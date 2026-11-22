@@ -42,7 +42,8 @@ import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
 import type { Animal, AnimalMemory } from '../animals.js';
 import { residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
-import { copyResidentFaunaTile, residentTileReader, type ResidentTileReader } from '../soa/terreno.js';
+import { copyResidentFaunaTile, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from '../soa/terreno.js';
+import { verifiedChunkBlocks } from '../tile-index.js';
 import { MAX_COORDINATE } from '../terrain.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
 import { buscarPagina, CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, siguientePotencia } from './paginas.js';
@@ -107,9 +108,12 @@ interface DisposicionTerreno {
   length: number;
   /** Certificado de topología residente con el que se construyó (`undefined` si el arreglo no es residente). */
   token: ResidentTopologyToken | undefined;
-  /** Coordenadas de cada tesela al construirla: se comprueban en cada tesela que se relee. */
+  /** Coordenadas de cada tesela al construirla: se comprueban en cada tesela que se relee (sin token residente). */
   xs: Float64Array;
   ys: Float64Array;
+  /** Coordenadas de página `(px, py)` por ranura `slot`, para consultas por bloque O(1) en `#releerPagina`. */
+  pagX: Int32Array;
+  pagY: Int32Array;
   paginas: number;
   capHash: number;
 }
@@ -139,6 +143,8 @@ export class EstadoFaunaCompartido {
   #sello = new Int32Array(0);
   #generacion = 0;
   #paginasReleidas = 0;
+  #xsBuf = new Float64Array(0);
+  #ysBuf = new Float64Array(0);
 
   constructor() {
     this.#buffers = {} as BuffersFauna;
@@ -192,7 +198,41 @@ export class EstadoFaunaCompartido {
    * tesela, la presencia de cada celda y la tesela de cada celda (la última con esas coordenadas). */
   #disponer(tiles: Tile[], token: ResidentTopologyToken | undefined): DisposicionTerreno {
     this.#reconstrucciones++;
-    const n = tiles.length, xs = new Float64Array(n), ys = new Float64Array(n), celdas = new Int32Array(n);
+    const n = tiles.length;
+    if (this.#xsBuf.length < n) {
+      const cap = crecerCapacidad(this.#xsBuf.length, Math.max(256, n));
+      this.#xsBuf = new Float64Array(cap);
+      this.#ysBuf = new Float64Array(cap);
+    }
+    const xs = this.#xsBuf, ys = this.#ysBuf;
+    const chunkInfo = token !== undefined ? verifiedChunkBlocks(tiles) : null;
+    if (chunkInfo) {
+      const paginas = chunkInfo.bases.size, capHash = siguientePotencia(Math.max(2, paginas * 2));
+      if (paginas > this.#capPaginas || capHash > this.#capHash) this.#asignarTerreno(crecerCapacidad(this.#capPaginas, paginas), Math.max(capHash, this.#capHash));
+      const b = this.#buffers;
+      const flags = new Uint8Array(b.celdaFlags), tesela = new Int32Array(b.celdaTesela);
+      const pagXArr = new Int32Array(paginas), pagYArr = new Int32Array(paginas);
+      const pagXList: number[] = new Array(paginas), pagYList: number[] = new Array(paginas);
+      let slot = 0;
+      for (const base of chunkInfo.bases.values()) {
+        const first = tiles[base]!, x0 = first.x, y0 = first.y, px = x0 >> 4, py = y0 >> 4;
+        pagXArr[slot] = px; pagYArr[slot] = py;
+        pagXList[slot] = px; pagYList[slot] = py;
+        const dst = slot * CELDAS_POR_PAGINA;
+        for (let k = 0; k < CELDAS_POR_PAGINA; k++) {
+          const i = base + k;
+          xs[i] = x0 + (k & 15);
+          ys[i] = y0 + (k >> 4);
+          tesela[dst + k] = i;
+          flags[dst + k] = CELDA_PRESENTE;
+        }
+        slot++;
+      }
+      llenarTablaPaginas({ paginasSlot: new Int32Array(b.paginasSlot), paginasX: new Int32Array(b.paginasX), paginasY: new Int32Array(b.paginasY) }, pagXList, pagYList, capHash);
+      this.#sello.fill(0); this.#generacion = 0;
+      return { tiles, length: n, token, xs, ys, pagX: pagXArr, pagY: pagYArr, paginas, capHash };
+    }
+    const celdas = new Int32Array(n);
     const paginaDe = new Map<number, number>(), pagX: number[] = [], pagY: number[] = [];
     for (let i = 0; i < n; i++) {
       const tile = tiles[i];
@@ -213,17 +253,88 @@ export class EstadoFaunaCompartido {
     // La última tesela con esas coordenadas gana, como `tileLookup`.
     for (let i = 0; i < n; i++) { const celda = celdas[i]!; if (celda >= 0) { tesela[celda] = i; flags[celda] = CELDA_PRESENTE; } }
     this.#sello.fill(0); this.#generacion = 0;
-    return { tiles, length: n, token, xs, ys, paginas, capHash };
+    return { tiles, length: n, token, xs, ys, pagX: Int32Array.from(pagX), pagY: Int32Array.from(pagY), paginas, capHash };
   }
 
   /** Relee los valores de las teselas de la página `slot`. `false` si una cambió de coordenadas. */
-  #releerPagina(d: DisposicionTerreno, vista: VistaFauna, slot: number, reader?: ResidentTileReader, trustedResident = false): boolean {
+  #releerPagina(
+    d: DisposicionTerreno, vista: VistaFauna, slot: number,
+    reader?: ResidentTileReader, fast?: ResidentFastAccess, trustedCoords = false, trustedResident = false,
+  ): boolean {
     const tiles = d.tiles, { flags, crecimiento, vegetacion, humedad, aguaPotable, tesela } = vista;
-    for (let celda = slot * CELDAS_POR_PAGINA, fin = celda + CELDAS_POR_PAGINA; celda < fin; celda++) {
+    const baseCelda = slot * CELDAS_POR_PAGINA;
+    if (reader && trustedCoords) {
+      const rbase = reader.pageBase(d.pagX[slot]!, d.pagY[slot]!);
+      if (rbase >= 0) {
+        const stamps = reader.stampsArr, ver = reader.versionStamp;
+        const tArr = reader.terrainArr, bArr = reader.biomeArr, gArr = reader.growthArr;
+        const vArr = reader.vegetationArr, mArr = reader.moistureArr, dwArr = reader.drinkingWaterArr;
+        const WATER = reader.TERRAIN_WATER, SHELTER = reader.TERRAIN_SHELTER, OCEAN = reader.BIOME_OCEAN;
+        for (let off = 0; off < CELDAS_POR_PAGINA; off++) {
+          const celda = baseCelda + off;
+          const i = tesela[celda]!;
+          if (i < 0) continue;
+          const rcell = rbase + off;
+          if (stamps[rcell] === ver) {
+            const g = gArr[rcell]!, hasG = g === g, tc = tArr[rcell]!;
+            flags[celda] = CELDA_PRESENTE | (tc === WATER ? CELDA_AGUA : 0) | (tc === SHELTER ? CELDA_REFUGIO : 0)
+              | (bArr[rcell] === OCEAN ? CELDA_OCEANO : 0) | (hasG ? CELDA_CRECIMIENTO : 0);
+            crecimiento[celda] = hasG ? g : 0;
+            vegetacion[celda] = vArr[rcell]!;
+            humedad[celda] = mArr[rcell]!;
+            const dw = dwArr[rcell]!;
+            aguaPotable[celda] = dw === dw ? dw : 0;
+          } else {
+            const tile = tiles[i];
+            if (!tile) return false;
+            const growth = tile.growth, conCrecimiento = growth !== undefined && growth !== null, terrain = tile.terrain;
+            flags[celda] = CELDA_PRESENTE | (terrain === 'water' ? CELDA_AGUA : 0) | (terrain === 'shelter' ? CELDA_REFUGIO : 0)
+              | (tile.biome === 'ocean' ? CELDA_OCEANO : 0) | (conCrecimiento ? CELDA_CRECIMIENTO : 0);
+            crecimiento[celda] = conCrecimiento ? growth : 0;
+            vegetacion[celda] = tile.vegetation;
+            humedad[celda] = tile.moisture;
+            aguaPotable[celda] = tile.drinkingWater ?? 0;
+          }
+        }
+        return true;
+      }
+    }
+    if (fast && trustedCoords) {
+      const tArr = fast.terrainArr, bArr = fast.biomeArr, gArr = fast.growthArr;
+      const vArr = fast.vegetationArr, mArr = fast.moistureArr, dwArr = fast.drinkingWaterArr;
+      const WATER = fast.TERRAIN_WATER, SHELTER = fast.TERRAIN_SHELTER, OCEAN = fast.BIOME_OCEAN;
+      for (let celda = baseCelda, fin = baseCelda + CELDAS_POR_PAGINA; celda < fin; celda++) {
+        const i = tesela[celda]!;
+        if (i < 0) continue;
+        const tile = tiles[i];
+        if (!tile) return false;
+        const rcell = fast.cellOf(tile);
+        if (rcell >= 0) {
+          const g = gArr[rcell]!, hasG = g === g, tc = tArr[rcell]!;
+          flags[celda] = CELDA_PRESENTE | (tc === WATER ? CELDA_AGUA : 0) | (tc === SHELTER ? CELDA_REFUGIO : 0)
+            | (bArr[rcell] === OCEAN ? CELDA_OCEANO : 0) | (hasG ? CELDA_CRECIMIENTO : 0);
+          crecimiento[celda] = hasG ? g : 0;
+          vegetacion[celda] = vArr[rcell]!;
+          humedad[celda] = mArr[rcell]!;
+          const dw = dwArr[rcell]!;
+          aguaPotable[celda] = dw === dw ? dw : 0;
+        } else {
+          const growth = tile.growth, conCrecimiento = growth !== undefined && growth !== null, terrain = tile.terrain;
+          flags[celda] = CELDA_PRESENTE | (terrain === 'water' ? CELDA_AGUA : 0) | (terrain === 'shelter' ? CELDA_REFUGIO : 0)
+            | (tile.biome === 'ocean' ? CELDA_OCEANO : 0) | (conCrecimiento ? CELDA_CRECIMIENTO : 0);
+          crecimiento[celda] = conCrecimiento ? growth : 0;
+          vegetacion[celda] = tile.vegetation;
+          humedad[celda] = tile.moisture;
+          aguaPotable[celda] = tile.drinkingWater ?? 0;
+        }
+      }
+      return true;
+    }
+    for (let celda = baseCelda, fin = baseCelda + CELDAS_POR_PAGINA; celda < fin; celda++) {
       const i = tesela[celda]!;
       if (i < 0) continue;
       const tile = tiles[i];
-      if (!tile || !Object.is(tile.x, d.xs[i]) || !Object.is(tile.y, d.ys[i])) return false;
+      if (!tile || (!trustedCoords && (!Object.is(tile.x, d.xs[i]) || !Object.is(tile.y, d.ys[i])))) return false;
       const rcell = reader ? reader.cellAt(d.xs[i]!, d.ys[i]!) : -1;
       if (rcell >= 0 && reader) {
         const growth = reader.growth(rcell), conCrecimiento = growth !== undefined, tcode = reader.terrainCode(rcell);
@@ -250,9 +361,13 @@ export class EstadoFaunaCompartido {
   }
 
   /** Sella y relee las páginas que toca la ventana de percepción de algún animal debido. */
-  #releerVentanas(d: DisposicionTerreno, vista: VistaFauna, due: readonly Animal[]): boolean {
+  #releerVentanas(d: DisposicionTerreno, vista: VistaFauna, due: readonly Animal[], token: ResidentTopologyToken | undefined): boolean {
     if (++this.#generacion === 0x7fffffff) { this.#sello.fill(0); this.#generacion = 1; }
-    const sello = this.#sello, generacion = this.#generacion, reader = residentTileReader(d.tiles), trustedResident = !reader && residentTopologyToken(d.tiles) !== undefined;
+    const sello = this.#sello, generacion = this.#generacion;
+    const trustedCoords = d.token !== undefined && sameResidentTopology(d.token, token);
+    const fast = token !== undefined ? residentFastAccess(d.tiles) : undefined;
+    const reader = fast?.exact ?? residentTileReader(d.tiles);
+    const trustedResident = !reader && !fast && token !== undefined;
     let releidas = 0;
     for (const a of due) {
       const ax = a.x, ay = a.y;
@@ -265,7 +380,7 @@ export class EstadoFaunaCompartido {
         const slot = buscarPagina(vista, px, py);
         if (slot < 0 || sello[slot] === generacion) continue;
         sello[slot] = generacion; releidas++;
-        if (!this.#releerPagina(d, vista, slot, reader, trustedResident)) return false;
+        if (!this.#releerPagina(d, vista, slot, reader, fast, trustedCoords, trustedResident)) return false;
       }
     }
     this.#paginasReleidas = releidas;
@@ -310,10 +425,10 @@ export class EstadoFaunaCompartido {
       d = this.#disposicion = this.#disponer(tiles, token);
     }
     let vista = crearVistaFauna(this.#buffers, { ...this.#params, hashMask: d.capHash - 1 });
-    if (!this.#releerVentanas(d, vista, due)) {
+    if (!this.#releerVentanas(d, vista, due, token)) {
       d = this.#disposicion = this.#disponer(tiles, token);
       vista = crearVistaFauna(this.#buffers, { ...this.#params, hashMask: d.capHash - 1 });
-      if (!this.#releerVentanas(d, vista, due)) throw new Error('Teselas mutadas durante el empaquetado de fauna.');
+      if (!this.#releerVentanas(d, vista, due, token)) throw new Error('Teselas mutadas durante el empaquetado de fauna.');
     }
     const celdasActivas = d.paginas * CELDAS_POR_PAGINA, sello = this.#sello, generacion = this.#generacion;
     /** La celda está en una página releída: sólo ahí puede haber celdas visibles. */

@@ -44,3 +44,18 @@ export function llenarTablaPaginas(tabla: Omit<TablaPaginas, 'params'>, pagX: re
     paginasX[h] = pagX[slot]!; paginasY[h] = pagY[slot]!; paginasSlot[h] = slot;
   }
 }
+
+/** Variante para ranuras recicladas no contiguas: inserta cada `(px, py) → slot` con sondeo lineal. */
+export function llenarTablaPaginasConSlots(
+  tabla: Omit<TablaPaginas, 'params'>,
+  entries: Iterable<{ px: number; py: number; slot: number }>,
+  capHash: number,
+): void {
+  const { paginasX, paginasY, paginasSlot } = tabla, mask = capHash - 1;
+  paginasSlot.fill(-1, 0, capHash);
+  for (const entry of entries) {
+    let h = hashPagina(entry.px, entry.py, mask);
+    while (paginasSlot[h]! >= 0) h = (h + 1) & mask;
+    paginasX[h] = entry.px; paginasY[h] = entry.py; paginasSlot[h] = entry.slot;
+  }
+}

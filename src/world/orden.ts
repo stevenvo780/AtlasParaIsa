@@ -41,3 +41,32 @@ export function primerosDos<T>(items: readonly T[], compare: (a: T, b: T) => num
   }
   return count === 0 ? [] : count === 1 ? [first as T] : [first as T, second as T];
 }
+
+/**
+ * Equivalente exacto de `primero(items, (a, b) => keyOf(a) - keyOf(b), keep)` para claves finitas,
+ * evaluando `keyOf(best)` una sola vez en vez de en cada comparación contra el candidato siguiente.
+ * En IEEE-754, para números finitos `k - bestKey < 0` equivale exactamente a `k < bestKey` (conserva
+ * empates por primera aparición, incluido −0 / +0).
+ */
+export function primeroPorClave<T>(items: readonly T[], keyOf: (item: T) => number, keep?: (item: T) => boolean): T | undefined {
+  let best: T | undefined, bestKey = 0, found = false;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if (keep && !keep(item)) continue;
+    const key = keyOf(item);
+    if (!found || key < bestKey) { best = item; bestKey = key; found = true; }
+  }
+  return best;
+}
+
+/** Equivalente exacto de `primeroConFiltroCaro(items, (a, b) => keyOf(a) - keyOf(b), keep)` para claves finitas. */
+export function primeroPorClaveConFiltroCaro<T>(items: readonly T[], keyOf: (item: T) => number, keep: (item: T) => boolean): T | undefined {
+  let best: T | undefined, bestKey = 0, found = false;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const key = keyOf(item);
+    if (found && !(key < bestKey)) continue;
+    if (keep(item)) { best = item; bestKey = key; found = true; }
+  }
+  return best;
+}

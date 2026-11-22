@@ -8,7 +8,7 @@ import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
-import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
+import { lastTileAt, splitTileBlocks, tileIndexAppended, tileIndexCopied } from './tile-index.js';
 import type { ResidentTopologyOwner } from './soa/topologia.js';
 import { chunkLruFor } from './lru.js';
 
@@ -174,7 +174,15 @@ function retireActiveChunks(world: World, keys: readonly string[], context: Worl
   }
   if (retired.size) {
     const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
-    if (byBlock) world.tiles = context.tileOwnership?.tiles(byBlock) ?? byBlock;
+    if (byBlock) {
+      if (context.tileOwnership) {
+        const wrapped = context.tileOwnership.tiles(byBlock);
+        tileIndexCopied(wrapped, byBlock, true);
+        world.tiles = wrapped;
+      } else {
+        world.tiles = byBlock;
+      }
+    }
     else {
       const active: Tile[] = [];
       for (const tile of world.tiles) {

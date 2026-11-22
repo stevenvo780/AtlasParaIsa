@@ -56,11 +56,16 @@ const NO_AUTHORITY = 'SoA de terreno: escritura sin autoridad; la página perten
 
 const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'food', 'wood', 'growth', 'fertility', 'cultivation', 'traffic', 'drinkingWater'] as const;
 type ResidentKey = typeof RESIDENT_NUMBERS[number] | 'terrain' | 'biome' | 'feature' | 'life';
-interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; }
+/** `seen`: pasada incremental de `prepareParallel` que la conservó (contador global, nunca se repite). */
+interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; seen: number; }
 const bindings = new WeakMap<Tile, ResidentBinding>();
+let residentPasses = 0;
 const residentStoreByTiles = new WeakMap<Tile[], TileStore>();
+const residentStoreByOwner = new WeakMap<ResidentTopologyOwner, TileStore>();
 const residentKeys: readonly ResidentKey[] = [...RESIDENT_NUMBERS, 'terrain', 'biome', 'feature', 'life'];
 const residentKeySet = new Set<PropertyKey>(residentKeys);
+/** Claves que el kernel asigna aunque falten al cargar: se dan de alta al confirmar el paso. */
+const PENDING_KEYS = ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const;
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
 const TERRAIN_IDX = residentKeys.indexOf('terrain');
 const BIOME_IDX = residentKeys.indexOf('biome');
@@ -121,30 +126,96 @@ export class ResidentTileReader {
   readonly TERRAIN_SHELTER = SHELTER_CODE;
   readonly BIOME_OCEAN = BIOMES.indexOf('ocean') + 1;
   readonly BIOME_DESERT = BIOMES.indexOf('desert') + 1;
-  constructor(private readonly regions: RegionTable, private readonly stamps: Uint32Array,
-    private readonly version: number, private readonly terrain: Uint8Array, private readonly biome: Uint8Array,
-    private readonly numbers: ReaderNumbers) {}
+  readonly growthArr: Float64Array;
+  readonly vegetationArr: Float64Array;
+  readonly moistureArr: Float64Array;
+  readonly drinkingWaterArr: Float64Array;
+  readonly foodArr: Float64Array;
+  readonly woodArr: Float64Array;
+  constructor(private readonly regions: RegionTable, readonly stampsArr: Uint32Array,
+    readonly versionStamp: number, readonly terrainArr: Uint8Array, readonly biomeArr: Uint8Array,
+    private readonly numbers: ReaderNumbers) {
+    this.growthArr = numbers.growth;
+    this.vegetationArr = numbers.vegetation;
+    this.moistureArr = numbers.moisture;
+    this.drinkingWaterArr = numbers.drinkingWater;
+    this.foodArr = numbers.food;
+    this.woodArr = numbers.wood;
+  }
 
   cellAt(x: number, y: number): number {
     if (!admissibleCoordinate(x) || !admissibleCoordinate(y)) return -1;
     const page = this.regions.slot(x >> 4, y >> 4);
     if (page < 0) return -1;
     const cell = (page << 8) | ((y & 15) << 4) | (x & 15);
-    return this.stamps[cell] === this.version ? cell : -1;
+    return this.stampsArr[cell] === this.versionStamp ? cell : -1;
   }
-  terrainCode(cell: number): number { return this.terrain[cell]!; }
-  biomeCode(cell: number): number { return this.biome[cell]!; }
-  growth(cell: number): number | undefined { const v = this.numbers.growth[cell]!; return v === v ? v : undefined; }
-  vegetation(cell: number): number | undefined { const v = this.numbers.vegetation[cell]!; return v === v ? v : undefined; }
-  moisture(cell: number): number | undefined { const v = this.numbers.moisture[cell]!; return v === v ? v : undefined; }
-  drinkingWater(cell: number): number | undefined { const v = this.numbers.drinkingWater[cell]!; return v === v ? v : undefined; }
-  food(cell: number): number | undefined { const v = this.numbers.food[cell]!; return v === v ? v : undefined; }
-  wood(cell: number): number | undefined { const v = this.numbers.wood[cell]!; return v === v ? v : undefined; }
+  /** Base de página (`slot << 8`) en una sola consulta de región para copiar bloques 16 × 16, o `-1`. */
+  pageBase(px: number, py: number): number {
+    const page = this.regions.slot(px, py);
+    return page < 0 ? -1 : page << 8;
+  }
+  isPresent(cell: number): boolean { return this.stampsArr[cell] === this.versionStamp; }
+  terrainCode(cell: number): number { return this.terrainArr[cell]!; }
+  biomeCode(cell: number): number { return this.biomeArr[cell]!; }
+  growth(cell: number): number | undefined { const v = this.growthArr[cell]!; return v === v ? v : undefined; }
+  vegetation(cell: number): number | undefined { const v = this.vegetationArr[cell]!; return v === v ? v : undefined; }
+  moisture(cell: number): number | undefined { const v = this.moistureArr[cell]!; return v === v ? v : undefined; }
+  drinkingWater(cell: number): number | undefined { const v = this.drinkingWaterArr[cell]!; return v === v ? v : undefined; }
+  food(cell: number): number | undefined { const v = this.foodArr[cell]!; return v === v ? v : undefined; }
+  wood(cell: number): number | undefined { const v = this.woodArr[cell]!; return v === v ? v : undefined; }
+}
+
+/**
+ * Vista de lectura directa de teselas ligadas al SoA residente, válida incluso entre pasos de
+ * `maintainRegions` y el próximo paso de `ecologia` (cuando 1–3 chunks nuevos aún no entraron al
+ * `TileStore` pero el resto sigue ligado a los SAB). Cada `cellOf(tile)` hace a lo sumo un lookup
+ * WeakMap en vez de 6–12 getters por tesela; cuando `exact` está presente, `exact.cellAt(x, y)`
+ * hace cero lookups WeakMap.
+ */
+export class ResidentFastAccess {
+  readonly TERRAIN_WATER = WATER_CODE;
+  readonly TERRAIN_SHELTER = SHELTER_CODE;
+  readonly BIOME_OCEAN = OCEAN_CODE;
+  readonly BIOME_DESERT = BIOMES.indexOf('desert') + 1;
+  constructor(
+    private readonly store: TileStore,
+    readonly exact: ResidentTileReader | undefined,
+    readonly terrainArr: Uint8Array,
+    readonly biomeArr: Uint8Array,
+    readonly growthArr: Float64Array,
+    readonly vegetationArr: Float64Array,
+    readonly moistureArr: Float64Array,
+    readonly drinkingWaterArr: Float64Array,
+    readonly foodArr: Float64Array,
+    readonly woodArr: Float64Array,
+  ) {}
+
+  cellOf(tile: Tile): number {
+    const b = bindings.get(tile);
+    return b && b.store === this.store ? b.cell : -1;
+  }
+  terrainCode(cell: number): number { return this.terrainArr[cell]!; }
+  biomeCode(cell: number): number { return this.biomeArr[cell]!; }
+  growth(cell: number): number | undefined { const v = this.growthArr[cell]!; return v === v ? v : undefined; }
+  vegetation(cell: number): number | undefined { const v = this.vegetationArr[cell]!; return v === v ? v : undefined; }
+  moisture(cell: number): number | undefined { const v = this.moistureArr[cell]!; return v === v ? v : undefined; }
+  drinkingWater(cell: number): number | undefined { const v = this.drinkingWaterArr[cell]!; return v === v ? v : undefined; }
+  food(cell: number): number | undefined { const v = this.foodArr[cell]!; return v === v ? v : undefined; }
+  wood(cell: number): number | undefined { const v = this.woodArr[cell]!; return v === v ? v : undefined; }
 }
 
 /** Sólo un owner observado puede certificar que los buffers siguen representando estas teselas. */
 export function residentTileReader(tiles: readonly Tile[]): ResidentTileReader | undefined {
   return residentStoreByTiles.get(tiles as Tile[])?.tileReaderIfResident(tiles);
+}
+
+/** Acceso directo SoA por tesela ligada (funciona también tras altas/retiros de chunks entre ticks de ecología). */
+export function residentFastAccess(tiles: readonly Tile[]): ResidentFastAccess | undefined {
+  const direct = residentStoreByTiles.get(tiles as Tile[]);
+  if (direct) return direct.fastAccessIfResident(tiles);
+  const owner = residentTopologyOwner(tiles as Tile[]);
+  return owner ? residentStoreByOwner.get(owner)?.fastAccessIfResident(tiles) : undefined;
 }
 
 export interface SharedTerrain {
@@ -192,6 +263,8 @@ export class TileStore {
   private residentRevision: object = {};
   private residentTopology: ResidentTopologyToken | undefined;
   private residentOwner: ResidentTopologyOwner | undefined;
+  private cachedReader: { generation: number; version: number; parity: number; reader: ResidentTileReader } | null = null;
+  private cachedFast: { generation: number; parity: number; exact: ResidentTileReader | undefined; fast: ResidentFastAccess } | null = null;
   private readonly residentModified = new Set<ResidentBinding>();
   private readonly topologyCosts = { fastHits: 0, genericCheckedTiles: 0, rebuilds: 0, changedBindings: 0 };
   private residentPending: ResidentBinding[] = [];
@@ -370,76 +443,39 @@ export class TileStore {
           this.refreshModifiedBinding(binding);
         }
         this.residentModified.clear();
+        // V17: lo ya ligado aquí con sus coordenadas conserva celda, ranura y accesores; sólo se ubican,
+        // validan y ligan las teselas nuevas. El certificado de coordenadas evita releer x/y de las 278 k.
+        const pass = ++residentPasses, sameCoordinates = token!.coordinates === this.residentTopology!.coordinates;
+        const nextBindings = new Array<ResidentBinding>(tiles.length);
         // Validación previa fail-closed antes de desligar o mutar nada.
         for (let i = 0; i < tiles.length; i++) {
-          const tile = tiles[i]!;
+          const tile = tiles[i]!, prior = bindings.get(tile);
+          if (prior?.store === this && (sameCoordinates || Object.is(tile.x, prior.x) && Object.is(tile.y, prior.y))) {
+            prior.seen = pass; nextBindings[i] = prior; continue;
+          }
           if (!admissibleCoordinate(tile.x) || !admissibleCoordinate(tile.y))
             throw new RangeError('Coordenada fuera del dominio entero del SoA paralelo.');
-          const prior = bindings.get(tile);
           if (prior?.store.residentBusy) throw new Error(TWO_WRITERS);
-          if (!(prior && prior.store === this && Object.is(tile.x, prior.x) && Object.is(tile.y, prior.y))) {
-            for (const key of residentKeys) this.encodeResident(key, tile[key as keyof Tile]);
-          }
+          for (const key of residentKeys) this.encodeResident(key, tile[key as keyof Tile]);
         }
-        const nextSet = new Set<Tile>(tiles);
-        const kept = new Set<ResidentBinding>();
-        const priorBindings = this.residentBindings;
-        const priorPending = this.residentPending;
-        const priorAbsent = this.residentAbsent;
-        const priorWoodHoles = [...this.residentWoodHoles.entries()];
-        for (let i = 0; i < priorBindings.length; i++) {
-          const binding = priorBindings[i]!;
-          if (nextSet.has(binding.tile) && Object.is(binding.tile.x, binding.x) && Object.is(binding.tile.y, binding.y)) {
-            kept.add(binding);
-          } else {
-            this.detachBinding(binding);
-          }
-        }
-        this.residentBindings = [...kept];
-        if (!this.map(tiles, false)) throw new RangeError('Coordenada fuera del dominio entero del SoA paralelo.');
+        const kept = (binding: ResidentBinding) => binding.seen === pass;
+        for (const binding of this.residentBindings) if (!kept(binding)) this.detachBinding(binding);
+        try { this.remap(tiles, nextBindings); } catch (error) { this.dropResidentCertificate(); throw error; }
         this.back(); this.refreshResident();
-        this.residentPending = priorPending.filter(b => kept.has(b));
-        this.residentAbsent = priorAbsent.filter(entry => kept.has(entry.binding));
-        this.residentWoodHoles.clear();
-        for (const [page, holes] of priorWoodHoles) {
-          const alive = holes.filter(b => kept.has(b));
-          if (alive.length) this.residentWoodHoles.set(page, alive);
+        this.residentPending = this.residentPending.filter(kept);
+        this.residentAbsent = this.residentAbsent.filter(entry => kept(entry.binding));
+        for (const [page, holes] of this.residentWoodHoles) {
+          const alive = holes.filter(kept);
+          if (alive.length) this.residentWoodHoles.set(page, alive); else this.residentWoodHoles.delete(page);
         }
         this.residentTiles = tiles;
         residentStoreByTiles.set(tiles, this);
-        const nextBindings = new Array<ResidentBinding>(tiles.length);
-        for (let i = 0; i < tiles.length; i++) {
-          const tile = tiles[i]!, cell = this.cellsOf[i]!;
-          const existing = bindings.get(tile);
-          if (existing && kept.has(existing) && existing.cell === cell) {
-            nextBindings[i] = existing;
-            continue;
-          }
-          if (existing) existing.store.detachBinding(existing);
-          const binding: ResidentBinding = { store: this, tile, cell, x: tile.x, y: tile.y, mask: 0 };
-          for (const key of residentKeys) this.writeResidentValue(key, cell, tile[key as keyof Tile]);
-          this.dirty[cell >>> 8] = 1;
-          bindings.set(tile, binding);
-          for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
-          observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
-          for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
-          if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
-          if (!Object.hasOwn(tile, 'wood')) {
-            const page = cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
-            holes.push(binding); this.residentWoodHoles.set(page, holes);
-          }
-          nextBindings[i] = binding;
-        }
+        for (let i = 0; i < tiles.length; i++) if (!nextBindings[i]) nextBindings[i] = this.bindResident(tiles[i]!, this.cellsOf[i]!);
         this.residentBindings = nextBindings;
         this.residentOwner = owner;
+        if (owner) residentStoreByOwner.set(owner, this);
         this.refreshResident();
         this.residentRevision = {};
-        if (this.residentWoodAdded.length !== this.arena.capacity) {
-          this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
-        } else {
-          this.residentWoodAdded.fill(0);
-        }
       } else {
         this.residentEpoch++;
         this.detachResident();
@@ -454,29 +490,10 @@ export class TileStore {
         this.residentTiles = tiles;
         residentStoreByTiles.set(tiles, this);
         this.residentOwner = owner;
-        this.residentBindings = tiles.map((tile, i) => {
-          // Otra arena puede retener el mismo Tile (clon/reintento/restauración). Desligar antes de
-          // reutilizar páginas: una tesela dormida nunca debe leer la ranura de otra región.
-          const prior = bindings.get(tile);
-          if (prior) prior.store.detachBinding(prior);
-          const binding: ResidentBinding = { store: this, tile, cell: this.cellsOf[i]!, x: tile.x, y: tile.y, mask: 0 };
-          for (const key of residentKeys) this.writeResidentValue(key, binding.cell, tile[key as keyof Tile]);
-          this.dirty[binding.cell >>> 8] = 1;
-          bindings.set(tile, binding);
-          for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
-          observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
-          for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
-          if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
-          if (!Object.hasOwn(tile, 'wood')) {
-            const page = binding.cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
-            holes.push(binding); this.residentWoodHoles.set(page, holes);
-          }
-          return binding;
-        });
+        if (owner) residentStoreByOwner.set(owner, this);
+        this.residentBindings = tiles.map((tile, i) => this.bindResident(tile, this.cellsOf[i]!));
         this.refreshResident();
         this.residentRevision = {};
-        this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
       }
     }
     if (!same || regionSide !== this.residentRegionSide) {
@@ -487,19 +504,18 @@ export class TileStore {
         const key = `${x},${y}`, group = grouped.get(key) ?? { x, y, slots: [] };
         group.slots.push(slot); grouped.set(key, group);
       }
-      const ordered: number[] = []; this.residentRegions = [];
+      // Cada tesela cargada sella una celda distinta: hay exactamente `loaded` celdas presentes.
+      const ordered = new Int32Array(new SharedArrayBuffer(this.loaded * 4)); this.residentRegions = [];
       const stamps = this.presence.stamps, version = this.version;
+      let end = 0;
       for (const region of [...grouped.values()].sort((a, b) => a.y - b.y || a.x - b.x)) {
-        const begin = ordered.length;
+        const begin = end;
         for (const slot of region.slots.sort((a, b) => this.pageY[a]! - this.pageY[b]! || this.pageX[a]! - this.pageX[b]!)) {
-          for (let offset = 0; offset < PAGE_CELLS; offset++) {
-            const cell = slot * PAGE_CELLS + offset;
-            if (stamps[cell] === version) ordered.push(cell);
-          }
+          for (let cell = slot * PAGE_CELLS, last = cell + PAGE_CELLS; cell < last; cell++) if (stamps[cell] === version) ordered[end++] = cell;
         }
-        this.residentRegions.push({ id: this.residentRegions.length, begin, end: ordered.length });
+        this.residentRegions.push({ id: this.residentRegions.length, begin, end });
       }
-      this.residentCells = new Int32Array(new SharedArrayBuffer(ordered.length * 4)); this.residentCells.set(ordered);
+      this.residentCells = ordered;
       this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
       this.residentWoodAddedQueue = new Int32Array(new SharedArrayBuffer((this.arena.capacity + 2) * 4));
       observeResidentArray(tiles, () => { if (this.residentBusy) throw new Error(TWO_WRITERS); });
@@ -578,7 +594,7 @@ export class TileStore {
     this.parity ^= 1; this.syncResidentCur(); this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
     if (phase === 'kernel') {
-      for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
+      for (const binding of this.residentPending) for (const key of PENDING_KEYS) {
         if (!Object.hasOwn(binding.tile, key)) this.attachResidentAccessor(binding, key);
       }
       this.residentPending = [];
@@ -649,14 +665,39 @@ export class TileStore {
   tileReaderIfResident(tiles: readonly Tile[]): ResidentTileReader | undefined {
     if (!this.canReadResident(tiles)) return undefined;
     if (this.residentGeneration !== this.arena.generation) this.refreshResident();
-    return new ResidentTileReader(this.regions, this.presence.stamps, this.version,
-      this.residentCur[TERRAIN_IDX] as Uint8Array, this.residentCur[residentKeys.indexOf('biome')] as Uint8Array,
+    const c = this.cachedReader;
+    if (c && c.generation === this.residentGeneration && c.version === this.version && c.parity === this.parity) return c.reader;
+    const reader = new ResidentTileReader(this.regions, this.presence.stamps, this.version,
+      this.residentCur[TERRAIN_IDX] as Uint8Array, this.residentCur[BIOME_IDX] as Uint8Array,
       { growth: this.residentCur[GROWTH_IDX] as Float64Array,
-        vegetation: this.residentCur[residentKeys.indexOf('vegetation')] as Float64Array,
-        moisture: this.residentCur[residentKeys.indexOf('moisture')] as Float64Array,
-        drinkingWater: this.residentCur[residentKeys.indexOf('drinkingWater')] as Float64Array,
+        vegetation: this.residentCur[VEGETATION_IDX] as Float64Array,
+        moisture: this.residentCur[MOISTURE_IDX] as Float64Array,
+        drinkingWater: this.residentCur[DRINKING_WATER_IDX] as Float64Array,
         food: this.residentCur[residentKeys.indexOf('food')] as Float64Array,
         wood: this.residentCur[residentKeys.indexOf('wood')] as Float64Array });
+    this.cachedReader = { generation: this.residentGeneration, version: this.version, parity: this.parity, reader };
+    return reader;
+  }
+  fastAccessIfResident(tiles: readonly Tile[]): ResidentFastAccess | undefined {
+    if (this.residentBusy || this.residentModified.size > 0 || this.residentBindings.length === 0) return undefined;
+    if (!residentTopologyToken(tiles as Tile[])) return undefined;
+    if (this.residentTiles !== tiles) {
+      const owner = residentTopologyOwner(tiles as Tile[]);
+      if (!owner || owner !== this.residentOwner) return undefined;
+    }
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const exact = this.tileReaderIfResident(tiles);
+    const c = this.cachedFast;
+    if (c && c.generation === this.residentGeneration && c.parity === this.parity && c.exact === exact) return c.fast;
+    const fast = new ResidentFastAccess(
+      this, exact,
+      this.residentCur[TERRAIN_IDX] as Uint8Array, this.residentCur[BIOME_IDX] as Uint8Array,
+      this.residentCur[GROWTH_IDX] as Float64Array, this.residentCur[VEGETATION_IDX] as Float64Array,
+      this.residentCur[MOISTURE_IDX] as Float64Array, this.residentCur[DRINKING_WATER_IDX] as Float64Array,
+      this.residentCur[residentKeys.indexOf('food')] as Float64Array, this.residentCur[residentKeys.indexOf('wood')] as Float64Array,
+    );
+    this.cachedFast = { generation: this.residentGeneration, parity: this.parity, exact, fast };
+    return fast;
   }
   copyFaunaBinding(
     binding: ResidentBinding, celda: number, flags: Uint8Array, crecimiento: Float64Array, vegetacion: Float64Array,
@@ -750,6 +791,32 @@ export class TileStore {
     maintainResidentTile(binding.tile, () => Object.defineProperty(binding.tile, key, residentAccessors[key]));
     binding.mask |= 1 << residentKeys.indexOf(key);
   }
+  /** Liga `tile` a `cell`: sus valores pasan al SAB y sus claves residentes propias, a accesores. */
+  private bindResident(tile: Tile, cell: number): ResidentBinding {
+    // Otra arena puede retener el mismo Tile (clon/reintento/restauración). Desligar antes de
+    // reutilizar páginas: una tesela dormida nunca debe leer la ranura de otra región.
+    const prior = bindings.get(tile);
+    if (prior) prior.store.detachBinding(prior);
+    const binding: ResidentBinding = { store: this, tile, cell, x: tile.x, y: tile.y, mask: 0, seen: 0 };
+    for (const key of residentKeys) this.writeResidentValue(key, cell, tile[key as keyof Tile]);
+    this.dirty[cell >>> 8] = 1;
+    bindings.set(tile, binding);
+    maintainResidentTile(tile, () => {
+      for (let k = 0; k < residentKeys.length; k++) {
+        const key = residentKeys[k]!;
+        if (Object.hasOwn(tile, key)) { Object.defineProperty(tile, key, residentAccessors[key]); binding.mask |= 1 << k; }
+      }
+    });
+    observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
+      after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
+    for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
+    if (PENDING_KEYS.some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
+    if (!Object.hasOwn(tile, 'wood')) {
+      const page = cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
+      holes.push(binding); this.residentWoodHoles.set(page, holes);
+    }
+    return binding;
+  }
   private refreshModifiedBinding(binding: ResidentBinding): void {
     // Validar TODOS los campos alterados antes de escribir ninguno: un NaN no se convierte en ausencia.
     const changes: { key: ResidentKey; value: unknown; own: boolean; index: number }[] = [];
@@ -763,7 +830,7 @@ export class TileStore {
       this.writeResidentValue(key, binding.cell, value);
       if (own) this.attachResidentAccessor(binding, key); else binding.mask &= ~(1 << index);
     }
-    if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(binding.tile, key)))
+    if (PENDING_KEYS.some(key => !Object.hasOwn(binding.tile, key)))
       this.residentPending.push(binding);
   }
   private detachBinding(binding: ResidentBinding): void {
@@ -776,6 +843,10 @@ export class TileStore {
     observeResidentTile(binding.tile, undefined);
     bindings.delete(binding.tile);
     // Cambiar la autoridad desde otra arena obliga a refrescar antes de volver a usar ésta.
+    this.dropResidentCertificate();
+  }
+  /** La próxima preparación no puede reutilizar la foto residente: recarga limpia (`else` de `prepareParallel`). */
+  private dropResidentCertificate(): void {
     if (this.residentTiles) {
       observeResidentArray(this.residentTiles, undefined);
       residentStoreByTiles.delete(this.residentTiles);
@@ -784,8 +855,10 @@ export class TileStore {
   }
   private detachResident(): void {
     if (this.residentTiles) residentStoreByTiles.delete(this.residentTiles);
+    if (this.residentOwner && residentStoreByOwner.get(this.residentOwner) === this) residentStoreByOwner.delete(this.residentOwner);
     for (const binding of this.residentBindings) this.detachBinding(binding);
     this.residentBindings = []; this.residentTiles = null; this.residentModified.clear(); this.residentTopology = undefined; this.residentOwner = undefined;
+    this.cachedReader = null; this.cachedFast = null;
   }
 
   /**
@@ -919,6 +992,38 @@ export class TileStore {
     if (reserved || stamped !== this.presentPages || this.sweepPending) this.sweep();
     this.presentPages = stamped; this.loaded = tiles.length;
     return true;
+  }
+
+  /** `map(tiles, false)` del despacho incremental: `kept[i]` (ligada aquí, mismas coordenadas) conserva su
+   * celda sin leer la tesela; las demás se ubican como en `map`. Mismas ranuras, sellos, errores y barrido. */
+  private remap(tiles: readonly Tile[], kept: readonly (ResidentBinding | undefined)[]): void {
+    if (this.taken) throw new Error(TWO_WRITERS);
+    this.loaded = 0; this.mode = 'none';
+    const presence = this.presence, version = presence.next();
+    if (this.cellsOf.length < tiles.length) this.cellsOf = new Int32Array(Math.max(tiles.length, Math.ceil(this.cellsOf.length * 1.25)));
+    const cells = this.cellsOf;
+    this.refresh();
+    let stamps = presence.stamps, lastSlot = -1, reserved = 0, stamped = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      let cell = kept[i]?.cell ?? -1;
+      if (cell < 0) {
+        const tile = tiles[i]!, x = tile.x, y = tile.y, px = x >> 4, py = y >> 4;
+        let slot = this.regions.slot(px, py);
+        if (slot < 0) {
+          slot = this.arena.reserve(); reserved++;
+          this.refresh(); stamps = presence.stamps;
+          this.regions.assign(px, py, slot);
+          this.inUse[slot] = 1; this.pageX[slot] = px; this.pageY[slot] = py; this.authority[slot] = OBJECT;
+        }
+        cell = (slot << 8) | ((y & 15) << 4) | (x & 15);
+      }
+      const slot = cell >>> 8;
+      if (slot !== lastSlot) { if (presence.markPage(slot)) stamped++; lastSlot = slot; }
+      if (stamps[cell] === version) { this.sweepPending = true; throw new Error(DUPLICATE); }
+      stamps[cell] = version; cells[i] = cell;
+    }
+    if (reserved || stamped !== this.presentPages || this.sweepPending) this.sweep();
+    this.presentPages = stamped; this.loaded = tiles.length;
   }
 
   /** Libera las páginas que la carga no selló y recalcula la vecindad de páginas: O(páginas). */

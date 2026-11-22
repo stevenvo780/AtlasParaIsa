@@ -15,8 +15,11 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT no válido.');
 const host = process.env.HOST ?? '127.0.0.1';
 const origin = process.env.CARTA_ORIGIN ?? `http://127.0.0.1:${port}`;
+const extraOrigins = (process.env.CARTA_EXTRA_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean);
 const secure = origin.startsWith('https://');
-if (!['127.0.0.1', 'localhost', '::1'].includes(host) && !secure) throw new Error('Configura CARTA_ORIGIN con HTTPS antes de escuchar fuera de loopback.');
+if (!['127.0.0.1', 'localhost', '::1'].includes(host) && (!secure || extraOrigins.some(item => !item.startsWith('https://')))) {
+  throw new Error('Configura CARTA_ORIGIN y CARTA_EXTRA_ORIGINS con HTTPS antes de escuchar fuera de loopback.');
+}
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
 const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
@@ -64,7 +67,7 @@ try {
     // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
     // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
     // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
-    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(baseHostParams()) });
+    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()) });
     // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
     // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
     // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
@@ -88,7 +91,7 @@ try {
     const escuchando = app;
     escuchando.start();
     escuchando.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
-    escuchando.server.listen(port, host, () => console.log(`Carta disponible en ${origin}; acceso privado requerido.`));
+    escuchando.server.listen(port, host, () => console.log(`Carta disponible en ${[origin, ...extraOrigins].join(', ')}; acceso privado requerido.`));
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'No se pudo iniciar el mundo.');

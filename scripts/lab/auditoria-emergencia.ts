@@ -11,6 +11,7 @@ import { Store } from '../../src/server/store.js';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
 import { createWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
+import { OFICIOS_CATEGORIAS } from '../../src/world/diversidad.js';
 import { policyDiversity, type PolicyGenome } from '../../src/world/politica.js';
 import { CAPABILITIES, materialCapacities } from '../../src/world/technology.js';
 import { technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
@@ -20,6 +21,8 @@ const MOTOR = 'motor.hilos=1,motor.particionarPersonas=false,motor.soaTerreno=tr
 const V15 = 'poblacion.natalidadVecindad=true,poblacion.radioVecindadNatalidad=16,social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=0,conducta.aptitud=0.35,conducta.politicaPeso=0.35,tecnologia.evitarNoOp=true,tecnologia.dosisCuanto=50,tecnologia.enfriamiento=240';
 const SAMPLE = 600;
 const AXES = ['sharing', 'stewardship', 'openness'] as const;
+/** Oficios productivos: el resto de `person.activity` (drink, explore, rest…) no cuenta aquí. */
+const CRAFTS = new Set(['farm', 'build', 'hunt', 'gather', 'craft', 'research', 'repair', 'cooperate', 'forage']);
 
 interface Axes { sharing: number; stewardship: number; openness: number }
 interface Causes { starvation: number; dehydration: number; exposure: number; senescence: number }
@@ -27,12 +30,15 @@ interface Tools { cutting: number; storage: number; insulation: number; cultivat
 interface SeedReport {
   seed: number; days: number; popFinal: number; popPeak: number; mortalPop: number; extinct: boolean;
   births: number; deaths: number; deathCauses: Causes; maxGen: number; meanEnergy: number; meanHunger: number; meanThirst: number;
-  structures: number; blueprints: number; discoveredChunks: number; activeTiles: number;
-  communities: number; maxCommunitySize: number; unaffiliatedFrac: number; cultureStdev: Axes; cultureMean: Axes;
+  structures: number; blueprints: number; discoveredChunks: number; activeChunks: number; archivedChunks: number; activeTiles: number;
+  communities: number; maxCommunitySize: number; maxCommunityShare: number; uniqueCommunityNameFrac: number; unaffiliatedFrac: number;
+  cultureStdev: Axes; cultureMean: Axes; interCommunityCultureStdev: Axes;
+  actionEntropy: number; craftActivityFrac: number;
   recipesTotal: number; hotRecipes: number; hotZeroUseFrac: number; functionalDiversity: number; complexityScore: number;
   toolUses: number; observedUtility: number; techMaxGen: number; toolsByCapability: Tools;
   policyDiversity: number; baldwinL2Mean: number; policySteeredReasons: number; cooperation: number; conflicts: number; teaching: number;
-  siFinalDist: number | null; siMeanDist: number | null; siMeetings: number; siZombieSamples: number; memoriesUntouched: boolean;
+  siFinalDist: number | null; siMeanDist: number | null; siMaxDist: number | null; siMeetings: number; siDaysSinceLastMeeting: number | null;
+  siZombieSamples: number; memoriesUntouched: boolean;
   msPerTickMean: number; msPerTickTail: number;
 }
 
@@ -71,7 +77,35 @@ function cultureOf(people: World['people']): { mean: Axes; stdev: Axes } {
   for (const k of AXES) { stdev[k] = n4(Math.sqrt(stdev[k] / n)); mean[k] = n4(mean[k]); }
   return { mean, stdev };
 }
-function summarize(world: World, seed: number, days: number, popPeak: number, dists: number[], zombies: number, meetings: number, windows: number[]): SeedReport {
+/** Desvío entre medias culturales de comunidades con ≥ 3 miembros; 0 si hay menos de dos. */
+function interCommunityCulture(world: World): Axes {
+  const groups = world.communities.filter(c => c.members.length >= 3);
+  const stdev: Axes = { sharing: 0, stewardship: 0, openness: 0 };
+  const n = groups.length;
+  if (n < 2) return stdev;
+  const mean: Axes = { sharing: 0, stewardship: 0, openness: 0 };
+  for (const c of groups) for (const k of AXES) mean[k] += c.culture[k];
+  for (const k of AXES) mean[k] /= n;
+  for (const c of groups) for (const k of AXES) stdev[k] += (c.culture[k] - mean[k]) ** 2;
+  for (const k of AXES) stdev[k] = n4(Math.sqrt(stdev[k] / n));
+  return stdev;
+}
+/** Entropía de Shannon de la actividad acumulada, normalizada por las 18 acciones posibles. */
+function activityOf(people: World['people']): { entropy: number; craftFrac: number } {
+  const counts = new Map<string, number>();
+  let total = 0, craft = 0;
+  for (const person of people) for (const [action, n] of Object.entries(person.activity)) {
+    if (!(n > 0)) continue;
+    total += n;
+    counts.set(action, (counts.get(action) ?? 0) + n);
+    if (CRAFTS.has(action)) craft += n;
+  }
+  if (total === 0) return { entropy: 0, craftFrac: 0 };
+  let h = 0;
+  for (const n of counts.values()) { const p = n / total; h -= p * Math.log(p); }
+  return { entropy: n4(Math.min(1, h / Math.log(OFICIOS_CATEGORIAS))), craftFrac: n4(craft / total) };
+}
+function summarize(world: World, seed: number, days: number, popPeak: number, dists: number[], zombies: number, meetings: number, windows: number[], archived: number): SeedReport {
   const people = world.people;
   let mortal = 0, unaff = 0, energy = 0, hunger = 0, thirst = 0, maxGen = 0, steered = 0, l2 = 0, l2n = 0;
   const tools: Tools = { cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
@@ -93,6 +127,8 @@ function summarize(world: World, seed: number, days: number, popPeak: number, di
   const hot = world.technology.recipes;
   const cat = technologyCatalogueTotals(world);
   const culture = cultureOf(people);
+  const activity = activityOf(people);
+  const guide = pair(world).s;
   let maxCommunity = 0;
   for (const c of world.communities) if (c.members.length > maxCommunity) maxCommunity = c.members.length;
   const causes = world.demographyDynamics.causes;
@@ -101,9 +137,13 @@ function summarize(world: World, seed: number, days: number, popPeak: number, di
     births: world.totals.births ?? 0, deaths: world.demographyDynamics.deaths,
     deathCauses: { starvation: causes.starvation, dehydration: causes.dehydration, exposure: causes.exposure, senescence: causes.senescence },
     maxGen, meanEnergy: n ? n4(energy / n) : 0, meanHunger: n ? n4(hunger / n) : 0, meanThirst: n ? n4(thirst / n) : 0,
-    structures: world.structures.length, blueprints: world.blueprints.length, discoveredChunks: world.discoveredChunks, activeTiles: world.tiles.length,
-    communities: world.communities.length, maxCommunitySize: maxCommunity, unaffiliatedFrac: n ? n4(unaff / n) : 0,
-    cultureStdev: culture.stdev, cultureMean: culture.mean,
+    structures: world.structures.length, blueprints: world.blueprints.length, discoveredChunks: world.discoveredChunks,
+    activeChunks: Object.keys(world.chunks).length, archivedChunks: archived, activeTiles: world.tiles.length,
+    communities: world.communities.length, maxCommunitySize: maxCommunity, maxCommunityShare: n ? n4(maxCommunity / n) : 0,
+    uniqueCommunityNameFrac: world.communities.length ? n4(new Set(world.communities.map(c => c.name)).size / world.communities.length) : 1,
+    unaffiliatedFrac: n ? n4(unaff / n) : 0,
+    cultureStdev: culture.stdev, cultureMean: culture.mean, interCommunityCultureStdev: interCommunityCulture(world),
+    actionEntropy: activity.entropy, craftActivityFrac: activity.craftFrac,
     recipesTotal: world.technology.recipeCounter, hotRecipes: hot.length,
     hotZeroUseFrac: hot.length ? n4(hot.filter(r => r.uses === 0).length / hot.length) : 0,
     functionalDiversity: cat.functionalDiversity, complexityScore: analyzeTechnologyStateComplexity(world.technology).complexityScore,
@@ -111,7 +151,9 @@ function summarize(world: World, seed: number, days: number, popPeak: number, di
     policyDiversity: n4(policyDiversity(genomes)), baldwinL2Mean: l2n ? n4(l2 / l2n) : 0, policySteeredReasons: steered,
     cooperation: world.totals.cooperation ?? 0, conflicts: world.totals.conflicts ?? 0, teaching: world.totals.teaching ?? 0,
     siFinalDist: dists.length ? n4(dists[dists.length - 1]!) : null, siMeanDist: dists.length ? n4(avg(dists)) : null,
-    siMeetings: meetings, siZombieSamples: zombies, memoriesUntouched: world.memories.length === 5,
+    siMaxDist: dists.length ? n4(Math.max(...dists)) : null, siMeetings: meetings,
+    siDaysSinceLastMeeting: guide ? n4((world.tick - guide.lastMeeting) / TICKS_PER_DAY) : null,
+    siZombieSamples: zombies, memoriesUntouched: world.memories.length === 5,
     msPerTickMean: windows.length ? n4(avg(windows)) : 0, msPerTickTail: windows.length ? n4(windows[windows.length - 1]!) : 0,
   };
 }
@@ -139,7 +181,8 @@ function runSeed(seed: number, days: number, params: WorldParams): SeedReport {
       store.save(world);
       if (t % TICKS_PER_DAY === 0) console.error(`seed ${seed} día ${t / TICKS_PER_DAY}/${days} pop ${world.people.length} pico ${popPeak} ms/tick ${n4(windows[windows.length - 1]!)}`);
     }
-    return summarize(world, seed, days, popPeak, dists, zombies, meetings, windows);
+    const archived = Number((store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number }).n);
+    return summarize(world, seed, days, popPeak, dists, zombies, meetings, windows, archived);
   } finally {
     try { store.close(); } finally { rmSync(dir, { recursive: true, force: true }); }
   }

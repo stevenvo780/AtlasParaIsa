@@ -29,6 +29,9 @@ export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
+  /** Orígenes HTTPS adicionales permitidos explícitamente por el operador (p. ej. acceso LAN/VPN).
+   * Nunca relajan la validación: cada solicitud debe emparejar exactamente Host ↔ Origin. */
+  extraOrigins?: readonly string[];
   secure?: boolean; staticDir?: string; tickMs?: number; seed?: number; manual?: boolean;
   /** Params con los que se GENERA un mundo nuevo (R6: antes llegaban después de que
    * `createApp` ya hubiera generado el terreno). Un mundo cargado conserva los suyos,
@@ -229,8 +232,18 @@ export function createApp(options: AppOptions) {
   const { store } = options;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const verifyPassword = passwordVerifier(options);
-  const origin = new URL(options.origin).origin;
+  const primaryUrl = new URL(options.origin);
+  const origin = primaryUrl.origin;
   if (options.secure && !origin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
+  const allowedOriginByHost = new Map<string, string>([[primaryUrl.host, origin]]);
+  for (const rawExtra of options.extraOrigins ?? []) {
+    const extraUrl = new URL(rawExtra);
+    const extraOrigin = extraUrl.origin;
+    if (options.secure && !extraOrigin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
+    const existing = allowedOriginByHost.get(extraUrl.host);
+    if (existing && existing !== extraOrigin) throw new Error('Conflicting origins for the same host.');
+    allowedOriginByHost.set(extraUrl.host, extraOrigin);
+  }
   const loaded = store.load();
   const existingInstanceId = readWorldInstance(store.db);
   let world = loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
@@ -418,8 +431,14 @@ export function createApp(options: AppOptions) {
     if (!hash || !store.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
     return hash;
   }
-  function checkOrigin(req: IncomingMessage) {
-    if (req.headers.origin !== origin) throw new HttpError(403, 'Origen no autorizado.');
+  function requestOrigin(req: IncomingMessage, errorMessage = 'Host no autorizado.'): string {
+    const host = req.headers.host;
+    const expected = typeof host === 'string' ? allowedOriginByHost.get(host) : undefined;
+    if (!expected) throw new HttpError(403, errorMessage);
+    return expected;
+  }
+  function checkOrigin(req: IncomingMessage, expectedOrigin: string) {
+    if (req.headers.origin !== expectedOrigin) throw new HttpError(403, 'Origen no autorizado.');
   }
   /** Único punto de salida: registra el último envío (para el latido). Los mensajes pequeños no
    * se comprimen salvo con `perMessageDeflate: true` (T136). */
@@ -758,14 +777,14 @@ export function createApp(options: AppOptions) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (options.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
-      const url = new URL(req.url ?? '/', origin);
-      if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Host no autorizado.');
+      const expectedOrigin = requestOrigin(req);
+      const url = new URL(req.url ?? '/', expectedOrigin);
       if (req.method === 'GET' && url.pathname === '/health') return json(res, failed ? 503 : 200, { status: failed ? 'paused' : 'ok', ...(respaldo ? { respaldo } : {}) });
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         return json(res, 200, { authenticated: !!hash && store.sessionValid(hash) });
       }
-      if (req.method === 'POST') checkOrigin(req);
+      if (req.method === 'POST') checkOrigin(req, expectedOrigin);
       if (req.method === 'POST' && url.pathname === '/api/login') {
         rate(loginAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustedProxies), 6, 60_000);
         // Cortafuegos ante una avalancha real, no un segundo límite por-persona: con el cupo
@@ -827,8 +846,8 @@ export function createApp(options: AppOptions) {
   server.on('upgrade', (req, socket, head) => {
     conexionesNuevas.delete(socket);
     try {
-      checkOrigin(req);
-      if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Ruta no autorizada.');
+      const expectedOrigin = requestOrigin(req, 'Ruta no autorizada.');
+      checkOrigin(req, expectedOrigin);
       const solicitud = solicitudWs(req.url);
       const hash = authorized(req);
       if (clients.size >= 12) throw new HttpError(429, 'Demasiadas conexiones.');

@@ -15,6 +15,8 @@ interface ObservedTile {
 interface ObservedArray {
   owner: ResidentTopologyOwner;
   revision: object;
+  /** Cambia solo cuando se muta o borra una posición `< oldLength` (un `push` puro al final no la mueve). */
+  inPlaceRevision: object;
   unsafe: Set<number>;
   length: number;
   observer?: () => void;
@@ -145,7 +147,7 @@ export class ResidentTopologyOwner {
       }
     }
     const state: ObservedArray = {
-      owner: this, revision: {}, unsafe, length: target.length,
+      owner: this, revision: {}, inPlaceRevision: {}, unsafe, length: target.length,
     };
     const inspect = (index: number): void => {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, String(index));
@@ -155,11 +157,13 @@ export class ResidentTopologyOwner {
     };
     const changed = (key: PropertyKey, oldLength: number): void => {
       if (key === 'length') {
+        if (target.length < oldLength) state.inPlaceRevision = {};
         for (let i = target.length; i < oldLength; i++) state.unsafe.delete(i);
         for (let i = oldLength; i < target.length; i++) inspect(i);
       } else {
         const index = indexOf(key);
         if (index === null) return;
+        if (index < oldLength) state.inPlaceRevision = {};
         for (let i = oldLength; i < target.length; i++) if (i !== index) inspect(i);
         inspect(index);
       }
@@ -188,7 +192,7 @@ export class ResidentTopologyOwner {
       },
       setPrototypeOf(object, prototype) {
         state.observer?.(); const accepted = Reflect.setPrototypeOf(object, prototype);
-        if (accepted) { owner.invalidate(); state.revision = {}; }
+        if (accepted) { owner.invalidate(); state.revision = {}; state.inPlaceRevision = {}; }
         return accepted;
       },
       preventExtensions(object) { state.observer?.(); return Reflect.preventExtensions(object); },
@@ -215,6 +219,11 @@ export function residentTopologyToken(tiles: Tile[]): ResidentTopologyToken | un
 export function residentTerrainRevision(tiles: Tile[]): object | undefined {
   const state = observedArrays.get(tiles);
   return state?.owner.token(state) ? state.owner.terrainToken() : undefined;
+}
+/** Revisión de escrituras/borrados en posiciones existentes (`< oldLength`); un `push` puro al final no la cambia. */
+export function residentInPlaceRevision(tiles: Tile[]): object | undefined {
+  const state = observedArrays.get(tiles);
+  return state?.owner.token(state) ? state.inPlaceRevision : undefined;
 }
 /** Asociación emitida por registry; el contexto del mundo puede preceder a un reemplazo del array. */
 export function residentTopologyOwner(tiles: Tile[]): ResidentTopologyOwner | undefined {

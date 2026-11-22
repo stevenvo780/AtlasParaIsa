@@ -36,8 +36,8 @@ export function updateCulturalNormsOnOutcome(world: World, person: Person, actio
   }
   const rate = person.genome.learningRate * 0.04 * derivaCultural;
   const wild = ['gather','hunt','forage'].includes(action);
-  if ((!useful && wild) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate * 1.1);
-  else if (useful && wild && person.hunger > 0.35) person.culture.stewardship = clamp(person.culture.stewardship - rate * 0.65);
+  if ((!useful && wild) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate * 1.15 * (0.95 - person.culture.stewardship));
+  else if (useful && wild && (action === 'hunt' || action === 'gather' || person.hunger > 0.18)) person.culture.stewardship = clamp(person.culture.stewardship - rate * 0.7 * Math.max(0.1, person.culture.stewardship - 0.08));
   const need = Math.max(person.hunger, person.thirst);
   if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9 * (0.95 - person.culture.sharing));
   else if (need > 0.72) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1 * Math.max(0.1, person.culture.sharing - 0.08));
@@ -487,6 +487,22 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
 
 const COMMUNITY_SYLLABLES = ['Sauce','Brisa','Lumbre','Junco','Piedra','Semilla','Rocío','Sendero'];
 const COMMUNITY_COLORS = ['#dfba67','#76b8be','#c498b8','#a3bb6c'];
+const COMMUNITY_FORMAS = ['Círculo','Casa','Senda','Rama','Lumbre','Aldea','Valle','Orilla','Refugio','Nido'];
+const COMMUNITY_RAICES = ['Sauce','Brisa','Junco','Piedra','Semilla','Rocío','Roble','Lluvia','Cauce','Musgo','Alba','Niebla','Arena','Ceniza','Espiga','Raíz'];
+const COMMUNITY_EPITETOS = ['Alta','Clara','Viva','del Sur','del Norte','del Oeste','del Este','Honda','Serena','Nueva','Verde','Antigua'];
+/** Nombre de una comunidad nueva. Sin deriva cultural, el histórico de 8 sílabas por
+ * semilla e id; con deriva, una de 10×16×12 = 1 920 combinaciones según el número monótono
+ * del id: el paso 37 es coprimo con 1 920, así que ninguna se repite en 1 920 fundaciones
+ * consecutivas y no hace falta recorrer las comunidades activas para desambiguar. */
+function communityName(world: World, id: string): string {
+  if (!(paramsOf(world).social.derivaCultural > 0)) {
+    const random = localRandom(world.seed, id);
+    return `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
+  }
+  const numero = Number(id.slice('community-'.length));
+  const m = ((Number.isFinite(numero) ? numero : world.communityCounter) * 37) % 1920;
+  return `${COMMUNITY_FORMAS[m % 10]} de ${COMMUNITY_RAICES[Math.floor(m / 10) % 16]} ${COMMUNITY_EPITETOS[Math.floor(m / 160)]}`;
+}
 /** Vecino de confianza: el mismo predicado con el que `updateCommunities` une y funda (≤ 6 celdas,
  * confianza propia ≥ 0,25, prácticas a menos de 0,3). */
 const trustedNeighbor = (person: Person, other: Person): boolean => other !== person && distance(person, other) <= 6
@@ -584,29 +600,42 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
     for (const p of members) { sumX += p.x; sumY += p.y; }
     const center = { x: sumX / members.length, y: sumY / members.length };
     const memberSet = new Set(members);
+    // Fisión orgánica (sólo con deriva cultural): la fricción social estrecha el radio de cohesión
+    // de los grupos grandes y permite varias separaciones limpias en una misma revisión. Sin
+    // deriva, el radio efectivo es el de siempre y sólo cabe una fisión por grupo y revisión.
+    const organica = params.social.derivaCultural > 0;
+    const effectiveRadius = organica && members.length > 48 ? Math.max(4, radius * Math.sqrt(48 / members.length)) : radius;
+    const maxSplits = organica && members.length > 64 ? Math.min(4, Math.floor(members.length / 40)) : 1;
+    let splits = 0;
     // R1 cuenta mortales del origen. No cambia mientras se busca al primer núcleo: `isMortalMember`
-    // lee el rol, y la fisión (una por grupo) reasigna `communityId` sólo después de esta cuenta.
-    const mortalesDeOrigen = disolver ? members.filter(isMortalMember).length : 0;
+    // lee el rol, y la fisión reasigna `communityId` sólo después de esta cuenta.
+    let mortalesDeOrigen = disolver ? members.filter(isMortalMember).length : 0;
     for (const person of members) {
+      if (!memberSet.has(person)) continue;
       const away = distance(person, center);
-      if (away <= radius) continue;
+      if (away <= effectiveRadius) continue;
       const core = vecinos(world, person, 7, p => memberSet.has(p) && trustedNeighbor(person, p), 'updateCommunities:cohabitation');
       const founders = [person, ...core];
+      let mortalFounders = 0;
       if (disolver) {
         // R1: arreglo en origen. El grupo nuevo y el de origen retienen cada uno ≥ 3 MORTALES
         // (antes bastaba con que el origen conservara a alguien, cualquiera; eso fabricaba restos).
-        const mortalFounders = founders.filter(isMortalMember).length;
+        mortalFounders = founders.filter(isMortalMember).length;
         const originMortalsAfter = mortalesDeOrigen - mortalFounders;
         if (mortalFounders < 3 || originMortalsAfter < 3 || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       } else if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       const id = `community-${++world.communityCounter}`;
-      const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
+      const name = communityName(world, id);
       const ids = founders.map(p => p.id);
       world.communities.push({ id, name, x: person.x, y: person.y, members: ids, color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 });
       for (const p of founders) p.communityId = id;
       // Arreglo propio para el evento: la fisión no reproduce el alias de la fundación (nota de abajo).
       emit({ kind: 'community', actors: [...ids], x: person.x, y: person.y, source: 'simulation', text: `${name} se separó de ${group.name} entre ${founders.map(p => p.name).join(', ')}.`, cause: `Viven a ${away.toFixed(1)} celdas del centro de ${group.name} (más de ${radius}) y confían entre sí; la pertenencia sigue a la convivencia, no a la etiqueta de origen. Mismos requisitos que una fundación: tres personas, un lugar cercano y el tope de comunidades.` });
-      break;
+      // Quienes ya se separaron no vuelven a elegirse en esta revisión ni cuentan para la siguiente fisión.
+      mortalesDeOrigen -= mortalFounders;
+      for (const p of founders) memberSet.delete(p);
+      splits++;
+      if (splits >= maxSplits || world.communities.length >= cap) break;
     }
   }
   for (const person of world.people) {
@@ -723,7 +752,7 @@ export function updateCommunities(world: World, emit: Emit): void {
     const communityCap = effectiveCommunityCap(paramsOf(world).social.maxComunidades, effectiveLimits(paramsOf(world)).comunidades);
     if (world.communities.length >= communityCap || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
-    const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
+    const name = communityName(world, id);
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };
     for (const p of members) p.communityId = id;
     world.communities.push(group);

@@ -148,6 +148,25 @@ export function proceduralPlaceName(seed: number, x: number, y: number): string 
   return `${nouns[hash(seed, x, y, 800) % nouns.length]} ${QUALIFIERS[hash(seed, x, y, 801) % QUALIFIERS.length]}`;
 }
 
+/** 64 nombres de pila cortos y sin artículo, tomados del paisaje (V18: sustituye al `El 389` que
+ * salía de cortar `proceduralPlaceName` por el primer espacio). */
+const PERSON_NAMES = [
+  'Alba', 'Brisa', 'Cauce', 'Río', 'Piedra', 'Roble', 'Lumbre', 'Sauce', 'Nube', 'Senda', 'Monte', 'Musgo',
+  'Rocío', 'Estero', 'Vega', 'Cima', 'Tierra', 'Sol', 'Lluvia', 'Canto', 'Junco', 'Ceniza', 'Aurora', 'Bruma',
+  'Arcilla', 'Ámbar', 'Olmo', 'Ciprés', 'Laurel', 'Retama', 'Jara', 'Brezo', 'Helecho', 'Trébol', 'Espiga', 'Semilla',
+  'Fresno', 'Abeto', 'Cedro', 'Acacia', 'Hiedra', 'Malva', 'Salvia', 'Tomillo', 'Romero', 'Ortiga', 'Avena', 'Lino',
+  'Arena', 'Grava', 'Duna', 'Loma', 'Ladera', 'Valle', 'Fuente', 'Arroyo', 'Ribera', 'Marea', 'Ola', 'Escarcha',
+  'Nieve', 'Viento', 'Trueno', 'Estrella',
+] as const;
+
+/** Nombre de una persona nacida en el mundo: puro y determinista en `(seed, serial, generation)`,
+ * sin artículos y de ≤ 70 caracteres. El serial (único por nacimiento) va al final, así que dos
+ * personas nunca comparten nombre completo; el nombre de pila sale de un hash, no del orden. */
+export function proceduralPersonName(seed: number, serial: number, generation: number): string {
+  const name = PERSON_NAMES[hash(seed, serial, generation, 1700) % PERSON_NAMES.length]!;
+  return `${name} ${serial}`.slice(0, 70);
+}
+
 export function generateChunk(seed: number, cx: number, cy: number, cuencas = 1): Chunk {
   assertSeed(seed);
   const limit = MAX_COORDINATE / CHUNK_SIZE;

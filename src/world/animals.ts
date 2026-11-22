@@ -4,7 +4,7 @@ import { FOOD_PER_ANIMAL } from './ecosystem.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
-import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
+import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, paramsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
 import { residentFaunaCapacity, residentTileReader, type ResidentTileReader } from './soa/terreno.js';
 import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
@@ -701,13 +701,14 @@ export function mascaraFauna(world: AnimalWorld): MascaraFauna {
 function calcularMascara(world: AnimalWorld): Animal[] {
   ordenCanonico(world.animals);
   const animals = world.animals, population = animals.length;
-  const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
+  const activeCap = openWorldCaps(world) ? limitsOf(world).fauna : MAX_ACTIVE_ANIMALS;
+  const offset = population ? ((world.tick % population) * activeCap) % population : 0;
   let selected: Animal[];
-  if (population <= MAX_ACTIVE_ANIMALS) selected = [...animals];
+  if (population <= activeCap) selected = [...animals];
   else {
     // Los dos tramos ya están en orden canónico: si la vuelta queda entera por delante, el `sort` de la
     // ventana los dejaría así; con ids repetidos entre ambos, lo decide el `sort`.
-    const tramo = animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), vuelta = animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population));
+    const tramo = animals.slice(offset, offset + activeCap), vuelta = animals.slice(0, Math.max(0, offset + activeCap - population));
     selected = !vuelta.length ? tramo : vuelta[vuelta.length - 1]!.id < tramo[0]!.id ? [...vuelta, ...tramo] : [...tramo, ...vuelta].sort(canonical);
   }
   return selected;
@@ -743,8 +744,9 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   world.animals = world.animals.filter(a => a.health > 0);
   const active = seleccion.filter(a => a.health > 0);
   // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
+  const decisionCap = openWorldCaps(world) ? limitsOf(world).fauna : MAX_ANIMAL_DECISIONS_PER_TICK;
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
-    .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
+    .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, decisionCap);
   // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
   const motor = paramsOf(world).motor, parallel = motor.hilos > 1 && due.length >= 384;
   if (parallel) applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));

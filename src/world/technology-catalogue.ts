@@ -247,8 +247,9 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
     const archived = reader.resolve(id, host.tick);
     if (!archived) return undefined;
     recipe = reader.freshCopies === true ? checkedRecipe(host, archived, id) : structuredClone(checkedRecipe(host, archived, id));
+  } else {
+    checkedRecipe(host, recipe, id);
   }
-  checkedRecipe(host, recipe, id);
   if (options.cache !== false) { if (session) touchInSession(session, recipe); else cacheRecipe(state, recipe); }
   return recipe;
 }

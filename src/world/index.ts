@@ -29,7 +29,7 @@ import { advancePopulation, assertLegacyRecord, assertPopulation } from './linea
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
-import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
+import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, openWorldCaps, type WorldParams } from './params.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 import {
@@ -1624,7 +1624,8 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(world).poblacion.maxima);
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
-  if (!list(world.tiles, legacy ? 1120 : limits.teselasActivas) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
+  const placesCap = legacy ? 3 : openWorldCaps(world) ? Math.max(2048, limits.teselasActivas) : 2048;
+  if (!list(world.tiles, legacy ? 1120 : limits.teselasActivas) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, placesCap) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
   for (let index = 0; index < world.tiles.length; index++) {
     const tile = world.tiles[index];
     if (!object(tile) || (legacy ? tile.x !== index % 40 || tile.y !== Math.floor(index / 40) : !validCoordinate(tile.x) || !validCoordinate(tile.y)) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !num(tile.moisture) || !num(tile.vegetation) || !num(tile.food)) fail();

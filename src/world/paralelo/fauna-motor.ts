@@ -42,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
 import type { Animal, AnimalMemory } from '../animals.js';
 import { residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
+import { copyResidentFaunaTile, residentTileReader, type ResidentTileReader } from '../soa/terreno.js';
 import { MAX_COORDINATE } from '../terrain.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
 import { buscarPagina, CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, siguientePotencia } from './paginas.js';
@@ -216,20 +217,34 @@ export class EstadoFaunaCompartido {
   }
 
   /** Relee los valores de las teselas de la página `slot`. `false` si una cambió de coordenadas. */
-  #releerPagina(d: DisposicionTerreno, vista: VistaFauna, slot: number): boolean {
+  #releerPagina(d: DisposicionTerreno, vista: VistaFauna, slot: number, reader?: ResidentTileReader, trustedResident = false): boolean {
     const tiles = d.tiles, { flags, crecimiento, vegetacion, humedad, aguaPotable, tesela } = vista;
     for (let celda = slot * CELDAS_POR_PAGINA, fin = celda + CELDAS_POR_PAGINA; celda < fin; celda++) {
       const i = tesela[celda]!;
       if (i < 0) continue;
       const tile = tiles[i];
       if (!tile || !Object.is(tile.x, d.xs[i]) || !Object.is(tile.y, d.ys[i])) return false;
-      const growth = tile.growth, conCrecimiento = growth !== undefined && growth !== null, terrain = tile.terrain;
-      flags[celda] = CELDA_PRESENTE | (terrain === 'water' ? CELDA_AGUA : 0) | (terrain === 'shelter' ? CELDA_REFUGIO : 0)
-        | (tile.biome === 'ocean' ? CELDA_OCEANO : 0) | (conCrecimiento ? CELDA_CRECIMIENTO : 0);
-      crecimiento[celda] = conCrecimiento ? growth : 0;
-      vegetacion[celda] = tile.vegetation;
-      humedad[celda] = tile.moisture;
-      aguaPotable[celda] = tile.drinkingWater ?? 0;
+      const rcell = reader ? reader.cellAt(d.xs[i]!, d.ys[i]!) : -1;
+      if (rcell >= 0 && reader) {
+        const growth = reader.growth(rcell), conCrecimiento = growth !== undefined, tcode = reader.terrainCode(rcell);
+        flags[celda] = CELDA_PRESENTE | (tcode === reader.TERRAIN_WATER ? CELDA_AGUA : 0) | (tcode === reader.TERRAIN_SHELTER ? CELDA_REFUGIO : 0)
+          | (reader.biomeCode(rcell) === reader.BIOME_OCEAN ? CELDA_OCEANO : 0) | (conCrecimiento ? CELDA_CRECIMIENTO : 0);
+        crecimiento[celda] = conCrecimiento ? growth : 0;
+        vegetacion[celda] = reader.vegetation(rcell)!;
+        humedad[celda] = reader.moisture(rcell)!;
+        aguaPotable[celda] = reader.drinkingWater(rcell) ?? 0;
+      } else if (!trustedResident || !copyResidentFaunaTile(
+        tile, celda, flags, crecimiento, vegetacion, humedad, aguaPotable,
+        CELDA_PRESENTE, CELDA_AGUA, CELDA_REFUGIO, CELDA_OCEANO, CELDA_CRECIMIENTO,
+      )) {
+        const growth = tile.growth, conCrecimiento = growth !== undefined && growth !== null, terrain = tile.terrain;
+        flags[celda] = CELDA_PRESENTE | (terrain === 'water' ? CELDA_AGUA : 0) | (terrain === 'shelter' ? CELDA_REFUGIO : 0)
+          | (tile.biome === 'ocean' ? CELDA_OCEANO : 0) | (conCrecimiento ? CELDA_CRECIMIENTO : 0);
+        crecimiento[celda] = conCrecimiento ? growth : 0;
+        vegetacion[celda] = tile.vegetation;
+        humedad[celda] = tile.moisture;
+        aguaPotable[celda] = tile.drinkingWater ?? 0;
+      }
     }
     return true;
   }
@@ -237,7 +252,7 @@ export class EstadoFaunaCompartido {
   /** Sella y relee las páginas que toca la ventana de percepción de algún animal debido. */
   #releerVentanas(d: DisposicionTerreno, vista: VistaFauna, due: readonly Animal[]): boolean {
     if (++this.#generacion === 0x7fffffff) { this.#sello.fill(0); this.#generacion = 1; }
-    const sello = this.#sello, generacion = this.#generacion;
+    const sello = this.#sello, generacion = this.#generacion, reader = residentTileReader(d.tiles), trustedResident = !reader && residentTopologyToken(d.tiles) !== undefined;
     let releidas = 0;
     for (const a of due) {
       const ax = a.x, ay = a.y;
@@ -250,7 +265,7 @@ export class EstadoFaunaCompartido {
         const slot = buscarPagina(vista, px, py);
         if (slot < 0 || sello[slot] === generacion) continue;
         sello[slot] = generacion; releidas++;
-        if (!this.#releerPagina(d, vista, slot)) return false;
+        if (!this.#releerPagina(d, vista, slot, reader, trustedResident)) return false;
       }
     }
     this.#paginasReleidas = releidas;

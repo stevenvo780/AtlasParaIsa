@@ -286,6 +286,15 @@ export function limitsOf(world: object, version?: number): Readonly<WorldLimits>
   return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(paramsOf(world));
 }
 
+export const OPEN_WORLD_MAX_BLUEPRINTS = 4096;
+
+/** Modo abierto V15 (`CARTA_OPEN_WORLD=1`): sin topes ficticios de estructuras, planos, lugares ni
+ * ventanas rotatorias de fauna; manda el límite de admisión derivado del hardware (`limitsOf`). */
+export function openWorldCaps(world: object): boolean {
+  const params = paramsOf(world);
+  return params.poblacion.natalidadVecindad && params.social.maxComunidades === 0 && params.limites.aplicacion === 'parametros';
+}
+
 
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
 export const PARAM_RANGES: Record<string, [number, number]> = {

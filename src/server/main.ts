@@ -75,7 +75,7 @@ try {
     const vivo = app;
     for (const device of motor.gpu) {
       if (abortado) break;
-      const parity = await gpuParitySession.initialize(device, { log: diagnostic => console.warn(JSON.stringify(diagnostic)) });
+      const parity = await gpuParitySession.initialize(device, { budgetMs: 5000, log: diagnostic => console.warn(JSON.stringify(diagnostic)) });
       console.info(JSON.stringify({ gpuAutoprueba: parity, v15: resumenDespacho(vivo.world) }));
     }
     if (!abortado && motor.gpu.length === 0) console.info(JSON.stringify({ gpuAutoprueba: null, v15: resumenDespacho(vivo.world) }));

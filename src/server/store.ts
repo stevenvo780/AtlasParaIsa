@@ -69,7 +69,7 @@ export const TECHNOLOGY_RETENTION_MIN_TICKS = TICKS_PER_DAY;
  * por encima de lo que crece (≈ 2 recibos por paso, 200 por guardado con `cadaTicks=100`). Medido en la copia
  * pública: ver docs/REGLAS.md, «Retención del archivo de recibos».
  */
-export const TECHNOLOGY_PRUNE_ROWS_PER_SAVE = 4096;
+export const TECHNOLOGY_PRUNE_ROWS_PER_SAVE = 16384;
 /** Tope de filas históricas de `technology_stats` compactadas por guardado (A1). */
 export const TECHNOLOGY_STATS_COMPACT_ROWS_PER_SAVE = 2048;
 /** Tope de recetas en la memoria de lecturas archivadas (`archivedRecipeMemo`); al llenarse se vacía. */
@@ -283,7 +283,7 @@ export class Store {
   private readonly slotBounds = new Map<string, SlotBounds | 'unusable'>();
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
-  private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe> } | null = null;
+  private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe>; warmMemo: ArchivedRecipeMemo | null } | null = null;
   private replayCache: { digest: string; world: World; stamp: ChronicleStamp } | null = null;
   private readonly replayFloors = new Map<string, number>();
   constructor(readonly path: string, options: StoreOptions = {}) {
@@ -387,7 +387,7 @@ export class Store {
     if (this.schemaVersion < 4) return null;
     const reads = typeof atTick === 'number' && typeof id === 'string' ? this.technologyReads : null, key = `${atTick}:${id}`;
     if (reads?.recipes.has(key)) return copyArchivedRecipe(reads.recipes.get(key)!);
-    const memo = this.technologyReads === null ? this.archivedRecipeMemo(id, atTick) : null;
+    const memo = reads ? reads.warmMemo : this.archivedRecipeMemo(id, atTick);
     const remembered = memo?.recipes.get(id);
     if (memo && remembered) {
       // Válida si la lectura recordada y ésta miran ambas desde la fila más reciente o después.
@@ -395,7 +395,7 @@ export class Store {
       if (remembered.atTick >= memo.horizon && atTick >= memo.horizon) return remembered.value && copyArchivedRecipe(remembered.value);
     }
     const definition = this.technologyArchive.getDefinition(id, atTick);
-    if (!definition) { memo?.recipes.set(id, { atTick, value: null }); return null; }
+    if (!definition) { if (!reads) memo?.recipes.set(id, { atTick, value: null }); return null; }
     const stats = this.technologyArchive.getStats(id, atTick);
     if (!stats) technologyFailure('definition has no statistics at the requested tick');
     const { lawsVersion: _lawsVersion, ...recipe } = definition;
@@ -403,8 +403,7 @@ export class Store {
     if (reads) {
       if (reads.recipes.size >= reads.limit) reads.recipes.delete(reads.recipes.keys().next().value!);
       reads.recipes.set(key, copyArchivedRecipe(value));
-    }
-    memo?.recipes.set(id, { atTick, value: copyArchivedRecipe(value) });
+    } else memo?.recipes.set(id, { atTick, value: copyArchivedRecipe(value) });
     return value;
   }
   /** Memoria de recetas archivadas durante la simulación (sprint noche-perf 2026-09-22). La ventana
@@ -439,8 +438,10 @@ export class Store {
     const epoch = batch && batch.atTick === atTick ? batch.epoch : this.technologyArchive.readEpoch();
     if (epoch === null) { this.archivedRecipes = null; return null; }
     let memo = this.archivedRecipes;
-    if (!memo || memo.epoch !== epoch || memo.recipes.size >= ARCHIVED_RECIPE_MEMO_LIMIT) {
+    if (!memo || memo.epoch !== epoch) {
       memo = this.archivedRecipes = { epoch, horizon: undefined, recipes: new Map() };
+    } else if (memo.recipes.size >= ARCHIVED_RECIPE_MEMO_LIMIT && !memo.recipes.has(id)) {
+      memo.recipes.delete(memo.recipes.keys().next().value!);
     }
     return memo;
   }
@@ -453,8 +454,10 @@ export class Store {
     try {
       this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
       const before = this.chronicleStamp();
+      const currentEpoch = `${before.dataVersion}:${before.totalChanges}:${before.schemaCookie}:${before.tempSchemaCookie}`;
+      const warmMemo = this.archivedRecipes && this.archivedRecipes.epoch === currentEpoch ? this.archivedRecipes : null;
       this.technologyArchive.beginHostTransaction();
-      this.technologyReads = { limit: Math.max(1, world.technology.recipes.length), recipes: new Map() };
+      this.technologyReads = { limit: Math.max(ARCHIVED_RECIPE_MEMO_LIMIT, world.technology.recipes.length), recipes: new Map(), warmMemo };
       validate();
       if (!this.db.isTransaction || !sameChronicleStamp(before, this.chronicleStamp()))
         technologyFailure('database changed during technology validation');

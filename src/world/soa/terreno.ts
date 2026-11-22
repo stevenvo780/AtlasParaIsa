@@ -63,8 +63,14 @@ const residentKeys: readonly ResidentKey[] = [...RESIDENT_NUMBERS, 'terrain', 'b
 const residentKeySet = new Set<PropertyKey>(residentKeys);
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
 const TERRAIN_IDX = residentKeys.indexOf('terrain');
+const BIOME_IDX = residentKeys.indexOf('biome');
 const GROWTH_IDX = residentKeys.indexOf('growth');
+const VEGETATION_IDX = residentKeys.indexOf('vegetation');
+const MOISTURE_IDX = residentKeys.indexOf('moisture');
+const DRINKING_WATER_IDX = residentKeys.indexOf('drinkingWater');
 const SHELTER_CODE = TERRAINS.indexOf('shelter') + 1;
+const WATER_CODE = TERRAINS.indexOf('water') + 1;
+const OCEAN_CODE = BIOMES.indexOf('ocean') + 1;
 const residentAccessors = Object.fromEntries(residentKeys.map((key, idx) => {
   const values = enumValues[key];
   return [key, values ? {
@@ -81,7 +87,27 @@ const residentAccessors = Object.fromEntries(residentKeys.map((key, idx) => {
 /** Camino rápido exacto de `faunaCapacity` sobre el SoA residente (0 llamadas a getters/Proxy). */
 export function residentFaunaCapacity(tiles: readonly Tile[]): number | undefined {
   const store = residentStoreByTiles.get(tiles as Tile[]);
-  return store?.faunaCapacityIfResident(tiles);
+  const direct = store?.faunaCapacityIfResident(tiles);
+  if (direct !== undefined) return direct;
+  if (!tiles.length || !residentTopologyToken(tiles as Tile[])) return undefined;
+  const firstBinding = bindings.get(tiles[0]!);
+  if (!firstBinding) return undefined;
+  return firstBinding.store.faunaCapacityMixed(tiles);
+}
+
+/** Copia los 6 campos de fauna de una tesela residente directo desde SAB (1 lookup, 0 getters/allocs),
+ * incluso entre cambios de topología (`maintainRegions` antes del próximo paso de ecología). */
+export function copyResidentFaunaTile(
+  tile: Tile, celda: number, flags: Uint8Array, crecimiento: Float64Array, vegetacion: Float64Array,
+  humedad: Float64Array, aguaPotable: Float64Array,
+  presentBit: number, waterBit: number, shelterBit: number, oceanBit: number, growthBit: number,
+): boolean {
+  const binding = bindings.get(tile);
+  if (!binding) return false;
+  return binding.store.copyFaunaBinding(
+    binding, celda, flags, crecimiento, vegetacion, humedad, aguaPotable,
+    presentBit, waterBit, shelterBit, oceanBit, growthBit,
+  );
 }
 
 type ReaderNumbers = { readonly [K in 'growth' | 'vegetation' | 'moisture' | 'drinkingWater' | 'food' | 'wood']: Float64Array };
@@ -631,6 +657,48 @@ export class TileStore {
         drinkingWater: this.residentCur[residentKeys.indexOf('drinkingWater')] as Float64Array,
         food: this.residentCur[residentKeys.indexOf('food')] as Float64Array,
         wood: this.residentCur[residentKeys.indexOf('wood')] as Float64Array });
+  }
+  copyFaunaBinding(
+    binding: ResidentBinding, celda: number, flags: Uint8Array, crecimiento: Float64Array, vegetacion: Float64Array,
+    humedad: Float64Array, aguaPotable: Float64Array,
+    presentBit: number, waterBit: number, shelterBit: number, oceanBit: number, growthBit: number,
+  ): boolean {
+    if (this.residentBusy || this.residentModified.size > 0) return false;
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const cell = binding.cell, cur = this.residentCur;
+    const tcode = (cur[TERRAIN_IDX] as Uint8Array)[cell]!;
+    const bcode = (cur[BIOME_IDX] as Uint8Array)[cell]!;
+    const growth = (cur[GROWTH_IDX] as Float64Array)[cell]!;
+    const hasGrowth = growth === growth;
+    flags[celda] = presentBit | (tcode === WATER_CODE ? waterBit : 0) | (tcode === SHELTER_CODE ? shelterBit : 0)
+      | (bcode === OCEAN_CODE ? oceanBit : 0) | (hasGrowth ? growthBit : 0);
+    crecimiento[celda] = hasGrowth ? growth : 0;
+    vegetacion[celda] = (cur[VEGETATION_IDX] as Float64Array)[cell]!;
+    humedad[celda] = (cur[MOISTURE_IDX] as Float64Array)[cell]!;
+    const dw = (cur[DRINKING_WATER_IDX] as Float64Array)[cell]!;
+    aguaPotable[celda] = dw === dw ? dw : 0;
+    return true;
+  }
+  faunaCapacityMixed(tiles: readonly Tile[]): number | undefined {
+    if (this.residentBusy || this.residentModified.size > 0) return undefined;
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;
+    const growth = this.residentCur[GROWTH_IDX] as Float64Array;
+    const vegetation = this.residentCur[VEGETATION_IDX] as Float64Array;
+    let count = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!, b = bindings.get(tile);
+      if (b && b.store === this) {
+        const cell = b.cell;
+        if (terrain[cell] !== SHELTER_CODE) {
+          const g = growth[cell]!;
+          if ((g === g ? g : vegetation[cell]!) > 0.04) count++;
+        }
+      } else if (tile.terrain !== 'shelter' && (tile.growth ?? tile.vegetation) > 0.04) {
+        count++;
+      }
+    }
+    return count * 3;
   }
   faunaCapacityIfResident(tiles: readonly Tile[]): number | undefined {
     if (!this.canReadResident(tiles)) return undefined;

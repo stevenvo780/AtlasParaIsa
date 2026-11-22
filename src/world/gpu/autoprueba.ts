@@ -29,6 +29,7 @@ interface ComputeHelpers {
 }
 export interface AutopruebaOptions {
   nvrtc?: string;
+  budgetMs?: number;
   createBackend?: (device: number, nvrtc: string) => Promise<ParityBackend>;
   log?: (diagnostic: ParityDiagnostic) => void;
 }
@@ -125,6 +126,7 @@ export class GPUParitySession {
         qIndex++;
       }
       // Context creation, NVRTC, topology setup and CPU oracle preparation are initialization costs, recorded separately.
+      const budgetMs = options.budgetMs ?? BUDGET_MS;
       verificationStart = process.hrtime.bigint();
       const check = async (): Promise<ParityResult> => {
         for (const { tick, rain, light, args, expected } of quadrants) {
@@ -134,12 +136,12 @@ export class GPUParitySession {
           if (actual.length !== expected.length) return disable('Tamaño de salida distinto.', Math.min(actual.length, expected.length));
           for (let i = 0; i < expected.length; i++) if (!Object.is(expected[i], actual[i]))
             return disable('Divergencia FP64.', i, expected[i], actual[i]);
-          if (elapsed(verificationStart!) > BUDGET_MS) return disable('Autoprueba excedió 200 ms.');
+          if (elapsed(verificationStart!) > budgetMs) return disable(`Autoprueba excedió ${budgetMs} ms.`);
         }
         return result(true, true);
       };
       return await Promise.race([check(), new Promise<ParityResult>(resolve => {
-        timer = setTimeout(() => { expired = true; resolve(disable('Autoprueba excedió 200 ms.')); }, BUDGET_MS);
+        timer = setTimeout(() => { expired = true; resolve(disable(`Autoprueba excedió ${budgetMs} ms.`)); }, budgetMs);
       })]);
     } catch (error) {
       if (!backend) return result(false, false, 'no disponible');

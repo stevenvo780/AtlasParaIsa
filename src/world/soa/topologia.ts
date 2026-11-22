@@ -132,10 +132,20 @@ export class ResidentTopologyOwner {
 
   tiles(source: readonly Tile[]): Tile[] {
     // No llama métodos sustituibles de source: el backing no puede escapar por un slice ajeno.
-    const target: Tile[] = new Array(source.length);
-    for (let i = 0; i < source.length; i++) if (Object.hasOwn(source, i)) target[i] = source[i]!;
+    const len = source.length;
+    const target: Tile[] = new Array(len);
+    const unsafe = new Set<number>();
+    for (let i = 0; i < len; i++) {
+      if (Object.hasOwn(source, i)) {
+        const tile = source[i]!;
+        target[i] = tile;
+        if (observedTiles.get(tile)?.owner !== this) unsafe.add(i);
+      } else {
+        unsafe.add(i);
+      }
+    }
     const state: ObservedArray = {
-      owner: this, revision: {}, unsafe: new Set(), length: target.length,
+      owner: this, revision: {}, unsafe, length: target.length,
     };
     const inspect = (index: number): void => {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, String(index));
@@ -143,7 +153,6 @@ export class ResidentTopologyOwner {
         state.unsafe.delete(index);
       else state.unsafe.add(index);
     };
-    for (let i = 0; i < target.length; i++) inspect(i);
     const changed = (key: PropertyKey, oldLength: number): void => {
       if (key === 'length') {
         for (let i = target.length; i < oldLength; i++) state.unsafe.delete(i);

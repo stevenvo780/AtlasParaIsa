@@ -13,6 +13,21 @@ export function exactJsonNumber(value: unknown): unknown {
   }
   return negativeZero;
 }
+function needsExactReplacer(value: unknown): boolean {
+  if (typeof value === 'number') return Object.is(value, -0);
+  if (value === null || typeof value !== 'object') return false;
+  if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return true;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) if (needsExactReplacer(value[i])) return true;
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key in record) {
+    if (Object.hasOwn(record, key) && needsExactReplacer(record[key])) return true;
+  }
+  return false;
+}
 export function stringifyExact(value: unknown): string {
+  if (!needsExactReplacer(value)) return JSON.stringify(value);
   return JSON.stringify(value, (_key, current: unknown) => exactJsonNumber(current));
 }

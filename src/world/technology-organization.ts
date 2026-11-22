@@ -1,8 +1,8 @@
 import type { OrganizationAnalysis, OrganizationExecution, OrganizationObservation, OrganizationProcess, OrganizationQuantity } from '../shared/organization.js';
-import type { Composition, ResourceMass, TechnologyCheckpoint, TechnologyExecution, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
+import type { Composition, ResourceMass, TechnologyCheckpoint, TechnologyExecution, TechnologyKnowledge, TechnologyRecipe, TechnologyState } from '../shared/technology.js';
 import { analyzeOrganization } from './organization.js';
 import { assertTechnologyCheckpoint, technologyHistoryGap } from './technology-checkpoint.js';
-import { resolveTechnologyRecipe } from './technology-catalogue.js';
+import { resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 
 export interface TechnologyOrganizationActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 type Stock = Map<string, number>;
@@ -73,15 +73,27 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   const currentActors = new Map(actors.map(actor => [actor.id, actor]));
   if (currentActors.size !== actors.length) diagnostics.push('duplicate-current-actor');
   const openingByActor = new Map<string, Stock>(), closingByActor = new Map<string, Stock>();
+  const initialInventoryByActor = new Map<string, TechnologyCheckpoint['inventories'][number]>();
   for (const inventory of checkpoint?.inventories ?? []) {
     const opening = actorStock({ technology: inventory });
     openingByActor.set(inventory.actorId, opening); closingByActor.set(inventory.actorId, new Map(opening));
+    initialInventoryByActor.set(inventory.actorId, inventory);
   }
   if (checkpoint && (currentActors.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !currentActors.has(inventory.actorId)))) diagnostics.push('checkpoint-roster-change');
   const lastKind = new Map<string, string>();
   const imported: Stock = new Map(), exported: Stock = new Map();
   const unknownOpening = new Set<string>(), unknownClosing = new Set<string>();
+  const actorsWithEnvelope = new Set<string>();
+  const resolvedRecipes = new Map<string, TechnologyRecipe | undefined>();
+  const resolveColdRecipe = (id: string): TechnologyRecipe | undefined => {
+    if (resolvedRecipes.has(id)) return resolvedRecipes.get(id);
+    const recipe = resolveTechnologyRecipe({ technology: state, tick }, id, { cache: false });
+    resolvedRecipes.set(id, recipe);
+    return recipe;
+  };
+  withArchiveReadBatch({ technology: state, tick }, () => {
   for (const event of envelopes) {
+    actorsWithEnvelope.add(event.actorId);
     const before = stock(event.balance.opening), after = stock(event.balance.closing);
     if (!openingByActor.has(event.actorId)) {
       diagnostics.push(`unobserved-opening-stock:${event.actorId}`);
@@ -103,11 +115,12 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
     }
     if (!equals(expected, after)) diagnostics.push(`transaction-resource-mismatch:${event.id}`);
     if (event.success && ['research', 'craft'].includes(event.kind)) {
-      const recipe = event.recipeId ? resolveTechnologyRecipe({ technology: state, tick }, event.recipeId, { cache: false }) : undefined;
+      const recipe = event.recipeId ? resolveColdRecipe(event.recipeId) : undefined;
       if (!recipe || recipe.tick > event.tick || recipe.signature !== event.programSignature) diagnostics.push(`unverified-recipe:${event.id}`);
       else if (recipe.program.steps.filter(step => step.requiredCatalyst).length !== event.catalysts.filter(catalyst => catalyst.required).length) diagnostics.push(`missing-required-catalyst:${event.id}`);
     }
   }
+  });
   // Estate and paired transfers describe movement across the scope, not manufacture.
   // Paired internal flows cancel; an incomplete pair remains an explicit import/loss.
   const transfers = new Map<string, FlowRecord[]>();
@@ -130,8 +143,8 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
     if (!openingByActor.has(actor.id)) {
       diagnostics.push(`unobserved-opening-stock:${actor.id}`);
       for (const id of actual.keys()) unknownOpening.add(id);
-    } else if (!envelopes.some(event => event.actorId === actor.id)) {
-      const initial = checkpoint!.inventories.find(inventory => inventory.actorId === actor.id)!;
+    } else if (!actorsWithEnvelope.has(actor.id)) {
+      const initial = initialInventoryByActor.get(actor.id)!;
       if (!samePhysicalStock(initial, actor)) diagnostics.push(`unlogged-physical-stock-change:${actor.id}`);
     }
     closingByActor.set(actor.id, actual);

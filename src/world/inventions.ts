@@ -7,12 +7,15 @@ import { chunkKey } from './terrain.js';
 import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
+import { openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS, paramsOf } from './params.js';
 import { vecinos } from './rejilla.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
 export const MAX_BLUEPRINTS = 64;
 export const MAX_STRUCTURES = 512;
+export const structureCap = (world: World): number => openWorldCaps(world) ? paramsOf(world).limites.teselasActivas : MAX_STRUCTURES;
+export const blueprintCap = (world: World): number => openWorldCaps(world) ? OPEN_WORLD_MAX_BLUEPRINTS : MAX_BLUEPRINTS;
 export const RESEARCH_WORK = 60;
 export const REPAIR_WORK = 30;
 export const RESEARCH_COOLDOWN = 1200;
@@ -222,7 +225,7 @@ function usefulRepairs(world: World, person: Person, context?: ReturnType<typeof
  * and pays the same material/work costs. No distant archive, historical uses or
  * invented number of occupants contributes to this local marginal comparison. */
 export function constructionOpportunity(world: World, person: Person): { score: number; reason: string } | undefined {
-  if (world.structures.length >= MAX_STRUCTURES) return;
+  if (world.structures.length >= structureCap(world)) return;
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components), materials = localMaterials(world, person);
   if (materials.wood < cost.wood || materials.stone < cost.stone) return;
   const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
@@ -353,7 +356,7 @@ function expertise(person: Person): number {
     + (person.skills.build ?? 0) + (person.skills.farm ?? 0) + (person.skills.gather ?? 0));
 }
 export function inventionOpportunity(world: World, person: Person): { score: number; target: Point; reason: string } | undefined {
-  if (!world.noveltyEnabled || world.blueprints.length >= MAX_BLUEPRINTS || person.materials.wood < 1 || expertise(person) < 0.2
+  if (!world.noveltyEnabled || world.blueprints.length >= blueprintCap(world) || person.materials.wood < 1 || expertise(person) < 0.2
     || world.tick - (person.lastInvention ?? -RESEARCH_COOLDOWN) < RESEARCH_COOLDOWN
     || person.energy < 0.45 || Math.max(person.hunger, person.thirst, person.fatigue) > 0.72) return;
   const context = inventionContext(world, person), need = Math.max(context.water, context.food, context.rest);
@@ -369,7 +372,7 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
   const identity = blueprintIdentity(world); if (!identity) return false;
   person.materials.wood--; person.work -= RESEARCH_WORK; person.lastInvention = world.tick;
   world.inventionDynamics.attempts++;
-  const candidate = world.blueprints.length < MAX_BLUEPRINTS ? chooseInvention(world, person) : undefined;
+  const candidate = world.blueprints.length < blueprintCap(world) ? chooseInvention(world, person) : undefined;
   if (!candidate) {
     person.reason = 'El ensayo consumió una madera y sesenta unidades de trabajo; no produjo una receta novedosa y útil.';
     return false;
@@ -390,7 +393,7 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
 /** The single debit boundary for construction. No stock is seeded into the finished building. */
 export function completeConstruction(world: World, person: Person, tile: Tile, emit: Emit): StructureView | null {
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components);
-  if (!validBlueprint(blueprint.components) || world.structures.length >= MAX_STRUCTURES || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
+  if (!validBlueprint(blueprint.components) || world.structures.length >= structureCap(world) || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
     || tile.terrain === 'water' || tile.terrain === 'shelter' || algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5)
     || algunoCerca(world.structures, tile, 1, s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
   const identity = nextIdentity(world.structureCounter, 'structure', world.structures.map(s => s.id), world);

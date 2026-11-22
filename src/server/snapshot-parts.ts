@@ -40,21 +40,34 @@ export interface WrittenSnapshot { body: string; digest: string; bytes: number; 
  * or tile source through last-key-wins semantics, including inside its metadata. */
 function assertUniqueKeys(body: string): void {
   const stack: (Set<string> | null)[] = [];
-  for (let i = 0; i < body.length; i++) {
-    const char = body[i];
-    if (char === '{') stack.push(new Set());
-    else if (char === '[') stack.push(null);
-    else if (char === '}' || char === ']') stack.pop();
-    else if (char === '"') {
+  const pool: Set<string>[] = [];
+  const len = body.length;
+  for (let i = 0; i < len; i++) {
+    const code = body.charCodeAt(i);
+    if (code === 123 /* { */) {
+      const set = pool.pop() ?? new Set<string>();
+      stack.push(set);
+    } else if (code === 91 /* [ */) {
+      stack.push(null);
+    } else if (code === 125 /* } */ || code === 93 /* ] */) {
+      const top = stack.pop();
+      if (top) { top.clear(); pool.push(top); }
+    } else if (code === 34 /* " */) {
       const start = i++;
-      for (; i < body.length; i++) {
-        if (body[i] === '\\') i++;
-        else if (body[i] === '"') break;
+      let escaped = false;
+      for (; i < len; i++) {
+        const ch = body.charCodeAt(i);
+        if (ch === 92 /* \ */) { escaped = true; i++; }
+        else if (ch === 34 /* " */) break;
       }
       let next = i + 1;
-      while (/\s/.test(body[next] ?? '') && next < body.length) next++;
-      if (body[next] === ':') {
-        const key = JSON.parse(body.slice(start, i + 1)) as string, seen = stack.at(-1);
+      while (next < len) {
+        const ws = body.charCodeAt(next);
+        if (ws === 32 || ws === 9 || ws === 10 || ws === 13) next++; else break;
+      }
+      if (next < len && body.charCodeAt(next) === 58 /* : */) {
+        const key = escaped ? JSON.parse(body.slice(start, i + 1)) as string : body.slice(start + 1, i);
+        const seen = stack[stack.length - 1];
         if (!seen || seen.has(key)) failure('duplicate metadata key');
         seen.add(key);
       }
@@ -237,24 +250,26 @@ export class SnapshotParts {
     const retained = new Set<string>(), bodies = new Set<string>();
     // In a UTF-8 database, valid UTF-8 bytes without NUL (node:sqlite cuts text there) hash exactly like
     // the text they decode to, without transcoding three multi-megabyte bodies to JS strings and back.
-    // Any other row takes the text path.
-    const snapshots = this.db.prepare("SELECT slot,CAST(body AS BLOB) AS bytes,instr(CAST(body AS BLOB),x'00') AS nul,digest FROM main.snapshots")
-      .all() as { slot: number; bytes: Uint8Array; nul: number; digest: string }[];
+    // Stream one slot at a time so peak memory holds at most one snapshot body instead of all three.
+    const slots = this.db.prepare('SELECT slot, digest FROM main.snapshots').all() as { slot: number; digest: string }[];
+    const blobOf = this.db.prepare("SELECT CAST(body AS BLOB) AS bytes, instr(CAST(body AS BLOB), x'00') AS nul FROM main.snapshots WHERE slot=?");
     const text = this.db.prepare('SELECT body FROM main.snapshots WHERE slot=?');
     const bodyOf = (slot: number) => (text.get(slot) as { body: string }).body;
     const utf8 = (this.db.prepare('PRAGMA main.encoding').get() as { encoding: string }).encoding === 'UTF-8';
     try {
-      for (const row of snapshots) {
-        if (checksum(utf8 && row.nul === 0 && isUtf8(row.bytes) ? row.bytes : bodyOf(row.slot)) !== row.digest) return;
-        bodies.add(row.digest);
-        let refs = this.references.get(row.digest);
+      for (const { slot, digest } of slots) {
+        const raw = blobOf.get(slot) as { bytes: Uint8Array; nul: number } | undefined;
+        if (!raw) return;
+        if (checksum(utf8 && raw.nul === 0 && isUtf8(raw.bytes) ? raw.bytes : bodyOf(slot)) !== digest) return;
+        bodies.add(digest);
+        let refs = this.references.get(digest);
         if (!refs) {
-          const body = bodyOf(row.slot), value = parseSnapshotJSON(body);
+          const body = bodyOf(slot), value = parseSnapshotJSON(body);
           refs = object(value) && Object.hasOwn(value, 'snapshotEncoding')
             ? this.manifest(value, body, false).tiles.pages.map(page => page.digest) : [];
-          this.references.set(row.digest, refs);
+          this.references.set(digest, refs);
         }
-        for (const digest of refs) retained.add(digest);
+        for (const pageDigest of refs) retained.add(pageDigest);
       }
     } catch (error) {
       if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotPartsFormatError)) throw error;

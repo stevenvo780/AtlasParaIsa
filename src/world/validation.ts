@@ -4,7 +4,7 @@ import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
 import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature } from './inventions.js';
-import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
+import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS } from './params.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
   if ((required || tile.feature !== undefined) && !['tree','pine','palm','cactus','reeds','berries','flowers','rock','clay','stump','spring','pool','none'].includes(String(tile.feature))) fail();
@@ -23,8 +23,8 @@ const integer = (v: unknown,max=Number.MAX_SAFE_INTEGER): v is number => number(
 const string = (v: unknown,max=200): v is string => typeof v==='string' && v.length>0 && v.length<=max;
 const coordinate = (v: unknown): v is number => typeof v==='number'&&Number.isSafeInteger(v)&&v>=-10_000_000&&v<10_000_000;
 const fail = ():never=>{throw new Error('Estado de vida o estructuras inválido.');};
-export function assertBlueprint(value: unknown,tick: number): asserts value is BlueprintView {
-  if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components)||!integer(value.generation,64)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,12)||!integer(value.cost.stone,8)||!integer(value.cost.work,600)||value.cost.work<1)fail();
+export function assertBlueprint(value: unknown,tick: number,maxGeneration=64): asserts value is BlueprintView {
+  if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,12)||!integer(value.cost.stone,8)||!integer(value.cost.work,600)||value.cost.work<1)fail();
   const b=value as unknown as BlueprintView, cost=blueprintCost(b.components);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
 }
@@ -65,9 +65,10 @@ export function assertLifeState(world: World): void {
   assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
   assertFaunaStock(world.tiles,world.animals);
   assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas);
-  if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>64)fail();
+  const maxBlueprints=openWorldCaps(world)?OPEN_WORLD_MAX_BLUEPRINTS:64;
+  if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>maxBlueprints)fail();
   const ids=new Set<string>(),signatures=new Set<string>();
-  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
+  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick,maxBlueprints);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
   if(!ids.has('blueprint-base'))fail();
   for(const blueprint of world.blueprints) {
     if(blueprint.parents.some(id=>id===blueprint.id||!ids.has(id))||new Set(blueprint.parents).size!==blueprint.parents.length)fail();

@@ -725,13 +725,13 @@ function viewCapacities(values: Record<Capability, number>): Record<Capability, 
   for (const capability of CAPABILITIES) out[capability] = Math.round(values[capability] * 1000) / 1000;
   return out;
 }
-export function projectTechnology(host: TechnologyHost): TechnologyView {
+export function projectTechnology(host: TechnologyHost, itemOwners: readonly TechnologyActor[] = host.people): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
   const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
   /** T036(h): el repertorio de cada actor (≈13 KiB) ya no viaja en cada `state`: el inspector lo pide
-   * por habitante con `{type:'persona'}`. Su ausencia significa «no está en esta vista», no «no sabe nada». */
+   * por habitante con `{type:'persona'}`. FR-026: `items` se recorta al mismo viewport que `people`. */
   return { recipes: state.recipes.map(recipe => ({ id: recipe.id, name: recipe.name, generation: recipe.generation, capacities: viewCapacities(recipe.capacities) })),
-    items: host.people.flatMap(p => p.technology.items.map(i => {
+    items: itemOwners.flatMap(p => p.technology.items.map(i => {
     const affordance = state.water ? containerAffordance(i) : undefined;
     return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: viewCapacities(materialCapacities(i)),
       ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,

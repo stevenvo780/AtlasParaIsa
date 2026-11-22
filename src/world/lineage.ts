@@ -3,8 +3,8 @@ import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.j
 import type { StructureView } from '../shared/life.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
-import { assertGenome } from './genetics.js';
-import { demographicTraits, updateDemography } from './demography.js';
+import { assertGenome, GENE_COUNT, type Genome } from './genetics.js';
+import { demographicTraits, exposureDamage, updateDemography } from './demography.js';
 import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
@@ -12,42 +12,100 @@ import { consumeInsulationTools, portableInsulationPower, toolEffectsEnabled } f
 
 export const RECENT_LEGACY_COUNT = 32;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
+/** De estos rasgos, `assertLegacyRecord` recalcula desde el genoma los cinco primeros, que sólo dependen de él,
+ * aunque no haya mundo a mano. Los dos últimos —`senescenceStart` y `maximumAge`— los fija `cuerpo.longevidad*`,
+ * que el laboratorio cambia por réplica (R3), así que un archivo escrito bajo otra ley no puede recalcularse; de
+ * ésos se exige la coherencia estructural que `updateDemography` da por supuesta. */
 const TRAIT_KEYS = ['resilience', 'foodDemand', 'waterDemand', 'maturityAge', 'fertilityCooldown', 'senescenceStart', 'maximumAge'] as const;
-/** Rasgos que sólo dependen del genoma: se recalculan aquí aunque no haya mundo a mano. Los dos que
- * faltan —`senescenceStart` y `maximumAge`— los fija `cuerpo.longevidad*`, que el laboratorio cambia
- * por réplica (R3), así que un archivo escrito bajo otra ley no puede recalcularse; de ésos se exige
- * la coherencia estructural que `updateDemography` da por supuesta. */
-const GENOME_TRAIT_KEYS = ['resilience', 'foodDemand', 'waterDemand', 'maturityAge', 'fertilityCooldown'] as const;
+const RECORD_KEYS = ['id', 'name', 'role', 'generation', 'parents', 'bornAt', 'diedAt', 'cause', 'genome', 'traits', 'communityId'] as const;
+const GENOME_KEYS = ['generation', 'parents', 'learningRate', 'cooperation', 'mutations', 'alleles'] as const;
+const STATE_KEYS = ['age', 'health', 'vitality', 'deathCause'] as const;
+const DYNAMICS_KEYS = ['deaths', 'causes', 'foodLost', 'woodLost', 'stoneLost'] as const;
+const ALLELE_COUNT = GENE_COUNT * 2;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-const identifier = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length < 50 && !/[\s\u0000-\u001f\u007f]/.test(value);
-const keysAre = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+const UNSAFE_ID = /[\s\u0000-\u001f\u007f]/;
+/** Mismo veredicto que `UNSAFE_ID`: el ASCII imprimible sin espacio (0x21–0x7e) se decide sin la expresión
+ * regular; cualquier otra unidad UTF-16 (espacios de Unicode incluidos) la sigue decidiendo ella. */
+function identifier(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length >= 50) return false;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x21 || code > 0x7e) return !UNSAFE_ID.test(value);
+  }
+  return true;
+}
+/** `!/[\u0000-\u001f\u007f]/.test(name)`, unidad a unidad (sin modo Unicode la clase compara unidades UTF-16). */
+function printable(value: string): boolean {
+  for (let i = 0; i < value.length; i++) { const code = value.charCodeAt(i); if (code < 0x20 || code === 0x7f) return false; }
+  return true;
+}
+/** Medido (V18): `Object.keys` copia la caché de enumeración de V8 y es 3-4× más rápido que contar con `for…in`. */
+const keysAre = (value: object, keys: readonly string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const fail = (): never => { throw new Error('Registro de identidad o población inválido.'); };
 
+/** `['S', 'I', 'neighbor'].includes(String(role))`. */
+function roleAccepted(role: unknown): boolean {
+  const text = typeof role === 'string' ? role : String(role);
+  return text === 'S' || text === 'I' || text === 'neighbor';
+}
+const causeAccepted = (cause: unknown): boolean => cause === 'starvation' || cause === 'dehydration' || cause === 'exposure' || cause === 'senescence';
+
+/** Padres de un registro, con la semántica de siempre: `every(identifier)` y `some(...)` se saltan los huecos,
+ * `includes` y `new Set` los leen como `undefined`. Devuelve si la lista es aceptable. */
+function parentsAccepted(parents: unknown[], id: string, generation: number): boolean {
+  const length = parents.length;
+  if (generation === 0 ? length !== 0 : length !== 2) return false;
+  for (let i = 0; i < length; i++) {
+    const parent = parents[i];
+    if (parent === id || (!identifier(parent) && i in parents)) return false;
+  }
+  return length === 0 || parents[0] !== parents[1];
+}
+
+/** Lo que `assertGenome` acepta sin duda (arreglos densos). `false` no rechaza: deja decidir a `assertGenome`,
+ * que lanza su propio error o acepta. */
+function plainGenome(genome: Genome): boolean {
+  const alleles = genome.alleles, parents = genome.parents;
+  if (!Array.isArray(alleles) || alleles.length !== ALLELE_COUNT || !Array.isArray(parents)) return false;
+  for (let i = 0; i < ALLELE_COUNT; i++) { const allele = alleles[i]; if (!(typeof allele === 'number' && allele >= 0 && allele <= 1)) return false; }
+  const generation = genome.generation, mutations = genome.mutations, learningRate = genome.learningRate, cooperation = genome.cooperation;
+  if (!Number.isSafeInteger(generation) || generation < 0 || !Number.isInteger(mutations) || mutations < 0 || mutations > 14
+    || !Number.isFinite(learningRate) || learningRate < 0.04 || learningRate > 0.2 || !Number.isFinite(cooperation) || cooperation < 0 || cooperation > 1) return false;
+  if (parents.length === 0) return generation === 0;
+  if (parents.length !== 2 || generation === 0) return false;
+  const a = parents[0], b = parents[1];
+  return typeof a === 'string' && typeof b === 'string' && a.length > 0 && b.length > 0 && a.length < 50 && b.length < 50 && a !== b;
+}
+
 /** Validates an archived identity at an explicit historical boundary. Parent existence is
- * resolved by the host against live identities and SQLite, never by silently inventing ancestors. */
+ * resolved by the host against live identities and SQLite, never by silently inventing ancestors.
+ * V18: la validación completa corre en cada llamada (nada se recuerda entre llamadas) con bucles directos y
+ * sin asignaciones; acepta exactamente lo mismo y lanza los mismos errores en el mismo orden que antes. */
 export function assertLegacyRecord(value: unknown, atTick: number): asserts value is LegacyRecord {
-  if (!integer(atTick) || !object(value) || !keysAre(value, ['id', 'name', 'role', 'generation', 'parents', 'bornAt', 'diedAt', 'cause', 'genome', 'traits', 'communityId'])
-    || !identifier(value.id) || typeof value.name !== 'string' || value.name.length < 1 || value.name.length > 80 || /[\u0000-\u001f\u007f]/.test(value.name)
-    || !['S', 'I', 'neighbor'].includes(String(value.role)) || !integer(value.generation)
-    || !Array.isArray(value.parents) || !value.parents.every(identifier) || value.parents.includes(value.id) || new Set(value.parents).size !== value.parents.length
-    || (value.generation === 0 ? value.parents.length !== 0 : value.parents.length !== 2)
+  // Mismas condiciones y en el mismo orden que siempre (todas lanzan el mismo error; el orden sólo importa
+  // para lo que puede lanzar por su cuenta, como el `String(role)` de un objeto ajeno).
+  if (!integer(atTick) || !object(value) || !keysAre(value, RECORD_KEYS)
+    || !identifier(value.id) || typeof value.name !== 'string' || value.name.length < 1 || value.name.length > 80 || !printable(value.name)
+    || !roleAccepted(value.role) || !integer(value.generation)
+    || !Array.isArray(value.parents) || !parentsAccepted(value.parents, value.id, value.generation)
     || typeof value.bornAt !== 'number' || !Number.isSafeInteger(value.bornAt) || !integer(value.diedAt) || value.bornAt > value.diedAt || value.diedAt > atTick
     || !Number.isSafeInteger(value.diedAt - value.bornAt)
-    || !CAUSES.includes(value.cause as DemographicDeathCause) || !object(value.genome) || !object(value.traits)
+    || !causeAccepted(value.cause) || !object(value.genome) || !object(value.traits)
     || !(value.communityId === null || identifier(value.communityId))) fail();
-  const record = value as unknown as LegacyRecord;
-  if (!keysAre(record.genome as unknown as Record<string, unknown>, ['generation', 'parents', 'learningRate', 'cooperation', 'mutations', 'alleles'])
-    || !keysAre(record.traits as unknown as Record<string, unknown>, TRAIT_KEYS)) fail();
-  assertGenome(record.genome);
-  if (record.generation !== record.genome.generation || record.parents.length !== record.genome.parents.length
-    || record.parents.some((id, index) => id !== record.genome.parents[index])) fail();
-  const expression = demographicTraits(record.genome);
-  if (GENOME_TRAIT_KEYS.some(key => record.traits[key] !== expression[key])) fail();
-  if (!integer(record.traits.senescenceStart) || !integer(record.traits.maximumAge)
-    || record.traits.maturityAge >= record.traits.senescenceStart || record.traits.senescenceStart >= record.traits.maximumAge) fail();
-  if (record.cause === 'senescence' && record.diedAt - record.bornAt < record.traits.senescenceStart) fail();
+  const record = value as unknown as LegacyRecord, genome = record.genome, traits = record.traits;
+  if (!keysAre(genome, GENOME_KEYS) || !keysAre(traits, TRAIT_KEYS)) fail();
+  if (!plainGenome(genome)) assertGenome(genome);
+  const genomeParents = genome.parents, ownParents = record.parents;
+  if (record.generation !== genome.generation || ownParents.length !== genomeParents.length) fail();
+  for (let i = 0; i < ownParents.length; i++) if (ownParents[i] !== genomeParents[i] && i in ownParents) fail();
+  const expression = demographicTraits(genome);
+  if (traits.resilience !== expression.resilience || traits.foodDemand !== expression.foodDemand || traits.waterDemand !== expression.waterDemand
+    || traits.maturityAge !== expression.maturityAge || traits.fertilityCooldown !== expression.fertilityCooldown) fail();
+  if (!integer(traits.senescenceStart) || !integer(traits.maximumAge)
+    || traits.maturityAge >= traits.senescenceStart || traits.senescenceStart >= traits.maximumAge) fail();
+  if (record.cause === 'senescence' && record.diedAt - record.bornAt < traits.senescenceStart) fail();
 }
 
 /** Only dead references need a legacy row; living parent/inventor identities are in the snapshot. */
@@ -66,22 +124,58 @@ function identityValue(record: LegacyRecord): string {
     TRAIT_KEYS.map(key => record.traits[key]), record.communityId]);
 }
 
-/** Prunes only the read cache. The pending immutable archive queue is never shortened here. */
+const hasToJSON = (value: unknown): boolean => typeof (value as { toJSON?: unknown } | null)?.toJSON === 'function';
+/** Arreglos que `JSON.stringify` serializa igual si sus elementos son `Object.is` uno a uno (sin `toJSON`). */
+function sameArray(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length || hasToJSON(a) || hasToJSON(b)) return false;
+  for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false;
+  return true;
+}
+/** `identityValue(a) === identityValue(b)`. El mismo objeto, o campos `Object.is` iguales, dan la misma
+ * cadena exacta; ante cualquier diferencia decide la comparación de siempre. */
+function sameIdentity(a: LegacyRecord, b: LegacyRecord): boolean {
+  const ga = a.genome, gb = b.genome, ta = a.traits, tb = b.traits;
+  if (a === b && !hasToJSON(a.parents) && !hasToJSON(ga.parents) && !hasToJSON(ga.alleles)) return true;
+  if (Object.is(a.id, b.id) && Object.is(a.name, b.name) && Object.is(a.role, b.role) && Object.is(a.generation, b.generation)
+    && Object.is(a.bornAt, b.bornAt) && Object.is(a.diedAt, b.diedAt) && Object.is(a.cause, b.cause) && Object.is(a.communityId, b.communityId)
+    && Object.is(ga.generation, gb.generation) && Object.is(ga.learningRate, gb.learningRate) && Object.is(ga.cooperation, gb.cooperation)
+    && Object.is(ga.mutations, gb.mutations) && Object.is(ta.resilience, tb.resilience) && Object.is(ta.foodDemand, tb.foodDemand)
+    && Object.is(ta.waterDemand, tb.waterDemand) && Object.is(ta.maturityAge, tb.maturityAge) && Object.is(ta.fertilityCooldown, tb.fertilityCooldown)
+    && Object.is(ta.senescenceStart, tb.senescenceStart) && Object.is(ta.maximumAge, tb.maximumAge)
+    && sameArray(a.parents, b.parents) && sameArray(ga.parents, gb.parents) && sameArray(ga.alleles, gb.alleles)) return true;
+  return identityValue(a) === identityValue(b);
+}
+
+const newestFirst = (a: LegacyRecord, b: LegacyRecord) => b.diedAt - a.diedAt || a.id.localeCompare(b.id);
+
+/** Prunes only the read cache. The pending immutable archive queue is never shortened here.
+ * V18: cada fila de la caché y de la cola se valida entera en cada paso, como siempre; la cola comparte
+ * objetos con la caché (la muerte empuja el mismo registro a las dos y `cloneWorld` conserva esa
+ * identidad), y un mismo objeto no necesita serializarse para saberse igual a sí mismo. */
 export function retainLegacy(world: World): void {
-  const required = referencedLegacy(world), records = new Map<string, LegacyRecord>();
-  for (const source of [world.legacy, world.retiredLegacy]) {
-    const seen = new Set<string>();
-    for (const record of source) {
-      assertLegacyRecord(record, world.tick);
-      const previous = records.get(record.id);
-      if (seen.has(record.id) || previous && identityValue(previous) !== identityValue(record)) fail();
-      seen.add(record.id); records.set(record.id, record);
-    }
+  const required = referencedLegacy(world), records = new Map<string, LegacyRecord>(), tick = world.tick;
+  const [cache, queue] = [world.legacy, world.retiredLegacy];
+  for (const record of cache) {
+    assertLegacyRecord(record, tick);
+    if (records.has(record.id)) fail();
+    records.set(record.id, record);
   }
-  const newest = [...records.values()].sort((a, b) => b.diedAt - a.diedAt || a.id.localeCompare(b.id));
-  const recent = new Set(newest.slice(0, RECENT_LEGACY_COUNT).map(record => record.id));
-  const retained = newest.filter(record => required.has(record.id) || recent.has(record.id));
-  world.legacy = retained;
+  const pending = new Set<string>();
+  for (const record of queue) {
+    assertLegacyRecord(record, tick);
+    const previous = records.get(record.id);
+    if (pending.has(record.id) || previous && !sameIdentity(previous, record)) fail();
+    pending.add(record.id); records.set(record.id, record);
+  }
+  const newest = Array.from(records.values()).sort(newestFirst);
+  // Los ids de `newest` son únicos (claves del mapa): «entre los RECENT_LEGACY_COUNT primeros» es su posición.
+  let kept = 0;
+  for (let i = 0; i < newest.length; i++) {
+    const record = newest[i]!;
+    if (i < RECENT_LEGACY_COUNT || required.has(record.id)) newest[kept++] = record;
+  }
+  newest.length = kept;
+  world.legacy = newest;
 }
 
 export function assertPopulation(world: World): void {
@@ -89,7 +183,7 @@ export function assertPopulation(world: World): void {
   const alive = new Set<string>();
   for (const person of world.people) {
     const state = person.demography;
-    if (!identifier(person.id) || alive.has(person.id) || !object(state) || !keysAre(state, ['age', 'health', 'vitality', 'deathCause'])
+    if (!identifier(person.id) || alive.has(person.id) || !object(state) || !keysAre(state, STATE_KEYS)
       || !integer(state.age) || state.age !== world.tick - person.bornAt || !unit(state.health) || state.health === 0 || !unit(state.vitality) || state.deathCause !== null) fail();
     alive.add(person.id);
   }
@@ -99,14 +193,20 @@ export function assertPopulation(world: World): void {
     if (alive.has(record.id) || index.has(record.id)) fail();
     index.set(record.id, record);
   }
-  for (const [id, record] of pending) if (cache.has(id) && identityValue(cache.get(id)!) !== identityValue(record)) fail();
+  // Identidades archivadas distintas: las de la caché más las pendientes que aún no están en ella.
+  let archived = cache.size;
+  for (const [id, record] of pending) {
+    const cached = cache.get(id);
+    if (cached === undefined) archived++;
+    else if (!sameIdentity(cached, record)) fail();
+  }
   const dynamics = world.demographyDynamics;
-  if (!object(dynamics) || !keysAre(dynamics, ['deaths', 'causes', 'foodLost', 'woodLost', 'stoneLost']) || !integer(dynamics.deaths)
+  if (!object(dynamics) || !keysAre(dynamics, DYNAMICS_KEYS) || !integer(dynamics.deaths)
     || !object(dynamics.causes) || !keysAre(dynamics.causes, CAUSES) || CAUSES.some(cause => !integer(dynamics.causes[cause]))
     || CAUSES.reduce((sum, cause) => sum + dynamics.causes[cause], 0) !== dynamics.deaths
     || ['foodLost', 'woodLost', 'stoneLost'].some(key => typeof dynamics[key as keyof typeof dynamics] !== 'number'
       || !Number.isFinite(dynamics[key as keyof typeof dynamics]) || (dynamics[key as keyof typeof dynamics] as number) < 0)
-    || dynamics.deaths < new Set([...cache.keys(), ...pending.keys()]).size) fail();
+    || dynamics.deaths < archived) fail();
 }
 
 export interface PopulationCallbacks {
@@ -162,34 +262,38 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   }
   const toolsActive = toolEffectsEnabled(world) && world.weather === 'rain' && world.shelterBenefitEnabled;
   const cloakWear: { person: Person; avoided: number }[] = [];
+  // La ley del cuerpo es la del mundo durante todo el paso (nada en este bucle la cambia).
+  const cuerpo = paramsOf(world).cuerpo, exposure = world.weather === 'rain' ? 1 : 0, wearTick = world.tick % 10 === 0;
   const transitions = world.people.map(person => {
     const tile = tileAt(world, person);
     const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0,
       ...(structuresByCell!.get(`${person.x},${person.y}`) ?? []).map(structure => structure.condition)) : 0;
-    const traits = demographicTraits(person.genome, paramsOf(world).cuerpo);
+    const traits = demographicTraits(person.genome, cuerpo);
     const bodyInput = { id: person.id, state: person.demography, traits,
       hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
-    const envBase = { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role === 'S' || person.role === 'I',
-      seed: world.seed, tick: world.tick, senescence: paramsOf(world).cuerpo };
+    const envBase = { exposure, shelter, protected: person.role === 'S' || person.role === 'I',
+      seed: world.seed, tick: world.tick, senescence: cuerpo };
     let effectiveShelter = shelter;
     if (toolsActive && shelter < 1) {
-      const insul = portableInsulationPower(person);
+      // Sin objetos no hay abrigo: `itemCapacities([])` da 0 en todas las capacidades.
+      const insul = person.technology.items.length ? portableInsulationPower(person) : 0;
       if (insul > 0) effectiveShelter = Math.min(1, shelter + insul * 0.55);
     }
     const transition = updateDemography(bodyInput, effectiveShelter === shelter ? envBase : { ...envBase, shelter: effectiveShelter }, 1);
-    if (effectiveShelter > shelter && world.tick % 10 === 0) {
-      const bare = updateDemography(bodyInput, envBase, 1);
-      const avoided = Math.max(0, bare.damage.exposure - transition.damage.exposure);
+    if (effectiveShelter > shelter && wearTick) {
+      // El daño sin abrigo: `exposureDamage` es bit a bit el `damage.exposure` de la transición sin él.
+      const avoided = Math.max(0, exposureDamage(bodyInput, envBase, 1) - transition.damage.exposure);
       if (avoided > 0) cloakWear.push({ person, avoided: avoided * 10 });
     }
-    return { person, transition };
+    return { person, transition, traits };
   });
   for (const { person, avoided } of cloakWear) consumeInsulationTools(world, person, avoided);
   const dying = transitions.filter(result => result.transition.death !== null).sort((a, b) => a.person.id.localeCompare(b.person.id));
   if (!callbacks.beforeDeath && dying.some(result => carriesEstate(result.person))) throw new Error('Falta una liquidación explícita de los recursos del fallecido.');
-  const records = dying.map(({ person, transition }): LegacyRecord => ({ id: person.id, name: person.name, role: person.role,
+  // Los rasgos del registro son los que acaban de decidir la muerte: mismo genoma y misma ley.
+  const records = dying.map(({ person, transition, traits }): LegacyRecord => ({ id: person.id, name: person.name, role: person.role,
     generation: person.genome.generation, parents: [...person.genome.parents], bornAt: person.bornAt, diedAt: world.tick,
-    cause: transition.death!, genome: structuredClone(person.genome), traits: demographicTraits(person.genome, paramsOf(world).cuerpo), communityId: person.communityId }));
+    cause: transition.death!, genome: structuredClone(person.genome), traits, communityId: person.communityId }));
   for (const record of records) assertLegacyRecord(record, world.tick);
   for (const { person, transition } of transitions) person.demography = transition.state;
   for (const { person } of dying) callbacks.beforeDeath?.(world, person);

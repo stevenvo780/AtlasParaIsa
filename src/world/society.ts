@@ -36,8 +36,15 @@ export function updateCulturalNormsOnOutcome(world: World, person: Person, actio
   }
   const rate = person.genome.learningRate * 0.04 * derivaCultural;
   const wild = ['gather','hunt','forage'].includes(action);
-  if ((!useful && wild) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate * 1.15 * (0.95 - person.culture.stewardship));
-  else if (useful && wild && (action === 'hunt' || action === 'gather' || person.hunger > 0.18)) person.culture.stewardship = clamp(person.culture.stewardship - rate * 0.7 * Math.max(0.1, person.culture.stewardship - 0.08));
+  // V18: el cuidado sube con lo que regenera (cultivar, reparar, construir) y con la extracción
+  // fallida, y baja con la extracción que sale bien (cazar, recolectar, o forrajear con hambre).
+  // Un refuerzo suave de la práctica ya aprendida (±20 % en los extremos, ×1 en 0,5) separa los
+  // nichos sin saturar: los topes blandos 0,95 y 0,08 son puntos fijos inalcanzables (en V17 el
+  // suelo `Math.max(0,1, s − 0,08)` de la bajada llevaba a 0 con extracción sostenida; por encima
+  // de 0,18 los dos dan lo mismo).
+  const steward = person.culture.stewardship;
+  if ((!useful && wild) || (useful && (action === 'farm' || action === 'repair' || action === 'build'))) person.culture.stewardship = clamp(steward + rate * 1.15 * (0.95 - steward) * (1 + 0.4 * (steward - 0.5)));
+  else if (useful && wild && (action === 'hunt' || action === 'gather' || person.hunger > 0.15)) person.culture.stewardship = clamp(steward - rate * 0.7 * Math.max(0, steward - 0.08) * (1 + 0.4 * (0.5 - steward)));
   const need = Math.max(person.hunger, person.thirst);
   if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9 * (0.95 - person.culture.sharing));
   else if (need > 0.72) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1 * Math.max(0.1, person.culture.sharing - 0.08));
@@ -276,9 +283,15 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   const rareza = paramsOf(world).social.ensenanzaRareza;
   const holders = rareza > 0 ? recipeHolders(world, viable) : undefined;
   const alive = Math.max(1, world.people.length);
-  return viable.map(candidate => ({ recipe: candidate.recipe,
-    key: candidate.gain + (holders ? rareza * (1 - (holders.get(candidate.recipe.id) ?? 0) / alive) : 0) }))
-    .sort((a, b) => b.key - a.key || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]!.recipe.id;
+  // El primero del `sort` de siempre (clave, beneficio del maestro, id) sin copiar ni ordenar: los ids
+  // son únicos, así que el comparador es un orden total y su mínimo es el mismo elemento.
+  const competence = teacher.technology.competence;
+  let bestRecipe = viable[0]!.recipe, bestKey = viable[0]!.gain + (holders ? rareza * (1 - (holders.get(bestRecipe.id) ?? 0) / alive) : 0);
+  for (let i = 1; i < viable.length; i++) {
+    const recipe = viable[i]!.recipe, key = viable[i]!.gain + (holders ? rareza * (1 - (holders.get(recipe.id) ?? 0) / alive) : 0);
+    if ((bestKey - key || (competence[bestRecipe.id]?.benefit ?? 0) - (competence[recipe.id]?.benefit ?? 0) || recipe.id.localeCompare(bestRecipe.id)) < 0) { bestRecipe = recipe; bestKey = key; }
+  }
+  return bestRecipe.id;
 }
 /** Vivos que ya recuerdan cada receta candidata, en UNA pasada por la población: contar
  * por receta recorrería `O(personas × recetas)` una vez por candidata. */
@@ -365,7 +378,11 @@ function productExchange(world: World, seller: Person, buyer: Person): Opportuni
 export function settlementOpportunity(world: World, person: Person): { target: {x:number;y:number}; score: number; reason: string } | undefined {
   if (!world.cooperationEnabled) return;
   const r = paramsOf(world).social.hogarTrabajo;
+  // `viable` es pura durante la llamada (sólo lee): el hogar suele ser uno de los lugares a ≤ 6, y su
+  // valor ya calculado se reutiliza en vez de recorrer otra vez las 49 celdas, estructuras y vecinos.
+  let memoX = NaN, memoY = NaN, memo = 0;
   const viable = (place: {x:number;y:number}) => {
+    if (place.x === memoX && place.y === memoY) return memo;
     let food = 0, water = 0, wood = 0, stone = 0, fauna = 0;
     for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {
       if (dx*dx+dy*dy>16) continue;
@@ -380,7 +397,8 @@ export function settlementOpportunity(world: World, person: Person): { target: {
     let provision = Math.min(clamp(food/0.8),clamp(water/0.12));
     // H-B: sólo el parche ya percibido modifica la provisión; con r=0 no se lee trabajo.
     if (r > 0) provision *= 1 - r * (1 - clamp((wood + stone) / 12 + fauna / 2));
-    return provision * (0.45 + (facilities.length ? 0.25 : 0) + trust*0.3);
+    memoX = place.x; memoY = place.y;
+    return memo = provision * (0.45 + (facilities.length ? 0.25 : 0) + trust*0.3);
   };
   if (person.home && distance(person,person.home)<=7) {
     person.home.quality = viable(person.home); person.home.observedAt = world.tick;
@@ -590,6 +608,10 @@ function mediaConfianza(person: Person, grupo: GrupoSalida, umbral: number): num
 function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciales: Map<string | null, Person[]>, disolver: boolean): void {
   const params = paramsOf(world);
   const cap = effectiveCommunityCap(params.social.maxComunidades, effectiveLimits(params).comunidades);
+  // Fisión orgánica (sólo con deriva cultural): la fricción social estrecha el radio de cohesión
+  // de los grupos grandes y permite varias separaciones limpias en una misma revisión. Sin
+  // deriva, el radio efectivo es el de siempre y sólo cabe una fisión por grupo y revisión.
+  const organica = params.social.derivaCultural > 0;
   for (const group of [...world.communities]) {
     // Hasta aquí sólo hubo salidas (a null) y fisiones de grupos anteriores (hacia ids nuevos, que esta
     // copia de `world.communities` no recorre): nadie entró en `group` desde que se hizo `iniciales`.
@@ -600,42 +622,51 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
     for (const p of members) { sumX += p.x; sumY += p.y; }
     const center = { x: sumX / members.length, y: sumY / members.length };
     const memberSet = new Set(members);
-    // Fisión orgánica (sólo con deriva cultural): la fricción social estrecha el radio de cohesión
-    // de los grupos grandes y permite varias separaciones limpias en una misma revisión. Sin
-    // deriva, el radio efectivo es el de siempre y sólo cabe una fisión por grupo y revisión.
-    const organica = params.social.derivaCultural > 0;
     const effectiveRadius = organica && members.length > 48 ? Math.max(4, radius * Math.sqrt(48 / members.length)) : radius;
     const maxSplits = organica && members.length > 64 ? Math.min(4, Math.floor(members.length / 40)) : 1;
+    // V18, núcleo urbano denso (sólo con deriva): en un grupo de más de 96 la mitad puede vivir
+    // apretada dentro del radio efectivo (V17 vivo: 233 con distP50 6,9 y radio 5,45). Tras la
+    // pasada de siempre, una segunda con un radio más estrecho deja separarse a los sub-núcleos de
+    // la periferia, con los mismos requisitos locales y hasta `n / 32` fisiones (como mucho 6).
+    const denso = organica && members.length > 96;
+    const radiosDeFision = denso ? [effectiveRadius, Math.max(2.5, radius * Math.sqrt(40 / members.length))] : [effectiveRadius];
+    const topeDeFisiones = denso ? Math.max(maxSplits, Math.min(6, Math.floor(members.length / 32))) : maxSplits;
     let splits = 0;
     // R1 cuenta mortales del origen. No cambia mientras se busca al primer núcleo: `isMortalMember`
     // lee el rol, y la fisión reasigna `communityId` sólo después de esta cuenta.
     let mortalesDeOrigen = disolver ? members.filter(isMortalMember).length : 0;
-    for (const person of members) {
-      if (!memberSet.has(person)) continue;
-      const away = distance(person, center);
-      if (away <= effectiveRadius) continue;
-      const core = vecinos(world, person, 7, p => memberSet.has(p) && trustedNeighbor(person, p), 'updateCommunities:cohabitation');
-      const founders = [person, ...core];
-      let mortalFounders = 0;
-      if (disolver) {
-        // R1: arreglo en origen. El grupo nuevo y el de origen retienen cada uno ≥ 3 MORTALES
-        // (antes bastaba con que el origen conservara a alguien, cualquiera; eso fabricaba restos).
-        mortalFounders = founders.filter(isMortalMember).length;
-        const originMortalsAfter = mortalesDeOrigen - mortalFounders;
-        if (mortalFounders < 3 || originMortalsAfter < 3 || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
-      } else if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
-      const id = `community-${++world.communityCounter}`;
-      const name = communityName(world, id);
-      const ids = founders.map(p => p.id);
-      world.communities.push({ id, name, x: person.x, y: person.y, members: ids, color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 });
-      for (const p of founders) p.communityId = id;
-      // Arreglo propio para el evento: la fisión no reproduce el alias de la fundación (nota de abajo).
-      emit({ kind: 'community', actors: [...ids], x: person.x, y: person.y, source: 'simulation', text: `${name} se separó de ${group.name} entre ${founders.map(p => p.name).join(', ')}.`, cause: `Viven a ${away.toFixed(1)} celdas del centro de ${group.name} (más de ${radius}) y confían entre sí; la pertenencia sigue a la convivencia, no a la etiqueta de origen. Mismos requisitos que una fundación: tres personas, un lugar cercano y el tope de comunidades.` });
-      // Quienes ya se separaron no vuelven a elegirse en esta revisión ni cuentan para la siguiente fisión.
-      mortalesDeOrigen -= mortalFounders;
-      for (const p of founders) memberSet.delete(p);
-      splits++;
-      if (splits >= maxSplits || world.communities.length >= cap) break;
+    pasadas: for (let pasada = 0; pasada < radiosDeFision.length; pasada++) {
+      // La primera pasada conserva su tope de siempre; la del núcleo denso sigue hasta el suyo.
+      const umbral = radiosDeFision[pasada]!, tope = pasada === 0 ? maxSplits : topeDeFisiones;
+      if (splits >= tope) continue;
+      for (const person of members) {
+        if (!memberSet.has(person)) continue;
+        const away = distance(person, center);
+        if (away <= umbral) continue;
+        const core = vecinos(world, person, 7, p => memberSet.has(p) && trustedNeighbor(person, p), 'updateCommunities:cohabitation');
+        const founders = [person, ...core];
+        let mortalFounders = 0;
+        if (disolver) {
+          // R1: arreglo en origen. El grupo nuevo y el de origen retienen cada uno ≥ 3 MORTALES
+          // (antes bastaba con que el origen conservara a alguien, cualquiera; eso fabricaba restos).
+          mortalFounders = founders.filter(isMortalMember).length;
+          const originMortalsAfter = mortalesDeOrigen - mortalFounders;
+          if (mortalFounders < 3 || originMortalsAfter < 3 || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+        } else if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+        const id = `community-${++world.communityCounter}`;
+        const name = communityName(world, id);
+        const ids = founders.map(p => p.id);
+        world.communities.push({ id, name, x: person.x, y: person.y, members: ids, color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 });
+        for (const p of founders) p.communityId = id;
+        // Arreglo propio para el evento: la fisión no reproduce el alias de la fundación (nota de abajo).
+        emit({ kind: 'community', actors: [...ids], x: person.x, y: person.y, source: 'simulation', text: `${name} se separó de ${group.name} entre ${founders.map(p => p.name).join(', ')}.`, cause: `Viven a ${away.toFixed(1)} celdas del centro de ${group.name} (más de ${radius}) y confían entre sí; la pertenencia sigue a la convivencia, no a la etiqueta de origen. Mismos requisitos que una fundación: tres personas, un lugar cercano y el tope de comunidades.` });
+        // Quienes ya se separaron no vuelven a elegirse en esta revisión ni cuentan para la siguiente fisión.
+        mortalesDeOrigen -= mortalFounders;
+        for (const p of founders) memberSet.delete(p);
+        splits++;
+        if (world.communities.length >= cap) break pasadas;
+        if (splits >= tope) break;
+      }
     }
   }
   for (const person of world.people) {
@@ -646,6 +677,11 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
     if (!best || best.count < 2 || best.count <= own) continue;
     const from = world.communities.find(c => c.id === person.communityId), to = world.communities.find(c => c.id === best.id);
     if (!to) continue;
+    // V18, gracia de fundación (sólo con deriva): en V17 los fundadores de una fisión, que aún viven
+    // junto a la madre, votaban volver a ella en la misma revisión y dejaban restos de un mortal.
+    // Durante sus tres primeras revisiones (< 360 pasos) una comunidad conserva a quien sigue
+    // conviviendo con alguien de confianza de ella, y en su revisión de nacimiento a todos.
+    if (organica && from && world.tick - from.formedAt < 360 && (own >= 1 || from.formedAt === world.tick)) continue;
     person.communityId = to.id;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${from?.name ?? 'su comunidad'} y se unió a ${to.name}.`, cause: `${best.count} de sus vecinos de confianza son de ${to.name} y ${own} de la suya; la pertenencia sigue a la convivencia y la confianza.` });
   }

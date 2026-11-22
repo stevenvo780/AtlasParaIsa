@@ -21,13 +21,63 @@ export function initialCulture(seed: number, id: string): Culture {
   return { sharing: 0.15 + random() * 0.7, stewardship: 0.15 + random() * 0.7, openness: 0.15 + random() * 0.7 };
 }
 export function culturalDistance(a: Culture, b: Culture): number { return (Math.abs(a.sharing - b.sharing) + Math.abs(a.stewardship - b.stewardship) + Math.abs(a.openness - b.openness)) / 3; }
+/** Revisión de prácticas tras un resultado (`social.derivaCultural`, default 0 = histórico).
+ * Con 0 son exactamente las dos subidas monótonas de siempre. Con > 0 cada dimensión tiene
+ * presión en los dos sentidos según el cuerpo y la pertenencia: la extracción silvestre con
+ * éxito y hambre baja el cuidado, la privación aguda baja el compartir, el sedentarismo
+ * comunitario cierra y explorar abre. Pura salvo la cultura de la persona. */
+export function updateCulturalNormsOnOutcome(world: World, person: Person, action: string, useful: boolean): void {
+  const derivaCultural = paramsOf(world).social.derivaCultural;
+  if (!(derivaCultural > 0)) {
+    const rate = person.genome.learningRate * 0.04;
+    if ((!useful && ['gather','hunt','forage'].includes(action)) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate);
+    if (useful && ['cooperate','share'].includes(action)) person.culture.sharing = clamp(person.culture.sharing + rate);
+    return;
+  }
+  const rate = person.genome.learningRate * 0.04 * derivaCultural;
+  const wild = ['gather','hunt','forage'].includes(action);
+  if ((!useful && wild) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate * 1.1);
+  else if (useful && wild && person.hunger > 0.35) person.culture.stewardship = clamp(person.culture.stewardship - rate * 0.65);
+  const need = Math.max(person.hunger, person.thirst);
+  if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9);
+  else if (need > 0.68) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1);
+  else if (useful && ['eat','forage','hunt'].includes(action) && (!person.communityId || person.hunger > 0.55)) person.culture.sharing = clamp(person.culture.sharing - rate * 0.45);
+  if (useful && ['farm','build'].includes(action) && person.communityId) person.culture.openness = clamp(person.culture.openness - rate * 0.2);
+  else if (useful && action === 'explore') person.culture.openness = clamp(person.culture.openness + rate * 0.3);
+}
+/** Herencia cultural vertical. Con `derivaCultural <= 0`, la media exacta de siempre; con
+ * > 0, la media más una variación determinista por cría acotada a [0,05, 0,98], para que la
+ * varianza entre comunidades no se colapse por 1/√2 en cada generación. */
+export function inheritCulture(seed: number, childId: string, parentA: Culture, parentB: Culture, derivaCultural: number): Culture {
+  if (!(derivaCultural > 0)) return { sharing: (parentA.sharing + parentB.sharing) / 2, stewardship: (parentA.stewardship + parentB.stewardship) / 2, openness: (parentA.openness + parentB.openness) / 2 };
+  const random = localRandom(seed, 'culture-child:' + childId);
+  return {
+    sharing: Math.max(0.05, Math.min(0.98, (parentA.sharing + parentB.sharing) / 2 + (random() - 0.5) * 0.12 * Math.min(2, derivaCultural))),
+    stewardship: Math.max(0.05, Math.min(0.98, (parentA.stewardship + parentB.stewardship) / 2 + (random() - 0.5) * 0.12 * Math.min(2, derivaCultural))),
+    openness: Math.max(0.05, Math.min(0.98, (parentA.openness + parentB.openness) / 2 + (random() - 0.5) * 0.12 * Math.min(2, derivaCultural))),
+  };
+}
 export function bond(world: World, a: Person, b: Person, amount: number): void {
   a.bonds[b.id] = clamp((a.bonds[b.id] ?? 0.2) + amount); b.bonds[a.id] = clamp((b.bonds[a.id] ?? 0.2) + amount);
   if (!world.cooperationEnabled || amount <= 0) return;
-  const similarity = 1 - culturalDistance(a.culture, b.culture);
-  for (const key of ['sharing','stewardship','openness'] as const) {
-    const delta = (b.culture[key] - a.culture[key]) * 0.015 * similarity;
-    a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
+  const derivaCultural = paramsOf(world).social.derivaCultural;
+  if (!(derivaCultural > 0)) {
+    const similarity = 1 - culturalDistance(a.culture, b.culture);
+    for (const key of ['sharing','stewardship','openness'] as const) {
+      const delta = (b.culture[key] - a.culture[key]) * 0.015 * similarity;
+      a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
+    }
+    return;
+  }
+  if (a.communityId !== null && a.communityId === b.communityId) {
+    const similarity = 1 - culturalDistance(a.culture, b.culture);
+    for (const key of ['sharing','stewardship','openness'] as const) {
+      const delta = (b.culture[key] - a.culture[key]) * 0.004 * similarity;
+      a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
+    }
+  } else if (a.communityId !== b.communityId && amount > 0) {
+    a.culture.openness = clamp(a.culture.openness + 0.006 * derivaCultural);
+    b.culture.openness = clamp(b.culture.openness + 0.006 * derivaCultural);
   }
 }
 /**
@@ -175,9 +225,11 @@ function practicedRecipes(teacher: Person): string[] {
 }
 function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[]): string | undefined {
   if (!world.learningEnabled) return;
+  const practicedIds = practiced ?? practicedRecipes(teacher);
+  if (!practicedIds.length) return;
   // Mismas recetas resueltas en el mismo orden que `knownRecipes.flatMap(…)` con los dos filtros puros.
   const candidates: TechnologyRecipe[] = [];
-  for (const id of practiced ?? practicedRecipes(teacher)) {
+  for (const id of practicedIds) {
     if (learner.technology.knownRecipes.includes(id)) continue;
     const recipe = resolveTechnologyRecipe(world, id); if (recipe) candidates.push(recipe);
   }
@@ -251,20 +303,36 @@ function processMaterialNeed(world: World, person: Person): { wood: number; ston
   for (const program of requestedPrograms(world, person)) {
     const required = { wood: 0, stone: 0 };
     for (const input of program.inputs) if (input.source === 'raw' && (input.material === 'wood' || input.material === 'stone')) required[input.material] += input.mass / MASS_UNIT;
-    const fuel = program.steps.reduce((n, s) => n + (s.op === 'heat' ? s.intensity * 50 : 0), 0);
-    const scrapUsed = program.inputs.filter(i => i.source === 'residue' && i.material === 'wood').reduce((n, i) => n + i.mass, 0);
+    // Los mismos pliegues desde 0 y en el mismo orden que `reduce`/`filter`+`reduce`, sin arreglos intermedios.
+    let fuel = 0;
+    for (const step of program.steps) fuel += step.op === 'heat' ? step.intensity * 50 : 0;
+    let scrapUsed = 0;
+    for (const input of program.inputs) if (input.source === 'residue' && input.material === 'wood') scrapUsed += input.mass;
     required.wood += Math.max(0, fuel - Math.max(0, person.technology.residue.wood - scrapUsed)) / MASS_UNIT;
     for (const material of ['wood', 'stone'] as const) deficit[material] = Math.max(deficit[material], required[material] - person.materials[material]);
   }
   return deficit;
 }
 function itemNeed(world: World, person: Person, item: MaterialBatch, excludingItem = false): number {
-  const inventory = excludingItem ? person.technology.items.filter(i => i.id !== item.id) : person.technology.items;
-  const powers = itemCapacities(inventory);
+  const items = person.technology.items;
+  // Sin excluir es `itemCapacities(items)` tal cual; excluyendo, el mismo pliegue de máximos
+  // en el mismo orden saltando `item.id`, sin copiar el inventario con `filter`.
+  let powers: Record<Capability, number>;
+  if (excludingItem) {
+    powers = { cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
+    for (const held of items) {
+      if (held.id === item.id) continue;
+      const heldPowers = materialCapacities(held);
+      for (const c of CAPABILITIES) powers[c] = Math.max(powers[c], heldPowers[c]);
+    }
+  } else powers = itemCapacities(items);
   const capacities = materialCapacities(item); let need = 0;
   for (const program of requestedPrograms(world, person)) {
-    const requiredMass = program.inputs.filter(i => i.source === 'product' && i.recipeId === item.recipeId).reduce((n, i) => n + i.mass, 0);
-    const availableMass = inventory.filter(i => i.recipeId === item.recipeId).reduce((n, i) => n + i.mass, 0);
+    // Las mismas sumas desde 0 y en el mismo orden que `filter`+`reduce`, sin arreglos intermedios.
+    let requiredMass = 0;
+    for (const input of program.inputs) if (input.source === 'product' && input.recipeId === item.recipeId) requiredMass += input.mass;
+    let availableMass = 0;
+    for (const held of items) if (!(excludingItem && held.id === item.id) && held.recipeId === item.recipeId) availableMass += held.mass;
     if (requiredMass > availableMass) need = Math.max(need, 0.5 + Math.min(0.3, item.mass / Math.max(1, requiredMass) * 0.3));
     for (const step of program.steps) if (step.requiredCatalyst && powers[step.requiredCatalyst] < 0.1 && capacities[step.requiredCatalyst] >= 0.1) need = Math.max(need, 0.75);
   }
@@ -280,11 +348,15 @@ function itemNeed(world: World, person: Person, item: MaterialBatch, excludingIt
 }
 function productExchange(world: World, seller: Person, buyer: Person): Opportunity['exchange'] | undefined {
   if (buyer.technology.items.length >= world.technology.budgets.maxItems) return;
+  if (seller.technology.items.length === 0) return;
   const item = seller.technology.items.filter(i => itemNeed(world, buyer, i) > 0 && itemNeed(world, seller, i, true) === 0)
     .sort((a, b) => itemNeed(world, buyer, b) - itemNeed(world, buyer, a) || a.id.localeCompare(b.id))[0];
   if (!item) return;
+  // Fuera de `research`/`craft` no hay programas pedidos: las dos necesidades comparadas son 0
+  // (y ninguna resolución de receta se saltaba en ese camino), así que la comparación se pliega.
+  const processFree = !['research', 'craft'].includes(buyer.action);
   const material = (['wood', 'stone'] as const).filter(m => buyer.materials[m] >= 1 && seller.materials[m] <= (m === 'wood' ? 11 : 7))
-    .filter(m => processMaterialNeed(world, { ...buyer, materials: { ...buyer.materials, [m]: buyer.materials[m] - 1 } })[m] <= processMaterialNeed(world, buyer)[m] && !(buyer.action === 'farm' && m === 'wood' && buyer.materials.wood < 2))
+    .filter(m => (processFree || processMaterialNeed(world, { ...buyer, materials: { ...buyer.materials, [m]: buyer.materials[m] - 1 } })[m] <= processMaterialNeed(world, buyer)[m]) && !(buyer.action === 'farm' && m === 'wood' && buyer.materials.wood < 2))
     .sort((a, b) => seller.materials[a] - seller.materials[b] || a.localeCompare(b))[0];
   if (!material) return;
   return { itemId: item.id, material, amount: 1 };
@@ -341,15 +413,20 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     const trust = person.bonds[other.id] ?? 0.2;
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
-    const cost = constructionCost(world,other);
-    const processNeed = processMaterialNeed(world, other);
+    // El coste de obra sólo se lee cuando el otro construye (las dos ramas de abajo); calcularlo
+    // para cada vecino era trabajo puro tirado. La necesidad de proceso fuera de
+    // `research`/`craft` es {0,0} sin resolver ninguna receta: mismo valor, sin la llamada.
+    let costWood = 0, costStone = 0, costWork = 0;
+    if (other.action === 'build') { const cost = constructionCost(world,other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
+    const processNeed = ['research', 'craft'].includes(other.action) ? processMaterialNeed(world, other) : { wood: 0, stone: 0 };
     const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
-    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined), exchange = productExchange(world, person, other);
+    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined);
+    const exchange = person.technology.items.length === 0 || other.technology.items.length >= world.technology.budgets.maxItems ? undefined : productExchange(world, person, other);
     if (exchange) opportunities.push({ person: other, kind: 'tools', exchange, score: score + 0.24 });
     if (supplyMaterial) opportunities.push({ person: other, kind: 'supply', supplyMaterial, score: score + 0.22 });
     if (recipeId) opportunities.push({ person: other, kind: 'teach', recipeId, score: score + 0.06 });
-    if (other.action === 'build' && ((other.materials.wood < cost.wood && person.materials.wood > 0) || (other.materials.stone < cost.stone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
-    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? cost.work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
+    if (other.action === 'build' && ((other.materials.wood < costWood && person.materials.wood > 0) || (other.materials.stone < costStone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
+    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? costWork : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
     else if (practicedSkillToTeach(world, person, other)) opportunities.push({ person: other, kind: 'teach', score });
   }
@@ -396,6 +473,12 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   person.lastSocial = world.tick;
   if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }
   bond(world, person, other, 0.12); count(world, 'cooperation');
+  const derivaCultural = paramsOf(world).social.derivaCultural;
+  if (derivaCultural > 0) {
+    const opennessDelta = person.communityId !== other.communityId ? 0.015 * derivaCultural : -0.003 * derivaCultural;
+    person.culture.openness = clamp(person.culture.openness + opennessDelta);
+    other.culture.openness = clamp(other.culture.openness + opennessDelta);
+  }
   const group = world.communities.find(c => c.id === person.communityId); if (group) group.cooperation++;
   const event = emit({ kind: 'cooperation', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} cooperó con ${other.name}. ${detail}`, cause: `Estrategia ${opportunity.kind}; recursos o trabajo transferidos realmente; confianza reforzada y prácticas locales aproximadas.` });
   for (const p of [person, other]) { p.experiences.push({ tick: world.tick, text: detail, causeId: event.id, placeId: '' }); p.experiences = p.experiences.slice(-8); p.recentMemory = detail; }
@@ -663,7 +746,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez;
   // `disputaDestino` es cuánto tienen que coincidir los dos destinos y `disputaEspera` los
   // ticks de calma que guarda cada lado tras disputar.
-  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera, memoriaDisputa } = paramsOf(world).social;
+  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera, memoriaDisputa, derivaCultural } = paramsOf(world).social;
   if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < disputaEspera || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
@@ -685,6 +768,10 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   const cede = cedeOtro ? other : person, sigue = cedeOtro ? person : other, fuente = { x: person.target.x, y: person.target.y };
   if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {
     bond(world, person, other, 0.04); person.lastDispute = other.lastDispute = world.tick;
+    if (derivaCultural > 0 && person.communityId !== other.communityId) {
+      person.culture.openness = clamp(person.culture.openness + 0.012 * derivaCultural);
+      other.culture.openness = clamp(other.culture.openness + 0.012 * derivaCultural);
+    }
     cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + 12;
     cede.reason = legible ? 'Acordó un turno ante la escasez: su vecino lo necesita más y accede primero.' : 'Acordó un turno ante la escasez: deja acceder primero a su vecino.';
     count(world, 'cooperation');
@@ -697,6 +784,14 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   person.lastDispute = world.tick; other.lastDispute = world.tick;
   person.socialLoad = clamp(person.socialLoad + 0.12); other.socialLoad = clamp(other.socialLoad + 0.12);
   person.fatigue = clamp(person.fatigue + 0.015); other.fatigue = clamp(other.fatigue + 0.015);
+  if (derivaCultural > 0) {
+    person.culture.sharing = clamp(person.culture.sharing - 0.025 * derivaCultural);
+    other.culture.sharing = clamp(other.culture.sharing - 0.025 * derivaCultural);
+    if (person.communityId !== other.communityId) {
+      person.culture.openness = clamp(person.culture.openness - 0.03 * derivaCultural);
+      other.culture.openness = clamp(other.culture.openness - 0.03 * derivaCultural);
+    }
+  }
   bond(world, person, other, -0.08); count(world, 'conflicts');
   for (const p of [person, other]) { const group = world.communities.find(c => c.id === p.communityId); if (group) group.disputes++; }
   // Yield one contested attempt, producing an observable cost without forced violence or theft.

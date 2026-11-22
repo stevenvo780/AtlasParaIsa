@@ -219,11 +219,11 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
 /**
  * V16 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
  * Activa todos los chips detectados (`hostFullHardwareParams`) junto con:
- * - presión ecológica realista (`recursos.*`, `agua.cuencas=0.30`, `agua.memoria=0.65`) para imponer
+ * - presión ecológica realista (`recursos.*`, `agua.cuencas=0.36`, `agua.memoria=1`) para imponer
  *   selección malthusiana real y migración sin colapso;
  * - natalidad local (`natalidadVecindad=true`) y comunidades vivas sin tope ficticio (`maxComunidades=0`)
  *   con deriva cultural bidireccional (`derivaCultural=1`) y ancla narrativa de S e I (`vinculoEncuentro=1`);
- * - política neuronal autónoma + plasticidad Baldwin (`politicaPeso=1.15`, `politicaAutonomia=0.65`);
+ * - política neuronal autónoma + plasticidad Baldwin (`politicaPeso=0.65`, `politicaAutonomia=0.55`);
  * - tecnología funcional de alto cociente señal/ruido (`mejoraLocal=0.08`, `dosisCuanto=100`, `efectosHerramientas=true`).
  */
 export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {

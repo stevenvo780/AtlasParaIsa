@@ -546,7 +546,7 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
     fichero: 'inventions.ts', funcion, patrones: ['!esMiembro(world.people, person, world.tick)'], motivo: 'Pertenencia de quien actúa (T140, `esMiembro`).' })),
   { id: 'pertenencia.estructura', fase: 'accion', fuente: 'world.structures', fichero: 'inventions.ts', funcion: 'repair',
     patrones: ['!world.structures.includes(structure)'], motivo: 'La estructura sigue activa.' },
-  ...(['canHandle', 'payContainedWaterCarry', 'beginWaterPreparation'] as const).map(funcion => ({ id: `pertenencia.${funcion}`, fase: 'accion' as const,
+  ...(['canHandle', 'payContainedWaterCarry', 'spillContainedWater', 'beginWaterPreparation'] as const).map(funcion => ({ id: `pertenencia.${funcion}`, fase: 'accion' as const,
     fuente: 'host.people', fichero: 'technology-water.ts', funcion, patrones: ['isHostMember(host.people, actor)'], motivo: 'Pertenencia de quien actúa (Set cacheado por longitud del arreglo).' })),
   { id: 'pertenencia.transferTechnologyItem', fase: 'accion', fuente: 'host.people', fichero: 'technology.ts', funcion: 'transferTechnologyItem',
     patrones: ['!isHostMember(host.people, from) || !isHostMember(host.people, to)'], motivo: 'Pertenencia de las dos partes (Set cacheado por longitud del arreglo).' },

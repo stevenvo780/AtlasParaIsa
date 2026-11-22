@@ -6,6 +6,11 @@ import {
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
+import { assertTechnology, researchTechnology } from '../src/world/technology.js';
+import { containedWaterQuanta, fillContainedWater } from '../src/world/technology-water.js';
+import { containerAffordance } from '../src/world/material-affordances.js';
+import type { TechnologyProgram } from '../src/shared/technology.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 after(async () => {
   closePolicyGpuBatchers();
@@ -95,4 +100,68 @@ test('V16 core: validation rejects corrupted partnerMemory', () => {
   assert.doesNotThrow(() => assertWorld(world));
   const tile = tileAt(world, s);
   assert.ok(tile);
+});
+
+test('V16 core: desperate explorer commits to search leg and turns out of visited dead-ends at energy=0, fatigue=1', () => {
+  const world = createWorld(7, parseParams('social.vinculoEncuentro=1', DEFAULT_PARAMS));
+  const s = world.people.find(p => p.role === 'S')!;
+  // Drain local water around S so seekingWater=true and mark nearby tiles visited to trigger coastal/visited turn.
+  for (const t of world.tiles) {
+    if (Math.hypot(t.x - s.x, t.y - s.y) <= 8) {
+      t.drinkingWater = 0;
+      t.food = 0;
+      s.visited.push(`${t.x},${t.y}`);
+    }
+  }
+  s.visited = s.visited.slice(-192);
+  s.energy = 0; s.fatigue = 1; s.hunger = 1; s.thirst = 1; s.inventory = 0;
+  s.action = 'explore'; s.target = { x: s.x, y: s.y }; s.decisionAt = world.tick;
+  const headingBefore = s.heading;
+  stepWorld(world);
+  assert.equal(s.action, 'explore');
+  assert.notEqual(s.heading, headingBefore, 'exhausted searcher with all nearby tiles visited must turn heading');
+  const chosenTarget = { ...s.target };
+  assert.ok(Math.hypot(chosenTarget.x - s.x, chosenTarget.y - s.y) >= 3, 'search leg must pick a distant waypoint');
+  // Must keep committed to chosenTarget across subsequent ticks instead of oscillating on every tick.
+  stepWorld(world);
+  assert.deepEqual(s.target, chosenTarget, 'desperate searcher must hold its search waypoint even at energy=0, fatigue=1');
+  assert.doesNotThrow(() => assertWorld(world));
+});
+
+test('V16 core: exhausted carrier drops carried water with exact conservation instead of freezing in move()', () => {
+  const world = createWorld(7, parseParams('social.vinculoEncuentro=1', DEFAULT_PARAMS));
+  const actor = world.people.find(p => p.role === 'I')!;
+  const waterTile = world.tiles.find(t => t.terrain !== 'water' && (t.drinkingWater ?? 0) > 0.2)!;
+  const dryAdj = world.tiles.find(t => t.terrain !== 'water' && Math.hypot(t.x - waterTile.x, t.y - waterTile.y) === 1 && (t.drinkingWater ?? 0) === 0)!;
+  actor.x = waterTile.x; actor.y = waterTile.y;
+  actor.materials.wood = 8; actor.materials.stone = 8;
+  // Craft a real hollow vessel through paid technology so all ledgers & checkpoints stay valid.
+  const hollow: TechnologyProgram = {
+    inputs: [{ source: 'raw', material: 'stone', mass: 2000 }],
+    steps: [{ op: 'form', intensity: 4, shape: 'hollow' }, { op: 'compress', intensity: 2 }],
+  };
+  actor.technology.project = proyectoInvestigacion(hollow, world.tick);
+  for (let n = 0; actor.technology.project && n < 250; n++) {
+    world.tick++;
+    for (const p of world.people) p.demography.age = world.tick - p.bornAt;
+    researchTechnology(world, actor);
+  }
+  const vessel = actor.technology.items.find(i => containerAffordance(i).capacityQuanta > 0)!;
+  assert.ok(vessel, 'need a hollow container');
+  world.tick++;
+  for (const p of world.people) p.demography.age = world.tick - p.bornAt;
+  const filled = fillContainedWater(world, actor, vessel.id, 250);
+  assert.ok(filled > 0, 'vessel must fill from local water');
+  // Move actor to dry adjacent tile with energy=0, fatigue=1, hunger=1, thirst=1 so payContainedWaterCarry fails.
+  actor.x = dryAdj.x; actor.y = dryAdj.y;
+  actor.energy = 0; actor.fatigue = 1; actor.hunger = 1; actor.thirst = 1;
+  actor.action = 'drink'; actor.target = { x: waterTile.x, y: waterTile.y };
+  const lossBefore = world.technology.water!.environmentalLoss;
+  const startTick = world.tick;
+  while (world.tick < startTick + 12) stepWorld(world);
+  assert.equal(containedWaterQuanta(actor), 0, 'exhausted actor must shed dead-weight water');
+  assert.ok(world.technology.water!.environmentalLoss >= lossBefore + filled - 50, 'spilled water must be conserved in environmentalLoss');
+  assert.ok(actor.x === waterTile.x && actor.y === waterTile.y, 'after shedding water weight, actor must move onto water tile');
+  assert.doesNotThrow(() => assertTechnology(world));
+  assert.doesNotThrow(() => assertWorld(world));
 });

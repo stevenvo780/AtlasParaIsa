@@ -27,7 +27,7 @@ import { initialDemography, demographicTraits, updateDemography } from './demogr
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
-import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
+import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, spillContainedWater, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, openWorldCaps, type WorldParams } from './params.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
@@ -603,9 +603,9 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   // mismo destino») le parece `memoriaDisputa` celdas más lejos. Sólo reordena las fuentes que ya percibe: si
   // no hay otra, vuelve; no prohíbe nada, no revela nada lejano y el camino se paga igual.
   const { memoriaDisputa, disputaDestino, vinculoEncuentro } = paramsOf(world).social;
-  // Con energía agotada y privación severa, descansar ya no recupera energía (`restBody`), pero `move()` sigue
-  // desplazándose saturando energía en 0: impedir elegir alimento/agua visibles bloqueaba en bucle a S/I (y moribundos).
-  const desperateSubsistence = vinculoEncuentro > 0 && (person.hunger > 0.85 || person.thirst > 0.85) && person.energy < 0.01;
+  // Con energía agotada o fatiga saturada y privación severa, descansar ya no recupera energía (`restBody`), pero
+  // `move()` sigue desplazándose saturando energía en 0: impedir buscar/elegir alimento o agua bloqueaba en bucle.
+  const desperateSubsistence = vinculoEncuentro > 0 && (person.hunger > 0.85 || person.thirst > 0.85) && (person.energy < 0.01 || person.fatigue > 0.98);
   if (memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick >= TICKS_PER_DAY) delete person.conflictMemory;
   const disputada = memoriaDisputa > 0 ? person.conflictMemory : undefined;
   const recelo = (tile: Point) => disputada && distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
@@ -799,7 +799,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   })();
   const prey = huntPlan?.tile;
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
-  if (!food && !prey && meal === 0 && person.hunger > .6) {
+  const seekingFood = !food && !prey && meal === 0 && person.hunger > .6;
+  if (seekingFood) {
     // Like thirst, deprivation still motivates a paid search when perception is
     // empty. This potential small meal is a need score, never a stock or reward.
     const soughtFood = { ...body }; assimilateFood(soughtFood, .002, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
@@ -931,7 +932,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   for (const candidate of candidates) {
     if (candidate.action === 'explore') continue; // Its destination is selected later; no fictional roof there.
     const steps = stepsTo(candidate.target);
-    if (steps === undefined || !planAffordable(steps, 0)) continue;
+    const bypassEffort = desperateSubsistence && (candidate.action === 'eat' || candidate.action === 'drink');
+    if (steps === undefined || (!bypassEffort && !planAffordable(steps, 0))) continue;
     let cover = exposed ? bodilyShelter(world, candidate.target) : protection, work = 0, travel = steps;
     // Accompany stops within 1.5 cells: another person's roof is not the follower's roof.
     if (candidate.action === 'accompany' && steps > 0) cover = 0;
@@ -1050,8 +1052,14 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     // Keep the paid local search leg; visible water and bodily recovery still
     // compete on every choice, and blocked/reached targets must be replaced.
     const remaining = stepsTo(person.target);
-    const continuingSearch = seekingWater && person.action === 'explore' && remaining !== undefined
-      && remaining > 0 && planAffordable(remaining, 0);
+    const urgentSearch = seekingWater || (vinculoEncuentro > 0 && seekingFood);
+    const continuingSearch = urgentSearch && person.action === 'explore' && remaining !== undefined
+      && remaining > 0 && (desperateSubsistence || planAffordable(remaining, 0));
+    if (vinculoEncuentro > 0 && urgentSearch && !continuingSearch && person.action === 'explore'
+      && (remaining === 0 || remaining === undefined)
+      && !reachableTiles.some(t => distance(person, t) >= 3 && distance(person, t) <= 6 && !person.visited.includes(`${t.x},${t.y}`))) {
+      person.heading += 1.3;
+    }
     selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);
   }
   // A viable work site retains accumulated work while the same action is selected.
@@ -1178,7 +1186,14 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
     }
     return;
   }
-  if (!payContainedWaterCarry(world, person)) { person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.'; return; }
+  if (!payContainedWaterCarry(world, person)) {
+    const desperateCarry = paramsOf(world).social.vinculoEncuentro > 0
+      && (person.hunger > 0.85 || person.thirst > 0.85) && (person.energy < 0.01 || person.fatigue > 0.98);
+    if (!desperateCarry || spillContainedWater(world, person) === 0 || !payContainedWaterCarry(world, person)) {
+      person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.';
+      return;
+    }
+  }
   person.x = nextStep.x; person.y = nextStep.y;
   personaMovida(world, person);
   trampleTile(tileAt(world, person)!);

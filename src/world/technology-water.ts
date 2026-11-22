@@ -103,7 +103,8 @@ export function assertWaterExecution(event: Pick<TechnologyExecution, 'kind' | '
   if (w.action === 'fill' && (increases !== 1 || decreases) || w.action === 'drink' && (decreases !== 1 || increases)
     || ['leak', 'spill'].includes(w.action) && increases || w.action === 'carry' && (increases || decreases)
     || w.action === 'transfer' && (w.sent && increases || w.received && decreases || !w.sent && !w.received && (increases || decreases))) fail();
-  if (w.action === 'spill' && !['use', 'research', 'craft', 'recycle', 'estate'].includes(event.kind)) fail();
+  if (w.action === 'spill' && (event.kind === 'water' ? (!w.lost || event.work || event.energy || event.benefit)
+    : !['use', 'research', 'craft', 'recycle', 'estate'].includes(event.kind))) fail();
 }
 export function assertTechnologyWater(host: TechnologyHost): void {
   const ledger = host.technology.water;
@@ -309,6 +310,29 @@ export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor):
   exertBody(actor, { energy, fatigue }); actor.technology.waterCarryAt = host.tick;
   record(host, actor, waterEnvelope(actor, opening, 'carry')!, 1, energy);
   return true;
+}
+/** An exhausted carrier can pour out carried water instead of freezing in place under dead weight.
+ * Every dropped quantum is recorded as an explicit environmental loss with zero work or hydration. */
+export function spillContainedWater(host: TechnologyHost, actor: WaterActor): number {
+  if (!isHostMember(host.people, actor)) return 0;
+  const opening = containedWaterStock(actor);
+  if (!opening.length) return 0;
+  const changes: { item: MaterialBatch; contents: ContainedWater }[] = [];
+  let lost = 0;
+  for (const item of actor.technology.items) if (item.contents && item.contents.water > 0) {
+    assertContainedWater(item.contents, host.tick);
+    const overflow = capacityOverflowReturns(item.contents, 0, 0, 0);
+    lost = safe(lost + overflow.environmentalLossQuanta);
+    changes.push({ item, contents: { ...item.contents, ...overflow.contents } });
+  }
+  if (!lost) return 0;
+  room(host);
+  const ledger = nextAccount(host, { environmentalLoss: lost });
+  host.technology.water = ledger;
+  for (const change of changes) change.item.contents = change.contents;
+  delete actor.technology.waterPreparation;
+  record(host, actor, waterEnvelope(actor, opening, 'spill', { lost })!);
+  return lost;
 }
 
 /** A preparatory plan predicts only its owner's bodily demand and observed material retention.

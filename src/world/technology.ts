@@ -114,16 +114,33 @@ export function rawMaterial(material: Material, quantity = MASS_UNIT): MaterialB
   const composition = empty(); composition[material] = quantity;
   return { id: `raw:${material}`, recipeId: null, composition, mass: quantity, properties: rawProperties(composition), generation: 0, madeAt: 0, parentItems: [], initialMass: quantity };
 }
-export function materialCapacities(batch: MaterialBatch): Record<Capability, number> {
+/** Las seis capacidades de un lote en el orden de `CAPABILITIES`, escritas en `out` sin crear objetos (V18: eran
+ * `materialCapacities` + `itemCapacities` ≈ 2,7 % del paso a 3 207 habitantes). Es la única fórmula: las
+ * demás funciones la leen de aquí, así que no hay dos versiones que puedan divergir. Lee SÓLO `mass`,
+ * `initialMass`, `composition.water` y las once propiedades que aparecen abajo —nada se cachea, un cambio
+ * en sitio de `mass`, `composition` o `properties` se ve en la llamada siguiente—. Mismas expresiones y
+ * mismo orden de operaciones que la versión con objeto: salida idéntica bit a bit (también `-0` y `NaN`). */
+function fillCapacities(batch: MaterialBatch, out: Float64Array): void {
   const p = batch.properties, integrity = clamp(batch.mass / Math.max(1, batch.initialMass));
   const solidity = 1 - batch.composition.water / Math.max(1, batch.mass);
   const usable = Math.min(1, batch.mass / 500) * integrity * solidity * clamp(1 - p.temperature);
-  return { cutting: clamp(p.edge * p.hardness * p.cohesion * 1.7) * usable,
-    storage: clamp(p.containment * p.cohesion * (1 - p.porosity) * 2) * usable,
-    insulation: clamp(p.insulation * p.cohesion * (0.3 + p.alignment) * 1.2) * usable,
-    cultivation: clamp(p.leverage * (p.hardness * 0.7 + p.toughness * 0.3) * p.cohesion * 1.6) * usable,
-    binding: clamp(p.flexibility * p.alignment * p.cohesion * 1.8) * usable,
-    abrasion: clamp(p.hardness * (1 - p.porosity) * (1 - p.edge * 0.5) * p.cohesion) * usable };
+  out[0] = clamp(p.edge * p.hardness * p.cohesion * 1.7) * usable;
+  out[1] = clamp(p.containment * p.cohesion * (1 - p.porosity) * 2) * usable;
+  out[2] = clamp(p.insulation * p.cohesion * (0.3 + p.alignment) * 1.2) * usable;
+  out[3] = clamp(p.leverage * (p.hardness * 0.7 + p.toughness * 0.3) * p.cohesion * 1.6) * usable;
+  out[4] = clamp(p.flexibility * p.alignment * p.cohesion * 1.8) * usable;
+  out[5] = clamp(p.hardness * (1 - p.porosity) * (1 - p.edge * 0.5) * p.cohesion) * usable;
+}
+const capacityScratch = new Float64Array(6);
+const CAPABILITY_SLOT: Readonly<Record<Capability, number>> = { cutting: 0, storage: 1, insulation: 2, cultivation: 3, binding: 4, abrasion: 5 };
+export function materialCapacities(batch: MaterialBatch): Record<Capability, number> {
+  const c = capacityScratch; fillCapacities(batch, c);
+  return { cutting: c[0]!, storage: c[1]!, insulation: c[2]!, cultivation: c[3]!, binding: c[4]!, abrasion: c[5]! };
+}
+/** `materialCapacities(batch)[capability]` sin construir el objeto. */
+function materialCapacity(batch: MaterialBatch, capability: Capability): number {
+  fillCapacities(batch, capacityScratch);
+  return capacityScratch[CAPABILITY_SLOT[capability]]!;
 }
 export interface OperationResult { product: MaterialBatch | null; residue: Composition; success: boolean; reason: string; }
 /** Laws operate on physical state. Neither recipe names nor identity affect any property. */
@@ -232,7 +249,7 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
   const waterTile = imported.water ? (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined) : undefined;
   // Drinking stock uses fifty mass units per normalized water unit; only the occupied tile is observable.
   if (imported.water && (waterTile?.drinkingWater ?? 0) * 50_000 + 1e-8 < imported.water) return;
-  for (const step of program.steps) if (step.requiredCatalyst && !actor.technology.items.some(item => item.mass - (itemMasses.get(item.id) ?? 0) >= 30 && materialCapacities(item)[step.requiredCatalyst!] >= 0.1)) return;
+  for (const step of program.steps) if (step.requiredCatalyst && !actor.technology.items.some(item => item.mass - (itemMasses.get(item.id) ?? 0) >= 30 && materialCapacity(item, step.requiredCatalyst!) >= 0.1)) return;
   const fuelInputs: ResourceMass[] = [];
   if (fuelNeeded > scrapFuel) fuelInputs.push({ resourceId: 'raw:wood', mass: fuelNeeded - scrapFuel });
   if (scrapFuel) fuelInputs.push({ resourceId: 'residue:wood', mass: scrapFuel });
@@ -263,13 +280,18 @@ export function toolCapacities(actor: TechnologyActor): Record<Capability, numbe
 /** Lo mismo que `toolCapacities` de un actor con esos objetos, sin construir el actor (sprint noche-perf2:
  * los llamadores copiaban la persona entera sólo para cambiarle el inventario). */
 export function itemCapacities(items: readonly MaterialBatch[]): Record<Capability, number> {
-  const result = { cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
-  for (const item of items) { const powers = materialCapacities(item); for (const c of CAPABILITIES) result[c] = Math.max(result[c], powers[c]); }
-  return result;
+  const c = capacityScratch;
+  let cutting = 0, storage = 0, insulation = 0, cultivation = 0, binding = 0, abrasion = 0;
+  for (let i = 0; i < items.length; i++) {
+    fillCapacities(items[i]!, c);
+    cutting = Math.max(cutting, c[0]!); storage = Math.max(storage, c[1]!); insulation = Math.max(insulation, c[2]!);
+    cultivation = Math.max(cultivation, c[3]!); binding = Math.max(binding, c[4]!); abrasion = Math.max(abrasion, c[5]!);
+  }
+  return { cutting, storage, insulation, cultivation, binding, abrasion };
 }
 export interface ToolReceipt { executionId: string; itemId: string; recipeId: string | null; capability: Capability; power: number; wear: number; }
 function bestTool(actor: TechnologyActor, capability: Capability) {
-  return actor.technology.items.map(item => ({ item, power: materialCapacities(item)[capability] })).filter(i => i.power > 0.07)
+  return actor.technology.items.map(item => ({ item, power: materialCapacity(item, capability) })).filter(i => i.power > 0.07)
     .sort((a, b) => b.power - a.power || a.item.id.localeCompare(b.item.id))[0];
 }
 /** Shared by execution and private forecasts: the useful impulse pays the same wear. */

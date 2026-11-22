@@ -103,10 +103,11 @@ const faunaCaches = new WeakMap<Tile[], FaunaCache>();
 export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   const counts = new Map<Cell, { count: number; species: AnimalSpecies; x: number; y: number }>();
   for (const animal of animals) {
-    const p = cell(animal), existing = counts.get(p);
-    if (existing) { existing.count++; if (animal.species < existing.species) existing.species = animal.species; }
-    else counts.set(p, { count: 1, species: animal.species, x: animal.x, y: animal.y });
-    if (counts.get(p)!.count > MAX_ANIMALS_PER_TILE) throw new Error('Capacidad local de fauna excedida.');
+    const p = cell(animal);
+    let entry = counts.get(p);
+    if (entry) { entry.count++; if (animal.species < entry.species) entry.species = animal.species; }
+    else counts.set(p, entry = { count: 1, species: animal.species, x: animal.x, y: animal.y });
+    if (entry.count > MAX_ANIMALS_PER_TILE) throw new Error('Capacidad local de fauna excedida.');
   }
   let cache = faunaCaches.get(tiles);
   if (!cache || cache.length !== tiles.length) {
@@ -116,10 +117,9 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     faunaCaches.set(tiles, cache);
   }
   const tileIn = tileLookup(tiles);
-  const write = (p: Cell, at: Point): void => {
+  const write = (at: Point, count: { count: number; species: AnimalSpecies } | undefined): void => {
     const tile = tileIn(at.x, at.y);
     if (!tile) return;
-    const count = counts.get(p);
     const nextFauna = count?.count ?? 0;
     if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
     if (count) {
@@ -130,8 +130,9 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   };
   // Cada celda una sola vez: primero las ocupadas antes y luego las nuevas, el orden del antiguo
   // `new Set([...occupied, ...counts.keys()])` (cada celda escribe una tesela distinta).
-  for (const [p, at] of cache.occupied) write(p, at);
-  for (const [p, at] of counts) if (!cache.occupied.has(p)) write(p, at);
+  const before = cache.occupied;
+  for (const [p, at] of before) write(at, counts.get(p));
+  for (const [p, entry] of counts) if (!before.has(p)) write(entry, entry);
   cache.occupied = counts;
 }
 

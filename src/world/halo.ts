@@ -131,6 +131,7 @@ export const PRIMITIVAS: readonly Declaracion[] = [
   ...['firstTileAt', 'lastTileAt', 'tileLookup'].map(funcion => ({ fichero: 'tile-index.ts', funcion, motivo: 'Tesela de unas coordenadas.' })),
   ...['filtrarCerca', 'primeroCerca', 'algunoCerca'].map(funcion => ({ fichero: 'indice-puntos.ts', funcion, motivo: 'Elementos a ≤ r por eje de un punto, en el orden del arreglo; el predicado acota.' })),
   { fichero: 'index.ts', funcion: 'personById', motivo: 'Persona por id: lectura por identidad, sin cota espacial.' },
+  { fichero: 'index.ts', funcion: 'placeById', motivo: 'Lugar por id: lectura por identidad de world.places, cacheada por longitud.' },
   // T141: la rejilla efímera de personas. `vecinos` ≡ `world.people.filter(pred)` y `primerVecino` ≡
   // `world.people.find(pred)` para cualquier `pred` que implique |Δx|, |Δy| ≤ alcance (los llamadores
   // dan radio + 1, igual que `filtrarCerca`/`primeroCerca`): mismos objetos, mismo orden de slot.
@@ -425,8 +426,11 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
  * de solo lectura, y agregados o selecciones que el coordinador calcula una vez. */
 export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
   { id: 'lugares.porId', fase: 'decision', fuente: 'world.places', cota: 2048, fichero: 'index.ts', funcion: 'choose',
-    patrones: ['world.places.find(p => p.id === habit.placeId)', 'world.places.find(p => p.id === memory.placeId)'],
-    motivo: 'Lugares de hábitos y recuerdos por id, dondequiera que estén. `world.places` (≤ 2 048, `assertCommon`) se replica íntegro: ninguna lectura de lugares necesita el halo.' },
+    patrones: ['placeById(world, habit.placeId)', 'placeById(world, memory.placeId)'],
+    motivo: 'Lugares de hábitos y recuerdos por id, dondequiera que estén (índice O(1) `placeById`).' },
+  { id: 'lugares.encuentroOrigen', fase: 'encuentros', fuente: 'world.places', cota: 2048, fichero: 'index.ts', funcion: 'encounters',
+    patrones: ["placeById(world, 'claro')"],
+    motivo: 'V16 (`social.vinculoEncuentro`): punto de partida compartido de S e I si aún no registraron un encuentro previo.' },
   { id: 'lugares.gesto', fase: 'gestos', fuente: 'world.places', cota: 2048, fichero: 'index.ts', funcion: 'applyGesture',
     patrones: ['world.places.find(p => p.id === memory?.placeId)'], motivo: 'Lugar del recuerdo pedido; luego exige que esté a ≤ 4 del gesto.' },
   { id: 'lugares.activacion', fase: 'activacion', fuente: 'world.places', cota: 2048, fichero: 'spatial.ts', funcion: 'activateChunk',
@@ -510,6 +514,8 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
     motivo: 'Con `poblacion.cortejo` > 0 (reglas 10) lee rol, vínculos y padres de cada persona vinculada, a cualquier distancia, antes de filtrar por `radioCortejo`.' },
   { id: 'indicePorId', fase: 'decision', fuente: 'world.people', fichero: 'index.ts', funcion: 'personById',
     patrones: ['function personById(', 'for (const person of world.people) if (!byId.has(person.id))'], motivo: 'Índice id → persona de toda la población.' },
+  { id: 'indiceLugarPorId', fase: 'decision', fuente: 'world.places', fichero: 'index.ts', funcion: 'placeById',
+    patrones: ['function placeById(', 'for (const place of world.places) if (!byId.has(place.id))'], motivo: 'Índice id → lugar de todos los lugares activos.' },
   { id: 'gesto.agente', fase: 'gestos', fuente: 'world.people', fichero: 'index.ts', funcion: 'applyGesture',
     patrones: ['world.people.find(p => p.id === gesture.agentId)'], motivo: 'Destinatario de una orden.' },
   { id: 'encuentro.SeI', fase: 'encuentros', fuente: 'world.people', fichero: 'index.ts', funcion: 'encounters',

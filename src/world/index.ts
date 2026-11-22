@@ -96,6 +96,8 @@ export interface Person extends PersonView {
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
+  /** Ley V16 (`social.vinculoEncuentro > 0`): último punto de encuentro o rastro recordado de S/I. */
+  partnerMemory?: { x: number; y: number; tick: number };
   /** Ley evolutiva V12 (`conducta.politicaPeso > 0`): red de política local 12→8→12 heredable. */
   policy?: PolicyGenome;
   /** Plasticidad adquirida en vida (efecto Baldwin, nunca heredable): sesgo y traza por familia de acción. */
@@ -321,7 +323,7 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   }
 }
 
-interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean; }
+interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean; policyDelta?: number; prePolicyScore?: number; }
 /** Ley DIV (`conducta.aptitud`): qué rasgo heredable hace a alguien apto para
  * cada OFICIO. Sigue las afinidades que la elección ya usaba (explorar e investigar con
  * `curiosity`, recolectar/cultivar con `industriousness`, compartir con `care`); la caza, el
@@ -486,6 +488,18 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
+const placesById = new WeakMap<PlaceView[], { length: number; byId: Map<string, PlaceView> }>();
+function placeById(world: World, id: string): PlaceView | undefined {
+  let index = placesById.get(world.places);
+  if (!index || index.length !== world.places.length) {
+    const byId = new Map<string, PlaceView>();
+    for (const place of world.places) if (!byId.has(place.id)) byId.set(place.id, place);
+    index = { length: world.places.length, byId };
+    placesById.set(world.places, index);
+  }
+  return index.byId.get(id);
+}
+
 function ensurePersonPolicy(world: World, person: Person): { genome: PolicyGenome; plasticity: PolicyPlasticity } {
   if (!person.policy) person.policy = founderPolicy(world.seed, person.id);
   if (!person.policyPlasticity) person.policyPlasticity = initialPolicyPlasticity();
@@ -582,12 +596,16 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   const aptitud = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5 ? paramsOf(world).conducta.aptitud : 0;
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
-  if (home) candidates.push({action:'approach',...home});
+  const homeCandidate: Candidate | undefined = home ? {action:'approach',...home} : undefined;
+  if (homeCandidate) candidates.push(homeCandidate);
   // Conflicto legible (`social.memoriaDisputa`, CONFL, default 0 = hoy): quien cedió una disputa recuerda un
   // día la fuente; al elegir dónde comer, beber o cazar esa fuente (la celda y las que la disputa llama «el
   // mismo destino») le parece `memoriaDisputa` celdas más lejos. Sólo reordena las fuentes que ya percibe: si
   // no hay otra, vuelve; no prohíbe nada, no revela nada lejano y el camino se paga igual.
-  const { memoriaDisputa, disputaDestino } = paramsOf(world).social;
+  const { memoriaDisputa, disputaDestino, vinculoEncuentro } = paramsOf(world).social;
+  // Con energía agotada y privación severa, descansar ya no recupera energía (`restBody`), pero `move()` sigue
+  // desplazándose saturando energía en 0: impedir elegir alimento/agua visibles bloqueaba en bucle a S/I (y moribundos).
+  const desperateSubsistence = vinculoEncuentro > 0 && (person.hunger > 0.85 || person.thirst > 0.85) && person.energy < 0.01;
   if (memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick >= TICKS_PER_DAY) delete person.conflictMemory;
   const disputada = memoriaDisputa > 0 ? person.conflictMemory : undefined;
   const recelo = (tile: Point) => disputada && distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
@@ -596,7 +614,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   // fusión CONFL + perf elige exactamente la misma celda que el `filter().sort()[0]` de la rama CONFL.
   const food = primero(reachableTiles, disputada
     ? (a, b) => (distance(person, a) - a.food * 2 + recelo(a)) - (distance(person, b) - b.food * 2 + recelo(b))
-    : (a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2), tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0));
+    : (a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2), tile => tile.food > 0.025 && (desperateSubsistence || planAffordable(stepsTo(tile)!, 0)));
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
   const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
@@ -703,7 +721,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   }
   const water = primeroConFiltroCaro(reachableTiles, disputada
     ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
-    : (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0));
+    : (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && (desperateSubsistence || planAffordable(stepsTo(t)!, 0)));
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
   const localWater = waterAvailable(world, person) > 0;
@@ -820,6 +838,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   const farmland = primero(nearbyTiles, (a, b) => distance(person, a) - distance(person, b), t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8);
   if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && food.food < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   if (partner) {
+    if (vinculoEncuentro > 0) person.partnerMemory = { x: partner.x, y: partner.y, tick: world.tick };
     if (person.socialLoad > 0.7 || partner.socialLoad > 0.8) {
       const space = nearbyTiles.filter(tile => distance(person, tile) <= 4).sort((a, b) => distance(partner, b) - distance(partner, a))[0]!;
       candidates.push({ action: 'retreat', target: space, score: 1.1 + person.socialLoad, reason: 'Después de compartir tiempo, busca espacio para recuperar su ritmo.' });
@@ -827,6 +846,15 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       candidates.push({ action: 'approach', target: partner, score: person.closeness * (0.65 + person.sociability * 0.45), reason: 'Le apetece acercarse; puede ver al otro en las cercanías.' });
       candidates.push({ action: 'accompany', target: partner, score: 0.18 + person.sociability * 0.1 + (partner.action === 'rest' ? 0.1 : 0), reason: 'Elige compartir una pausa con quien está cerca.' });
     }
+  } else if (vinculoEncuentro > 0 && person.role !== 'neighbor' && person.partnerMemory
+    && distance(person, person.partnerMemory) >= 2 && person.hunger < 0.65 && person.thirst < 0.65
+    && person.fatigue < 0.72 && person.socialLoad < 0.65 && person.closeness > 0.42) {
+    candidates.push({
+      action: 'approach',
+      target: { x: person.partnerMemory.x, y: person.partnerMemory.y },
+      score: vinculoEncuentro * (0.45 + person.closeness * 0.55),
+      reason: 'Recuerda el último lugar compartido y emprende el camino de regreso para reencontrarse; conserva sus necesidades.',
+    });
   }
   for (const invitation of world.invitations) {
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
@@ -840,13 +868,13 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   });
   // Learning also makes a locally known meeting place attractive; it cannot reveal distant places.
   for (const habit of person.habits) {
-    const knownPlace = world.places.find(p => p.id === habit.placeId);
+    const knownPlace = placeById(world, habit.placeId);
     const usefulVisit = knownPlace && person.inventory >= 0.025 && nearbyPeople.some(p => distance(p, knownPlace) <= 3 && p.hunger > 0.27);
     if (habit.strength >= 0.5 && knownPlace && usefulVisit && distance(person, knownPlace) <= RADIUS && person.hunger < 0.5) candidates.push({ action: 'approach', target: knownPlace, score: 0.43 + habit.strength * 0.3, reason: `Recuerda el cuidado compartido en ${knownPlace.name} y vuelve por decisión propia.` });
   }
   for (const memory of world.memories) {
     if (person.role === 'neighbor' || !memory.roles.includes(person.role)) continue;
-    const memoryPlace = world.places.find(p => p.id === memory.placeId);
+    const memoryPlace = placeById(world, memory.placeId);
     if (!memoryPlace || distance(person, memoryPlace) > 4) continue;
     const relevant = memory.context === 'partner-tired' ? !!partner && partner.fatigue > 0.45 && person.socialLoad < 0.7
       : memory.context === 'shelter-tired' ? person.fatigue > 0.4
@@ -961,10 +989,12 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
   }
-  // Ley evolutiva V12 (`conducta.politicaPeso`): red local 12→8→12 heredable + plasticidad Baldwin
-  // adquirida en vida (nunca heredada). Nunca sobrepone urgencias corporales severas (> 0,75) ni
-  // búsquedas de emergencia por sed o lluvia. Con default 0 no ejecuta nada (V11 bit a bit).
-  const politicaPeso = person.thirst <= 0.75 && person.hunger <= 0.75 ? paramsOf(world).conducta.politicaPeso : 0;
+  // Ley evolutiva V12 (`conducta.politicaPeso`) + autonomía V16 (`conducta.politicaAutonomia`):
+  // red local 12→8→12 heredable + plasticidad Baldwin adquirida en vida (nunca heredada). Nunca sobrepone
+  // urgencias corporales severas (> 0,75) ni búsquedas de emergencia por sed o lluvia. Con default 0 no ejecuta nada.
+  const { politicaPeso: pesoBase, politicaAutonomia } = paramsOf(world).conducta;
+  const politicaPeso = person.thirst <= 0.75 && person.hunger <= 0.75 ? pesoBase : 0;
+  let heuristicWinnerAction: Action | undefined;
   if (politicaPeso > 0) {
     let scores = policyScores?.get(person.id);
     if (!scores) {
@@ -972,9 +1002,23 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       scores = evaluatePolicySingle(localPolicyObservation(world, person), genome.weights, plasticity.bias);
     }
     const emergencyExplore = seekingWater || (exposed && !protectionPlan && protection === 0);
+    const softenHeuristics = politicaAutonomia > 0 && !emergencyExplore
+      && person.thirst <= 0.72 && person.hunger <= 0.72 && person.fatigue <= 0.8;
+    const heuristicScale = softenHeuristics ? 1 - politicaAutonomia * 0.55 : 1;
+    let bestPre = -Infinity;
     for (const candidate of candidates) {
+      const strategic = candidate === homeCandidate || (!candidate.memory && candidate !== familyForage
+        && (candidate.action === 'explore' || candidate.action === 'gather' || candidate.action === 'farm'
+          || candidate.action === 'hunt' || candidate.action === 'build' || candidate.action === 'cooperate'
+          || candidate.action === 'research' || candidate.action === 'craft' || candidate.action === 'share'
+          || candidate.action === 'invent' || candidate.action === 'repair'));
+      if (softenHeuristics && strategic) candidate.score *= heuristicScale;
+      candidate.prePolicyScore = candidate.score;
+      if (candidate.score > bestPre) { bestPre = candidate.score; heuristicWinnerAction = candidate.action; }
       if (candidate === candidates[0] && emergencyExplore) continue;
-      candidate.score += policyActionBias(scores, candidate.action, politicaPeso);
+      const delta = policyActionBias(scores, candidate.action, politicaPeso);
+      candidate.score += delta;
+      candidate.policyDelta = delta;
     }
   }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
@@ -1013,7 +1057,10 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if (selected.action !== 'drink') delete person.technology.waterPreparation;
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
   person.target = { x: selected.target.x, y: selected.target.y };
-  person.reason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
+  const policyDriven = politicaAutonomia > 0 && !selected.directed && (selected.policyDelta ?? 0) > 0.12
+    && heuristicWinnerAction !== undefined && selected.action !== heuristicWinnerAction;
+  const baseReason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
+  person.reason = policyDriven ? `${baseReason} Su política neuronal aprendida inclinó esta estrategia.` : baseReason;
   person.decisionAt = world.tick + (selected === restCandidate && recoverWater ? 1 : 30);
   if (selected.memory && person.recentMemory !== selected.memory.text) {
     const event = addEvent(world, { kind: 'memory', actors: [person.id], text: `${person.name} eligió ${actionLabel(selected.action)} al recordar «${selected.memory.title}».`, cause: `Contexto ${selected.memory.context}; recuerdo ${selected.memory.id}; aumenta la preferencia por ${selected.action}.`, x: person.x, y: person.y, source: selected.memory.source });
@@ -1044,7 +1091,8 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   if (world.adaptationEnabled) person.values[key] = Math.max(-0.3, Math.min(0.3, (person.values[key] ?? 0) + person.genome.learningRate * (benefit - (person.values[key] ?? 0))));
   if (world.adaptationEnabled && paramsOf(world).conducta.politicaPeso > 0) {
     const { plasticity } = ensurePersonPolicy(world, person);
-    updatePolicyPlasticity(plasticity, action, benefit, person.genome.learningRate * 0.25);
+    const step = paramsOf(world).conducta.politicaAutonomia > 0 ? 0.4 : 0.25;
+    updatePolicyPlasticity(plasticity, action, benefit, person.genome.learningRate * step);
   }
   if (world.adaptationEnabled && world.cooperationEnabled) {
     // Acquired norms react to consequences, independently from inherited alleles.
@@ -1251,6 +1299,12 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
     const beforeRest={fatigue:person.fatigue,energy:person.energy};
     restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
+    const { politicaPeso, politicaAutonomia } = paramsOf(world).conducta;
+    if (politicaAutonomia > 0 && politicaPeso > 0 && world.adaptationEnabled && world.tick % 30 === 0) {
+      const gained = (beforeRest.fatigue - person.fatigue) + (person.energy - beforeRest.energy);
+      const { plasticity } = ensurePersonPolicy(world, person);
+      updatePolicyPlasticity(plasticity, 'rest', gained * 25, person.genome.learningRate * 0.3);
+    }
   }
   if (person.action === 'share') share(world, person);
   if (['research','craft'].includes(person.action) && distance(person,person.target)<0.5) {
@@ -1334,7 +1388,25 @@ function performWork(world: World, person: Person, tile: Tile): void {
 function encounters(world: World): void {
   const s = world.people.find(p => p.role === 'S');
   const i = world.people.find(p => p.role === 'I');
-  if (!s || !i || distance(s, i) > 1.5 || s.action === 'retreat' || i.action === 'retreat' || s.socialLoad > 0.8 || i.socialLoad > 0.8) return;
+  if (!s || !i) return;
+  const { vinculoEncuentro } = paramsOf(world).social;
+  if (vinculoEncuentro > 0) {
+    const separation = distance(s, i);
+    if (separation <= RADIUS) {
+      s.partnerMemory = { x: i.x, y: i.y, tick: world.tick };
+      i.partnerMemory = { x: s.x, y: s.y, tick: world.tick };
+    } else if (world.tick % 120 === 0) {
+      if (separation <= paramsOf(world).poblacion.radioCortejo) {
+        const mid = { x: Math.round((s.x + i.x) / 2), y: Math.round((s.y + i.y) / 2), tick: world.tick };
+        s.partnerMemory = { ...mid }; i.partnerMemory = { ...mid };
+      } else {
+        const origin = placeById(world, 'claro') ?? { x: 0, y: 0 };
+        if (!s.partnerMemory) s.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
+        if (!i.partnerMemory) i.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
+      }
+    }
+  }
+  if (distance(s, i) > 1.5 || s.action === 'retreat' || i.action === 'retreat' || s.socialLoad > 0.8 || i.socialLoad > 0.8) return;
   if (!['approach', 'accompany', 'rest', 'share'].includes(s.action) || !['approach', 'accompany', 'rest', 'share'].includes(i.action)) return;
   for (const person of [s, i]) {
     // Shared pauses reduce exertion; they do not create food or erase hunger.
@@ -1344,10 +1416,29 @@ function encounters(world: World): void {
     person.closeness = clamp(person.closeness - 0.0018);
   }
   if (world.tick - s.lastMeeting < 240) return;
+  const elapsed = s.lastMeeting > 0 ? world.tick - s.lastMeeting : 0;
   s.lastMeeting = world.tick; i.lastMeeting = world.tick;
+  if (vinculoEncuentro > 0) {
+    s.partnerMemory = { x: s.x, y: s.y, tick: world.tick };
+    i.partnerMemory = { x: i.x, y: i.y, tick: world.tick };
+    bond(world, s, i, 0.08);
+    if (world.adaptationEnabled && paramsOf(world).conducta.politicaPeso > 0) {
+      for (const person of [s, i]) {
+        const { plasticity } = ensurePersonPolicy(world, person);
+        updatePolicyPlasticity(plasticity, 'cooperate', 0.18, person.genome.learningRate * 0.35);
+      }
+    }
+  }
   const place = primeroCerca(world.places, s, 4, p => distance(s, p) <= 3);
-  const event = addEvent(world, { kind: 'meeting', actors: [s.id, i.id], source: 'simulation', x: s.x, y: s.y, text: 'S e I compartieron una pausa. Después podrán volver a sus propios caminos.', cause: 'Cercanía percibida, disposición de ambos y una acción de compañía; la pausa reduce cansancio, sin producir alimento.' });
-  for (const person of [s, i]) remember(person, world, 'Una pausa acompañada ayudó a recuperar el ritmo.', event.id, place?.id);
+  const reunion = vinculoEncuentro > 0 && elapsed >= TICKS_PER_DAY;
+  const event = addEvent(world, {
+    kind: 'meeting', actors: [s.id, i.id], source: 'simulation', x: s.x, y: s.y,
+    text: reunion
+      ? `Tras ${(elapsed / TICKS_PER_DAY).toFixed(1)} días en caminos separados, S e I volvieron a encontrarse${place ? ` en ${place.name}` : ''} y compartieron una pausa.`
+      : 'S e I compartieron una pausa. Después podrán volver a sus propios caminos.',
+    cause: 'Cercanía percibida, disposición de ambos y una acción de compañía; la pausa reduce cansancio, sin producir alimento.',
+  });
+  for (const person of [s, i]) remember(person, world, reunion ? 'Un reencuentro tras caminos distintos ayudó a recuperar el ritmo.' : 'Una pausa acompañada ayudó a recuperar el ritmo.', event.id, place?.id);
 }
 
 function applyGesture(world: World, gesture: Gesture, order: number): GestureResult {
@@ -1523,6 +1614,7 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    delete child.partnerMemory;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
     delete (child as unknown as Record<string, unknown>).vocacion;
     // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.

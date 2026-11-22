@@ -217,18 +217,30 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
 }
 
 /**
- * V15 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
- * Activa todos los chips detectados (`hostFullHardwareParams`) junto con natalidad estrictamente local
- * (sin cupo global de 40 nacimientos/día), comunidades vivas sin tope ficticio (`maxComunidades=0`),
- * política evolutiva local + plasticidad Baldwin (`politicaPeso=0.35`, `aptitud=0.35`) y señal limpia
- * de innovación tecnológica sin spam de microvariantes (`evitarNoOp=true`, `dosisCuanto=50`).
+ * V16 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
+ * Activa todos los chips detectados (`hostFullHardwareParams`) junto con:
+ * - presión ecológica realista (`recursos.*`, `agua.cuencas=0.30`, `agua.memoria=0.65`) para imponer
+ *   selección malthusiana real y migración sin colapso;
+ * - natalidad local (`natalidadVecindad=true`) y comunidades vivas sin tope ficticio (`maxComunidades=0`)
+ *   con deriva cultural bidireccional (`derivaCultural=1`) y ancla narrativa de S e I (`vinculoEncuentro=1`);
+ * - política neuronal autónoma + plasticidad Baldwin (`politicaPeso=1.15`, `politicaAutonomia=0.65`);
+ * - tecnología funcional de alto cociente señal/ruido (`mejoraLocal=0.08`, `dosisCuanto=100`, `efectosHerramientas=true`).
  */
 export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
   const full = hostFullHardwareParams(base, probe);
   return parseParams({
+    recursos: {
+      ...full.recursos,
+      capacidadBosque: 0.65,
+      capacidadPastizal: 0.45,
+      capacidadOtros: 0.22,
+      velocidadRegeneracion: 0.55,
+      decaimientoFertilidad: 0.0025,
+    },
+    agua: { ...full.agua, cuencas: 0.3, memoria: 0.65 },
     poblacion: { ...full.poblacion, natalidadVecindad: true, radioVecindadNatalidad: 16 },
-    social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0 },
-    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 0.35 },
-    tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 50, enfriamiento: 240 },
+    social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0, derivaCultural: 1, vinculoEncuentro: 1 },
+    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 1.15, politicaAutonomia: 0.65 },
+    tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true },
   }, full);
 }

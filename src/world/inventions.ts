@@ -9,6 +9,7 @@ import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
 import { openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS, paramsOf } from './params.js';
 import { vecinos } from './rejilla.js';
+import { constructionWorkFactor, consumeConstructionTools, recordTechnologyBenefit, toolEffectsEnabled, useTool } from './technology.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -390,23 +391,30 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
   return true;
 }
 
-/** The single debit boundary for construction. No stock is seeded into the finished building. */
+/** The single debit boundary for construction. No stock is seeded into the finished building.
+ * V16 (`tecnologia.efectosHerramientas`): lashings, carpentry and masonry tools shorten the work the
+ * blueprint needs (`constructionWorkFactor`) without changing its materials. The work saved is measured,
+ * not assumed: only work the builder really did not spend wears the tools and counts as their benefit. */
 export function completeConstruction(world: World, person: Person, tile: Tile, emit: Emit): StructureView | null {
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components);
+  const tools = toolEffectsEnabled(world), requiredWork = tools ? cost.work * constructionWorkFactor(world, person) : cost.work;
   if (!validBlueprint(blueprint.components) || world.structures.length >= structureCap(world) || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
     || tile.terrain === 'water' || tile.terrain === 'shelter' || algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5)
-    || algunoCerca(world.structures, tile, 1, s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
+    || algunoCerca(world.structures, tile, 1, s => s.x === tile.x && s.y === tile.y) || person.work < requiredWork || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
   const identity = nextIdentity(world.structureCounter, 'structure', world.structures.map(s => s.id), world);
   if (!identity) return null;
-  person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work; world.structureCounter = identity.counter;
+  const paidWork = tools ? Math.min(person.work, cost.work) : cost.work, savedWork = cost.work - paidWork;
+  person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= paidWork; world.structureCounter = identity.counter;
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
   world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
     description: `Construido por ${person.name}; componentes ${blueprint.components.join(', ')}.`, gatherings: 0 };
   world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]?.places.push(place);
+  if (savedWork > 0) consumeConstructionTools(world, person, savedWork);
+  const toolNote = savedWork > 0 ? ` Herramientas de atar, cortar y desbastar ahorraron ${Math.round(savedWork * 10) / 10} de trabajo, con desgaste real.` : '';
   const event = emit({ kind: 'settlement', actors: [person.id], x: tile.x, y: tile.y, source: 'simulation', text: `${person.name} construyó ${blueprint.name.toLocaleLowerCase('es')}.`,
-    cause: `Plano ${blueprint.id}; trabajo ${cost.work}; inventario −${cost.wood} madera y −${cost.stone} piedra. Depósitos inicialmente vacíos.` });
+    cause: `Plano ${blueprint.id}; trabajo ${cost.work}; inventario −${cost.wood} madera y −${cost.stone} piedra. Depósitos inicialmente vacíos.${toolNote}` });
   person.experiences.push({ tick: world.tick, text: `Construyó ${blueprint.name}.`, causeId: event.id, placeId: place.id });
   person.experiences = person.experiences.slice(-8); person.recentMemory = person.experiences.at(-1)!.text;
   return structure;
@@ -506,11 +514,24 @@ export function repairOpportunity(world: World, person: Person): StructureView |
   const materials = localMaterials(world, person);
   return options.find(option => materials.wood >= option.steps)?.structure;
 }
+/** V16 (`tecnologia.efectosHerramientas`): lashings (`binding`) and dressed stone (`abrasion`) make the same wood
+ * and work restore more condition, +0.25·power per tool up to 1. Each tool pays real wear and is credited
+ * exactly the condition it added. Perception (`usefulRepairs`) still plans the bare +0.4 step. */
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
   if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
   person.materials.wood--; person.work -= REPAIR_WORK; structure.condition = clamp(structure.condition + 0.4); world.inventionDynamics.repairs++;
+  let toolGain = 0;
+  if (toolEffectsEnabled(world)) for (const capability of ['binding', 'abrasion'] as const) {
+    if (structure.condition >= 1) break;
+    const receipt = useTool(world, person, capability, 0.7);
+    if (!receipt) continue;
+    const before = structure.condition;
+    structure.condition = clamp(before + 0.25 * receipt.power); toolGain += structure.condition - before;
+    recordTechnologyBenefit(world, person, receipt, structure.condition - before);
+  }
+  const toolNote = toolGain > 0 ? ` Ataduras y piedra desbastada sumaron +${Math.round(toolGain * 1000) / 1000} de condición, con desgaste real.` : '';
   emit({ kind: 'invention', actors: [person.id], x: structure.x, y: structure.y, source: 'simulation', text: `${person.name} reparó ${structure.name.toLocaleLowerCase('es')}.`,
-    cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.` });
+    cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.${toolNote}` });
   return true;
 }
 

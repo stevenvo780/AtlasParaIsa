@@ -99,9 +99,10 @@ export function computeLocalPolicyObservation(
       if (tile!.terrain === 'shelter') shelterTiles++;
       materialSum += (tile!.wood ?? 0) + (tile!.stone ?? 0);
     }
-    const key = cellIntKey(x, y);
+    const tx = exact ? x : tile!.x, ty = exact ? y : tile!.y;
+    const key = cellIntKey(tx, ty);
     if (key === undefined) {
-      if (visited.length === 0 || !visited.includes(`${x},${y}`)) unvisited++;
+      if (visited.length === 0 || !visited.includes(`${tx},${ty}`)) unvisited++;
     } else if (!ints || !ints.has(key)) unvisited++;
   }
   let trustSum = 0;

@@ -28,7 +28,15 @@ const fail = (): never => { throw new TypeError('Invalid recipe memory input.');
 const knownIndexes = new WeakMap<string[], { ids: string[]; known: ReadonlySet<string> }>();
 function knownIndex(ids: string[]): ReadonlySet<string> {
   const cached = knownIndexes.get(ids);
-  if (cached && cached.ids.length === ids.length && cached.ids.every((id, i) => id === ids[i])) return cached.known;
+  if (cached) {
+    // Mismo contenido que la copia validada: se compara índice a índice, sin cierre ni iterador.
+    const seen = cached.ids, length = ids.length;
+    if (seen.length === length) {
+      let i = 0;
+      while (i < length && seen[i] === ids[i]) i++;
+      if (i === length) return cached.known;
+    }
+  }
   const known = new Set<string>();
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i]!;
@@ -52,13 +60,16 @@ function assertMemory(knowledge: TechnologyKnowledge, id?: string): ReadonlySet<
     if (!record(item) || (item.recipeId !== null && !recipeId(item.recipeId))) fail();
   }
   if (!Array.isArray(knowledge.learnedFrom) || !record(knowledge.competence)) fail();
-  for (const learned of knowledge.learnedFrom) {
+  const learnedFrom = knowledge.learnedFrom;
+  for (let n = 0; n < learnedFrom.length; n++) {
+    const learned: unknown = learnedFrom[n];
     if (!record(learned) || !recipeId(learned.recipeId) || !known.has(learned.recipeId) ||
       typeof learned.teacherId !== 'string' || !learned.teacherId.length || learned.teacherId.length > 100 || !integer(learned.tick)) fail();
   }
-  for (const key in knowledge.competence) {
-    if (!Object.hasOwn(knowledge.competence, key)) continue;
-    const practice: unknown = knowledge.competence[key];
+  const competence = knowledge.competence;
+  for (const key in competence) {
+    if (!Object.hasOwn(competence, key)) continue;
+    const practice: unknown = competence[key];
     if (!recipeId(key) || !record(practice) || !integer(practice.attempts) || !integer(practice.successes) ||
       practice.successes > practice.attempts || !integer(practice.work) || typeof practice.benefit !== 'number' ||
       !Number.isFinite(practice.benefit) || practice.benefit < 0) fail();

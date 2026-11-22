@@ -1,0 +1,41 @@
+{
+  "capturedAt": "2026-11-22T01:43:00-05:00",
+  "status": "published",
+  "kind": "new open-world V16 (publico-v16, fresh world mundos/v16-20261122; V15 preserved intact in mundos/v15-20261121)",
+  "reason": "Corregir los 6 hallazgos estructurales detectados en la auditoría del mundo vivo V15: (1) ruido combinatorio de 35 613 recetas y capacidades insulation/binding sin efecto físico; (2) colapso cultural a sharing=1.000 stdev=0.000; (3) falta de presión malthusiana/ecológica real; (4) política neuronal opacada por heurísticas rígidas; (5) S e I perdidos a 1 898 celdas con bloqueo zombi en energía 0 sin tocar jamás la carta; (6) cuello CPU hilo-0 en society.ts e index.ts.",
+  "codeRevision": "d091f7a",
+  "previousCodeRevision": "a928287",
+  "whatChanged": {
+    "code": "main 0f30f3d→d091f7a: 4 claves opt-in (0/false en DEFAULT_PARAMS e HISTORICAL_PARAMS, paridad histórica byte a byte preservada): tecnologia.efectosHerramientas + puerta locallyUsefulDiscovery/Pareto + caché caliente ponderada por utilidad + efectos físicos reales con desgaste en insulation/binding/cutting/abrasion; social.derivaCultural bidireccional + herencia vertical acotada + optimizaciones bit-idénticas en society.ts; conducta.politicaAutonomia + plasticidad Baldwin en rest/encuentros; social.vinculoEncuentro con memoria local de reencuentro de S e I (sin mutar world.memories), rescate de subsistencia con energía 0 / fatiga 1, búsqueda balística con rebote costero y derrame conservado spillContainedWater; presión ecológica calibrada (agua.cuencas=0.36, capacidadBosque=0.80, velocidadRegeneracion=0.72, decaimientoFertilidad=0.0018).",
+    "deployment": "Nuevo mundo limpio v16-20261122 (semilla 51926, access.scrypt copiada de V15), CARTA_OPEN_WORLD=1, 28 hilos CPU, Dual-GPU [0,1] (RTX 5070 Ti + RTX 2060), NODE_OPTIONS=--max-old-space-size=65536, CARTA_PARAMS=gobernador.presupuestoMs=5000,persistencia.ventanaEventosTicks=2400,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296, respaldos horarios en /mnt/Data2/respaldos-atlas-v16.",
+    "evidence": {
+      "abAudit4Seeds20Days": "V15 control vs V16 (semillas 7, 42, 404, 51926 × 20 días): extinciones 0/4; siZombieSamples 0/0/0/0; siFinalDist mediana 343.7→10.63 (seed 51926=0, seed 7=1.41); siMeetings mediana 2→64.5 (32×); memoriesUntouched 4/4; comunidades media 6→14; cultureStdev sharing 0.022→0.154 / openness 0.026→0.121 sin saturación; recetas 1 547.5→164 (-89.4%); toolUses 7 911→41 049 (5.2×); complexityScore 174.4→187.4; las 6 capacidades activas; dehydration 4.0→9.0 (+125%) y exposure 5.5→2.75 (-50% gracias a mantos insulation); baldwinL2 0.367→0.777 (2.1×); policySteeredReasons 0→44.5; msPerTickMean 18.06→9.65 ms (-46.6%).",
+      "tests": "npm run typecheck verde; 2 106 + 17 (digesto-stream, estabilidad-persistencia, sc013) + 375 (determinismo-hardware) + 13 (gpu-autoprueba + v12 Dual-GPU [0,1] FP64 0 ULP) + 8 (halo-radios) + 39 (agua/paridad) = 0 fallos; deploy-check.sh d091f7a salida 0."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh d091f7a37828d5588441221bfeb9d6158f875a46 → salida 0",
+    "previousWorldBackup": {
+      "world": "v15-20261121 (detenido en tick 97 400, día 40.58, 4 867 hab., 371 comunidades, 5 954 nacimientos, 35 613 recetas)",
+      "path": "/mnt/Data2/respaldos-atlas-v15/world-20261122-0139.sqlite.gz",
+      "size": "535 MiB",
+      "sha256": "da123e5881bf0add0dbf9967af35d0d34c8c331b8f62438de3d9b96fe13ca8fd",
+      "gzipTest": "OK"
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v16 en d091f7a con node_modules propio y build allí (73 ms); publico-v15-r3 y anteriores conservados intactos para rollback",
+    "worldCreated": {
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v16-20261122",
+      "worldInstanceId": "76dcf86d-d42c-4d02-8397-820fe5b6570c",
+      "seed": 51926,
+      "reset": true
+    },
+    "start": "arranque 2026-11-22 01:42:08 -05 (PID 429843, carta-isa, NODE_OPTIONS=--max-old-space-size=65536, gpuAutoprueba PASS en GPU 0 RTX 5070 Ti [8.53 ms] y GPU 1 RTX 2060 [7.61 ms]; 28 hilos CPU + daemons Dual-GPU activos)"
+  },
+  "liveChecks": {
+    "domainHealth": "https://atlas.humanizar.tech/health → 200 {\"status\":\"ok\"}",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido en https://atlas.humanizar.tech = compilado en publico-v16 (cmp -s: OK)",
+    "durableWorldConfirmed": "tick 300+, 16 hab., 2 048 teselas, 5 recuerdos intactos; todas las leyes V16 persistidas (cuencas=0.36, derivaCultural=1, vinculoEncuentro=1, politicaPeso=0.65, politicaAutonomia=0.55, mejoraLocal=0.08, dosisCuanto=100, efectosHerramientas=true, hilos=28, gpu=[0,1])",
+    "firstBackupVerified": "/mnt/Data2/respaldos-atlas-v16/world-20261122-0142.sqlite.gz (654 KiB, gzip -t OK)"
+  }
+}

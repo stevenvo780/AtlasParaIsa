@@ -93,7 +93,11 @@ export interface WorldParams {
     aptitud: number;
     /** V12: peso de la política neuronal local evolutiva + plasticidad vitalicia (`src/world/politica.ts`).
      * 0 = apagada (conducta V11 exacta); > 0 suma `politicaPeso · softSign(z + bias)` fuera de emergencias. */
-    politicaPeso: number };
+    politicaPeso: number;
+    /** V16: autonomía de la política neuronal frente a las heurísticas fijas fuera de emergencias corporales.
+     * 0 = heurísticas intactas (V12/V15); (0, 1] atenúa los sesgos fijos no urgentes para que la red
+     * 12→8→12 y su plasticidad de Baldwin conduzcan de verdad la estrategia del habitante. */
+    politicaAutonomia: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -133,7 +137,13 @@ export interface WorldParams {
      * · R4: orden fisión → mayoría → disolución → reagrupar → fundación; una comunidad no se disuelve en
      *   la revisión en que nace (`formedAt === tick`).
      */
-    disolucion: number };
+    disolucion: number;
+    /** V16: deriva cultural bidireccional (`sharing`, `stewardship`, `openness`) ligada a escasez,
+     * intercambio exogrupal, disputas y variación vertical. 0 = conducta histórica (monotónica); > 0 activa. */
+    derivaCultural: number;
+    /** V16: vínculo y memoria local de reencuentro de S e I + rescate del bloqueo de subsistencia con
+     * energía cero ante alimento/agua adyacentes. 0 = conducta histórica; > 0 activa. */
+    vinculoEncuentro: number };
   /**
    * Leyes locales de estabilidad tecnológica (Fase B, `docs/PLAN-ESTABILIDAD-2026-11-18.md`,
    * `docs/preregistros/2026-11-18-estabilidad-tecnologia.md`). Constitución II: nacen en sus valores
@@ -154,6 +164,9 @@ export interface WorldParams {
     mejoraLocal: number;
     enfriamiento: number;
     evitarNoOp: boolean;
+    /** V16: efectos físicos cualitativos de todas las capacidades (`insulation`, `binding`, `cutting` en caza/obra,
+     * `abrasion` en obra/reparación) con desgaste material real (`useTool`). `false` = histórico. */
+    efectosHerramientas: boolean;
   };
 }
 
@@ -192,10 +205,10 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0, politicaPeso: 0 },
+  conducta: { habituacion: 0, aptitud: 0, politicaPeso: 0, politicaAutonomia: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0 },
-  tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0, derivaCultural: 0, vinculoEncuentro: 0 },
+  tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false },
 };
 
 /**
@@ -357,6 +370,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
   'conducta.politicaPeso': [0, 2],
+  'conducta.politicaAutonomia': [0, 1],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
@@ -381,6 +395,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // COM-D′: 0 (default) = hoy; 1 activa R0–R4 (sólo con `radioConvivencia > 0`). Entero: es un
   // interruptor, no una magnitud continua.
   'social.disolucion': [0, 1],
+  'social.derivaCultural': [0, 2],
+  'social.vinculoEncuentro': [0, 2],
   // Fase B — estabilidad tecnológica (`docs/preregistros/2026-11-18-estabilidad-tecnologia.md`):
   // nacen con sus valores históricos (0, 0, 45, false) en HISTORICAL_PARAMS y DEFAULT_PARAMS.
   'tecnologia.dosisCuanto': [0, 1000],
@@ -412,6 +428,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95', 'max', 'rss', 'colaRed', 'saveMs'] }, minLength: 1, unique: true },
   'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
   'tecnologia.evitarNoOp': { kind: 'boolean' },
+  'tecnologia.efectosHerramientas': { kind: 'boolean' },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 

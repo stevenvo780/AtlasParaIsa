@@ -158,7 +158,7 @@ test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt
   // cuantización/puerta/especulación; en el código son estas cuatro):
   // dosisCuanto=0 (sin cuantizar), mejoraLocal=0 (sin puerta), enfriamiento=45
   // y evitarNoOp=false reproducen la tecnología de siempre, bit a bit.
-  const historica = { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false };
+  const historica = { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false };
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, historica);
   assert.deepEqual(HISTORICAL_PARAMS.tecnologia, historica);
   // El motor nace en el camino de siempre: serie, sin GPU y sin SoA de terreno.

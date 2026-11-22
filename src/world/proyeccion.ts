@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Viewport, type WorldView } from '../shared/types.js';
+import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
 import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from './index.js';
 import { bindWorldContext, projectTerrain, worldContext } from './spatial.js';
@@ -27,9 +27,24 @@ export const VIEW_EVENTS = 40, VIEW_MEMORIES = 100;
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 const viewNumber = <T extends number | undefined>(value: T): T => (typeof value === 'number' ? r3(value) : value) as T;
 /** T036(h): las cantidades (existencias, huellas, fauna) no viajan cuando valen 0; el cliente las lee
- * con `?? 0`. Las magnitudes del terreno viajan siempre, porque ahí un cero es un dato. */
-const amount = <K extends string>(key: K, value: number | undefined): Partial<Record<K, number>> =>
-  (typeof value !== 'number' || value === 0 ? {} : { [key]: r3(value) } as Record<K, number>);
+ * con `?? 0`. Las magnitudes del terreno viajan siempre, porque ahí un cero es un dato. Se asignan
+ * directamente (sin objetos ni spreads intermedios por tesela). */
+function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number]): Tile {
+  const out: Tile = { x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species };
+  if (typeof t.wood === 'number' && t.wood !== 0) out.wood = r3(t.wood);
+  if (typeof t.stone === 'number' && t.stone !== 0) out.stone = r3(t.stone);
+  if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
+  if (typeof t.cultivation === 'number' && t.cultivation !== 0) out.cultivation = r3(t.cultivation);
+  if (typeof t.traffic === 'number' && t.traffic !== 0) out.traffic = r3(t.traffic);
+  if (typeof t.drinkingWater === 'number' && t.drinkingWater !== 0) out.drinkingWater = r3(t.drinkingWater);
+  if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
+  if (typeof t.life === 'number' && t.life !== 0) out.life = r3(t.life);
+  return out;
+}
+/** Acciones de trabajo y de proyecto, fuera de la proyección para no crear un arreglo por persona. */
+const WORKING_ACTIONS: ReadonlySet<string> = new Set(['gather', 'farm', 'build', 'hunt', 'invent', 'repair', 'research', 'craft', 'forage']);
+const PROJECT_ACTIONS: ReadonlySet<string> = new Set(['research', 'craft']);
+const SKILLED_ACTIONS: ReadonlySet<string> = new Set(['farm', 'hunt']);
 export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
   bindWorldContext(world, context);
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
@@ -53,13 +68,13 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
-    tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species, ...amount('wood', t.wood), ...amount('stone', t.stone), ...amount('variety', t.variety), ...amount('cultivation', t.cultivation), ...amount('traffic', t.traffic), ...amount('drinkingWater', t.drinkingWater), ...amount('fauna', t.fauna), ...amount('life', t.life) })),
+    tiles: projected.tiles.map(projectTile),
     people: peopleInView.map((p): PersonView => {
       const life = demographicTraits(p.genome, cuerpo);
       return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
-      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
+      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || WORKING_ACTIONS.has(p.action) && distance(p,p.target)<0.5,
       workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
-        : ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
+        : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture } };

@@ -439,3 +439,87 @@ for (const [modo, perMessageDeflate, trocea] of [['en claro', false, true], ['co
   assert.equal(socket.readyState, NodeWebSocket.OPEN);
   socket.terminate();
 });
+
+test('gracia de arranque de página: tras un paso largo cede mientras llegan los recursos encadenados y se desarma al abrir /ws', async t => {
+  const staticDir = mkdtempSync(join(tmpdir(), 'carta-v18-boot-'));
+  const dir = mkdtempSync(join(tmpdir(), 'carta-v18-boot-db-'));
+  t.after(() => { rmSync(staticDir, { recursive: true, force: true }); rmSync(dir, { recursive: true, force: true }); });
+  writeFileSync(join(staticDir, 'index.html'), '<!doctype html><title>Carta</title>');
+  writeFileSync(join(staticDir, 'app.js'), 'console.log("ok");');
+  const store = new Store(join(dir, 'world.sqlite'));
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const password = 'synthetic-v18-boot-password';
+
+  let reloj = 1000, duracion = 0;
+  const citas: { fn: () => void; ms: number }[] = [];
+  const setTimeoutReal = globalThis.setTimeout;
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+    citas.push({ fn, ms: ms ?? 0 });
+    return { unref() { return this; }, ref() { return this; } };
+  }) as unknown as typeof setTimeout;
+
+  let app: ReturnType<typeof createApp> | undefined;
+  let ws: NodeWebSocket | undefined;
+  try {
+    app = createApp({ store, password, origin, staticDir, tickMs: 100, seed: 42, monotonicNow: () => reloj });
+    app.server.listen(port, '127.0.0.1');
+    await once(app.server, 'listening');
+    const guardar = store.save.bind(store);
+    store.save = (...args) => { reloj += duracion; return guardar(...args); };
+
+    const disparar = (en: number, dura = 0): number => {
+      reloj = en; duracion = dura;
+      const cita = citas.shift()!;
+      assert.equal(citas.length, 0);
+      cita.fn();
+      assert.equal(citas.length, 1);
+      return citas[0]!.ms;
+    };
+
+    // 1) Paso largo (> tickMs): llega tarde y arma cederHasta + limiteCargaHasta.
+    const tick0 = app.world.tick;
+    assert.equal(disparar(1100, 300), 0);
+    assert.equal(app.world.tick, tick0 + 1);
+
+    // 2) El navegador pide GET / -> 200 arma la ventana de gracia breve para los activos siguientes.
+    const rHtml = await pedir(port, '/');
+    assert.equal(rHtml.status, 200);
+    assert.equal(disparar(1400), 1, 'tras servir /, el paso siguiente cede para que lleguen .js, /api/session y /api/world');
+    assert.equal(app.world.tick, tick0 + 1, 'ningún paso interrumpe la ráfaga de carga inicial');
+
+    // 3) Pide app.js y /api/session: siguen entrando sin paso en medio.
+    const rJs = await pedir(port, '/app.js');
+    assert.equal(rJs.status, 200);
+    const rSess = await pedir(port, '/api/session');
+    assert.equal(rSess.status, 200);
+    assert.equal(disparar(1410), 1, 'sigue cediendo dentro de la gracia mientras completa la carga');
+    assert.equal(app.world.tick, tick0 + 1);
+
+    // 4) Login 200 + abrir /ws desarma la gracia de carga de inmediato (el siguiente paso ya corre).
+    const login = await pedir(port, '/api/login', { Origin: origin, 'Content-Type': 'application/json' }, 'POST');
+    assert.equal(login.status, 400); // sin cuerpo: no arma nada; hacemos login real con fetch sobre setTimeout real
+    globalThis.setTimeout = setTimeoutReal;
+    const loginRes = await fetch(`${origin}/api/login`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+    assert.equal(loginRes.status, 200);
+    const cookie = loginRes.headers.get('set-cookie')!.split(';')[0]!;
+    ws = new NodeWebSocket(`${origin.replace('http:', 'ws:')}/ws?ack=1`, { headers: { Origin: origin, Cookie: cookie } });
+    await once(ws, 'open');
+    // Tras abrir WS, cerramos el cliente para probar que `graciaCargaHasta` ya quedó desarmada (0).
+    ws.terminate();
+    while (app.flujo.length > 0) await new Promise(r => setImmediate(r));
+
+    globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+      citas.push({ fn, ms: ms ?? 0 });
+      return { unref() { return this; }, ref() { return this; } };
+    }) as unknown as typeof setTimeout;
+    // Sin clientes ni gracia activa, el siguiente paso ya avanza normalmente.
+    assert.equal(disparar(1420, 20), 60, 'desarmada la gracia al abrir /ws, el paso retoma su cadencia');
+    assert.equal(app.world.tick, tick0 + 2);
+  } finally {
+    globalThis.setTimeout = setTimeoutReal;
+    ws?.terminate();
+    await app?.close();
+    store.close();
+  }
+});

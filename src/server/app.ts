@@ -478,6 +478,15 @@ export function createApp(options: AppOptions) {
   }
   /** Solicitudes HTTP con la respuesta sin terminar (incluida la lectura de su cuerpo). */
   let solicitudesEnCurso = 0;
+  /** Gracia breve tras servir un recurso de arranque de página (`/`, activos, `/api/session`, `/api/world`,
+   * login 200): el navegador encadena esas 5 peticiones con 5–30 ms de parseo entre ellas; sin esta ventana,
+   * con pasos largos (> tickMs) cada recurso tropezaba con otro paso entero. Acotada por `TOPE_CARGA_MS` por
+   * paso y desarmada en cuanto se abre el WebSocket. */
+  const GRACIA_CARGA_MS = 80;
+  const TOPE_CARGA_MS = 250;
+  let graciaCargaHasta = 0;
+  let limiteCargaHasta = 0;
+  function armarGraciaCarga() { graciaCargaHasta = relojReal() + GRACIA_CARGA_MS; }
   /** Conexiones aceptadas que aún no trajeron su primera solicitud (o su `upgrade`): libuv acepta en una vuelta
    * del bucle y lee en la siguiente, así que entre las dos todavía no hay solicitud que contar. Una que nunca
    * habla la cierra `headersTimeout`; mientras tanto el planificador cede, como mucho `tickMs` por paso. */
@@ -816,6 +825,7 @@ export function createApp(options: AppOptions) {
       if (req.method === 'GET' && url.pathname === '/health') return json(res, failed ? 503 : 200, { status: failed ? 'paused' : 'ok', ...(respaldo ? { respaldo } : {}) });
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
+        armarGraciaCarga();
         return json(res, 200, { authenticated: !!hash && store.sessionValid(hash) });
       }
       if (req.method === 'POST') checkOrigin(req, expectedOrigin);
@@ -831,6 +841,7 @@ export function createApp(options: AppOptions) {
         const oldHash = sessionHash(req); if (oldHash) store.revoke(oldHash);
         const token = makeToken(); store.addSession(hashToken(token), Date.now() + 14 * 86400_000);
         res.setHeader('Set-Cookie', cookie(token, !!options.secure));
+        armarGraciaCarga();
         return json(res, 200, { ok: true });
       }
       if (url.pathname.startsWith('/api/')) {
@@ -848,8 +859,9 @@ export function createApp(options: AppOptions) {
           }
           // Sin comprimir pesaba 0,45–1,4 MB y el cliente lo aborta a los 10 s: por un enlace lento
           // la reconexión fallaba en bucle. gzip lo deja ~8× menor y corre en el threadpool.
-          if (!aceptaGzip(req)) return json(res, 200, view(viewport));
+          if (!aceptaGzip(req)) { armarGraciaCarga(); return json(res, 200, view(viewport)); }
           const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(view(viewport))), { level: 3 });
+          armarGraciaCarga();
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
           return res.end(cuerpo);
         }
@@ -866,6 +878,7 @@ export function createApp(options: AppOptions) {
       let content: Estatico;
       try { content = estatico(path, extname(path)); }
       catch { throw new HttpError(404, 'La interfaz aún no está compilada. Ejecuta npm run build.'); }
+      armarGraciaCarga();
       if (content.gzip && aceptaGzip(req)) {
         res.writeHead(200, { 'Content-Type': mimes[extname(path)]!, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Content-Length': content.gzip.length });
         res.end(req.method === 'HEAD' ? undefined : content.gzip);
@@ -960,6 +973,7 @@ export function createApp(options: AppOptions) {
             if (store.sessionValid(hash)) send(client, { type: 'result', result });
           } catch (error) { send(client, { type: 'error', message: error instanceof HttpError ? error.message : 'No se pudo aplicar el gesto.' }); }
         });
+        graciaCargaHasta = 0;
         sendView(client);
       });
     } catch (error) { socket.end(`HTTP/1.1 ${error instanceof HttpError ? error.status : 503} Rejected\r\nConnection: close\r\n\r\n`); }
@@ -979,9 +993,14 @@ export function createApp(options: AppOptions) {
   function tic() {
     if (stopped) return;
     // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
-    if (cederHasta !== null && monotonicNow() < cederHasta
-      && (cedidas < (clients.size > 0 ? VUELTAS_CON_CLIENTES_WS : 0) || ioEnCurso())) { cedidas++; citar(1); return; }
-    cederHasta = null; cedidas = 0;
+    const enGraciaCarga = graciaCargaHasta > 0 && (() => {
+      const ahora = relojReal();
+      return ahora < limiteCargaHasta && (ahora < graciaCargaHasta || solicitudesEnCurso > 0);
+    })();
+    if (cederHasta !== null
+      && ((monotonicNow() < cederHasta && (cedidas < (clients.size > 0 ? VUELTAS_CON_CLIENTES_WS : 0) || ioEnCurso()))
+        || enGraciaCarga)) { cedidas++; citar(1); return; }
+    cederHasta = null; cedidas = 0; graciaCargaHasta = 0;
     next += tickMs;
     stepOnce();
     // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a su cita, y
@@ -995,7 +1014,7 @@ export function createApp(options: AppOptions) {
     // WS se ceden además `VUELTAS_CON_CLIENTES_WS` citas. Nunca una ráfaga: un paso por callback, y el retraso
     // acumulado no se recupera: a tiempo, la cita compensa la deriva.
     const now = monotonicNow();
-    if (next < now) { next = now; cederHasta = now + tickMs; }
+    if (next < now) { next = now; cederHasta = now + tickMs; limiteCargaHasta = relojReal() + TOPE_CARGA_MS; }
     if (!stopped) citar(Math.max(0, next - monotonicNow()));
   }
   if (!options.manual) citar(Math.max(0, next - monotonicNow()));

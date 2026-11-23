@@ -44,7 +44,7 @@ let lastVisit: number | null = null;
 const cronica = new CronicaBuffer();
 let hitosGuardados: HitoGuardado[] = [];
 let journalFilter: GrupoCronica | 'todo' = 'todo';
-let populationSignature = '', inspectorSignature = '', memorySignature = '';
+let populationSignature = '', inspectorSignature = '', memorySignature = '', statsSignature = '';
 let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
 /** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
 let modoActual: Modo = 'completo';
@@ -52,6 +52,7 @@ let populationKind: 'people' | 'animals' = 'people';
 let notebook: Notebook | null = null;
 let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
+let focusedCommunity: string | null = null;
 /** Steps requested one by one: the snapshot only carries each procedure's identity and capacities. */
 const recipeDetails = new Map<string, TechnologyRecipe | null>();
 /** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora.
@@ -80,7 +81,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -110,9 +111,9 @@ function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
+  focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
   const modo = syncModo(); modoActual = modo;
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -287,11 +288,12 @@ function navigateEntity(event: MouseEvent): void {
   // A link changes the camera or notebook selection, never submits a gesture.
   if (link.dataset.personLink) { choosePerson(link.dataset.personLink); el('inhabitant-card').focus({ preventScroll: true }); }
   else if (link.dataset.community) {
+    focusedCommunity = link.dataset.community; statsSignature = '';
     selectStatsTab('communities'); drawer('stats', true);
     const card = [...el('stats-content').querySelectorAll<HTMLElement>('[data-community-card]')].find(card=>card.dataset.communityCard===link.dataset.community);
     card?.scrollIntoView({ block: 'nearest' }); card?.focus({ preventScroll: true });
   } else if (link.dataset.recipe) {
-    focusedRecipe = link.dataset.recipe;
+    focusedRecipe = link.dataset.recipe; statsSignature = '';
     // Opening a procedure is what asks the server for its steps; the snapshot never carries them.
     if (!recipeDetails.has(focusedRecipe)) connection?.requestRecipe(focusedRecipe);
     selectStatsTab('technology'); drawer('stats', true);
@@ -357,9 +359,13 @@ function renderPopulation(): void {
   const ventana = ventanaLista(people);
   el('population-count').textContent = rotuloRecuento(world);
   el('population-note').textContent = `La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella.${ventana.restantes ? ` Se nombran las primeras ${ventana.visibles.length} coincidencias de ${people.length}; afina la búsqueda para encontrar a alguien concreto.` : ''} Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.`;
-  const signature = JSON.stringify([search, activePersonId, people.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
+  const signature = JSON.stringify([search, activePersonId, people.length, ventana.visibles.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
   el('population-list').innerHTML = ventana.visibles.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || (world.people.length ? '<p class="drawer-note">No hay habitantes de esta vista que coincidan.</p>' : '<p class="drawer-note">No hay nadie en esta vista. El censo del mundo está en Mundo › Vida; mueve el mapa o usa S e I para encontrar a alguien.</p>');
-  const select = el<HTMLSelectElement>('person-select'); select.innerHTML = `<option value="">${world.people.length ? 'Elige a alguien de esta vista' : 'Nadie en esta vista'}</option>` + world.people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
+  const select = el<HTMLSelectElement>('person-select');
+  const selectOptions = ventana.visibles.some(p => p.id === activePersonId)
+    ? ventana.visibles
+    : (() => { const current = world.people.find(p => p.id === activePersonId); return current ? [current, ...ventana.visibles] : ventana.visibles; })();
+  select.innerHTML = `<option value="">${world.people.length ? 'Elige a alguien de esta vista' : 'Nadie en esta vista'}</option>` + selectOptions.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
 }
 function replacePersonCard(html: string): void {
   const card = el('inhabitant-card');
@@ -444,7 +450,8 @@ function renderInspector(): void {
     const cached = personaDetails.get(p.id);
     if (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick) connection?.requestPersona(p.id);
     const persona = cached?.detail ?? undefined;
-    const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    const ownCommunity = p.communityId ? world.communities?.find(c => c.id === p.communityId) ?? null : null;
+    const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds, persona ?? null, id => cronica.get(id) ?? world?.events.find(event => event.id === id), cronica.todos());
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
@@ -582,6 +589,9 @@ function renderPanelGobernadorEnDom(): void {
 }
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel) return;
+  const sig = statsTab === 'performance' ? '' : `${statsTab}|${status}|${world?.tick ?? -1}|${world?.sequence ?? -1}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
+  if (sig && sig === statsSignature) return;
+  statsSignature = sig;
   renderPanelGobernadorEnDom();
   const restore = retainViewState(panel);
   renderStatsContent();
@@ -609,7 +619,14 @@ function renderStatsContent(): void {
   if (statsTab === 'communities') {
     const sueltos = sinComunidad(world);
     const comunidades = comunidadesOrdenadas(world.communities);
-    panel.innerHTML = `${stamp}<p class="stats-note">Las comunidades se forman en el mundo simulado, de la más poblada a la menos. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${sueltos !== null ? `<p class="stats-note stats-scope-note" data-without-community>${number(sueltos)} ${sueltos === 1 ? 'vida no pertenece' : 'vidas no pertenecen'} a ninguna comunidad (pertenecer es opcional).</p>` : ''}${resumenCultural(world)}${comunidades.length ? comunidades.map(community => {
+    const ventana = ventanaLista(comunidades, 60);
+    const mostradas = focusedCommunity && !ventana.visibles.some(c => c.id === focusedCommunity)
+      ? (() => { const extra = comunidades.find(c => c.id === focusedCommunity); return extra ? [extra, ...ventana.visibles] : ventana.visibles; })()
+      : ventana.visibles;
+    const notaVentana = ventana.restantes > 0
+      ? `<p class="stats-note stats-scope-note" data-communities-window>Se muestran las ${number(mostradas.length)} comunidades más pobladas de ${number(comunidades.length)} vivas; el resumen cultural incluye a todas.</p>`
+      : '';
+    panel.innerHTML = `${stamp}<p class="stats-note">Las comunidades se forman en el mundo simulado, de la más poblada a la menos. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${sueltos !== null ? `<p class="stats-note stats-scope-note" data-without-community>${number(sueltos)} ${sueltos === 1 ? 'vida no pertenece' : 'vidas no pertenecen'} a ninguna comunidad (pertenecer es opcional).</p>` : ''}${resumenCultural(world)}${notaVentana}${mostradas.length ? mostradas.map(community => {
       const color = /^#[\da-f]{3,8}$/i.test(community.color) ? community.color : '#779264';
       // T134 (FR-026): `members` ya no viaja completo — solo quien está en la cámara. `memberCount`
       // trae el total real; si faltan miembros por estar fuera de vista, se dice explícitamente

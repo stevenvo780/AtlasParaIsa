@@ -279,28 +279,55 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   }
   // Biomas y rasgos se cuentan por rachas (las teselas contiguas repiten valor) y se vuelcan al cambiar:
   // son enteros, así que los totales y el orden de primera aparición de las claves no cambian.
+  let lastBiome: string | undefined, biomeRun = 0;
   let lastFeature: string | undefined, featureRun = 0;
-  if (lectura?.completa) {
-    // Vía rápida SoA: bioma y agua potable salen de los arrays residentes (0 accesores); se cuenta por código de bioma
-    // y las claves se insertan por orden de primera aparición (el nombre se lee de la primera tesela de cada código,
-    // con el mismo accesor de siempre). `feature`, `cultivation` y `traffic` no tienen array expuesto y siguen por tesela.
-    const tiles = world.tiles, { fast, cells } = lectura, biomeArr = fast.biomeArr, waterArr = fast.drinkingWaterArr;
-    const biomeCount = new Uint32Array(256), biomeFirst = new Int32Array(256);
+  if (lectura) {
+    // Vía rápida SoA (completa o parcial): bioma, rasgo, agua potable, cultivo y tránsito salen de los
+    // arrays residentes (0 accesores/Proxy para celdas ligadas); solo las teselas aún sin ligar (`cell < 0`)
+    // leen el objeto. Mismo orden de primera aparición de claves y misma suma de `freshWater` que el barrido base.
+    const tiles = world.tiles, { fast, cells } = lectura;
+    const biomeArr = fast.biomeArr, featureArr = fast.featureArr, waterArr = fast.drinkingWaterArr;
+    const cultArr = fast.cultivationArr, trafficArr = fast.trafficArr;
+    const biomeNames = fast.BIOME_NAMES, featureNames = fast.FEATURE_NAMES;
+    let lastBiomeCode = -1, lastFeatureCode = -1;
     for (let i = 0; i < tiles.length; i++) {
-      const cell = cells[i]!, code = biomeArr[cell]!;
-      if (biomeCount[code]!++ === 0) biomeFirst[code] = i;
-      const tile = tiles[i]!, feature = tile.feature ?? 'none';
-      if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
-      featureRun++;
-      const water = waterArr[cell]!;
-      freshWater += water === water ? water : 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
+      const cell = cells[i]!;
+      if (cell >= 0) {
+        const bcode = biomeArr[cell]!;
+        if (bcode === lastBiomeCode) biomeRun++;
+        else {
+          const biome = bcode ? biomeNames[bcode - 1]! : 'grassland';
+          if (biome !== lastBiome) {
+            if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
+            lastBiome = biome; biomeRun = 0;
+          }
+          biomeRun++; lastBiomeCode = bcode;
+        }
+        const fcode = featureArr[cell]!;
+        if (fcode === lastFeatureCode) featureRun++;
+        else {
+          const feature = fcode ? featureNames[fcode - 1]! : 'none';
+          if (feature !== lastFeature) {
+            if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
+            lastFeature = feature; featureRun = 0;
+          }
+          featureRun++; lastFeatureCode = fcode;
+        }
+        const water = waterArr[cell]!;
+        freshWater += water === water ? water : 0;
+        if (cultArr[cell]! > 0.1) cultivatedTiles++;
+        if (trafficArr[cell]! > 0.15) trailTiles++;
+      } else {
+        lastBiomeCode = -1; lastFeatureCode = -1;
+        const tile = tiles[i]!, biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
+        if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
+        biomeRun++;
+        if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
+        featureRun++;
+        freshWater += tile.drinkingWater ?? 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
+      }
     }
-    const codes: number[] = [];
-    for (let code = 0; code < 256; code++) if (biomeCount[code]! > 0) codes.push(code);
-    codes.sort((a, b) => biomeFirst[a]! - biomeFirst[b]!);
-    for (const code of codes) { const biome = tiles[biomeFirst[code]!]!.biome ?? 'grassland'; biomes[biome] = (biomes[biome] ?? 0) + biomeCount[code]!; }
   } else {
-    let lastBiome: string | undefined, biomeRun = 0;
     for (const tile of world.tiles) {
       const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
       if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
@@ -309,8 +336,8 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
       featureRun++;
       freshWater += tile.drinkingWater ?? 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
     }
-    if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   }
+  if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
   const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}

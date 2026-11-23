@@ -67,6 +67,13 @@ interface GroundMaterial extends FieldSample {
 }
 
 /** The raster and its cache key must observe the same received-state buckets. */
+const TERRAIN_SIG: Record<string, number> = { water: 1, soil: 2, meadow: 3, shelter: 4 };
+const BIOME_SIG: Record<string, number> = { grassland: 1, forest: 2, desert: 3, mountain: 4, wetland: 5, ocean: 6 };
+const FEATURE_SIG: Record<string, number> = { tree: 1, pine: 2, palm: 3, cactus: 4, reeds: 5, berries: 6, flowers: 7, rock: 8, clay: 9, stump: 10, spring: 11, pool: 12, none: 13 };
+const PUDDLE_W3 = new Float32Array(9);
+const PUDDLE_DEPR = new Float32Array(25);
+const PUDDLE_GRID = new Float32Array(ART * ART);
+
 function groundBucket(value: number): number { return Math.round(clamp01(value) * 12); }
 function groundValue(value: number): number { return groundBucket(value) / 12; }
 
@@ -747,21 +754,30 @@ export class Landscape {
 
   private chunkSignature(startX: number, startY: number): number {
     let h = 2166136261;
-    const acc = (v: number): void => {
-      h = Math.imul(h ^ (v | 0), 16777619) >>> 0;
-    };
     // Include the one-cell border: a neighbouring coastline change invalidates both chunks.
     for (let y = startY - 1; y <= startY + CHUNK_ART_TILES; y++) for (let x = startX - 1; x <= startX + CHUNK_ART_TILES; x++) {
       const t = this.tileAt(x, y);
-      if (!t) { acc(-1); continue; }
-      for (const value of `${t.terrain}:${t.biome ?? ''}:${t.feature ?? ''}`) acc(value.charCodeAt(0));
-      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(groundBucket(value));
+      if (!t) { h = Math.imul(h ^ -1, 16777619) >>> 0; continue; }
+      const typeCode = (TERRAIN_SIG[t.terrain] ?? 0) | ((BIOME_SIG[t.biome ?? ''] ?? 0) << 4) | ((FEATURE_SIG[t.feature ?? ''] ?? 0) << 8);
+      h = Math.imul(h ^ typeCode, 16777619) >>> 0;
+      const growth = t.growth ?? 1, cult = t.cultivation ?? 0, dw = t.drinkingWater ?? 0;
+      const foodTier = t.food < .3 ? 0 : Math.round(clamp01(t.food) * 3);
+      const b1 = groundBucket(t.moisture) | (groundBucket(t.vegetation) << 4) | (foodTier << 8)
+        | (groundBucket(growth) << 12) | (groundBucket(t.fertility ?? .5) << 16)
+        | (groundBucket(cult) << 20) | (groundBucket(t.traffic ?? 0) << 24) | (groundBucket(dw) << 28);
+      h = Math.imul(h ^ b1, 16777619) >>> 0;
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
-      for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04, t.moisture > .65,
-        (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
-        (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72,
-        (t.wood ?? 0) > 0, (t.wood ?? 0) > .05]) acc(active ? 1 : 0);
-      acc(Math.round((t.wood ?? 0) * 2)); acc(Math.round((t.stone ?? 0) * 2)); acc(t.variety ?? 0);
+      const gEff = t.growth ?? t.vegetation;
+      const flags = (cult > .08 ? 1 : 0) | (dw > .04 ? 2 : 0) | (t.moisture > .65 ? 4 : 0)
+        | (gEff > .15 ? 8 : 0) | (gEff > .25 ? 16 : 0) | (t.vegetation > .04 ? 32 : 0)
+        | ((t.life ?? 0) > .45 ? 64 : 0) | (t.vegetation > .25 ? 128 : 0)
+        | (t.food > .3 ? 256 : 0) | (t.food > .72 ? 512 : 0)
+        | ((t.wood ?? 0) > 0 ? 1024 : 0) | ((t.wood ?? 0) > .05 ? 2048 : 0)
+        | (gEff > .55 && t.moisture > .35 ? 4096 : 0);
+      h = Math.imul(h ^ flags, 16777619) >>> 0;
+      const stock = (Math.round((t.wood ?? 0) * 2) & 0xff) | ((Math.round((t.stone ?? 0) * 2) & 0xff) << 8)
+        | (((t.variety ?? 0) & 0xff) << 16) | ((t.elevation !== undefined ? Math.round(t.elevation * 32) & 0xff : 0) << 24);
+      h = Math.imul(h ^ stock, 16777619) >>> 0;
     }
     return h;
   }
@@ -865,6 +881,9 @@ export class Landscape {
     const stencil = prepareTerrainStencil(samples);
     const waveX0 = Math.floor(rnd(x, y, 10) * ART), waveY0 = Math.floor(rnd(x, y, 40) * ART);
     const waveX1 = Math.floor(rnd(x, y, 11) * ART), waveY1 = Math.floor(rnd(x, y, 41) * ART);
+    const slopeShade = tile.elevation !== undefined
+      ? clamp(Math.round(((this.tileAt(x - 1, y - 1)?.elevation ?? tile.elevation) - (this.tileAt(x + 1, y + 1)?.elevation ?? tile.elevation)) * 32), -7, 7)
+      : 0;
     const pixel = newFieldPixel();
     const data = this.groundPixels.data;
     for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
@@ -903,9 +922,6 @@ export class Landscape {
       const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
       const fibre = pixel.grass && !pixel.wear && rnd(fx, fy, 366) < pixel.cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
       const granule = !pixel.grass && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
-      const slopeShade = tile.elevation !== undefined
-        ? clamp(Math.round(((this.tileAt(x - 1, y - 1)?.elevation ?? tile.elevation) - (this.tileAt(x + 1, y + 1)?.elevation ?? tile.elevation)) * 32), -7, 7)
-        : 0;
       const relief = Math.round((pixel.fine - .5) * 3) * 3 + (pixel.fine - .5) * 6 + grain + granule + (fibre ? 15 : 0) + slopeShade;
       const edge = pixel.grassEdge ? -12 : pixel.wearEdge ? -9 : 0;
       data[offset] = soilR + (leafR - soilR) * pigment + (pixel.wear ? 9 : 0) + relief + edge;
@@ -1043,7 +1059,8 @@ export class Landscape {
       if (w <= 0.04 || !(res || t.biome === 'wetland' || t.moisture > 0.65)) return 0;
       return Math.min(1, (res ? 0.38 : 0.14) + Math.sqrt(w) * 0.48);
     };
-    const w3 = new Float32Array(9);
+    const w3 = PUDDLE_W3;
+    w3.fill(0);
     w3[4] = Math.min(1, (reservoir ? 0.38 : 0.14) + Math.sqrt(water) * 0.48);
     let neighborCount = 0;
     if (inGrid) {
@@ -1068,8 +1085,21 @@ export class Landscape {
     const cy = 8.8 + (rnd(x, y, 507) - 0.5) * 2.0;
     const rx = 2.5 + water * 3.2;
     const ry = 1.7 + water * 2.2;
+    const hasCore = reservoir || neighborCount === 0;
+    const coreScale = 0.54 + water * 0.34;
 
-    const fieldAt = (bx: number, by: number): number => {
+    // Precompute the smooth low-frequency basin wave (28px & 11px lattices) on a 5×5 corner lattice
+    // (step 4px → 25 evaluations instead of 256) and bilinearly interpolate across each 4×4 pixel block.
+    const depr = PUDDLE_DEPR;
+    for (let gy = 0; gy <= 4; gy++) {
+      const wy = oy + gy * 4;
+      for (let gx = 0; gx <= 4; gx++) {
+        const wx = ox + gx * 4;
+        depr[gy * 5 + gx] = materialNoise(wx, wy, 28, 509) * 0.64 + materialNoise(wx, wy, 11, 521) * 0.36;
+      }
+    }
+
+    const fieldAt = (bx: number, by: number, depression: number): number => {
       const wx = ox + bx, wy = oy + by;
       const left = bx < 8 ? 0 : 1, top = by < 8 ? 0 : 1;
       const u = (bx + 8.5) / ART - left;
@@ -1083,29 +1113,30 @@ export class Landscape {
       } else if (b > 0 && c > 0 && a === 0 && d === 0) {
         base = Math.max(base, Math.min(b, c) * (0.58 - Math.abs(u + v - 1) * 0.42));
       }
-      // World-space multi-tile basin depressions (28px & 11px lattices are incommensurate with 16px tiles,
-      // so puddles span 1.5–4 tiles organically while leaving mossy ground visible between pools).
-      const depression = materialNoise(wx, wy, 28, 509) * 0.64 + materialNoise(wx, wy, 11, 521) * 0.36;
-      const fine = materialNoise(wx, wy, 5, 533) - 0.5;
+      const fine = rnd(wx, wy, 533) - 0.5;
       let val = base * 0.88 + (depression - 0.54) * 0.82 + fine * 0.08;
 
       // Local pool core guarantees springs/pools and isolated puddle tiles always show a distinct water pool
-      if (reservoir || neighborCount === 0) {
+      if (hasCore) {
         const dx = (bx + 0.5 - cx) / rx;
         const dy = (by + 0.5 - cy) / ry;
         const dist2 = dx * dx + dy * dy;
         if (dist2 < 1.32) {
-          const core = (1.14 - dist2) * (0.54 + water * 0.34) + fine * 0.07;
+          const core = (1.14 - dist2) * coreScale + fine * 0.07;
           if (core > val) val = core;
         }
       }
       return val;
     };
 
-    const grid = new Float32Array(ART * ART);
+    const grid = PUDDLE_GRID;
     for (let by = 0; by < ART; by++) {
+      const gy = by >> 2, ty = (by & 3) * 0.25, r0 = gy * 5, r1 = r0 + 5;
       for (let bx = 0; bx < ART; bx++) {
-        grid[by * ART + bx] = fieldAt(bx, by);
+        const gx = bx >> 2, tx = (bx & 3) * 0.25;
+        const d00 = depr[r0 + gx]!, d10 = depr[r0 + gx + 1]!, d01 = depr[r1 + gx]!, d11 = depr[r1 + gx + 1]!;
+        const depression = (d00 + (d10 - d00) * tx) * (1 - ty) + (d01 + (d11 - d01) * tx) * ty;
+        grid[by * ART + bx] = fieldAt(bx, by, depression);
       }
     }
 
@@ -1118,7 +1149,9 @@ export class Landscape {
           px(g, wx, wy, 1, 1, mudColor);
         } else if (f <= 0.52) {
           px(g, wx, wy, 1, 1, shallowColor);
-          const above = by > 0 ? grid[(by - 1) * ART + bx]! : fieldAt(bx, by - 1);
+          const above = by > 0
+            ? grid[(by - 1) * ART + bx]!
+            : fieldAt(bx, -1, materialNoise(wx, wy - 1, 28, 509) * 0.64 + materialNoise(wx, wy - 1, 11, 521) * 0.36);
           if (above <= 0.40 && (wx & 1) === 0 && (hash3(wx >> 1, wy, 541) % 5) === 0) {
             px(g, wx, wy, 1, 1, gleamColor);
           }

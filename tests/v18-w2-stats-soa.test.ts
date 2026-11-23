@@ -233,6 +233,42 @@ test('worldStatistics tras stepWorld con motor.soaTerreno + ResidentTopologyOwne
   }
 });
 
+test('worldStatistics con chunk nuevo sin ligar (completa=false) y caché de lecturaResidente fail-closed: paridad 0 ULP', () => {
+  const world = mundoConChunks(51926, [...chunksDispersos(88, 12, 16, -8, -8)]);
+  const owner = new ResidentTopologyOwner(), store = new TileStore();
+  const tiles = owner.tiles(world.tiles.map(t => owner.tile({ ...t })));
+  store.prepareParallel(tiles);
+  try {
+    // 1) Caché de lecturaResidente reutiliza el resultado con topología y fast sin cambios.
+    const l1 = lecturaResidente(tiles), l2 = lecturaResidente(tiles);
+    assert.ok(l1 && l1 === l2, 'lecturaResidente reutiliza entrada con topología y SoA intactos');
+
+    // 2) Añadir un chunk sin ligar (con feature, cultivation y traffic variados) invalida caché y pasa a parcial.
+    const nuevo = chunksSinteticos(99, [[25, 25]]).map((t, i) => owner.tile({
+      ...t,
+      feature: i % 5 === 0 ? 'berries' : i % 7 === 0 ? 'spring' : 'none',
+      cultivation: i % 3 === 0 ? 0.45 : 0,
+      traffic: i % 4 === 0 ? 0.35 : 0,
+    }));
+    tiles.push(...nuevo);
+    const l3 = lecturaResidente(tiles);
+    assert.ok(l3 && l3 !== l1 && !l3.completa, 'alta de chunk invalida la caché y conserva vía parcial');
+    const l4 = lecturaResidente(tiles);
+    assert.equal(l4, l3, 'la vía parcial también se cachea hasta el siguiente cambio de topología');
+
+    const flat = planas(tiles);
+    const resid: World = { ...world, tick: world.tick + 1, tiles };
+    const plano: World = { ...world, tick: world.tick + 1, tiles: flat };
+    const a = worldStatistics(resid), b = worldStatistics(plano);
+    assert.deepStrictEqual(a.biomes, b.biomes);
+    assert.deepEqual(Object.keys(a.biomes), Object.keys(b.biomes), 'orden exacto de biomas en vía parcial');
+    assert.deepStrictEqual(a.features, b.features);
+    assert.deepEqual(Object.keys(a.features), Object.keys(b.features), 'orden exacto de rasgos en vía parcial');
+    for (const key of ['freshWater', 'cultivatedTiles', 'trailTiles', 'giniRecursosPorRegion', 'fraccionCeldasConComida', 'distanciaMediaAgua', 'regionesSinAgua'] as const)
+      same(a[key], b[key], `parcial worldStatistics.${key}`);
+  } finally { store.releaseParallelObjects(); }
+});
+
 function mejor(repeticiones: number, run: () => void): number {
   let min = Infinity;
   for (let i = 0; i < repeticiones; i++) { const t0 = performance.now(); run(); min = Math.min(min, performance.now() - t0); }

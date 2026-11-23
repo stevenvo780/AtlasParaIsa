@@ -69,10 +69,15 @@ const PENDING_KEYS = ['life', 'fertility', 'growth', 'traffic', 'cultivation', '
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
 const TERRAIN_IDX = residentKeys.indexOf('terrain');
 const BIOME_IDX = residentKeys.indexOf('biome');
+const FEATURE_IDX = residentKeys.indexOf('feature');
 const GROWTH_IDX = residentKeys.indexOf('growth');
 const VEGETATION_IDX = residentKeys.indexOf('vegetation');
 const MOISTURE_IDX = residentKeys.indexOf('moisture');
 const DRINKING_WATER_IDX = residentKeys.indexOf('drinkingWater');
+const FOOD_IDX = residentKeys.indexOf('food');
+const WOOD_IDX = residentKeys.indexOf('wood');
+const CULTIVATION_IDX = residentKeys.indexOf('cultivation');
+const TRAFFIC_IDX = residentKeys.indexOf('traffic');
 const SHELTER_CODE = TERRAINS.indexOf('shelter') + 1;
 const WATER_CODE = TERRAINS.indexOf('water') + 1;
 const OCEAN_CODE = BIOMES.indexOf('ocean') + 1;
@@ -178,17 +183,22 @@ export class ResidentFastAccess {
   readonly TERRAIN_SHELTER = SHELTER_CODE;
   readonly BIOME_OCEAN = OCEAN_CODE;
   readonly BIOME_DESERT = BIOMES.indexOf('desert') + 1;
+  readonly BIOME_NAMES: readonly Biome[] = BIOMES;
+  readonly FEATURE_NAMES: readonly Feature[] = FEATURES;
   constructor(
     private readonly store: TileStore,
     readonly exact: ResidentTileReader | undefined,
     readonly terrainArr: Uint8Array,
     readonly biomeArr: Uint8Array,
+    readonly featureArr: Uint8Array,
     readonly growthArr: Float64Array,
     readonly vegetationArr: Float64Array,
     readonly moistureArr: Float64Array,
     readonly drinkingWaterArr: Float64Array,
     readonly foodArr: Float64Array,
     readonly woodArr: Float64Array,
+    readonly cultivationArr: Float64Array,
+    readonly trafficArr: Float64Array,
   ) {}
 
   cellOf(tile: Tile): number {
@@ -756,9 +766,11 @@ export class TileStore {
     const fast = new ResidentFastAccess(
       this, exact,
       this.residentCur[TERRAIN_IDX] as Uint8Array, this.residentCur[BIOME_IDX] as Uint8Array,
+      this.residentCur[FEATURE_IDX] as Uint8Array,
       this.residentCur[GROWTH_IDX] as Float64Array, this.residentCur[VEGETATION_IDX] as Float64Array,
       this.residentCur[MOISTURE_IDX] as Float64Array, this.residentCur[DRINKING_WATER_IDX] as Float64Array,
-      this.residentCur[residentKeys.indexOf('food')] as Float64Array, this.residentCur[residentKeys.indexOf('wood')] as Float64Array,
+      this.residentCur[FOOD_IDX] as Float64Array, this.residentCur[WOOD_IDX] as Float64Array,
+      this.residentCur[CULTIVATION_IDX] as Float64Array, this.residentCur[TRAFFIC_IDX] as Float64Array,
     );
     this.cachedFast = { generation: this.residentGeneration, parity: this.parity, exact, fast };
     return fast;

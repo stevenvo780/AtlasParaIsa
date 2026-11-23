@@ -1,6 +1,7 @@
 import type { Tile } from '../shared/types.js';
 import { verifiedChunkBlocks } from './tile-index.js';
 import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
+import { residentTopologyToken } from './soa/topologia.js';
 
 /**
  * Agua superficial en cuencas (T035, SC-004). `initializeEcosystem` (ecosystem.ts) gatea el
@@ -88,10 +89,26 @@ const CHUNK_CELLS = 256;
 /** Cota conservadora de coordenada de origen de chunk (< `MAX_COORDINATE` = 10^7 menos margen): ahí el vecino de un chunk de borde no solapa filas en las claves empaquetadas. No se importa `terrain.ts`: ya importa este módulo y los workers de ecología cargan `ecosystem.ts` como entrada (ciclo). */
 const CHUNK_LIMIT = 8_000_000;
 
+interface LecturaCacheEntry {
+  readonly arrayToken: object;
+  readonly coordToken: object;
+  readonly length: number;
+  readonly fast: ResidentFastAccess;
+  readonly result: LecturaResidente;
+}
+const lecturaCache = new WeakMap<readonly Tile[], LecturaCacheEntry>();
+
 export function lecturaResidente(tiles: readonly Tile[]): LecturaResidente | undefined {
   const fast = residentFastAccess(tiles);
   if (!fast) return undefined;
-  const count = tiles.length, cells = new Int32Array(count);
+  const token = residentTopologyToken(tiles as Tile[]);
+  const count = tiles.length;
+  if (token) {
+    const cached = lecturaCache.get(tiles);
+    if (cached && cached.arrayToken === token.array && cached.coordToken === token.coordinates
+      && cached.length === count && cached.fast === fast) return cached.result;
+  }
+  const cells = new Int32Array(count);
   let chunkX: Int32Array | undefined, chunkY: Int32Array | undefined;
   const layout = count > 0 && count % CHUNK_CELLS === 0 ? verifiedChunkBlocks(tiles) : null;
   if (layout && layout.bases.size * CHUNK_CELLS === count) {
@@ -122,7 +139,9 @@ export function lecturaResidente(tiles: readonly Tile[]): LecturaResidente | und
     }
   }
   if (!resolved) for (let i = 0; i < count; i++) { const cell = fast.cellOf(tiles[i]!); cells[i] = cell; if (cell < 0) completa = false; }
-  return { fast, cells, completa, chunkX, chunkY };
+  const result: LecturaResidente = { fast, cells, completa, chunkX, chunkY };
+  if (token) lecturaCache.set(tiles, { arrayToken: token.array, coordToken: token.coordinates, length: count, fast, result });
+  return result;
 }
 
 /**

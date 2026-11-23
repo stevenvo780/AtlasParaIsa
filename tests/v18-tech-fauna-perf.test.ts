@@ -38,11 +38,13 @@ const GiB = 1024 ** 3;
 const probe = { cpuThreads: () => 1, totalRamBytes: () => 128 * GiB, nvrtcAvailable: () => false, nvidiaSmi: () => '',
   memory: () => ({ fisicaBytes: 128 * GiB, heapBytes: 8 * GiB }) };
 const BASE_DIGESTS: Record<'host' | 'default', Record<number, string>> = {
+  // `host` incluye derivaCultural=1 (estabilidad de fisión Dunbar, stewardship y proceduralPersonName V18).
   host: {
-    7: '6f20680645993b84bf81a02bcd99c733a95b623b0258f47025d3a2577667a535',
-    42: 'ef59c956161e78bcba4fafed626ee6cd30c83f39261e890984dfc155f88ed31b',
-    51926: 'a9e3128b545de914c969c39ea829fbcb627707318b57a7d796cd60f037402fba',
+    7: '37b0f1dba371751e31cbf5624891bdd3cd6696312984bdefc3e14087c5febc5d',
+    42: '4f2eac87352f07f1125f5c2e26235f53873a9d4cf9cad411f85b35c80f8a5eab',
+    51926: '359230c1c0f903f8cf6a0a377eab9449d7d275b39a8fbd118729e8dd0ad357fc',
   },
+  // `default` tiene derivaCultural=0: idéntico bit a bit (0 ULP) a V17 af88d13.
   default: {
     7: '1141d89985268b06fb4cc5ea6097c1446a1d00e76f10b856d97352074111bbed',
     42: '855f334c0288f029d757e3af7f20c23ed43b1456b143d5ce5f0dbe6673041072',

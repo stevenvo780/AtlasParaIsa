@@ -25,7 +25,7 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     const res = await page.evaluate(async (version) => {
       const module = '/src/client/landscape.ts', artModule = '/src/client/life-art.ts', vsModule = '/src/client/visual-state.ts';
       const { Landscape } = await import(/* @vite-ignore */ module);
-      const { paintStructure } = await import(/* @vite-ignore */ artModule);
+      const { paintStructure, paintAnimal } = await import(/* @vite-ignore */ artModule);
       const { newEventAccents } = await import(/* @vite-ignore */ vsModule);
       const canvas = document.getElementById('c') as HTMLCanvasElement;
       const r: any = new Landscape(canvas, () => {});
@@ -146,6 +146,19 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
         raster32(g => r.drawPerson(g, { ...p, x: 0.5, y: 0.5, moving: false }, 0))
       );
 
+      // 7. Evolved animal phenotypes (camouflage, agile, fierce, maturity)
+      const deerMorphs = [
+        raster32(g => paintAnimal(g, 'deer', 'roam', 0, { maturity: 0, camouflage: 1, agile: 0 })),
+        raster32(g => paintAnimal(g, 'deer', 'roam', 0, { maturity: 1, camouflage: 0, agile: 0 })),
+        raster32(g => paintAnimal(g, 'deer', 'roam', 0, { maturity: 1, camouflage: 2, agile: 0 })),
+        raster32(g => paintAnimal(g, 'deer', 'roam', 0, { maturity: 2, camouflage: 2, agile: 1 })),
+      ];
+      const boarMorphs = [
+        raster32(g => paintAnimal(g, 'boar', 'roam', 0, { maturity: 0, fierce: 0, camouflage: 1 })),
+        raster32(g => paintAnimal(g, 'boar', 'roam', 0, { maturity: 1, fierce: 0, camouflage: 0 })),
+        raster32(g => paintAnimal(g, 'boar', 'roam', 0, { maturity: 2, fierce: 1, camouflage: 2 })),
+      ];
+
       r.destroy();
       return {
         sigChanged: sigBelow !== sigAbove,
@@ -158,6 +171,8 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
         accentKinds: accents.map((a: any) => a.kind),
         cuesDistinct: new Set([basePersonRaster, directedRaster, thirstyRaster, lowHealthRaster]).size,
         distinctNeighborSprites: new Set(neighborSprites).size,
+        distinctDeerMorphs: new Set(deerMorphs).size,
+        distinctBoarMorphs: new Set(boarMorphs).size,
       };
     }, PROTOCOL_VERSION);
 
@@ -171,6 +186,8 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     assert.deepEqual(res.accentKinds, ['conflict', 'meeting'], 'conflict and meeting events produce visual accents');
     assert.equal(res.cuesDistinct, 4, 'directed mode, critical thirst and low health produce distinct person rasters');
     assert.equal(res.distinctNeighborSprites, 9, 'every neighbor-10..90 renders a distinct outlined character sprite');
+    assert.equal(res.distinctDeerMorphs, 4, 'deer phenotypes differ across maturity, camouflage and agility');
+    assert.equal(res.distinctBoarMorphs, 3, 'boar phenotypes differ across maturity, carnivory tusks and camouflage');
   } finally {
     await browser.close();
     await server.close();

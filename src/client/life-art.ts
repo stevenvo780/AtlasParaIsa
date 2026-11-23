@@ -104,49 +104,189 @@ export const componentNames = { frame: 'Armazón', roof: 'Cubierta', cistern: 'C
 export const componentPurpose = { frame: 'sostiene la construcción', roof: 'protege al descansar', cistern: 'recoge agua de lluvia', granary: 'guarda alimento', garden: 'cultiva usando agua', hearth: 'ayuda al descanso con combustible' };
 export const animalColors: Record<AnimalView['species'], string> = { hare: '#c8b29a', deer: '#b78450', boar: '#705c49', fish: '#9bd5ce', wolf: '#858c91', fox: '#d08746' };
 
-/** A reusable 32px sprite. Only a server position locates the body in the world. */
-export function paintAnimal(g: CanvasRenderingContext2D, species: AnimalView['species'], action: AnimalView['action'], pose: number): void {
-  const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(x, y, w, h); };
-  const coat = animalColors[species], sleep = action === 'rest', feeding = action === 'graze' || action === 'drink';
+export interface AnimalVisualTraits {
+  /** 0 = bold/dark coat, 1 = base coat, 2 = high-camouflage dappled/striped coat */
+  camouflage?: 0 | 1 | 2;
+  /** 0 = standard, 1 = high speed or perception (taller ears, longer antlers/fins) */
+  agile?: 0 | 1;
+  /** 0 = standard, 1 = high carnivory/defense (prominent fangs/tusks & dorsal crest) */
+  fierce?: 0 | 1;
+  /** 0 = juvenile, 1 = adult, 2 = evolved veteran (generation >= 3) */
+  maturity?: 0 | 1 | 2;
+}
+
+/** A reusable 32px sprite with 2-pass #231710 outline and evolved genetic/maturity traits. */
+export function paintAnimal(
+  g: CanvasRenderingContext2D,
+  species: AnimalView['species'],
+  action: AnimalView['action'],
+  pose: number,
+  traits: AnimalVisualTraits = {},
+): void {
+  const rawBlock = (x: number, y: number, w: number, h: number, color: string) => {
+    if (w > 0 && h > 0) {
+      g.fillStyle = color;
+      g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+    }
+  };
+  const cam = traits.camouflage ?? 1;
+  const agile = traits.agile ?? 0;
+  const fierce = traits.fierce ?? 0;
+  const maturity = traits.maturity ?? 1;
+  const juvenile = maturity === 0;
+  const veteran = maturity === 2;
+  const outlineHex = '#231710';
+
+  const rects: { x: number; y: number; w: number; h: number; color: string; outline: boolean }[] = [];
+  const block = (x: number, y: number, w: number, h: number, color: string, outline = true) => {
+    if (w > 0 && h > 0) {
+      rects.push({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), color, outline });
+    }
+  };
+  const flush = () => {
+    for (const r of rects) {
+      if (r.outline) rawBlock(r.x - 1, r.y - 1, r.w + 2, r.h + 2, outlineHex);
+    }
+    for (const r of rects) {
+      rawBlock(r.x, r.y, r.w, r.h, r.color);
+    }
+  };
+
+  const baseCoat = animalColors[species];
+  const coat = cam === 0
+    ? (species === 'deer' ? '#9e6234' : species === 'boar' ? '#4d3f34' : species === 'wolf' ? '#626b73' : species === 'fox' ? '#c26026' : species === 'hare' ? '#ab9076' : '#3a8c94')
+    : cam === 2
+      ? (species === 'deer' ? '#c2925a' : species === 'boar' ? '#7d6752' : species === 'wolf' ? '#969e9c' : species === 'fox' ? '#d99652' : species === 'hare' ? '#d4c0a6' : '#7ec7bf')
+      : baseCoat;
+  const sleep = action === 'rest', feeding = action === 'graze' || action === 'drink';
   const stride = feeding || sleep ? 0 : [0, 1, 0, -1][pose % 4]!;
   const dip = feeding ? pose % 2 : 0;
-  block(10, 27, 14, 2, '#14221a30');
+
+  // Soft ground shadow (outside 2-pass outline)
+  rawBlock(juvenile ? 11 : 9, 27, juvenile ? 11 : 15, 2, '#14221a38');
+
   if (species === 'fish') {
-    block(10, 20, 12, 3, '#4d9b9f'); block(12, 19, 9, 4, coat); block(14, 19, 6, 1, '#d1e6d8');
-    block(7, 19 + stride, 3, 5, '#6bb2ab'); block(10, 20, 2, 3, '#77bfb7');
-    block(21, 20, 1, 1, '#264e53'); block(15, 17, 3, 2, '#65a99f'); block(15, 23, 3, 1, '#4a8c94'); return;
+    block(10, 20, juvenile ? 10 : 12, 3, '#3b848a');
+    block(12, 19, juvenile ? 7 : 9, 4, coat);
+    block(14, 19, juvenile ? 4 : 6, 1, '#e0f5ec', false);
+    block(7, 19 + stride, 3, agile || veteran ? 6 : 5, '#5da8a1');
+    block(10, 20, 2, 3, '#77bfb7', false);
+    if (cam === 2) {
+      block(14, 20, 1, 2, '#285e63', false);
+      block(17, 20, 1, 2, '#285e63', false);
+    }
+    block(20, 20, 1, 1, '#182e30', false);
+    block(15, agile || veteran ? 16 : 17, 3, agile || veteran ? 3 : 2, '#5ca399');
+    block(15, 23, 3, 1, '#3b7a82');
+    flush();
+    return;
   }
+
   if (species === 'hare') {
     const headY = sleep ? 22 : feeding ? 22 + dip : 18;
-    block(12, 20, 8, 6, '#9d876f'); block(13, 19, 6, 5, coat); block(18, headY, 5, 4, '#deccb3');
-    block(19, headY - (sleep ? 2 : 6), 2, sleep ? 3 : 7, coat); block(22, headY - 5, 1, sleep ? 2 : 6, '#ae9279');
-    block(11, 22, 2, 2, '#f1ead9'); block(21, headY + 1, 1, 1, '#3e392f');
-    if (!sleep) { block(13 - stride, 25, 4, 2, '#deccb3'); block(20 + stride, 25, 2, 2, '#c8b29a'); } return;
+    const earH = sleep ? 3 : (agile ? 8 : juvenile ? 5 : 7);
+    block(12, 20, juvenile ? 7 : 8, juvenile ? 5 : 6, '#8f7860');
+    block(13, 19, juvenile ? 5 : 6, 5, coat);
+    if (cam === 2) {
+      block(14, 20, 2, 1, '#f2e8d5', false);
+      block(16, 22, 2, 1, '#705c48', false);
+    }
+    block(18, headY, 5, 4, '#ead8bf');
+    block(19, headY - (sleep ? 2 : earH - 1), 2, earH, coat);
+    block(22, headY - (sleep ? 1 : earH - 2), 1, Math.max(2, earH - 1), '#b89b80');
+    if (agile && !sleep) {
+      block(19, headY - earH + 1, 2, 1, '#2b211a', false);
+    }
+    block(10, 22, 2, 2, '#fff8eb');
+    block(21, headY + 1, 1, 1, '#1c1510', false);
+    if (!sleep) {
+      block(13 - stride, 25, 4, 2, '#ead8bf');
+      block(20 + stride, 25, 2, 2, coat);
+    }
+    flush();
+    return;
   }
+
   const deer = species === 'deer', boar = species === 'boar', fox = species === 'fox';
-  const headY = sleep ? 22 : feeding ? 22 + dip : deer ? 13 : boar ? 20 : 17;
-  const backY = sleep ? 23 : deer ? 18 : boar ? 19 : 20;
-  block(10, backY, 13, sleep ? 4 : 6, coat); block(11, backY, 9, 2, boar ? '#8c7760' : deer ? '#c99a62' : fox ? '#e2a262' : '#a0a7a5');
-  block(12, backY + 4, 9, 2, deer || fox ? '#d9c6a6' : boar ? '#554939' : '#bcc1b8');
-  if (deer && !sleep && !feeding) block(20, 15, 3, 7, coat);
-  block(21, headY, 5, 4, coat); block(25, headY + 2, boar ? 3 : 2, 2, boar ? '#aa9077' : coat);
-  block(24, headY + 1, 1, 1, '#29322d'); block(26, headY + 2, 1, 1, '#3c3a33');
+  const headY = sleep ? 22 : feeding ? 22 + dip : deer ? (juvenile ? 15 : 13) : boar ? 20 : 17;
+  const backY = sleep ? 23 : deer ? (juvenile ? 19 : 18) : boar ? 19 : 20;
+  const bodyW = juvenile ? 11 : 13;
+  const bodyH = sleep ? 4 : juvenile ? 5 : 6;
+
+  // Legs (drawn before torso so outline wraps cleanly)
   if (!sleep) {
-    block(11 + stride, backY + 5, deer ? 1 : 2, deer ? 6 : 3, '#61503d');
-    block(20 - stride, backY + 5, deer ? 1 : 2, deer ? 6 : 3, '#61503d');
-    block(13 - stride, backY + 6, 1, deer ? 5 : 2, '#89755c'); block(22 + stride, backY + 6, 1, deer ? 5 : 2, '#89755c');
+    const legH = deer ? (agile ? 7 : 6) : (agile ? 4 : 3);
+    block(11 + stride, backY + bodyH - 1, deer ? 1 : 2, legH, '#4f3f2f');
+    block(20 - stride, backY + bodyH - 1, deer ? 1 : 2, legH, '#4f3f2f');
+    block(13 - stride, backY + bodyH, 1, Math.max(2, legH - 1), '#7a6750');
+    block(21 + stride, backY + bodyH, 1, Math.max(2, legH - 1), '#7a6750');
   }
+
+  // Main body & dorsal/belly shading
+  block(10, backY, bodyW, bodyH, coat);
+  block(11, backY, bodyW - 4, 2, boar ? '#967f66' : deer ? '#d9aa72' : fox ? '#f0ad68' : '#b4bcba', false);
+  block(12, backY + bodyH - 2, bodyW - 4, 2, deer || fox ? '#eee0c4' : boar ? '#4a3e30' : '#d2d6ce', false);
+
+  // Evolved camouflage coat patterns (fawn spots, boar brindle stripes, wolf/fox mottling)
+  if (cam === 2) {
+    if (deer) {
+      block(12, backY + 2, 1, 1, '#fff3db', false);
+      block(15, backY + 1, 2, 1, '#fff3db', false);
+      block(18, backY + 2, 1, 1, '#fff3db', false);
+    } else if (boar) {
+      block(12, backY + 1, 6, 1, '#3b2f24', false);
+      block(13, backY + 3, 5, 1, '#b89f82', false);
+    } else {
+      block(13, backY + 2, 2, 1, '#eef2ef', false);
+      block(17, backY + 1, 2, 1, '#545c61', false);
+    }
+  }
+
+  if (deer && !sleep && !feeding) block(20, headY + 2, 3, backY - headY + 1, coat);
+  block(21, headY, 5, 4, coat);
+  block(25, headY + 2, boar ? 3 : 2, 2, boar ? '#b89c80' : coat);
+  block(24, headY + 1, 1, 1, '#1a1612', false);
+  if (agile) block(23, headY + 1, 1, 1, '#f5ebd6', false);
+  block(26, headY + 2, 1, 1, '#26201a', false);
+
   if (deer) {
-    block(22, headY - 6, 1, 6, '#715e44'); block(25, headY - 5, 1, 5, '#715e44');
-    block(20, headY - 5, 3, 1, '#715e44'); block(25, headY - 4, 3, 1, '#715e44'); block(20, headY - 2, 3, 1, '#d4af78');
-    block(9, backY + 1, 2, 3, '#ead6b6'); block(15, backY + 2, 1, 1, '#e4c394');
+    if (!juvenile) {
+      // Antlers scale with maturity (veteran G3+) and agile (perception/speed)
+      const antlerH = veteran || agile ? 7 : 5;
+      const antlerColor = veteran ? '#c9a96e' : '#7d674a';
+      block(22, headY - antlerH, 1, antlerH, antlerColor);
+      block(25, headY - antlerH + 1, 1, antlerH - 1, antlerColor);
+      block(20, headY - antlerH + 1, 3, 1, antlerColor);
+      block(25, headY - antlerH + 2, 3, 1, antlerColor);
+      if (veteran || agile) {
+        block(19, headY - antlerH, 1, 2, '#f5e4be');
+        block(27, headY - antlerH + 1, 1, 2, '#f5e4be');
+      }
+    }
+    block(20, headY - 2, 3, 1, '#e0bc84');
+    block(8, backY + 1, 2, 3, '#f5e4c6');
   } else if (boar) {
-    block(26, headY + 3, 1, 2, '#f1ead9'); block(10, backY - 2, 9, 2, '#574737'); block(21, headY - 2, 2, 2, '#9a8264'); block(8, backY + 2, 2, 1, coat);
+    // Tusks & dorsal bristle crest scale with fierce (carnivory) and veteran maturity
+    const tuskH = fierce || veteran ? 3 : juvenile ? 1 : 2;
+    block(26, headY + 4 - tuskH, 1, tuskH, '#fff8e6');
+    if (fierce || veteran) block(28, headY + 3 - tuskH, 1, tuskH, '#fff8e6');
+    block(10, backY - (fierce || veteran ? 2 : 1), 9, fierce || veteran ? 2 : 1, '#3b2e22');
+    block(21, headY - 2, 2, 2, '#a3896a');
+    block(8, backY + 2, 2, 1, coat);
   } else {
-    block(21, headY - 3, 2, 3, coat); block(24, headY - 2, 2, 2, coat); block(22, headY - 2, 1, 1, '#574e47');
-    block(6, backY + 1 - stride, 5, fox ? 4 : 3, coat); block(3, backY - stride, 4, fox ? 3 : 2, fox ? '#f0e1c5' : '#69737b');
-    block(24, headY + 3, 2, 1, '#f0e1c5');
+    // Wolf & Fox: ears, bushy tail, and predator fangs when fierce
+    const earH = agile ? 4 : 3;
+    block(21, headY - earH, 2, earH, coat);
+    block(24, headY - earH + 1, 2, earH - 1, coat);
+    block(22, headY - 2, 1, 1, '#453c36', false);
+    block(6, backY + 1 - stride, 5, fox ? 4 : 3, coat);
+    block(3, backY - stride, 4, fox ? 3 : 2, fox ? '#fff3db' : '#5d6770');
+    block(24, headY + 3, 2, 1, '#f5ead2', false);
+    if (fierce || veteran) {
+      block(26, headY + 4, 1, 2, '#fffaf0');
+    }
   }
+  flush();
 }
 
 export interface StructureSurface {

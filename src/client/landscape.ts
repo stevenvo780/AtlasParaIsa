@@ -1555,10 +1555,21 @@ export class Landscape {
   }
 
   private drawAnimal(g: CanvasRenderingContext2D, animal: RenderAnimal, t: number): void {
-    const pose = animalPose(animal.view, animal.moving, t + hash3(animal.view.id.length, animal.view.id.charCodeAt(animal.view.id.length-1), 48) % 13, this.reduceMotion, this.actionActive);
-    const key = `animal:${animal.view.species}:${animal.view.action}:${pose}`;
+    const v = animal.view;
+    const pose = animalPose(v, animal.moving, t + hash3(v.id.length, v.id.charCodeAt(v.id.length-1), 48) % 13, this.reduceMotion, this.actionActive);
+    const genes = v.genes;
+    const camouflage: 0 | 1 | 2 = genes ? (genes.camouflage > 0.56 ? 2 : genes.camouflage < 0.44 ? 0 : 1) : 1;
+    const agile: 0 | 1 = genes && (genes.speed > 0.56 || genes.perception > 0.56) ? 1 : 0;
+    const fierce: 0 | 1 = genes && genes.carnivory > 0.54 ? 1 : 0;
+    const maturity: 0 | 1 | 2 = (v.age ?? 1200) < 700 ? 0 : (v.generation ?? 0) >= 3 ? 2 : 1;
+    const key = `animal:${v.species}:${v.action}:${pose}:${camouflage}:${agile}:${fierce}:${maturity}`;
     let art = this.spriteCache.get(key);
-    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintAnimal(art.getContext('2d')!, animal.view.species, animal.view.action, pose); this.cacheSprite(key, art); }
+    if (!art) {
+      art = document.createElement('canvas');
+      art.width = art.height = 32;
+      paintAnimal(art.getContext('2d')!, v.species, v.action, pose, { camouflage, agile, fierce, maturity });
+      this.cacheSprite(key, art);
+    }
     g.save(); g.translate(Math.round(animal.x * ART + 8), Math.round(animal.y * ART + 12)); if (animal.left) g.scale(-1, 1);
     g.drawImage(art, -16, -26); g.restore(); this.drawCalls++;
   }

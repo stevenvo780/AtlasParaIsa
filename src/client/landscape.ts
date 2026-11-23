@@ -370,6 +370,7 @@ export class Landscape {
   private actionActive = false;
   private lighting = { shadowX: 4, shadowY: 3, shadowAlpha: .14 };
   private carriedProducts = new Map<string, Capability | 'material'>();
+  private carriedWater = new Map<string, boolean>();
   /** Escena completa por frame, también a resolución de arte. */
   private scene: HTMLCanvasElement;
   private sceneCtx: CanvasRenderingContext2D;
@@ -547,8 +548,14 @@ export class Landscape {
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
     this.carriedProducts.clear();
+    this.carriedWater.clear();
     for (const item of world.technology?.items ?? []) {
-      if (item.mass <= 0 || this.carriedProducts.has(item.ownerId)) continue;
+      if (item.mass <= 0) continue;
+      const w = (item as { water?: { quanta?: number } }).water;
+      if (w && typeof w.quanta === 'number' && w.quanta > 0) {
+        this.carriedWater.set(item.ownerId, true);
+      }
+      if (this.carriedProducts.has(item.ownerId)) continue;
       const dominant = (Object.entries(item.capacities) as [Capability,number][]).sort((a,b)=>b[1]-a[1])[0];
       if (dominant) this.carriedProducts.set(item.ownerId,dominant[1]>.08 ? dominant[0] : 'material');
     }
@@ -889,7 +896,10 @@ export class Landscape {
       const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
       const fibre = pixel.grass && !pixel.wear && rnd(fx, fy, 366) < pixel.cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
       const granule = !pixel.grass && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
-      const relief = Math.round((pixel.fine - .5) * 3) * 3 + (pixel.fine - .5) * 6 + grain + granule + (fibre ? 15 : 0);
+      const slopeShade = tile.elevation !== undefined
+        ? clamp(Math.round(((this.tileAt(x - 1, y - 1)?.elevation ?? tile.elevation) - (this.tileAt(x + 1, y + 1)?.elevation ?? tile.elevation)) * 32), -7, 7)
+        : 0;
+      const relief = Math.round((pixel.fine - .5) * 3) * 3 + (pixel.fine - .5) * 6 + grain + granule + (fibre ? 15 : 0) + slopeShade;
       const edge = pixel.grassEdge ? -12 : pixel.wearEdge ? -9 : 0;
       data[offset] = soilR + (leafR - soilR) * pigment + (pixel.wear ? 9 : 0) + relief + edge;
       data[offset + 1] = soilG + (leafG - soilG) * pigment + (pixel.wear ? 6 : 0) + relief + edge;
@@ -908,10 +918,25 @@ export class Landscape {
     const edge = this.biomeEdgeFraction(tile);
     const cultivation = clamp01(tile.cultivation ?? 0);
     if (cultivation > .08) {
+      const inGrid = this.tileAt(x, y) === tile;
+      const hasLeft = inGrid && ((this.tileAt(x - 1, y)?.cultivation ?? 0) > .08);
+      const hasRight = inGrid && ((this.tileAt(x + 1, y)?.cultivation ?? 0) > .08);
+      const xStart = hasLeft ? ox : ox + 2;
+      const spanW = (hasRight ? ox + ART : ox + ART - 2) - xStart;
       for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
-        px(g, ox+2, oy+3+row*3, 12, 2, css(P.soilDark, .5 + cultivation * .4));
-        px(g, ox+2, oy+3+row*3, 12, 1, css(P.trunkLight, .3));
-        for (let plant = 0; plant < 4; plant++) if (growth > .15 && tile.vegetation > .04) px(g, ox+3+plant*3, oy+2+row*3, 1, 1 + Math.round(growth*2), css(mix(P.reed, P.grassLight, clamp01(tile.moisture))));
+        const fy = oy + 3 + row * 3;
+        px(g, xStart, fy, spanW, 2, css(P.soilDark, .55 + cultivation * .38));
+        px(g, xStart, fy, spanW, 1, css(P.trunkLight, .32));
+        for (let plant = 0; plant < 4; plant++) {
+          if (growth > .15 && tile.vegetation > .04) {
+            const px0 = ox + 2 + plant * 3 + ((hash3(x, y, 610 + row * 4 + plant) & 1));
+            const ph = 1 + Math.round(growth * 2);
+            px(g, px0, fy - ph + 1, 1, ph, css(mix(P.reed, P.grassLight, clamp01(tile.moisture))));
+            if (growth > .55 && tile.moisture > .35) {
+              px(g, px0, fy - ph, 2, 1, css(P.grassLight));
+            }
+          }
+        }
       }
     }
     const water = clamp01(tile.drinkingWater ?? 0);
@@ -1754,12 +1779,17 @@ export class Landscape {
       const cx = place.x * ART + ART / 2;
       const cy = place.y * ART + ART / 2;
       const lively = place.gatherings > 0;
-      for (let i = 0; i < 7; i++) {
-        const a = (i / 7) * 6.283 + (hash3(px0, py0, 1400) % 100) / 100;
-        const sx = Math.round(cx + Math.cos(a) * 6);
-        const sy = Math.round(cy + Math.sin(a) * 4);
-        px(g, sx, sy, 2, 1, css(lively ? lighten(P.stone, 0.12) : P.stone, 0.85));
-        px(g, sx, sy + 1, 2, 1, css(P.stoneShade, 0.7));
+      const tier = Math.min(3, Math.ceil((place.gatherings ?? 0) / 5));
+      const count = 7 + tier;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * 6.283 + (hash3(px0, py0, 1400) % 100) / 100;
+        const sx = Math.round(cx + Math.cos(a) * (5.5 + tier * 0.4));
+        const sy = Math.round(cy + Math.sin(a) * (3.8 + tier * 0.3));
+        px(g, sx, sy, 2, 1, css(lively ? lighten(P.stone, 0.16) : P.stone, 0.88));
+        px(g, sx, sy + 1, 2, 1, css(P.stoneShade, 0.75));
+      }
+      if (tier >= 2) {
+        px(g, Math.round(cx) - 1, Math.round(cy), 2, 2, css(P.amber, 0.72));
       }
     }
   }
@@ -1866,10 +1896,26 @@ export class Landscape {
     if (product) {
       // One carried-object symbol per owner, present only while a real material batch exists.
       const x = ax - 7, y = baseY - 5;
-      if (product === 'material') { px(g,x,y,4,3,css(P.stoneShade));px(g,x,y,3,1,css(P.stone)); }
-      else if (product === 'storage') { px(g,x,y,4,4,css(P.soil)); px(g,x+1,y-1,2,1,css(P.soilLight)); }
-      else if (product === 'insulation' || product === 'binding') { px(g,x,y,4,3,css(P.sand));px(g,x+1,y,1,4,css(P.trunkLight)); }
-      else { px(g,x+1,y-3,1,7,css(P.trunkLight));px(g,x,y-4,product === 'cutting'?2:4,3,css(P.stone));px(g,x,y-4,1,2,css(P.paper)); }
+      if (product === 'material') {
+        px(g, x, y, 4, 3, css(P.stoneShade)); px(g, x, y, 3, 1, css(P.stone));
+      } else if (product === 'storage') {
+        px(g, x, y, 4, 4, css(P.soil)); px(g, x + 1, y - 1, 2, 1, css(P.soilLight));
+        if (this.carriedWater.get(view.id)) {
+          px(g, x + 1, y, 2, 2, css(P.waterShallow));
+          px(g, x + 1, y, 2, 1, css(P.waterGleam));
+        }
+      } else if (product === 'insulation') {
+        px(g, x, y, 4, 3, css(P.sand)); px(g, x, y + 1, 4, 1, css(P.soilLight));
+      } else if (product === 'binding') {
+        px(g, x, y, 3, 3, css(P.trunkLight)); px(g, x + 1, y - 1, 1, 5, css(P.sand));
+      } else if (product === 'cultivation') {
+        px(g, x + 1, y - 3, 1, 7, css(P.trunkLight)); px(g, x, y - 3, 3, 1, css(P.stone)); px(g, x + 2, y - 2, 1, 2, css(P.stoneShade));
+      } else if (product === 'abrasion') {
+        px(g, x, y - 1, 4, 3, css(P.stone)); px(g, x + 1, y - 2, 2, 1, css(P.paper));
+      } else {
+        // cutting: stone blade on wooden haft
+        px(g, x + 1, y - 3, 1, 7, css(P.trunkLight)); px(g, x, y - 4, 3, 3, css(P.stone)); px(g, x, y - 4, 1, 2, css(P.paper));
+      }
     }
     const working = view.working === true || (view.working === undefined && atTarget);
     const previous = this.prevPeople.get(view.id);
@@ -1953,10 +1999,16 @@ export class Landscape {
       if (screen.x < -30 || screen.y < -30 || screen.x > this.cssW + 30 || screen.y > this.cssH + 30) continue;
       const progress = clamp01((now - event.bornAt) / EVENT_LIFETIME_MS);
       const radius = this.reduceMotion ? 12 : 10 + progress * 14;
-      g.strokeStyle = `rgba(239,208,136,${(1 - progress) * .8})`; g.lineWidth = 1.5; g.beginPath();
+      const strokeRgb = event.kind === 'birth' || event.kind === 'care' ? '168,224,132'
+        : event.kind === 'invention' || event.kind === 'learning' ? '132,214,218'
+        : event.kind === 'discovery' ? '232,158,120' : '239,208,136';
+      const fillRgb = event.kind === 'birth' || event.kind === 'care' ? '210,245,180'
+        : event.kind === 'invention' || event.kind === 'learning' ? '190,242,245'
+        : event.kind === 'discovery' ? '248,204,176' : '249,231,181';
+      g.strokeStyle = `rgba(${strokeRgb},${(1 - progress) * .82})`; g.lineWidth = 1.5; g.beginPath();
       g.ellipse(screen.x, screen.y, radius, radius * .46, 0, 0, Math.PI * 2); g.stroke();
       // Four small marks read as an acknowledgement, not sparks, births or physical light.
-      g.fillStyle = `rgba(249,231,181,${1 - progress})`;
+      g.fillStyle = `rgba(${fillRgb},${1 - progress})`;
       for (const side of [-1, 1]) g.fillRect(screen.x + side * radius - 1, screen.y - radius * .5 - 3, 2, 3);
       this.effects.events++;
     }

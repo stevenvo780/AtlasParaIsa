@@ -5,7 +5,7 @@ import type { EcologyExecution } from './ecosystem-kernel.js';
 import { tileLookup } from './tile-index.js';
 import { residentFastAccess, residentTileReader, type ResidentFastAccess } from './soa/terreno.js';
 import { gpuNvrtcAvailable } from './gpu/puente.js';
-import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
+import { chunkKey, generateChunk, proceduralPlaceName, proceduralPersonName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
 import { bond, convivir, cooperate, cooperationOpportunity, inheritCulture, initialCulture, resourceDispute, updateCommunities, updateCulturalNormsOnOutcome, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample } from './statistics.js';
@@ -1777,7 +1777,10 @@ function reproduce(world: World): void {
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
     const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
     const traits = expressGenome(genome);
-    const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
+    const childName = paramsOf(world).social.derivaCultural > 0
+      ? proceduralPersonName(world.seed, world.birthCounter, genome.generation)
+      : `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70);
+    const child: Person = { ...structuredClone(a), id, name: childName, role: 'neighbor',
       genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
       hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
       culture: inheritCulture(world.seed, id, a.culture, b.culture, paramsOf(world).social.derivaCultural),

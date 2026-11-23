@@ -22,7 +22,7 @@ export function daylightAt(tick: number): { color: string; alpha: number; shadow
 }
 
 export interface EventAccent { id: string; x: number; y: number; kind: ChronicleEvent['kind']; bornAt: number; }
-const ACCENT_KINDS = new Set<ChronicleEvent['kind']>(['birth', 'care', 'learning', 'discovery', 'settlement', 'cooperation', 'community', 'invention']);
+const ACCENT_KINDS = new Set<ChronicleEvent['kind']>(['birth', 'care', 'learning', 'discovery', 'settlement', 'cooperation', 'community', 'invention', 'conflict', 'meeting']);
 
 /** Marks acknowledge received facts, never generate outcomes or replay old chronicle entries. */
 export function newEventAccents(previous: WorldView | null, current: WorldView, now: number): EventAccent[] {

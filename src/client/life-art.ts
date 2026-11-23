@@ -154,6 +154,7 @@ export interface StructureSurface {
   ground?: Pick<Tile, 'growth' | 'vegetation' | 'cultivation' | 'moisture'>;
   generation?: number;
   communityColor?: string;
+  culture?: { sharing: number; stewardship: number; openness: number };
 }
 
 /** Parts change layout and capacity; material tones describe the blueprint cost, never an invented alloy. */
@@ -311,16 +312,42 @@ export function paintStructure(g: CanvasRenderingContext2D, s: StructureView, su
       block(l - 1, eave - 1, spanW + 2, 2, outline);
       block(l, eave - 1, spanW, 1, roofLight);
 
-      // Community pennant on main roof peak
+      // Community pennant on main roof peak (extended streamer when cultural openness is high)
       if (communityHex && bay === spans - 1) {
         const px0 = l + Math.floor(spanW / 2);
-        block(px0, Math.max(0, ridge - 4), 1, 4, outline);
-        block(px0 + 1, Math.max(0, ridge - 4), 3, 2, communityHex);
+        const openCulture = (surface.culture?.openness ?? 0) > 0.52;
+        block(px0, Math.max(0, ridge - (openCulture ? 5 : 4)), 1, openCulture ? 5 : 4, outline);
+        block(px0 + 1, Math.max(0, ridge - (openCulture ? 5 : 4)), openCulture ? 4 : 3, 2, communityHex);
+        if (openCulture) {
+          block(px0 + 5, Math.max(0, ridge - 4), 2, 1, '#e8f4f8');
+        }
       }
       if (broken) {
         g.clearRect(l + Math.floor(spanW * .45), ridge + 2, 3, 3);
         block(l + 2, floor - 1, 5, 2, '#5c4b36');
       }
+    }
+  }
+
+  // Cultural architectural motifs (when community culture is known):
+  // - stewardship (>0.52): living green vine/moss garland along the eave
+  // - sharing (>0.52): communal welcome bench/table beside the doorway
+  // - openness (>0.52): painted sky-blue window shutters/trim
+  if (surface.culture && frames) {
+    if (surface.culture.stewardship > 0.52) {
+      for (let vx = left + 1; vx < left + width - 1; vx += 3) {
+        block(vx, eave + 1, 2, 1, '#68a848');
+        if ((vx & 1) === 0) block(vx, eave + 2, 1, 1, '#a8e070');
+      }
+    }
+    if (surface.culture.sharing > 0.52) {
+      const bx = left + Math.max(1, width - 10);
+      block(bx, floor - 2, 4, 1, '#f2ca68');
+      block(bx, floor - 1, 1, 1, outline);
+      block(bx + 3, floor - 1, 1, 1, outline);
+    }
+    if (surface.culture.openness > 0.52 && width >= 15) {
+      block(left + 2, eave + 3, 1, 3, '#74b8c4');
     }
   }
 

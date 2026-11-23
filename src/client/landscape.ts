@@ -370,6 +370,7 @@ export class Landscape {
   private actionActive = false;
   private lighting = { shadowX: 4, shadowY: 3, shadowAlpha: .14 };
   private carriedProducts = new Map<string, Capability | 'material'>();
+  private secondaryProducts = new Map<string, Capability | 'material'>();
   private carriedWater = new Map<string, boolean>();
   /** Escena completa por frame, también a resolución de arte. */
   private scene: HTMLCanvasElement;
@@ -548,6 +549,7 @@ export class Landscape {
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
     this.carriedProducts.clear();
+    this.secondaryProducts.clear();
     this.carriedWater.clear();
     for (const item of world.technology?.items ?? []) {
       if (item.mass <= 0) continue;
@@ -555,9 +557,14 @@ export class Landscape {
       if (w && typeof w.quanta === 'number' && w.quanta > 0) {
         this.carriedWater.set(item.ownerId, true);
       }
-      if (this.carriedProducts.has(item.ownerId)) continue;
       const dominant = (Object.entries(item.capacities) as [Capability,number][]).sort((a,b)=>b[1]-a[1])[0];
-      if (dominant) this.carriedProducts.set(item.ownerId,dominant[1]>.08 ? dominant[0] : 'material');
+      if (!dominant) continue;
+      const cap: Capability | 'material' = dominant[1] > .08 ? dominant[0] : 'material';
+      if (!this.carriedProducts.has(item.ownerId)) {
+        this.carriedProducts.set(item.ownerId, cap);
+      } else if (!this.secondaryProducts.has(item.ownerId) && this.carriedProducts.get(item.ownerId) !== cap) {
+        this.secondaryProducts.set(item.ownerId, cap);
+      }
     }
     this.sceneRevision++;
 
@@ -1572,27 +1579,29 @@ export class Landscape {
       }
     }
     let communityColor: string | undefined;
+    let culture: { sharing: number; stewardship: number; openness: number } | undefined;
     if (structure.builderId && this.curr?.communities?.length) {
       const builder = this.curr.people.find(p => p.id === structure.builderId);
       const comm = builder?.communityId
         ? this.curr.communities.find(c => c.id === builder.communityId)
         : undefined;
-      if (comm) communityColor = comm.color;
+      if (comm) { communityColor = comm.color; culture = comm.culture; }
     }
     if (!communityColor && this.curr?.communities?.length) {
       let bestDist = 18 * 18;
       for (const c of this.curr.communities) {
         const d2 = (c.x - structure.x) ** 2 + (c.y - structure.y) ** 2;
-        if (d2 < bestDist) { bestDist = d2; communityColor = c.color; }
+        if (d2 < bestDist) { bestDist = d2; communityColor = c.color; culture = c.culture; }
       }
     }
     const cisterns = structure.components.filter(c=>c==='cistern').length, granaries = structure.components.filter(c=>c==='granary').length;
     const waterLevel = clamp(Math.ceil(structure.water / Math.max(1, cisterns) / .6 * 6), 0, 6);
     const foodLevel = clamp(Math.ceil(structure.food / Math.max(1, granaries) / .7 * 4), 0, 4);
     const planted = ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15;
-    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${generation ?? -1}:${communityColor ?? ''}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
+    const cultKey = culture ? `${culture.sharing > .52 ? 1 : 0}${culture.stewardship > .52 ? 1 : 0}${culture.openness > .52 ? 1 : 0}` : '';
+    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${generation ?? -1}:${communityColor ?? ''}:${cultKey}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
     let art = this.spriteCache.get(key);
-    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground,generation,communityColor}); this.cacheSprite(key, art); }
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground,generation,communityColor,culture}); this.cacheSprite(key, art); }
     return art;
   }
 
@@ -1893,6 +1902,12 @@ export class Landscape {
     }
     const atTarget = view.target ? Math.hypot(view.x - view.target.x, view.y - view.target.y) < .5 : false;
     const product = this.carriedProducts.get(view.id);
+    const secondary = this.secondaryProducts.get(view.id);
+    if (secondary) {
+      // Secondary carried object slung on the hip/back
+      const sx = ax - 5, sy = baseY - legH - 2;
+      px(g, sx, sy, 2, 2, css(secondary === 'storage' ? P.soilLight : secondary === 'cutting' ? P.stone : P.sand));
+    }
     if (product) {
       // One carried-object symbol per owner, present only while a real material batch exists.
       const x = ax - 7, y = baseY - 5;
@@ -1917,30 +1932,75 @@ export class Landscape {
         px(g, x + 1, y - 3, 1, 7, css(P.trunkLight)); px(g, x, y - 4, 3, 3, css(P.stone)); px(g, x, y - 4, 1, 2, css(P.paper));
       }
     }
+    const hasInventoryView = this.curr?.technology?.items !== undefined;
+    const hasRealTool = product !== undefined && product !== 'material';
+    const showActionTool = !hasInventoryView || hasRealTool;
     const working = view.working === true || (view.working === undefined && atTarget);
     const previous = this.prevPeople.get(view.id);
     const consuming = view.action === 'drink' ? previous?.thirst !== undefined && view.thirst !== undefined && previous.thirst > view.thirst
       : view.action === 'eat' && previous !== undefined && previous.hunger > view.hunger;
     const beat = !this.reduceMotion && this.actionActive && !p.moving && (working || consuming) ? Math.floor(t * 3 + p.seed) % 2 : 0;
-    if (view.action === 'hunt') { px(g,ax+5+beat,baseY-13+beat*3,1,13,css(P.trunkLight));px(g,ax+4+beat,baseY-15+beat*3,3,3,css(P.stone)); }
-    else if (view.action === 'drink') { const lift = p.moving ? 4 : beat; px(g,ax+3,headTop+3+lift,3,3,css(P.waterGleam));px(g,ax+3,headTop+5+lift,3,1,css(P.water)); }
-    else if (view.action === 'eat') { px(g,ax+3,headTop+4+beat,2,2,css(P.amber)); px(g,ax+2,headTop+5+beat,2,1,css(P.skin)); }
-    else if (view.action === 'forage') {
+    if (view.action === 'hunt') {
+      if (showActionTool) {
+        px(g, ax + 5 + beat, baseY - 13 + beat * 3, 1, 13, css(P.trunkLight));
+        px(g, ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, css(P.stone));
+      } else {
+        px(g, ax + 3 + beat, baseY - 7 + beat * 2, 3, 2, css(skinColor));
+      }
+    } else if (view.action === 'drink') {
+      const lift = p.moving ? 4 : beat;
+      px(g, ax + 3, headTop + 3 + lift, 3, 3, css(P.waterGleam));
+      px(g, ax + 3, headTop + 5 + lift, 3, 1, css(P.water));
+    } else if (view.action === 'eat') {
+      px(g, ax + 3, headTop + 4 + beat, 2, 2, css(P.amber));
+      px(g, ax + 2, headTop + 5 + beat, 2, 1, css(skinColor));
+    } else if (view.action === 'forage') {
       // Reach toward the ground only during confirmed work; the pouch fills only from received stock.
       const reach = beat * 3;
-      px(g,ax+3+reach,baseY-6+beat*3,3,1,css(P.skin));
-      px(g,ax+3,baseY-3,4,3,css(P.trunkLight)); px(g,ax+3,baseY-1,4,1,css(P.soil));
-      px(g,ax+4,baseY-4,2,1,css(P.soil));
-      if ((view.foodReserve ?? 0) > 0) { px(g,ax+4,baseY-3,2,1,css(P.amber)); px(g,ax+5,baseY-4,1,1,css(P.grassLight)); }
-    }
-    else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {
-      const hand = baseY - 6 - beat * 4; px(g,ax+3,hand,3,1,css(P.skin));
-      px(g,ax+6,hand-3,1,5,css(P.trunkLight)); px(g,ax+5,hand-4,4,2,css(P.stone));
+      px(g, ax + 3 + reach, baseY - 6 + beat * 3, 3, 1, css(skinColor));
+      px(g, ax + 3, baseY - 3, 4, 3, css(P.trunkLight)); px(g, ax + 3, baseY - 1, 4, 1, css(P.soil));
+      px(g, ax + 4, baseY - 4, 2, 1, css(P.soil));
+      if ((view.foodReserve ?? 0) > 0) { px(g, ax + 4, baseY - 3, 2, 1, css(P.amber)); px(g, ax + 5, baseY - 4, 1, 1, css(P.grassLight)); }
+    } else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {
+      const hand = baseY - 6 - beat * 4;
+      px(g, ax + 3, hand, 3, 1, css(skinColor));
+      if (showActionTool) {
+        px(g, ax + 6, hand - 3, 1, 5, css(P.trunkLight));
+        px(g, ax + 5, hand - 4, 4, 2, css(P.stone));
+      } else {
+        // Working bare-handed with raw wood/stone stock
+        const hasStone = (view.materials?.stone ?? 0) > 0;
+        px(g, ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight));
+      }
     } else if (view.action === 'farm' || view.action === 'gather') {
-      const hand = baseY - 6 + beat * 2; px(g,ax+3,hand,3,1,css(P.skin));
-      px(g,ax+6,hand-1,1,7,css(P.trunkLight)); px(g,ax+6,hand+5,4,1,css(P.stoneShade));
+      const hand = baseY - 6 + beat * 2;
+      px(g, ax + 3, hand, 3, 1, css(skinColor));
+      if (showActionTool) {
+        px(g, ax + 6, hand - 1, 1, 7, css(P.trunkLight));
+        px(g, ax + 6, hand + 5, 4, 1, css(P.stoneShade));
+      } else {
+        px(g, ax + 5, hand, 2, 2, css(P.soilLight));
+      }
+    } else if (view.action === 'cooperate' || view.action === 'share') {
+      px(g, ax + 3, baseY - 6, 4, 4, css(P.soil)); px(g, ax + 3, baseY - 7, 4, 1, css(P.grassLight));
     }
-    else if (view.action === 'cooperate' || view.action === 'share') { px(g,ax+3,baseY-6,4,4,css(P.soil));px(g,ax+3,baseY-7,4,1,css(P.grassLight)); }
+
+    // Discrete body distress & manual control cues
+    if (view.controlMode === 'directed') {
+      px(g, headX - 1, headTop - 4, 2, 2, '#f4d18b');
+      px(g, headX, headTop - 5, 1, 1, '#fff6d6');
+    }
+    if ((view.thirst ?? 0) >= 0.82) {
+      px(g, headX + 4, headTop, 2, 3, css(P.waterGleam));
+      px(g, headX + 4, headTop + 2, 2, 1, css(P.water));
+    } else if ((view.hunger ?? 0) >= 0.82) {
+      px(g, headX + 4, headTop, 2, 2, css(P.coral));
+      px(g, headX + 4, headTop + 2, 2, 1, css(P.coralDeep));
+    }
+    if (view.health !== undefined && view.health < 0.45) {
+      px(g, ax - 4, baseY + 3, 8, 1, '#2b1414');
+      px(g, ax - 4, baseY + 3, Math.max(1, Math.round(clamp01(view.health) * 8)), 1, '#e05252');
+    }
     if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
       px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
     }
@@ -1999,14 +2059,25 @@ export class Landscape {
       if (screen.x < -30 || screen.y < -30 || screen.x > this.cssW + 30 || screen.y > this.cssH + 30) continue;
       const progress = clamp01((now - event.bornAt) / EVENT_LIFETIME_MS);
       const radius = this.reduceMotion ? 12 : 10 + progress * 14;
-      const strokeRgb = event.kind === 'birth' || event.kind === 'care' ? '168,224,132'
+      const isConflict = event.kind === 'conflict';
+      const isMeeting = event.kind === 'meeting';
+      const strokeRgb = isConflict ? '224,88,72'
+        : isMeeting ? '238,148,118'
+        : event.kind === 'birth' || event.kind === 'care' ? '168,224,132'
         : event.kind === 'invention' || event.kind === 'learning' ? '132,214,218'
         : event.kind === 'discovery' ? '232,158,120' : '239,208,136';
-      const fillRgb = event.kind === 'birth' || event.kind === 'care' ? '210,245,180'
+      const fillRgb = isConflict ? '250,165,152'
+        : isMeeting ? '252,208,188'
+        : event.kind === 'birth' || event.kind === 'care' ? '210,245,180'
         : event.kind === 'invention' || event.kind === 'learning' ? '190,242,245'
         : event.kind === 'discovery' ? '248,204,176' : '249,231,181';
-      g.strokeStyle = `rgba(${strokeRgb},${(1 - progress) * .82})`; g.lineWidth = 1.5; g.beginPath();
+      g.strokeStyle = `rgba(${strokeRgb},${(1 - progress) * .85})`; g.lineWidth = isConflict ? 2 : 1.5; g.beginPath();
       g.ellipse(screen.x, screen.y, radius, radius * .46, 0, 0, Math.PI * 2); g.stroke();
+      if (isConflict) {
+        g.beginPath();
+        g.ellipse(screen.x, screen.y, radius * .68, radius * .31, 0, 0, Math.PI * 2);
+        g.stroke();
+      }
       // Four small marks read as an acknowledgement, not sparks, births or physical light.
       g.fillStyle = `rgba(${fillRgb},${1 - progress})`;
       for (const side of [-1, 1]) g.fillRect(screen.x + side * radius - 1, screen.y - radius * .5 - 3, 2, 3);
@@ -2015,11 +2086,95 @@ export class Landscape {
     g.restore();
   }
 
+  /**
+   * Visualizes active interpersonal debates/disputes (`conflict`), teachings (`learning`),
+   * cooperation/sharing (`cooperate`, `share`, `care`), and S↔I / close meetings on the overlay canvas.
+   */
+  private drawSocialLinks(people: RenderPerson[]): void {
+    if (people.length < 2 || !this.curr) return;
+    const ctx = this.labelCtx;
+    const byId = new Map<string, RenderPerson>();
+    for (const p of people) byId.set(p.view.id, p);
+    const drawnPairs = new Set<string>();
+    const drawArc = (a: RenderPerson, b: RenderPerson, kind: 'conflict' | 'learning' | 'cooperate' | 'bond'): void => {
+      const pairKey = a.view.id < b.view.id ? `${a.view.id}:${b.view.id}` : `${b.view.id}:${a.view.id}`;
+      if (drawnPairs.has(pairKey)) return;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (dist > 5.5) return;
+      drawnPairs.add(pairKey);
+      const sa = this.worldToScreen(a.x + 0.5, a.y + 0.35);
+      const sb = this.worldToScreen(b.x + 0.5, b.y + 0.35);
+      if ((sa.x < -40 && sb.x < -40) || (sa.x > this.cssW + 40 && sb.x > this.cssW + 40)) return;
+      const mx = (sa.x + sb.x) / 2;
+      const my = Math.min(sa.y, sb.y) - Math.max(8, Math.min(22, dist * this.cam.zoom * 0.22));
+      ctx.save();
+      ctx.strokeStyle = kind === 'conflict' ? 'rgba(224,92,74,0.82)'
+        : kind === 'learning' ? 'rgba(132,214,218,0.82)'
+        : kind === 'bond' ? 'rgba(232,134,108,0.78)' : 'rgba(176,214,132,0.78)';
+      ctx.lineWidth = kind === 'conflict' ? 1.75 : 1.35;
+      if (kind === 'conflict' || kind === 'learning') ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(sa.x, sa.y);
+      ctx.quadraticCurveTo(mx, my, sb.x, sb.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Midpoint dialogue/interaction glyph
+      const gx = Math.round(mx), gy = Math.round((sa.y + sb.y) / 4 + my / 2);
+      ctx.fillStyle = '#1f1a15d9';
+      ctx.fillRect(gx - 4, gy - 4, 8, 8);
+      ctx.fillStyle = kind === 'conflict' ? '#f2725c'
+        : kind === 'learning' ? '#8ce0e6'
+        : kind === 'bond' ? '#f4a88e' : '#b8e288';
+      if (kind === 'conflict') {
+        ctx.fillRect(gx - 3, gy - 2, 2, 4);
+        ctx.fillRect(gx + 1, gy - 2, 2, 4);
+      } else if (kind === 'learning') {
+        ctx.fillRect(gx - 1, gy - 3, 2, 6);
+        ctx.fillRect(gx - 3, gy - 1, 6, 2);
+      } else {
+        ctx.fillRect(gx - 2, gy - 2, 4, 4);
+      }
+      ctx.restore();
+    };
+
+    // 1. Recent chronicle events in the current window involving 2 visible actors
+    const recentCutoff = this.curr.tick - 30;
+    for (const ev of this.curr.events) {
+      if (ev.tick < recentCutoff || ev.actors.length < 2) continue;
+      const a = byId.get(ev.actors[0]!), b = byId.get(ev.actors[1]!);
+      if (!a || !b) continue;
+      if (ev.kind === 'conflict') drawArc(a, b, 'conflict');
+      else if (ev.kind === 'learning') drawArc(a, b, 'learning');
+      else if (ev.kind === 'cooperation' || ev.kind === 'care') drawArc(a, b, 'cooperate');
+      else if (ev.kind === 'meeting') drawArc(a, b, 'bond');
+    }
+
+    // 2. Active live social actions (share, cooperate, accompany, approach) & S↔I proximity
+    for (const p of people) {
+      const act = p.view.action;
+      if (act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && p.view.role !== 'S') continue;
+      let nearest: RenderPerson | null = null;
+      let bestD = 3.2;
+      for (const other of people) {
+        if (other.view.id === p.view.id) continue;
+        if (p.view.role === 'S' && act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && other.view.role !== 'I') continue;
+        const d = Math.hypot(p.x - other.x, p.y - other.y);
+        if (d < bestD) { bestD = d; nearest = other; }
+      }
+      if (nearest) {
+        const kind = (p.view.role === 'S' && nearest.view.role === 'I') || act === 'accompany' || act === 'approach' ? 'bond' : 'cooperate';
+        drawArc(p, nearest, kind);
+      }
+    }
+  }
+
   /** Selección e insignias: en píxeles de pantalla, para que el texto no se pixele. */
   private drawOverlaysScreen(people: RenderPerson[], animals: RenderAnimal[]): void {
     const ctx = this.labelCtx;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    this.drawSocialLinks(people);
 
     if (this.pendingTarget) {
       const mark = this.worldToScreen(this.pendingTarget.x + .5, this.pendingTarget.y + .5);

@@ -23,9 +23,10 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     await page.goto(new URL('__v18_art.html', server.resolvedUrls!.local[0]).href);
 
     const res = await page.evaluate(async (version) => {
-      const module = '/src/client/landscape.ts', artModule = '/src/client/life-art.ts';
+      const module = '/src/client/landscape.ts', artModule = '/src/client/life-art.ts', vsModule = '/src/client/visual-state.ts';
       const { Landscape } = await import(/* @vite-ignore */ module);
       const { paintStructure } = await import(/* @vite-ignore */ artModule);
+      const { newEventAccents } = await import(/* @vite-ignore */ vsModule);
       const canvas = document.getElementById('c') as HTMLCanvasElement;
       const r: any = new Landscape(canvas, () => {});
 
@@ -116,6 +117,32 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
         }, 0));
       const stageRasters = [drawStage('juvenile'), drawStage('adult'), drawStage('senescent')];
 
+      // 5. Cultural motifs on structures (stewardship, sharing, openness)
+      const cultStew = raster32(g => paintStructure(g, baseStruct as any, { generation: 2, communityColor: '#76b8be', culture: { sharing: 0.3, stewardship: 0.7, openness: 0.3 } }));
+      const cultShare = raster32(g => paintStructure(g, baseStruct as any, { generation: 2, communityColor: '#76b8be', culture: { sharing: 0.7, stewardship: 0.3, openness: 0.3 } }));
+      const cultOpen = raster32(g => paintStructure(g, baseStruct as any, { generation: 2, communityColor: '#76b8be', culture: { sharing: 0.3, stewardship: 0.3, openness: 0.7 } }));
+
+      // 6. Conflict and meeting accents + social link arcs + directed/critical body cues
+      const prevW: any = { tick: 100, events: [] };
+      const currW: any = {
+        tick: 101,
+        events: [
+          { id: 'c1', tick: 101, kind: 'conflict', source: 'simulation', x: 1, y: 1, actors: ['neighbor-10', 'neighbor-20'], text: 'Disputa', cause: 'Escasez' },
+          { id: 'm1', tick: 101, kind: 'meeting', source: 'simulation', x: 2, y: 2, actors: ['neighbor-10', 'neighbor-20'], text: 'Encuentro', cause: 'Vínculo' },
+        ],
+      };
+      const accents = newEventAccents(prevW, currW, 1000);
+
+      const drawCue = (extra: object) =>
+        raster32(g => r.drawPerson(g, {
+          view: { ...tensPeople[0]!, ...extra },
+          x: 0.5, y: 0.5, moving: false, seed: seeds[0],
+        }, 0));
+      const basePersonRaster = drawCue({});
+      const directedRaster = drawCue({ controlMode: 'directed' });
+      const thirstyRaster = drawCue({ thirst: 0.9 });
+      const lowHealthRaster = drawCue({ health: 0.25 });
+
       r.destroy();
       return {
         sigChanged: sigBelow !== sigAbove,
@@ -124,6 +151,9 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
         commDistinct: commA !== commB,
         distinctTensSeeds: new Set(seeds).size,
         distinctLifeStages: new Set(stageRasters).size,
+        distinctCultures: new Set([cultStew, cultShare, cultOpen]).size,
+        accentKinds: accents.map((a: any) => a.kind),
+        cuesDistinct: new Set([basePersonRaster, directedRaster, thirstyRaster, lowHealthRaster]).size,
       };
     }, PROTOCOL_VERSION);
 
@@ -133,6 +163,9 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     assert.equal(res.commDistinct, true, 'community color pennant/lintel changes structure raster');
     assert.equal(res.distinctTensSeeds, 9, 'neighbor-10..90 must not collide on person seed');
     assert.equal(res.distinctLifeStages, 3, 'juvenile, adult and senescent have distinct sprites');
+    assert.equal(res.distinctCultures, 3, 'stewardship, sharing and openness motifs produce distinct structure rasters');
+    assert.deepEqual(res.accentKinds, ['conflict', 'meeting'], 'conflict and meeting events produce visual accents');
+    assert.equal(res.cuesDistinct, 4, 'directed mode, critical thirst and low health produce distinct person rasters');
   } finally {
     await browser.close();
     await server.close();

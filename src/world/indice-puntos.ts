@@ -22,11 +22,13 @@ export interface Punto { readonly x: number; readonly y: number }
 
 const LADO = 4;
 const MAXIMO = 2 ** 23;
+const SPAN = 2 * MAXIMO;
 interface Indice { length: number; celdas: Map<number, number[]> | null }
 const indices = new WeakMap<readonly Punto[], Indice>();
-// LADO es potencia de dos: la división es exacta y la casilla también.
-const casilla = (v: number): number => Math.floor(v / LADO);
-const clave = (cx: number, cy: number): number => (cx + MAXIMO) * (2 * MAXIMO) + (cy + MAXIMO);
+// LADO es potencia de dos: la división es exacta y la casilla también. Para un entero int32,
+// `v >> 2` es la misma división con suelo; cualquier otro número va por la fórmula de siempre.
+const casilla = (v: number): number => v === (v | 0) ? v >> 2 : Math.floor(v / LADO);
+const clave = (cx: number, cy: number): number => (cx + MAXIMO) * SPAN + (cy + MAXIMO);
 
 function celdas(puntos: readonly Punto[]): Map<number, number[]> | null {
   let indice = indices.get(puntos);
@@ -58,12 +60,21 @@ function rango(puntos: readonly Punto[], centro: Punto, alcance: number): Rango 
   return { mapa, x0, x1, y0, y1 };
 }
 
+// Los tres recorridos visitan las casillas en el mismo orden `cx` exterior, `cy` interior de
+// siempre (el orden de llamada del predicado no cambia), pero la clave avanza por incrementos
+// exactos —`cy + 1` suma 1 y `cx + 1` suma `SPAN`, todo entero < 2^53— en vez de multiplicar
+// por casilla, y las listas se recorren por índice, sin el protocolo de iteración.
 export function algunoCerca<T extends Punto>(puntos: readonly T[], centro: Punto, alcance: number, pred: (punto: T) => boolean): boolean {
   const r = rango(puntos, centro, alcance);
   if (!r) return puntos.some(punto => pred(punto));
-  for (let cx = r.x0; cx <= r.x1; cx++) for (let cy = r.y0; cy <= r.y1; cy++) {
-    const lista = r.mapa.get(clave(cx, cy));
-    if (lista) for (const i of lista) if (pred(puntos[i]!)) return true;
+  const mapa = r.mapa;
+  let claveFila = (r.x0 + MAXIMO) * SPAN + (r.y0 + MAXIMO);
+  for (let cx = r.x0; cx <= r.x1; cx++, claveFila += SPAN) {
+    let k = claveFila;
+    for (let cy = r.y0; cy <= r.y1; cy++, k++) {
+      const lista = mapa.get(k);
+      if (lista) for (let j = 0; j < lista.length; j++) if (pred(puntos[lista[j]!]!)) return true;
+    }
   }
   return false;
 }
@@ -71,11 +82,17 @@ export function primeroCerca<T extends Punto>(puntos: readonly T[], centro: Punt
   const r = rango(puntos, centro, alcance);
   if (!r) return puntos.find(punto => pred(punto));
   let mejor = -1;
-  for (let cx = r.x0; cx <= r.x1; cx++) for (let cy = r.y0; cy <= r.y1; cy++) {
-    const lista = r.mapa.get(clave(cx, cy));
-    if (lista) for (const i of lista) {
-      if (mejor >= 0 && i >= mejor) break; // lista creciente: nada de aquí mejora lo hallado
-      if (pred(puntos[i]!)) { mejor = i; break; }
+  const mapa = r.mapa;
+  let claveFila = (r.x0 + MAXIMO) * SPAN + (r.y0 + MAXIMO);
+  for (let cx = r.x0; cx <= r.x1; cx++, claveFila += SPAN) {
+    let k = claveFila;
+    for (let cy = r.y0; cy <= r.y1; cy++, k++) {
+      const lista = mapa.get(k);
+      if (lista) for (let j = 0; j < lista.length; j++) {
+        const i = lista[j]!;
+        if (mejor >= 0 && i >= mejor) break; // lista creciente: nada de aquí mejora lo hallado
+        if (pred(puntos[i]!)) { mejor = i; break; }
+      }
     }
   }
   return mejor >= 0 ? puntos[mejor] : undefined;
@@ -84,10 +101,21 @@ export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punt
   const r = rango(puntos, centro, alcance);
   if (!r) return puntos.filter(punto => pred(punto));
   const posiciones: number[] = [];
-  for (let cx = r.x0; cx <= r.x1; cx++) for (let cy = r.y0; cy <= r.y1; cy++) {
-    const lista = r.mapa.get(clave(cx, cy));
-    if (lista) for (const i of lista) if (pred(puntos[i]!)) posiciones.push(i);
+  let ordenado = true, ultimo = -1;
+  const mapa = r.mapa;
+  let claveFila = (r.x0 + MAXIMO) * SPAN + (r.y0 + MAXIMO);
+  for (let cx = r.x0; cx <= r.x1; cx++, claveFila += SPAN) {
+    let k = claveFila;
+    for (let cy = r.y0; cy <= r.y1; cy++, k++) {
+      const lista = mapa.get(k);
+      if (lista) for (let j = 0; j < lista.length; j++) {
+        const i = lista[j]!;
+        if (pred(puntos[i]!)) { if (i < ultimo) ordenado = false; ultimo = i; posiciones.push(i); }
+      }
+    }
   }
-  if (posiciones.length > 1) posiciones.sort((a, b) => a - b);
-  return posiciones.map(i => puntos[i]!);
+  if (!ordenado && posiciones.length > 1) posiciones.sort((a, b) => a - b);
+  const resultado = new Array<T>(posiciones.length);
+  for (let j = 0; j < posiciones.length; j++) resultado[j] = puntos[posiciones[j]!]!;
+  return resultado;
 }

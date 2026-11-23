@@ -1827,111 +1827,261 @@ export class Landscape {
     const ax = Math.round(p.x * ART + ART / 2);
     const ay = Math.round(p.y * ART + ART / 2 + 4);
 
+    // Deterministic 32-bit identity seed combining FNV-1a(id) and view.color
+    let h = p.seed >>> 0;
+    const rawColor = view.color ?? '';
+    for (let i = 0; i < rawColor.length; i++) {
+      h = Math.imul(h ^ rawColor.charCodeAt(i), 16777619) >>> 0;
+    }
+
+    // 8 high-contrast personal garment palettes that never dissolve into brown soil (#a8825c) or sage grass (#96aa7c)
+    const ROPA = [
+      rgb(194, 59, 46),   // 0: crimson madder
+      rgb(47, 109, 181),  // 1: indigo blue
+      rgb(224, 165, 38),  // 2: saffron gold
+      rgb(107, 63, 160),  // 3: plum violet
+      rgb(31, 138, 122),  // 4: deep teal
+      rgb(217, 106, 30),  // 5: rust terracotta
+      rgb(59, 74, 140),   // 6: slate navy
+      rgb(184, 51, 106),  // 7: berry rose
+    ] as const;
+    const SKINS = [
+      rgb(241, 210, 180),
+      rgb(226, 190, 158),
+      rgb(201, 154, 114),
+      rgb(164, 116, 79),
+      rgb(126, 86, 58),
+    ] as const;
+    const HAIRS = [
+      rgb(30, 22, 18),
+      rgb(74, 44, 26),
+      rgb(138, 75, 34),
+      rgb(196, 132, 54),
+      rgb(226, 202, 134),
+      rgb(92, 76, 68),
+    ] as const;
+
     const community = this.curr?.communities?.find(group => group.id === view.communityId);
-    const fallback = view.role === 'I' ? P.coral : view.role === 'S' ? P.neutralCloth : community ? parseColor(community.color, P.neutralCloth) : P.neutralCloth;
-    const given = parseColor(view.color, fallback);
-    const body =
-      view.role === 'I' ? P.coral : view.role === 'S' ? mix(given, P.paper, 0.18) : mix(given, P.neutralCloth, 0.16);
-    const bodyDark = darken(body, 0.28);
-    const legs = darken(body, 0.44);
+    const commRgb = community ? parseColor(community.color, P.amber) : parseColor(view.color, P.amber);
+    const mainIdx = h % 8;
+    const secIdx = (mainIdx + 3 + ((h >>> 3) % 3)) % 8;
+    const mainRgb = view.role === 'I' ? P.coral : view.role === 'S' ? rgb(44, 79, 138) : ROPA[mainIdx]!;
+    const secRgb = view.role === 'I' ? P.coralDeep : view.role === 'S' ? P.amber : ROPA[secIdx]!;
+    const claraHex = '#efe6d2';
+    const mainHex = css(mainRgb);
+    const mainDarkHex = css(darken(mainRgb, 0.25));
+    const secHex = css(secRgb);
+    const comHex = css(commRgb);
+    const pantsHex = css(darken(secRgb, 0.42));
+    const bootHex = '#3a2618';
+    const outlineHex = '#231710';
+
+    const skinRgb = view.role === 'S' || view.role === 'I' ? P.skin : SKINS[(h >>> 6) % SKINS.length]!;
+    const skinHex = css(skinRgb);
+    const skinLightHex = css(lighten(skinRgb, 0.28));
+    const cheekHex = css(mix(skinRgb, rgb(217, 119, 106), 0.35));
+    const hairRgb = senescent ? rgb(210, 206, 198) : view.role === 'S' || view.role === 'I' ? rgb(58, 36, 24) : HAIRS[(h >>> 9) % HAIRS.length]!;
+    const hairHex = css(hairRgb);
+    const hairLightHex = css(lighten(hairRgb, 0.24));
+    const hairDarkHex = css(darken(hairRgb, 0.25));
 
     // Balanceo de paso: sólo si el servidor la movió de verdad.
     const step = !this.reduceMotion && p.moving ? (Math.floor(t * (senescent ? 4.5 : 6) + p.seed) & 1) : 0;
     const bob = resting ? 0 : step === 1 ? -1 : 0;
     const baseY = resting ? ay + 2 : ay;
 
-    ellipse(g, ax, baseY + 1, juvenile ? 3.2 : 4, 1.6, css(P.shadow, 0.32));
-    if (community) ellipse(g, ax, baseY + 2, juvenile ? 4.2 : 5.2, 1.3, css(parseColor(community.color, P.amber), .88));
+    // Ground shadow & community ring
+    ellipse(g, ax, baseY + 1, view.role === 'S' || view.role === 'I' ? 4.8 : juvenile ? 3.5 : 4.2, 1.7, css(P.shadow, 0.36));
+    if (community) ellipse(g, ax, baseY + 2, juvenile ? 4.4 : 5.4, 1.35, css(commRgb, .9));
 
     const torsoH = juvenile ? 4 : 5;
     const legH = juvenile ? 2 : 3;
     const torsoTop = baseY - legH - torsoH;
-
-    if (resting) {
-      px(g, ax - 4, baseY - 3, 8, 3, css(bodyDark));
-      px(g, ax - 3, baseY - 6, 6, 4, css(body));
-    } else {
-      px(g, ax - 2, baseY - legH, 2, legH, css(legs));
-      px(g, ax, baseY - legH, 2, Math.max(1, legH - step), css(legs));
-      px(g, ax - 3, torsoTop, 6, torsoH, css(body));
-      px(g, ax - 3, baseY - legH - 1, 6, 1, css(bodyDark));
-      px(g, ax - 4, torsoTop + bob, 1, Math.max(2, torsoH - 2), css(bodyDark));
-      px(g, ax + 3, torsoTop - bob, 1, Math.max(2, torsoH - 2), css(bodyDark));
-    }
-
-    const skins = [P.skin, darken(P.skin, 0.08), lighten(P.skin, 0.07), mix(P.skin, P.soilLight, 0.18)];
-    const skinColor = view.role === 'S' || view.role === 'I' ? P.skin : skins[p.seed & 3]!;
-    const hairs = [P.hair, rgb(42, 32, 26), rgb(96, 64, 42), rgb(120, 78, 46), rgb(54, 44, 38)];
-    const hairColor = senescent ? rgb(198, 195, 186) : view.role === 'S' || view.role === 'I' ? P.hair : hairs[(p.seed >>> 2) % hairs.length]!;
-
     const headTop = (resting ? baseY - 10 : torsoTop - 4 + (senescent ? 1 : 0)) + bob;
     const headX = ax + (senescent && !resting ? 1 : 0);
-    px(g, headX - 2, headTop, 4, 4, css(skinColor));
-    px(g, headX - 2, headTop - 1, 4, 2, css(hairColor));
-    px(g, headX - 3, headTop, 1, 2, css(hairColor));
-    px(g, headX + 2, headTop, 1, 2, css(hairColor));
-    px(g, headX - 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
-    px(g, headX + 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
+
+    // 2-pass pixel buffer: pass 1 paints a 1px dark silhouette contour (#231710) around outlined rects;
+    // pass 2 paints the interior colors in exact layer order.
+    const rects: { x: number; y: number; w: number; h: number; color: string; outline: boolean }[] = [];
+    const add = (x: number, y: number, w: number, h: number, color: string, outline = true): void => {
+      if (w > 0 && h > 0) rects.push({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), color, outline });
+    };
+
+    // Determine hairstyle/headwear (0..7) and garment style (0..5) uniformly from 32-bit identity hash
+    const headStyle = view.role === 'S' || view.role === 'I' ? -1 : (h >>> 12) % 8;
+    const garmentStyle = (h >>> 15) % 6;
+
+    // Back hair layer (for long flowing hair style 3)
+    if (!resting && headStyle === 3) {
+      add(headX - 3, headTop, 1, 5, hairDarkHex, true);
+      add(headX + 2, headTop, 1, 5, hairDarkHex, true);
+    }
+
+    if (resting) {
+      add(ax - 4, baseY - 3, 8, 3, mainDarkHex, true);
+      add(ax - 3, baseY - 6, 6, 4, mainHex, true);
+      add(ax - 2, baseY - 6, 4, 1, comHex, false);
+    } else {
+      // Legs & outward-pointing boots
+      const leftLegH = legH;
+      const rightLegH = Math.max(1, legH - step);
+      add(ax - 2, baseY - leftLegH, 2, leftLegH, pantsHex, true);
+      add(ax, baseY - rightLegH, 2, rightLegH, pantsHex, true);
+      add(ax - 3, baseY - 1, 2, 1, bootHex, true);
+      add(ax + 1, baseY - 1 + (legH - rightLegH), 2, 1, bootHex, true);
+
+      // Torso base & arms
+      add(ax - 3, torsoTop, 6, torsoH, mainHex, true);
+      add(ax - 3, baseY - legH - 1, 6, 1, mainDarkHex, false);
+      // Short sleeves + skin forearms
+      const armH = Math.max(2, torsoH - 2);
+      add(ax - 4, torsoTop + bob, 1, 1, mainHex, true);
+      add(ax - 4, torsoTop + 1 + bob, 1, armH - 1, skinHex, true);
+      add(ax + 3, torsoTop - bob, 1, 1, mainHex, true);
+      add(ax + 3, torsoTop + 1 - bob, 1, armH - 1, skinHex, true);
+
+      if (view.role !== 'S' && view.role !== 'I') {
+        // 6 distinctive garment silhouettes
+        if (garmentStyle === 0) {
+          // A: Open vest over cream linen shirt
+          add(ax - 1, torsoTop + 1, 2, torsoH - 1, claraHex, false);
+          add(ax - 3, torsoTop, 2, torsoH, mainHex, false);
+          add(ax + 1, torsoTop, 2, torsoH, mainHex, false);
+          add(ax - 2, torsoTop, 4, 1, comHex, false);
+        } else if (garmentStyle === 1) {
+          // B: Wide V-neck poncho
+          add(ax - 4, torsoTop + 1, 8, Math.min(3, torsoH - 1), mainHex, true);
+          add(ax - 1, torsoTop, 2, 2, comHex, false);
+          add(ax - 3, torsoTop + Math.min(3, torsoH - 1), 6, 1, secHex, false);
+        } else if (garmentStyle === 2) {
+          // C: Craftsman leather apron over tunic
+          add(ax - 2, torsoTop + 1, 4, torsoH - 1, '#7a4a28', false);
+          add(ax - 3, torsoTop + 2, 6, 1, secHex, false);
+          add(ax - 2, torsoTop, 4, 1, comHex, false);
+        } else if (garmentStyle === 3) {
+          // D: Crossed tunic with wide community waist sash
+          add(ax - 2, torsoTop, 4, 1, claraHex, false);
+          add(ax - 3, torsoTop + Math.max(1, torsoH - 3), 6, 2, comHex, false);
+        } else if (garmentStyle === 4) {
+          // E: One-shoulder cloak with community brooch
+          add(ax - 4, torsoTop, 3, Math.min(4, torsoH), secHex, true);
+          add(ax - 1, torsoTop, 2, 1, comHex, false);
+        } else {
+          // F: Work suspenders over shirt
+          add(ax - 2, torsoTop, 1, torsoH, secHex, false);
+          add(ax + 1, torsoTop, 1, torsoH, secHex, false);
+          add(ax - 1, torsoTop, 2, 1, comHex, false);
+        }
+      }
+    }
+
+    // Face & crisp eyes
+    add(headX - 2, headTop, 4, 4, skinHex, true);
+    add(headX - 2, headTop + 1, 1, 1, skinLightHex, false);
+    add(headX - 2, headTop + 3, 1, 1, cheekHex, false);
+    add(headX - 1, headTop + 2, 1, 1, '#1c1410', false);
+    add(headX + 1, headTop + 2, 1, 1, '#1c1410', false);
 
     if (view.role === 'S') {
-      // Bufanda ámbar, con la cola al viento.
+      // S: dark hair + iconic amber scarf with fluttering tail
+      add(headX - 2, headTop - 1, 4, 2, hairHex, true);
+      add(headX - 3, headTop, 1, 2, hairHex, true);
+      add(headX + 2, headTop, 1, 2, hairHex, true);
       const neck = headTop + 4;
-      px(g, ax - 4, neck, 8, 2, css(P.amber));
-      px(g, ax - 4, neck + 1, 8, 1, css(P.amberDeep));
+      add(ax - 4, neck, 8, 2, css(P.amber), true);
+      add(ax - 4, neck + 1, 8, 1, css(P.amberDeep), false);
       const tail = this.reduceMotion || !p.moving ? 0 : step;
-      px(g, ax + 3 + tail, neck + 1, 2, 4, css(P.amber));
-      px(g, ax + 3 + tail, neck + 4, 2, 1, css(P.amberDeep));
+      add(ax + 3 + tail, neck + 1, 2, 4, css(P.amber), true);
+      add(ax + 3 + tail, neck + 4, 2, 1, css(P.amberDeep), false);
     } else if (view.role === 'I') {
-      // Túnica coral con vuelo y capucha.
-      px(g, ax - 4, baseY - 9, 8, 7, css(P.coral));
-      px(g, ax - 5, baseY - 3, 10, 2, css(P.coral));
-      px(g, ax - 5, baseY - 2, 10, 1, css(P.coralDeep));
-      px(g, ax - 3, headTop - 2, 6, 3, css(P.coral));
-      px(g, ax - 3, headTop - 2, 6, 1, css(lighten(P.coral, 0.2)));
-      px(g, ax - 2, headTop, 4, 3, css(P.skin));
-      px(g, ax - 1, headTop + 1, 1, 1, css(darken(P.hair, 0.2), 0.75));
-      px(g, ax + 1, headTop + 1, 1, 1, css(darken(P.hair, 0.2), 0.75));
+      // I: coral hooded cloak & dress with cream sash
+      add(ax - 4, baseY - 9, 8, 7, css(P.coral), true);
+      add(ax - 5, baseY - 3, 10, 2, css(P.coral), true);
+      add(ax - 5, baseY - 2, 10, 1, css(P.coralDeep), false);
+      add(ax - 3, baseY - 6, 6, 1, claraHex, false);
+      add(headX - 3, headTop - 2, 6, 3, css(P.coral), true);
+      add(headX - 3, headTop - 2, 6, 1, css(lighten(P.coral, 0.25)), false);
+      add(headX - 2, headTop, 4, 3, skinHex, false);
+      add(headX - 1, headTop + 1, 1, 1, '#1c1410', false);
+      add(headX + 1, headTop + 1, 1, 1, '#1c1410', false);
     } else {
-      // Vecindario: vestimenta con acento comunitario y variante por identidad completa.
-      const commAccent = community ? parseColor(community.color, body) : lighten(body, 0.22);
-      const variant = (p.seed >>> 5) % 4;
-      if (variant === 0) px(g, ax - 3, baseY - legH - 2, 6, 2, css(lighten(commAccent, 0.15)));
-      else if (variant === 1) px(g, headX - 3, headTop - 1, 6, 1, css(commAccent));
-      else if (variant === 2) px(g, ax - 4, torsoTop, 8, 2, css(darken(commAccent, 0.15)));
-      else { px(g, ax - 3, torsoTop, 2, torsoH, css(commAccent)); px(g, ax + 1, torsoTop, 2, torsoH, css(commAccent)); }
+      // 8 distinct head / hairstyle / headwear silhouettes for neighbors
+      if (headStyle === 0 && !juvenile) {
+        // 0: Wide-brimmed straw sun hat with community band
+        add(headX - 4, headTop - 1, 8, 1, '#e3c26a', true);
+        add(headX - 2, headTop - 3, 4, 2, '#d4b052', true);
+        add(headX - 2, headTop - 2, 4, 1, comHex, false);
+      } else if (headStyle === 1) {
+        // 1: Explorer headband + feather
+        add(headX - 2, headTop - 1, 4, 1, hairHex, true);
+        add(headX - 2, headTop, 4, 1, comHex, false);
+        add(headX + 2, headTop - 3, 1, 3, claraHex, true);
+        add(headX + 2, headTop - 3, 1, 1, css(ROPA[0]), false);
+      } else if (headStyle === 2) {
+        // 2: High top-knot / bun
+        add(headX - 2, headTop - 1, 4, 1, hairHex, true);
+        add(headX - 1, headTop - 3, 2, 2, hairHex, true);
+        add(headX - 1, headTop - 1, 2, 1, comHex, false);
+      } else if (headStyle === 3) {
+        // 3: Long flowing hair
+        add(headX - 2, headTop - 1, 4, 2, hairHex, true);
+        add(headX - 1, headTop - 1, 2, 1, hairLightHex, false);
+      } else if (headStyle === 4) {
+        // 4: Full curly / textured crown
+        add(headX - 3, headTop - 2, 6, 3, hairHex, true);
+        add(headX - 2, headTop - 2, 1, 1, hairLightHex, false);
+        add(headX, headTop - 1, 1, 1, hairLightHex, false);
+        add(headX + 2, headTop - 2, 1, 1, hairLightHex, false);
+      } else if (headStyle === 5) {
+        // 5: Side braid with community ribbon tie
+        add(headX - 2, headTop - 1, 4, 2, hairHex, true);
+        add(headX + 2, headTop + 1, 1, 4, hairDarkHex, true);
+        add(headX + 2, headTop + 4, 1, 1, comHex, false);
+      } else if (headStyle === 6 && !juvenile) {
+        // 6: Artisan knit cap with pom-pom & visible hair fringe
+        add(headX - 2, headTop - 2, 4, 2, secHex, true);
+        add(headX - 2, headTop - 1, 4, 1, comHex, false);
+        add(headX - 2, headTop, 1, 1, hairHex, false);
+        add(headX + 1, headTop, 1, 1, hairHex, false);
+        add(headX, headTop - 3, 1, 1, claraHex, true);
+      } else {
+        // 7: Classic cropped cut with sideburns
+        add(headX - 2, headTop - 1, 4, 2, hairHex, true);
+        add(headX - 3, headTop, 1, 2, hairHex, true);
+        add(headX + 2, headTop, 1, 2, hairHex, true);
+      }
     }
+
     const atTarget = view.target ? Math.hypot(view.x - view.target.x, view.y - view.target.y) < .5 : false;
     const product = this.carriedProducts.get(view.id);
     const secondary = this.secondaryProducts.get(view.id);
     if (secondary) {
-      // Secondary carried object slung on the hip/back
       const sx = ax - 5, sy = baseY - legH - 2;
-      px(g, sx, sy, 2, 2, css(secondary === 'storage' ? P.soilLight : secondary === 'cutting' ? P.stone : P.sand));
+      add(sx, sy, 2, 2, css(secondary === 'storage' ? P.soilLight : secondary === 'cutting' ? P.stone : P.sand), true);
     }
     if (product) {
-      // One carried-object symbol per owner, present only while a real material batch exists.
       const x = ax - 7, y = baseY - 5;
       if (product === 'material') {
-        px(g, x, y, 4, 3, css(P.stoneShade)); px(g, x, y, 3, 1, css(P.stone));
+        add(x, y, 4, 3, css(P.stoneShade), true); add(x, y, 3, 1, css(P.stone), false);
       } else if (product === 'storage') {
-        px(g, x, y, 4, 4, css(P.soil)); px(g, x + 1, y - 1, 2, 1, css(P.soilLight));
+        add(x, y, 4, 4, css(P.soil), true); add(x + 1, y - 1, 2, 1, css(P.soilLight), true);
         if (this.carriedWater.get(view.id)) {
-          px(g, x + 1, y, 2, 2, css(P.waterShallow));
-          px(g, x + 1, y, 2, 1, css(P.waterGleam));
+          add(x + 1, y, 2, 2, css(P.waterShallow), false);
+          add(x + 1, y, 2, 1, css(P.waterGleam), false);
         }
       } else if (product === 'insulation') {
-        px(g, x, y, 4, 3, css(P.sand)); px(g, x, y + 1, 4, 1, css(P.soilLight));
+        add(x, y, 4, 3, css(P.sand), true); add(x, y + 1, 4, 1, css(P.soilLight), false);
       } else if (product === 'binding') {
-        px(g, x, y, 3, 3, css(P.trunkLight)); px(g, x + 1, y - 1, 1, 5, css(P.sand));
+        add(x, y, 3, 3, css(P.trunkLight), true); add(x + 1, y - 1, 1, 5, css(P.sand), false);
       } else if (product === 'cultivation') {
-        px(g, x + 1, y - 3, 1, 7, css(P.trunkLight)); px(g, x, y - 3, 3, 1, css(P.stone)); px(g, x + 2, y - 2, 1, 2, css(P.stoneShade));
+        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 3, 3, 1, css(P.stone), true); add(x + 2, y - 2, 1, 2, css(P.stoneShade), false);
       } else if (product === 'abrasion') {
-        px(g, x, y - 1, 4, 3, css(P.stone)); px(g, x + 1, y - 2, 2, 1, css(P.paper));
+        add(x, y - 1, 4, 3, css(P.stone), true); add(x + 1, y - 2, 2, 1, css(P.paper), false);
       } else {
-        // cutting: stone blade on wooden haft
-        px(g, x + 1, y - 3, 1, 7, css(P.trunkLight)); px(g, x, y - 4, 3, 3, css(P.stone)); px(g, x, y - 4, 1, 2, css(P.paper));
+        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 4, 3, 3, css(P.stone), true); add(x, y - 4, 1, 2, css(P.paper), false);
       }
     }
+
     const hasInventoryView = this.curr?.technology?.items !== undefined;
     const hasRealTool = product !== undefined && product !== 'material';
     const showActionTool = !hasInventoryView || hasRealTool;
@@ -1940,60 +2090,76 @@ export class Landscape {
     const consuming = view.action === 'drink' ? previous?.thirst !== undefined && view.thirst !== undefined && previous.thirst > view.thirst
       : view.action === 'eat' && previous !== undefined && previous.hunger > view.hunger;
     const beat = !this.reduceMotion && this.actionActive && !p.moving && (working || consuming) ? Math.floor(t * 3 + p.seed) % 2 : 0;
+
     if (view.action === 'hunt') {
       if (showActionTool) {
-        px(g, ax + 5 + beat, baseY - 13 + beat * 3, 1, 13, css(P.trunkLight));
-        px(g, ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, css(P.stone));
+        add(ax + 5 + beat, baseY - 13 + beat * 3, 1, 13, css(P.trunkLight), true);
+        add(ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, css(P.stone), true);
       } else {
-        px(g, ax + 3 + beat, baseY - 7 + beat * 2, 3, 2, css(skinColor));
+        add(ax + 3 + beat, baseY - 7 + beat * 2, 3, 2, skinHex, true);
       }
     } else if (view.action === 'drink') {
       const lift = p.moving ? 4 : beat;
-      px(g, ax + 3, headTop + 3 + lift, 3, 3, css(P.waterGleam));
-      px(g, ax + 3, headTop + 5 + lift, 3, 1, css(P.water));
+      add(ax + 3, headTop + 3 + lift, 3, 3, css(P.waterGleam), true);
+      add(ax + 3, headTop + 5 + lift, 3, 1, css(P.water), false);
     } else if (view.action === 'eat') {
-      px(g, ax + 3, headTop + 4 + beat, 2, 2, css(P.amber));
-      px(g, ax + 2, headTop + 5 + beat, 2, 1, css(skinColor));
+      add(ax + 3, headTop + 4 + beat, 2, 2, css(P.amber), true);
+      add(ax + 2, headTop + 5 + beat, 2, 1, skinHex, false);
     } else if (view.action === 'forage') {
-      // Reach toward the ground only during confirmed work; the pouch fills only from received stock.
       const reach = beat * 3;
-      px(g, ax + 3 + reach, baseY - 6 + beat * 3, 3, 1, css(skinColor));
-      px(g, ax + 3, baseY - 3, 4, 3, css(P.trunkLight)); px(g, ax + 3, baseY - 1, 4, 1, css(P.soil));
-      px(g, ax + 4, baseY - 4, 2, 1, css(P.soil));
-      if ((view.foodReserve ?? 0) > 0) { px(g, ax + 4, baseY - 3, 2, 1, css(P.amber)); px(g, ax + 5, baseY - 4, 1, 1, css(P.grassLight)); }
+      add(ax + 3 + reach, baseY - 6 + beat * 3, 3, 1, skinHex, true);
+      add(ax + 3, baseY - 3, 4, 3, css(P.trunkLight), true);
+      add(ax + 3, baseY - 1, 4, 1, css(P.soil), false);
+      add(ax + 4, baseY - 4, 2, 1, css(P.soil), true);
+      if ((view.foodReserve ?? 0) > 0) {
+        add(ax + 4, baseY - 3, 2, 1, css(P.amber), false);
+        add(ax + 5, baseY - 4, 1, 1, css(P.grassLight), false);
+      }
     } else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {
       const hand = baseY - 6 - beat * 4;
-      px(g, ax + 3, hand, 3, 1, css(skinColor));
+      add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
-        px(g, ax + 6, hand - 3, 1, 5, css(P.trunkLight));
-        px(g, ax + 5, hand - 4, 4, 2, css(P.stone));
+        add(ax + 6, hand - 3, 1, 5, css(P.trunkLight), true);
+        add(ax + 5, hand - 4, 4, 2, css(P.stone), true);
       } else {
-        // Working bare-handed with raw wood/stone stock
         const hasStone = (view.materials?.stone ?? 0) > 0;
-        px(g, ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight));
+        add(ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight), true);
       }
     } else if (view.action === 'farm' || view.action === 'gather') {
       const hand = baseY - 6 + beat * 2;
-      px(g, ax + 3, hand, 3, 1, css(skinColor));
+      add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
-        px(g, ax + 6, hand - 1, 1, 7, css(P.trunkLight));
-        px(g, ax + 6, hand + 5, 4, 1, css(P.stoneShade));
+        add(ax + 6, hand - 1, 1, 7, css(P.trunkLight), true);
+        add(ax + 6, hand + 5, 4, 1, css(P.stoneShade), true);
       } else {
-        px(g, ax + 5, hand, 2, 2, css(P.soilLight));
+        add(ax + 5, hand, 2, 2, css(P.soilLight), true);
       }
     } else if (view.action === 'cooperate' || view.action === 'share') {
-      px(g, ax + 3, baseY - 6, 4, 4, css(P.soil)); px(g, ax + 3, baseY - 7, 4, 1, css(P.grassLight));
+      add(ax + 3, baseY - 6, 4, 4, css(P.soil), true);
+      add(ax + 3, baseY - 7, 4, 1, css(P.grassLight), false);
     }
 
-    // Discrete body distress & manual control cues
+    // Pass 1: 1px dark silhouette outline (#231710)
+    for (const r of rects) {
+      if (r.outline) px(g, r.x - 1, r.y - 1, r.w + 2, r.h + 2, outlineHex);
+    }
+    // Pass 2: interior fill in layer order
+    for (const r of rects) {
+      px(g, r.x, r.y, r.w, r.h, r.color);
+    }
+
+    // Discrete body distress & manual control cues (drawn above outline)
     if (view.controlMode === 'directed') {
+      px(g, headX - 2, headTop - 5, 4, 4, outlineHex);
       px(g, headX - 1, headTop - 4, 2, 2, '#f4d18b');
       px(g, headX, headTop - 5, 1, 1, '#fff6d6');
     }
     if ((view.thirst ?? 0) >= 0.82) {
+      px(g, headX + 3, headTop - 1, 4, 5, outlineHex);
       px(g, headX + 4, headTop, 2, 3, css(P.waterGleam));
       px(g, headX + 4, headTop + 2, 2, 1, css(P.water));
     } else if ((view.hunger ?? 0) >= 0.82) {
+      px(g, headX + 3, headTop - 1, 4, 5, outlineHex);
       px(g, headX + 4, headTop, 2, 2, css(P.coral));
       px(g, headX + 4, headTop + 2, 2, 1, css(P.coralDeep));
     }

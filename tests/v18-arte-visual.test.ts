@@ -142,6 +142,9 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
       const directedRaster = drawCue({ controlMode: 'directed' });
       const thirstyRaster = drawCue({ thirst: 0.9 });
       const lowHealthRaster = drawCue({ health: 0.25 });
+      const neighborSprites = r.interpolatePeople(1000).map((p: any) =>
+        raster32(g => r.drawPerson(g, { ...p, x: 0.5, y: 0.5, moving: false }, 0))
+      );
 
       r.destroy();
       return {
@@ -154,6 +157,7 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
         distinctCultures: new Set([cultStew, cultShare, cultOpen]).size,
         accentKinds: accents.map((a: any) => a.kind),
         cuesDistinct: new Set([basePersonRaster, directedRaster, thirstyRaster, lowHealthRaster]).size,
+        distinctNeighborSprites: new Set(neighborSprites).size,
       };
     }, PROTOCOL_VERSION);
 
@@ -166,6 +170,7 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     assert.equal(res.distinctCultures, 3, 'stewardship, sharing and openness motifs produce distinct structure rasters');
     assert.deepEqual(res.accentKinds, ['conflict', 'meeting'], 'conflict and meeting events produce visual accents');
     assert.equal(res.cuesDistinct, 4, 'directed mode, critical thirst and low health produce distinct person rasters');
+    assert.equal(res.distinctNeighborSprites, 9, 'every neighbor-10..90 renders a distinct outlined character sprite');
   } finally {
     await browser.close();
     await server.close();

@@ -367,20 +367,27 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
  * toque de la ventana. */
 function resolveInSession(host: TechnologyCatalogueHost, session: RecipeSession, id: string, cache: boolean): TechnologyRecipe | undefined {
   const state = host.technology;
-  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? session.lru.get(id) ?? session.archived.get(id);
-  if (recipe === undefined || session.checked.get(id) !== recipe) {
-    // Primera vez en la sesión (o un objeto distinto): el camino completo de siempre.
-    const number = serial(id);
-    if (number < 1 || number > state.recipeCounter) return undefined;
-    if (recipe === undefined) {
+  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? session.lru.get(id);
+  if (recipe === undefined) {
+    const cached = session.archived.get(id);
+    if (cached !== undefined) {
+      // Mismo contenido sin volver a leer SQLite, pero copia nueva: una receta expulsada de la
+      // ventana o leída con `cache: false` no comparte identidad de objeto con la lectura previa.
+      recipe = structuredClone(cached);
+    } else {
+      const number = serial(id);
+      if (number < 1 || number > state.recipeCounter) return undefined;
       const reader = readers.get(state); if (!reader) fail('an archived reference requires its host reader');
       const archived = reader.resolve(id, host.tick);
       if (!archived) return undefined;
       recipe = reader.freshCopies === true ? checkedRecipe(host, archived, id) : structuredClone(checkedRecipe(host, archived, id));
-      session.archived.set(id, recipe);
-    } else {
-      checkedRecipe(host, recipe, id);
+      session.archived.set(id, structuredClone(recipe));
     }
+    session.checked.set(id, recipe);
+  } else if (session.checked.get(id) !== recipe) {
+    const number = serial(id);
+    if (number < 1 || number > state.recipeCounter) return undefined;
+    checkedRecipe(host, recipe, id);
     session.checked.set(id, recipe);
   }
   if (cache) touchInSession(session, recipe);

@@ -160,6 +160,34 @@ function residentRecipe(recipes: TechnologyRecipe[], id: string): TechnologyReci
   return byId ? byId.get(id) : recipes.find(recipe => recipe.id === id);
 }
 /**
+ * V18 ola 2: sin catálogo, `resolveTechnologyRecipe` era `state.recipes.find(…)` (hasta 256 recetas por
+ * búsqueda, cientos de miles de búsquedas por paso en mundos sin Store). Índice id → POSICIÓN de la
+ * PRIMERA receta con ese id, asociado a la identidad y la longitud del arreglo (como `windowIndex`). Un
+ * acierto sólo se devuelve si el elemento de esa posición sigue siendo un objeto con ese id; un fallo,
+ * o un acierto que ya no cuadra (cambio en sitio de un elemento o de su id), vuelve al `find` de siempre.
+ * La única diferencia posible con `find` exigiría ids repetidos en `state.recipes`, que
+ * `assertTechnology` rechaza; con repetidos al construirlo, el índice ni se usa.
+ */
+const standaloneIndexes = new WeakMap<TechnologyRecipe[], { length: number; byId: Map<string, number> | null }>();
+function standaloneRecipe(recipes: TechnologyRecipe[], id: string): TechnologyRecipe | undefined {
+  let index = standaloneIndexes.get(recipes);
+  if (!index || index.length !== recipes.length) {
+    let byId: Map<string, number> | null = new Map();
+    for (let n = 0; n < recipes.length; n++) {
+      const recipe = recipes[n];
+      if (!(n in recipes) || !indexable(recipe) || byId.has(recipe.id)) { byId = null; break; }
+      byId.set(recipe.id, n);
+    }
+    index = { length: recipes.length, byId };
+    standaloneIndexes.set(recipes, index);
+  }
+  if (index.byId) {
+    const n = index.byId.get(id);
+    if (n !== undefined) { const recipe = recipes[n]; if (indexable(recipe) && recipe.id === id) return recipe; }
+  }
+  return recipes.find(recipe => recipe.id === id);
+}
+/**
  * V16: ventana residente ponderada por utilidad. Con `tecnologia.mejoraLocal > 0` o
  * `tecnologia.efectosHerramientas` (leyes ligadas al anfitrión con `setParams`), al desbordar la
  * ventana se expulsa la receta MÁS ANTIGUA SIN USOS de su mitad más antigua, para que una racha de
@@ -226,16 +254,55 @@ function cacheRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe): v
  * cierra antes la sesión. Una sesión sólo se abre con el catálogo activo, ids únicos en la ventana,
  * `maxRecipes` entero positivo y la ventana sin exceso; si no, todo sigue el camino de siempre.
  */
-interface RecipeSession { lru: Map<string, TechnologyRecipe>; max: number; touched: boolean; utilityAware: boolean; }
+/**
+ * Memoria de la sesión (V18 ola 2). Perfil del mundo real (3 207 habitantes): con 32 instrucciones por
+ * persona y la ventana de 256, `evaluateCooperation` resuelve por cada vecino las recetas del maestro y
+ * del aprendiz; las que no caben en la ventana se volvían a LEER Y COPIAR del archivo en cada
+ * resolución (la misma receta, decenas de veces en una misma decisión), y cada resolución repetía la
+ * expresión regular del id y `checkedRecipe`. Durante una sesión nada de eso puede cambiar:
+ *  - `archived`: la copia que el archivo dio para cada id en esta sesión. El paso lee una sola foto del
+ *    archivo (`readBatch`) y toda escritura (estadísticas, registro, confirmación) cierra antes la sesión,
+ *    así que una segunda lectura daría una copia con el mismo contenido. La búsqueda sigue el orden de
+ *    siempre —pendientes, ventana, y sólo entonces el archivo— y los toques de la ventana son los mismos,
+ *    en el mismo orden: la ventana final es la de siempre.
+ *  - `checked`: id → objeto ya validado (id, tiempo y estadísticas) en esta sesión. Sólo se salta la
+ *    validación si la búsqueda devuelve EXACTAMENTE ese objeto.
+ * Las dos memorias se vacían si cambia algo que la validación o la búsqueda leen (tick, `recipeCounter`,
+ * el catálogo, el arreglo `pending` o su longitud): fallan cerradas aunque alguien cambie el estado sin
+ * pasar por este módulo.
+ */
+interface RecipeSession {
+  lru: Map<string, TechnologyRecipe>; max: number; touched: boolean; utilityAware: boolean;
+  base: TechnologyRecipe[]; tick: number; counter: number; catalogue: TechnologyState['catalogue'];
+  pending: TechnologyRecipe[]; pendingLength: number;
+  checked: Map<string, TechnologyRecipe>; archived: Map<string, TechnologyRecipe>;
+}
 const sessions = new WeakMap<TechnologyState, RecipeSession>();
 function endRecipeSession(state: TechnologyState): void {
   const session = sessions.get(state);
   if (!session) return;
   sessions.delete(state);
-  if (!session.touched) return;
+  if (!session.touched) {
+    // Sin toques el mapa es exactamente el índice de la ventana de siempre: se le devuelve, y la
+    // siguiente búsqueda fuera de sesión no recorre otra vez las 256 residentes.
+    if (state.recipes === session.base && !windowIndexes.has(state.recipes) && session.lru.size === state.recipes.length)
+      windowIndexes.set(state.recipes, { length: state.recipes.length, byId: session.lru });
+    return;
+  }
   const next = [...session.lru.values()];
   windowIndexes.set(next, { length: next.length, byId: session.lru });
   state.recipes = next;
+}
+/** Vacía la memoria de la sesión si cambió algo de lo que dependen sus entradas. */
+function sessionMemoFor(host: TechnologyCatalogueHost, session: RecipeSession): RecipeSession {
+  const state = host.technology, catalogue = state.catalogue;
+  if (session.tick !== host.tick || session.counter !== state.recipeCounter || session.catalogue !== catalogue ||
+    session.pending !== catalogue!.pending || session.pendingLength !== catalogue!.pending.length) {
+    session.checked.clear(); session.archived.clear();
+    session.tick = host.tick; session.counter = state.recipeCounter; session.catalogue = catalogue;
+    session.pending = catalogue!.pending; session.pendingLength = catalogue!.pending.length;
+  }
+  return session;
 }
 export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: () => T): T {
   const state = host.technology;
@@ -246,7 +313,10 @@ export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: ()
     if (!lru || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
     // The map now belongs to the session; retained arrays must rebuild their own index.
     windowIndexes.delete(state.recipes);
-    const session: RecipeSession = { lru, max, touched: false, utilityAware: utilityAwareWindow(host) };
+    const catalogue = state.catalogue!;
+    const session: RecipeSession = { lru, max, touched: false, utilityAware: utilityAwareWindow(host),
+      base: state.recipes, tick: host.tick, counter: state.recipeCounter, catalogue,
+      pending: catalogue.pending, pendingLength: catalogue.pending.length, checked: new Map(), archived: new Map() };
     sessions.set(state, session);
     try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
   };
@@ -275,11 +345,12 @@ function sessionEvictionKey(session: RecipeSession): string {
 export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: string,
   options: { cache?: boolean } = {}): TechnologyRecipe | undefined {
   const state = host.technology;
-  if (!catalogueEnabled(state)) return state.recipes.find(recipe => recipe.id === id);
+  if (!catalogueEnabled(state)) return standaloneRecipe(state.recipes, id);
+  const session = sessions.get(state);
+  if (session) return resolveInSession(host, sessionMemoFor(host, session), id, options.cache !== false);
   const number = serial(id);
   if (number < 1 || number > state.recipeCounter) return undefined;
-  const session = sessions.get(state);
-  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? (session ? session.lru.get(id) : residentRecipe(state.recipes, id));
+  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? residentRecipe(state.recipes, id);
   if (!recipe) {
     const reader = readers.get(state); if (!reader) fail('an archived reference requires its host reader');
     const archived = reader.resolve(id, host.tick);
@@ -288,7 +359,31 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
   } else {
     checkedRecipe(host, recipe, id);
   }
-  if (options.cache !== false) { if (session) touchInSession(session, recipe); else cacheRecipe(host, recipe); }
+  if (options.cache !== false) cacheRecipe(host, recipe);
+  return recipe;
+}
+/** La resolución de arriba dentro de una sesión, con su memoria: misma búsqueda (pendientes, ventana,
+ * archivo), mismo objeto o una copia del archivo con el mismo contenido, mismas excepciones y el mismo
+ * toque de la ventana. */
+function resolveInSession(host: TechnologyCatalogueHost, session: RecipeSession, id: string, cache: boolean): TechnologyRecipe | undefined {
+  const state = host.technology;
+  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? session.lru.get(id) ?? session.archived.get(id);
+  if (recipe === undefined || session.checked.get(id) !== recipe) {
+    // Primera vez en la sesión (o un objeto distinto): el camino completo de siempre.
+    const number = serial(id);
+    if (number < 1 || number > state.recipeCounter) return undefined;
+    if (recipe === undefined) {
+      const reader = readers.get(state); if (!reader) fail('an archived reference requires its host reader');
+      const archived = reader.resolve(id, host.tick);
+      if (!archived) return undefined;
+      recipe = reader.freshCopies === true ? checkedRecipe(host, archived, id) : structuredClone(checkedRecipe(host, archived, id));
+      session.archived.set(id, recipe);
+    } else {
+      checkedRecipe(host, recipe, id);
+    }
+    session.checked.set(id, recipe);
+  }
+  if (cache) touchInSession(session, recipe);
   return recipe;
 }
 export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: string): TechnologyRecipe | undefined {

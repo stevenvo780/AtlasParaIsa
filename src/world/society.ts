@@ -253,6 +253,19 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   const requested = requestedPrograms(world, learner);
   const unblocks = (program: TechnologyProgram, id: string) =>
     program.inputs.some(input => input.source === 'product' && input.recipeId === id) && inputsAvailable(program, id);
+  // V18 ola 2: `unblocks(p, id)` sólo puede ser verdadero si `id` es la receta de alguna entrada de
+  // producto de `p`. Los ids que aparecen así en lo recordado o pedido se reúnen una vez; para una
+  // candidata fuera de ese conjunto los dos `some` dan `false` sin evaluar nada (todo es puro aquí:
+  // `inputsAvailable` sólo rellena sus memorias locales), y dentro de él se evalúan como siempre.
+  let unblockable: Set<string | undefined> | undefined;
+  const mayUnblock = (id: string): boolean => {
+    if (!unblockable) {
+      unblockable = new Set();
+      for (const known of remembered) for (const input of known.program.inputs) if (input.source === 'product') unblockable.add(input.recipeId);
+      for (const program of requested) for (const input of program.inputs) if (input.source === 'product') unblockable.add(input.recipeId);
+    }
+    return unblockable.has(id);
+  };
   let powers: Record<Capability, number> | undefined;
   const viable: { recipe: TechnologyRecipe; gain: number }[] = [];
   for (const recipe of candidates) {
@@ -270,7 +283,7 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
     }
     let best = -Infinity;
     for (const capability of CAPABILITIES) best = Math.max(best, recipe.capacities[capability] - powers[capability]);
-    const gain = best + (remembered.some(known => unblocks(known.program, recipe.id)) || requested.some(program => unblocks(program, recipe.id)) ? 1 : 0);
+    const gain = best + (mayUnblock(recipe.id) && (remembered.some(known => unblocks(known.program, recipe.id)) || requested.some(program => unblocks(program, recipe.id))) ? 1 : 0);
     if (gain > 0.12) viable.push({ recipe, gain });
   }
   // Con una sola viable (o ninguna) el orden no decide nada: ni rareza ni desempates.

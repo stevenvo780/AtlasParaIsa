@@ -111,9 +111,11 @@ test('V18 stringifyExact: casos extremos byte a byte contra el serializador ante
     ['instancia de clase con -0', new Punto()], ['clave heredada enumerable', heredado], ['getter que devuelve -0', conGetter],
     ['Map y Set (sin enumerables)', { m: new Map([[1, -0]]), s: new Set([-0]) }], ['TypedArray', { f: new Float64Array([-0, 0, 1.5]) }],
     ['orden de claves numéricas', { b: 1, 2: -0, a: 2, 1: 3 }], ['números extremos', [Number.MAX_VALUE, Number.MIN_VALUE, -Number.MIN_VALUE, 1e21, 1e-7, 123456789012345680000, 5e-324]],
-    ['BigInt (lanza)', { a: 1n }], ['ciclo (lanza)', ciclo], ['objeto envuelto', { n: Object(-0), s: Object('x'), b: Object(true) }],
+    ['BigInt (lanza)', { a: 1n }], ['objeto envuelto', { n: Object(-0), s: Object('x'), b: Object(true) }],
   ];
   for (const [label, value] of casos) sameOutcome(value, label);
+  // Con recorrido iterativo acotado (ola 2), un ciclo delega en JSON.stringify nativo (TypeError, no desborde de pila).
+  assert.throws(() => stringifyExact(ciclo), TypeError);
   // La forma de salida de los casos con −0 es la del JSON válido: el −0 conserva su signo al releer.
   assert.equal(stringifyExact({ a: -0, b: 0 }), '{"a":-0,"b":0}');
   assert.ok(Object.is(JSON.parse(stringifyExact([-0]))[0], -0));

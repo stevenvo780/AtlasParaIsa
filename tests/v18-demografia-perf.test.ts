@@ -368,9 +368,10 @@ const GOLDEN_MUNDO: Record<string, string> = {
   'default/11': '04eccae9f6fff9bce0ee9ba14a4579eb93d96b83eba76252b0c63b27f202bd0a',
   'default/431': '06970b808b833c01a4e94bf14f17ae67b37c45fd910988db8bf28e62dea34aa3',
   'default/51926': '7d70c818adac9efbc90a91d50b4bed6fadd9d9c97fe36bd6a7cce996e304c4d5',
-  'openWorld-corta/11': 'f5b704cc6879d4464b53d691d714a0cccbac68ef4567793cf678b6f919152ce0',
-  'openWorld-corta/431': '8d6e136ab82330f0515fec57f546138b36a7831fa0f19044ddd6b73f10846334',
-  'openWorld-corta/51926': '2a3d017115eb38bdf61f1ff83c1758a29997e95d986cf0a06fd0f40be3979c56',
+  // `openWorld-corta` activa derivaCultural=1 (fisión Dunbar, stewardship y proceduralPersonName V18).
+  'openWorld-corta/11': 'f06462e0e34a1f2b07199de9d94ad822043dc0aa199e0eb2ff55e5be119e0ea4',
+  'openWorld-corta/431': '371e0495628af29c878292bc6cc4d75aee4771e3b5d31616ffb4cf00e2b4bb44',
+  'openWorld-corta/51926': '5a52c5c5b54b2409e90f92157e327d9bb0c72526bd5ffde466086980251badb9',
 };
 const capture = process.env.V18_CAPTURE === '1';
 

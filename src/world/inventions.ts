@@ -31,7 +31,28 @@ const COSTS: Record<StructureComponent, BlueprintView['cost']> = {
   garden: { wood: 2, stone: 1, work: 30 }, hearth: { wood: 1, stone: 2, work: 30 },
 };
 const clamp = (value: number, maximum = 1) => Math.max(0, Math.min(maximum, value));
-const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+/** V18 ola 2: `Math.hypot` es el coste dominante de este módulo (≈ 60 % del tiempo propio con miles de habitantes: cada
+ * llamada reserva un arreglo interno). Para dos argumentos V8 calcula `max·√Σ(|vᵢ|/max)²` con suma de Kahan; con dos
+ * términos positivos la compensación de la primera vuelta es exactamente 0, así que se reduce a `√(a² + b²)·max` con las
+ * mismas operaciones IEEE: el resultado es idéntico bit a bit (incluidos ±0, NaN e ∞). Al cargar el módulo se comprueba
+ * contra `Math.hypot` en una muestra; si un motor distinto difiriera, se usa `Math.hypot`. */
+export function hypotExact(x: number, y: number): number {
+  const ax = Math.abs(x), ay = Math.abs(y);
+  if (ax === Infinity || ay === Infinity) return Infinity;
+  if (x !== x || y !== y) return NaN;
+  const max = ax > ay ? ax : ay;
+  if (max === 0) return 0;
+  const a = ax / max, b = ay / max;
+  return Math.sqrt(a * a + b * b) * max;
+}
+const HYPOT_EXACT = (() => {
+  let state = 0x9e3779b9;
+  const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  const samples: [number, number][] = [[0, 0], [-0, 0], [0, -0], [3, 4], [NaN, 1], [1, NaN], [Infinity, NaN], [-Infinity, 2], [5e-324, 0], [1e308, 1e308]];
+  for (let i = 0; i < 512; i++) samples.push([(next() - 0.5) * 40, (next() - 0.5) * 40], [Math.floor(next() * 30) - 15, Math.floor(next() * 30) - 15]);
+  return samples.every(([x, y]) => Object.is(hypotExact(x, y), Math.hypot(x, y)));
+})();
+const distance = (a: Point, b: Point) => HYPOT_EXACT ? hypotExact(a.x - b.x, a.y - b.y) : Math.hypot(a.x - b.x, a.y - b.y);
 function counts(components: readonly StructureComponent[]): Record<StructureComponent, number> {
   const result = { frame: 0, roof: 0, cistern: 0, granary: 0, garden: 0, hearth: 0 };
   for (const component of components) {
@@ -432,14 +453,16 @@ function observeUse(world: World, structure: StructureView, benefit: number): vo
 // Sprint noche-perf2: los candidatos salen del índice por casillas (indice-puntos.ts), en el orden del arreglo.
 const functionalNear = (world: World, point: Point, radius = 1.5) => filtrarCerca(world.structures, point, radius + 1, s => Math.abs(s.x - point.x) <= radius + 1
   && Math.abs(s.y - point.y) <= radius + 1 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);
-export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (blueprintAffordances(s.components).foodCapacity ? s.food : 0), 0); }
+// `foodCapacity = granary·0.7` es positiva exactamente cuando hay algún granero (y `waterCapacity` con alguna cisterna): basta mirar
+// el componente, sin construir el recuento ni el objeto de capacidades por estructura.
+export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0); }
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */
 export function takeFood(world: World, person: Point, requested: number): number {
   if (!Number.isFinite(requested) || requested <= 0) return 0;
   const member = person as Person;
   let taken = 0;
   for (const structure of functionalNear(world, person).sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))) {
-    if (!blueprintAffordances(structure.components).foodCapacity) continue;
+    if (!structure.components.includes('granary')) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
     if (esMiembro(world.people, member, world.tick) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
@@ -451,7 +474,7 @@ export function takeFood(world: World, person: Point, requested: number): number
 /** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */
 export function waterAvailable(world: World, point: Point): number {
   return (tileAt(world, point)?.drinkingWater ?? 0) + functionalNear(world, point, 0.5)
-    .reduce((sum, structure) => sum + (blueprintAffordances(structure.components).waterCapacity > 0 ? structure.water : 0), 0);
+    .reduce((sum, structure) => sum + (structure.components.includes('cistern') ? structure.water : 0), 0);
 }
 
 /** Sole drinking debit: use ambient water first, then credit only water delivered by a cistern.
@@ -464,7 +487,7 @@ export function takeWater(world: World, person: Person, requested: number): numb
   tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
   let taken = ambient;
   for (const structure of functionalNear(world, person, 0.5)) {
-    if (blueprintAffordances(structure.components).waterCapacity <= 0) continue;
+    if (!structure.components.includes('cistern')) continue;
     const amount = Math.min(structure.water, needed - taken);
     structure.water -= amount; taken += amount;
     observeUse(world, structure, amount * 15);
@@ -564,10 +587,15 @@ export function stepStructures(world: World, _emit: Emit): void {
     }
   }
   if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {
-    const context = inventionContext(world, person), current = selectedBlueprint(world, person);
+    // El único efecto es la asignación de abajo, que exige `action !== 'build'` y otro plano mejor: quien construye, o sólo
+    // conoce su propio plano (o ninguno), no cambia; se evita entonces calcular el contexto local, que es lo más caro.
+    if (person.action === 'build') continue;
+    const current = selectedBlueprint(world, person), candidates = knownBlueprints(world, person);
+    if (candidates.length === 0 || (candidates.length === 1 && candidates[0]!.id === current.id)) continue;
+    const context = inventionContext(world, person);
     const value = (b: BlueprintView) => expectedValue(b.components, context) + b.usefulness * 0.12;
-    const observed = knownBlueprints(world, person).map(blueprint => ({ blueprint, value: value(blueprint) }))
+    const observed = candidates.map(blueprint => ({ blueprint, value: value(blueprint) }))
       .sort((a, b) => b.value - a.value || a.blueprint.id.localeCompare(b.blueprint.id))[0];
-    if (observed && observed.blueprint.id !== current.id && observed.value > value(current) + 0.025 && person.action !== 'build') person.blueprintId = observed.blueprint.id;
+    if (observed && observed.blueprint.id !== current.id && observed.value > value(current) + 0.025) person.blueprintId = observed.blueprint.id;
   }
 }

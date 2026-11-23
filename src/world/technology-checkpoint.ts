@@ -10,9 +10,8 @@ const identifier = (value: unknown): value is string => typeof value === 'string
 /** `Object.keys` cuenta solo claves string propias y enumerables. Un material heredado sigue valiendo. */
 function composition(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  let keys = 0;
-  for (const key in value) if (Object.hasOwn(value, key) && ++keys > 3) return false;
-  if (keys !== 3) return false;
+  // `for…in` + `hasOwn` cuenta las mismas claves (propias, enumerables, cadena) que `Object.keys`, sin el recorrido de la cadena de prototipos.
+  if (Object.keys(value).length !== 3) return false;
   const record = value as Record<string, unknown>;
   return integer(record.wood) && integer(record.stone) && integer(record.water);
 }
@@ -47,36 +46,66 @@ function sameProcessSerial(id: string, serial: number): boolean {
   }
   return value === serial;
 }
-/** `/^product-[1-9]\\d*$/` y `integer(Number(id.slice(8)), max)` sin regex ni copia del sufijo. */
-function productSerial(id: string, max: number): boolean {
-  if (id.length < 9) return false;
+/** `/^product-[1-9]\\d*$/` y `integer(Number(id.slice(8)), max)` sin regex ni copia del sufijo.
+ * Devuelve el serial, o `-1` si el id no es un `product-N` válido con N ≤ max (un serial válido es ≥ 1). */
+function productSerial(id: string, max: number): number {
+  if (id.length < 9) return -1;
   if (id.charCodeAt(0) !== 112 || id.charCodeAt(1) !== 114 || id.charCodeAt(2) !== 111 || id.charCodeAt(3) !== 100
-    || id.charCodeAt(4) !== 117 || id.charCodeAt(5) !== 99 || id.charCodeAt(6) !== 116 || id.charCodeAt(7) !== 45) return false;
+    || id.charCodeAt(4) !== 117 || id.charCodeAt(5) !== 99 || id.charCodeAt(6) !== 116 || id.charCodeAt(7) !== 45) return -1;
   const first = id.charCodeAt(8);
-  if (first < 49 || first > 57) return false;
+  if (first < 49 || first > 57) return -1;
   let value = first - 48;
   for (let i = 9; i < id.length; i++) {
     const digit = id.charCodeAt(i) - 48;
-    if (digit < 0 || digit > 9) return false;
+    if (digit < 0 || digit > 9) return -1;
     value = value * 10 + digit;
   }
-  return integer(value, max);
+  return integer(value, max) ? value : -1;
+}
+/** V18 ola 2: en el alfabeto de los ids `compareId` es el orden lexicográfico por unidades UTF-16 (el de `<`),
+ * así que una lista cuyos ids están todos en él se ordena con la comparación nativa de cadenas, sin recorrer
+ * cada par carácter a carácter. Un id fuera del alfabeto, o que no es cadena, usa `compareId` como siempre
+ * (incluido el mismo `TypeError` ante un id no cadena en una lista de 2 o más). */
+const plainId = (id: unknown): boolean => {
+  if (typeof id !== 'string') return false;
+  for (let i = 0; i < id.length; i++) if (!idAlphabet(id.charCodeAt(i))) return false;
+  return true;
+};
+const compareRaw = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+/** `list.sort(compareRaw por clave)` sin reservar la copia temporal del ordenamiento cuando ya está en orden (no decreciente:
+ * el orden estable lo deja igual). Sólo para claves que son todas cadenas del alfabeto. */
+function sortedRaw<T>(list: T[], key: (element: T) => string): void {
+  for (let i = 1; i < list.length; i++) if (key(list[i - 1]!) > key(list[i]!)) { list.sort((x, y) => compareRaw(key(x), key(y))); return; }
 }
 
 /** Captures only technology matter, never raw inventories, decisions, or random state. */
 export function captureTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number,
   reason: TechnologyCheckpoint['reason']): TechnologyCheckpoint {
+  const inventories: TechnologyCheckpoint['inventories'] = [];
+  let actorsPlain = true;
+  for (let a = 0; a < actors.length; a++) {
+    const actor = actors[a]!, source = actor.technology.items, items: TechnologyCheckpoint['inventories'][number]['items'] = [];
+    let itemsPlain = true;
+    for (let i = 0; i < source.length; i++) {
+      const item = source[i]!, id = item.id;
+      if (itemsPlain && !plainId(id)) itemsPlain = false;
+      items.push(item.contents
+        ? { id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition }, contents: { ...item.contents } }
+        : { id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition } });
+    }
+    if (items.length > 1) { if (itemsPlain) sortedRaw(items, item => item.id); else items.sort((x, y) => compareId(x.id, y.id)); }
+    if (actorsPlain && !plainId(actor.id)) actorsPlain = false;
+    inventories.push({ actorId: actor.id, residue: { ...actor.technology.residue }, items });
+  }
+  if (inventories.length > 1) { if (actorsPlain) sortedRaw(inventories, inventory => inventory.actorId); else inventories.sort((x, y) => compareId(x.actorId, y.actorId)); }
   return { version: 1, tick, executionCounter: state.executionCounter, reason,
-    ...(state.water ? { water: { ...state.water } } : {}),
-    inventories: actors.map(actor => ({ actorId: actor.id, residue: { ...actor.technology.residue },
-      items: actor.technology.items.map(item => ({ id: item.id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition }, ...(item.contents ? { contents: { ...item.contents } } : {}) }))
-        .sort((a, b) => compareId(a.id, b.id)),
-    })).sort((a, b) => compareId(a.actorId, b.actorId)) };
+    ...(state.water ? { water: { ...state.water } } : {}), inventories };
 }
 
 /** Shape/integrity of a historical opening, not a claim that subsequent flows close. */
 /** Un inventario por habitante vivo: espeja el tope anticorrupción de `assertWorld` (ruling R17); antes 128, y 32 antes de T041. Ya no limita el mundo. */
 const MAX_CHECKPOINT_INVENTORIES = POPULATION_HARD_LIMIT;
+const ITEM_BITMAP_LIMIT = 2 ** 26;
 
 export function assertTechnologyCheckpoint(state: TechnologyState, tick: number): void {
   const checkpoint = state.checkpoint;
@@ -92,7 +121,13 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
     const serial = Number(event.id.slice(8));
     if (serial <= checkpoint.executionCounter ? event.tick > checkpoint.tick : event.tick <= checkpoint.tick) fail();
   }
-  const actorIds = new Set<string>(), itemIds = new Set<string>();
+  const actorIds = new Set<string>();
+  // V18 ola 2: un id `product-N` válido es exactamente su serial N (sin ceros a la izquierda), así que «repetido»
+  // equivale a «serial ya visto». Un mapa de bits por serial (≤ 2^26) reemplaza al `Set` de cadenas; fuera de ese
+  // rango (o con un contador forjado) se usa un `Set` de seriales, con el mismo veredicto.
+  const counter = state.itemCounter;
+  const seenBits = Number.isSafeInteger(counter) && counter >= 0 && counter <= ITEM_BITMAP_LIMIT ? new Uint32Array((counter >>> 5) + 1) : undefined;
+  const seenSerials = seenBits ? undefined : new Set<number>();
   let contained = 0;
   // Sprint noche-perf2 2026-09-22: con ~230 habitantes cada rotación resolvía ~1 800 objetos, casi todos
   // de unas pocas decenas de recetas, y cada resolución fuera de la ventana va al archivo. Dentro de esta
@@ -117,10 +152,12 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
     for (const item of inventory.items) {
       if (!item) fail();
       const itemId = item.id;
-      if (!identifier(itemId) || !productSerial(itemId, state.itemCounter) ||
-        itemIds.has(itemId) || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
+      if (!identifier(itemId)) fail();
+      const serial = productSerial(itemId, counter);
+      if (serial < 0 || (seenBits ? (seenBits[serial >>> 5]! & (1 << (serial & 31))) !== 0 : seenSerials!.has(serial))
+        || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
         !integer(item.mass) || item.mass === 0 || item.mass !== item.composition.wood + item.composition.stone + item.composition.water) fail();
-      itemIds.add(item.id);
+      if (seenBits) seenBits[serial >>> 5]! |= 1 << (serial & 31); else seenSerials!.add(serial);
       if (item.contents !== undefined) {
         if (!state.water) fail();
         assertContainedWater(item.contents, checkpoint.tick);

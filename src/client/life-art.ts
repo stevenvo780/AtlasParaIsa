@@ -43,15 +43,23 @@ export function paintTree(g: CanvasRenderingContext2D, form: TreeForm, pose = 1)
   block(13, 43, 4, 1, '#69533e'); block(17, 42, 3, 2, '#69533e');
   if (form.foliage === 0) {
     // Low received ground cover is not evidence of felling or tree death.
-    // Keep standing wood and its height; tapered, unequal forks avoid a repeated fence glyph.
+    // Keep standing wood and its height; weathered silver-bark forks avoid clashing with warm timber houses.
+    // Note: keep R >= G >= B on all pixels so leafless wood never registers as green foliage.
+    const barkDark = '#57524b', barkMid = '#736d64', barkLight = '#918a7e';
+    block(16 - Math.floor(trunk / 2), top + crown * .5, trunk, form.height - crown * .5, barkDark);
+    block(16, top + crown * .5, 1, form.height - crown * .5, barkLight);
+    block(13, 43, 4, 1, barkDark); block(17, 42, 3, 2, barkDark);
     const lean = form.variant % 2 === 0 ? -1 : 1;
     for (let step = 0; step < Math.ceil(crown * .52); step++) {
-      block(16 + lean * Math.floor(step / 5), top + crown * .52 - step, step < 3 ? 2 : 1, 2, '#795f43');
+      const dx = lean * Math.floor((step + form.variant) / 4);
+      block(16 + dx, top + crown * .52 - step, step < 4 ? 2 : 1, 2, step % 3 === 0 ? barkLight : barkMid);
     }
     for (const side of [-1, 1]) {
-      const length = 3 + (form.variant + (side > 0 ? 1 : 0)) % 3;
-      const fork = top + crown * (side === lean ? .55 : .81);
-      for (let step = 0; step < length; step++) block(16 + side * step, fork - step, step < 2 ? 2 : 1, 2, '#795f43');
+      const length = 3 + (form.variant + (side > 0 ? 1 : 0)) % 4;
+      const fork = top + crown * (side === lean ? .52 : .78);
+      for (let step = 0; step < length; step++) {
+        block(16 + side * (step + 1), fork - step, step < 2 ? 2 : 1, 2, step === length - 1 ? barkLight : barkMid);
+      }
     }
     return;
   }
@@ -144,80 +152,245 @@ export function paintAnimal(g: CanvasRenderingContext2D, species: AnimalView['sp
 export interface StructureSurface {
   materials?: { wood: number; stone: number };
   ground?: Pick<Tile, 'growth' | 'vegetation' | 'cultivation' | 'moisture'>;
+  generation?: number;
+  communityColor?: string;
 }
 
 /** Parts change layout and capacity; material tones describe the blueprint cost, never an invented alloy. */
 export function paintStructure(g: CanvasRenderingContext2D, s: StructureView, surface: StructureSurface = {}): void {
-  const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(Math.round(x), Math.round(y), Math.max(0, Math.round(w)), Math.max(0, Math.round(h))); };
+  const block = (x: number, y: number, w: number, h: number, color: string) => {
+    g.fillStyle = color;
+    g.fillRect(Math.round(x), Math.round(y), Math.max(0, Math.round(w)), Math.max(0, Math.round(h)));
+  };
   const count = (part: StructureView['components'][number]) => s.components.filter(c => c === part).length;
-  const frames = count('frame'), roofs = count('roof'), cisterns = count('cistern'), stores = count('granary'), gardens = count('garden');
+  const frames = count('frame'), roofs = count('roof'), cisterns = count('cistern');
+  const stores = count('granary'), gardens = count('garden'), hearths = count('hearth');
   const condition = Math.max(0, Math.min(1, s.condition)), degraded = condition < .65, broken = condition < .3;
   const wood = surface.materials?.wood ?? 0, stone = surface.materials?.stone ?? 0;
-  const masonry = wood + stone > 0 ? Math.round(stone / (wood + stone) * 4) : 1;
-  const left = frames > 1 ? 3 : cisterns ? 3 : 6, width = frames > 1 ? 26 : cisterns ? 19 : 21;
-  const floor = stores ? 25 : 28, eave = stores ? 12 : gardens ? 14 : 13;
-  const timber = degraded ? '#88785f' : '#bc9767', beam = '#6b513c', light = '#e0bf87';
-  block(2, 29, 28, 2, '#17292030');
+  const stoneRatio = wood + stone > 0 ? stone / (wood + stone) : 0.25;
+  const masonry = wood + stone > 0 ? Math.round(stoneRatio * 6) : 1;
+  const gen = Math.max(0, Math.min(4, surface.generation ?? (frames > 1 || roofs > 1 || cisterns + stores + gardens + hearths >= 2 ? 2 : cisterns + stores + gardens + hearths === 1 ? 1 : 0)));
+  const outline = '#2b1d14';
+  const communityHex = surface.communityColor && /^#[0-9a-fA-F]{6}$/.test(surface.communityColor) ? surface.communityColor : null;
+
+  // Layout geometry: never erase the main room when a garden or annex is attached.
+  const hasRightAnnex = cisterns > 0;
+  const hasLeftGarden = gardens > 0;
+  const left = frames > 1 ? (hasLeftGarden ? 6 : 3) : hasLeftGarden ? 9 : hasRightAnnex ? 4 : 6;
+  const width = frames > 1 ? (hasRightAnnex ? 19 : 24) : hasLeftGarden ? (hasRightAnnex ? 14 : 18) : hasRightAnnex ? 18 : 20;
+  const floor = stores ? 25 : 27;
+  const wallH = gen === 0 && frames <= 1 && roofs <= 1 && cisterns + stores + gardens + hearths === 0 ? 11 : gen >= 2 || frames > 1 ? 15 : 13;
+  const eave = floor - wallH;
+
+  // Ground shadow & stone foundation plinth (high value contrast against #a8825c soil)
+  block(2, 29, 28, 2, '#14201948');
+  block(left - 1, floor, width + 2, 2, outline);
+  block(left, floor, width, 1, '#cfc9ba');
+
   if (frames) {
-    // Raised granaries, open garden shelters and framed rooms occupy different silhouettes.
-    block(left, floor, width, Math.max(1, masonry), '#a49a80');
-    block(left, floor + 1, width, 1, '#686d62');
-    if (stores) for (let x = left + 2; x < left + width; x += 7) { block(x, floor, 2, 4, beam); block(x - 1, 28, 4, 1, '#ada68c'); }
-    if (!gardens) {
-      block(left + 2, eave, width - 4, floor - eave, timber);
-      for (let y = eave + 2; y < floor; y += 3) block(left + 2, y, width - 4, 1, '#97774f');
-      block(left + width - 6, floor - 8, 4, 8, '#4e4637');
-      block(left + width - 6, floor - 8, 1, 8, '#deb778');
-      if (stores) for (let x = left + 4; x < left + width - 7; x += 4) block(x, eave + 3, 2, 2, '#4e4637');
+    // Raised granary stilts
+    if (stores) {
+      for (let x = left + 2; x < left + width - 1; x += 6) {
+        block(x, floor + 1, 2, 3, outline);
+        block(x, floor + 1, 1, 2, '#8c6947');
+        block(x - 1, 28, 4, 1, '#cfc9ba');
+      }
     }
-    for (let bay = 0; bay <= Math.max(1, frames); bay++) {
-      const x = left + Math.round(bay / Math.max(1, frames) * (width - 2));
-      block(x, eave - 1, 2, floor - eave + 2, beam); block(x, eave, 1, floor - eave, light);
+
+    // Main wall body: light dressed timber (#e4c797) + real stone masonry courses up to stoneH
+    const innerX = left + 1, innerW = Math.max(4, width - 2), innerH = Math.max(4, floor - eave);
+    const stoneH = Math.min(innerH, Math.max(1, Math.round(innerH * Math.min(1, stoneRatio * 1.15))));
+    const wallTopColor = degraded ? '#a39074' : '#e4c797';
+    const plankJoint = degraded ? '#6e5c44' : '#b38b59';
+
+    // Outer dark outline of the building box
+    block(left, eave, width, innerH + 1, outline);
+    // Upper timber wall
+    block(innerX, eave + 1, innerW, innerH - 1, wallTopColor);
+    for (let y = eave + 3; y < floor - stoneH; y += 3) {
+      block(innerX, y, innerW, 1, plankJoint);
     }
-    block(left, eave, width, 2, beam);
+
+    // Lower (or full) coursed stone masonry wall
+    if (stoneH > 0) {
+      const sy0 = floor - stoneH;
+      block(innerX, sy0, innerW, stoneH, degraded ? '#8f8a7e' : '#cfc9ba');
+      for (let y = sy0; y < floor; y += 2) {
+        block(innerX, y, innerW, 1, '#5e5a52');
+        const shift = ((y - sy0) >> 1) & 1 ? 2 : 0;
+        for (let x = innerX + shift; x < innerX + innerW; x += 4) {
+          block(x, y + 1, 1, 1, '#5e5a52');
+          if (x + 1 < innerX + innerW) block(x + 1, y + 1, 2, 1, (x + y) % 3 === 0 ? '#9c9689' : '#ded8c8');
+        }
+      }
+      // Corner stone quoins when stone ratio is high
+      if (masonry >= 3) {
+        for (let y = eave + 2; y < floor; y += 3) {
+          block(innerX, y, 2, 2, '#ded8c8');
+          block(innerX + innerW - 2, y, 2, 2, '#9c9689');
+        }
+      }
+    }
+
+    // Structural frame posts & bays (1 frame vs 2+ frames)
+    const bays = Math.max(1, frames);
+    for (let bay = 0; bay <= bays; bay++) {
+      const x = left + Math.round(bay / bays * (width - 2));
+      block(x, eave, 2, innerH + 1, '#4a3321');
+      block(x, eave + 1, 1, innerH - 1, '#d4ad73');
+    }
+    // Reinforced buttresses for 2+ frames
+    if (frames > 1) {
+      block(left - 1, floor - 5, 2, 6, '#7a756c');
+      block(left + width - 1, floor - 5, 2, 6, '#7a756c');
+    }
+
+    // Doorway with warm interior depth & optional community lintel
+    const doorX = left + Math.max(2, width - 6);
+    const doorH = Math.min(7, innerH - 2);
+    block(doorX - 1, floor - doorH - 1, 5, doorH + 1, outline);
+    block(doorX, floor - doorH, 3, doorH, '#291d15');
+    block(doorX, floor - doorH, 1, doorH, '#c99b5b');
+    if (communityHex) {
+      block(doorX - 1, floor - doorH - 1, 5, 1, communityHex);
+    }
+
+    // Windows for multi-bay or higher-generation structures
+    if ((gen >= 2 || frames > 1 || stores > 0) && width >= 15) {
+      const winCount = frames > 1 ? 2 : 1;
+      for (let w = 0; w < winCount; w++) {
+        const wx = left + 3 + w * 6;
+        if (wx + 3 < doorX) {
+          block(wx, eave + 3, 3, 3, outline);
+          block(wx + 1, eave + 4, 1, 1, '#f2d08a');
+        }
+      }
+    }
+    // Cross-beam at eave
+    block(left - 1, eave, width + 2, 2, outline);
+    block(left, eave, width, 1, communityHex ?? '#6b4c32');
   }
+
+  // Hearth chimney stack (drawn behind/through roof ridge, no fake smoke or fire from historical `uses`)
+  if (hearths) {
+    const hx = left + 2;
+    block(hx - 1, 3, 6, floor - 3, outline);
+    block(hx, 4, 4, floor - 4, '#b8b2a4');
+    block(hx, 4, 1, floor - 4, '#ded8c8');
+    block(hx - 1, 3, 6, 2, '#ded8c8');
+    block(hx, 7, 4, 1, '#6e6a61');
+    block(hx, 11, 4, 1, '#6e6a61');
+    // Hearth firebox arch at base
+    block(hx - 1, floor - 5, 6, 5, '#5e5a52');
+    block(hx, floor - 4, 4, 4, '#24221e');
+    block(hx + 1, floor - 2, 2, 1, '#7a5238');
+  }
+
+  // Roofs: distinct silhouettes by roof count (1 vs 2 stepped gables) and palette by generation/stone
   if (roofs) {
     const spans = Math.max(1, roofs);
+    const roofDark = gen >= 3 || masonry >= 4 ? '#6e3222' : gen >= 1 ? '#5c3822' : '#6e5522';
+    const roofMid = degraded ? '#7d6e52' : gen >= 3 || masonry >= 4 ? '#9e4933' : gen >= 1 ? '#8c5634' : '#b89240';
+    const roofLight = degraded ? '#a69676' : gen >= 3 || masonry >= 4 ? '#d1785e' : gen >= 1 ? '#c78c58' : '#ebd07a';
+
     for (let bay = 0; bay < spans; bay++) {
-      const l = left - 1 + Math.floor(bay * (width + 2) / spans), w = Math.ceil((width + 2) / spans), ridge = eave - (gardens ? 5 : 8);
+      const spanW = Math.ceil((width + 4) / spans);
+      const l = left - 2 + Math.floor(bay * (width + 2) / spans);
+      // Second roof gable is taller/stepped so "Casa de dos cubiertas" has an unmistakable twin silhouette
+      const roofH = (spans > 1 ? (bay === 0 ? 6 : 8) : gen === 0 ? 5 : gen >= 2 ? 8 : 7);
+      const ridge = Math.max(2, eave - roofH);
       for (let row = 0; row < eave - ridge; row++) {
-        const inset = cisterns ? Math.max(0, Math.round((eave - ridge - row - 1) * .55)) : Math.round((eave - ridge - row - 1) * w / (2 * (eave - ridge)));
-        block(l + inset, ridge + row, w - inset * (cisterns ? 1 : 2), 1, row % 3 === 0 ? '#e0bc79' : degraded ? '#9c8862' : '#b78a50');
+        const taper = gen === 0 && spans === 1
+          ? Math.round((eave - ridge - row - 1) * .45)
+          : Math.round((eave - ridge - row - 1) * spanW / (2 * Math.max(1, eave - ridge)));
+        const rx = l + taper;
+        const rw = Math.max(2, spanW - taper * (gen === 0 && spans === 1 ? 1 : 2));
+        block(rx - 1, ridge + row, rw + 2, 1, outline);
+        block(rx, ridge + row, rw, 1, row === 0 ? roofLight : row % 2 === 0 ? roofMid : roofDark);
       }
-      block(l, eave - 1, w, 2, '#76583d'); block(l + 1, ridge, Math.max(2, w * .28), 1, '#efd39a');
-      if (broken) { g.clearRect(l + w * .48, ridge + 3, 3, 3); block(l + 3, floor - 1, 6, 2, '#786448'); }
+      block(l - 1, eave - 1, spanW + 2, 2, outline);
+      block(l, eave - 1, spanW, 1, roofLight);
+
+      // Community pennant on main roof peak
+      if (communityHex && bay === spans - 1) {
+        const px0 = l + Math.floor(spanW / 2);
+        block(px0, Math.max(0, ridge - 4), 1, 4, outline);
+        block(px0 + 1, Math.max(0, ridge - 4), 3, 2, communityHex);
+      }
+      if (broken) {
+        g.clearRect(l + Math.floor(spanW * .45), ridge + 2, 3, 3);
+        block(l + 2, floor - 1, 5, 2, '#5c4b36');
+      }
     }
   }
-  for (let i = 0; i < cisterns; i++) {
-    const x = 24 - i * 7, y = 21 - i * 2;
-    block(x, y, 7, 8, '#79857c'); block(x + 1, y + 1, 5, 6, '#384e4b');
-    const fill = Math.max(0, Math.min(5, Math.ceil(s.water / Math.max(1, cisterns) / .6 * 5)));
-    if (fill) { block(x + 1, y + 7 - fill, 5, fill, '#529fa4'); block(x + 1, y + 7 - fill, 5, 1, '#bae2d3'); }
-    block(x, y, 7, 1, '#d5d0b3'); block(x, y + 7, 7, 1, '#afb39c');
-    if (roofs) { block(x + 3, eave, 1, y - eave, '#b4bb9d'); block(left + width - 4, eave + 1, Math.max(1, x + 4 - left - width + 4), 1, '#73877f'); }
-  }
+
+  // Granary modules: raised storage chests with visible golden grain level
   for (let i = 0; i < stores; i++) {
-    const x = left + 2 + i * 7;
-    block(x, floor - 6, 6, 5, '#8d673e'); block(x, floor - 6, 6, 1, '#dfba73');
+    const x = left + 2 + i * 7, y = floor - 7;
+    block(x - 1, y - 1, 7, 7, outline);
+    block(x, y, 5, 5, '#6e4e2e');
+    block(x, y, 5, 1, '#d9b066');
     const fill = Math.max(0, Math.min(4, Math.ceil(s.food / Math.max(1, stores) / .7 * 4)));
-    if (fill) { block(x + 1, floor - 1 - fill, 4, fill, '#e9c677'); block(x + 2, floor - fill, 1, Math.max(1, fill - 1), '#b98c48'); }
+    if (fill) {
+      block(x + 1, y + 5 - fill, 3, fill, '#f2ca68');
+      block(x + 1, y + 5 - fill, 3, 1, '#fff0b8');
+    }
   }
+
+  // Cistern modules: stone water tower / well on the right with bright turquoise water gauge
+  for (let i = 0; i < cisterns; i++) {
+    const x = 23 - i * 6, y = 18 - i * 2;
+    block(x - 1, y - 1, 8, 11, outline);
+    block(x, y, 6, 9, '#b8b4a6');
+    block(x + 1, y + 1, 4, 7, '#22383b');
+    const fill = Math.max(0, Math.min(6, Math.ceil(s.water / Math.max(1, cisterns) / .6 * 6)));
+    if (fill) {
+      block(x + 1, y + 8 - fill, 4, fill, '#3da5ad');
+      block(x + 1, y + 8 - fill, 4, 1, '#b8f2e6');
+    }
+    block(x, y, 6, 1, '#e6e1d0');
+    block(x, y + 8, 6, 1, '#8c897d');
+    if (roofs) {
+      block(left + width - 1, eave + 1, Math.max(1, x - (left + width) + 2), 2, '#5e6e68');
+      block(x + 2, eave + 1, 2, Math.max(1, y - eave - 1), '#7d8f88');
+    }
+  }
+
+  // Garden modules: fenced courtyard beds in front/left (never deleting the house walls!)
   for (let i = 0; i < gardens; i++) {
-    const x = 2 + i * 11, y = 24;
-    block(x, y, 10, 5, '#745a3f'); block(x, y + 4, 10, 1, '#c69f6d');
-    for (let row = 0; row < 2; row++) block(x + 1, y + row * 2, 8, 1, '#493f31');
-    // A garden component is prepared infrastructure; crops require received living ground.
+    const x = 1 + i * 10, y = 21;
+    // Fenced enclosure with dark irrigated soil contrast
+    block(x, y, 9, 8, outline);
+    block(x + 1, y + 1, 7, 6, '#423122');
+    // Fence posts & top rail
+    block(x, y - 2, 1, 3, '#d4ad73');
+    block(x + 4, y - 2, 1, 3, '#d4ad73');
+    block(x + 8, y - 2, 1, 3, '#d4ad73');
+    block(x, y - 1, 9, 1, '#8c6742');
+    // Furrows
+    for (let row = 0; row < 3; row++) {
+      block(x + 1, y + 1 + row * 2, 7, 1, '#2b1e14');
+    }
+    // Live crops require received cultivated living ground
     const ground = surface.ground;
     if (ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15) {
-      for (let n = 0; n < 3; n++) block(x + 2 + n * 3, y - 1, 1, 3, ground.moisture > .3 ? '#97b86f' : '#baaa69');
+      const lush = ground.moisture > .3;
+      for (let col = 0; col < 3; col++) {
+        for (let row = 0; row < 2; row++) {
+          const cx = x + 2 + col * 2, cy = y + 1 + row * 3;
+          block(cx, cy - 1, 2, 2, lush ? '#68a848' : '#9eb054');
+          block(cx, cy - 2, 1, 1, lush ? '#a8e070' : '#d4c86a');
+        }
+      }
     }
   }
-  if (count('hearth')) {
-    block(left + 3, 7, 4, 13, '#a2a08d'); block(left + 2, 6, 6, 2, '#d4cbb0');
-    block(left + 3, 13, 3, 1, '#777d72'); block(left + 4, 9, 3, 1, '#777d72');
-    block(left + 2, 24, 6, 4, '#6b6d60'); block(left + 3, 25, 4, 3, '#343a31');
-    // No flame or smoke: StructureView carries no current fuel-burning receipt.
+
+  if (degraded) {
+    block(left + 3, eave + 3, 1, 4, outline);
+    block(left + 4, eave + 6, 2, 1, outline);
   }
-  if (degraded) { block(left + 3, eave + 3, 1, 4, '#554735'); block(left + 4, eave + 6, 2, 1, '#554735'); }
-  if (broken) { block(left + 2, 28, 5, 1, '#6d624d'); block(left + 9, 29, 3, 1, '#9c8866'); }
+  if (broken) {
+    block(left + 2, 28, 5, 1, outline);
+    block(left + 9, 29, 3, 1, '#7a684b');
+  }
 }

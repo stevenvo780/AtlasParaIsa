@@ -19,7 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
-import { classifyTerrainPixel, hash3, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
+import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -743,7 +743,7 @@ export class Landscape {
       for (const value of `${t.terrain}:${t.biome ?? ''}:${t.feature ?? ''}`) acc(value.charCodeAt(0));
       for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(groundBucket(value));
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
-      for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
+      for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04, t.moisture > .65,
         (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
         (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72,
         (t.wood ?? 0) > 0, (t.wood ?? 0) > .05]) acc(active ? 1 : 0);
@@ -917,9 +917,7 @@ export class Landscape {
     const water = clamp01(tile.drinkingWater ?? 0);
     const reservoir = tile.feature === 'spring' || tile.feature === 'pool';
     if (water > .04 && (reservoir || tile.biome === 'wetland' || tile.moisture > .65)) {
-      ellipse(g, ox+10, oy+11, 2 + water*3, 1+water*2, css(P.soilDark));
-      ellipse(g, ox+10, oy+10, 1 + water*3, .5+water*2, css(P.waterShallow));
-      px(g, ox+9, oy+9, Math.max(1,Math.round(water*3)), 1, css(P.waterGleam, .65));
+      this.bakePuddleField(g, tile, ox, oy, water, reservoir);
     }
     const feature = tile.feature;
     if (reservoir && water <= .04) {
@@ -944,18 +942,28 @@ export class Landscape {
       const stock = feature === 'rock' ? (tile.stone ?? 0) : (tile.fertility ?? .6) * 8;
       if (stock > .2) {
         const size = Math.min(5, 2 + Math.min(stock / 3, 2.5) + rnd(x,y,2600) - .5) * edge;
-        const cx = ox + 8 + Math.floor(rnd(x,y,2601)*5) - 2;
-        const cy = oy + 9 + Math.floor(rnd(x,y,2602)*3) - 1;
-        const aspect = .6 + rnd(x,y,2603)*.2;
-        const color = feature === 'clay' ? mix(P.soilDark,P.coralDeep,.25) : P.stone;
-        ellipse(g,cx,cy+3,size+1,Math.max(1,2*edge),css(P.shadow,.2));
+        const cx = ox + 4 + Math.floor(rnd(x,y,2601)*9);
+        const cy = oy + 5 + Math.floor(rnd(x,y,2602)*7);
+        const aspect = .55 + rnd(x,y,2603)*.28;
+        const color = feature === 'clay' ? mix(P.soilDark,P.coralDeep,.22) : P.stone;
+        ellipse(g,cx,cy+2,size+1,Math.max(1,1.8*edge),css(P.shadow,.2));
         ellipse(g,cx,cy,size,size*aspect,css(darken(color,.2)));
         ellipse(g,cx-1,cy-1,size*.8,size*aspect*.72,css(color));
-        px(g,cx-2,cy-3,Math.max(1,Math.round(size*.6)),1,css(lighten(color,.2)));
+        px(g,cx-2,cy-2,Math.max(1,Math.round(size*.6)),1,css(lighten(color,.2)));
       }
     } else if (feature === 'reeds') {
-      const count = Math.max(1,Math.round(4*edge));
-      for(let i=0;i<count;i++){ const h = 2+Math.round(growth*5); const rx = ox + (count === 1 ? 8 : 3 + Math.round(i*9/(count-1))); px(g,rx,oy+12-h,1,h,css(P.reed));px(g,rx,oy+10-h,1,2,css(P.reedLight)); }
+      const count = Math.max(1, Math.round((3 + growth * 2) * edge));
+      for (let i = 0; i < count; i++) {
+        const h = 3 + Math.round(growth * 4) + (hash3(x, y, 801 + i) & 1);
+        const rx = ox + 2 + Math.floor(rnd(x, y, 810 + i * 11) * 12);
+        const ry = oy + 5 + Math.floor(rnd(x, y, 825 + i * 13) * 9);
+        const lean = (hash3(x, y, 840 + i) % 3) - 1;
+        px(g, rx, ry - h + 2, 1, Math.max(1, h - 2), css(P.reed));
+        px(g, rx + lean, ry - h, 1, 2, css(P.reedLight));
+        if (hash3(x, y, 860 + i) % 3 === 0) {
+          px(g, rx + lean, ry - h + 1, 1, 2, '#6b4c2b');
+        }
+      }
     } else if (feature === 'flowers') {
       for(let i=0;i<Math.max(1,Math.round((3+growth*4)*edge));i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
     }
@@ -963,17 +971,129 @@ export class Landscape {
     // A reservoir, bare patch or building may retain legacy wood without a living
     // tree feature. Show the actual deposit; never turn its water/rock into a tree.
     if ((tile.wood ?? 0) > 0 && !treeForm(tile) && !['stump', 'reeds', 'cactus'].includes(feature ?? 'none')) {
-      // Match the ground-cache stock buckets, keeping positive remnants visible.
+      // Match the ground-cache stock buckets, keeping positive remnants visible with subtle world jitter.
       const stock = Math.min(12, Math.max(.5, Math.round(tile.wood! * 2) / 2)), pieces = Math.min(3, Math.ceil(stock / 4));
+      const jx = Math.floor(rnd(x, y, 2701) * 4), jy = Math.floor(rnd(x, y, 2702) * 2);
       for (let i = 0; i < pieces; i++) {
         const width = Math.max(2, Math.round(2 + Math.sqrt(stock / 12) * 5));
-        px(g, ox+1+i*2, oy+12+i, width, 2, css(P.trunk));
-        px(g, ox+1+i*2, oy+12+i, width, 1, css(P.trunkLight));
-        px(g, ox+i*2, oy+12+i, 1, 2, css(P.soilLight));
+        px(g, ox+1+jx+i*2, oy+11+jy+i, width, 2, css(P.trunk));
+        px(g, ox+1+jx+i*2, oy+11+jy+i, width, 1, css(P.trunkLight));
+        px(g, ox+jx+i*2, oy+11+jy+i, 1, 2, css(P.soilLight));
       }
     }
     if ((tile.life ?? 0) > .45 && tile.vegetation > .25) {
       for(let i=0;i<3;i++) px(g, ox+2+Math.floor(rnd(x,y,1900+i)*12), oy+2+Math.floor(rnd(x,y,1920+i)*12), 1, 1, css(P.grassLight,.8));
+    }
+  }
+
+  /**
+   * Continuous 3×3 surface-water puddle field ("charcos").
+   * Neighboring tiles with potable surface water coalesce across cell edges via shared 2×2 corner
+   * bilinear weights + world-space basin micro-topography, while isolated pools/springs (and standalone
+   * unit-test calls where `tile` is not in `this.grid`) retain a guaranteed local pool away from the
+   * bottom-left wood deposit (`bx <= 7, by >= 12`).
+   */
+  private bakePuddleField(
+    g: CanvasRenderingContext2D,
+    tile: Tile,
+    ox: number,
+    oy: number,
+    water: number,
+    reservoir: boolean,
+  ): void {
+    const { x, y } = tile;
+    const inGrid = this.tileAt(x, y) === tile;
+    const cellStrength = (t: Tile | undefined): number => {
+      if (!t) return 0;
+      if (t.terrain === 'water') return 0.85;
+      const w = clamp01(t.drinkingWater ?? 0);
+      const res = t.feature === 'spring' || t.feature === 'pool';
+      if (w <= 0.04 || !(res || t.biome === 'wetland' || t.moisture > 0.65)) return 0;
+      return Math.min(1, (res ? 0.38 : 0.14) + Math.sqrt(w) * 0.48);
+    };
+    const w3 = new Float32Array(9);
+    w3[4] = Math.min(1, (reservoir ? 0.38 : 0.14) + Math.sqrt(water) * 0.48);
+    let neighborCount = 0;
+    if (inGrid) {
+      let idx = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++, idx++) {
+          if (idx === 4) continue;
+          const s = cellStrength(this.tileAt(x + dx, y + dy));
+          w3[idx] = s;
+          if (s > 0) neighborCount++;
+        }
+      }
+    }
+
+    const mudColor = css(P.soilDark, 0.82);
+    const shallowColor = css(P.waterShallow);
+    const deepColor = css(mix(P.waterShallow, P.waterDeep, 0.45));
+    const gleamColor = css(P.waterGleam, 0.65);
+
+    // Local spring/pool kernel center (kept in upper-right quadrant around (10,9) so bottom-left wood deposits stay visible)
+    const cx = 9.8 + (rnd(x, y, 503) - 0.5) * 2.2;
+    const cy = 8.8 + (rnd(x, y, 507) - 0.5) * 2.0;
+    const rx = 2.5 + water * 3.2;
+    const ry = 1.7 + water * 2.2;
+
+    const fieldAt = (bx: number, by: number): number => {
+      const wx = ox + bx, wy = oy + by;
+      const left = bx < 8 ? 0 : 1, top = by < 8 ? 0 : 1;
+      const u = (bx + 8.5) / ART - left;
+      const v = (by + 8.5) / ART - top;
+      const i0 = top * 3 + left;
+      const a = w3[i0]!, b = w3[i0 + 1]!, c = w3[i0 + 3]!, d = w3[i0 + 4]!;
+      const wa = (1 - u) * (1 - v), wb = u * (1 - v), wc = (1 - u) * v, wd = u * v;
+      let base = a * wa + b * wb + c * wc + d * wd;
+      if (a > 0 && d > 0 && b === 0 && c === 0) {
+        base = Math.max(base, Math.min(a, d) * (0.58 - Math.abs(u - v) * 0.42));
+      } else if (b > 0 && c > 0 && a === 0 && d === 0) {
+        base = Math.max(base, Math.min(b, c) * (0.58 - Math.abs(u + v - 1) * 0.42));
+      }
+      // World-space multi-tile basin depressions (28px & 11px lattices are incommensurate with 16px tiles,
+      // so puddles span 1.5–4 tiles organically while leaving mossy ground visible between pools).
+      const depression = materialNoise(wx, wy, 28, 509) * 0.64 + materialNoise(wx, wy, 11, 521) * 0.36;
+      const fine = materialNoise(wx, wy, 5, 533) - 0.5;
+      let val = base * 0.88 + (depression - 0.54) * 0.82 + fine * 0.08;
+
+      // Local pool core guarantees springs/pools and isolated puddle tiles always show a distinct water pool
+      if (reservoir || neighborCount === 0) {
+        const dx = (bx + 0.5 - cx) / rx;
+        const dy = (by + 0.5 - cy) / ry;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < 1.32) {
+          const core = (1.14 - dist2) * (0.54 + water * 0.34) + fine * 0.07;
+          if (core > val) val = core;
+        }
+      }
+      return val;
+    };
+
+    const grid = new Float32Array(ART * ART);
+    for (let by = 0; by < ART; by++) {
+      for (let bx = 0; bx < ART; bx++) {
+        grid[by * ART + bx] = fieldAt(bx, by);
+      }
+    }
+
+    for (let by = 0; by < ART; by++) {
+      for (let bx = 0; bx < ART; bx++) {
+        const f = grid[by * ART + bx]!;
+        if (f <= 0.33) continue;
+        const wx = ox + bx, wy = oy + by;
+        if (f <= 0.40) {
+          px(g, wx, wy, 1, 1, mudColor);
+        } else if (f <= 0.52) {
+          px(g, wx, wy, 1, 1, shallowColor);
+          const above = by > 0 ? grid[(by - 1) * ART + bx]! : fieldAt(bx, by - 1);
+          if (above <= 0.40 && (wx & 1) === 0 && (hash3(wx >> 1, wy, 541) % 5) === 0) {
+            px(g, wx, wy, 1, 1, gleamColor);
+          }
+        } else {
+          px(g, wx, wy, 1, 1, deepColor);
+        }
+      }
     }
   }
 
@@ -1076,12 +1196,16 @@ export class Landscape {
         x = before.x + dx * alpha;
         y = before.y + dy * alpha;
       }
+      let idHash = 2166136261;
+      for (let i = 0; i < p.id.length; i++) {
+        idHash = Math.imul(idHash ^ p.id.charCodeAt(i), 16777619) >>> 0;
+      }
       out.push({
         view: p,
         x,
         y,
         moving,
-        seed: hash3(p.id.length, p.id.charCodeAt(0) | 0, p.id.charCodeAt(p.id.length - 1) | 0) % 4096,
+        seed: idHash & 0xffff,
       });
     }
     return out;
@@ -1092,8 +1216,9 @@ export class Landscape {
     return (this.curr?.animals ?? []).map(view => {
       const before = this.prevAnimals.get(view.id);
       const dx = before ? view.x - before.x : 0, dy = before ? view.y - before.y : 0;
+      const defaultLeft = (hash3(view.id.length, view.id.charCodeAt(0) | 0, view.id.charCodeAt(view.id.length - 1) | 0) & 1) === 1;
       return { view, x: before ? before.x + dx * alpha : view.x, y: before ? before.y + dy * alpha : view.y,
-        moving: !!before && (dx !== 0 || dy !== 0) && alpha < 1, left: dx < 0 };
+        moving: !!before && (dx !== 0 || dy !== 0) && alpha < 1, left: dx !== 0 ? dx < 0 : defaultLeft };
     });
   }
 
@@ -1407,15 +1532,42 @@ export class Landscape {
   }
 
   private structureRaster(structure: StructureView): HTMLCanvasElement {
-    const materials = this.curr?.blueprints?.find(b => b.id === structure.blueprintId)?.cost;
-    const ground = this.tileAt(structure.x, structure.y);
+    const blueprint = this.curr?.blueprints?.find(b => b.id === structure.blueprintId);
+    const materials = blueprint?.cost;
+    const generation = blueprint?.generation;
+    // `stepStructures` irrigates the 4 cardinal neighbor tiles around a garden structure; check own cell + 4 neighbors.
+    let ground = this.tileAt(structure.x, structure.y);
+    for (const [dx, dy] of [[0, -1], [-1, 0], [1, 0], [0, 1]] as const) {
+      const nb = this.tileAt(structure.x + dx, structure.y + dy);
+      if (!nb) continue;
+      const nbPlanted = (nb.cultivation ?? 0) > .08 && nb.vegetation > .1 && (nb.growth ?? nb.vegetation) > .15;
+      const curPlanted = ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15;
+      if (nbPlanted && (!curPlanted || nb.moisture > (ground?.moisture ?? 0))) {
+        ground = nb;
+      }
+    }
+    let communityColor: string | undefined;
+    if (structure.builderId && this.curr?.communities?.length) {
+      const builder = this.curr.people.find(p => p.id === structure.builderId);
+      const comm = builder?.communityId
+        ? this.curr.communities.find(c => c.id === builder.communityId)
+        : undefined;
+      if (comm) communityColor = comm.color;
+    }
+    if (!communityColor && this.curr?.communities?.length) {
+      let bestDist = 18 * 18;
+      for (const c of this.curr.communities) {
+        const d2 = (c.x - structure.x) ** 2 + (c.y - structure.y) ** 2;
+        if (d2 < bestDist) { bestDist = d2; communityColor = c.color; }
+      }
+    }
     const cisterns = structure.components.filter(c=>c==='cistern').length, granaries = structure.components.filter(c=>c==='granary').length;
-    const waterLevel = clamp(Math.ceil(structure.water / Math.max(1, cisterns) / .6 * 5), 0, 5);
+    const waterLevel = clamp(Math.ceil(structure.water / Math.max(1, cisterns) / .6 * 6), 0, 6);
     const foodLevel = clamp(Math.ceil(structure.food / Math.max(1, granaries) / .7 * 4), 0, 4);
     const planted = ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15;
-    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
+    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${generation ?? -1}:${communityColor ?? ''}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
     let art = this.spriteCache.get(key);
-    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground}); this.cacheSprite(key, art); }
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground,generation,communityColor}); this.cacheSprite(key, art); }
     return art;
   }
 
@@ -1630,44 +1782,57 @@ export class Landscape {
   private drawPerson(g: CanvasRenderingContext2D, p: RenderPerson, t: number): void {
     const view = p.view;
     const resting = view.action === 'rest';
+    const stage = view.lifeStage;
+    const juvenile = stage === 'juvenile';
+    const senescent = stage === 'senescent';
     const ax = Math.round(p.x * ART + ART / 2);
-    const ay = Math.round(p.y * ART + ART / 2 + 4) - (resting ? 0 : 0);
+    const ay = Math.round(p.y * ART + ART / 2 + 4);
 
-    const fallback = view.role === 'I' ? P.coral : view.role === 'S' ? P.neutralCloth : P.neutralCloth;
+    const community = this.curr?.communities?.find(group => group.id === view.communityId);
+    const fallback = view.role === 'I' ? P.coral : view.role === 'S' ? P.neutralCloth : community ? parseColor(community.color, P.neutralCloth) : P.neutralCloth;
     const given = parseColor(view.color, fallback);
     const body =
-      view.role === 'I' ? P.coral : view.role === 'S' ? mix(given, P.paper, 0.18) : mix(given, P.neutralCloth, 0.45);
-    const bodyDark = darken(body, 0.24);
-    const legs = darken(body, 0.4);
+      view.role === 'I' ? P.coral : view.role === 'S' ? mix(given, P.paper, 0.18) : mix(given, P.neutralCloth, 0.16);
+    const bodyDark = darken(body, 0.28);
+    const legs = darken(body, 0.44);
 
     // Balanceo de paso: sólo si el servidor la movió de verdad.
-    const step = !this.reduceMotion && p.moving ? (Math.floor(t * 6 + p.seed) & 1) : 0;
+    const step = !this.reduceMotion && p.moving ? (Math.floor(t * (senescent ? 4.5 : 6) + p.seed) & 1) : 0;
     const bob = resting ? 0 : step === 1 ? -1 : 0;
     const baseY = resting ? ay + 2 : ay;
 
-    ellipse(g, ax, baseY + 1, 4, 1.6, css(P.shadow, 0.28));
-    const community = this.curr?.communities?.find(group => group.id === view.communityId);
-    if (community) ellipse(g,ax,baseY+2,5,1.1,css(parseColor(community.color,P.amber),.8));
+    ellipse(g, ax, baseY + 1, juvenile ? 3.2 : 4, 1.6, css(P.shadow, 0.32));
+    if (community) ellipse(g, ax, baseY + 2, juvenile ? 4.2 : 5.2, 1.3, css(parseColor(community.color, P.amber), .88));
+
+    const torsoH = juvenile ? 4 : 5;
+    const legH = juvenile ? 2 : 3;
+    const torsoTop = baseY - legH - torsoH;
 
     if (resting) {
       px(g, ax - 4, baseY - 3, 8, 3, css(bodyDark));
       px(g, ax - 3, baseY - 6, 6, 4, css(body));
     } else {
-      px(g, ax - 2, baseY - 3 + (step === 1 ? 0 : 0), 2, 3, css(legs));
-      px(g, ax, baseY - 3, 2, 3 - step, css(legs));
-      px(g, ax - 3, baseY - 8, 6, 5, css(body));
-      px(g, ax - 3, baseY - 4, 6, 1, css(bodyDark));
-      px(g, ax - 4, baseY - 8 + bob, 1, 3, css(bodyDark));
-      px(g, ax + 3, baseY - 8 - bob, 1, 3, css(bodyDark));
+      px(g, ax - 2, baseY - legH, 2, legH, css(legs));
+      px(g, ax, baseY - legH, 2, Math.max(1, legH - step), css(legs));
+      px(g, ax - 3, torsoTop, 6, torsoH, css(body));
+      px(g, ax - 3, baseY - legH - 1, 6, 1, css(bodyDark));
+      px(g, ax - 4, torsoTop + bob, 1, Math.max(2, torsoH - 2), css(bodyDark));
+      px(g, ax + 3, torsoTop - bob, 1, Math.max(2, torsoH - 2), css(bodyDark));
     }
 
-    const headTop = (resting ? baseY - 10 : baseY - 12) + bob;
-    px(g, ax - 2, headTop, 4, 4, css(P.skin));
-    px(g, ax - 2, headTop - 1, 4, 2, css(P.hair));
-    px(g, ax - 3, headTop, 1, 2, css(P.hair));
-    px(g, ax + 2, headTop, 1, 2, css(P.hair));
-    px(g, ax - 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
-    px(g, ax + 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
+    const skins = [P.skin, darken(P.skin, 0.08), lighten(P.skin, 0.07), mix(P.skin, P.soilLight, 0.18)];
+    const skinColor = view.role === 'S' || view.role === 'I' ? P.skin : skins[p.seed & 3]!;
+    const hairs = [P.hair, rgb(42, 32, 26), rgb(96, 64, 42), rgb(120, 78, 46), rgb(54, 44, 38)];
+    const hairColor = senescent ? rgb(198, 195, 186) : view.role === 'S' || view.role === 'I' ? P.hair : hairs[(p.seed >>> 2) % hairs.length]!;
+
+    const headTop = (resting ? baseY - 10 : torsoTop - 4 + (senescent ? 1 : 0)) + bob;
+    const headX = ax + (senescent && !resting ? 1 : 0);
+    px(g, headX - 2, headTop, 4, 4, css(skinColor));
+    px(g, headX - 2, headTop - 1, 4, 2, css(hairColor));
+    px(g, headX - 3, headTop, 1, 2, css(hairColor));
+    px(g, headX + 2, headTop, 1, 2, css(hairColor));
+    px(g, headX - 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
+    px(g, headX + 1, headTop + 2, 1, 1, css(darken(P.hair, 0.2), 0.75));
 
     if (view.role === 'S') {
       // Bufanda ámbar, con la cola al viento.
@@ -1688,11 +1853,13 @@ export class Landscape {
       px(g, ax - 1, headTop + 1, 1, 1, css(darken(P.hair, 0.2), 0.75));
       px(g, ax + 1, headTop + 1, 1, 1, css(darken(P.hair, 0.2), 0.75));
     } else {
-      // Vecindario: tres prendas apagadas, siempre la misma para la misma persona.
-      const variant = p.seed % 3;
-      if (variant === 0) px(g, ax - 3, baseY - 5, 6, 2, css(lighten(body, 0.22)));
-      else if (variant === 1) px(g, ax - 3, headTop - 1, 6, 1, css(darken(body, 0.15)));
-      else px(g, ax - 4, baseY - 8, 8, 2, css(darken(body, 0.3)));
+      // Vecindario: vestimenta con acento comunitario y variante por identidad completa.
+      const commAccent = community ? parseColor(community.color, body) : lighten(body, 0.22);
+      const variant = (p.seed >>> 5) % 4;
+      if (variant === 0) px(g, ax - 3, baseY - legH - 2, 6, 2, css(lighten(commAccent, 0.15)));
+      else if (variant === 1) px(g, headX - 3, headTop - 1, 6, 1, css(commAccent));
+      else if (variant === 2) px(g, ax - 4, torsoTop, 8, 2, css(darken(commAccent, 0.15)));
+      else { px(g, ax - 3, torsoTop, 2, torsoH, css(commAccent)); px(g, ax + 1, torsoTop, 2, torsoH, css(commAccent)); }
     }
     const atTarget = view.target ? Math.hypot(view.x - view.target.x, view.y - view.target.y) < .5 : false;
     const product = this.carriedProducts.get(view.id);

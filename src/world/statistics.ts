@@ -2,7 +2,7 @@ import type { Tile, WorldStats, WorldSample } from '../shared/types.js';
 import type { World } from './index.js';
 import { CHUNK_SIZE, MAX_COORDINATE } from './terrain.js';
 import { indiceDiversidad } from './diversidad.js';
-import { regionesSinAgua as regionesSinAguaDe } from './agua.js';
+import { lecturaResidente, regionesSinAgua as regionesSinAguaDe, type LecturaResidente } from './agua.js';
 import { demographicTraits } from './demography.js';
 import { paramsOf } from './params.js';
 
@@ -28,13 +28,13 @@ export function heredarEstadisticas(draft: World, source: World): void {
   const caras = carasPorMundo.get(source);
   if (caras) carasPorMundo.set(draft, caras);
 }
-function estadisticasCaras(world: World): EstadisticasCaras {
+function estadisticasCaras(world: World, lectura: LecturaResidente | undefined): EstadisticasCaras {
   const previa = carasPorMundo.get(world);
   // Un mundo que retrocede (recuperación) o que ya cumplió la cadencia recalcula.
   if (previa && world.tick >= previa.statsTick && world.tick - previa.statsTick < ESTADISTICAS_CARAS_CADA_TICKS) return previa;
   const caras: EstadisticasCaras = { statsTick: world.tick,
-    giniRecursosPorRegion: giniRecursosPorRegion(world.tiles), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles),
-    distanciaMediaAgua: distanciaMediaAgua(world.tiles), regionesSinAgua: regionesSinAguaDe(world.tiles),
+    giniRecursosPorRegion: giniRecursosPorRegion(world.tiles, lectura), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles, 0.1, lectura),
+    distanciaMediaAgua: distanciaMediaAgua(world.tiles, lectura), regionesSinAgua: regionesSinAguaDe(world.tiles, 16, lectura),
     diversidad: indiceDiversidad(world) };
   carasPorMundo.set(world, caras);
   return caras;
@@ -49,21 +49,39 @@ const packRegion = (x: number, y: number): number => (Math.floor(x / CHUNK_SIZE)
 
 /** Gini de la comida sumada por region (chunk de CHUNK_SIZE). Forma ordenada: O(n log n) en vez del
  * doble bucle O(n^2), identica por definicion y exacta en los ejemplos de prueba. */
-export function giniRecursosPorRegion(tiles: readonly Tile[]): number {
+export function giniRecursosPorRegion(tiles: readonly Tile[], lectura: LecturaResidente | undefined = lecturaResidente(tiles)): number {
   const totals = new Map<number, number>();
-  // Las teselas llegan agrupadas por región: se acumula la racha en una variable (continuando el total ya guardado,
-  // así la suma de cada región conserva el orden de teselas) y se vuelca solo al cambiar de región.
-  let open = false, current = 0, running = 0;
-  for (const tile of tiles) {
-    const region = packRegion(tile.x, tile.y);
-    if (!open || region !== current) {
-      if (open) totals.set(current, running);
-      open = true; current = region; running = totals.get(region) ?? 0;
+  let values: number[];
+  if (lectura?.chunkX && lectura.chunkY) {
+    // Disposición por chunks (CHUNK_SIZE = 16): cada chunk es una región y sus 256 teselas son contiguas, así que el
+    // total de la región es la suma en el orden del arreglo (desde 0, como `running`) y la región aparece una sola vez,
+    // en el mismo orden de primera visita que el `Map` histórico. Sin `Map`, sin leer x/y de cada tesela.
+    const { fast, cells, chunkX } = lectura, food = fast.foodArr;
+    values = new Array<number>(chunkX.length);
+    for (let k = 0; k < chunkX.length; k++) {
+      let running = 0;
+      for (let i = k << 8, fin = i + 256; i < fin; i++) { const cell = cells[i]!; running += cell >= 0 ? food[cell]! : tiles[i]!.food; }
+      values[k] = running;
     }
-    running += tile.food;
+  } else {
+    const cells = lectura?.cells, food = lectura?.fast.foodArr;
+    // Las teselas llegan agrupadas por región: se acumula la racha en una variable (continuando el total ya guardado,
+    // así la suma de cada región conserva el orden de teselas) y se vuelca solo al cambiar de región.
+    let open = false, current = 0, running = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!, region = packRegion(tile.x, tile.y);
+      if (!open || region !== current) {
+        if (open) totals.set(current, running);
+        open = true; current = region; running = totals.get(region) ?? 0;
+      }
+      const cell = cells ? cells[i]! : -1;
+      running += cell >= 0 ? food![cell]! : tile.food;
+    }
+    if (open) totals.set(current, running);
+    values = [...totals.values()];
   }
-  if (open) totals.set(current, running);
-  const values = [...totals.values()].sort((left, right) => left - right), n = values.length;
+  values.sort((left, right) => left - right);
+  const n = values.length;
   if (n === 0) return 0;
   let sum = 0, weighted = 0;
   for (let i = 0; i < n; i++) { const value = values[i]!; sum += value; weighted += (i + 1) * value; }
@@ -71,9 +89,16 @@ export function giniRecursosPorRegion(tiles: readonly Tile[]): number {
   return 2 * weighted / (n * sum) - (n + 1) / n;
 }
 
-export function fraccionCeldasConComida(tiles: readonly Tile[], umbral = 0.1): number {
+export function fraccionCeldasConComida(tiles: readonly Tile[], umbral = 0.1, lectura: LecturaResidente | undefined = lecturaResidente(tiles)): number {
   let land = 0, withFood = 0;
-  for (const tile of tiles) if (tile.terrain !== 'water') { land++; if (tile.food > umbral) withFood++; }
+  if (lectura) {
+    const { fast, cells } = lectura, terreno = fast.terrainArr, food = fast.foodArr, WATER = fast.TERRAIN_WATER;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i]!;
+      if (cell >= 0) { if (terreno[cell] !== WATER) { land++; if (food[cell]! > umbral) withFood++; } }
+      else { const tile = tiles[i]!; if (tile.terrain !== 'water') { land++; if (tile.food > umbral) withFood++; } }
+    }
+  } else for (const tile of tiles) if (tile.terrain !== 'water') { land++; if (tile.food > umbral) withFood++; }
   return land === 0 ? 0 : withFood / land;
 }
 
@@ -84,13 +109,36 @@ export function fraccionCeldasConComida(tiles: readonly Tile[], umbral = 0.1): n
  * toda tesela oceánica) y contarlo infla artificialmente la conectividad, invirtiendo el veredicto
  * de SC-004 en mundos costeros (ver `.superpowers/sdd/tasks/t041-residuales.md`, hallazgo R1).
  * BFS por indices enteros sobre arrays tipados: sin objetos ni claves de cadena por celda visitada. */
-export function distanciaMediaAgua(tiles: readonly Tile[]): number {
+export function distanciaMediaAgua(tiles: readonly Tile[], lectura: LecturaResidente | undefined = lecturaResidente(tiles)): number {
   const count = tiles.length;
   const distances = new Int32Array(count).fill(-1), queue = new Int32Array(count);
-  const lookup = positionLookup(tiles);
+  const cells = lectura?.cells, agua = lectura?.fast.drinkingWaterArr;
   let tail = 0;
-  for (let i = 0; i < count; i++) { const tile = tiles[i]!; if ((tile.drinkingWater ?? 0) > 0) { distances[i] = 0; queue[tail++] = i; } }
+  for (let i = 0; i < count; i++) {
+    const cell = cells ? cells[i]! : -1;
+    // Un NaN del SoA es «ausente» (`tile.drinkingWater ?? 0`): `NaN > 0` es falso, igual que `0 > 0`.
+    if (cell >= 0 ? agua![cell]! > 0 : (tiles[i]!.drinkingWater ?? 0) > 0) { distances[i] = 0; queue[tail++] = i; }
+  }
   if (tail === 0) return -1;
+  if (lectura?.chunkX && lectura.chunkY) bfsPorChunks(distances, queue, tail, lectura.chunkX, lectura.chunkY);
+  else bfsPorPosicion(tiles, distances, queue, tail);
+  let land = 0, total = 0;
+  if (lectura) {
+    const terreno = lectura.fast.terrainArr, WATER = lectura.fast.TERRAIN_WATER;
+    for (let i = 0; i < count; i++) {
+      const distance = distances[i]!;
+      if (distance < 0) continue;
+      const cell = lectura.cells[i]!;
+      if (cell >= 0 ? terreno[cell] !== WATER : tiles[i]!.terrain !== 'water') { land++; total += distance; }
+    }
+  } else for (let i = 0; i < count; i++) if (tiles[i]!.terrain !== 'water' && distances[i]! >= 0) { land++; total += distances[i]!; }
+  return land === 0 ? 0 : total / land;
+}
+
+/** BFS histórico por posición (4-vecinos en el orden fijo N, O, E, S). */
+function bfsPorPosicion(tiles: readonly Tile[], distances: Int32Array, queue: Int32Array, seeds: number): void {
+  const lookup = positionLookup(tiles);
+  let tail = seeds;
   // Vecinos en el orden fijo N, O, E, S: el recorrido BFS (y por tanto cada distancia) no cambia.
   for (let head = 0; head < tail; head++) {
     const origin = queue[head]!, tile = tiles[origin]!, next = distances[origin]! + 1, x = tile.x, y = tile.y;
@@ -103,9 +151,39 @@ export function distanciaMediaAgua(tiles: readonly Tile[]): number {
     neighbor = lookup(x, y + 1);
     if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
   }
-  let land = 0, total = 0;
-  for (let i = 0; i < count; i++) if (tiles[i]!.terrain !== 'water' && distances[i]! >= 0) { land++; total += distances[i]!; }
-  return land === 0 ? 0 : total / land;
+}
+
+const CHUNK_OFFSET = 2 ** 21, CHUNK_STRIDE = 2 ** 22;
+/**
+ * Mismo BFS sobre un arreglo de chunks completos de 16 × 16 (`tiles[256·k + s]`, `s = (y & 15) << 4 | (x & 15)`):
+ * el vecino de una casilla interior es `origen ± 1` / `± 16` sin consultar nada, y sólo el 12,5 % que cruza el borde
+ * del chunk mira una tabla de 4 vecinos por chunk precalculada (1 086 chunks en el mundo real, no 278 016 posiciones).
+ * Misma relación de vecindad geométrica y mismo orden N, O, E, S que `bfsPorPosicion`; sin posiciones repetidas.
+ */
+function bfsPorChunks(distances: Int32Array, queue: Int32Array, seeds: number, chunkX: Int32Array, chunkY: Int32Array): void {
+  const chunks = chunkX.length, index = new Map<number, number>(), around = new Int32Array(chunks * 4).fill(-1);
+  const key = (cx: number, cy: number): number => (cx + CHUNK_OFFSET) * CHUNK_STRIDE + (cy + CHUNK_OFFSET);
+  for (let k = 0; k < chunks; k++) index.set(key(chunkX[k]! >> 4, chunkY[k]! >> 4), k);
+  for (let k = 0; k < chunks; k++) {
+    const cx = chunkX[k]! >> 4, cy = chunkY[k]! >> 4;
+    around[k * 4] = index.get(key(cx, cy - 1)) ?? -1;
+    around[k * 4 + 1] = index.get(key(cx - 1, cy)) ?? -1;
+    around[k * 4 + 2] = index.get(key(cx + 1, cy)) ?? -1;
+    around[k * 4 + 3] = index.get(key(cx, cy + 1)) ?? -1;
+  }
+  let tail = seeds;
+  for (let head = 0; head < tail; head++) {
+    const origin = queue[head]!, next = distances[origin]! + 1, k = origin >> 8, s = origin & 255;
+    let neighbor: number, other: number;
+    if (s >= 16) neighbor = origin - 16; else { other = around[k * 4]!; neighbor = other >= 0 ? (other << 8) | (s + 240) : -1; }
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    if ((s & 15) !== 0) neighbor = origin - 1; else { other = around[k * 4 + 1]!; neighbor = other >= 0 ? (other << 8) | (s + 15) : -1; }
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    if ((s & 15) !== 15) neighbor = origin + 1; else { other = around[k * 4 + 2]!; neighbor = other >= 0 ? (other << 8) | (s - 15) : -1; }
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    if (s < 240) neighbor = origin + 16; else { other = around[k * 4 + 3]!; neighbor = other >= 0 ? (other << 8) | (s - 240) : -1; }
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+  }
 }
 
 /** Máximo de celdas de la rejilla densa por tesela: por encima, las teselas están demasiado dispersas y se usa el mapa. */
@@ -175,7 +253,9 @@ export function worldStatistics(world: World): WorldStatsRecursos {
   return value;
 }
 function computeWorldStatistics(world: World): WorldStatsRecursos {
-  const caras = estadisticasCaras(world);
+  // Una sola resolución de celdas SoA para las cuatro métricas caras y el recorrido de biomas (`undefined` sin vía rápida).
+  const lectura = lecturaResidente(world.tiles);
+  const caras = estadisticasCaras(world, lectura);
   const current = sample(world), actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
   const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0;
   // T134 (FR-026): censo sobre TODA la población, no solo la de la cámara — `people` ahora se
@@ -199,16 +279,38 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   }
   // Biomas y rasgos se cuentan por rachas (las teselas contiguas repiten valor) y se vuelcan al cambiar:
   // son enteros, así que los totales y el orden de primera aparición de las claves no cambian.
-  let lastBiome: string | undefined, biomeRun = 0, lastFeature: string | undefined, featureRun = 0;
-  for (const tile of world.tiles) {
-    const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
-    if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
-    biomeRun++;
-    if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
-    featureRun++;
-    freshWater += tile.drinkingWater ?? 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
+  let lastFeature: string | undefined, featureRun = 0;
+  if (lectura?.completa) {
+    // Vía rápida SoA: bioma y agua potable salen de los arrays residentes (0 accesores); se cuenta por código de bioma
+    // y las claves se insertan por orden de primera aparición (el nombre se lee de la primera tesela de cada código,
+    // con el mismo accesor de siempre). `feature`, `cultivation` y `traffic` no tienen array expuesto y siguen por tesela.
+    const tiles = world.tiles, { fast, cells } = lectura, biomeArr = fast.biomeArr, waterArr = fast.drinkingWaterArr;
+    const biomeCount = new Uint32Array(256), biomeFirst = new Int32Array(256);
+    for (let i = 0; i < tiles.length; i++) {
+      const cell = cells[i]!, code = biomeArr[cell]!;
+      if (biomeCount[code]!++ === 0) biomeFirst[code] = i;
+      const tile = tiles[i]!, feature = tile.feature ?? 'none';
+      if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
+      featureRun++;
+      const water = waterArr[cell]!;
+      freshWater += water === water ? water : 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
+    }
+    const codes: number[] = [];
+    for (let code = 0; code < 256; code++) if (biomeCount[code]! > 0) codes.push(code);
+    codes.sort((a, b) => biomeFirst[a]! - biomeFirst[b]!);
+    for (const code of codes) { const biome = tiles[biomeFirst[code]!]!.biome ?? 'grassland'; biomes[biome] = (biomes[biome] ?? 0) + biomeCount[code]!; }
+  } else {
+    let lastBiome: string | undefined, biomeRun = 0;
+    for (const tile of world.tiles) {
+      const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
+      if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
+      biomeRun++;
+      if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
+      featureRun++;
+      freshWater += tile.drinkingWater ?? 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
+    }
+    if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   }
-  if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
   const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}

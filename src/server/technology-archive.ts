@@ -1,3 +1,4 @@
+import * as nodeCrypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition, type TechnologyExecutionQuery,
@@ -11,7 +12,10 @@ const CAPABILITIES = ['cutting', 'storage', 'insulation', 'cultivation', 'bindin
 const MATERIALS = ['wood', 'stone', 'water'];
 const CATALYSTS: Record<string, string[]> = { combine: ['binding'], separate: ['cutting', 'abrasion'], form: ['cutting', 'abrasion'],
   abrade: ['abrasion'], heat: ['insulation'], cool: ['storage'], compress: ['cultivation'], weave: ['binding'] };
-const checksum = (body: string) => createHash('sha256').update(body).digest('hex');
+// `crypto.hash` (Node ≥ 21.7) es el mismo SHA-256 hexadecimal sobre el mismo UTF-8 que
+// `createHash().update().digest()`, sin crear un objeto Hash por fila (V18 ola 2: 1,4 M filas por carga).
+const checksum: (body: string) => string = typeof nodeCrypto.hash === 'function'
+  ? body => nodeCrypto.hash('sha256', body, 'hex') : body => createHash('sha256').update(body).digest('hex');
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const integer = (value: unknown): value is number => finite(value) && Number.isSafeInteger(value);
@@ -19,13 +23,40 @@ const text = (value: unknown, max = 100): value is string => typeof value === 's
 const identifier = (value: unknown): value is string => text(value) && !/\s/.test(value);
 const keys = (value: unknown, required: string[], optional: string[] = []): value is Record<string, unknown> => object(value)
   && required.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => required.includes(key) || optional.includes(key));
-// Precompiladas (sprint noche-arch 2026-09-23): `serialOf` construía un `new RegExp` en cada llamada y
-// con 296 495 recibos la carga pasaba 6,9 s de CPU propia sólo en eso. Mismo patrón, mismo resultado.
-const SERIAL_PATTERNS = { process: /^process-[1-9]\d*$/, recipe: /^recipe-[1-9]\d*$/, product: /^product-[1-9]\d*$/,
-  transfer: /^transfer-[1-9]\d*$/ } as const;
-const serialOf = (value: unknown, prefix: keyof typeof SERIAL_PATTERNS): number | null => {
-  if (typeof value !== 'string' || !SERIAL_PATTERNS[prefix].test(value)) return null;
-  const serial = Number(value.slice(prefix.length + 1)); return integer(serial) ? serial : null;
+/** La misma ley que `keys` sin alocar nada por llamada (V18 ola 2, camino caliente de los recibos): toda clave
+ * requerida es propia (enumerable o no) y toda clave propia enumerable está permitida. `for…in` recorre las
+ * propias enumerables y además las heredadas enumerables, que se descartan con `Object.hasOwn`: el conjunto
+ * que se examina es exactamente el de `Object.keys`. */
+interface Shape { required: readonly string[]; allowed: ReadonlySet<string>; }
+const shape = (required: readonly string[], optional: readonly string[] = []): Shape => ({ required, allowed: new Set([...required, ...optional]) });
+function shaped(value: unknown, form: Shape): value is Record<string, unknown> {
+  if (!object(value)) return false;
+  const required = form.required;
+  for (let index = 0; index < required.length; index++) if (!Object.hasOwn(value, required[index]!)) return false;
+  for (const key in value) if (!form.allowed.has(key) && Object.hasOwn(value, key)) return false;
+  return true;
+}
+/** Serie canónica `[1-9][0-9]*` desde `start` hasta el final, como entero seguro, o `null`. Equivale a
+ * `/^…-[1-9]\d*$/` + `Number(slice)` + `integer`: más de 16 cifras sin cero inicial ya supera 2^53 − 1, y
+ * mientras el acumulado es exacto (≤ 2^53) el redondeo monótono no puede devolverlo por debajo del tope. */
+function serialAt(value: string, start: number): number | null {
+  const length = value.length;
+  if (start >= length || length - start > 16) return null;
+  let serial = 0;
+  for (let index = start; index < length; index++) {
+    const digit = value.charCodeAt(index) - 48;
+    if (digit < 0 || digit > 9 || digit === 0 && index === start) return null;
+    serial = serial * 10 + digit;
+  }
+  return Number.isSafeInteger(serial) ? serial : null;
+}
+// Sprint noche-arch 2026-09-23: `serialOf` construía un `new RegExp` en cada llamada; V18 ola 2: ni RegExp ni
+// `slice`, mismo lenguaje aceptado (prefijo exacto, sin cero inicial, entero seguro).
+const SERIAL_PREFIXES = { process: 'process-', recipe: 'recipe-', product: 'product-', transfer: 'transfer-' } as const;
+const serialOf = (value: unknown, prefix: keyof typeof SERIAL_PREFIXES): number | null => {
+  if (typeof value !== 'string') return null;
+  const head = SERIAL_PREFIXES[prefix];
+  return value.startsWith(head) ? serialAt(value, head.length) : null;
 };
 const recipeId = (value: unknown): value is string => serialOf(value, 'recipe') !== null;
 function fail(what: string): never { throw new Error(`Invalid technology archive ${what}.`); }
@@ -72,43 +103,80 @@ function assertDefinition(value: unknown): asserts value is TechnologyDefinition
 function assertStats(value: unknown): asserts value is TechnologyStats {
   if (!keys(value, ['uses', 'utility', 'manufactured']) || !integer(value.uses) || !finite(value.utility) || !integer(value.manufactured)) fail('statistics');
 }
+const BASIC_RESOURCES: ReadonlySet<string> = new Set(['raw', 'residue', 'spent']
+  .flatMap(state => ['wood', 'stone', 'water'].map(material => `${state}:${material}`)).concat('unclassified'));
+/** `/^(raw|residue|spent):(wood|stone|water)$/`, `unclassified` o `recipe:` + un id de receta canónico. */
 const resourceId = (value: unknown): boolean => typeof value === 'string'
-  && (/^(raw|residue|spent):(wood|stone|water)$/.test(value) || value === 'unclassified' || value.startsWith('recipe:') && recipeId(value.slice(7)));
-function resources(value: unknown): boolean {
-  // Repeated resource lines are legal (two substrates or substrate plus fuel).
-  return Array.isArray(value) && value.length <= 64 && value.every(line => keys(line, ['resourceId', 'mass']) && resourceId(line.resourceId) && integer(line.mass))
-    && Number.isSafeInteger(value.reduce((sum, line) => sum + line.mass, 0));
+  && (BASIC_RESOURCES.has(value) || value.startsWith('recipe:recipe-') && serialAt(value, 14) !== null);
+/** Masa total de una lista de recursos válida, o −1 si la lista no es válida. Repeated resource lines are
+ * legal (two substrates or substrate plus fuel). Cada línea tiene exactamente `resourceId` y `mass` propios;
+ * los huecos de un arreglo disperso (imposibles en JSON) se rechazan en vez de saltarse. */
+function resourceMass(value: unknown): number {
+  if (!Array.isArray(value) || value.length > 64) return -1;
+  let mass = 0;
+  for (let index = 0; index < value.length; index++) {
+    const line: unknown = value[index];
+    if (!object(line) || !Object.hasOwn(line, 'resourceId') || !Object.hasOwn(line, 'mass')) return -1;
+    for (const key in line) if (key !== 'resourceId' && key !== 'mass' && Object.hasOwn(line, key)) return -1;
+    if (!resourceId(line.resourceId) || !integer(line.mass)) return -1;
+    mass += line.mass;
+  }
+  return Number.isSafeInteger(mass) ? mass : -1;
 }
-function assertExecution(value: unknown): asserts value is TechnologyExecution {
-  if (!keys(value, ['id', 'kind', 'tick', 'actorId', 'recipeId', 'programSignature', 'inputs', 'outputs', 'residueMass', 'energy', 'work', 'success',
-    'parentRecipeIds', 'catalysts', 'benefit', 'balance'], ['transferId', 'counterpartyId', 'nestedExecutionIds', 'water'])
-    || serialOf(value.id, 'process') === null || !integer(value.tick) || !identifier(value.actorId)
-    || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer', 'water'].includes(String(value.kind))
+const EXECUTION_SHAPE = shape(['id', 'kind', 'tick', 'actorId', 'recipeId', 'programSignature', 'inputs', 'outputs', 'residueMass', 'energy', 'work',
+  'success', 'parentRecipeIds', 'catalysts', 'benefit', 'balance'], ['transferId', 'counterpartyId', 'nestedExecutionIds', 'water']);
+const BALANCE_SHAPE = shape(['opening', 'closing', 'externalInputs', 'externalLoss']);
+const CATALYST_SHAPE = shape(['executionId', 'itemId', 'recipeId', 'wear', 'required']);
+const EXECUTION_KIND_SET: ReadonlySet<unknown> = new Set(['research', 'craft', 'use', 'recycle', 'estate', 'transfer', 'water']);
+/** `ids` sin `Set` ni cierres para listas cortas (≤ 13): series canónicas del prefijo, sin repetir; con
+ * `below`, todas menores que esa serie. */
+function serialIds(value: unknown, max: number, prefix: keyof typeof SERIAL_PREFIXES, below = Number.POSITIVE_INFINITY): value is string[] {
+  if (!Array.isArray(value) || value.length > max) return false;
+  for (let index = 0; index < value.length; index++) {
+    const id: unknown = value[index], serial = serialOf(id, prefix);
+    if (serial === null || serial >= below) return false;
+    for (let prior = 0; prior < index; prior++) if (value[prior] === id) return false;
+  }
+  return true;
+}
+/** Verifica la forma y las leyes locales de un recibo y devuelve su serie. Las mismas condiciones que la
+ * versión anterior basada en `keys`/`every`/`Set` (sprint noche-arch 2026-09-23), en el mismo orden de
+ * mensajes, sin alocar nada por recibo (V18 ola 2: 1,4 M recibos por carga). Sólo es más estricta en
+ * objetos que JSON no puede producir: claves de balance no enumerables, huecos de arreglos dispersos,
+ * `kind` no cadena convertible con `String`, y `nestedExecutionIds` heredado en vez de propio. */
+function executionSerial(value: unknown): number {
+  if (!shaped(value, EXECUTION_SHAPE)) fail('execution');
+  const serial = serialOf(value.id, 'process');
+  const balance = value.balance;
+  if (serial === null || !integer(value.tick) || !identifier(value.actorId) || !EXECUTION_KIND_SET.has(value.kind)
     || !(value.recipeId === null || recipeId(value.recipeId)) || typeof value.programSignature !== 'string' || value.programSignature.length > 16000
     || !integer(value.residueMass) || !finite(value.energy) || !integer(value.work) || !finite(value.benefit) || typeof value.success !== 'boolean'
-    || !ids(value.parentRecipeIds, 6) || !Array.isArray(value.catalysts) || value.catalysts.length > 12
-    || !keys(value.balance, ['opening', 'closing', 'externalInputs', 'externalLoss'])
-    || ![value.inputs, value.outputs, ...Object.values(value.balance)].every(resources)) fail('execution');
-  const serial = serialOf(value.id, 'process')!;
-  if (Object.hasOwn(value, 'nestedExecutionIds') && (!ids(value.nestedExecutionIds, 13, (id: unknown): id is string => serialOf(id, 'process') !== null)
-    || (value.nestedExecutionIds as string[]).some(id => serialOf(id, 'process')! >= serial))) fail('nested execution identities');
-  const catalystIds = new Set<string>();
-  for (const catalyst of value.catalysts) {
-    if (!keys(catalyst, ['executionId', 'itemId', 'recipeId', 'wear', 'required']) || serialOf(catalyst.executionId, 'process') === null
-      || serialOf(catalyst.executionId, 'process')! >= serial || serialOf(catalyst.itemId, 'product') === null
+    || !serialIds(value.parentRecipeIds, 6, 'recipe') || !Array.isArray(value.catalysts) || value.catalysts.length > 12
+    || !shaped(balance, BALANCE_SHAPE) || resourceMass(value.inputs) < 0 || resourceMass(value.outputs) < 0) fail('execution');
+  const opening = resourceMass(balance.opening), closing = resourceMass(balance.closing);
+  const externalInputs = resourceMass(balance.externalInputs), externalLoss = resourceMass(balance.externalLoss);
+  if (opening < 0 || closing < 0 || externalInputs < 0 || externalLoss < 0) fail('execution');
+  const hasNested = Object.hasOwn(value, 'nestedExecutionIds'), nested: unknown = hasNested ? value.nestedExecutionIds : undefined;
+  if (hasNested && !serialIds(nested, 13, 'process', serial)) fail('nested execution identities');
+  const catalysts = value.catalysts as unknown[];
+  for (let index = 0; index < catalysts.length; index++) {
+    const catalyst = catalysts[index];
+    if (!shaped(catalyst, CATALYST_SHAPE)) fail('catalyst');
+    const executionId = catalyst.executionId, used = serialOf(executionId, 'process');
+    if (used === null || used >= serial || serialOf(catalyst.itemId, 'product') === null
       || !(catalyst.recipeId === null || recipeId(catalyst.recipeId)) || !integer(catalyst.wear) || typeof catalyst.required !== 'boolean'
-      || catalystIds.has(catalyst.executionId as string) || !(value.nestedExecutionIds as string[] | undefined)?.includes(catalyst.executionId as string)) fail('catalyst');
-    catalystIds.add(catalyst.executionId as string);
+      || !hasNested || !(nested as string[]).includes(executionId as string)) fail('catalyst');
+    for (let prior = 0; prior < index; prior++) if ((catalysts[prior] as { executionId: unknown }).executionId === executionId) fail('catalyst');
   }
   if (value.kind === 'transfer') {
     if (serialOf(value.transferId, 'transfer') === null || !identifier(value.counterpartyId) || value.counterpartyId === value.actorId) fail('transfer identities');
   } else if (Object.hasOwn(value, 'transferId') || Object.hasOwn(value, 'counterpartyId')) fail('unexpected transfer identities');
-  const execution = value as unknown as TechnologyExecution;
-  assertWaterExecution(execution);
-  const total = (lines: TechnologyExecution['inputs']) => lines.reduce((sum, line) => sum + line.mass, 0);
-  const opening = total(execution.balance.opening) + total(execution.balance.externalInputs), closing = total(execution.balance.closing) + total(execution.balance.externalLoss);
-  if (!Number.isSafeInteger(opening) || !Number.isSafeInteger(closing) || opening !== closing) fail('execution mass envelope');
+  assertWaterExecution(value as unknown as TechnologyExecution);
+  const inflow = opening + externalInputs, outflow = closing + externalLoss;
+  if (!Number.isSafeInteger(inflow) || !Number.isSafeInteger(outflow) || inflow !== outflow) fail('execution mass envelope');
+  return serial;
 }
+function assertExecution(value: unknown): asserts value is TechnologyExecution { executionSerial(value); }
 
 type DefinitionRow = { id: string; tick: number; signature: string; body: string; digest: string };
 type StatsRow = { recipeId: string; tick: number; body: string; digest: string };
@@ -161,6 +229,12 @@ interface DefinitionProof {
   throughTick: number; recipes: number; maxGeneration: number; lastTick: number;
   functionalDiversity: number; functions: number[];
 }
+/** Definiciones ya verificadas en esta generación de pruebas, por id y por línea de recurso `recipe:<id>`. */
+interface ReferenceMemo {
+  generation: number;
+  definitions: Map<string, { tick: number; signature: string }>;
+  resources: Map<string, { tick: number; signature: string }>;
+}
 interface SummaryProof { fromTick: number; throughTick: number; value: TechnologyDefinitionSummary; }
 const sameDatabase = (a: ArchiveStamp, b: ArchiveStamp) => a.dataVersion === b.dataVersion && a.schemaCookie === b.schemaCookie && a.tempSchemaCookie === b.tempSchemaCookie;
 const sameStamp = (a: ArchiveStamp, b: ArchiveStamp) => sameDatabase(a, b) && a.totalChanges === b.totalChanges && a.transaction === b.transaction;
@@ -211,7 +285,8 @@ export class TechnologyArchive {
   private readDepth = 0;
   /** A fixed set of SQL programs, never cached rows or validation results. Each get
    * still reads the current SQLite snapshot and every stamp check remains in place.
-   * Streaming statements stay separate: a nested read must not reset an iterator. */
+   * Streaming statements stay separate: a nested read must not reset an iterator.
+   * Also holds non-streaming writes run to completion (`putExecution`'s INSERT). */
   private readonly readStatements = new Map<string, StatementSync>();
   constructor(private readonly db: DatabaseSync, private readonly host: TechnologyArchiveHost | null = null) {}
 
@@ -232,7 +307,7 @@ export class TechnologyArchive {
   }
   private clearProofs(): void {
     this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null;
-    this.referenceMemo = null; this.compactedStatsThrough = null;
+    this.referenceMemo = null; this.compactedStatsThrough = null; this.proofGeneration++;
   }
   invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; this.epochMemo = null; }
   /** Sello de la base para la memoria de lecturas del anfitrión (Store, sprint noche-perf 2026-09-22):
@@ -388,7 +463,7 @@ export class TechnologyArchive {
   }
 
   getHistoryOrigin(): TechnologyHistoryOrigin | null {
-    const rows = this.db.prepare('SELECT id,body,digest FROM technology_origin LIMIT 2').all() as { id: number; body: string; digest: string }[];
+    const rows = this.readStatement('SELECT id,body,digest FROM technology_origin LIMIT 2').all() as { id: number; body: string; digest: string }[];
     if (!rows.length) return null;
     if (rows.length !== 1 || rows[0]!.id !== 1) fail('history origin identity');
     const value = decode(rows[0]!);
@@ -721,9 +796,9 @@ export class TechnologyArchive {
     return this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE id=?').get(id) as ExecutionRow | undefined;
   }
   private execution(row: ExecutionRow): TechnologyExecution {
-    const value = decode(row); assertExecution(value);
-    if (value.id !== row.id || value.tick !== row.tick || serialOf(value.id, 'process') !== row.serial) fail('execution key, serial or tick');
-    return value;
+    const value = decode(row), serial = executionSerial(value), execution = value as TechnologyExecution;
+    if (execution.id !== row.id || execution.tick !== row.tick || serial !== row.serial) fail('execution key, serial or tick');
+    return execution;
   }
   /**
    * Referencias verificadas durante una transacción anfitriona (sprint noche-perf2 2026-09-22). Cada
@@ -733,19 +808,30 @@ export class TechnologyArchive {
    * cuerpo; sólo `truncateAfter`, de recuperación, borra filas y limpia las pruebas), así que dentro de
    * la transacción anfitriona —donde toda escritura pasa por las mutaciones propias o por
    * `observeHostWrites`, que mantienen el sello verificado— la respuesta de `getDefinition(id, t)` para
-   * un id ya verificado es siempre la misma: la definición si su tick ≤ t y si no `null`. La memoria va
-   * atada al OBJETO de prueba de definiciones vigente: cualquier `clearProofs` (sello inesperado,
-   * error, fin de la transacción) o un nuevo recorrido completo la invalida. La primera lectura de cada
-   * id sigue siendo la completa, con sellos y verificación. Nada de esto entra en el mundo ni en disco.
+   * un id ya verificado es siempre la misma: la definición si su tick ≤ t y si no `null`. La primera
+   * lectura de cada id sigue siendo la completa, con sellos y verificación. Nada de esto entra en el mundo
+   * ni en disco.
+   *
+   * V18 ola 2: la memoria iba atada al OBJETO de prueba de definiciones, y cada extensión de esa prueba
+   * (una definición referenciada por primera vez con un tick posterior) la tiraba entera aunque el sello
+   * no hubiera cambiado; con 1 841 definiciones la carga la reconstruía cientos de veces. Ahora va atada a
+   * la generación de pruebas: `clearProofs` —sello inesperado o ajeno, escritura no contabilizada, disparadores,
+   * error, `truncateAfter`, fin o invalidación de la transacción— la incrementa y la memoria deja de valer.
+   * Extender la prueba sobre el mismo sello no retira nada verificado: las filas ya leídas no cambian.
    */
-  private referenceMemo: { proof: DefinitionProof; definitions: Map<string, { tick: number; signature: string }> } | null = null;
+  private proofGeneration = 0;
+  private referenceMemo: ReferenceMemo | null = null;
+  private validReferenceMemo(): ReferenceMemo | null {
+    const memo = this.referenceMemo;
+    return memo && this.hostTransaction && this.definitionProof && memo.generation === this.proofGeneration ? memo : null;
+  }
   private referencedDefinition(id: string, asOfTick: number): { signature: string } | null {
-    const memo = this.hostTransaction && this.definitionProof && this.referenceMemo?.proof === this.definitionProof ? this.referenceMemo : null;
-    const known = memo?.definitions.get(id);
+    const known = this.validReferenceMemo()?.definitions.get(id);
     if (known) { tick(asOfTick); return known.tick <= asOfTick ? known : null; }
     const definition = this.getDefinition(id, asOfTick);
     if (definition && this.hostTransaction && this.definitionProof) {
-      if (this.referenceMemo?.proof !== this.definitionProof) this.referenceMemo = { proof: this.definitionProof, definitions: new Map() };
+      if (this.referenceMemo?.generation !== this.proofGeneration)
+        this.referenceMemo = { generation: this.proofGeneration, definitions: new Map(), resources: new Map() };
       this.referenceMemo.definitions.set(id, { tick: definition.tick, signature: definition.signature });
     }
     return definition;
@@ -762,11 +848,25 @@ export class TechnologyArchive {
    * página: una anidada comparte tick con su padre y casi siempre va justo antes, así que no se relee. */
   private executionReferences(value: TechnologyExecution, origin = this.getHistoryOrigin(),
     unverifiable = this.unverifiableThrough(origin), page?: ReadonlyMap<string, TechnologyExecution>): void {
-    const references = new Set([...value.parentRecipeIds, ...value.catalysts.flatMap(c => c.recipeId ? [c.recipeId] : []), ...(value.recipeId ? [value.recipeId] : [])]);
-    for (const list of [value.inputs, value.outputs, ...Object.values(value.balance)]) for (const line of list) if (line.resourceId.startsWith('recipe:')) references.add(line.resourceId.slice(7));
-    for (const id of references) if (!this.referencedDefinition(id, value.tick)) fail('execution definition reference');
-    if (value.recipeId && ['research', 'craft'].includes(value.kind) && value.programSignature !== this.referencedDefinition(value.recipeId, value.tick)!.signature) fail('execution program signature');
-    for (const id of value.nestedExecutionIds ?? []) {
+    // Cada id distinto se comprueba una vez y en el mismo orden de primera visita que el antiguo
+    // `new Set([...padres, ...catalizadores, receta, ...líneas])`, sin construir arreglos ni conjuntos por
+    // recibo: `referenceScratch` es un único conjunto reutilizado (nada de lo que hay dentro sale de aquí).
+    const seen = this.referenceScratch, at = value.tick; seen.clear();
+    try {
+      for (let index = 0; index < value.parentRecipeIds.length; index++) this.referenceOnce(value.parentRecipeIds[index]!, at);
+      for (let index = 0; index < value.catalysts.length; index++) { const recipe = value.catalysts[index]!.recipeId; if (recipe) this.referenceOnce(recipe, at); }
+      if (value.recipeId) this.referenceOnce(value.recipeId, at);
+      this.lineReferences(value.inputs, at); this.lineReferences(value.outputs, at);
+      // El orden de `Object.values(balance)`: el de inserción de sus claves propias enumerables.
+      const balance = value.balance as unknown as Record<string, TechnologyExecution['inputs']>;
+      for (const key in balance) if (Object.hasOwn(balance, key)) this.lineReferences(balance[key]!, at);
+    } finally { seen.clear(); }
+    if (value.recipeId && (value.kind === 'research' || value.kind === 'craft')
+      && value.programSignature !== this.referencedDefinition(value.recipeId, at)!.signature) fail('execution program signature');
+    const nested = value.nestedExecutionIds;
+    if (!nested) return;
+    for (let index = 0; index < nested.length; index++) {
+      const id = nested[index]!;
       let child = page?.get(id);
       if (!child) {
         const row = this.executionRow(id);
@@ -779,7 +879,31 @@ export class TechnologyArchive {
         }
         child = this.execution(row);
       }
-      if (child.tick !== value.tick || child.actorId !== value.actorId || !['use', 'recycle'].includes(child.kind)) fail('nested execution reference');
+      if (child.tick !== value.tick || child.actorId !== value.actorId || child.kind !== 'use' && child.kind !== 'recycle') fail('nested execution reference');
+    }
+  }
+  private readonly referenceScratch = new Set<string>();
+  /** Un acierto de la memoria vigente es puro (misma respuesta cada vez), así que no necesita el conjunto de
+   * vistos; sólo un fallo hace la lectura completa, una vez por id y recibo. */
+  private referenceOnce(id: string, at: number): void {
+    const known = this.validReferenceMemo()?.definitions.get(id);
+    if (known) { if (known.tick > at) fail('execution definition reference'); return; }
+    if (this.referenceScratch.has(id)) return;
+    this.referenceScratch.add(id);
+    if (!this.referencedDefinition(id, at)) fail('execution definition reference');
+  }
+  /** Las líneas `recipe:<id>` se resuelven por la cadena entera de la línea (sin `slice` por línea) contra la
+   * misma memoria, que sólo se llena con definiciones ya verificadas por `referencedDefinition`. */
+  private lineReferences(list: TechnologyExecution['inputs'], at: number): void {
+    for (let index = 0; index < list.length; index++) {
+      const resource = list[index]!.resourceId;
+      if (!resource.startsWith('recipe:')) continue;
+      const known = this.validReferenceMemo()?.resources.get(resource);
+      if (known) { if (known.tick > at) fail('execution definition reference'); continue; }
+      const id = resource.slice(7);
+      this.referenceOnce(id, at);
+      const memo = this.validReferenceMemo(), verified = memo?.definitions.get(id);
+      if (verified) memo!.resources.set(resource, verified);
     }
   }
   private executionTimeline(row: ExecutionRow, asOfTick = MAX_TICK): void {
@@ -808,19 +932,36 @@ export class TechnologyArchive {
    */
   listExecutionRecords({ afterSerial = 0, asOfTick = MAX_TICK, limit = 256 }: TechnologyExecutionQuery = {}): TechnologyExecutionRecord[] {
     tick(afterSerial); tick(asOfTick); if (!integer(limit) || limit < 1 || limit > 10000) fail('execution page limit');
-    const origin = this.getHistoryOrigin(), unverifiable = this.unverifiableThrough(origin);
-    const rows = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT ?').all(afterSerial, asOfTick, limit) as ExecutionRow[];
-    const values = rows.map(row => this.execution(row)), page = new Map(values.map(value => [value.id, value]));
-    for (let index = 1; index < values.length; index++) if (values[index - 1]!.tick > values[index]!.tick) fail('execution chronology');
-    if (rows.length) {
-      const first = rows[0]!, last = rows.at(-1)!;
-      const before = this.readStatement(EXECUTION_BEFORE).get(first.serial, asOfTick) as ExecutionRow | undefined;
-      const after = this.readStatement(EXECUTION_AFTER).get(last.serial, asOfTick) as ExecutionRow | undefined;
-      if (before && this.execution(before).tick > first.tick || after && this.execution(after).tick < last.tick)
-        fail('execution chronology');
-    }
-    for (const value of values) this.executionReferences(value, origin, unverifiable, page);
-    return values.map((execution, index) => ({ execution, digest: rows[index]!.digest }));
+    // V18 ola 2: toda la página es UNA lectura verificada. `read` sincroniza el sello al empezar (cualquier
+    // escritura propia, ajena o de esquema desde la llamada anterior borra las pruebas y la memoria de
+    // referencias, también dentro de la transacción anfitriona) y exige el mismo sello al terminar; las
+    // lecturas de definiciones anidadas ya no sellan dos veces cada una.
+    return this.read(() => {
+      const origin = this.getHistoryOrigin(), unverifiable = this.unverifiableThrough(origin);
+      // `.all()` materializa la página antes de cualquier otra lectura: la sentencia preparada se puede reutilizar.
+      const rows = this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT ?')
+        .all(afterSerial, asOfTick, limit) as ExecutionRow[];
+      const values: TechnologyExecution[] = new Array(rows.length), page = new Map<string, TechnologyExecution>();
+      for (let index = 0; index < rows.length; index++) {
+        const value = this.execution(rows[index]!);
+        values[index] = value; page.set(value.id, value);
+      }
+      for (let index = 1; index < values.length; index++) if (values[index - 1]!.tick > values[index]!.tick) fail('execution chronology');
+      if (rows.length) {
+        const first = rows[0]!, last = rows.at(-1)!;
+        const before = this.readStatement(EXECUTION_BEFORE).get(first.serial, asOfTick) as ExecutionRow | undefined;
+        const after = this.readStatement(EXECUTION_AFTER).get(last.serial, asOfTick) as ExecutionRow | undefined;
+        if (before && this.execution(before).tick > first.tick || after && this.execution(after).tick < last.tick)
+          fail('execution chronology');
+      }
+      const records: TechnologyExecutionRecord[] = new Array(values.length);
+      for (let index = 0; index < values.length; index++) {
+        const execution = values[index]!;
+        this.executionReferences(execution, origin, unverifiable, page);
+        records[index] = { execution, digest: rows[index]!.digest };
+      }
+      return records;
+    });
   }
   /** Devuelve el digesto de la fila (nueva o idéntica ya archivada): el anfitrión lo encadena. */
   putExecution(value: TechnologyExecution): string {
@@ -830,7 +971,7 @@ export class TechnologyArchive {
     if (prior) { this.getExecution(value.id); if (prior.body !== body) fail('immutable execution conflict'); return digest; }
     const serial = serialOf(value.id, 'process')!;
     this.executionTimeline({ id: value.id, serial, tick: value.tick, body, digest });
-    const result = this.db.prepare('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, digest);
+    const result = this.readStatement('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, digest);
     this.ownMutation(token, Number(result.changes));
     return digest;
   }

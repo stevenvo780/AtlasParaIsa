@@ -1,6 +1,5 @@
 import type { Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
-import { extractLocalObservation } from './politica.js';
 import type { ResidentFastAccess } from './soa/terreno.js';
 
 /**
@@ -11,6 +10,7 @@ import type { ResidentFastAccess } from './soa/terreno.js';
  */
 const CELL_KEY_BIAS = 33_554_432;
 const CELL_KEY_SPAN = 67_108_864;
+const SOA_SAFE_COORD = 1_073_741_800; // 2^30 - 24: x ± 4 siempre en el dominio admisible SoA
 
 export function cellIntKey(x: number, y: number): number | undefined {
   if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return undefined;
@@ -26,34 +26,117 @@ export function cellKeyY(key: number): number {
   return Math.floor(key / CELL_KEY_SPAN) - CELL_KEY_BIAS;
 }
 
-const clamp = (n: number, max = 1): number => Math.max(0, Math.min(max, n));
+const PARSE_INVALID = 0x7fffffff;
 
-/** `visited` se reasigna con `slice` al entrar en una celda nueva, pero un `push`/`shift`
- * en el mismo arreglo deja la longitud quieta en el tope. La caché exige identidad del
- * arreglo y, además, longitud + primer + último elemento. */
-interface VisitedInts { length: number; first: string | undefined; last: string | undefined; set: Set<number> }
-const visitedInts = new WeakMap<string[], VisitedInts>();
-
-function canonicalCellKey(entry: string): number | undefined {
-  const comma = entry.indexOf(',');
-  if (comma <= 0 || entry.indexOf(',', comma + 1) !== -1) return undefined;
-  const xs = entry.slice(0, comma), ys = entry.slice(comma + 1);
-  const x = Number(xs), y = Number(ys);
-  if (String(x) !== xs || String(y) !== ys) return undefined;
-  return cellIntKey(x, y);
+/** Parsea un entero decimal canónico en `[-CELL_KEY_BIAS, CELL_KEY_BIAS)` sin asignar subcadenas:
+ * acepta exactamente lo mismo que `String(Number(s)) === s && cellIntKey` (rechaza `-0`, `01`, `+3`,
+ * espacios, fracciones y fuera de rango). */
+function parseCanonInt(s: string, start: number, end: number): number {
+  if (start >= end) return PARSE_INVALID;
+  let i = start, neg = false;
+  let c = s.charCodeAt(i);
+  if (c === 45) {
+    neg = true;
+    i++;
+    if (i >= end) return PARSE_INVALID;
+    c = s.charCodeAt(i);
+    if (c < 49 || c > 57) return PARSE_INVALID;
+  } else if (c === 48) {
+    return i + 1 === end ? 0 : PARSE_INVALID;
+  } else if (c < 49 || c > 57) {
+    return PARSE_INVALID;
+  }
+  if (end - i > 8) return PARSE_INVALID;
+  let val = c - 48;
+  for (i++; i < end; i++) {
+    c = s.charCodeAt(i);
+    if (c < 48 || c > 57) return PARSE_INVALID;
+    val = val * 10 + (c - 48);
+  }
+  const signed = neg ? -val : val;
+  return signed >= -CELL_KEY_BIAS && signed < CELL_KEY_BIAS ? signed : PARSE_INVALID;
 }
 
-function visitedIntegerSet(visited: string[]): Set<number> {
-  const first = visited[0], last = visited[visited.length - 1];
-  const hit = visitedInts.get(visited);
-  if (hit && hit.length === visited.length && hit.first === first && hit.last === last) return hit.set;
-  const set = new Set<number>();
-  for (let i = 0; i < visited.length; i++) {
-    const key = canonicalCellKey(visited[i]!);
-    if (key !== undefined) set.add(key);
+/** `visited` se reasigna con `slice` al entrar en una celda nueva, pero un `push`/`shift`
+ * en el mismo arreglo deja la longitud quieta en el tope. La caché por persona exige identidad
+ * del arreglo y, además, longitud + primer + último elemento, y reutiliza el `Int32Array` de
+ * coordenadas y la máscara de 81 bits (ventana 9 × 9 alrededor de `(px, py)`), con 0 reservas
+ * de cadenas ni `Set<number>` de HeapNumbers. */
+interface VisitedWindowCache {
+  visited: string[];
+  length: number;
+  first: string | undefined;
+  last: string | undefined;
+  coords: Int32Array;
+  count: number;
+  px: number;
+  py: number;
+  m0: number;
+  m1: number;
+  m2: number;
+}
+const visitedWindows = new WeakMap<Person, VisitedWindowCache>();
+
+function visitedWindowMask(person: Person, visited: string[], px: number, py: number): VisitedWindowCache {
+  const len = visited.length, first = visited[0], last = visited[len - 1];
+  let cache = visitedWindows.get(person);
+  if (cache && cache.visited === visited && cache.length === len && cache.first === first && cache.last === last) {
+    if (cache.px === px && cache.py === py) return cache;
+    let m0 = 0, m1 = 0, m2 = 0;
+    const coords = cache.coords, end = cache.count * 2;
+    for (let i = 0; i < end; i += 2) {
+      const dx = coords[i]! - px;
+      if (dx < -4 || dx > 4) continue;
+      const dy = coords[i + 1]! - py;
+      if (dy < -4 || dy > 4) continue;
+      const bit = (dy + 4) * 9 + (dx + 4);
+      if (bit < 30) m0 |= 1 << bit;
+      else if (bit < 60) m1 |= 1 << (bit - 30);
+      else m2 |= 1 << (bit - 60);
+    }
+    cache.px = px; cache.py = py; cache.m0 = m0; cache.m1 = m1; cache.m2 = m2;
+    return cache;
   }
-  visitedInts.set(visited, { length: visited.length, first, last, set });
-  return set;
+  const needed = len * 2;
+  const coords = cache && cache.coords.length >= needed ? cache.coords : new Int32Array(Math.max(384, needed));
+  let count = 0, m0 = 0, m1 = 0, m2 = 0;
+  for (let i = 0; i < len; i++) {
+    const entry = visited[i]!;
+    const comma = entry.indexOf(',');
+    if (comma <= 0 || entry.indexOf(',', comma + 1) !== -1) continue;
+    const vx = parseCanonInt(entry, 0, comma);
+    if (vx === PARSE_INVALID) continue;
+    const vy = parseCanonInt(entry, comma + 1, entry.length);
+    if (vy === PARSE_INVALID) continue;
+    coords[count * 2] = vx;
+    coords[count * 2 + 1] = vy;
+    count++;
+    const dx = vx - px;
+    if (dx >= -4 && dx <= 4) {
+      const dy = vy - py;
+      if (dy >= -4 && dy <= 4) {
+        const bit = (dy + 4) * 9 + (dx + 4);
+        if (bit < 30) m0 |= 1 << bit;
+        else if (bit < 60) m1 |= 1 << (bit - 30);
+        else m2 |= 1 << (bit - 60);
+      }
+    }
+  }
+  if (!cache) {
+    cache = { visited, length: len, first, last, coords, count, px, py, m0, m1, m2 };
+    visitedWindows.set(person, cache);
+  } else {
+    cache.visited = visited; cache.length = len; cache.first = first; cache.last = last;
+    cache.coords = coords; cache.count = count; cache.px = px; cache.py = py;
+    cache.m0 = m0; cache.m1 = m1; cache.m2 = m2;
+  }
+  return cache;
+}
+
+function encodeObs(value: number, key: string): number {
+  const c = Math.max(0, Math.min(1, value));
+  if (!Number.isFinite(c)) throw new RangeError(`Invalid local observation: ${key}`);
+  return c * 2 - 1;
 }
 
 /** Misma observación local que el bucle de radio 4 sobre `tileAt`, sin construir
@@ -67,18 +150,41 @@ export function computeLocalPolicyObservation(
 ): Float64Array {
   void world;
   let land = 0, foodSum = 0, waterTiles = 0, shelterTiles = 0, materialSum = 0, unvisited = 0;
+  const px = person.x, py = person.y;
   const visited = person.visited;
-  const ints = visited.length > 0 ? visitedIntegerSet(visited) : null;
+  const intCenter = (px | 0) === px && (py | 0) === py && px >= -CELL_KEY_BIAS + 4 && px < CELL_KEY_BIAS - 4 && py >= -CELL_KEY_BIAS + 4 && py < CELL_KEY_BIAS - 4;
+  let m0 = 0, m1 = 0, m2 = 0;
+  if (visited.length > 0 && intCenter) {
+    const win = visitedWindowMask(person, visited, px, py);
+    m0 = win.m0; m1 = win.m1; m2 = win.m2;
+  }
   const exact = fast?.exact;
   const WATER = fast?.TERRAIN_WATER ?? -1, SHELTER = fast?.TERRAIN_SHELTER ?? -1;
   const terrainArr = fast?.terrainArr, foodArr = fast?.foodArr, dwArr = fast?.drinkingWaterArr, woodArr = fast?.woodArr;
+  // Con `exact` y centro entero admisible, el disco de radio 4 toca a lo sumo 2 × 2 páginas SoA:
+  // precargar las 4 bases evita 49 lookups de RegionTable por observador.
+  const usePageCache = !!exact && (px | 0) === px && (py | 0) === py && px >= -SOA_SAFE_COORD && px <= SOA_SAFE_COORD && py >= -SOA_SAFE_COORD && py <= SOA_SAFE_COORD;
+  const px0 = usePageCache ? (px - 4) >> 4 : 0, px1 = usePageCache ? (px + 4) >> 4 : 0;
+  const py0 = usePageCache ? (py - 4) >> 4 : 0, py1 = usePageCache ? (py + 4) >> 4 : 0;
+  const b00 = usePageCache ? exact!.pageBase(px0, py0) : -1;
+  const b10 = usePageCache ? (px1 !== px0 ? exact!.pageBase(px1, py0) : b00) : -1;
+  const b01 = usePageCache ? (py1 !== py0 ? exact!.pageBase(px0, py1) : b00) : -1;
+  const b11 = usePageCache ? (py1 !== py0 ? (px1 !== px0 ? exact!.pageBase(px1, py1) : b01) : b10) : -1;
+  const stampsArr = exact?.stampsArr, versionStamp = exact?.versionStamp ?? 0;
   for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
     if (dx * dx + dy * dy > 16) continue;
-    const x = person.x + dx, y = person.y + dy;
+    const x = px + dx, y = py + dy;
     let cell = -1;
     if (exact) {
-      cell = exact.cellAt(x, y);
-      if (cell < 0 || terrainArr![cell] === WATER) continue;
+      if (usePageCache) {
+        const base = (y >> 4) === py0 ? ((x >> 4) === px0 ? b00 : b10) : ((x >> 4) === px0 ? b01 : b11);
+        if (base < 0) continue;
+        cell = base | ((y & 15) << 4) | (x & 15);
+        if (stampsArr![cell] !== versionStamp || terrainArr![cell] === WATER) continue;
+      } else {
+        cell = exact.cellAt(x, y);
+        if (cell < 0 || terrainArr![cell] === WATER) continue;
+      }
     }
     const tile = tileIn(x, y);
     if (!exact) {
@@ -99,27 +205,33 @@ export function computeLocalPolicyObservation(
       if (tile!.terrain === 'shelter') shelterTiles++;
       materialSum += (tile!.wood ?? 0) + (tile!.stone ?? 0);
     }
-    const tx = exact ? x : tile!.x, ty = exact ? y : tile!.y;
-    const key = cellIntKey(tx, ty);
-    if (key === undefined) {
-      if (visited.length === 0 || !visited.includes(`${tx},${ty}`)) unvisited++;
-    } else if (!ints || !ints.has(key)) unvisited++;
+    if (visited.length === 0) {
+      unvisited++;
+    } else if (intCenter && (exact || (tile!.x === x && tile!.y === y))) {
+      const bit = (dy + 4) * 9 + (dx + 4);
+      const seen = bit < 30 ? (m0 & (1 << bit)) !== 0 : bit < 60 ? (m1 & (1 << (bit - 30))) !== 0 : (m2 & (1 << (bit - 60))) !== 0;
+      if (!seen) unvisited++;
+    } else {
+      const tx = exact ? x : tile!.x, ty = exact ? y : tile!.y;
+      if (!visited.includes(`${tx},${ty}`)) unvisited++;
+    }
   }
   let trustSum = 0;
-  for (const other of nearbyPeople) trustSum += person.bonds[other.id] ?? 0;
+  const bonds = person.bonds;
+  for (let i = 0; i < nearbyPeople.length; i++) trustSum += bonds[nearbyPeople[i]!.id] ?? 0;
   const denom = Math.max(1, land);
-  return extractLocalObservation({
-    hunger: clamp(person.hunger),
-    thirst: clamp(person.thirst),
-    fatigue: clamp(person.fatigue),
-    energy: clamp(person.energy),
-    inventoryFrac: clamp(person.inventory / 0.25),
-    localFood: clamp(foodSum / denom),
-    localWater: clamp((waterTiles / denom) * 3),
-    localCrowd: clamp(nearbyPeople.length / 16),
-    localShelter: clamp(shelterTiles / 4),
-    localResources: clamp(materialSum / 24),
-    communityTrust: nearbyPeople.length > 0 ? clamp(trustSum / nearbyPeople.length) : 0,
-    biomeNovelty: clamp(unvisited / denom),
-  });
+  const out = new Float64Array(12);
+  out[0] = encodeObs(person.hunger, 'hunger');
+  out[1] = encodeObs(person.thirst, 'thirst');
+  out[2] = encodeObs(person.fatigue, 'fatigue');
+  out[3] = encodeObs(person.energy, 'energy');
+  out[4] = encodeObs(person.inventory / 0.25, 'inventoryFrac');
+  out[5] = encodeObs(foodSum / denom, 'localFood');
+  out[6] = encodeObs((waterTiles / denom) * 3, 'localWater');
+  out[7] = encodeObs(nearbyPeople.length / 16, 'localCrowd');
+  out[8] = encodeObs(shelterTiles / 4, 'localShelter');
+  out[9] = encodeObs(materialSum / 24, 'localResources');
+  out[10] = encodeObs(nearbyPeople.length > 0 ? trustSum / nearbyPeople.length : 0, 'communityTrust');
+  out[11] = encodeObs(unvisited / denom, 'biomeNovelty');
+  return out;
 }

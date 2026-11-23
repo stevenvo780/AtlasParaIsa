@@ -5,8 +5,9 @@ import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, paramsOf } from './params.js';
-import { tileLookup } from './tile-index.js';
+import { tileLookup, verifiedChunkBlocks } from './tile-index.js';
 import { residentFaunaCapacity, residentTileReader, type ResidentTileReader } from './soa/terreno.js';
+import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
 import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
 import { primero, primerosDos } from './orden.js';
 
@@ -71,7 +72,9 @@ function genes(seed: number, id: string, species: AnimalSpecies): AnimalGenes {
 export function materializeAnimals(seed: number, tiles: Tile[], tick: number): Animal[] {
   const animals: Animal[] = [];
   const positions = new Set<string>();
-  for (const tile of tiles) {
+  const raw = residentBackingArray(tiles);
+  for (let i = 0; i < raw.length; i++) {
+    const tile = raw[i]!;
     if (positions.has(key(tile))) throw new Error('Coordenadas de fauna duplicadas.');
     positions.add(key(tile));
     const population = tile.fauna ?? 0;
@@ -94,8 +97,86 @@ export function materializeAnimals(seed: number, tiles: Tile[], tick: number): A
 /** Celdas con fauna en la llamada anterior, con sus coordenadas: la tesela se busca en el índice
  * compartido (tile-index.ts), el mismo «última tesela con esas coordenadas» que el `Map` propio que se
  * construía aquí cada vez que cambiaba el arreglo de teselas. */
-interface FaunaCache { length: number; occupied: Map<Cell, Point>; }
+interface FaunaCache { length: number; inPlaceRev: object | undefined; occupied: Map<Cell, Point>; }
 const faunaCaches = new WeakMap<Tile[], FaunaCache>();
+let faunaFullScans = 0;
+/** Diagnóstico (pruebas y perfiles): barridos completos de `tiles` realizados por `syncFauna`. */
+export const faunaCacheBuilds = (): number => faunaFullScans;
+const CHUNK_GRID_LIMIT = 2 ** 24, CHUNK_BLOCK_OFFSET = 2 ** 20, CHUNK_BLOCK_SPAN = 2 ** 21;
+
+/** Mantenimiento incremental de la caché de `syncFauna` tras `tiles.push(...)` (p. ej. `activateChunk`).
+ * Registra solo las teselas nuevas `[from..length)` con `fauna` truthy (mismo criterio y orden que el
+ * barrido completo), evitando reescanear 440k teselas al activar un chunk. */
+export function faunaCacheAppended(tiles: Tile[], from: number): void {
+  const cache = faunaCaches.get(tiles);
+  if (!cache || cache.length !== from) return;
+  const inPlaceRev = residentInPlaceRevision(tiles);
+  if (cache.inPlaceRev !== inPlaceRev) {
+    faunaCaches.delete(tiles);
+    return;
+  }
+  const raw = residentBackingArray(tiles);
+  if (raw.length < from) {
+    faunaCaches.delete(tiles);
+    return;
+  }
+  const occupied = cache.occupied;
+  for (let i = from; i < raw.length; i++) {
+    const t = raw[i];
+    if (t && t.fauna) {
+      const p = cell(t);
+      if (!occupied.has(p)) occupied.set(p, t);
+    }
+  }
+  cache.length = raw.length;
+}
+
+/** Mantenimiento incremental de la caché de `syncFauna` tras retirar chunks (`retireActiveChunks`).
+ * Si `prevTiles` tiene caché vigente y ambos arreglos comparten disposición verificada por chunks
+ * (proveniencia de `blockIds` confirmada en O(chunks)), migra solo las entradas ocupadas (~7,5k)
+ * en vez de reescanear todas las teselas activas (~440k). Fail-closed ante cualquier anomalía. */
+export function faunaCacheFiltered(prevTiles: Tile[], nextTiles: Tile[]): void {
+  if (prevTiles === nextTiles) return;
+  const prev = faunaCaches.get(prevTiles);
+  if (!prev) return;
+  const prevRaw = residentBackingArray(prevTiles);
+  if (prev.length !== prevRaw.length || prev.inPlaceRev !== residentInPlaceRevision(prevTiles)) return;
+  const nextRaw = residentBackingArray(nextTiles);
+  if (nextRaw.length > prevRaw.length) return;
+  const prevBlocks = verifiedChunkBlocks(prevTiles), nextBlocks = verifiedChunkBlocks(nextTiles);
+  if (!prevBlocks || !nextBlocks) return;
+  for (const [key, id] of nextBlocks.blockIds) {
+    if (prevBlocks.blockIds.get(key) !== id) return;
+  }
+  const occupied = new Map<Cell, Point>();
+  if (nextBlocks.bases.size > 0) {
+    const bases = nextBlocks.bases;
+    let k1 = -1, b1 = -1, k2 = -1, b2 = -1, k3 = -1, b3 = -1, k4 = -1, b4 = -1;
+    for (const [p, at] of prev.occupied) {
+      const x = at.x, y = at.y;
+      if (x !== (x | 0) || y !== (y | 0) || x < -CHUNK_GRID_LIMIT || x >= CHUNK_GRID_LIMIT
+        || y < -CHUNK_GRID_LIMIT || y >= CHUNK_GRID_LIMIT) continue;
+      const key = ((x >> 4) + CHUNK_BLOCK_OFFSET) * CHUNK_BLOCK_SPAN + ((y >> 4) + CHUNK_BLOCK_OFFSET);
+      let base: number;
+      if (key === k1) base = b1;
+      else if (key === k2) base = b2;
+      else if (key === k3) base = b3;
+      else if (key === k4) base = b4;
+      else {
+        base = bases.get(key) ?? -1;
+        k4 = k3; b4 = b3; k3 = k2; b3 = b2; k2 = k1; b2 = b1; k1 = key; b1 = base;
+      }
+      if (base < 0) continue;
+      const tile = nextRaw[base + (((y & 15) << 4) | (x & 15))];
+      if (tile && tile.fauna) occupied.set(p, tile);
+    }
+  }
+  faunaCaches.set(nextTiles, {
+    length: nextRaw.length,
+    inPlaceRev: residentInPlaceRevision(nextTiles),
+    occupied,
+  });
+}
 
 /** Compatibility projection only. Mixed-species totals must be counted from identities, not this representative species.
  * P2: only tiles with fauna the previous call or this one are written; a cache keyed on the tiles array remembers which
@@ -109,17 +190,27 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     else counts.set(p, entry = { count: 1, species: animal.species, x: animal.x, y: animal.y });
     if (entry.count > MAX_ANIMALS_PER_TILE) throw new Error('Capacidad local de fauna excedida.');
   }
+  const raw = residentBackingArray(tiles);
+  const inPlaceRev = residentInPlaceRevision(tiles);
   let cache = faunaCaches.get(tiles);
-  if (!cache || cache.length !== tiles.length) {
+  if (!cache || cache.length !== raw.length || cache.inPlaceRev !== inPlaceRev) {
+    faunaFullScans++;
     const occupied = new Map<Cell, Point>();
-    for (const t of tiles) if (t.fauna && !occupied.has(cell(t))) occupied.set(cell(t), t);
-    cache = { length: tiles.length, occupied };
+    for (let i = 0; i < raw.length; i++) {
+      const t = raw[i]!;
+      if (t.fauna) {
+        const p = cell(t);
+        if (!occupied.has(p)) occupied.set(p, t);
+      }
+    }
+    cache = { length: raw.length, inPlaceRev, occupied };
     faunaCaches.set(tiles, cache);
   }
   const tileIn = tileLookup(tiles);
+  let missing = false;
   const write = (at: Point, count: { count: number; species: AnimalSpecies } | undefined): void => {
     const tile = tileIn(at.x, at.y);
-    if (!tile) return;
+    if (!tile) { if (count) missing = true; return; }
     const nextFauna = count?.count ?? 0;
     if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
     if (count) {
@@ -133,6 +224,9 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   const before = cache.occupied;
   for (const [p, at] of before) write(at, counts.get(p));
   for (const [p, entry] of counts) if (!before.has(p)) write(entry, entry);
+  if (missing) {
+    for (const [p, entry] of counts) if (!tileIn(entry.x, entry.y)) counts.delete(p);
+  }
   cache.occupied = counts;
 }
 
@@ -528,8 +622,12 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
 function faunaCapacity(tiles: readonly Tile[]): number {
   const fast = residentFaunaCapacity(tiles);
   if (fast !== undefined) return fast;
+  const raw = residentBackingArray(tiles);
   let count = 0;
-  for (const t of tiles) if (t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04) count++;
+  for (let i = 0; i < raw.length; i++) {
+    const t = raw[i]!;
+    if (t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04) count++;
+  }
   return count * 3;
 }
 const BREEDING_CELLS = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]] as const;
@@ -790,7 +888,7 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
   const enCelda = animalesVivosEnCelda(world, point.x, point.y);
   const victim = enCelda ? enCelda.sort(canonical)[0]
     : world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0).sort(canonical)[0];
-  if (!victim || !world.tiles.some(t => t.x === point.x && t.y === point.y)) return 0;
+  if (!victim || !residentBackingArray(world.tiles).some(t => t.x === point.x && t.y === point.y)) return 0;
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
   return FOOD_PER_ANIMAL[victim.species];
@@ -825,7 +923,8 @@ export function assertAnimal(value: unknown, tick: number): asserts value is Ani
 }
 export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = LEGACY_WORLD_LIMITS.fauna): asserts value is Animal[] {
   if (!Number.isSafeInteger(maxAnimals) || maxAnimals < 1 || !Array.isArray(value) || value.length > maxAnimals) throw new Error('Colección de fauna inválida.');
-  const ids = new Set<string>(), counts = new Map<string, number>(), positions = tiles && new Map(tiles.map(t => [key(t), t]));
+  const ids = new Set<string>(), counts = new Map<string, number>();
+  const positions = tiles && new Map(residentBackingArray(tiles).map(t => [key(t), t]));
   for (const animal of value) {
     assertAnimal(animal, tick);
     const p = key(animal), count = (counts.get(p) ?? 0) + 1;

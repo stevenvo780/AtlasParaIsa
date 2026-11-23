@@ -6,6 +6,7 @@ import { paramsOf } from './params.js';
 import { demographicTraits } from './demography.js';
 import { constructionCost } from './inventions.js';
 import { worldStatistics } from './statistics.js';
+import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
 import { projectTechnology } from './technology.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 
@@ -29,7 +30,35 @@ const viewNumber = <T extends number | undefined>(value: T): T => (typeof value 
 /** T036(h): las cantidades (existencias, huellas, fauna) no viajan cuando valen 0; el cliente las lee
  * con `?? 0`. Las magnitudes del terreno viajan siempre, porque ahí un cero es un dato. Se asignan
  * directamente (sin objetos ni spreads intermedios por tesela). */
-function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number]): Tile {
+function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast?: ResidentFastAccess): Tile {
+  const cell = fast ? fast.cellOf(t as Tile) : -1;
+  if (cell >= 0 && fast) {
+    const tc = fast.terrainArr[cell]!, bc = fast.biomeArr[cell]!, fc = fast.featureArr[cell]!;
+    const mo = fast.moistureArr[cell]!, fo = fast.foodArr[cell]!, ve = fast.vegetationArr[cell]!;
+    const gr = fast.growthArr[cell]!, fe = fast.fertilityArr[cell]!;
+    const out: Tile = {
+      x: t.x, y: t.y,
+      terrain: (tc ? fast.TERRAIN_NAMES[tc - 1] : undefined) as Tile['terrain'],
+      biome: (bc ? fast.BIOME_NAMES[bc - 1] : undefined) as Tile['biome'],
+      elevation: viewNumber(t.elevation),
+      moisture: (mo === mo ? r3(mo) : undefined) as number,
+      food: (fo === fo ? r3(fo) : undefined) as number,
+      vegetation: (ve === ve ? r3(ve) : undefined) as number,
+      feature: (fc ? fast.FEATURE_NAMES[fc - 1] : undefined) as Tile['feature'],
+      growth: gr === gr ? r3(gr) : undefined,
+      fertility: fe === fe ? r3(fe) : undefined,
+      species: t.species,
+    };
+    const wo = fast.woodArr[cell]!; if (wo === wo && wo !== 0) out.wood = r3(wo);
+    if (typeof t.stone === 'number' && t.stone !== 0) out.stone = r3(t.stone);
+    if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
+    const cu = fast.cultivationArr[cell]!; if (cu === cu && cu !== 0) out.cultivation = r3(cu);
+    const tr = fast.trafficArr[cell]!; if (tr === tr && tr !== 0) out.traffic = r3(tr);
+    const dw = fast.drinkingWaterArr[cell]!; if (dw === dw && dw !== 0) out.drinkingWater = r3(dw);
+    if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
+    const li = fast.lifeArr[cell]!; if (li === li && li !== 0) out.life = r3(li);
+    return out;
+  }
   const out: Tile = { x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species };
   if (typeof t.wood === 'number' && t.wood !== 0) out.wood = r3(t.wood);
   if (typeof t.stone === 'number' && t.stone !== 0) out.stone = r3(t.stone);
@@ -64,11 +93,12 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
   const visibleIds = new Set(peopleInView.map(p => p.id));
   // Solo viajan los planos que referencia alguna estructura visible; el resto se pide a demanda.
   const referencedBlueprintIds = new Set(projected.structures.map(s => s.blueprintId).filter((id): id is string => typeof id === 'string'));
+  const fastTiles = residentFastAccess(world.tiles);
   return {
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
-    tiles: projected.tiles.map(projectTile),
+    tiles: projected.tiles.map(t => projectTile(t, fastTiles)),
     people: peopleInView.map((p): PersonView => {
       const life = demographicTraits(p.genome, cuerpo);
       return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,

@@ -30,7 +30,7 @@ import { demographicTraits } from '../demography.js';
 import { waterAvailable } from '../inventions.js';
 import { paramsOf } from '../params.js';
 import { residentFastAccess, residentTileReader, type ResidentFastAccess } from '../soa/terreno.js';
-import { residentInPlaceRevision, residentTerrainRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
+import { residentBackingArray, residentInPlaceRevision, residentTerrainRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
 import { verifiedChunkBlocks } from '../tile-index.js';
 import { containedWaterQuanta } from '../technology-water.js';
 import { emptyAggregateBooks, reduceAggregates, type AggregateBooks, type Intent as IntentAgregado, type ReductionCost } from './agregados.js';
@@ -270,6 +270,7 @@ export class EstadoPersonasCompartido {
   #llenarWalkChunk(
     vista: VistaPersonas, slot: number, tiles: readonly Tile[], base: number, px: number, py: number, fast?: ResidentFastAccess,
   ): void {
+    tiles = residentBackingArray(tiles) as readonly Tile[];
     const flags = vista.flags, dst = slot * CELDAS_POR_PAGINA;
     const exact = fast?.exact;
     if (exact) {
@@ -309,7 +310,7 @@ export class EstadoPersonasCompartido {
     regionSide?: RegionSidePersonas; bloque?: number; movimiento?: boolean; decisiones?: Uint8Array;
   } = {}): void {
     const { regionSide, bloque } = opcionesReparto(opciones);
-    const tiles = world.tiles, personas = world.people;
+    const tiles = world.tiles, rawTiles = residentBackingArray(tiles) as readonly Tile[], personas = world.people;
     const token = residentTopologyToken(tiles);
     const terrainRev = token ? residentTerrainRevision(tiles) : undefined;
     const inPlaceRev = token ? residentInPlaceRevision(tiles) : undefined;
@@ -335,7 +336,7 @@ export class EstadoPersonasCompartido {
           // Comprueba antes si el número de bloques nuevos cabe sin superar `#capPaginas`.
           let newCount = 0;
           for (const [bKey, base] of chunkInfo.bases) {
-            const first = tiles[base]!, pKey = clavePagina(first.x >> 4, first.y >> 4);
+            const first = rawTiles[base]!, pKey = clavePagina(first.x >> 4, first.y >> 4);
             if (!blocks.pages.has(pKey)) newCount++;
           }
           const retiredCount = blocks.pages.size + newCount - neededPages;
@@ -346,7 +347,7 @@ export class EstadoPersonasCompartido {
             vista = this.#crearVista(personas.length, capHash);
             const toFill: { pKey: number; blockId: number; base: number; px: number; py: number }[] = [];
             for (const [bKey, base] of chunkInfo.bases) {
-              const first = tiles[base]!, px = first.x >> 4, py = first.y >> 4, pKey = clavePagina(px, py);
+              const first = rawTiles[base]!, px = first.x >> 4, py = first.y >> 4, pKey = clavePagina(px, py);
               const blockId = chunkInfo.blockIds.get(bKey)!;
               const existing = blocks.pages.get(pKey);
               if (existing && existing.blockId === blockId) { existing.seen = pass; continue; }
@@ -382,7 +383,7 @@ export class EstadoPersonasCompartido {
         const pages = new Map<number, { slot: number; blockId: number; px: number; py: number; seen: number }>();
         let nextSlot = 0;
         for (const [bKey, base] of chunkInfo.bases) {
-          const first = tiles[base]!, px = first.x >> 4, py = first.y >> 4, pKey = clavePagina(px, py);
+          const first = rawTiles[base]!, px = first.x >> 4, py = first.y >> 4, pKey = clavePagina(px, py);
           const slot = nextSlot++;
           this.#llenarWalkChunk(vista, slot, tiles, base, px, py, fast);
           pages.set(pKey, { slot, blockId: chunkInfo.blockIds.get(bKey)!, px, py, seen: 1 });
@@ -397,8 +398,8 @@ export class EstadoPersonasCompartido {
         const paginado = this.#paginar(tiles, personas.length, false);
         paginas = paginado.paginas; vista = paginado.vista;
         const lector = token ? residentTileReader(tiles) : undefined;
-        for (let i = 0; i < tiles.length; i++) {
-          const tile = tiles[i]!, x = tile.x, y = tile.y;
+        for (let i = 0; i < rawTiles.length; i++) {
+          const tile = rawTiles[i]!, x = tile.x, y = tile.y;
           const slot = paginado.paginaDe.get(clavePagina(x >> 4, y >> 4))!;
           const celda = slot * CELDAS_POR_PAGINA + ((y & 15) << 4) + (x & 15);
           const residente = lector ? lector.cellAt(x, y) : -1;

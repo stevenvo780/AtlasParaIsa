@@ -3,7 +3,7 @@ import { PageArena } from './arena.js';
 import { Presence } from './presencia.js';
 import { PAGE_CELLS, RegionTable, admissibleCoordinate } from './region.js';
 import type { StaticRegion } from '../paralelo/particion.js';
-import { maintainResidentTile, observeResidentArray, observeResidentTile, residentTopologyOwner,
+import { maintainResidentTile, observeResidentArray, observeResidentTile, residentBackingArray, residentTopologyOwner,
   residentTopologyToken, sameResidentTopology, type ResidentTopologyOwner, type ResidentTopologyToken } from './topologia.js';
 
 /**
@@ -78,6 +78,8 @@ const FOOD_IDX = residentKeys.indexOf('food');
 const WOOD_IDX = residentKeys.indexOf('wood');
 const CULTIVATION_IDX = residentKeys.indexOf('cultivation');
 const TRAFFIC_IDX = residentKeys.indexOf('traffic');
+const FERTILITY_IDX = residentKeys.indexOf('fertility');
+const LIFE_IDX = residentKeys.indexOf('life');
 const SHELTER_CODE = TERRAINS.indexOf('shelter') + 1;
 const WATER_CODE = TERRAINS.indexOf('water') + 1;
 const OCEAN_CODE = BIOMES.indexOf('ocean') + 1;
@@ -183,6 +185,7 @@ export class ResidentFastAccess {
   readonly TERRAIN_SHELTER = SHELTER_CODE;
   readonly BIOME_OCEAN = OCEAN_CODE;
   readonly BIOME_DESERT = BIOMES.indexOf('desert') + 1;
+  readonly TERRAIN_NAMES: readonly Terrain[] = TERRAINS;
   readonly BIOME_NAMES: readonly Biome[] = BIOMES;
   readonly FEATURE_NAMES: readonly Feature[] = FEATURES;
   constructor(
@@ -199,6 +202,8 @@ export class ResidentFastAccess {
     readonly woodArr: Float64Array,
     readonly cultivationArr: Float64Array,
     readonly trafficArr: Float64Array,
+    readonly fertilityArr: Float64Array,
+    readonly lifeArr: Float64Array,
   ) {}
 
   cellOf(tile: Tile): number {
@@ -213,6 +218,8 @@ export class ResidentFastAccess {
   drinkingWater(cell: number): number | undefined { const v = this.drinkingWaterArr[cell]!; return v === v ? v : undefined; }
   food(cell: number): number | undefined { const v = this.foodArr[cell]!; return v === v ? v : undefined; }
   wood(cell: number): number | undefined { const v = this.woodArr[cell]!; return v === v ? v : undefined; }
+  fertility(cell: number): number | undefined { const v = this.fertilityArr[cell]!; return v === v ? v : undefined; }
+  life(cell: number): number | undefined { const v = this.lifeArr[cell]!; return v === v ? v : undefined; }
 }
 
 /** Sólo un owner observado puede certificar que los buffers siguen representando estas teselas. */
@@ -246,9 +253,12 @@ export function residentSnapshotGate(tiles: Tile[]): ResidentSnapshotGate | unde
     const owner = residentTopologyOwner(tiles);
     if (owner) store = residentStoreByOwner.get(owner);
   }
-  if (!store) for (const tile of tiles) {
-    const binding = bindings.get(tile);
-    if (binding) { store = binding.store; break; }
+  if (!store) {
+    const raw = residentBackingArray(tiles);
+    for (let i = 0; i < raw.length; i++) {
+      const binding = bindings.get(raw[i]!);
+      if (binding) { store = binding.store; break; }
+    }
   }
   return store?.snapshotGate();
 }
@@ -771,6 +781,7 @@ export class TileStore {
       this.residentCur[MOISTURE_IDX] as Float64Array, this.residentCur[DRINKING_WATER_IDX] as Float64Array,
       this.residentCur[FOOD_IDX] as Float64Array, this.residentCur[WOOD_IDX] as Float64Array,
       this.residentCur[CULTIVATION_IDX] as Float64Array, this.residentCur[TRAFFIC_IDX] as Float64Array,
+      this.residentCur[FERTILITY_IDX] as Float64Array, this.residentCur[LIFE_IDX] as Float64Array,
     );
     this.cachedFast = { generation: this.residentGeneration, parity: this.parity, exact, fast };
     return fast;
@@ -802,9 +813,10 @@ export class TileStore {
     const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;
     const growth = this.residentCur[GROWTH_IDX] as Float64Array;
     const vegetation = this.residentCur[VEGETATION_IDX] as Float64Array;
+    const raw = residentBackingArray(tiles);
     let count = 0;
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i]!, b = bindings.get(tile);
+    for (let i = 0; i < raw.length; i++) {
+      const tile = raw[i]!, b = bindings.get(tile);
       if (b && b.store === this) {
         const cell = b.cell;
         if (terrain[cell] !== SHELTER_CODE) {

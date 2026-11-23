@@ -8,7 +8,7 @@ import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
-import { residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
+import { residentBackingArray, residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
 import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/terreno.js';
 
 // Transport bounds, independent of world laws and available host hardware.
@@ -178,8 +178,9 @@ export class SnapshotParts {
    * en el instante de codificarla (el guardado es síncrono: nada muta entre codificar y COMMIT). */
   private cachedPage(tiles: readonly Tile[], offset: number, count: number, digest: string, bytes: number): CachedPage {
     const refs = new Array<Tile>(count), revisions = new Int32Array(count);
+    const raw = residentTopologyToken(tiles as Tile[]) === undefined ? tiles : residentBackingArray(tiles);
     for (let i = 0; i < count; i++) {
-      const tile = tiles[offset + i]!;
+      const tile = raw[offset + i]!;
       refs[i] = tile;
       // `-1` nunca coincide con una revisión real (≥ 0): una tesela sin owner ensucia su página siempre.
       revisions[i] = residentTileRevision(tile) ?? -1;
@@ -203,6 +204,7 @@ export class SnapshotParts {
       : gate !== undefined && gate.identity === cache.parallel.identity && gate.epoch === cache.parallel.epoch;
     if (!parallelOk || !this.reuseStampIntact(ticket)) return null;
     const confirmedSerial = cache.parallel?.serial ?? 0;
+    const raw = residentBackingArray(tiles);
     const candidates: (CachedPage | null)[] = [], digests: string[] = [];
     for (let index = 0, offset = 0; offset < tiles.length; index++, offset += SNAPSHOT_PAGE_TILES) {
       const count = Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset), entry = cache.pages[index];
@@ -211,12 +213,12 @@ export class SnapshotParts {
         const entryTiles = entry!.tiles, entryRevisions = entry!.revisions;
         if (gate === undefined) {
           for (let i = 0; i < count; i++) {
-            const tile = tiles[offset + i]!;
+            const tile = raw[offset + i]!;
             if (tile !== entryTiles[i] || residentTileRevision(tile) !== entryRevisions[i]) { clean = false; break; }
           }
         } else {
           for (let i = 0; i < count; i++) {
-            const tile = tiles[offset + i]!;
+            const tile = raw[offset + i]!;
             if (tile !== entryTiles[i] || residentTileRevision(tile) !== entryRevisions[i]
               || gate.stampOfTile(tile) > confirmedSerial) { clean = false; break; }
           }

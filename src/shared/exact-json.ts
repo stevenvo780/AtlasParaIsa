@@ -17,22 +17,81 @@ export function exactJsonNumber(value: unknown): unknown {
 function exactReplacer(_key: string, current: unknown): unknown {
   return typeof current === 'number' && current === 0 && 1 / current < 0 ? exactJsonNumber(current) : current;
 }
-/** Presupuesto del pre-escaneo (ms tras las primeras 512 visitas). Agotado, se serializa directamente
- * con el replacer: los bytes son idénticos por cualquiera de las dos vías, solo cambia quién paga el
- * recorrido extra. Medido (v18 ola 2): en árboles planos el pre-escaneo + nativo gana al replacer,
- * pero en árboles de teselas Proxy cada lectura del pre-escaneo es un trap y el replacer —que reusa
- * la única lectura del serializador— gana con claridad; un presupuesto de tiempo discrimina ambos
- * perfiles sin inspeccionar tipos, y de paso acota ciclos y DAGs compartidos antes de delegarlos en
- * el error nativo de `JSON.stringify`. */
-const SCAN_BUDGET_MS = 8;
+/** Enough for V18 metadata (~30 MB), while bounding speculative work on opaque
+ * graphs. Exhaustion only selects the exact replacer; it never changes bytes. */
+const SCAN_BUDGET_MS = 500;
 const SCAN_CHUNK = 512;
-/** ¿Hace falta el replacer? Un `-0` está en el árbol, un `toJSON` podría producirlo, o el escaneo
- * agotó su presupuesto (falso positivo: cuesta tiempo, nunca cambia la salida; un falso negativo sí
- * la cambiaría). El recorrido es un SUPERCONJUNTO de lo que serializa `JSON.stringify` (`for…in`
- * visita las propias enumerables y además las heredadas), iterativo con pila explícita y con los
- * números —la inmensa mayoría de los nodos— examinados en línea (`v === 0 && 1 / v < 0` es
- * `Object.is(v, -0)`). */
+// No static Node import: this shared module is also imported by the client.
+// Proxies can return different values from their data descriptors and get trap.
+const isProxy = typeof process === 'undefined' ? undefined : process.getBuiltinModule?.('node:util').types.isProxy;
+const lookupGetter: (this: object, key: PropertyKey) => unknown =
+  Object.getOwnPropertyDescriptor(Object.prototype, '__lookupGetter__')!.value;
+/** Inspect accessors, never evaluate getters/toJSON speculatively: they
+ * may mutate already scanned values or produce -0 on their next invocation.
+ * Unusual prototypes, accessors and functions select the generic writer. Shared
+ * data objects need inspecting only once; JSON.stringify owns cycle errors. */
 function needsExactReplacer(value: unknown): boolean {
+  if (typeof value === 'number') return Object.is(value, -0);
+  if (typeof value === 'function' || typeof value === 'bigint') return true;
+  if (typeof value !== 'object' || value === null) return false;
+  if (!isProxy) return true;
+  const stack: object[] = [value];
+  // Only records with object children can form a cycle. Do not register the
+  // hundreds of thousands of scalar-only metadata records/arrays in the Set.
+  const seen = new Set<object>();
+  const started = performance.now();
+  let visits = 0;
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (isProxy(current)) return true;
+    const array = Array.isArray(current), prototype = Object.getPrototypeOf(current);
+    if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return true;
+    if ('toJSON' in current) return true;
+    let hasChildren = false;
+    if (array) {
+      const values = current as unknown[];
+      for (let i = 0; i < values.length; i++) {
+        if (++visits % SCAN_CHUNK === 0 && performance.now() - started > SCAN_BUDGET_MS) return true;
+        // No descriptor allocation per scalar; also checks inherited array holes.
+        if (lookupGetter.call(current, i) !== undefined) return true;
+        const v = values[i];
+        if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
+        else if (typeof v === 'object' && v !== null) {
+          if (!hasChildren) {
+            if (seen.has(current)) break;
+            seen.add(current); hasChildren = true;
+          }
+          stack.push(v);
+        }
+        else if (typeof v === 'function' || typeof v === 'bigint') return true;
+      }
+    } else {
+      const record = current as Record<string, unknown>;
+      // Use V8's enumeration cache rather than allocating Object.keys for every
+      // tiny record. Inherited enumerables are a safe superset of JSON's keys.
+      for (const key in record) {
+        if (++visits % SCAN_CHUNK === 0 && performance.now() - started > SCAN_BUDGET_MS) return true;
+        if (lookupGetter.call(current, key) !== undefined) return true;
+        const v = record[key];
+        if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
+        else if (typeof v === 'object' && v !== null) {
+          if (!hasChildren) {
+            if (seen.has(current)) break;
+            seen.add(current); hasChildren = true;
+          }
+          stack.push(v);
+        }
+        else if (typeof v === 'function' || typeof v === 'bigint') return true;
+      }
+    }
+  }
+  return false;
+}
+/** Preserve the original observable pre-scan for opaque values. In particular,
+ * getters (including toJSON getters) historically run during this scan as well
+ * as during JSON.stringify. The safe probe above must not change those reads,
+ * their errors, or the values a stateful getter subsequently returns. */
+function legacyNeedsExactReplacer(value: unknown): boolean {
   if (typeof value === 'number') return Object.is(value, -0);
   if (typeof value !== 'object' || value === null) return false;
   const stack: object[] = [value];
@@ -40,7 +99,7 @@ function needsExactReplacer(value: unknown): boolean {
   while (stack.length) {
     const current = stack.pop()!;
     if (++visits === SCAN_CHUNK) started = performance.now();
-    else if (started !== 0 && visits % SCAN_CHUNK === 0 && performance.now() - started > SCAN_BUDGET_MS) return true;
+    else if (started !== 0 && visits % SCAN_CHUNK === 0 && performance.now() - started > 8) return true;
     if (typeof (current as { toJSON?: unknown }).toJSON === 'function') return true;
     if (Array.isArray(current)) {
       for (let i = 0; i < current.length; i++) {
@@ -60,6 +119,6 @@ function needsExactReplacer(value: unknown): boolean {
   return false;
 }
 export function stringifyExact(value: unknown): string {
-  if (!needsExactReplacer(value)) return JSON.stringify(value);
+  if (!needsExactReplacer(value) || !legacyNeedsExactReplacer(value)) return JSON.stringify(value);
   return JSON.stringify(value, exactReplacer);
 }

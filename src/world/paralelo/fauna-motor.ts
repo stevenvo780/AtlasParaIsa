@@ -41,12 +41,21 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
 import type { Animal, AnimalMemory } from '../animals.js';
-import { residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
-import { copyResidentFaunaTile, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from '../soa/terreno.js';
+import {
+  residentBackingArray, residentInPlaceRevision, residentTopologyToken, sameResidentTopology,
+  type ResidentTopologyToken,
+} from '../soa/topologia.js';
+import {
+  copyResidentFaunaTile, residentFastAccess, residentSnapshotGate, residentTileReader,
+  type ResidentFastAccess, type ResidentTileReader,
+} from '../soa/terreno.js';
 import { verifiedChunkBlocks } from '../tile-index.js';
 import { MAX_COORDINATE } from '../terrain.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
-import { buscarPagina, CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, siguientePotencia } from './paginas.js';
+import {
+  buscarPagina, CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, llenarTablaPaginasConSlots,
+  siguientePotencia,
+} from './paginas.js';
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import {
   ACCIONES_FAUNA, CELDA_AGUA, CELDA_CRECIMIENTO, CELDA_OCEANO, CELDA_PRESENTE, CELDA_REFUGIO,
@@ -104,6 +113,8 @@ function coordenadasDeClave(clave: number | string, salida: { x: number; y: numb
 }
 
 interface DisposicionTerreno {
+  /** Proxy observado para certificados SoA; `tiles` es el backing de solo lectura. */
+  accessTiles: Tile[];
   tiles: Tile[];
   length: number;
   /** Certificado de topología residente con el que se construyó (`undefined` si el arreglo no es residente). */
@@ -196,8 +207,9 @@ export class EstadoFaunaCompartido {
 
   /** Disposición de páginas de `tiles` (orden de primera aparición, determinista): qué celda ocupa cada
    * tesela, la presencia de cada celda y la tesela de cada celda (la última con esas coordenadas). */
-  #disponer(tiles: Tile[], token: ResidentTopologyToken | undefined): DisposicionTerreno {
+  #disponer(accessTiles: Tile[], token: ResidentTopologyToken | undefined): DisposicionTerreno {
     this.#reconstrucciones++;
+    const tiles = residentBackingArray(accessTiles) as Tile[];
     const n = tiles.length;
     if (this.#xsBuf.length < n) {
       const cap = crecerCapacidad(this.#xsBuf.length, Math.max(256, n));
@@ -205,7 +217,7 @@ export class EstadoFaunaCompartido {
       this.#ysBuf = new Float64Array(cap);
     }
     const xs = this.#xsBuf, ys = this.#ysBuf;
-    const chunkInfo = token !== undefined ? verifiedChunkBlocks(tiles) : null;
+    const chunkInfo = token !== undefined ? verifiedChunkBlocks(accessTiles) : null;
     if (chunkInfo) {
       const paginas = chunkInfo.bases.size, capHash = siguientePotencia(Math.max(2, paginas * 2));
       if (paginas > this.#capPaginas || capHash > this.#capHash) this.#asignarTerreno(crecerCapacidad(this.#capPaginas, paginas), Math.max(capHash, this.#capHash));
@@ -230,7 +242,7 @@ export class EstadoFaunaCompartido {
       }
       llenarTablaPaginas({ paginasSlot: new Int32Array(b.paginasSlot), paginasX: new Int32Array(b.paginasX), paginasY: new Int32Array(b.paginasY) }, pagXList, pagYList, capHash);
       this.#sello.fill(0); this.#generacion = 0;
-      return { tiles, length: n, token, xs, ys, pagX: pagXArr, pagY: pagYArr, paginas, capHash };
+      return { accessTiles, tiles, length: n, token, xs, ys, pagX: pagXArr, pagY: pagYArr, paginas, capHash };
     }
     const celdas = new Int32Array(n);
     const paginaDe = new Map<number, number>(), pagX: number[] = [], pagY: number[] = [];
@@ -253,7 +265,7 @@ export class EstadoFaunaCompartido {
     // La última tesela con esas coordenadas gana, como `tileLookup`.
     for (let i = 0; i < n; i++) { const celda = celdas[i]!; if (celda >= 0) { tesela[celda] = i; flags[celda] = CELDA_PRESENTE; } }
     this.#sello.fill(0); this.#generacion = 0;
-    return { tiles, length: n, token, xs, ys, pagX: Int32Array.from(pagX), pagY: Int32Array.from(pagY), paginas, capHash };
+    return { accessTiles, tiles, length: n, token, xs, ys, pagX: Int32Array.from(pagX), pagY: Int32Array.from(pagY), paginas, capHash };
   }
 
   /** Relee los valores de las teselas de la página `slot`. `false` si una cambió de coordenadas. */
@@ -365,8 +377,8 @@ export class EstadoFaunaCompartido {
     if (++this.#generacion === 0x7fffffff) { this.#sello.fill(0); this.#generacion = 1; }
     const sello = this.#sello, generacion = this.#generacion;
     const trustedCoords = d.token !== undefined && sameResidentTopology(d.token, token);
-    const fast = token !== undefined ? residentFastAccess(d.tiles) : undefined;
-    const reader = fast?.exact ?? residentTileReader(d.tiles);
+    const fast = token !== undefined ? residentFastAccess(d.accessTiles) : undefined;
+    const reader = fast?.exact ?? residentTileReader(d.accessTiles);
     const trustedResident = !reader && !fast && token !== undefined;
     let releidas = 0;
     for (const a of due) {
@@ -421,7 +433,7 @@ export class EstadoFaunaCompartido {
     //    alguna ventana de percepción (fuera de ellas `choose` sólo pregunta si hay tesela).
     const tiles = world.tiles, token = residentTopologyToken(tiles);
     let d = this.#disposicion;
-    if (!d || d.tiles !== tiles || d.length !== tiles.length || (d.token === undefined ? token !== undefined : !sameResidentTopology(d.token, token))) {
+    if (!d || d.accessTiles !== tiles || d.length !== tiles.length || (d.token === undefined ? token !== undefined : !sameResidentTopology(d.token, token))) {
       d = this.#disposicion = this.#disponer(tiles, token);
     }
     let vista = crearVistaFauna(this.#buffers, { ...this.#params, hashMask: d.capHash - 1 });

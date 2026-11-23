@@ -4,6 +4,8 @@ import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
   assertWorldLimits, effectiveLimits, paramsOf, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
+import { residentBackingArray, residentTopologyToken } from '../world/soa/topologia.js';
+import { residentFastAccess } from '../world/soa/terreno.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
@@ -147,9 +149,26 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
   const rows: unknown[][] = new Array(count);
+  const token = residentTopologyToken(tiles as Tile[]);
+  // An opaque array index accessor must keep the public Proxy as its receiver.
+  const raw = token === undefined ? tiles : residentBackingArray(tiles);
+  // The provider refuses busy stores and reflected resident descriptors. A binding
+  // lookup (not an array index/coordinate guess) also handles mixed/new chunks.
+  // Inherited optional values cannot be represented by the SoA absence sentinel.
+  const fast = token !== undefined
+    && !SNAPSHOT_TILE_FIELDS.some(key => key in Object.prototype) ? residentFastAccess(tiles) : undefined;
   for (let n = 0; n < count; n++) {
-    const t = tiles[offset + n]!;
-    const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
+    const t = raw[offset + n]!;
+    const cell = fast ? fast.cellOf(t) : -1;
+    // Keep the historical tuple projection: custom object key order, extra keys
+    // and tile.toJSON do not change it. Unbound/opaque tiles take the old reads.
+    const row: unknown[] = cell < 0 ? [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]
+      : [t.x,t.y,fast!.TERRAIN_NAMES[fast!.terrainArr[cell]! - 1],
+        optionalNumber(fast!.moistureArr[cell]!),optionalNumber(fast!.vegetationArr[cell]!),optionalNumber(fast!.foodArr[cell]!),
+        fast!.BIOME_NAMES[fast!.biomeArr[cell]! - 1],t.elevation,optionalNumber(fast!.woodArr[cell]!),t.stone,
+        fast!.FEATURE_NAMES[fast!.featureArr[cell]! - 1],t.variety,optionalNumber(fast!.growthArr[cell]!),
+        optionalNumber(fast!.fertilityArr[cell]!),optionalNumber(fast!.cultivationArr[cell]!),optionalNumber(fast!.trafficArr[cell]!),
+        optionalNumber(fast!.drinkingWaterArr[cell]!),t.species,t.fauna,optionalNumber(fast!.lifeArr[cell]!)];
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
       if (typeof value === 'number') {
@@ -164,6 +183,9 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
   }
   return rows;
 }
+/** NaN is the resident absence sentinel; Infinity is a present value and must
+ * reach the same validation/error below as it does through a resident getter. */
+function optionalNumber(value: number): number | undefined { return value === value ? value : undefined; }
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
   if (Object.hasOwn(world, 'snapshotReplay')) throw new Error('Reserved snapshot replay field. Snapshot was not written.');
   if (Object.hasOwn(world, 'snapshotEncoding')) throw new Error('Reserved snapshot encoding field. Snapshot was not written.');

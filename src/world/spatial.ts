@@ -3,12 +3,11 @@ import { CHUNK_SIZE, MAX_COORDINATE, chunkCoords, chunkKey, generateChunk, gener
 import type { World } from './index.js';
 import { initializeEcosystem } from './ecosystem.js';
 import { paramsOf } from './params.js';
-import { materializeAnimals } from './animals.js';
+import { faunaCacheAppended, faunaCacheFiltered, materializeAnimals, projectAnimal } from './animals.js';
 import type { AnimalView, StructureView } from '../shared/life.js';
-import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
-import { lastTileAt, splitTileBlocks, tileIndexAppended, tileIndexCopied } from './tile-index.js';
+import { lastTileAt, splitTileBlocks, splitTileBlocksWith, tileIndexAppended, tileLookup } from './tile-index.js';
 import type { ResidentTopologyOwner } from './soa/topologia.js';
 import { chunkLruFor } from './lru.js';
 
@@ -154,6 +153,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   const from = world.tiles.length;
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
+  faunaCacheAppended(world.tiles, from);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
@@ -173,24 +173,26 @@ function retireActiveChunks(world: World, keys: readonly string[], context: Worl
     delete world.chunks[key]; retired.add(key); state?.order.delete(key); done.push(key);
   }
   if (retired.size) {
-    const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
+    const prevTiles = world.tiles;
+    const owner = context.tileOwnership;
+    const byBlock = owner
+      ? splitTileBlocksWith(
+          prevTiles,
+          first => detached.get(chunkKey(first.x, first.y))?.tiles,
+          (keptBases, blockLen) => owner.subsetBlocks(prevTiles, keptBases, blockLen),
+        )
+      : splitTileBlocks(prevTiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
     if (byBlock) {
-      if (context.tileOwnership) {
-        const wrapped = context.tileOwnership.tiles(byBlock);
-        tileIndexCopied(wrapped, byBlock, true);
-        world.tiles = wrapped;
-      } else {
-        world.tiles = byBlock;
-      }
-    }
-    else {
+      world.tiles = byBlock;
+    } else {
       const active: Tile[] = [];
       for (const tile of world.tiles) {
         const chunk = detached.get(chunkKey(tile.x, tile.y));
         if (chunk) chunk.tiles.push(tile); else active.push(tile);
       }
-      world.tiles = context.tileOwnership?.tiles(active) ?? active;
+      world.tiles = owner?.tiles(active) ?? active;
     }
+    faunaCacheFiltered(prevTiles, world.tiles);
     for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
     world.animals = world.animals.filter(animal => {
       const chunk = detached.get(chunkKey(animal.x, animal.y));
@@ -331,12 +333,14 @@ export function normalizeViewport(value?: Viewport): Viewport {
 }
 export function projectTerrain(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): { viewport: Viewport; tiles: Tile[]; places: PlaceView[]; animals: AnimalView[]; structures: StructureView[] } {
   const v = normalizeViewport(viewport), tiles: Tile[] = [], places = new Map(world.places.map(p => [p.id, p]));
+  // Fija la misma vista que tileAt al comienzo; evita crear un Point por cada celda visible.
+  const activeTile = tileLookup(world.tiles);
   const archive = new Map<string, Chunk>();
   // T035 ronda de arreglo (hallazgo crítico #2): misma cuenca que `activate()`, para que la
   // previsualización de una zona aún no materializada coincida con lo que se generará de verdad.
   const cuencas = paramsOf(world).agua.cuencas;
   for (let y = v.y; y < v.y + v.height; y++) for (let x = v.x; x < v.x + v.width; x++) {
-    const active = tileAt(world, { x, y });
+    const active = activeTile(x, y);
     if (active) { tiles.push({ ...active }); continue; }
     const key = chunkKey(x, y);
     let chunk = archive.get(key);

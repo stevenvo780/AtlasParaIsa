@@ -18,6 +18,8 @@ interface ObservedTile {
 }
 interface ObservedArray {
   owner: ResidentTopologyOwner;
+  /** Backing plano privado del Proxy: solo para lecturas internas de solo lectura (`residentBackingArray`). */
+  readonly target: readonly Tile[];
   revision: object;
   /** Cambia solo cuando se muta o borra una posición `< oldLength` (un `push` puro al final no la mueve). */
   inPlaceRevision: object;
@@ -142,6 +144,12 @@ export class ResidentTopologyOwner {
     const len = source.length;
     const target: Tile[] = new Array(len);
     const unsafe = new Set<number>();
+    const prev = observedArrays.get(source as Tile[]);
+    if (prev?.owner === this && prev.unsafe.size === 0) {
+      const src = prev.target;
+      for (let i = 0; i < len; i++) target[i] = src[i]!;
+      return this.wrapArray(target, unsafe);
+    }
     for (let i = 0; i < len; i++) {
       if (Object.hasOwn(source, i)) {
         const tile = source[i]!;
@@ -151,8 +159,37 @@ export class ResidentTopologyOwner {
         unsafe.add(i);
       }
     }
+    return this.wrapArray(target, unsafe);
+  }
+
+  /** Subconjunto denso de bloques de `source` (p. ej. tras retirar chunks en `maintainRegions`):
+   * si `source` pertenece a este owner sin huecos/inseguros, copia directo desde su backing privado
+   * sin revalidar 440k `WeakMap.get`/`Object.hasOwn`, manteniendo 100 % la garantía fail-closed. */
+  subsetBlocks(source: readonly Tile[], keptBases: readonly number[], blockLen: number): Tile[] {
+    const prev = observedArrays.get(source as Tile[]);
+    if (prev?.owner === this && prev.unsafe.size === 0 && Number.isInteger(blockLen) && blockLen > 0) {
+      const src = prev.target, srcLen = src.length;
+      const total = keptBases.length * blockLen;
+      const target: Tile[] = new Array(total);
+      let out = 0, valid = true;
+      for (let b = 0; b < keptBases.length; b++) {
+        const base = keptBases[b]!;
+        if (!Number.isInteger(base) || base < 0 || base + blockLen > srcLen) { valid = false; break; }
+        for (let i = 0; i < blockLen; i++) target[out++] = src[base + i]!;
+      }
+      if (valid) return this.wrapArray(target, new Set());
+    }
+    const flat: Tile[] = [];
+    for (let b = 0; b < keptBases.length; b++) {
+      const base = keptBases[b]!;
+      for (let i = 0; i < blockLen; i++) flat.push(source[base + i]!);
+    }
+    return this.tiles(flat);
+  }
+
+  private wrapArray(target: Tile[], unsafe: Set<number>): Tile[] {
     const state: ObservedArray = {
-      owner: this, revision: {}, inPlaceRevision: {}, unsafe, length: target.length,
+      owner: this, target, revision: {}, inPlaceRevision: {}, unsafe, length: target.length,
     };
     const inspect = (index: number): void => {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, String(index));
@@ -233,6 +270,11 @@ export function residentInPlaceRevision(tiles: Tile[]): object | undefined {
 /** Asociación emitida por registry; el contexto del mundo puede preceder a un reemplazo del array. */
 export function residentTopologyOwner(tiles: Tile[]): ResidentTopologyOwner | undefined {
   return observedArrays.get(tiles)?.owner;
+}
+/** Backing plano de SOLO LECTURA de un array observado por `ResidentTopologyOwner` (el Proxy no tiene trap `get`,
+ * así que `arr[i]` es semánticamente idéntico pero evita entrar en `ProxyGetProperty` de V8). NUNCA mutar el resultado. */
+export function residentBackingArray(tiles: readonly Tile[]): readonly Tile[] {
+  return observedArrays.get(tiles as Tile[])?.target ?? tiles;
 }
 /** Revisión monotónica de escrituras lógicas de una tesela observada (`undefined` si ningún owner la emitió).
  * Solo certifica «sin escrituras desde la revisión recordada» junto a un `ResidentTopologyToken` vigente del

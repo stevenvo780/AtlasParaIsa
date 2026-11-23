@@ -11,11 +11,14 @@ import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } f
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { primerVecino, vecinos } from './rejilla.js';
+import { tileLookup } from './tile-index.js';
+import { residentFastAccess } from './soa/terreno.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+const CULTURE_KEYS = ['sharing', 'stewardship', 'openness'] as const;
 export function initialCulture(seed: number, id: string): Culture {
   const random = localRandom(seed, `culture:${id}`);
   return { sharing: 0.15 + random() * 0.7, stewardship: 0.15 + random() * 0.7, openness: 0.15 + random() * 0.7 };
@@ -70,7 +73,7 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
   const derivaCultural = paramsOf(world).social.derivaCultural;
   if (!(derivaCultural > 0)) {
     const similarity = 1 - culturalDistance(a.culture, b.culture);
-    for (const key of ['sharing','stewardship','openness'] as const) {
+    for (const key of CULTURE_KEYS) {
       const delta = (b.culture[key] - a.culture[key]) * 0.015 * similarity;
       a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
     }
@@ -78,7 +81,7 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
   }
   if (a.communityId !== null && a.communityId === b.communityId) {
     const similarity = 1 - culturalDistance(a.culture, b.culture);
-    for (const key of ['sharing','stewardship','openness'] as const) {
+    for (const key of CULTURE_KEYS) {
       const delta = (b.culture[key] - a.culture[key]) * 0.004 * similarity;
       a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
     }
@@ -119,7 +122,9 @@ export function convivir(world: World): void {
   for (let i = 0; i < people.length; i++) {
     const a = people[i]!, cx = celda(a.x), cy = celda(a.y);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      for (const j of casillas.get(`${cx + dx},${cy + dy}`) ?? []) {
+      const bucket = casillas.get(`${cx + dx},${cy + dy}`);
+      if (!bucket) continue;
+      for (const j of bucket) {
         const b = people[j]!;
         if (j <= i || distance(a, b) > RADIO_CONVIVENCIA) continue;
         const ganancia = tasa * (a.sociability + b.sociability) / 2;
@@ -198,10 +203,21 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
     if (!(needWood <= carriedWood && needStone <= carriedStone && needWater <= 0)) {
       if (!raw) {
         raw = { wood: carriedWood, stone: carriedStone, water: 0 };
+        const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
         for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
           if (dx * dx + dy * dy > 49) continue;
-          const tile = tileAt(world, { x: learner.x + dx, y: learner.y + dy });
-          if (tile && tile.terrain !== 'water') { raw.wood += (tile.wood ?? 0) * MASS_UNIT; raw.stone += (tile.stone ?? 0) * MASS_UNIT; raw.water += (tile.drinkingWater ?? 0) * 50_000; }
+          const x = learner.x + dx, y = learner.y + dy, tile = tileIn(x, y);
+          if (!tile) continue;
+          const cell = fast ? (fast.exact ? fast.exact.cellAt(x, y) : fast.cellOf(tile)) : -1;
+          if (cell >= 0) {
+            if (fast!.terrainArr[cell] === fast!.TERRAIN_WATER) continue;
+            const wood = fast!.woodArr[cell]!, water = fast!.drinkingWaterArr[cell]!;
+            raw.wood += (wood === wood ? wood : 0) * MASS_UNIT;
+            raw.stone += (tile.stone ?? 0) * MASS_UNIT;
+            raw.water += (water === water ? water : 0) * 50_000;
+          } else if (tile.terrain !== 'water') {
+            raw.wood += (tile.wood ?? 0) * MASS_UNIT; raw.stone += (tile.stone ?? 0) * MASS_UNIT; raw.water += (tile.drinkingWater ?? 0) * 50_000;
+          }
         }
       }
       if (!(needWood <= raw.wood && needStone <= raw.stone && needWater <= raw.water)) return false;
@@ -228,9 +244,11 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
 /** Recetas que el maestro ha practicado con éxito, en el orden de sus instrucciones. No depende del
  * aprendiz: `cooperationOpportunity` la calcula una vez por decisión (nada cambia mientras evalúa). */
 function practicedRecipes(teacher: Person): string[] {
-  return teacher.technology.knownRecipes.filter(id => !((teacher.technology.competence[id]?.successes ?? 0) <= 0));
+  const ids: string[] = [];
+  for (const id of teacher.technology.knownRecipes) if (!((teacher.technology.competence[id]?.successes ?? 0) <= 0)) ids.push(id);
+  return ids;
 }
-function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[]): string | undefined {
+function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[], census?: { counts?: Map<string, number> }): string | undefined {
   if (!world.learningEnabled) return;
   const practicedIds = practiced ?? practicedRecipes(teacher);
   if (!practicedIds.length) return;
@@ -294,7 +312,7 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   // la clave vuelve a ser `gain` y el orden es exactamente el histórico. El filtro
   // `gain > 0.12` y los dos desempates (beneficio del maestro, id) no se tocan.
   const rareza = paramsOf(world).social.ensenanzaRareza;
-  const holders = rareza > 0 ? recipeHolders(world, viable) : undefined;
+  const holders = rareza > 0 ? census ? census.counts ??= recipeHolders(world) : recipeHolders(world) : undefined;
   const alive = Math.max(1, world.people.length);
   // El primero del `sort` de siempre (clave, beneficio del maestro, id) sin copiar ni ordenar: los ids
   // son únicos, así que el comparador es un orden total y su mínimo es el mismo elemento.
@@ -306,13 +324,12 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   }
   return bestRecipe.id;
 }
-/** Vivos que ya recuerdan cada receta candidata, en UNA pasada por la población: contar
- * por receta recorrería `O(personas × recetas)` una vez por candidata. */
-function recipeHolders(world: World, candidates: readonly { recipe: { id: string } }[]): Map<string, number> {
-  const counts = new Map(candidates.map(candidate => [candidate.recipe.id, 0]));
+/** One population fold per decision, reused by every learner's candidate ranking.
+ * Counts occurrences, including repeated ids, exactly as the original nested loop. */
+function recipeHolders(world: World): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const person of world.people) for (const id of person.technology.knownRecipes) {
-    const held = counts.get(id);
-    if (held !== undefined) counts.set(id, held + 1);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   return counts;
 }
@@ -322,7 +339,9 @@ function requestedPrograms(world: World, person: Person): TechnologyProgram[] {
   if (!['research', 'craft'].includes(person.action)) return [];
   if (person.technology.project) return [person.technology.project.program];
   if (person.action !== 'craft') return [];
-  return person.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe.program] : []; });
+  const programs: TechnologyProgram[] = [];
+  for (const id of person.technology.knownRecipes) { const recipe = resolveTechnologyRecipe(world, id); if (recipe) programs.push(recipe.program); }
+  return programs;
 }
 function processMaterialNeed(world: World, person: Person): { wood: number; stone: number } {
   const deficit = { wood: 0, stone: 0 };
@@ -391,6 +410,7 @@ function productExchange(world: World, seller: Person, buyer: Person): Opportuni
 export function settlementOpportunity(world: World, person: Person): { target: {x:number;y:number}; score: number; reason: string } | undefined {
   if (!world.cooperationEnabled) return;
   const r = paramsOf(world).social.hogarTrabajo;
+  const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
   // `viable` es pura durante la llamada (sólo lee): el hogar suele ser uno de los lugares a ≤ 6, y su
   // valor ya calculado se reutiliza en vez de recorrer otra vez las 49 celdas, estructuras y vecinos.
   let memoX = NaN, memoY = NaN, memo = 0;
@@ -399,9 +419,19 @@ export function settlementOpportunity(world: World, person: Person): { target: {
     let food = 0, water = 0, wood = 0, stone = 0, fauna = 0;
     for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {
       if (dx*dx+dy*dy>16) continue;
-      const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});
-      if (tile && tile.terrain !== 'water') { food += tile.food; water += tile.drinkingWater ?? 0; }
-      if (r > 0 && tile) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }
+      const x = place.x + dx, y = place.y + dy, tile = tileIn(x, y);
+      if (!tile) continue;
+      const cell = fast ? (fast.exact ? fast.exact.cellAt(x, y) : fast.cellOf(tile)) : -1;
+      if (cell >= 0) {
+        if (fast!.terrainArr[cell] !== fast!.TERRAIN_WATER) {
+          food += fast!.foodArr[cell]!;
+          const dw = fast!.drinkingWaterArr[cell]!; water += dw === dw ? dw : 0;
+        }
+        if (r > 0) { const w = fast!.woodArr[cell]!; wood += w === w ? w : 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }
+      } else {
+        if (tile.terrain !== 'water') { food += tile.food; water += tile.drinkingWater ?? 0; }
+        if (r > 0) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }
+      }
     }
     const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
@@ -437,6 +467,9 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
 }
 function evaluateCooperation(world: World, person: Person): Opportunity | undefined {
   const opportunities: Opportunity[] = [];
+  // Only this synchronous, read-only decision shares the census. Never cache across
+  // people decisions: teaching, births and deaths can change it within one tick.
+  const census: { counts?: Map<string, number> } = {};
   let practiced: string[] | undefined;
   if (world.tick - person.lastSocial < 30) return;
   for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {
@@ -451,7 +484,7 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     if (other.action === 'build') { const cost = constructionCost(world,other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
     const processNeed = ['research', 'craft'].includes(other.action) ? processMaterialNeed(world, other) : { wood: 0, stone: 0 };
     const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
-    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined);
+    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census);
     const exchange = person.technology.items.length === 0 || other.technology.items.length >= world.technology.budgets.maxItems ? undefined : productExchange(world, person, other);
     if (exchange) opportunities.push({ person: other, kind: 'tools', exchange, score: score + 0.24 });
     if (supplyMaterial) opportunities.push({ person: other, kind: 'supply', supplyMaterial, score: score + 0.22 });
@@ -753,7 +786,8 @@ export function updateCommunities(world: World, emit: Emit): void {
   // Una foto por grupo que de verdad revisa a alguien. Quien no llega a distancia cultural 0,3
   // no la construye: en el paso típico este bucle sale en O(P).
   const salida = new Map<string, GrupoSalida>();
-  const comunidadesPorId = new Map(world.communities.map(c => [c.id, c]));
+  const comunidadesPorId = new Map<string, CommunityView>();
+  for (const group of world.communities) comunidadesPorId.set(group.id, group);
   for (const person of world.people) {
     const group = person.communityId ? comunidadesPorId.get(person.communityId) : undefined;
     if (!group || culturalDistance(person.culture, group.culture) < 0.3) continue;
@@ -772,7 +806,9 @@ export function updateCommunities(world: World, emit: Emit): void {
   const actuales = porComunidad(world.people);
   for (const group of world.communities) {
     const members = actuales.get(group.id) ?? [];
-    group.members = members.map(p => p.id);
+    const ids: string[] = [];
+    for (const p of members) ids.push(p.id);
+    group.members = ids;
     if (members.length) {
       // Un pliegue por campo, en orden de slot: los mismos bits que cinco `reduce` seguidos.
       let sharing = 0, stewardship = 0, openness = 0, sx = 0, sy = 0;
@@ -785,7 +821,8 @@ export function updateCommunities(world: World, emit: Emit): void {
       group.x = Math.round(sx / n); group.y = Math.round(sy / n);
     }
   }
-  const gruposActuales = new Map(world.communities.map(c => [c.id, c]));
+  const gruposActuales = new Map<string, CommunityView>();
+  for (const group of world.communities) gruposActuales.set(group.id, group);
   for (const person of world.people) {
     if (person.communityId) continue;
     const nearby = vecinos(world, person, 7, p => p !== person && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.25 && culturalDistance(person.culture, p.culture) < 0.3, 'updateCommunities:foundation');

@@ -3,7 +3,8 @@ import type { Action, ChronicleEvent, Gesture, GestureResult, MemoryView, Person
 import { activate, bindWorldContext, maintainRegions, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext as SpatialWorldContext } from './spatial.js';
 import type { EcologyExecution } from './ecosystem-kernel.js';
 import { tileLookup } from './tile-index.js';
-import { residentFastAccess, residentTileReader, type ResidentFastAccess } from './soa/terreno.js';
+import { residentBackingArray } from './soa/topologia.js';
+import { residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from './soa/terreno.js';
 import { gpuNvrtcAvailable } from './gpu/puente.js';
 import { chunkKey, generateChunk, proceduralPlaceName, proceduralPersonName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
@@ -70,8 +71,27 @@ const MAX_HABITS = 3;
 const RADIUS = 7;
 const COOLDOWN = 30;
 const clamp = (n: number, max = 1): number => Math.max(0, Math.min(max, n));
-const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
+const distance = (a: Point, b: Point): number => HYPOT2_EXACT ? hypot2(a.x - b.x, a.y - b.y) : Math.hypot(a.x - b.x, a.y - b.y);
 interface Point { x: number; y: number; }
+type TileLookup = (x: number, y: number) => Tile | undefined;
+/** `Math.hypot(x, y)` reserva un arreglo interno en cada llamada. Con dos argumentos la suma de
+ * Kahan de V8 se reduce a estas mismas operaciones IEEE; si alguna muestra difiere, se usa `Math.hypot`. */
+function hypot2(x: number, y: number): number {
+  const ax = Math.abs(x), ay = Math.abs(y);
+  if (ax === Infinity || ay === Infinity) return Infinity;
+  if (x !== x || y !== y) return NaN;
+  const max = ax > ay ? ax : ay;
+  if (max === 0) return 0;
+  const a = ax / max, b = ay / max;
+  return Math.sqrt(a * a + b * b) * max;
+}
+const HYPOT2_EXACT = (() => {
+  let state = 0x9e3779b9;
+  const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  const samples: [number, number][] = [[0, 0], [-0, 0], [0, -0], [3, 4], [NaN, 1], [1, NaN], [Infinity, NaN], [-Infinity, 2], [5e-324, 0], [1e308, 1e308]];
+  for (let i = 0; i < 256; i++) samples.push([(next() - 0.5) * 80, (next() - 0.5) * 80], [Math.floor(next() * 400) - 200, Math.floor(next() * 400) - 200]);
+  return samples.every(([x, y]) => Object.is(hypot2(x, y), Math.hypot(x, y)));
+})();
 export interface Experience { tick: number; text: string; causeId: string; placeId: string; }
 export interface Habit {
   placeId: string; observations: number; strength: number; demonstrator: string;
@@ -134,8 +154,8 @@ export function phaseAt(tick: number): WorldView['phase'] {
   return t < 300 ? 'dawn' : t < 1500 ? 'day' : t < 1800 ? 'dusk' : 'night';
 }
 
-function walkable(world: World, p: Point): boolean {
-  const tile = tileAt(world, p);
+function walkable(world: World, p: Point, lookup?: TileLookup): boolean {
+  const tile = (lookup ?? tileLookup(world.tiles))(p.x, p.y);
   return !!tile && tile.terrain !== 'water';
 }
 
@@ -307,18 +327,48 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   // las teselas, nunca `world.tiles`, así que es la misma tesela que devolvería `tileAt` en cada vuelta,
   // sin crear cuatro pares y cuatro puntos por tesela.
   const tileIn = tileLookup(world.tiles);
-  const waterAt = (x: number, y: number): boolean => tileIn(x, y)?.terrain === 'water';
-  for (const tile of world.tiles) {
-    if (tile.terrain === 'water') continue;
+  const fast = residentFastAccess(world.tiles);
+  const exact = fast?.exact, terrainArr = fast?.terrainArr, biomeArr = fast?.biomeArr;
+  const moistureArr = fast?.moistureArr, vegArr = fast?.vegetationArr, foodArr = fast?.foodArr;
+  const WATER = fast?.TERRAIN_WATER ?? -1;
+  const waterAt = (x: number, y: number): boolean => {
+    if (exact && terrainArr) {
+      const cell = exact.cellAt(x, y);
+      if (cell >= 0) return terrainArr[cell] === WATER;
+    }
+    const tile = tileIn(x, y);
+    if (!tile) return false;
+    if (fast && terrainArr) {
+      const cell = fast.cellOf(tile);
+      if (cell >= 0) return terrainArr[cell] === WATER;
+    }
+    return tile.terrain === 'water';
+  };
+  const rawTiles = residentBackingArray(world.tiles);
+  for (let i = 0; i < rawTiles.length; i++) {
+    const tile = rawTiles[i]!;
+    let cell = exact ? exact.cellAt(tile.x, tile.y) : -1;
+    if (cell < 0 && fast) cell = fast.cellOf(tile);
+    const bound = cell >= 0 && !!fast && !!terrainArr && !!biomeArr && !!moistureArr && !!vegArr && !!foodArr;
+    if (bound && terrainArr![cell] === WATER) continue;
+    if (!bound && tile.terrain === 'water') continue;
     // Neighbor water is an explicit, local moisture source (same four cells, same short-circuit order).
     const nearWater = waterAt(tile.x - 1, tile.y) || waterAt(tile.x + 1, tile.y) || waterAt(tile.x, tile.y - 1) || waterAt(tile.x, tile.y + 1);
-    tile.moisture = clamp(tile.moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
-    const K = tile.biome === 'forest' ? capacidadBosque : tile.biome === 'grassland' ? capacidadPastizal : capacidadOtros;
-    const headroom = K > 0 ? 1 - tile.vegetation / K : 0;
-    const growth = velocidadRegeneracion * light * tile.moisture * 0.007 * headroom;
-    tile.vegetation = clamp(tile.vegetation + growth - (tile.moisture < 0.15 ? 0.0015 : 0.0001));
-    const foodHeadroom = K > 0 ? 1 - tile.food / K : 0;
-    tile.food = clamp(tile.food + velocidadRegeneracion * light * tile.moisture * tile.vegetation * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
+    let moisture = bound ? moistureArr![cell]! : tile.moisture;
+    let vegetation = bound ? vegArr![cell]! : tile.vegetation;
+    let food = bound ? foodArr![cell]! : tile.food;
+    const biomeCode = bound ? biomeArr![cell]! : 0;
+    const biome = bound ? (biomeCode ? fast!.BIOME_NAMES[biomeCode - 1] : undefined) : tile.biome;
+    moisture = clamp(moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
+    tile.moisture = moisture;
+    const K = biome === 'forest' ? capacidadBosque : biome === 'grassland' ? capacidadPastizal : capacidadOtros;
+    const headroom = K > 0 ? 1 - vegetation / K : 0;
+    const growth = velocidadRegeneracion * light * moisture * 0.007 * headroom;
+    vegetation = clamp(vegetation + growth - (moisture < 0.15 ? 0.0015 : 0.0001));
+    tile.vegetation = vegetation;
+    const foodHeadroom = K > 0 ? 1 - food / K : 0;
+    food = clamp(food + velocidadRegeneracion * light * moisture * vegetation * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
+    tile.food = food;
   }
 }
 
@@ -345,11 +395,50 @@ export function ventajaComparativa(traits: NonNullable<PersonView['traits']>, ac
   return traits[rasgo] - (traits.curiosity + traits.sociability + traits.industriousness + traits.care + traits.resilience) / 5;
 }
 
+/** Celda SoA de `(x, y)`: `exact.cellAt` y, si no está, la ligadura de la tesela. `< 0` = leer el objeto. */
+function soaCell(fast: ResidentFastAccess | undefined, x: number, y: number, tile?: Tile): number {
+  if (!fast) return -1;
+  if (fast.exact) {
+    const cell = fast.exact.cellAt(x, y);
+    if (cell >= 0) return cell;
+  }
+  if (tile) {
+    const cell = fast.cellOf(tile);
+    if (cell >= 0) return cell;
+  }
+  return -1;
+}
+function readResidentNumber(arr: Float64Array, cell: number): number | undefined {
+  const v = arr[cell]!;
+  return v === v ? v : undefined;
+}
+function tileIsDesert(tile: Tile, cell: number, fast?: ResidentFastAccess): boolean {
+  return fast && cell >= 0 ? fast.biomeArr[cell] === fast.BIOME_DESERT : tile.biome === 'desert';
+}
+function tileIsExposed(tile: Tile, cell: number, fast?: ResidentFastAccess): boolean {
+  return fast && cell >= 0 ? fast.terrainArr[cell] !== fast.TERRAIN_SHELTER : tile.terrain !== 'shelter';
+}
+function shelterTerrain(tile: Tile | undefined, cell: number, fast?: ResidentFastAccess): boolean {
+  if (fast && cell >= 0) return fast.terrainArr[cell] === fast.TERRAIN_SHELTER;
+  return tile?.terrain === 'shelter';
+}
+/** Igual que el getter (`NaN` = ausente → `undefined`) y que `?? 0` cuando el original lo usa. */
+function foodStock(tile: Tile | undefined, cell: number, fast?: ResidentFastAccess): number {
+  const raw = fast && cell >= 0 ? readResidentNumber(fast.foodArr, cell) : tile?.food;
+  return raw ?? 0;
+}
+
 /** Exact physical roof predicate used by population damage, independent of display labels. */
-function bodilyShelter(world: World, point: Point): number {
-  return world.shelterBenefitEnabled && tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...filtrarCerca(world.structures, point, 0,
-    s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))
-    .map(s => s.condition)) : 0;
+function bodilyShelter(world: World, point: Point, lookup?: TileLookup, fast?: ResidentFastAccess): number {
+  if (!world.shelterBenefitEnabled) return 0;
+  const tileIn = lookup ?? tileLookup(world.tiles);
+  const tile = tileIn(point.x, point.y);
+  if (!shelterTerrain(tile, soaCell(fast, point.x, point.y, tile), fast)) return 0;
+  let best = 0;
+  const roofs = filtrarCerca(world.structures, point, 0,
+    s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'));
+  for (let i = 0; i < roofs.length; i++) best = Math.max(best, roofs[i]!.condition);
+  return best;
 }
 
 /** One model day converts damage/tick into the same normalized units as health.
@@ -373,8 +462,10 @@ function bodilyDamage(world: World, person: Person, body: Pick<Person, 'hunger' 
 
 /** Read-only preview of the current cell's meal, including the existing reserve split.
  * This is only a decision forecast. bodyAndAction still owns every actual debit. */
-function immediateMeal(world: World, person: Person): number {
-  const harvest = Math.min(tileAt(world, person)?.food ?? 0, 0.0035);
+function immediateMeal(world: World, person: { x: number; y: number; inventory: number; hunger: number }, lookup?: TileLookup, fast?: ResidentFastAccess): number {
+  const tileIn = lookup ?? tileLookup(world.tiles);
+  const tile = tileIn(person.x, person.y);
+  const harvest = Math.min(foodStock(tile, soaCell(fast, person.x, person.y, tile), fast), 0.0035);
   const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
   let consumed = harvest - saved;
   if (consumed < 0.001 && person.hunger > 0.2) consumed += Math.min(foodAvailable(world, person), 0.002);
@@ -465,9 +556,12 @@ function drinkingBody(world: World, person: Person, point: Point) {
   return body;
 }
 
+function needRates(world: World, desert: boolean, exposed: boolean, physiology: ReturnType<typeof demographicTraits>) {
+  return { hunger: HAMBRE_POR_PASO * physiology.foodDemand, thirst: (SED_POR_PASO + (desert ? 0.0002 : 0)) * physiology.waterDemand,
+    energy: 0.00007, stressEnergy: 0.00015, fatigue: 0.00009 + (world.weather === 'rain' && exposed ? 0.0001 : 0) };
+}
 export function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
-  return { hunger: HAMBRE_POR_PASO * physiology.foodDemand, thirst: (SED_POR_PASO + (tile.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand,
-    energy: 0.00007, stressEnergy: 0.00015, fatigue: 0.00009 + (world.weather === 'rain' && tile.terrain !== 'shelter' ? 0.0001 : 0) };
+  return needRates(world, tile.biome === 'desert', tile.terrain !== 'shelter', physiology);
 }
 
 function localRestQuality(world: World, person: Person): number {
@@ -477,9 +571,16 @@ function localRestQuality(world: World, person: Person): number {
 
 /** A local paid pause is useful only if its real recovery can enable handling within
  * the next decision interval. This predicts capacity, never hydration or new contents. */
-function canRecoverWaterHandling(world: World, person: Person): boolean {
-  const forecast = { ...person }, quality = localRestQuality(world, person);
-  const rates = bodilyNeedRates(world, tileAt(world, person)!, demographicTraits(person.genome, paramsOf(world).cuerpo));
+function canRecoverWaterHandling(world: World, person: Person, lookup?: TileLookup, fast?: ResidentFastAccess): boolean {
+  const forecast = {
+    id: person.id, x: person.x, y: person.y, hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy,
+    materials: person.materials, skills: person.skills, technology: person.technology,
+  };
+  const quality = localRestQuality(world, person);
+  const tileIn = lookup ?? tileLookup(world.tiles);
+  const here = tileIn(person.x, person.y)!;
+  const hereCell = soaCell(fast, person.x, person.y, here);
+  const rates = needRates(world, tileIsDesert(here, hereCell, fast), tileIsExposed(here, hereCell, fast), demographicTraits(person.genome, paramsOf(world).cuerpo));
   for (let elapsed = 1; elapsed <= 30; elapsed++) {
     restBody(forecast, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     // The next choice happens after the following tick's basal needs, as in bodyAndAction.
@@ -586,10 +687,19 @@ function precomputePolicyScores(world: World): (() => Map<string, Float64Array>)
   return () => ready;
 }
 
-function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number): void {
-  const nearbyTiles: Tile[] = [];
-  const nearbyCells: number[] = [];
-  const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles), exact = fast?.exact;
+const chooseNearby: Tile[] = [], chooseNearbyCells: number[] = [], chooseReachable: Tile[] = [], chooseReachableCells: number[] = [];
+const chooseHuntOrder = new Int16Array(256);
+let chooseDepth = 0;
+function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
+  const depth = ++chooseDepth;
+  try {
+  const own = depth === 1;
+  if (own) { chooseNearby.length = 0; chooseNearbyCells.length = 0; chooseReachable.length = 0; chooseReachableCells.length = 0; }
+  const nearbyTiles = own ? chooseNearby : [];
+  const nearbyCells = own ? chooseNearbyCells : [];
+  const tileIn = tileInArg ?? tileLookup(world.tiles);
+  const fast = fastArg === undefined ? residentFastAccess(world.tiles) : fastArg ?? undefined;
+  const exact = fast?.exact;
   const params = paramsOf(world);
   const WATER_CODE = fast?.TERRAIN_WATER ?? -1, terrainScan = fast?.terrainArr;
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
@@ -608,8 +718,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     }
   }
   const stepsTo = precomputedRouteLookup(person, precomputed, slot) ?? perceivedRoutes(person, nearbyTiles);
-  const reachableTiles: Tile[] = [];
-  const reachableCells: number[] = [];
+  const reachableTiles = own ? chooseReachable : [];
+  const reachableCells = own ? chooseReachableCells : [];
   // Pasos y distancias de cada tesela percibida, calculados una sola vez: ni la persona ni las
   // teselas se mueven durante `choose`, así que cada bucle posterior lee el mismo doble que
   // `stepsTo`/`distance` devolvería (`nearbySteps` usa -1 para «sin ruta», como `undefined`).
@@ -690,7 +800,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   }
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
-  const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
+  const protection = bodilyShelter(world, person, tileIn, fast), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person, tileIn, fast);
   if (meal > 0) {
     const fed = { ...body }; assimilateFood(fed, meal, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     const relief = avoidedDamageScore(person, damage, bodilyDamage(world, person, fed, protection));
@@ -716,7 +826,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     // rates give a conservative desert/rain forecast without reading remote land.
     // `bodilyNeedRates` only depends on the tile through (desert?, shelter?), so with the
     // resident arrays one representative per combination gives the same componentwise max.
-    const worst = bodilyNeedRates(world, reachableTiles[0]!, physiology);
+    const firstCell = fast ? reachableCells[0]! : -1;
+    const worst = needRates(world, tileIsDesert(reachableTiles[0]!, firstCell, fast), tileIsExposed(reachableTiles[0]!, firstCell, fast), physiology);
     let seenCombos = 0;
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, cell = reachableCells[i]!;
@@ -725,7 +836,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
         if (seenCombos & (1 << combo)) continue;
         seenCombos |= 1 << combo;
       }
-      const rates = bodilyNeedRates(world, tile, physiology);
+      const rates = needRates(world, tileIsDesert(tile, cell, fast), tileIsExposed(tile, cell, fast), physiology);
       worst.hunger = Math.max(worst.hunger, rates.hunger); worst.thirst = Math.max(worst.thirst, rates.thirst);
       worst.energy = Math.max(worst.energy, rates.energy); worst.stressEnergy = Math.max(worst.stressEnergy, rates.stressEnergy);
       worst.fatigue = Math.max(worst.fatigue, rates.fatigue);
@@ -743,7 +854,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
         capacity: other => Math.min(FORAGE_AMOUNT, Math.max(0, 0.25 - other.inventory)),
         continues: (other, ticks) => {
           const body = { hunger: other.hunger, thirst: other.thirst, energy: other.energy, fatigue: other.fatigue };
-          advanceNeeds(body, bodilyNeedRates(world, tile, demographicTraits(other.genome, params.cuerpo)), ticks);
+          const otherCell = reachableCells[sourceIndex]!;
+          advanceNeeds(body, needRates(world, tileIsDesert(tile, otherCell, fast), tileIsExposed(tile, otherCell, fast), demographicTraits(other.genome, params.cuerpo)), ticks);
           return body.hunger <= 0.9 && body.thirst <= 0.9;
         },
       })) continue;
@@ -824,7 +936,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
   const localWater = waterAvailable(world, person) > 0;
-  const recoverWater = carriedWater && !portableWater && !localWater && canRecoverWaterHandling(world, person);
+  const recoverWater = carriedWater && !portableWater && !localWater && canRecoverWaterHandling(world, person, tileIn, fast);
   const seekingWater = !water && !portableWater && !localWater && !recoverWater && person.thirst > 0.6;
   // Memoria del agua (2026-09-22, `agua.memoria`, default 1 = conducta de hoy). Diagnóstico en la
   // semilla 42 (base del laboratorio de la noche): quien muere de sed lleva 850–1100 pasos con sed > 0,7
@@ -842,7 +954,9 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const recuerdo = person.waterMemory;
     if (recuerdo && distance(person, recuerdo) <= RADIUS && waterAvailable(world, recuerdo) <= 0.005) delete person.waterMemory;
     else if (recuerdo && !water && !localWater && distance(person, recuerdo) >= 0.5) {
-      const sedPorPaso = bodilyNeedRates(world, tileAt(world, person)!, demographicTraits(person.genome, params.cuerpo)).thirst;
+      const here = tileIn(person.x, person.y)!;
+      const hereCell = soaCell(fast, person.x, person.y, here);
+      const sedPorPaso = needRates(world, tileIsDesert(here, hereCell, fast), tileIsExposed(here, hereCell, fast), demographicTraits(person.genome, params.cuerpo)).thirst;
       sedAlLlegar = person.thirst - containedWaterQuanta(person) / WATER_QUANTA_PER_UNIT * 3 + distance(person, recuerdo) * 6 * sedPorPaso;
       if (sedAlLlegar > umbralMemoria) aguaRecordada = { x: recuerdo.x, y: recuerdo.y };
     }
@@ -870,9 +984,23 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if (waterAvailable(world, person) > 0 && damage > 0) candidates.push({ action: 'drink', target: person,
     score: Math.max(0, person.thirst - .18) * 3.1, reason: 'Puede beber una reserva local ahora para aliviar la privación corporal.' });
   const huntPlan = (() => {
-    for (const tile of reachableTiles.filter(t => (t.fauna ?? 0) >= 1).sort(disputada
-      ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
-      : (a, b) => distance(person, a) - distance(person, b))) {
+    let huntCount = 0;
+    const huntOrder = reachableTiles.length <= chooseHuntOrder.length && own ? chooseHuntOrder : new Int16Array(reachableTiles.length);
+    for (let i = 0; i < reachableTiles.length; i++) if ((reachableTiles[i]!.fauna ?? 0) >= 1) huntOrder[huntCount++] = i;
+    for (let i = 1; i < huntCount; i++) {
+      const idx = huntOrder[i]!, key = disputada ? reachableDist[idx]! + recelo(reachableTiles[idx]!) : reachableDist[idx]!;
+      let j = i;
+      while (j > 0) {
+        const prev = huntOrder[j - 1]!;
+        const prevKey = disputada ? reachableDist[prev]! + recelo(reachableTiles[prev]!) : reachableDist[prev]!;
+        if (!(prevKey > key)) break;
+        huntOrder[j] = prev;
+        j--;
+      }
+      huntOrder[j] = idx;
+    }
+    for (let h = 0; h < huntCount; h++) {
+      const tile = reachableTiles[huntOrder[h]!]!;
       const victim = (() => {
         const enCelda = animalesVivosEnCelda(world, tile.x, tile.y);
         if (enCelda) {
@@ -888,7 +1016,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       })();
       const work = Math.max(0, Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25))
         - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
-      if (victim && planAffordable(stepsTo(tile)!, work)) return { tile, victim, work };
+      if (victim && planAffordable(reachableSteps[huntOrder[h]!]!, work)) return { tile, victim, work };
     }
     return undefined;
   })();
@@ -914,7 +1042,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       if (!isShelterOf(tile, fast ? nearbyCells[i]! : -1)) continue;
       const steps = nearbySteps[i]!;
       if (steps < 0) continue;
-      const sh = bodilyShelter(world, tile);
+      const sh = bodilyShelter(world, tile, tileIn, fast);
       if (!(sh > 0)) continue;
       const sc = sh * (TICKS_PER_DAY - steps * 6);
       if (!shelter || sc > shelterBestScore) { shelter = tile; shelterBestScore = sc; }
@@ -977,8 +1105,14 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if (partner) {
     if (vinculoEncuentro > 0) person.partnerMemory = { x: partner.x, y: partner.y, tick: world.tick };
     if (person.socialLoad > 0.7 || partner.socialLoad > 0.8) {
-      const space = nearbyTiles.filter(tile => distance(person, tile) <= 4).sort((a, b) => distance(partner, b) - distance(partner, a))[0]!;
-      candidates.push({ action: 'retreat', target: space, score: 1.1 + person.socialLoad, reason: 'Después de compartir tiempo, busca espacio para recuperar su ritmo.' });
+      let space: Tile | undefined, spaceDist = -Infinity;
+      for (let i = 0; i < nearbyTiles.length; i++) {
+        const tile = nearbyTiles[i]!;
+        if (!(nearbyDist[i]! <= 4)) continue;
+        const away = distance(partner, tile);
+        if (!space || away > spaceDist) { space = tile; spaceDist = away; }
+      }
+      candidates.push({ action: 'retreat', target: space!, score: 1.1 + person.socialLoad, reason: 'Después de compartir tiempo, busca espacio para recuperar su ritmo.' });
     } else {
       candidates.push({ action: 'approach', target: partner, score: person.closeness * (0.65 + person.sociability * 0.45), reason: 'Le apetece acercarse; puede ver al otro en las cercanías.' });
       candidates.push({ action: 'accompany', target: partner, score: 0.18 + person.sociability * 0.1 + (partner.action === 'rest' ? 0.1 : 0), reason: 'Elige compartir una pausa con quien está cerca.' });
@@ -1074,7 +1208,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const steps = stepsTo(candidate.target);
     const bypassEffort = desperateSubsistence && (candidate.action === 'eat' || candidate.action === 'drink');
     if (steps === undefined || (!bypassEffort && !planAffordable(steps, 0))) continue;
-    let cover = exposed ? bodilyShelter(world, candidate.target) : protection, work = 0, travel = steps;
+    let cover = exposed ? bodilyShelter(world, candidate.target, tileIn, fast) : protection, work = 0, travel = steps;
     // Accompany stops within 1.5 cells: another person's roof is not the follower's roof.
     if (candidate.action === 'accompany' && steps > 0) cover = 0;
     if (exposed && candidate.action === 'repair' && damaged?.components.includes('roof')) {
@@ -1088,7 +1222,13 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     if (candidate === coverGather) { cover = 1; work = gatherWork; travel = gatherSteps; }
     if (cover > 0 && exposed) protectionPlan = true;
     let forecast = { ...body };
-    if (candidate.action === 'eat') assimilateFood(forecast, immediateMeal(world, { ...person, ...candidate.target }), { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
+    if (candidate.action === 'eat') {
+      const over = candidate.target as Partial<Person>;
+      assimilateFood(forecast, immediateMeal(world, {
+        x: candidate.target.x, y: candidate.target.y,
+        inventory: over.inventory ?? person.inventory, hunger: over.hunger ?? person.hunger,
+      }, tileIn, fast), { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
+    }
     if (candidate.action === 'drink') forecast = drinkingBody(world, person, candidate.target);
     // A speculative pursuit must not displace a meal that can already be eaten.
     if (candidate.action === 'hunt' && !food && meal === 0 && huntPlan) {
@@ -1175,7 +1315,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
-    if (command.order === 'explore') directed.target = explorationTarget(world, person, reachableTiles);
+    if (command.order === 'explore') directed.target = explorationTarget(world, person, reachableTiles, reachableCells, fast);
     if (command.order === 'gather' && distance(person, command) <= RADIUS && resource) directed.target = resource;
     if (command.order === 'forage' && distance(person, command) <= RADIUS && food) directed.target = food;
     if (command.order === 'drink' && (portableWater || water)) directed.target = portableWater ? { x: person.x, y: person.y } : water!;
@@ -1217,7 +1357,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
         person.heading += 1.3;
       }
     }
-    selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);
+    selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles, reachableCells, fast);
   }
   // A viable work site retains accumulated work while the same action is selected.
   // A protective forecast in rain cannot be redirected to a different old site
@@ -1225,7 +1365,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if (selected.action===person.action && (selected.action==='build' || selected.action==='invent' || selected.action==='repair' || selected.action==='farm' || selected.action==='forage') && person.work>0
     && (!exposed || distance(person.target, selected.target) === 0)
     && (selected !== familyForage || distance(person.target, selected.target) === 0)
-    && (selected.action!=='forage' || (tileAt(world,person.target)?.food??0)>=MIN_FORAGE_STOCK)) selected.target=person.target;
+    && (selected.action!=='forage' || foodStock(tileIn(person.target.x, person.target.y), soaCell(fast, person.target.x, person.target.y, tileIn(person.target.x, person.target.y)), fast)>=MIN_FORAGE_STOCK)) selected.target=person.target;
   if (person.action !== selected.action || distance(person.target, selected.target) > 0) person.work = 0;
   person.action = selected.action;
   if (selected.action !== 'drink') delete person.technology.waterPreparation;
@@ -1240,13 +1380,16 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const event = addEvent(world, { kind: 'memory', actors: [person.id], text: `${person.name} eligió ${actionLabel(selected.action)} al recordar «${selected.memory.title}».`, cause: `Contexto ${selected.memory.context}; recuerdo ${selected.memory.id}; aumenta la preferencia por ${selected.action}.`, x: person.x, y: person.y, source: selected.memory.source });
     remember(person, world, selected.memory.text, event.id, selected.memory.placeId);
   }
+  } finally {
+    chooseDepth--;
+  }
 }
 
 function actionLabel(action: Action): string {
   return ({ explore: 'explorar', eat: 'buscar alimento', forage: 'cosechar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar', research:'investigar materiales', craft:'fabricar una técnica aprendida' })[action];
 }
 
-function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
+function explorationTarget(world: World, person: Person, tiles: Tile[], cells?: readonly number[], fast?: ResidentFastAccess): Point {
   const headingX = Math.cos(person.heading), headingY = Math.sin(person.heading);
   const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];
   const desperate = paramsOf(world).social.vinculoEncuentro > 0 && (person.thirst > 0.85 || person.hunger > 0.85);
@@ -1260,9 +1403,12 @@ function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
     const t = tiles[i]!;
     const away = distance(person, t);
     if (away < 3 || away > 6) continue;
+    const cell = cells ? cells[i]! : -1;
+    const rawTraffic = fast && cell >= 0 ? fast.trafficArr[cell]! : undefined;
+    const traffic = fast && cell >= 0 ? (rawTraffic === rawTraffic ? rawTraffic! : 0) : (t.traffic ?? 0);
     const s = ((t.x - person.x) * headingX + (t.y - person.y) * headingY) * headingWeight
       + (novelty && !(visitedSet ??= new Set(visited)).has(`${t.x},${t.y}`) ? 2 : 0)
-      + (t.traffic ?? 0) * 0.1
+      + traffic * 0.1
       + (comp0 ? (compDist - distance(t, comp0)) * compWeight : 0);
     if (!best || s > bestScore || (s === bestScore && (t.x < best.x || (t.x === best.x && t.y < best.y)))) {
       best = t; bestScore = s;
@@ -1296,7 +1442,7 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
 }
 
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
-function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number): void {
+function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number, tileInArg?: TileLookup, readerArg?: ResidentTileReader | null): void {
   if (distance(person, person.target) < 0.5) return;
   const key = (p: Point) => `${p.x},${p.y}`;
   const start = { x: person.x, y: person.y };
@@ -1313,9 +1459,10 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
   }
   const allowCoastalDetour = paramsOf(world).social.vinculoEncuentro > 0
     && person.action === 'approach' && !person.command && distance(start, person.target) > 12;
+  const tileIn = tileInArg ?? tileLookup(world.tiles);
   if ((!blocked && nextStep === null) || allowCoastalDetour) {
     const routeKey = (x: number, y: number) => cellIntKey(x, y) ?? `${x},${y}`;
-    const tileIn = tileLookup(world.tiles), reader = residentTileReader(world.tiles);
+    const reader = readerArg === undefined ? residentTileReader(world.tiles) : readerArg ?? undefined;
     const queue: Point[] = [start], previous = new Map<number | string, Point | null>([[routeKey(start.x, start.y), null]]);
     let best = start, bestDist = distance(start, person.target), head = 0;
     // Bounded local BFS takes one physical step toward even a distant order.
@@ -1380,7 +1527,7 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
   }
   person.x = nextStep.x; person.y = nextStep.y;
   personaMovida(world, person);
-  trampleTile(tileAt(world, person)!);
+  trampleTile(tileIn(person.x, person.y)!);
   exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
   const visitedKey = key(person);
   if (!person.visited.includes(visitedKey)) {
@@ -1435,12 +1582,15 @@ function share(world: World, donor: Person): void {
   }
 }
 
-function bodyAndAction(world: World, person: Person, precomputedMoves?: PrecomputedMoves, slot?: number, policyScores?: Map<string, Float64Array>): void {
+function bodyAndAction(world: World, person: Person, precomputedMoves?: PrecomputedMoves, slot?: number, policyScores?: Map<string, Float64Array>, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   maintainContainedWater(world, person);
   const params = paramsOf(world);
-  const tile = tileAt(world, person)!;
+  const tileIn = tileInArg ?? tileLookup(world.tiles);
+  const fast = fastArg === undefined ? residentFastAccess(world.tiles) : fastArg ?? undefined;
+  const tile = tileIn(person.x, person.y)!;
+  const tileCell = soaCell(fast, person.x, person.y, tile);
   const physiology = demographicTraits(person.genome, params.cuerpo);
-  advanceNeeds(person, bodilyNeedRates(world, tile, physiology));
+  advanceNeeds(person, needRates(world, tileIsDesert(tile, tileCell, fast), tileIsExposed(tile, tileCell, fast), physiology));
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   if (person.technology.waterPreparation) {
@@ -1455,21 +1605,30 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
       }
     }
   }
-  const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
-  const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < MIN_FORAGE_STOCK;
+  const targetFood = (person.action === 'eat' || person.action === 'forage')
+    ? (() => {
+      const targetTile = tileIn(person.target.x, person.target.y);
+      return foodStock(targetTile, soaCell(fast, person.target.x, person.target.y, targetTile), fast);
+    })() : 0;
+  const emptyFood = person.action === 'eat' && targetFood < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
+  const emptyHarvest = person.action === 'forage' && targetFood < MIN_FORAGE_STOCK;
   const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot, tileIn, fast ?? null);
   if (person.action === 'eat' || person.action === 'drink' || person.action === 'hunt') resourceDispute(world, person, event => addEvent(world, event));
-  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot);
-  const current = person.x === tile.x && person.y === tile.y ? tile : tileAt(world, person)!;
+  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot, tileIn, fast?.exact ?? null);
+  const moved = person.x !== tile.x || person.y !== tile.y;
+  const current = moved ? tileIn(person.x, person.y)! : tile;
+  const currentCell = moved ? soaCell(fast, person.x, person.y, current) : tileCell;
   if (person.action === 'eat') {
-    const foodBefore = current.food, harvest = Math.min(foodBefore, 0.0035);
+    const foodBefore = fast && currentCell >= 0 ? fast.foodArr[currentCell]! : current.food;
+    const harvest = Math.min(foodBefore, 0.0035);
     current.food = clamp(foodBefore - harvest);
     count(world, 'foodHarvested', harvest);
-    current.vegetation = clamp(current.vegetation - harvest * 0.1);
+    const vegBefore = fast && currentCell >= 0 ? fast.vegetationArr[currentCell]! : current.vegetation;
+    current.vegetation = clamp(vegBefore - harvest * 0.1);
     // Harvested biomass is divided between today's meal and a bounded portable reserve.
     const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
     person.inventory += saved;
@@ -1497,7 +1656,7 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
       if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; }
       person.decisionAt = world.tick + 1;
       if (ambient > 0 && !person.command && beginWaterPreparation(world, person,
-        (SED_POR_PASO + (current.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand)) {
+        (SED_POR_PASO + (tileIsDesert(current, currentCell, fast) ? 0.0002 : 0)) * physiology.waterDemand)) {
         person.reason = 'Ya bebió de la fuente local; prepara una reserva útil para cuando se aleje.';
       }
     }
@@ -1761,7 +1920,9 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       ? precomputePersonasParallel(world, motor, context.personasExecution)
       : undefined;
     const policyScores = collectPolicyScores?.();
-    for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);
+    const tileIn = tileLookup(world.tiles);
+    const fast = residentFastAccess(world.tiles) ?? null;
+    for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores, tileIn, fast);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
       if (!chunk.discovered) {

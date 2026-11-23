@@ -27,7 +27,12 @@
  * Se invalida exactamente como el índice que reemplaza: por identidad del arreglo y longitud
  * (`world.tiles` sólo cambia por reasignación o `push`).
  */
+import type { Tile } from '../shared/types.js';
+import { residentBackingArray } from './soa/topologia.js';
+
 interface Cell { x: number; y: number; }
+const backingOf = <T extends Cell>(tiles: readonly T[]): readonly T[] =>
+  residentBackingArray(tiles as unknown as readonly Tile[]) as unknown as readonly T[];
 /** Rejilla por bloques de 16 × 16 para coordenadas enteras en [-2^24, 2^24) —todo el dominio del mundo
  * (`MAX_COORDINATE` = 10^7)—: una clave de bloque y un índice dentro del bloque, con el último bloque
  * consultado a mano (las leyes preguntan por celdas vecinas). Cualquier otro número (no entero o fuera
@@ -55,6 +60,8 @@ interface Blocks { bases: Map<number, number>; blockIds: Map<number, number>; la
 let nextBlockId = 1;
 interface TileIndex {
   length: number;
+  /** Backing plano de solo lectura (sin `ProxyGetProperty` para arrays observados por `ResidentTopologyOwner`). */
+  raw: readonly Cell[];
   /** Modo aritmético (T113); si es `null`, rejilla o cadena. */
   chunks: Blocks | null;
   /** Modo numérico: última tesela de cada par de coordenadas; `null` si alguna no es número. */
@@ -101,18 +108,18 @@ function blocksGet(tiles: readonly Cell[], chunks: Blocks, limit: number, x: num
   return base >= 0 && base < limit ? tiles[base + slot(x, y)] : undefined;
 }
 
-/** Comprueba que `tiles[from…]` son bloques completos y nuevos y los anota en `added`; `false` si no. */
-function readBlocks(tiles: readonly Cell[], from: number, known: Map<number, number>, added: Map<number, number>): boolean {
-  if ((tiles.length - from) % BLOCK !== 0) return false;
-  for (let base = from; base < tiles.length; base += BLOCK) {
-    const first = tiles[base];
+/** Comprueba que `raw[from…]` son bloques completos y nuevos y los anota en `added`; `false` si no. */
+function readBlocks(raw: readonly Cell[], from: number, known: Map<number, number>, added: Map<number, number>): boolean {
+  if (from < 0 || raw.length < from || (raw.length - from) % BLOCK !== 0) return false;
+  for (let base = from; base < raw.length; base += BLOCK) {
+    const first = raw[base];
     if (first == null) return false;
     const x0 = first.x, y0 = first.y;
     if (typeof x0 !== 'number' || typeof y0 !== 'number' || !inGrid(x0) || !inGrid(y0) || (x0 & 15) !== 0 || (y0 & 15) !== 0) return false;
     const key = blockKey(x0, y0);
     if (known.has(key) || added.has(key)) return false;
     for (let s = 1; s < BLOCK; s++) {
-      const tile = tiles[base + s];
+      const tile = raw[base + s];
       if (tile == null || tile.x !== x0 + (s & 15) || tile.y !== y0 + (s >> 4)) return false;
     }
     added.set(key, base);
@@ -122,16 +129,17 @@ function readBlocks(tiles: readonly Cell[], from: number, known: Map<number, num
 
 function build(tiles: readonly Cell[]): TileIndex {
   fullBuilds++;
+  const raw = backingOf(tiles);
   const bases = new Map<number, number>();
-  if (readBlocks(tiles, 0, new Map(), bases)) {
+  if (readBlocks(raw, 0, new Map(), bases)) {
     const blockIds = new Map<number, number>();
     for (const key of bases.keys()) blockIds.set(key, nextBlockId++);
-    return { length: tiles.length, chunks: { bases, blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false };
+    return { length: raw.length, raw, chunks: { bases, blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false };
   }
   const grid: Grid = { blocks: new Map(), others: new Map(), lastKey: -1, lastBlock: undefined, lastKey2: -1, lastBlock2: undefined };
   let duplicates = false, numeric = true;
   // `forEach` salta los huecos igual que el `tiles.map` del índice original; gana la última tesela.
-  tiles.forEach(tile => {
+  raw.forEach(tile => {
     if (!numeric) return;
     const { x, y } = tile;
     if (typeof x !== 'number' || typeof y !== 'number') { numeric = false; return; }
@@ -149,8 +157,8 @@ function build(tiles: readonly Cell[]): TileIndex {
       column.set(y, tile);
     }
   });
-  if (!numeric) return { length: tiles.length, chunks: null, grid: null, strings: new Map(tiles.map(t => [`${t.x},${t.y}`, t])), duplicates: true };
-  return { length: tiles.length, chunks: null, grid, strings: null, duplicates };
+  if (!numeric) return { length: raw.length, raw, chunks: null, grid: null, strings: new Map(raw.map(t => [`${t.x},${t.y}`, t])), duplicates: true };
+  return { length: raw.length, raw, chunks: null, grid, strings: null, duplicates };
 }
 
 /** Último índice consultado: casi todas las consultas de un paso van al mismo `world.tiles`,
@@ -158,9 +166,9 @@ function build(tiles: readonly Cell[]): TileIndex {
  * por consulta. Retiene sólo ese último arreglo; `tileIndexAppended` lo olvida al descartar. */
 let memoTiles: readonly Cell[] | undefined, memoIndex: TileIndex | undefined;
 function indexOf(tiles: readonly Cell[]): TileIndex {
-  if (tiles === memoTiles && memoIndex && memoIndex.length === tiles.length) return memoIndex;
+  if (tiles === memoTiles && memoIndex && memoIndex.length === memoIndex.raw.length) return memoIndex;
   let index = indexes.get(tiles);
-  if (!index || index.length !== tiles.length) { index = build(tiles); indexes.set(tiles, index); }
+  if (!index || index.length !== index.raw.length) { index = build(tiles); indexes.set(tiles, index); }
   memoTiles = tiles; memoIndex = index;
   return index;
 }
@@ -171,14 +179,15 @@ function indexOf(tiles: readonly Cell[]): TileIndex {
 export function tileIndexAppended(tiles: readonly Cell[], from: number): void {
   const index = indexes.get(tiles);
   if (!index || index.length !== from) return;
+  const raw = index.raw;
   const added = new Map<number, number>();
-  if (!index.chunks || !readBlocks(tiles, from, index.chunks.bases, added)) { indexes.delete(tiles); if (memoTiles === tiles) { memoTiles = undefined; memoIndex = undefined; } return; }
+  if (!index.chunks || !readBlocks(raw, from, index.chunks.bases, added)) { indexes.delete(tiles); if (memoTiles === tiles) { memoTiles = undefined; memoIndex = undefined; } return; }
   for (const [key, base] of added) {
     index.chunks.bases.set(key, base);
     index.chunks.blockIds.set(key, nextBlockId++);
   }
   index.chunks.lastKey = -1; index.chunks.lastKey2 = -1;
-  index.length = tiles.length;
+  index.length = raw.length;
   stringIndexes.delete(index);
 }
 
@@ -190,35 +199,109 @@ export function tileIndexAppended(tiles: readonly Cell[], from: number): void {
  * `blockIds` de identidad de bloque; una copia con teselas nuevas (`cloneWorld`) recibe ids nuevos. */
 export function tileIndexCopied(copy: readonly Cell[], source: readonly Cell[], sameObjects = false): void {
   const index = indexes.get(source);
-  if (!index?.chunks || index.length !== source.length || copy.length !== source.length) return;
+  if (!index?.chunks) return;
+  const rawCopy = backingOf(copy), rawSource = index.raw;
+  if (index.length !== rawSource.length || rawCopy.length !== rawSource.length) return;
   for (const [key, base] of index.chunks.bases) {
-    const first = copy[base];
-    if (first == null || !inGrid(first.x) || !inGrid(first.y) || (first.x & 15) !== 0 || (first.y & 15) !== 0 || blockKey(first.x, first.y) !== key) return;
-    if (sameObjects && first !== source[base]) return;
+    const first = rawCopy[base];
+    if (first == null || typeof first.x !== 'number' || typeof first.y !== 'number'
+      || !inGrid(first.x) || !inGrid(first.y) || (first.x & 15) !== 0 || (first.y & 15) !== 0 || blockKey(first.x, first.y) !== key) return;
+    if (sameObjects && first !== rawSource[base]) return;
   }
   const blockIds = sameObjects
     ? new Map(index.chunks.blockIds)
     : new Map([...index.chunks.bases.keys()].map(key => [key, nextBlockId++] as const));
-  indexes.set(copy, { length: copy.length, chunks: { bases: new Map(index.chunks.bases), blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false });
+  indexes.set(copy, { length: rawCopy.length, raw: rawCopy, chunks: { bases: new Map(index.chunks.bases), blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false });
+  if (memoTiles === copy) { memoTiles = undefined; memoIndex = undefined; }
 }
 
 /** Reparto de `maintainRegions` por bloques: cada chunk va entero a `destination(primera tesela)` o se
  * queda, en el orden del arreglo, igual que repartir tesela a tesela; el arreglo nuevo hereda la
  * disposición sin recorrer teselas. `null` si `tiles` no tiene disposición por chunks. */
 export function splitTileBlocks<T extends Cell>(tiles: readonly T[], destination: (first: T) => T[] | undefined): T[] | null {
-  const chunks = indexOf(tiles).chunks;
+  const index = indexOf(tiles), chunks = index.chunks;
   if (!chunks) return null;
-  const kept: T[] = [], bases = new Map<number, number>(), blockIds = new Map<number, number>();
+  const raw = index.raw as readonly T[];
+  const keptBases: number[] = [], bases = new Map<number, number>(), blockIds = new Map<number, number>();
+  let keptLen = 0;
   for (const [key, base] of chunks.bases) {
-    const target = destination(tiles[base]!);
-    if (!target) {
-      bases.set(key, kept.length);
+    const target = destination(raw[base]!);
+    if (target) {
+      for (let i = base; i < base + BLOCK; i++) target.push(raw[i]!);
+    } else {
+      keptBases.push(base);
+      bases.set(key, keptLen);
       blockIds.set(key, chunks.blockIds.get(key)!);
+      keptLen += BLOCK;
     }
-    const to = target ?? kept;
-    for (let i = base; i < base + BLOCK; i++) to.push(tiles[i]!);
   }
-  indexes.set(kept, { length: kept.length, chunks: { bases, blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false });
+  const kept = new Array<T>(keptLen);
+  let out = 0;
+  for (let b = 0; b < keptBases.length; b++) {
+    const base = keptBases[b]!;
+    for (let i = 0; i < BLOCK; i++) kept[out++] = raw[base + i]!;
+  }
+  indexes.set(kept, { length: keptLen, raw: kept, chunks: { bases, blockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 }, grid: null, strings: null, duplicates: false });
+  return kept;
+}
+
+/** Reparto de `maintainRegions` por bloques delegando el ensamblado de los bloques conservados en
+ * `assemble(keptBases, 256)` (p. ej. `ResidentTopologyOwner.subsetBlocks`, que copia directo del
+ * backing privado sin materializar un arreglo intermedio ni revalidar 440k `WeakMap.get`/`Object.hasOwn`).
+ * Hereda `bases` y `blockIds` en O(chunks) verificando el origen de cada bloque; `null` sin disposición por chunks. */
+export function splitTileBlocksWith<T extends Cell>(
+  tiles: readonly T[],
+  destination: (first: T) => T[] | undefined,
+  assemble: (keptBases: readonly number[], blockLength: number) => T[],
+): T[] | null {
+  const index = indexOf(tiles), chunks = index.chunks;
+  if (!chunks) return null;
+  const raw = index.raw as readonly T[];
+  const keptBases: number[] = [], bases = new Map<number, number>(), blockIds = new Map<number, number>();
+  let keptLen = 0;
+  for (const [key, base] of chunks.bases) {
+    const target = destination(raw[base]!);
+    if (target) {
+      for (let i = base; i < base + BLOCK; i++) target.push(raw[i]!);
+    } else {
+      keptBases.push(base);
+      bases.set(key, keptLen);
+      blockIds.set(key, chunks.blockIds.get(key)!);
+      keptLen += BLOCK;
+    }
+  }
+  const kept = assemble(keptBases, BLOCK);
+  const rawKept = backingOf(kept);
+  if (rawKept.length === keptLen) {
+    let sameObjects = true, sameCoords = true, b = 0;
+    for (const [key, keptBase] of bases) {
+      const first = rawKept[keptBase];
+      const origBase = keptBases[b++]!;
+      if (first !== raw[origBase]) {
+        sameObjects = false;
+        if (first == null || typeof first.x !== 'number' || typeof first.y !== 'number'
+          || !inGrid(first.x) || !inGrid(first.y) || (first.x & 15) !== 0 || (first.y & 15) !== 0
+          || blockKey(first.x, first.y) !== key) {
+          sameCoords = false;
+          break;
+        }
+      }
+    }
+    if (sameCoords) {
+      const nextBlockIds = sameObjects
+        ? blockIds
+        : new Map([...bases.keys()].map(key => [key, nextBlockId++] as const));
+      indexes.set(kept, {
+        length: rawKept.length,
+        raw: rawKept,
+        chunks: { bases, blockIds: nextBlockIds, lastKey: -1, lastBase: -1, lastKey2: -1, lastBase2: -1 },
+        grid: null,
+        strings: null,
+        duplicates: false,
+      });
+      if (memoTiles === kept) { memoTiles = undefined; memoIndex = undefined; }
+    }
+  }
   return kept;
 }
 
@@ -232,10 +315,10 @@ export function verifiedChunkBlocks(tiles: readonly Cell[]): { bases: ReadonlyMa
 export function lastTileAt<T extends Cell>(tiles: readonly T[], x: unknown, y: unknown): T | undefined {
   const index = indexOf(tiles);
   if (typeof x === 'number' && typeof y === 'number') {
-    if (index.chunks) return blocksGet(tiles, index.chunks, index.length, x, y) as T | undefined;
+    if (index.chunks) return blocksGet(index.raw, index.chunks, index.length, x, y) as T | undefined;
     if (index.grid) return gridGet(index.grid, x, y) as T | undefined;
   }
-  return (index.strings ?? stringIndex(tiles, index)).get(`${x},${y}`) as T | undefined;
+  return (index.strings ?? stringIndex(index.raw, index)).get(`${x},${y}`) as T | undefined;
 }
 
 /** El índice VIGENTE al llamar, fijado: equivale a construir en ese momento
@@ -248,6 +331,7 @@ export function tileLookup<T extends Cell>(tiles: readonly T[]): (x: number, y: 
     // recorre por filas, así que el último chunk compartido de `blocksGet` volvía al `Map` en
     // cada fila y entre personas. Las bases no se mueven tras fijar la consulta (un chunk
     // añadido después tiene base ≥ `limit` y se rechaza igual), así que el resultado es el mismo.
+    const raw = index.raw as readonly T[];
     const limit = index.length, bases = chunks.bases;
     let k1 = -1, b1 = -1, k2 = -1, b2 = -1, k3 = -1, b3 = -1, k4 = -1, b4 = -1;
     return (x, y) => {
@@ -259,7 +343,7 @@ export function tileLookup<T extends Cell>(tiles: readonly T[]): (x: number, y: 
       else if (key === k3) base = b3;
       else if (key === k4) base = b4;
       else { base = bases.get(key) ?? -1; k4 = k3; b4 = b3; k3 = k2; b3 = b2; k2 = k1; b2 = b1; k1 = key; b1 = base; }
-      return base >= 0 && base < limit ? tiles[base + (((y & 15) << 4) | (x & 15))] : undefined;
+      return base >= 0 && base < limit ? raw[base + (((y & 15) << 4) | (x & 15))] : undefined;
     };
   }
   if (grid) {
@@ -285,11 +369,12 @@ export function tileLookup<T extends Cell>(tiles: readonly T[]): (x: number, y: 
 export function firstTileAt<T extends Cell>(tiles: readonly T[], x: number, y: number): T | undefined {
   // Las copias privadas de una previsión (`dependencyCraft`) llevan una sola tesela: indexarlas
   // costaría más que recorrerlas.
-  if (tiles.length < 64) return tiles.find(t => t.x === x && t.y === y);
+  const raw = tiles === memoTiles && memoIndex ? (memoIndex.raw as readonly T[]) : backingOf(tiles);
+  if (raw.length < 64) return raw.find(t => t.x === x && t.y === y);
   const index = indexOf(tiles);
-  if (typeof x !== 'number' || typeof y !== 'number') return tiles.find(t => t.x === x && t.y === y);
-  if (index.chunks) return blocksGet(tiles, index.chunks, index.length, x, y) as T | undefined;
-  if (index.duplicates || !index.grid) return tiles.find(t => t.x === x && t.y === y);
+  if (typeof x !== 'number' || typeof y !== 'number') return raw.find(t => t.x === x && t.y === y);
+  if (index.chunks) return blocksGet(index.raw, index.chunks, index.length, x, y) as T | undefined;
+  if (index.duplicates || !index.grid) return raw.find(t => t.x === x && t.y === y);
   if (Number.isNaN(x) || Number.isNaN(y)) return undefined;
   return gridGet(index.grid, x, y) as T | undefined;
 }

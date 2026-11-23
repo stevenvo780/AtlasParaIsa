@@ -3,6 +3,8 @@ import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { tileAt } from './spatial.js';
+import { tileLookup } from './tile-index.js';
+import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
 import { chunkKey } from './terrain.js';
 import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
@@ -74,29 +76,85 @@ export const blueprintSignature = (components: readonly StructureComponent[]): s
 };
 
 export function blueprintCost(components: readonly StructureComponent[]): BlueprintView['cost'] {
-  return components.reduce((cost, component) => {
-    cost.wood += COSTS[component].wood; cost.stone += COSTS[component].stone; cost.work += COSTS[component].work;
-    return cost;
-  }, { wood: 0, stone: 0, work: 0 });
+  let wood = 0, stone = 0, work = 0;
+  for (let i = 0; i < components.length; i++) {
+    const c = COSTS[components[i]!];
+    wood += c.wood; stone += c.stone; work += c.work;
+  }
+  return { wood, stone, work };
 }
 
 /** A roof needs a frame; enclosed storage needs a roof; gardens need captured water.
  * Repetition is structural: extra frames support roofs and slow wear, extra modules add capacity. */
 export function validBlueprint(components: unknown): components is StructureComponent[] {
-  if (!Array.isArray(components) || components.length < 2 || components.length > 8 || !components.every(component => COMPONENTS.includes(component))) return false;
-  const n = counts(components), cost = blueprintCost(components);
-  return n.frame >= 1 && n.frame <= 2 && n.roof >= 1 && n.roof <= n.frame
-    && n.cistern <= 2 && n.granary <= 2 && n.garden <= 2 && n.hearth <= 1
-    && (n.garden === 0 || n.cistern > 0) && components.length - n.frame - n.roof <= n.frame * 4
-    && cost.wood <= 12 && cost.stone <= 8;
+  if (!Array.isArray(components) || components.length < 2 || components.length > 8) return false;
+  let frame = 0, roof = 0, cistern = 0, granary = 0, garden = 0, hearth = 0;
+  let wood = 0, stone = 0;
+  for (let i = 0; i < components.length; i++) {
+    switch (components[i]) {
+      case 'frame': frame++; wood += 2; stone += 1; break;
+      case 'roof': roof++; wood += 4; stone += 2; break;
+      case 'cistern': cistern++; wood += 2; stone += 3; break;
+      case 'granary': granary++; wood += 3; stone += 1; break;
+      case 'garden': garden++; wood += 2; stone += 1; break;
+      case 'hearth': hearth++; wood += 1; stone += 2; break;
+      default: return false;
+    }
+  }
+  return frame >= 1 && frame <= 2 && roof >= 1 && roof <= frame
+    && cistern <= 2 && granary <= 2 && garden <= 2 && hearth <= 1
+    && (garden === 0 || cistern > 0) && components.length - frame - roof <= frame * 4
+    && wood <= 12 && stone <= 8;
 }
 
 export function blueprintAffordances(components: readonly StructureComponent[]) {
-  const n = counts(components);
-  return { waterCapacity: n.cistern * 0.6, foodCapacity: n.granary * 0.7,
-    catchment: n.cistern ? n.roof * 0.012 : 0, irrigation: n.garden * 0.008,
-    restQuality: clamp(0.82 + (n.roof - 1) * 0.09 + (n.frame - 1) * 0.03),
-    hearths: n.hearth, durability: 1 + (n.frame - 1) * 0.5 };
+  let frame = 0, roof = 0, cistern = 0, granary = 0, garden = 0, hearth = 0;
+  for (let i = 0; i < components.length; i++) {
+    switch (components[i]) {
+      case 'frame': frame++; break;
+      case 'roof': roof++; break;
+      case 'cistern': cistern++; break;
+      case 'granary': granary++; break;
+      case 'garden': garden++; break;
+      case 'hearth': hearth++; break;
+    }
+  }
+  return { waterCapacity: cistern * 0.6, foodCapacity: granary * 0.7,
+    catchment: cistern ? roof * 0.012 : 0, irrigation: garden * 0.008,
+    restQuality: clamp(0.82 + (roof - 1) * 0.09 + (frame - 1) * 0.03),
+    hearths: hearth, durability: 1 + (frame - 1) * 0.5 };
+}
+
+function restQualityOf(components: readonly StructureComponent[]): number {
+  let frame = 0, roof = 0;
+  for (let i = 0; i < components.length; i++) {
+    const c = components[i];
+    if (c === 'frame') frame++;
+    else if (c === 'roof') roof++;
+  }
+  return clamp(0.82 + (roof - 1) * 0.09 + (frame - 1) * 0.03);
+}
+
+const SOA_SAFE_COORD = 1_073_741_800; // 2^30 - 24: x ± 7 siempre en el dominio admisible SoA
+
+function isShelterAt(
+  tileIn: (x: number, y: number) => Tile | undefined,
+  fast: ResidentFastAccess | undefined,
+  x: number,
+  y: number,
+): boolean {
+  if (fast) {
+    const exact = fast.exact;
+    if (exact) {
+      const cell = exact.cellAt(x, y);
+      return cell >= 0 && fast.terrainArr[cell] === fast.TERRAIN_SHELTER;
+    }
+    const tile = tileIn(x, y);
+    if (!tile) return false;
+    const cell = fast.cellOf(tile);
+    return cell >= 0 ? fast.terrainArr[cell] === fast.TERRAIN_SHELTER : tile.terrain === 'shelter';
+  }
+  return tileIn(x, y)?.terrain === 'shelter';
 }
 
 function blueprintName(components: readonly StructureComponent[]): string {

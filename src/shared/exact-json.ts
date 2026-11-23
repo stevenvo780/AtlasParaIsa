@@ -13,35 +13,53 @@ export function exactJsonNumber(value: unknown): unknown {
   }
   return negativeZero;
 }
-/** Un `-0` está en el árbol (o un `toJSON` que podría producirlo). Sólo decide si hace falta el replacer,
- * y el replacer da exactamente los mismos bytes que el serializador nativo salvo en ese escalar, así que
- * un falso positivo cuesta tiempo pero nunca cambia la salida; un falso negativo sí la cambiaría. Por eso
- * el recorrido es un SUPERCONJUNTO de lo que serializa `JSON.stringify` (`for…in` visita las propias
- * enumerables y además las heredadas) y evita una llamada por escalar: los números, la inmensa mayoría de
- * los nodos, se examinan en línea (`v === 0 && 1 / v < 0` es `Object.is(v, -0)`). */
-function holdsNegativeZero(value: object): boolean {
-  if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return true;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      const v: unknown = value[i];
-      if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
-      else if (typeof v === 'object' && v !== null && holdsNegativeZero(v)) return true;
+/** Replacer de una sola pasada: solo el `-0` paga la llamada a `exactJsonNumber`. */
+function exactReplacer(_key: string, current: unknown): unknown {
+  return typeof current === 'number' && current === 0 && 1 / current < 0 ? exactJsonNumber(current) : current;
+}
+/** Presupuesto del pre-escaneo (ms tras las primeras 512 visitas). Agotado, se serializa directamente
+ * con el replacer: los bytes son idénticos por cualquiera de las dos vías, solo cambia quién paga el
+ * recorrido extra. Medido (v18 ola 2): en árboles planos el pre-escaneo + nativo gana al replacer,
+ * pero en árboles de teselas Proxy cada lectura del pre-escaneo es un trap y el replacer —que reusa
+ * la única lectura del serializador— gana con claridad; un presupuesto de tiempo discrimina ambos
+ * perfiles sin inspeccionar tipos, y de paso acota ciclos y DAGs compartidos antes de delegarlos en
+ * el error nativo de `JSON.stringify`. */
+const SCAN_BUDGET_MS = 8;
+const SCAN_CHUNK = 512;
+/** ¿Hace falta el replacer? Un `-0` está en el árbol, un `toJSON` podría producirlo, o el escaneo
+ * agotó su presupuesto (falso positivo: cuesta tiempo, nunca cambia la salida; un falso negativo sí
+ * la cambiaría). El recorrido es un SUPERCONJUNTO de lo que serializa `JSON.stringify` (`for…in`
+ * visita las propias enumerables y además las heredadas), iterativo con pila explícita y con los
+ * números —la inmensa mayoría de los nodos— examinados en línea (`v === 0 && 1 / v < 0` es
+ * `Object.is(v, -0)`). */
+function needsExactReplacer(value: unknown): boolean {
+  if (typeof value === 'number') return Object.is(value, -0);
+  if (typeof value !== 'object' || value === null) return false;
+  const stack: object[] = [value];
+  let visits = 0, started = 0;
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (++visits === SCAN_CHUNK) started = performance.now();
+    else if (started !== 0 && visits % SCAN_CHUNK === 0 && performance.now() - started > SCAN_BUDGET_MS) return true;
+    if (typeof (current as { toJSON?: unknown }).toJSON === 'function') return true;
+    if (Array.isArray(current)) {
+      for (let i = 0; i < current.length; i++) {
+        const v: unknown = current[i];
+        if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
+        else if (typeof v === 'object' && v !== null) stack.push(v);
+      }
+    } else {
+      const record = current as Record<string, unknown>;
+      for (const key in record) {
+        const v = record[key];
+        if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
+        else if (typeof v === 'object' && v !== null) stack.push(v);
+      }
     }
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  for (const key in record) {
-    const v = record[key];
-    if (typeof v === 'number') { if (v === 0 && 1 / v < 0) return true; }
-    else if (typeof v === 'object' && v !== null && holdsNegativeZero(v)) return true;
   }
   return false;
 }
-function needsExactReplacer(value: unknown): boolean {
-  if (typeof value === 'number') return Object.is(value, -0);
-  return typeof value === 'object' && value !== null && holdsNegativeZero(value);
-}
 export function stringifyExact(value: unknown): string {
   if (!needsExactReplacer(value)) return JSON.stringify(value);
-  return JSON.stringify(value, (_key, current: unknown) => exactJsonNumber(current));
+  return JSON.stringify(value, exactReplacer);
 }

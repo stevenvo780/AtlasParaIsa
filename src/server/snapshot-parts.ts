@@ -117,6 +117,13 @@ export class SnapshotParts {
    * un ROLLBACK lo descarta y el directorio confirmado sigue describiendo lo durable. */
   private confirmedPages: PageCache | null = null;
   private unconfirmedPages: PageCache | null | undefined = undefined;
+  /** Digestos de slot cuyos cuerpos `collect()` ya probó (checksum + referencias) y que un COMMIT
+   * confirmó: con el sello de la base intacto son la prueba que permite recoger sin re-hashear los
+   * tres cuerpos. `pendingSlots` es el conjunto de la transacción en curso y solo se promueve con
+   * `confirmPendingPages()`; `writtenDigest`, el cuerpo que `write()` acaba de construir en ella. */
+  private confirmedSlots: ReadonlySet<string> | null = null;
+  private pendingSlots: ReadonlySet<string> | undefined = undefined;
+  private writtenDigest: string | null = null;
   private pagesReused = 0;
   private pagesEncoded = 0;
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number) {}
@@ -126,14 +133,19 @@ export class SnapshotParts {
   get pageStats(): { reused: number; encoded: number } {
     return { reused: this.pagesReused, encoded: this.pagesEncoded };
   }
-  /** Solo tras el COMMIT de la transacción en la que `write` construyó el directorio pendiente. */
+  /** Solo tras el COMMIT de la transacción en la que `write`/`collect` construyeron lo pendiente. */
   confirmPendingPages(): void {
     if (this.unconfirmedPages !== undefined) { this.confirmedPages = this.unconfirmedPages; this.unconfirmedPages = undefined; }
+    if (this.pendingSlots !== undefined) { this.confirmedSlots = this.pendingSlots; this.pendingSlots = undefined; }
+    this.writtenDigest = null;
   }
   /** La transacción que construyó el directorio pendiente no confirmó: se descarta entero. */
-  discardPendingPages(): void { this.unconfirmedPages = undefined; }
+  discardPendingPages(): void { this.unconfirmedPages = undefined; this.pendingSlots = undefined; this.writtenDigest = null; }
   /** Olvida también lo confirmado (p. ej. si el sello post-COMMIT no se pudo tomar): todo se recodifica. */
-  invalidatePageCache(): void { this.confirmedPages = null; this.unconfirmedPages = undefined; }
+  invalidatePageCache(): void {
+    this.confirmedPages = null; this.unconfirmedPages = undefined;
+    this.confirmedSlots = null; this.pendingSlots = undefined; this.writtenDigest = null;
+  }
 
   static install(db: DatabaseSync): void {
     db.exec('CREATE TABLE main.snapshot_parts (digest TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL)');
@@ -148,7 +160,9 @@ export class SnapshotParts {
     // Keep a validated null placeholder: deleting/reinserting tiles changes the
     // world's enumerable property order when a paged checkpoint is reloaded.
     const metadata = stringifyExact(snapshotRecord(world, params, null));
-    if (Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
+    // UTF-8 ocupa como mucho 3 bytes por unidad UTF-16: por debajo de un tercio del tope el cuerpo
+    // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
+    if (metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
     return { metadata, tiles: world.tiles };
   }
 
@@ -193,10 +207,20 @@ export class SnapshotParts {
     for (let index = 0, offset = 0; offset < tiles.length; index++, offset += SNAPSHOT_PAGE_TILES) {
       const count = Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset), entry = cache.pages[index];
       let clean = entry !== undefined && entry.offset === offset && entry.count === count;
-      if (clean) for (let i = 0; i < count; i++) {
-        const tile = tiles[offset + i]!;
-        if (tile !== entry!.tiles[i] || residentTileRevision(tile) !== entry!.revisions[i]
-          || gate !== undefined && gate.stampOfTile(tile) > confirmedSerial) { clean = false; break; }
+      if (clean) {
+        const entryTiles = entry!.tiles, entryRevisions = entry!.revisions;
+        if (gate === undefined) {
+          for (let i = 0; i < count; i++) {
+            const tile = tiles[offset + i]!;
+            if (tile !== entryTiles[i] || residentTileRevision(tile) !== entryRevisions[i]) { clean = false; break; }
+          }
+        } else {
+          for (let i = 0; i < count; i++) {
+            const tile = tiles[offset + i]!;
+            if (tile !== entryTiles[i] || residentTileRevision(tile) !== entryRevisions[i]
+              || gate.stampOfTile(tile) > confirmedSerial) { clean = false; break; }
+          }
+        }
       }
       candidates.push(clean ? entry! : null);
       if (clean) digests.push(entry!.digest);
@@ -224,11 +248,13 @@ export class SnapshotParts {
     assertSnapshotPartsSchema(this.db);
     // Un directorio pendiente de una transacción que nunca confirmó no deja residuo reutilizable.
     this.unconfirmedPages = undefined;
+    this.writtenDigest = null;
     if (prepared.inline !== undefined) {
       const digest = checksum(prepared.inline);
       if (this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) this.references.set(digest, []);
       else this.references.clear();
       this.unconfirmedPages = null;
+      this.writtenDigest = digest;
       return { body: prepared.inline, digest, bytes: Buffer.byteLength(prepared.inline), pages: [] };
     }
     if (prepared.metadata === undefined) failure('metadata missing');
@@ -255,7 +281,7 @@ export class SnapshotParts {
         this.pagesReused++;
         continue;
       }
-      const rows = encodeSnapshotTileRows(tiles.slice(offset, offset + SNAPSHOT_PAGE_TILES));
+      const rows = encodeSnapshotTileRows(tiles, offset, Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset));
       const body = JSON.stringify(rows), digest = checksum(body), size = Buffer.byteLength(body);
       if (size > PAGE_BYTES) failure('page exceeds transport size');
       const existing = same.get(body, digest) as { same: number } | undefined;
@@ -272,6 +298,7 @@ export class SnapshotParts {
     const size = Buffer.byteLength(body), digest = checksum(body), digests = pages.map(page => page.digest);
     if (size > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
     this.references.set(digest, digests);
+    this.writtenDigest = digest;
     this.unconfirmedPages = certified
       ? { pages: pending, parallel: gate ? { identity: gate.identity, epoch: gate.epoch, serial: gate.serial } : null }
       : null;
@@ -368,14 +395,42 @@ export class SnapshotParts {
     }
   }
 
+  /** Recogida sin re-hashear cuerpos: solo con el vale del Store (sello completo intacto desde su
+   * último COMMIT y sin triggers, recotejado aquí dentro de la transacción) y cuando cada slot es un
+   * cuerpo ya probado por `collect` y confirmado, o el que `write` acaba de construir en esta misma
+   * transacción (slot 0, aún sin confirmar). Dentro de `BEGIN IMMEDIATE` ninguna conexión ajena pudo
+   * escribir, y las escrituras propias del guardado solo rotan cuerpos con su digesto o insertan el
+   * recién construido, así que las referencias recordadas son exactamente las durables. Cualquier
+   * duda —sin vale, digesto no confirmado o referencias no recordadas— devuelve `false` sin tocar
+   * nada y el camino completo de abajo decide. El borrado es idéntico al histórico. */
+  private tryCollectFast(ticket: SnapshotReuseTicket): boolean {
+    const confirmed = this.confirmedSlots;
+    if (!confirmed || !this.reuseStampIntact(ticket)) return false;
+    const slots = this.db.prepare('SELECT slot, digest FROM main.snapshots').all() as { slot: number; digest: string }[];
+    const retained = new Set<string>(), bodies = new Set<string>();
+    for (const { slot, digest } of slots) {
+      if (!confirmed.has(digest) && !(slot === 0 && digest === this.writtenDigest)) return false;
+      const refs = this.references.get(digest);
+      if (!refs) return false;
+      bodies.add(digest);
+      for (const pageDigest of refs) retained.add(pageDigest);
+    }
+    for (const digest of this.references.keys()) if (!bodies.has(digest)) this.references.delete(digest);
+    this.pendingSlots = bodies;
+    this.db.prepare('DELETE FROM main.snapshot_parts WHERE digest NOT IN (SELECT value FROM json_each(?))').run(JSON.stringify([...retained]));
+    return true;
+  }
+
   /** An unreadable older checkpoint is not proof that it has no references.
    * In that case retain pages; explicit recovery can later start a clean chain. */
-  collect(): void {
+  collect(reuse?: SnapshotReuseTicket): void {
     this.requireTransaction();
+    this.pendingSlots = undefined;
     // Most existing worlds use only inline checkpoints. An empty page table
     // needs no collection: avoid copying/hashing three multi-megabyte bodies
     // merely to prove that there are no page rows to delete.
     if (!this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) { this.references.clear(); return; }
+    if (reuse && this.tryCollectFast(reuse)) return;
     const retained = new Set<string>(), bodies = new Set<string>();
     // In a UTF-8 database, valid UTF-8 bytes without NUL (node:sqlite cuts text there) hash exactly like
     // the text they decode to, without transcoding three multi-megabyte bodies to JS strings and back.
@@ -405,6 +460,9 @@ export class SnapshotParts {
       return;
     }
     finally { for (const digest of this.references.keys()) if (!bodies.has(digest)) this.references.delete(digest); }
+    // Los tres slots quedaron probados (checksum y referencias) en esta transacción: el conjunto solo
+    // pasa a confirmado si el COMMIT llega (`confirmPendingPages`); un ROLLBACK lo descarta entero.
+    this.pendingSlots = bodies;
     // Only the current reference set crosses the JS boundary; never materialize
     // the whole historical archive or mutate a table under a live SELECT cursor.
     this.db.prepare('DELETE FROM main.snapshot_parts WHERE digest NOT IN (SELECT value FROM json_each(?))').run(JSON.stringify([...retained]));

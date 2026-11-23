@@ -622,9 +622,9 @@ export class Store {
   }
   /** Objects and paged checkpoints belong to the three retained heads, including
    * the old checkpoint needed by previous() at a checkpoint rollover. */
-  private collectSnapshots(): void {
+  private collectSnapshots(reuse?: SnapshotReuseTicket): void {
     const objects = this.db.prepare('SELECT key,value FROM main.metadata WHERE key GLOB ?').all(REPLAY_KEY + '*') as { key: string; value: string }[];
-    if (!objects.length) { this.snapshotParts.collect(); return; }
+    if (!objects.length) { this.snapshotParts.collect(reuse); return; }
     const retained = new Set<string>(), pages = new Set<string>();
     const visit = (body: string, remaining: number): void => {
       const node = readSnapshotReplay(parseSnapshotJSON(body));
@@ -1183,21 +1183,56 @@ export class Store {
    * y el 2): una vez por proceso y respaldo. */
   private slotBoundsOf(slot: SnapshotSlot, digest: string): SlotBounds | 'unusable' | null {
     const known = this.slotBounds.get(digest);
-    if (known) return known;
+    if (known) {
+      // LRU de verdad: sin refrescar al acertar, cada guardado anota un digesto nuevo y a los ~8
+      // guardados el respaldo profundo salía de la memoria y se volvía a decodificar entero.
+      this.slotBounds.delete(digest); this.slotBounds.set(digest, known);
+      return known;
+    }
     const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
     if (!row || row.digest !== digest) return null;
     let bounds: SlotBounds | 'unusable';
     if (checksum(row.body) !== row.digest) bounds = 'unusable';
     else {
-      try { bounds = this.boundsOf(this.readSnapshot(row.body) as World); }
-      catch (error) {
-        if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError)) return null;
-        bounds = 'unusable';
-      }
+      const decided = this.cheapSlotBounds(slot, digest, row.body) ?? this.readSlotBounds(row.body);
+      if (decided === null) return null;
+      bounds = decided;
     }
     this.slotBounds.set(digest, bounds);
     while (this.slotBounds.size > 8) this.slotBounds.delete(this.slotBounds.keys().next().value!);
     return bounds;
+  }
+  /** La clasificación completa de siempre: legible entero o `'unusable'`; `null` si ni decidir se pudo.
+   * Solo la devuelve `slotBoundsOf`, que memoriza cualquier decisión distinta de `null`. */
+  private readSlotBounds(body: string): SlotBounds | 'unusable' | null {
+    try { return this.boundsOf(this.readSnapshot(body) as World); }
+    catch (error) {
+      if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError)) return null;
+      return 'unusable';
+    }
+  }
+  /** Cotas de una instantánea por partes sin decodificarla: `boundsOf` solo lee `tick`,
+   * `technology.executionCounter` y el tick del primer recibo residente, así que SQLite los extrae
+   * del manifiesto en C y el mismo `boundsOf` los sanea sobre un mundo mínimo equivalente. Solo se
+   * aplica al prefijo canónico que escribe `SnapshotParts.write` (con el checksum ya cotejado por
+   * el llamador); replay, cuerpos en línea y cualquier rareza de extracción vuelven a la lectura
+   * completa. Un manifiesto por partes que la lectura completa declararía `'unusable'` (claves
+   * duplicadas, página dañada, límites inválidos) puede aquí dar unas cotas, pero ambos usos de las
+   * cotas —poda de recibos y compactación de estadísticas— solo las aplican con `Math.min` contra
+   * las del propio mundo y las de los demás respaldos: tratarlo como utilizable jamás poda más que
+   * ignorarlo, solo puede retener de más. La carga y la recuperación siguen juzgando el cuerpo
+   * entero exactamente igual. `null` = sin extracción fiable, que decida la lectura completa. */
+  private cheapSlotBounds(slot: SnapshotSlot, digest: string, body: string): SlotBounds | null {
+    if (!body.startsWith('{"snapshotEncoding":"snapshot-parts-v1","world":{')) return null;
+    try {
+      const row = this.db.prepare("SELECT json_extract(body,'$.world.tick','$.world.technology.executionCounter','$.world.technology.history[0].tick') AS v FROM main.snapshots WHERE slot=? AND digest=?").get(slot, digest) as { v: unknown } | undefined;
+      if (!row || typeof row.v !== 'string') return null;
+      const values: unknown = JSON.parse(row.v);
+      if (!Array.isArray(values) || values.length !== 3) return null;
+      const [tick, committed, ringTick] = values as [unknown, unknown, unknown];
+      return this.boundsOf({ tick, technology: { executionCounter: committed,
+        history: ringTick === null || ringTick === undefined ? [] : [{ tick: ringTick }] } } as unknown as Pick<World, 'tick' | 'technology'>);
+    } catch { return null; }
   }
   /** Serie del último recibo con tick < `tick` (con todos los de su mismo tick), o `null` si no hay ninguno. */
   private lastExecutionBefore(tick: number): number | null {
@@ -1534,10 +1569,13 @@ export class Store {
     // sigue siendo el del último COMMIT de este Store y no toca la revisión completa. Los triggers se
     // descartan dentro de la transacción, antes de escribir; `snapshot-parts` recoteja allí los campos
     // que una conexión ajena puede mover. Cualquier desajuste ⇒ codificación completa de siempre.
-    const pageReuseTicket: SnapshotReuseTicket | undefined = !deepValidation && this.snapshotPagesStamp !== null
+    const stampTicket: SnapshotReuseTicket | undefined = this.snapshotPagesStamp !== null
       && sameChronicleStamp(this.snapshotPagesStamp, chronicleStamp)
       ? { dataVersion: chronicleStamp.dataVersion, schemaCookie: chronicleStamp.schemaCookie, tempSchemaCookie: chronicleStamp.tempSchemaCookie }
       : undefined;
+    // Las páginas limpias exigen además que no toque la revisión completa; la recogida de partes
+    // huérfanas solo necesita el sello (y, como aquellas, que no haya triggers: se retira al usarlo).
+    const pageReuseTicket: SnapshotReuseTicket | undefined = !deepValidation ? stampTicket : undefined;
     const replayEnabled = paramsOf(world).persistencia.paginasSucias;
     // A replay reads archives at the checkpoint's horizon, not merely at its
     // head. Bound pruning by every retained anchor, even after flag rollback.
@@ -1650,7 +1688,7 @@ export class Store {
       this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
-      this.collectSnapshots();
+      this.collectSnapshots(chronicleTriggers ? undefined : stampTicket);
       });
       if (replay && this.replayParent(bodyDigest) !== body) throw new SnapshotPhysicalError('Replay head changed before commit.');
       if (chronicleTriggers) {

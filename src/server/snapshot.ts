@@ -141,20 +141,28 @@ export function assertSnapshotCounts(record: Record<string, unknown>, limits: Re
     || Array.isArray(record.animals) && record.animals.length > limits.fauna)
     throw new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.');
 }
-export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
+/** Codifica `count` teselas desde `offset` sin copiar el tramo (el guardado por páginas ya no paga un
+ * `slice` —otra pasada de traps sobre el array Proxy residente— por página). Sin tramo, el array entero. */
+export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset): unknown[][] {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
-  return tiles.map(t => {
+  const rows: unknown[][] = new Array(count);
+  for (let n = 0; n < count; n++) {
+    const t = tiles[offset + n]!;
     const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
-      if (i < 6 && i !== 2 && (typeof value !== 'number' || !Number.isFinite(value)))
-        throw new Error('Invalid required numeric tile value. Snapshot was not written.');
-      if (i >= 6 && (value === null || typeof value === 'number' && !Number.isFinite(value))) throw new Error('Invalid optional tile value. Snapshot was not written.');
-      if (Object.is(value, -0)) row[i] = exactJsonNumber(value);
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+          if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
+          if (i >= 6) throw new Error('Invalid optional tile value. Snapshot was not written.');
+        } else if (value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
+      } else if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
+      else if (i >= 6 && value === null) throw new Error('Invalid optional tile value. Snapshot was not written.');
     }
-    return row;
-  });
+    rows[n] = row;
+  }
+  return rows;
 }
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
   if (Object.hasOwn(world, 'snapshotReplay')) throw new Error('Reserved snapshot replay field. Snapshot was not written.');

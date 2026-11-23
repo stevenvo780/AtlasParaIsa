@@ -23,8 +23,9 @@ test('V18 visual art upgrade: connected multi-tile puddles, blueprint generation
     await page.goto(new URL('__v18_art.html', server.resolvedUrls!.local[0]).href);
 
     const res = await page.evaluate(async (version) => {
-      const { Landscape } = await import(/* @vite-ignore */ '/src/client/landscape.ts');
-      const { paintStructure } = await import(/* @vite-ignore */ '/src/client/life-art.ts');
+      const module = '/src/client/landscape.ts', artModule = '/src/client/life-art.ts';
+      const { Landscape } = await import(/* @vite-ignore */ module);
+      const { paintStructure } = await import(/* @vite-ignore */ artModule);
       const canvas = document.getElementById('c') as HTMLCanvasElement;
       const r: any = new Landscape(canvas, () => {});
 

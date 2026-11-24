@@ -300,7 +300,11 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     for (const key of update.activeKeys) next[key] = true;
     for (const key of pages.keys()) if (!next[key]) pages.delete(key);
     for (const page of update.chunks) pages.set(page.key, { data: page.data });
-    pendingChunks = new Map(update.pendingChunks.map(c => [c.key, c]));
+    // Retired chunks cross once; the keys say which of the earlier ones are still pending an archive.
+    const pending = new Map<string, Chunk>();
+    for (const key of update.pendingKeys) { const chunk = pendingChunks.get(key); if (chunk) pending.set(key, chunk); }
+    for (const chunk of update.pendingChunks) pending.set(chunk.key, chunk);
+    pendingChunks = pending;
     for (const entry of update.minimap ?? []) atlas.setActive(entry.key, entry.cells);
     atlas.retainActive(update.activeKeys);
     for (const chunk of update.pendingChunks) atlas.addKnown(chunk);

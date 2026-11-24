@@ -27,7 +27,7 @@ import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
 import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import type { Chunk } from '../world/terrain.js';
-import { createChunkObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
@@ -625,7 +625,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
    * and `gateway.tapeMeta/tapeChunk` read; here the app owns both ends of the same tape. */
   const tapePath = !gateway && tapeRequested ? (store.path === ':memory:' ? ':memory:' : tapePathForWorld(store.path)) : undefined;
   let tapeWriter = tapePath ? new TapeWriter({ path: tapePath, maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval }) : undefined;
-  const observadorCinta = createChunkObserver();
+  const observadorCinta = createTileObserver();
   let ultimoTickGrabado = -1;
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
@@ -633,10 +633,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function grabarCinta() {
     if (!tapeWriter || failed || aMedioPaso || world.tick === ultimoTickGrabado) return;
     try {
-      const { chunks, changed, fast } = observadorCinta.scan(world);
+      const { chunks, changed } = observadorCinta.scan(world);
       const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, ultimoTickGrabado < 0);
-      const tiles: Tile[] = [];
-      for (const [key, chunk] of chunks) if (keyframe || changed.has(key)) for (const tile of chunk) tiles.push(projectMirrorTile(tile, fast));
+      let tiles = changed;
+      if (keyframe) { tiles = []; for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile); }
       tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz, !keyframe);
       ultimoTickGrabado = world.tick;
     } catch (error) {
@@ -672,7 +672,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   /** V24 direct mode (no gateway): minimap, directory and whispers read the live `world` between steps,
    * rebuilt at most once per simulated tick (the same object is served while the tick does not move). */
-  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache(), atlasObserver = createChunkObserver();
+  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache(), atlasObserver = createTileObserver();
   let mapaDirecto: { tick: number; version: number; value: WorldMapResponse } | undefined;
   let directorioDirecto: { tick: number; value: WorldDirectoryResponse } | undefined;
   let susurrosDirectos: { tick: number; count: number; value: WhispersResponse } | undefined;
@@ -680,8 +680,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const mundo = mundoConsultable();
     if (mapaDirecto?.tick !== mundo.tick) {
       // Every chunk the scan reports as changed is re-encoded now: a change is reported only once.
-      const { chunks, changed } = atlasObserver.scan(mundo);
-      for (const key of changed) {
+      const { chunks, dirty } = atlasObserver.scan(mundo);
+      for (const key of dirty) {
         const comma = key.indexOf(',');
         atlas.setActive(key, encodeChunkMinimapCells(chunks.get(key)!, Number(key.slice(0, comma)), Number(key.slice(comma + 1))));
       }

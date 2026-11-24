@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
+import type { ChemicalFormulaView, ChemistrySummaryView } from '../shared/chemistry.js';
 import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from './index.js';
 import { bindWorldContext, projectTerrain, worldContext } from './spatial.js';
 import { paramsOf } from './params.js';
@@ -54,6 +55,7 @@ function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast
     if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
     const cu = fast.cultivationArr[cell]!; if (cu === cu && cu !== 0) out.cultivation = r3(cu);
     const tr = fast.trafficArr[cell]!; if (tr === tr && tr !== 0) out.traffic = r3(tr);
+    if (typeof t.paved === 'number' && t.paved !== 0) out.paved = r3(t.paved);
     const dw = fast.drinkingWaterArr[cell]!; if (dw === dw && dw !== 0) out.drinkingWater = r3(dw);
     if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
     const li = fast.lifeArr[cell]!; if (li === li && li !== 0) out.life = r3(li);
@@ -65,6 +67,7 @@ function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast
   if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
   if (typeof t.cultivation === 'number' && t.cultivation !== 0) out.cultivation = r3(t.cultivation);
   if (typeof t.traffic === 'number' && t.traffic !== 0) out.traffic = r3(t.traffic);
+  if (typeof t.paved === 'number' && t.paved !== 0) out.paved = r3(t.paved);
   if (typeof t.drinkingWater === 'number' && t.drinkingWater !== 0) out.drinkingWater = r3(t.drinkingWater);
   if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
   if (typeof t.life === 'number' && t.life !== 0) out.life = r3(t.life);
@@ -74,6 +77,30 @@ function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast
 const WORKING_ACTIONS: ReadonlySet<string> = new Set(['gather', 'farm', 'build', 'hunt', 'invent', 'repair', 'research', 'craft', 'forage']);
 const PROJECT_ACTIONS: ReadonlySet<string> = new Set(['research', 'craft']);
 const SKILLED_ACTIONS: ReadonlySet<string> = new Set(['farm', 'hunt']);
+
+/** Structural boundary for the chemistry worktree: only public summary fields cross the wire.
+ * Internal ledgers/provenance remain private; every nested public value is detached. */
+export function projectChemistry(world: World): ChemistrySummaryView {
+  const state = (world.chemistry && typeof world.chemistry === 'object' ? world.chemistry : {}) as Partial<ChemistrySummaryView>;
+  const formulas: ChemicalFormulaView[] = (Array.isArray(state.formulas) ? state.formulas : []).map(f => ({
+    id: f.id, signature: f.signature, name: f.name, composition: { ...f.composition }, phase: f.phase,
+    temperatureTier: f.temperatureTier, operator: f.operator, discoveredAt: f.discoveredAt,
+    discovererId: f.discovererId, uses: f.uses, properties: { ...f.properties },
+  }));
+  const byOperator: ChemistrySummaryView['byOperator'] = { grind: 0, wash: 0, heat: 0, bind: 0 };
+  let maxTemperatureTier: ChemistrySummaryView['maxTemperatureTier'] = 0;
+  for (const f of formulas) {
+    if (Object.hasOwn(byOperator, f.operator)) byOperator[f.operator]++;
+    if (f.temperatureTier > maxTemperatureTier) maxTemperatureTier = f.temperatureTier;
+  }
+  if (state.byOperator) for (const op of ['grind', 'wash', 'heat', 'bind'] as const) byOperator[op] = state.byOperator[op] ?? byOperator[op];
+  let lots = 0;
+  for (const p of world.people) lots += p.compounds?.length ?? 0;
+  for (const s of world.structures) lots += s.storedCompounds?.length ?? 0;
+  return { formulas, totalFormulas: state.totalFormulas ?? formulas.length, totalLots: state.totalLots ?? lots,
+    maxTemperatureTier: state.maxTemperatureTier ?? maxTemperatureTier, byOperator };
+}
+
 export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
   bindWorldContext(world, context);
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
@@ -95,7 +122,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
   const referencedBlueprintIds = new Set(projected.structures.map(s => s.blueprintId).filter((id): id is string => typeof id === 'string'));
   const fastTiles = residentFastAccess(world.tiles);
   return {
-    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
+    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, seed: world.seed, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => projectTile(t, fastTiles)),
@@ -107,13 +134,15 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
         : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
-      genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture } };
+      genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture },
+      ...(p.compounds?.length ? { compounds: p.compounds.map(c => ({ ...c, composition: { ...c.composition }, properties: { ...c.properties } })) } : {}) };
     }),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.filter(b=>referencedBlueprintIds.has(b.id)).map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: projectTechnology(world, peopleInView), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
+    ...(world.chemistry ? { chemistry: projectChemistry(world) } : {}),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
 }

@@ -229,7 +229,7 @@ export function saturateTotal(current: number | undefined, amount: number): numb
   return Math.min(TOTALS_CAP, (current ?? 0) + amount);
 }
 export function emptyTotals(): Record<string, number> { return Object.fromEntries(TOTAL_KEYS.map(key => [key, 0])); }
-export function count(world: World, key: typeof TOTAL_KEYS[number], amount = 1): void {
+export function count(world: World, key: typeof TOTAL_KEYS[number] | 'roadsPaved', amount = 1): void {
   world.totals[key] = saturateTotal(world.totals[key], amount);
 }
 function sample(world: World): WorldSample {
@@ -257,7 +257,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   const lectura = lecturaResidente(world.tiles);
   const caras = estadisticasCaras(world, lectura);
   const current = sample(world), actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
-  const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0;
+  const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0, pavedTiles = 0;
   // T134 (FR-026): censo sobre TODA la población, no solo la de la cámara — `people` ahora se
   // recorta por viewport (`projectWorld`), así que el recuento y las etapas de vida deben salir
   // de aquí, no de contar el `people` recibido como hacía el cliente (`game.ts:419-437`).
@@ -292,6 +292,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
     let lastBiomeCode = -1, lastFeatureCode = -1;
     for (let i = 0; i < tiles.length; i++) {
       const cell = cells[i]!;
+      if ((tiles[i]!.paved ?? 0) >= 0.5) pavedTiles++;
       if (cell >= 0) {
         const bcode = biomeArr[cell]!;
         if (bcode === lastBiomeCode) biomeRun++;
@@ -329,6 +330,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
     }
   } else {
     for (const tile of world.tiles) {
+      if ((tile.paved ?? 0) >= 0.5) pavedTiles++;
       const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
       if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
       biomeRun++;
@@ -340,7 +342,19 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
-  const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}
+  const structures: Record<string, number> = {};
+  let polyominoStructures = 0, synergyLinks = 0;
+  for (const structure of world.structures) {
+    freshWater += structure.water;
+    for (const component of structure.components) structures[component] = (structures[component] ?? 0) + 1;
+    if ((structure.cells?.length ?? ((structure.footprint?.width ?? 1) * (structure.footprint?.height ?? 1))) > 1) polyominoStructures++;
+    const synergy = structure.synergy;
+    synergyLinks += (synergy?.sharedEdges ?? 0) + (synergy?.heated ? 1 : 0) + (synergy?.irrigated ? 1 : 0) + ((synergy?.workshopBonus ?? 0) > 0 ? 1 : 0);
+  }
+  const chemistry = world.chemistry as { formulas?: unknown[] } | undefined;
+  const chemicalFormulas = chemistry?.formulas?.length ?? 0;
   return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad },
-    census: { neighbors, identities, protectedCount, lifeStage: { ...lifeStage } } };
+    census: { neighbors, identities, protectedCount, lifeStage: { ...lifeStage } },
+    ...(pavedTiles > 0 ? { pavedTiles } : {}), ...(polyominoStructures > 0 ? { polyominoStructures } : {}),
+    ...(synergyLinks > 0 ? { synergyLinks } : {}), ...(chemicalFormulas > 0 ? { chemicalFormulas } : {}) };
 }

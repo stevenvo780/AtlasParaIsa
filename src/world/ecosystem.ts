@@ -3,6 +3,7 @@ import { EcosystemKernel, type EcosystemOptions } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
 import { ruidoCuenca } from './agua.js';
 import type { WorldParams } from './params.js';
+import { residentBackingArray } from './soa/topologia.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -107,9 +108,30 @@ export const ecosystemKernelForTest = ecosystemKernel;
  * cuando el llamador no los pasa. El llamador real (`stepWorld` en `index.ts`) pasa `world.seed` y
  * `paramsOf(world).agua.cuencas` para que la cuenca sea DURADERA (no se rellene con la lluvia).
  */
-export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true, options?: EcosystemOptions): void {
+export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true, options?: EcosystemOptions & { caminosFisicos?: boolean }): void {
   if (tick % 10 !== 0) return;
-  ecosystemKernel.step(tiles, tick, weather, phase, options);
+  if (options?.caminosFisicos) {
+    // Traffic decays in the life kernel, not the local moisture/food pass. Paving is an
+    // ordinary optional Tile field, outside TileStore's resident arrays. Save only paved
+    // cells and write through their normal setters after the CPU/GPU barrier, so the
+    // resident traffic array and dirty-page bookkeeping receive the same authoritative value.
+    const roads: { tile: Tile; traffic: number }[] = [];
+    for (const tile of residentBackingArray(tiles)) if ((tile.paved ?? 0) > 0) roads.push({ tile, traffic: tile.traffic ?? 0 });
+    let settled = false;
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      for (const { tile, traffic } of roads) {
+        tile.traffic = clamp(traffic - 0.00005);
+        if (tile.traffic < 0.05) {
+          const paved = Math.max(0, tile.paved! - 0.0005);
+          if (paved < 0.001) delete tile.paved; else tile.paved = paved;
+        }
+      }
+    };
+    ecosystemKernel.step(tiles, tick, weather, phase, { ...options, onBarrier: event => { settle(); options.onBarrier?.(event); } });
+    settle();
+  } else ecosystemKernel.step(tiles, tick, weather, phase, options);
   if (updateFauna && tick % 50 === 0) stepFauna(tiles, tick);
 }
 

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { cerrarPiscinasDeComputo, createApp } from './app.js';
+import { createWorkerGateway } from './gateway.js';
 import { Store } from './store.js';
 import { acquireLock } from './lock.js';
 import { paramsOf, setParams } from '../world/params.js';
@@ -23,7 +24,7 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(host) && (!secure || extraOrigin
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
 const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
-let app: ReturnType<typeof createApp> | undefined;
+let app: ReturnType<typeof createApp> | ReturnType<typeof createWorkerGateway> | undefined;
 let released = false;
 let closing: Promise<void> | undefined;
 /** `shutdown` puede entrar por señal mientras el `await` de la autoprueba sigue en curso. */
@@ -50,6 +51,11 @@ function shutdown(code?: number): Promise<void> {
 process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
 try {
+  if (process.env.CARTA_SIM_WORKER === '1') {
+    app = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
+      password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure });
+    await app.ready;
+  } else {
   store = new Store(resolve(dataPath, 'world.sqlite'));
   if (!abortado) {
     // Los params llegan ANTES de que `createApp` genere un mundo nuevo (R6: `agua.cuencas`
@@ -85,6 +91,7 @@ try {
       console.info(JSON.stringify({ gpuAutoprueba: parity, v15: resumenDespacho(vivo.world) }));
     }
     if (!abortado && motor.gpu.length === 0) console.info(JSON.stringify({ gpuAutoprueba: null, v15: resumenDespacho(vivo.world) }));
+  }
   }
   if (abortado || !app) await shutdown(abortado ? undefined : 1);
   else {

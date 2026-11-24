@@ -14,11 +14,14 @@ import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
 import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
-import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
+import { bodySeed, animalPose, daylightAt, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
+import type { ClientTileCache } from './tile-cache.js';
 import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
+import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from './crop-art.js';
+import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure } from './structure-art.js';
 import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
@@ -43,14 +46,26 @@ export type SelectHandler = (selection: LandscapeSelection) => void;
 /** Píxeles de arte por tile: la resolución nativa del pixel-art. */
 const ART = 16;
 const CHUNK_ART_TILES = 8;
-const TERRAIN_CACHE_LIMIT = 128; // 8 MiB CPU rasters; at most 8 MiB GPU textures.
+const TERRAIN_CACHE_LIMIT = 256; // V18: 16 MiB CPU rasters (256 chunks); volver a lo ya visitado no vuelve a hornear píxeles.
 const SPRITE_CACHE_LIMIT = 320; // At most 1.875 MiB of 32 × 48 RGBA sprites.
 const MAX_ZOOM = 84;
 /** Radio de acierto al tocar una persona, en tiles. */
 const PERSON_HIT = 0.65;
+/** V18 capa 1.5: cuánto hay que mover (tiles) o acercar (ln del zoom) la cámara a mano para vaciar el colchón de reproducción. */
+const PLAYBACK_PAN_TILES = 3;
+const PLAYBACK_ZOOM_LOG = .15;
 /** Margen (en tiles) de mar visible alrededor de la isla al encuadrar. */
 const FIT_PADDING = 1.4;
 const FOCUS_MS = 380;
+/** Teselas que recorre un cuerpo entre dos medios pasos de su zancada (andar sereno, ligado a la distancia real). */
+const STRIDE_TILES = .3;
+const ANIMAL_STEP_TILES = .17;
+/** Un destino ordenado se marca al instante y se retira al llegar o pasado este tiempo. */
+const DESTINATION_MS = 12_000;
+/** Ventana compuesta desde la caché: alineada a trozos de arte y con holgura para que arrastrar no la rehaga cada fotograma. */
+const WINDOW_ALIGN = CHUNK_ART_TILES, WINDOW_MARGIN = 8;
+/** Retraso mínimo antes de mostrar «cargando» (un instante no merece aviso) y vigencia máxima del aviso. */
+const LOADING_DELAY_MS = 250, LOADING_MAX_MS = 6000;
 
 /* ------------------------------------------------------------------ */
 /* Utilidades de color                                                 */
@@ -267,8 +282,11 @@ interface RenderPerson {
   y: number;
   moving: boolean;
   seed: number;
+  /** Teselas recorridas: la fase de la zancada sale de la distancia, no del reloj. */
+  stride: number;
 }
-interface RenderAnimal { view: AnimalView; x: number; y: number; moving: boolean; left: boolean; }
+interface RenderAnimal { view: AnimalView; x: number; y: number; moving: boolean; left: boolean; stride: number; }
+interface ViewBounds { x0: number; x1: number; y0: number; y1: number; }
 
 const enum SpriteKind {
   Tree = 0,
@@ -388,6 +406,26 @@ export class Landscape {
   private prevAt = 0;
   private currAt = 0;
   private interval = 500;
+  /** V18: cadencia real del servidor, trayectorias visuales de personas y animales, luz/lluvia suavizadas. */
+  private readonly cadence = new CadenceEstimator();
+  private readonly peopleMotion = new MotionTracker(this.cadence);
+  private readonly animalMotion = new MotionTracker(this.cadence);
+  private readonly atmosphere = new AtmosphereSmoother();
+  /** V18 capa 1.5: colchón de 3–6 s de fotogramas recibidos; los cuerpos se reproducen A→B dentro de él. */
+  private readonly playback = new PlaybackBuffer<WorldView>();
+  /** Reloj de muestreo de los cuerpos en este fotograma (`playback.visualMs`). */
+  private motionClock = 0;
+  private playbackAnchor: { x: number; y: number; zoom: number } | null = null;
+  /** V18: caché espacial del cliente (la posee `game.ts`). Sin ella el paisaje se comporta como antes. */
+  private tileCache: ClientTileCache | null = null;
+  /** Ventana (en teselas) que el servidor envió; la cuadrícula puede ser mayor si se compuso desde la caché. */
+  private serverWindow: { x: number; y: number; w: number; h: number } | null = null;
+  private viewCoverage = 1;
+  private coverageAt = 0;
+  private cameraMovedAt = 0;
+  private loadingSince = 0;
+  private loadingAlpha = 0;
+  private destination: { x: number; y: number; id: string; bornAt: number } | null = null;
 
   private worldW = 0;
   private worldH = 0;
@@ -535,6 +573,11 @@ export class Landscape {
 
     const now = performance.now();
     const first = this.curr === null;
+    // Un eco de cámara (misma `sequence`) no es un paso del servidor: no mide cadencia.
+    this.cadence.observe(world.sequence, world.tick, now);
+    this.interval = this.cadence.tickIntervalMs;
+    // Un eco de cámara (misma `sequence`) sustituye la vista del fotograma sin avanzar el reloj de reproducción.
+    this.playback.push(world, world.sequence, world.tick, now);
 
     // A new camera window at the same tick must not restart body interpolation.
     if (!this.curr || this.curr.tick !== world.tick) {
@@ -543,7 +586,6 @@ export class Landscape {
       if (this.curr && world.tick > this.curr.tick) {
         for (const p of this.curr.people) this.prevPeople.set(p.id, p);
         for (const a of this.curr.animals ?? []) this.prevAnimals.set(a.id, a);
-        this.interval = clamp(now - this.currAt, 60, 2000);
       }
       this.prev = this.curr && world.tick > this.curr.tick ? this.curr : null;
       this.prevAt = this.currAt;
@@ -575,12 +617,36 @@ export class Landscape {
     }
     this.sceneRevision++;
 
-    this.rebuildGrid(world);
-    this.bakeGround();
+    this.serverWindow = { x: world.originX ?? 0, y: world.originY ?? 0, w: Math.max(0, Math.floor(world.width)), h: Math.max(0, Math.floor(world.height)) };
+    // La cámara pudo moverse mientras el servidor terminaba el paso: si su ventana ya no cubre lo que se ve,
+    // se compone con la caché (verdad fresca encima) en vez de dejar el hueco hasta el siguiente estado.
+    const view = !first && this.tileCache ? this.visibleBounds() : null;
+    if (view && !this.windowCovers(this.serverWindow, view)) this.composeWindow(view, world.tiles);
+    else { this.rebuildGrid(world); this.bakeGround(); }
 
     if (first) {
       this.fitWorld();
     }
+  }
+
+  /** V18 capa 1.5: colapsa el colchón al estado más reciente (cámara movida u orden directa); luego se vuelve a llenar. */
+  flushPlayback(): void { this.playback.flushToLatest(); }
+
+  /** Un paneo o zoom manual deja el colchón en vivo para ver el terreno y a la gente donde están ya. Seguir a alguien no. */
+  private syncPlaybackCamera(): void {
+    const anchor = this.playbackAnchor, cam = this.cam;
+    if (!anchor || this.followedId) { this.playbackAnchor = { x: cam.x, y: cam.y, zoom: cam.zoom }; return; }
+    if (Math.hypot(cam.x - anchor.x, cam.y - anchor.y) <= PLAYBACK_PAN_TILES && Math.abs(Math.log(cam.zoom / anchor.zoom)) <= PLAYBACK_ZOOM_LOG) return;
+    this.playback.flushToLatest();
+    this.playbackAnchor = { x: cam.x, y: cam.y, zoom: cam.zoom };
+  }
+
+  /** V18: la caché espacial del cliente (null la desactiva). */
+  setTileCache(cache: ClientTileCache | null): void { this.tileCache = cache; }
+
+  /** V18: marca al instante a dónde se ordenó ir (antes de que el servidor aplique la orden en su siguiente paso). */
+  markDestination(position: { x: number; y: number } | null, personId = ''): void {
+    this.destination = position ? { x: position.x, y: position.y, id: personId, bornAt: performance.now() } : null;
   }
 
   /** Centra la cámara en una coordenada del mundo (en tiles). */
@@ -681,6 +747,7 @@ export class Landscape {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.destination = null; this.tileCache = null; this.peopleMotion.clear(); this.animalMotion.clear(); this.playback.clear();
     cancelAnimationFrame(this.raf);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
@@ -708,10 +775,12 @@ export class Landscape {
   /* ---------------------------------------------------------------- */
 
   private rebuildGrid(world: WorldView): void {
-    this.originX = world.originX ?? 0;
-    this.originY = world.originY ?? 0;
-    const w = Math.max(0, Math.floor(world.width));
-    const h = Math.max(0, Math.floor(world.height));
+    this.setWindow(world.originX ?? 0, world.originY ?? 0, Math.max(0, Math.floor(world.width)), Math.max(0, Math.floor(world.height)), world.tiles);
+  }
+
+  private setWindow(originX: number, originY: number, w: number, h: number, tiles: readonly Tile[]): void {
+    this.originX = originX;
+    this.originY = originY;
     if (w !== this.worldW || h !== this.worldH) {
       this.worldW = w;
       this.worldH = h;
@@ -724,12 +793,53 @@ export class Landscape {
     const cells = w * h;
     if (this.grid.length !== cells) this.grid = new Array<Tile | undefined>(cells);
     this.grid.fill(undefined);
-    for (const t of world.tiles) {
+    for (const t of tiles) {
       const tx = Math.floor(t.x) - this.originX;
       const ty = Math.floor(t.y) - this.originY;
       if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
       this.grid[ty * w + tx] = t;
     }
+  }
+
+  /** Teselas que `drawScene` pinta con la cámara de ahora (misma holgura que allí: copas altas). */
+  private visibleBounds(): ViewBounds {
+    const halfW = this.cssW / this.cam.zoom / 2, halfH = this.cssH / this.cam.zoom / 2;
+    return { x0: Math.floor(this.cam.x - halfW) - 1, x1: Math.ceil(this.cam.x + halfW) + 1, y0: Math.floor(this.cam.y - halfH) - 3, y1: Math.ceil(this.cam.y + halfH) + 3 };
+  }
+
+  private windowCovers(win: { x: number; y: number; w: number; h: number }, view: ViewBounds): boolean {
+    return view.x0 >= win.x && view.x1 <= win.x + win.w - 1 && view.y0 >= win.y && view.y1 <= win.y + win.h - 1;
+  }
+
+  /** Cuadrícula = lo visible + holgura, alineada a trozos: verdad fresca del servidor encima, el resto de la caché. */
+  private composeWindow(view: ViewBounds, live: readonly Tile[]): void {
+    const cache = this.tileCache; if (!cache) return;
+    const x = Math.floor((view.x0 - WINDOW_MARGIN) / WINDOW_ALIGN) * WINDOW_ALIGN, y = Math.floor((view.y0 - WINDOW_MARGIN) / WINDOW_ALIGN) * WINDOW_ALIGN;
+    const w = Math.ceil((view.x1 + 1 + WINDOW_MARGIN) / WINDOW_ALIGN) * WINDOW_ALIGN - x, h = Math.ceil((view.y1 + 1 + WINDOW_MARGIN) / WINDOW_ALIGN) * WINDOW_ALIGN - y;
+    const composed = cache.composeViewport(x, y, w, h, live);
+    this.setWindow(x, y, w, h, composed.tiles);
+    this.bakeGround();
+    this.sceneKey = '';
+    this.measureCoverage(view, performance.now());
+  }
+
+  /** Fracción de lo visible que ya se conoce (0..1). Sólo importa mientras el servidor aún no cubre la cámara. */
+  private measureCoverage(view: ViewBounds, now: number): void {
+    this.coverageAt = now;
+    let known = 0, total = 0;
+    for (let y = view.y0 + 3; y <= view.y1 - 3; y++) for (let x = view.x0 + 1; x <= view.x1 - 1; x++) { total++; if (this.tileAt(x, y)) known++; }
+    this.viewCoverage = total ? known / total : 1;
+  }
+
+  /** Cada fotograma: si la cámara salió de la cuadrícula, se pinta YA lo visitado desde la caché (0 ms de espera al servidor). */
+  private ensureWindow(now: number): void {
+    const world = this.curr;
+    if (!world || !this.groundBaked || !this.tileCache || !this.serverWindow) return;
+    const view = this.visibleBounds();
+    if (!this.windowCovers({ x: this.originX, y: this.originY, w: this.worldW, h: this.worldH }, view)) this.composeWindow(view, world.tiles);
+    if (this.windowCovers(this.serverWindow, view)) { this.viewCoverage = 1; this.loadingSince = 0; return; }
+    if (now - this.coverageAt > 250) this.measureCoverage(view, now);
+    if (this.viewCoverage < 1 && now - this.cameraMovedAt < LOADING_MAX_MS) { if (!this.loadingSince) this.loadingSince = now; } else this.loadingSince = 0;
   }
 
   /** Teselas existentes dentro de la ventana visible ya calculada por `drawScene`. */
@@ -766,6 +876,8 @@ export class Landscape {
         | (groundBucket(growth) << 12) | (groundBucket(t.fertility ?? .5) << 16)
         | (groundBucket(cult) << 20) | (groundBucket(t.traffic ?? 0) << 24) | (groundBucket(dw) << 28);
       h = Math.imul(h ^ b1, 16777619) >>> 0;
+      // Etapa del cultivo (arada → brote → hojas → madura): el trozo solo se rehornea al cruzar un umbral visual.
+      h = Math.imul(h ^ (cropSignature(t) + 1), 16777619) >>> 0;
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
       const gEff = t.growth ?? t.vegetation;
       const flags = (cult > .08 ? 1 : 0) | (dw > .04 ? 2 : 0) | (t.moisture > .65 ? 4 : 0)
@@ -933,34 +1045,18 @@ export class Landscape {
     g.drawImage(this.groundStamp, ox, oy);
   }
 
+  private isCropAt(x: number, y: number): boolean { const t = this.tileAt(x, y); return t !== undefined && cropStage(t) !== null; }
+
   /** Resource art follows server stock/growth. Depleted resources do not remain lush props. */
   private bakeFeatures(g: CanvasRenderingContext2D, tile: Tile): void {
     const { x, y } = tile, ox = x * ART, oy = y * ART;
     const growth = clamp01(tile.growth ?? tile.vegetation);
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
     const edge = this.biomeEdgeFraction(tile);
-    const cultivation = clamp01(tile.cultivation ?? 0);
-    if (cultivation > .08) {
+    const stage = cropStage(tile);
+    if (stage !== null) {
       const inGrid = this.tileAt(x, y) === tile;
-      const hasLeft = inGrid && ((this.tileAt(x - 1, y)?.cultivation ?? 0) > .08);
-      const hasRight = inGrid && ((this.tileAt(x + 1, y)?.cultivation ?? 0) > .08);
-      const xStart = hasLeft ? ox : ox + 2;
-      const spanW = (hasRight ? ox + ART : ox + ART - 2) - xStart;
-      for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
-        const fy = oy + 3 + row * 3;
-        px(g, xStart, fy, spanW, 2, css(P.soilDark, .55 + cultivation * .38));
-        px(g, xStart, fy, spanW, 1, css(P.trunkLight, .32));
-        for (let plant = 0; plant < 4; plant++) {
-          if (growth > .15 && tile.vegetation > .04) {
-            const px0 = ox + 2 + plant * 3 + ((hash3(x, y, 610 + row * 4 + plant) & 1));
-            const ph = 1 + Math.round(growth * 2);
-            px(g, px0, fy - ph + 1, 1, ph, css(mix(P.reed, P.grassLight, clamp01(tile.moisture))));
-            if (growth > .55 && tile.moisture > .35) {
-              px(g, px0, fy - ph, 2, 1, css(P.grassLight));
-            }
-          }
-        }
-      }
+      paintCropField(g, tile, stage, ART, inGrid && this.isCropAt(x - 1, y), inGrid && this.isCropAt(x + 1, y));
     }
     const water = clamp01(tile.drinkingWater ?? 0);
     const reservoir = tile.feature === 'spring' || tile.feature === 'pool';
@@ -1205,6 +1301,7 @@ export class Landscape {
     const signature = JSON.stringify(viewport);
     if (signature === this.reportedViewport) return;
     this.reportedViewport = signature;
+    this.cameraMovedAt = performance.now();
     this.onViewport?.(viewport);
   }
 
@@ -1241,50 +1338,41 @@ export class Landscape {
   /* Interpolación                                                    */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * V18: cada cuerpo se desliza desde DONDE SE VE hacia su casilla nueva durante la duración medida del paso
+   * del servidor (`MotionTracker`); ya no «salta» cuando llega un estado. Con movimiento reducido se coloca.
+   */
   private interpolatePeople(now: number): RenderPerson[] {
     const world = this.curr;
     if (!world) return [];
     // T137: `prevPeople` solo conserva ids del frame actual; sin esto acumula huérfanos.
     const currentIds = new Set(world.people.map(p => p.id));
     for (const id of this.prevPeople.keys()) if (!currentIds.has(id)) this.prevPeople.delete(id);
-    const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
+    const smooth = !this.reduceMotion;
     const out: RenderPerson[] = [];
     for (const p of world.people) {
-      const before = this.prevPeople.get(p.id);
-      let x = p.x;
-      let y = p.y;
-      let moving = false;
-      if (before) {
-        const dx = p.x - before.x;
-        const dy = p.y - before.y;
-        moving = dx * dx + dy * dy > 0.0004 && alpha < 1;
-        x = before.x + dx * alpha;
-        y = before.y + dy * alpha;
-      }
-      let idHash = 2166136261;
-      for (let i = 0; i < p.id.length; i++) {
-        idHash = Math.imul(idHash ^ p.id.charCodeAt(i), 16777619) >>> 0;
-      }
-      out.push({
-        view: p,
-        x,
-        y,
-        moving,
-        seed: idHash & 0xffff,
-      });
+      const shown = smooth ? this.peopleMotion.sample(p.id, now) : undefined; // `now` = reloj virtual del colchón
+      out.push({ view: p, x: shown ? shown.x : p.x, y: shown ? shown.y : p.y, moving: shown ? shown.moving : false, seed: shown ? shown.seed : bodySeed(p.id), stride: shown ? shown.stride : 0 });
     }
     return out;
   }
 
   private interpolateAnimals(now: number): RenderAnimal[] {
-    const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
+    const smooth = !this.reduceMotion;
     return (this.curr?.animals ?? []).map(view => {
-      const before = this.prevAnimals.get(view.id);
-      const dx = before ? view.x - before.x : 0, dy = before ? view.y - before.y : 0;
+      const shown = smooth ? this.animalMotion.sample(view.id, now) : undefined;
+      if (shown) return { view, x: shown.x, y: shown.y, moving: shown.moving, left: shown.left, stride: shown.stride };
+      const before = this.prevAnimals.get(view.id), dx = before ? view.x - before.x : 0;
       const defaultLeft = (hash3(view.id.length, view.id.charCodeAt(0) | 0, view.id.charCodeAt(view.id.length - 1) | 0) & 1) === 1;
-      return { view, x: before ? before.x + dx * alpha : view.x, y: before ? before.y + dy * alpha : view.y,
-        moving: !!before && (dx !== 0 || dy !== 0) && alpha < 1, left: dx !== 0 ? dx < 0 : defaultLeft };
+      return { view, x: view.x, y: view.y, moving: false, left: dx !== 0 ? dx < 0 : defaultLeft, stride: 0 };
     });
+  }
+
+  /** Posición visual de un cuerpo seguido por la cámara (sin construir la lista de todos). */
+  private bodyPosition(id: string, kind: 'person' | 'animal', now: number): { x: number; y: number } | undefined {
+    const shown = this.reduceMotion ? undefined : (kind === 'animal' ? this.animalMotion : this.peopleMotion).sample(id, now);
+    if (shown) return shown;
+    return kind === 'animal' ? this.curr?.animals?.find(a => a.id === id) : this.curr?.people.find(p => p.id === id);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1303,11 +1391,22 @@ export class Landscape {
     }
     this.lastFrameAt = now;
     this.tickFocus(now);
+    if (!this.reduceMotion) {
+      this.syncPlaybackCamera(); this.playback.advance(now, this.cadence.tickIntervalMs);
+      // Los fotogramas que el colchón libera alimentan a los rastreadores: cada casilla se reparte en ≈ 5,2 pasos y el servidor, aunque se atrase, no deja a nadie parado.
+      for (const frame of this.playback.takeReleased()) {
+        this.peopleMotion.ingest(frame.view.people, this.playback.visualMs);
+        this.animalMotion.ingest(frame.view.animals ?? [], this.playback.visualMs);
+      }
+    }
+    // Reloj con el que se muestrean los cuerpos (el virtual del colchón); con movimiento reducido no se interpola.
+    this.motionClock = this.playback.visualMs;
     if (this.followedId) {
-      const person = (this.followedKind === 'animal' ? this.interpolateAnimals(now) : this.interpolatePeople(now)).find(p => p.view.id === this.followedId);
-      if (person) { this.cam.x = person.x + 0.5; this.cam.y = person.y + 0.5; }
+      const body = this.bodyPosition(this.followedId, this.followedKind, this.motionClock);
+      if (body) { this.cam.x = body.x + 0.5; this.cam.y = body.y + 0.5; }
     }
     this.reportViewport();
+    this.ensureWindow(now);
     const renderAt = performance.now();
     this.render(now);
     const elapsed = performance.now() - renderAt;
@@ -1347,12 +1446,16 @@ export class Landscape {
     if (world && this.groundBaked && this.worldW > 0) {
       const t = now / 1000;
       this.actionActive = !world.paused && now - this.currAt < Math.max(1200, this.interval * 2);
-      const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
-      const light = daylightAt(this.prev ? this.prev.tick + (world.tick - this.prev.tick) * alpha : world.tick);
-      if (world.weather === 'rain') light.shadowAlpha *= .4;
-      this.lighting = light;
-      const people = this.interpolatePeople(now);
-      const animals = this.interpolateAnimals(now);
+      // V18: la fase del día y la lluvia se acercan a lo recibido en ~1,5 s en vez de saltar entre amanecer/día/noche.
+      if (this.reduceMotion) this.atmosphere.reset();
+      // Con colchón, la luz y la lluvia siguen al mismo instante A→B que se dibuja (no al más reciente).
+      const shownTime = this.reduceMotion ? null : this.playback.bracket();
+      const shownTick = this.reduceMotion ? world.tick : this.playback.shownTick(world.tick);
+      const shownWeather = shownTime ? (shownTime.alpha < .5 ? shownTime.a.view : shownTime.b.view).weather : world.weather;
+      const light = this.atmosphere.step(daylightAt(shownTick), shownWeather === 'rain', now);
+      this.lighting = { shadowX: light.shadowX, shadowY: light.shadowY, shadowAlpha: light.shadowAlpha * (1 - .6 * light.rain) };
+      const people = this.interpolatePeople(this.motionClock);
+      const animals = this.interpolateAnimals(this.motionClock);
       this.drawScene(world, people, animals, t);
 
       // Volcado nítido de la escena al panel.
@@ -1369,7 +1472,7 @@ export class Landscape {
       );
       this.drawCalls++;
 
-      this.drawAmbient(world, cw, ch, now, light);
+      this.drawAmbient(cw, ch, now, light);
       this.drawOverlaysScreen(people, animals);
     }
   }
@@ -1404,7 +1507,7 @@ export class Landscape {
     this.effects.water = this.effects.vegetation = this.effects.shadows = 0;
     this.visibleTiles = 0;
     this.visibleAnimals = 0; this.visibleStructures = 0;
-    const structuredTiles = new Set((world.structures ?? []).map(s => `${s.x},${s.y}`));
+    const structuredTiles = new Set((world.structures ?? []).flatMap(s => footprintCells(s as ExtendedStructure).map(c => `${c.x},${c.y}`)));
 
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
@@ -1443,9 +1546,11 @@ export class Landscape {
     this.drawPlaces(g, world.places, x0, x1, y0, y1);
 
     for (const structure of world.structures ?? []) {
-      if (structure.x < x0 || structure.x > x1 || structure.y < y0 || structure.y > y1) continue;
+      const box = footprintBox(structure as ExtendedStructure);
+      if (box.x0 + box.w - 1 < x0 || box.x0 > x1 || box.y0 + box.h - 1 < y0 || box.y0 > y1) continue;
       this.visibleStructures++;
-      sprites.push({ kind: SpriteKind.Structure, sortY: structure.y * ART + 13, ax: structure.x * ART + 8, ay: structure.y * ART + 13, seed: 0, size: 0, person: null, structure });
+      const foot = structureExtent(structure as ExtendedStructure).foot;
+      sprites.push({ kind: SpriteKind.Structure, sortY: foot, ax: (box.x0 + box.w / 2) * ART, ay: foot, seed: 0, size: 0, person: null, structure });
     }
     for (const animal of animals) {
       if (animal.x < x0 || animal.x > x1 || animal.y < y0 || animal.y > y1) continue;
@@ -1499,7 +1604,8 @@ export class Landscape {
       else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed);
       else if (s.animal) this.drawAnimal(g, s.animal, t);
       else if (s.structure) {
-        const hidden = behind(s, 28, 30);
+        const extent = structureExtent(s.structure as ExtendedStructure);
+        const hidden = behind(s, Math.max(28, extent.foot - extent.top), Math.max(30, extent.right - extent.left));
         if (hidden) { g.save(); g.globalAlpha = .45; }
         this.drawStructure(g, s.structure, t);
         if (hidden) g.restore();
@@ -1589,7 +1695,10 @@ export class Landscape {
 
   private drawAnimal(g: CanvasRenderingContext2D, animal: RenderAnimal, t: number): void {
     const v = animal.view;
-    const pose = animalPose(v, animal.moving, t + hash3(v.id.length, v.id.charCodeAt(v.id.length-1), 48) % 13, this.reduceMotion, this.actionActive);
+    const phase = hash3(v.id.length, v.id.charCodeAt(v.id.length-1), 48) % 13;
+    // En marcha la pose avanza con la distancia recorrida (una pose cada ANIMAL_STEP_TILES), no con el reloj.
+    const rate = v.action === 'flee' || v.action === 'hunt' ? 10 : 6;
+    const pose = animalPose(v, animal.moving, (animal.moving ? animal.stride / ANIMAL_STEP_TILES / rate : t) + phase, this.reduceMotion, this.actionActive || animal.moving);
     const genes = v.genes;
     const camouflage: 0 | 1 | 2 = genes ? (genes.camouflage > 0.56 ? 2 : genes.camouflage < 0.44 ? 0 : 1) : 1;
     const agile: 0 | 1 = genes && (genes.speed > 0.56 || genes.perception > 0.56) ? 1 : 0;
@@ -1650,8 +1759,12 @@ export class Landscape {
   }
 
   private drawStructure(g: CanvasRenderingContext2D, structure: StructureView, t = 0): void {
+    const ext = structure as ExtendedStructure, animate = !this.reduceMotion && this.actionActive;
+    if (ext.site) { paintConstructionSite(g, ext, ext.site, t, animate); this.drawCalls++; return; }
+    if (isModular(ext)) { paintModularHall(g, ext, t, animate); this.drawCalls++; return; }
     const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
+    paintCompactAccessories(g, ext);
     const previous = this.prev?.structures?.find(s => s.id === structure.id);
     if (!this.reduceMotion && this.actionActive && this.curr?.weather === 'rain' && previous && structure.water > previous.water
       && structure.components.includes('cistern') && this.effects.water < VISUAL_BUDGET.water) {
@@ -1930,7 +2043,8 @@ export class Landscape {
     const hairDarkHex = css(darken(hairRgb, 0.25));
 
     // Balanceo de paso: sólo si el servidor la movió de verdad.
-    const step = !this.reduceMotion && p.moving ? (Math.floor(t * (senescent ? 4.5 : 6) + p.seed) & 1) : 0;
+    // V18: el paso sale de la distancia recorrida (mayores caminan a zancada más corta): andar sereno, nunca a trompicones.
+    const step = !this.reduceMotion && p.moving ? (Math.floor(p.stride / (senescent ? STRIDE_TILES * 1.3 : STRIDE_TILES) + p.seed) & 1) : 0;
     const bob = resting ? 0 : step === 1 ? -1 : 0;
     const baseY = resting ? ay + 2 : ay;
 
@@ -2134,6 +2248,8 @@ export class Landscape {
     const consuming = view.action === 'drink' ? previous?.thirst !== undefined && view.thirst !== undefined && previous.thirst > view.thirst
       : view.action === 'eat' && previous !== undefined && previous.hunger > view.hunger;
     const beat = !this.reduceMotion && this.actionActive && !p.moving && (working || consuming) ? Math.floor(t * 3 + p.seed) % 2 : 0;
+    // V19: labor agrícola sobre el cultivo real de la casilla (azada al arar, hoz al cosechar, gavilla al comer).
+    const cropWork = cropWorkMode(view.action, working, p.moving, this.tileAt(Math.round(p.x), Math.round(p.y)));
 
     if (view.action === 'hunt') {
       if (showActionTool) {
@@ -2169,7 +2285,7 @@ export class Landscape {
         const hasStone = (view.materials?.stone ?? 0) > 0;
         add(ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight), true);
       }
-    } else if (view.action === 'farm' || view.action === 'gather') {
+    } else if ((view.action === 'farm' && !cropWork) || view.action === 'gather') {
       const hand = baseY - 6 + beat * 2;
       add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
@@ -2214,19 +2330,21 @@ export class Landscape {
     if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
       px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
     }
+    if (cropWork) drawCropWork(g, { mode: cropWork, ax, baseY, t, seed: p.seed, animate: !this.reduceMotion && this.actionActive, workProgress: view.workProgress, ring: this.cam.zoom >= 18 });
   }
 
   /* ------------------------ capas de pantalla ---------------------- */
 
-  private drawAmbient(world: WorldView, cw: number, ch: number, now: number, tint: { color: string; alpha: number }): void {
+  private drawAmbient(cw: number, ch: number, now: number, tint: { color: string; alpha: number; rain: number }): void {
     const ctx = this.labelCtx;
-    const key = `${tint.color}:${tint.alpha.toFixed(3)}:${world.weather}:${this.reduceMotion}`;
+    // El suavizado ya ocurre por fotograma (AtmosphereSmoother): sin transiciones CSS que lo contradigan.
+    const rainAlpha = (RAIN_TINT.alpha * tint.rain).toFixed(3);
+    const key = `${tint.color}:${tint.alpha.toFixed(3)}:${rainAlpha}`;
     if (key !== this.ambientKey) {
       this.ambientKey = key;
-      this.phaseLayer.style.transition = this.reduceMotion ? 'none' : 'background-color 1600ms linear, opacity 1600ms linear';
-      this.rainLayer.style.transition = this.reduceMotion ? 'none' : 'opacity 1000ms linear';
-      this.phaseLayer.style.backgroundColor = tint.color; this.phaseLayer.style.opacity = String(tint.alpha);
-      this.rainLayer.style.backgroundColor = RAIN_TINT.color; this.rainLayer.style.opacity = world.weather === 'rain' ? String(RAIN_TINT.alpha) : '0';
+      this.phaseLayer.style.transition = 'none'; this.rainLayer.style.transition = 'none';
+      this.phaseLayer.style.backgroundColor = tint.color; this.phaseLayer.style.opacity = tint.alpha.toFixed(3);
+      this.rainLayer.style.backgroundColor = RAIN_TINT.color; this.rainLayer.style.opacity = rainAlpha;
     }
     // Viñeta muy leve: acerca el mapa al papel sin degradados pesados.
     const v = ctx.createRadialGradient(
@@ -2241,16 +2359,16 @@ export class Landscape {
     v.addColorStop(1, 'rgba(24,30,26,0.16)');
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, cw, ch);
-    this.drawRain(world, now);
+    this.drawRain(tint.rain, now);
     this.drawEventAccents(now);
   }
 
-  private drawRain(world: WorldView, now: number): void {
+  private drawRain(intensity: number, now: number): void {
     this.effects.rain = 0;
-    if (world.weather !== 'rain') return;
-    const g = this.labelCtx, count = Math.min(VISUAL_BUDGET.rain, Math.ceil(this.cssW * this.cssH / 12500));
+    if (intensity < .02) return;
+    const g = this.labelCtx, count = Math.min(VISUAL_BUDGET.rain, Math.ceil(Math.ceil(this.cssW * this.cssH / 12500) * Math.min(1, intensity)));
     const time = this.reduceMotion ? 0 : Math.floor(now / 85) * .085;
-    g.save(); g.scale(this.dpr, this.dpr); g.strokeStyle = 'rgba(211,232,223,.30)'; g.lineWidth = 1; g.beginPath();
+    g.save(); g.scale(this.dpr, this.dpr); g.strokeStyle = intensity >= .98 ? 'rgba(211,232,223,.30)' : `rgba(211,232,223,${(.3 * Math.min(1, intensity)).toFixed(3)})`; g.lineWidth = 1; g.beginPath();
     for (let i = 0; i < count; i++) {
       const x = (rnd(i, 0, 991) * this.cssW + time * 38) % this.cssW;
       const y = (rnd(i, 1, 993) * this.cssH + time * 210) % this.cssH;
@@ -2392,6 +2510,7 @@ export class Landscape {
       ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(mark.x, mark.y, Math.max(9, this.cam.zoom * .42), 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
       this.drawChip(mark.x, mark.y - 23, 'Pendiente', P.ink, P.amber, 'meta');
     }
+    this.drawDestination(people);
 
     const sel = this.selection;
     if (sel && sel.kind === 'tile') {
@@ -2443,6 +2562,38 @@ export class Landscape {
         }
       }
     }
+    this.drawLoading();
+    ctx.restore();
+  }
+
+  /** V18: pulso local en el destino ordenado, visible desde el clic aunque el servidor aplique la orden un paso (o varios segundos) después. */
+  private drawDestination(people: RenderPerson[]): void {
+    const d = this.destination;
+    if (!d) return;
+    const now = performance.now(), age = now - d.bornAt;
+    const body = d.id ? people.find(p => p.view.id === d.id) : undefined;
+    const arrived = !!body && age > 500 && Math.hypot(body.x - d.x, body.y - d.y) < .3 && !body.moving;
+    if (age > DESTINATION_MS || arrived) { this.destination = null; return; }
+    const mark = this.worldToScreen(d.x + .5, d.y + .5);
+    if (mark.x < -40 || mark.x > this.cssW + 40 || mark.y < -40 || mark.y > this.cssH + 40) return;
+    const ctx = this.labelCtx, phase = this.reduceMotion ? .5 : (age % 1100) / 1100;
+    const fade = clamp01(1 - Math.max(0, age - (DESTINATION_MS - 1500)) / 1500);
+    ctx.save();
+    ctx.strokeStyle = '#f4d18b'; ctx.fillStyle = '#f4d18b'; ctx.lineWidth = 2;
+    ctx.globalAlpha = (1 - phase) * .85 * fade; ctx.beginPath(); ctx.arc(mark.x, mark.y, this.cam.zoom * (.18 + .42 * phase), 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = .9 * fade; ctx.beginPath(); ctx.arc(mark.x, mark.y, Math.max(2.5, this.cam.zoom * .09), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  /** V18: aviso sereno y no bloqueante mientras llega terreno que el cliente todavía no conoce. */
+  private drawLoading(): void {
+    const now = performance.now();
+    const wanted = this.loadingSince > 0 && now - this.loadingSince > LOADING_DELAY_MS;
+    this.loadingAlpha += ((wanted ? 1 : 0) - this.loadingAlpha) * .12;
+    if (this.loadingAlpha < .03) { this.loadingAlpha = 0; return; }
+    const ctx = this.labelCtx;
+    ctx.save(); ctx.globalAlpha = this.loadingAlpha * .85;
+    this.drawChip(this.cssW / 2, this.cssH - 26, 'Explorando el terreno…', P.ink, P.rule, 'meta');
     ctx.restore();
   }
 

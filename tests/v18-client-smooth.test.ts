@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AtmosphereSmoother, CadenceEstimator, MotionTracker, daylightAt, glideEase, parseRgb, MOTION_LIMITS, CADENCE_LIMITS } from '../src/client/visual-state.js';
+import { AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, daylightAt, glideEase, parseRgb, MOTION_LIMITS, CADENCE_LIMITS, PLAYBACK_LIMITS } from '../src/client/visual-state.js';
 import { ClientTileCache } from '../src/client/tile-cache.js';
 import type { Tile } from '../src/shared/types.js';
 
@@ -276,4 +276,132 @@ test('composeViewport merges live and cached tiles instantly with accurate cover
   assert.deepEqual([cache.chunkCount, cache.tileCount], [0, 0]);
   assert.equal(cache.composeViewport(0, 0, 16, 16).coverage, 0);
   assert.equal(cache.peek(0, 0), undefined);
+});
+
+
+/* ------------------------------------------------------------------ */
+/* Capa 1.5 — colchón de reproducción                                  */
+/* ------------------------------------------------------------------ */
+
+interface TestView { people: { id: string; x: number; y: number }[]; animals: { id: string; x: number; y: number }[]; }
+const viewAt = (x: number, extra: Partial<TestView> = {}): TestView => ({ people: [{ id: 'p1', x, y: 0 }], animals: [], ...extra });
+
+/** Simula un cliente: llegadas con los huecos dados (ms) y fotogramas de animación de 16 ms; devuelve las trazas por fotograma. */
+function simulate(buffer: PlaybackBuffer<TestView>, gaps: readonly number[], options: { tickMs?: number; onFrame?: (t: number, x: number | undefined) => void } = {}): { t: number; x: number | undefined; lag: number; rate: number }[] {
+  const trace: { t: number; x: number | undefined; lag: number; rate: number }[] = [];
+  const arrivals: number[] = []; let at = 0;
+  for (const gap of gaps) { at += gap; arrivals.push(at); }
+  let next = 0, sequence = 1000;
+  const end = arrivals.at(-1)! + 100;
+  for (let t = 0; t <= end; t += 16) {
+    while (next < arrivals.length && arrivals[next]! <= t) { sequence++; buffer.push(viewAt(next), sequence, sequence, arrivals[next]!); next++; }
+    buffer.advance(t, options.tickMs ?? 600);
+    const body = buffer.resolve('people', 'p1', undefined);
+    options.onFrame?.(t, body?.x);
+    trace.push({ t, x: body?.x, lag: buffer.lagMs, rate: buffer.rate });
+  }
+  return trace;
+}
+
+test('playback buffer: a 2.4 s Store.save() gap is crossed A→B with monotonic motion and no motionless stall', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  // Entrada con colchón por construir (≈ 60 s a ritmo normal) y luego ciclos 600,600,600,2400,600 (jitter asimétrico).
+  const cycle = [600, 600, 600, 2400, 600];
+  const gaps = [...Array(100).fill(600), ...cycle, ...cycle, ...cycle, ...cycle];
+  const trace = simulate(buffer, gaps);
+  // El primer pico no estaba previsto (el anillo aún no lo había visto): tras él el colchón es adaptativo.
+  const warm = trace.filter(f => f.t > 60_000 + cycle.reduce((a, b) => a + b, 0) && f.x !== undefined);
+  assert.ok(warm.length > 600, 'the playhead is inside the buffer for the whole steady-state window');
+  let longest = 0, still = 0;
+  for (let i = 1; i < warm.length; i++) {
+    assert.ok(warm[i]!.x! >= warm[i - 1]!.x! - 1e-9, `never moves backwards (t=${warm[i]!.t})`);
+    if (warm[i]!.x! === warm[i - 1]!.x!) { still += 16; longest = Math.max(longest, still); } else still = 0;
+  }
+  assert.ok(longest <= 48, `no motionless stall in steady state (${longest} ms still)`);
+  // El tramo de 2,4 s se recorre repartido: pasos por fotograma pequeños, sin saltos.
+  const steps = warm.slice(1).map((f, i) => f.x! - warm[i]!.x!);
+  assert.ok(Math.max(...steps) < .1, `no frame jumps a tile (${Math.max(...steps)})`);
+  assert.ok(buffer.size <= PLAYBACK_LIMITS.maxFrames);
+});
+
+test('playback buffer: rate stays in [0.92, 1.08], ring is bounded, and tab sleep re-syncs cleanly', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  const trace = simulate(buffer, [...Array(60).fill(600), ...Array(20).fill(250), ...Array(60).fill(1200)], { tickMs: 700 });
+  for (const f of trace) assert.ok(f.rate >= PLAYBACK_LIMITS.rateMin - 1e-9 && f.rate <= PLAYBACK_LIMITS.rateMax + 1e-9, `rate ${f.rate}`);
+  assert.ok(buffer.size <= PLAYBACK_LIMITS.maxFrames && buffer.size === PLAYBACK_LIMITS.maxFrames);
+  assert.ok(Math.abs(buffer.targetLagMs - buffer.desiredLagMs(700)) < 1);
+  // La velocidad por debajo del objetivo frena (0,92×); por encima acelera (1,08×).
+  const slowStart = new PlaybackBuffer<TestView>();
+  slowStart.push(viewAt(0), 1, 1, 0); slowStart.push(viewAt(1), 2, 2, 100);
+  slowStart.playTimeMs = 100;
+  for (let t = 0; t < 2000; t += 16) slowStart.advance(t, 700);
+  assert.ok(slowStart.rate < .93, `buffer below target slows down (${slowStart.rate})`);
+  const fast = new PlaybackBuffer<TestView>();
+  for (let i = 0; i < 10; i++) fast.push(viewAt(i), i + 1, i + 1, i * 600);
+  fast.playTimeMs = 0;
+  for (let t = 0; t < 2000; t += 16) fast.advance(t, 600);
+  assert.ok(fast.rate > 1.07, `buffer far above target speeds up (${fast.rate})`);
+  // Pestaña dormida: el reloj no salta por el hueco de dt, y un retraso > objetivo + 8 s se recoloca limpio.
+  const sleepy = new PlaybackBuffer<TestView>();
+  sleepy.push(viewAt(0), 1, 1, 0); sleepy.push(viewAt(1), 2, 2, 600);
+  sleepy.advance(0, 700); sleepy.advance(60_000, 700);
+  assert.ok(sleepy.playTimeMs <= 600 && sleepy.playTimeMs >= 0, 'a 60 s frame gap moves the clock at most 100 ms');
+  sleepy.push(viewAt(2), 3, 3, 70_000);
+  sleepy.advance(70_016, 700);
+  assert.equal(Math.round(sleepy.playTimeMs), Math.round(70_000 - sleepy.targetLagMs), 'jumps to latest − target');
+  assert.ok(sleepy.lagMs <= sleepy.targetLagMs + 1);
+});
+
+test('playback buffer: same-sequence viewport echoes replace the frame without advancing time or adding frames', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  buffer.push(viewAt(0), 10, 10, 0); buffer.push(viewAt(1), 11, 11, 600);
+  buffer.push(viewAt(1, { animals: [{ id: 'a1', x: 3, y: 3 }] }), 11, 11, 640);
+  assert.equal(buffer.size, 2);
+  assert.equal(buffer.latest!.receivedAt, 600, 'echo keeps the original arrival time');
+  assert.equal(buffer.latest!.view.animals.length, 1, 'echo updates the frame view');
+  // Reconexión con la secuencia hacia atrás: se empieza de cero.
+  buffer.push(viewAt(9), 3, 3, 900);
+  assert.equal(buffer.size, 1);
+});
+
+test('playback buffer: interpolates A→B exactly, skips teleports, and blends in from MotionTracker', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  buffer.push({ people: [{ id: 'p1', x: 0, y: 0 }, { id: 'tp', x: 0, y: 0 }], animals: [{ id: 'a1', x: 10, y: 10 }] }, 1, 1, 0);
+  buffer.push({ people: [{ id: 'p1', x: 2, y: 1 }, { id: 'tp', x: 50, y: 0 }, { id: 'new', x: 4, y: 4 }], animals: [{ id: 'a1', x: 10, y: 8 }] }, 2, 2, 1000);
+  buffer.playTimeMs = 250; buffer.advance(0, 600); buffer.advance(1000, 600); // dt acotado a 100 ms
+  buffer.weight = 1; buffer.playTimeMs = 250; (buffer as unknown as { locate(): void }).locate();
+  const person = buffer.resolve('people', 'p1', undefined)!;
+  assert.ok(Math.abs(person.x - .5) < 1e-9 && Math.abs(person.y - .25) < 1e-9, `quarter of the way (${person.x},${person.y})`);
+  assert.equal(person.moving, true);
+  assert.equal(buffer.resolve('people', 'tp', undefined), undefined, 'teleport beyond 6 tiles falls back to MotionTracker');
+  assert.equal(buffer.resolve('people', 'new', undefined), undefined, 'a body missing from frame A falls back');
+  const animal = buffer.resolve('animals', 'a1', undefined)!;
+  assert.ok(Math.abs(animal.y - 9.5) < 1e-9 && animal.left === (bodyLeft('a1')), 'animals interpolate too');
+  // Mezcla con el fallback mientras el peso < 1.
+  buffer.weight = .5;
+  const blended = buffer.resolve('people', 'p1', { x: 2, y: 0, dirX: 0, dirY: 0, speed: 0, moving: false, stride: 7, left: false, seed: 1 })!;
+  assert.ok(Math.abs(blended.x - 1.25) < 1e-9 && Math.abs(blended.y - .125) < 1e-9, `half way between tracker and playback (${blended.x},${blended.y})`);
+});
+function bodyLeft(id: string): boolean { let h = 2166136261; for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619) >>> 0; return ((h & 0xffff) % 2) === 1; }
+
+test('playback buffer: flushToLatest snaps to the newest frame and the controller refills the cushion afterwards', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  const trace = simulate(buffer, Array(80).fill(600));
+  const lagBefore = buffer.lagMs;
+  assert.ok(lagBefore > 1500, `cushion built (${lagBefore})`);
+  buffer.flushToLatest();
+  assert.equal(buffer.lagMs, 0);
+  assert.equal(buffer.weight, 0, 'blend restarts so the tracker position fades into the buffer');
+  assert.equal(buffer.resolve('people', 'p1', undefined), undefined, 'weight 0 → draws from the tracker, no pop');
+  assert.ok(trace.length > 0);
+  // Siguen llegando pasos: sin errores, la velocidad frena a 0,92× y el colchón crece poco a poco.
+  let at = 80 * 600, sequence = 2000, previousX = -1;
+  for (let step = 0; step < 40; step++) {
+    sequence++; buffer.push(viewAt(100 + step), sequence, sequence, at);
+    for (let k = 0; k < 37; k++) { buffer.advance(at + k * 16, 600); const body = buffer.resolve('people', 'p1', { x: 99 + step + k / 37, y: 0, dirX: 0, dirY: 0, speed: 0, moving: false, stride: 0, left: false, seed: 0 }); if (body) { assert.ok(body.x >= previousX - 1e-9, 'monotonic after the flush'); previousX = body.x; } }
+    at += 600;
+  }
+  assert.ok(buffer.lagMs > 0 && buffer.lagMs < lagBefore, `cushion refilling gradually (${buffer.lagMs})`);
+  assert.ok(buffer.rate >= PLAYBACK_LIMITS.rateMin && buffer.rate <= PLAYBACK_LIMITS.rateMax);
+  assert.equal(buffer.weight, 1, 'blend completes');
 });

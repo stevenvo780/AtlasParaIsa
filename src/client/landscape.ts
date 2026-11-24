@@ -14,7 +14,7 @@ import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
 import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
-import { bodySeed, animalPose, daylightAt, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
+import { bodySeed, animalPose, daylightAt, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { ClientTileCache } from './tile-cache.js';
 import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
@@ -49,6 +49,9 @@ const SPRITE_CACHE_LIMIT = 320; // At most 1.875 MiB of 32 × 48 RGBA sprites.
 const MAX_ZOOM = 84;
 /** Radio de acierto al tocar una persona, en tiles. */
 const PERSON_HIT = 0.65;
+/** V18 capa 1.5: cuánto hay que mover (tiles) o acercar (ln del zoom) la cámara a mano para vaciar el colchón de reproducción. */
+const PLAYBACK_PAN_TILES = 3;
+const PLAYBACK_ZOOM_LOG = .15;
 /** Margen (en tiles) de mar visible alrededor de la isla al encuadrar. */
 const FIT_PADDING = 1.4;
 const FOCUS_MS = 380;
@@ -406,6 +409,9 @@ export class Landscape {
   private readonly peopleMotion = new MotionTracker(this.cadence);
   private readonly animalMotion = new MotionTracker(this.cadence);
   private readonly atmosphere = new AtmosphereSmoother();
+  /** V18 capa 1.5: colchón de 3–6 s de fotogramas recibidos; los cuerpos se reproducen A→B dentro de él. */
+  private readonly playback = new PlaybackBuffer<WorldView>();
+  private playbackAnchor: { x: number; y: number; zoom: number } | null = null;
   /** V18: caché espacial del cliente (la posee `game.ts`). Sin ella el paisaje se comporta como antes. */
   private tileCache: ClientTileCache | null = null;
   /** Ventana (en teselas) que el servidor envió; la cuadrícula puede ser mayor si se compuso desde la caché. */
@@ -566,6 +572,8 @@ export class Landscape {
     // Un eco de cámara (misma `sequence`) no es un paso del servidor: no mide cadencia.
     this.cadence.observe(world.sequence, world.tick, now);
     this.interval = this.cadence.tickIntervalMs;
+    // Un eco de cámara (misma `sequence`) sustituye la vista del fotograma sin avanzar el reloj de reproducción.
+    this.playback.push(world, world.sequence, world.tick, now);
 
     // A new camera window at the same tick must not restart body interpolation.
     if (!this.curr || this.curr.tick !== world.tick) {
@@ -617,6 +625,18 @@ export class Landscape {
     if (first) {
       this.fitWorld();
     }
+  }
+
+  /** V18 capa 1.5: colapsa el colchón al estado más reciente (cámara movida u orden directa); luego se vuelve a llenar. */
+  flushPlayback(): void { this.playback.flushToLatest(); }
+
+  /** Un paneo o zoom manual deja el colchón en vivo para ver el terreno y a la gente donde están ya. Seguir a alguien no. */
+  private syncPlaybackCamera(): void {
+    const anchor = this.playbackAnchor, cam = this.cam;
+    if (!anchor || this.followedId) { this.playbackAnchor = { x: cam.x, y: cam.y, zoom: cam.zoom }; return; }
+    if (Math.hypot(cam.x - anchor.x, cam.y - anchor.y) <= PLAYBACK_PAN_TILES && Math.abs(Math.log(cam.zoom / anchor.zoom)) <= PLAYBACK_ZOOM_LOG) return;
+    this.playback.flushToLatest();
+    this.playbackAnchor = { x: cam.x, y: cam.y, zoom: cam.zoom };
   }
 
   /** V18: la caché espacial del cliente (null la desactiva). */
@@ -725,7 +745,7 @@ export class Landscape {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.destination = null; this.tileCache = null; this.peopleMotion.clear(); this.animalMotion.clear();
+    this.destination = null; this.tileCache = null; this.peopleMotion.clear(); this.animalMotion.clear(); this.playback.clear();
     cancelAnimationFrame(this.raf);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
@@ -1344,7 +1364,9 @@ export class Landscape {
     const out: RenderPerson[] = [];
     for (const p of world.people) {
       const m = smooth ? this.peopleMotion.sample(p.id, now) : undefined;
-      out.push({ view: p, x: m ? m.x : p.x, y: m ? m.y : p.y, moving: m ? m.moving : false, seed: m ? m.seed : bodySeed(p.id), stride: m ? m.stride : 0 });
+      const b = smooth ? this.playback.resolve('people', p.id, m) : undefined; // colchón A→B; sin él, el deslizamiento en vivo
+      const shown = b ?? m;
+      out.push({ view: p, x: shown ? shown.x : p.x, y: shown ? shown.y : p.y, moving: shown ? shown.moving : false, seed: shown ? shown.seed : bodySeed(p.id), stride: shown ? shown.stride : 0 });
     }
     return out;
   }
@@ -1353,7 +1375,8 @@ export class Landscape {
     const smooth = !this.reduceMotion;
     return (this.curr?.animals ?? []).map(view => {
       const m = smooth ? this.animalMotion.sample(view.id, now) : undefined;
-      if (m) return { view, x: m.x, y: m.y, moving: m.moving, left: m.left, stride: m.stride };
+      const shown = (smooth ? this.playback.resolve('animals', view.id, m) : undefined) ?? m;
+      if (shown) return { view, x: shown.x, y: shown.y, moving: shown.moving, left: shown.left, stride: shown.stride };
       const before = this.prevAnimals.get(view.id), dx = before ? view.x - before.x : 0;
       const defaultLeft = (hash3(view.id.length, view.id.charCodeAt(0) | 0, view.id.charCodeAt(view.id.length - 1) | 0) & 1) === 1;
       return { view, x: view.x, y: view.y, moving: false, left: dx !== 0 ? dx < 0 : defaultLeft, stride: 0 };
@@ -1363,7 +1386,8 @@ export class Landscape {
   /** Posición visual de un cuerpo seguido por la cámara (sin construir la lista de todos). */
   private bodyPosition(id: string, kind: 'person' | 'animal', now: number): { x: number; y: number } | undefined {
     const m = this.reduceMotion ? undefined : (kind === 'animal' ? this.animalMotion : this.peopleMotion).sample(id, now);
-    if (m) return m;
+    const shown = (m ? this.playback.resolve(kind === 'animal' ? 'animals' : 'people', id, m) : undefined) ?? m;
+    if (shown) return shown;
     return kind === 'animal' ? this.curr?.animals?.find(a => a.id === id) : this.curr?.people.find(p => p.id === id);
   }
 
@@ -1383,6 +1407,7 @@ export class Landscape {
     }
     this.lastFrameAt = now;
     this.tickFocus(now);
+    if (!this.reduceMotion) { this.syncPlaybackCamera(); this.playback.advance(now, this.cadence.tickIntervalMs); }
     if (this.followedId) {
       const body = this.bodyPosition(this.followedId, this.followedKind, now);
       if (body) { this.cam.x = body.x + 0.5; this.cam.y = body.y + 0.5; }
@@ -1430,7 +1455,11 @@ export class Landscape {
       this.actionActive = !world.paused && now - this.currAt < Math.max(1200, this.interval * 2);
       // V18: la fase del día y la lluvia se acercan a lo recibido en ~1,5 s en vez de saltar entre amanecer/día/noche.
       if (this.reduceMotion) this.atmosphere.reset();
-      const light = this.atmosphere.step(daylightAt(world.tick), world.weather === 'rain', now);
+      // Con colchón, la luz y la lluvia siguen al mismo instante A→B que se dibuja (no al más reciente).
+      const shownTime = this.reduceMotion ? null : this.playback.bracket();
+      const shownTick = shownTime ? shownTime.a.tick + (shownTime.b.tick - shownTime.a.tick) * shownTime.alpha : world.tick;
+      const shownWeather = shownTime ? (shownTime.alpha < .5 ? shownTime.a.view : shownTime.b.view).weather : world.weather;
+      const light = this.atmosphere.step(daylightAt(shownTick), shownWeather === 'rain', now);
       this.lighting = { shadowX: light.shadowX, shadowY: light.shadowY, shadowAlpha: light.shadowAlpha * (1 - .6 * light.rain) };
       const people = this.interpolatePeople(now);
       const animals = this.interpolateAnimals(now);

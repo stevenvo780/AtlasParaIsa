@@ -1,11 +1,9 @@
 /**
  * V21 — Uncapped turbo loop, DVR tape API and observer-only mode on the real HTTP/WS server.
  *
- * The tape store in this branch may be the in-memory stub (one store per thread) or the SQLite WAL
- * implementation. Every assertion about the worker-side recording goes through `flushTape()` (an RPC
- * answered by the worker's own TapeWriter), so it holds for both. Frames read back by the gateway's
- * TapeReader (main thread) are required when the tape file exists on disk (SQLite); with the stub the
- * same-thread `createApp` tests below prove the content end to end.
+ * V23: la cinta graba un fotograma cada `CINTA.pasos[0]` ticks (`src/server/cinta/`). Lo que graba el hilo de la cinta
+ * se comprueba con `flushTape()`; lo que leen los hilos lectores de la pasarela, por `/api/tape/*` (alias del
+ * reproductor actual) y con `LectorCinta` sobre el directorio de la cinta.
  */
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +19,10 @@ import { WebSocket } from 'ws';
 import { createWorkerGateway, type WorkerGatewayOptions } from '../src/server/gateway.js';
 import { createApp, MENSAJE_MODO_OBSERVADOR, type AppOptions } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
-import { TapeReader, tapePathForWorld } from '../src/server/tape-store.js';
+import { INDICE_CINTA } from '../src/server/cinta/catalogo.js';
+import { cintaDeMundo, PASO_MAXIMO } from '../src/server/cinta/escritor.js';
+import { LectorCinta } from '../src/server/cinta/lector.js';
+import { CINTA } from '../src/shared/cinta.js';
 import { parseParams } from '../src/world/params.js';
 import type { TapeChunkResponse, TapeMetaResponse } from '../src/shared/tape.js';
 import type { WorldView } from '../src/shared/types.js';
@@ -122,7 +123,7 @@ async function gatewayFixture(t: TestContext, overrides: Partial<WorkerGatewayOp
   app = createWorkerGateway({ worldPath, staticDir, origin, secure: true, password, seed: 42, params, manual: true, tickMs: 40, ...overrides });
   await app.ready;
   await h.listen();
-  return { ...h, app, worldPath, tapeOnDisk: () => existsSync(tapePathForWorld(worldPath)) };
+  return { ...h, app, worldPath, tapeOnDisk: () => existsSync(join(cintaDeMundo(worldPath), INDICE_CINTA)) };
 }
 
 async function appFixture(t: TestContext, overrides: Partial<AppOptions> = {}) {
@@ -136,7 +137,7 @@ async function appFixture(t: TestContext, overrides: Partial<AppOptions> = {}) {
   return { ...h, app, store, worldPath };
 }
 
-test('turbo worker: uncapped loop advances many ticks per second, tape records every tick, mirror is throttled', { timeout: 20_000 }, async t => {
+test('turbo worker: uncapped loop advances many ticks per second, tape records at its cadence, mirror is throttled', { timeout: 20_000 }, async t => {
   const f = await gatewayFixture(t, { turbo: true, tape: true });
   await f.login();
   let mirrors = 0;
@@ -152,7 +153,10 @@ test('turbo worker: uncapped loop advances many ticks per second, tape records e
   const ticks = after.latestTick - before.latestTick;
   t.diagnostic(`turbo: ${ticks} ticks in ${elapsed.toFixed(0)} ms, ${mirrors} mirror posts, ${after.frames} tape frames`);
   assert.ok(ticks > 30, `more than 30 ticks in ~2 s with tickMs=0 (got ${ticks})`);
-  assert.equal(after.frames, after.latestTick + 1, 'one tape frame per simulated tick, none skipped');
+  // La cadencia se ensancha hasta PASO_MAXIMO si el hilo de la cinta se atrasa.
+  assert.equal(after.latestTick % CINTA.pasos[0], 0);
+  assert.ok(after.frames <= after.latestTick / CINTA.pasos[0] + 1 && after.frames >= after.latestTick / PASO_MAXIMO + 1,
+    `a tape frame every ${CINTA.pasos[0]}–${PASO_MAXIMO} ticks (${after.frames} up to ${after.latestTick})`);
   // At most one post per 250 ms (+ the initial post and scheduling slack): far fewer than ticks.
   assert.ok(mirrors <= Math.ceil(elapsed / 250) + 2, `mirror throttled to 250 ms (got ${mirrors} posts in ${elapsed.toFixed(0)} ms)`);
   assert.ok(mirrors >= 2, 'the live mirror keeps moving while turbo runs');
@@ -177,9 +181,8 @@ test('turbo worker: DVR tape endpoints are private, validated, gzip-aware and ne
   assert.equal(meta.enabled, true); assert.equal(meta.turbo, true); assert.equal(meta.observerOnly, false);
   assert.ok(Array.isArray(meta.timeline) && meta.timeline.length <= 240);
   const onDisk = f.tapeOnDisk();
-  if (onDisk) {
-    assert.ok(meta.totalFrames > 0 && meta.maxTick >= meta.minTick, 'the gateway reads the worker-written tape');
-  } else t.diagnostic('tape store is the in-memory stub: the gateway thread sees its own (empty) tape; content is covered by the createApp tests.');
+  assert.ok(onDisk);
+  assert.ok(meta.totalFrames > 0 && meta.maxTick >= meta.minTick, 'the gateway reads the worker-written tape');
   const plain = await f.http(`/api/tape/chunk?fromTick=${meta.minTick}&count=20`);
   assert.equal(plain.status, 200, plain.text); assert.equal(plain.headers['content-encoding'], undefined);
   const chunk = plain.json() as TapeChunkResponse;
@@ -188,12 +191,10 @@ test('turbo worker: DVR tape endpoints are private, validated, gzip-aware and ne
   assert.equal(gz.status, 200, gz.text);
   assert.equal(gz.headers['content-encoding'], 'gzip'); assert.equal(gz.headers.vary, 'Accept-Encoding');
   const clipped = gz.json() as TapeChunkResponse;
-  if (onDisk) {
-    assert.ok(chunk.frames.length > 0 && clipped.frames.length > 0);
-    for (const frame of clipped.frames) {
-      assert.equal(frame.originX, 12); assert.equal(frame.originY, 8);
-      assert.ok(frame.tiles.every(tile => tile.x >= 12 && tile.x < 32 && tile.y >= 8 && tile.y < 28));
-    }
+  assert.ok(chunk.frames.length > 0 && clipped.frames.length > 0);
+  for (const frame of clipped.frames) {
+    assert.equal(frame.originX, 12); assert.equal(frame.originY, 8);
+    assert.ok(frame.tiles.length === 400 && frame.tiles.every(tile => tile.x >= 12 && tile.x < 32 && tile.y >= 8 && tile.y < 28));
   }
   for (const bad of ['count=0', 'count=241', 'fromTick=-1', 'fromTick=1.5', 'count=abc', 'x=1&y=2', 'x=0&y=0&width=500&height=10']) {
     assert.equal((await f.http(`/api/tape/chunk?${bad}`)).status, 400, bad);
@@ -254,13 +255,11 @@ test('turbo worker: graceful shutdown flushes the tape and joins the worker', { 
   let savedTick: number;
   try { savedTick = saved.load()!.world.tick; } finally { saved.close(); }
   assert.ok(savedTick >= recorded.latestTick, 'the world was saved at or after the last flushed frame');
-  if (f.tapeOnDisk()) {
-    const reader = new TapeReader({ path: tapePathForWorld(f.worldPath), turbo: true });
-    try {
-      const meta = reader.readMeta(10);
-      assert.equal(meta.maxTick, savedTick, 'every buffered frame up to the final tick reached disk on close');
-    } finally { reader.close(); }
-  }
+  assert.ok(f.tapeOnDisk());
+  const reader = new LectorCinta(cintaDeMundo(f.worldPath));
+  try {
+    assert.equal(reader.meta().niveles[0]!.t1, savedTick, 'every buffered frame up to the final tick reached disk on close');
+  } finally { reader.close(); }
 });
 
 test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, simHz and no leaked immediates', { timeout: 20_000 }, async t => {
@@ -282,19 +281,19 @@ test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, 
   const meta = (await f.http('/api/tape/meta')).json() as TapeMetaResponse;
   assert.equal(meta.enabled, true); assert.equal(meta.turbo, true);
   assert.equal(meta.minTick, tick0, 'the tape starts at the initial frame');
-  // TapeWriter commits in batches of 25 frames (or every 250 ms), so at most one partial batch may still be buffered before close().
-  assert.ok(meta.maxTick >= tick0 + Math.max(0, ticks - 25) && meta.totalFrames >= Math.max(1, ticks - 25),
+  // El escritor vacía cada segundo: lo grabado en el último segundo puede no verse todavía.
+  assert.ok(meta.maxTick > tick0 && meta.totalFrames === (meta.maxTick - tick0) / CINTA.pasos[0] + 1,
     JSON.stringify({ ticks, ...meta, timeline: meta.timeline.length }));
   assert.ok(meta.timeline.length > 0 && meta.timeline.length <= 240);
   const available = Math.min(30, meta.totalFrames);
-  assert.ok(available >= 20, `at least 20 flushed frames readable during turbo (got ${available})`);
+  assert.ok(available >= 3, `flushed frames readable during turbo (got ${available})`);
   const res = await f.http(`/api/tape/chunk?fromTick=${tick0}&count=${available}&x=10&y=6&width=24&height=16`, undefined, { 'Accept-Encoding': 'gzip' });
   assert.equal(res.status, 200, res.text); assert.equal(res.headers['content-encoding'], 'gzip');
   const chunk = res.json() as TapeChunkResponse;
   assert.equal(chunk.frames.length, available);
-  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, tick0 + available - 1);
+  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, tick0 + (available - 1) * CINTA.pasos[0]);
   assert.equal(chunk.hasMore, meta.totalFrames > available);
-  for (let i = 1; i < chunk.frames.length; i++) assert.equal(chunk.frames[i]!.tick, chunk.frames[i - 1]!.tick + 1, 'tick-by-tick history');
+  for (let i = 1; i < chunk.frames.length; i++) assert.equal(chunk.frames[i]!.tick, chunk.frames[i - 1]!.tick + CINTA.pasos[0], 'history at the tape cadence');
   const first = chunk.frames[0]!;
   assert.equal(first.originX, 10); assert.equal(first.width, 24);
   assert.ok(first.tiles.length > 0 && first.tiles.every(tile => tile.x >= 10 && tile.x < 34 && tile.y >= 6 && tile.y < 22));
@@ -307,8 +306,8 @@ test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, 
   await wait(50);
   assert.equal(f.app.world.tick, closedTick, 'no step after close');
   // The writer flushed on close: a fresh reader sees the final tick.
-  const reader = new TapeReader({ path: tapePathForWorld(f.worldPath) });
-  try { assert.equal(reader.readMeta(10).maxTick, closedTick); } finally { reader.close(); }
+  const reader = new LectorCinta(cintaDeMundo(f.worldPath));
+  try { assert.equal(reader.meta().niveles[0]!.t1, closedTick); } finally { reader.close(); }
 });
 
 test('createApp observer-only (classic speed): orders rejected in requestGesture too, gestures step without cloning', { timeout: 15_000 }, async t => {
@@ -347,10 +346,5 @@ test('createApp turbo with tape explicitly off: uncapped loop, no tape writer, n
   assert.ok(f.app.world.tick - tick0 > 10, 'still uncapped');
   await f.app.close();
   // Nothing was ever recorded under this world's tape path (the sim worker relies on this to own the only writer).
-  let frames = 0;
-  try {
-    const reader = new TapeReader({ path: tapePathForWorld(f.worldPath) });
-    try { frames = reader.readMeta(10).totalFrames; } finally { reader.close(); }
-  } catch { /* a file-backed store has no tape file to open: nothing was recorded either */ }
-  assert.equal(frames, 0);
+  assert.equal(existsSync(cintaDeMundo(f.worldPath)), false);
 });

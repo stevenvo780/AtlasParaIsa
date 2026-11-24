@@ -32,15 +32,14 @@ function enteroPositivo(name: string): number | undefined {
   return value;
 }
 // V21: `CARTA_TURBO=1` corre sin tope (`tickMs = 0`) y graba la cinta; `CARTA_TAPE=1` graba la cinta a
-// ritmo normal; `CARTA_OBSERVER_ONLY=1` quita las órdenes directas a los habitantes.
-const tapeMaxFrames = enteroPositivo('CARTA_TAPE_MAX_FRAMES');
-const tapeKeyframeInterval = enteroPositivo('CARTA_TAPE_KEYFRAME_INTERVAL');
+// ritmo normal; `CARTA_OBSERVER_ONLY=1` quita las órdenes directas a los habitantes. `CARTA_TAPE_TOPE_BYTES` fija
+// cuánto disco puede ocupar la cinta (por defecto `CINTA.topeBytes`).
+const tapeTopeBytes = enteroPositivo('CARTA_TAPE_TOPE_BYTES');
 const v21 = {
   ...(process.env.CARTA_TURBO === '1' ? { turbo: true, tape: true, tickMs: 0 } : {}),
   ...(process.env.CARTA_TAPE === '1' ? { tape: true } : {}),
   ...(process.env.CARTA_OBSERVER_ONLY === '1' ? { observerOnly: true } : {}),
-  ...(tapeMaxFrames === undefined ? {} : { tapeMaxFrames }),
-  ...(tapeKeyframeInterval === undefined ? {} : { tapeKeyframeInterval }),
+  ...(tapeTopeBytes === undefined ? {} : { tapeTopeBytes }),
 };
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
 function commitEnEjecucion(): string | undefined {

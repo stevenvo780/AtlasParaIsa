@@ -179,7 +179,7 @@ function http(server: import('node:http').Server) {
   });
 }
 
-test('HTTP full/delta validation in the legacy createApp reader', { timeout: 30_000 }, async t => {
+test('HTTP full/delta validation of the /api/tape alias in createApp', { timeout: 30_000 }, async t => {
   const dir = directory(t);
   const store = new Store(join(dir, 'app.sqlite'));
   const app = createApp({ store, params, seed: 42, manual: true, tape: true, origin: 'https://carta.test', password: 'v22-test-password' });

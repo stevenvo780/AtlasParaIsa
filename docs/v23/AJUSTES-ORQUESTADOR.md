@@ -30,3 +30,7 @@ En 8 semillas × 60 días, los mortales se extinguen en al menos la mitad de las
 
 ## 5. Código limpio
 Cada carril borra lo que sustituye. Cada entrega pasa una revisión de un modelo distinto y una pasada de simplificación antes de integrarse. Al cerrar cada ola se retiran worktrees, ramas fusionadas y temporales.
+
+## 6. Modelos disponibles desde la tarde del 24-nov
+- **GPT-6.2 Sol** sustituye a GPT-6.1 Sol en todos los carriles de Codex (el lanzador ya lo usa por defecto; probado en las dos cuentas con esfuerzo hasta `ultra`). También existe GPT-6.1 Terra, que sustituye a Terra 5.6 en los carriles medios.
+- **Gemini 4 Neon (XHigh)** vuelve a estar disponible por `agy -p --model gemini-4-neon-xhigh`. Steven lo considera el más capaz después de Fable. Su cuota semanal está al 27 %, así que se reserva para lo extremo: 0H fundadores, una pasada adversarial sobre los contratos congelados, y en las olas siguientes uno de cada par de carriles extremos (M2b o Q; M4a o W; B o T1), con Opus en el otro y revisión cruzada entre ambos.

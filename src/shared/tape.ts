@@ -3,6 +3,12 @@
  * 60 fps Cinema Player, and Observer-Only Mode (server + client).
  */
 import type { Tile, Viewport, WorldView } from './types.js';
+import type { TapeChunkEncoding, TapeClientDelta } from './tape-delta.js';
+export type {
+  TapeChunkEncoding, TapeClientDelta, TapeEntityPatch, TapeIdentified,
+  TapeObjectPatch, TapePartialUpsert, TapePatchEntry, TapeTechPatch,
+} from './tape-delta.js';
+export { applyClientTapeDelta, applyTapeEntityPatch, applyTapeObjectPatch, indexTiles } from './tape-delta.js';
 
 /** Playback speeds supported by the 60 fps DVR Cinema Player (1x = 6 ticks/sec calm observation). */
 export const TAPE_SPEEDS = [0.5, 1, 2, 5, 10, 25] as const;
@@ -47,7 +53,7 @@ export interface TapeMetaResponse {
   timeline: TapeTimelinePoint[];
 }
 
-/** Response of GET /api/tape/chunk?fromTick=T&count=N&x=..&y=..&width=..&height=.. */
+/** Response of GET /api/tape/chunk?fromTick=T&count=N&x=..&y=..&width=..&height=..[&encoding=full|delta] */
 export interface TapeChunkResponse {
   fromTick: number;
   toTick: number;
@@ -55,7 +61,11 @@ export interface TapeChunkResponse {
   maxTick: number;
   simHz: number;
   hasMore: boolean;
+  /** V22: `'full'` (default) populates `frames`; `'delta'` populates `baseFrame` + `deltas` (50x smaller). */
+  encoding?: TapeChunkEncoding;
   frames: WorldView[];
+  baseFrame?: WorldView;
+  deltas?: TapeClientDelta[];
 }
 
 /** Optional tile provider used by TapeReader to fill static/unmodified background tiles in a viewport. */
@@ -107,12 +117,14 @@ export interface ITapeReader {
   /**
    * Reconstruct up to `count` sequential frames starting at the first recorded tick >= `fromTick`,
    * clipped cleanly to `viewport` (using `backgroundTile` for static unmodified tiles).
+   * Pass `encoding = 'delta'` (V22) to return 1 full `baseFrame` + compact viewport-clipped `deltas[]`.
    */
   readChunk(
     fromTick: number,
     count: number,
     viewport?: Viewport,
     backgroundTile?: TapeBackgroundTileFn,
+    encoding?: TapeChunkEncoding,
   ): TapeChunkResponse;
   /** Close the read-only SQLite handle cleanly. */
   close(): void;

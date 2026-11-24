@@ -32,10 +32,11 @@ export function saludDelEspejo(medicion: MedicionSalud, avance: OperacionWorker,
   const { operacion, medidaEn } = avance;
   const segundos = medicion.salud.segundosDesdeUltimoPaso + Math.max(0, ahora - medicion.saludMedidaEn) / 1000;
   const desdeOperacion = Math.max(0, ahora - medidaEn) / 1000;
+  // Un guardado rutinario es parte del ritmo normal: solo degrada si deja el paso sin completar más de `PASO_PARADO_S`.
   // Tras una operación hay margen para completar el siguiente paso sin alterar la edad del tick.
   const silencio = operacion ? desdeOperacion : Math.min(segundos, desdeOperacion);
   const estado = detenido || silencio > PASO_PARADO_S ? 'parado'
-    : operacion || segundos > PASO_PARADO_S || medicion.salud.estado === 'degradado' ? 'degradado' : 'ok';
+    : operacion && operacion.tipo !== 'guardando' || segundos > PASO_PARADO_S || medicion.salud.estado === 'degradado' ? 'degradado' : 'ok';
   return { ...medicion.salud, segundosDesdeUltimoPaso: segundos, estado, operacion };
 }
 

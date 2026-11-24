@@ -194,6 +194,20 @@ test('la salud del worker vence por falta de progreso, aunque una operación sig
   assert.equal(saludDelEspejo(medicion, fin, false, 780_001).estado, 'parado');
 });
 
+test('un guardado rutinario no degrada la salud, pero uno que deja el paso parado más de un minuto sí', () => {
+  const salud: Salud = { estado: 'ok', tick: 12, ticksPorSegundo: 10, segundosDesdeUltimoPaso: 0.1, ultimoGuardado: 500, gpu: [],
+    recargas: 0, operacion: null,
+    diagnostico: { duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0 } };
+  const medicion = { salud, saludMedidaEn: 1000 };
+  const operacion: OperacionSalud = { tipo: 'guardando', inicio: 1_000, progresoEn: 1_000 };
+  const guardando = saludDelEspejo(medicion, { type: 'operacion', operacion, medidaEn: 1_500 }, false, 3_000);
+  assert.equal(guardando.estado, 'ok');
+  assert.deepEqual(guardando.operacion, operacion, 'la operación sigue visible aunque no degrade');
+  const largo = saludDelEspejo(medicion, { type: 'operacion', operacion, medidaEn: 61_000 }, false, 62_000);
+  assert.equal(largo.estado, 'degradado');
+  assert.equal(saludDelEspejo(medicion, { type: 'operacion', operacion: { ...operacion, tipo: 'arrancando' }, medidaEn: 1_500 }, false, 3_000).estado, 'degradado');
+});
+
 test('turbo gateway: every tick on the tape in order, summaries on every frame, live mirror at its cadence', { timeout: 120_000 }, async t => {
   const dir = directory(t);
   const worldPath = join(dir, 'world.sqlite');

@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, daylightAt, glideEase, parseRgb, MOTION_LIMITS, CADENCE_LIMITS, PLAYBACK_LIMITS } from '../src/client/visual-state.js';
 import { ClientTileCache } from '../src/client/tile-cache.js';
 import type { Tile } from '../src/shared/types.js';
+import type { StructureView } from '../src/shared/life.js';
+import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from '../src/client/crop-art.js';
+import { footprintBox, footprintLabel, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, siteFractions, stockLevel, structureExtent, structureTier, type ExtendedStructure } from '../src/client/structure-art.js';
+import { structureCard } from '../src/client/inspector-view.js';
 
 /** Alimenta el estimador con `count` pasos del servidor separados `gapMs` y devuelve la serie de medias. */
 function feed(estimator: CadenceEstimator, state: { sequence: number; tick: number; at: number }, count: number, gapMs: number): number[] {
@@ -286,42 +290,72 @@ test('composeViewport merges live and cached tiles instantly with accurate cover
 interface TestView { people: { id: string; x: number; y: number }[]; animals: { id: string; x: number; y: number }[]; }
 const viewAt = (x: number, extra: Partial<TestView> = {}): TestView => ({ people: [{ id: 'p1', x, y: 0 }], animals: [], ...extra });
 
-/** Simula un cliente: llegadas con los huecos dados (ms) y fotogramas de animación de 16 ms; devuelve las trazas por fotograma. */
-function simulate(buffer: PlaybackBuffer<TestView>, gaps: readonly number[], options: { tickMs?: number; onFrame?: (t: number, x: number | undefined) => void } = {}): { t: number; x: number | undefined; lag: number; rate: number }[] {
-  const trace: { t: number; x: number | undefined; lag: number; rate: number }[] = [];
+interface Frame { t: number; x: number | undefined; lag: number; rate: number }
+/**
+ * Simula un cliente completo: llegadas con los huecos dados (ms), fotogramas de animación de 16 ms, el colchón liberando
+ * fotogramas y `MotionTracker` alimentado con ellos (lo mismo que hace `Landscape.frame`). `xOf(n)` da la casilla del
+ * servidor en la llegada n.
+ */
+function simulate(buffer: PlaybackBuffer<TestView>, gaps: readonly number[], options: { tickMs?: number; xOf?: (n: number) => number } = {}): Frame[] {
+  const tickMs = options.tickMs ?? 600, xOf = options.xOf ?? (n => n);
+  const motion = new MotionTracker(fixedCadence(tickMs));
+  const trace: Frame[] = [];
   const arrivals: number[] = []; let at = 0;
   for (const gap of gaps) { at += gap; arrivals.push(at); }
   let next = 0, sequence = 1000;
   const end = arrivals.at(-1)! + 100;
   for (let t = 0; t <= end; t += 16) {
-    while (next < arrivals.length && arrivals[next]! <= t) { sequence++; buffer.push(viewAt(next), sequence, sequence, arrivals[next]!); next++; }
-    buffer.advance(t, options.tickMs ?? 600);
-    const body = buffer.resolve('people', 'p1', undefined);
-    options.onFrame?.(t, body?.x);
-    trace.push({ t, x: body?.x, lag: buffer.lagMs, rate: buffer.rate });
+    while (next < arrivals.length && arrivals[next]! <= t) { sequence++; buffer.push(viewAt(xOf(next)), sequence, sequence, arrivals[next]!); next++; }
+    buffer.advance(t, tickMs);
+    for (const frame of buffer.takeReleased()) motion.ingest(frame.view.people, buffer.visualMs);
+    trace.push({ t, x: motion.sample('p1', buffer.visualMs)?.x, lag: buffer.lagMs, rate: buffer.rate });
   }
   return trace;
 }
 
-test('playback buffer: a 2.4 s Store.save() gap is crossed A→B with monotonic motion and no motionless stall', () => {
+/** Quien se mueve una casilla cada 6 pasos (cada 3,6 s con pasos de 600 ms). */
+const everySixth = (n: number): number => Math.floor(n / 6);
+
+test('playback buffer → MotionTracker: a 1-tile move every 6 ticks glides over ≈ 5,2 ticks, not a 0,6 s dash and a 3 s freeze, across 2.4 s save spikes', () => {
   const buffer = new PlaybackBuffer<TestView>();
-  // Entrada con colchón por construir (≈ 60 s a ritmo normal) y luego ciclos 600,600,600,2400,600 (jitter asimétrico).
-  const cycle = [600, 600, 600, 2400, 600];
+  // El primer pico nadie lo espera (se mide después); los siguientes sí. 60 s de entrada a ritmo normal (el colchón se va llenando) y luego un guardado de 2,4 s cada 100 pasos (el ±8 % repone ≈ 1,9 s por cada 24 s de calma).
+  const cycle = [...Array(99).fill(600), 2400];
   const gaps = [...Array(100).fill(600), ...cycle, ...cycle, ...cycle, ...cycle];
-  const trace = simulate(buffer, gaps);
-  // El primer pico no estaba previsto (el anillo aún no lo había visto): tras él el colchón es adaptativo.
-  const warm = trace.filter(f => f.t > 60_000 + cycle.reduce((a, b) => a + b, 0) && f.x !== undefined);
-  assert.ok(warm.length > 600, 'the playhead is inside the buffer for the whole steady-state window');
+  const trace = simulate(buffer, gaps, { xOf: everySixth });
+  const warm = trace.filter(f => f.t > 70_000 + cycle.reduce((a, b) => a + b, 0) && f.x !== undefined);
+  assert.ok(warm.length > 8000, 'the tracker has a track for the whole steady-state window');
+  const steps = warm.slice(1).map((f, i) => f.x! - warm[i]!.x!);
+  for (const step of steps) assert.ok(step >= -1e-9, 'never moves backwards');
+  assert.ok(Math.max(...steps) < .012, `no dash: the biggest per-frame step is tiny (${Math.max(...steps)}); a 0,6 s dash would be ≈ .027`);
+  let longest = 0, still = 0, moving = 0;
+  for (const step of steps) { if (step < 1e-6) { still += 16; longest = Math.max(longest, still); } else { still = 0; moving++; } }
+  assert.ok(longest <= 1300, `no 3 s freeze between tiles (${longest} ms still)`);
+  assert.ok(moving * 16 / (steps.length * 16) > .6, `it walks most of the time (${(moving / steps.length).toFixed(2)})`);
+  assert.ok(buffer.size <= PLAYBACK_LIMITS.maxFrames);
+
+  // Referencia: la interpolación A→B entre fotogramas contiguos (lo que había) sí hace «carrera + parada».
+  const naive: number[] = [];
+  const xs = [...Array(300).keys()].map(everySixth);
+  for (let t = 0; t < 299 * 600; t += 16) { const k = Math.floor(t / 600), a = t / 600 - k; naive.push(xs[k]! + (xs[k + 1]! - xs[k]!) * a); }
+  let naiveStill = 0, naiveLongest = 0;
+  for (let i = 1; i < naive.length; i++) { if (naive[i]! === naive[i - 1]!) { naiveStill += 16; naiveLongest = Math.max(naiveLongest, naiveStill); } else naiveStill = 0; }
+  assert.ok(naiveLongest >= 2900, `the old A→B scheme froze for ${naiveLongest} ms`);
+});
+
+test('playback buffer: a body that moves every server step glides smoothly through a 2.4 s spike with no stall in steady state', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  const cycle = [...Array(99).fill(600), 2400];
+  const trace = simulate(buffer, [...Array(100).fill(600), ...cycle, ...cycle, ...cycle, ...cycle]);
+  const warm = trace.filter(f => f.t > 70_000 + cycle.reduce((a, b) => a + b, 0) && f.x !== undefined);
+  assert.ok(warm.length > 8000);
   let longest = 0, still = 0;
   for (let i = 1; i < warm.length; i++) {
     assert.ok(warm[i]!.x! >= warm[i - 1]!.x! - 1e-9, `never moves backwards (t=${warm[i]!.t})`);
     if (warm[i]!.x! === warm[i - 1]!.x!) { still += 16; longest = Math.max(longest, still); } else still = 0;
   }
-  assert.ok(longest <= 48, `no motionless stall in steady state (${longest} ms still)`);
-  // El tramo de 2,4 s se recorre repartido: pasos por fotograma pequeños, sin saltos.
+  assert.ok(longest <= 112, `no stall beyond the natural ≈ 80 ms rest between 1-tile steps (${longest} ms still)`);
   const steps = warm.slice(1).map((f, i) => f.x! - warm[i]!.x!);
   assert.ok(Math.max(...steps) < .1, `no frame jumps a tile (${Math.max(...steps)})`);
-  assert.ok(buffer.size <= PLAYBACK_LIMITS.maxFrames);
 });
 
 test('playback buffer: rate stays in [0.92, 1.08], ring is bounded, and tab sleep re-syncs cleanly', () => {
@@ -333,23 +367,25 @@ test('playback buffer: rate stays in [0.92, 1.08], ring is bounded, and tab slee
   // La velocidad por debajo del objetivo frena (0,92×); por encima acelera (1,08×).
   const slowStart = new PlaybackBuffer<TestView>();
   slowStart.push(viewAt(0), 1, 1, 0); slowStart.push(viewAt(1), 2, 2, 100);
-  slowStart.playTimeMs = 100;
+  slowStart.playTick = 2;
   for (let t = 0; t < 2000; t += 16) slowStart.advance(t, 700);
   assert.ok(slowStart.rate < .93, `buffer below target slows down (${slowStart.rate})`);
   const fast = new PlaybackBuffer<TestView>();
   for (let i = 0; i < 10; i++) fast.push(viewAt(i), i + 1, i + 1, i * 600);
-  fast.playTimeMs = 0;
+  fast.playTick = 1;
   for (let t = 0; t < 2000; t += 16) fast.advance(t, 600);
   assert.ok(fast.rate > 1.07, `buffer far above target speeds up (${fast.rate})`);
   // Pestaña dormida: el reloj no salta por el hueco de dt, y un retraso > objetivo + 8 s se recoloca limpio.
   const sleepy = new PlaybackBuffer<TestView>();
   sleepy.push(viewAt(0), 1, 1, 0); sleepy.push(viewAt(1), 2, 2, 600);
   sleepy.advance(0, 700); sleepy.advance(60_000, 700);
-  assert.ok(sleepy.playTimeMs <= 600 && sleepy.playTimeMs >= 0, 'a 60 s frame gap moves the clock at most 100 ms');
-  sleepy.push(viewAt(2), 3, 3, 70_000);
+  assert.ok(sleepy.playTick <= 2 && sleepy.playTick >= 1, 'a 60 s frame gap moves the clock at most 100 ms');
+  assert.ok(sleepy.visualMs <= 108, 'and the sampling clock too');
+  sleepy.push(viewAt(2), 3, 100, 70_000); // tras dormir, el servidor va 97 pasos más allá
   sleepy.advance(70_016, 700);
-  assert.equal(Math.round(sleepy.playTimeMs), Math.round(70_000 - sleepy.targetLagMs), 'jumps to latest − target');
-  assert.ok(sleepy.lagMs <= sleepy.targetLagMs + 1);
+  assert.ok(Math.abs(sleepy.playTick - (100 - sleepy.targetLagMs / 700)) < .05, 'jumps to latest − target');
+  assert.ok(Math.abs(sleepy.lagMs - sleepy.targetLagMs) < 40);
+  assert.equal(sleepy.takeReleased().length, 1, 'a re-sync releases only the newest frame');
 });
 
 test('playback buffer: same-sequence viewport echoes replace the frame without advancing time or adding frames', () => {
@@ -364,44 +400,207 @@ test('playback buffer: same-sequence viewport echoes replace the frame without a
   assert.equal(buffer.size, 1);
 });
 
-test('playback buffer: interpolates A→B exactly, skips teleports, and blends in from MotionTracker', () => {
+test('playback buffer: frames are released once, in order, only when the delayed playhead crosses them', () => {
   const buffer = new PlaybackBuffer<TestView>();
-  buffer.push({ people: [{ id: 'p1', x: 0, y: 0 }, { id: 'tp', x: 0, y: 0 }], animals: [{ id: 'a1', x: 10, y: 10 }] }, 1, 1, 0);
-  buffer.push({ people: [{ id: 'p1', x: 2, y: 1 }, { id: 'tp', x: 50, y: 0 }, { id: 'new', x: 4, y: 4 }], animals: [{ id: 'a1', x: 10, y: 8 }] }, 2, 2, 1000);
-  buffer.playTimeMs = 250; buffer.advance(0, 600); buffer.advance(1000, 600); // dt acotado a 100 ms
-  buffer.weight = 1; buffer.playTimeMs = 250; (buffer as unknown as { locate(): void }).locate();
-  const person = buffer.resolve('people', 'p1', undefined)!;
-  assert.ok(Math.abs(person.x - .5) < 1e-9 && Math.abs(person.y - .25) < 1e-9, `quarter of the way (${person.x},${person.y})`);
-  assert.equal(person.moving, true);
-  assert.equal(buffer.resolve('people', 'tp', undefined), undefined, 'teleport beyond 6 tiles falls back to MotionTracker');
-  assert.equal(buffer.resolve('people', 'new', undefined), undefined, 'a body missing from frame A falls back');
-  const animal = buffer.resolve('animals', 'a1', undefined)!;
-  assert.ok(Math.abs(animal.y - 9.5) < 1e-9 && animal.left === (bodyLeft('a1')), 'animals interpolate too');
-  // Mezcla con el fallback mientras el peso < 1.
-  buffer.weight = .5;
-  const blended = buffer.resolve('people', 'p1', { x: 2, y: 0, dirX: 0, dirY: 0, speed: 0, moving: false, stride: 7, left: false, seed: 1 })!;
-  assert.ok(Math.abs(blended.x - 1.25) < 1e-9 && Math.abs(blended.y - .125) < 1e-9, `half way between tracker and playback (${blended.x},${blended.y})`);
+  for (let i = 0; i < 6; i++) buffer.push(viewAt(i), i + 1, i + 1, i * 600);
+  buffer.advance(0, 600);
+  assert.deepEqual(buffer.takeReleased().map(f => f.sequence), [1], 'the oldest frame is released first');
+  assert.deepEqual(buffer.takeReleased(), [], 'nothing is released twice');
+  buffer.playTick = 3; buffer.advance(16, 600); // cruza los ticks 2 y 3
+  assert.deepEqual(buffer.takeReleased().map(f => f.sequence), [2, 3]);
+  // Un eco de cámara de un fotograma aún sin liberar cambia la vista que se liberará.
+  const echo = viewAt(99);
+  buffer.push(echo, 5, 5, 700);
+  buffer.playTick = 5; buffer.advance(32, 600);
+  const next = buffer.takeReleased();
+  assert.deepEqual(next.map(f => f.sequence), [4, 5]);
+  assert.equal(next[1]!.view, echo);
 });
-function bodyLeft(id: string): boolean { let h = 2166136261; for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619) >>> 0; return ((h & 0xffff) % 2) === 1; }
 
-test('playback buffer: flushToLatest snaps to the newest frame and the controller refills the cushion afterwards', () => {
+test('playback buffer: flushToLatest releases only the newest frame, the sampling clock never jumps, and the cushion refills afterwards', () => {
   const buffer = new PlaybackBuffer<TestView>();
   const trace = simulate(buffer, Array(80).fill(600));
   const lagBefore = buffer.lagMs;
   assert.ok(lagBefore > 1500, `cushion built (${lagBefore})`);
+  assert.ok(trace.length > 0);
+  const visualBefore = buffer.visualMs;
   buffer.flushToLatest();
   assert.equal(buffer.lagMs, 0);
-  assert.equal(buffer.weight, 0, 'blend restarts so the tracker position fades into the buffer');
-  assert.equal(buffer.resolve('people', 'p1', undefined), undefined, 'weight 0 → draws from the tracker, no pop');
-  assert.ok(trace.length > 0);
-  // Siguen llegando pasos: sin errores, la velocidad frena a 0,92× y el colchón crece poco a poco.
-  let at = 80 * 600, sequence = 2000, previousX = -1;
+  assert.equal(buffer.visualMs, visualBefore, 'flushing moves the playhead, not the sampling clock');
+  const released = buffer.takeReleased();
+  assert.equal(released.length, 1, 'MotionTracker re-targets once, from where the body is seen');
+  assert.equal(released[0], buffer.latest);
+  // Siguen llegando pasos: sin errores, la velocidad frena a 0,92× y el colchón crece poco a poco, con el cuerpo sin retroceder.
+  const motion = new MotionTracker(fixedCadence(600));
+  motion.ingest(released[0]!.view.people, buffer.visualMs);
+  let at = 80 * 600, sequence = 2000, previousX = motion.sample('p1', buffer.visualMs)!.x;
   for (let step = 0; step < 40; step++) {
     sequence++; buffer.push(viewAt(100 + step), sequence, sequence, at);
-    for (let k = 0; k < 37; k++) { buffer.advance(at + k * 16, 600); const body = buffer.resolve('people', 'p1', { x: 99 + step + k / 37, y: 0, dirX: 0, dirY: 0, speed: 0, moving: false, stride: 0, left: false, seed: 0 }); if (body) { assert.ok(body.x >= previousX - 1e-9, 'monotonic after the flush'); previousX = body.x; } }
+    for (let k = 0; k < 37; k++) {
+      buffer.advance(at + k * 16, 600);
+      for (const frame of buffer.takeReleased()) motion.ingest(frame.view.people, buffer.visualMs);
+      const x = motion.sample('p1', buffer.visualMs)!.x;
+      assert.ok(x >= previousX - 1e-9, 'monotonic after the flush'); previousX = x;
+    }
     at += 600;
   }
   assert.ok(buffer.lagMs > 0 && buffer.lagMs < lagBefore, `cushion refilling gradually (${buffer.lagMs})`);
   assert.ok(buffer.rate >= PLAYBACK_LIMITS.rateMin && buffer.rate <= PLAYBACK_LIMITS.rateMax);
-  assert.equal(buffer.weight, 1, 'blend completes');
+});
+
+test('daylight follows the delayed stream: the shown tick is the A→B tick at the playhead, and AtmosphereSmoother eases toward it', () => {
+  const buffer = new PlaybackBuffer<TestView>();
+  assert.equal(buffer.shownTick(777), 777, 'no cushion yet → the latest tick');
+  buffer.push(viewAt(0), 1, 1000, 0); buffer.push(viewAt(1), 2, 1010, 1000); buffer.push(viewAt(2), 3, 1020, 2000);
+  buffer.playTick = 1015; (buffer as unknown as { locate(): void }).locate();
+  assert.equal(buffer.shownTick(1020), 1015, 'halfway between the bracketing ticks, behind the newest');
+  const smoother = new AtmosphereSmoother();
+  const lagged = smoother.step(daylightAt(buffer.shownTick(1020)), false, 0);
+  const newest = daylightAt(1020);
+  assert.equal(lagged.color, daylightAt(1015).color);
+  const later = smoother.step(daylightAt(buffer.shownTick(1020) + 1), false, 16);
+  assert.ok(Math.abs(later.alpha - lagged.alpha) < .01, 'no snap toward the newest tick');
+  assert.ok(newest.alpha !== undefined);
+});
+
+/* ------------------------------------------------------------------ */
+/* V19 — ciclo de cultivo, labores y arquitectura modular              */
+/* ------------------------------------------------------------------ */
+
+/** Contexto 2D mínimo que registra los rectángulos pintados. */
+function recorder(): { g: CanvasRenderingContext2D; rects: { x: number; y: number; w: number; h: number; color: string }[] } {
+  const rects: { x: number; y: number; w: number; h: number; color: string }[] = [];
+  const state = { fillStyle: '' };
+  const g = { get fillStyle() { return state.fillStyle; }, set fillStyle(v: string) { state.fillStyle = v; }, fillRect(x: number, y: number, w: number, h: number) { rects.push({ x, y, w, h, color: state.fillStyle }); } };
+  return { g: g as unknown as CanvasRenderingContext2D, rects };
+}
+const crop = (extra: Partial<Tile> = {}): Tile => ({ x: 4, y: 5, terrain: 'meadow', moisture: .3, vegetation: .5, food: 0, cultivation: .6, ...extra });
+
+test('crop stages follow real tile fields: plowed → sprouting → leafy → ripe, and uncultivated tiles have none', () => {
+  assert.equal(cropStage(crop({ cultivation: 0 })), null);
+  assert.equal(cropStage(crop({ cultivation: .05 })), null, 'at the threshold it is still not a field');
+  assert.equal(cropStage(crop({ cultivation: undefined })), null);
+  assert.equal(cropStage(crop({ food: .02, growth: .1, vegetation: .9 })), 0, 'freshly plowed: little food and low growth');
+  assert.equal(cropStage(crop({ food: .02, growth: .25 })), 1, 'growth alone starts the sprouts');
+  assert.equal(cropStage(crop({ food: .02, growth: undefined, vegetation: .3 })), 1, 'growth falls back to vegetation');
+  assert.equal(cropStage(crop({ food: .06, growth: 0 })), 1);
+  assert.equal(cropStage(crop({ food: .139, growth: 0 })), 1);
+  assert.equal(cropStage(crop({ food: .14, growth: 0 })), 2);
+  assert.equal(cropStage(crop({ food: .259 })), 2);
+  assert.equal(cropStage(crop({ food: .26 })), 3);
+  assert.equal(cropStage(crop({ food: 1 })), 3);
+  // La firma del trozo solo cambia al cruzar un umbral visual (no con cada décima de alimento).
+  assert.equal(cropSignature(crop({ cultivation: 0 })), 0);
+  assert.equal(cropSignature(crop({ food: .27 })), cropSignature(crop({ food: .9 })), 'ripe stays ripe');
+  assert.notEqual(cropSignature(crop({ food: .13, growth: 0 })), cropSignature(crop({ food: .15, growth: 0 })));
+  assert.equal(cropSignature(crop({ food: .141, growth: 0 })), cropSignature(crop({ food: .2, growth: 0 })));
+  assert.notEqual(cropSignature(crop({ food: 0, growth: 0, moisture: .3 })), cropSignature(crop({ food: 0, growth: 0, moisture: .6 })), 'moist sheen on fresh furrows');
+  assert.equal(cropSignature(crop({ food: .5, moisture: .3 })), cropSignature(crop({ food: .5, moisture: .6 })), 'sheen only on the plowed stage');
+});
+
+test('crop fields paint each stage with its own palette inside the tile and continue furrows across neighbours', () => {
+  const colors = new Map<number, Set<string>>();
+  for (const stage of [0, 1, 2, 3] as const) {
+    const { g, rects } = recorder();
+    paintCropField(g, crop({ moisture: .6 }), stage, 16, false, false);
+    assert.ok(rects.length > 6, `stage ${stage} paints`);
+    for (const r of rects) assert.ok(r.x >= 4 * 16 && r.x + r.w <= 5 * 16 && r.y >= 5 * 16 - 0 && r.y + r.h <= 6 * 16, `stage ${stage} stays inside its tile (${r.x},${r.y},${r.w},${r.h})`);
+    colors.set(stage, new Set(rects.map(r => r.color)));
+  }
+  assert.ok([...colors.get(0)!].some(c => c.startsWith('rgba(190')), 'moist plowed earth shines');
+  assert.ok(colors.get(1)!.has('#9be04a'), 'sprouts are chartreuse');
+  assert.ok(colors.get(2)!.has('#3f8a4e') || colors.get(2)!.has('#6f8f3a'), 'growing crops are emerald/olive');
+  assert.ok(colors.get(3)!.has('#e8b83a') || colors.get(3)!.has('#c98a1e'), 'ripe crops are golden-amber');
+  assert.ok(!colors.get(0)!.has('#e8b83a'));
+  const alone = recorder(), joined = recorder();
+  paintCropField(alone.g, crop(), 2, 16, false, false); paintCropField(joined.g, crop(), 2, 16, true, true);
+  assert.ok(Math.min(...joined.rects.map(r => r.x)) < Math.min(...alone.rects.map(r => r.x)), 'neighbouring plots share furrows with no border');
+});
+
+test('agricultural work: hoe while farming on site, sickle + sheaf when foraging or eating from a field, none while walking', () => {
+  const ripe = crop({ food: .5 });
+  assert.equal(cropWorkMode('farm', true, false, undefined), 'till', 'plowing needs no crop yet');
+  assert.equal(cropWorkMode('farm', false, false, ripe), null, 'farm but not working yet');
+  assert.equal(cropWorkMode('farm', true, true, ripe), null, 'walking');
+  assert.equal(cropWorkMode('forage', false, false, ripe), 'harvest');
+  assert.equal(cropWorkMode('eat', false, false, ripe), 'eat');
+  assert.equal(cropWorkMode('forage', true, false, crop({ cultivation: 0 })), null, 'wild forage keeps its own art');
+  assert.equal(cropWorkMode('forage', true, false, undefined), null);
+  assert.equal(cropWorkMode('rest', true, false, ripe), null);
+  const frames = new Set<string>();
+  for (let t = 0; t < 1; t += .1) {
+    const { g, rects } = recorder();
+    drawCropWork(g, { mode: 'till', ax: 40, baseY: 60, t, seed: 3, animate: true, workProgress: .5, ring: true });
+    frames.add(JSON.stringify(rects));
+    assert.ok(rects.some(r => r.color === 'rgba(217,146,46,.9)'), 'progress ring shows the filled arc');
+  }
+  assert.ok(frames.size >= 4, `the swing animates (${frames.size} distinct frames)`);
+  const still = recorder(), still2 = recorder();
+  drawCropWork(still.g, { mode: 'till', ax: 40, baseY: 60, t: 0, seed: 3, animate: false, ring: false });
+  drawCropWork(still2.g, { mode: 'till', ax: 40, baseY: 60, t: .7, seed: 3, animate: false, ring: false });
+  assert.deepEqual(still.rects, still2.rects, 'reduced motion = one fixed frame');
+  const harvest = recorder(); drawCropWork(harvest.g, { mode: 'harvest', ax: 40, baseY: 60, t: .4, seed: 1, animate: true, ring: false });
+  assert.ok(harvest.rects.some(r => r.color === '#e8b83a'), 'golden grain / sheaf');
+  const eat = recorder(); drawCropWork(eat.g, { mode: 'eat', ax: 40, baseY: 60, t: .4, seed: 1, animate: true, ring: false });
+  assert.ok(eat.rects.length > 8);
+});
+
+const structure = (extra: Record<string, unknown> = {}): StructureView => ({ id: 's1', x: 10, y: 20, blueprintId: 'b', name: 'Obra', components: ['frame', 'roof'], condition: .9, water: .3, food: .2, uses: 0, builtAt: 1, builderId: null, ...extra }) as StructureView;
+
+test('structure helpers: footprint box and label, tiers, site fractions and logarithmic stock levels', () => {
+  assert.deepEqual(footprintBox(structure() as ExtendedStructure), { x0: 10, y0: 20, w: 1, h: 1 });
+  const hall = structure({ footprint: [{ x: 10, y: 20 }, { x: 11, y: 20 }] }) as ExtendedStructure;
+  assert.deepEqual(footprintBox(hall), { x0: 10, y0: 20, w: 2, h: 1 });
+  assert.equal(footprintLabel(hall), '2×1');
+  assert.equal(footprintLabel(structure({ footprint: [{ x: 3, y: 4 }, { x: 4, y: 4 }, { x: 3, y: 5 }, { x: 4, y: 5 }] }) as ExtendedStructure), '2×2');
+  assert.equal(footprintLabel(structure() as ExtendedStructure), '');
+  assert.equal(structureTier(structure({ components: ['frame', 'frame'] }) as ExtendedStructure), 'hut');
+  assert.equal(structureTier(structure({ components: ['frame', 'frame', 'frame'] }) as ExtendedStructure), 'hall');
+  assert.equal(structureTier(structure({ components: ['frame', 'frame', 'frame', 'frame', 'frame'] }) as ExtendedStructure), 'grand');
+  assert.equal(structureTier(structure({ footprint: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }] }) as ExtendedStructure), 'grand', 'the real footprint wins over frames');
+  assert.equal(isModular(hall), true); assert.equal(isModular(structure() as ExtendedStructure), false);
+  assert.deepEqual(siteFractions({ requiredWood: 4, requiredStone: 0, depositedWood: 1, depositedStone: 0, requiredWork: 10, completedWork: 25 }), { wood: .25, stone: 1, work: 1 });
+  assert.deepEqual([undefined, 0, -3, 1, 3, 7, 63, 1e9].map(stockLevel), [0, 0, 0, 1, 2, 3, 6, 6]);
+  const extent = structureExtent(hall);
+  assert.ok(extent.right - extent.left >= 32 && extent.foot === 20 * 16 + 13 && extent.top < extent.foot);
+});
+
+test('modular painters draw construction sites, halls, warehouse stock and installed hardware inside the structure extent', () => {
+  const site = structure({ site: { requiredWood: 6, requiredStone: 4, depositedWood: 3, depositedStone: 1, requiredWork: 10, completedWork: 7 } }) as ExtendedStructure;
+  const empty = structure({ site: { requiredWood: 6, requiredStone: 4, depositedWood: 0, depositedStone: 0, requiredWork: 10, completedWork: 0 } }) as ExtendedStructure;
+  const a = recorder(), b = recorder();
+  paintConstructionSite(a.g, site, site.site!, 0, false); paintConstructionSite(b.g, empty, empty.site!, 0, false);
+  assert.ok(a.rects.length > b.rects.length, 'more deposited material and work draw more scaffolding, stock and roof');
+  assert.ok(a.rects.some(r => r.color === '#d9922e' && r.w >= 7), 'progress bar fill is drawn');
+  const base = { footprint: [{ x: 10, y: 20 }, { x: 11, y: 20 }, { x: 10, y: 19 }, { x: 11, y: 19 }], components: ['frame', 'frame', 'frame', 'frame', 'frame', 'roof', 'hearth', 'cistern', 'granary'] };
+  const plain = structure(base) as ExtendedStructure;
+  const rich = structure({ ...base, storedWood: 20, storedStone: 20, installed: [1, 2, 3, 4].map(i => ({ id: `i${i}`, recipeId: null, mass: 1, containment: 1, insulation: 1, cohesion: 1, binding: 1, condition: 1 })) }) as ExtendedStructure;
+  const p = recorder(), r = recorder();
+  paintModularHall(p.g, plain, 0, true); paintModularHall(r.g, rich, 0, true);
+  assert.ok(p.rects.length > 60, 'a grand hall is a rich composition');
+  assert.ok(r.rects.length > p.rects.length + 8, 'stock and installed parts add visible detail');
+  assert.ok(r.rects.some(rect => rect.color === '#aeb8bf'), 'steel accents for installed parts');
+  assert.ok(r.rects.some(rect => rect.color === '#6b5d41' || rect.color === '#7a5d41'), 'cordwood');
+  const ext = structureExtent(rich);
+  for (const rect of r.rects) assert.ok(rect.x >= ext.left - 14 && rect.x + rect.w <= ext.right + 14 && rect.y >= ext.top - 12 && rect.y + rect.h <= ext.bottom + 12, `inside extent (${rect.x},${rect.y})`);
+  const hallOnly = recorder(); paintModularHall(hallOnly.g, structure({ footprint: [{ x: 10, y: 20 }, { x: 11, y: 20 }], components: ['frame', 'frame', 'frame'] }) as ExtendedStructure, 0, false);
+  assert.ok(hallOnly.rects.length > 30 && hallOnly.rects.length < p.rects.length, 'a 2×1 hall is simpler than a 2×2 compound');
+  const acc = recorder(); paintCompactAccessories(acc.g, structure({ storedWood: 5, storedStone: 5, installed: [{ id: 'i', recipeId: null, mass: 1, containment: 1, insulation: 1, cohesion: 1, binding: 1, condition: 1 }] }) as ExtendedStructure);
+  assert.ok(acc.rects.length > 5);
+  const none = recorder(); paintCompactAccessories(none.g, structure() as ExtendedStructure);
+  assert.equal(none.rects.length, 0, 'nothing is drawn without stock or installed parts');
+});
+
+test('structureCard shows site progress, footprint, warehouse stock and installed parts only when the server sent them', () => {
+  const plain = structureCard(structure(), null);
+  for (const marker of ['data-structure-site', 'data-structure-footprint', 'data-structure-stock', 'data-structure-installed']) assert.ok(!plain.includes(marker), `no ${marker} without data`);
+  const html = structureCard(structure({
+    site: { requiredWood: 6, requiredStone: 4, depositedWood: 3, depositedStone: 1, requiredWork: 10, completedWork: 7 },
+    footprint: [{ x: 10, y: 20 }, { x: 11, y: 20 }], storedWood: 12, storedStone: 3,
+    installed: [{ id: 'i', recipeId: null, mass: 1, containment: 1, insulation: 1, cohesion: 1, binding: 1, condition: 1 }],
+  }), null);
+  assert.match(html, /Madera 3\/6 · Piedra 1\/4 · Obra 70%/);
+  assert.match(html, /data-structure-footprint[^]*2×1/);
+  assert.match(html, /Bodega: 12 madera · 3 piedra/);
+  assert.match(html, /data-structure-installed[^]*<strong>1<\/strong>/);
 });

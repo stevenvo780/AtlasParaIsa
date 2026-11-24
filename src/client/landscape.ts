@@ -20,6 +20,8 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
+import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from './crop-art.js';
+import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure } from './structure-art.js';
 import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
@@ -411,6 +413,8 @@ export class Landscape {
   private readonly atmosphere = new AtmosphereSmoother();
   /** V18 capa 1.5: colchón de 3–6 s de fotogramas recibidos; los cuerpos se reproducen A→B dentro de él. */
   private readonly playback = new PlaybackBuffer<WorldView>();
+  /** Reloj de muestreo de los cuerpos en este fotograma (`playback.visualMs`). */
+  private motionClock = 0;
   private playbackAnchor: { x: number; y: number; zoom: number } | null = null;
   /** V18: caché espacial del cliente (la posee `game.ts`). Sin ella el paisaje se comporta como antes. */
   private tileCache: ClientTileCache | null = null;
@@ -591,8 +595,6 @@ export class Landscape {
     if (this.curr && world.tick < this.curr.tick) this.eventAccents = [];
     this.eventAccents = [...this.eventAccents.filter(event => now - event.bornAt < EVENT_LIFETIME_MS), ...newAccents].slice(-VISUAL_BUDGET.events);
     this.curr = world;
-    this.peopleMotion.ingest(world.people, now);
-    this.animalMotion.ingest(world.animals ?? [], now);
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
     this.carriedProducts.clear();
@@ -874,6 +876,8 @@ export class Landscape {
         | (groundBucket(growth) << 12) | (groundBucket(t.fertility ?? .5) << 16)
         | (groundBucket(cult) << 20) | (groundBucket(t.traffic ?? 0) << 24) | (groundBucket(dw) << 28);
       h = Math.imul(h ^ b1, 16777619) >>> 0;
+      // Etapa del cultivo (arada → brote → hojas → madura): el trozo solo se rehornea al cruzar un umbral visual.
+      h = Math.imul(h ^ (cropSignature(t) + 1), 16777619) >>> 0;
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
       const gEff = t.growth ?? t.vegetation;
       const flags = (cult > .08 ? 1 : 0) | (dw > .04 ? 2 : 0) | (t.moisture > .65 ? 4 : 0)
@@ -1041,34 +1045,18 @@ export class Landscape {
     g.drawImage(this.groundStamp, ox, oy);
   }
 
+  private isCropAt(x: number, y: number): boolean { const t = this.tileAt(x, y); return t !== undefined && cropStage(t) !== null; }
+
   /** Resource art follows server stock/growth. Depleted resources do not remain lush props. */
   private bakeFeatures(g: CanvasRenderingContext2D, tile: Tile): void {
     const { x, y } = tile, ox = x * ART, oy = y * ART;
     const growth = clamp01(tile.growth ?? tile.vegetation);
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
     const edge = this.biomeEdgeFraction(tile);
-    const cultivation = clamp01(tile.cultivation ?? 0);
-    if (cultivation > .08) {
+    const stage = cropStage(tile);
+    if (stage !== null) {
       const inGrid = this.tileAt(x, y) === tile;
-      const hasLeft = inGrid && ((this.tileAt(x - 1, y)?.cultivation ?? 0) > .08);
-      const hasRight = inGrid && ((this.tileAt(x + 1, y)?.cultivation ?? 0) > .08);
-      const xStart = hasLeft ? ox : ox + 2;
-      const spanW = (hasRight ? ox + ART : ox + ART - 2) - xStart;
-      for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
-        const fy = oy + 3 + row * 3;
-        px(g, xStart, fy, spanW, 2, css(P.soilDark, .55 + cultivation * .38));
-        px(g, xStart, fy, spanW, 1, css(P.trunkLight, .32));
-        for (let plant = 0; plant < 4; plant++) {
-          if (growth > .15 && tile.vegetation > .04) {
-            const px0 = ox + 2 + plant * 3 + ((hash3(x, y, 610 + row * 4 + plant) & 1));
-            const ph = 1 + Math.round(growth * 2);
-            px(g, px0, fy - ph + 1, 1, ph, css(mix(P.reed, P.grassLight, clamp01(tile.moisture))));
-            if (growth > .55 && tile.moisture > .35) {
-              px(g, px0, fy - ph, 2, 1, css(P.grassLight));
-            }
-          }
-        }
-      }
+      paintCropField(g, tile, stage, ART, inGrid && this.isCropAt(x - 1, y), inGrid && this.isCropAt(x + 1, y));
     }
     const water = clamp01(tile.drinkingWater ?? 0);
     const reservoir = tile.feature === 'spring' || tile.feature === 'pool';
@@ -1363,9 +1351,7 @@ export class Landscape {
     const smooth = !this.reduceMotion;
     const out: RenderPerson[] = [];
     for (const p of world.people) {
-      const m = smooth ? this.peopleMotion.sample(p.id, now) : undefined;
-      const b = smooth ? this.playback.resolve('people', p.id, m) : undefined; // colchón A→B; sin él, el deslizamiento en vivo
-      const shown = b ?? m;
+      const shown = smooth ? this.peopleMotion.sample(p.id, now) : undefined; // `now` = reloj virtual del colchón
       out.push({ view: p, x: shown ? shown.x : p.x, y: shown ? shown.y : p.y, moving: shown ? shown.moving : false, seed: shown ? shown.seed : bodySeed(p.id), stride: shown ? shown.stride : 0 });
     }
     return out;
@@ -1374,8 +1360,7 @@ export class Landscape {
   private interpolateAnimals(now: number): RenderAnimal[] {
     const smooth = !this.reduceMotion;
     return (this.curr?.animals ?? []).map(view => {
-      const m = smooth ? this.animalMotion.sample(view.id, now) : undefined;
-      const shown = (smooth ? this.playback.resolve('animals', view.id, m) : undefined) ?? m;
+      const shown = smooth ? this.animalMotion.sample(view.id, now) : undefined;
       if (shown) return { view, x: shown.x, y: shown.y, moving: shown.moving, left: shown.left, stride: shown.stride };
       const before = this.prevAnimals.get(view.id), dx = before ? view.x - before.x : 0;
       const defaultLeft = (hash3(view.id.length, view.id.charCodeAt(0) | 0, view.id.charCodeAt(view.id.length - 1) | 0) & 1) === 1;
@@ -1385,8 +1370,7 @@ export class Landscape {
 
   /** Posición visual de un cuerpo seguido por la cámara (sin construir la lista de todos). */
   private bodyPosition(id: string, kind: 'person' | 'animal', now: number): { x: number; y: number } | undefined {
-    const m = this.reduceMotion ? undefined : (kind === 'animal' ? this.animalMotion : this.peopleMotion).sample(id, now);
-    const shown = (m ? this.playback.resolve(kind === 'animal' ? 'animals' : 'people', id, m) : undefined) ?? m;
+    const shown = this.reduceMotion ? undefined : (kind === 'animal' ? this.animalMotion : this.peopleMotion).sample(id, now);
     if (shown) return shown;
     return kind === 'animal' ? this.curr?.animals?.find(a => a.id === id) : this.curr?.people.find(p => p.id === id);
   }
@@ -1407,9 +1391,18 @@ export class Landscape {
     }
     this.lastFrameAt = now;
     this.tickFocus(now);
-    if (!this.reduceMotion) { this.syncPlaybackCamera(); this.playback.advance(now, this.cadence.tickIntervalMs); }
+    if (!this.reduceMotion) {
+      this.syncPlaybackCamera(); this.playback.advance(now, this.cadence.tickIntervalMs);
+      // Los fotogramas que el colchón libera alimentan a los rastreadores: cada casilla se reparte en ≈ 5,2 pasos y el servidor, aunque se atrase, no deja a nadie parado.
+      for (const frame of this.playback.takeReleased()) {
+        this.peopleMotion.ingest(frame.view.people, this.playback.visualMs);
+        this.animalMotion.ingest(frame.view.animals ?? [], this.playback.visualMs);
+      }
+    }
+    // Reloj con el que se muestrean los cuerpos (el virtual del colchón); con movimiento reducido no se interpola.
+    this.motionClock = this.playback.visualMs;
     if (this.followedId) {
-      const body = this.bodyPosition(this.followedId, this.followedKind, now);
+      const body = this.bodyPosition(this.followedId, this.followedKind, this.motionClock);
       if (body) { this.cam.x = body.x + 0.5; this.cam.y = body.y + 0.5; }
     }
     this.reportViewport();
@@ -1457,12 +1450,12 @@ export class Landscape {
       if (this.reduceMotion) this.atmosphere.reset();
       // Con colchón, la luz y la lluvia siguen al mismo instante A→B que se dibuja (no al más reciente).
       const shownTime = this.reduceMotion ? null : this.playback.bracket();
-      const shownTick = shownTime ? shownTime.a.tick + (shownTime.b.tick - shownTime.a.tick) * shownTime.alpha : world.tick;
+      const shownTick = this.reduceMotion ? world.tick : this.playback.shownTick(world.tick);
       const shownWeather = shownTime ? (shownTime.alpha < .5 ? shownTime.a.view : shownTime.b.view).weather : world.weather;
       const light = this.atmosphere.step(daylightAt(shownTick), shownWeather === 'rain', now);
       this.lighting = { shadowX: light.shadowX, shadowY: light.shadowY, shadowAlpha: light.shadowAlpha * (1 - .6 * light.rain) };
-      const people = this.interpolatePeople(now);
-      const animals = this.interpolateAnimals(now);
+      const people = this.interpolatePeople(this.motionClock);
+      const animals = this.interpolateAnimals(this.motionClock);
       this.drawScene(world, people, animals, t);
 
       // Volcado nítido de la escena al panel.
@@ -1514,7 +1507,7 @@ export class Landscape {
     this.effects.water = this.effects.vegetation = this.effects.shadows = 0;
     this.visibleTiles = 0;
     this.visibleAnimals = 0; this.visibleStructures = 0;
-    const structuredTiles = new Set((world.structures ?? []).map(s => `${s.x},${s.y}`));
+    const structuredTiles = new Set((world.structures ?? []).flatMap(s => footprintCells(s as ExtendedStructure).map(c => `${c.x},${c.y}`)));
 
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
@@ -1553,9 +1546,11 @@ export class Landscape {
     this.drawPlaces(g, world.places, x0, x1, y0, y1);
 
     for (const structure of world.structures ?? []) {
-      if (structure.x < x0 || structure.x > x1 || structure.y < y0 || structure.y > y1) continue;
+      const box = footprintBox(structure as ExtendedStructure);
+      if (box.x0 + box.w - 1 < x0 || box.x0 > x1 || box.y0 + box.h - 1 < y0 || box.y0 > y1) continue;
       this.visibleStructures++;
-      sprites.push({ kind: SpriteKind.Structure, sortY: structure.y * ART + 13, ax: structure.x * ART + 8, ay: structure.y * ART + 13, seed: 0, size: 0, person: null, structure });
+      const foot = structureExtent(structure as ExtendedStructure).foot;
+      sprites.push({ kind: SpriteKind.Structure, sortY: foot, ax: (box.x0 + box.w / 2) * ART, ay: foot, seed: 0, size: 0, person: null, structure });
     }
     for (const animal of animals) {
       if (animal.x < x0 || animal.x > x1 || animal.y < y0 || animal.y > y1) continue;
@@ -1609,7 +1604,8 @@ export class Landscape {
       else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed);
       else if (s.animal) this.drawAnimal(g, s.animal, t);
       else if (s.structure) {
-        const hidden = behind(s, 28, 30);
+        const extent = structureExtent(s.structure as ExtendedStructure);
+        const hidden = behind(s, Math.max(28, extent.foot - extent.top), Math.max(30, extent.right - extent.left));
         if (hidden) { g.save(); g.globalAlpha = .45; }
         this.drawStructure(g, s.structure, t);
         if (hidden) g.restore();
@@ -1763,8 +1759,12 @@ export class Landscape {
   }
 
   private drawStructure(g: CanvasRenderingContext2D, structure: StructureView, t = 0): void {
+    const ext = structure as ExtendedStructure, animate = !this.reduceMotion && this.actionActive;
+    if (ext.site) { paintConstructionSite(g, ext, ext.site, t, animate); this.drawCalls++; return; }
+    if (isModular(ext)) { paintModularHall(g, ext, t, animate); this.drawCalls++; return; }
     const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
+    paintCompactAccessories(g, ext);
     const previous = this.prev?.structures?.find(s => s.id === structure.id);
     if (!this.reduceMotion && this.actionActive && this.curr?.weather === 'rain' && previous && structure.water > previous.water
       && structure.components.includes('cistern') && this.effects.water < VISUAL_BUDGET.water) {
@@ -2248,6 +2248,8 @@ export class Landscape {
     const consuming = view.action === 'drink' ? previous?.thirst !== undefined && view.thirst !== undefined && previous.thirst > view.thirst
       : view.action === 'eat' && previous !== undefined && previous.hunger > view.hunger;
     const beat = !this.reduceMotion && this.actionActive && !p.moving && (working || consuming) ? Math.floor(t * 3 + p.seed) % 2 : 0;
+    // V19: labor agrícola sobre el cultivo real de la casilla (azada al arar, hoz al cosechar, gavilla al comer).
+    const cropWork = cropWorkMode(view.action, working, p.moving, this.tileAt(Math.round(p.x), Math.round(p.y)));
 
     if (view.action === 'hunt') {
       if (showActionTool) {
@@ -2283,7 +2285,7 @@ export class Landscape {
         const hasStone = (view.materials?.stone ?? 0) > 0;
         add(ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight), true);
       }
-    } else if (view.action === 'farm' || view.action === 'gather') {
+    } else if ((view.action === 'farm' && !cropWork) || view.action === 'gather') {
       const hand = baseY - 6 + beat * 2;
       add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
@@ -2328,6 +2330,7 @@ export class Landscape {
     if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
       px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
     }
+    if (cropWork) drawCropWork(g, { mode: cropWork, ax, baseY, t, seed: p.seed, animate: !this.reduceMotion && this.actionActive, workProgress: view.workProgress, ring: this.cam.zoom >= 18 });
   }
 
   /* ------------------------ capas de pantalla ---------------------- */

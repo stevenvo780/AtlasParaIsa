@@ -256,15 +256,23 @@ export class AtmosphereSmoother {
 /* V18 capa 1.5 — colchón de reproducción corto (3–6 s) en el cliente  */
 /* ------------------------------------------------------------------ */
 /* Presentación pura. Guarda los últimos fotogramas recibidos y reproduce un reloj virtual que va un
- * colchón por detrás del más reciente: cuando un paso del servidor tarda 2,4 s (guardado) el cuerpo no
- * llega a su casilla y se queda quieto, porque los dos fotogramas A y B ya están en el anillo. */
+ * colchón por detrás del más reciente. El cabezal corre en el dominio del TICK del modelo (1 tick cada
+ * `tickIntervalMs`, ±8 %), no en el de las llegadas: así un paso de servidor que tarda 2,4 s (guardado)
+ * consume colchón en vez de abrir un hueco en lo que se ve.
+ *
+ * El colchón NO interpola posiciones A→B (quien se mueve cada 6 pasos recorría su casilla en un solo
+ * intervalo y esperaba el resto). Solo decide CUÁNDO se libera cada fotograma, a un ritmo regular; los
+ * fotogramas liberados alimentan a `MotionTracker`, que reparte cada casilla en ≈ 5,2 pasos, y se muestrea
+ * en el reloj virtual (`visualMs`). La luz y la lluvia siguen el mismo cabezal (`shownTick`). */
 
 export const PLAYBACK_LIMITS = {
   maxFrames: 10,
   /** Colchón objetivo = clamp(paso·3,2, 1200, 5000) ms. */
   lagPerTick: 3.2, minLagMs: 1200, maxLagMs: 5000,
-  /** Margen sobre el mayor hueco entre llegadas visto en el anillo (el colchón nunca baja de «hueco + margen»). */
+  /** Margen sobre el mayor hueco entre llegadas (el colchón nunca baja de «hueco + un paso + margen»: el paso cubre el diente de sierra de las llegadas). */
   gapMarginMs: 250,
+  /** Un pico de hueco (p. ej. un guardado de 2,4 s) se recuerda tanto tiempo, aunque el anillo (≈ 6 s) ya lo haya olvidado. */
+  gapMemoryMs: 180_000,
   rateMin: .92, rateMax: 1.08,
   /** Banda muerta alrededor del objetivo antes de acelerar o frenar. */
   deadbandMs: 400,
@@ -274,19 +282,11 @@ export const PLAYBACK_LIMITS = {
   maxDtMs: 100,
   /** Constante de tiempo con la que la velocidad se acerca a la deseada. */
   rateSettleMs: 500,
-  /** Tras un vaciado o al aparecer el colchón, la mezcla con `MotionTracker` tarda esto en pasar a 100 %. */
-  blendMs: 1000,
 } as const;
 
 export interface PlaybackFrame<V> { receivedAt: number; sequence: number; tick: number; view: V; }
 interface PlaybackBodies { id: string; x: number; y: number; }
 interface PlaybackSource { people: readonly PlaybackBodies[]; animals?: readonly PlaybackBodies[]; }
-export type PlaybackKind = 'people' | 'animals';
-
-/** Cuerpo resuelto para dibujar. El objeto devuelto se reutiliza (cópialo si lo guardas). */
-export interface PlaybackBody { x: number; y: number; moving: boolean; left: boolean; stride: number; seed: number; }
-
-interface PlaybackIndex { people: Map<string, PlaybackBodies>; animals: Map<string, PlaybackBodies>; }
 
 /**
  * Anillo de ≤ 10 fotogramas + reloj de reproducción con control de velocidad suave (0,92×–1,08×).
@@ -294,33 +294,39 @@ interface PlaybackIndex { people: Map<string, PlaybackBodies>; animals: Map<stri
  */
 export class PlaybackBuffer<V extends PlaybackSource = PlaybackSource> {
   private readonly ring: PlaybackFrame<V>[] = [];
-  private readonly indexes = new Map<PlaybackFrame<V>, PlaybackIndex>();
-  private readonly odometer: Record<PlaybackKind, Map<string, { x: number; y: number; odo: number }>> = { people: new Map(), animals: new Map() };
-  private readonly out: PlaybackBody = { x: 0, y: 0, moving: false, left: false, stride: 0, seed: 0 };
   private lastNow = Number.NaN;
   private bracketA: PlaybackFrame<V> | null = null;
   private bracketB: PlaybackFrame<V> | null = null;
-  /** Reloj virtual de reproducción (ms, mismo dominio que `receivedAt`). */
-  playTimeMs = 0;
+  private releasedSequence = Number.NEGATIVE_INFINITY;
+  private collapse = false;
+  /** Último ritmo del servidor (ms por tick) con el que se avanzó; convierte ticks de colchón en milisegundos. */
+  private tickMs: number = CADENCE_LIMITS.initialMs;
+  /** Cabezal de reproducción, en ticks del modelo (fraccionario): se libera cada fotograma al cruzar su `tick`. */
+  playTick = 0;
+  /**
+   * Reloj de muestreo de `MotionTracker`: avanza `dt × rate` SIN tope superior ni saltos (un vaciado o un
+   * resincronizado solo mueve `playTick`), así un deslizamiento a medias nunca se corta ni se adelanta de golpe.
+   */
+  visualMs = 0;
   /** Velocidad actual del reloj (0,92–1,08). */
   rate = 1;
-  /** 0..1: peso del colchón frente a `MotionTracker` (0 justo tras vaciar). */
-  weight = 0;
   /** Colchón objetivo vigente (ms). */
   targetLagMs: number = PLAYBACK_LIMITS.minLagMs;
-  /** Mayor hueco entre llegadas distintas visto en el anillo. */
+  /** Mayor hueco entre llegadas distintas: el del anillo o un pico reciente (`gapMemoryMs`). */
   maxGapMs = 0;
+  private gapPeak = { gap: 0, at: 0 };
 
   get size(): number { return this.ring.length; }
   get latest(): PlaybackFrame<V> | null { return this.ring.length ? this.ring[this.ring.length - 1]! : null; }
-  /** Colchón actual: cuánto contenido recibido queda por delante del cabezal. */
-  get lagMs(): number { const latest = this.latest; return latest ? latest.receivedAt - this.playTimeMs : 0; }
-  /** `true` si hay un par A→B que cubre el cabezal (si no, se cae a `MotionTracker`). */
+  /** Colchón actual (ms): cuánto contenido recibido queda por delante del cabezal al ritmo del servidor. */
+  get lagMs(): number { const latest = this.latest; return latest ? (latest.tick - this.playTick) * this.tickMs : 0; }
+  /** `true` si hay un par A→B que cubre el cabezal. */
   get active(): boolean { return this.bracketA !== null; }
 
   clear(): void {
-    this.ring.length = 0; this.indexes.clear(); this.odometer.people.clear(); this.odometer.animals.clear();
-    this.bracketA = this.bracketB = null; this.lastNow = Number.NaN; this.rate = 1; this.weight = 0; this.playTimeMs = 0; this.maxGapMs = 0;
+    this.ring.length = 0;
+    this.bracketA = this.bracketB = null; this.lastNow = Number.NaN; this.rate = 1; this.playTick = 0; this.maxGapMs = 0; this.gapPeak = { gap: 0, at: 0 };
+    this.releasedSequence = Number.NEGATIVE_INFINITY; this.collapse = false; // `visualMs` sigue: el muestreo no retrocede
   }
 
   /**
@@ -332,25 +338,29 @@ export class PlaybackBuffer<V extends PlaybackSource = PlaybackSource> {
     for (let i = this.ring.length - 1; i >= 0; i--) {
       const frame = this.ring[i]!;
       if (frame.sequence !== sequence) continue;
-      frame.view = view; frame.tick = tick; this.indexes.delete(frame);
+      frame.view = view; frame.tick = tick;
       return;
     }
     const last = this.latest;
     if (last && (sequence < last.sequence || tick < last.tick)) this.clear();
     const stamp = this.latest ? Math.max(receivedAt, this.latest.receivedAt) : receivedAt;
     this.ring.push({ receivedAt: stamp, sequence, tick, view });
-    while (this.ring.length > PLAYBACK_LIMITS.maxFrames) { const old = this.ring.shift()!; this.indexes.delete(old); }
-    if (this.ring.length === 1) this.playTimeMs = stamp;
+    while (this.ring.length > PLAYBACK_LIMITS.maxFrames) this.ring.shift();
+    if (this.ring.length === 1) this.playTick = tick;
     let gap = 0;
     for (let i = 1; i < this.ring.length; i++) gap = Math.max(gap, this.ring[i]!.receivedAt - this.ring[i - 1]!.receivedAt);
-    this.maxGapMs = gap;
+    if (this.ring.length > 1) {
+      const fresh = stamp - this.ring[this.ring.length - 2]!.receivedAt;
+      if (fresh >= this.gapPeak.gap || stamp - this.gapPeak.at > PLAYBACK_LIMITS.gapMemoryMs) this.gapPeak = { gap: fresh, at: stamp };
+    }
+    this.maxGapMs = Math.max(gap, this.gapPeak.gap);
   }
 
   /** Colapsa el colchón al fotograma más reciente (cámara movida u orden directa). La velocidad lo vuelve a llenar. */
   flushToLatest(): void {
     const latest = this.latest;
     if (!latest) return;
-    this.playTimeMs = latest.receivedAt; this.rate = PLAYBACK_LIMITS.rateMin; this.weight = 0;
+    this.playTick = latest.tick; this.rate = PLAYBACK_LIMITS.rateMin; this.collapse = true;
     this.locate();
   }
 
@@ -358,7 +368,7 @@ export class PlaybackBuffer<V extends PlaybackSource = PlaybackSource> {
   desiredLagMs(tickIntervalMs: number): number {
     const L = PLAYBACK_LIMITS;
     const base = Number.isFinite(tickIntervalMs) ? tickIntervalMs * L.lagPerTick : L.minLagMs;
-    return clampTo(Math.max(base, this.maxGapMs + L.gapMarginMs), L.minLagMs, L.maxLagMs);
+    return clampTo(Math.max(base, this.maxGapMs + (Number.isFinite(tickIntervalMs) ? tickIntervalMs : 0) + L.gapMarginMs), L.minLagMs, L.maxLagMs);
   }
 
   /** Avanza el reloj virtual un fotograma de animación (`nowMs`: reloj de rAF). Devuelve la velocidad aplicada. */
@@ -367,78 +377,53 @@ export class PlaybackBuffer<V extends PlaybackSource = PlaybackSource> {
     const dt = Number.isNaN(this.lastNow) || !Number.isFinite(nowMs) ? 0 : clampTo(nowMs - this.lastNow, 0, L.maxDtMs);
     if (Number.isFinite(nowMs)) this.lastNow = nowMs;
     if (!latest) return this.rate = 1;
+    if (Number.isFinite(tickIntervalMs) && tickIntervalMs > 0) this.tickMs = tickIntervalMs;
     this.targetLagMs = this.desiredLagMs(tickIntervalMs);
-    const target = this.targetLagMs, lag = latest.receivedAt - this.playTimeMs;
+    const target = this.targetLagMs, lag = this.lagMs;
     if (lag > target + L.resyncMs) {
-      this.playTimeMs = latest.receivedAt - target; this.rate = 1; this.weight = 0;
+      this.playTick = latest.tick - target / this.tickMs; this.rate = 1; this.collapse = true;
     } else {
       const wanted = lag > target + L.deadbandMs ? L.rateMax : lag < target - L.deadbandMs ? L.rateMin : 1;
       this.rate = clampTo(this.rate + (wanted - this.rate) * (1 - Math.exp(-dt / L.rateSettleMs)), L.rateMin, L.rateMax);
-      this.playTimeMs += dt * this.rate;
+      this.playTick += dt * this.rate / this.tickMs;
     }
-    this.playTimeMs = clampTo(this.playTimeMs, this.ring[0]!.receivedAt, latest.receivedAt);
+    this.visualMs += dt * this.rate;
+    this.playTick = clampTo(this.playTick, this.ring[0]!.tick, latest.tick);
     this.locate();
-    this.weight = this.bracketA ? Math.min(1, this.weight + dt / L.blendMs) : 0;
     return this.rate;
+  }
+
+  /**
+   * Fotogramas que el cabezal acaba de cruzar desde la última llamada, en orden. Tras un vaciado o un resincronizado
+   * solo se devuelve el más reciente: `MotionTracker` se reorienta desde donde se ve el cuerpo, sin pasar por los intermedios.
+   */
+  takeReleased(): PlaybackFrame<V>[] {
+    const out: PlaybackFrame<V>[] = [];
+    for (const frame of this.ring) if (frame.sequence > this.releasedSequence && frame.tick <= this.playTick) out.push(frame);
+    if (!out.length) { this.collapse = false; return out; }
+    this.releasedSequence = out[out.length - 1]!.sequence;
+    if (this.collapse) { this.collapse = false; return [out[out.length - 1]!]; }
+    return out;
   }
 
   /** Par A→B que cubre el cabezal y su fracción exacta (0..1). `null` si aún no hay dos fotogramas. */
   bracket(): { a: PlaybackFrame<V>; b: PlaybackFrame<V>; alpha: number } | null {
     if (!this.bracketA || !this.bracketB) return null;
-    const span = this.bracketB.receivedAt - this.bracketA.receivedAt;
-    return { a: this.bracketA, b: this.bracketB, alpha: span > 0 ? clampTo((this.playTimeMs - this.bracketA.receivedAt) / span, 0, 1) : 1 };
+    const span = this.bracketB.tick - this.bracketA.tick;
+    return { a: this.bracketA, b: this.bracketB, alpha: span > 0 ? clampTo((this.playTick - this.bracketA.tick) / span, 0, 1) : 1 };
   }
 
-  /**
-   * Cuerpo en el instante de reproducción: A→B por `alpha` si está en ambos (≤ 6 casillas), mezclado con `fallback`
-   * (`MotionTracker`) mientras `weight` < 1. `undefined` si no hay colchón útil para ese cuerpo.
-   */
-  resolve(kind: PlaybackKind, id: string, fallback: MotionView | undefined): PlaybackBody | undefined {
-    const pair = this.bracket();
-    if (!pair || this.weight <= 0) return undefined;
-    const a = this.indexOf(pair.a)[kind].get(id), b = this.indexOf(pair.b)[kind].get(id);
-    if (!a || !b) return undefined;
-    const dx = b.x - a.x, dy = b.y - a.y, step = Math.hypot(dx, dy);
-    if (step > MOTION_LIMITS.snapTiles) return undefined;
-    let x = a.x + dx * pair.alpha, y = a.y + dy * pair.alpha;
-    if (fallback && this.weight < 1) { x = fallback.x + (x - fallback.x) * this.weight; y = fallback.y + (y - fallback.y) * this.weight; }
-    const moving = step > 0 && pair.alpha > 0 && pair.alpha < 1;
-    const odo = this.odometer[kind], mark = odo.get(id);
-    let stride: number;
-    if (!mark) { stride = fallback?.stride ?? 0; odo.set(id, { x, y, odo: stride }); }
-    else { const d = Math.hypot(x - mark.x, y - mark.y); if (d <= MOTION_LIMITS.snapTiles) mark.odo += d; mark.x = x; mark.y = y; stride = mark.odo; }
-    const out = this.out;
-    out.x = x; out.y = y; out.moving = moving; out.stride = stride;
-    out.left = Math.abs(dx) > .2 ? dx < 0 : fallback?.left ?? bodySeed(id) % 2 === 1;
-    out.seed = fallback?.seed ?? bodySeed(id);
-    return out;
+  /** Tick del modelo en el cabezal; sin colchón útil, `fallbackTick`. La luz y la lluvia siguen este flujo retrasado. */
+  shownTick(fallbackTick: number): number {
+    return this.bracketA ? this.playTick : fallbackTick;
   }
 
-  private indexOf(frame: PlaybackFrame<V>): PlaybackIndex {
-    let index = this.indexes.get(frame);
-    if (!index) {
-      index = { people: new Map(), animals: new Map() };
-      for (const p of frame.view.people) index.people.set(p.id, p);
-      for (const a of frame.view.animals ?? []) index.animals.set(a.id, a);
-      this.indexes.set(frame, index);
-    }
-    return index;
-  }
-
-  /** Elige (A, B) y libera índices y odómetros de lo que ya no se usa. */
+  /** Elige (A, B) que cubren el cabezal. */
   private locate(): void {
     const ring = this.ring, n = ring.length;
     if (n < 2) { this.bracketA = this.bracketB = null; return; }
     let i = n - 2;
-    while (i > 0 && ring[i]!.receivedAt > this.playTimeMs) i--;
-    const a = ring[i]!, b = ring[i + 1]!;
-    if (a === this.bracketA && b === this.bracketB) return;
-    const hadPair = this.bracketA !== null;
-    this.bracketA = a; this.bracketB = b;
-    for (const frame of [...this.indexes.keys()]) if (frame !== a && frame !== b) this.indexes.delete(frame);
-    if (hadPair) {
-      const keep = this.indexOf(b);
-      for (const kind of ['people', 'animals'] as const) for (const id of this.odometer[kind].keys()) if (!keep[kind].has(id)) this.odometer[kind].delete(id);
-    }
+    while (i > 0 && ring[i]!.tick > this.playTick) i--;
+    this.bracketA = ring[i]!; this.bracketB = ring[i + 1]!;
   }
 }

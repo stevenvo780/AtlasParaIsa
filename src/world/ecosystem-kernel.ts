@@ -4,7 +4,9 @@ import { TileStore } from './soa/terreno.js';
 import { StaticWorkerPool, type StaticWorkerDiagnostics, type StaticWorkerHandlerJob } from './paralelo/piscina.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { runParallelEcology, type ParallelEcologyParams } from './ecology-kernel.js';
+import { CLIMATE_STRIDE, runParallelEcology, type ParallelEcologyParams } from './ecology-kernel.js';
+import { regionalClimateFactor } from './clima.js';
+import type { SharedTerrain } from './soa/terreno.js';
 import type { WorldParams } from './params.js';
 import { ResidentGpuBridge, gpuNvrtcAvailable, type GpuBridgeStats } from './gpu/puente.js';
 
@@ -28,10 +30,14 @@ export interface EcologyExecution {
   regionSide?: 256 | 512;
   onBarrier?: (event: EcosystemBarrierEvent) => void;
 }
+/** V22: parámetros de `regionalClimateFactor` para la ecología local paralela/GPU (`ecologia.*` + semilla). */
+export interface ClimaEstacional { seed: number; amplitud: number; periodoDias: number; escalaCeldas: number }
 export interface EcosystemOptions extends EcologyExecution {
   decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean; hilos?: number;
   orden?: 'natural' | 'inverso' | 'adversarial';
   gpu?: readonly number[];
+  /** Solo `stepEcology`: estacionalidad regional (V19/E). Ausente o amplitud 0 = cuerpo de siempre. */
+  clima?: ClimaEstacional;
 }
 export interface EcosystemKernelOptions { createPool?: (workers: number) => StaticWorkerPool }
 
@@ -105,6 +111,8 @@ export class EcosystemKernel {
   private readonly gpuBridges = new Map<string, ResidentGpuBridge>();
   private lastGpuBridge: ResidentGpuBridge | null = null;
   private lastPool: StaticWorkerPool | null = null;
+  /** Campo climático por ranura de página (SAB reutilizado mientras no cambie la capacidad). */
+  private climate: Float64Array | null = null;
   private readonly createPool: (workers: number) => StaticWorkerPool;
 
   constructor(options?: EcosystemKernelOptions) {
@@ -140,6 +148,31 @@ export class EcosystemKernel {
   }
 
   get cachedTopologyCount(): number { return this.topologies.length; }
+
+  /**
+   * V22: un `regionalClimateFactor` por página presente, en el centro de su chunk 16×16
+   * (`px*16+8, py*16+8`): exactamente las mismas entradas que el memo por región del bucle serie de
+   * `ecology()`, así que cada doble es idéntico. Las páginas se recorren por `cells` (todas las celdas
+   * de una página son contiguas); las ranuras libres no se leen nunca.
+   */
+  private climateField(terrain: SharedTerrain, tick: number, clima: ClimaEstacional): Float64Array {
+    const buffers = terrain.buffers;
+    const pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!), cells = new Int32Array(buffers.cells!);
+    const length = pageX.length * CLIMATE_STRIDE;
+    if (this.climate?.length !== length) this.climate = new Float64Array(new SharedArrayBuffer(length * 8));
+    const out = this.climate;
+    let last = -1;
+    for (let i = 0; i < cells.length; i++) {
+      const slot = cells[i]! >>> 8;
+      if (slot === last) continue;
+      last = slot;
+      const factor = regionalClimateFactor(clima.seed, tick, pageX[slot]! * 16 + 8, pageY[slot]! * 16 + 8,
+        clima.amplitud, clima.periodoDias, clima.escalaCeldas);
+      const at = slot * CLIMATE_STRIDE;
+      out[at] = factor.rainScale; out[at + 1] = factor.evapScale; out[at + 2] = factor.growthScale;
+    }
+    return out;
+  }
   /** T112: el `TileStore` de la topología SoA, si alguna pasada lo usó (para medir sus bytes). */
   get soaStore(): TileStore | null { return this.soa; }
 
@@ -148,9 +181,11 @@ export class EcosystemKernel {
     recursos: WorldParams['recursos'], options: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
     const gpu = options.gpu;
+    const clima = options.clima && options.clima.amplitud > 0 ? options.clima : undefined;
     if (gpu && gpu.length > 0 && gpuNvrtcAvailable()) {
       const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
       this.topologies.length = 0;
+      const climate = clima ? this.climateField(terrain, tick, clima) : undefined;
       const bridge = this.gpuBridge(gpu);
       store.beginParallel();
       let result;
@@ -161,7 +196,7 @@ export class EcosystemKernel {
           capacidadBosque: recursos.capacidadBosque, capacidadPastizal: recursos.capacidadPastizal,
           capacidadOtros: recursos.capacidadOtros, velocidadRegeneracion: recursos.velocidadRegeneracion,
           decaimientoComida: recursos.decaimientoComida,
-        }, options.regionSide ?? 256);
+        }, options.regionSide ?? 256, climate ? { climate } : undefined);
         store.commitParallel('ecologia');
       } catch (error) { store.abortParallel(); this.dropGpuBridge(bridge); throw error; }
       options.onBarrier?.({ tick, phase: 'ecologia', regionSide: options.regionSide ?? 256,
@@ -175,11 +210,13 @@ export class EcosystemKernel {
     let pool = this.pools.get(workers);
     if (!pool) { pool = this.createPool(workers); this.pools.set(workers, pool); }
     this.lastPool = pool; this.topologies.length = 0;
+    const climate = clima ? this.climateField(terrain, tick, clima) : undefined;
     store.beginParallel();
     try {
       const params: ParallelEcologyParams = { phase: 'ecologia', weather,
         light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4, recursos, version: terrain.version };
-      pool.run({ regions: terrain.regions, buffers: terrain.buffers, orden: options.orden, params });
+      const buffers = climate ? { ...terrain.buffers, climate: climate.buffer as SharedArrayBuffer } : terrain.buffers;
+      pool.run({ regions: terrain.regions, buffers, orden: options.orden, params });
       store.commitParallel('ecologia');
     } catch (error) { store.abortParallel(); throw error; }
     options.onBarrier?.({ tick, phase: 'ecologia', regionSide: options.regionSide ?? 256,

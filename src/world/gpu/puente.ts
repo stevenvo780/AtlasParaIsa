@@ -223,7 +223,11 @@ async function handle(job){
   const haloField = job.pass===1 ? 'terrain' : 'life';
   const haloSpec = FIELD_BY_NAME[haloField];
   const haloBytes = (job.haloSlotsPerDevice||[]).reduce((s,l)=>s+l.length*256*haloSpec.bytes,0);
-  const body=Buffer.alloc(job.dirtySlots.length*perPage + (job.pass===2 ? slots : 0) + haloBytes);
+  // V22: campo climático por ranura (3 dobles), solo pasada 1 estacional; va al final del cuerpo.
+  const climate = job.pass===1 && job.climate ? job.climate : null;
+  if(climate && climate.length !== slots*3) throw new Error('GPU climate: longitud distinta de slots*3');
+  const climateBytes = climate ? climate.byteLength : 0;
+  const body=Buffer.alloc(job.dirtySlots.length*perPage + (job.pass===2 ? slots : 0) + haloBytes + climateBytes);
   let off=0;
   // Subida coalescida: por campo y por tramo contiguo de dirtySlots (ordenados).
   const dirtyRuns = runsOf(job.dirtySlots);
@@ -231,7 +235,8 @@ async function handle(job){
   if(job.pass===2){ body.set(bytesOf(buffers,'woodAdded').subarray(0,slots),off); off+=slots; }
   { const src=bytesOf(buffers,haloField); const hb=256*haloSpec.bytes;
     for(const lst of (job.haloSlotsPerDevice||[])){ for(const [s0,c] of runsOf(lst)){ body.set(src.subarray(s0*hb,(s0+c)*hb),off); off+=c*hb; } } }
-  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params}, body);
+  if(climate){ body.set(new Uint8Array(climate.buffer, climate.byteOffset, climate.byteLength), off); off+=climate.byteLength; }
+  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params, climate:!!climate}, body);
   if(!reply.header.ok) throw new Error('GPU step failed');
   uploaded += reply.header.uploadedBytes||0; downloaded += reply.header.downloadedBytes||0;
   // Bajada selectiva coalescida: solo los campos de la pasada, por campo y por tramo.
@@ -727,12 +732,18 @@ export class ResidentGpuBridge {
       || s.slots !== key.slots || s.totalCells !== key.totalCells || s.regionSide !== key.regionSide;
   }
 
-  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
+  /**
+   * `options.climate` (V22, solo `ecologia`): `regionalClimateFactor` por ranura de página
+   * (`slots*3` dobles, calculados en JS); con él se lanza `ecology_pass1_seasonal` en vez de `ecology_pass1`.
+   */
+  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[]; climate?: Float64Array }): GpuRunResult {
     if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
     if (this.broken) throw this.broken;
     const buffers = terrain.buffers;
     const key = this.topologyKey(terrain, pageSetVersion, regionSide);
     const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
+    if (options?.climate && (pass !== 'ecologia' || options.climate.length !== key.slots * 3))
+      throw new RangeError('climate requiere la pasada ecologia y slots*3 dobles.');
     let plan: ReturnType<ResidentGpuBridge['planTopology']> | null = null;
     // Incremental solo si el anfitrión es autoritativo (el último paso bajó todas las páginas propias).
     if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
@@ -752,6 +763,7 @@ export class ResidentGpuBridge {
       this.worker.postMessage({
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, haloSlotsPerDevice,
         downloadSlots, capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
+        climate: options?.climate,
       }, this.transferables(plan?.full, plan?.delta));
     } catch (error) { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; throw error; }
     this.wait('ResidentGpuBridge', 120000);

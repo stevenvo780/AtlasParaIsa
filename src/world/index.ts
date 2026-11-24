@@ -325,9 +325,14 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
   const climateParams = paramsOf(world).ecologia;
-  if (climateParams.amplitudEstacional === 0 && (paramsOf(world).motor.hilos > 1 || (paramsOf(world).motor.gpu.length > 0 && gpuNvrtcAvailable()))) {
+  // V22: la estacionalidad regional también va al pool de hilos y a la GPU. `regionalClimateFactor`
+  // depende solo de la página 16×16 (su centro), así que el kernel lo precalcula una vez por página con
+  // las mismas entradas que `climateFor` de abajo y aplica el mismo orden aritmético (0 ULP).
+  if (paramsOf(world).motor.hilos > 1 || (paramsOf(world).motor.gpu.length > 0 && gpuNvrtcAvailable())) {
     stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,
       { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,
+        ...(climateParams.amplitudEstacional > 0 ? { clima: { seed: world.seed, amplitud: climateParams.amplitudEstacional,
+          periodoDias: climateParams.periodoEstacionalDias, escalaCeldas: climateParams.escalaClimaticaCeldas } } : {}),
         ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) });
     return;
   }

@@ -13,6 +13,14 @@ export interface ParallelEcologyParams {
 }
 
 /**
+ * V22: forzamiento estacional regional precalculado UNA vez por página 16×16 (`regionalClimateFactor`
+ * en el centro `(px*16+8, py*16+8)`, el mismo punto que usa el bucle serie de `ecology()`), en el
+ * buffer compartido `climate` con tres dobles por ranura: `rainScale`, `evapScale`, `growthScale`.
+ * Sin el buffer (amplitud 0) el cuerpo es el de siempre, literal a literal.
+ */
+export const CLIMATE_STRIDE = 3;
+
+/**
  * Primera pasada ecológica sobre los buffers residentes. Cada celda copia primero la foto
  * completa al fondo: la barrera puede intercambiar todos los pares sin perder campos que esta
  * ley no escribe. La única lectura remota es `terrain` de las cuatro vecinas cardinales.
@@ -38,6 +46,7 @@ export function runParallelEcology({ regions, buffers, params }: StaticWorkerHan
   const dirty = new Uint8Array(buffers.dirty!);
   const woodAddedQueue = buffers.woodAddedQueue ? new Int32Array(buffers.woodAddedQueue) : undefined;
   if (woodAddedQueue) Atomics.store(woodAddedQueue, 0, 1);
+  const climate = buffers.climate ? new Float64Array(buffers.climate) : undefined;
 
   const waterAt = (cell: number, dx: number, dy: number): boolean => {
     const slot = cell >>> 8, nx = (cell & 15) + dx, ny = ((cell >> 4) & 15) + dy;
@@ -69,6 +78,27 @@ export function runParallelEcology({ regions, buffers, params }: StaticWorkerHan
       // || waterAt(y - 1) || waterAt(y + 1)` del camino de objetos.
       const nearWater = waterAt(cell, -1, 0) || waterAt(cell, 1, 0)
         || waterAt(cell, 0, -1) || waterAt(cell, 0, 1);
+      if (climate) {
+        // Mismo orden aritmético que la rama `seasonal` del bucle serie de `ecology()` (index.ts).
+        const at = slot * CLIMATE_STRIDE;
+        const rainScale = climate[at]!, evapScale = climate[at + 1]!, growthScale = climate[at + 2]!;
+        const moisture = clamp(moistureFront[cell]! + (weather === 'rain' ? 0.012 * rainScale : 0)
+          + (nearWater ? 0.008 : 0) - (0.0015 + light * 0.001) * evapScale);
+        moistureBack[cell] = moisture;
+        const biome = biomeFront[cell]!;
+        const K = biome === 2 ? capacidadBosque : biome === 1 ? capacidadPastizal : capacidadOtros;
+        const vegetation = vegetationFront[cell]!;
+        const headroom = K > 0 ? 1 - vegetation / K : 0;
+        const growth = velocidadRegeneracion * growthScale * light * moisture * 0.007 * headroom;
+        const nextVegetation = clamp(vegetation + growth - (moisture < 0.15 ? 0.0015 : 0.0001));
+        vegetationBack[cell] = nextVegetation;
+        const food = foodFront[cell]!;
+        const foodHeadroom = K > 0 ? 1 - food / K : 0;
+        foodBack[cell] = clamp(food + velocidadRegeneracion * growthScale * light * moisture * nextVegetation
+          * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
+        dirty[slot] = 1;
+        continue;
+      }
       const moisture = clamp(moistureFront[cell]! + (weather === 'rain' ? 0.012 : 0)
         + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
       moistureBack[cell] = moisture;

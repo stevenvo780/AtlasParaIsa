@@ -334,7 +334,7 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('technology.ts', 'forecastCraft', 'technology.ts:planWithdrawal', 'entrada', ['const plan = planWithdrawal(host, actor, recipe.program);']),
   ll('animals.ts', 'choose', 'animals.ts:localTiles', 'entrada', ['const visible = localTiles(animal, state)']),
   ll('index.ts', 'ecology', 'ecosystem.ts:stepLocalEcology', 'entrada', [
-    'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,\n      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,\n        ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) })'],
+    'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,\n      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,\n        ...(climateParams.amplitudEstacional > 0 ? { clima: { seed: world.seed, amplitud: climateParams.amplitudEstacional,\n          periodoDias: climateParams.periodoEstacionalDias, escalaCeldas: climateParams.escalaClimaticaCeldas } } : {}),\n        ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) })'],
     'T120/T122: despacho paralelo/GPU de la ecología local sobre el mismo pool residente.'),
   ll('ecosystem.ts', 'stepLocalEcology', 'ecosystem.ts:ecosystemKernel', 'entrada', ['ecosystemKernel.stepEcology(tiles, tick, weather, phase, recursos, options)']),
   ll('ecosystem.ts', 'ecosystemKernel', 'ecosystem-kernel.ts:EcosystemKernel', 'entrada', ['new EcosystemKernel()']),

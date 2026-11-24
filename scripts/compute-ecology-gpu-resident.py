@@ -17,6 +17,49 @@ FIELDS = [('moisture',8),('vegetation',8),('food',8),('wood',8),('growth',8),('f
 DOWNLOAD_FIELDS = {1: [('moisture',8),('vegetation',8),('food',8)],
                    2: [(f,e) for f,e in FIELDS if f not in ('food','terrain','biome')],
                    '2_halo': [(f,e) for f,e in FIELDS if f not in ('terrain','biome')]}
+# V22: ecología local con estacionalidad regional. Se compila en la MISMA unidad que el .cu residente
+# (reutiliza `bounded` y `neighborCell`) con las mismas opciones NVRTC (FP64, sin contracción).
+# `climate` = 3 dobles por ranura LOCAL (rainScale, evapScale, growthScale), calculados en JS con
+# `regionalClimateFactor` (seno/coseno de V8: nunca se evalúan aquí). Orden aritmético literal de la
+# rama `seasonal` de `ecology()` en src/world/index.ts y de `runParallelEcology`.
+SEASONAL_SRC = r'''
+extern "C" __global__ void ecology_pass1_seasonal(
+  const int* cells,const unsigned int* stamps,const int* around,
+  const double* moistureF,const double* vegetationF,const double* foodF,const double* woodF,const double* growthF,const double* fertilityF,const double* cultivationF,const double* trafficF,const double* drinkingF,const unsigned char* terrainF,const unsigned char* biomeF,const unsigned char* featureF,const double* lifeF,
+  double* moistureB,double* vegetationB,double* foodB,double* woodB,double* growthB,double* fertilityB,double* cultivationB,double* trafficB,double* drinkingB,unsigned char* terrainB,unsigned char* biomeB,unsigned char* featureB,double* lifeB,
+  int begin,int end,unsigned int version,int rain,double light,double capacidadBosque,double capacidadPastizal,double capacidadOtros,double velocidadRegeneracion,double decaimientoComida,
+  const double* climate){
+  int i=begin+(int)(blockIdx.x*blockDim.x+threadIdx.x);
+  if(i>=end) return;
+  int cell=cells[i];
+  moistureB[cell]=moistureF[cell]; vegetationB[cell]=vegetationF[cell]; foodB[cell]=foodF[cell];
+  woodB[cell]=woodF[cell]; growthB[cell]=growthF[cell]; fertilityB[cell]=fertilityF[cell];
+  cultivationB[cell]=cultivationF[cell]; trafficB[cell]=trafficF[cell]; drinkingB[cell]=drinkingF[cell];
+  lifeB[cell]=lifeF[cell]; terrainB[cell]=terrainF[cell]; biomeB[cell]=biomeF[cell]; featureB[cell]=featureF[cell];
+  if(terrainF[cell]!=1){
+    int present=0; int nearWater=0;
+    int n;
+    n=neighborCell(around,stamps,cell,-1,0,version,&present); if(present && terrainF[n]==1) nearWater=1;
+    if(!nearWater){ n=neighborCell(around,stamps,cell,1,0,version,&present); if(present && terrainF[n]==1) nearWater=1; }
+    if(!nearWater){ n=neighborCell(around,stamps,cell,0,-1,version,&present); if(present && terrainF[n]==1) nearWater=1; }
+    if(!nearWater){ n=neighborCell(around,stamps,cell,0,1,version,&present); if(present && terrainF[n]==1) nearWater=1; }
+    int at=(cell>>8)*3;
+    double rainScale=climate[at]; double evapScale=climate[at+1]; double growthScale=climate[at+2];
+    double moisture=bounded(moistureF[cell] + (rain?0.012*rainScale:0.0) + (nearWater?0.008:0.0) - (0.0015 + light*0.001)*evapScale);
+    moistureB[cell]=moisture;
+    unsigned char biome=biomeF[cell];
+    double K = biome==2?capacidadBosque:(biome==1?capacidadPastizal:capacidadOtros);
+    double vegetation=vegetationF[cell];
+    double headroom = K>0 ? 1 - vegetation/K : 0;
+    double regen = velocidadRegeneracion * growthScale * light * moisture * 0.007 * headroom;
+    double nextVegetation=bounded(vegetation + regen - (moisture<0.15?0.0015:0.0001));
+    vegetationB[cell]=nextVegetation;
+    double food=foodF[cell];
+    double foodHeadroom = K>0 ? 1 - food/K : 0;
+    foodB[cell]=bounded(food + velocidadRegeneracion * growthScale * light * moisture * nextVegetation * 0.006 * foodHeadroom - decaimientoComida);
+  }
+}
+'''
 
 def runs_of(slots_sorted):
     """Agrupa una lista ordenada de slots en tramos contiguos [(start_slot, count_slots), ...]."""
@@ -112,6 +155,7 @@ class Device:
         self.compile_ms=(clock()-cs)*1000
         self.module=p(); checked(self.load(C.byref(self.module),ptx))
         self.k1=p(); checked(self.function(C.byref(self.k1),self.module,b'ecology_pass1'))
+        self.k1s=p(); checked(self.function(C.byref(self.k1s),self.module,b'ecology_pass1_seasonal'))
         self.k2=p(); checked(self.function(C.byref(self.k2),self.module,b'ecology_pass2'))
         self.kcopy=p(); checked(self.function(C.byref(self.kcopy),self.module,b'copy_front_to_back'))
         self.index=index; self.ptrs={}; self.slots=0; self.local_cap=0; self.cells_cap=0; self.n_cells=0
@@ -311,6 +355,20 @@ class Device:
                 nbytes=count*256*esz
                 self._up(self.ptrs[halo_field+'F'], body_addr+halo_offset+src_idx*256*esz, nbytes, dst_slot*256*esz)
                 uploaded+=nbytes
+        climate_global = req.pop('_climate', None) if req['pass']==1 else None
+        if climate_global is not None:
+            # Global -> local: en modo replicado la ranura local ES la global; en modo repartido se
+            # copian (bit a bit, sin aritmética) las filas de las ranuras residentes vía `l2g`.
+            if self.identity:
+                climate_local = climate_global
+            else:
+                climate_local = np.zeros(self.local_cap*3, dtype=np.float64)
+                valid = np.nonzero(self.l2g >= 0)[0]
+                if valid.size: climate_local.reshape(-1,3)[valid] = climate_global.reshape(-1,3)[self.l2g[valid]]
+            climate_local = np.ascontiguousarray(climate_local, dtype=np.float64)
+            if climate_local.size != self.local_cap*3: raise ValueError('climate: tamaño local inesperado')
+            if 'climate' not in self.ptrs: self._alloc('climate', self.local_cap*3*8)
+            self._up(self.ptrs['climate'], climate_local.ctypes.data, climate_local.nbytes); uploaded+=climate_local.nbytes
         k_begin, k_end = 0, self.n_cells
         p = req['params']
         # Build kernel args (presencia 1/0 en VRAM: version=1).
@@ -320,6 +378,8 @@ class Device:
         if req['pass']==1:
             vals = topo + front + back + [C.c_int(k_begin),C.c_int(k_end),C.c_uint(1),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['capacidadBosque']),C.c_double(p['capacidadPastizal']),C.c_double(p['capacidadOtros']),C.c_double(p['velocidadRegeneracion']),C.c_double(p['decaimientoComida'])]
             kern=self.k1
+            if climate_global is not None:
+                vals = vals + [self.ptrs['climate']]; kern=self.k1s
         else:
             vals = topo + [self.ptrs['pageX'],self.ptrs['pageY'],self.ptrs['woodAdded']] + front + back + [C.c_int(k_begin),C.c_int(k_end),C.c_int(p['tick']),C.c_uint(1),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['decaimientoFertilidad']),C.c_uint(p['seed']),C.c_double(p['cuencas'])]
             kern=self.k2
@@ -503,7 +563,7 @@ def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--devices',required=True); ap.add_argument('--nvrtc',required=True); a=ap.parse_args()
     indices=[int(x) for x in a.devices.split(',') if x!='']
     if not indices or any(x<0 for x in indices) or len(set(indices))!=len(indices): raise ValueError('Invalid devices')
-    source=pathlib.Path(__file__).with_name('compute-ecology-resident.cu').read_text()
+    source=pathlib.Path(__file__).with_name('compute-ecology-resident.cu').read_text() + SEASONAL_SRC
     devices=[]
     global SHM
     try:
@@ -512,7 +572,7 @@ def main():
         SHM = None
     try:
         for idx in indices: devices.append(Device(idx,a.nvrtc,source))
-        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
+        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass1_seasonal','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
         cached_halo_per = None
         cached_halo_plan = None
         def release_body(b):
@@ -590,6 +650,12 @@ def main():
                     if halo_field:
                         esz=dict(FIELDS)[halo_field]
                         for lst in halo_per: halo_offsets.append(hoff); hoff+=len(lst)*256*esz
+                    climate_arr=None
+                    if req.get('climate'):
+                        if req['pass']!=1: raise ValueError('climate solo en la pasada 1')
+                        n_climate=devices[0].slots*3
+                        if hoff + n_climate*8 > body_np.nbytes: raise ValueError('climate: cuerpo corto')
+                        climate_arr=np.frombuffer(body_np,dtype=np.float64,count=n_climate,offset=hoff).copy()
                     # DMA directa al mmap /dev/shm: cada dispositivo descarga en su tramo del
                     # buffer compartido y la respuesta no vuelve a copiarse staging->shm.
                     req_dl_slots = req.get('downloadSlots')
@@ -611,7 +677,7 @@ def main():
                     # Multi-GPU: cada dispositivo en su hilo (contexto propio); nunca secuencial.
                     def run_one(di_d):
                         di,d = di_d
-                        r=dict(req); r['_wood_arr']=wood_arr
+                        r=dict(req); r['_wood_arr']=wood_arr; r['_climate']=climate_arr
                         halo=(halo_per[di], halo_field, halo_offsets[di]) if halo_field and di < len(halo_per) else None
                         return d.step(r,body_addr,dirty,halo, staging_slices[di] if staging_slices is not None else None)
                     futs=[ex.submit(run_one,(di,d)) for di,d in enumerate(devices)]

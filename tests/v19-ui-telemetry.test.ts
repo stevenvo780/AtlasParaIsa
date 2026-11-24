@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { AnimalView, CommunityView, PersonView, WorldStats, WorldView } from '../src/shared/types.js';
+import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../src/shared/types.js';
 import { activitySplit, communitySummary, cropCounts, cropStage, pulseHealth, renderAnimalTelemetry, renderCommunityTelemetry, renderLandTelemetry, renderLifeTelemetry, renderPersonTelemetry, renderTelemetry, renderTileTelemetry, structureRollup, telemetryKpis, viewportCensus, viewportCensusText, type StructureTelemetry } from '../src/client/telemetry-hud.js';
 import { worldShell } from '../src/client/world-shell.js';
 
@@ -31,7 +31,7 @@ function animalFixture(): AnimalView {
   return { id: 'wolf-1', species: 'wolf', x: 0, y: 0, action: 'hunt', reason: '', hunger: .1, thirst: .2, energy: .8, fatigue: .2, health: .9, generation: 3, age: 1234, parents: ['a', '<b>'],
     genes: { speed: .7, perception: .6, metabolism: .5, carnivory: .9, waterEfficiency: .4, camouflage: .3 } };
 }
-function structureFixture(): StructureTelemetry {
+function structureFixture(): StructureView {
   return { id: 's', x: 0, y: 0, blueprintId: 'b', name: 'Granero', components: ['granary'], condition: .8, water: 2, food: 7, uses: 4, builtAt: 0, builderId: null };
 }
 
@@ -105,10 +105,16 @@ test('crop stages and camera census reflect the received view without using glob
 test('structure rollups accept absent and optional V19 fields and prefer storedFood over legacy food', () => {
   const base = structureFixture();
   assert.deepEqual(structureRollup([base]), { total: 1, food: 7, wood: undefined, stone: undefined, sites: undefined, installed: undefined, multiTile: undefined, footprintTiles: undefined });
-  const extra: StructureTelemetry = { ...base, storedFood: 11, storedWood: 3, storedStone: 2, site: { progress: .4 }, installed: ['cistern', 'roof'], footprint: [{ x: 0, y: 0 }, { x: 1, y: 0 }] };
+  const extra: StructureView = { ...base, food: 11, storedWood: 3, storedStone: 2,
+    site: { requiredWood: 6, requiredStone: 4, depositedWood: 3, depositedStone: 2, requiredWork: 10, completedWork: 4 },
+    installed: [
+      { id: 'i1', recipeId: null, mass: 1, containment: 1, insulation: 0, cohesion: 1, binding: 0, condition: 1 },
+      { id: 'i2', recipeId: null, mass: 1, containment: 0, insulation: 1, cohesion: 1, binding: 0, condition: 1 },
+    ],
+    footprint: { width: 2, height: 1 } };
   assert.deepEqual(structureRollup([base, extra]), { total: 2, food: 18, wood: 3, stone: 2, sites: 1, installed: 2, multiTile: 1, footprintTiles: 3 });
-  assert.equal(structureRollup([{ ...extra, site: { progress: 1 } }]).sites, 0);
-  assert.equal(structureRollup([{ ...extra, storedFood: 0 }]).food, 0);
+  assert.equal(structureRollup([{ ...extra, site: { progress: 1 } } as StructureTelemetry]).sites, 0);
+  assert.equal(structureRollup([{ ...extra, storedFood: 0 } as StructureTelemetry]).food, 0);
   const world = worldFixture(); world.structures = [extra];
   assert.match(renderLandTelemetry(world), /Alimento almacenado<strong>11/);
   assert.match(renderLandTelemetry(world), /Tecnología instalada<strong>2/);

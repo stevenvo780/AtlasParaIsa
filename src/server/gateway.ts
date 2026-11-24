@@ -119,7 +119,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     const visible = (p: { x: number; y: number }, margin = 0) => p.x >= v.x - margin && p.y >= v.y - margin
       && p.x < v.x + v.width + margin && p.y < v.y + v.height + margin;
     const people = source.people.filter(p => visible(p, 1)), visibleIds = new Set(people.map(p => p.id));
-    const structures = [...source.structures ?? [], ...[...chunks.values()].flatMap(c => c.structures ?? legacyStructures(c.tiles, c.lastTick))].filter(s => visible(s));
+    const structures = [...source.structures ?? [], ...[...chunks.values()].flatMap(c => c.structures ?? legacyStructures(c.tiles, c.lastTick))].filter(s => visible(s, 1));
     const blueprintIds = new Set(structures.map(s => s.blueprintId));
     return { ...source, width: v.width, height: v.height, originX: v.x, originY: v.y, tiles, people,
       places: [...places.values()].filter(p => visible(p)),

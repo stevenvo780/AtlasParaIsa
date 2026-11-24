@@ -5,6 +5,7 @@ export interface AnimalView {
   id: string; species: AnimalSpecies; x: number; y: number; action: AnimalAction; reason: string;
   hunger: number; thirst: number; energy: number; fatigue: number; health: number;
   generation: number; parents: string[]; genes: AnimalGenes; age: number;
+  reproReserve?: number;
 }
 export interface AnimalDynamics { births: number; deaths: number; predations: number; humanHunts: number; waterConsumed: number; plantConsumed: number; }
 export type StructureComponent = 'frame' | 'roof' | 'cistern' | 'granary' | 'garden' | 'hearth';

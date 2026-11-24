@@ -115,22 +115,38 @@ export function renderLifeTelemetry(stats: WorldStats): string {
     ]), `Diversidad: población viva. Recursos: regiones activas. Medición: ${stats.statsTick === undefined ? 'paso no informado' : `paso ${number(stats.statsTick)}`}.`);
 }
 
-/** V19 fields can arrive before shared projection typings are upgraded. Absent is unknown. */
-export type StructureTelemetry = StructureView & {
+/** V19 fields can arrive as {width,height} or cell arrays; absent is unknown. */
+export type StructureTelemetry = Omit<StructureView, 'footprint' | 'site' | 'installed'> & {
   storedFood?: number; storedWood?: number; storedStone?: number;
-  site?: { progress?: number; requiredWork?: number } | boolean | null;
+  site?: StructureView['site'] | { progress?: number; requiredWork?: number; completedWork?: number } | boolean | null;
   installed?: readonly unknown[];
-  footprint?: readonly { x: number; y: number }[];
+  footprint?: { width: number; height: number } | readonly { x: number; y: number }[];
 };
+function footprintArea(fp: StructureTelemetry['footprint']): number {
+  if (!fp) return 1;
+  if ('width' in fp) return Math.max(1, (fp.width || 1) * (fp.height || 1));
+  return fp.length || 1;
+}
+function isSitePending(site: StructureTelemetry['site']): boolean {
+  if (!site) return false;
+  if (typeof site === 'boolean') return site;
+  if ('completedWork' in site && typeof site.completedWork === 'number') {
+    const reqWork = site.requiredWork ?? 1;
+    const reqWood = 'requiredWood' in site ? site.requiredWood : 0, depWood = 'depositedWood' in site ? site.depositedWood : reqWood;
+    const reqStone = 'requiredStone' in site ? site.requiredStone : 0, depStone = 'depositedStone' in site ? site.depositedStone : reqStone;
+    return site.completedWork < reqWork || depWood < reqWood || depStone < reqStone;
+  }
+  return ('progress' in site ? (site.progress ?? 0) : 0) < (site.requiredWork ?? 1);
+}
 export function structureRollup(structures?: readonly StructureTelemetry[]) {
   const values = structures ?? [];
   const optionalSum = (key: 'storedWood' | 'storedStone') => values.some(s => finite(s[key])) ? sum(values.map(s => s[key] ?? 0)) : undefined;
   return { total: structures?.length, food: structures ? sum(values.map(s => s.storedFood ?? s.food)) : undefined,
     wood: optionalSum('storedWood'), stone: optionalSum('storedStone'),
-    sites: values.some(s => s.site !== undefined) ? values.filter(s => s.site && (typeof s.site === 'boolean' || (s.site.progress ?? 0) < (s.site.requiredWork ?? 1))).length : undefined,
+    sites: values.some(s => s.site !== undefined) ? values.filter(s => isSitePending(s.site)).length : undefined,
     installed: values.some(s => s.installed !== undefined) ? sum(values.map(s => s.installed?.length ?? 0)) : undefined,
-    multiTile: values.some(s => s.footprint !== undefined) ? values.filter(s => (s.footprint?.length ?? 0) > 1).length : undefined,
-    footprintTiles: values.some(s => s.footprint !== undefined) ? sum(values.map(s => s.footprint?.length ?? 1)) : undefined };
+    multiTile: values.some(s => s.footprint !== undefined) ? values.filter(s => footprintArea(s.footprint) > 1).length : undefined,
+    footprintTiles: values.some(s => s.footprint !== undefined) ? sum(values.map(s => footprintArea(s.footprint))) : undefined };
 }
 export function renderLandTelemetry(world: WorldView): string {
   const stages = cropCounts(world.tiles);
@@ -171,11 +187,12 @@ export function renderPersonTelemetry(p: PersonView): string {
   ])) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
 }
 export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve?: number }): string {
+  const reserve = animal.reproReserve ?? animal.reproductiveReserve;
   return section('Genética y estado', facts([
     ['Velocidad', number(animal.genes.speed, 2)], ['Percepción', number(animal.genes.perception, 2)], ['Metabolismo', number(animal.genes.metabolism, 2)],
     ['Carnivoría', number(animal.genes.carnivory, 2)], ['Agua · eficiencia', number(animal.genes.waterEfficiency, 2)], ['Camuflaje', number(animal.genes.camouflage, 2)],
     ['Edad', `${number(animal.age)} pasos`], ['Generación', `G${number(animal.generation)}`], ['Progenitores', animal.parents.length ? animal.parents.join(' · ') : 'Primera generación registrada'],
-    ...(animal.reproductiveReserve === undefined ? [] : [['Reserva reproductiva', number(animal.reproductiveReserve, 2)] as [string, string]]),
+    ...(reserve === undefined ? [] : [['Reserva reproductiva', number(reserve, 3)] as [string, string]]),
   ]));
 }
 export function renderTileTelemetry(tile: WorldView['tiles'][number]): string {

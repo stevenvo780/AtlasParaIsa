@@ -1015,7 +1015,8 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
 export function projectAnimal(animal: Animal, _tick: number): AnimalView {
   return { id: animal.id, species: animal.species, x: animal.x, y: animal.y, action: animal.action, reason: animal.reason,
     hunger: animal.hunger, thirst: animal.thirst, energy: animal.energy, fatigue: animal.fatigue, health: animal.health,
-    generation: animal.generation, parents: [...animal.parents], genes: { ...animal.genes }, age: animal.age };
+    generation: animal.generation, parents: [...animal.parents], genes: { ...animal.genes }, age: animal.age,
+    ...(animal.reproReserve === undefined ? {} : { reproReserve: Math.round(animal.reproReserve * 1000) / 1000 }) };
 }
 export function assertAnimal(value: unknown, tick: number): asserts value is Animal {
   const fail = (): never => { throw new Error('Animal individual inválido.'); };

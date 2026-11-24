@@ -10,10 +10,11 @@ import type { StructureView } from '../shared/life.js';
 import { hash3 } from './terrain-field.js';
 
 export interface FootprintCell { x: number; y: number }
+export interface FootprintSize { width: number; height: number }
 export interface ConstructionSite { requiredWood: number; requiredStone: number; depositedWood: number; depositedStone: number; requiredWork: number; completedWork: number }
 export interface InstalledPart { id: string; recipeId: string | null; mass: number; containment: number; insulation: number; cohesion: number; binding: number; condition: number }
-export type ExtendedStructure = StructureView & {
-  footprint?: readonly FootprintCell[]; site?: ConstructionSite; installed?: readonly InstalledPart[]; storedWood?: number; storedStone?: number;
+export type ExtendedStructure = Omit<StructureView, 'footprint'> & {
+  footprint?: FootprintSize | readonly FootprintCell[]; site?: ConstructionSite; installed?: readonly InstalledPart[]; storedWood?: number; storedStone?: number;
 };
 
 const ART = 16;
@@ -22,7 +23,13 @@ const ratio = (done: number, required: number): number => required > 0 ? clamp01
 
 /** Caja de teselas que ocupa la estructura (1×1 si el servidor no manda planta). */
 export function footprintBox(s: ExtendedStructure): { x0: number; y0: number; w: number; h: number } {
-  const cells = s.footprint?.filter(c => Number.isFinite(c.x) && Number.isFinite(c.y));
+  const fp = s.footprint;
+  if (fp && 'width' in fp) {
+    const w = Number.isFinite(fp.width) && fp.width >= 1 ? Math.floor(fp.width) : 1;
+    const h = Number.isFinite(fp.height) && fp.height >= 1 ? Math.floor(fp.height) : 1;
+    return { x0: s.x, y0: s.y, w, h };
+  }
+  const cells = fp ? fp.filter(c => Number.isFinite(c.x) && Number.isFinite(c.y)) : undefined;
   if (!cells?.length) return { x0: s.x, y0: s.y, w: 1, h: 1 };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const c of cells) { x0 = Math.min(x0, c.x); y0 = Math.min(y0, c.y); x1 = Math.max(x1, c.x); y1 = Math.max(y1, c.y); }
@@ -31,13 +38,20 @@ export function footprintBox(s: ExtendedStructure): { x0: number; y0: number; w:
 
 /** «2×1», «2×2»…; vacío sin planta. */
 export function footprintLabel(s: ExtendedStructure): string {
-  if (!s.footprint?.length) return '';
+  const fp = s.footprint;
+  if (!fp || (!('width' in fp) && !fp.length)) return '';
   const box = footprintBox(s);
   return `${box.w}×${box.h}`;
 }
 
 /** Casillas que ocupa, para que nada más (p. ej. una choza de terreno) se dibuje debajo. */
-export function footprintCells(s: ExtendedStructure): readonly FootprintCell[] { return s.footprint?.length ? s.footprint : [{ x: s.x, y: s.y }]; }
+export function footprintCells(s: ExtendedStructure): readonly FootprintCell[] {
+  const fp = s.footprint;
+  if (fp && !('width' in fp)) return fp.length ? fp : [{ x: s.x, y: s.y }];
+  const box = footprintBox(s), out: FootprintCell[] = [];
+  for (let dy = 0; dy < box.h; dy++) for (let dx = 0; dx < box.w; dx++) out.push({ x: box.x0 + dx, y: box.y0 + dy });
+  return out;
+}
 
 export type StructureTier = 'hut' | 'hall' | 'grand';
 /** Salón mediano (2×1 o 3–4 marcos) y recinto grande (2×2 o ≥ 5 marcos); la planta real manda sobre los marcos. */

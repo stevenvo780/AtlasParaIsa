@@ -13,6 +13,9 @@ import { containerAffordance } from './material-affordances.js';
 import { firstTileAt } from './tile-index.js';
 import { boundParamsOf, HISTORICAL_PARAMS, type WorldParams } from './params.js';
 import { isGenuineFunctionalNovelty } from './tecnologia-complejidad.js';
+import type { World } from './index.js';
+import { BROKEN_CONDITION, storedMaterialsNear, withdrawMaterials, structureDistance } from './inventions.js';
+import { filtrarCerca } from './indice-puntos.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -51,6 +54,23 @@ const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => M
  * los `TechnologyHost` sintéticos sin registro usan siempre los valores históricos. */
 function techParams(host: TechnologyHost): WorldParams['tecnologia'] {
   return boundParamsOf(host)?.tecnologia ?? HISTORICAL_PARAMS.tecnologia;
+}
+function synergyWorld(host: TechnologyHost): World | undefined {
+  return boundParamsOf(host)?.construccion.poliminosYSinergia && host.structures && host.tiles && 'blueprints' in host ? host as World : undefined;
+}
+/** Physical workshop contact only; never chains a second neighbour search from a decision. */
+export function workshopWorkFactor(host: TechnologyHost, actor: TechnologyActor): number {
+  const world = synergyWorld(host);
+  if (!world) return 1;
+  const workshops = filtrarCerca(world.structures, actor, 5, s => (!s.site || !!s.site.expansion) && s.condition > BROKEN_CONDITION
+    && structureDistance(actor, s) <= 1.5 && (s.synergy?.workshopBonus ?? 0) > 0);
+  return 1 - Math.min(0.30, Math.max(0, ...workshops.map(s => s.synergy!.workshopBonus)));
+}
+function availableRawMaterials(host: TechnologyHost, actor: TechnologyActor): TechnologyActor['materials'] {
+  const world = synergyWorld(host);
+  if (!world) return actor.materials;
+  const stored = storedMaterialsNear(world, actor);
+  return { wood: actor.materials.wood + stored.wood, stone: actor.materials.stone + stored.stone };
 }
 /** `host.people.includes(x)` on the decision path (T141 inventory: `technology.ts:584,605`): a cache
  * keyed by the array itself, invalidated by length, like `tile-index.ts` and `rejilla.ts`. Exact
@@ -248,7 +268,8 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
   const fuelNeeded = fuelCost(program), availableScrap = Math.max(0, actor.technology.residue.wood - residue.wood);
   const scrapFuel = Math.min(fuelNeeded, availableScrap); residue.wood += scrapFuel; fuel.wood = fuelNeeded;
   imported.wood += fuelNeeded - scrapFuel;
-  if (actor.materials.wood * MASS_UNIT + 1e-8 < imported.wood || actor.materials.stone * MASS_UNIT + 1e-8 < imported.stone || MATERIALS.some(m => actor.technology.residue[m] < residue[m])) return;
+  const available = availableRawMaterials(host, actor);
+  if (available.wood * MASS_UNIT + 1e-8 < imported.wood || available.stone * MASS_UNIT + 1e-8 < imported.stone || MATERIALS.some(m => actor.technology.residue[m] < residue[m])) return;
   const waterTile = imported.water ? (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined) : undefined;
   // Drinking stock uses fifty mass units per normalized water unit; only the occupied tile is observable.
   if (imported.water && (waterTile?.drinkingWater ?? 0) * 50_000 + 1e-8 < imported.water) return;
@@ -259,6 +280,14 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
   return { inputs, imported, fuel, fuelInputs, itemMasses, itemCompositions, residue, waterTile };
 }
 function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal): void {
+  const world = synergyWorld(host);
+  if (world) {
+    const stock = withdrawMaterials(world, actor, {
+      wood: Math.max(0, Math.ceil(plan.imported.wood / MASS_UNIT - actor.materials.wood - 1e-8)),
+      stone: Math.max(0, Math.ceil(plan.imported.stone / MASS_UNIT - actor.materials.stone - 1e-8)),
+    });
+    actor.materials.wood += stock.wood; actor.materials.stone += stock.stone;
+  }
   actor.materials.wood = Math.max(0, actor.materials.wood - plan.imported.wood / MASS_UNIT);
   actor.materials.stone = Math.max(0, actor.materials.stone - plan.imported.stone / MASS_UNIT);
   if (plan.waterTile) plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000);
@@ -412,7 +441,8 @@ function nextInstruction(random: () => number, evitarNoOp: boolean, priorSteps: 
 }
 function localInputs(host: TechnologyHost, actor: TechnologyActor): MaterialRequirement[] {
   const result: MaterialRequirement[] = [], { dosisCuanto } = techParams(host);
-  for (const material of ['wood', 'stone'] as const) if (actor.materials[material] >= 1) result.push({ source: 'raw', material, mass: MASS_UNIT });
+  const availableRaw = availableRawMaterials(host, actor);
+  for (const material of ['wood', 'stone'] as const) if (availableRaw[material] >= 1) result.push({ source: 'raw', material, mass: MASS_UNIT });
   const minResidue = dosisCuanto > 0 ? Math.max(150, dosisCuanto) : 150;
   for (const material of MATERIALS) {
     const available = actor.technology.residue[material];
@@ -764,7 +794,10 @@ function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: Tech
   const practice = project.recipeId ? knowledge.competence[project.recipeId] : undefined;
   const energy = 0.00045 * (1 - (actor.skills.technology ?? 0) * 0.2 - Math.min(1, (practice?.successes ?? 0) / 10) * 0.1);
   actor.energy = clamp(actor.energy - energy); actor.fatigue = clamp(actor.fatigue + 0.00032);
-  project.progress++; project.energyPaid += energy; host.technology.ledger.work++; host.technology.ledger.energy += energy;
+  const factor = workshopWorkFactor(host, actor);
+  if (synergyWorld(host)) project.requiredWork = Math.ceil(technologyWorkCost(project.program) * factor);
+  project.progress++;
+  project.energyPaid += energy; host.technology.ledger.work++; host.technology.ledger.energy += energy;
   return project.progress >= project.requiredWork ? finishProject(host, actor, project, emit) : false;
 }
 export function researchTechnology(host: TechnologyHost, actor: TechnologyActor, emit?: Emit): boolean { return advanceProject(host, actor, 'research', undefined, emit); }
@@ -1011,7 +1044,10 @@ export function assertTechnology(host: TechnologyHost): void {
       add(current, item.composition); itemIds.add(item.id);
     }
     const project = knowledge.project;
-    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.length > 6 || new Set(project.parents).size !== project.parents.length || project.parents.some(id => !getRecipe(id, project.startedAt)) || (project.kind === 'research' && (project.recipeId !== null || project.parents.some(id => !knowledge.knownRecipes.includes(id)) || project.program.inputs.some(input => input.source === 'product' && !project.parents.includes(input.recipeId!)))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || getRecipe(project.recipeId!, project.startedAt)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(getRecipe(project.recipeId!, project.startedAt)?.parents))))) fail();
+    const validWork = (p: TechnologyProject) => synergyWorld(host)
+      ? integer(p.requiredWork, technologyWorkCost(p.program)) && p.requiredWork >= Math.ceil(technologyWorkCost(p.program) * 0.70)
+      : p.requiredWork === technologyWorkCost(p.program);
+    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || !validWork(project) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.length > 6 || new Set(project.parents).size !== project.parents.length || project.parents.some(id => !getRecipe(id, project.startedAt)) || (project.kind === 'research' && (project.recipeId !== null || project.parents.some(id => !knowledge.knownRecipes.includes(id)) || project.program.inputs.some(input => input.source === 'product' && !project.parents.includes(input.recipeId!)))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || getRecipe(project.recipeId!, project.startedAt)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(getRecipe(project.recipeId!, project.startedAt)?.parents))))) fail();
   }
   // Exported fixed assets remain reserved identities and must be a subset of the
   // explicit external-stock ledger, including dormant chunks and dead installers.

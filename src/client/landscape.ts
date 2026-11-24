@@ -21,6 +21,7 @@ import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
 import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from './crop-art.js';
+import { paintGeologyVeins, paintRoadTile } from './road-geology-art.js';
 import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure } from './structure-art.js';
 import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
@@ -388,6 +389,8 @@ export class Landscape {
   private bodyCutaways = 0;
   private drawCalls = 0;
   private sceneRevision = 0;
+  /** V20: semilla del mundo para la geología latente (veta de hierro/cal/sal) horneada en el suelo. */
+  private worldSeed: number | undefined;
   private sceneKey = '';
   private ambientKey = '';
   private eventAccents: EventAccent[] = [];
@@ -595,6 +598,7 @@ export class Landscape {
     if (this.curr && world.tick < this.curr.tick) this.eventAccents = [];
     this.eventAccents = [...this.eventAccents.filter(event => now - event.bornAt < EVENT_LIFETIME_MS), ...newAccents].slice(-VISUAL_BUDGET.events);
     this.curr = world;
+    this.worldSeed = world.seed;
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
     this.carriedProducts.clear();
@@ -864,6 +868,7 @@ export class Landscape {
 
   private chunkSignature(startX: number, startY: number): number {
     let h = 2166136261;
+    if (this.worldSeed !== undefined) h = Math.imul(h ^ (this.worldSeed | 0), 16777619) >>> 0; // otra semilla = otras vetas
     // Include the one-cell border: a neighbouring coastline change invalidates both chunks.
     for (let y = startY - 1; y <= startY + CHUNK_ART_TILES; y++) for (let x = startX - 1; x <= startX + CHUNK_ART_TILES; x++) {
       const t = this.tileAt(x, y);
@@ -885,7 +890,8 @@ export class Landscape {
         | ((t.life ?? 0) > .45 ? 64 : 0) | (t.vegetation > .25 ? 128 : 0)
         | (t.food > .3 ? 256 : 0) | (t.food > .72 ? 512 : 0)
         | ((t.wood ?? 0) > 0 ? 1024 : 0) | ((t.wood ?? 0) > .05 ? 2048 : 0)
-        | (gEff > .55 && t.moisture > .35 ? 4096 : 0);
+        | (gEff > .55 && t.moisture > .35 ? 4096 : 0)
+        | ((t.traffic ?? 0) >= .25 ? 8192 : 0) | ((t.paved ?? 0) >= .5 ? 16384 : 0) | ((t.paved ?? 0) > 0 ? 32768 : 0);
       h = Math.imul(h ^ flags, 16777619) >>> 0;
       const stock = (Math.round((t.wood ?? 0) * 2) & 0xff) | ((Math.round((t.stone ?? 0) * 2) & 0xff) << 8)
         | (((t.variety ?? 0) & 0xff) << 16) | ((t.elevation !== undefined ? Math.round(t.elevation * 32) & 0xff : 0) << 24);
@@ -920,7 +926,7 @@ export class Landscape {
           }
           for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
             const tile = this.tileAt(x, y);
-            if (tile) this.bakeFeatures(g, tile);
+            if (tile) { this.bakeV20Ground(g, tile); this.bakeFeatures(g, tile); }
           }
           g.restore();
           if (chunk) { chunk.signature = signature; chunk.revision = ++this.cacheBuilds; }
@@ -1043,6 +1049,12 @@ export class Landscape {
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
     g.drawImage(this.groundStamp, ox, oy);
+  }
+
+  /** V20: vetas minerales y caminos (senda/calzada) sobre el suelo; se hornean con el trozo, cero coste por fotograma. */
+  private bakeV20Ground(g: CanvasRenderingContext2D, tile: Tile): void {
+    paintGeologyVeins(g, tile, this.worldSeed);
+    paintRoadTile(g, tile, { n: this.tileAt(tile.x, tile.y - 1), e: this.tileAt(tile.x + 1, tile.y), s: this.tileAt(tile.x, tile.y + 1), w: this.tileAt(tile.x - 1, tile.y) });
   }
 
   private isCropAt(x: number, y: number): boolean { const t = this.tileAt(x, y); return t !== undefined && cropStage(t) !== null; }
@@ -1572,7 +1584,7 @@ export class Landscape {
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
     }
     const inspectedAnimal = selectedBody ? animals.find(a=>a.view.id===selectedBody) : undefined;
-    const inspectedStructures = selectedTile ? (world.structures ?? []).filter(s => s.x === selectedTile.x && s.y === selectedTile.y) : [];
+    const inspectedStructures = selectedTile ? (world.structures ?? []).filter(s => footprintCells(s as ExtendedStructure).some(c => c.x === selectedTile.x && c.y === selectedTile.y)) : [];
     const siteTile = selectedTile ? this.tileAt(selectedTile.x, selectedTile.y) : undefined;
     const inspectedWater = siteTile && !inspectedStructures.length && (siteTile.terrain === 'water'
       || (siteTile.drinkingWater ?? 0) > 0 && (siteTile.feature === 'pool' || siteTile.feature === 'spring')) ? siteTile : undefined;
@@ -1764,7 +1776,7 @@ export class Landscape {
     if (isModular(ext)) { paintModularHall(g, ext, t, animate); this.drawCalls++; return; }
     const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
-    paintCompactAccessories(g, ext);
+    paintCompactAccessories(g, ext, t, animate);
     const previous = this.prev?.structures?.find(s => s.id === structure.id);
     if (!this.reduceMotion && this.actionActive && this.curr?.weather === 'rain' && previous && structure.water > previous.water
       && structure.components.includes('cistern') && this.effects.water < VISUAL_BUDGET.water) {

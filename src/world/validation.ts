@@ -2,11 +2,14 @@ import type { Tile } from '../shared/types.js';
 import type { World } from './index.js';
 import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
+import { ELEMENTS } from '../shared/chemistry.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
-import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells } from './inventions.js';
+import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells, polyominoCost } from './inventions.js';
+import { chunkKey } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
+  if (tile.paved !== undefined && (typeof tile.paved !== 'number' || !Number.isFinite(tile.paved) || tile.paved < 0 || tile.paved > 1)) fail();
   if ((required || tile.feature !== undefined) && !['tree','pine','palm','cactus','reeds','berries','flowers','rock','clay','stump','spring','pool','none'].includes(String(tile.feature))) fail();
   if ((required || tile.variety !== undefined) && (!Number.isInteger(tile.variety) || tile.variety! < 0 || tile.variety! > 3)) fail();
   for (const key of ['growth','fertility','cultivation','traffic','drinkingWater','life'] as const) {
@@ -48,30 +51,74 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
       capacity.waterCapacity*=1+containment;capacity.foodCapacity*=1+containment;
     }
     if(s.water>capacity.waterCapacity||s.food>capacity.foodCapacity)fail();
-    const checkFootprint=(components:StructureView['components'],footprint:StructureView['footprint'])=>{
+    if(s.synergy!==undefined){
+      const v=s.synergy;
+      if(!object(v)||!integer(v.sharedEdges,24)||typeof v.heated!=='boolean'||typeof v.irrigated!=='boolean'
+        ||!number(v.workshopBonus,0.30)||(v.kilnTier!==undefined&&![0,1,2].includes(v.kilnTier))
+        ||Object.keys(v).some(k=>!['sharedEdges','heated','irrigated','workshopBonus','kilnTier'].includes(k)))fail();
+    }
+    if(s.materialProfile!==undefined){
+      const p=s.materialProfile;
+      if(!object(p)||Object.keys(p).length!==4||![p.strength,p.insulation,p.seal].every(v=>number(v))
+        ||typeof p.tint!=='string'||!/^#[0-9a-f]{6}$/i.test(p.tint))fail();
+    }
+    if(s.storedCompounds!==undefined){
+      if(!Array.isArray(s.storedCompounds))fail();
+      const lots=new Set<string>();
+      for(const lot of s.storedCompounds){
+        if(!object(lot)||!string(lot.id,100)||lots.has(lot.id)||!string(lot.formulaId,100)||!number(lot.mass,Number.MAX_VALUE)
+          ||!object(lot.composition)||Object.keys(lot.composition).length!==6||!ELEMENTS.every(e=>number(lot.composition[e],Number.MAX_VALUE))
+          ||!['raw','ground','washed','fired','smelted','vitrified'].includes(lot.phase)||!object(lot.properties)
+          ||!['hardness','toughness','seal','insulation','fuelPower'].every(k=>number((lot.properties as unknown as Record<string,unknown>)[k]))
+          ||typeof lot.properties.colorHex!=='string'||!/^#[0-9a-f]{6}$/i.test(lot.properties.colorHex))fail();
+        lots.add(lot.id);
+      }
+    }
+    const checkFootprint=(components:StructureView['components'],footprint:StructureView['footprint'],cells?:StructureView['cells'])=>{
       const frames=components.filter(c=>c==='frame').length;
       if(footprint!==undefined&&(!object(footprint)||Object.keys(footprint).length!==2||![1,2].includes(footprint.width)||![1,2].includes(footprint.height)))fail();
+      if(cells!==undefined){
+        if(!Array.isArray(cells)||cells.length<1||cells.length>6)fail();
+        const keys=new Set<string>();
+        for(const c of cells){
+          if(!object(c)||Object.keys(c).length!==2||!coordinate(c.x)||!coordinate(c.y)||chunkKey(c.x,c.y)!==chunkKey(s.x,s.y)||keys.has(`${c.x},${c.y}`))fail();
+          keys.add(`${c.x},${c.y}`);
+        }
+        if(!keys.has(`${s.x},${s.y}`))fail();
+        const reached=new Set([`${s.x},${s.y}`]),queue=[{x:s.x,y:s.y}];
+        for(const c of queue)for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const p={x:c.x+dx!,y:c.y+dy!},key=`${p.x},${p.y}`;
+          if(keys.has(key)&&!reached.has(key)){reached.add(key);queue.push(p);}
+        }
+        if(reached.size!==keys.size)fail();
+        if(footprint){
+          const w=Math.max(...cells.map(c=>c.x))-Math.min(...cells.map(c=>c.x))+1;
+          const h=Math.max(...cells.map(c=>c.y))-Math.min(...cells.map(c=>c.y))+1;
+          if(w!==footprint.width||h!==footprint.height)fail();
+        }
+        return;
+      }
       const width=footprint?.width??1,height=footprint?.height??1;
       if(frames<=2?width!==1||height!==1:frames<=4?width*height!==2:width!==2||height!==2)fail();
     };
-    checkFootprint(s.components,s.footprint);
+    checkFootprint(s.components,s.footprint,s.cells);
     const materials=materialCapacity(s);
     if((s.storedWood!==undefined&&!integer(s.storedWood,materials.wood))||(s.storedStone!==undefined&&!integer(s.storedStone,materials.stone)))fail();
     const completedCells=structureFootprintCells({...s,site:undefined});
     let expansion=false;
     if(s.site!==undefined){
-      const site=s.site;let cost=blueprintCost(s.components,true);
+      const site=s.site;let cost=s.cells?.length?polyominoCost(s.components,s.cells.length):blueprintCost(s.components,true);
       if(!object(site))fail();
       if(site.expansion!==undefined){
         const target=site.expansion;
         if(!object(target)||!string(target.blueprintId,100)||target.blueprintId===s.blueprintId||!validBlueprint(target.components,true)
-          ||Object.keys(target).some(k=>!['blueprintId','components','footprint'].includes(k)))fail();
-        checkFootprint(target.components,target.footprint);
+          ||Object.keys(target).some(k=>!['blueprintId','components','footprint','cells'].includes(k)))fail();
+        checkFootprint(target.components,target.footprint,target.cells);
         for(const c of ['frame','roof','cistern','granary','garden','hearth'] as const){
           const old=s.components.filter(v=>v===c).length,next=target.components.filter(v=>v===c).length;
           if(next<old||(c==='frame'&&next===old))fail();
         }
-        const targetCost=blueprintCost(target.components,true);
+        const targetCost=target.cells?.length?polyominoCost(target.components,target.cells.length):blueprintCost(target.components,true);
         cost={wood:targetCost.wood-cost.wood,stone:targetCost.stone-cost.stone,work:targetCost.work-cost.work};
         const reserved=structureFootprintCells(s);
         if(!completedCells.every(c=>reserved.some(r=>c.x===r.x&&c.y===r.y)))fail();

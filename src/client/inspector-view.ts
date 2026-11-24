@@ -8,7 +8,8 @@ import { carriedWaterCard, recipeLabel } from './technology-art.js';
 import { esc, svg, icon, number, percentage } from './ui-catalog.js';
 import { nombreConocido } from './vistos.js';
 import { ejeDominante, ejesCultura } from './censo-view.js';
-import { footprintLabel, installedCount, siteFractions, type ExtendedStructure } from './structure-art.js';
+import { footprintCells, footprintLabel, installedCount, siteFractions, type ExtendedStructure } from './structure-art.js';
+import { compoundLotsMarkup, swatch } from './telemetry-hud.js';
 
 /** FR-006: the legible context (place, tick, up to 3 prior episodes) of a `death` chronicle event,
  * for a «Historia» detail on an identity that no longer appears in `world.people`. The caller
@@ -46,16 +47,35 @@ function structureV19Facts(structure: ExtendedStructure): string {
   const site = structure.site;
   if (site) lines.push(`<div data-structure-site><span>Obra en curso</span><strong>Madera ${number(site.depositedWood, 1)}/${number(site.requiredWood, 1)} · Piedra ${number(site.depositedStone, 1)}/${number(site.requiredStone, 1)} · Obra ${Math.round(siteFractions(site).work * 100)}%</strong></div>`);
   const footprint = footprintLabel(structure);
-  if (footprint) lines.push(`<div data-structure-footprint><span>Planta</span><strong>${esc(footprint)}</strong></div>`);
+  if (footprint) lines.push(`<div data-structure-footprint><span>Planta</span><strong>${esc(footprint)}${structure.cells?.length ? ` <small>${number(footprintCells(structure).length)} ${footprintCells(structure).length === 1 ? 'casilla' : 'casillas'}</small>` : ''}</strong></div>`);
   if (structure.storedWood !== undefined || structure.storedStone !== undefined) lines.push(`<div data-structure-stock><span>Almacén</span><strong>Bodega: ${resourceQuantity(structure.storedWood ?? 0)} madera · ${resourceQuantity(structure.storedStone ?? 0)} piedra</strong></div>`);
   if (structure.installed) lines.push(`<div data-structure-installed><span>Piezas técnicas instaladas</span><strong>${number(installedCount(structure))}</strong></div>`);
   return lines.length ? `<div class="structure-reserves structure-v19">${lines.join('')}</div>` : '';
+}
+/** V20: sinergias vivas, perfil material y compuestos almacenados; cada bloque solo aparece si el servidor mandó ese dato. */
+export function structureV20Facts(structure: StructureView): string {
+  const blocks: string[] = [];
+  const syn = structure.synergy;
+  if (syn) {
+    const badges: string[] = [];
+    if (syn.sharedEdges > 0) badges.push(`<span class="synergy-badge" data-synergy="shared">+${number(syn.sharedEdges)} ${syn.sharedEdges === 1 ? 'muro compartido' : 'muros compartidos'}</span>`);
+    if (syn.heated) badges.push('<span class="synergy-badge is-heat" data-synergy="heated">Secado / calor local</span>');
+    if ((syn.kilnTier ?? 0) >= 1) badges.push(`<span class="synergy-badge is-heat" data-synergy="kiln">Horno T${esc(syn.kilnTier ?? 0)}</span>`);
+    if (syn.irrigated) badges.push('<span class="synergy-badge is-water" data-synergy="irrigated">Riego de cisterna</span>');
+    if (syn.workshopBonus > 0) badges.push(`<span class="synergy-badge" data-synergy="workshop">Taller -${esc(percentage(Math.min(1, syn.workshopBonus)))} tiempo</span>`);
+    blocks.push(`<div data-structure-synergy><span>Sinergias activas</span><div class="synergy-badges">${badges.length ? badges.join('') : '<small>Ninguna por ahora</small>'}</div></div>`);
+  }
+  const mat = structure.materialProfile;
+  if (mat) blocks.push(`<div data-structure-material><span>Perfil material</span><div class="material-profile">${swatch(mat.tint)}<span>Fuerza <strong>${esc(percentage(mat.strength))}</strong></span><span>Aislamiento <strong>${esc(percentage(mat.insulation))}</strong></span><span>Sellado <strong>${esc(percentage(mat.seal))}</strong></span></div></div>`);
+  const lots = structure.storedCompounds ?? [];
+  if (lots.length) blocks.push(`<div data-structure-compounds-block><span>Compuestos almacenados</span>${compoundLotsMarkup(lots, 'data-structure-compounds')}</div>`);
+  return blocks.length ? `<div class="structure-reserves structure-v20">${blocks.join('')}</div>` : '';
 }
 export function structureCard(structure: StructureView, world: WorldView | null): string {
   const blueprint = world?.blueprints?.find(b => b.id === structure.blueprintId);
   const parts = [...new Set(structure.components)].map(part => `${componentNames[part]}${structure.components.filter(p => p === part).length > 1 ? ` ×${structure.components.filter(p => p === part).length}` : ''}`);
   const cisterns = structure.components.filter(part => part === 'cistern').length, granaries = structure.components.filter(part => part === 'granary').length;
-  return `<section class="structure-card" data-structure="${esc(structure.id)}">${meter('Estado', structure.condition)}<div class="structure-reserves">${cisterns ? `<div data-structure-water><span>Agua en la cisterna</span><strong>${resourceQuantity(structure.water)} <small>/ ${number(cisterns * .6, 2)} u.</small></strong></div>` : ''}${granaries ? `<div data-structure-food><span>Alimento en el granero</span><strong>${resourceQuantity(structure.food)} <small>/ ${number(granaries * .7, 2)} u.</small></strong></div>` : ''}</div>${structureV19Facts(structure as ExtendedStructure)}<p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p><p class="structure-components">${parts.join(' · ')}</p><div class="structure-benefit"><span>Usos con beneficio</span><strong>${number(structure.uses)}</strong></div><p class="drawer-note structure-history-note">Acumulados desde su construcción; no indican ocupación actual.</p>${blueprint ? `<details class="person-detail" data-detail="structure-blueprint-${esc(structure.id)}"><summary>Proyecto y materiales</summary>${blueprintCard(blueprint, world)}</details>` : ''}</section>`;
+  return `<section class="structure-card" data-structure="${esc(structure.id)}">${meter('Estado', structure.condition)}<div class="structure-reserves">${cisterns ? `<div data-structure-water><span>Agua en la cisterna</span><strong>${resourceQuantity(structure.water)} <small>/ ${number(cisterns * .6, 2)} u.</small></strong></div>` : ''}${granaries ? `<div data-structure-food><span>Alimento en el granero</span><strong>${resourceQuantity(structure.food)} <small>/ ${number(granaries * .7, 2)} u.</small></strong></div>` : ''}</div>${structureV19Facts(structure as ExtendedStructure)}${structureV20Facts(structure)}<p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p><p class="structure-components">${parts.join(' · ')}</p><div class="structure-benefit"><span>Usos con beneficio</span><strong>${number(structure.uses)}</strong></div><p class="drawer-note structure-history-note">Acumulados desde su construcción; no indican ocupación actual.</p>${blueprint ? `<details class="person-detail" data-detail="structure-blueprint-${esc(structure.id)}"><summary>Proyecto y materiales</summary>${blueprintCard(blueprint, world)}</details>` : ''}</section>`;
 }
 
 /** A positive reserve smaller than the display precision must never read as zero. */

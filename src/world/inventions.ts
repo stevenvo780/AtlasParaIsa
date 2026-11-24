@@ -1,4 +1,5 @@
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
+import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
@@ -97,7 +98,57 @@ function footprintCells(point: Point, footprint?: StructureView['footprint']): P
 
 /** Includes reserved expansion ground, so even simultaneous works cannot collide. */
 export function structureFootprintCells(structure: StructureView): Point[] {
+  if (structure.site?.expansion?.cells?.length) return structure.site.expansion.cells;
+  if (structure.cells?.length) return structure.cells;
   return footprintCells(structure, structure.site?.expansion?.footprint ?? structure.footprint);
+}
+
+/** Operational ground excludes the unpaid extension. Six cells bound every geometry operation. */
+export const completedStructureCells = (s: StructureView): Point[] => s.cells?.length ? s.cells : footprintCells(s, s.footprint);
+const ORTHOGONAL = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
+const cellKey = (p: Point) => `${p.x},${p.y}`;
+export function polyominoGeometry(cells: readonly Point[]): { area: number; perimeter: number; compactness: number } {
+  const occupied = new Set(cells.map(cellKey));
+  let perimeter = 0;
+  for (const c of cells) for (const [dx, dy] of ORTHOGONAL) if (!occupied.has(`${c.x + dx},${c.y + dy}`)) perimeter++;
+  return { area: occupied.size, perimeter, compactness: occupied.size / Math.max(1, perimeter) };
+}
+
+/** Area surcharge is paid once; expansions subtract the entire old paid estate. */
+export function polyominoCost(components: readonly StructureComponent[], area: number): BlueprintView['cost'] {
+  const base = blueprintCost(components, true), extra = area * area - 1;
+  return { wood: base.wood + extra * 2, stone: base.stone + extra, work: base.work + extra * 10 };
+}
+function cellFootprint(cells: readonly Point[]): StructureView['footprint'] {
+  const width = Math.max(...cells.map(c => c.x)) - Math.min(...cells.map(c => c.x)) + 1;
+  const height = Math.max(...cells.map(c => c.y)) - Math.min(...cells.map(c => c.y)) + 1;
+  return width <= 2 && height <= 2 ? { width: width as 1 | 2, height: height as 1 | 2 } : undefined;
+}
+
+/** Bounded growth around the anchor: planner 7 + extent 2 + occupancy anchor 5 <= HALO 14.
+ * Two-axis extent also admits L, T, U and 3x2 halls without a global occupancy scan. */
+export function fittingPolyomino(world: World, anchor: Point, components: readonly StructureComponent[], existing?: StructureView): Point[] | false {
+  const n = counts(components), target = n.frame <= 2 ? 1 : n.frame - 1;
+  const cells = existing ? completedStructureCells(existing).map(c => ({ ...c })) : [{ x: anchor.x, y: anchor.y }];
+  const wanted = n.frame >= 6 && n.roof + n.hearth >= n.cistern + n.garden ? 6 : target;
+  if (!isFootprintFree(world, cells, existing?.id) || cells.length > wanted) return false;
+  const compact = n.roof + n.hearth >= n.cistern + n.garden;
+  while (cells.length < wanted) {
+    const keys = new Set(cells.map(cellKey)), frontier = new Map<string, Point>();
+    for (const c of cells) for (const [dx, dy] of ORTHOGONAL) {
+      const p = { x: c.x + dx, y: c.y + dy };
+      if (keys.has(cellKey(p)) || Math.abs(p.x - anchor.x) > 2 || Math.abs(p.y - anchor.y) > 2
+        || chunkKey(p.x, p.y) !== chunkKey(anchor.x, anchor.y) || tileAt(world, p)?.terrain === 'shelter'
+        || !isFootprintFree(world, [p], existing?.id)) continue;
+      frontier.set(cellKey(p), p);
+    }
+    const edges = (p: Point) => ORTHOGONAL.filter(([dx, dy]) => keys.has(`${p.x + dx},${p.y + dy}`)).length;
+    const candidate = [...frontier.values()].sort((a, b) => (compact ? edges(b) - edges(a) : edges(a) - edges(b))
+      || distance(a, anchor) - distance(b, anchor) || b.x - a.x || b.y - a.y)[0];
+    if (!candidate) return false;
+    cells.push(candidate);
+  }
+  return cells;
 }
 
 export function isFootprintFree(world: World, cells: readonly Point[], ignoreStructureId?: string): boolean {
@@ -105,7 +156,7 @@ export function isFootprintFree(world: World, cells: readonly Point[], ignoreStr
   const keys = new Set(cells.map(c => `${c.x},${c.y}`));
   if (keys.size !== cells.length || cells.some(c => !Number.isSafeInteger(c.x) || !Number.isSafeInteger(c.y)
     || !tileAt(world, c) || tileAt(world, c)!.terrain === 'water')) return false;
-  for (const cell of cells) if (filtrarCerca(world.structures, cell, 2,
+  for (const cell of cells) if (filtrarCerca(world.structures, cell, paramsOf(world).construccion.poliminosYSinergia ? 5 : 2,
     s => s.id !== ignoreStructureId && structureFootprintCells(s).some(c => keys.has(`${c.x},${c.y}`))).length) return false;
   return true;
 }
@@ -126,23 +177,24 @@ function fittingFootprint(world: World, point: Point, components: readonly Struc
   return false;
 }
 
-function structureDistance(point: Point, structure: StructureView): number {
-  return Math.min(...footprintCells(structure, structure.footprint).map(cell => distance(point, cell)));
+export function structureDistance(point: Point, structure: StructureView): number {
+  return Math.min(...completedStructureCells(structure).map(cell => distance(point, cell)));
 }
 
 const hasCompletedBuilding = (s: StructureView) => !s.site || !!s.site.expansion;
+const structureSearchRadius = (world: World, legacy: number) => paramsOf(world).construccion.poliminosYSinergia ? Math.min(3, legacy) : legacy;
 
 /** Fixed storage section persists when a liner wears out: contents never disappear
  * or exceed a shrinking capacity. Condition controls access, not conserved volume. */
 export function materialCapacity(structure: StructureView): { wood: number; stone: number } {
-  const n = counts(structure.components), area = (structure.footprint?.width ?? 1) * (structure.footprint?.height ?? 1);
+  const n = counts(structure.components), area = completedStructureCells(structure).length;
   if (n.frame < 2 && n.granary === 0) return { wood: 0, stone: 0 };
   const extra = (structure.installed ?? []).reduce((sum, i) => sum + i.containment * i.mass / 1000, 0);
   return { wood: Math.floor((n.frame >= 2 ? area * 12 : 4) + extra * 4), stone: Math.floor((n.frame >= 2 ? area * 8 : 3) + extra * 3) };
 }
 
 function warehousesNear(world: World, person: Point): StructureView[] {
-  return filtrarCerca(world.structures, person, 4.5, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
+  return filtrarCerca(world.structures, person, paramsOf(world).construccion.poliminosYSinergia ? 5 : 4.5, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
     && tileAt(world, s)?.terrain === 'shelter' && structureDistance(person, s) <= 2.5)
     .sort((a, b) => structureDistance(person, a) - structureDistance(person, b) || a.id.localeCompare(b.id));
 }
@@ -154,7 +206,7 @@ export function storedMaterialsNear(world: World, person: Point): { wood: number
 }
 
 /** Sole matching debit for material delivered directly into a local paid process. */
-function withdrawMaterials(world: World, person: Person, requested: { wood: number; stone: number }): { wood: number; stone: number } {
+export function withdrawMaterials(world: World, person: Point, requested: { wood: number; stone: number }): { wood: number; stone: number } {
   const taken = { wood: 0, stone: 0 };
   for (const s of warehousesNear(world, person)) {
     const wood = Math.max(0, Math.min(s.storedWood ?? 0, Math.floor(requested.wood - taken.wood)));
@@ -333,19 +385,30 @@ function expansionDelta(structure: StructureView, components: readonly Structure
 
 function expansionCandidate(world: World, person: Person, blueprint = selectedBlueprint(world, person)) {
   if (!paramsOf(world).construccion.modular || !validBlueprint(blueprint.components, true)) return;
-  for (const structure of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, s => !s.site && s.condition > 0.5 && distance(person, s) <= CONSTRUCTION_RADIUS
+  const radius = structureSearchRadius(world, CONSTRUCTION_RADIUS);
+  for (const structure of filtrarCerca(world.structures, person, radius + 1, s => !s.site && s.condition > 0.5 && distance(person, s) <= radius
     && tileAt(world, s)?.terrain === 'shelter')
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))) {
     const cost = expansionDelta(structure, blueprint.components);
     if (!cost) continue;
+    if (paramsOf(world).construccion.poliminosYSinergia) {
+      const cells = fittingPolyomino(world, structure, blueprint.components, structure);
+      if (!cells) continue;
+      const before = structure.cells?.length ? polyominoCost(structure.components, structure.cells.length) : blueprintCost(structure.components, true);
+      const after = polyominoCost(blueprint.components, cells.length);
+      return { structure, cells, footprint: cells.length > 1 ? cellFootprint(cells) : undefined,
+        cost: { wood: after.wood - before.wood, stone: after.stone - before.stone, work: after.work - before.work } };
+    }
     const footprint = fittingFootprint(world, structure, blueprint.components, structure);
-    if (footprint !== false) return { structure, cost, footprint };
+    if (footprint !== false) return { structure, cost, footprint, cells: undefined };
   }
 }
 
 export function constructionCost(world: World, person: Person): BlueprintView['cost'] {
   const modular = paramsOf(world).construccion.modular;
-  const cost = blueprintCost(selectedBlueprint(world, person).components, modular);
+  const components = selectedBlueprint(world, person).components;
+  const cells = modular && paramsOf(world).construccion.poliminosYSinergia ? fittingPolyomino(world, person, components) : false;
+  const cost = cells ? polyominoCost(components, cells.length) : blueprintCost(components, modular);
   if (!paramsOf(world).construccion.modular) return cost;
   const structure = constructionSite(world, person), site = structure?.site;
   const expansion = site ? undefined : expansionCandidate(world, person), delta = expansion?.cost;
@@ -379,7 +442,8 @@ export function partnerConstructionCost(world: World, person: Person): Blueprint
 
 export function constructionSite(world: World, person: Point): StructureView | undefined {
   if (!paramsOf(world).construccion.modular) return;
-  return filtrarCerca(world.structures, person, 8, s => !!s.site && distance(person, s) <= 7)
+  const radius = structureSearchRadius(world, 7);
+  return filtrarCerca(world.structures, person, radius + 1, s => !!s.site && distance(person, s) <= radius)
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
 }
 
@@ -405,8 +469,9 @@ function localServices(world: World, person: Person, replacement?: { structure: 
   };
   // Negación literal del `continue` de siempre (no la forma positiva): preserva cómo se trata una
   // distancia o condición NaN, igual que hizo T141 en `share`/`evaluateCooperation`.
-  for (const structure of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1,
-    structure => (paramsOf(world).construccion.modular ? hasCompletedBuilding(structure) : !structure.site) && !(distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'))) {
+  const radius = structureSearchRadius(world, CONSTRUCTION_RADIUS);
+  for (const structure of filtrarCerca(world.structures, person, radius + 1,
+    structure => (paramsOf(world).construccion.modular ? hasCompletedBuilding(structure) : !structure.site) && !(distance(person, structure) > radius || tileAt(world, structure)?.terrain !== 'shelter'))) {
     add(structure.components, replacement?.structure === structure ? replacement.condition : structure.condition, structure.water, structure.food,
       paramsOf(world).tecnologia.obrasPorPropiedades ? structureAffordances(world, structure) : undefined);
   }
@@ -446,8 +511,9 @@ function localMaterials(world: World, person: Person): Person['materials'] {
     }
   }
   if (paramsOf(world).construccion.modular) {
-    for (const s of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
-      && distance(person, s) <= CONSTRUCTION_RADIUS && tileAt(world, s)?.terrain === 'shelter')) {
+    const radius = structureSearchRadius(world, CONSTRUCTION_RADIUS);
+    for (const s of filtrarCerca(world.structures, person, radius + 1, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
+      && distance(person, s) <= radius && tileAt(world, s)?.terrain === 'shelter')) {
       materials.wood += s.storedWood ?? 0; materials.stone += s.storedStone ?? 0;
     }
   }
@@ -457,8 +523,9 @@ function localMaterials(world: World, person: Person): Person['materials'] {
 function usefulRepairs(world: World, person: Person, context?: ReturnType<typeof constructionContext>) {
   // Negación literal del `return []` de siempre: una condición/distancia NaN no debe excluir aquí lo
   // que el bucle de abajo (también insensible a NaN por `while (condition < LIMIT)`) habría procesado.
-  const structures = filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, structure => !structure.site && !(structure.condition >= REPAIR_CONDITION_LIMIT
-    || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'));
+  const radius = structureSearchRadius(world, CONSTRUCTION_RADIUS);
+  const structures = filtrarCerca(world.structures, person, radius + 1, structure => !structure.site && !(structure.condition >= REPAIR_CONDITION_LIMIT
+    || distance(person, structure) > radius || tileAt(world, structure)?.terrain !== 'shelter'));
   if (!structures.length) return [];
   const perceived = context ?? constructionContext(world, person), before = serviceValue(localServices(world, person), perceived);
   return structures.flatMap(structure => {
@@ -486,13 +553,14 @@ export function constructionOpportunity(world: World, person: Person): { score: 
   const modular = paramsOf(world).construccion.modular, blueprint = selectedBlueprint(world, person);
   const expansion = modular ? expansionCandidate(world, person, blueprint) : undefined;
   if (!expansion && world.structures.length >= structureCap(world)) return;
-  const cost = expansion?.cost ?? blueprintCost(blueprint.components, modular), materials = localMaterials(world, person);
+  const cells = !expansion && modular && paramsOf(world).construccion.poliminosYSinergia ? fittingPolyomino(world, person, blueprint.components) : false;
+  const cost = expansion?.cost ?? (cells ? polyominoCost(blueprint.components, cells.length) : blueprintCost(blueprint.components, modular)), materials = localMaterials(world, person);
   if (materials.wood < cost.wood || materials.stone < cost.stone) return;
   const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
   if (expansion) {
     const old = blueprintAffordances(expansion.structure.components), upgraded = blueprintAffordances(blueprint.components);
     const stored = storedMaterialsNear(world, expansion.structure), oldCapacity = materialCapacity(expansion.structure);
-    const capacity = materialCapacity({ ...expansion.structure, components: blueprint.components, footprint: expansion.footprint });
+    const capacity = materialCapacity({ ...expansion.structure, components: blueprint.components, footprint: expansion.footprint, cells: expansion.cells });
     const storageNeeded = capacity.wood > oldCapacity.wood && capacity.stone > oldCapacity.stone
       && person.materials.wood + stored.wood >= Math.min(12, cost.wood) && person.materials.stone + stored.stone >= Math.min(8, cost.stone);
     const gain = Math.max(0, upgraded.restQuality - old.restQuality) * context.rest
@@ -529,7 +597,8 @@ export function inventionContext(world: World, person: Person): InventionContext
   }
   moisture /= Math.max(1, count); food /= Math.max(1, count); wood /= Math.max(1, count);
   const portable = vecinos(world, person, 5, p => distance(person, p) <= 4).reduce((sum, p) => sum + Math.max(0, p.inventory - 0.08), 0);
-  const roofs = filtrarCerca(world.structures, person, 5, s => distance(person, s) <= 4 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
+  const roofRadius = structureSearchRadius(world, 4);
+  const roofs = filtrarCerca(world.structures, person, roofRadius + 1, s => distance(person, s) <= roofRadius && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
   const quality = Math.max(0, ...roofs.map(s => blueprintAffordances(s.components).restQuality * s.condition));
   return { water: clamp(0.65 * (1 - clamp(reserve * 5)) + person.thirst * 0.35),
     food: clamp(0.65 * (1 - clamp(food * 4)) + person.hunger * 0.35),
@@ -543,7 +612,8 @@ export function inventionContext(world: World, person: Person): InventionContext
 /** Cultural parents must be known through ownership, nearby built examples, or trusted contacts. */
 function knownBlueprints(world: World, person: Person): BlueprintView[] {
   const ids = new Set(['blueprint-base', person.blueprintId]);
-  for (const structure of filtrarCerca(world.structures, person, 6, structure => distance(person, structure) <= 5
+  const radius = structureSearchRadius(world, 5);
+  for (const structure of filtrarCerca(world.structures, person, radius + 1, structure => distance(person, structure) <= radius
     && (paramsOf(world).construccion.modular ? hasCompletedBuilding(structure) : !structure.site) && structure.condition > BROKEN_CONDITION && tileAt(world, structure)?.terrain === 'shelter')) ids.add(structure.blueprintId);
   if (world.cooperationEnabled) for (const other of vecinos(world, person, 4, other => other !== person && distance(person, other) <= 3
     && (person.bonds[other.id] ?? 0.2) >= 0.2 && person.culture.openness >= 0.15)) ids.add(other.blueprintId);
@@ -736,21 +806,25 @@ function modularConstruction(world: World, person: Person, tile: Tile, emit: Emi
         && storedMaterialsNear(world, person).wood + storedMaterialsNear(world, person).stone <= 0)) return null;
       existing.site = { requiredWood: expansion.cost.wood, requiredStone: expansion.cost.stone, requiredWork: expansion.cost.work,
         depositedWood: 0, depositedStone: 0, completedWork: 0,
-        expansion: { blueprintId: blueprint.id, components: [...blueprint.components], ...(expansion.footprint ? { footprint: expansion.footprint } : {}) } };
+        expansion: { blueprintId: blueprint.id, components: [...blueprint.components], ...(expansion.footprint ? { footprint: expansion.footprint } : {}),
+          ...(expansion.cells && expansion.cells.length > 1 ? { cells: expansion.cells } : {}) } };
     }
     return contributeConstruction(world, person, existing, emit) ? existing : null;
   }
-  const footprint = fittingFootprint(world, tile, blueprint.components);
+  const polyomino = paramsOf(world).construccion.poliminosYSinergia;
+  const cells = polyomino ? fittingPolyomino(world, tile, blueprint.components) : undefined;
+  const footprint = polyomino ? (cells && cells.length > 1 ? cellFootprint(cells) : undefined) : fittingFootprint(world, tile, blueprint.components);
+  const paidCost = cells ? polyominoCost(blueprint.components, cells.length) : cost;
   if (!validBlueprint(blueprint.components, true) || tile.terrain === 'shelter' || world.structures.length >= structureCap(world)
-    || footprint === false
+    || footprint === false || cells === false
     || algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5 && !world.structures.some(s => p.id === `settlement-${s.x}-${s.y}`))
     || (person.materials.wood <= 0 && person.materials.stone <= 0 && person.work <= 0)) return null;
   const identity = nextIdentity(world.structureCounter, 'structure', world.structures.map(s => s.id), world);
   if (!identity) return null;
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 0, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id,
-    site: { requiredWood: cost.wood, requiredStone: cost.stone, depositedWood: 0, depositedStone: 0, requiredWork: cost.work, completedWork: 0 },
-    ...(footprint ? { footprint } : {}) };
+    site: { requiredWood: paidCost.wood, requiredStone: paidCost.stone, depositedWood: 0, depositedStone: 0, requiredWork: paidCost.work, completedWork: 0 },
+    ...(footprint ? { footprint } : {}), ...(cells && cells.length > 1 ? { cells } : {}) };
   world.structureCounter = identity.counter; world.structures.push(structure);
   contributeConstruction(world, person, structure, emit);
   return structure;
@@ -774,6 +848,10 @@ export function contributeConstruction(world: World, person: Person, structure: 
     const target = world.blueprints.find(b => b.id === site.expansion!.blueprintId)!;
     structure.blueprintId = target.id; structure.name = target.name; structure.components = [...site.expansion.components];
     if (site.expansion.footprint) structure.footprint = { ...site.expansion.footprint };
+    if (paramsOf(world).construccion.poliminosYSinergia) {
+      if (site.expansion.cells) structure.cells = site.expansion.cells.map(c => ({ ...c }));
+      if (!site.expansion.footprint) delete structure.footprint;
+    }
   }
   delete structure.site; structure.condition = 1;
   for (const cell of structureFootprintCells(structure)) tileAt(world, cell)!.terrain = 'shelter';
@@ -806,6 +884,66 @@ function installationProtection(world: World, structure: StructureView) {
     joining += i.cohesion * i.binding * i.condition * i.mass / 1000;
   }
   return { insulation, joining };
+}
+
+/** Anchor-index broad phase; the physical predicate always limits neighbours to three cells.
+ * Query each occupied cell so opposite ends of two halls still share their actual wall. */
+function synergyNeighbours(world: World, structure: StructureView): StructureView[] {
+  const found = new Set<StructureView>();
+  for (const cell of completedStructureCells(structure)) for (const other of filtrarCerca(world.structures, cell, 5,
+    s => s !== structure && hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION && structureDistance(cell, s) <= 3)) found.add(other);
+  return [...found].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function computeStructureSynergy(world: World, structure: StructureView): StructureSynergyView {
+  const result: StructureSynergyView = { sharedEdges: 0, heated: false, irrigated: false, workshopBonus: 0, kilnTier: 0 };
+  if (!hasCompletedBuilding(structure) || structure.condition <= BROKEN_CONDITION) return result;
+  const cells = completedStructureCells(structure), neighbours = synergyNeighbours(world, structure), n = counts(structure.components);
+  const walls = new Set(neighbours.flatMap(completedStructureCells).map(cellKey));
+  for (const c of cells) for (const [dx, dy] of ORTHOGONAL) if (walls.has(`${c.x + dx},${c.y + dy}`)) result.sharedEdges++;
+  result.heated = n.hearth > 0 || neighbours.some(s => s.components.includes('hearth'));
+  result.irrigated = (n.cistern > 0 && structure.water > 0) || neighbours.some(s => s.components.includes('cistern') && s.water >= 0.02);
+  const installed = (structure.installed ?? []).filter(i => i.condition > 0);
+  if (n.roof && (installed.length || n.hearth)) {
+    const properties = installed.reduce((sum, i) => sum + (i.cohesion + i.binding + i.insulation) * i.condition / 3, 0);
+    result.workshopBonus = Math.min(0.30, properties * 0.24 + (n.hearth ? 0.04 : 0)
+      + (neighbours.some(s => (s.storedWood ?? 0) + (s.storedStone ?? 0) > 0 && materialCapacity(s).wood > 0) ? 0.06 : 0));
+  }
+  if (n.hearth) {
+    result.kilnTier = n.roof ? 1 : 0;
+    if (n.roof && (installed.some(i => i.insulation * i.condition >= 0.35) || n.hearth >= 2
+      || (cells.length >= 2 && structure.storedCompounds?.some(c => c.mass > 0 && c.properties.fuelPower >= 0.6)))) result.kilnTier = 2;
+  }
+  return result;
+}
+
+function defaultMaterialProfile(structure: StructureView): StructureMaterialProfile {
+  const cost = blueprintCost(structure.components), stone = cost.stone / Math.max(1, cost.stone + cost.wood);
+  let strength = 0.3 + stone * 0.5, insulation = 0.25 + (1 - stone) * 0.35, seal = stone * 0.4;
+  let tint = stone >= 0.5 ? '#ccc4b4' : '#a87848';
+  for (const i of structure.installed ?? []) {
+    strength += (i.cohesion + i.binding) * i.condition * 0.12;
+    insulation += i.insulation * i.condition * 0.2; seal += i.containment * i.condition * 0.2;
+  }
+  let total = 0, r = 0, g = 0, b = 0;
+  for (const lot of structure.storedCompounds ?? []) if (lot.mass > 0) {
+    const p = lot.properties, weight = lot.mass;
+    strength += (p.hardness + p.toughness) * weight / (1000 + weight) * 0.15;
+    insulation += p.insulation * weight / (1000 + weight) * 0.2; seal += p.seal * weight / (1000 + weight) * 0.2;
+    total += weight; r += parseInt(p.colorHex.slice(1, 3), 16) * weight;
+    g += parseInt(p.colorHex.slice(3, 5), 16) * weight; b += parseInt(p.colorHex.slice(5, 7), 16) * weight;
+  }
+  if (total > 0) tint = '#' + [r, g, b].map(c => Math.round(c / total).toString(16).padStart(2, '0')).join('');
+  return { strength: clamp(strength), insulation: clamp(insulation), seal: clamp(seal), tint };
+}
+
+/** Never walks neighbours from a decision helper: the last ecological step supplies shared walls. */
+function thermalBonus(world: World, structure: StructureView): number {
+  if (!paramsOf(world).construccion.poliminosYSinergia) return 0.12;
+  const geometry = polyominoGeometry(completedStructureCells(structure));
+  return 0.12 * (1 + Math.min(0.30, (structure.synergy?.sharedEdges ?? 0) * 0.10)
+    + Math.min(0.25, Math.max(0, geometry.compactness - 0.25) / 0.35 * 0.25)
+    + (structure.materialProfile?.insulation ?? defaultMaterialProfile(structure).insulation) * 0.25);
 }
 
 function observeUse(world: World, structure: StructureView, benefit: number): void {
@@ -889,7 +1027,7 @@ export function facilityRestQuality(world: World, person: Person): number {
   if (!world.shelterBenefitEnabled) return outdoor;
   const structure = restFacility(world, person); if (!structure) return outdoor;
   const a = blueprintAffordances(structure.components), fuel = hearthFuel(world, person, structure);
-  return Math.max(outdoor, clamp((a.restQuality + (fuel > 0 && person.materials.wood >= fuel ? 0.12 : 0)) * structure.condition));
+  return Math.max(outdoor, clamp((a.restQuality + (fuel > 0 && person.materials.wood >= fuel ? thermalBonus(world, structure) : 0)) * structure.condition));
 }
 /** Called after body recovery, with the pre-rest body. Only recovery beyond the outdoor
  * counterfactual is evidence; saturated bodies and degraded roofs cannot earn fictitious utility. */
@@ -950,22 +1088,34 @@ export function repair(world: World, person: Person, structure: StructureView, e
 }
 
 function maintenanceLoad(structure: StructureView): number {
-  const area = (structure.footprint?.width ?? 1) * (structure.footprint?.height ?? 1);
+  const area = completedStructureCells(structure).length;
   return Math.ceil(area * (1 + 0.15 * Math.max(0, counts(structure.components).frame - 1)));
 }
 
 /** Bounded active structures only. Inflow, transfers and irrigation all have explicit debits. */
 export function stepStructures(world: World, _emit: Emit): void {
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
+  const polyomino = paramsOf(world).construccion.poliminosYSinergia;
+  if (polyomino) for (const structure of world.structures) {
+    if (!hasCompletedBuilding(structure)) continue;
+    structure.materialProfile ??= defaultMaterialProfile(structure);
+    structure.synergy = computeStructureSynergy(world, structure);
+  }
   for (const structure of world.structures) {
     const modular = paramsOf(world).construccion.modular;
     if (modular ? !hasCompletedBuilding(structure) : structure.site) continue;
     const tile = tileAt(world, structure); if (!tile || tile.terrain !== 'shelter') continue;
     const a = structureAffordances(world, structure), protection = installationProtection(world, structure);
-    const wear = modular ? (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability * maintenanceLoad(structure)
+    let wear = modular ? (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability * maintenanceLoad(structure)
       : (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability;
+    const geometry = polyomino ? polyominoGeometry(completedStructureCells(structure)) : undefined;
+    if (polyomino) {
+      const compact = Math.min(0.25, Math.max(0, geometry!.compactness - 0.25) / 0.35 * 0.25);
+      wear *= (1 - compact) * (1 - Math.min(0.45, structure.synergy!.sharedEdges * 0.15)) * (1 - structure.materialProfile!.strength * 0.25);
+      a.catchment *= 1 + Math.min(0.40, Math.max(0, geometry!.perimeter - 4) * 0.08);
+    }
     structure.condition = clamp(structure.condition - (paramsOf(world).tecnologia.obrasPorPropiedades ? wear / (1 + protection.joining) : wear));
-    if (paramsOf(world).tecnologia.obrasPorPropiedades) {
+    if (paramsOf(world).tecnologia.obrasPorPropiedades || polyomino) {
       // Exposure consumes condition, never material quanta. Failed liners retain their matter.
       for (const i of structure.installed ?? []) i.condition = clamp(i.condition - wear);
       const capacity = structureAffordances(world, structure);
@@ -973,8 +1123,15 @@ export function stepStructures(world: World, _emit: Emit): void {
       const beforeWater = structure.water, beforeFood = structure.food;
       structure.water = Math.min(structure.water, capacity.waterCapacity);
       structure.food = Math.min(structure.food, capacity.foodCapacity);
-      structure.water -= structure.water * 0.002 / (1 + protection.insulation);
-      structure.food -= structure.food * 0.001 / (1 + protection.insulation);
+      const sealing = polyomino ? 1 - structure.materialProfile!.seal * 0.35 : 1;
+      const drying = polyomino && structure.synergy!.heated && structure.components.includes('granary') ? 0.5 : 1;
+      if (polyomino) {
+        structure.water -= structure.water * 0.002 / (1 + protection.insulation) * sealing;
+        structure.food -= structure.food * 0.001 / (1 + protection.insulation) * sealing * drying;
+      } else {
+        structure.water -= structure.water * 0.002 / (1 + protection.insulation);
+        structure.food -= structure.food * 0.001 / (1 + protection.insulation);
+      }
       const losses = structure.losses ??= { water: 0, food: 0 };
       losses.water += beforeWater - structure.water; losses.food += beforeFood - structure.food;
       a.waterCapacity = capacity.waterCapacity; a.foodCapacity = capacity.foodCapacity;
@@ -986,9 +1143,20 @@ export function stepStructures(world: World, _emit: Emit): void {
       structure.water += Math.max(0, collected); world.inventionDynamics.waterCollected += Math.max(0, collected);
     }
     // Production remains stock. Only an actual consumer may turn supply into observed utility.
-    if (a.irrigation > 0 && structure.water > 0) {
-      const gardens = [[0, -1], [-1, 0], [1, 0], [0, 1]].map(([dx, dy]) => tileAt(world, { x: structure.x + dx!, y: structure.y + dy! }))
+    if (a.irrigation > 0 && (structure.water > 0 || polyomino)) {
+      const irrigationCells = polyomino ? completedStructureCells(structure) : [structure];
+      const ground = new Map<string, Point>();
+      for (const cell of irrigationCells) for (const [dx, dy] of ORTHOGONAL) {
+        const p = { x: cell.x + dx, y: cell.y + dy }; ground.set(cellKey(p), p);
+      }
+      const gardens = (polyomino ? [...ground.values()].map(p => tileAt(world, p))
+        : [[0, -1], [-1, 0], [1, 0], [0, 1]].map(([dx, dy]) => tileAt(world, { x: structure.x + dx!, y: structure.y + dy! })))
         .filter((t): t is Tile => !!t && t.terrain !== 'water' && t.terrain !== 'shelter' && t.moisture < 0.75);
+      if (polyomino && gardens.length > 0 && structure.water <= 0) {
+        const donor = synergyNeighbours(world, structure).find(s => s.components.includes('cistern') && s.water >= 0.02);
+        // Transfer is real stock; residual water stays in the garden's reservoir.
+        if (donor) { donor.water -= 0.01; structure.water += 0.01; observeUse(world, donor, 0.01 * 15); }
+      }
       let budget = Math.min(structure.water, a.irrigation * structure.condition);
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);

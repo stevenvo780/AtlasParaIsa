@@ -2,6 +2,7 @@
 import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../shared/types.js';
 import { esc, number, percentage } from './ui-catalog.js';
 import { censoDe } from './censo-view.js';
+import { ELEMENTS, geologyAt, type ChemOperator, type ChemistrySummaryView, type CompoundLot, type ElementSymbol, type ElementVector, type ThermalPhase } from '../shared/chemistry.js';
 
 export type HudNav = 'people' | 'life' | 'communities' | 'animals' | 'land' | 'technology' | 'performance';
 export type PulseHealth = 'unknown' | 'healthy' | 'warn' | 'hot';
@@ -83,10 +84,10 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
     { nav: 'communities', label: 'Sociedad · coop/desac', value: `${number(community.total)} · ${number(community.cooperation)}/${number(community.disputes)}`,
       detail: `${number(community.total)} comunidades · ${number(community.cooperation)} cooperaciones · ${number(community.disputes)} desacuerdos · apertura media ${percentage(community.cultures.find(c => c.axis === 'openness')?.mean)}. Abrir Mundo › Comunidades.` },
     { nav: 'animals', label: 'Fauna · depred.', value: `${number(wildlife)} · ${number(predators)} dep.`, detail: `Regiones activas: ${number(wildlife)} animales · ${number(predators)} depredadores (zorros y lobos). Abrir Vidas › Fauna.` },
-    { nav: 'land', label: 'Cultivos · planos', value: `${number(stats?.cultivatedTiles)} · ${number(stats?.blueprints)}`,
-      detail: `${number(stats?.cultivatedTiles)} cultivos en regiones activas · ${number(stats?.blueprints)} planos conocidos · ${number(world?.structures?.length)} obras en esta vista. Abrir Mundo › Paisaje.` },
-    { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.`,
-      detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(stats?.blueprints)} planos. Abrir Mundo › Técnica.` },
+    { nav: 'land', label: 'Cultivos · planos', value: `${number(stats?.cultivatedTiles)} · ${number(stats?.blueprints)}${count(stats?.pavedTiles) > 0 ? ` · ${number(stats?.pavedTiles)} calz.` : ''}`,
+      detail: `${number(stats?.cultivatedTiles)} cultivos en regiones activas · ${number(stats?.blueprints)} planos conocidos · ${number(world?.structures?.length)} obras en esta vista${stats?.pavedTiles !== undefined ? ` · ${number(stats.pavedTiles)} calzadas empedradas` : ''}${stats?.polyominoStructures !== undefined ? ` · ${number(stats.polyominoStructures)} edificios poliominó` : ''}. Abrir Mundo › Paisaje.` },
+    { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
+      detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
     { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`, health: pulseHealth(runtime),
       detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms / presupuesto ${number(runtime?.gobernador?.presupuestoMs)} ms · ${number(runtime?.tickHz, 2)} Hz · ${pulseHealth(runtime) === 'hot' ? 'Presupuesto superado' : pulseHealth(runtime) === 'warn' ? 'Cerca del presupuesto' : pulseHealth(runtime) === 'healthy' ? 'Con margen' : 'Sin presupuesto medido'}. Abrir Mundo › Rendimiento.` },
   ];
@@ -160,6 +161,7 @@ export function renderLandTelemetry(world: WorldView): string {
       ['Obras', number(s.total)], ['Alimento almacenado', number(s.food, 2)], ['Madera almacenada', number(s.wood, 2)], ['Piedra almacenada', number(s.stone, 2)],
       ['Obras sin terminar', number(s.sites)], ['Tecnología instalada', number(s.installed)], ['Obras de varias casillas', number(s.multiTile)], ['Casillas de huella', number(s.footprintTiles)],
     ]), 'Existencias del modelo. — indica un campo aún no proyectado; no significa cero.')
+    + renderRoadsAndChemistryRollup(world)
     + section('Fauna por especie y depredadores', facts([
       ['Herbívoros y otros no depredadores', number(total === undefined || predators === undefined ? undefined : total - predators)], ['Carnívoros · zorros y lobos', number(predators)],
       ...Object.entries(wildlife ?? {}).map(([key, value]): [string, string] => [speciesLabels[key] ?? key, number(value)]),
@@ -184,7 +186,7 @@ export function renderPersonTelemetry(p: PersonView): string {
     ['Salud', percentage(p.health)], ['Vitalidad', percentage(p.vitality)], ['Etapa', stage], ['Edad', `${number(p.age)} pasos`],
     ['Gen', p.genome ? `G${number(p.genome.generation)}` : '—'], ['Reserva', `${number(p.foodReserve, 2)} / ${number(p.foodReserveCapacity, 2)}`],
     ['Madera', number(p.materials?.wood)], ['Piedra', number(p.materials?.stone)],
-  ])) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
+  ])) + personCompoundsSection(p) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
 }
 export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve?: number }): string {
   const reserve = animal.reproReserve ?? animal.reproductiveReserve;
@@ -195,6 +197,95 @@ export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve
     ...(reserve === undefined ? [] : [['Reserva reproductiva', number(reserve, 3)] as [string, string]]),
   ]));
 }
-export function renderTileTelemetry(tile: WorldView['tiles'][number]): string {
-  return facts([['Estado del cultivo', cropLabels[cropStage(tile.cultivation)]], ['Crecimiento', percentage(tile.growth)]]);
+export function renderTileTelemetry(tile: WorldView['tiles'][number], seed?: number): string {
+  return facts([['Estado del cultivo', cropLabels[cropStage(tile.cultivation)]], ['Crecimiento', percentage(tile.growth)]]) + roadSection(tile) + geologySection(tile, seed);
+}
+
+/* ------------------------------------------------------------------ */
+/* V20 — caminos, geología, compuestos y química emergente             */
+/* ------------------------------------------------------------------ */
+
+export const phaseLabels: Record<ThermalPhase, string> = { raw: 'crudo', ground: 'molido', washed: 'lavado', fired: 'cocido', smelted: 'fundido', vitrified: 'vítreo' };
+export const operatorLabels: Record<ChemOperator, string> = { grind: 'moler', wash: 'lavar', heat: 'calentar', bind: 'unir' };
+export const elementNames: Record<ElementSymbol, string> = { C: 'Carbono', Si: 'Silicio', Ca: 'Calcio', Fe: 'Hierro', S: 'Azufre', H: 'Hidrógeno' };
+/** Color propio de cada elemento en barras e insignias (carbón, pizarra, cal, óxido, azufre, agua). */
+export const elementColors: Record<ElementSymbol, string> = { C: '#4a4743', Si: '#8d9bab', Ca: '#e1dccb', Fe: '#b5532e', S: '#e0cf5a', H: '#5fb2d6' };
+const safeColor = (hex: string | undefined, fallback = '#a29484'): string => typeof hex === 'string' && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(hex) ? hex : fallback;
+const pct = (v: number | undefined): string => percentage(finite(v) ? Math.max(0, Math.min(1, v)) : undefined);
+
+export function swatch(color: string | undefined): string { return `<i class="chem-swatch" style="background:${esc(safeColor(color))}" aria-hidden="true"></i>`; }
+
+/** Ocupación local: la senda necesita `traffic ≥ 0,25` y la calzada `paved ≥ 0,5` (mismos umbrales que el dibujo del mapa). */
+export type RoadState = 'none' | 'trail' | 'paved';
+export function roadState(tile: { traffic?: number; paved?: number; terrain?: string }): RoadState {
+  if (tile.terrain === 'water') return 'none';
+  if (count(tile.paved) >= .5) return 'paved';
+  return count(tile.traffic) >= .25 ? 'trail' : 'none';
+}
+/** Alivio de esfuerzo al pisar la casilla. Refleja `roadEffortFactor` del servidor V20: 1 − min(0,55; tráfico·0,45 + empedrado·0,15). */
+export function roadEffortRelief(tile: { traffic?: number; paved?: number }): number {
+  return Math.min(.55, Math.max(0, Math.min(1, count(tile.traffic))) * .45 + Math.max(0, Math.min(1, count(tile.paved))) * .15);
+}
+const roadLabels: Record<RoadState, string> = { none: 'Sin sendero', trail: 'Sendero pisado', paved: 'Calzada empedrada' };
+export function roadSection(tile: { traffic?: number; paved?: number; terrain?: string }): string {
+  const state = roadState(tile), relief = roadEffortRelief(tile);
+  return `<div class="telemetry-facts" data-tile-road="${state}"><span>Camino<strong>${esc(roadLabels[state])}</strong></span><span>Alivio de esfuerzo<strong>${esc(percentage(relief))}</strong></span>${tile.paved !== undefined ? `<span>Empedrado<strong>${esc(percentage(tile.paved))}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${esc(number(tile.traffic, 2))}</strong></span>` : ''}</div>`;
+}
+
+/** Insignias compactas de cada elemento; la veta que aflora en el mapa (Fe ≥ 24 %, Ca ≥ 28 %, S ≥ 22 %) se marca. */
+export function elementBadges(vector: ElementVector): string {
+  const veins: Partial<Record<ElementSymbol, number>> = { Fe: .24, Ca: .28, S: .22 };
+  return `<div class="element-badges">${ELEMENTS.map(e => `<span class="element-badge${vector[e] >= (veins[e] ?? 2) ? ' is-vein' : ''}" data-element="${e}" title="${esc(elementNames[e])}"><i style="background:${elementColors[e]}" aria-hidden="true"></i>${e} <strong>${esc(pct(vector[e]))}</strong></span>`).join('')}</div>`;
+}
+/** Barra apilada de los 6 elementos (cada tramo proporcional a su fracción). */
+export function elementBar(vector: ElementVector): string {
+  const total = ELEMENTS.reduce((sum, e) => sum + count(vector[e]), 0) || 1;
+  const label = ELEMENTS.map(e => `${e} ${pct(vector[e] / total)}`).join(' · ');
+  return `<div class="element-bar" role="img" aria-label="${esc(label)}" title="${esc(label)}">${ELEMENTS.map(e => `<span data-element="${e}" style="flex:${(count(vector[e]) / total).toFixed(4)} 1 0;background:${elementColors[e]}"></span>`).join('')}</div>`;
+}
+
+export function geologySection(tile: WorldView['tiles'][number], seed: number | undefined): string {
+  if (seed === undefined || !finite(seed) || tile.terrain === 'water') return '';
+  const geo = geologyAt(seed, tile.x, tile.y, tile.biome, tile.feature);
+  return `<div class="tile-geology" data-tile-geology><h4 class="detail-subtitle">Geología local</h4>${elementBadges(geo)}<p class="stats-note">Composición latente del suelo, derivada de la semilla del mundo; no cambia sola.</p></div>`;
+}
+
+/** Lotes con muestra de color, fase, masa y sus propiedades principales. */
+export function compoundLotsMarkup(lots: readonly CompoundLot[], attribute: string): string {
+  if (!lots.length) return '';
+  return `<ul class="compound-lots" ${attribute}>${lots.map(lot => `<li data-compound="${esc(lot.id)}">${swatch(lot.properties?.colorHex)}<span class="compound-name">${esc(lot.formulaId)}</span><span class="detail-badge">${esc(phaseLabels[lot.phase] ?? lot.phase)}</span><strong>${esc(number(lot.mass, 2))} u.</strong><small>dureza ${esc(pct(lot.properties?.hardness))} · sellado ${esc(pct(lot.properties?.seal))} · combustible ${esc(pct(lot.properties?.fuelPower))}</small></li>`).join('')}</ul>`;
+}
+function personCompoundsSection(p: PersonView): string {
+  return p.compounds?.length ? section('Compuestos que lleva', compoundLotsMarkup(p.compounds, 'data-person-compounds'), 'Lotes químicos que carga ahora: color, fase y masa.') : '';
+}
+
+/** V20 en Mundo › Paisaje: calzadas, edificios poliominó, sinergias y compuestos en las bodegas visibles. */
+export function renderRoadsAndChemistryRollup(world: WorldView): string {
+  const stats = world.stats, structures = world.structures ?? [];
+  const stored = structures.flatMap(s => s.storedCompounds ?? []);
+  const polyHere = structures.filter(s => (s.cells?.length ?? 0) > 1).length, linksHere = structures.reduce((n, s) => n + count(s.synergy?.sharedEdges), 0);
+  const trails = world.tiles.filter(t => roadState(t) === 'trail').length, paved = world.tiles.filter(t => roadState(t) === 'paved').length;
+  return section('Caminos, edificios y química', facts([
+    ['Calzadas empedradas', number(stats?.pavedTiles)], ['Edificios poliominó', number(stats?.polyominoStructures)], ['Enlaces de sinergia', number(stats?.synergyLinks)],
+    ['Fórmulas descubiertas', number(stats?.chemicalFormulas ?? world.chemistry?.totalFormulas)],
+    ['Compuestos en bodegas de esta vista', `${number(stored.length)} lotes · ${number(stored.reduce((n, l) => n + count(l.mass), 0), 2)} u.`],
+    ['Sendas y calzadas en vista', `${number(trails)} · ${number(paved)}`], ['Poliominós en vista', number(polyHere)], ['Muros compartidos en vista', number(linksHere)],
+  ]), 'Las cifras globales cuentan regiones activas; las de «en vista» solo lo que llegó a esta cámara. — indica un campo aún no proyectado.');
+}
+
+/** Mundo › Oficios: química emergente (fórmulas halladas, lotes activos, temperatura máxima y operadores). */
+export function renderChemistryTelemetry(chemistry: ChemistrySummaryView | undefined): string {
+  if (!chemistry) return '';
+  const tiers = ['T0 · sin fuego', 'T1 · fuego abierto', 'T2 · horno'];
+  const summary = facts([
+    ['Fórmulas', number(chemistry.totalFormulas)], ['Lotes activos', number(chemistry.totalLots)], ['Temperatura máx.', tiers[chemistry.maxTemperatureTier] ?? `T${chemistry.maxTemperatureTier}`],
+    ...(Object.keys(operatorLabels) as ChemOperator[]).map((op): [string, string] => [`Operador · ${operatorLabels[op]}`, number(chemistry.byOperator?.[op])]),
+  ]);
+  const meters: [string, keyof CompoundLot['properties']][] = [['Dureza', 'hardness'], ['Tenacidad', 'toughness'], ['Sellado', 'seal'], ['Aislamiento', 'insulation'], ['Combustible', 'fuelPower']];
+  const cards = chemistry.formulas.slice(0, 12).map(f => `<article class="chem-card" data-formula="${esc(f.id)}">
+    <header>${swatch(f.properties.colorHex)}<strong>${esc(f.name)}</strong><span class="detail-badge">${esc(phaseLabels[f.phase] ?? f.phase)}</span><span class="detail-badge">T${esc(f.temperatureTier)}</span><span class="detail-badge">${esc(operatorLabels[f.operator] ?? f.operator)}</span></header>
+    ${elementBar(f.composition)}
+    <div class="chem-props">${meters.map(([label, key]) => { const v = Math.max(0, Math.min(1, count(f.properties[key] as number))); return `<span>${label}<meter aria-label="${label}" min="0" max="1" value="${v}"></meter><small>${esc(percentage(v))}</small></span>`; }).join('')}</div>
+    <small>Usos ${esc(number(f.uses))} · descubierta en el paso ${esc(number(f.discoveredAt))}</small></article>`).join('');
+  return `<section class="stats-section telemetry-section" data-chemistry><h3 class="section-title">Química emergente</h3><p class="stats-note">Seis elementos conservados (C, Si, Ca, Fe, S, H) y cuatro operadores físicos; cada fórmula nace de lo que alguien hizo.</p>${summary}${cards ? `<div class="chem-cards">${cards}</div>` : '<p class="stats-note">Todavía nadie ha descubierto una fórmula.</p>'}${chemistry.formulas.length < chemistry.totalFormulas ? `<p class="stats-note">Se muestran ${number(Math.min(12, chemistry.formulas.length))} de ${number(chemistry.totalFormulas)} fórmulas.</p>` : ''}</section>`;
 }

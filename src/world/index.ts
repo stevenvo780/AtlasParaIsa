@@ -21,6 +21,7 @@ import { defaultBlueprint, constructionCost, constructionOpportunity, inventionO
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
+import type { CompoundLot } from '../shared/chemistry.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory, constructionWorkFactor, consumeHuntingTools, huntingWorkFactor } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch, withRecipeSession } from './technology-catalogue.js';
@@ -100,6 +101,7 @@ export interface Habit {
   evidence: { eventId: string; tick: number; demonstrator: string; recipient: string; food: number }[];
 }
 export interface Person extends PersonView {
+  compounds?: CompoundLot[];
   inventory: number; curiosity: number; sociability: number; generosity: number;
   closeness: number; socialLoad: number; target: Point; decisionAt: number;
   lastMeeting: number; lastShared: number; experiences: Experience[]; habits: Habit[];
@@ -133,6 +135,7 @@ export interface Memory extends MemoryView {
   action: Action; weight: number; roles: ('S' | 'I')[];
 }
 export interface World {
+  chemistry?: unknown;
   version: number; seed: number; rng: number; tick: number; width: number; height: number;
   weather: 'clear' | 'rain'; tiles: Tile[]; people: Person[]; places: PlaceView[];
   memories: Memory[]; events: ChronicleEvent[]; eventCounter: number; chronicleJournal?: ChronicleJournal;
@@ -1539,6 +1542,11 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   person.activity[action] = Math.min(1_000_000, (person.activity[action] ?? 0) + 1);
 }
 
+/** Physical relief from the material state of the single cell underfoot. */
+export function roadEffortFactor(tile: { traffic?: number; paved?: number } | undefined): number {
+  return 1 - Math.min(0.55, Math.max(0, tile?.traffic ?? 0) * 0.45 + Math.max(0, tile?.paved ?? 0) * 0.15);
+}
+
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
 function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number, tileInArg?: TileLookup, readerArg?: ResidentTileReader | null): void {
   if (distance(person, person.target) < 0.5) return;
@@ -1546,6 +1554,21 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
   const start = { x: person.x, y: person.y };
   let nextStep: Point | null = null;
   let blocked = false;
+  const physicalRoads = paramsOf(world).terreno.caminosFisicos;
+  const startDistance = physicalRoads ? distance(start, person.target) : 0;
+  let roadStep: Point | null = null, roadDistance = Infinity, roadBestDistance = Infinity, roadScore = Infinity;
+  // At most two cardinal neighbors can reduce Euclidean distance. Compare those in one pass;
+  // the road bonus cannot admit a step more than 0.15 farther than the best reducing neighbor.
+  const considerRoad = (x: number, y: number, tile: Tile | undefined): void => {
+    if (!tile || tile.terrain === 'water') return;
+    const d = distance({ x, y }, person.target);
+    if (d >= startDistance) return;
+    roadBestDistance = Math.min(roadBestDistance, d);
+    const score = d - 0.18 * ((tile.traffic ?? 0) + (tile.paved ?? 0) * 0.5);
+    if (d <= roadBestDistance + 0.15 && (roadDistance > roadBestDistance + 0.15 || score < roadScore)) {
+      roadStep = { x, y }; roadDistance = d; roadScore = score;
+    }
+  };
   if (precomputed !== undefined && slot !== undefined && slot < precomputed.count
     && precomputed.targetX[slot] === person.target.x && precomputed.targetY[slot] === person.target.y) {
     const status = precomputed.si[SI.moveStatus * precomputed.cap + slot]!;
@@ -1578,7 +1601,9 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
         } else {
           const tile = tileIn(x, y);
           if (!tile || tile.terrain === 'water') continue;
+          if (physicalRoads && current === start) considerRoad(x, y, tile);
         }
+        if (physicalRoads && reader && current === start) considerRoad(x, y, tileIn(x, y));
         const nextKey = routeKey(x, y);
         if (previous.has(nextKey)) continue;
         const next = { x, y };
@@ -1603,6 +1628,22 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
       nextStep = best;
       blocked = false;
     }
+  } else if (physicalRoads && nextStep && distance(nextStep, person.target) < startDistance) {
+    // The worker already chose a route. Only its four-cell local stencil is consulted here;
+    // no route search, halo extension, or world scan is introduced by the road preference.
+    considerRoad(start.x + 1, start.y, tileIn(start.x + 1, start.y));
+    considerRoad(start.x, start.y + 1, tileIn(start.x, start.y + 1));
+    considerRoad(start.x - 1, start.y, tileIn(start.x - 1, start.y));
+    considerRoad(start.x, start.y - 1, tileIn(start.x, start.y - 1));
+  }
+  // Keep route-selected detours around water/obstacles; roads only break local progress ties.
+  if (physicalRoads && roadStep && nextStep && !allowCoastalDetour) {
+    const baselineDistance = distance(nextStep, person.target);
+    if (baselineDistance < startDistance && baselineDistance <= roadBestDistance + 0.15) {
+      const tile = tileIn(nextStep.x, nextStep.y);
+      const baselineScore = baselineDistance - 0.18 * ((tile?.traffic ?? 0) + (tile?.paved ?? 0) * 0.5);
+      if (roadScore < baselineScore) nextStep = roadStep;
+    }
   }
   if (blocked || !nextStep) {
     person.heading += 1.3; person.decisionAt = world.tick + 1;
@@ -1615,6 +1656,7 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
     }
     return;
   }
+  const carryFatigue = physicalRoads ? person.fatigue : 0;
   if (!payContainedWaterCarry(world, person)) {
     const desperateCarry = paramsOf(world).social.vinculoEncuentro > 0
       && (person.hunger > 0.85 || person.thirst > 0.85) && (person.energy < 0.01 || person.fatigue > 0.98);
@@ -1623,10 +1665,25 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
       return;
     }
   }
+  if (physicalRoads && person.fatigue > carryFatigue) {
+    // Water policy v1 receipts require the exact historical energy debit. Relieve only the
+    // bodily fatigue of carrying: liquid, work, energy ledger and admissibility stay conserved.
+    person.fatigue = carryFatigue + (person.fatigue - carryFatigue) * roadEffortFactor(tileIn(start.x, start.y));
+  }
   person.x = nextStep.x; person.y = nextStep.y;
   personaMovida(world, person);
-  trampleTile(tileIn(person.x, person.y)!);
-  exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
+  const steppedTile = tileIn(person.x, person.y)!;
+  const effort = physicalRoads ? roadEffortFactor(steppedTile) : 1;
+  trampleTile(steppedTile);
+  exertBody(person, { energy: 0.0008 * effort, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) * effort });
+  if (physicalRoads && steppedTile.terrain !== 'water' && steppedTile.terrain !== 'shelter'
+    && (steppedTile.traffic ?? 0) >= 0.72 && (steppedTile.paved ?? 0) < 0.9
+    && person.materials.stone >= 4 && person.energy > 0.35) {
+    person.materials.stone -= 1;
+    exertBody(person, { energy: 0.004, fatigue: 0.004 });
+    steppedTile.paved = 1;
+    count(world, 'roadsPaved');
+  }
   const visitedKey = key(person);
   if (!person.visited.includes(visitedKey)) {
     person.visited.push(visitedKey); person.visited = person.visited.slice(-192);
@@ -2020,7 +2077,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos,
-      gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
+      gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, caminosFisicos: paramsOf(world).terreno.caminosFisicos, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => withRecipeSession(world, () => {
     const motor = paramsOf(world).motor;

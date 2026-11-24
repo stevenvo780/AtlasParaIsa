@@ -8,13 +8,13 @@
  */
 import type { Tile } from '../shared/types.js';
 
-export const capasDeCalor = ['comida', 'vegetacion', 'agua', 'fertilidad', 'madera'] as const;
+export const capasDeCalor = ['comida', 'vegetacion', 'agua', 'fertilidad', 'madera', 'caminos'] as const;
 export type Capa = typeof capasDeCalor[number];
 
 // Cota máxima de `tile.wood` fijada por el contrato del mundo (validation.ts:
 // `number(t.wood, 12)`), no un parámetro simulable: normaliza a 0..1 para la rampa.
 const MADERA_MAXIMA = 12;
-const COTA: Record<Capa, number> = { comida: 1, vegetacion: 1, agua: 1, fertilidad: 1, madera: MADERA_MAXIMA };
+const COTA: Record<Capa, number> = { comida: 1, vegetacion: 1, agua: 1, fertilidad: 1, madera: MADERA_MAXIMA, caminos: 1 };
 
 /** Valor crudo de la capa tal cual llega en la tesela (mismas unidades que el servidor). */
 export function valorCrudo(tile: Tile, capa: Capa): number {
@@ -24,6 +24,8 @@ export function valorCrudo(tile: Tile, capa: Capa): number {
     case 'agua': return tile.drinkingWater ?? 0;
     case 'fertilidad': return tile.fertility ?? 0;
     case 'madera': return tile.wood ?? 0;
+    // V20: red de caminos emergente; el empedrado pesa más que las huellas de paso (0..1).
+    case 'caminos': return Math.min(1, (tile.traffic ?? 0) * 0.7 + (tile.paved ?? 0) * 0.5);
   }
 }
 
@@ -35,6 +37,7 @@ const RAMPA: Record<Capa, readonly [readonly [number, number, number], readonly 
   agua:       [[18, 30, 46], [60, 150, 224]],
   fertilidad: [[40, 28, 18], [212, 132, 48]],
   madera:     [[30, 22, 16], [168, 118, 62]],
+  caminos:    [[34, 30, 26], [226, 196, 120]],
 };
 
 const canal = (a: number, b: number, t: number): number => Math.round(a + (b - a) * t);
@@ -70,7 +73,7 @@ export function dibujarCalor(ctx: CanvasRenderingContext2D, tiles: readonly Tile
   }
 }
 
-export const TITULOS: Record<Capa, string> = { comida: 'Comida', vegetacion: 'Vegetación', agua: 'Agua potable', fertilidad: 'Fertilidad', madera: 'Madera' };
+export const TITULOS: Record<Capa, string> = { comida: 'Comida', vegetacion: 'Vegetación', agua: 'Agua potable', fertilidad: 'Fertilidad', madera: 'Madera', caminos: 'Caminos y calzadas' };
 const ETIQUETAS = ['nulo', 'escaso', 'moderado', 'abundante', 'máximo'] as const;
 
 export function leyendaCalor(capa: Capa): { titulo: string; paradas: { valor: number; color: string; etiqueta: string }[] } {
@@ -101,7 +104,7 @@ export function rangoRecibido(tiles: readonly Tile[], capa: Capa): RangoCalor | 
 
 const formato: Record<Capa, (v: number) => string> = {
   comida: v => `${Math.round(v * 100)} %`, vegetacion: v => `${Math.round(v * 100)} %`, fertilidad: v => `${Math.round(v * 100)} %`,
-  agua: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })} u.`, madera: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 1 })} u.`,
+  agua: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })} u.`, madera: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 1 })} u.`, caminos: v => `${Math.round(v * 100)} %`,
 };
 
 /** M10: leyenda con los valores reales de lo que se ve: cinco paradas entre el mínimo y el máximo recibidos,

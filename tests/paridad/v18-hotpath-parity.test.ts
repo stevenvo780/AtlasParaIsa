@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, type World, type Person } from '../src/world/index.js';
-import type { Tile, ChronicleEvent } from '../src/shared/types.js';
-import { parseParams, setParams } from '../src/world/params.js';
-import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { TileStore, residentFastAccess } from '../src/world/soa/terreno.js';
-import { tileLookup } from '../src/world/tile-index.js';
-import { computeLocalPolicyObservation } from '../src/world/politica-obs.js';
-import { inventionContext, inventionCandidates, constructionOpportunity } from '../src/world/inventions.js';
-import { cooperationOpportunity, settlementOpportunity, convivir, bond, updateCommunities } from '../src/world/society.js';
-import { conRejilla, vecinos, primerVecino, personaMovida } from '../src/world/rejilla.js';
-import { filtrarCerca, primeroCerca, algunoCerca } from '../src/world/indice-puntos.js';
-import { researchTechnology, type TechnologyProgram } from '../src/world/technology.js';
-import { proyectoInvestigacion, PROGRAMA_FILO } from './lib/escenas.js';
+import { createWorld, type World, type Person } from '../../src/world/index.js';
+import type { Tile, ChronicleEvent } from '../../src/shared/types.js';
+import { parseParams, setParams } from '../../src/world/params.js';
+import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
+import { TileStore, residentFastAccess } from '../../src/world/soa/terreno.js';
+import { tileLookup } from '../../src/world/tile-index.js';
+import { computeLocalPolicyObservation } from '../../src/world/politica-obs.js';
+import { inventionContext, inventionCandidates, constructionOpportunity } from '../../src/world/inventions.js';
+import { cooperationOpportunity, settlementOpportunity, convivir, bond, updateCommunities } from '../../src/world/society.js';
+import { conRejilla, vecinos, primerVecino, personaMovida } from '../../src/world/rejilla.js';
+import { filtrarCerca, primeroCerca, algunoCerca } from '../../src/world/indice-puntos.js';
+import { researchTechnology, type TechnologyProgram } from '../../src/world/technology.js';
+import { proyectoInvestigacion, PROGRAMA_FILO } from '../lib/escenas.js';
 
 // deepStrictEqual uses Object.is for numbers, preserving -0 and rejecting even
 // a one-ULP difference; Float64Array buffers additionally compare actual bytes.

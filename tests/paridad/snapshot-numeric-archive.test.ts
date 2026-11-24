@@ -3,17 +3,17 @@ import test, { type TestContext } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../src/server/store.js';
-import type { LegacyRecord } from '../src/shared/demography.js';
-import { assertWorld, cloneWorld, createWorld, type World } from '../src/world/index.js';
-import { demographicTraits } from '../src/world/demography.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { assertLegacyRecord } from '../src/world/lineage.js';
-import { paramsOf } from '../src/world/params.js';
-import { activate } from '../src/world/spatial.js';
-import { generateChunk } from '../src/world/terrain.js';
-import { decodeArchivedChunk, encodeArchivedChunk } from '../src/server/snapshot.js';
-import { sha256 } from './lib/store.js';
+import { Store } from '../../src/server/store.js';
+import type { LegacyRecord } from '../../src/shared/demography.js';
+import { assertWorld, cloneWorld, createWorld, type World } from '../../src/world/index.js';
+import { demographicTraits } from '../../src/world/demography.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { assertLegacyRecord } from '../../src/world/lineage.js';
+import { paramsOf } from '../../src/world/params.js';
+import { activate } from '../../src/world/spatial.js';
+import { generateChunk } from '../../src/world/terrain.js';
+import { decodeArchivedChunk, encodeArchivedChunk } from '../../src/server/snapshot.js';
+import { sha256 } from '../lib/store.js';
 
 interface ArchiveRow { body: string; digest: string; tick: number; }
 

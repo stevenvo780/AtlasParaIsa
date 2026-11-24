@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld } from '../src/world/index.js';
-import { paramsOf } from '../src/world/params.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { sha256 } from './lib/store.js';
+import { createWorld } from '../../src/world/index.js';
+import { paramsOf } from '../../src/world/params.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { sha256 } from '../lib/store.js';
 
 /** Previous 3dd615e byte contract, retained as an independent small-state oracle. */
 function previousCanonical(value: unknown): unknown {

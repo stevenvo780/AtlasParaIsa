@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createWorld, stepWorld, type World } from '../src/world/index.js';
-import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
-import { initializeEcosystem } from '../src/world/ecosystem.js';
-import { generateChunk } from '../src/world/terrain.js';
-import type { Tile } from '../src/shared/types.js';
-import { HISTORICAL_PARAMS } from '../src/world/params.js';
+import { createWorld, stepWorld, type World } from '../../src/world/index.js';
+import { EcosystemKernel } from '../../src/world/ecosystem-kernel.js';
+import { initializeEcosystem } from '../../src/world/ecosystem.js';
+import { generateChunk } from '../../src/world/terrain.js';
+import type { Tile } from '../../src/shared/types.js';
+import { HISTORICAL_PARAMS } from '../../src/world/params.js';
 
 /**
  * Control bit a bit del bucle caliente (R4, perfilado del kernel de ecología).

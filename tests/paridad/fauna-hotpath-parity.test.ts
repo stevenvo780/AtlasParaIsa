@@ -8,14 +8,14 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import type { Tile } from '../src/shared/types.js';
-import { assertAnimals, MAX_ANIMALS_PER_TILE, materializeAnimals, stepAnimals, type AnimalWorld } from '../src/world/animals.js';
-import { closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
-import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { parseParams } from '../src/world/params.js';
-import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { residentTileReader, TileStore } from '../src/world/soa/terreno.js';
+import type { Tile } from '../../src/shared/types.js';
+import { assertAnimals, MAX_ANIMALS_PER_TILE, materializeAnimals, stepAnimals, type AnimalWorld } from '../../src/world/animals.js';
+import { closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld } from '../../src/world/index.js';
+import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { parseParams } from '../../src/world/params.js';
+import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
+import { residentTileReader, TileStore } from '../../src/world/soa/terreno.js';
 
 after(async () => {
   closePolicyGpuBatchers();

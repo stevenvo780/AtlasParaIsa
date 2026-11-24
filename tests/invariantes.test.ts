@@ -168,7 +168,16 @@ test('panel sin horizonte no aprueba y la permutación respeta las semillas', ()
   assert.throws(() => configurarPanel({ M4: { desde: 30, hasta: 15 } }));
   const grupos = [{ semilla: 1, valores: [2, 3, 4] }, { semilla: 2, valores: [100, 101, 102] }];
   const resultado = permutacionEstratificada(grupos, grupos, { iteraciones: 100, semilla: 23 });
-  assert.ok(JSON.stringify(resultado).includes('1'));
+  assert.equal(resultado.estado, 'desconocido');
+  assert.equal('p' in resultado && resultado.p, 1);
   const a = new AzarPropiedades(23), b = new AzarPropiedades(23);
   for (let i = 0; i < 20; i++) assert.equal(a.siguiente(), b.siguiente());
+});
+
+test('las réplicas deterministas no inflan la significación de la permutación', () => {
+  const a = [1, 2, 3, 4].map(semilla => ({ semilla, valores: [100, 100, 100] }));
+  const b = [1, 2, 3, 4].map(semilla => ({ semilla, valores: [110, 110, 110] }));
+  const resultado = permutacionEstratificada(a, b, { replicasDeterministas: true });
+  assert.equal(resultado.estado, 'desconocido');
+  assert.ok('p' in resultado && resultado.p! > 0.1);
 });

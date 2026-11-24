@@ -145,10 +145,15 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const animal = { id: 'observed-deer', species: 'deer', x: -3, y: -2, action: 'flee', reason: 'Un lobo se aproxima.', hunger: .2, thirst: .3, energy: .7, fatigue: .2, health: 1, generation: 1, parents: ['deer-parent'], genes: {speed:.7,perception:.8,metabolism:.5,carnivory:.1,waterEfficiency:.6,camouflage:.3}, age: 800 };
       let legacyDraws = 0; renderer.drawFauna = () => legacyDraws++;
       const state = {...world, tick: 10, sequence: 10, animals: [animal], tiles: world.tiles.map((t: object) => ({...t, species:'deer',fauna:2}))};
-      renderer.update(state); renderer.reduceMotion = false;
+      renderer.reduceMotion = false;
+      renderer.setDvrMode(true);
+      renderer.update(state);
       const next = {...state, tick: 11, sequence: 11, animals: [{...animal,x:-2}]}; const serialized = JSON.stringify(next);
-      renderer.update(next); renderer.currAt = 0; renderer.interval = 500;
-      const midpoint = renderer.interpolateAnimals(250)[0]; const completed = renderer.interpolateAnimals(1000)[0];
+      renderer.update(next);
+      const start = renderer.currAt, duration = renderer.cadence.moveDurationMs;
+      const midpoint = renderer.interpolateAnimals(start + duration / 2)[0];
+      const completed = renderer.interpolateAnimals(start + 2 * duration)[0];
+      renderer.setDvrMode(false);
       renderer.reduceMotion = true; renderer.focus(-2,-2); renderer.render(1000);
       const screen = renderer.worldToScreen(-1.5,-1.5); renderer.pick(screen.x,screen.y);
       const preserved = serialized === JSON.stringify(next);
@@ -174,16 +179,20 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     const atmosphere = await page.evaluate(() => {
       const {renderer,world} = (window as unknown as {renderTest:{renderer:any;world:any}}).renderTest;
       const water = {...world,tick:900,sequence:900,weather:'rain',people:[],animals:[],events:[],tiles:world.tiles.map((tile:object)=>({...tile,terrain:'water',feature:'none'}))};
-      renderer.reduceMotion = true; renderer.update(water); renderer.focus(0,0); renderer.render(performance.now());
+      renderer.reduceMotion = true;
+      renderer.setGraphicsSettings({ ...renderer.graphicsSettings, waterRipples: true });
+      renderer.update(water); renderer.focus(0,0); renderer.zoom(4);
+      const at = performance.now();
+      renderer.render(at);
       const first = renderer.getDiagnostics();
       const pixels = () => [...renderer.labelCtx.getImageData(0,0,640,480).data].join(',');
-      const frozen = pixels(); renderer.render(performance.now()+5000); const reducedStable = frozen === pixels();
-      renderer.reduceMotion = false; renderer.render(performance.now()+6000); const movingRain = frozen !== pixels();
-      renderer.update({...water,tick:901,sequence:901,weather:'clear'}); renderer.render(performance.now());
-      const clearRain = renderer.getDiagnostics().effects.rain;
+      const frozen = pixels(); renderer.render(at + 500); const reducedStable = frozen === pixels();
+      renderer.reduceMotion = false; renderer.render(at + 600); const movingRain = frozen !== pixels();
+      renderer.update({...water,tick:901,sequence:901,weather:'clear'});
       const next = {...water,tick:902,sequence:902,weather:'clear',events:Array.from({length:200},(_,i)=>({id:`accent-${i}`,tick:902,kind:'birth',source:'simulation',x:0,y:0,actors:[],text:'Synthetic fixture',cause:'Synthetic event'}))};
-      renderer.update(next); renderer.render(performance.now()); const burst = renderer.getDiagnostics();
-      renderer.render(performance.now()+3000); const expired = renderer.getDiagnostics().effects.events;
+      renderer.update(next); renderer.render(at + 700); const burst = renderer.getDiagnostics();
+      renderer.render(at + 4000);
+      const { rain: clearRain, events: expired } = renderer.getDiagnostics().effects;
       const person = {view:{id:'worker',name:'Worker',role:'neighbor',color:'#a4805b',x:0,y:0,action:'drink',thirst:.7,hunger:.5,working:false,foodReserve:0},x:0,y:0,moving:false,seed:27};
       const drawPerson = (time:number) => {const canvas=document.createElement('canvas');canvas.width=canvas.height=32;const g=canvas.getContext('2d')!;renderer.drawPerson(g,person,time);return [...g.getImageData(0,0,32,32).data].join(',');};
       renderer.actionActive=true;renderer.prevPeople.clear();const noDebit=drawPerson(0)===drawPerson(.4);
@@ -217,16 +226,24 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     const travel = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
       const renderer = state.renderer;
-      for (let stop = 1; stop <= 16; stop++) {
+      renderer.reduceMotion = true;
+      const before = renderer.getDiagnostics().terrainBuilds;
+      // Doce trozos por ventana disjunta: supera la capacidad de terreno de V24 (1 100).
+      const tiles = state.world.tiles.filter((tile: {x:number;y:number}) => tile.x % 8 === 0 && tile.y % 8 === 0);
+      for (let stop = 1; stop <= 96; stop++) {
         const shift = stop * 64;
-        renderer.update({...state.world, tick: stop+5, sequence: stop+5, originX: state.world.originX+shift, tiles: state.world.tiles.map((tile: {x:number}) => ({...tile, x: tile.x+shift}))});
-        renderer.focus(shift,0); renderer.render(0);
+        renderer.focus(shift,0);
+        renderer.update({...state.world, tick: stop+5, sequence: stop+5, originX: state.world.originX+shift, tiles: tiles.map((tile: {x:number}) => ({...tile, x: tile.x+shift}))});
+        renderer.render(0);
       }
-      return renderer.getDiagnostics();
+      const diagnostics = renderer.getDiagnostics();
+      return { ...diagnostics, terrainBuilds: diagnostics.terrainBuilds - before, terrainEntries: renderer.terrainCache.size };
     });
-    assert.ok(travel.cacheBytes <= 10*1024*1024, 'CPU raster caches stay within 10 MiB while travelling');
-    assert.ok(travel.gpuTextureBytes <= 8*1024*1024, 'evicted chunks release GPU textures within 8 MiB');
-    assert.ok(travel.cacheEntries <= 640);
+    const terrainCapacity = 1100, terrainBytes = terrainCapacity * 128 * 128 * 4;
+    assert.ok(travel.terrainBuilds > terrainCapacity, 'travel visits more chunks than the cache can retain');
+    assert.equal(travel.terrainEntries, terrainCapacity, 'travel fills and evicts from the terrain cache');
+    assert.ok(travel.cacheBytes <= terrainBytes + 2*1024*1024, 'CPU rasters stay within the terrain and sprite budgets');
+    assert.ok(travel.gpuTextureBytes <= terrainBytes, 'evicting terrain also releases its GPU textures');
     const cleanup = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: {destroy():void;getDiagnostics():{cacheEntries:number}}}}).renderTest;
       state.renderer.destroy(); return { count: document.querySelectorAll('[data-renderer="webgl2-terrain"], [data-landscape-layer]').length, entries: state.renderer.getDiagnostics().cacheEntries };

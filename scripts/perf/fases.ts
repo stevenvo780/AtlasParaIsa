@@ -5,7 +5,7 @@
  *
  * Copia la base (y su -wal/-shm si existen) a un directorio temporal PROPIO bajo `$TMPDIR` —el
  * original no se escribe nunca—, la carga con el `Store` del proyecto (params del propio mundo)
- * y avanza N pasos con el mismo régimen que `scripts/lab/replica.ts` sin gobernador: `stepWorld`
+ * y avanza N pasos con el mismo régimen que `scripts/lab/replica.ts` en modo de leyes: `stepWorld`
  * y `store.save` cada `persistencia.cadaTicks`. Mide CPU PROPIA del proceso (`process.cpuUsage`,
  * usuario+sistema), nunca reloj de pared: la torre corre a carga 60–140.
  *

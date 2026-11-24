@@ -2,7 +2,7 @@
  * Laboratorio — control de identidad y perfil de CPU del paso (sprint noche-perf 2026-09-22).
  *
  * Tres subcomandos, todos con el mismo régimen que `replica.ts` (Store temporal guardado antes
- * del primer tick y cada `persistencia.cadaTicks` ticks; sin gobernador):
+ * del primer tick y cada `persistencia.cadaTicks` ticks):
  *
  *   digestos    [--pasos 1200,2400]
  *       `digestoCanonico` tras cada número de pasos, en las tres semillas de control
@@ -42,7 +42,7 @@ function arg(flag: string): string | undefined {
 
 const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
 
-/** Un paso del laboratorio: `stepWorld` y, por cadencia, `store.save` (como replica.ts sin gobernador). */
+/** Un paso del laboratorio: `stepWorld` y, por cadencia, `store.save` (como replica.ts en modo de leyes). */
 function paso(world: World, store: Store, medicion?: FaseMedicion): void {
   stepWorld(world, [], undefined, medicion);
   if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);

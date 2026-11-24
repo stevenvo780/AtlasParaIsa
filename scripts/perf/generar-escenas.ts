@@ -1,4 +1,4 @@
-/** Escenas naturales de laboratorio: mismo bucle que replica.ts, sin gobernador ni instrumentos. */
+/** Escenas naturales de laboratorio: mismo bucle que replica.ts, en modo de leyes y sin instrumentos. */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -206,7 +206,7 @@ export function generateNaturalScenes(options: GenerationOptions, log: (message:
   finally { store.close(); }
   const missingThresholds = checked.thresholds.filter(n => !scenes.some(scene => scene.threshold === n));
   const report: GenerationReport = { version: 1, status: error ? 'failed' : 'done', retryable: false,
-    seed: checked.seed, params, paramsSource, source, mode: 'replica.ts; gobernador=no; instrumentos=no; stepWorld inplace; población natural',
+    seed: checked.seed, params, paramsSource, source, mode: 'replica.ts; servidor=no; instrumentos=no; stepWorld inplace; población natural',
     maxDays: checked.maxDays, thresholds: checked.thresholds, workingDb, tick: world?.tick ?? 0,
     population: world?.people.length ?? 0, scenes, missingThresholds, startedAt, finishedAt: new Date().toISOString(), ...(error ? { error } : {}) };
   writeFileSync(join(output, 'manifiesto.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 });

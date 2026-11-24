@@ -37,7 +37,7 @@ import { Store } from '../../src/server/store.js';
 import { hostParams } from '../../src/server/hardware-limits.js';
 import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../../src/world/chronicle-journal.js';
-import { assertWorld, cloneWorld, createWorld, fraccionSerial, projectWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion, type World } from '../../src/world/index.js';
+import { assertWorld, createWorld, fraccionSerial, projectWorld, puntoDeRestauracion, stepWorld, TICKS_PER_DAY, type FaseMedicion, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueNearCapacity, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
@@ -47,8 +47,6 @@ import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { faunaTotal, registrarFaunaRetirada } from './fauna-total.js';
-
-type ModoServidor = 'no' | 'servidor';
 
 /** Pasos de la ventana del p95 del paso, la misma que la telemetría del servidor (`registrarPaso`, src/server/app.ts). */
 const VENTANA_P95_PASOS = 120;
@@ -171,12 +169,7 @@ function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store, censo
   };
 }
 
-/**
- * T118-bis ("laboratorio consciente del servidor"): `dailyMetrics` (arriba) queda intacta a
- * propósito — es el contrato que el test (a) protege bit a bit para `--gobernador no` (default).
- * Estas métricas SOLO existen con `--gobernador servidor` (que imita `stepOnce`: clon, paso y guardado
- * por cadencia), y se calculan aparte para no arriesgar ni una clave nueva en el régimen de hoy.
- */
+/** Métricas adicionales de `--servidor si`, con la reserva, el paso y el guardado de `stepOnce`. */
 function metricasServidor(world: World, p95PasoFinal: number, cloneMsMuestras: readonly number[], saveMsMuestras: readonly number[]) {
   const vivos = world.people;
   type Rasgos = { resilience: number; learningRate: number; curiosity: number; sociability: number; care: number };
@@ -219,9 +212,10 @@ async function main(): Promise<void> {
   if (!Number.isInteger(seed) || seed < 0) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (seed entero ≥ 0).');
   if (!Number.isInteger(dias) || dias < 1) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (dias entero ≥ 1).');
   if (!salida) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (falta --salida).');
-  const gobernadorArg = arg('--gobernador') ?? 'no';
-  if (gobernadorArg !== 'no' && gobernadorArg !== 'servidor') throw new Error('Uso: --gobernador no|servidor (por defecto "no").');
-  const gobernadorModo: ModoServidor = gobernadorArg;
+  if (flagPresente('--gobernador')) throw new Error('La opción --gobernador fue retirada. Usa --servidor si|no.');
+  const servidorArg = flagPresente('--servidor') ? arg('--servidor') : 'no';
+  if (servidorArg !== 'si' && servidorArg !== 'no') throw new Error('Uso: --servidor si|no (por defecto "no").');
+  const imitarServidor = servidorArg === 'si';
   // Instrumentos de medida (scripts/lab/instrumentos.ts): conducta, cooperación y panel C8.
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
@@ -250,7 +244,7 @@ async function main(): Promise<void> {
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
   try {
-    let world = createWorld(seed, params);
+    const world = createWorld(seed, params);
     const censosFauna = new Map<string, number>();
     const poblacionInicial = world.people.length;
     const vecinosMortalesIniciales = world.people.filter(person => person.role === 'neighbor').length;
@@ -261,7 +255,7 @@ async function main(): Promise<void> {
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
 
-    // Solo con --gobernador servidor: tiempos de clon y guardado del DÍA en curso, reiniciados en cada dia-NNN.json.
+    // Solo con --servidor si: tiempos de reserva y guardado del día en curso.
     const cloneMsDia: number[] = [], saveMsDia: number[] = [];
 
     const totalTicks = dias * TICKS_PER_DAY, stepTimes: number[] = [];
@@ -269,20 +263,18 @@ async function main(): Promise<void> {
     const medicion: FaseMedicion = { clock: () => performance.now(), fases: fasesAcumuladas };
     let maxRss = process.memoryUsage().rss, ultimoDia: ReturnType<typeof dailyMetrics> | null = null;
     for (let tick = 1; tick <= totalTicks; tick++) {
-      if (gobernadorModo === 'servidor') {
-        // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
-        // medición.
+      if (imitarServidor) {
+        // Como stepOnce sin entradas y sin turbo: `true` avanza en el sitio y `false`
+        // toma un punto de restauración. El guardado del paso queda dentro de la medición.
         instrumentos?.antesDelPaso(world);
         const stepStarted = performance.now();
-        let cloneMs = 0;
-        if (params.motor.clonPorPaso) {
-          const cloneStarted = performance.now();
-          const draft = cloneWorld(world, store.context);
-          cloneMs = performance.now() - cloneStarted;
-          stepWorld(draft, [], undefined, medicion);
-          world = draft;
-        } else {
+        const punto = params.motor.clonPorPaso ? null : puntoDeRestauracion(world);
+        const cloneMs = punto ? performance.now() - stepStarted : 0;
+        try {
           stepWorld(world, [], undefined, medicion);
+        } catch (error) {
+          punto?.restaurar();
+          throw error;
         }
         // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
         // descuenta de stepMs para medir el mismo paso que sin instrumentos.
@@ -337,10 +329,10 @@ async function main(): Promise<void> {
           const { foodShared, ...conducta } = instrumentos.metricasDia(world, store.db);
           medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
         }
-        const extra = gobernadorModo === 'servidor' ? metricasServidor(world, distribution(stepTimes.slice(-VENTANA_P95_PASOS)).p95, cloneMsDia, saveMsDia) : {};
+        const extra = imitarServidor ? metricasServidor(world, distribution(stepTimes.slice(-VENTANA_P95_PASOS)).p95, cloneMsDia, saveMsDia) : {};
         const body = { tick, ...medidas, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
-        if (gobernadorModo === 'servidor') { cloneMsDia.length = 0; saveMsDia.length = 0; }
+        if (imitarServidor) { cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
     }
     registrarFaunaRetirada(world, censosFauna);
@@ -365,9 +357,9 @@ async function main(): Promise<void> {
     };
     const replica = {
       metricasVersion: 2,
-      gobernador: gobernadorModo === 'servidor'
-        ? 'servidor; imita stepOnce (clon+paso, guardado por cadencia) cada tick, sin gobernador'
-        : 'no-ejecutado; replica de leyes, no del servidor',
+      servidor: imitarServidor
+        ? 'si, imita stepOnce sin entradas y sin turbo, con guardado por cadencia o presión de diarios'
+        : 'no, mide stepWorld en el sitio',
       instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y panel C8' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),

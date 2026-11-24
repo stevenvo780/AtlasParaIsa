@@ -31,6 +31,7 @@ const DEFAULT_TIMEOUT_SECONDS = 600; // 10 min/réplica: el brief de T017 no dab
 // (quickstart.md L12/13, T031) — hallazgo de revisión T017.
 
 type JobStatus = 'ok' | 'abortada' | 'error';
+type ModoServidor = 'si' | 'no';
 
 interface Job {
   readonly id: string;
@@ -38,7 +39,7 @@ interface Job {
   readonly dias: number;
   readonly paramsArg: string;
   readonly dir: string;
-  readonly gobernador: string | undefined;
+  readonly servidor: ModoServidor | undefined;
   readonly hilos: string | undefined;
   readonly gpu: string | undefined;
   readonly orden: string | undefined;
@@ -60,7 +61,7 @@ interface Options {
   readonly timeoutMs: number;
   readonly salida: string;
   readonly control: string | undefined;
-  readonly gobernador: string | undefined;
+  readonly servidor: ModoServidor | undefined;
   readonly hilos: string | undefined;
   readonly gpu: string | undefined;
   readonly orden: string | undefined;
@@ -75,7 +76,7 @@ function normalizarGpuArg(raw: string): string {
 function printHelp(): void {
   console.log(
     'Uso: npm run lab -- --replicas N --dias D [--param clave=v1,v2 ...] [--seed-base S] ' +
-    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR] [--gobernador no|servidor] ' +
+    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR] [--servidor si|no] ' +
     '[--hilos N] [--gpu LISTA] [--orden natural|inverso|adversarial]\n' +
     'Corre el producto cartesiano de --param (repetible, o varios "clave=v1,v2" sueltos tras un ' +
     'solo --param, como en T031) × --replicas réplicas con scripts/lab/replica.ts, en cola con ' +
@@ -102,7 +103,8 @@ function sello(): string {
 function parseArgs(argv: readonly string[]): Options | null {
   const paramValues = new Map<string, string[]>();
   let replicas: number | undefined, dias: number | undefined, seedBase: number | undefined;
-  let concurrencia: number | undefined, timeoutSeconds: number | undefined, salida: string | undefined, control: string | undefined, gobernador: string | undefined;
+  let concurrencia: number | undefined, timeoutSeconds: number | undefined, salida: string | undefined, control: string | undefined;
+  let servidor: ModoServidor | undefined;
   let hilos: string | undefined, gpu: string | undefined, orden: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -123,10 +125,10 @@ function parseArgs(argv: readonly string[]): Options | null {
       case '--timeout': timeoutSeconds = requireInt(takeValue(), key, 1); break;
       case '--salida': salida = takeValue(); break;
       case '--control': control = takeValue(); break;
-      case '--gobernador': {
+      case '--servidor': {
         const value = takeValue();
-        if (value !== 'no' && value !== 'servidor') throw new Error(`--gobernador requiere "no" o "servidor" (recibido "${value}")`);
-        gobernador = value;
+        if (value !== 'si' && value !== 'no') throw new Error(`--servidor requiere "si" o "no" (recibido "${value}")`);
+        servidor = value;
         break;
       }
       case '--hilos': {
@@ -174,7 +176,7 @@ function parseArgs(argv: readonly string[]): Options | null {
     replicas, dias, paramValues,
     salida: resolve(ROOT, salida ?? join('artifacts', 'lab', sello())),
     control: control ? resolve(ROOT, control) : undefined,
-    gobernador, hilos, gpu, orden,
+    servidor, hilos, gpu, orden,
     seedBase: seedBase ?? 1,
     concurrencia: concurrencia ?? Math.max(1, availableParallelism() - 2),
     timeoutMs: (timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000,
@@ -206,7 +208,7 @@ function buildJobs(options: Options): Job[] {
       const seed = options.seedBase + replica;
       jobs.push({
         id: `${slug}/seed-${seed}`, seed, dias: options.dias, paramsArg,
-        dir: join(options.salida, slug, `seed-${seed}`), gobernador: options.gobernador,
+        dir: join(options.salida, slug, `seed-${seed}`), servidor: options.servidor,
         hilos: options.hilos, gpu: options.gpu, orden: options.orden,
       });
     }
@@ -295,7 +297,7 @@ async function runJob(job: Job, timeoutMs: number): Promise<JobResult> {
   const replicaScript = process.env.CARTA_REPLICA_SCRIPT || 'scripts/lab/replica.ts';
   const args = ['tsx', replicaScript, '--seed', String(job.seed), '--dias', String(job.dias), '--salida', job.dir];
   if (job.paramsArg) args.push('--params', job.paramsArg);
-  if (job.gobernador) args.push('--gobernador', job.gobernador);
+  if (job.servidor !== undefined) args.push('--servidor', job.servidor);
   if (job.hilos !== undefined) args.push('--hilos', job.hilos);
   if (job.gpu !== undefined) args.push('--gpu', job.gpu);
   if (job.orden !== undefined) args.push('--orden', job.orden);

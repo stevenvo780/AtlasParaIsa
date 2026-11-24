@@ -34,7 +34,7 @@ test('flags estrictos: umbrales naturales, semilla u32 y ninguna bandera que alt
   assert.deepEqual(parseGenerationArgs(base), { seed: 8101, paramsDb: base[1], output: base[3], thresholds: [700, 2000], maxDays: 60 });
   assert.deepEqual(parseGenerationArgs([...base, '--umbrales', '16,20', '--max-dias', '1']).thresholds, [16, 20]);
   for (const suffix of [['--seed'], ['--seed', '4294967296'], ['--max-dias', '0'], ['--umbrales', '20,16'],
-    ['--umbrales', '16,16'], ['--seed', '1e3'], ['--params', 'agua.cuencas=1'], ['--gobernador', 'servidor'], ['--salida', base[3]!]])
+    ['--umbrales', '16,16'], ['--seed', '1e3'], ['--params', 'agua.cuencas=1'], ['--servidor', 'si'], ['--salida', base[3]!]])
     assert.throws(() => parseGenerationArgs([...base, ...suffix]));
 });
 

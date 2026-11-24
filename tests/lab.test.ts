@@ -85,11 +85,8 @@ test('dos réplicas con la misma semilla y params dan métricas idénticas salvo
   assert.deepEqual(stripTimings(replicaA.resumen as Json), stripTimings(replicaB.resumen as Json));
 });
 
-// T118-bis ("laboratorio consciente del servidor"): --gobernador servidor|no en replica.ts.
-// Claves exactas de dia-NNN.json ANTES de esta tarea (congeladas a partir de la corrida de
-// control, seed 51926, FAST_PARAMS): el default (sin --flag) DEBE seguir produciendo
-// exactamente este conjunto — ni una clave nueva de más.
-const CLAVES_DIA_SIN_GOBERNADOR = new Set([
+// Claves de dia-NNN.json para una réplica de leyes con los instrumentos desactivados.
+const CLAVES_DIA_SIN_INSTRUMENTOS = new Set([
   'tick', 'poblacion', 'nacimientos', 'muertesPorCausa', 'fundadoresVivos', 'generacionesVivas',
   'diversidadOficios', 'recetasCreadasAcumuladas', 'diversidadConducta', 'diversidadFuncional',
   'catalogoActivo', 'cooperaciones', 'gini', 'fraccionComida', 'distanciaAgua', 'regionesSinAgua',
@@ -101,35 +98,34 @@ const CLAVES_DIA_SIN_GOBERNADOR = new Set([
 ]);
 // Instrumentos de medida (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22): activos por defecto,
 // añaden estas claves (y `foodShared` dentro de `cooperacionAcumuladaPorTipo`); con
-// `--instrumentos no` el conjunto vuelve a ser EXACTAMENTE `CLAVES_DIA_SIN_GOBERNADOR`
+// `--instrumentos no` el conjunto vuelve a ser EXACTAMENTE `CLAVES_DIA_SIN_INSTRUMENTOS`
 // (tests/instrumentos-lab.test.ts).
 const CLAVES_INSTRUMENTOS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'sedMuertes', 'sedRegiones', 'sedFuentes'] as const;
-const CLAVES_DIA_POR_DEFECTO = new Set<string>([...CLAVES_DIA_SIN_GOBERNADOR, ...CLAVES_INSTRUMENTOS]);
-const CLAVES_GOBERNADOR_SERVIDOR = ['p95PasoFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
+const CLAVES_DIA_POR_DEFECTO = new Set<string>([...CLAVES_DIA_SIN_INSTRUMENTOS, ...CLAVES_INSTRUMENTOS]);
+const CLAVES_SERVIDOR = ['p95PasoFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
 
-test('--gobernador (default "no" y explícito "no") no añade ninguna clave nueva a dia-001.json', (t) => {
+test('--servidor no conserva las claves y métricas diarias por defecto', (t) => {
   const dirDefault = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS]);
-  const dirNo = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'no']);
+  const dirNo = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--servidor', 'no']);
 
   const diaDefault = readJson(join(dirDefault, 'dia-001.json'));
   const diaNo = readJson(join(dirNo, 'dia-001.json'));
-  assert.deepEqual(new Set(Object.keys(diaDefault)), CLAVES_DIA_POR_DEFECTO, 'sin --gobernador el conjunto de claves debe ser EXACTAMENTE el de antes de esta tarea (+ instrumentos)');
-  assert.deepEqual(new Set(Object.keys(diaNo)), CLAVES_DIA_POR_DEFECTO, '--gobernador no debe producir el mismo conjunto de claves que el default');
-  for (const clave of CLAVES_GOBERNADOR_SERVIDOR) { assert.ok(!(clave in diaDefault), `${clave} no debe existir sin --gobernador`); assert.ok(!(clave in diaNo), `${clave} no debe existir con --gobernador no`); }
-  assert.deepEqual(stripTimings(diaDefault), stripTimings(diaNo), 'default y --gobernador no deben coincidir bit a bit salvo tiempos');
+  assert.deepEqual(new Set(Object.keys(diaDefault)), CLAVES_DIA_POR_DEFECTO);
+  assert.deepEqual(stripTimings(diaDefault), stripTimings(diaNo));
 
   const replicaDefault = readJson(join(dirDefault, 'replica.json')), replicaNo = readJson(join(dirNo, 'replica.json'));
   assert.deepEqual(stripTimings(replicaDefault.resumen as Json), stripTimings(replicaNo.resumen as Json));
-  assert.equal(replicaDefault.gobernador, replicaNo.gobernador, 'el campo descriptivo "gobernador" no debe cambiar entre default y --gobernador no');
+  assert.match(replicaDefault.servidor as string, /^no\b/);
+  assert.equal(replicaDefault.servidor, replicaNo.servidor);
 });
 
-test('--gobernador servidor añade los campos nuevos', (t) => {
-  const dir = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'servidor']);
+test('--servidor si añade métricas y mide el paso sin reserva cuando clonPorPaso=true', (t) => {
+  const dir = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', `${FAST_PARAMS},motor.clonPorPaso=true`, '--servidor', 'si']);
   const dia = readJson(join(dir, 'dia-001.json'));
 
-  for (const clave of CLAVES_GOBERNADOR_SERVIDOR) assert.ok(clave in dia, `dia-001.json.${clave} debe existir con --gobernador servidor`);
+  for (const clave of CLAVES_SERVIDOR) assert.ok(clave in dia, `dia-001.json.${clave} debe existir con --servidor si`);
   assert.equal(typeof dia.p95PasoFinal, 'number'); assert.ok((dia.p95PasoFinal as number) >= 0);
-  assert.equal(typeof dia.cloneMsP50, 'number'); assert.ok((dia.cloneMsP50 as number) >= 0);
+  assert.equal(dia.cloneMsP50, 0);
   assert.equal(typeof dia.saveMsP50, 'number'); assert.ok((dia.saveMsP50 as number) >= 0);
 
   const indice = dia.indiceDiversidad as Json;
@@ -149,12 +145,22 @@ test('--gobernador servidor añade los campos nuevos', (t) => {
   assert.ok((dia.varianzaGenetica as number) >= 0);
 
   const replica = readJson(join(dir, 'replica.json'));
-  assert.match(replica.gobernador as string, /servidor/, 'el campo "gobernador" debe describir el modo servidor');
+  assert.match(replica.servidor as string, /^si\b/);
 });
 
-test('--gobernador acepta solo "servidor"|"no"', (t) => {
+test('--servidor si mide el punto de restauración cuando clonPorPaso=false', (t) => {
+  const dir = runReplica(t, ['--seed', '1', '--dias', '1', '--params', `${FAST_PARAMS},motor.clonPorPaso=false`, '--servidor=si']);
+  const dia = readJson(join(dir, 'dia-001.json'));
+  assert.equal(typeof dia.cloneMsP50, 'number');
+  assert.ok((dia.cloneMsP50 as number) > 0);
+});
+
+test('--servidor requiere "si" o "no" y la opción anterior se rechaza', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-lab-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'invalido', '--salida', dir], { encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
+  for (const args of [['--servidor', 'invalido'], ['--servidor'], ['--gobernador', 'servidor']]) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--salida', dir, ...args], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /--servidor si\|no/);
+  }
 });

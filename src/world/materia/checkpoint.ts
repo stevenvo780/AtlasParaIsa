@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { crc32 } from 'node:zlib';
 import { NE } from '../../shared/naturaleza.js';
 import { REF_NULA, TipoIntento, slotDe, type Hilo, type Intento } from '../motor/contratos.js';
 import { balancePares, comprobarConservacion } from './libro.js';
@@ -16,7 +17,7 @@ export interface LoteGuardado {
 const FIRMA = 0x54414d56; // VMAT, little endian
 const VERSION = 1;
 const CELDAS_POR_PAGINA = 256;
-const TOTAL_MAX_U32 = 0xffff_ffff;
+const U32_MAX = 0xffff_ffff;
 const TIPOS_CON_GARANTIA = new Set<TipoIntento>([TipoIntento.Depositar, TipoIntento.Dar, TipoIntento.Concedido, TipoIntento.Devuelto]);
 
 function entero(valor: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
@@ -48,7 +49,7 @@ class Escritor {
   }
 
   u8(valor: number): void { const inicio = this.reservar(1); this.vista.setUint8(inicio, entero(valor, 0, 255)); }
-  u32(valor: number): void { const inicio = this.reservar(4); this.vista.setUint32(inicio, entero(valor, 0, TOTAL_MAX_U32), true); }
+  u32(valor: number): void { const inicio = this.reservar(4); this.vista.setUint32(inicio, entero(valor, 0, U32_MAX), true); }
   f64(valor: number): void { const inicio = this.reservar(8); this.vista.setFloat64(inicio, valor, true); }
   entero(valor: number, min = 0): void { this.f64(entero(valor, min)); }
 
@@ -144,7 +145,7 @@ function registrarRanura(ranuras: Set<number>, ref: LoteRef): void {
 }
 
 function validarRanuras(ranuras: Set<number>): void {
-  for (const ranura of ranuras) if (ranura >= ranuras.size || ranura >= TOTAL_MAX_U32) {
+  for (const ranura of ranuras) if (ranura >= ranuras.size || ranura >= U32_MAX) {
     throw new Error(`Ranuras de materia no consecutivas: ${ranura}.`);
   }
 }
@@ -152,7 +153,7 @@ function validarRanuras(ranuras: Set<number>): void {
 function validarLote(lote: LoteGuardado, exclusivos: Set<string>): void {
   const { celda, rol, dueno, pares } = lote;
   entero(rol, Rol.Suelo, Rol.Pieza);
-  entero(dueno, 0, TOTAL_MAX_U32);
+  entero(dueno, 0, U32_MAX);
   if (celda >= 0 && rol <= Rol.Aire) {
     if (rol === Rol.Aire && celda % CELDAS_POR_PAGINA !== 0) throw new Error('Celda de aire fuera del inicio de página.');
     const clave = `${celda}:${rol}`;
@@ -316,13 +317,15 @@ export function codificarCheckpoint(checkpoint: MateriaCheckpoint): Uint8Array {
   leerPaginas(epoca, checkpoint.paginas, () => {}, () => {});
   leerEnVuelo(checkpoint.enVuelo, () => {});
   const libro = cuentas.terminar();
-  const salida = new Escritor(24 + libro.length + bloques.reduce((n, bytes) => n + 8 + bytes.length, 0));
+  const salida = new Escritor(28 + libro.length + bloques.reduce((n, bytes) => n + 8 + bytes.length, 0));
   salida.u32(FIRMA);
   salida.u32(VERSION);
   salida.entero(epoca);
   salida.entero(tick);
   for (const bytes of bloques) salida.bloque(bytes);
   salida.crudo(libro);
+  // La validación estructural y el balance no ven un bit cambiado en una forma, una celda o los bloques opacos.
+  salida.u32(crc32(salida.terminar()));
   return salida.terminar();
 }
 
@@ -330,9 +333,27 @@ function* entradasPares(pares: Float64Array): IterableIterator<readonly [number,
   for (let i = 0; i < pares.length; i += 2) yield [pares[i]!, pares[i + 1]!];
 }
 
+function sumarPares(cuenta: bigint[], pares: Float64Array, sustancia: (id: number) => Readonly<Sustancia>): void {
+  const balance = balancePares(entradasPares(pares), sustancia);
+  for (let e = 0; e <= NE; e++) cuenta[e] += balance[e]!;
+}
+
+/** Balance de las garantías de `MateriaCheckpoint.enVuelo`: al cargar es el `enVuelo` del libro del hilo 0. */
+export function saldoEnVuelo(enVuelo: Uint8Array, sustancia: (id: number) => Readonly<Sustancia>): bigint[] {
+  const saldo = Array<bigint>(NE + 1).fill(0n);
+  leerEnVuelo(enVuelo, intento => { if (intento.materia) sumarPares(saldo, intento.materia, sustancia); });
+  return saldo;
+}
+
 export function decodificarCheckpoint(bytes: Uint8Array, sustancia: (id: number, registroQuimico: Uint8Array) => Readonly<Sustancia>): MateriaCheckpoint {
-  const entrada = new Lector(bytes);
+  const fin = bytes.length - 4;
+  if (fin < 0) throw new Error('Punto de control truncado.');
+  const cuerpo = bytes.subarray(0, fin);
+  const entrada = new Lector(cuerpo);
   if (entrada.u32() !== FIRMA || entrada.u32() !== VERSION) throw new Error('Formato de punto de control de materia desconocido.');
+  if (crc32(cuerpo) !== new DataView(bytes.buffer, bytes.byteOffset + fin, 4).getUint32(0, true)) {
+    throw new Error('Punto de control de materia corrupto o truncado: no cuadra su CRC32.');
+  }
   const epoca = entrada.entero();
   const tick = entrada.entero();
   const [sustancias, registro, paginas, enVuelo] = Array.from({ length: 4 }, () => entrada.bloque());
@@ -340,14 +361,9 @@ export function decodificarCheckpoint(bytes: Uint8Array, sustancia: (id: number,
   const [inicial, fuentes, sumideros] = Array.from({ length: 3 }, () => Array.from({ length: NE + 1 }, () => entrada.cuenta()));
   entrada.terminar();
 
+  const quimica = (id: number) => sustancia(id, sustancias);
   const lotes = Array<bigint>(NE + 1).fill(0n);
-  const depositos = Array<bigint>(NE + 1).fill(0n);
-  const contar = (cuenta: bigint[], pares: Float64Array): void => {
-    const balance = balancePares(entradasPares(pares), id => sustancia(id, sustancias));
-    for (let e = 0; e <= NE; e++) cuenta[e] += balance[e]!;
-  };
-  leerPaginas(epoca, paginas, lote => contar(lotes, lote.pares), () => {});
-  leerEnVuelo(enVuelo, intento => { if (intento.materia) contar(depositos, intento.materia); });
-  comprobarConservacion({ inicial: inicial!, fuentes: fuentes!, sumideros: sumideros! }, lotes, depositos);
+  leerPaginas(epoca, paginas, lote => sumarPares(lotes, lote.pares, quimica), () => {});
+  comprobarConservacion({ inicial: inicial!, fuentes: fuentes!, sumideros: sumideros! }, lotes, saldoEnVuelo(enVuelo, quimica));
   return { epoca, tick, sustancias, registro, paginas, enVuelo, inicial: inicial!, fuentes: fuentes!, sumideros: sumideros! };
 }

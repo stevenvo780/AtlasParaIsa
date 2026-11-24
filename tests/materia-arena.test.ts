@@ -7,6 +7,7 @@ import { NE, TABLA } from '../src/shared/naturaleza.js';
 import { ArenaLotes, LOTES_POR_BLOQUE, type MemoriaMateria } from '../src/world/materia/arena.js';
 import {
   codificarCheckpoint, codificarEnVuelo, codificarPaginas, decodificarCheckpoint, decodificarEnVuelo, decodificarPaginas,
+  saldoEnVuelo,
 } from '../src/world/materia/checkpoint.js';
 import { comprobarConservacion, plegarLibros, registrarConservacion, sumarEnVuelo, type TotalesMateria } from '../src/world/materia/libro.js';
 import { REF_NULA, TipoIntento, slotDe, type Intento } from '../src/world/motor/contratos.js';
@@ -171,7 +172,9 @@ function memoriaDe(n: number, capacidad: number) {
   return { lotes, desborde, paginas, duenoChunk };
 }
 
-function arenaDe({ lotes, desborde, paginas, duenoChunk }: ReturnType<typeof memoriaDe>, hilo: number): ArenaLotes {
+type MemoriaArena = { lotes: MemoriaMateria; desborde: MemoriaMateria; paginas: MemoriaMateria; duenoChunk: Int16Array };
+
+function arenaDe({ lotes, desborde, paginas, duenoChunk }: MemoriaArena, hilo: number): ArenaLotes {
   return new ArenaLotes({
     lotes, desborde, paginas, hilo, quimica,
     terreno: { chunkDe: celda => Math.floor(celda / 256), duenoChunk },
@@ -408,6 +411,16 @@ if (isMainThread) test('I3: rechaza cantidades y asientos inexactos antes de esc
   assert.ok(arena.vivo(origen));
 });
 
+if (isMainThread) test('la arena rechaza columnas que no crecen con la memoria', () => {
+  const memoria = memoriaDe(1, 8);
+  const fija: MemoriaMateria = {
+    field: (_nombre, Tipo, porPagina) => new Tipo(new SharedArrayBuffer(64 * porPagina * Tipo.BYTES_PER_ELEMENT)),
+    reserve: () => 0, release: () => {}, slots: 0,
+  };
+  assert.throws(() => arenaDe({ ...memoria, desborde: fija }, 0), /crecible/);
+  assert.throws(() => arenaDe({ ...memoria, paginas: fija }, 0), /crecible/);
+});
+
 if (isMainThread) test('una ranura vacía caduca al liberar y vuelve en barrera con otra generación', () => {
   const memoria = memoriaDe(2, 8), arena = arenaDe(memoria, 0), otro = arenaDe(memoria, 1);
   const viejo = arena.nuevo(Rol.Tejido, -1, 0);
@@ -463,6 +476,66 @@ if (isMainThread) test('desborde y moverParte conservan composición y calor par
   const totales = plegarLibros([libro], { inicial: saldo(cantidadesVacias()), fuentes: saldo(cantidadesVacias()), sumideros: saldo(cantidadesVacias()) });
   comprobarConservacion(totales, arena.saldo(), sumarEnVuelo([libro]));
   arena.liberar(origen);
+});
+
+if (isMainThread) test('el sumidero recorta a existencias y asienta solo lo que salió', () => {
+  const arena = arenaDe(memoriaDe(1, 8), 0), libro = libroVacio();
+  const lote = arena.nuevo(Rol.Aire, 17, 0);
+  arena.fuente(lote, Float64Array.of(1, 10, 2, 3, 0, 400), libro);
+  const salida = arena.sumidero(lote, Float64Array.of(1, 4, 2, 9, 5, 2, 0, 1000), libro);
+  const cantidades = cantidadesVacias();
+  acumularPares(cantidades, salida);
+  assert.deepEqual(cantidades, [400, 4, 3, ...Array(sustancias.length - 2).fill(0)]);
+  assert.equal(arena.cuantos(lote, 1), 6);
+  assert.equal(arena.cuantos(lote, 2), 0);
+  assert.equal(arena.calor(lote), 0);
+  assert.deepEqual(Array.from(libro.sumideros, BigInt), saldo(cantidades));
+  const cero = saldo(cantidadesVacias());
+  comprobarConservacion(plegarLibros([libro], { inicial: cero, fuentes: cero, sumideros: cero }), arena.saldo(), cero);
+});
+
+if (isMainThread) test('un nonce repetido no tiene efecto durante los dos ticks de I-B', () => {
+  const arena = arenaDe(memoriaDe(1, 8), 0), libro = libroVacio();
+  const origen = arena.nuevo(Rol.Reserva, -1, 0), destino = arena.nuevo(Rol.Tejido, -1, 0);
+  arena.fuente(origen, Float64Array.of(1, 100), libro);
+  const pedido = { parte: Parte.Exacta, esp: 1, cuantos: 1, kappa: null };
+  const garantia = arena.garantizarUna(9, origen, pedido, libro)!;
+  assert.ok(arena.abonarUna(9, destino, garantia, libro));
+  for (let tick = 0; tick < 2; tick++) {
+    arena.barrera();
+    assert.equal(arena.garantizarUna(9, origen, pedido, libro), null);
+    assert.equal(arena.abonarUna(9, destino, garantia, libro), false);
+  }
+  assert.equal(arena.cuantos(origen, 1), 99);
+  assert.equal(arena.cuantos(destino, 1), 1);
+  assert.ok(libro.enVuelo.every(v => v === 0));
+});
+
+if (isMainThread) test('sin desborde libre no se escribe ningún lote ni el libro', () => {
+  // Capacidad de 8 entradas de desborde: dos lotes con las 12 sustancias la agotan.
+  const arena = arenaDe(memoriaDe(1, 2), 0), libro = libroVacio();
+  const todas = Float64Array.from(sustancias.flatMap(({ id }) => [id, 10]));
+  const [a, b, c] = [Rol.Tejido, Rol.Reserva, Rol.Digestivo].map(rol => arena.nuevo(rol, -1, 0));
+  arena.fuente(a, todas, libro);
+  arena.fuente(b, todas, libro);
+  arena.fuente(c, todas.subarray(0, 16), libro);
+  const antes = arena.saldo(), fuentes = libro.fuentes.slice(), enVuelo = libro.enVuelo.slice();
+  const composicion = (l: LoteRef) => sustancias.map(({ id }) => arena.cuantos(l, id));
+  const lotes = [a, b, c].map(composicion);
+  assert.throws(() => arena.mover({ de: a, a: c, esp: 9, cuantos: 10 }));
+  assert.throws(() => arena.fuente(c, Float64Array.of(9, 1), libro));
+  assert.throws(() => arena.abonar(c, Float64Array.of(10, 1, 11, 1), libro));
+  assert.deepEqual([a, b, c].map(composicion), lotes);
+  assert.deepEqual(arena.saldo(), antes);
+  assert.deepEqual(libro.fuentes, fuentes);
+  assert.deepEqual(libro.enVuelo, enVuelo);
+  // El desborde que suelta un lote vaciado vuelve en barrera, y entonces el traslado cabe.
+  assert.equal(arena.moverParte(b, a, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null }), 120);
+  assert.throws(() => arena.mover({ de: a, a: c, esp: 9, cuantos: 10 }));
+  arena.barrera();
+  assert.equal(arena.mover({ de: a, a: c, esp: 9, cuantos: 20 }), 20);
+  assert.equal(arena.cuantos(c, 9), 20);
+  assert.deepEqual(arena.saldo(), antes);
 });
 
 if (isMainThread) test('una reacción balanceada recorta a existencias y conserva los átomos y la energía', () => {
@@ -529,7 +602,9 @@ if (isMainThread) test('el punto de control restaura lotes, generaciones, depós
   assert.notEqual(nuevo, caducado);
   assert.ok(!restaurada.vivo(caducado));
   const libroRestaurado = libroVacio();
-  libroRestaurado.enVuelo.set(vuelo.map(Number));
+  const vueloGuardado = saldoEnVuelo(leido.enVuelo, quimica.sustancia);
+  assert.deepEqual(vueloGuardado, vuelo);
+  libroRestaurado.enVuelo.set(vueloGuardado.map(Number));
   assert.ok(restaurada.abonarUna(pendientes[0].nonce, suelo, pendientes[0].materia!, libroRestaurado));
   assert.equal(restaurada.cuantos(suelo, 2), 111);
   comprobarConservacion(leido, restaurada.saldo(), sumarEnVuelo([libroRestaurado]));
@@ -541,6 +616,37 @@ if (isMainThread) test('el punto de control restaura lotes, generaciones, depós
   assert.throws(() => codificarEnVuelo([intento, intento]), /[Nn]once/);
   const sinDeposito = codificarCheckpoint({ ...checkpoint, enVuelo: codificarEnVuelo([]) });
   assert.throws(() => decodificarCheckpoint(sinDeposito, quimica.sustancia), /No se conserva/);
+  const otraVersion = bytes.slice();
+  new DataView(otraVersion.buffer).setUint32(4, 2, true);
+  assert.throws(() => decodificarCheckpoint(otraVersion, quimica.sustancia), /desconocido/);
+});
+
+if (isMainThread) test('el punto de control detecta la corrupción de cualquier bit', () => {
+  const arena = arenaDe(memoriaDe(1, 8), 0), libro = libroVacio();
+  const suelo = arena.nuevo(Rol.Suelo, 3, 7);
+  arena.fuente(suelo, Float64Array.of(1, 10, 2, 4, 0, 5), libro);
+  const garantia = arena.garantizar(suelo, { parte: Parte.Exacta, esp: 2, cuantos: 1, kappa: null }, libro);
+  const intento: Intento = {
+    tipo: TipoIntento.Dar, nonce: 4, de: 1, a: 2, celda: 3, lote: REF_NULA, materia: garantia,
+    dato: Float64Array.of(Rol.Suelo, 0), bytes: Uint8Array.of(1, 2),
+  };
+  const cero = saldo(cantidadesVacias());
+  const bytes = codificarCheckpoint({
+    epoca: 2, tick: 9, sustancias: Uint8Array.of(1, 2, 3), registro: Uint8Array.of(4),
+    paginas: codificarPaginas(2, arena.muestras(), arena.libres()), enVuelo: codificarEnVuelo([intento]),
+    ...plegarLibros([libro], { inicial: cero, fuentes: cero, sumideros: cero }),
+  });
+  decodificarCheckpoint(bytes, quimica.sustancia);
+  let aceptados = 0;
+  for (let i = 0; i < bytes.length; i++) for (let bit = 0; bit < 8; bit++) {
+    const corrupto = bytes.slice();
+    corrupto[i] ^= 1 << bit;
+    try {
+      decodificarCheckpoint(corrupto, quimica.sustancia);
+      aceptados++;
+    } catch { /* detectada */ }
+  }
+  assert.equal(aceptados, 0, `${aceptados} de ${bytes.length * 8} bits cambiados pasaron por buenos`);
 });
 
 if (isMainThread) test('el registro comprueba el balance global a los 2.400 ticks, incluso con asientos sin plegar', async () => {

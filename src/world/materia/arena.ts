@@ -91,9 +91,6 @@ export class ArenaLotes implements ArenaMateria {
     natural(op.hilo, 'Hilo', UINT32_MAX);
     // M1 reserva bloques completos en F0. Al crecer el SAB las columnas anteriores mantienen su desplazamiento.
     this.datos = lotes.field('materia.lotes', Uint8Array, BYTES_POR_LOTE);
-    if (!(this.datos.buffer instanceof SharedArrayBuffer) || !('growable' in this.datos.buffer && this.datos.buffer.growable)) {
-      throw new Error('Los lotes exigen un SharedArrayBuffer crecible.');
-    }
     this.celda = lotes.field('materia.celda', Float64Array, 1);
     this.dueno = lotes.field('materia.dueno', Uint32Array, 1);
     this.siguiente = lotes.field('materia.siguiente', Uint32Array, 1);
@@ -101,6 +98,13 @@ export class ArenaLotes implements ArenaMateria {
     this.extraEsp = desborde.field('materia.esp', Uint32Array, 1);
     this.extraCant = desborde.field('materia.cant', Float64Array, 1);
     this.extraSig = desborde.field('materia.siguiente', Uint32Array, 1);
+    // Una vista que no crece con la memoria pierde en silencio lo que se escribe tras su final: sería materia destruida.
+    for (const columna of [this.datos, this.celda, this.dueno, this.siguiente, this.primero, this.extraEsp, this.extraCant, this.extraSig]) {
+      const memoria = columna.buffer;
+      if (!(memoria instanceof SharedArrayBuffer) || !('growable' in memoria && memoria.growable)) {
+        throw new Error('La materia exige columnas sobre un SharedArrayBuffer crecible.');
+      }
+    }
   }
 
   private sustancia = (id: SustanciaId): Readonly<Sustancia> => this.op.quimica.sustancia(id);
@@ -267,7 +271,29 @@ export class ArenaLotes implements ArenaMateria {
     return this.bloque(s).calor[s % LOTES_POR_BLOQUE];
   }
 
-  private escribir(s: number, m: Cantidades): void {
+  /** Reserva, antes de escribir nada, el desborde que les falta a estas composiciones: si no alcanza la memoria, ningún
+   * lote cambia (un traslado a medias crearía o destruiría materia). Lo reservado y sin enlazar vuelve en barrera. */
+  private reservar(escrituras: readonly (readonly [number, Cantidades])[]): number[][] {
+    const reservas: number[][] = [];
+    try {
+      for (const [s, m] of escrituras) {
+        let faltan = m.size - Number(m.has(0)) - RANURAS;
+        for (let p = this.bloque(s).exceso[s % LOTES_POR_BLOQUE]; p && faltan > 0; p = this.extraSig[p - 1]) faltan--;
+        const nuevas: number[] = [];
+        reservas.push(nuevas);
+        while (nuevas.length < faltan) {
+          nuevas.push(this.op.desborde.reserve());
+          puntero(nuevas[nuevas.length - 1]);
+        }
+      }
+    } catch (error) {
+      for (const nuevas of reservas) this.retirarExtra.push(...nuevas);
+      throw error;
+    }
+    return reservas;
+  }
+
+  private escribir(s: number, m: Cantidades, nuevas = this.reservar([[s, m]])[0]!): void {
     const b = this.bloque(s), local = s % LOTES_POR_BLOQUE;
     let i = local * RANURAS;
     const fin = i + RANURAS;
@@ -280,8 +306,12 @@ export class ArenaLotes implements ArenaMateria {
         b.cant[i++] = q;
         continue;
       }
-      const extra = p === 0 ? this.op.desborde.reserve() : p - 1;
-      p = this.extraSig[extra];
+      let extra: number;
+      if (p === 0) extra = nuevas.pop()!;
+      else {
+        extra = p - 1;
+        p = this.extraSig[extra];
+      }
       this.extraEsp[extra] = id;
       this.extraCant[extra] = q;
       this.enlazarExtra(s, anterior, puntero(extra));
@@ -316,8 +346,9 @@ export class ArenaLotes implements ArenaMateria {
       sumar(origen, id, -q);
       sumar(destino, id, q);
     }
-    this.escribir(de, origen);
-    this.escribir(a, destino);
+    const [nuevasDe, nuevasA] = this.reservar([[de, origen], [a, destino]]);
+    this.escribir(de, origen, nuevasDe);
+    this.escribir(a, destino, nuevasA);
   }
 
   mover({ de, a, esp, cuantos }: Traslado): number {

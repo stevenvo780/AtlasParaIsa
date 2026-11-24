@@ -10,7 +10,8 @@ import { once } from 'node:events';
 import { freePort } from './lib/net.js';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
-import { cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
+import { bindWorldContext, cloneWorld, createWorld, stepWorld, worldContext, type World } from '../src/world/index.js';
+import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import { gpuNvrtcAvailable } from '../src/world/gpu/puente.js';
@@ -27,11 +28,11 @@ const digestoDelMundo = (world: World): string => {
   const copia = cloneWorld(world); setParams(copia, DEFAULT_PARAMS); return digestoCanonico(copia);
 };
 
-/** Mundo turbo en memoria que guarda en cada paso, detenido en manual y con las salidas observadas. */
-function mundoTurbo(salidas: number[]) {
+/** Mundo turbo en memoria que guarda en cada paso (o según `params`), detenido en manual y con las salidas observadas. */
+function mundoTurbo(salidas: number[], params = '') {
   const store = new Store(':memory:');
   const app = createApp({ store, origin: 'http://127.0.0.1:3000', password: 'recuperacion-0d-password',
-    manual: true, turbo: true, tape: false, turboSaveIntervalMs: 0, seed: 51926,
+    manual: true, turbo: true, tape: false, turboSaveIntervalMs: 0, seed: 51926, params: parseParams(params, DEFAULT_PARAMS),
     onFatalExit: codigo => { salidas.push(codigo); } });
   return { app, store, close: async () => { await app.close(); store.close(); } };
 }
@@ -76,12 +77,117 @@ test('tres fallos seguidos intentando salir del mismo tick salen con 75', async 
       // La recarga perdió la mudanza: se repite para volver a estrellarse al salir del mismo tick.
       mudar(app.world, 40, 40);
       app.stepOnce();
-      assert.equal(app.world.tick, tickGuardado, `tras el intento ${intento} el mundo está en el guardado`);
+      // El tercero sale sin recargar: el proceso muere y el siguiente arranca sobre el mismo guardado.
+      if (intento < 3) assert.equal(app.world.tick, tickGuardado, `tras el intento ${intento} el mundo está en el guardado`);
       assert.deepEqual(salidas, intento < 3 ? [] : [75], `la salida solo llega al tercer fallo (intento ${intento})`);
     }
-    assert.equal(app.salud().recargas, 3);
+    assert.equal(app.salud().recargas, 2);
     assert.equal(app.failed, true, 'con la salida pedida el mundo queda detenido');
   } finally { await close(); }
+});
+
+test('la cuenta de fallos sobrevive a la recarga: tres intentos de superar el mismo tick salen con 75', async () => {
+  // Guarda en el tick 5 y falla siempre al llegar al 8: tras cada recarga los pasos 6 y 7 salen bien,
+  // y una cuenta que se borrara con cada paso exitoso no llegaría nunca a tres.
+  const salidas: number[] = [];
+  const { app, store, close } = mundoTurbo(salidas, 'persistencia.cadaTicks=5');
+  try {
+    for (let n = 0; n < 7; n++) app.stepOnce();
+    assert.equal(store.load()!.world.tick, 5);
+    const leer = store.loadChunk.bind(store);
+    let falla = false;
+    store.loadChunk = (key, atTick) => { if (falla) throw new Error('fallo persistente al llegar al tick 8'); return leer(key, atTick); };
+    for (let intento = 1; intento <= 3; intento++) {
+      while (app.world.tick < 7) app.stepOnce();
+      mudar(app.world, 40, 40); falla = true;
+      app.stepOnce(); falla = false;
+      if (intento < 3) assert.equal(app.world.tick, 5, `tras el intento ${intento} el mundo volvió al guardado`);
+      assert.deepEqual(salidas, intento < 3 ? [] : [75], `intento ${intento}`);
+    }
+    assert.equal(app.salud().recargas, 2, 'el tercer fallo sale sin gastar otra recarga');
+  } finally { await close(); }
+});
+
+test('la recarga devuelve al mundo la propiedad residente de las teselas que le dio el arranque', async () => {
+  const salidas: number[] = [];
+  const { app, store, close } = mundoTurbo(salidas, 'motor.hilos=2');
+  try {
+    // Lo que hacen main.ts y el worker de simulación tras crear el mundo con un motor paralelo.
+    const tileOwnership = new ResidentTopologyOwner();
+    app.world.tiles = tileOwnership.tiles(app.world.tiles.map(tile => tileOwnership.tile(tile)));
+    bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+    for (let n = 0; n < 4; n++) app.stepOnce();
+    const leer = store.loadChunk.bind(store);
+    let falla = true;
+    store.loadChunk = (key, atTick) => { if (falla) { falla = false; throw new Error('fallo sintético a mitad de paso'); } return leer(key, atTick); };
+    mudar(app.world, 40, 40);
+    app.stepOnce();
+    assert.equal(app.salud().recargas, 1);
+    assert.ok(worldContext(app.world).tileOwnership, 'el mundo recargado trae la propiedad residente');
+    app.stepOnce(); app.stepOnce();
+    assert.equal(app.failed, false);
+    assert.deepEqual(salidas, []);
+  } finally { await close(); }
+});
+
+test('una piscina de cómputo caída sale con 75 al primer fallo, sin recargar', async () => {
+  const salidas: number[] = [];
+  const { app, store, close } = mundoTurbo(salidas);
+  try {
+    for (let n = 0; n < 4; n++) app.stepOnce();
+    store.loadChunk = () => { throw new Error('StaticWorkerPool abortado: Supervisor salió inesperadamente (código 1).'); };
+    mudar(app.world, 40, 40);
+    app.stepOnce();
+    assert.deepEqual(salidas, [75]);
+    assert.equal(app.salud().recargas, 0, 'una recarga no recrea las piscinas: solo un proceso nuevo lo hace');
+    assert.equal(app.failed, true);
+  } finally { await close(); }
+});
+
+test('tras una recarga con páginas sucias el guardado sigue y un reinicio posterior arranca', async () => {
+  const salidas: number[] = [];
+  const { app, store } = mundoTurbo(salidas, 'persistencia.paginasSucias=true,persistencia.cadaTicks=3');
+  try {
+    for (let n = 0; n < 8; n++) app.stepOnce();
+    const leer = store.loadChunk.bind(store);
+    let falla = true;
+    store.loadChunk = (key, atTick) => { if (falla) { falla = false; throw new Error('fallo sintético a mitad de paso'); } return leer(key, atTick); };
+    mudar(app.world, 40, 40);
+    app.stepOnce();
+    assert.equal(app.salud().recargas, 1);
+    assert.equal(app.world.tick, 6);
+    while (app.world.tick < 12) app.stepOnce();
+    assert.equal(app.failed, false, 'el guardado siguiente reprodujo el mundo recargado');
+    assert.equal(store.load()!.world.tick, 12);
+    await app.close();
+    const otro = createApp({ store, origin: 'http://127.0.0.1:3000', password: 'recuperacion-0d-password', manual: true, turbo: true, tape: false });
+    try {
+      otro.stepOnce();
+      assert.equal(otro.world.tick, 13);
+      assert.equal(otro.failed, false);
+    } finally { await otro.close(); }
+  } finally { store.close(); }
+});
+
+test('un mundo guardado con los nacimientos apagados por el gobernador antiguo los recupera; la pausa manual no sobrevive al reinicio', async () => {
+  const salidas: number[] = [];
+  const { app, store } = mundoTurbo(salidas);
+  try {
+    app.world.reproductionEnabled = false;
+    app.stepOnce();
+    assert.equal(store.load()!.world.reproductionEnabled, false, 'el guardado lleva el valor heredado');
+    await app.close();
+    const otro = createApp({ store, origin: 'http://127.0.0.1:3000', password: 'recuperacion-0d-password', manual: true, turbo: true, tape: false });
+    try {
+      assert.equal(otro.world.reproductionEnabled, true, 'al cargarlo se rehabilita');
+      otro.setReproduccionManual(false);
+      assert.equal(otro.world.reproductionEnabled, false);
+      otro.stepOnce();
+      assert.equal(otro.world.reproductionEnabled, false, 'la pausa manual manda mientras el proceso la mantenga');
+      otro.setReproduccionManual(null);
+      assert.equal(otro.world.reproductionEnabled, true);
+    } finally { await otro.close(); }
+  } finally { store.close(); }
 });
 
 test('/health sirve la Salud y responde 200 con el mundo avanzando', async (t) => {
@@ -119,4 +225,7 @@ test('un fallo del puente GPU a mitad de paso termina el tick por CPU y apaga la
     assert.equal(conGpu.tick, 20);
     assert.ok(dispositivosGpuApagados.has(0), 'la tarjeta queda apagada hasta el siguiente arranque');
     assert.equal(digestoDelMundo(conGpu), digestoDelMundo(soloCpu), 'el tick por CPU es el mismo mundo');
+    // Los ticks ecológicos siguientes, ya con la tarjeta apagada y un solo hilo, también los acaba la CPU.
+    for (let i = 0; i < 20; i++) { assert.doesNotThrow(() => stepWorld(conGpu)); stepWorld(soloCpu); }
+    assert.equal(digestoDelMundo(conGpu), digestoDelMundo(soloCpu), 'y siguen siendo el mismo mundo');
   });

@@ -5,7 +5,7 @@ import { parseParams, paramsOf } from '../src/world/params.js';
 import { closeEcosystemWorkers, ecosystemGpuDiagnostics, killGpuSubprocessForTest } from '../src/world/ecosystem.js';
 import { stepEcosystem, stepLocalEcology } from '../src/world/ecosystem.js';
 import { gpuNvrtcAvailable, ResidentGpuBridge, GPU_FIELDS } from '../src/world/gpu/puente.js';
-import { dispositivosGpuApagados, runParallelEcosystem } from '../src/world/ecosystem-kernel.js';
+import { dispositivosGpuApagados, EcosystemKernel, runParallelEcosystem } from '../src/world/ecosystem-kernel.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
 import type { SharedTerrain } from '../src/world/soa/terreno.js';
 import { finalCanonicalDigest } from './hardware/contrato.js';
@@ -68,6 +68,25 @@ test('T122 matar el subproceso GPU no lanza: la fase termina por CPU y la tarjet
   assert.equal(events[0]!.gpuStats, undefined);
   assert.ok(dispositivosGpuApagados.has(0), 'la tarjeta 0 queda apagada para el proceso');
   assert.deepStrictEqual(world.tiles.map(t => ({ ...t })), gemelo);
+  // El tick ecológico siguiente: la tarjeta ya está apagada y con un solo hilo la CPU sigue en serie.
+  stepLocalEcology(gemelo, 40, world.weather, phaseAt(40), paramsOf(world).recursos, { hilos: 2 });
+  assert.doesNotThrow(() => stepLocalEcology(world.tiles, 40, world.weather, phaseAt(40), paramsOf(world).recursos, { gpu: [0], hilos: 1 }));
+  assert.deepStrictEqual(world.tiles.map(t => ({ ...t })), gemelo);
+});
+
+test('un fallo del puente abandona los buffers compartidos: la CPU no reutiliza los que el hilo GPU pudo no soltar', { skip }, async () => {
+  dispositivosGpuApagados.clear();
+  const kernel = new EcosystemKernel(), world = worldWith([0]), recursos = paramsOf(world).recursos;
+  try {
+    for (let i = 0; i < 20; i++) stepWorld(world);
+    kernel.stepEcology(world.tiles, 30, world.weather, phaseAt(30), recursos, { gpu: [0], hilos: 1 });
+    const antes = kernel.soaStore;
+    assert.ok(antes, 'el puente trabajó sobre un almacén compartido');
+    kernel.killGpuSubprocessForTest();
+    kernel.stepEcology(world.tiles, 40, world.weather, phaseAt(40), recursos, { gpu: [0], hilos: 1 });
+    assert.ok(dispositivosGpuApagados.has(0));
+    assert.notEqual(kernel.soaStore, antes, 'la CPU trabajó sobre un almacén nuevo');
+  } finally { dispositivosGpuApagados.clear(); await kernel.closeParallelPool(); }
 });
 
 test('T122 VRAM sharded Dual-GPU [0,1] (70/30) produce 0 diferencias Object.is frente a CPU 1 hilo con mutaciones sobre la costura', { skip }, async () => {

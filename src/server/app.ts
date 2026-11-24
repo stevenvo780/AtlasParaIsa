@@ -6,8 +6,9 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
+import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
@@ -76,6 +77,8 @@ export interface AppOptions {
   /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
   observerOnly?: boolean;
 }
+/** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
+export const PASO_PARADO_S = 60;
 /** Estado de salud operacional que sirve `GET /health` y consume el vigilante externo. */
 export interface Salud {
   estado: 'ok' | 'degradado' | 'parado';
@@ -466,6 +469,19 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (existing && existing !== extraOrigin) throw new Error('Conflicting origins for the same host.');
     allowedOriginByHost.set(extraUrl.host, extraOrigin);
   }
+  /** Cambios del anfitrión sobre el mundo (arranque, recarga, pausa manual) que el próximo guardado debe registrar
+   * para que `persistencia.paginasSucias` pueda reproducir ese mundo. */
+  const cambiosPendientes: SnapshotReplayChange[] = [];
+  /** Pausa manual de los nacimientos, solo de este proceso: nada la persiste, así que un mundo guardado con
+   * `reproductionEnabled` en falso (p. ej. por el gobernador antiguo) se rehabilita al cargarlo. */
+  let reproduccionManual: boolean | null = null;
+  /** Deja `reproductionEnabled` en lo que manda la pausa manual (por defecto, permitido) y lo anota para el guardado. */
+  function normalizarReproduccion(): void {
+    const deseado = reproduccionManual ?? true;
+    if (world.reproductionEnabled === deseado) return;
+    world.reproductionEnabled = deseado;
+    cambiosPendientes.push(captureReplayChange(world, ['reproductionEnabled']));
+  }
   const loaded = gateway ? null : store.load();
   const existingInstanceId = gateway ? undefined : readWorldInstance(store.db);
   let world = gateway ? undefined! as World : loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
@@ -479,6 +495,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   if (respaldo) console.warn(`El último momento guardado no se pudo leer; el mundo arranca desde el respaldo ${respaldo.slot}`
     + `${respaldo.retrocesoSegundos === null ? '' : `, ${respaldo.retrocesoSegundos} s atrás`}. Motivo: ${loaded!.skipped.join('; ')}.`);
   if (loaded) {
+    normalizarReproduccion();
     // Sin número cuando la fila del eslabón dañado ni siquiera estaba: decirlo sin cifra
     // es honesto; inventarla, no. En pasos nunca se puede medir (el cuerpo es ilegible).
     const perdido = respaldo === null ? '' : respaldo.retrocesoSegundos === null
@@ -489,14 +506,17 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       cause: respaldo ? `Reinicio del servicio; se adoptó el respaldo ${respaldo.slot} de la cadena y se perdió ${perdido}.`
         : 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
     world.events = world.events.slice(-120);
+    cambiosPendientes.push(captureReplayChange(world, ['events']));
   }
-  if (!gateway) store.save(world);
+  if (!gateway) { store.save(world, [], [], cambiosPendientes); cambiosPendientes.length = 0; }
   let lastWorldSaveAt = monotonicNow();
   /** Salud operacional y recuperación (reloj real, no el inyectable de las cuentas de paso). */
   let ultimoGuardadoEn: number | null = gateway ? null : Date.now();
   let ultimoPasoEn = relojReal();
   let recargas = 0;
-  let fallosEnTick = -1, fallosSeguidos = 0;
+  /** Tick que el paso no logra superar y cuántas veces ha fallado. Sobrevive a una recarga (que devuelve el mundo
+   * a un tick anterior) y solo se olvida cuando el mundo pasa de ese tick. */
+  let fallo: { tick: number; intentos: number } | null = null;
   const salirFatal = options.onFatalExit ?? ((codigo: number) => process.exit(codigo));
   const turboSaveIntervalMs = Math.max(0, options.turboSaveIntervalMs ?? 30_000);
   const instanceId = gateway ? undefined : existingInstanceId ?? ensureWorldInstance(store.db);
@@ -551,8 +571,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const ordenadas = [...duracionesPaso].sort((a, b) => a - b);
     return ordenadas[Math.min(ordenadas.length - 1, Math.floor(ordenadas.length * 0.95))]!;
   }
-  /** Pausa manual de los nacimientos: la única mano que escribe `reproductionEnabled`. */
-  let reproduccionManual: boolean | null = null;
   // T107: nombres fijos de `FaseNombre`, listados una vez para no repetir el literal en cada
   // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
   const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
@@ -563,7 +581,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (gateway) return gateway.salud();
     const segundos = Math.max(0, (relojReal() - ultimoPasoEn) / 1000);
     const gpu = estadoGpu(paramsOf(world).motor.gpu);
-    const parado = failed || stopped || segundos > 60;
+    const parado = failed || stopped || segundos > PASO_PARADO_S;
     return { estado: parado ? 'parado' : gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
       tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
       ultimoGuardado: ultimoGuardadoEn, gpu, recargas };
@@ -942,6 +960,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (turbo && simHz > 0) runtime.tickHz = simHz;
     const batch = [...pending.values()];
     const valid: Pending[] = [];
+    /** Tick que este paso intenta alcanzar: el que cuenta `recuperarPaso` si falla. */
+    const tickObjetivo = world.tick + 1;
     // T104: sin clon, el paso corre sobre el mundo vigente y la atomicidad la sostiene esto.
     let punto: PuntoDeRestauracion | null = null;
     // PERF3: el paso corre sobre el mundo vigente sin nada con que deshacerlo. Mientras siga en
@@ -985,7 +1005,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // replayed save rebuilds exactly this world. A message the world rejects (its listener died, the
       // destination is water) is answered 400 and never touches the world.
       const susurrosAplicados: { item: PendingWhisper; whisper: DivineWhisper }[] = [];
-      const cambios: SnapshotReplayChange[] = [];
+      const cambios: SnapshotReplayChange[] = [...cambiosPendientes];
       for (const item of whisperBatch) {
         try { susurrosAplicados.push({ item, whisper: whisperView(submitWhisper(draft, item.request)) }); }
         catch (error) {
@@ -1035,7 +1055,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         guardando = true;
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
           [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios);
-        guardando = false; ultimoGuardadoEn = Date.now();
+        guardando = false; ultimoGuardadoEn = Date.now(); cambiosPendientes.length = 0;
         lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
@@ -1058,8 +1078,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
       runtime.stepMs = monotonicNow() - stepStarted;
       runtime.p95StepMs = registrarPaso(runtime.stepMs);
-      // Solo la pausa manual toca `reproductionEnabled`, sobre el mundo ya vigente.
-      if (reproduccionManual !== null) world.reproductionEnabled = reproduccionManual;
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró
@@ -1095,7 +1113,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (paraleloCapturadoMs > 0) { runtime.ocupacionWorkers = Math.max(0, Math.min(1, ocupacionPonderada / paraleloCapturadoMs)); runtime.tiempoParaleloMs = paraleloCapturadoMs; runtime.tiempoBarreraMs = barreraCapturadaMs; }
         else if (hayGpu && paraleloPasoMs > 0) { runtime.tiempoParaleloMs = paraleloPasoMs; runtime.tiempoBarreraMs = 0; }
       }
-      ultimoPasoEn = relojReal(); fallosSeguidos = 0; fallosEnTick = -1;
+      ultimoPasoEn = relojReal(); if (fallo && world.tick > fallo.tick) fallo = null;
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -1117,7 +1135,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (confirmado) {
         // El paso ya es durable y el mundo está entero: falló la telemetría o la difusión, no el paso.
         console.warn(`Un fallo tras confirmar el paso ${world.tick} no detiene el mundo: ${motivo}`);
-        ultimoPasoEn = relojReal(); fallosSeguidos = 0; fallosEnTick = -1;
+        ultimoPasoEn = relojReal(); if (fallo && world.tick > fallo.tick) fallo = null;
         return;
       }
       if (guardando) {
@@ -1141,18 +1159,28 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         }
         return;
       }
-      recuperarPaso(error, restaurado);
+      recuperarPaso(error, restaurado, tickObjetivo);
     }
   }
   /**
    * Un paso de simulación que lanzó ya no pausa el mundo para siempre: el paso quedó deshecho
    * (clon o punto de restauración) o, si iba sin reserva, el mundo en memoria se descarta y se
    * recarga el último guardado; en ambos casos el mundo sigue. Tres fallos seguidos intentando
-   * salir del mismo tick son un estado que el paso no puede atravesar: se sale con 75 y systemd
-   * reinicia el servicio sobre ese mismo guardado (con el vigilante de respaldo).
+   * superar el mismo tick (aunque entre uno y otro una recarga haya devuelto el mundo a un tick
+   * anterior) son un estado que el paso no puede atravesar: se sale con 75 y systemd reinicia el
+   * servicio sobre ese mismo guardado. También se sale con 75 sin recargar cuando se cayó una
+   * piscina de cómputo: su fallo es permanente y solo un proceso nuevo las vuelve a crear.
    */
-  function recuperarPaso(error: unknown, restaurado: boolean): void {
+  function recuperarPaso(error: unknown, restaurado: boolean, tickObjetivo: number): void {
     const motivo = error instanceof Error ? error.message : String(error);
+    if (fallo?.tick === tickObjetivo) fallo.intentos++; else fallo = { tick: tickObjetivo, intentos: 1 };
+    const piscinaCaida = motivo.includes('StaticWorkerPool');
+    if (fallo.intentos >= 3 || piscinaCaida) {
+      console.error(piscinaCaida
+        ? `El paso ${tickObjetivo} falló porque una piscina de cómputo cayó (${motivo}): salgo con 75 para que el servicio reinicie.`
+        : `Tres fallos seguidos intentando superar el paso ${tickObjetivo} (último: ${motivo}): salgo con 75 para que el servicio reinicie.`);
+      failed = true; aMedioPaso = !restaurado; salirFatal(75); return;
+    }
     if (!restaurado) {
       let cargado: ReturnType<Store['load']> = null;
       try { cargado = store.load(); } catch { cargado = null; }
@@ -1160,18 +1188,30 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         console.error(`El paso falló (${motivo}) y no hay un guardado legible desde el que recargar: salgo con 75.`);
         failed = true; aMedioPaso = true; salirFatal(75); return;
       }
+      // El arranque (main.ts, sim-worker.ts) envuelve las teselas con la propiedad residente cuando el motor es
+      // paralelo; el mundo recién cargado no la trae y se le da igual que al descartado.
+      const conPropiedad = !!worldContext(world).tileOwnership;
       world = cargado.world; recargas++; aMedioPaso = false;
+      if (conPropiedad) {
+        const tileOwnership = new ResidentTopologyOwner();
+        world.tiles = tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)));
+        bindWorldContext(world, { ...worldContext(world), tileOwnership });
+      }
       // Las cachés por tick y la cinta describían el mundo descartado: el próximo fotograma va completo.
       mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
       ultimoTickGrabado = -1;
+      // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
+      cambiosPendientes.length = 0;
+      normalizarReproduccion();
       world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
         text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
         cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
       world.events = world.events.slice(-120);
+      cambiosPendientes.push(captureReplayChange(world, ['events']));
       renovarReserva();
       console.warn(`El paso falló (${motivo}); el mundo se recargó desde su último guardado (paso ${world.tick}, recarga ${recargas}) y sigue.`);
     } else {
-      console.warn(`El paso ${world.tick + 1} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
+      console.warn(`El paso ${tickObjetivo} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
     }
     // Ni los gestos ni los mensajes del lote llegaron a aplicarse ni a guardarse: esperan al paso
     // siguiente como con `SessionRevoked`, salvo los de sesiones que ya terminaron.
@@ -1179,11 +1219,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       item.reject(new HttpError(401, 'La sesión terminó antes de guardar el gesto.')); pending.delete(item.gesture.id);
     }
     rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
-    if (world.tick === fallosEnTick) fallosSeguidos++; else { fallosEnTick = world.tick; fallosSeguidos = 1; }
-    if (fallosSeguidos >= 3) {
-      console.error(`Tres fallos seguidos intentando salir del paso ${world.tick} (último: ${motivo}): salgo con 75 para que el servicio reinicie.`);
-      failed = true; salirFatal(75); return;
-    }
     broadcast();
   }
   const server = createServer(async (req, res) => {
@@ -1199,7 +1234,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const expectedOrigin = requestOrigin(req);
       const url = new URL(req.url ?? '/', expectedOrigin);
       if (req.method === 'GET' && url.pathname === '/health') {
-        // 503 solo en `parado`: más de 60 s sin completar un paso, o la pausa protectora de guardado.
+        // 503 solo en `parado`: más de `PASO_PARADO_S` sin completar un paso, o la pausa protectora de guardado.
         const estado = salud();
         return json(res, estado.estado === 'parado' ? 503 : 200,
           { ...estado, status: estado.estado === 'parado' ? 'paused' : 'ok', ...((gateway?.respaldo ?? respaldo) ? { respaldo: gateway?.respaldo ?? respaldo } : {}) });
@@ -1509,9 +1544,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     },
     /** Copia de las métricas vivas; solo lectura. */
     get runtime(): RuntimeStats { if (gateway) return gateway.runtime; return { ...runtime }; },
-    /** Pausa manual de los nacimientos: `false` los detiene, `true` los permite y `null` deja
-     * el valor vigente sin tocarlo. Nada más escribe `reproductionEnabled`. */
-    setReproduccionManual(value: boolean | null) { reproduccionManual = value; if (value !== null) world.reproductionEnabled = value; },
+    /** Pausa manual de los nacimientos: `false` los detiene; `true` y `null` los permiten. Es de este proceso
+     * y la única mano que escribe `reproductionEnabled`: al reiniciar, el mundo vuelve a permitirlos. */
+    setReproduccionManual(value: boolean | null) { reproduccionManual = value; normalizarReproduccion(); },
     close() {
       if (cierre) return cierre;
       stopped = true; if (timer) clearTimeout(timer); if (inmediato) clearImmediate(inmediato); clearInterval(heartbeat); clearInterval(latido);

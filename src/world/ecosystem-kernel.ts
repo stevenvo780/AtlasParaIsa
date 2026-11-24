@@ -141,9 +141,12 @@ export class EcosystemKernel {
     if (this.lastGpuBridge === bridge) this.lastGpuBridge = null;
     void bridge.close().catch(() => undefined);
   }
-  /** Un fallo del puente no pausa el mundo: sus tarjetas quedan apagadas y la fase sigue por CPU. */
+  /** Un fallo del puente no pausa el mundo: sus tarjetas quedan apagadas y la fase sigue por CPU.
+   * Si venció su plazo, el hilo del puente puede seguir volcando en los buffers compartidos: se abandonan
+   * (almacén y campo climático) y la CPU trabaja con buffers nuevos que ese hilo nunca vio. */
   private caidaGpu(bridge: ResidentGpuBridge, gpu: readonly number[], error: unknown): void {
     this.dropGpuBridge(bridge);
+    this.soa = null; this.climate = null;
     for (const dispositivo of gpu) dispositivosGpuApagados.add(dispositivo);
     console.warn(`La GPU [${gpu.join(', ')}] falló y queda apagada hasta el próximo arranque; el cálculo sigue por CPU. Motivo: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -193,7 +196,6 @@ export class EcosystemKernel {
     if (tick % 10 !== 0) return;
     const gpu = options.gpu;
     const clima = options.clima && options.clima.amplitud > 0 ? options.clima : undefined;
-    let cayoGpu = false;
     if (gpu && gpu.length > 0 && gpuNvrtcAvailable() && !gpu.some(d => dispositivosGpuApagados.has(d))) {
       const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
       this.topologies.length = 0;
@@ -213,11 +215,11 @@ export class EcosystemKernel {
           orden: options.orden ?? 'natural', workers: gpu.length, dirtyPages: result.dirtyPages,
           diagnostics: null, topologyCertificate: store.parallelTopologyCertificate(tiles), gpu, gpuStats: result });
         return;
-      } catch (error) { store.abortParallel(); this.caidaGpu(bridge, gpu, error); cayoGpu = true; }
+      } catch (error) { store.abortParallel(); this.caidaGpu(bridge, gpu, error); }
     }
     const workers = options.hilos ?? 1;
-    // Sin GPU caída de por medio, esta función sigue siendo solo el despacho paralelo.
-    if (!Number.isSafeInteger(workers) || workers < 1 || (workers <= 1 && !cayoGpu)) throw new RangeError('El despacho paralelo de ecology requiere hilos > 1.');
+    // Con una GPU pedida (caída o no disponible) un solo hilo basta: el mismo cuerpo corre en serie.
+    if (!Number.isSafeInteger(workers) || workers < 1 || (workers <= 1 && !(gpu && gpu.length > 0))) throw new RangeError('El despacho paralelo de ecology requiere hilos > 1.');
     const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
     let pool: StaticWorkerPool | undefined;
     if (workers > 1) {
@@ -233,7 +235,7 @@ export class EcosystemKernel {
         light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4, recursos, version: terrain.version };
       const buffers = climate ? { ...terrain.buffers, climate: climate.buffer as SharedArrayBuffer } : terrain.buffers;
       const job = { regions: terrain.regions, buffers, orden: options.orden, params };
-      // Con la GPU caída y un solo hilo, el mismo cuerpo corre aquí, en serie.
+      // Con un solo hilo, el mismo cuerpo corre aquí, en serie.
       if (pool) pool.run(job); else runParallelEcology({ ...job, workerIndex: 0 });
       store.commitParallel('ecologia');
     } catch (error) { store.abortParallel(); throw error; }

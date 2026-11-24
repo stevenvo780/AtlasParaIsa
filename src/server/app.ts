@@ -20,7 +20,6 @@ import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
-import { Gobernador, teselasPorHabitante } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
@@ -32,8 +31,6 @@ import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeF
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
-export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
-
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
@@ -516,92 +513,22 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     perMessageDeflate: compresion === 'nunca' ? false : compresion === 'siempre' ? true : { zlibDeflateOptions: { level: 3, chunkSize: 128 * 1024 } } });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = gateway ? {} : store.context;
-  const gobernador = new Gobernador();
   const beats: number[] = [];
+  /** Duraciones de los últimos 120 pasos: de aquí sale el p95 que publica la telemetría. */
+  const duracionesPaso: number[] = [];
+  function registrarPaso(ms: number): number {
+    duracionesPaso.push(ms); if (duracionesPaso.length > 120) duracionesPaso.shift();
+    const ordenadas = [...duracionesPaso].sort((a, b) => a - b);
+    return ordenadas[Math.min(ordenadas.length - 1, Math.floor(ordenadas.length * 0.95))]!;
+  }
+  /** Pausa manual de los nacimientos: la única mano que escribe `reproductionEnabled`. */
+  let reproduccionManual: boolean | null = null;
   // T107: nombres fijos de `FaseNombre`, listados una vez para no repetir el literal en cada
   // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
   const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: turbo ? 0 : 1000 / (options.tickMs ?? 100),
-    fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0,
-    gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
-      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
-      p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, faseMax: null, fasesP95: fasesEnCero(),
-      tickHz: 0, rssBytes: process.memoryUsage.rss(), saveMs: 0,
-      regionesActivas: Object.keys(world.chunks).length, teselasActivas: world.tiles.length,
-      teselasPorHabitante: teselasPorHabitante(world.tiles.length, world.people.length),
-      poblacion: world.people.length, nacimientos: world.totals.births ?? 0,
-      muertes: Object.values(world.demographyDynamics.causes).reduce((a, b) => a + b, 0),
-      colaRed: 0, maxBufferedAmount: 0, reproductionEnabled: world.reproductionEnabled, techoPoblacion: null,
-      estado: 'verde', palancaActiva: null, senalDisparadora: null, ventanasVerdesConsecutivas: 0,
-      solicitarRetiroPaginasFrias: false, subscribeMsEfectivo: 0, cadaTicksEfectivo: paramsOf(world).persistencia.cadaTicks } };
-  /**
-   * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
-   * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`.
-   * La política la elige `gobernador.politica` (ver `governor.ts`): `apagar` (2026-09-19,
-   * apaga por encima y reenciende bajo el 70 %) o `techo` (default desde 2026-09-22: por
-   * encima solo se repone, no se crece). La histéresis (0,7) evita oscilar en el filo.
-   *
-   * Una orden humana manda siempre: mientras `runtime.gobernador.manual` no sea `null`,
-   * el gobernador observa y publica el p95 pero no toca `reproductionEnabled`.
-   */
-  /** T162: efectos vigentes de las palancas de red y guardado para los pasos siguientes.
-   * Sin palanca activa valen 0 (sin suelo) y la cadencia declarada en `persistencia.cadaTicks`. */
-  let suscripcionGobernadorMs = 0;
-  let cadaTicksGobernador: number | null = null;
-  function gobernar(draft: World): void {
-    const stats = runtime.gobernador!, params = paramsOf(draft).gobernador;
-    stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
-    stats.p95StepMs = runtime.p95StepMs;
-    if (stats.manual !== null) {
-      draft.reproductionEnabled = stats.manual; stats.activo = stats.manual;
-      gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; gobernador.senalDisparadora = null;
-      suscripcionGobernadorMs = 0; cadaTicksGobernador = null;
-      publicarSenalesGobernador(draft); return;
-    }
-    let colaRed = 0;
-    for (const socket of clients.keys()) colaRed = Math.max(colaRed, socket.bufferedAmount);
-    const decision = gobernador.gobernar({ presupuestoMs: params.presupuestoMs, politica: params.politica, senales: params.senales,
-      valores: { saveMs: runtime.saveMs, colaRed, rss: process.memoryUsage().rss / 1048576 },
-      // El retiro de páginas frías es T163: aún no está habilitado, así que la palanca de área no gana ni solicita.
-      areaHabilitada: false, paginasFriasExceso: 0,
-      subscribeMs: 0, cadaTicks: paramsOf(draft).persistencia.cadaTicks, gestoEnEstePaso: false },
-    draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
-    draft.reproductionEnabled = decision.reproductionEnabled;
-    suscripcionGobernadorMs = decision.palancaActiva === 'red' ? decision.subscribeMsEfectivo : 0;
-    cadaTicksGobernador = decision.palancaActiva === 'guardado' ? decision.cadaTicksEfectivo : null;
-    stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
-    stats.activo = draft.reproductionEnabled;
-    publicarSenalesGobernador(draft);
-  }
-  /** T161: publica las señales de la ventana y del mundo servido. Solo lee; nunca toca el mundo. */
-  function publicarSenalesGobernador(mundo: World): void {
-    const stats = runtime.gobernador!;
-    const senales = gobernador.senales();
-    const poblacion = mundo.people.length, teselasActivas = mundo.tiles.length;
-    let colaRed = 0;
-    for (const socket of clients.keys()) colaRed = Math.max(colaRed, socket.bufferedAmount);
-    stats.p50Ms = senales.p50Ms; stats.p95Ms = senales.p95Ms; stats.p99Ms = senales.p99Ms; stats.p95StepMs = senales.p95Ms;
-    stats.maxMs = senales.maxMs; stats.faseMax = senales.faseMax;
-    stats.fasesP95 = Object.assign(fasesEnCero(), senales.fasesP95);
-    stats.tickHz = runtime.tickHz; stats.rssBytes = process.memoryUsage().rss; stats.saveMs = runtime.saveMs;
-    stats.regionesActivas = Object.keys(mundo.chunks).length; stats.teselasActivas = teselasActivas;
-    stats.teselasPorHabitante = teselasPorHabitante(teselasActivas, poblacion);
-    stats.poblacion = poblacion; stats.nacimientos = mundo.totals.births ?? 0;
-    stats.muertes = Object.values(mundo.demographyDynamics.causes).reduce((a, b) => a + b, 0);
-    stats.colaRed = colaRed; stats.maxBufferedAmount = colaRed;
-    const params = paramsOf(mundo).gobernador;
-    stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
-    stats.reproductionEnabled = mundo.reproductionEnabled; stats.activo = mundo.reproductionEnabled;
-    stats.techo = gobernador.estado.techo; stats.techoPoblacion = gobernador.estado.techo;
-    stats.techoObservado = gobernador.techoObservado;
-    stats.estado = stats.manual !== null ? 'manual' : gobernador.estadoGobernador;
-    stats.palancaActiva = stats.manual !== null ? null : gobernador.palancaActiva;
-    stats.senalDisparadora = stats.manual !== null ? null : gobernador.senalDisparadora;
-    stats.ventanasVerdesConsecutivas = gobernador.ventanasVerdesConsecutivas;
-    stats.solicitarRetiroPaginasFrias = stats.manual !== null ? false : gobernador.solicitarRetiroPaginasFrias;
-    stats.subscribeMsEfectivo = suscripcionGobernadorMs; stats.cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(mundo).persistencia.cadaTicks;
-  }
+    fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0 };
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = monotonicNow() - start;
@@ -868,9 +795,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     for (const [socket, client] of clients) {
       if (!sessions.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
       // T024 (P1): un cliente suscrito con `intervaloMs` no recibe empujes más seguido que eso.
-      // T162: la palanca de red sube ese suelo efectivo antes que descartar mensajes.
-      const subscribeEfectivo = Math.max(client.subscribeMs, suscripcionGobernadorMs);
-      if (subscribeEfectivo && now - client.lastBroadcastAt < subscribeEfectivo) continue;
+      if (client.subscribeMs && now - client.lastBroadcastAt < client.subscribeMs) continue;
       sendView(socket);
     }
   }
@@ -1028,9 +953,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const simulationStarted = monotonicNow();
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
       // Reloj propio, **no** `monotonicNow`: perfilar por fase es observabilidad de hardware
-      // real, nunca la variable de la que dependen las cuentas exactas de paso/gobernador con
-      // reloj inyectado en pruebas (`tests/gobernador.test.ts`); compartir el contador falso
-      // haría que instrumentar sumara ticks fantasma a `simulationMs`/`stepMs`.
+      // real, nunca la variable de la que dependen las cuentas exactas de paso con reloj
+      // inyectado en pruebas; compartir el contador falso haría que instrumentar sumara
+      // ticks fantasma a `simulationMs`/`stepMs`.
       const medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
       // T151: capturar la ocupación del pool en las barreras ecológicas sin tocar el mundo;
       // se encadena cualquier `onBarrier` previo del contexto y solo se acumulan ms.
@@ -1056,10 +981,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // población grande, esperar `cadaTicks` pasos puede acumular más recibos de los que caben
       // entre guardados (ver `technologyJournalNearCapacity`/`chronicleJournalNearCapacity`); esto
       // es lo que de verdad evita morir, no solo el tope más alto de esos módulos.
-      // T162: la cadencia vigente puede venir espaciada por la palanca de guardado; el gesto
-      // (`valid.length > 0`) sigue forzando el guardado en su propio paso, sin tocar esa invariante.
-      const cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(draft).persistencia.cadaTicks;
-      const routineSaveDue = draft.tick % cadaTicksEfectivo === 0
+      // El gesto (`valid.length > 0`) sigue forzando el guardado en su propio paso,
+      // sin tocar esa invariante.
+      const routineSaveDue = draft.tick % paramsOf(draft).persistencia.cadaTicks === 0
         && (!turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
       if (valid.length > 0 || susurrosAplicados.length > 0 || routineSaveDue
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
@@ -1072,15 +996,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       }
       world = draft;
       // Desde aquí el paso es el mundo vigente (y, si tocaba guardar, ya es durable): un fallo en lo
-      // que queda (gobernador, métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
+      // que queda (métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
       // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
       // disco ya dejó atrás y los gestos resueltos en este paso quedarían fuera del mundo en memoria.
       // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
       punto = null; sinReserva = false;
       runtime.stepMs = monotonicNow() - stepStarted;
-      runtime.p95StepMs = gobernador.registrar(runtime.stepMs, { ...medicion.fases, save: runtime.saveMs });
-      // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
-      gobernar(world);
+      runtime.p95StepMs = registrarPaso(runtime.stepMs);
+      // Solo la pausa manual toca `reproductionEnabled`, sobre el mundo ya vigente.
+      if (reproduccionManual !== null) world.reproductionEnabled = reproduccionManual;
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
@@ -1105,7 +1029,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         const broadcastStarted = performance.now();
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
-        gobernador.medidas.anotarUltimaFase('broadcast', fases.broadcast);
       }
       // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
       if (reservaVieja()) renovarReserva();
@@ -1125,7 +1048,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (paraleloCapturadoMs > 0) { runtime.ocupacionWorkers = Math.max(0, Math.min(1, ocupacionPonderada / paraleloCapturadoMs)); runtime.tiempoParaleloMs = paraleloCapturadoMs; runtime.tiempoBarreraMs = barreraCapturadaMs; }
         else if (hayGpu && paraleloPasoMs > 0) { runtime.tiempoParaleloMs = paraleloPasoMs; runtime.tiempoBarreraMs = 0; }
       }
-      publicarSenalesGobernador(world);
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -1476,10 +1398,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         acuses: c.flujo?.acuses ?? 0, ultimoAcuseMs: c.flujo?.ultimoAcuseMs ?? null, ultimoEnlaceMs: c.flujo?.ultimoEnlaceMs ?? null,
         comprime: deflateNegociado(socket) && (compresion === 'siempre' || !!c.flujo?.comprimir), bufferedAmount: socket.bufferedAmount }));
     },
-    /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
-    get runtime(): RuntimeStats { if (gateway) return gateway.runtime; return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
-    /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
-    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; runtime.gobernador!.estado = 'manual'; runtime.gobernador!.palancaActiva = null; gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; } },
+    /** Copia de las métricas vivas; solo lectura. */
+    get runtime(): RuntimeStats { if (gateway) return gateway.runtime; return { ...runtime }; },
+    /** Pausa manual de los nacimientos: `false` los detiene, `true` los permite y `null` deja
+     * el valor vigente sin tocarlo. Nada más escribe `reproductionEnabled`. */
+    setReproduccionManual(value: boolean | null) { reproduccionManual = value; if (value !== null) world.reproductionEnabled = value; },
     close() {
       if (cierre) return cierre;
       stopped = true; if (timer) clearTimeout(timer); if (inmediato) clearImmediate(inmediato); clearInterval(heartbeat); clearInterval(latido);

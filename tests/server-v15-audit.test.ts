@@ -1,6 +1,6 @@
 /**
- * Auditoría V15 del servidor: cierre de piscinas, palanca de guardado con la cadencia
- * de producción y precedencia `CARTA_OPEN_WORLD` → `CARTA_PARAMS`.
+ * Auditoría V15 del servidor: cierre de piscinas y precedencia
+ * `CARTA_OPEN_WORLD` → `CARTA_PARAMS`.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,6 @@ import { mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cerrarPiscinasDeComputo, createApp } from '../src/server/app.js';
-import { gobernar } from '../src/server/governor.js';
 import { deploymentParams } from '../src/server/deployment-params.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { resumenDespacho, resumenVivo } from '../src/server/resumen-vivo.js';
@@ -45,7 +44,7 @@ function shmAbiertos(): string[] {
 
 test('V15: mundo nuevo fusiona host abierto y CARTA_PARAMS; uno cargado solo cede lo nombrado', () => {
   const abierto = deploymentParams(hostOpenWorldParams(DEFAULT_PARAMS, probe), undefined);
-  assert.equal(abierto.motor.hilos, 28);
+  assert.equal(abierto.motor.hilos, 32);
   assert.deepEqual(abierto.motor.gpu, [0, 1]);
   assert.equal(abierto.motor.soaTerreno, true);
   assert.equal(abierto.motor.particionarPersonas, true);
@@ -77,32 +76,11 @@ test('V15: mundo nuevo fusiona host abierto y CARTA_PARAMS; uno cargado solo ced
   const world = createWorld(51926, abierto);
   const despacho = resumenDespacho(world);
   assert.deepEqual(despacho, {
-    hilos: 28, gpu: [0, 1], soaTerreno: true, particionarPersonas: true,
+    hilos: 32, gpu: [0, 1], soaTerreno: true, particionarPersonas: true,
     natalidadVecindad: true, radioVecindadNatalidad: 16, maxComunidades: 0,
-    politica: 'techo', presupuestoMs: 100,
   });
   assert.deepEqual(Object.keys(resumenVivo(world)).sort(), ['comidaCompartida', 'conducta', 'natalidad']);
   assert.equal(paramsOf(world).poblacion.natalidadVecindad, true);
-});
-
-test('V15: la palanca de guardado no acorta la cadencia de producción ni una suscripción ya más holgada', () => {
-  const guardado = gobernar({
-    presupuestoMs: 100, politica: 'techo', senales: ['saveMs'], valores: { saveMs: 500 },
-    actual: true, poblacion: 40, cadaTicks: 100,
-  });
-  assert.equal(guardado.palancaActiva, 'guardado');
-  assert.equal(guardado.cadaTicksEfectivo, 100, '100 ya supera el tope de 20: acortarlo reintroduce el fallo de R19');
-  assert.equal(gobernar({
-    presupuestoMs: 100, politica: 'techo', senales: ['saveMs'], valores: { saveMs: 500 },
-    actual: true, poblacion: 40, cadaTicks: 100, gestoEnEstePaso: true,
-  }).cadaTicksEfectivo, 100);
-
-  const red = gobernar({
-    presupuestoMs: 50, politica: 'techo', senales: ['colaRed'], valores: { colaRed: 80 },
-    actual: true, poblacion: 10, subscribeMs: 8000,
-  });
-  assert.equal(red.palancaActiva, 'red');
-  assert.equal(red.subscribeMsEfectivo, 8000, 'no se acelera un intervalo que ya superaba el máximo');
 });
 
 test('V15: close() suelta las piscinas que abrió el paso y se puede repetir', async (t) => {

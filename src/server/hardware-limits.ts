@@ -170,9 +170,8 @@ export function detectHostHardware(probe?: HostHardwareProbe): HostHardware {
 }
 
 /**
- * Función pura que deriva el despacho recomendado del motor a partir del hardware detectado.
- * En torres grandes (`cpuThreads >= 8`) reserva 4 hilos para SO, WebSockets y SQLite
- * (p. ej. 32 hilos → 28 hilos + todas las GPUs CUDA disponibles).
+ * Función pura que deriva el despacho recomendado del motor a partir del hardware detectado:
+ * todos los hilos de la máquina y todas las GPUs CUDA disponibles, sin reservas.
  */
 export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor {
   const cpuThreads = Number.isFinite(hw.cpuThreads) && hw.cpuThreads >= 1 ? Math.floor(hw.cpuThreads) : 1;
@@ -184,7 +183,7 @@ export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor 
       gpu.push(device);
     }
   }
-  const hilos = Math.min(MAX_MOTOR_HILOS, Math.max(1, cpuThreads >= 8 ? cpuThreads - 4 : cpuThreads));
+  const hilos = Math.min(MAX_MOTOR_HILOS, Math.max(1, cpuThreads));
   return {
     hilos,
     gpu,

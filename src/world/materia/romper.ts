@@ -57,34 +57,39 @@ export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef,
     movidos += m;
     atomosMovidos += m * atomosDe(q.sustancia(id).atomos);
   }
+  // En bigint: calor·átomos pasa de 2⁵³ en lotes grandes y el doble redondearía el cociente.
   const calor = arena.calor(de);
-  arena.moverCalor(de, a, atomosMovidos === atomos ? calor : Math.floor(calor * atomosMovidos / atomos));
+  arena.moverCalor(de, a, Number(BigInt(calor) * BigInt(atomosMovidos) / BigInt(atomos)));
   return movidos;
 }
 
 /**
- * Quema por demanda (no Arrhenius): aplica en `lote` la reacción de Q de cada sustancia con `oxidante` (en el orden de la
- * arena) tantas veces como pide `trabajo` J, recortado a existencias, hasta pagarlo. Solo usa reacciones exotérmicas y
- * balanceadas; las que Q no tiene aún (encoladas) no queman este tick. El calor liberado queda en el lote (de ahí lo
- * toman la síntesis o fluir). Devuelve los J liberados: ≥ trabajo si alcanzó (sobra menos de una vez), menos si no.
+ * Quema por demanda (no Arrhenius): aplica en `lote` la reacción de Q de cada sustancia con `oxidante` (por id) tantas
+ * veces como pide `trabajo` J, recortado a existencias, hasta pagarlo o agotar el oxidante. Solo usa reacciones
+ * exotérmicas y balanceadas; las que Q no tiene aún (encoladas) no queman este tick. Con oxidante 0, que Q tomaría por
+ * reacción unaria, no quema: ningún lote tiene cuantos de 0. El calor liberado queda en el lote (de ahí lo toman la
+ * síntesis o fluir). Devuelve los J liberados: ≥ trabajo si alcanzó (sobra menos de una vez), menos si no.
  */
 export function quemar(arena: ArenaMateria, q: ServicioQuimico, lote: LoteRef, oxidante: SustanciaId, trabajo: number): number {
+  if (!(trabajo > 0)) return 0; // NaN: la arena no admite veces NaN
   let liberado = 0;
   const nivel = nivelDeT(arena.vista(lote).T);
   for (const id of especies(arena, lote)) {
-    if (liberado >= trabajo) break;
+    if (liberado >= trabajo || arena.cuantos(lote, oxidante) === 0) break;
     if (id === oxidante) continue;
     const r = q.reaccion(id, oxidante, nivel);
     if (!r || r.dH >= 0 || !balanceada(q, r)) continue;
-    liberado -= r.dH * arena.aplicar(lote, r, Math.ceil((trabajo - liberado) / -r.dH));
+    const veces = Math.min(Number.MAX_SAFE_INTEGER, Math.ceil((trabajo - liberado) / -r.dH)); // la arena pide un entero seguro
+    liberado -= r.dH * arena.aplicar(lote, r, veces);
   }
   return liberado;
 }
 
+/** Sustancias del lote por id: lo que ocurre no depende de en qué ranura de la arena está cada una. */
 function especies(arena: ArenaMateria, l: LoteRef): Uint32Array {
   let ids = new Uint32Array(16), n = arena.especies(l, ids);
   if (n > ids.length) n = arena.especies(l, ids = new Uint32Array(n));
-  return ids.subarray(0, n);
+  return ids.subarray(0, n).sort();
 }
 
 const atomosDe = (a: Uint8Array) => a.reduce((s, v) => s + v, 0);

@@ -10,10 +10,12 @@ import type { Registro } from '../motor/contratos.js';
 import type { ArenaMateria, Ecuacion, LoteRef, Plantilla, ServicioQuimico } from './tipos.js';
 
 type Termino = { id: SustanciaId; nu: number };
+const MAX = Number.MAX_SAFE_INTEGER;
 
 /** Cierto si `e` conserva cada elemento y su `dH` es exactamente Σ energía de las salidas − Σ de las entradas, en enteros.
- * Va en el camino caliente de `copiar` y `quemar`, así que suma en doble: es exacto porque exige Σ nu·(|energía| + 8) ≤ 2⁵³
- * (cota de toda suma parcial); una ecuación que no cabe ahí tampoco cabría en la arena (I3) y no ocurre. */
+ * Va en el camino caliente de `copiar` y `quemar`, así que suma en doble; es exacto porque exige que Σ nu·(|energía| + 8)
+ * + |dH| ≤ 2⁵³ acote toda suma parcial. Una ecuación fuera de esa cota se trata como desbalanceada: no es viable al crear
+ * la plantilla y no ocurre al copiar ni al quemar. */
 export function balanceada(q: ServicioQuimico, e: Ecuacion): boolean {
   const atomos = new Float64Array(NE);
   let energia = 0, cota = 0;
@@ -28,77 +30,88 @@ export function balanceada(q: ServicioQuimico, e: Ecuacion): boolean {
     return true;
   };
   return Number.isSafeInteger(e.dH) && sumar(e.salidas, 1) && sumar(e.entradas, -1)
-    && cota + Math.abs(e.dH) <= Number.MAX_SAFE_INTEGER && atomos.every((a) => a === 0) && energia === e.dH;
+    && cota + Math.abs(e.dH) <= MAX && atomos.every((a) => a === 0) && energia === e.dH;
 }
 
 /** Lo que define una plantilla antes de balancearla: `partes` es la unidad propuesta (se multiplica por el menor entero
- * que balancea), `entradas` de dónde puede sacar sus átomos y `subproductos` lo que puede devolver (O₂, H₂O…). */
+ * que balancea), `entradas` de dónde puede sacar sus átomos y `subproductos` lo que puede devolver (O₂, H₂O…), las dos en
+ * orden de preferencia. Una misma sustancia puede ser parte y entrada (el agua del tejido) o parte y subproducto. */
 export interface DatosPlantilla extends Omit<Plantilla, 'id' | 'sintesis'> {
   entradas: readonly SustanciaId[];
   subproductos: readonly SustanciaId[];
 }
 
 /**
- * Balancea la síntesis de `d` y la registra. Incógnitas: las unidades de `partes`, cuánto de cada entrada y de cada
- * subproducto. Exige una solución única (núcleo de dimensión 1) con todo ≥ 0 y unidades > 0; las especies con 0 salen
- * de la ecuación. null = no viable: le falta un elemento, la solución es ambigua, una especie está en los dos lados o
- * un número no es un entero seguro.
+ * Balancea la síntesis de `d` y la registra. Incógnitas ≥ 0: las unidades de `partes` (> 0), cuánto de cada subproducto y
+ * cuánto de cada entrada. Si hay varias soluciones, toma la reacción de menos especies y, a igualdad, la de las primeras
+ * de cada lista. null = no viable: ninguna solución (falta un elemento o sobraría uno que no puede salir), datos repetidos
+ * en una lista o números que no son enteros seguros.
  */
 export function crearPlantilla(q: ServicioQuimico, registro: Registro, d: DatosPlantilla): Plantilla | null {
-  const ids = [...d.partes.map((t) => t.id), ...d.subproductos, ...d.entradas];
-  if (d.partes.length === 0 || new Set(ids).size !== ids.length) return null;
-  if (d.partes.some((t) => !Number.isSafeInteger(t.nu) || t.nu <= 0)) return null;
+  if (d.partes.length === 0 || d.partes.some((t) => !Number.isSafeInteger(t.nu) || t.nu <= 0)) return null;
+  if ([d.partes.map((t) => t.id), d.subproductos, d.entradas].some((l) => new Set(l).size !== l.length)) return null;
 
   // Columnas: la unidad de partes, cada subproducto (lado de las salidas) y cada entrada (con signo −).
-  const cols = 1 + d.subproductos.length + d.entradas.length;
-  const m = Array.from({ length: NE }, () => new Array<bigint>(cols).fill(0n));
+  const unidad = new Array<bigint>(NE).fill(0n);
   for (const t of d.partes) {
     const a = q.sustancia(t.id).atomos;
-    for (let k = 0; k < NE; k++) m[k]![0]! += BigInt(t.nu) * BigInt(a[k]!);
+    for (let k = 0; k < NE; k++) unidad[k]! += BigInt(t.nu) * BigInt(a[k]!);
   }
-  [...d.subproductos, ...d.entradas].forEach((id, j) => {
-    const a = q.sustancia(id).atomos, signo = j < d.subproductos.length ? 1n : -1n;
-    for (let k = 0; k < NE; k++) m[k]![1 + j] = signo * BigInt(a[k]!);
-  });
-  let z = nucleo(m, cols);
-  if (!z) return null;
-  if (z[0]! < 0n) z = z.map((v) => -v);
-  if (z[0] === 0n || z.some((v) => v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER))) return null;
+  const especies = [...d.subproductos, ...d.entradas], nSub = d.subproductos.length;
+  const cols = [unidad, ...especies.map((id, j) =>
+    Array.from(q.sustancia(id).atomos, (a) => (j < nSub ? 1n : -1n) * BigInt(a)))];
+  const z = reaccionMinima(cols);
+  if (!z || z.some((v) => v > BigInt(MAX))) return null;
 
   const u = Number(z[0]);
   const partes = d.partes.map((t) => ({ id: t.id, nu: t.nu * u })).sort(porId);
-  const terminos = (lista: readonly SustanciaId[], desde: number) =>
-    lista.map((id, j) => ({ id, nu: Number(z![desde + j]) })).filter((t) => t.nu > 0);
-  const entradas = terminos(d.entradas, 1 + d.subproductos.length).sort(porId);
-  const salidas = [...partes, ...terminos(d.subproductos, 1)].sort(porId);
-  if (partes.some((t) => !Number.isSafeInteger(t.nu))) return null;
-  let dH = 0n;
-  for (const t of salidas) dH += BigInt(t.nu) * BigInt(q.sustancia(t.id).energia);
-  for (const t of entradas) dH -= BigInt(t.nu) * BigInt(q.sustancia(t.id).energia);
-  if (dH > BigInt(Number.MAX_SAFE_INTEGER) || dH < -BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  const salen = new Map(partes.map((t) => [t.id, t.nu]));
+  const entradas: Termino[] = [];
+  especies.forEach((id, j) => {
+    const nu = Number(z[1 + j]);
+    if (nu > 0 && j < nSub) salen.set(id, (salen.get(id) ?? 0) + nu);
+    else if (nu > 0) entradas.push({ id, nu });
+  });
+  const salidas = [...salen].map(([id, nu]) => ({ id, nu })).sort(porId);
+  entradas.sort(porId);
+  const dH = salidas.reduce((s, t) => s + t.nu * q.sustancia(t.id).energia, 0)
+    - entradas.reduce((s, t) => s + t.nu * q.sustancia(t.id).energia, 0);
+  const sintesis: Ecuacion = { entradas, salidas, dH };
+  // Exacta si cabe en la cota de `balanceada`; si no, la plantilla no se podría copiar nunca y no es viable.
+  if (!balanceada(q, sintesis)) return null;
 
-  const sintesis: Ecuacion = { entradas, salidas, dH: Number(dH) };
-  const resto = { kappa: d.kappa, captura: d.captura, masaAdulta: d.masaAdulta, m0: d.m0, linaje: d.linaje };
+  const resto = { kappa: [d.kappa[0], d.kappa[1], d.kappa[2]] as const, // copia: los bytes registrados no cambian
+    captura: d.captura, masaAdulta: d.masaAdulta, m0: d.m0, linaje: d.linaje };
   return { id: registro.insertar(canonico(partes, sintesis, resto)), partes, sintesis, ...resto };
 }
 
 /**
  * Sintetiza en `destino` unidades enteras de `p`: n = min(⌊maxUnidades⌋, Liebig sobre la suma de `fuentes`,
  * ⌊min(energia, calor del destino)/dH⌋ si la síntesis es endotérmica). Mueve n·nu de cada entrada desde las fuentes (en
- * su orden) al destino, aplica la síntesis y lleva los subproductos al lote `residuo` (aire, agua, digestivo); las partes
- * se quedan en el destino. `energia` es lo que el llamador autoriza a fijar (luz captada, o lo quemado por η): el calor
- * ambiente del lote no paga síntesis. Destino, fuentes y residuo son lotes distintos del mismo dueño. Devuelve n.
+ * su orden) al destino, aplica la síntesis y lleva al lote `residuo` (aire, agua, digestivo) lo que sale por encima de
+ * las partes, que se quedan en el destino. `energia` es lo que el llamador autoriza a fijar (luz captada, o lo quemado
+ * por η): el calor ambiente del lote no paga síntesis. Destino, fuentes y residuo son lotes distintos del mismo dueño.
+ * Devuelve n.
  */
 export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, destino: LoteRef,
   fuentes: readonly LoteRef[], residuo: LoteRef, energia: number, maxUnidades: number): number {
   const e = p.sintesis;
   if (!balanceada(q, e)) return 0;
+  const enPartes = new Map(p.partes.map((t) => [t.id, t.nu]));
+  // Cuántas veces caben `por` más en algo que ya tiene `ya`: ningún estado intermedio puede pasar de 2⁵³ (I3).
+  const cabe = (ya: number, por: number) => Math.floor((MAX - ya) / por);
   let n = Math.floor(maxUnidades);
   if (e.dH > 0) n = Math.min(n, Math.floor(Math.min(energia, arena.calor(destino)) / e.dH));
+  if (e.dH < 0) n = Math.min(n, cabe(arena.calor(destino), -e.dH));
   for (const t of e.entradas) {
     let hay = 0;
     for (const f of fuentes) hay += arena.cuantos(f, t.id);
-    n = Math.min(n, Math.floor(hay / t.nu));
+    n = Math.min(n, Math.floor(hay / t.nu), cabe(arena.cuantos(destino, t.id), t.nu));
+  }
+  for (const t of e.salidas) {
+    n = Math.min(n, cabe(arena.cuantos(destino, t.id), t.nu));
+    const sobra = t.nu - (enPartes.get(t.id) ?? 0);
+    if (sobra > 0) n = Math.min(n, cabe(arena.cuantos(residuo, t.id), sobra));
   }
   if (!(n > 0)) return 0;
   for (const t of e.entradas) {
@@ -106,9 +119,9 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
     for (const f of fuentes) if (falta > 0) falta -= arena.mover({ de: f, a: destino, esp: t.id, cuantos: falta });
   }
   const hechas = arena.aplicar(destino, e, n);
-  const partes = new Set(p.partes.map((t) => t.id));
   for (const t of e.salidas) {
-    if (!partes.has(t.id)) arena.mover({ de: destino, a: residuo, esp: t.id, cuantos: hechas * t.nu });
+    const sobra = t.nu - (enPartes.get(t.id) ?? 0);
+    if (sobra > 0) arena.mover({ de: destino, a: residuo, esp: t.id, cuantos: hechas * sobra });
   }
   return hechas;
 }
@@ -124,6 +137,53 @@ function canonico(partes: readonly Termino[], e: Ecuacion, r: Omit<Plantilla, 'i
   }
   v.push(e.dH, ...r.kappa, r.captura, r.masaAdulta, r.m0, r.linaje);
   return new Uint8Array(Float64Array.from(v).buffer);
+}
+
+/**
+ * Coeficientes ≥ 0 por columna (0 fuera de la reacción) de la reacción con la columna 0 > 0 de menos columnas: el primer
+ * soporte S ∋ 0, por tamaño y luego en orden lexicográfico, cuyo núcleo es de dimensión 1 y > 0 en todo S. Si existe
+ * alguna solución ≥ 0 con la columna 0 > 0, la de soporte mínimo es de esta forma (si su núcleo tuviera dimensión ≥ 2, una
+ * dirección con la columna 0 a cero vaciaría otra columna), así que no encontrarla prueba que no hay solución.
+ */
+function reaccionMinima(cols: readonly (readonly bigint[])[]): bigint[] | null {
+  // Un elemento cuyos términos tienen todos el mismo signo obliga a 0 esas columnas: se quitan hasta que no quede ninguno
+  // (así lo que no puede balancearse cae sin recorrer soportes).
+  const signo = cols.map((c) => c.map((v) => (v > 0n ? 1 : v < 0n ? -1 : 0)));
+  const unSigno = (s: readonly number[], e: number) => {
+    let mas = false, menos = false;
+    for (const j of s) { mas ||= signo[j]![e]! > 0; menos ||= signo[j]![e]! < 0; }
+    return mas !== menos;
+  };
+  let vivas = cols.map((_, j) => j);
+  for (let cambio = true; cambio;) {
+    cambio = false;
+    for (let e = 0; e < NE; e++) {
+      if (!unSigno(vivas, e)) continue;
+      vivas = vivas.filter((j) => signo[j]![e] === 0);
+      cambio = true;
+    }
+  }
+  if (vivas[0] !== 0) return null;
+  // Un soporte tiene a lo sumo rango + 1 ≤ NE + 1 columnas.
+  for (let k = 0; k < vivas.length && k <= NE; k++) {
+    for (const resto of combinaciones(vivas.length - 1, k)) {
+      const s = [0, ...resto.map((i) => vivas[i + 1]!)];
+      if (signo[0]!.some((_, e) => unSigno(s, e))) continue; // el mismo criterio dentro de S: no admite z > 0
+      let z = nucleo(Array.from({ length: NE }, (_, e) => s.map((j) => cols[j]![e]!)), s.length);
+      if (!z) continue;
+      if (z[0]! < 0n) z = z.map((v) => -v);
+      if (!z.every((v) => v > 0n)) continue;
+      const todo = new Array<bigint>(cols.length).fill(0n);
+      s.forEach((j, i) => { todo[j] = z![i]!; });
+      return todo;
+    }
+  }
+  return null;
+}
+
+function* combinaciones(n: number, k: number, desde = 0): Generator<number[]> {
+  if (k === 0) { yield []; return; }
+  for (let i = desde; i <= n - k; i++) for (const r of combinaciones(n, k - 1, i + 1)) yield [i, ...r];
 }
 
 /** Vector primitivo del núcleo de `m` si tiene dimensión 1; si no, null. Eliminación de Gauss-Jordan sin fracciones. */

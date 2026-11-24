@@ -29,7 +29,9 @@ export const TIPOS: readonly TipoEnlace[] = (() => {
     const a = TABLA[e]!, b = TABLA[f]!;
     const kMax = a.pi * b.pi > 0 ? Math.min(a.valencia, b.valencia, ORDEN_MAX) : 1;
     for (let k = 1; k <= kMax; k++) {
-      const d = (a.dPropia + b.dPropia) / 2 + PAULING * (a.chi - b.chi) ** 2 + (k - 1) * Math.sqrt(a.pi * b.pi);
+      // Cada par de electrones de un enlace múltiple se polariza por Δχ: sin `k`, C=O queda por debajo de 2·C–O
+      // (el CO₂ polimerizaría en frío y la madera/carbón se apagarían en aire a 655/535 K).
+      const d = (a.dPropia + b.dPropia) / 2 + k * PAULING * (a.chi - b.chi) ** 2 + (k - 1) * Math.sqrt(a.pi * b.pi);
       tipos.push({ e, f, k: k as TipoEnlace['k'], d: Math.round(d) });
     }
   }
@@ -47,7 +49,7 @@ export interface Propiedades {
   tenacidad: number;    // [0, 1]
   flexibilidad: number; // [0, 1]
   polaridad: number;    // [0, 1]
-  densidad: number;     // kg/L
+  densidad: number;     // kg/L en fase condensada (sólido/líquido); para gas a T, P usa gas ideal R·T/101,325 L/cuanto
   color: number;        // 0xRRGGBB
 }
 

@@ -38,17 +38,31 @@ export type Clase = (typeof Clase)[keyof typeof Clase];
 
 // ── Tabla de organismos y frente público ─────────────────────────────────────────────────────────────────
 
-/** Columna de solo lectura: TS rechaza `c[i] = v`. Una columna de ancho w guarda c[slot·w + i]. En modo verificar,
- * el frente leído se sella con CRC32 por tick (I-F). */
-export interface Col { readonly [i: number]: number; readonly length: number }
+/** Columna de solo lectura: TS rechaza `c[i] = v`, y cumple `ArrayBufferView` para que M3 la copie en bloque al
+ * canal GPU sin bucle elemento a elemento. Una columna de ancho w guarda c[slot·w + i]. En modo verificar, el frente
+ * leído se sella con CRC32 por tick (I-F). */
+export interface Col extends ArrayBufferView { readonly [i: number]: number; readonly length: number; readonly BYTES_PER_ELEMENT: number }
 
-/** Alelos por slot en `genoma`: 8 loci diploides (el 8.º, escucha, lo añade E; hasta entonces van a 0). */
+/** Alelos por slot en `genoma`: en personas, 8 loci diploides (el 8.º, escucha, lo añade E; hasta entonces van a 0);
+ * en fauna (F), hasta 16 genes continuos. */
 export const GENOMA_ANCHO = 16;
 /** Fenotipo por slot en `rasgos` (media de los dos alelos de cada locus): entrada de W·rasgos. */
 export const RASGOS_ANCHO = 8;
 /** Posición de cada campo de `VistaCuerpo` dentro de la columna `cuerpo`. */
 export const CAMPOS_CUERPO = { hambre: 0, sed: 1, energia: 2, salud: 3, masa: 4, carga: 5, T: 6 } as const satisfies Record<keyof VistaCuerpo, number>;
 export const CUERPO_ANCHO = 7;
+
+export type TipoColumna = 'f32' | 'f64' | 'i32' | 'u16' | 'u8';
+
+/** Tipo y ancho congelados de las columnas fijas de `FrentePublico`, en el orden en que encabezan `FrentePublico.columnas`:
+ * así M2a, M3, M4a, M6, B, N y F usan el mismo método de `FrenteEscritura` y los mismos índices en `ConsultaOrganismo`.
+ * `decideEn`, `uid` y `pareja` son f64 (i32 desbordaría a 300 Hz en 82 días). */
+export const COLUMNAS_FIJAS = [
+  ['gen', 'i32', 1], ['vivo', 'u8', 1], ['clase', 'u8', 1], ['uid', 'f64', 1], ['dueno', 'i32', 1],
+  ['x', 'f32', 1], ['y', 'f32', 1], ['chunk', 'i32', 1], ['accion', 'u8', 1], ['objetivo', 'i32', 1],
+  ['decideEn', 'f64', 1], ['cuerpo', 'f32', CUERPO_ANCHO], ['rasgos', 'f32', RASGOS_ANCHO],
+  ['genoma', 'f32', GENOMA_ANCHO], ['pareja', 'f64', 1],
+] as const satisfies readonly (readonly [string, TipoColumna, number])[];
 
 /**
  * Estado público tras el tick `tick`, inmutable durante el siguiente (doble búfer): una tabla para personas y fauna.
@@ -58,10 +72,10 @@ export const CUERPO_ANCHO = 7;
 export interface FrentePublico {
   readonly tick: number;
   readonly alta: number;                 // filas reservadas: los slots válidos son < alta
-  readonly columnas: readonly string[];  // nombres por índice (las fijas y luego las registradas): así las citan las consultas
+  readonly columnas: readonly string[];  // nombres por índice (las de COLUMNAS_FIJAS y luego las registradas): así las citan las consultas
   readonly gen: Col; readonly vivo: Col; readonly clase: Col;
-  readonly uid: Col;                     // identidad durable (f64), nunca reutilizada
-  readonly dueno: Col;                   // hilo que tiene al organismo durante el tick siguiente
+  readonly uid: Col;                     // identidad durable (f64, ≥ 1), nunca reutilizada
+  readonly dueno: Col;                   // hilo que tiene al organismo durante el tick siguiente (−1 si no asignado)
   readonly x: Col; readonly y: Col; readonly chunk: Col;
   readonly accion: Col;                  // índice en la lista de acciones de su clase
   readonly objetivo: Col;                // celda objetivo (`Terreno.celda`); −1 si no tiene
@@ -69,7 +83,7 @@ export interface FrentePublico {
   readonly cuerpo: Col;                  // CUERPO_ANCHO f32, en el orden de CAMPOS_CUERPO
   readonly rasgos: Col;                  // RASGOS_ANCHO f32
   readonly genoma: Col;                  // GENOMA_ANCHO f32: la pareja lo aporta al concebir
-  readonly pareja: Col;                  // uid de su mejor vínculo fértil (−1 si no tiene): hace de consentimiento
+  readonly pareja: Col;                  // consentimiento de cría: −1 = no fértil/no consiente; 0 = cualquiera compatible (fauna); uid > 0 = mejor vínculo fértil en alcance (personas; mutuo en el mismo tick desempata por mayor reserva, luego menor uid)
   col(nombre: string): Col;              // columnas registradas por los demás carriles
 }
 
@@ -80,15 +94,13 @@ export interface FrenteEscritura {
   u16(nombre: string): Uint16Array; u8(nombre: string): Uint8Array;
 }
 
-export type TipoColumna = 'f32' | 'f64' | 'i32' | 'u16' | 'u8';
-
 /** Implementa: M2a (`soa/organismos.ts`). Consumen: M2b, M4a, M4b, N, F. */
 export interface TablaOrganismos {
   columna(nombre: string, tipo: TipoColumna, ancho: number): void; // antes de arrancar
   lectura(): FrentePublico;
   escritura(h: Hilo): FrenteEscritura;
   alta(h: Hilo, c: Clase): Ref;          // slot libre tras 2 ticks de cuarentena; gen nueva
-  baja(h: Hilo, r: Ref): void;           // gen++ y vivo = 0 en el frente t+1
+  baja(h: Hilo, r: Ref): void;           // gen++ y vivo = 0 en el frente t+1, conservando x, y y chunk durante la cuarentena (respaldo de M5)
 }
 
 // ── Cerebro ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -115,18 +127,25 @@ export const COLUMNAS_CEREBRO = {
 // ── Terreno ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Celdas en la arena de páginas 16×16 (SAB crecible: las vistas siguen su longitud). La arena crece solo en F0.
- * Implementa: M1 (`soa/{arena,terreno}.ts`). Consumen: M2b, M3, M4a, M4b, M5, W. */
+ * Disposición de celdas (como `soa/region.ts`): `celda = chunk * 256 + ((y & 15) << 4 | (x & 15))`, así que
+ * `chunkDe(celda) === celda >> 8` y el índice local dentro del chunk es `celda & 255` en orden `(ly·16 + lx)`.
+ * Implementa: M1 (`soa/{arena,terreno}.ts`). Consumen: M2b, M3, M4a, M4b, M5, M6, W. */
 export interface Terreno {
+  readonly paginas: number;              // cota de ChunkId asignados: los residentes tienen c < paginas y duenoChunk[c] ≥ 0
+  readonly paginaX: Int32Array;          // coordenada px del chunk c (para BFS GPU y Fotograma.paginas)
+  readonly paginaY: Int32Array;          // coordenada py del chunk c
   readonly versionPagina: Uint32Array;   // por chunk; la sube el dueño y la GPU solo sube lo que cambió
-  readonly duenoChunk: Int16Array;       // vigente durante el tick; lo cambia el coordinador en F0
+  readonly versionVisible: Uint32Array;  // por chunk; la sube marcar(c, true): M6 compara con la última entregada (saltar no pierde cambios)
+  readonly duenoChunk: Int16Array;       // vigente durante el tick (−1 si libre); lo cambia el coordinador en F0
   readonly campos: readonly string[];    // nombres por índice: así los citan las consultas
   celda(x: number, y: number): number;   // −1 si no residente
   chunkDe(celda: number): ChunkId;
-  campo(nombre: string): Col;
+  campo(nombre: string): Col;            // indexado por `celda`
 }
 export interface TerrenoDueno extends Terreno {
-  escribible(nombre: string, c: ChunkId): Float64Array | Float32Array | Int32Array | Uint8Array; // verifica dueño en modo verificar
-  marcar(c: ChunkId, visible: boolean): void; // versión++ y, si visible, bit para el fotograma
+  /** Subarray de las 256 celdas del chunk `c`, indexado por `celda & 255` (`ly·16 + lx`); verifica dueño en modo verificar. */
+  escribible(nombre: string, c: ChunkId): Float64Array | Float32Array | Int32Array | Uint8Array;
+  marcar(c: ChunkId, visible: boolean): void; // versionPagina[c]++ y, si visible, versionVisible[c]++
 }
 
 // ── Intentos ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -136,11 +155,15 @@ export interface TerrenoDueno extends Terreno {
  * organismos del mismo chunk incluidos, es un intento al buzón de su dueño aunque lo tenga el mismo hilo: el dueño lo
  * aplica contra su estado actual (la regla depende del chunk, nunca del hilo). Lo que va en `dato` por tipo:
  * - Tomar: `DATO_TOMAR`; siempre se contesta con Concedido (con lo que hubo, quizá nada).
- * - Depositar, Dar, Concedido, Devuelto: llevan `materia` y `DATO_MATERIA` (dato null: Suelo, sin forma).
+ * - Depositar, Dar, Concedido, Devuelto: llevan `materia` y `DATO_MATERIA` (dato null: Suelo, sin forma). Devuelto
+ *   devuelve al emisor `de` una garantía rechazada por un receptor vivo.
  * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] = cuánto sube el vínculo del receptor hacia el emisor.
  * - Ensenar, Migrante, Gesto, Global: `bytes` (v8.serialize). Activar: dato = [cx, cy] del chunk nuevo.
- * Si `a` ya no vive o no es de este dueño, o `lote` caducó, la materia se deposita en el Suelo de `celda` (o de la celda
- * de `a` en el frente), reenviada como Depositar si esa celda es ajena, y un Tomar se contesta con Concedido vacío.
+ * Enrutado con garantía: si `a` sigue vivo (`vivo === 1 && gen === genDe(a)`) pero ahora pertenece a otro dueño
+ * (`frente.dueno[slotDe(a)] !== hilo`, por migración o rebalanceo), el intento se reenvía a su dueño actual (en F1 entra
+ * en su cola A y se aplica en F5 del mismo tick). Solo si `a` ya no vive o `lote` caducó, la materia se deposita en el
+ * Suelo de `celda` (o de la última celda de `a` en el frente), reenviada como Depositar si esa celda es ajena; un Tomar
+ * sobre destino ausente se contesta con Concedido vacío.
  * Las respuestas llevan el nonce del intento que contestan; un dueño descarta el (nonce, tipo) que ya aplicó.
  * Toda garantía termina en ≤ 2 ticks (I-B).
  */
@@ -174,17 +197,18 @@ export const DATO_TOMAR = { rol: 0, parte: 1, esp: 2, cuantos: 3, loteDestino: 4
 /** Posiciones en `dato` de un Golpear: el trabajo en J y lo que la ley de romper necesita del útil o cuerpo que golpea. */
 export const DATO_GOLPEAR = { trabajo: 0, filo: 1, tenacidad: 2, esbeltez: 3, dureza: 4 } as const;
 
-/** Colas de cada dueño: A se vacía en F5 del mismo tick; B, en F1 del siguiente; F0, solo la del coordinador. */
-export type Cola = 'A' | 'B' | 'F0';
+/** Colas de cada dueño: M (migrantes, se vacía PRIMERO en F1 antes que B); B (respuestas y gestos, en F1); A (intentos
+ * del tick, en F5); F0 (solo la del coordinador, en F0 de t+1). */
+export type Cola = 'M' | 'A' | 'B' | 'F0';
 
 /** MPSC sobre SAB crecible. Implementa: M1 (`motor/buzon.ts`). Consumen: M4a, M4b, M5, W, N, F, S, E, T1. */
 export interface Buzon {
-  /** Lo enviado en F1–F4 va a la cola A del destino; en F5 y F6, a la B; los gestos de F0, a la B (F1 del mismo tick).
-   * Activar y Global van a la cola F0 del coordinador, que los aplica en F0 de t+1. `enviar` copia el intento al SAB:
-   * al volver, el emisor puede reutilizar sus arrays. */
+  /** Enruta según tipo y fase (el coordinador fija la fase en cada barrera): `Migrante` va siempre a M; `Activar` y
+   * `Global`, a F0 del coordinador; el resto, a A en F1–F4 y a B en F5–F6 (y gestos de F0 → B para F1 del mismo tick).
+   * `enviar` copia el intento al SAB: al volver, el emisor puede reutilizar sus arrays. */
   enviar(destino: Hilo, i: Intento): void;
-  /** Solo el dueño, en la fase de esa cola; orden barajado con su azar. Los arrays del intento entregado son vistas
-   * del SAB: valen solo durante la llamada a `f`. */
+  /** Solo el dueño, en la fase de esa cola; orden barajado con su azar (salvo M y F0). Los arrays del intento entregado
+   * son vistas del SAB: valen solo durante la llamada a `f`. */
   vaciar(cola: Cola, f: (i: Intento) => void): number;
 }
 
@@ -230,8 +254,12 @@ export interface CtxDueno extends CtxLectura {
   readonly libro: Libro;                 // el del hilo: el único `Libro` (materia/tipos.ts)
   azar(): number;                        // del hilo; sembrado de MotorConfig.semilla o de entropía real
   /** Único, sin orden y < 2⁵³ (llegar ahí es fatal). 'nonce' arranca tras `cargar` por encima del mayor nonce de
-   * `MateriaCheckpoint.enVuelo`. */
+   * `MateriaCheckpoint.enVuelo`. 'uid' arranca en ≥ 1 (0 queda reservado en `FrentePublico.pareja`). */
   id(tipo: 'uid' | 'suceso' | 'comunidad' | 'estructura' | 'nonce'): number;
+  /** Da de alta una cría en la tabla de organismos (y registra `persona` en este dueño si `clase === Clase.Persona`). */
+  alta(clase: Clase, persona?: Person): Ref;
+  /** Da de baja un organismo propio (gen++ y vivo = 0 en el frente t+1, y lo retira de `personas` si es Persona). */
+  baja(r: Ref): void;
   suceso(e: Omit<ChronicleEvent, 'id' | 'tick'>): string;
   publicar(s: SucesoVisible): void;      // textos y vistas lentas que cambiaron, para la cinta (solo al cambiar)
   /** Lo aplica F0 de t+1. S manda así las aristas ≥ θ de sus personas; F0 junta las mutuas y arma las componentes. */
@@ -252,20 +280,30 @@ export interface Consulta {
   campos: Int32Array; pesos: Float32Array; pesoDist: number; pesoPasos: number;
   filtros: Float32Array; alcanzable: boolean;
 }
-/** Organismo en `radio`: el más cercano (criterio 0) o el de mayor valor en la columna `columna` (criterio 1);
- * `filtros` son tripletas [columna, mínimo, máximo] sobre `FrentePublico.columnas`. */
-export interface ConsultaOrganismo { radio: number; clase: Clase; filtros: Float32Array; criterio: 0 | 1; columna: number }
+/** Organismo vivo en `radio` (excluye al propio actor): el más cercano (criterio 0) o el de mayor valor en
+ * `(columna, componente)` (criterio 1). `clase`: 0 = cualquiera (amenaza/masa mixta), o `Clase`. `filtros` son
+ * cuádruplas [columna, componente, mínimo, máximo] sobre `FrentePublico.columnas` (`componente = 0` en escalares). */
+export interface ConsultaOrganismo {
+  radio: number; clase: 0 | Clase; filtros: Float32Array; criterio: 0 | 1; columna: number; componente: number;
+}
 /** Lo que un actor necesita percibir para decidir. Los definen M2b (`decision/planes.ts`) y M2a (fauna); los ejecutan M2b (CPU) y M3 (GPU).
- * Con cerebro, `acciones` = CEREBRO.acciones y `w` es la tabla W (acciones × RASGOS_ANCHO, por filas); sin él, 0 y null. */
+ * `transitable` son tripletas [campo, mínimo, máximo] sobre `Terreno.campos` para el BFS r = 7 (tierra para personas, agua
+ * para peces; vacío = toda celda residente). Con cerebro, `acciones` = CEREBRO.acciones y `w` es la tabla W
+ * (acciones × RASGOS_ANCHO, por filas); sin él, 0 y null. */
 export interface Plan {
-  id: number; celdas: readonly Consulta[]; organismos: readonly ConsultaOrganismo[];
+  id: number; transitable: Float32Array; celdas: readonly Consulta[]; organismos: readonly ConsultaOrganismo[];
   acciones: number; w: Float32Array | null;
 }
-/** Vencidos de un tick que van a un mismo percibidor (lotes de 64 slots en CPU, miles en GPU). */
+/** Vencidos de un tick que van a un mismo percibidor (lotes de 64 slots en CPU, miles en GPU).
+ * `plan[i]` es el índice en `planes` (`0 ≤ plan[i] < planes.length`, con `planes[k].id === k`). */
 export interface LotePercepcion { tick: number; slots: Int32Array; plan: Uint16Array }
-/** Alineada con `slots`: N×Q celdas, pasos y valores, N×V organismos (Ref) y N×A utilidades; Q, V y A son los máximos
- * de los planes del lote y lo que sobra queda a −1. utilidad[a] = red(observacion)[a] + sesgo[a] + Σₖ w[a·RASGOS_ANCHO + k]·rasgos[k]. */
-export interface Percepcion { celda: Int32Array; pasos: Int16Array; valor: Float32Array; organismo: Float64Array; utilidad: Float32Array }
+/** Alineada con `slots`: N×q celdas, pasos y valores, N×v organismos (Ref) y N×a utilidades; q, v y a son los máximos
+ * sobre `planes` (sin resultado o sobrante: celda = −1, pasos = −1, valor = Infinity, organismo = REF_NULA).
+ * utilidad[j] = red(observacion)[j] + sesgo[j] + Σₖ w[j·RASGOS_ANCHO + k]·rasgos[k]. */
+export interface Percepcion {
+  readonly q: number; readonly v: number; readonly a: number;
+  celda: Int32Array; pasos: Int16Array; valor: Float32Array; organismo: Float64Array; utilidad: Float32Array;
+}
 
 export type Dispositivo = 'cpu' | `gpu${number}`;
 
@@ -290,6 +328,8 @@ export class ErrorDispositivo extends Error {
 /**
  * Canal con el servidor de una tarjeta. Los datos van por un fichero de /dev/shm abierto por ambos lados; la tubería
  * solo lleva órdenes y respuestas de pocos bytes (AJUSTES §2: por tubería, 1 M de agentes costaba 1,3 s con un kernel de 6 ms).
+ * `enviar` y `recibir` van separados para que F0 lance todas las tarjetas sin bloquear y B2 recoja las respuestas en
+ * paralelo con F1–F2 de CPU. Ambos lanzan `ErrorDispositivo` si cae el servidor o vence el plazo.
  * Implementa: M3 (`gpu/canal.ts`). Consumen: M3 (`percibir-gpu.ts`) y G (`materia-gpu.ts`).
  */
 export interface CanalGpu {
@@ -298,7 +338,8 @@ export interface CanalGpu {
   crecer(bytes: number): void;
   escribir(desde: number, datos: ArrayBufferView): void;
   leer(desde: number, destino: ArrayBufferView): void;
-  pedir(orden: Uint8Array, plazoMs: number): Uint8Array; // ErrorDispositivo si vence el plazo o cae el servidor
+  enviar(orden: Uint8Array): void;                       // no bloquea: ErrorDispositivo si el servidor cayó
+  recibir(plazoMs: number): Uint8Array;                  // ErrorDispositivo si vence el plazo o cae el servidor
   cerrar(): void;
 }
 

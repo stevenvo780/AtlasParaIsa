@@ -39,15 +39,15 @@ export const TABLA: readonly ConstantesElemento[] = [
   { valencia: 4, chi: 2.55, dPropia: 346, pi: 266, masa: 12.011 }, // C
   { valencia: 3, chi: 3.04, dPropia: 167, pi: 300, masa: 14.007 }, // N
   { valencia: 2, chi: 3.44, dPropia: 142, pi: 352, masa: 15.999 }, // O
-  { valencia: 5, chi: 2.19, dPropia: 201, pi: 120, masa: 30.974 }, // P
+  { valencia: 5, chi: 2.19, dPropia: 201, pi: 15, masa: 30.974 },  // P (con k·PAULING: P=O = 546 ≈ 544 real; H₃PO₄/CaHPO₄ estables)
   { valencia: 4, chi: 1.90, dPropia: 222, pi: 0, masa: 28.085 },   // Si
   { valencia: 2, chi: 1.00, dPropia: 178, pi: 0, masa: 40.078 },   // Ca
-  { valencia: 3, chi: 1.83, dPropia: 275, pi: 0, masa: 55.845 },   // Fe
+  { valencia: 3, chi: 2.15, dPropia: 275, pi: 0, masa: 55.845 },   // Fe (Fe–O = 369: Fe₂O₃+C funde en horno ~1.180 K y no en fogata)
 ];
 
 // ── Enlaces ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** J por cuanto por unidad de Δχ²: término iónico de Pauling, D = (D_e + D_f)/2 + PAULING·Δχ² + (k − 1)·√(π_e·π_f). */
+/** J por cuanto por unidad de Δχ²: término iónico de Pauling por orden k, D = (D_e + D_f)/2 + k·PAULING·Δχ² + (k − 1)·√(π_e·π_f). */
 export const PAULING = 96.5;
 /** Orden máximo de un enlace (triple). */
 export const ORDEN_MAX = 3;
@@ -63,16 +63,19 @@ export const CAPACIDAD_ATOMO = 0.025;
 /** ν: factor de frecuencia de Arrhenius, en L/(cuanto·tick) entre dos sustancias y en 1/tick para una sola. */
 export const NU = 1e9;
 /** γ: la barrera de una reacción es γ·D del enlace más fuerte que disminuye (adimensional). La paga la cinética de P, no
- * `quemar`. Con O₂ el más fuerte es O=O (494): Q la calibra con ν y κ₀ para que el combustible aguante en frío, arda en
- * un fuego y la digestión y la descomposición avancen a temperatura del cuerpo y del suelo. */
+ * `quemar`. Con O₂ el más fuerte es O=O (494): en frío (295 K) los combustibles aguantan (k ~ 10⁻²²), en fuego (800–1.100 K)
+ * arden, en el digestivo (310 K) `KAPPA0` rompe C–N/C–O/C–C sin carbonizar y en el suelo (295 K) `KAPPA_SUELO` cierra el ciclo. */
 export const GAMMA = 0.35;
-/** s: J/(cuanto·K) de entropía por cuanto de molécula gaseosa en los productos; G = −Σd·b − T·s·#gas. */
-export const S_GAS = 0.12;
+/** s: J/(cuanto·K) de entropía por cuanto de molécula gaseosa en los productos (CO₂/H₂O/O₂/N₂ reales ≈ 0,19–0,21); G = −Σd·b − T·s·#gas. */
+export const S_GAS = 0.18;
 /** ε: J por cuanto de energía libre que un reparto debe ganar a los reactivos para que haya reacción. */
 export const EPSILON_G = 1;
-/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de las reacciones de su familia de enlace
- * (`Reaccion.catalisis`). */
+/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de su familia de enlace (`Reaccion.catalisis`):
+ * a 310 K rompe C–N/C–O/C–C sin carbonizar C–H ni oxidar con O₂ dentro del digestivo. */
 export const KAPPA0 = 60;
+/** κ del suelo (descomposición microbiana aerobia a ~295 K): rebaja la barrera de O=O lo justo para mineralizar cadáveres
+ * y residuos de vuelta a CO₂, H₂O, N y P en cientos de ticks (con KAPPA0 = 60 quedaría en ~10⁻¹¹/tick y vaciaría el suelo). */
+export const KAPPA_SUELO = 105;
 
 // ── Propiedades por estructura ───────────────────────────────────────────────────────────────────────────
 
@@ -93,7 +96,8 @@ export const PERCOLACION = 0.3;
 
 /** Tenacidad que se suma a la del blanco al romper (evita dividir por 0): se desprende P·min(1, r²)/(tenacidad + EPS_TENACIDAD). */
 export const EPS_TENACIDAD = 0.01;
-/** g: fracción de su propia masa que una plantilla puede sintetizar por tick como mucho (copiar). */
+/** g: fracción máxima de su masa que una plantilla sintetiza por tick al crecer; en gestación (embrión desde 0) es
+ * fracción de `Plantilla.m0`, lo que fija T_min = 1/G_SINTESIS = 1.200 ticks (0,5 días). */
 export const G_SINTESIS = 1 / 1200;
 /** J por kg y celda: moverse cuesta C_MOVER·(masa + carga)·distancia, pagado con `quemar` (cargar no tiene tope). */
 export const C_MOVER = 50;

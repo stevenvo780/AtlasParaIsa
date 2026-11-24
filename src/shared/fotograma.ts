@@ -8,7 +8,8 @@ import type { BlueprintView, StructureView } from './life.js';
 import type { SustanciaVista } from './materia.js';
 import type { OrganizationSummary } from './organization.js';
 import type { TechnologyView } from './technology.js';
-import type { ChronicleEvent, CommunityView, MemoryView, PlaceView } from './types.js';
+import type { ChronicleEvent, CommunityView, MemoryView, PlaceView, WorldView } from './types.js';
+import type { DivineWhisper } from './worldmap.js';
 
 export type TipoCampo = 'u8' | 'u16' | 'i16' | 'u32' | 'i32' | 'f32' | 'f64';
 export const BYTES_CAMPO: Readonly<Record<TipoCampo, number>> = { u8: 1, u16: 2, i16: 2, u32: 4, i32: 4, f32: 4, f64: 8 };
@@ -73,7 +74,7 @@ export interface Fotograma {
   organismos: Uint8Array;                // n filas de ESQUEMA_ORGANISMO
   paginas: Int32Array;                   // pares (px, py) de páginas 16×16 con cambio visible desde el último entregado
   celdas: Uint8Array;                    // por página, 256 celdas de ESQUEMA_CELDA en orden (y·16 + x)
-  sucesos: [desde: number, hasta: number]; // números de suceso [desde, hasta): la cinta los lee antes de aplicar el fotograma
+  sucesos: [desde: number, hasta: number]; // bytes acumulados [desde, hasta) en el anillo de sucesos (misma unidad que sucesosEscritos/sucesosLeidos)
   serie: Float64Array;                   // SERIE_CAMPOS
   reparto: Int16Array | null;            // dueño de cada página de `paginas`; solo en fotogramas completos
 }
@@ -81,14 +82,15 @@ export interface Fotograma {
 // ── Sucesos: lo que cambia sin pérdida ───────────────────────────────────────────────────────────────────
 
 /** Vistas lentas que la cinta necesita para rehacer el `WorldView`: se mandan enteras al nacer o cambiar (null = baja).
- * Tecnología y organización son únicas en el mundo (id ''). M6 puede añadir clases al final. */
+ * Clima, tecnología y organización son únicos en el mundo (id ''). M6 puede añadir clases al final. */
 export interface VistasLentas {
   lugar: PlaceView; comunidad: CommunityView; estructura: StructureView; plano: BlueprintView;
   recuerdo: MemoryView; tecnologia: TechnologyView; organizacion: OrganizationSummary;
+  clima: WorldView['weather']; susurro: DivineWhisper;
 }
 export type SucesoVista = { [K in keyof VistasLentas]: { tipo: K; id: string; vista: VistasLentas[K] | null } }[keyof VistasLentas];
-/** Texto visible de un organismo (nombre, razón, necesidad, color…: los campos de texto de su vista), solo al cambiar. */
-export interface SucesoTexto { tipo: 'texto'; uid: number; campo: string; valor: string }
+/** Texto visible de un organismo (nombre, razón, necesidad, color, recentMemory…), solo al cambiar (null = borrado). */
+export interface SucesoTexto { tipo: 'texto'; uid: number; campo: string; valor: string | null }
 /** Lo que publican los dueños con `CtxDueno.publicar`. */
 export type SucesoVisible = SucesoVista | SucesoTexto;
 /** Registro sin pérdida: la crónica (`CtxDueno.suceso`), las sustancias que Q internó y lo visible. Lo junta el coordinador
@@ -103,8 +105,8 @@ export type Suceso = { tipo: 'cronica'; evento: ChronicleEvent } | { tipo: 'sust
  * control (créditos = ranuras.length, cadencia = CINTA.pasos[0]) en la ola 1 y M6 le añade ranuras y sucesos en la 2.
  * - `control`: CONTROL_ENLACE_BYTES.
  * - `ranuras`: una por fotograma en vuelo, SAB crecible con la disposición de `regionesRanura`.
- * - `sucesos`: anillo de bytes (≤ 256 MiB: el único freno físico) con registros u32 de longitud + v8.serialize(Suceso),
- *   que pueden dar la vuelta al final.
+ * - `sucesos`: anillo de bytes (≤ 256 MiB: el único freno físico) con registros [u32 len LE][len bytes de v8.serialize(Suceso)],
+ *   envueltos byte a byte módulo `sucesos.byteLength` (también la cabecera u32 si cae en el borde).
  */
 export interface DescriptorEnlace { control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null }
 
@@ -112,12 +114,16 @@ export interface DescriptorEnlace { control: SharedArrayBuffer; ranuras: readonl
 export const CONTROL_ENLACE_BYTES = 40;
 
 /**
- * Protocolo. Motor: si `creditos[0] > 0`, resta uno y escribe el fotograma en la ranura `entregados % ranuras`; al acabar,
- * Atomics.add(entregados, 0, 1n) y Atomics.notify. Antes de cada fotograma escribe sus sucesos en el anillo
- * (sucesosEscritos, en bytes) y espera si no caben. Cinta: lee en orden la ranura `leidos % ranuras` mientras
- * leidos < entregados (Atomics.load), lee antes los sucesos hasta `Fotograma.sucesos[1]`, sube sucesosLeidos y, al
- * soltar la ranura, Atomics.add(creditos, 0, 1). Los contadores BigInt64 no desbordan en la vida del mundo.
- * `pedirCompleto[0] = 1` lo pone la cinta y lo baja el motor; `cadencia[0]` son ticks entre fotogramas y la cinta lo sube si se atrasa.
+ * Protocolo. Motor: si `creditos[0] > 0`, resta uno y dimensiona la ranura `entregados % ranuras` con holgura; si en F6
+ * un parto o activación superara `capOrganismos` o `capPaginas`, el dueño no escribe fuera de cota y el coordinador
+ * aborta ese fotograma devolviendo el crédito y sumando 1 a `saltados`. Al acabar un fotograma válido,
+ * `Atomics.add(entregados, 0, 1n)` y `Atomics.notify(entregados, 0)` (`entregados` es monótono entre épocas, nunca se
+ * reinicia en `cargar`). Antes de publicar el fotograma escribe sus sucesos en el anillo (`sucesosEscritos`, en bytes) y
+ * espera con `Atomics.wait(sucesosLeidos, 0, ...)` si no caben. Cinta: lee en orden la ranura `leidos % ranuras` mientras
+ * `leidos < entregados`, lee antes los bytes del anillo hasta `BigInt(Fotograma.sucesos[1])`, sube `sucesosLeidos` con
+ * `Atomics.store` + `Atomics.notify(sucesosLeidos, 0)` y, al soltar la ranura, `Atomics.add(creditos, 0, 1)`. Los contadores
+ * BigInt64 no desbordan en la vida del mundo. `pedirCompleto[0] = 1` lo pone la cinta y lo baja el motor; `cadencia[0]`
+ * son ticks entre fotogramas y la cinta lo sube si se atrasa.
  */
 export interface EnlaceCinta {
   readonly ranuras: readonly SharedArrayBuffer[];

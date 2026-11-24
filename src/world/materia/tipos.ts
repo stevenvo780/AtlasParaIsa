@@ -49,8 +49,9 @@ export interface Ecuacion {
 export interface Reaccion extends Ecuacion {
   a: SustanciaId; b: SustanciaId; nivelT: number;
   ea: number;                  // J por cuanto de reacción: barrera, GAMMA·D del enlace más fuerte que disminuye
-  /** Familia del enlace catalizable más fuerte que disminuye, índice de `Plantilla.kappa` (C–O, C–N, C–C/C–H); los
-   * enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = no disminuye ninguno catalizable. */
+  /** Familia del enlace catalizable más débil que disminuye, índice de `Plantilla.kappa` (0 = C–O, 1 = C–N,
+   * 2 = C–C/C–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. Tomar el más débil
+   * evita que C–H (403) tape siempre a C–N (280, proteínas) y C–O (320, azúcares/celulosa). −1 = ninguno catalizable. */
   catalisis: -1 | 0 | 1 | 2;
 }
 
@@ -59,7 +60,7 @@ export interface ServicioQuimico {
   /** En el hilo del servicio o antes de arrancar (creación del mundo); las sustancias nuevas solo salen de reacciones. */
   internar(enlaces: Uint16Array): SustanciaId;
   sustancia(id: SustanciaId): Readonly<Sustancia>;
-  /** null = no reaccionan; undefined = encolada: el resultado se publica en la barrera siguiente. */
+  /** Simétrica en (a, b) si b > 0 (b = 0 = unaria). null = no reaccionan; undefined = encolada para la barrera siguiente. */
   reaccion(a: SustanciaId, b: SustanciaId, nivelT: number): Reaccion | null | undefined;
 }
 
@@ -105,10 +106,10 @@ export interface Pedido { parte: Parte; esp: SustanciaId; cuantos: number; kappa
  * Cada campo es un Float64Array(NE + 1): las NE primeras posiciones son mmol de átomos por elemento y la última
  * (`ENERGIA`) J de energía química (cuantos × `Sustancia.energia`) más calor.
  * Exactitud: todo asiento, cantidad y calor de un lote es un entero seguro (|v| ≤ 2⁵³ − 1); una operación que daría
- * otra cosa es fatal (I3), nunca se redondea. Para que los asientos no crezcan sin fin, el coordinador pliega en cada F0
- * que comprueba: suma los libros de los hilos en bigint, añade fuentes − sumideros a los totales del mundo
- * (`MateriaCheckpoint`) y deja a cero los libros de los hilos, salvo el enVuelo total, que queda en el hilo 0.
- * Así comprueba Σ lotes + Σ enVuelo = inicial + fuentes − sumideros, exacto (I1, I2, I-C), con las sumas del mundo en bigint.
+ * otra cosa es fatal (I3), nunca se redondea. Para que los asientos no crezcan sin fin ni se acerquen a 2⁵³ al abrir
+ * chunks, el coordinador pliega en cada F0: suma los libros de los hilos en bigint, añade fuentes − sumideros a los
+ * totales del mundo (`MateriaCheckpoint`) y deja a cero los libros de los hilos, salvo el enVuelo total, que queda en
+ * el hilo 0. Así comprueba Σ lotes + Σ enVuelo = inicial + fuentes − sumideros, exacto (I1, I2, I-C), en bigint.
  * Implementa: A (`materia/libro.ts`). Consumen: M1, M4a, M5, W, B, N, 0C (invariantes).
  */
 export interface Libro { readonly enVuelo: Float64Array; readonly fuentes: Float64Array; readonly sumideros: Float64Array }
@@ -117,16 +118,20 @@ export const libroVacio = (): Libro =>
   ({ enVuelo: new Float64Array(NE + 1), fuentes: new Float64Array(NE + 1), sumideros: new Float64Array(NE + 1) });
 
 /**
- * Arena de lotes de tamaño fijo sobre el SAB crecible de M1 (ARQ-materia §2). Solo el dueño de un lote lo modifica (el de
- * su página o el de su organismo; en modo verificar la arena lo comprueba); leer uno ajeno es una carrera tolerada
- * (ARQ-motor §3.3). Lo que entra o sale del mundo pasa por `fuente` y
- * `sumidero`; lo demás se conserva por construcción. Implementa: A (`materia/arena.ts`). Consumen: P, L, W, B, N, F, T1, T2, M5.
+ * Arena de lotes de tamaño fijo sobre el SAB crecible de M1 (ARQ-materia §2), vista por hilo dueño. Solo el dueño de un
+ * lote lo modifica (el de su página o el de su organismo; en modo verificar la arena lo comprueba); leer uno ajeno es una
+ * carrera tolerada (ARQ-motor §3.3). Lo que entra o sale del mundo pasa por `fuente` y `sumidero`; lo demás se conserva
+ * por construcción. Implementa: A (`materia/arena.ts`). Consumen: P, L, W, B, N, F, T1, T2, M4a, M5.
  */
 export interface ArenaMateria {
-  /** Lote vacío en `celda` (`Terreno.celda`); −1 para los de un cuerpo, que van con su organismo. */
+  /** Lote vacío en `celda` (`Terreno.celda`); −1 para los de un cuerpo u objeto llevado, que van con su organismo. */
   nuevo(rol: Rol, celda: number, forma: number): LoteRef;
-  liberar(l: LoteRef): void;   // solo en barrera; la ranura vuelve con gen++
+  /** Marca inactivo y encola el reciclaje (puede llamarse en F1/F4/F5): la ranura solo se reutiliza en barrera con gen++. */
+  liberar(l: LoteRef): void;
   vivo(l: LoteRef): boolean;   // false si la referencia caducó
+  propio(l: LoteRef): boolean; // vivo(l) y pertenece a este hilo dueño (para validar `Intento.lote` en M5)
+  /** En F1, al adoptar un `Migrante`: pasa la propiedad de un lote ligado a organismo (`celda === −1`) a este hilo. */
+  adoptar(l: LoteRef): void;
   /** Lotes de `rol` en `celda` (Suelo, Agua y Vida: uno por tesela; Aire: el de su página). Los escribe en `destino` y
    * devuelve cuántos hay; si son más que destino.length, solo escribe los que caben. */
   lotes(celda: number, rol: Rol, destino: Float64Array): number;
@@ -137,6 +142,9 @@ export interface ArenaMateria {
   vista(l: LoteRef): VistaLote;
   formar(l: LoteRef, forma: number): void; // `codigoForma` nuevo (romper con patrón, unir)
   mover(t: Traslado): number;  // recorta a existencias y devuelve lo movido
+  /** Traslado local con la misma selección que `garantizar` (Exacta, Digerible, Agua o Todo, con su parte del calor):
+   * evita duplicar la regla de `Parte` entre el mismo dueño y entre dueños. Devuelve los cuantos movidos. */
+  moverParte(de: LoteRef, a: LoteRef, p: Pedido): number;
   moverCalor(de: LoteRef, a: LoteRef, j: number): number;
   /** Aplica `e` hasta `veces` veces, recortado a existencias y a calor ≥ 0; devuelve las que aplicó. Reacciones (P),
    * síntesis de plantillas (L) y `quemar`. */
@@ -170,11 +178,13 @@ export interface Plantilla {
   linaje: number;     // linaje fundador: solo lo leen la proyección y el cliente (decisión 9)
 }
 
-/** Gestación con un solo escritor, el dueño de la gestante. La pareja solo aporta su genoma, leído del frente (§1.2). */
+/** Gestación con un solo escritor, el dueño de la gestante. La pareja solo aporta su genoma (y pesos de política en
+ * personas), leídos del frente al concebir (§1.2), así que sobrevivir al parto no depende de que la pareja siga viva. */
 export interface Gestacion {
   embrion: LoteRef;
   otro: number;           // uid de la pareja (frente público)
-  genoma: number[];       // GENOMA_ANCHO alelos de la cría, sorteados al concebir de los dos genomas
+  genoma: number[];       // alelos (personas, GENOMA_ANCHO) o genes continuos (fauna) de la cría, sorteados al concebir
+  politica?: number[];    // pesos heredados de CEREBRO (`COLUMNAS_CEREBRO.politica`), sorteados al concebir; ausente en fauna
   inicio: number;         // tick
   bajoBasalDesde: number; // tick desde el que la reserva no paga el basal; −1 si la paga
 }

@@ -235,3 +235,110 @@ test('el modo de un solo dueño con semilla es el único reproducible', () => {
   assert.ok(!reproducible({ ...base, semilla: null }));
   assert.ok(!reproducible({ ...base, hilos: 'auto' }));
 });
+
+test('COLUMNAS_FIJAS fija tipos, anchos y orden del frente, y Col cumple ArrayBufferView', () => {
+  const mapa = new Map<string, readonly [contratos.TipoColumna, number]>();
+  for (const [nombre, tipo, ancho] of contratos.COLUMNAS_FIJAS) {
+    assert.equal(mapa.has(nombre), false, `columna fija repetida: ${nombre}`);
+    assert.ok(Number.isInteger(ancho) && ancho >= 1);
+    mapa.set(nombre, [tipo, ancho]);
+  }
+  // Identidades y ticks deben ir en f64 (i32 desborda a 300 Hz en 82 días).
+  for (const c of ['uid', 'decideEn', 'pareja']) assert.deepEqual(mapa.get(c), ['f64', 1], c);
+  assert.deepEqual(mapa.get('cuerpo'), ['f32', contratos.CUERPO_ANCHO]);
+  assert.deepEqual(mapa.get('rasgos'), ['f32', contratos.RASGOS_ANCHO]);
+  assert.deepEqual(mapa.get('genoma'), ['f32', contratos.GENOMA_ANCHO]);
+  // Toda TypedArray (sobre ArrayBuffer o SharedArrayBuffer) satisface Col y ArrayBufferView (copia directa al CanalGpu).
+  const vista: contratos.Col = new Float32Array(new SharedArrayBuffer(16));
+  const abv: ArrayBufferView = vista;
+  assert.equal(abv.byteLength, 16);
+  // Cada nombre en COLUMNAS_FIJAS existe como columna en FrentePublico.
+  const _claveValida: (k: (typeof contratos.COLUMNAS_FIJAS)[number][0]) => contratos.Col = (k) =>
+    ({} as contratos.FrentePublico)[k];
+  assert.equal(typeof _claveValida, 'function');
+});
+
+test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción multi-ancho, ciclo de vida y vistas lentas', () => {
+  // Comprobación en tiempo de compilación de las firmas que enlazan carriles (M1, M3, M4a, M5, M6, C1a, A, B, N, F).
+  const chequearTipos = (
+    ctx: contratos.CtxMateria,
+    canal: contratos.CanalGpu,
+    plan: contratos.Plan,
+    perc: contratos.Percepcion,
+    gest: tipos.Gestacion,
+    corte: cinta.Corte,
+    texto: fotograma.SucesoTexto,
+    vistas: fotograma.VistasLentas,
+  ) => {
+    const colas: contratos.Cola[] = ['M', 'A', 'B', 'F0'];
+    const r = ctx.alta(contratos.Clase.Persona);
+    ctx.baja(r);
+    const px = ctx.terreno.paginaX[0]!, py = ctx.terreno.paginaY[0]!, vv = ctx.terreno.versionVisible[0]!;
+    const okProp = ctx.materia.propio(gest.embrion);
+    ctx.materia.adoptar(gest.embrion);
+    ctx.materia.moverParte(gest.embrion, gest.embrion, { parte: tipos.Parte.Todo, esp: 0, cuantos: 0, kappa: null });
+    canal.enviar(new Uint8Array(4));
+    const resp: Uint8Array = canal.recibir(100);
+    const q: contratos.ConsultaOrganismo = { radio: 7, clase: 0, filtros: new Float32Array(4), criterio: 1, columna: 11, componente: contratos.CAMPOS_CUERPO.masa };
+    const tr: Float32Array = plan.transitable;
+    const dims: [number, number, number] = [perc.q, perc.v, perc.a];
+    const pol: number[] | undefined = gest.politica;
+    const nac: number = corte.serie.nacimientos;
+    const tNulo: fotograma.SucesoTexto = { ...texto, valor: null };
+    const cl: fotograma.VistasLentas['clima'] = vistas.clima;
+    const su: fotograma.VistasLentas['susurro'] = vistas.susurro;
+    return [colas, px, py, vv, okProp, resp, q, tr, dims, pol, nac, tNulo, cl, su];
+  };
+  assert.equal(typeof chequearTipos, 'function');
+});
+
+test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', () => {
+  const { TIPOS } = materia;
+  const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
+  const D = (a: string, b: string, k = 1): number => {
+    const [e, f] = [ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never)].sort((x, y) => x - y);
+    return TIPOS.find(t => t.e === e && t.f === f && t.k === k)!.d;
+  };
+  const kRate = (T: number, d: number, kappa = 0) => NU * Math.exp(-Math.max(0, GAMMA * d - kappa) / (R * T));
+
+  // 1. CO₂ gas supera al polímero sólido [4×C–O] incluso a 0 K; fosfatos (H₃PO₄/CaHPO₄) son más estables que P=O extra.
+  assert.ok(2 * D('C', 'O', 2) > 4 * D('C', 'O', 1), 'CO₂ gas debe vencer al polímero sólido [4×C–O]');
+  assert.ok(2 * D('P', 'O', 1) > D('P', 'O', 2), 'H₃PO₄ y CaHPO₄ deben vencer a la deshidratación en frío');
+
+  // 2. Combustibles estables en frío, llama adiabática en aire sostenible (> 1.000 K) y orden madera < carbón < grasa.
+  const eC = -2 * D('C', 'C'), eO2 = -D('O', 'O', 2), eCO2 = -2 * D('C', 'O', 2), eH2O = -2 * D('O', 'H');
+  const eCH2O = -(D('C', 'C') + D('C', 'H') + D('C', 'O') + D('O', 'H'));
+  const eCH2 = -(D('C', 'C') + 2 * D('C', 'H'));
+  const qMadera = -((eCO2 + eH2O) - (eCH2O + eO2));
+  const qCarbon = -(eCO2 - (eC + eO2));
+  const qGrasa = -((eCO2 + eH2O) - (eCH2 + 1.5 * eO2));
+  assert.ok(qMadera > 0 && qCarbon > 0 && qGrasa > 0);
+  assert.ok(qMadera / 30.03 < qCarbon / 12.01 && qCarbon / 12.01 < qGrasa / 14.03, 'MJ/kg: madera < carbón < grasa');
+  const tLlamaMadera = 295 + qMadera / (14 * CAPACIDAD_ATOMO);
+  const tLlamaCarbon = 295 + qCarbon / (11 * CAPACIDAD_ATOMO);
+  assert.ok(tLlamaMadera > 1000 && tLlamaCarbon > 1000, `llama adiabática insuficiente: madera=${tLlamaMadera}, carbón=${tLlamaCarbon}`);
+  assert.ok(kRate(295, D('O', 'O', 2)) < 1e-18, 'combustible debe ser estable en frío');
+  assert.ok(kRate(tLlamaCarbon, D('O', 'O', 2)) > 1, 'carbón debe sostener su propia llama');
+
+  // 3. Atmósfera (N₂ + O₂) y etano (C₂H₆) estables a 295 K.
+  const dH_aire = -(4 * D('N', 'O') + 4 * D('N', 'O', 2)) + (2 * D('N', 'N', 3) + 3 * D('O', 'O', 2));
+  assert.ok(dH_aire > 100, 'el aire N₂ + O₂ debe ser estable');
+  const dG_etano = (2 * D('C', 'H') + D('C', 'C') - D('C', 'C', 2) - D('H', 'H')) - 295 * S_GAS;
+  assert.ok(dG_etano > 20, 'el etano debe ser estable a 295 K');
+
+  // 4. Hierro (Fe₂O₃ + C → Fe₂O + CO₂): NO funde en fogata (800 K), SÍ funde en horno (1.400 K).
+  const dH_fe = (4 * D('Fe', 'O') - 2 * D('Fe', 'Fe')) + (2 * D('C', 'C') - 2 * D('C', 'O', 2));
+  assert.ok(dH_fe - 800 * S_GAS > 0, 'Fe₂O₃ no debe reducirse en fogata (800 K)');
+  assert.ok(dH_fe - 1400 * S_GAS < 0, 'Fe₂O₃ debe reducirse en horno (1.400 K)');
+
+  // 5. Digestión (310 K, KAPPA0) rompe C–N/C–O/C–C sin carbonizar C–H ni oxidar O=O; suelo (295 K, KAPPA_SUELO) cierra el ciclo.
+  assert.ok(D('C', 'N') < D('C', 'O') && D('C', 'O') < D('C', 'C') && D('C', 'C') < D('C', 'H'), 'orden catalítico C–N < C–O < C–C < C–H');
+  assert.ok(kRate(310, D('C', 'N'), KAPPA0) > 1 && kRate(310, D('C', 'O'), KAPPA0) > 1 && kRate(310, D('C', 'C'), KAPPA0) > 1e-2);
+  assert.ok(kRate(310, D('C', 'H'), KAPPA0) < 1e-4 && kRate(310, D('O', 'O', 2), KAPPA0) < 1e-9);
+  assert.ok(kRate(295, D('O', 'O', 2), KAPPA_SUELO) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
+
+  // 6. Magnitudes en enteros seguros (un chunk nuevo entero cabe con margen en Float64 entero antes de plegar a bigint en F0).
+  const cuantosChunk = 256 * Math.round(2000e6 / 60.08);
+  const energiaChunk = cuantosChunk * (4 * D('Si', 'O')) + Math.round(CAPACIDAD_ATOMO * cuantosChunk * 3 * 300);
+  assert.ok(Number.isSafeInteger(cuantosChunk) && Number.isSafeInteger(energiaChunk));
+});

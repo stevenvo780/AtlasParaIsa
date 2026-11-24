@@ -3,8 +3,8 @@ import type { World } from './index.js';
 import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
-import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature } from './inventions.js';
-import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS } from './params.js';
+import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap } from './inventions.js';
+import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
   if ((required || tile.feature !== undefined) && !['tree','pine','palm','cactus','reeds','berries','flowers','rock','clay','stump','spring','pool','none'].includes(String(tile.feature))) fail();
@@ -23,8 +23,8 @@ const integer = (v: unknown,max=Number.MAX_SAFE_INTEGER): v is number => number(
 const string = (v: unknown,max=200): v is string => typeof v==='string' && v.length>0 && v.length<=max;
 const coordinate = (v: unknown): v is number => typeof v==='number'&&Number.isSafeInteger(v)&&v>=-10_000_000&&v<10_000_000;
 const fail = ():never=>{throw new Error('Estado de vida o estructuras inválido.');};
-export function assertBlueprint(value: unknown,tick: number,maxGeneration=64): asserts value is BlueprintView {
-  if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,12)||!integer(value.cost.stone,8)||!integer(value.cost.work,600)||value.cost.work<1)fail();
+export function assertBlueprint(value: unknown,tick: number,maxGeneration=64,modular=false): asserts value is BlueprintView {
+  if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,modular)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,modular?Number.MAX_SAFE_INTEGER:12)||!integer(value.cost.stone,modular?Number.MAX_SAFE_INTEGER:8)||!integer(value.cost.work,modular?Number.MAX_SAFE_INTEGER:600)||value.cost.work<1)fail();
   const b=value as unknown as BlueprintView, cost=blueprintCost(b.components);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
 }
@@ -34,11 +34,29 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
   if(!Array.isArray(value)||value.length>Math.min(maxTiles,tiles.length))fail();
   const positions=new Map(tiles.map(t=>[`${t.x},${t.y}`,t])),ids=new Set<string>(),occupied=new Set<string>();
   for(const s of value as StructureView[]) {
-    if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!validBlueprint(s.components)||!number(s.condition)||!number(s.water,4)||!number(s.food,4)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
+    if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!validBlueprint(s.components,true)||!number(s.condition)||!number(s.water,Number.MAX_SAFE_INTEGER)||!number(s.food,Number.MAX_SAFE_INTEGER)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
     const capacity=blueprintAffordances(s.components);
+    if(s.losses!==undefined&&(!object(s.losses)||Object.keys(s.losses).length!==2||!number(s.losses.water,Number.MAX_SAFE_INTEGER)||!number(s.losses.food,Number.MAX_SAFE_INTEGER)))fail();
+    if(s.installed!==undefined){
+      if(!Array.isArray(s.installed)||s.installed.length>4)fail();
+      const installedIds=new Set<string>();let containment=0;
+      for(const i of s.installed){
+        if(!object(i)||!string(i.id,100)||installedIds.has(i.id)||!(i.recipeId===null||string(i.recipeId,100))||!integer(i.mass)||i.mass<1||![i.containment,i.insulation,i.cohesion,i.binding,i.condition].every(v=>number(v)))fail();
+        if(i.composition!==undefined&&(!object(i.composition)||Object.keys(i.composition).length!==3||!integer(i.composition.wood)||!integer(i.composition.stone)||!integer(i.composition.water)||i.mass!==i.composition.wood+i.composition.stone+i.composition.water))fail();
+        installedIds.add(i.id);containment+=i.containment*i.condition*i.mass/1000;
+      }
+      capacity.waterCapacity*=1+containment;capacity.foodCapacity*=1+containment;
+    }
     if(s.water>capacity.waterCapacity||s.food>capacity.foodCapacity)fail();
     const position=`${s.x},${s.y}`;
-    if(!positions.has(position)||positions.get(position)!.terrain!=='shelter'||occupied.has(position))fail();
+    if(s.site!==undefined){
+      const site=s.site,cost=blueprintCost(s.components);
+      if(!object(site)||Object.keys(site).length!==6||site.requiredWood!==cost.wood||site.requiredStone!==cost.stone||site.requiredWork!==cost.work
+        ||!number(site.depositedWood,site.requiredWood)||!number(site.depositedStone,site.requiredStone)||!number(site.completedWork,site.requiredWork)
+        ||s.condition!==0||s.water!==0||s.food!==0||s.uses!==0
+        ||(site.depositedWood===site.requiredWood&&site.depositedStone===site.requiredStone&&site.completedWork===site.requiredWork))fail();
+    }
+    if(!positions.has(position)||(s.site?['water','shelter'].includes(positions.get(position)!.terrain):positions.get(position)!.terrain!=='shelter')||occupied.has(position))fail();
     ids.add(s.id);occupied.add(position);
   }
 }
@@ -65,10 +83,10 @@ export function assertLifeState(world: World): void {
   assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
   assertFaunaStock(world.tiles,world.animals);
   assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas);
-  const maxBlueprints=openWorldCaps(world)?OPEN_WORLD_MAX_BLUEPRINTS:64;
+  const maxBlueprints=blueprintCap(world);
   if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>maxBlueprints)fail();
   const ids=new Set<string>(),signatures=new Set<string>();
-  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick,maxBlueprints);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
+  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick,maxBlueprints,paramsOf(world).construccion.modular);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
   if(!ids.has('blueprint-base'))fail();
   for(const blueprint of world.blueprints) {
     if(blueprint.parents.some(id=>id===blueprint.id||!ids.has(id))||new Set(blueprint.parents).size!==blueprint.parents.length)fail();

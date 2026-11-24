@@ -124,20 +124,27 @@ const ELIGIBILITY_FRACTION = 20;
  * que una preferencia que nada confirma se olvida. La primera llamada sólo fija la marca corporal. Devuelve el
  * retorno observado (0 en la primera llamada). */
 export function updatePolicyPlasticityCausal(plasticity: PolicyPlasticity, action: string, context: PolicyContext,
-  body: readonly [number, number, number, number], tick: number, memoryTicks: number, learningRate: number): number {
+  body: readonly [number, number, number, number], tick: number, memoryTicks: number, learningRate: number, serviceBenefit = 0): number {
   assertPolicyPlasticity(plasticity);
   vector(body, 4, 0, 1, 'policy body');
   if (!Number.isSafeInteger(tick) || tick < 0) throw new RangeError('Invalid policy tick');
   if (!Number.isSafeInteger(memoryTicks) || memoryTicks < 1) throw new RangeError('Invalid policy memory');
   bounded(learningRate, 0, 1, 'learning rate');
+  bounded(serviceBenefit, -1, 1, 'policy service benefit');
   if (plasticity.baseline === undefined) {
     plasticity.baseline = new Array<number>(POLICY_CONTEXTS.length).fill(0);
     plasticity.at = tick; plasticity.body = [body[0], body[1], body[2], body[3]];
+    const chosen = actionIndex(action), contextIndex = POLICY_CONTEXTS.indexOf(context);
+    if (serviceBenefit !== 0 && chosen >= 0 && contextIndex >= 0 && learningRate > 0) {
+      plasticity.trace[chosen] = 1;
+      plasticity.bias[chosen] = clamp(plasticity.bias[chosen] + learningRate * serviceBenefit, -0.5, 0.5);
+      plasticity.baseline[contextIndex] = clamp(learningRate * serviceBenefit, -1, 1);
+    }
     return 0;
   }
   const previous = plasticity.body!, elapsed = Math.max(0, tick - plasticity.at!);
   const observed = clamp(CAUSAL_RETURN_SCALE * ((previous[0] - body[0]) + (previous[1] - body[1])
-    + (previous[2] - body[2]) + (body[3] - previous[3])), -1, 1);
+    + (previous[2] - body[2]) + (body[3] - previous[3])) + serviceBenefit, -1, 1);
   plasticity.at = tick; plasticity.body = [body[0], body[1], body[2], body[3]];
   const chosen = actionIndex(action), contextIndex = POLICY_CONTEXTS.indexOf(context);
   if (chosen < 0 || contextIndex < 0 || learningRate === 0) return observed;

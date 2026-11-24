@@ -16,6 +16,13 @@ export interface BlueprintView {
 export interface StructureView {
   id: string; x: number; y: number; blueprintId: string; name: string; components: StructureComponent[];
   condition: number; water: number; food: number; uses: number; builtAt: number; builderId: string | null;
+  site?: { requiredWood: number; requiredStone: number; depositedWood: number; depositedStone: number; requiredWork: number; completedWork: number };
+  losses?: { water: number; food: number };
+  installed?: Array<{ id: string; recipeId: string | null; mass: number; containment: number; insulation: number;
+    cohesion: number; binding: number; condition: number;
+    /** Fixed assets leave the portable technology ledger through its explicit estate outflow.
+     * Retain their exact composition here, including after their installer dies. */
+    composition?: import('./technology.js').Composition }>;
 }
 export interface InventionDynamics { attempts: number; accepted: number; repairs: number; waterCollected: number; foodStored: number; foodTaken: number; }
 

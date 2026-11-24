@@ -36,7 +36,9 @@ const GiB = 1024 ** 3;
 const probe = { cpuThreads: () => 1, totalRamBytes: () => 128 * GiB, nvrtcAvailable: () => false, nvidiaSmi: () => '',
   memory: () => ({ fisicaBytes: 128 * GiB, heapBytes: 8 * GiB }) };
 const V19_OFF = { conducta: { aprendizajeCausal: false }, social: { acuerdosMateriales: false },
-  fauna: { contactoContinuo: false, reservaReproductiva: false, encuentroFertil: false } } as const;
+  fauna: { contactoContinuo: false, reservaReproductiva: false, encuentroFertil: false },
+  construccion: { modular: false }, tecnologia: { obrasPorPropiedades: false },
+  ecologia: { amplitudEstacional: 0 } } as const;
 const hostWith = (overrides: Record<string, unknown> = {}): WorldParams => parseParams(overrides, hostOpenWorldParams(DEFAULT_PARAMS, probe));
 
 // ───────────────────────── 0. esquema de parámetros ─────────────────────────
@@ -52,7 +54,7 @@ test('V19 fase 1: los interruptores nacen apagados en DEFAULT y HISTORICAL; sól
   const host = hostWith();
   assert.deepEqual([host.conducta.aprendizajeCausal, host.social.acuerdosMateriales, host.fauna.contactoContinuo, host.fauna.reservaReproductiva,
     host.fauna.encuentroFertil], [true, true, true, true, true]);
-  assert.deepEqual([host.construccion.modular, host.tecnologia.obrasPorPropiedades, host.ecologia.amplitudEstacional], [false, false, 0]);
+  assert.deepEqual([host.construccion.modular, host.tecnologia.obrasPorPropiedades, host.ecologia.amplitudEstacional], [true, true, 0.25]);
   assert.throws(() => parseParams('fauna.fraccionReservaCria=1.5'), /fuera de rango/);
   assert.throws(() => parseParams('conducta.memoriaResultadoTicks=0'), /fuera de rango/);
   assert.throws(() => parseParams('social.memoriaResultadosDias=2.5'), /entero/);

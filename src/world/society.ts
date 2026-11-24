@@ -5,7 +5,7 @@ import { effectiveLimits, paramsOf } from './params.js';
 import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
-import { constructionCost, waterAvailable } from './inventions.js';
+import { constructionCost, constructionSite, contributeConstruction, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
@@ -136,7 +136,8 @@ export function convivir(world: World): void {
   }
 }
 export interface Opportunity {
-  person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade' | 'tools'; score: number;
+  person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade' | 'tools' | 'site'; score: number;
+  siteId?: string;
   recipeId?: string; supplyMaterial?: 'wood' | 'stone';
   exchange?: { itemId: string; material: 'wood' | 'stone'; amount: number };
 }
@@ -479,6 +480,15 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     const trust = person.bonds[other.id] ?? 0.2;
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
+    if (other.action === 'build' && paramsOf(world).construccion.modular) {
+      const structure = constructionSite(world, other), site = structure?.site;
+      if (structure && site && distance(other, structure) <= 0.5 && distance(person, structure) <= 1.5
+        && ((site.depositedWood < site.requiredWood && person.materials.wood > 0)
+          || (site.depositedStone < site.requiredStone && person.materials.stone > 0)
+          || (site.completedWork < site.requiredWork && (person.work > 0 || person.energy >= 0.005)))) {
+        opportunities.push({ person: other, kind: 'site', siteId: structure.id, score: score + 0.3 });
+      }
+    }
     // El coste de obra sólo se lee cuando el otro construye (las dos ramas de abajo); calcularlo
     // para cada vecino era trabajo puro tirado. La necesidad de proceso fuera de
     // `research`/`craft` es {0,0} sin resolver ninguna receta: mismo valor, sin la llamada.
@@ -502,7 +512,17 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   const opportunity = cooperationOpportunity(world, person);
   if (!opportunity || distance(person, opportunity.person) > 1.5) return false;
   const other = opportunity.person; let detail = '', helperPaid = false;
-  if (opportunity.kind === 'supply') {
+  if (opportunity.kind === 'site') {
+    const structure = world.structures.find(s => s.id === opportunity.siteId), site = structure?.site;
+    if (!structure || !site || distance(person, structure) > 1.5) return false;
+    // The social action can supply joining work, paid from the helper's own body.
+    const paid = person.work > 0 ? 0 : Math.min(12, site.requiredWork - site.completedWork, Math.floor(person.energy / 0.0003));
+    person.energy = clamp(person.energy - paid * 0.0003); person.fatigue = clamp(person.fatigue + paid * 0.00025);
+    person.work += paid;
+    if (!contributeConstruction(world, person, structure, emit)) return false;
+    helperPaid = paid > 0; count(world, 'constructionHelp');
+    detail = `Entregó materiales y trabajo pagado en la obra compartida ${structure.name}.`;
+  } else if (opportunity.kind === 'supply') {
     const material = opportunity.supplyMaterial ?? (other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone');
     if (person.materials[material] < 1 || other.materials[material] > (material === 'wood' ? 11 : 7) || (opportunity.supplyMaterial && processMaterialNeed(world, other)[material] <= 0)) return false;
     person.materials[material]--; other.materials[material]++;

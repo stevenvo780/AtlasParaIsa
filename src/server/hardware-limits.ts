@@ -246,9 +246,10 @@ export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: 
       acuerdosMateriales: true, memoriaResultadosDias: 10 },
     conducta: { ...full.conducta, aptitud: 0.85, politicaPeso: 0.8, politicaAutonomia: 0.65,
       aprendizajeCausal: true, memoriaResultadoTicks: 2400 },
-    // V19 fase 1 (`RULES_VERSION 13`): candidatos L, S, F, R, M. B (`construccion.modular`), T
-    // (`tecnologia.obrasPorPropiedades`) y E (`ecologia.amplitudEstacional`) siguen apagados hasta la fase 2.
+    // V19 completo (`RULES_VERSION 13`): todos los candidatos L, S, F, R, M, B, T y E activos en modo abierto.
     fauna: { ...full.fauna, contactoContinuo: true, reservaReproductiva: true, fraccionReservaCria: 0.15, encuentroFertil: true },
-    tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true },
+    construccion: { ...full.construccion, modular: true },
+    ecologia: { ...full.ecologia, amplitudEstacional: 0.25, periodoEstacionalDias: 20, escalaClimaticaCeldas: 64 },
+    tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true, obrasPorPropiedades: true },
   }, full);
 }

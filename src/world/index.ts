@@ -11,6 +11,7 @@ import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inhe
 import { bond, convivir, cooperate, cooperationOpportunity, inheritCulture, initialCulture, resourceDispute, settleAgreement, updateCommunities, updateCulturalNormsOnOutcome, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
+import { regionalClimateFactor } from './clima.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { animalesVivosEnCelda, conRejillaFauna, materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
@@ -319,7 +320,8 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   }
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
-  if (paramsOf(world).motor.hilos > 1 || (paramsOf(world).motor.gpu.length > 0 && gpuNvrtcAvailable())) {
+  const climateParams = paramsOf(world).ecologia;
+  if (climateParams.amplitudEstacional === 0 && (paramsOf(world).motor.hilos > 1 || (paramsOf(world).motor.gpu.length > 0 && gpuNvrtcAvailable()))) {
     stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,
       { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,
         ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) });
@@ -327,6 +329,18 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   }
   const light = phase === 'day' ? 1 : phase === 'night' ? 0 : LUZ_CREPSCULO;
   const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = paramsOf(world).recursos;
+  const seasonal = climateParams.amplitudEstacional > 0;
+  const climateByRegion = seasonal ? new Map<number, ReturnType<typeof regionalClimateFactor>>() : undefined;
+  const climateFor = (x: number, y: number): ReturnType<typeof regionalClimateFactor> => {
+    const cx = Math.floor(x / 16), cy = Math.floor(y / 16), key = cx * 0x1_0000 + cy;
+    let value = climateByRegion!.get(key);
+    if (!value) {
+      value = regionalClimateFactor(world.seed, world.tick, cx * 16 + 8, cy * 16 + 8,
+        climateParams.amplitudEstacional, climateParams.periodoEstacionalDias, climateParams.escalaClimaticaCeldas);
+      climateByRegion!.set(key, value);
+    }
+    return value;
+  };
   // Índice fijado antes del recorrido (sprint noche-perf 2026-09-22): este bucle sólo cambia campos de
   // las teselas, nunca `world.tiles`, así que es la misma tesela que devolvería `tileAt` en cada vuelta,
   // sin crear cuatro pares y cuatro puntos por tesela.
@@ -363,6 +377,21 @@ export function ecology(world: World, execution?: EcologyExecution): void {
     let food = bound ? foodArr![cell]! : tile.food;
     const biomeCode = bound ? biomeArr![cell]! : 0;
     const biome = bound ? (biomeCode ? fast!.BIOME_NAMES[biomeCode - 1] : undefined) : tile.biome;
+    if (seasonal) {
+      const climate = climateFor(tile.x, tile.y);
+      moisture = clamp(moisture + (world.weather === 'rain' ? 0.012 * climate.rainScale : 0) + (nearWater ? 0.008 : 0)
+        - (0.0015 + light * 0.001) * climate.evapScale);
+      tile.moisture = moisture;
+      const K = biome === 'forest' ? capacidadBosque : biome === 'grassland' ? capacidadPastizal : capacidadOtros;
+      const headroom = K > 0 ? 1 - vegetation / K : 0;
+      const growth = velocidadRegeneracion * climate.growthScale * light * moisture * 0.007 * headroom;
+      vegetation = clamp(vegetation + growth - (moisture < 0.15 ? 0.0015 : 0.0001));
+      tile.vegetation = vegetation;
+      const foodHeadroom = K > 0 ? 1 - food / K : 0;
+      food = clamp(food + velocidadRegeneracion * climate.growthScale * light * moisture * vegetation * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
+      tile.food = food;
+      continue;
+    }
     moisture = clamp(moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
     tile.moisture = moisture;
     const K = biome === 'forest' ? capacidadBosque : biome === 'grassland' ? capacidadPastizal : capacidadOtros;
@@ -624,12 +653,12 @@ function placeById(world: World, id: string): PlaceView | undefined {
 
 /** V19/L (`conducta.aprendizajeCausal`): acredita la consecuencia corporal REAL observada desde la última marca a la
  * acción que la precedió; el retorno lo mide `updatePolicyPlasticityCausal`, no una constante por acción hecha. */
-function creditCausalOutcome(world: World, person: Person, action: Action | 'rest'): void {
+function creditCausalOutcome(world: World, person: Person, action: Action | 'rest', serviceBenefit = 0): void {
   const { conducta } = paramsOf(world);
   const { plasticity } = ensurePersonPolicy(world, person);
   updatePolicyPlasticityCausal(plasticity, action, person.intentContext,
     [person.hunger, person.thirst, person.fatigue, person.energy], world.tick, conducta.memoriaResultadoTicks,
-    person.genome.learningRate * (conducta.politicaAutonomia > 0 ? 0.4 : 0.25));
+    person.genome.learningRate * (conducta.politicaAutonomia > 0 ? 0.4 : 0.25), serviceBenefit);
 }
 
 function ensurePersonPolicy(world: World, person: Person): { genome: PolicyGenome; plasticity: PolicyPlasticity } {
@@ -1440,7 +1469,12 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   const key = `${person.intentContext}:${action}`;
   if (world.adaptationEnabled) person.values[key] = Math.max(-0.3, Math.min(0.3, (person.values[key] ?? 0) + person.genome.learningRate * (benefit - (person.values[key] ?? 0))));
   if (world.adaptationEnabled && paramsOf(world).conducta.politicaPeso > 0) {
-    if (paramsOf(world).conducta.aprendizajeCausal) creditCausalOutcome(world, person, action);
+    if (paramsOf(world).conducta.aprendizajeCausal) {
+      // Only a delivered local service enters the causal return; failed attempts contribute negative evidence.
+      const witnessed = useful && ['share', 'cooperate', 'build', 'repair', 'craft'].includes(action)
+        ? Math.max(0, Math.min(0.25, benefit)) : !useful ? Math.max(-0.25, Math.min(0, benefit)) : 0;
+      creditCausalOutcome(world, person, action, witnessed);
+    }
     else {
       const { plasticity } = ensurePersonPolicy(world, person);
       const step = paramsOf(world).conducta.politicaAutonomia > 0 ? 0.4 : 0.25;

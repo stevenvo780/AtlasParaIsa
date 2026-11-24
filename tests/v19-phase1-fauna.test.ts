@@ -77,7 +77,8 @@ test('V19/R: parte de lo realmente consumido se aparta como reserva (sin bajar e
   const on = pastar('fauna.reservaReproductiva=true'), off = pastar('');
   assert.ok(on.w.animalDynamics.plantConsumed > 0 && on.w.animalDynamics.plantConsumed === off.w.animalDynamics.plantConsumed,
     'la planta consumida es la misma: lo apartado sale de lo consumido, no se crea');
-  assert.ok(Math.abs(on.hare.reproReserve! - 0.15 * on.w.animalDynamics.plantConsumed) < 1e-12);
+  // Calibración fase 2: herbívoros apartan min(1, 4 × fraccionReservaCria) = 0,60 de cada bocado pequeño de pasto.
+  assert.ok(Math.abs(on.hare.reproReserve! - Math.min(1, 0.15 * 4) * on.w.animalDynamics.plantConsumed) < 1e-12);
   assert.ok(on.hare.hunger > off.hare.hunger, 'lo apartado no sacia');
   assert.equal(off.hare.reproReserve, undefined);
   // Predación: un zorro que mata una liebre aparta 0,15 × 0,12.
@@ -163,7 +164,7 @@ test('V19 F+R+M: en un hábitat productivo zorros y lobos cazan, acumulan reserv
       const r = a.reproReserve ?? 0; ahora.set(a.id, r); maximo = Math.max(maximo, r);
       assert.ok(r >= 0 && r <= RESERVA_MAXIMA, 'la reserva nunca se sale de [0, 0,12]');
       const antes = previa.get(a.id); if (antes !== undefined && r < antes) pagado += antes - r;
-      if (antes !== undefined && nacio.has(a.id)) { const cuota = antes - r, ganancia = a.genes.carnivory < 0.6 ? 0.15 * 0.0015 : 0.15 * 0.25; assert.ok(cuota <= RESERVA_POR_PROGENITOR + 1e-12 && cuota >= RESERVA_POR_PROGENITOR - ganancia - 1e-12, `cuota ${cuota}`); }
+      if (antes !== undefined && nacio.has(a.id)) { const cuota = antes - r, ganancia = a.genes.carnivory < 0.6 ? Math.min(1, 0.15 * 4) * 0.0015 : 0.15 * 0.25; assert.ok(cuota <= RESERVA_POR_PROGENITOR + 1e-12 && cuota >= RESERVA_POR_PROGENITOR - ganancia - 1e-12, `cuota ${cuota}`); }
       if (a.reason === RAZON_PAREJA) {
         const d = Math.abs(a.x - a.target.x) + Math.abs(a.y - a.target.y);
         const visto = buscando.get(a.id);

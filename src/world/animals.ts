@@ -624,7 +624,9 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState)
     const consumed = Math.min(tile.growth ?? tile.vegetation, 0.0015, animal.hunger / 4);
     tile.growth = clamp((tile.growth ?? tile.vegetation) - consumed);
     tile.vegetation = clamp(tile.vegetation - consumed * 0.5);
-    const apartado = state.reserva ? reservar(animal, consumed, state.fraccionReserva) : 0;
+    // Grazing is paid in tiny per-tick plant units, unlike a carnivore's whole carcass intake.
+    // Allocate up to four times the configured fraction to herbivores, still only from consumed biomass.
+    const apartado = state.reserva ? reservar(animal, consumed, Math.min(1, state.fraccionReserva * 4)) : 0;
     assimilateFood(animal, state.reserva ? consumed - apartado : consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
     world.animalDynamics.plantConsumed += consumed;
     // Plant water is finite and belongs to this patch, never to an invisible drinking reservoir.

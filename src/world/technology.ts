@@ -1,4 +1,5 @@
 import type { ChronicleEvent } from '../shared/types.js';
+import type { StructureView } from '../shared/life.js';
 import type { Capability, Composition, Material, MaterialBatch, MaterialProperties, MaterialRequirement, OperationInstruction, PhysicalOperation, ResourceMass, TechnologyExecution, TechnologyKnowledge, TechnologyProgram, TechnologyProject, TechnologyRecipe, TechnologyState, TechnologyView } from '../shared/technology.js';
 import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
@@ -27,6 +28,8 @@ export interface TechnologyHost {
   cooperationEnabled?: boolean; learningEnabled?: boolean; noveltyEnabled?: boolean; emit?: Emit;
   /** Tiempo del paso (`World.weather`); sólo lo leen los usos de `tecnologia.efectosHerramientas`. */
   weather?: string;
+  structures?: StructureView[];
+  retiredChunks?: { structures?: StructureView[] }[];
 }
 export const MASS_UNIT = 1000;
 export const CAPABILITIES: readonly Capability[] = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
@@ -377,7 +380,7 @@ export function consumeConstructionTools(host: TechnologyHost, actor: Technology
   if (!toolEffectsEnabled(host) || !Number.isFinite(workSaved) || workSaved <= 0) return;
   for (const capability of ['binding', 'cutting', 'abrasion'] as const) {
     const receipt = useTool(host, actor, capability, 0.7);
-    recordTechnologyBenefit(host, actor, receipt, Math.max(0.05, workSaved * 0.01));
+    recordTechnologyBenefit(host, actor, receipt, techParams(host).obrasPorPropiedades ? workSaved * 0.01 : Math.max(0.05, workSaved * 0.01));
   }
 }
 /** Tras una exposición cuyo daño corporal evitado por el abrigo portátil (`portableInsulationPower`) se
@@ -637,7 +640,20 @@ function locallyUsefulDiscovery(host: TechnologyHost, actor: TechnologyActor, pr
   // Known instructions resolve without touching the resident LRU; the window is read as it stands.
   const compared = new Map<string, TechnologyRecipe>();
   for (const recipe of knownTechnologyRecipes(host, actor, false)) compared.set(recipe.id, recipe);
-  for (const recipe of host.technology.recipes) if (!compared.has(recipe.id)) compared.set(recipe.id, recipe);
+  if (techParams(host).obrasPorPropiedades) {
+    // Seeing an artifact permits a physical comparison, never grants its instructions.
+    for (const other of host.people) if (other === actor || distance(actor, other) <= 5) for (const item of other.technology.items) {
+      if (!item.recipeId || compared.has(item.recipeId)) continue;
+      const recipe = resolveTechnologyRecipe(host, item.recipeId, { cache: false });
+      if (recipe) compared.set(recipe.id, { ...recipe, capacities: materialCapacities(item) });
+    }
+    for (const structure of host.structures ?? []) if (distance(actor, structure) <= 5) for (const item of structure.installed ?? []) {
+      if (!item.recipeId || compared.has(item.recipeId)) continue;
+      const recipe = resolveTechnologyRecipe(host, item.recipeId, { cache: false });
+      if (recipe) compared.set(recipe.id, { ...recipe, capacities: { cutting: 0, storage: item.containment * item.condition,
+        insulation: item.insulation * item.condition, cultivation: 0, binding: item.binding * item.condition, abrasion: 0 } });
+    }
+  } else for (const recipe of host.technology.recipes) if (!compared.has(recipe.id)) compared.set(recipe.id, recipe);
   const candidate: TechnologyRecipe = { id: `recipe-${host.technology.recipeCounter + 1}`, name: '', program: project.program, signature,
     parents: [...project.parents], generation, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y, novelty: 'program', capacities,
     uses: 0, utility: 0, manufactured: 0 };
@@ -682,11 +698,16 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
   add(knowledge.residue, residue);
   let recipe = project.recipeId ? resolveTechnologyRecipe(host, project.recipeId) : findTechnologyRecipe(host, signature);
   const output = current[0];
+  const propertyDiscovery = techParams(host).obrasPorPropiedades && project.kind === 'research';
+  const locallyAccepted = !propertyDiscovery || !output || locallyUsefulDiscovery(host, actor, project, parentRecipes as TechnologyRecipe[],
+    materialCapacities(output), signature, nextGeneration, techParams(host).mejoraLocal || 0.05);
+  // An interned remote program is reusable only after this paid local experiment qualifies.
+  if (!locallyAccepted) recipe = undefined;
   if (success && output) {
-    if (!recipe && inventionRoom(state)) {
+    if (!recipe && locallyAccepted && inventionRoom(state)) {
       const capacities = materialCapacities(output), newFunction = !hasTechnologyFunction(host, capacities);
       const { mejoraLocal } = techParams(host);
-      const accepted = mejoraLocal > 0
+      const accepted = propertyDiscovery ? locallyAccepted : mejoraLocal > 0
         ? locallyUsefulDiscovery(host, actor, project, parentRecipes as TechnologyRecipe[], capacities, signature, nextGeneration, mejoraLocal)
         : true;
       if (accepted) {
@@ -796,6 +817,40 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
   maintainTechnologyMemory(host, from); maintainTechnologyMemory(host, to);
   return true;
 }
+
+/** Transfer a manufactured lot from portable stock into a local fixed asset.
+ * estateLoss is the existing external-stock boundary (not destruction): retain the exact
+ * composition on the structure and emit an explicit export receipt, so old checkpoint and
+ * estate replay keep closing without inventing an immortal inventory owner. */
+export function installTechnologyItem(host: TechnologyHost, actor: TechnologyActor, structure: StructureView): boolean {
+  if (!techParams(host).obrasPorPropiedades || !host.structures?.includes(structure) || !isHostMember(host.people, actor)
+    || distance(actor, structure) > 1.5 || (structure.installed?.length ?? 0) >= 4) return false;
+  const item = actor.technology.items.find(i => {
+    if (!i.recipeId || i.mass <= 0) return false;
+    const c = materialCapacities(i);
+    return c.binding > 0.15 || c.insulation > 0.15 || (c.storage > 0.15 && (structure.components.includes('cistern') || structure.components.includes('granary')));
+  });
+  if (!item) return false;
+  const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), capabilities = materialCapacities(item);
+  const lost = settleContainedWaterCapacity(host, item, true);
+  actor.technology.items.splice(actor.technology.items.indexOf(item), 1);
+  (structure.installed ??= []).push({ id: item.id, recipeId: item.recipeId, mass: item.mass,
+    composition: { ...item.composition }, containment: item.properties.containment, insulation: item.properties.insulation,
+    cohesion: item.properties.cohesion, binding: capabilities.binding, condition: Math.min(1, item.mass / item.initialMass) });
+  add(host.technology.ledger.estateLoss, item.composition);
+  const resources = [{ resourceId: itemResource(item), mass: item.mass }];
+  const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
+  appendExecution(host, { kind: 'estate', actorId: actor.id, recipeId: item.recipeId,
+    programSignature: '', inputs: resources, outputs: [], residueMass: 0, energy: 0, work: 0, success: true,
+    parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}),
+    balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: resources } });
+  maintainTechnologyMemory(host, actor);
+  return true;
+}
+
+function fixedTechnologyAssets(host: TechnologyHost): NonNullable<StructureView['installed']> {
+  return [...(host.structures ?? []), ...(host.retiredChunks ?? []).flatMap(c => c.structures ?? [])].flatMap(s => s.installed ?? []);
+}
 /** Death settles a physical estate before its owner is removed from the active population.
  * Local transfers move the existing objects; unclaimed material exits the technology model
  * at that location and is explicitly accounted as loss, never invented ecological food. */
@@ -853,6 +908,7 @@ function viewCapacities(values: Record<Capability, number>): Record<Capability, 
 export function projectTechnology(host: TechnologyHost, itemOwners: readonly TechnologyActor[] = host.people): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
   const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
+  const installedMass = fixedTechnologyAssets(host).reduce((n, item) => n + item.mass, 0);
   /** T036(h): el repertorio de cada actor (≈13 KiB) ya no viaja en cada `state`: el inspector lo pide
    * por habitante con `{type:'persona'}`. FR-026: `items` se recorta al mismo viewport que `people`. */
   return { recipes: state.recipes.map(recipe => ({ id: recipe.id, name: recipe.name, generation: recipe.generation, capacities: viewCapacities(recipe.capacities) })),
@@ -864,7 +920,7 @@ export function projectTechnology(host: TechnologyHost, itemOwners: readonly Tec
   })),
     dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
       toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,
-      importedMass, productMass, residueMass, massError: importedMass - productMass - residueMass - state.ledger.fuelMass - mass(state.ledger.estateLoss), estateLostMass: mass(state.ledger.estateLoss),
+      importedMass, productMass: productMass + installedMass, residueMass, massError: importedMass - productMass - residueMass - state.ledger.fuelMass - mass(state.ledger.estateLoss), estateLostMass: mass(state.ledger.estateLoss) - installedMass,
       work: state.ledger.work, energy: state.ledger.energy, programDiversity: totals.recipes,
       functionalDiversity: totals.functionalDiversity,
       reusedProducts: state.history.filter(e => ['research', 'craft'].includes(e.kind) && e.inputs.some(i => i.resourceId.startsWith('recipe:'))).length, historyDropped: state.historyDropped }, budgets: { ...state.budgets } };
@@ -957,6 +1013,17 @@ export function assertTechnology(host: TechnologyHost): void {
     const project = knowledge.project;
     if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.length > 6 || new Set(project.parents).size !== project.parents.length || project.parents.some(id => !getRecipe(id, project.startedAt)) || (project.kind === 'research' && (project.recipeId !== null || project.parents.some(id => !knowledge.knownRecipes.includes(id)) || project.program.inputs.some(input => input.source === 'product' && !project.parents.includes(input.recipeId!)))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || getRecipe(project.recipeId!, project.startedAt)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(getRecipe(project.recipeId!, project.startedAt)?.parents))))) fail();
   }
+  // Exported fixed assets remain reserved identities and must be a subset of the
+  // explicit external-stock ledger, including dormant chunks and dead installers.
+  const fixed = empty();
+  for (const item of fixedTechnologyAssets(host)) {
+    if (!item || !/^product-[1-9]\d*$/.test(item.id) || !integer(Number(item.id.slice(8)), state.itemCounter)
+      || itemIds.has(item.id) || !item.recipeId || !getRecipe(item.recipeId) || !item.composition || !composition(item.composition)
+      || !integer(item.mass) || item.mass < 1 || item.mass !== mass(item.composition)
+      || ![item.containment, item.insulation, item.cohesion, item.binding, item.condition].every(v => finite(v, 1))) fail();
+    add(fixed, item.composition!); itemIds.add(item.id);
+  }
+  if (MATERIALS.some(m => fixed[m] > state.ledger.estateLoss[m])) fail();
   current.wood += state.ledger.fuelMass; add(current, state.ledger.estateLoss);
   if (MATERIALS.some(m => current[m] !== state.ledger.imported[m])) fail();
   assertTechnologyWater(host);

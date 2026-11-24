@@ -1,11 +1,11 @@
-// Sólo control entero. Los valores del mundo nunca se reducen mediante Atomics.
+// Solo control entero. Los valores del mundo nunca se reducen mediante Atomics.
 export const BARRIER_HEADER = {
-  wake: 0, fatal: 1, ready: 2, quiesced: 3, closed: 4, epoch: 5, supervisorThreadId: 6,
-  cells: 7,
+  wake: 0, fatal: 1, ready: 2, quiesced: 3, epoch: 4, supervisorThreadId: 5, pending: 6, phase: 7,
+  cells: 8,
 } as const;
-export const WORKER_CELL = { status: 0, threadId: 1, completed: 2, errorLength: 3, cells: 4 } as const;
-export const WORKER_STATUS = { starting: 0, ready: 1, running: 2, done: 3, jobError: 4, fatal: 5 } as const;
+export const WORKER_CELL = { threadId: 0, completed: 1, errorLength: 2, activoUs: 3, cells: 4 } as const;
 export const ERROR_CHARACTERS = 8192;
+export const PLAZO_BARRERA_MS = 60_000;
 
 export interface SharedBarrier {
   control: Int32Array<SharedArrayBuffer>;
@@ -15,7 +15,7 @@ export interface SharedBarrier {
 export function createBarrier(workers: number): SharedBarrier {
   return {
     control: new Int32Array(new SharedArrayBuffer((BARRIER_HEADER.cells + workers * WORKER_CELL.cells) * 4)),
-    // Un slot adicional para errores del supervisor.
+    // Un slot adicional, escrito solo por el supervisor.
     errors: new Uint16Array(new SharedArrayBuffer((workers + 1) * ERROR_CHARACTERS * 2)),
   };
 }
@@ -24,12 +24,20 @@ export function workerCell(workerIndex: number, field: number): number {
   return BARRIER_HEADER.cells + workerIndex * WORKER_CELL.cells + field;
 }
 
-/** Sin plazo artificial; releer la condición tras tomar wake evita perder notificaciones. */
-export function waitForBarrier(control: Int32Array<SharedArrayBuffer>, complete: () => boolean): void {
+/** El plazo se renueva con cada avance publicado, nunca por despertarse sin avance. */
+export function waitForBarrier(control: Int32Array<SharedArrayBuffer>, complete: () => boolean, plazoMs = PLAZO_BARRERA_MS): boolean {
+  let observado = Atomics.load(control, BARRIER_HEADER.wake);
+  let vence = performance.now() + plazoMs;
   for (;;) {
     const wake = Atomics.load(control, BARRIER_HEADER.wake);
-    if (complete()) return;
-    Atomics.wait(control, BARRIER_HEADER.wake, wake);
+    if (complete()) return true;
+    if (wake !== observado) {
+      observado = wake;
+      vence = performance.now() + plazoMs;
+    }
+    const restante = vence - performance.now();
+    if (restante <= 0) return false;
+    Atomics.wait(control, BARRIER_HEADER.wake, wake, Math.min(restante, 1000));
   }
 }
 

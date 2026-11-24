@@ -1,28 +1,59 @@
-import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { threadId, Worker } from 'node:worker_threads';
 import {
-  BARRIER_HEADER, WORKER_CELL, WORKER_STATUS, ERROR_CHARACTERS, createBarrier,
+  BARRIER_HEADER, WORKER_CELL, ERROR_CHARACTERS, PLAZO_BARRERA_MS, createBarrier,
   workerCell, waitForBarrier, readWorkerError, readSupervisorError, type SharedBarrier,
 } from './barrera.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
 
-export interface StaticWorkerPoolOptions {
-  workers: number;
+interface ModuloCalculo {
   moduleURL: string | URL;
   exportName: string;
+}
+
+type EjecutarFase = (fase: number) => void;
+
+export interface OpcionesPiscina<Datos> extends ModuloCalculo {
+  /** Cuenta al coordinador (dueño 0) entre los hilos de cálculo. */
+  hilos: number;
+  datos: Datos;
+  /** El export indicado en moduleURL tiene esta misma firma. Cada hilo conserva su función entre fases. */
+  crear(hilo: number, datos: Datos): EjecutarFase;
+}
+
+export interface DiagnosticoPiscina {
+  hilos: number;
+  threadIds: number[];
+  fases: number;
+  tiempoActivoMs: number[];
+  tiempoTotalMs: number;
+  esperaBarreraMs: number;
+  fatal: boolean;
+}
+
+export class ErrorFatalMotor extends Error {
+  constructor(motivo: unknown) {
+    const mensaje = motivo instanceof Error ? motivo.message : String(motivo);
+    // recuperarPaso identifica una piscina caída por este prefijo.
+    super(`StaticWorkerPool abortado: ${mensaje}`, { cause: motivo });
+    this.name = 'ErrorFatalMotor';
+  }
+}
+
+export interface StaticWorkerPoolOptions extends ModuloCalculo {
+  workers: number;
 }
 
 export interface StaticWorkerJob<Params = unknown> {
   regions: readonly StaticRegion[];
   buffers: Record<string, SharedArrayBuffer>;
   params: Params;
+  /** Campos de los llamadores anteriores a V23 que se retiran con M2 y M3. */
   orden?: StaticRegionOrder;
-  /** Espera física entre regiones en adversarial; por defecto 1 ms. */
   retardoMs?: number;
 }
 
-/** Natural: una llamada por cola. Inverso/adversarial: una llamada por región de la cola. */
 export interface StaticWorkerHandlerJob<Params = unknown> extends StaticWorkerJob<Params> {
   workerIndex: number;
 }
@@ -31,28 +62,19 @@ export interface StaticWorkerDiagnostics {
   workers: number;
   threadIds: number[];
   dispatches: number;
-  /** Despachos terminados por trabajador, incluidos los que comunican un throw controlado. */
   completedJobs: number[];
   supervisorThreadId: number;
   sourceLoader: boolean;
-  /** IDs de llamadas por región observadas en el último despacho; natural no las instrumenta. */
   regionOrder: (number | string)[][];
-  /** Duración monotónica acumulada de esperas reales del último despacho, por trabajador. */
   adversarialDelaysMs: number[];
-  /** Número de Atomics.wait realmente ejecutados entre regiones del último despacho. */
   adversarialDelayCounts: number[];
-  /** T151: ocupación real del último despacho, en [0,1]: tiempo activo útil sumado de los
-   * workers dividido por `workers * tiempoParaleloMs`. 0 antes del primer despacho. */
   ocupacionWorkers: number;
-  /** T151: tiempo activo útil por worker en el último despacho (ms, excluye esperas entre regiones). */
   tiempoActivoWorkersMs: number[];
-  /** T151: duración de pared del último despacho en el coordinador (ms). */
   tiempoParaleloMs: number;
-  /** T151: parte del último despacho fuera del worker más ocupado (ms): espera de barrera y despacho. */
   tiempoBarreraMs: number;
 }
 
-/** T151: aceleración teórica de Amdahl para una fracción serial `fraccionSerial` en [0,1] y `hilos` ≥ 1. */
+/** T151: aceleración teórica de Amdahl para una fracción serial en [0,1]. */
 export function aceleracionAmdahlTeorica(fraccionSerial: number, hilos: number): number {
   if (!Number.isFinite(fraccionSerial) || fraccionSerial < 0 || fraccionSerial > 1) throw new RangeError('fraccionSerial debe estar en [0,1].');
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError('hilos debe ser un entero positivo.');
@@ -61,7 +83,6 @@ export function aceleracionAmdahlTeorica(fraccionSerial: number, hilos: number):
   return 1 / (fraccionSerial + (1 - fraccionSerial) / hilos);
 }
 
-/** T151: ocupación en [0,1] a partir de tiempos activos por worker y la pared del despacho. */
 export function calcularOcupacionWorkers(tiemposActivosMs: readonly number[], wallMs: number): number {
   if (!Number.isFinite(wallMs) || wallMs <= 0 || tiemposActivosMs.length === 0) return 0;
   let suma = 0;
@@ -69,7 +90,6 @@ export function calcularOcupacionWorkers(tiemposActivosMs: readonly number[], wa
   return Math.max(0, Math.min(1, suma / (tiemposActivosMs.length * wallMs)));
 }
 
-/** T151: fracción serial real: 1 sin tramo paralelo (1 hilo y sin GPU); si lo hay, tiempo fuera del tramo paralelo sobre el total. */
 export function calcularFraccionSerialReal(tiempoSerialMs: number, tiempoParaleloMs: number, hilos: number, dispositivosGpu = 0): number {
   if (!Number.isFinite(tiempoSerialMs) || !Number.isFinite(tiempoParaleloMs)) throw new RangeError('Los tiempos de la fracción serial deben ser finitos.');
   if (hilos <= 1 && dispositivosGpu <= 0) return 1;
@@ -78,368 +98,365 @@ export function calcularFraccionSerialReal(tiempoSerialMs: number, tiempoParalel
   return Math.max(0, Math.min(1, serial / total));
 }
 
-interface DispatchObservation {
-  queues: StaticRegion[][];
-  offsets: number[];
-  counts: Int32Array<SharedArrayBuffer>;
-  order: Int32Array<SharedArrayBuffer>;
-  delays: Float64Array<SharedArrayBuffer>;
-}
-
-// Bootstrap autocontenido: también funciona desde dist/server sin copiar un .mjs auxiliar.
-// El supervisor mantiene libre SU event loop mientras el coordinador espera en Atomics.wait.
-// Sus eventos error/exit de los hijos se convierten en fatal + quiesced dentro del SAB.
+// El supervisor puede procesar error/exit aunque el coordinador esté bloqueado en Atomics.wait.
 const WORKER_BOOTSTRAP = String.raw`
 const { Worker, parentPort, workerData, threadId } = require('node:worker_threads');
-let H, C, S, E, control, errors;
-const children = [];
-let stopping = false, stopPromise, computeFatal = false;
-// Guards antes de inicializar el protocolo o crear/importar hijos. No dependen del event loop del main.
-function fail(error) {
-  if (workerData.role === 'compute') {
-    if (computeFatal) return;
-    computeFatal = true;
-    markFatal(workerData.workerIndex, error);
-    parentPort.postMessage({ type: 'fatal', workerIndex: workerData.workerIndex });
-  } else {
-    void stopAll(error);
-  }
-}
-process.on('uncaughtException', fail);
-process.on('unhandledRejection', fail);
+const { header: H, cells: C, errorCharacters: E } = workerData.layout;
+const control = new Int32Array(workerData.control), errors = new Uint16Array(workerData.errors);
 const cell = (index, field) => H.cells + index * C.cells + field;
-const wake = () => { Atomics.add(control, H.wake, 1); Atomics.notify(control, H.wake); };
-const messageOf = error => error instanceof Error ? (error.stack || error.message) : String(error);
+const wake = () => { Atomics.add(control, H.wake, 1); Atomics.notify(control, H.wake, 1); };
 function writeError(index, error) {
-  const message = messageOf(error).slice(0, E - 1), start = index * E;
+  const text = (error instanceof Error ? error.stack || error.message : String(error)) || 'Error sin mensaje';
+  const message = text.slice(0, E - 1), start = index * E;
   for (let i = 0; i < message.length; i++) errors[start + i] = message.charCodeAt(i);
   errors[start + message.length] = 0;
   if (index < workerData.workers) Atomics.store(control, cell(index, C.errorLength), message.length);
 }
-function markFatal(index, error) {
+function fatal(index, error) {
   writeError(index, error);
-  if (index < workerData.workers) Atomics.store(control, cell(index, C.status), S.fatal);
   Atomics.store(control, H.fatal, 1);
   wake();
 }
-function stopAll(error) {
-  if (error) markFatal(workerData.workers, error);
-  if (stopPromise) return stopPromise;
-  stopping = true;
-  stopPromise = (async () => {
-    await Promise.all(children.map(child => child.terminate()));
-    // Ningún trabajador puede escribir scratch después de esta publicación.
-    Atomics.store(control, H.quiesced, 1);
-    Atomics.store(control, H.closed, 1);
-    wake();
-    parentPort.close();
-  })();
-  return stopPromise;
-}
-
-try {
-({ header: H, cells: C, status: S, errorCharacters: E } = workerData.layout);
-control = new Int32Array(workerData.control);
-errors = new Uint16Array(workerData.errors);
-if (workerData.role === 'compute') {
-  const index = workerData.workerIndex;
-  // Este SAB privado no se comparte con el mundo ni puede recibir notificaciones de otro hilo.
-  const delayClock = new Int32Array(new SharedArrayBuffer(4));
-  // T151: microsegundos activos por worker (entero vía Atomics; nunca entra en el cálculo del mundo).
-  const tiemposActivos = new Int32Array(workerData.timing);
-  const { performance } = require('node:perf_hooks');
-  let handler, busy = false;
-  (async () => {
-    // Sólo los imports desde el árbol TS necesitan el loader de desarrollo.
-    if (workerData.loaderURL) {
-      const loader = await import(workerData.loaderURL);
-      loader.register();
-    }
-    const module = await import(workerData.moduleURL);
-    handler = module[workerData.exportName];
-    if (typeof handler !== 'function') throw new TypeError('El export de cálculo no es una función: ' + workerData.exportName);
-    parentPort.on('message', async job => {
-      if (computeFatal) return;
-      if (busy || job.epoch !== Atomics.load(control, H.epoch)) {
-        fail(new Error('Despacho superpuesto o época inválida.'));
-        return;
-      }
-      busy = true;
-      let outcome = S.done;
-      let activoUs = 0;
-      const medir = async fn => { const inicio = performance.now(); try { await fn(); } finally { activoUs += (performance.now() - inicio) * 1000; } };
-      try {
-        // No se copian los buffers: los halos y la salida pertenecen a los mismos SAB.
-        if (job.orden === 'natural') {
-          await medir(() => handler({ regions: job.regions, buffers: job.buffers, params: job.params, workerIndex: index }));
-        } else {
-          const counts = new Int32Array(job.observation.counts);
-          const order = new Int32Array(job.observation.order);
-          const delays = new Float64Array(job.observation.delays);
-          for (let ordinal = 0; ordinal < job.regions.length; ordinal++) {
-            if (ordinal > 0 && job.orden === 'adversarial') {
-              const start = performance.now();
-              Atomics.wait(delayClock, 0, 0, job.retardoMs);
-              delays[index] += performance.now() - start;
-              Atomics.add(counts, workerData.workers + index, 1);
-            }
-            // Sólo se publica una observación al invocar realmente ese rango del handler.
-            Atomics.store(order, job.observation.offset + ordinal, ordinal);
-            Atomics.add(counts, index, 1);
-            await medir(() => handler({ regions: [job.regions[ordinal]], buffers: job.buffers, params: job.params, workerIndex: index }));
-          }
-        }
-      } catch (error) {
-        writeError(index, error);
-        outcome = S.jobError;
-      }
-      Atomics.store(tiemposActivos, index, Math.round(activoUs));
-      busy = false;
-      if (computeFatal) return;
-      Atomics.add(control, cell(index, C.completed), 1);
-      Atomics.store(control, cell(index, C.status), outcome);
+if (workerData.index === undefined) {
+  const children = [];
+  let stopping = false;
+  function stop(error) {
+    if (stopping) return;
+    stopping = true;
+    if (error) fatal(workerData.workers, error);
+    void Promise.all(children.map(child => child.terminate())).then(() => {
+      Atomics.store(control, H.quiesced, 1);
       wake();
+      parentPort.close();
     });
-    Atomics.store(control, cell(index, C.threadId), threadId);
-    Atomics.store(control, cell(index, C.status), S.ready);
-    Atomics.add(control, H.ready, 1);
-    wake();
-  })().catch(fail);
-} else {
+  }
+  process.on('uncaughtException', stop);
+  process.on('unhandledRejection', stop);
   Atomics.store(control, H.supervisorThreadId, threadId);
   try {
     for (let index = 0; index < workerData.workers; index++) {
       const child = new Worker(workerData.bootstrap, {
-        eval: true, execArgv: [], name: 'atlas-static-compute-' + index,
-        workerData: { ...workerData, role: 'compute', workerIndex: index, bootstrap: undefined },
+        eval: true, execArgv: [], name: 'atlas-compute-' + index,
+        workerData: { ...workerData, index, bootstrap: undefined },
       });
       children.push(child);
-      child.on('message', message => {
-        if (message.type === 'fatal') fail(new Error('Fallo fatal en worker ' + index));
-      });
-      child.on('error', error => { markFatal(index, error); fail(error); });
-      child.on('exit', code => {
-        if (!stopping) {
-          const error = new Error('Worker ' + index + ' salió inesperadamente (código ' + code + ').');
-          markFatal(index, error);
-          fail(error);
-        }
-      });
+      child.on('message', () => stop());
+      child.on('error', stop);
+      child.on('exit', code => stop(new Error('Worker ' + index + ' salió inesperadamente (código ' + code + ').')));
     }
     parentPort.on('message', message => {
-      if (message.type === 'close') { void stopAll(); return; }
-      if (stopping || Atomics.load(control, H.fatal)) { fail(new Error('El pool ya está abortado.')); return; }
-      if (message.type !== 'run') { fail(new Error('Mensaje de control desconocido.')); return; }
+      if (message === 'close') { stop(); return; }
+      if (stopping) return;
       try {
         for (let index = 0; index < children.length; index++) {
-          children[index].postMessage({
-            epoch: message.epoch, regions: message.queues[index], buffers: message.buffers, params: message.params,
-            orden: message.orden, retardoMs: message.retardoMs,
-            observation: message.observation && { ...message.observation, offset: message.observation.offsets[index] },
-          });
+          children[index].postMessage({ regions: message.queues[index], buffers: message.buffers, params: message.params });
         }
-      } catch (error) { fail(error); }
+      } catch (error) { stop(error); }
     });
-  } catch (error) { fail(error); }
+  } catch (error) { stop(error); }
+} else {
+  const index = workerData.index;
+  let failed = false;
+  function fail(error) {
+    if (failed) return;
+    failed = true;
+    fatal(index, error);
+    parentPort.postMessage('fatal');
+  }
+  function finish(start) {
+    Atomics.store(control, cell(index, C.activoUs), Math.round((performance.now() - start) * 1000));
+    Atomics.add(control, cell(index, C.completed), 1);
+    Atomics.sub(control, H.pending, 1);
+    wake();
+  }
+  function ready() {
+    Atomics.store(control, cell(index, C.threadId), threadId);
+    Atomics.add(control, H.ready, 1);
+    wake();
+  }
+  process.on('uncaughtException', fail);
+  process.on('unhandledRejection', fail);
+  (async () => {
+    if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
+    const handler = (await import(workerData.moduleURL))[workerData.exportName];
+    if (typeof handler !== 'function') throw new TypeError('El export de cálculo no es una función: ' + workerData.exportName);
+    if (!workerData.compartida) {
+      parentPort.on('message', async job => {
+        if (failed) return;
+        const start = performance.now();
+        try { await handler({ ...job, workerIndex: index }); }
+        catch (error) { writeError(index, error); }
+        if (!failed) finish(start);
+      });
+      ready();
+      return;
+    }
+    const ejecutar = handler(index + 1, workerData.compartida.datos);
+    if (typeof ejecutar !== 'function') throw new TypeError('La fábrica de cálculo debe devolver una función.');
+    let epoca = 0;
+    ready();
+    while (!Atomics.load(control, H.fatal)) {
+      const nueva = Atomics.load(control, H.epoch);
+      if (nueva === epoca) {
+        Atomics.wait(control, H.epoch, epoca);
+        continue;
+      }
+      epoca = nueva;
+      const start = performance.now();
+      const resultado = ejecutar(Atomics.load(control, H.phase));
+      if (resultado?.then) throw new TypeError('La fase de cálculo debe ser síncrona.');
+      finish(start);
+    }
+  })().catch(fail);
 }
-} catch (error) { fail(error); }
 `;
 
-/**
- * N trabajadores persistentes y un supervisor administrativo; run conserva stepWorld síncrono.
- * Los fallos JS del supervisor y error/exit de hijos se comunican por SAB tras detenerlos.
- * La muerte externa/native abrupta del supervisor no tiene garantía de despertar al main:
- * sus eventos de Worker necesitan el event loop bloqueado. No se simula quiescencia ni se
- * convierte un plazo de reloj en éxito del motor.
- */
-export class StaticWorkerPool {
-  readonly #workers: number;
+interface DespachoAnterior {
+  queues: StaticRegion[][];
+  buffers: Record<string, SharedArrayBuffer>;
+  params: unknown;
+}
+
+class HilosPersistentes {
   readonly #barrier: SharedBarrier;
   readonly #supervisor: Worker;
   readonly #exit: Promise<void>;
-  readonly #sourceLoader: boolean;
-  #dispatches = 0;
-  #closed = false;
-  #running = false;
-  #supervisorFailure: Error | null = null;
-  #supervisorExited = false;
-  #observation: DispatchObservation | null = null;
-  readonly #tiemposActivos: Int32Array<SharedArrayBuffer>;
-  #ocupacionWorkers = 0;
-  #tiempoParaleloMs = 0;
-  #tiempoBarreraMs = 0;
-  #tiempoActivoWorkersMs: number[] = [];
+  readonly sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
+  #cerrada = false;
+  #ejecutando = false;
+  #fallo: ErrorFatalMotor | undefined;
+  #errorSupervisor: Error | undefined;
+  readonly workers: number;
+  despachos = 0;
+  tiempoTotalMs = 0;
+  esperaBarreraMs = 0;
+  tiempoLocalMs = 0;
 
-  constructor(options: StaticWorkerPoolOptions) {
-    if (!Number.isSafeInteger(options.workers) || options.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
-    if (!options.exportName) throw new TypeError('exportName no puede estar vacío.');
-    this.#workers = options.workers;
-    this.#tiemposActivos = new Int32Array(new SharedArrayBuffer(options.workers * 4));
-    this.#tiempoActivoWorkersMs = Array.from({ length: options.workers }, () => 0);
-    this.#barrier = createBarrier(options.workers);
-    this.#sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
-    let moduleURL = new URL(options.moduleURL).href;
-    if (this.#sourceLoader && moduleURL.startsWith('file:') && moduleURL.endsWith('.js')) {
+  constructor(opciones: StaticWorkerPoolOptions, compartida?: { datos: unknown }) {
+    if (!Number.isSafeInteger(opciones.workers) || opciones.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
+    if (!opciones.exportName) throw new TypeError('exportName no puede estar vacío.');
+    this.workers = opciones.workers;
+    this.#barrier = createBarrier(this.workers);
+    let moduleURL = new URL(opciones.moduleURL).href;
+    if (this.sourceLoader && moduleURL.startsWith('file:') && moduleURL.endsWith('.js')) {
       const sourceURL = moduleURL.slice(0, -3) + '.ts';
       if (!existsSync(fileURLToPath(moduleURL)) && existsSync(fileURLToPath(sourceURL))) moduleURL = sourceURL;
     }
+    const { control, errors } = this.#barrier;
     this.#supervisor = new Worker(WORKER_BOOTSTRAP, {
-      eval: true, execArgv: [], name: 'atlas-static-supervisor',
+      eval: true, execArgv: [], name: 'atlas-supervisor',
       workerData: {
-        role: 'supervisor', workers: this.#workers, moduleURL, exportName: options.exportName,
-        loaderURL: this.#sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
-        timing: this.#tiemposActivos.buffer,
-        control: this.#barrier.control.buffer, errors: this.#barrier.errors.buffer,
-        layout: { header: BARRIER_HEADER, cells: WORKER_CELL, status: WORKER_STATUS, errorCharacters: ERROR_CHARACTERS },
+        workers: this.workers, moduleURL, exportName: opciones.exportName, compartida,
+        loaderURL: this.sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
+        control: control.buffer, errors: errors.buffer,
+        layout: { header: BARRIER_HEADER, cells: WORKER_CELL, errorCharacters: ERROR_CHARACTERS },
         bootstrap: WORKER_BOOTSTRAP,
       },
     });
-    // Respaldo diagnóstico cuando el main puede procesar eventos; no es el despertador de la barrera.
-    this.#supervisor.on('error', error => { this.#supervisorFailure = error; });
+    this.#supervisor.on('error', error => { this.#errorSupervisor = error; });
     this.#exit = new Promise(resolve => {
       this.#supervisor.once('exit', code => {
-        this.#supervisorExited = true;
-        if (!Atomics.load(this.#barrier.control, BARRIER_HEADER.closed)) {
-          this.#supervisorFailure ??= new Error(`Supervisor salió inesperadamente (código ${code}).`);
+        if (!Atomics.load(control, BARRIER_HEADER.quiesced)) {
+          this.#errorSupervisor ??= new Error(`Supervisor salió inesperadamente (código ${code}).`);
         }
         resolve();
       });
     });
     this.#supervisor.unref();
-    waitForBarrier(this.#barrier.control, () => this.#fatalAndQuiesced()
-      || Atomics.load(this.#barrier.control, BARRIER_HEADER.ready) === this.#workers);
-    this.#throwIfFatal();
+    this.#esperar(() => Atomics.load(control, BARRIER_HEADER.ready) === this.workers);
   }
 
-  #fatalAndQuiesced(): boolean {
-    const control = this.#barrier.control;
-    return Atomics.load(control, BARRIER_HEADER.fatal) !== 0 && Atomics.load(control, BARRIER_HEADER.quiesced) !== 0;
+  get fatal(): boolean {
+    return this.#fallo !== undefined || this.#errorSupervisor !== undefined
+      || Atomics.load(this.#barrier.control, BARRIER_HEADER.fatal) !== 0;
   }
 
-  #throwIfFatal(): void {
-    if (this.#supervisorExited && this.#supervisorFailure) {
-      throw new Error(`StaticWorkerPool abortado: ${this.#supervisorFailure.message}`);
+  #abortar(causa?: unknown): never {
+    if (!this.#fallo) {
+      const { control } = this.#barrier;
+      Atomics.store(control, BARRIER_HEADER.fatal, 1);
+      void this.cerrar();
+      // Si también cayó el supervisor, el servidor debe salir aunque no pueda confirmar el cierre.
+      waitForBarrier(control, () => Atomics.load(control, BARRIER_HEADER.quiesced) !== 0, 1000);
+      const errores = Array.from({ length: this.workers }, (_, index) => readWorkerError(this.#barrier, index)).filter(Boolean);
+      const supervisor = readSupervisorError(this.#barrier, this.workers);
+      if (supervisor) errores.push(supervisor);
+      this.#fallo = new ErrorFatalMotor(causa ?? this.#errorSupervisor ?? (errores.join('\n') || 'fallo fatal de worker'));
     }
-    if (!Atomics.load(this.#barrier.control, BARRIER_HEADER.fatal)) return;
-    // Un fallo puede ocurrir entre despachos: drenar también en ese caso antes de entregar el error.
-    waitForBarrier(this.#barrier.control, () => this.#fatalAndQuiesced());
-    const errors = Array.from({ length: this.#workers }, (_, index) => readWorkerError(this.#barrier, index)).filter(Boolean);
-    const supervisorError = readSupervisorError(this.#barrier, this.#workers);
-    if (supervisorError) errors.push(supervisorError);
-    throw new Error(`StaticWorkerPool abortado: ${errors.join('\n') || 'fallo fatal de worker'}`);
+    throw this.#fallo;
   }
 
-  run<Params>(job: StaticWorkerJob<Params>): void {
-    if (this.#closed) throw new Error('StaticWorkerPool cerrado.');
-    if (this.#running) throw new Error('StaticWorkerPool no admite despachos superpuestos.');
-    this.#throwIfFatal();
-    const orden = job.orden ?? 'natural';
-    const queues = partitionRegions(job.regions, this.#workers, orden);
-    const retardoMs = job.retardoMs ?? 1;
-    if (!Number.isFinite(retardoMs) || retardoMs < 0) {
-      throw new RangeError('retardoMs debe ser finito y no negativo.');
+  #esperar(terminado: () => boolean): void {
+    if (!waitForBarrier(this.#barrier.control, () => this.fatal || this.#cerrada || terminado())) {
+      this.#abortar(new Error(`Barrera vencida tras ${PLAZO_BARRERA_MS / 1000} s sin avance.`));
     }
-    for (const [name, buffer] of Object.entries(job.buffers)) {
-      if (!(buffer instanceof SharedArrayBuffer)) throw new TypeError(`El buffer ${name} requiere SharedArrayBuffer.`);
-    }
-    let observation: DispatchObservation | null = null;
-    if (orden !== 'natural') {
-      let offset = 0;
-      const offsets = queues.map(queue => { const start = offset; offset += queue.length; return start; });
-      observation = {
-        queues, offsets,
-        counts: new Int32Array(new SharedArrayBuffer(this.#workers * 2 * 4)),
-        order: new Int32Array(new SharedArrayBuffer(job.regions.length * 4)),
-        delays: new Float64Array(new SharedArrayBuffer(this.#workers * 8)),
-      };
-    }
-    this.#running = true;
-    const control = this.#barrier.control;
-    const epoch = (Atomics.load(control, BARRIER_HEADER.epoch) + 1) | 0;
-    Atomics.store(control, BARRIER_HEADER.epoch, epoch);
-    for (let index = 0; index < this.#workers; index++) {
-      Atomics.store(control, workerCell(index, WORKER_CELL.errorLength), 0);
-      Atomics.store(control, workerCell(index, WORKER_CELL.status), WORKER_STATUS.running);
-      Atomics.store(this.#tiemposActivos, index, 0);
-    }
-    const paredInicio = performance.now();
+    if (this.fatal || this.#cerrada) this.#abortar();
+  }
+
+  ejecutar(despacho: DespachoAnterior | number, local?: EjecutarFase): void {
+    if (this.fatal) this.#abortar();
+    if (this.#cerrada) throw new Error('Piscina cerrada.');
+    if (this.#ejecutando) throw new Error('La piscina no admite fases superpuestas.');
+    this.#ejecutando = true;
+    const { control } = this.#barrier;
+    const inicio = performance.now();
+    Atomics.store(control, BARRIER_HEADER.pending, this.workers);
     try {
-      try {
-        this.#supervisor.postMessage({
-          type: 'run', epoch, queues, buffers: job.buffers, params: job.params, orden, retardoMs,
-          observation: observation && {
-            offsets: observation.offsets, counts: observation.counts.buffer,
-            order: observation.order.buffer, delays: observation.delays.buffer,
-          },
-        });
-      } catch (error) {
-        // structured-clone rechaza el mensaje entero antes de despacharlo: ningún hijo recibió trabajo.
-        for (let index = 0; index < this.#workers; index++) {
-          Atomics.store(control, workerCell(index, WORKER_CELL.status), WORKER_STATUS.ready);
-        }
-        throw error;
+      if (typeof despacho === 'number') {
+        Atomics.store(control, BARRIER_HEADER.phase, despacho);
+        Atomics.add(control, BARRIER_HEADER.epoch, 1);
+        Atomics.notify(control, BARRIER_HEADER.epoch);
+        this.despachos++;
+        try { local!(despacho); }
+        catch (error) { this.#abortar(error); }
+        this.tiempoLocalMs = performance.now() - inicio;
+      } else {
+        for (let i = 0; i < this.workers; i++) Atomics.store(control, workerCell(i, WORKER_CELL.errorLength), 0);
+        this.#supervisor.postMessage(despacho);
+        this.despachos++;
       }
-      this.#observation = observation;
-      this.#dispatches++;
-      waitForBarrier(control, () => {
-        if (Atomics.load(control, BARRIER_HEADER.fatal)) return this.#fatalAndQuiesced();
-        for (let index = 0; index < this.#workers; index++) {
-          const status = Atomics.load(control, workerCell(index, WORKER_CELL.status));
-          if (status !== WORKER_STATUS.done && status !== WORKER_STATUS.jobError) return false;
-        }
-        return true;
-      });
-      // T151: la pared y los tiempos activos solo se leen; nunca alimentan el cálculo.
-      this.#tiempoParaleloMs = Math.max(0, performance.now() - paredInicio);
-      this.#tiempoActivoWorkersMs = Array.from({ length: this.#workers }, (_, index) => Atomics.load(this.#tiemposActivos, index) / 1000);
-      this.#ocupacionWorkers = calcularOcupacionWorkers(this.#tiempoActivoWorkersMs, this.#tiempoParaleloMs);
-      this.#tiempoBarreraMs = Math.max(0, this.#tiempoParaleloMs - Math.max(0, ...this.#tiempoActivoWorkersMs));
-      this.#throwIfFatal();
-      // Todos terminaron antes de comunicar un throw recuperable: no quedan escrituras tardías.
-      for (let index = 0; index < this.#workers; index++) {
-        if (Atomics.load(control, workerCell(index, WORKER_CELL.status)) === WORKER_STATUS.jobError) {
-          throw new Error(`Worker ${index}: ${readWorkerError(this.#barrier, index)}`);
+      const inicioEspera = performance.now();
+      this.#esperar(() => Atomics.load(control, BARRIER_HEADER.pending) === 0);
+      this.esperaBarreraMs = Math.max(0, performance.now() - inicioEspera);
+      this.tiempoTotalMs = Math.max(0, performance.now() - inicio);
+      if (typeof despacho !== 'number') {
+        for (let index = 0; index < this.workers; index++) {
+          const error = readWorkerError(this.#barrier, index);
+          if (error) throw new Error(`Worker ${index}: ${error}`);
         }
       }
     } finally {
-      this.#running = false;
+      this.#ejecutando = false;
     }
   }
 
-  diagnostics(): StaticWorkerDiagnostics {
-    return {
-      workers: this.#workers,
-      threadIds: Array.from({ length: this.#workers }, (_, index) => Atomics.load(this.#barrier.control, workerCell(index, WORKER_CELL.threadId))),
-      dispatches: this.#dispatches,
-      completedJobs: Array.from({ length: this.#workers }, (_, index) => Atomics.load(this.#barrier.control, workerCell(index, WORKER_CELL.completed))),
-      supervisorThreadId: Atomics.load(this.#barrier.control, BARRIER_HEADER.supervisorThreadId),
-      sourceLoader: this.#sourceLoader,
-      regionOrder: Array.from({ length: this.#workers }, (_, index) => {
-        const observation = this.#observation;
-        if (!observation) return [];
-        const count = Atomics.load(observation.counts, index);
-        return Array.from({ length: count }, (_, ordinal) => {
-          const regionIndex = Atomics.load(observation.order, observation.offsets[index]! + ordinal);
-          return observation.queues[index]![regionIndex]!.id;
-        });
-      }),
-      adversarialDelaysMs: Array.from({ length: this.#workers }, (_, index) => this.#observation?.delays[index] ?? 0),
-      adversarialDelayCounts: Array.from({ length: this.#workers }, (_, index) => this.#observation
-        ? Atomics.load(this.#observation.counts, this.#workers + index) : 0),
-      ocupacionWorkers: this.#ocupacionWorkers,
-      tiempoActivoWorkersMs: [...this.#tiempoActivoWorkersMs],
-      tiempoParaleloMs: this.#tiempoParaleloMs,
-      tiempoBarreraMs: this.#tiempoBarreraMs,
-    };
+  leerHilos(campo: number): number[] {
+    return Array.from({ length: this.workers }, (_, index) => Atomics.load(this.#barrier.control, workerCell(index, campo)));
   }
 
-  close(): Promise<void> {
-    if (!this.#closed) {
-      this.#closed = true;
-      // Una Promise sola no mantiene vivo el event loop durante el cierre asíncrono.
+  get supervisorThreadId(): number { return Atomics.load(this.#barrier.control, BARRIER_HEADER.supervisorThreadId); }
+
+  cerrar(): Promise<void> {
+    if (!this.#cerrada) {
+      this.#cerrada = true;
       this.#supervisor.ref();
-      if (!Atomics.load(this.#barrier.control, BARRIER_HEADER.closed)) this.#supervisor.postMessage({ type: 'close' });
+      this.#supervisor.postMessage('close');
     }
     return this.#exit;
   }
+}
+
+function ejecutarSincrono(ejecutar: EjecutarFase, fase: number): void {
+  const resultado: unknown = ejecutar(fase);
+  if (resultado && typeof (resultado as PromiseLike<unknown>).then === 'function') {
+    throw new TypeError('La fase de cálculo debe ser síncrona.');
+  }
+}
+
+/** Una misma piscina para todas las fases. Los datos del despacho viajan por SAB. */
+export class Piscina<Datos = unknown> {
+  readonly #equipo: HilosPersistentes | null;
+  readonly #local: EjecutarFase;
+  readonly #hilos: number;
+  #cerrada = false;
+  #ejecutando = false;
+  #fallo: ErrorFatalMotor | undefined;
+  #fases = 0;
+  #tiempoLocalMs = 0;
+
+  constructor(opciones: OpcionesPiscina<Datos>) {
+    const { hilos, crear, datos } = opciones;
+    if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError('hilos debe ser un entero positivo.');
+    this.#hilos = hilos;
+    try {
+      const ejecutar = crear(0, datos);
+      if (typeof ejecutar !== 'function') throw new TypeError('La fábrica de cálculo debe devolver una función.');
+      this.#local = fase => ejecutarSincrono(ejecutar, fase);
+      this.#equipo = hilos === 1 ? null : new HilosPersistentes({ ...opciones, workers: hilos - 1 }, { datos });
+    } catch (error) {
+      throw error instanceof ErrorFatalMotor ? error : new ErrorFatalMotor(error);
+    }
+  }
+
+  ejecutar(fase: number): void {
+    if (this.#fallo) throw this.#fallo;
+    if (this.#cerrada) throw new Error('Piscina cerrada.');
+    if (this.#ejecutando) throw new Error('La piscina no admite fases superpuestas.');
+    if (!Number.isInteger(fase) || fase !== (fase | 0)) throw new RangeError('La fase debe ser un entero de 32 bits.');
+    this.#ejecutando = true;
+    this.#fases++;
+    try {
+      if (this.#equipo) {
+        this.#equipo.ejecutar(fase, this.#local);
+      } else {
+        const inicio = performance.now();
+        this.#local(fase);
+        this.#tiempoLocalMs = performance.now() - inicio;
+      }
+    } catch (error) {
+      this.#fallo = error instanceof ErrorFatalMotor ? error : new ErrorFatalMotor(error);
+      throw this.#fallo;
+    } finally {
+      this.#ejecutando = false;
+    }
+  }
+
+  diagnostico(): DiagnosticoPiscina {
+    const equipo = this.#equipo;
+    return {
+      hilos: this.#hilos,
+      fases: this.#fases,
+      threadIds: equipo ? [threadId, ...equipo.leerHilos(WORKER_CELL.threadId)] : [threadId],
+      tiempoActivoMs: equipo
+        ? [equipo.tiempoLocalMs, ...equipo.leerHilos(WORKER_CELL.activoUs).map(us => us / 1000)] : [this.#tiempoLocalMs],
+      tiempoTotalMs: equipo?.tiempoTotalMs ?? this.#tiempoLocalMs,
+      esperaBarreraMs: equipo?.esperaBarreraMs ?? 0,
+      fatal: this.#fallo !== undefined || (equipo?.fatal ?? false),
+    };
+  }
+
+  cerrar(): Promise<void> {
+    if (this.#ejecutando) throw new Error('La piscina todavía está ejecutando una fase.');
+    this.#cerrada = true;
+    return this.#equipo?.cerrar() ?? Promise.resolve();
+  }
+}
+
+/** Adaptación de los núcleos anteriores mientras M2 y M3 los conectan a Piscina. */
+export class StaticWorkerPool {
+  readonly #equipo: HilosPersistentes;
+
+  constructor(options: StaticWorkerPoolOptions) {
+    this.#equipo = new HilosPersistentes(options);
+  }
+
+  run<Params>(job: StaticWorkerJob<Params>): void {
+    for (const [name, buffer] of Object.entries(job.buffers)) {
+      if (!(buffer instanceof SharedArrayBuffer)) throw new TypeError(`El buffer ${name} requiere SharedArrayBuffer.`);
+    }
+    const queues = partitionRegions(job.regions, this.#equipo.workers);
+    this.#equipo.ejecutar({ queues, buffers: job.buffers, params: job.params });
+  }
+
+  diagnostics(): StaticWorkerDiagnostics {
+    const equipo = this.#equipo;
+    const tiempoActivoWorkersMs = equipo.leerHilos(WORKER_CELL.activoUs).map(us => us / 1000);
+    return {
+      workers: equipo.workers,
+      threadIds: equipo.leerHilos(WORKER_CELL.threadId),
+      dispatches: equipo.despachos,
+      completedJobs: equipo.leerHilos(WORKER_CELL.completed),
+      supervisorThreadId: equipo.supervisorThreadId,
+      sourceLoader: equipo.sourceLoader,
+      regionOrder: [],
+      adversarialDelaysMs: [],
+      adversarialDelayCounts: [],
+      ocupacionWorkers: calcularOcupacionWorkers(tiempoActivoWorkersMs, equipo.tiempoTotalMs),
+      tiempoActivoWorkersMs,
+      tiempoParaleloMs: equipo.tiempoTotalMs,
+      tiempoBarreraMs: Math.max(0, equipo.tiempoTotalMs - Math.max(0, ...tiempoActivoWorkersMs)),
+    };
+  }
+
+  close(): Promise<void> { return this.#equipo.cerrar(); }
 }

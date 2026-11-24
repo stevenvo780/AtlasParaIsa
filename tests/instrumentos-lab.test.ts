@@ -249,7 +249,7 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.deepEqual(sinTiempos(replicaCon.resumen as Json), sinTiempos(replicaSin.resumen as Json));
   assert.match(replicaCon.instrumentos as string, /^si/);
   assert.equal(replicaSin.instrumentos, 'no');
-  // Sin --techo-lab no aparece nada del techo de laboratorio (tests/lab-techo.test.ts).
+  // La réplica ya no escribe nada del techo de laboratorio.
   for (const r of [replicaCon, replicaSin]) { assert.ok(!('techoLab' in r) && !('techoLabDetalle' in r)); assert.equal(r.gobernador, 'no-ejecutado; replica de leyes, no del servidor'); }
 
   // Coherencia de los campos nuevos.

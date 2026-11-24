@@ -24,7 +24,6 @@
     "lab": "tsx scripts/lab/barrido.ts",
     "lab:replica": "tsx scripts/lab/replica.ts",
     "lab:resumen": "tsx scripts/lab/resumen.ts",
-    "techo": "tsx scripts/curva-techo.mts",
     "banco:red": "tsx scripts/banco-red.mts",
     "check": "npm run typecheck && npm test && npm run build"
   },

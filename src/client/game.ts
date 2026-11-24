@@ -1,3 +1,11 @@
+import { makeFloatingPanel, type FloatingPanel } from './panel-manager.js';
+import { GRAPHICS_STORAGE_KEY, loadGraphicsSettings, saveGraphicsSettings, sanitizeGraphicsSettings, applyPreset, renderGraphicsSettingsHtml, minZoomLabel, GRAPHICS_PRESETS, type GraphicsPreset, type GraphicsSettings } from './graphics-settings.js';
+import { MAP_LAYER_CATALOG, isMapLayerId, toggleLayer, clearLayers, activeLayersSummary, renderLayersPopoverHtml, type MapLayerId } from './layers-control.js';
+import { mountMinimap, type MinimapController } from './minimap.js';
+import { SpatialSoundscape } from './soundscape.js';
+import { fetchJson, modoDeAjustes, validDirectory, validMap, validWhisperResult, validWhispers } from './ui-guards.js';
+import { renderMundoDeepStats } from './mundo-dashboard.js';
+import type { WorldMapResponse, WorldDirectoryResponse, DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
@@ -17,8 +25,7 @@ import { technologyPane, recipeCard } from './technology-art.js';
 import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCounters, saveWorldVisit, type HitoGuardado } from './visit-memory.js';
 import { enClaro } from './textos.js';
 import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
-import { decidirModo, setModo, type Modo } from './modo.js';
-import { capasDeCalor, leyendaEnRango, rangoRecibido, type Capa } from './calor.js';
+import { decidirModo, type Modo } from './modo.js';
 import { ausenteEstado, comunidadesOrdenadas, demographicSummary, ejeDominante, ejesCultura, miembrosNombrados, resumenCultural, rotuloRecuento, ventanaLista } from './censo-view.js';
 import { estadoCrecimiento, renderPanelGobernador, ritmo, seccionFases, ultimoFrenazo } from './gobernador-view.js';
 import { distribution, sparkline, statCard } from './charts.js';
@@ -45,25 +52,25 @@ let observerOnly = false;
 interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean }
 let landscape: Landscape | null = null;
 /** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
-const tileCache = new ClientTileCache();
+// V24: 640 trozos de 16×16 (≈ 164 k teselas): alejar al zoom mínimo (≈ 480×270 teselas a 1080p) cabe sin expulsar lo visible.
+const tileCache = new ClientTileCache(640);
 let selected: Selection = { kind: 'person', id: 's' };
 let activePersonId = 's';
 let control: 'inspect' | 'direct' = 'inspect';
 let following = false;
 let status: ConnectionStatus = 'connecting';
 let pending = false;
-let tool: 'plant' | 'invite' | 'remember' = 'plant';
 let lastVisit: number | null = null;
 /** M5: los episodios que este navegador recibió en esta visita (sin duplicados, acotados) y los hitos
  * guardados en visitas anteriores de este mismo mundo (localStorage, como mucho 80). */
 const cronica = new CronicaBuffer();
 let hitosGuardados: HitoGuardado[] = [];
 let journalFilter: GrupoCronica | 'todo' = 'todo';
-let populationSignature = '', inspectorSignature = '', memorySignature = '', statsSignature = '';
+let populationSignature = '', inspectorSignature = '', statsSignature = '';
 let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
 /** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
 let modoActual: Modo = 'completo';
-let populationKind: 'people' | 'animals' = 'people';
+let populationKind: 'people' | 'animals' | 'communities' | 'structures' = 'people';
 let notebook: Notebook | null = null;
 let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
@@ -80,8 +87,33 @@ let buscando: string | null = null;
 /** M1: lo que el servidor contestó sobre cada identidad pedida (true = vive en el mundo servido). No caduca por tick:
  * una muerte llega por `demography.recent`, que manda sobre este registro. */
 const personaVivo = new Map<string, boolean>();
-let soundContext: AudioContext | null = null;
-let soundTimer: ReturnType<typeof setTimeout> | undefined;
+let soundscape = new SpatialSoundscape();
+let soundEnabled = false;
+let graphicsSettings = loadGraphicsSettings();
+/** `true` cuando el visitante ya eligió en Ajustes: desde entonces el perfil manda sobre la heurística del aparato. */
+let graphicsChosen = false;
+let sessionFlags: SessionFlags = {};
+let soundBusy = false;
+let activeLayers = clearLayers();
+const panels: Partial<Record<NotebookPage, FloatingPanel>> = {};
+let panelQuery: MediaQueryList | null = null, panelSync: (() => void) | null = null;
+let minimap: MinimapController | null = null;
+let uiSession: AbortController | null = null;
+const uiTimers: ReturnType<typeof setInterval>[] = [];
+let uiRaf = 0;
+let directory: WorldDirectoryResponse | null = null;
+/** Antes de la primera respuesta del directorio no es lo mismo que tras un fallo. */
+let directoryState: 'loading' | 'ready' | 'failed' = 'loading';
+let recentWhispers: DivineWhisper[] = [];
+let directoryBusy = false, mapBusy = false, whispersBusy = false;
+let pickingWhisper = false;
+let whisperTile = { x: 0, y: 0 };
+/** El lugar del susurro sigue a la cámara hasta que se elige una casilla a propósito. */
+let whisperPicked = false;
+/** Tras un fallo de /api/worldmap se espera antes de volver a pedirlo (no se insiste cada 3 s a un servidor lento). */
+let mapFailures = 0, mapRetryAt = 0;
+/** Filas máximas que se dibujan en Vidas; la búsqueda siempre recorre todo el directorio. */
+const DIRECTORY_ROWS = 300;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
 function saveVisit(): void {
@@ -95,8 +127,8 @@ function saveVisit(): void {
   } catch { /* Optional. */ }
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
-function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { stopTape(); observerOnly = false; tileCache.clear(); capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function stopSound(): void { soundEnabled = false; soundBusy = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
+function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -111,17 +143,6 @@ function loginScreen(message = ''): void {
   });
 }
 
-/** P1: refleja en la barra el modo decidido por `decidirModo()` (query, recordado o heurística). */
-function syncModo(): Modo {
-  const modo = decidirModo();
-  const active = modo === 'observador';
-  const button = el('modo-toggle');
-  button.setAttribute('aria-pressed', String(active));
-  button.title = active ? 'Modo ligero activo: el mundo llega cada 5 s y se dibuja con menos detalle. Toca para volver al completo.' : 'Activar el modo ligero para móviles lentos';
-  button.setAttribute('aria-label', active ? 'Modo ligero activo (toca para volver al completo)' : 'Modo ligero para móviles lentos');
-  return modo;
-}
-
 /** V21: banderas del servidor (`tapeEnabled`, `observerOnly`); sin respuesta válida, modo vivo clásico. */
 async function readSessionFlags(): Promise<SessionFlags> {
   try {
@@ -130,19 +151,31 @@ async function readSessionFlags(): Promise<SessionFlags> {
   } catch { return {}; }
 }
 
+/** Sin elección guardada manda la heurística del aparato (pantalla pequeña, poca memoria, sin WebGL2, `?modo=`) y se muestra como perfil Ligero. */
+function startupSettings(): GraphicsSettings {
+  if (graphicsChosen) return graphicsSettings;
+  const loaded = loadGraphicsSettings();
+  let saved = false;
+  try { saved = localStorage.getItem(GRAPHICS_STORAGE_KEY) !== null; } catch { /* Sin almacenamiento: no hay elección guardada. */ }
+  return !saved && decidirModo() === 'observador' ? applyPreset('ligero', loaded) : loaded;
+}
+
 function enterWorld(flags: SessionFlags = {}): void {
+  sessionFlags = flags;
   clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
-  notebook = new Notebook(el('game')); inspectorTab = 'now';
+  inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
-  const modo = syncModo(); modoActual = modo;
+  // El perfil de Ajustes decide el modo de dibujo (Ligero = observador); ya no hay otro conmutador que lo deje atrapado.
+  graphicsSettings = startupSettings();
+  const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
   if (modo === 'observador') connection.suscribir(5000);
-  wire(); renderTool();
+  startClientUi(); wire(); wireClientUi();
   observerOnly = !!flags.observerOnly; applyObserverOnly(document, observerOnly);
   if (flags.tapeEnabled) startTape(); // la cinta manda el mundo; el socket sigue para gestos, recetas y fichas
   connection.start();
@@ -164,8 +197,9 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   // V22: con trozos delta solo se ingieren las teselas que cambiaron (10–50) en vez de las ~6.000 de la vista.
   // Sin `changedTiles` (fotograma completo, base de trozo, salto) se ingiere la vista entera como siempre.
   const tiles = info.changedTiles ?? frame.tiles;
-  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles); }
-  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame); cronica.acumular(frame.events); }
+  // V24: el paisaje también recibe `changedTiles`: solo rehornea los trozos de 8×8 que tocan esas teselas.
+  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
+  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); cronica.acumular(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
 }
 
@@ -219,13 +253,28 @@ function tapeShortcut(event: KeyboardEvent): void {
 
 type Drawer = NotebookPage;
 function drawer(name: Drawer, open?: boolean): void {
-  if (observerOnly && name === 'tool') return; // sin gestos en observación pura
   const next = notebook?.show(name, open) ?? false;
+  if (next && mobile()) { el('layers-popover').hidden = true; el('layers-toggle').setAttribute('aria-expanded', 'false'); }
+  if (name === 'whisper' && !next && pickingWhisper) setPickingWhisper(false);
   syncPickingMode();
-  if (name === 'population' && next) el('population-search').focus();
-  if (name === 'stats' && next) { renderStats(); el(`stats-tab-${statsTab}`).focus(); }
+  if (name === 'population' && next) { renderPopulation(); void refreshDirectory(); el('population-search').focus(); }
+  if (name === 'whisper' && next) { if (!whisperPicked) followWhisperTile(); renderWhisperPeople(); renderWhispers(); void refreshDirectory(); void refreshWhispers(); }
+  if (name === 'stats' && next) { renderStats(); void refreshDirectory(); el(`stats-tab-${statsTab}`).focus(); }
 }
-function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && el('tool-drawer').hidden ? 'inspect' : 'ground'); }
+function setWhisperTile(x: number, y: number, picked: boolean): void {
+  whisperTile = { x: Math.floor(x), y: Math.floor(y) }; whisperPicked = picked;
+  el('whisper-coordinates').textContent = `${whisperTile.x}, ${whisperTile.y}`;
+  el('whisper-place-label').textContent = picked ? 'Lugar: casilla elegida' : 'Lugar: centro de la cámara';
+}
+/** Sin casilla elegida, el lugar del susurro es el centro de lo que se está mirando. */
+function followWhisperTile(): void { const camera = landscape?.camera(); if (camera) setWhisperTile(camera.x, camera.y, false); }
+/** Elegir casilla para un susurro no queda armado: Esc, cerrar Susurros, elegir otra cosa o volver a Mapa lo cancelan. */
+function setPickingWhisper(active: boolean): void {
+  pickingWhisper = active;
+  el('whisper-pick').setAttribute('aria-pressed', String(active)); el('pick-hint').hidden = !active;
+  syncPickingMode();
+}
+function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && !pickingWhisper ? 'inspect' : 'ground'); }
 function choosePerson(id: string, focus = true): void {
   const person = world?.people.find(p => p.id === id); if (!person) { irAPersona(id); return; }
   buscando = null;
@@ -257,17 +306,24 @@ function chooseAnimal(id: string, focus = true): void {
   const animal = world?.animals?.find(a => a.id === id); if (!animal) return;
   inspectorTab = 'now'; toggleTasks(false); selected = { kind: 'animal', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
   if (focus) landscape?.focus(animal.x, animal.y);
-  inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); renderTool(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true });
+  inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true });
 }
 function pick(selection: Selection): void {
+  if (pickingWhisper && selection.kind === 'tile') {
+    setWhisperTile(selection.x, selection.y, true); setPickingWhisper(false); drawer('whisper', true); return;
+  }
+  if (pickingWhisper) setPickingWhisper(false); // eligió otra cosa: el susurro ya no espera casilla
   if (control === 'direct' && selection.kind === 'tile') { sendCommand('move', selection); return; }
   selected = selection; landscape?.select(selection);
   if (selection.kind === 'person') { choosePerson(selection.id, false); return; }
   if (selection.kind === 'animal') { chooseAnimal(selection.id, false); return; }
-  inspectorSignature = ''; renderInspector(); renderTool(); if (el('tool-drawer').hidden) drawer('inspector', true);
+  inspectorSignature = ''; renderInspector(); drawer('inspector', true);
 }
 function person(): PersonView | undefined { return world?.people.find(p => p.id === activePersonId); }
-function target(): { x: number; y: number } | null { if (!world) return null; const selection = selected; if (selection.kind === 'tile') return selection; const p = selection.kind === 'animal' ? world.animals?.find(a => a.id === selection.id) : person(); return p ? { x: p.x, y: p.y } : null; }
+function focusTile(x: number, y: number): void {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  following = false; control = 'inspect'; landscape?.focusTile(x, y); renderControls();
+}
 function message(text: string, accepted?: boolean): void { const output = document.getElementById('gesture-result'); if (output) { output.textContent = text; output.hidden = !text; output.dataset.accepted = accepted === undefined ? 'pending' : String(accepted); } }
 function send(input: Omit<Gesture, 'id'>): boolean { if (!world || world.paused || status !== 'live' || pending) return false; if (connection?.send({ ...input, id: crypto.randomUUID() })) { landscape?.flushPlayback(); /* V18 capa 1.5: la orden se ve sobre el estado más reciente */ landscape?.setPendingTarget(input); message('Esperando la confirmación del mundo…'); return true; } return false; }
 function sendCommand(order: Order, position?: { x: number; y: number }): void { if (observerOnly) return; const p = person(); if (!p || selected.kind === 'animal') return; const x = position?.x ?? p.x, y = position?.y ?? p.y; // V18: el destino se marca al instante; el servidor lo aplica en su siguiente paso.
@@ -276,9 +332,8 @@ function sendCommand(order: Order, position?: { x: number; y: number }): void { 
 function wire(): void {
   root.removeEventListener('click', navigateEntity);
   root.addEventListener('click', navigateEntity);
-  for (const name of ['population', 'inspector', 'layer', 'stats'] as const) el(`${name}-toggle`).addEventListener('click', () => drawer(name));
+  for (const name of ['population', 'inspector', 'settings', 'whisper', 'stats'] as const) el(`${name}-toggle`).addEventListener('click', () => drawer(name));
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-close]')) button.addEventListener('click', () => drawer(button.dataset.close as Drawer, false));
-  el('intervene-toggle').addEventListener('click', () => { if (observerOnly) return; control = 'inspect'; renderTool(); renderControls(); drawer('tool'); });
   el('selection-back').addEventListener('click', () => drawer('population', true));
   wireTabs(el('inspector-tabs'), 'data-inspector-tab', value => selectInspectorTab(value as typeof inspectorTab));
   el('task-toggle').addEventListener('click', () => toggleTasks(!!el('task-palette').hidden));
@@ -289,7 +344,18 @@ function wire(): void {
   el('population-search').addEventListener('input', () => { populationSignature = ''; renderPopulation(); });
   for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-population]')) tab.addEventListener('click', () => { populationKind = tab.dataset.population as typeof populationKind; el<HTMLInputElement>('population-search').value = ''; populationSignature = ''; renderPopulation(); el('population-search').focus(); });
   el('species-filter').addEventListener('change', () => { populationSignature = ''; renderPopulation(); });
-  el('population-list').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-person], [data-animal]'); if (button?.dataset.person) choosePerson(button.dataset.person); else if (button?.dataset.animal) chooseAnimal(button.dataset.animal); });
+  el('population-list').addEventListener('click', event => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-directory-kind]'); if (!row) return;
+    const x = Number(row.dataset.directoryX), y = Number(row.dataset.directoryY), id = row.dataset.directoryId;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (row.dataset.directoryKind === 'person' && id) choosePerson(id, false);
+    else if (row.dataset.directoryKind === 'animal' && id) chooseAnimal(id, false);
+    else if (row.dataset.directoryKind === 'herd') {
+      const animal = world?.animals?.find(a => Math.hypot(a.x - x, a.y - y) < 2);
+      if (animal) chooseAnimal(animal.id, false); else pick({ kind: 'tile', x, y });
+    }
+    focusTile(x, y);
+  });
   el('inhabitant-card').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-parent]'); if (button) choosePerson(button.dataset.parent!); });
   for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-stats]')) {
     tab.addEventListener('click', () => selectStatsTab(tab.dataset.stats as typeof statsTab));
@@ -312,15 +378,6 @@ function wire(): void {
   for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.addEventListener('click', () => { journalFilter = chip.dataset.journalFilter as typeof journalFilter; renderJournal(); });
   el('enter-landscape').addEventListener('click', () => { el<HTMLDialogElement>('letter-dialog').close(); el('landscape').focus(); });
   for (const dialog of root.querySelectorAll<HTMLDialogElement>('dialog')) dialog.querySelector('.dialog-close')!.addEventListener('click', () => dialog.close());
-  el('modo-toggle').addEventListener('click', () => {
-    const next: Modo = decidirModo() === 'observador' ? 'completo' : 'observador';
-    setModo(next);
-    // Si `?modo=` sigue en la URL tras recargar, decidirModo() le da prioridad y pisa lo que
-    // acabamos de guardar: el conmutador quedaría en no-op permanente. La quitamos primero.
-    const url = new URL(location.href);
-    if (url.searchParams.has('modo')) { url.searchParams.delete('modo'); history.replaceState(null, '', url); }
-    location.reload();
-  });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });
   el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); const s = world?.people.find(p => p.role === 'S'); if (s) { landscape?.fit(); renderControls(); return; } irAPersona(idDeRol('S', world)); });
   // M3: S e I se encuentran aunque estén fuera de la cámara (la ficha a demanda trae su posición).
@@ -328,68 +385,35 @@ function wire(): void {
   el('follow-toggle').addEventListener('click', () => { if (selected.kind === 'tile') return; following = !following; landscape?.follow(following ? selected.id : null, selected.kind); renderControls(); if (mobile()) drawer('inspector', false); });
   el('direct-toggle').addEventListener('click', () => { if (observerOnly) return; control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.addEventListener('click', () => sendCommand(button.dataset.order as Order));
-  el('observe-tool').addEventListener('click', () => { control = 'inspect'; notebook?.close(); root.querySelectorAll('[data-gesture]').forEach(b => b.setAttribute('aria-pressed', 'false')); el('observe-tool').setAttribute('aria-pressed', 'true'); renderControls(); });
-  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-gesture]')) button.addEventListener('click', () => { tool = button.dataset.gesture as typeof tool; control = 'inspect'; root.querySelectorAll('[data-gesture]').forEach(item => item.setAttribute('aria-pressed', String((item as HTMLElement).dataset.gesture === tool))); el('observe-tool').setAttribute('aria-pressed', 'false'); renderTool(); renderControls(); drawer('tool', true); });
-  el('gesture-send').addEventListener('click', () => { const position = target(); if (position) send({ kind: tool, x: position.x, y: position.y, ...(tool === 'remember' ? { memoryId: el<HTMLSelectElement>('memory-select').value } : {}) }); });
-  el('memory-select').addEventListener('change', renderTool);
-  // M10: un solo selector de capas; el botón «Calor» y la tecla H recorren las mismas.
-  el<HTMLSelectElement>('observation-layer').addEventListener('change', event => aplicarCapa((event.target as HTMLSelectElement).value as CapaMapa));
-  el<HTMLSelectElement>('person-select').addEventListener('change', event => choosePerson((event.target as HTMLSelectElement).value));
-  el<HTMLSelectElement>('place-select').addEventListener('change', event => { const place = world?.places.find(p => p.id === (event.target as HTMLSelectElement).value); if (place) { selected = { kind: 'tile', x: place.x, y: place.y }; landscape?.focus(place.x, place.y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); drawer('layer', false); drawer('inspector', true); } });
-  el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; following = false; landscape?.follow(null); landscape?.focus(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); renderTool(); drawer('inspector', true); });
+  el('observe-tool').addEventListener('click', () => { control = 'inspect'; if (pickingWhisper) setPickingWhisper(false); notebook?.close(); el('observe-tool').setAttribute('aria-pressed', 'true'); renderControls(); });
+  el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; focusTile(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); if (!el('layers-popover').hidden) toggleLayers(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
-  el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
-  el('heat-button').addEventListener('click', () => cicloCalor());
+  el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (pickingWhisper) { setPickingWhisper(false); return; } if (!el('layers-popover').hidden) { toggleLayers(); el('layers-toggle').focus(); return; } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
-  document.addEventListener('keydown', event => {
+  el('game').addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const focus = event.target as HTMLElement | null;
     const tag = focus?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || focus?.isContentEditable) return;
     event.preventDefault();
-    cicloCalor();
+    toggleLayers();
   });
-  el('sound-toggle').addEventListener('click', async () => { if (soundContext) { stopSound(); return; } try { soundContext = new AudioContext(); await soundContext.resume(); el('sound-toggle').setAttribute('aria-pressed', 'true'); sound(); } catch { stopSound(); message('No se pudo activar el sonido. Puedes explorar sin él.', false); } });
-}
-
-/** M10: la capa del mapa, única para Explorar, el botón «Calor» y la tecla H. */
-type CapaMapa = 'none' | Capa | 'humedad';
-const capasMapa: CapaMapa[] = ['none', ...capasDeCalor, 'humedad'];
-let capaMapa: CapaMapa = 'none';
-let capaCalor: Capa | null = null;
-
-/** Cicla sin capa → comida → vegetación → agua → fertilidad → madera → humedad → sin capa. */
-function cicloCalor(): void { aplicarCapa(capasMapa[(capasMapa.indexOf(capaMapa) + 1) % capasMapa.length]!); }
-
-function aplicarCapa(capa: CapaMapa): void {
-  capaMapa = capa;
-  capaCalor = capa === 'none' || capa === 'humedad' ? null : capa;
-  landscape?.setLayer(capa === 'humedad' ? 'moisture' : 'none');
-  landscape?.setCapaCalor(capaCalor, capaCalor && world ? rangoRecibido(world.tiles, capaCalor) : null);
-  const select = document.getElementById('observation-layer') as HTMLSelectElement | null;
-  if (select && select.value !== capa) select.value = capa;
-  const explicacion = document.getElementById('layer-explanation');
-  if (explicacion) explicacion.textContent = capa === 'none' ? 'Agua, recursos y encuentros cambian las posibilidades.' : capa === 'humedad' ? 'Más azul: más humedad. Inspecciona una casilla para ver su valor.' : 'Más intenso: más valor, entre el mínimo y el máximo de lo que ves. La leyenda da los valores reales.';
-  renderLeyendaCalor();
-}
-
-function renderLeyendaCalor(): void {
-  const panel = document.getElementById('heat-legend');
-  const boton = document.getElementById('heat-button');
-  boton?.setAttribute('aria-pressed', String(capaMapa !== 'none'));
-  if (!panel) return;
-  panel.hidden = capaMapa === 'none';
-  if (capaMapa === 'none') { panel.innerHTML = ''; return; }
-  if (capaMapa === 'humedad') {
-    const tiles = world?.tiles ?? [];
-    const valores = tiles.map(t => t.moisture).filter(Number.isFinite);
-    panel.innerHTML = `<p class="eyebrow">CAPA DEL MAPA</p><h3>Humedad</h3><p class="heat-range">Más azul, más humedad.${valores.length ? ` En lo que ves va de ${esc(percentage(Math.min(...valores)))} a ${esc(percentage(Math.max(...valores)))}.` : ''}</p>`;
-    return;
-  }
-  const leyenda = leyendaEnRango(capaMapa, world ? rangoRecibido(world.tiles, capaMapa) : null);
-  panel.innerHTML = `<p class="eyebrow">MAPA DE CALOR</p><h3>${esc(leyenda.titulo)}</h3><ul class="heat-stops">${leyenda.paradas
-    .map(parada => `<li><i style="background:${parada.color}" aria-hidden="true"></i><span>${esc(parada.etiqueta)}</span></li>`)
-    .join('')}</ul><p class="heat-range">${esc(leyenda.nota)}</p>`;
+  el('sound-toggle').addEventListener('click', async () => {
+    // Un arranque en curso no admite otra pulsación: dos start() simultáneos abrirían dos AudioContext y solo se guardaría el último.
+    if (soundBusy) return;
+    const session = uiSession, audio = soundscape, button = el('sound-toggle');
+    if (soundEnabled) { soundEnabled = false; soundscape.setMuted(true); }
+    else {
+      soundEnabled = true; soundBusy = true; button.setAttribute('aria-busy', 'true');
+      soundscape.setMuted(false); soundscape.setHidden(document.hidden);
+      let started = false;
+      try { started = await audio.start(); }
+      finally { if (session === uiSession) { soundBusy = false; button.removeAttribute('aria-busy'); } }
+      if (session !== uiSession) { audio.stop(); return; }
+      if (!started) { soundEnabled = false; message('No se pudo activar el sonido. Puedes explorar sin él.', false); }
+    }
+    button.setAttribute('aria-pressed', String(soundEnabled));
+  });
 }
 
 function navigateEntity(event: MouseEvent): void {
@@ -417,13 +441,192 @@ function navigateEntity(event: MouseEvent): void {
   }
 }
 
-function sound(): void {
-  if (!soundContext) return;
-  if (!document.hidden) for (const [index, frequency] of [261.63, 329.63, 392].entries()) { const oscillator = soundContext.createOscillator(), gain = soundContext.createGain(), now = soundContext.currentTime; oscillator.frequency.value = frequency; oscillator.type = 'sine'; gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(0.008, now + 1.5); gain.gain.exponentialRampToValueAtTime(0.0001, now + 7); oscillator.connect(gain); gain.connect(soundContext.destination); oscillator.start(now + index * .15); oscillator.stop(now + 7.2); }
-  soundTimer = setTimeout(sound, 12_000);
+/** Session-owned V24 windows, network refreshes and camera/audio bridge. */
+function startClientUi(): void {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const rects = {
+    // Cascada inicial: cada ventana nace con su cabecera a la vista (Vidas y Susurros a la izquierda, Inspector y Ajustes a la derecha).
+    population: { x: 24, y: 96, width: 390, height: 560 },
+    whisper: { x: 64, y: 140, width: 380, height: 500 },
+    inspector: { x: vw - 414, y: 96, width: 390, height: 580 },
+    settings: { x: vw - 454, y: 140, width: 360, height: 520 },
+    stats: { x: Math.max(24, Math.round((vw - 920) / 2)), y: 88, width: Math.min(920, vw - 48), height: Math.min(720, vh - 160) },
+  };
+  // Ventanas libres solo en escritorio; en móvil rige la hoja única del cuaderno (sin estilos en línea).
+  const syncPanels = (): void => {
+    for (const page of Object.keys(rects) as NotebookPage[]) {
+      const panel = el(`${page}-drawer`);
+      if (mobile()) { panels[page]?.destroy(); delete panels[page]; panel.classList.remove('is-floating'); }
+      else if (!panels[page]) { panel.classList.add('is-floating'); panels[page] = makeFloatingPanel(panel, { id: page, handleSelector: 'header', defaultRect: rects[page] }); }
+    }
+  };
+  syncPanels();
+  panelQuery = matchMedia('(max-width: 760px)'); panelQuery.addEventListener('change', syncPanels); panelSync = syncPanels;
+  notebook = new Notebook(el('game'), panels);
+  soundscape = new SpatialSoundscape();
+  el('settings-body').innerHTML = renderGraphicsSettingsHtml(graphicsSettings);
+  landscape?.setGraphicsSettings(graphicsSettings); soundscape.setVolume(graphicsSettings.soundVolume);
+  minimap = mountMinimap(el<HTMLCanvasElement>('minimap-canvas'), focusTile);
+  uiSession = new AbortController();
+  void refreshMap();
+  uiTimers.push(setInterval(() => { if (!document.hidden) void refreshMap(); }, 3000));
+  uiTimers.push(setInterval(() => {
+    if (document.hidden) return;
+    if (!el('population-drawer').hidden || !el('whisper-drawer').hidden) void refreshDirectory();
+    if (!el('whisper-drawer').hidden) void refreshWhispers();
+  }, 2500));
+  let previous = '';
+  const frame = (): void => {
+    uiRaf = requestAnimationFrame(frame); // primero: un fallo de dibujo o de audio no detiene el bucle
+    if (document.hidden || !landscape || !world) return;
+    try {
+      const b = landscape.getViewportBounds(), camera = landscape.camera();
+      const viewport = { x: b.minX, y: b.minY, width: b.maxX - b.minX, height: b.maxY - b.minY };
+      const key = JSON.stringify(viewport);
+      if (key !== previous) {
+        previous = key; minimap?.updateViewport(viewport);
+        // V24: la ventana pedida al servidor ya no sigue a la cámara paso a paso; las coordenadas salen de la cámara.
+        el('camera-coordinates').textContent = `${Math.floor(camera.x)}, ${Math.floor(camera.y)}`;
+        if (!whisperPicked && !el('whisper-drawer').hidden) followWhisperTile(); // lo que se ve en el formulario es lo que se envía
+      }
+      // Con el mundo en pausa (o la cinta detenida) el paisaje conserva sus camas pero no repite golpes sobre un fotograma congelado.
+      if (!world.paused && !(dvr?.enabled && !dvr.playing)) soundscape.update(world, { ...viewport, zoom: camera.zoom });
+    } catch { /* La cámara visible manda; el minimapa y el sonido son accesorios. */ }
+  };
+  uiRaf = requestAnimationFrame(frame);
+}
+function stopClientUi(): void {
+  uiSession?.abort(); uiSession = null;
+  for (const timer of uiTimers.splice(0)) clearInterval(timer);
+  cancelAnimationFrame(uiRaf); minimap?.destroy(); minimap = null;
+  notebook?.destroy();
+  if (panelQuery && panelSync) panelQuery.removeEventListener('change', panelSync);
+  panelQuery = null; panelSync = null;
+  for (const page of Object.keys(panels) as NotebookPage[]) { panels[page]?.destroy(); delete panels[page]; }
+  directory = null; directoryState = 'loading'; recentWhispers = []; pickingWhisper = false; whisperTile = { x: 0, y: 0 }; whisperPicked = false;
+  directoryBusy = mapBusy = whispersBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
+}
+const uiJson = <T>(url: string, session: AbortController, valid: (data: unknown) => data is T): Promise<T> => fetchJson(url, session.signal, valid);
+async function refreshMap(): Promise<void> {
+  const session = uiSession; if (!session || mapBusy || document.hidden || Date.now() < mapRetryAt) return; mapBusy = true;
+  try { const data = await uiJson('/api/worldmap', session, validMap); if (session !== uiSession) return; mapFailures = 0; minimap?.updateMap(data); el('minimap-status').textContent = `${number(data.discoveredChunks)} regiones descubiertas`; }
+  catch { if (session === uiSession) { mapFailures = Math.min(mapFailures + 1, 5); mapRetryAt = Date.now() + 3000 * 2 ** mapFailures; el('minimap-status').textContent = 'Mapa sin actualizar · reintentando'; } }
+  finally { if (session === uiSession) mapBusy = false; }
+}
+async function refreshDirectory(): Promise<void> {
+  const session = uiSession; if (!session || directoryBusy || document.hidden) return; directoryBusy = true;
+  try { const data = await uiJson('/api/directory', session, validDirectory); if (session !== uiSession) return; directory = data; directoryState = 'ready'; }
+  catch { if (session === uiSession) directoryState = 'failed'; } // se conserva el último directorio válido: su paso dice cuán viejo es
+  finally {
+    if (session === uiSession) {
+      directoryBusy = false;
+      if (!el('population-drawer').hidden) renderPopulation();
+      if (!el('whisper-drawer').hidden) renderWhisperPeople();
+      if (!el('stats-drawer').hidden) renderStats();
+    }
+  }
+}
+async function refreshWhispers(): Promise<void> {
+  const session = uiSession; if (!session || whispersBusy || document.hidden) return; whispersBusy = true;
+  try { const data = await uiJson('/api/whispers', session, validWhispers); if (session !== uiSession) return; recentWhispers = data.whispers; }
+  catch { /* Received world whispers remain available offline. */ }
+  finally { if (session === uiSession) { whispersBusy = false; renderWhispers(); } }
+}
+function renderWhisperPeople(): void {
+  const select = el<HTMLSelectElement>('whisper-person'), previous = select.value || activePersonId;
+  const all = directory?.people ?? world?.people ?? [];
+  // Un mundo grande no cabe en un desplegable: S, I y la persona elegida primero, luego por nombre hasta el tope.
+  const rank = (p: { id: string; role: string }): number => p.id === previous ? 0 : p.role === 'S' ? 1 : p.role === 'I' ? 2 : 3;
+  const people = all.length > DIRECTORY_ROWS ? [...all].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'es')).slice(0, DIRECTORY_ROWS) : all;
+  const html = people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.role === 'S' || p.role === 'I' ? ` (${esc(p.role)})` : ''} · ${esc(p.x)}, ${esc(p.y)}</option>`).join('')
+    + (all.length > people.length ? `<option disabled>… y ${esc(number(all.length - people.length))} más (solo se listan 300): usa «A quien pase por el lugar»</option>` : '');
+  if (select.innerHTML !== html) { select.innerHTML = html; if (people.some(p => p.id === previous)) select.value = previous; }
+}
+function renderWhispers(): void {
+  const whispers = new Map((world?.whispers ?? []).map(w => [w.id, w]));
+  // Polling reflects the live world; tape snapshots remain the truth while replaying history.
+  if (!dvr?.enabled || dvr.atLiveEdge) for (const w of recentWhispers) {
+    const current = whispers.get(w.id);
+    const changedAt = (item: DivineWhisper): number => item.resolvedTick ?? item.heardTick ?? item.createdTick;
+    if (!current || changedAt(w) >= changedAt(current)) whispers.set(w.id, w);
+  }
+  const labels = { latent: 'Latente', heard: 'Escuchado', fulfilled: 'Cumplido', faded: 'Desvanecido' };
+  const intents: Record<DivineWhisperIntent, string> = { travel: 'Viajar', explore: 'Explorar', gather: 'Recolectar', build: 'Construir', craft: 'Crear', tend: 'Cuidar fauna' };
+  el('whisper-list').innerHTML = [...whispers.values()].sort((a, b) => b.createdTick - a.createdTick).map(w => `<article class="whisper-card"><span class="whisper-state">${esc(labels[w.status] ?? w.status)}</span><strong>${esc(w.personName ?? w.personId ?? 'Quien pase por el lugar')}</strong><p>${esc(w.note)}</p><button type="button" data-whisper-x="${esc(w.x)}" data-whisper-y="${esc(w.y)}">${esc(w.x)}, ${esc(w.y)} · ${esc(intents[w.intent] ?? w.intent)}</button></article>`).join('') || '<p class="drawer-note">Aún no hay susurros recibidos.</p>';
+}
+function renderLayers(): void {
+  landscape?.setActiveLayers(activeLayers);
+  const options = el('layers-options'), focused = (document.activeElement as HTMLElement | null)?.dataset?.layer;
+  options.innerHTML = renderLayersPopoverHtml(activeLayers);
+  if (focused) options.querySelector<HTMLElement>(`[data-layer="${focused}"]`)?.focus({ preventScroll: true });
+  const summary = el('layers-summary'); summary.hidden = !activeLayers.size; summary.textContent = activeLayersSummary(activeLayers);
+  const legend = el('heat-legend'); legend.hidden = !activeLayers.size;
+  legend.innerHTML = MAP_LAYER_CATALOG.filter(layer => activeLayers.has(layer.id)).map(layer => `<p class="layer-legend-row"><i class="layer-swatch" style="background:${layer.color}"></i><span><strong>${esc(layer.label)}</strong> · ${esc(layer.description)}</span><button type="button" data-remove-layer="${layer.id}" aria-label="Quitar ${esc(layer.label)}">×</button></p>`).join('') + (activeLayers.size ? '<button type="button" data-action="clear-layers">Limpiar</button>' : '');
+}
+function toggleLayers(): void {
+  const panel = el('layers-popover'); panel.hidden = !panel.hidden;
+  if (!panel.hidden && mobile()) notebook?.close();
+  el('layers-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+}
+function wireClientUi(): void {
+  renderLayers();
+  el('layers-toggle').addEventListener('click', toggleLayers);
+  const layerClick = (event: Event): void => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action="clear-layers"], [data-remove-layer]'); if (!button) return;
+    activeLayers = isMapLayerId(button.dataset.removeLayer) ? toggleLayer(activeLayers, button.dataset.removeLayer) : clearLayers(); renderLayers();
+  };
+  el('layers-options').addEventListener('change', event => { const id = (event.target as HTMLElement).dataset.layer; if (isMapLayerId(id)) { activeLayers = toggleLayer(activeLayers, id); renderLayers(); } });
+  el('layers-options').addEventListener('click', layerClick); el('heat-legend').addEventListener('click', layerClick);
+  const applyGraphics = (): void => {
+    graphicsSettings = sanitizeGraphicsSettings(graphicsSettings);
+    try { saveGraphicsSettings(localStorage, graphicsSettings); } catch { /* Private browsing. */ }
+    graphicsChosen = true;
+    // Ligero ⇄ Ultra/Equilibrado cambia el modo de dibujo (GPU, dpr, fps y cadencia del mundo), que se decide al entrar: se reentra.
+    if (modoDeAjustes(graphicsSettings) !== modoActual) { enterWorld(sessionFlags); return; }
+    landscape?.setGraphicsSettings(graphicsSettings); soundscape.setVolume(graphicsSettings.soundVolume);
+    el('setting-min-zoom-out').textContent = minZoomLabel(graphicsSettings.minZoom);
+    el('setting-sound-volume-out').textContent = `${Math.round(graphicsSettings.soundVolume * 100)} %`;
+  };
+  el('settings-body').addEventListener('click', event => { const preset = (event.target as HTMLElement).closest<HTMLElement>('[data-preset]')?.dataset.preset; if (!GRAPHICS_PRESETS.includes(preset as GraphicsPreset)) return; graphicsSettings = applyPreset(preset as GraphicsPreset, graphicsSettings); el('settings-body').innerHTML = renderGraphicsSettingsHtml(graphicsSettings); applyGraphics(); });
+  const settingChanged = (event: Event): void => {
+    const input = event.target as HTMLInputElement, key = input.dataset.setting;
+    if (key === 'minZoom') graphicsSettings.minZoom = Number(input.value);
+    else if (key === 'maxDpr') graphicsSettings.maxDpr = ([1, 1.5, 2] as const)[Number(input.value)] ?? 1.5;
+    else if (key === 'soundVolume') graphicsSettings.soundVolume = Number(input.value);
+    else if (key === 'shadows' || key === 'atmosphere' || key === 'vegetationSway' || key === 'waterRipples' || key === 'cutaways' || key === 'chemicalGlint') graphicsSettings[key] = input.checked;
+    else return;
+    applyGraphics();
+  };
+  el('settings-body').addEventListener('input', settingChanged);
+  el('minimap-expand').addEventListener('click', () => { const expanded = el('world-minimap').classList.toggle('is-expanded'); el('minimap-expand').setAttribute('aria-expanded', String(expanded)); el('minimap-expand').textContent = expanded ? 'Reducir mapa' : 'Ampliar mapa'; const bounds = landscape?.getViewportBounds(); if (bounds) minimap?.updateViewport({ x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY }); });
+  el('tame-filter').addEventListener('change', renderPopulation);
+  el('whisper-mode').addEventListener('change', () => { el('whisper-person-label').hidden = el<HTMLSelectElement>('whisper-mode').value === 'place'; });
+  el('whisper-pick').addEventListener('click', () => { const next = !pickingWhisper; control = 'inspect'; if (next && mobile()) drawer('whisper', false); setPickingWhisper(next); });
+  el('whisper-list').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLElement>('[data-whisper-x]'); if (button) focusTile(Number(button.dataset.whisperX), Number(button.dataset.whisperY)); });
+  el('whisper-form').addEventListener('submit', async event => {
+    event.preventDefault(); const session = uiSession; if (!session) return;
+    const isPerson = el<HTMLSelectElement>('whisper-mode').value === 'person';
+    const id = el<HTMLSelectElement>('whisper-person').value;
+    const recipient = (directory?.people ?? world?.people ?? []).find(p => p.id === id);
+    if (isPerson && !recipient) { el('whisper-status').textContent = 'Elige un habitante recibido.'; return; }
+    // El lugar es el destino del susurro; la persona solo decide quién lo puede escuchar.
+    const request: DivineWhisperRequest = { personId: isPerson ? id : null, x: whisperTile.x, y: whisperTile.y, intent: el<HTMLSelectElement>('whisper-intent').value as DivineWhisperIntent, note: el<HTMLInputElement>('whisper-note').value.slice(0, 120) };
+    const button = el<HTMLButtonElement>('whisper-submit'); button.disabled = true; el('whisper-status').textContent = 'Enviando susurro…';
+    try {
+      const response = await fetch('/api/whisper', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.any([session.signal, AbortSignal.timeout(10000)]) });
+      if (session !== uiSession) return;
+      if (response.status !== 201) throw new Error(response.status === 401 || response.status === 403 ? 'La sesión no permite enviar el susurro.' : 'El mundo no aceptó el susurro.');
+      const result: unknown = await response.json();
+      if (session !== uiSession) return;
+      if (!validWhisperResult(result)) { el('whisper-status').textContent = 'El mundo recibió el susurro, pero su confirmación llegó ilegible; míralo en la lista.'; void refreshWhispers(); return; }
+      recentWhispers = [...recentWhispers.filter(w => w.id !== result.whisper.id), result.whisper]; renderWhispers();
+      el('whisper-status').textContent = 'Susurro recibido por el mundo; escucharlo y actuar dependen de cada vida.';
+    } catch (error) { if (session === uiSession) el('whisper-status').textContent = error instanceof Error && error.message.startsWith('El mundo') ? error.message : 'No se pudo confirmar el envío. Revisa los susurros antes de reintentar.'; }
+    finally { if (session === uiSession) button.disabled = false; }
+  });
 }
 
-function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles): void {
+function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles, changedTiles?: readonly Tile[]): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
   // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
@@ -431,7 +634,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   recordarVistos(next);
   tileCache.ingest(tilesToIngest, next.tick);
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
-  const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
+  const first = world === null; world = next; landscape?.update(next, changedTiles); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
   renderTelemetryHud(next);
   cronica.acumular(next.events);
@@ -442,10 +645,9 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
     if (!mobile()) drawer('inspector', true);
     if (lastVisit !== null) returnCard(next, lastVisit);
   }
-  const memoryKey = JSON.stringify(next.memories); if (memoryKey !== memorySignature) { memorySignature = memoryKey; const old = el<HTMLSelectElement>('memory-select').value; el('memory-select').innerHTML = next.memories.map(m => `<option value="${esc(m.id)}">${esc(m.title)} · ${m.source === 'sample' ? 'prueba' : 'aprobado'}</option>`).join(''); if (next.memories.some(m => m.id === old)) el<HTMLSelectElement>('memory-select').value = old; }
-  const places = el<HTMLSelectElement>('place-select'), oldPlace = places.value; const placesHtml = '<option value="">Un lugar de esta región</option>' + next.places.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); if (places.innerHTML !== placesHtml) { places.innerHTML = placesHtml; places.value = oldPlace; }
-  if (capaMapa !== 'none') { if (capaCalor) landscape?.setCapaCalor(capaCalor, rangoRecibido(next.tiles, capaCalor)); renderLeyendaCalor(); }
-  renderPopulation(); renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();
+  if (!el('whisper-drawer').hidden) { renderWhisperPeople(); renderWhispers(); }
+  if (!el('population-drawer').hidden) renderPopulation();
+  renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();
 }
 /** V21: en observación pura toda ayuda de la lista se completa con la nota única (sin «dar una orden»). */
 function observerNote(text: string): string { return observerOnly ? `${OBSERVER_NOTE} ${text}` : text; }
@@ -454,42 +656,48 @@ function renderTelemetryHud(current: WorldView): void {
     const button = el('hud-telemetry').querySelector<HTMLButtonElement>(`[data-hud-nav="${kpi.nav}"]`)!;
     const value = button.querySelector<HTMLElement>('[data-hud-value]')!;
     if (value.textContent !== kpi.value) value.textContent = kpi.value;
+    const extra = button.querySelector<HTMLElement>('[data-hud-extra]');
+    if (extra && extra.textContent !== (kpi.summary ?? '')) extra.textContent = kpi.summary ?? '';
     button.title = kpi.detail;
-    button.setAttribute('aria-label', `${kpi.label}: ${kpi.value}. ${kpi.detail}`);
+    button.setAttribute('aria-label', `${kpi.label}: ${kpi.value}. ${kpi.summary ?? ''} ${kpi.detail}`);
     button.dataset.health = kpi.health ?? 'unknown';
   }
   el('viewport-census').textContent = viewportCensusText(current);
 }
 function renderPopulation(): void {
-  if (!world) return; const search = el<HTMLInputElement>('population-search').value.toLocaleLowerCase('es'); const people = world.people.filter(p => `${p.name} ${p.specialty ?? ''} ${p.specialty ? enClaro(p.specialty, {}, 'especialidad') : ''}`.toLocaleLowerCase('es').includes(search));
-  const fauna = populationKind === 'animals';
-  el('population-heading').textContent = fauna ? 'Fauna' : 'Habitantes';
-  el('population-search-label').textContent = fauna ? 'Buscar animal' : 'Buscar habitante';
-  el<HTMLInputElement>('population-search').placeholder = fauna ? 'Especie, actividad o identificador' : 'Nombre o especialidad';
-  el('species-filter-label').hidden = !fauna; el('species-legend').hidden = !fauna;
+  if (!world) return;
+  const query = el<HTMLInputElement>('population-search').value.trim().toLocaleLowerCase('es');
+  const fauna = populationKind === 'animals', tameOnly = el<HTMLInputElement>('tame-filter').checked;
+  const labels = { people: 'Habitantes', animals: 'Fauna', communities: 'Comunidades', structures: 'Obras' };
+  el('population-heading').textContent = labels[populationKind];
+  el('population-search-label').textContent = `Buscar en ${labels[populationKind]}`;
+  el<HTMLInputElement>('population-search').placeholder = 'Nombre, oficio, comunidad, especie o x,y';
+  el('species-filter-label').hidden = !fauna; el('species-legend').hidden = !fauna; el('tame-filter-label').hidden = !fauna;
   for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-population]')) tab.setAttribute('aria-pressed', String(tab.dataset.population === populationKind));
-  if (fauna) {
+  type Row = { id?: string; kind: 'person' | 'animal' | 'place' | 'herd'; name: string; detail: string; x: number; y: number; role?: string; species?: string; tame?: boolean };
+  let rows: Row[] = [];
+  if (populationKind === 'people') {
+    rows = (directory?.people ?? world.people).map<Row>(p => {
+      const specialty = 'craftFocus' in p ? p.craftFocus : 'specialty' in p ? p.specialty : '';
+      const community = (directory?.communities ?? world!.communities ?? []).find(c => c.id === p.communityId)?.name ?? p.communityId ?? '';
+      return { id: p.id, kind: 'person', name: p.name, role: p.role, x: p.x, y: p.y, detail: `${specialty ?? ''} · ${community} · ${p.role === 'S' || p.role === 'I' ? p.role : 'Vecino'} · ${actions[p.action as PersonView['action']] ?? p.action}` };
+    }).sort((a, b) => (a.role === 'S' ? 0 : a.role === 'I' ? 1 : 2) - (b.role === 'S' ? 0 : b.role === 'I' ? 1 : 2) || a.name.localeCompare(b.name, 'es'));
+  } else if (fauna) {
+    if (directory) rows = directory.herds.map(h => ({ kind: 'herd', name: speciesPlural[h.species as AnimalView['species']] ?? h.species, species: h.species, x: h.x, y: h.y, tame: h.tameCount > 0 || h.avgHabituation >= .45, detail: `${h.count} individuos · ${h.tameCount} mansos · habituación ${percentage(h.avgHabituation)}` }));
+    else rows = (world.animals ?? []).map(a => ({ id: a.id, kind: 'animal', name: speciesNames[a.species], species: a.species, x: a.x, y: a.y, tame: (a.habituation ?? 0) >= .45, detail: `${a.id} · ${animalActions[a.action]} · G${a.generation}` }));
     const species = el<HTMLSelectElement>('species-filter').value;
-    const animals = (world.animals ?? []).filter(a => (!species || species === a.species) && `${speciesNames[a.species]} ${a.id} ${animalActions[a.action]}`.toLocaleLowerCase('es').includes(search));
-    const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = `${number(world.animals?.length ?? 0)} en esta vista`;
-    el('population-note').textContent = observerNote(`Individuos de la región recibida por la cámara. ${animals.length} coincidencias${animals.length > 80 ? '; se muestran las primeras 80, afina la búsqueda' : ''}. Sus necesidades guían su actividad; puedes observarlos y seguirlos.`);
-    if (signature === populationSignature) return; populationSignature = signature;
-    el('population-list').innerHTML = animals.slice(0, 80).map(a => `<button class="population-person animal-row" data-animal="${esc(a.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === a.id}"><span class="animal-avatar" style="--animal-color:${animalColors[a.species]}" aria-hidden="true">${animalSilhouette(a.species)}</span><span><strong>${speciesNames[a.species]}</strong><small>${animalActions[a.action]} · generación ${esc(a.generation)}</small></span></button>`).join('') || '<p class="drawer-note">No hay animales que coincidan en esta región. Puedes recorrer el mapa o ampliar el filtro.</p>';
-    return;
-  }
-  // M1: `people` llega recortado a la cámara (protocolo 10); el total del mundo sale del censo.
-  // V18: con 300+ habitantes en cuadro la lista nombra solo una ventana acotada (como la de fauna);
-  // el paisaje sigue en Canvas/WebGL2, sin un nodo DOM por habitante fuera de esta lista.
-  const ventana = ventanaLista(people);
-  el('population-count').textContent = rotuloRecuento(world);
-  el('population-note').textContent = observerNote(`La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella.${ventana.restantes ? ` Se nombran las primeras ${ventana.visibles.length} coincidencias de ${people.length}; afina la búsqueda para encontrar a alguien concreto.` : ''} Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.`);
-  const signature = JSON.stringify([search, activePersonId, people.length, ventana.visibles.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
-  el('population-list').innerHTML = ventana.visibles.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || (world.people.length ? '<p class="drawer-note">No hay habitantes de esta vista que coincidan.</p>' : '<p class="drawer-note">No hay nadie en esta vista. El censo del mundo está en Mundo › Vida; mueve el mapa o usa S e I para encontrar a alguien.</p>');
-  const select = el<HTMLSelectElement>('person-select');
-  const selectOptions = ventana.visibles.some(p => p.id === activePersonId)
-    ? ventana.visibles
-    : (() => { const current = world.people.find(p => p.id === activePersonId); return current ? [current, ...ventana.visibles] : ventana.visibles; })();
-  select.innerHTML = `<option value="">${world.people.length ? 'Elige a alguien de esta vista' : 'Nadie en esta vista'}</option>` + selectOptions.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
+    rows = rows.filter(row => (!species || row.species === species) && (!tameOnly || row.tame));
+  } else if (populationKind === 'communities') rows = (directory?.communities ?? world.communities ?? []).map(c => ({ kind: 'place', name: c.name, x: c.x, y: c.y, detail: `${c.memberCount ?? ('members' in c ? c.members.length : 0)} habitantes · comunidad` }));
+  else rows = (directory?.structures ?? world.structures ?? []).map(s => ({ kind: 'place', name: s.name, x: s.x, y: s.y, detail: `${typeof s.cells === 'number' ? s.cells : s.cells?.length ?? 1} casillas · obra / poliominó · estado ${percentage(s.condition)}` }));
+  const matches = rows.filter(row => `${row.name} ${row.detail} ${row.species ?? ''} ${row.x},${row.y} ${row.x}, ${row.y}`.toLocaleLowerCase('es').includes(query));
+  const totals = populationKind === 'people' ? directory?.totalPeople : fauna ? directory?.totalAnimals : populationKind === 'structures' ? directory?.totalStructures : directory?.communities.length;
+  const shown = matches.slice(0, DIRECTORY_ROWS);
+  const found = `${number(matches.length)} coincidencias${matches.length > shown.length ? ` · se muestran ${number(shown.length)}` : ''}`;
+  // Sin directorio global, el recuento honesto de siempre: lo recibido por la cámara frente al censo del mundo.
+  el('population-count').textContent = !directory && populationKind === 'people' ? `${rotuloRecuento(world)}${query ? ` · ${found}` : ''}` : `${number(totals ?? rows.length)}${directory ? ' en el mundo' : ' recibidos'} · ${found}`;
+  el('population-note').textContent = observerNote(directory ? `Directorio global · paso ${directory.tick}${directoryState === 'failed' ? ' (no se pudo actualizar; se reintenta solo)' : ''}.${fauna ? ' La fauna está agrupada en rebaños; toca uno para inspeccionar el lugar y sus individuos recibidos.' : ''}` : directoryState === 'loading' ? 'Cargando el directorio global… mientras tanto se muestra lo recibido por la cámara.' : 'Directorio global no disponible. Se muestra solo la instantánea recibida por la cámara; se reintenta solo.');
+  const html = shown.map(row => `<button type="button" class="population-person${row.kind === 'animal' ? ' animal-row' : ''}"${row.kind === 'person' && row.id ? ` data-person="${esc(row.id)}" aria-pressed="${row.id === activePersonId && selected.kind === 'person'}"` : row.kind === 'animal' && row.id ? ` data-animal="${esc(row.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === row.id}"` : ''} data-directory-kind="${row.kind}" data-directory-id="${esc(row.id ?? '')}" data-directory-x="${esc(row.x)}" data-directory-y="${esc(row.y)}"><span><strong>${esc(row.name)}${row.tame ? ' <b class="tame-badge">Habituado / manso</b>' : ''}</strong><small>${esc(row.detail)}</small><small>${esc(row.x)}, ${esc(row.y)}</small></span>${icon.arrow}</button>`).join('') + (matches.length > shown.length ? '<p class="drawer-note">Hay más resultados: escribe un nombre, oficio, comunidad o coordenadas para afinar la búsqueda.</p>' : '') || '<p class="drawer-note">No hay coincidencias en la información recibida.</p>';
+  if (populationSignature !== html) { populationSignature = html; el('population-list').innerHTML = html; }
 }
 function replacePersonCard(html: string): void {
   const card = el('inhabitant-card');
@@ -585,7 +793,7 @@ function renderInspector(): void {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
     const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.cells?.length ? s.cells.some(c => c.x === tile.x && c.y === tile.y) : tile.x >= s.x && tile.x < s.x + (s.footprint?.width ?? 1) && tile.y >= s.y && tile.y < s.y + (s.footprint?.height ?? 1)) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
-    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">${observerOnly ? OBSERVER_NOTE : 'Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.'}</p>`);
+    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">${observerOnly ? OBSERVER_NOTE : 'Selecciona un habitante para dar una orden; puedes compartir un susurro desde Susurros.'}</p>`);
   }
 }
 function renderControls(): void {
@@ -597,7 +805,7 @@ function renderControls(): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.disabled = blocked;
   el('mode-indicator').hidden = control !== 'direct' && !following; el('mode-indicator').textContent = control === 'direct' ? `Dirigir a ${person()?.name ?? ''}: toca un destino · WASD mueve una casilla · Esc sale` : `Siguiendo a ${selected.kind === 'animal' ? (world?.animals?.find(a=>a.id===(selection.kind==='animal'?selection.id:'')) ? speciesNames[world.animals.find(a=>a.id===(selection.kind==='animal'?selection.id:''))!.species] : 'un animal') : person()?.name ?? ''} · arrastra para liberar la cámara`;
   el('control-help').textContent = pending ? 'Esperando confirmación del mundo.' : world?.paused ? 'Mundo en pausa · las tareas esperan.' : status !== 'live' ? 'Sin conexión para dar tareas.' : control === 'direct' ? 'Toca un destino · WASD camina · Esc sale.' : 'Una tarea cambia su actividad. Sus necesidades siguen contando.';
-  el('game').classList.toggle('direct-mode', control === 'direct'); renderTool();
+  el('game').classList.toggle('direct-mode', control === 'direct');
 }
 function renderStatus(): void {
   if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; const tape = !!dvr?.enabled && !!world; el('connection-label').textContent = paused ? 'En pausa' : tape ? (dvr!.atLiveEdge ? 'En vivo · cinta' : 'Cinta') : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String((tape || status === 'live') && !paused);
@@ -620,13 +828,6 @@ function renderRhythm(): void {
     el('growth-chip-detail').textContent = growth.detalle;
     chip.title = `${growth.detalle} Toca para ver Mundo › Vida.`;
   }
-}
-function renderTool(): void {
-  if (!document.getElementById('gesture-title')) return;
-  const labels = { plant: ['Sembrar', 'Deja una planta en la casilla elegida. Necesita agua y luz para crecer.', 'Sembrar aquí'], invite: ['Invitar', 'Deja una invitación en el lugar elegido. Cada habitante decide si responder.', 'Invitar aquí'], remember: ['Recordar', 'Un recuerdo ofrece contexto; no impone una reconciliación ni una decisión.', 'Traer este recuerdo'] };
-  el('gesture-title').textContent = labels[tool][0]!; el('gesture-description').textContent = labels[tool][1]!; el('memory-choice').hidden = tool !== 'remember'; const memory = world?.memories.find(m => m.id === el<HTMLSelectElement>('memory-select').value);
-  el('memory-preview').textContent = memory ? `${memory.source === 'sample' ? 'Recuerdo de prueba, no biográfico' : 'Recuerdo aprobado'}: ${memory.text}` : 'No hay recuerdos disponibles.';
-  const position = target(); el('gesture-target').textContent = position ? `casilla ${position.x}, ${position.y}` : 'toca una casilla'; const button = el<HTMLButtonElement>('gesture-send'); button.innerHTML = pending ? 'Esperando confirmación…' : `${labels[tool][2]} ${icon.arrow}`; button.disabled = status !== 'live' || !!world?.paused || pending || !position || (tool === 'remember' && !memory);
 }
 /** M5: «Desde tu última visita» con lo que cambió (contadores del estado real) y los hitos, no 3 episodios al azar. */
 function returnCard(current: WorldView, since: number): void {
@@ -712,14 +913,33 @@ function renderPanelGobernadorEnDom(): void {
   const html = world ? renderPanelGobernador(world.performance, world.stats?.population) : '';
   contenedor.innerHTML = html; contenedor.hidden = !html;
 }
+/**
+ * V24: el panel de estadísticas solo se rehace si está abierto y algo cambió. Lo que cambia con cada paso del mundo
+ * (tick/secuencia) lo refresca a lo sumo una vez por segundo; cambiar de pestaña, de foco, de receta o de estado lo
+ * rehace al momento. Antes se reconstruía su HTML ~6 veces por segundo y competía con el dibujo del mapa.
+ */
+const STATS_TICK_MS = 1000;
+let statsRenderedAt = -Infinity, statsTrailing: ReturnType<typeof setTimeout> | null = null;
 function renderStats(): void {
-  const panel = document.getElementById('stats-content'); if (!panel) return;
-  const sig = statsTab === 'performance' ? '' : `${statsTab}|${status}|${world?.tick ?? -1}|${world?.sequence ?? -1}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
-  if (sig && sig === statsSignature) return;
-  statsSignature = sig;
+  const panel = document.getElementById('stats-content'); if (!panel || el('stats-drawer').hidden) return;
+  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
+  const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}`;
+  if (sig === statsSignature) return;
+  const now = performance.now();
+  if (statsSignature.startsWith(`${structure}#`) && now - statsRenderedAt < STATS_TICK_MS) {
+    // El último paso recibido se muestra igual, al cumplirse el segundo (aunque no llegue otro paso).
+    statsTrailing ??= setTimeout(() => { statsTrailing = null; renderStats(); }, STATS_TICK_MS - (now - statsRenderedAt));
+    return;
+  }
+  if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; }
+  statsSignature = sig; statsRenderedAt = now;
   renderPanelGobernadorEnDom();
   const restore = retainViewState(panel);
+  const deepStats = document.getElementById('mundo-deep-stats') ?? Object.assign(document.createElement('div'), { id: 'mundo-deep-stats' });
   renderStatsContent();
+  // Estadísticas profundas de Mundo (mundo-dashboard.ts): lectura pura de lo recibido; un fallo suyo no tumba el panel.
+  try { deepStats.innerHTML = world ? renderMundoDeepStats(world, statsTab, directory) : ''; } catch { deepStats.innerHTML = '<p class="stats-note">Las estadísticas ampliadas no están disponibles ahora.</p>'; }
+  el('stats-content').append(deepStats);
   restore();
 }
 function renderStatsContent(): void {
@@ -782,6 +1002,6 @@ function renderStatsContent(): void {
   panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
-window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
+window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { soundscape.setHidden(document.hidden); if (document.hidden) saveVisit(); else if (uiSession) { void refreshMap(); if (!el('population-drawer').hidden) void refreshDirectory(); if (!el('whisper-drawer').hidden) void refreshWhispers(); } });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean } & SessionFlags; if (response.ok && session.authenticated) enterWorld({ tapeEnabled: session.tapeEnabled, observerOnly: session.observerOnly }); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
 void boot();

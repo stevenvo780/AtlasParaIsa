@@ -102,7 +102,7 @@ test('catalogue metadata and personal learning refresh independently without com
     await expect(page.locator('#stats-content')).toContainText('Hay procedimientos descubiertos');
     await expect(page.locator('#stats-content')).not.toContainText('Todavía no hay una receta descubierta');
     mkdirSync('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/catalog-ui-partial.png' });
-    await page.locator('#focus-s').click(); await page.locator('#inspector-tab-kit').click();
+    if (!await page.locator('#population-drawer').isVisible()) await page.locator('#population-toggle').click(); await page.locator('#focus-s').click(); await page.locator('#inspector-tab-kit').click(); // V24: S e I viven en Vidas
     if (await procedures.getAttribute('open') === null) await summary.click();
     await expect(procedures).toContainText('Procedimiento recipe-cold'); await expect(recipeLink).toHaveCount(0);
     await expect(procedures).not.toContainText('No recuerda ningún procedimiento ahora');
@@ -157,7 +157,7 @@ test('inspector destination changes with received intent; viewing, focusing and 
     await auto.focus(); await page.keyboard.press('Enter');
     await expect(page.locator('.tile-biome')).toContainText('25, 8');
     await expect(page.locator('#person-controls')).toBeHidden();
-    await page.locator('#focus-s').click();
+    if (!await page.locator('#population-drawer').isVisible()) await page.locator('#population-toggle').click(); await page.locator('#focus-s').click(); // V24: S e I viven en Vidas
     const directed = structuredClone(received); directed.sequence++;
     directed.people.find(person => person.id === 's')!.controlMode = 'directed';
     socket!.send(JSON.stringify({ type: 'state', world: directed }));

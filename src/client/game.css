@@ -89,7 +89,7 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .dvr-transport[data-loading=true] .dvr-time::after{content:" …";opacity:.7}
 .game-shell.has-dvr .map-hint{display:none}
 /* V21 — observador puro: ninguna orden ni gesto; todo lo demás sigue vivo. */
-.game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette,#intervene-toggle,#tool-drawer){display:none!important}
+.game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette){display:none!important}
 .game-shell.is-observer-only .control-pair{grid-template-columns:1fr}
 @media(max-width:1100px) and (min-width:761px){.dvr-transport{grid-template-columns:auto 1fr auto;}.dvr-scrubber{grid-column:1/-1;grid-row:2}}
 @media(max-width:760px){
@@ -101,3 +101,86 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .game-shell.has-dvr .world-coordinates{bottom:222px}.game-shell.has-dvr .camera-controls{bottom:232px}.game-shell.has-dvr .heat-legend{bottom:232px}
 }
 @media(prefers-reduced-motion:reduce){.dvr-bar,.dvr-bar *{transition:none!important}}
+
+/* V24: independent windows, live map controls and global directory. */
+.game-shell .game-drawer.is-floating { max-width:100vw; min-width:0; }
+.game-shell .game-drawer.is-floating > header { cursor:grab; touch-action:none; }
+.game-shell .is-floating.panel-dragging > header,.game-shell .is-dragging > header { cursor:grabbing; }
+.game-shell .is-floating.panel-dragging,.game-shell .is-resizing { user-select:none; box-shadow:0 16px 48px #14271960; }
+.game-shell .panel-resize-handle { position:absolute; right:3px; bottom:3px; width:21px; height:21px; cursor:nwse-resize; touch-action:none; z-index:3; }
+.game-shell .is-floating:has(.panel-resize-handle:active) { cursor:nwse-resize; }
+#settings-body { flex:1; min-height:0; overflow:auto; padding:0 4px 18px; }
+#whisper-drawer { overflow:auto; }
+#whisper-drawer > header { position:sticky; top:0; z-index:1; background:var(--paper,#fbf8ed); }
+#whisper-form { display:grid; gap:9px; }
+#whisper-drawer input,#whisper-drawer select { width:100%; }
+#whisper-status { min-height:2em; font-size:12px; line-height:1.5; }
+.preset-pills { display:flex; flex-wrap:wrap; gap:5px; }
+.preset-pill { flex:1; padding:10px 9px; min-height:40px; border:1px solid #aebc9c; border-radius:20px; font-size:12px; }
+.preset-pill[aria-pressed=true] { background:#294a3a; color:#fffbe9; border-color:#294a3a; }
+.settings-group { padding:12px 0; border-bottom:1px solid #d5dcc6; }
+.settings-group h3 { font-size:15px; margin-bottom:10px; }
+.settings-check,.layer-option { display:flex; align-items:center; gap:9px; padding:8px 0; }
+.game-shell .settings-check input,.game-shell .layer-option input { width:18px; min-height:18px; height:18px; margin:0; flex:0 0 18px; accent-color:#476f47; }
+.settings-check span,.layer-option span { display:grid; gap:2px; }
+.settings-check small,.layer-option small,.settings-hint { font-size:11px; color:#617556; line-height:1.5; }
+.settings-range { display:flex; justify-content:space-between; gap:10px; }
+.settings-range output { white-space:nowrap; }
+.game-shell .layers-dock { position:absolute; left:50%; bottom:96px; transform:translateX(-50%); z-index:900; width:360px; max-width:calc(100vw - 24px); max-height:calc(100dvh - 190px); overflow:auto; padding:15px; border-radius:12px; }
+.layers-popover { font-size:12px; }
+.layer-list { list-style:none; padding:0; margin:0; }
+.layer-option { cursor:pointer; border-bottom:1px solid #d5dcc6; }
+.layer-swatch { width:13px; height:13px; border-radius:3px; display:inline-block; flex:0 0 13px; }
+.layer-legend-row { display:flex; align-items:center; gap:7px; font-size:11px; margin:6px 0; }
+.layer-legend-row button { min-width:28px; min-height:28px; }
+#heat-legend > button { min-height:30px; margin-top:4px; padding:4px 12px; border:1px solid #81977780; border-radius:6px; color:inherit; font-size:11px; }
+#heat-legend { width:300px; max-width:calc(100vw - 36px); max-height:34dvh; overflow:auto; bottom:185px; z-index:899; }
+/* A la derecha: la izquierda es del minimapa. */
+@media (min-width:761px) { #heat-legend { left:auto; right:20px; } }
+.whisper-place { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
+.whisper-place output { font-weight:700; }
+.whisper-place button { min-height:36px; text-decoration:underline; }
+#layers-summary { background:#dce9c8; color:#294638; border-radius:10px; padding:2px 5px; font-size:9px; max-width:100px; }
+#tile-form fieldset { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; min-width:0; margin-top:12px; }
+#tile-form input { width:100%; min-width:0; }
+#tile-form label { min-width:0; }
+#world-minimap.minimap-dock { position:absolute; left:20px; bottom:180px; width:196px; padding:9px; z-index:12; border-radius:12px; }
+#world-minimap canvas { display:block; width:176px; height:176px; cursor:crosshair; touch-action:none; image-rendering:pixelated; border-radius:5px; }
+#world-minimap.is-expanded { width:330px; }
+#world-minimap.is-expanded canvas { width:310px; height:310px; }
+#world-minimap button { display:block; width:100%; min-height:30px; font-size:11px; text-align:left; }
+#minimap-status { display:block; font-size:10px; color:#617556; padding-top:4px; }
+.whisper-card { border:1px solid #d5dcc6; border-radius:9px; padding:12px; margin:10px 0; background:#f1f2e5; font-size:13px; overflow-wrap:anywhere; }
+.whisper-card strong { display:block; margin:7px 0; }
+.whisper-card p { margin:8px 0; }
+.whisper-card button { min-height:34px; text-decoration:underline; }
+.whisper-state,.tame-badge { display:inline-block; border-radius:12px; padding:3px 7px; font-size:10px; background:#dce9c8; color:#294638; }
+.vidas-si-bar { display:flex; gap:10px; padding-bottom:12px; flex:0 0 auto; }
+.game-shell .vidas-si-bar .role-button { flex:1; width:auto; height:auto; min-height:44px; padding:8px 18px; border-radius:8px; font-size:16px; }
+.game-shell .vidas-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; flex:0 0 auto; }
+.game-shell .vidas-tabs button { min-width:0; padding:9px 2px; font-size:11px; }
+#population-list { flex:1; min-height:70px; overflow:auto; overscroll-behavior:contain; }
+#population-list .population-person { width:100%; min-width:0; text-align:left; }
+#population-list .population-person > span { min-width:0; overflow-wrap:anywhere; }
+#stats-drawer { container-type:inline-size; }
+#stats-drawer .stats-grid,#stats-drawer .telemetry-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); gap:10px; }
+#stats-drawer .stats-tabs { flex-wrap:wrap; flex-shrink:0; }
+#stats-drawer .stats-tabs button { flex:1; min-height:44px; }
+#stats-drawer .stats-two-columns,#stats-drawer .stats-chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr)); gap:18px; }
+/* La cifra principal de «Vivos» (27 px) y la línea de resumen no caben en 56 px: el pulso crece con su contenido en vez de recortarlo. */
+#hud-telemetry { height:auto; min-height:56px; }
+#hud-telemetry .hud-kpi-primary { background:#294a3a; color:#fffbe9; border-radius:8px; min-width:126px; }
+#hud-telemetry .hud-kpi-primary > span { font-weight:800; text-transform:uppercase; letter-spacing:1px; color:inherit; }
+#hud-telemetry .hud-kpi-primary strong { font-size:27px; color:inherit; }
+#hud-telemetry .hud-kpi small { display:block; font-size:9px; line-height:1.35; max-width:175px; white-space:normal; color:inherit; opacity:.85; }
+#hud-telemetry .hud-kpi small:empty { display:none; }
+@media (max-width:760px) {
+  .game-shell .world-navigation { width:calc(100vw - 16px); overflow-x:auto; justify-content:flex-start; }
+  .game-shell .world-navigation button { flex:1 0 54px; min-width:54px; padding:5px 3px; font-size:10px; }
+  #world-minimap.minimap-dock { left:12px; bottom:165px; transform:scale(.8); transform-origin:bottom left; }
+  .has-dvr #world-minimap.minimap-dock { bottom:270px; }
+  .notebook-open #world-minimap { visibility:hidden; }
+  #world-minimap.is-expanded { max-width:calc(125vw - 32px); }
+  .game-shell .layers-dock { bottom:222px; max-height:calc(100dvh - 355px); }
+  #heat-legend { left:auto; right:10px; width:190px; bottom:240px; }
+}

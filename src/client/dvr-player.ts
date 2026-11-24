@@ -8,12 +8,13 @@
  *
  * Invariantes:
  *  - El cabezal nunca supera el último tick cargado: si el búfer se vacía espera, no salta ni retrocede.
- *  - A lo sumo UNA petición de trozo en vuelo; un `seek`/cambio de cámara invalida (época + `AbortSignal`) la anterior.
+ *  - A lo sumo UNA petición de trozo en vuelo; un `seek` invalida (época + `AbortSignal`) la anterior. Un cambio de cámara
+ *    (V24) no aborta ni congela: el trozo con la ventana nueva sustituye a la cola desde el tick que se está viendo.
  *  - La cola no pasa de `DVR_LIMITS.maxFrames` fotogramas.
  *
  * V22 — trozos `encoding: 'delta'` (`baseFrame` + `deltas[]`): la cola guarda los deltas SIN expandir y cada uno se aplica
  * (`applyClientTapeDelta`) solo cuando el cabezal lo cruza, así `fetchChunk` no bloquea el hilo con 90 reconstrucciones y
- * `onFrame` recibe `info.changedTiles` (10–50 teselas) en lugar de las ~6.000 de la vista. Los trozos `full` siguen igual.
+ * `onFrame` recibe `info.changedTiles` (solo las teselas parcheadas) en lugar de las ~6.000 de la vista. Los trozos `full` siguen igual.
  */
 import { TAPE_BASE_TICKS_PER_SEC, TAPE_SPEEDS, applyClientTapeDelta, indexTiles, type TapeChunkResponse, type TapeClientDelta, type TapeMetaResponse, type TapeSpeed, type TapeTimelinePoint } from '../shared/tape.js';
 import type { Tile, Viewport, WorldView } from '../shared/types.js';
@@ -120,8 +121,10 @@ export class DvrPlayer {
   private epoch = 0;
   private inFlight = false;
   private aborter: AbortController | null = null;
-  /** Hay un salto (seek/refresco/arranque) esperando su primer fotograma: el cabezal no corre. */
+  /** Hay un salto (seek/arranque) esperando su primer fotograma: el cabezal no corre. */
   private jumping = false;
+  /** V24: la cámara cambió y falta pedir el trozo con la ventana nueva (sale en cuanto no haya otra petición en vuelo). */
+  private refreshPending = false;
   private started = false;
   private lastNow: number | null = null;
   private recent: number[] = [];
@@ -170,7 +173,7 @@ export class DvrPlayer {
 
   stop(): void {
     this.stopTimers();
-    this.epoch++; this.aborter?.abort(); this.aborter = null; this.inFlight = false; this.loading = false; this.jumping = false;
+    this.epoch++; this.aborter?.abort(); this.aborter = null; this.inFlight = false; this.loading = false; this.jumping = false; this.refreshPending = false;
     this.frames = [];
   }
 
@@ -211,6 +214,7 @@ export class DvrPlayer {
       // (cada uno parte del anterior) pero su fotograma no se emite; sus teselas cambiadas se acumulan en el entregado.
       if (batch.length && !this.deliver(batch, 'play', crossed - 1)) return;
     }
+    if (this.refreshPending) void this.refresh();
     this.prefetch();
   }
 
@@ -281,13 +285,46 @@ export class DvrPlayer {
   /* Internos                                                         */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * V24: la cámara nueva NO congela la reproducción. Lo ya cargado (recortado para la cámara anterior) sigue
+   * reproduciéndose; se pide un trozo desde el fotograma actual con la cámara nueva y, al llegar, sustituye a la cola
+   * desde el tick que esté mostrando el cabezal (sin abortar nada, sin discontinuidad y sin vaciar la cola antes).
+   */
   private applyViewport(): Promise<void> {
     const next = this.pendingViewport; this.pendingViewport = null;
     if (!next || JSON.stringify(next) === JSON.stringify(this.viewport)) return Promise.resolve();
     this.viewport = next;
     if (!this.enabled || !this.started) return Promise.resolve();
-    // Lo cargado por delante se recortó para la cámara anterior: se descarta y se repide desde el fotograma actual.
-    return this.jump(this.currentTick, 'refresh', true);
+    this.refreshPending = true;
+    return this.refresh();
+  }
+
+  /** Trozo con la cámara actual desde `currentTick`; espera su turno si ya hay una petición en vuelo. */
+  private async refresh(): Promise<void> {
+    if (!this.refreshPending || this.inFlight || this.jumping || !this.enabled || !this.started) return;
+    this.refreshPending = false;
+    const epoch = this.epoch, viewport = this.viewport;
+    const chunk = await this.fetchChunk(this.currentTick, this.chunkCount(), epoch);
+    if (epoch !== this.epoch) return; // un salto lo reemplazó
+    if (!chunk) { this.notify(); return; }
+    this.applyChunkBounds(chunk); this.error = null;
+    if (viewport !== this.viewport) this.refreshPending = true; // la cámara volvió a moverse mientras volaba
+    // El cabezal siguió avanzando mientras volaba: el trozo se corta en el tick que se ve ahora.
+    const list = DvrPlayer.ordered(chunk, this.currentTick - 1);
+    const first = list.shift();
+    if (!first || first.tick !== this.currentTick) { // el cabezal ya pasó este trozo: se reintenta con la cámara actual
+      if (first) list.unshift(first);
+      if (list.length && list[0]!.tick > this.currentTick) this.frames = list.slice(0, DVR_LIMITS.maxFrames);
+      else this.refreshPending = true;
+      this.notify(); return;
+    }
+    this.frames = list.slice(0, DVR_LIMITS.maxFrames);
+    let decoded: { frame: WorldView };
+    try { decoded = this.decode(first); }
+    catch (error) { this.error = describe(error); this.frames = []; this.notify(); return; }
+    // Mismo tick con la ventana nueva: se repinta sin discontinuidad (los cuerpos siguen su interpolación).
+    this.emit(decoded.frame, 'refresh', 0, false);
+    this.prefetch();
   }
 
   private hasFrames(): boolean { return this.maxTick >= this.minTick && this.maxTick >= 0; }
@@ -418,7 +455,7 @@ export class DvrPlayer {
     const target = clamp(Math.floor(fromTick), this.minTick, Math.max(this.minTick, this.maxTick));
     const epoch = ++this.epoch;
     this.aborter?.abort();
-    this.frames = []; this.jumping = true;
+    this.frames = []; this.jumping = true; this.refreshPending = false; // el salto ya pide con la cámara actual
     if (!keepPlayTick) this.playTick = target;
     this.notify();
     const chunk = await this.fetchChunk(target, this.chunkCount(), epoch);
@@ -458,6 +495,7 @@ export class DvrPlayer {
       const fresh = DvrPlayer.ordered(chunk, this.maxLoadedTick);
       this.frames.push(...fresh.slice(0, Math.max(0, DVR_LIMITS.maxFrames - this.frames.length)));
       this.notify();
+      if (this.refreshPending) void this.refresh();
       this.prefetch();
     });
   }

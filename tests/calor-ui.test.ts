@@ -93,23 +93,24 @@ test('M10: leyenda del calor con contraste legible y un solo selector de capas',
     await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { ws.onMessage(() => {}); });
     await page.goto(server.resolvedUrls!.local[0]!); await expect(page.locator('#connection-label')).toHaveText('En vivo');
     if (await page.locator('#letter-dialog').isVisible()) await page.getByRole('button', { name: 'Entrar al mundo' }).click();
-    await page.locator('#heat-button').click();
+    // V24: Explorar y Calor son un solo control de capas de selección múltiple.
+    assert.equal(await page.locator('#heat-button, #layer-toggle, #observation-layer').count(), 0, 'los controles duplicados ya no existen');
+    await page.locator('#layers-toggle').click();
+    await page.locator('input[data-layer="food"]').check();
     const legend = page.locator('#heat-legend');
-    await expect(legend).toBeVisible(); await expect(legend).toContainText('Comida'); await expect(legend).toContainText('%');
-    const colores = await legend.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el.querySelector('.heat-stops span')!).color]);
+    await expect(legend).toBeVisible(); await expect(legend).toContainText('Comida');
+    const colores = await legend.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el.querySelector('.layer-legend-row span')!).color]);
     const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
     const canal = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
     const lum = ([r, g, b]: number[]) => 0.2126 * canal(r!) + 0.7152 * canal(g!) + 0.0722 * canal(b!);
     const fondo = lum(rgb(colores[0]!)), texto = lum(rgb(colores[1]!));
     const contraste = (Math.max(fondo, texto) + 0.05) / (Math.min(fondo, texto) + 0.05);
     assert.ok(contraste >= 4.5, `contraste del texto de la leyenda: ${contraste.toFixed(2)}`);
-    // El selector de Explorar sigue a la tecla y al botón: una sola capa a la vez.
-    await page.locator('#layer-toggle').click();
-    await expect(page.locator('#observation-layer')).toHaveValue('comida');
-    await page.locator('#observation-layer').selectOption('humedad');
-    await expect(legend).toContainText('Humedad');
-    await expect(page.locator('#heat-button')).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('#observation-layer').selectOption('none');
-    await expect(legend).toBeHidden(); await expect(page.locator('#heat-button')).toHaveAttribute('aria-pressed', 'false');
+    // Varias capas a la vez, todas legibles en la leyenda, y «Limpiar» las quita.
+    await page.locator('input[data-layer="moisture"]').check();
+    await expect(legend).toContainText('Humedad'); await expect(legend).toContainText('Comida');
+    await expect(page.locator('#layers-summary')).toContainText('Comida');
+    await legend.getByRole('button', { name: 'Limpiar' }).click();
+    await expect(legend).toBeHidden(); await expect(page.locator('#layers-summary')).toBeHidden();
   } finally { await browser.close(); await server.close(); }
 });

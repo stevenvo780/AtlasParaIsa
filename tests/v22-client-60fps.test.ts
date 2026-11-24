@@ -278,20 +278,24 @@ test('Landscape 60 fps: caches estáticas, LOD lejano, rejilla espacial de behin
         r.destroy();
       }
 
-      /* ---- B. LOD lejano con la gente moviéndose: capa estática + sin behind() ---- */
+      /* ---- B. LOD lejano (V24) con la gente moviéndose: copas por trozos cacheadas, cuerpos cacheados, sin escena ni behind() ---- */
       {
         const r = mount(false); r.setDvrMode(true);
         r.update(world(1, 0)); setCam(r, 8);
         r.update(world(2, 1));
+        let clock = 1000;
+        for (let i = 0; i < 20; i++) r.frame(clock += 16); // calentamiento: copas y sprites de la primera cámara
         const c0 = r.getPerfCounters();
-        let moving = 0;
-        for (let i = 0; i < 40; i++) { r.frame(performance.now()); if (r.sceneKey) moving++; }
+        for (let i = 0; i < 40; i++) r.frame(clock += 16);
         const c1 = r.getPerfCounters();
+        let trees = 0;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const tile = r.tileAt(x, y); if (tile && r.treeForms.get(tile)) trees++; }
         out.far = {
-          farLod: c1.farLod, dvrMode: c1.dvrMode, sceneBuilds: c1.sceneBuilds - c0.sceneBuilds,
-          propsBuilds: c1.scenePropsBuilds - c0.scenePropsBuilds, canopyBuilds: c1.canopyBuilds - c0.canopyBuilds, canopyBlits: c1.canopyBlits - c0.canopyBlits,
-          behindQueries: c1.behindQueries - c0.behindQueries, behindTests: c1.behindCandidateTests - c0.behindCandidateTests, behindSkipped: c1.behindSkipped - c0.behindSkipped,
-          trees: r.sceneProps.props.filter((s: { kind: number }) => s.kind === 0).length, sorted: c1.spritesSorted - c0.spritesSorted, drawCalls: r.drawCalls, playback: r.playback.size, motion: r.peopleMotion.size, moving,
+          farLod: c1.farLod, lod: c1.lod, dvrMode: c1.dvrMode, sceneBuilds: c1.sceneBuilds - c0.sceneBuilds, farFrames: c1.farFrames - c0.farFrames, scene: r.scene.width * r.scene.height,
+          canopyChunkBuilds: c1.canopyChunkBuilds - c0.canopyChunkBuilds, warmCanopy: c0.canopyChunkBuilds, canopyBlits: c1.canopyBlits - c0.canopyBlits,
+          personBuilds: c1.personSpriteBuilds - c0.personSpriteBuilds, bodies: c1.bodiesDrawn - c0.bodiesDrawn,
+          behindQueries: c1.behindQueries - c0.behindQueries, behindTests: c1.behindCandidateTests - c0.behindCandidateTests,
+          trees, playback: r.playback.size, motion: r.peopleMotion.size,
         };
         r.destroy();
       }
@@ -327,18 +331,23 @@ test('Landscape 60 fps: caches estáticas, LOD lejano, rejilla espacial de behin
         r.destroy();
       }
 
-      /* ---- D. Pixel a pixel: capa estática lejana == dibujo Y-ordenado cercano (sin gente, sin vaivenes) ---- */
+      /* ---- D. Pixel a pixel (V24): a 16 px/tesela el nivel lejano (suelo + copas por trozos, directo al panel) pinta lo
+       *      mismo que la escena cercana Y-ordenada, sin gente ni vaivenes. Solo difieren las sombras proyectadas (que el
+       *      lejano omite) y el orden de copas solapadas en la costura vertical entre dos trozos. ---- */
       {
         const r = mount(true);
+        r.setGraphicsSettings({ ...r.graphicsSettings, shadows: false, atmosphere: false, vegetationSway: false, waterRipples: false });
         const w = { ...world(1, 0), people: [] as unknown[], structures: [] as unknown[] };
         r.update(w);
-        setCam(r, 15); r.frame(1000);
-        const near = r.scene.getContext('2d').getImageData(0, 0, r.scene.width, r.scene.height).data.slice();
+        setCam(r, 16); r.frame(1000);
+        const ctx = r.ctx as CanvasRenderingContext2D, cw = ctx.canvas.width, ch = ctx.canvas.height;
+        const near = ctx.getImageData(0, 0, cw, ch).data.slice();
         const nearCounters = r.getPerfCounters();
-        setCam(r, 13); r.frame(1001);
-        const far = r.scene.getContext('2d').getImageData(0, 0, r.scene.width, r.scene.height).data;
+        r.lodTier = () => 'far'; // mismo zoom, mismo encuadre: solo cambia el camino de dibujo
+        r.frame(2000); r.frame(3000);
+        const far = ctx.getImageData(0, 0, cw, ch).data;
         let diff = 0, drawn = 0;
-        for (let i = 0; i < near.length; i += 4) { if (near[i + 3]) drawn++; if (near[i] !== far[i] || near[i + 1] !== far[i + 1] || near[i + 2] !== far[i + 2] || near[i + 3] !== far[i + 3]) diff++; }
+        for (let i = 0; i < near.length; i += 4) { drawn++; if (near[i] !== far[i] || near[i + 1] !== far[i + 1] || near[i + 2] !== far[i + 2] || near[i + 3] !== far[i + 3]) diff++; }
         out.parity = { diff, drawn, farLod: r.getPerfCounters().farLod, nearFar: nearCounters.farLod, blits: r.getPerfCounters().canopyBlits };
         r.destroy();
       }
@@ -348,7 +357,8 @@ test('Landscape 60 fps: caches estáticas, LOD lejano, rejilla espacial de behin
         const r = mount(false); r.setDvrMode(true);
         r.update(world(1, 0)); setCam(r, 24); r.update(world(2, 1));
         const h0 = r.getPerfCounters();
-        for (let i = 0; i < 30; i++) r.frame(performance.now());
+        // Reloj sintético a 60 fps (V24: con el reloj real, una torre cargada estira 30 fotogramas a varios segundos).
+        for (let i = 0; i < 30; i++) r.frame(1000 + i * 1000 / 60);
         const h1 = r.getPerfCounters();
         const compare = (st: any, animate: boolean, t: number) => {
           const ext = structureExtent(st), left = ext.left - 20, top = ext.top - 40, width = ext.right - ext.left + 40, height = ext.bottom - ext.top + 60;
@@ -407,15 +417,18 @@ test('Landscape 60 fps: caches estáticas, LOD lejano, rejilla espacial de behin
     assert.equal(r.structured.cells, r.structured.expectedCells);
 
     // B
-    assert.equal(r.far.farLod, true); assert.equal(r.far.dvrMode, true);
-    assert.ok(r.far.sceneBuilds >= 30, `la escena se rehace cada fotograma con gente en movimiento (${r.far.sceneBuilds})`);
+    assert.equal(r.far.farLod, true); assert.equal(r.far.lod, 'far'); assert.equal(r.far.dvrMode, true);
     assert.ok(r.far.trees > 1000, `muchos árboles visibles (${r.far.trees})`);
-    assert.equal(r.far.propsBuilds, 1, 'sprites/ventana: UNA construcción en el primer fotograma y ninguna más (misma rejilla)');
-    assert.equal(r.far.canopyBuilds, 1, 'la capa de copas se pinta una vez');
-    assert.ok(r.far.canopyBlits >= 30, 'y se vuelca con un drawImage por fotograma');
+    assert.equal(r.far.farFrames, 40, 'cada fotograma se dibuja (la gente se mueve)');
+    assert.equal(r.far.sceneBuilds, 0, 'lejos no hay lienzo de escena a 16 px/tesela');
+    assert.ok(r.far.scene <= 1, `el lienzo de escena se libera lejos (${r.far.scene} px)`);
+    assert.ok(r.far.warmCanopy > 0 && r.far.warmCanopy <= 8 * 12 + 12, `copas: un lienzo por trozo de 8×8 (${r.far.warmCanopy})`);
+    assert.equal(r.far.canopyChunkBuilds, 0, 'con la misma rejilla y el mismo zoom ninguna copa se rehace');
+    assert.ok(r.far.canopyBlits >= 40 * 50, `y cada trozo se vuelca con un drawImage por fotograma (${r.far.canopyBlits})`);
+    assert.ok(r.far.bodies >= 40 * 80, `los cuerpos visibles se dibujan cada fotograma (${r.far.bodies})`);
+    assert.ok(r.far.personBuilds <= 300, `sprites de persona por identidad + pose: ${r.far.personBuilds} construcciones en 40 fotogramas para 300 personas`);
     assert.equal(r.far.behindQueries, 0, 'sin behind() de cuerpos en zoom lejano');
     assert.equal(r.far.behindTests, 0);
-    assert.ok(r.far.sorted < r.far.trees / 4 * 40, `solo se ordena lo vivo (${r.far.sorted} sprites en 40 fotogramas, no ${r.far.trees * 40})`);
     assert.equal(r.far.playback, 0, 'DVR: el colchón V18 no recibe fotogramas');
     assert.equal(r.far.motion, 300, 'MotionTracker sigue interpolando a toda la gente');
 
@@ -427,9 +440,9 @@ test('Landscape 60 fps: caches estáticas, LOD lejano, rejilla espacial de behin
     assert.equal(r.near.cutaways, r.near.expectedCutaways, 'mismos cuerpos recortados que el bucle O(N×M) original');
 
     // D
-    assert.ok(r.parity.drawn > 100_000, 'la escena de paridad tiene arbolado');
+    assert.ok(r.parity.drawn > 1_000_000, 'la comparación cubre el panel entero');
     assert.equal(r.parity.nearFar, false); assert.equal(r.parity.farLod, true); assert.ok(r.parity.blits >= 1);
-    assert.equal(r.parity.diff, 0, 'la capa estática lejana es pixel a pixel el dibujo Y-ordenado cercano sin cuerpos');
+    assert.ok(r.parity.diff <= r.parity.drawn * .01, `el nivel lejano es el mismo pixel-art que el cercano: ${r.parity.diff} de ${r.parity.drawn} píxeles distintos`);
 
     // E
     assert.ok(r.halls.blits >= 30 * 3, `los 3 salones se vuelcan cada fotograma (${r.halls.blits})`);

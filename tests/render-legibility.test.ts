@@ -37,7 +37,7 @@ test('selected facility is visible in the mobile first fold and reserve-only cha
   p.on('pageerror',e=>errors.push(e.name));await p.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));await p.route('**/api/world**',r=>r.fulfill({json:w}));
   await p.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});await p.routeWebSocket(/\/ws(\?.*)?$/,s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
   await p.goto(server.resolvedUrls!.local[0]!);await expect(p.locator('#connection-label')).toHaveText('En vivo');if(await p.locator('#letter-dialog').isVisible())await p.getByRole('button',{name:'Entrar al mundo'}).click();
-  await p.locator('#layer-toggle').click();await p.locator('#tile-x').fill('0');await p.locator('#tile-y').fill('0');await p.locator('#tile-form button').click();await expect(p.locator('#camera-coordinates')).toHaveText('0, 0');
+  await p.locator('#layers-toggle').click();await p.locator('#tile-x').fill('0');await p.locator('#tile-y').fill('0');await p.locator('#tile-form button').click();await expect(p.locator('#camera-coordinates')).toHaveText('0, 0');
   const water=p.locator('[data-structure-water]');await expect(water).toContainText('0,6 / 0,6 u.');
   const box=await water.boundingBox(),drawer=await p.locator('#inspector-drawer').boundingBox();assert.ok(box&&drawer&&box.y>=drawer.y&&box.y+box.height<=drawer.y+drawer.height);
   await expect(p.locator('#inhabitant-card')).not.toContainText('frame, roof');const summary=p.locator('[data-detail="structure-ground"] summary');await summary.focus();

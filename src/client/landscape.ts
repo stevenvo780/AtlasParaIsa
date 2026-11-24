@@ -13,7 +13,7 @@
 import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
-import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
+import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm, type AnimalVisualTraits } from './life-art.js';
 import { bodySeed, animalPose, daylightAt, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { ClientTileCache } from './tile-cache.js';
 import type { Capability } from '../shared/technology.js';
@@ -24,6 +24,42 @@ import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } 
 import { paintGeologyVeins, paintRoadTile } from './road-geology-art.js';
 import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure } from './structure-art.js';
 import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
+
+/** Only discrete phenotype buckets enter the sprite key; continuous genetic noise never does. */
+export function animalVisualTraits(v: AnimalView): AnimalVisualTraits {
+  const bucket = (n: number | undefined): 0 | 1 | 2 => n === undefined || !Number.isFinite(n) ? 1 : n < .35 ? 0 : n >= .65 ? 2 : 1;
+  return {
+    camouflage: v.genes?.camouflage > .56 ? 2 : v.genes?.camouflage < .44 ? 0 : 1,
+    agile: v.genes?.speed > .56 || v.genes?.perception > .56 || (v.morphology?.caution ?? 0) >= .65 ? 1 : 0,
+    fierce: v.genes?.carnivory > .54 ? 1 : 0,
+    maturity: (v.age ?? 1200) < 700 ? 0 : (v.generation ?? 0) >= 3 ? 2 : 1,
+    size: bucket(v.morphology?.size), coat: bucket(v.morphology?.coat), defense: bucket(v.morphology?.defense),
+    tame: (v.habituation ?? 0) >= .75 ? 2 : (v.habituation ?? 0) >= .45 ? 1 : 0,
+  };
+}
+export function animalSpriteKey(v: AnimalView, pose: number, traits = animalVisualTraits(v)): string {
+  // Drink/graze and roam/flee/hunt use identical silhouettes at a given pose.
+  const action = v.action === 'rest' ? 'rest' : v.action === 'drink' || v.action === 'graze' ? 'graze' : 'roam';
+  return `animal:${v.species}:${action}:${pose}:${Object.values(traits).join(':')}`;
+}
+const chemicalColor = (v: string | undefined): string | undefined => v && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(v) ? v : undefined;
+type ForgedItem = NonNullable<WorldView['technology']>['items'][number];
+export interface CraftVisual { tint?: string; glint: boolean; packTint?: string; lightPack: boolean }
+/** Snapshot-time selection, shared with tests: personal craft > best forged tool > carried chemistry. */
+export function personCraftVisual(person: PersonView, items: readonly ForgedItem[] = []): CraftVisual {
+  let best: ForgedItem | undefined, score = -Infinity;
+  for (const item of items) {
+    if (item.ownerId !== person.id || item.mass <= 0 || !chemicalColor(item.materialTint)) continue;
+    const utility = Math.max(0, ...Object.values(item.capacities));
+    if (utility > score || utility === score && item.mass > (best?.mass ?? 0)) { best = item; score = utility; }
+  }
+  let lot: NonNullable<PersonView['compounds']>[number] | undefined;
+  for (const candidate of person.compounds ?? []) if (candidate.mass > 0 && chemicalColor(candidate.properties.colorHex) && (!lot || candidate.mass > lot.mass)) lot = candidate;
+  const tint = chemicalColor(person.craftTint) ?? chemicalColor(best?.materialTint) ?? lot?.properties.colorHex;
+  const phase = best?.chemPhase ?? lot?.phase;
+  return { tint, glint: phase === 'smelted' || phase === 'vitrified', packTint: lot?.properties.colorHex, lightPack: (lot?.properties.lightness ?? 0) >= .65 };
+}
+const tintBucket = (tint: string | undefined): string => chemicalColor(tint)?.replace(/[\da-f]/gi, c => Math.floor(parseInt(c, 16) / 4).toString(16)) ?? '';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -70,7 +106,7 @@ const LOADING_DELAY_MS = 250, LOADING_MAX_MS = 6000;
 /** V22: por debajo de estos px/tesela (zoom lejano) no se dibujan recortes, vaivenes ni sombras y el arbolado va en una capa estática. */
 const FAR_ZOOM = 14;
 /** V22: la animación de los salones modulares (humo, brasas) se re-pinta a esta cadencia, no en cada fotograma. */
-const HALL_POSES_PER_SEC = 12;
+const HALL_POSES_PER_SEC = 8;
 const HALL_SLOT_LIMIT = 192;
 /** Holgura (px de arte) alrededor de `structureExtent` para humo, chimeneas, bodega y contrafuertes del salón cacheado. */
 const HALL_PAD = { x: 14, top: 30, bottom: 14 } as const;
@@ -423,6 +459,8 @@ export class Landscape {
   private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
   private cacheBuilds = 0;
+  // Independent bounded phenotype bank prevents trees/buildings from evicting evolving herds.
+  private readonly animalCache = new BoundedCache<HTMLCanvasElement>(2048, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private spriteBuilds = 0;
   private frameMs = 0;
   private fps = 0;
@@ -461,6 +499,7 @@ export class Landscape {
   private effects = { water: 0, vegetation: 0, rain: 0, events: 0, shadows: 0 };
   private actionActive = false;
   private lighting = { shadowX: 4, shadowY: 3, shadowAlpha: .14 };
+  private craftVisuals = new Map<string, CraftVisual>();
   private carriedProducts = new Map<string, Capability | 'material'>();
   private secondaryProducts = new Map<string, Capability | 'material'>();
   private carriedWater = new Map<string, boolean>();
@@ -669,6 +708,13 @@ export class Landscape {
     this.worldSeed = world.geologyKey;
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
+    this.craftVisuals.clear();
+    const forgedByOwner = new Map<string, ForgedItem[]>();
+    for (const item of world.technology?.items ?? []) {
+      const group = forgedByOwner.get(item.ownerId);
+      if (group) group.push(item); else forgedByOwner.set(item.ownerId, [item]);
+    }
+    for (const person of world.people) this.craftVisuals.set(person.id, personCraftVisual(person, forgedByOwner.get(person.id)));
     this.carriedProducts.clear();
     this.secondaryProducts.clear();
     this.carriedWater.clear();
@@ -789,7 +835,7 @@ export class Landscape {
   getDiagnostics(): RenderDiagnostics {
     return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu?.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu?.status ?? 'unavailable', gpuLabel: this.gpu?.label || undefined,
       visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + (this.gpu?.drawCalls ?? 0), cacheBuilds: this.cacheBuilds + this.spriteBuilds,
-      cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteBytes,
+      cacheEntries: this.terrainCache.size + this.spriteCache.size + this.animalCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteBytes,
       textureUploads: this.gpu?.uploads ?? 0, gpuTextureBytes: (this.gpu?.textureCount ?? 0) * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures,
       bodyCutaways: this.bodyCutaways, effects: { ...this.effects }, effectBudget: VISUAL_BUDGET };
   }
@@ -851,7 +897,7 @@ export class Landscape {
     this.grid = [];
     this.prev = null;
     this.curr = null;
-    this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
+    this.terrainCache.clear(); this.spriteCache.clear(); this.animalCache.clear(); this.chunks = []; this.gpu?.destroy();
     for (const slot of this.hallSlots.values()) slot.canvas.width = slot.canvas.height = 0;
     this.hallSlots.clear(); this.sceneProps = null; this.staticPropsOwner = null; if (this.staticPropsCanvas) this.staticPropsCanvas.width = this.staticPropsCanvas.height = 0;
     this.groundStamp.width = this.groundStamp.height = 0;
@@ -1889,7 +1935,7 @@ export class Landscape {
     const animated = animate && this.cam.zoom >= FAR_ZOOM;
     const pose = animated ? Math.floor(t * HALL_POSES_PER_SEC) : -1;
     let sig = this.hallSigs.get(ext);
-    if (sig === undefined) { sig = JSON.stringify(ext); this.hallSigs.set(ext, sig); }
+    if (sig === undefined) { sig = `${tintBucket(ext.materialProfile?.tint)}:${ext.synergy?.kilnTier ?? 0}:${JSON.stringify(ext)}`; this.hallSigs.set(ext, sig); }
     const extent = structureExtent(ext);
     const left = extent.left - HALL_PAD.x, top = extent.top - HALL_PAD.top;
     const width = extent.right + HALL_PAD.x - left, height = extent.bottom + HALL_PAD.bottom - top;
@@ -1939,18 +1985,14 @@ export class Landscape {
     // En marcha la pose avanza con la distancia recorrida (una pose cada ANIMAL_STEP_TILES), no con el reloj.
     const rate = v.action === 'flee' || v.action === 'hunt' ? 10 : 6;
     const pose = animalPose(v, animal.moving, (animal.moving ? animal.stride / ANIMAL_STEP_TILES / rate : t) + phase, this.reduceMotion, this.actionActive || animal.moving);
-    const genes = v.genes;
-    const camouflage: 0 | 1 | 2 = genes ? (genes.camouflage > 0.56 ? 2 : genes.camouflage < 0.44 ? 0 : 1) : 1;
-    const agile: 0 | 1 = genes && (genes.speed > 0.56 || genes.perception > 0.56) ? 1 : 0;
-    const fierce: 0 | 1 = genes && genes.carnivory > 0.54 ? 1 : 0;
-    const maturity: 0 | 1 | 2 = (v.age ?? 1200) < 700 ? 0 : (v.generation ?? 0) >= 3 ? 2 : 1;
-    const key = `animal:${v.species}:${v.action}:${pose}:${camouflage}:${agile}:${fierce}:${maturity}`;
-    let art = this.spriteCache.get(key);
+    const traits = animalVisualTraits(v);
+    const key = animalSpriteKey(v, pose, traits);
+    let art = this.animalCache.get(key);
     if (!art) {
       art = document.createElement('canvas');
       art.width = art.height = 32;
-      paintAnimal(art.getContext('2d')!, v.species, v.action, pose, { camouflage, agile, fierce, maturity });
-      this.cacheSprite(key, art);
+      paintAnimal(art.getContext('2d')!, v.species, v.action, pose, traits);
+      this.cacheSprite(key, art, this.animalCache);
     }
     g.save(); g.translate(Math.round(animal.x * ART + 8), Math.round(animal.y * ART + 12)); if (animal.left) g.scale(-1, 1);
     g.drawImage(art, -16, -26); g.restore(); this.drawCalls++;
@@ -1992,7 +2034,8 @@ export class Landscape {
     const foodLevel = clamp(Math.ceil(structure.food / Math.max(1, granaries) / .7 * 4), 0, 4);
     const planted = ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15;
     const cultKey = culture ? `${culture.sharing > .52 ? 1 : 0}${culture.stewardship > .52 ? 1 : 0}${culture.openness > .52 ? 1 : 0}` : '';
-    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${generation ?? -1}:${communityColor ?? ''}:${cultKey}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
+    const materialKey = `${tintBucket(structure.materialProfile?.tint)}:${structure.materialProfile?.tint ?? ''}:${(structure.materialProfile?.strength ?? 0) >= .65}:${(structure.materialProfile?.seal ?? 0) >= .65}:${structure.synergy?.kilnTier ?? 0}:${(structure.storedCompounds ?? []).filter(l => l.mass > 0).slice(0, 3).map(l => l.properties.colorHex).join(',')}`;
+    const key = `structure:${materialKey}:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${generation ?? -1}:${communityColor ?? ''}:${cultKey}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
     let art = this.spriteCache.get(key);
     if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground,generation,communityColor,culture}); this.cacheSprite(key, art); }
     return art;
@@ -2004,7 +2047,7 @@ export class Landscape {
     if (isModular(ext)) { this.drawModularHall(g, ext, t, animate); return; }
     const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
-    paintCompactAccessories(g, ext, t, animate);
+    paintCompactAccessories(g, ext, t, animate, true);
     const previous = this.prev?.structures?.find(s => s.id === structure.id);
     if (!this.reduceMotion && this.actionActive && this.curr?.weather === 'rain' && previous && structure.water > previous.water
       && structure.components.includes('cistern') && this.effects.water < VISUAL_BUDGET.water) {
@@ -2094,9 +2137,9 @@ export class Landscape {
       person: null, feature: form.kind, tree: form, tile };
   }
 
-  private cacheSprite(key: string, canvas: HTMLCanvasElement): void {
+  private cacheSprite(key: string, canvas: HTMLCanvasElement, cache = this.spriteCache): void {
     this.spriteBytes += canvas.width * canvas.height * 4;
-    this.spriteCache.set(key, canvas); this.spriteBuilds++;
+    cache.set(key, canvas); this.spriteBuilds++;
   }
 
   private treeRaster(form: TreeForm, pose: number): HTMLCanvasElement {
@@ -2451,34 +2494,48 @@ export class Landscape {
     }
 
     const atTarget = view.target ? Math.hypot(view.x - view.target.x, view.y - view.target.y) < .5 : false;
+    const craft = this.craftVisuals.get(view.id);
+    const toolHex = craft?.tint ?? css(P.stone);
+    if (craft?.tint) {
+      // A narrow sash/apron retains the inhabitant's own clothes and community colors.
+      add(ax - 1, baseY - legH - 4, 1, 4, craft.tint, false);
+      add(ax, baseY - legH - 2, 2, 2, craft.tint, false);
+    }
+    if (craft?.packTint) {
+      const height = craft.lightPack ? 3 : 5;
+      add(ax - 6, baseY - legH - height, craft.lightPack ? 3 : 4, height, craft.packTint, true);
+      add(ax - 5, baseY - legH - height, 1, height, '#d9bf8c', false);
+    }
     const product = this.carriedProducts.get(view.id);
     const secondary = this.secondaryProducts.get(view.id);
     if (secondary) {
       const sx = ax - 5, sy = baseY - legH - 2;
-      add(sx, sy, 2, 2, css(secondary === 'storage' ? P.soilLight : secondary === 'cutting' ? P.stone : P.sand), true);
+      add(sx, sy, 2, 2, toolHex, true);
     }
     if (product) {
       const x = ax - 7, y = baseY - 5;
       if (product === 'material') {
-        add(x, y, 4, 3, css(P.stoneShade), true); add(x, y, 3, 1, css(P.stone), false);
+        add(x, y, 4, 3, toolHex, true); add(x, y, 3, 1, toolHex, false);
       } else if (product === 'storage') {
-        add(x, y, 4, 4, css(P.soil), true); add(x + 1, y - 1, 2, 1, css(P.soilLight), true);
+        add(x, y, 4, 4, craft?.tint ?? css(P.soil), true); add(x + 1, y - 1, 2, 1, css(P.soilLight), true);
         if (this.carriedWater.get(view.id)) {
           add(x + 1, y, 2, 2, css(P.waterShallow), false);
           add(x + 1, y, 2, 1, css(P.waterGleam), false);
         }
       } else if (product === 'insulation') {
-        add(x, y, 4, 3, css(P.sand), true); add(x, y + 1, 4, 1, css(P.soilLight), false);
+        add(x, y, 4, 3, craft?.tint ?? css(P.sand), true); add(x, y + 1, 4, 1, css(P.soilLight), false);
       } else if (product === 'binding') {
-        add(x, y, 3, 3, css(P.trunkLight), true); add(x + 1, y - 1, 1, 5, css(P.sand), false);
+        add(x, y, 3, 3, craft?.tint ?? css(P.trunkLight), true); add(x + 1, y - 1, 1, 5, css(P.sand), false);
       } else if (product === 'cultivation') {
-        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 3, 3, 1, css(P.stone), true); add(x + 2, y - 2, 1, 2, css(P.stoneShade), false);
+        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 3, 3, 1, toolHex, true); add(x + 2, y - 2, 1, 2, toolHex, false);
       } else if (product === 'abrasion') {
-        add(x, y - 1, 4, 3, css(P.stone), true); add(x + 1, y - 2, 2, 1, css(P.paper), false);
+        add(x, y - 1, 4, 3, toolHex, true); add(x + 1, y - 2, 2, 1, css(P.paper), false);
       } else {
-        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 4, 3, 3, css(P.stone), true); add(x, y - 4, 1, 2, css(P.paper), false);
+        add(x + 1, y - 3, 1, 7, css(P.trunkLight), true); add(x, y - 4, 3, 3, toolHex, true); add(x, y - 4, 1, 2, css(P.paper), false);
       }
     }
+
+    if (product && craft?.glint) add(ax - 7, baseY - 5, 1, 1, '#f4ffff', false);
 
     const hasInventoryView = this.curr?.technology?.items !== undefined;
     const hasRealTool = product !== undefined && product !== 'material';
@@ -2494,13 +2551,15 @@ export class Landscape {
     if (view.action === 'hunt') {
       if (showActionTool) {
         add(ax + 5 + beat, baseY - 13 + beat * 3, 1, 13, css(P.trunkLight), true);
-        add(ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, css(P.stone), true);
+        add(ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, toolHex, true);
+        add(ax + 5 + beat, baseY - 16 + beat * 3, 1, 1, craft?.glint ? '#f4ffff' : toolHex, false);
       } else {
         add(ax + 3 + beat, baseY - 7 + beat * 2, 3, 2, skinHex, true);
       }
     } else if (view.action === 'drink') {
       const lift = p.moving ? 4 : beat;
-      add(ax + 3, headTop + 3 + lift, 3, 3, css(P.waterGleam), true);
+      add(ax + 3, headTop + 3 + lift, 3, 3, craft?.tint ?? css(P.waterGleam), true);
+      if (craft?.glint) add(ax + 3, headTop + 3 + lift, 1, 1, '#f4ffff', false);
       add(ax + 3, headTop + 5 + lift, 3, 1, css(P.water), false);
     } else if (view.action === 'eat') {
       add(ax + 3, headTop + 4 + beat, 2, 2, css(P.amber), true);
@@ -2520,7 +2579,8 @@ export class Landscape {
       add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
         add(ax + 6, hand - 3, 1, 5, css(P.trunkLight), true);
-        add(ax + 5, hand - 4, 4, 2, css(P.stone), true);
+        add(ax + 5, hand - 4, 4, 2, toolHex, true);
+        if (craft?.glint) add(ax + 5, hand - 4, 1, 1, '#f4ffff', false);
       } else {
         const hasStone = (view.materials?.stone ?? 0) > 0;
         add(ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight), true);
@@ -2530,7 +2590,7 @@ export class Landscape {
       add(ax + 3, hand, 3, 1, skinHex, true);
       if (showActionTool) {
         add(ax + 6, hand - 1, 1, 7, css(P.trunkLight), true);
-        add(ax + 6, hand + 5, 4, 1, css(P.stoneShade), true);
+        add(ax + 6, hand + 5, 4, 1, toolHex, true);
       } else {
         add(ax + 5, hand, 2, 2, css(P.soilLight), true);
       }

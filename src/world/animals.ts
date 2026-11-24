@@ -1,4 +1,4 @@
-import type { AnimalAction, AnimalDynamics, AnimalGenes, AnimalSpecies, AnimalView } from '../shared/life.js';
+import type { AnimalAction, AnimalDynamics, AnimalGenes, AnimalMorphology, AnimalSpecies, AnimalView } from '../shared/life.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import { FOOD_PER_ANIMAL } from './ecosystem.js';
 import { SED_POR_UNIDAD } from './ecologia-constantes.js';
@@ -11,6 +11,7 @@ import { residentFaunaCapacity, residentFastAccess, residentTileReader, type Res
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
 import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
 import { primero, primerosDos } from './orden.js';
+import { assertAnimalTraits } from './validation.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
@@ -58,10 +59,16 @@ export interface Animal extends AnimalView {
   target: Point; memory: AnimalMemory[]; work: number; preyId: string | null;
   /** V19/R (`fauna.reservaReproductiva`): biomasa de la dieta apartada para la cría, en [0, `RESERVA_MAXIMA`]. Ausente = 0. */
   reproReserve?: number;
+  /** V23: persistent biological costs/cooldowns; absent in historical worlds. */
+  lastTended?: number;
+  lastHunted?: number;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;
   animalDynamics: AnimalDynamics; reproductionEnabled?: boolean;
+  people?: readonly Point[];
+  structures?: readonly (Point & { condition: number; components: readonly string[] })[];
+  weather?: 'clear' | 'rain';
 }
 export type AnimalEmitter = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => unknown;
 const key = (p: Point): string => `${p.x},${p.y}`;
@@ -94,6 +101,67 @@ function genes(seed: number, id: string, species: AnimalSpecies): AnimalGenes {
     perception: varied('perception', species === 'wolf' || species === 'fox' ? 0.7 : 0.55), metabolism: varied('metabolism', 0.5),
     carnivory: varied('carnivory', species === 'wolf' ? 0.96 : species === 'fox' ? 0.85 : species === 'boar' ? 0.22 : 0.04),
     waterEfficiency: varied('water', 0.5), camouflage: varied('camouflage', species === 'hare' || species === 'fox' ? 0.65 : 0.4) };
+}
+
+const MORPH_FIELDS = ['caution', 'size', 'coat', 'defense'] as const;
+const MORPH_BASE: Record<AnimalSpecies, AnimalMorphology> = {
+  deer: { caution: 0.62, size: 0.5, coat: 0.45, defense: 0.4 },
+  boar: { caution: 0.5, size: 0.62, coat: 0.4, defense: 0.55 },
+  hare: { caution: 0.57, size: 0.3, coat: 0.5, defense: 0.15 },
+  wolf: { caution: 0.68, size: 0.6, coat: 0.6, defense: 0.65 },
+  fox: { caution: 0.58, size: 0.35, coat: 0.55, defense: 0.3 },
+  fish: { caution: 0.5, size: 0.3, coat: 0.1, defense: 0.2 },
+};
+function ensureMorphology(animal: Animal, seed: number): AnimalMorphology {
+  if (!animal.morphology) {
+    const base = MORPH_BASE[animal.species];
+    animal.morphology = { ...base };
+    for (const field of MORPH_FIELDS) animal.morphology[field] = Math.max(0.05, Math.min(0.95,
+      base[field] + (hash(seed, `${animal.id}:morph:${field}`) / 4294967296 - 0.5) * 0.18));
+  }
+  return animal.morphology;
+}
+export const isHerdAnimal = (animal: Animal): boolean => animal.species === 'deer' || animal.species === 'boar' || animal.species === 'hare';
+export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[animal.species] * (0.75 + (animal.morphology?.size ?? 0.5) * 0.65);
+
+/** V23 serial physical overlay, after both implementations of choose. All sensing is local
+ * (Manhattan ≤ 6); no person/structure data enters the parallel decision/halo phase.
+ * Point buckets are built once per step rather than scanning the population per animal. */
+function settlementBuckets(points: readonly Point[]): Map<Cell, Point[]> {
+  const result = new Map<Cell, Point[]>();
+  for (const p of points) { const k = cell(p), here = result.get(k); if (here) here.push(p); else result.set(k, [p]); }
+  return result;
+}
+function settlementOverlay(animal: Animal, tick: number, state: LocalState, humans: Map<Cell, Point[]>, hearths: Map<Cell, Point[]>): void {
+  const m = animal.morphology!, threats: Point[] = [];
+  const predator = animal.species === 'wolf' || animal.species === 'fox';
+  let nearSettlement = false;
+  const alarm = animal.lastHunted !== undefined && tick - animal.lastHunted < 120;
+  const fleeRadius = Math.max(alarm ? 3 : 0, 1 + m.caution * (1 - (animal.habituation ?? 0) * 0.78) * 5);
+  // This serial neighborhood is deliberately separate from choose/localTiles (the worker halo).
+  for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
+    const d = Math.abs(dx) + Math.abs(dy); if (d > 6) continue;
+    const x = animal.x + dx, y = animal.y + dy, k = cellXY(x, y);
+    const tile = state.tile(x, y);
+    if (d <= 5 && (humans.has(k) || tile?.terrain === 'shelter' || (tile?.cultivation ?? 0) > 0)) nearSettlement = true;
+    if (predator && d <= 3 && (hearths.has(k) || tile?.terrain === 'shelter')) threats.push({ x, y });
+    if (!predator && animal.species !== 'fish' && d <= fleeRadius) threats.push(...humans.get(k) ?? []);
+  }
+  if (isHerdAnimal(animal)) {
+    animal.habituation = clamp((animal.habituation ?? 0) + (nearSettlement && !alarm && m.caution < 0.65 ? 0.012 : -0.003));
+  }
+  if (!threats.length) return;
+  let best = animal as Point, bestSafety = Infinity;
+  const safetyAt = (p: Point): number => { let d = Infinity; for (const t of threats) d = Math.min(d, distance(p, t)); return d; };
+  bestSafety = safetyAt(best);
+  for (const [dx, dy] of BREEDING_CELLS) {
+    const p = { x: animal.x + dx, y: animal.y + dy }, tile = state.tile(p.x, p.y);
+    if (!tile || !habitat(animal, tile) || (state.counts.get(cell(p)) ?? 0) >= MAX_ANIMALS_PER_TILE) continue;
+    const safe = safetyAt(p);
+    if (safe > bestSafety) { best = p; bestSafety = safe; }
+  }
+  animal.action = 'flee'; animal.target = { x: best.x, y: best.y }; animal.preyId = null; animal.work = 0;
+  animal.reason = predator ? 'Evita el fuego y el refugio humano.' : 'Su cautela y habituación regulan la distancia a las personas.';
 }
 
 /** Exactly one identity per saved stock unit. Neither traversal order nor the world's weather RNG is consumed. */
@@ -613,7 +681,8 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
  * quién entra. */
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
-  if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < interval || animal.energy < 0.06) return;
+  const physicalInterval = paramsOf(world).quimica.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
+  if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < physicalInterval || animal.energy < 0.06) return;
   const neighbors = state.neighbors, reader = state.reader, fast = state.fast;
   neighbors.length = 0;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -654,7 +723,9 @@ function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalE
     text: `${animal.species} ${animal.id} muere por ${cause}.`, cause, source: 'simulation' });
 }
 function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emit?: AnimalEmitter): void {
-  const metabolism = 0.6 + animal.genes.metabolism * 0.8;
+  const emergent = paramsOf(world).quimica.emergente;
+  const morphology = emergent ? ensureMorphology(animal, world.seed) : undefined;
+  const metabolism = (0.6 + animal.genes.metabolism * 0.8) * (morphology ? 0.9 + morphology.size * 0.3 : 1);
   advanceNeeds(animal, { hunger: 0.00042 * metabolism, thirst: 0.00048 * (1.3 - animal.genes.waterEfficiency * 0.6)
     + (desert ? 0.00015 : 0), energy: 0.00008 * metabolism, stressEnergy: 0.0002, fatigue: 0.00012 });
   // Dormancy never catches up. A founder materialized in this very tick has not yet completed another age interval.
@@ -770,6 +841,12 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
       hunger: 0.32, thirst: 0.25, energy: 0.35, fatigue: 0.2, health: 0.8, genes: inherited,
       generation: Math.max(a.generation, b.generation) + 1, parents, age: 0, bornAt: world.tick, lastBirth: world.tick, lastBirthAge: 0,
       lastDecision: world.tick, lastMove: world.tick, target: { x: a.x, y: a.y }, memory: [], work: 0, preyId: null };
+    if (paramsOf(world).quimica.emergente) {
+      const ma = ensureMorphology(a, world.seed), mb = ensureMorphology(b, world.seed);
+      child.morphology = { ...ma };
+      for (const field of MORPH_FIELDS) child.morphology[field] = Math.max(0.05, Math.min(0.95,
+        (ma[field] + mb[field]) / 2 + (hash(world.seed, `${id}:morph:${field}`) / 4294967296 - 0.5) * 0.06));
+    }
     const here = cell(a);
     world.animals.push(child); state.counts.set(here, (state.counts.get(here) ?? 0) + 1); world.animalDynamics.births++;
     emit?.({ kind: 'animal', actors: [...parents, id], x: a.x, y: a.y, text: `Nace ${a.species} de generación ${child.generation}.`, cause: 'reproducción con costes corporales, alimento y agua', source: 'simulation' });
@@ -926,6 +1003,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
     contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
   const { fauna: leyesFauna } = paramsOf(world);
+  const emergent = paramsOf(world).quimica.emergente;
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
   if (leyesFauna) {
     state.contacto = leyesFauna.contactoContinuo; state.reserva = leyesFauna.reservaReproductiva;
@@ -944,6 +1022,14 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
     if (!piensan || piensan.has(animal.id)) physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
+    if (emergent && (!piensan || piensan.has(animal.id)) && animal.species !== 'fish') {
+      const m = animal.morphology!, cold = tile.biome === 'mountain' || world.tick % 2400 >= 1800 || world.weather === 'rain';
+      // Physical heat loss, paid by the body. Insulation protects in cold conditions,
+      // but traps heat in desert; these costs affect survival and breeding eligibility.
+      const loss = (cold ? 0.00022 * (1 - m.coat * 0.85) * (1.2 - m.size * 0.5) : 0)
+        + (tile.biome === 'desert' ? 0.00016 * m.coat : 0);
+      animal.energy = clamp(animal.energy - loss);
+    }
     if (animal.health <= 0) continue;
     const p = cell(animal), here = state.occupants.get(p);
     if (here) here.push(animal); else state.occupants.set(p, [animal]);
@@ -959,6 +1045,12 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   const motor = paramsOf(world).motor, parallel = motor.hilos > 1 && due.length >= 384;
   if (parallel) applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));
   else for (const animal of due) choose(animal, world, state);
+  if (emergent) {
+    const humans = settlementBuckets(world.people ?? []);
+    const structures = world.structures ?? [];
+    const hearths = settlementBuckets(structures.filter(s => s.condition > 0.1 && s.components.includes('hearth')));
+    for (const animal of due) settlementOverlay(animal, world.tick, state, humans, hearths);
+  }
   // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador. `active` ya está
   // en orden canónico (la selección de la máscara), así que dos pasadas (`flee` primero) son idénticas al `sort`.
   for (const animal of active) if (animal.action === 'flee') move(animal, world, state);
@@ -968,12 +1060,17 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     if (animal.health <= 0) continue;
     const tile = state.tile(animal.x, animal.y)!;
     feed(animal, tile, world, state);
+    if (emergent && world.tick % 8 === 0 && isHerdAnimal(animal) && tile.terrain !== 'water'
+      && (animal.action === 'graze' || animal.action === 'rest')) tile.fertility = clamp((tile.fertility ?? 0) + 0.008);
     if (animal.action !== 'hunt' || !animal.preyId) continue;
     if (!byId) {
       byId = new Map();
       for (const a of world.animals) byId.set(a.id, a);
     }
     const prey = byId.get(animal.preyId);
+    if (emergent && prey && hash(world.seed, `${animal.id}:${prey.id}:defense:${Math.floor(world.tick / 8)}`) / 4294967296 < (prey.morphology?.defense ?? 0) * 0.65) {
+      animal.work = 0; continue;
+    }
     // A resident prey is physically reachable even when its own routine is deferred; archived animals are absent from byId.
     if (state.contacto && prey && prey.health > 0 && edible(animal, prey)) {
       // V19/F: el alcance es el contacto o la adyacencia (≤ 1 celda, también tras cruzarse); una separación breve
@@ -982,11 +1079,12 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     } else if (!prey || prey.health <= 0 || !edible(animal, prey) || distance(animal, prey) > 0) { animal.work = 0; continue; }
     animal.work++; exertBody(animal, { energy: 0.0008, fatigue: 0.001 });
     if (animal.work < 4) continue;
-    animal.work = 0; prey.health = clamp(prey.health - (0.18 + animal.genes.speed * 0.08 - prey.genes.camouflage * 0.05));
+    animal.work = 0; prey.health = clamp(prey.health - (0.18 + animal.genes.speed * 0.08 - prey.genes.camouflage * 0.05)
+      * (emergent ? 1 - (prey.morphology?.defense ?? 0) * 0.5 : 1));
     if (prey.health > 0) continue;
     death(world, prey, 'depredación', emit, animal.id); world.animalDynamics.predations++;
     state.counts.set(cell(prey), state.counts.get(cell(prey))! - 1);
-    const botin = FOOD_PER_ANIMAL[prey.species];
+    const botin = emergent ? animalBiomass(prey) : FOOD_PER_ANIMAL[prey.species];
     assimilateFood(animal, state.reserva ? botin - reservar(animal, botin, state.fraccionReserva) : botin, { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     // V19/R: una presa es también agua. Como el pasto (`feed`: 3 unidades de agua por unidad de biomasa, 0,3 de sed
     // por unidad), el cuerpo de la presa aporta la que conservaba: `botín · 3 · (1 − sed de la presa)`. Sale de ESE
@@ -1001,27 +1099,39 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */
-export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, emit?: AnimalEmitter): number {
+export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, emit?: AnimalEmitter, victimId?: string): number {
   refrescarAmbitoFauna(world);
   const enCelda = animalesVivosEnCelda(world, point.x, point.y);
-  const victim = enCelda ? enCelda.sort(canonical)[0]
-    : world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0).sort(canonical)[0];
+  const candidates = enCelda ?? world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0);
+  const victim = (victimId === undefined ? candidates : candidates.filter(a => a.id === victimId)).sort(canonical)[0];
   if (!victim || !residentBackingArray(world.tiles).some(t => t.x === point.x && t.y === point.y)) return 0;
+  if (paramsOf(world).quimica.emergente) alarmHerd(world.animals, victim, world.tick);
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
-  return FOOD_PER_ANIMAL[victim.species];
+  return paramsOf(world).quimica.emergente ? animalBiomass(victim) : FOOD_PER_ANIMAL[victim.species];
+}
+
+function alarmHerd(animals: readonly Animal[], at: Point, tick: number): void {
+  for (const animal of animals) if (animal.health > 0 && distance(animal, at) <= 3) {
+    animal.lastHunted = tick; animal.habituation = clamp((animal.habituation ?? 0) - 0.15);
+    animal.lastDecision = tick - 12;
+  }
 }
 
 export function projectAnimal(animal: Animal, _tick: number): AnimalView {
   return { id: animal.id, species: animal.species, x: animal.x, y: animal.y, action: animal.action, reason: animal.reason,
     hunger: animal.hunger, thirst: animal.thirst, energy: animal.energy, fatigue: animal.fatigue, health: animal.health,
     generation: animal.generation, parents: [...animal.parents], genes: { ...animal.genes }, age: animal.age,
+    ...(animal.morphology === undefined ? {} : { morphology: { ...animal.morphology } }),
+    ...(animal.habituation === undefined ? {} : { habituation: animal.habituation }),
+    ...(animal.tends === undefined ? {} : { tends: animal.tends }),
     ...(animal.reproReserve === undefined ? {} : { reproReserve: Math.round(animal.reproReserve * 1000) / 1000 }) };
 }
 export function assertAnimal(value: unknown, tick: number): asserts value is Animal {
   const fail = (): never => { throw new Error('Animal individual inválido.'); };
   if (!value || typeof value !== 'object') fail();
   const a = value as Animal, time = (n: number, lower = 0): boolean => Number.isSafeInteger(n) && n >= lower && n <= tick;
+  assertAnimalTraits(a, tick);
   if (typeof a.id !== 'string' || !/^animal-[a-zA-Z0-9-]{1,110}$/.test(a.id) || !SPECIES.includes(a.species) || !ACTIONS.includes(a.action)
     || !point(a) || !point(a.target) || typeof a.reason !== 'string' || a.reason.length > 240
     || !['hunger', 'thirst', 'energy', 'fatigue', 'health'].every(k => unit(a[k as keyof Animal])) || a.health <= 0

@@ -76,6 +76,7 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
   const predators = stats?.wildlife ? count(stats.wildlife.fox) + count(stats.wildlife.wolf) : undefined;
   const recipes = world?.technology?.dynamics.recipes;
   const runtime = world?.performance;
+  const herds = habituatedFauna(world?.animals), forged = forgedToolsCount(world?.technology?.items);
   return [
     { nav: 'people', label: 'Población · linaje', value: `${number(census?.total ?? stats?.population)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
       detail: census ? `${number(census.neighbors)} vecinos · ${number(census.identities)} S/I · J/A/M: ${number(census.lifeStage.juvenile)}/${number(census.lifeStage.adult)}/${number(census.lifeStage.senescent)} · sin etapa: ${number(census.lifeStage.unknown)}. Mundo › Vidas.` : 'Censo no recibido. Abrir Vidas.' },
@@ -83,11 +84,11 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
       detail: `Actividad viva · faena ${percentage(activity.working)} · descanso ${percentage(activity.resting)} · diversidad de conducta ${percentage(stats?.diversidad?.conducta)}. Abrir Mundo › Vida.` },
     { nav: 'communities', label: 'Sociedad · coop/desac', value: `${number(community.total)} · ${number(community.cooperation)}/${number(community.disputes)}`,
       detail: `${number(community.total)} comunidades · ${number(community.cooperation)} cooperaciones · ${number(community.disputes)} desacuerdos · apertura media ${percentage(community.cultures.find(c => c.axis === 'openness')?.mean)}. Abrir Mundo › Comunidades.` },
-    { nav: 'animals', label: 'Fauna · depred.', value: `${number(wildlife)} · ${number(predators)} dep.`, detail: `Regiones activas: ${number(wildlife)} animales · ${number(predators)} depredadores (zorros y lobos). Abrir Vidas › Fauna.` },
+    { nav: 'animals', label: 'Fauna · depred.', value: `${number(wildlife)} · ${number(predators)} dep.${herds.known ? ` · ${herds.tame} mans. / ${herds.calming} hab.` : ''}`, detail: `Regiones activas: ${number(wildlife)} animales · ${number(predators)} depredadores (zorros y lobos). En vista: ${herds.known ? `${herds.tame} mansos y ${herds.calming} habituándose (individuos recibidos)` : 'habituación no recibida'}. Abrir Vidas › Fauna.` },
     { nav: 'land', label: 'Cultivos · planos', value: `${number(stats?.cultivatedTiles)} · ${number(stats?.blueprints)}${count(stats?.pavedTiles) > 0 ? ` · ${number(stats?.pavedTiles)} calz.` : ''}`,
       detail: `${number(stats?.cultivatedTiles)} cultivos en regiones activas · ${number(stats?.blueprints)} planos conocidos · ${number(world?.structures?.length)} obras en esta vista${stats?.pavedTiles !== undefined ? ` · ${number(stats.pavedTiles)} calzadas empedradas` : ''}${stats?.polyominoStructures !== undefined ? ` · ${number(stats.polyominoStructures)} edificios poliominó` : ''}. Abrir Mundo › Paisaje.` },
-    { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
-      detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
+    { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${forged === undefined ? '' : ` · ${forged} forj.`}${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
+      detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
     { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`, health: pulseHealth(runtime),
       detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms / presupuesto ${number(runtime?.gobernador?.presupuestoMs)} ms · ${number(runtime?.tickHz, 2)} Hz · ${pulseHealth(runtime) === 'hot' ? 'Presupuesto superado' : pulseHealth(runtime) === 'warn' ? 'Cerca del presupuesto' : pulseHealth(runtime) === 'healthy' ? 'Con margen' : 'Sin presupuesto medido'}. Abrir Mundo › Rendimiento.` },
   ];
@@ -186,7 +187,7 @@ export function renderPersonTelemetry(p: PersonView): string {
     ['Salud', percentage(p.health)], ['Vitalidad', percentage(p.vitality)], ['Etapa', stage], ['Edad', `${number(p.age)} pasos`],
     ['Gen', p.genome ? `G${number(p.genome.generation)}` : '—'], ['Reserva', `${number(p.foodReserve, 2)} / ${number(p.foodReserveCapacity, 2)}`],
     ['Madera', number(p.materials?.wood)], ['Piedra', number(p.materials?.stone)],
-  ])) + personCompoundsSection(p) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
+  ])) + (p.craftFocus || p.craftTint ? section('Oficio emergente', `${swatch(p.craftTint)}<strong>${esc(p.craftFocus ?? 'Práctica material')}</strong>`) : '') + personCompoundsSection(p) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
 }
 export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve?: number }): string {
   const reserve = animal.reproReserve ?? animal.reproductiveReserve;
@@ -195,7 +196,12 @@ export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve
     ['Carnivoría', number(animal.genes.carnivory, 2)], ['Agua · eficiencia', number(animal.genes.waterEfficiency, 2)], ['Camuflaje', number(animal.genes.camouflage, 2)],
     ['Edad', `${number(animal.age)} pasos`], ['Generación', `G${number(animal.generation)}`], ['Progenitores', animal.parents.length ? animal.parents.join(' · ') : 'Primera generación registrada'],
     ...(reserve === undefined ? [] : [['Reserva reproductiva', number(reserve, 3)] as [string, string]]),
-  ]));
+  ])) + (animal.morphology ? section('Morfología evolutiva', facts([
+    ['Cautela', percentage(animal.morphology.caution)], ['Tamaño', percentage(animal.morphology.size)],
+    ['Pelaje', percentage(animal.morphology.coat)], ['Defensa', percentage(animal.morphology.defense)],
+  ])) : '') + section('Habituación / Mansedumbre',
+    facts([['Estado', finite(animal.habituation) ? animal.habituation >= .75 ? 'Manso · aprovechable sin caza' : animal.habituation >= .45 ? 'Habituándose' : 'Salvaje' : 'Sin dato'], ['Cuidados', number(animal.tends)]])
+    + (finite(animal.habituation) ? `<meter aria-label="Habituación / Mansedumbre" min="0" max="1" value="${Math.max(0, Math.min(1, animal.habituation))}">${esc(percentage(animal.habituation))}</meter>` : ''), 'Habituación aprendida en vida; la morfología es heredable.');
 }
 export function renderTileTelemetry(tile: WorldView['tiles'][number], seed?: number): string {
   return facts([['Estado del cultivo', cropLabels[cropStage(tile.cultivation)]], ['Crecimiento', percentage(tile.growth)]]) + roadSection(tile) + geologySection(tile, seed);
@@ -253,7 +259,8 @@ export function geologySection(tile: WorldView['tiles'][number], seed: number | 
 /** Lotes con muestra de color, fase, masa y sus propiedades principales. */
 export function compoundLotsMarkup(lots: readonly CompoundLot[], attribute: string): string {
   if (!lots.length) return '';
-  return `<ul class="compound-lots" ${attribute}>${lots.map(lot => `<li data-compound="${esc(lot.id)}">${swatch(lot.properties?.colorHex)}<span class="compound-name">${esc(lot.formulaId)}</span><span class="detail-badge">${esc(phaseLabels[lot.phase] ?? lot.phase)}</span><strong>${esc(number(lot.mass, 2))} u.</strong><small>dureza ${esc(pct(lot.properties?.hardness))} · sellado ${esc(pct(lot.properties?.seal))} · combustible ${esc(pct(lot.properties?.fuelPower))}</small></li>`).join('')}</ul>`;
+  const attr = /^data-[a-z0-9-]+$/.test(attribute) ? attribute : 'data-compounds';
+  return `<ul class="compound-lots" ${attr}>${lots.map(lot => `<li data-compound="${esc(lot.id)}">${swatch(lot.properties?.colorHex)}<span class="compound-name">${esc(lot.formulaId)}</span><span class="detail-badge">${esc(phaseLabels[lot.phase] ?? lot.phase)}</span><strong>${esc(number(lot.mass, 2))} u.</strong><small>dureza ${esc(pct(lot.properties?.hardness))} · sellado ${esc(pct(lot.properties?.seal))} · combustible ${esc(pct(lot.properties?.fuelPower))}</small>${materialPropertiesMarkup(lot.properties)}</li>`).join('')}</ul>`;
 }
 function personCompoundsSection(p: PersonView): string {
   return p.compounds?.length ? section('Compuestos que lleva', compoundLotsMarkup(p.compounds, 'data-person-compounds'), 'Lotes químicos que carga ahora: color, fase y masa.') : '';
@@ -281,11 +288,28 @@ export function renderChemistryTelemetry(chemistry: ChemistrySummaryView | undef
     ['Fórmulas', number(chemistry.totalFormulas)], ['Lotes activos', number(chemistry.totalLots)], ['Temperatura máx.', tiers[chemistry.maxTemperatureTier] ?? `T${chemistry.maxTemperatureTier}`],
     ...(Object.keys(operatorLabels) as ChemOperator[]).map((op): [string, string] => [`Operador · ${operatorLabels[op]}`, number(chemistry.byOperator?.[op])]),
   ]);
-  const meters: [string, keyof CompoundLot['properties']][] = [['Dureza', 'hardness'], ['Tenacidad', 'toughness'], ['Sellado', 'seal'], ['Aislamiento', 'insulation'], ['Combustible', 'fuelPower']];
   const cards = chemistry.formulas.slice(0, 12).map(f => `<article class="chem-card" data-formula="${esc(f.id)}">
     <header>${swatch(f.properties.colorHex)}<strong>${esc(f.name)}</strong><span class="detail-badge">${esc(phaseLabels[f.phase] ?? f.phase)}</span><span class="detail-badge">T${esc(f.temperatureTier)}</span><span class="detail-badge">${esc(operatorLabels[f.operator] ?? f.operator)}</span></header>
     ${elementBar(f.composition)}
-    <div class="chem-props">${meters.map(([label, key]) => { const v = Math.max(0, Math.min(1, count(f.properties[key] as number))); return `<span>${label}<meter aria-label="${label}" min="0" max="1" value="${v}"></meter><small>${esc(percentage(v))}</small></span>`; }).join('')}</div>
+    ${materialPropertiesMarkup(f.properties)}
     <small>Usos ${esc(number(f.uses))} · descubierta en el paso ${esc(number(f.discoveredAt))}</small></article>`).join('');
   return `<section class="stats-section telemetry-section" data-chemistry><h3 class="section-title">Química emergente</h3><p class="stats-note">Seis elementos conservados (C, Si, Ca, Fe, S, H) y cuatro operadores físicos; cada fórmula nace de lo que alguien hizo.</p>${summary}${cards ? `<div class="chem-cards">${cards}</div>` : '<p class="stats-note">Todavía nadie ha descubierto una fórmula.</p>'}${chemistry.formulas.length < chemistry.totalFormulas ? `<p class="stats-note">Se muestran ${number(Math.min(12, chemistry.formulas.length))} de ${number(chemistry.totalFormulas)} fórmulas.</p>` : ''}</section>`;
+}
+
+
+const materialProperties = [['Dureza', 'hardness'], ['Tenacidad', 'toughness'], ['Sellado', 'seal'], ['Aislamiento', 'insulation'], ['Combustible', 'fuelPower'], ['Fertilidad', 'fertility'], ['Ligereza', 'lightness']] as const;
+/** Seven received chemical properties; absent legacy values stay unknown. */
+export function materialPropertiesMarkup(properties: Partial<CompoundLot['properties']> | undefined): string {
+  return `<div class="chem-props">${materialProperties.map(([label, key]) => {
+    const raw = properties?.[key], v = finite(raw) ? Math.max(0, Math.min(1, raw)) : undefined;
+    return `<span>${label}${v === undefined ? '' : `<meter aria-label="${label}" min="0" max="1" value="${v}"></meter>`}<small>${esc(percentage(v))}</small></span>`;
+  }).join('')}</div>`;
+}
+export function habituatedFauna(animals?: readonly AnimalView[]) {
+  const alive = (animals ?? []).filter(a => a.health > 0);
+  return { known: alive.some(a => finite(a.habituation)), tame: alive.filter(a => (a.habituation ?? 0) >= .75).length,
+    calming: alive.filter(a => (a.habituation ?? 0) >= .45 && (a.habituation ?? 0) < .75).length };
+}
+export function forgedToolsCount(items?: NonNullable<WorldView['technology']>['items']): number | undefined {
+  return items?.filter(item => item.mass > 0 && !!item.chemFormulaId && !!item.chemPhase && item.chemPhase !== 'raw' && item.chemPhase !== 'ground' && item.chemPhase !== 'washed' && Object.values(item.capacities).some(v => v > .08)).length;
 }

@@ -208,7 +208,6 @@ const FIELD_BY_NAME = Object.fromEntries(FIELDS.map(f => [f.name, f]));
 const DOWNLOAD_FIELDS = {
   1: ['moisture', 'vegetation', 'food'],
   2: FIELDS.map(f => f.name).filter(n => n !== 'food' && n !== 'terrain' && n !== 'biome'),
-  '2_halo': FIELDS.map(f => f.name).filter(n => n !== 'terrain' && n !== 'biome'),
 };
 function runsOf(sorted) {
   const runs = [];
@@ -409,15 +408,14 @@ async function handle(job){
   { const src=bytesOf(buffers,haloField); const hb=256*haloSpec.bytes;
     for(const lst of (job.haloSlotsPerDevice||[])){ for(const [s0,c] of runsOf(lst)){ body.set(src.subarray(s0*hb,(s0+c)*hb),off); off+=c*hb; } } }
   if(climate){ body.set(new Uint8Array(climate.buffer, climate.byteOffset, climate.byteLength), off); off+=climate.byteLength; }
-  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params, climate:!!climate}, body);
+  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, params:job.params, climate:!!climate}, body);
   if(!reply.header.ok) throw new Error('GPU step failed');
   uploaded += reply.header.uploadedBytes||0; downloaded += reply.header.downloadedBytes||0;
   // Bajada selectiva coalescida: solo los campos de la pasada, por campo y por tramo.
   // Los campos no descargados se copian front->back en RAM local para los tramos tocados.
   let boff=0;
   const perDevice = reply.header.downloadRunsPerDevice||[];
-  const dlKey = (job.downloadSlots !== undefined && job.downloadSlots !== null && job.pass === 2) ? '2_halo' : job.pass;
-  const dlNames = DOWNLOAD_FIELDS[dlKey] || FIELDS.map(f=>f.name);
+  const dlNames = DOWNLOAD_FIELDS[job.pass];
   const dlSet = new Set(dlNames);
   const touched=new Set();
   for(let di=0; di<perDevice.length; di++){
@@ -909,40 +907,32 @@ export class ResidentGpuBridge {
    * `options.climate` (V22, solo `ecologia`): `regionalClimateFactor` por ranura de página
    * (`slots*3` dobles, calculados en JS); con él se lanza `ecology_pass1_seasonal` en vez de `ecology_pass1`.
    */
-  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[]; climate?: Float64Array }): GpuRunResult {
+  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { climate?: Float64Array }): GpuRunResult {
     if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
     if (this.broken) throw this.broken;
+    if (this.vramAhead) throw new Error('La pasada ecológica requiere el frente confirmado en RAM.');
     const buffers = terrain.buffers;
     const key = this.topologyKey(terrain, pageSetVersion, regionSide);
-    const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
+    const sharded = this.devices.length > 1 && this.shardedOption === true;
     if (options?.climate && (pass !== 'ecologia' || options.climate.length !== key.slots * 3))
       throw new RangeError('climate requiere la pasada ecologia y slots*3 dobles.');
     let plan: ReturnType<ResidentGpuBridge['planTopology']> | null = null;
-    // Incremental solo si el anfitrión es autoritativo (el último paso bajó todas las páginas propias).
-    if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
+    if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, true);
     const topo = this.topo!;
     const dirtyArr = new Uint8Array(buffers.dirty!);
     const dirtySlots = this.dirtySlotsOf(dirtyArr);
     const haloSlotsPerDevice = topo.haloLists();
-    let downloadSlots: number[] | undefined;
-    if (options?.downloadSlots !== undefined) {
-      const set = new Set<number>(options.downloadSlots);
-      if (pass === 'kernel') for (const lst of haloSlotsPerDevice) for (const s of lst) set.add(s);
-      downloadSlots = [...set].sort((a, b) => a - b);
-    }
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
       this.worker.postMessage({
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, haloSlotsPerDevice,
-        downloadSlots, capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
+        capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
         climate: options?.climate,
       }, this.transferables(plan?.full, plan?.delta));
     } catch (error) { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; throw error; }
     this.wait('ResidentGpuBridge', 120000);
     this.synced = key; this.syncedDirtyBuffer = buffers.dirty!;
-    if (plan?.full) this.vramAhead = false;
-    if (options?.downloadSlots !== undefined) this.vramAhead = true;
     return this.finish(buffers, dirtyArr, pass, plan?.kind ?? null);
   }
 

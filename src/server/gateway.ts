@@ -12,6 +12,7 @@ import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, tapePathForWorld } from './tape-store.js';
 import { projectMirrorTile, type MirrorUpdate, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
 import type { RuntimeStats, Tile, Viewport, WorldView } from '../shared/types.js';
+import type { TapeChunkEncoding } from '../shared/tape.js';
 import type { World } from '../world/index.js';
 
 export interface WorkerGatewayOptions extends GatewayAppOptions, SimWorkerOptions {}
@@ -204,9 +205,9 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     get respaldo() { return mirror?.respaldo; },
     ...(tapeEnabled ? {
       tapeMeta: () => tape().readMeta(240),
-      tapeChunk: (fromTick: number, count: number, viewport?: Viewport) => {
+      tapeChunk: (fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding) => {
         const reader = tape();
-        return reader.readChunk(fromTick, count, viewport, viewport ? tapeBackground() : undefined);
+        return reader.readChunk(fromTick, count, viewport, viewport ? tapeBackground() : undefined, encoding);
       },
     } : {}),
   };
@@ -227,6 +228,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       options: { worldPath: options.worldPath, seed: options.seed, params: options.params, tickMs: options.tickMs,
         deployment: options.deployment, testStepDelayMs: options.testStepDelayMs,
         turbo, tape: tapeEnabled, tapeMaxFrames: options.tapeMaxFrames, tapeKeyframeInterval: options.tapeKeyframeInterval,
+        turboSaveIntervalMs: options.turboSaveIntervalMs,
         observerOnly: options.observerOnly } satisfies SimWorkerOptions } });
   let workerExited = false;
   const exited = new Promise<void>(resolve => worker.once('exit', code => {

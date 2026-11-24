@@ -124,7 +124,8 @@ export function projectMirrorWorld(world: World, viewport?: Viewport, context: W
 }
 
 
-import { isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { isMainThread, parentPort, workerData, Worker } from 'node:worker_threads';
+import { existsSync } from 'node:fs';
 import { serialize } from 'node:v8';
 import { createApp, HttpError } from './app.js';
 import { Store } from './store.js';
@@ -137,7 +138,8 @@ import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardw
 import { resumenDespacho } from './resumen-vivo.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
-import { TapeWriter, tapePathForWorld } from './tape-store.js';
+import { tapePathForWorld } from './tape-store.js';
+import type { TapeWorkerRequest, TapeWorkerReply } from './tape-worker.js';
 import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
 import type { AppOptions } from './app.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
@@ -155,6 +157,7 @@ export interface SimWorkerOptions {
   /** V21: uncapped loop (`tickMs = 0`, a step per `setImmediate`); the live mirror is throttled to
    * `TURBO_MIRROR_MS` while the tape still records every tick. */
   turbo?: boolean;
+  turboSaveIntervalMs?: number;
   /** V21: record every step in the DVR tape (`tapePathForWorld(worldPath)`). Defaults to `turbo`. */
   tape?: boolean;
   tapeMaxFrames?: number;
@@ -223,9 +226,9 @@ export function createChunkObserver() {
 const q2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
- * V21 DVR frame: the full-population mirror projection (no private fields), with its own copies of
- * everything that still aliases live world state, plus the tiles given by the caller (changed chunks,
- * or every resident tile on a keyframe). `tapeWriter.record` may buffer it by reference.
+ * Full-population DVR projection (no private fields), plus the caller's changed/resident tiles.
+ * Consume before the next step: postMessage makes the single cross-thread copy, while the
+ * same-thread app's TapeWriter copies its input synchronously inside record().
  */
 export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
   const view = projectMirrorWorld(world, undefined, worldContext(world));
@@ -255,8 +258,7 @@ export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId
       ...(a.age !== undefined ? { age: Math.floor(a.age / 20) * 20 } : {}),
     }));
   }
-  // `projectMirrorWorld` hands out the live structures array: the step after this one mutates it.
-  if (view.structures) view.structures = structuredClone(view.structures);
+  // Consume synchronously: postMessage clones the live structures exactly once before the next step.
   view.tiles = tiles;
   return view;
 }
@@ -282,18 +284,43 @@ async function runSimulation(options: SimWorkerOptions) {
   const observer = createChunkObserver();
   const turbo = !!options.turbo || options.tickMs === 0;
   const tapeEnabled = options.tape ?? turbo;
-  let tapeWriter: TapeWriter | undefined;
+  let tapeWorker: Worker | undefined;
   let tapeClosed = false;
+  let tapeError: Error | undefined;
+  let inFlightFrames = 0;
+  let tapeRequestId = 0;
+  type TapeResult = { frames: number; latestTick: number };
+  const tapeCalls = new Map<number, { resolve(value: TapeResult): void; reject(error: Error): void }>();
+  let tapeExited: Promise<void> | undefined;
   let firstTapeFrame = true;
   let lastSimHz = 0;
   /** Projected chunk pages changed since the last mirror post (turbo accumulates across throttled ticks). */
   const unpostedChunks = new Map<string, Tile[]>();
   let lastPostAt = -Infinity;
   let previousPaused = false;
-  function closeTape() {
-    if (!tapeWriter || tapeClosed) return;
+  function failTape(error: Error) {
+    if (tapeError) return;
+    tapeError = error;
+    inFlightFrames = 0;
+    for (const call of tapeCalls.values()) call.reject(error);
+    tapeCalls.clear();
+    port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error.message } });
+  }
+  function tapeCommand(type: 'flush' | 'close'): Promise<TapeResult> {
+    if (tapeError) return Promise.reject(tapeError);
+    if (!tapeWorker) return Promise.resolve({ frames: 0, latestTick: -1 });
+    const id = ++tapeRequestId;
+    return new Promise((resolve, reject) => {
+      tapeCalls.set(id, { resolve, reject });
+      try { tapeWorker!.postMessage({ type, id } satisfies TapeWorkerRequest); }
+      catch (error) { tapeCalls.delete(id); reject(error); }
+    });
+  }
+  async function closeTape() {
+    if (!tapeWorker || tapeClosed) return;
     tapeClosed = true;
-    tapeWriter.close();
+    try { await tapeCommand('close'); await tapeExited; }
+    finally { if (tapeError) await tapeWorker.terminate(); }
   }
   let instanceId: string | undefined;
   function publish({ forcePost = false, record = true }: { forcePost?: boolean; record?: boolean } = {}) {
@@ -309,7 +336,7 @@ async function runSimulation(options: SimWorkerOptions) {
     // The world's identity never changes under its single writer: read once, not per (turbo) tick.
     instanceId ??= readWorldInstance(store.db)!;
     let frame: WorldView | undefined;
-    if (record && tapeWriter && !tapeClosed) {
+    if (record && tapeWorker && !tapeClosed && !tapeError) {
       // Every tick reaches the tape, even when the live mirror is throttled.
       const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, firstTapeFrame);
       const tiles: Tile[] = [];
@@ -319,12 +346,13 @@ async function runSimulation(options: SimWorkerOptions) {
       }
       frame = projectTapeFrame(world, live.runtime, instanceId, tiles);
       try {
-        tapeWriter.record(frame, lastSimHz, !keyframe);
+        tapeWorker.postMessage({ type: 'record', view: frame, simHz: lastSimHz,
+          partialTiles: !keyframe } satisfies TapeWorkerRequest);
+        inFlightFrames++;
         firstTapeFrame = false;
       } catch (error) {
         // A DVR is an observer: it never pauses the world. It stops recording and says so once.
-        port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error instanceof Error ? error.message : String(error) } });
-        try { closeTape(); } catch { /* ya está perdida */ }
+        failTape(error instanceof Error ? error : new Error(String(error)));
       }
     }
     const now = performance.now();
@@ -380,10 +408,12 @@ async function runSimulation(options: SimWorkerOptions) {
       : process.env.CARTA_FULL_HARDWARE === '1' ? hostFullHardwareParams() : hostParams();
     app = createApp({ store, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
-      // This worker owns the only TapeWriter of the world (`publish`); the inner app must not open another.
+      // publish sends to the dedicated writer thread; the inner app must not open another writer.
       tape: false,
+      turboSaveIntervalMs: options.turboSaveIntervalMs,
       params: options.deployment ? () => deploymentParams(base()) : options.params,
       beforeStep: () => {
+        if (inFlightFrames >= 64) return false;
         if (options.testStepDelayMs) {
           port.postMessage({ type: 'step-blocked', tick: app!.world.tick });
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.testStepDelayMs);
@@ -402,15 +432,42 @@ async function runSimulation(options: SimWorkerOptions) {
       port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: parity, v15: resumenDespacho(app.world) } });
     }
     if (motor.gpu.length === 0) port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: null, v15: resumenDespacho(app.world) } });
-    if (tapeEnabled) tapeWriter = new TapeWriter({ path: tapePathForWorld(options.worldPath),
-      maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval });
+    if (tapeEnabled) {
+      let moduleURL = new URL('./tape-worker.js', import.meta.url);
+      const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
+      if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
+      tapeWorker = new Worker(`
+        const { workerData } = require('node:worker_threads');
+        (async () => {
+          if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
+          await import(workerData.moduleURL);
+        })().catch(error => { setImmediate(() => { throw error; }); });
+      `, { eval: true, execArgv: [], name: 'carta-tape', workerData: {
+        role: 'carta-tape', moduleURL: moduleURL.href,
+        loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
+        options: { path: tapePathForWorld(options.worldPath), maxFrames: options.tapeMaxFrames,
+          keyframeInterval: options.tapeKeyframeInterval },
+      } });
+      tapeWorker.on('message', (message: TapeWorkerReply) => {
+        if (message.type === 'ack') inFlightFrames--;
+        else {
+          tapeCalls.get(message.id)?.resolve({ frames: message.frames, latestTick: message.latestTick });
+          tapeCalls.delete(message.id);
+        }
+      });
+      tapeWorker.on('error', failTape);
+      tapeExited = new Promise(resolve => tapeWorker!.once('exit', code => {
+        if (!tapeClosed || code !== 0 || tapeCalls.size) failTape(new Error(`Tape worker exited (code ${code}).`));
+        resolve();
+      }));
+    }
     publish({ forcePost: true });
     // The gateway opens its read-only TapeReader on `ready`: the initial frame must already be durable.
-    tapeWriter?.flush();
+    await tapeCommand('flush');
     port.on('message', (message: SimRpc) => { void handle(message); });
     port.postMessage({ type: 'ready', sessions: initialSessions });
   } catch (error) {
-    try { await app?.close(); } finally { try { closeTape(); } finally { store.close(); } }
+    try { await app?.close(); } finally { try { await closeTape(); } finally { store.close(); } }
     throw error;
   }
   async function handle(message: SimRpc) {
@@ -437,8 +494,7 @@ async function runSimulation(options: SimWorkerOptions) {
           value = technologyRecipeDetail(app!.world, args[0] as string) ?? null; break;
         }
         case 'flushTape':
-          if (tapeWriter && !tapeClosed) tapeWriter.flush();
-          value = { enabled: !!tapeWriter && !tapeClosed, frames: tapeWriter?.frameCount ?? 0, latestTick: tapeWriter?.latestTick ?? -1 };
+          value = { enabled: !!tapeWorker && !tapeClosed && !tapeError, ...await tapeCommand('flush') };
           break;
         case 'shutdown':
           closing = true;
@@ -447,9 +503,8 @@ async function runSimulation(options: SimWorkerOptions) {
             if (!app!.failed) {
               // Turbo throttles the mirror: the last steps reach the gateway before it goes away.
               if (turbo) publish({ forcePost: true, record: false });
-              store.save(app!.world);
             }
-          } finally { try { closeTape(); } finally { store.close(); } }
+          } finally { try { await closeTape(); } finally { store.close(); } }
           break;
         default: throw new HttpError(400, 'RPC desconocido.');
       }

@@ -23,16 +23,17 @@ const digestoDelMundo = (world: World): string => {
   const copia = cloneWorld(world); setParams(copia, DEFAULT_PARAMS); return digestoCanonico(copia);
 };
 
-type Harness = { app: ReturnType<typeof createApp>; store: Store; origin: string; close: () => Promise<void> };
+type Harness = { app: ReturnType<typeof createApp>; store: Store; origin: string; salidas: number[]; close: () => Promise<void> };
 async function harness(clonPorPaso: boolean, extra = '', seed = 51926): Promise<Harness> {
   const port = await freePort(), origin = `http://127.0.0.1:${port}`;
   const store = new Store(':memory:');
   const params = parseParams(`motor.clonPorPaso=${clonPorPaso}${extra}`, DEFAULT_PARAMS);
   // Reloj propio del servidor: así `performance.now()` durante el paso solo lo llama la medición de
   // fases de `stepOnce`, y `relojDeFases` puede contar en qué fase va el paso.
+  const salidas: number[] = [];
   const app = createApp({ store, origin, password: 'restauracion-t104-password', manual: true, seed, params,
-    monotonicNow: () => Number(process.hrtime.bigint()) / 1e6 });
-  return { app, store, origin, close: async () => { await app.close(); store.close(); } };
+    monotonicNow: () => Number(process.hrtime.bigint()) / 1e6, onFatalExit: codigo => { salidas.push(codigo); } });
+  return { app, store, origin, salidas, close: async () => { await app.close(); store.close(); } };
 }
 /** Lleva a todos los habitantes a un chunk vecino: el paso siguiente reanima terreno y retira el viejo. */
 function mudar(world: World, dx: number, dy: number): void {
@@ -81,19 +82,24 @@ test('(2) el mismo fallo con un chunk reanimado en ese paso: el terreno dormido 
   } finally { await close(); }
 });
 
-test('(3) `stepWorld` que lanza a mitad deja el mundo restaurado, no a medio paso', async () => {
-  const { app, store, close } = await harness(false);
+test('(3) `stepWorld` que lanza a mitad deja el mundo restaurado, no a medio paso, y el mundo sigue', async () => {
+  const { app, store, salidas, close } = await harness(false);
   try {
     for (let n = 0; n < 6; n++) app.stepOnce();
     // `activate` pide el chunk archivado al anfitrión desde dentro de `maintainRegions`, o sea
     // después de `world.tick++` y antes de la ecología: un fallo aquí es un paso a medias real.
     mudar(app.world, 40, 40);
     const antes = digestoCanonico(app.world), tick = app.world.tick;
+    const leer = store.loadChunk.bind(store);
     store.loadChunk = () => { throw new Error('synthetic mid-step failure'); };
     assert.doesNotThrow(() => app.stepOnce());
-    assert.equal(app.failed, true);
+    assert.equal(app.failed, false, 'el paso quedó deshecho y el mundo no se pausa');
     assert.equal(app.world.tick, tick);
     assert.equal(digestoCanonico(app.world), antes);
+    assert.deepEqual(salidas, []);
+    store.loadChunk = leer;
+    app.stepOnce();
+    assert.equal(app.world.tick, tick + 1, 'sin el fallo, el mundo avanza desde donde estaba');
   } finally { await close(); }
 });
 
@@ -122,8 +128,7 @@ test('(4) SessionRevoked: el mundo no avanza con un gesto aplicado y no confirma
   for (const clonPorPaso of [true, false]) {
     // PERF3: con clon por paso, el paso CON gestos sigue simulando sobre un clon, el único que puede
     // deshacerse; el gemelo nunca vio el gesto y los dos tienen que seguir siendo el mismo mundo.
-    const presupuesto = ',gobernador.presupuestoMs=5000';
-    const h = await harness(clonPorPaso, presupuesto), gemelo = await harness(clonPorPaso, presupuesto);
+    const h = await harness(clonPorPaso), gemelo = await harness(clonPorPaso);
     const { app, store } = h;
     try {
       for (let n = 0; n < 6; n++) { app.stepOnce(); gemelo.app.stepOnce(); }
@@ -152,12 +157,7 @@ test('(4) SessionRevoked: el mundo no avanza con un gesto aplicado y no confirma
 });
 
 test('(5) `motor.clonPorPaso=true` reproduce exactamente el mundo de hoy, tick a tick', async () => {
-  // El gobernador (ruling R17) es el único punto donde el reloj de pared entra en el mundo:
-  // apaga los nacimientos cuando el p95 supera su presupuesto. Comparar dos motores que corren
-  // a velocidades distintas exige un presupuesto que ninguno de los dos alcance; si no, la
-  // divergencia que se mide es la del host, no la del cambio.
-  const presupuesto = ',gobernador.presupuestoMs=5000';
-  const conClon = await harness(true, presupuesto), sinClon = await harness(false, presupuesto);
+  const conClon = await harness(true), sinClon = await harness(false);
   try {
     for (let n = 0; n < 60; n++) {
       conClon.app.stepOnce(); sinClon.app.stepOnce();
@@ -172,7 +172,7 @@ test('(13) PERF3: con gestos y la cadencia de producción, clon por paso (en el 
     // El punto (T104) simula todo paso sobre el mundo vigente con reserva y ya se probó bit a bit igual al
     // clon de siempre ((5), (10), `scripts/perf/trayectoria-punto.ts`); aquí el otro lado alterna sin reserva
     // (sin gestos) y clon (con gestos). Cada 25 pasos un gesto real en los dos, que obliga a guardar.
-    const receta = `,${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000`;
+    const receta = `,${PRODUCTION_PARAMS}`;
     for (const seed of [7, 42, 51926]) {
       const clon = await harness(true, receta, seed), punto = await harness(false, receta, seed);
       try {
@@ -220,7 +220,7 @@ test('el punto de restauración deshace un paso completo sin servidor, paso a pa
 });
 
 test('PERF3: con clon por paso, el paso sin gestos corre en el sitio y el paso con gestos sobre un clon', async () => {
-  const h = await harness(true, ',gobernador.presupuestoMs=5000');
+  const h = await harness(true);
   try {
     const mundo = h.app.world;
     for (let n = 0; n < 4; n++) h.app.stepOnce();
@@ -309,16 +309,19 @@ const enMedio = <T>(lista: readonly T[]): T => {
 test('(6) un fallo al cerrar cualquier fase del paso deja el mundo exactamente como antes del paso', async () => {
   await conRelojDeFases(async fases => {
     for (const fase of FASES) {
-      const { app, close } = await harness(false);
+      const { app, salidas, close } = await harness(false);
       try {
         for (let n = 0; n < 6; n++) app.stepOnce();
         const antes = digestoCanonico(app.world), tick = app.world.tick, mundoAntes = cloneWorld(app.world);
         fases.armar(fase); app.stepOnce(); fases.desarmar();
         assert.equal(fases.disparado, true, `el fallo no llegó a cerrar ${fase}`);
-        assert.equal(app.failed, true);
+        assert.equal(app.failed, false, `${fase}: el paso se deshace y el mundo no se pausa`);
         assert.equal(app.world.tick, tick, fase);
         assert.equal(diferenciaCanonica(mundoAntes, app.world), null, fase);
         assert.equal(digestoCanonico(app.world), antes, fase);
+        assert.deepEqual(salidas, [], fase);
+        app.stepOnce();
+        assert.equal(app.world.tick, tick + 1, `${fase}: y el mundo sigue`);
       } finally { fases.desarmar(); await close(); }
     }
   });
@@ -326,6 +329,9 @@ test('(6) un fallo al cerrar cualquier fase del paso deja el mundo exactamente c
 
 test('(7) un fallo a mitad de personas, a mitad de fauna o al confirmar el guardado: mundo intacto y el Store sigue', async () => {
   await conRelojDeFases(async fases => {
+    // Solo un fallo del propio guardado pausa el mundo (simular sin poder guardar no es recuperable aquí):
+    // los demás se deshacen y el mundo sigue.
+    const pausan = new Set(['guardado']);
     const casos: Record<string, (h: Harness) => () => boolean> = {
       personas: ({ app }) => {
         const t = trampa(enMedio(app.world.people), 'x', () => fases.dentro('personas'), () => new Error('fallo inyectado en personas'));
@@ -348,7 +354,7 @@ test('(7) un fallo a mitad de personas, a mitad de fauna o al confirmar el guard
         const antes = digestoCanonico(h.app.world), tick = h.app.world.tick, mundoAntes = cloneWorld(h.app.world);
         fases.armar(); h.app.stepOnce(); fases.desarmar();
         assert.equal(disparado(), true, `el fallo de ${nombre} no se disparó`);
-        assert.equal(h.app.failed, true, nombre);
+        assert.equal(h.app.failed, pausan.has(nombre), nombre);
         assert.equal(h.app.world.tick, tick, nombre);
         assert.equal(diferenciaCanonica(mundoAntes, h.app.world), null, nombre);
         assert.equal(digestoCanonico(h.app.world), antes, nombre);
@@ -370,7 +376,7 @@ test('(7) un fallo a mitad de personas, a mitad de fauna o al confirmar el guard
 test('(8) un fallo DESPUÉS de confirmar el guardado no deshace en memoria un paso que ya es durable', async () => {
   const finales: string[] = [];
   for (const clonPorPaso of [true, false]) {
-    const { app, store, close } = await harness(clonPorPaso, ',gobernador.presupuestoMs=5000');
+    const { app, store, close } = await harness(clonPorPaso);
     try {
       for (let n = 0; n < 6; n++) app.stepOnce();
       const tick = app.world.tick;
@@ -380,7 +386,7 @@ test('(8) un fallo DESPUÉS de confirmar el guardado no deshace en memoria un pa
         get: () => { if (armado) { armado = false; throw new Error('fallo inyectado tras confirmar'); } return 0; } });
       app.stepOnce();
       assert.equal(armado, false, 'el fallo no se disparó');
-      assert.equal(app.failed, true);
+      assert.equal(app.failed, false, 'un fallo de la telemetría tras confirmar no detiene el mundo');
       assert.equal(app.world.tick, tick + 1, `clonPorPaso=${clonPorPaso}: lo confirmado en disco no se deshace en memoria`);
       assert.equal(digestoDelMundo(store.load()!.world), digestoDelMundo(app.world));
       finales.push(digestoDelMundo(app.world));
@@ -391,8 +397,7 @@ test('(8) un fallo DESPUÉS de confirmar el guardado no deshace en memoria un pa
 
 test('(9) tras deshacer, el servidor sigue y su mundo es el de un gemelo con clon que nunca intentó ese paso', async () => {
   await conRelojDeFases(async fases => {
-    const presupuesto = ',gobernador.presupuestoMs=5000';
-    const gemelo = await harness(true, presupuesto), punto = await harness(false, presupuesto);
+    const gemelo = await harness(true), punto = await harness(false);
     try {
       // `SessionRevoked` es el fallo del que el servidor se recupera solo: deshace y reintenta al paso
       // siguiente. Lanzado a mitad de fase, o al confirmar, ejercita la restauración de un paso a medias.
@@ -428,7 +433,7 @@ test('(9) tras deshacer, el servidor sigue y su mundo es el de un gemelo con clo
 });
 
 test('(10) con la receta de producción los dos motores dan el mismo mundo, en memoria y en disco', async () => {
-  const receta = `,${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000`;
+  const receta = `,${PRODUCTION_PARAMS}`;
   const conClon = await harness(true, receta), sinClon = await harness(false, receta);
   try {
     assert.equal(paramsOf(sinClon.app.world).persistencia.cadaTicks, 100);
@@ -502,7 +507,7 @@ test('(12) receta de producción: deshacer entre guardados conserva lo compartid
       // Cadencia de producción (100): entre guardados las colas del Store acumulan lo que el estado
       // también referencia. Con la cadencia 1 de los defaults se vacían en cada paso y un punto
       // tomado al empezar el paso nunca las ve llenas.
-      const receta = `,${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000`;
+      const receta = `,${PRODUCTION_PARAMS}`;
       const gemelo = await harness(true, receta), punto = await harness(false, receta);
       try {
         const revocada = (donde: string) => () => new SessionRevoked(`sesión revocada ${donde}`);

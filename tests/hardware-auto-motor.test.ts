@@ -97,16 +97,16 @@ test('recommendedMotorForHost: mapeo puro por tamaño de máquina y GPUs', () =>
     hilos: 7, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
-  // A partir de 8 hilos reserva 4 para SO/WebSockets/SQLite.
+  // Sin reserva: todos los hilos de la máquina van al motor.
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 8, totalRamBytes: 32 * GiB, cudaDevices: [] }), {
-    hilos: 4, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
+    hilos: 8, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
-  // Torre de 32 hilos y 2 GPUs CUDA → 28 hilos + gpu [0, 1].
+  // Torre de 32 hilos y 2 GPUs CUDA → 32 hilos (sin reserva) + gpu [0, 1].
   const hw32: HostHardware = { cpuThreads: 32, totalRamBytes: 125 * GiB, cudaDevices: [0, 1] };
   const motor32 = recommendedMotorForHost(hw32);
   assert.deepEqual(motor32, {
-    hilos: 28, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
+    hilos: 32, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
   // Copia defensiva y deduplicación de cudaDevices.
@@ -133,7 +133,7 @@ test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y 
   assert.deepEqual({ ...resolved.limites }, { ...hostLimits(memory), aplicacion: DEFAULT_PARAMS.limites.aplicacion });
   assert.deepEqual(resolved.motor, {
     clonPorPaso: true,
-    hilos: 28,
+    hilos: 32,
     soaTerreno: true,
     particionarPersonas: true,
     gpu: [0, 1],
@@ -192,7 +192,7 @@ test('anfitrión real: detectHostHardware y hostFullHardwareParams son coherente
   const params = hostFullHardwareParams();
   assert.deepEqual({ ...params.limites }, { ...hostLimits(hostMemory()), aplicacion: 'parametros' });
   assertWorldLimits(params.limites, true);
-  assert.equal(params.motor.hilos, Math.min(512, Math.max(1, hw.cpuThreads >= 8 ? hw.cpuThreads - 4 : hw.cpuThreads)));
+  assert.equal(params.motor.hilos, Math.min(512, Math.max(1, hw.cpuThreads)));
   assert.deepEqual(params.motor.gpu, hw.cudaDevices);
   assert.equal(params.motor.soaTerreno, hw.cpuThreads > 1 || hw.cudaDevices.length > 0);
   assert.equal(params.motor.particionarPersonas, hw.cpuThreads >= 4);

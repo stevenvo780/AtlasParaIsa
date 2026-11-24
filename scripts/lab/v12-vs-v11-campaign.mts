@@ -3,10 +3,9 @@ import { writeFileSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { createWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
-import { parseParams, paramsOf } from '../../src/world/params.js';
+import { parseParams } from '../../src/world/params.js';
 import { policyDiversity } from '../../src/world/politica.js';
 import { analyzeTechnologicalComplexity } from '../../src/world/tecnologia-complejidad.js';
-import { Gobernador } from '../../src/server/governor.js';
 
 function arg(name: string, fallback: string): string {
   const idx = process.argv.indexOf(name);
@@ -22,8 +21,6 @@ const V11_PARAMS = [
   'limites.chunks=2048',
   'motor.clonPorPaso=false',
   'motor.soaTerreno=true',
-  'gobernador.politica=techo',
-  'gobernador.presupuestoMs=100',
 ].join(',');
 
 const V12_PARAMS = [
@@ -42,8 +39,6 @@ const V12_PARAMS = [
   'limites.chunks=2048',
   'motor.clonPorPaso=false',
   'motor.soaTerreno=true',
-  'gobernador.politica=techo',
-  'gobernador.presupuestoMs=100',
 ].join(',');
 
 function behavioralDiversity(world: World): { pairwise: number; activeActions: number; entropy: number } {
@@ -85,11 +80,10 @@ function behavioralDiversity(world: World): { pairwise: number; activeActions: n
   return { pairwise: pairs > 0 ? distSum / pairs : 0, activeActions: keys.length, entropy };
 }
 
-function runSeed(arm: 'v11' | 'v12', seed: number, days: number, useGovernor: boolean, popGuard: number) {
+function runSeed(arm: 'v11' | 'v12', seed: number, days: number, popGuard: number) {
   const t0 = performance.now();
   const params = parseParams(arm === 'v12' ? V12_PARAMS : V11_PARAMS);
   const world = createWorld(seed, params);
-  const gov = useGovernor ? new Gobernador() : null;
   let peakPeople = world.people.length;
   let peakCommunities = 0;
   let extinctDay: number | null = null;
@@ -99,13 +93,7 @@ function runSeed(arm: 'v11' | 'v12', seed: number, days: number, useGovernor: bo
   for (let day = 1; day <= days; day++) {
     const tDay = performance.now();
     for (let t = 0; t < TICKS_PER_DAY; t++) {
-      const ts = gov ? performance.now() : 0;
       stepWorld(world);
-      if (gov) {
-        const dt = performance.now() - ts;
-        gov.registrar(dt);
-        world.reproductionEnabled = gov.decidir(paramsOf(world).gobernador, world.reproductionEnabled, world.people.length, world.tiles.length, world.tick);
-      }
       if (world.people.length > peakPeople) peakPeople = world.people.length;
       if (world.communities.length > peakCommunities) peakCommunities = world.communities.length;
     }
@@ -130,11 +118,10 @@ function runSeed(arm: 'v11' | 'v12', seed: number, days: number, useGovernor: bo
         tech,
         coop: world.totals.cooperation ?? 0, teaching: world.totals.teaching ?? 0,
         trade: world.totals.trade ?? 0, conflicts: world.totals.conflicts ?? 0,
-        govZona: gov ? gov.estadoGobernador : 'off', govTecho: gov ? gov.estado.techo : null,
         daySec: +((performance.now() - tDay) / 1000).toFixed(2),
       };
       trajectory.push(snap);
-      console.log(`[${arm.toUpperCase()} s=${seed}] d=${day}/${days} pop=${snap.people} com=${snap.communities} gen=${maxGen}(${gensAlive}g) pDiv=${snap.policyDiversity} bDiv=${snap.behavioralPairwise} tech=${tech.distinctFunctionalProfiles}p/g${tech.maxGeneration}/c${tech.compositeChainCount} gov=${snap.govZona}(${snap.govTecho}) (${snap.daySec}s)`);
+      console.log(`[${arm.toUpperCase()} s=${seed}] d=${day}/${days} pop=${snap.people} com=${snap.communities} gen=${maxGen}(${gensAlive}g) pDiv=${snap.policyDiversity} bDiv=${snap.behavioralPairwise} tech=${tech.distinctFunctionalProfiles}p/g${tech.maxGeneration}/c${tech.compositeChainCount} (${snap.daySec}s)`);
     }
     if (mortals === 0 || guardDay !== null) break;
   }
@@ -151,7 +138,7 @@ function runSeed(arm: 'v11' | 'v12', seed: number, days: number, useGovernor: bo
   ].filter(Boolean).length;
   const techTransmitted = world.people.some(p => p.genome.generation > 0 && p.technology.knownRecipes.length > 0);
   return {
-    arm, seed, days, survived, extinctDay, guardDay, useGovernor,
+    arm, seed, days, survived, extinctDay, guardDay,
     sec: +((performance.now() - t0) / 1000).toFixed(1),
     peakPeople, peakCommunities,
     finalPeople: world.people.length,
@@ -170,19 +157,18 @@ function runSeed(arm: 'v11' | 'v12', seed: number, days: number, useGovernor: bo
 }
 
 if (!isMainThread) {
-  const { arm, seed, days, useGovernor, popGuard } = workerData as { arm: 'v11' | 'v12'; seed: number; days: number; useGovernor: boolean; popGuard: number };
-  parentPort!.postMessage(runSeed(arm, seed, days, useGovernor, popGuard));
+  const { arm, seed, days, popGuard } = workerData as { arm: 'v11' | 'v12'; seed: number; days: number; popGuard: number };
+  parentPort!.postMessage(runSeed(arm, seed, days, popGuard));
 } else {
   const arm = arg('--arm', 'v12') as 'v11' | 'v12';
   const days = Number(arg('--days', '60'));
   const seeds = arg('--seeds', '51926,42,2001,2002,2003,2004,2005,2006').split(',').map(Number);
-  const useGovernor = process.argv.includes('--with-gov');
   const popGuard = Number(arg('--pop-guard', '0'));
   const out = arg('--out', `/tmp/campaign-${arm}-${days}d.json`);
   const t0 = performance.now();
   const selfPath = fileURLToPath(import.meta.url);
   const workers = seeds.map(seed => new Promise<ReturnType<typeof runSeed>>((resolve, reject) => {
-    const w = new Worker(selfPath, { workerData: { arm, seed, days, useGovernor, popGuard }, execArgv: process.execArgv });
+    const w = new Worker(selfPath, { workerData: { arm, seed, days, popGuard }, execArgv: process.execArgv });
     w.on('message', resolve);
     w.on('error', reject);
     w.on('exit', code => { if (code !== 0) reject(new Error(`Worker seed ${seed} exited ${code}`)); });

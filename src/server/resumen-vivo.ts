@@ -95,13 +95,12 @@ export function aQuienBusca(world: World, person: Person): { id: string; name: s
 export interface DespachoVivo {
   hilos: number; gpu: number[]; soaTerreno: boolean; particionarPersonas: boolean;
   natalidadVecindad: boolean; radioVecindadNatalidad: number; maxComunidades: number;
-  politica: 'apagar' | 'techo'; presupuestoMs: number;
 }
 export function resumenDespacho(world: World): DespachoVivo {
   const params = paramsOf(world), motor = params.motor;
   return {
     hilos: motor.hilos, gpu: [...motor.gpu], soaTerreno: motor.soaTerreno, particionarPersonas: motor.particionarPersonas,
     natalidadVecindad: params.poblacion.natalidadVecindad, radioVecindadNatalidad: params.poblacion.radioVecindadNatalidad,
-    maxComunidades: params.social.maxComunidades, politica: params.gobernador.politica, presupuestoMs: params.gobernador.presupuestoMs,
+    maxComunidades: params.social.maxComunidades,
   };
 }

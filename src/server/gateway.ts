@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { deserialize } from 'node:v8';
-import { createReadOnlyApp, HttpError, MinimapAtlas, type GatewayAppOptions, type ReadOnlyBackend, type WhispersResponse } from './app.js';
+import { createReadOnlyApp, estadoGpu, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type Salud, type WhispersResponse } from './app.js';
 import { buildWorldDirectory, WorldMapCache } from './worldmap-service.js';
 import { TICKS_PER_DAY } from '../world/index.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapResponse } from '../shared/worldmap.js';
@@ -26,6 +26,9 @@ type TilePage = { data: Uint8Array; tiles?: Tile[] };
  * Main-thread transport. Only an authenticated, immutable projection crosses from the
  * simulation worker. Its archive connection is WAL/read-only: never load/save a World here.
  */
+/** Plazo del silencio del espejo antes de declarar `parado`: cubre un guardado o una recarga síncronos del worker. */
+const ESPEJO_PARADO_S = 600;
+
 export function createWorkerGateway(options: WorkerGatewayOptions) {
   let mirror: MirrorUpdate | undefined;
   let archive: Store | undefined;
@@ -35,6 +38,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   /** Read-only WAL view of the worker's tape: scrubbing never sends an RPC to the simulation. */
   let tapeReader: TapeReader | undefined;
   let fatal: Error | undefined;
+  /** Salud vista desde el espejo: cuándo cambió el tick por última vez y cuántas veces retrocedió
+   * (cada retroceso es una recarga del worker desde su guardado). */
+  const creadoEn = Date.now();
+  let tickVisto = -1, tickCambioEn = creadoEn, recargas = 0;
   let simulationPaused = false;
   let lastPublishMs = 0;
   let closing = false, started = !options.manual, isReady = false;
@@ -246,6 +253,20 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       await applying;
       return created;
     },
+    salud(): Salud {
+      // El worker guarda y recarga de forma síncrona (una recarga de un mundo grande tardó 140-330 s) y el
+      // espejo no se mueve mientras tanto: ese silencio no se distingue desde aquí de un paso colgado.
+      // Hasta `ESPEJO_PARADO_S` es `degradado` (sigue en 200, el vigilante espera); pasado el plazo, `parado`.
+      // Sin espejo aún, los segundos cuentan desde el arranque, pero el transporte no escucha hasta que el
+      // worker está listo. El estado `cpu` de una GPU caída vive en el worker y aquí no se ve (solo la
+      // disponibilidad de NVRTC): publicarlo exige que el espejo lleve la salud del worker.
+      const segundos = Math.max(0, (Date.now() - (mirror ? tickCambioEn : creadoEn)) / 1000);
+      const gpu = estadoGpu(options.params?.motor.gpu ?? []);
+      const parado = !!fatal || simulationPaused || !!mirror?.failed || segundos > ESPEJO_PARADO_S;
+      return { estado: parado ? 'parado' : segundos > PASO_PARADO_S || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
+        tick: mirror?.view.tick ?? 0, ticksPorSegundo: mirror?.view.performance?.tickHz ?? 0,
+        segundosDesdeUltimoPaso: segundos, ultimoGuardado: null, gpu, recargas };
+    },
     get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
@@ -311,6 +332,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     atlas.retainActive(update.activeKeys);
     for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
     activeKeys = update.activeChunks; mirror = update;
+    if (update.view.tick !== tickVisto) {
+      if (update.view.tick < tickVisto) recargas++;
+      tickVisto = update.view.tick; tickCambioEn = Date.now();
+    }
     if (isReady && !closing) transport.broadcast();
     events.emit('mirror', update.view.tick);
   }
@@ -358,6 +383,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   return {
     server: transport.server, ready, events,
     start() { started = true; if (isReady && !closing) void rpc('start').catch(fail); },
+    salud: () => backend.salud(),
     get runtime() { return backend.runtime; },
     get failed() { return backend.failed; },
     get workerThreadId() { return worker.threadId; },

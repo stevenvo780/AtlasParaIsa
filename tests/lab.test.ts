@@ -105,7 +105,7 @@ const CLAVES_DIA_SIN_GOBERNADOR = new Set([
 // (tests/instrumentos-lab.test.ts).
 const CLAVES_INSTRUMENTOS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'sedMuertes', 'sedRegiones', 'sedFuentes'] as const;
 const CLAVES_DIA_POR_DEFECTO = new Set<string>([...CLAVES_DIA_SIN_GOBERNADOR, ...CLAVES_INSTRUMENTOS]);
-const CLAVES_GOBERNADOR_SERVIDOR = ['reproduccionActivaFraccion', 'p95GobernadorFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
+const CLAVES_GOBERNADOR_SERVIDOR = ['p95PasoFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
 
 test('--gobernador (default "no" y explícito "no") no añade ninguna clave nueva a dia-001.json', (t) => {
   const dirDefault = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS]);
@@ -123,15 +123,12 @@ test('--gobernador (default "no" y explícito "no") no añade ninguna clave nuev
   assert.equal(replicaDefault.gobernador, replicaNo.gobernador, 'el campo descriptivo "gobernador" no debe cambiar entre default y --gobernador no');
 });
 
-test('--gobernador servidor añade los campos nuevos y reproduccionActivaFraccion cae en [0,1]', (t) => {
+test('--gobernador servidor añade los campos nuevos', (t) => {
   const dir = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'servidor']);
   const dia = readJson(join(dir, 'dia-001.json'));
 
   for (const clave of CLAVES_GOBERNADOR_SERVIDOR) assert.ok(clave in dia, `dia-001.json.${clave} debe existir con --gobernador servidor`);
-  const fraccion = dia.reproduccionActivaFraccion as number;
-  assert.equal(typeof fraccion, 'number');
-  assert.ok(fraccion >= 0 && fraccion <= 1, `reproduccionActivaFraccion debe caer en [0,1] (fue ${fraccion})`);
-  assert.equal(typeof dia.p95GobernadorFinal, 'number'); assert.ok((dia.p95GobernadorFinal as number) >= 0);
+  assert.equal(typeof dia.p95PasoFinal, 'number'); assert.ok((dia.p95PasoFinal as number) >= 0);
   assert.equal(typeof dia.cloneMsP50, 'number'); assert.ok((dia.cloneMsP50 as number) >= 0);
   assert.equal(typeof dia.saveMsP50, 'number'); assert.ok((dia.saveMsP50 as number) >= 0);
 
@@ -160,21 +157,4 @@ test('--gobernador acepta solo "servidor"|"no"', (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'invalido', '--salida', dir], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-});
-
-test('--gobernador servidor respeta gobernador.politica=techo y documenta la política en replica.json', (t) => {
-  // Verifica que `--gobernador servidor` usa `Gobernador` (como `src/server/app.ts`) en vez
-  // de hardcodear `decideReproduction` (`apagar`), y documenta la política efectiva.
-  const dirTecho = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', `${FAST_PARAMS},gobernador.presupuestoMs=5,gobernador.politica=techo`, '--gobernador', 'servidor']);
-  const dirApagar = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', `${FAST_PARAMS},gobernador.presupuestoMs=5,gobernador.politica=apagar`, '--gobernador', 'servidor']);
-  const repTecho = readJson(join(dirTecho, 'replica.json'));
-  const repApagar = readJson(join(dirApagar, 'replica.json'));
-  assert.match(repTecho.gobernador as string, /politica=techo/);
-  assert.match(repApagar.gobernador as string, /politica=apagar/);
-  const diaTecho = readJson(join(dirTecho, 'dia-001.json'));
-  const diaApagar = readJson(join(dirApagar, 'dia-001.json'));
-  for (const d of [diaTecho, diaApagar]) {
-    const f = d.reproduccionActivaFraccion as number;
-    assert.ok(f >= 0 && f <= 1, `reproduccionActivaFraccion fuera de [0,1]: ${f}`);
-  }
 });

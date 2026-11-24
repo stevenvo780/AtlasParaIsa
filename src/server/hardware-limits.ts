@@ -16,8 +16,8 @@ import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from 
  * `previous`, migración ni validación de respaldos.
  *
  * Es un límite de ADMISIÓN, no una promesa de RSS: dice hasta dónde se acepta un mundo antes
- * de considerarlo corrupto, no que ese mundo quepa cómodo ni que el paso llegue a tiempo
- * (de eso responde el gobernador por p95, ruling R17).
+ * de considerarlo corrupto, no que ese mundo quepa cómodo ni que el paso llegue a tiempo:
+ * a esa velocidad no la frena ningún software, la pone el hardware.
  */
 const TILES_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE;
 /**
@@ -170,9 +170,8 @@ export function detectHostHardware(probe?: HostHardwareProbe): HostHardware {
 }
 
 /**
- * Función pura que deriva el despacho recomendado del motor a partir del hardware detectado.
- * En torres grandes (`cpuThreads >= 8`) reserva 4 hilos para SO, WebSockets y SQLite
- * (p. ej. 32 hilos → 28 hilos + todas las GPUs CUDA disponibles).
+ * Función pura que deriva el despacho recomendado del motor a partir del hardware detectado:
+ * todos los hilos de la máquina y todas las GPUs CUDA disponibles, sin reservas.
  */
 export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor {
   const cpuThreads = Number.isFinite(hw.cpuThreads) && hw.cpuThreads >= 1 ? Math.floor(hw.cpuThreads) : 1;
@@ -184,7 +183,7 @@ export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor 
       gpu.push(device);
     }
   }
-  const hilos = Math.min(MAX_MOTOR_HILOS, Math.max(1, cpuThreads >= 8 ? cpuThreads - 4 : cpuThreads));
+  const hilos = Math.min(MAX_MOTOR_HILOS, Math.max(1, cpuThreads));
   return {
     hilos,
     gpu,
@@ -198,7 +197,7 @@ export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor 
 
 /**
  * Combina los límites de admisión del anfitrión (`hostParams`) con el despacho real para todos los
- * chips detectados, gobernador por hardware (`techo` a 100 ms) y cadencia de persistencia de producción.
+ * chips detectados y la cadencia de persistencia de producción.
  */
 export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
   const hw = detectHostHardware(probe);

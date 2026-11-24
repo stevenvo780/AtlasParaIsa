@@ -1,0 +1,5 @@
+[Unit]
+Description=Vigilante del mundo público: reinicia atlas-publico si el paso se para
+[Service]
+Type=oneshot
+ExecStart=/datos/workspaces/personal/AtlasParaIsa/scripts/systemd/torre/vigilante.sh

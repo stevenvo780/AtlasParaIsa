@@ -55,7 +55,7 @@ test('V12: hostOpenWorldParams activa todos los chips y todas las leyes de evolu
     nvidiaSmi: () => '0\n1\n',
     memory: () => ({ fisicaBytes: 128 * 1024 ** 3, heapBytes: 8 * 1024 ** 3 }),
   });
-  assert.equal(params.motor.hilos, 28);
+  assert.equal(params.motor.hilos, 32);
   assert.deepEqual(params.motor.gpu, [0, 1]);
   assert.equal(params.motor.soaTerreno, true);
   assert.equal(params.motor.particionarPersonas, true);

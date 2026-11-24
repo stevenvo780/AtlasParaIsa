@@ -86,6 +86,10 @@ export const PASO_PARADO_S = 60;
 export const DIAGNOSTICO_VACIO: DiagnosticoSalud = {
   duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0,
 };
+/** `/health` no exige sesión: del fallo de la bitácora solo sale el código del sistema, nunca rutas ni texto del error. */
+function errorPublico(error: string | undefined): string | null {
+  return error === undefined ? null : /\bE[A-Z0-9]{2,}\b/.exec(error)?.[0] ?? 'ERROR';
+}
 /** `cpu`: la tarjeta cayó en este proceso y su trabajo va por CPU. `sin`: pedida pero no utilizable. */
 function estadoGpu(dispositivos: readonly number[]): Salud['gpu'] {
   const hayNvrtc = gpuNvrtcAvailable();
@@ -583,11 +587,21 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const parado = failed || stopped || segundos > PASO_PARADO_S;
     const resumen = muestreador?.resumen();
     const diagnostico = resumen ? { duras24h: resumen.duras24h, blandas24h: resumen.blandas24h,
-      ultimaViolacion: resumen.ultimaViolacion ?? null, errorBitacora: resumen.errorBitacora ?? null,
+      ultimaViolacion: resumen.ultimaViolacion ?? null, errorBitacora: errorPublico(resumen.errorBitacora),
       registrosSinBitacora: resumen.registrosSinBitacora } : DIAGNOSTICO_VACIO;
     return { estado: parado ? 'parado' : diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
       tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
       ultimoGuardado: ultimoGuardadoEn, gpu, recargas, diagnostico, operacion: null };
+  }
+  let muestreoFallido = false;
+  /** El diagnóstico observa el paso ya confirmado: un fallo suyo no puede saltarse la difusión ni la telemetría. */
+  function muestrear(): void {
+    try { muestreador?.paso(world, runtime.stepMs); }
+    catch (error) {
+      if (muestreoFallido) return;
+      muestreoFallido = true;
+      console.warn(`El muestreador de invariantes falló y no detiene el mundo: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   function duranteOperacion<T>(tipo: Exclude<OperacionSalud['tipo'], 'arrancando'>, ejecutar: () => T): T {
     options.onOperacion?.(tipo);
@@ -1084,7 +1098,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
       runtime.stepMs = monotonicNow() - stepStarted;
-      muestreador?.paso(world, runtime.stepMs);
+      muestrear();
       runtime.p95StepMs = registrarPaso(runtime.stepMs);
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
@@ -1586,6 +1600,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
               try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
             } finally {
               try { await muestreador?.vaciar(); }
+              catch (error) { console.warn(`La bitácora de invariantes no se pudo escribir: ${error instanceof Error ? error.message : String(error)}`); }
               finally { if (!gateway) await cerrarPiscinasDeComputo(); }
             }
           }

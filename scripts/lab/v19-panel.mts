@@ -7,7 +7,7 @@ import { join, dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Store } from '../../src/server/store.js';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
-import { createWorld, stepWorld, TICKS_PER_DAY, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, bindWorldContext, worldContext, type World } from '../../src/world/index.js';
+import { createWorld, stepWorld, TICKS_PER_DAY, closeFaunaParallelPools, closePolicyGpuBatchers, bindWorldContext, worldContext, type World } from '../../src/world/index.js';
 import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { DEFAULT_PARAMS, parseParams, paramsOf, setParams } from '../../src/world/params.js';
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
       criterionDailySummary:null as unknown};
     mkdirSync(dirname(out),{recursive:true}); writeFileSync(out,JSON.stringify(result,null,2)+'\n'); console.log(JSON.stringify(result));
   } finally {
-    try { await closeFaunaParallelPools(); } finally { try { await closePersonasParallelPools(); } finally { try { await closeEcosystemWorkers(); } finally { closePolicyGpuBatchers(); store.close(); rmSync(tmp,{recursive:true,force:true}); } } }
+    try { await closeFaunaParallelPools(); } finally { try { await closeEcosystemWorkers(); } finally { closePolicyGpuBatchers(); store.close(); rmSync(tmp,{recursive:true,force:true}); } }
   }
 }
 main().catch(e=>{ console.error(e instanceof Error?e.stack:e); process.exitCode=1; });

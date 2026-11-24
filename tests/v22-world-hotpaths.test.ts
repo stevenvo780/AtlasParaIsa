@@ -4,7 +4,6 @@ import { performance } from 'node:perf_hooks';
 import { cloneWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
-import { EstadoPersonasCompartido, escenaDesdeMundo } from '../src/world/paralelo/personas-motor.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { constructionSite, depositMaterials, storedMaterialsNear, repairOpportunity } from '../src/world/inventions.js';
@@ -42,25 +41,6 @@ test('V22: RULES_VERSION 14; 0 ULP, dos semillas y dos regímenes durante 240 pa
   }
 });
 
-test('V22: la paginación certificada se reutiliza y los valores dinámicos se releen', () => {
-  const world = createWorld(51926);
-  const owner = new ResidentTopologyOwner();
-  world.tiles = owner.tiles(world.tiles.map(tile => owner.tile(tile)));
-  const packed = new EstadoPersonasCompartido();
-  packed.empaquetar(escenaDesdeMundo(world));
-  assert.equal(packed.reutilizacionesPaginas, 0);
-  packed.empaquetar(escenaDesdeMundo(world));
-  assert.equal(packed.reutilizacionesPaginas, 1);
-  const tile = world.tiles[0]!;
-  tile.food = 0.73125;
-  packed.empaquetar(escenaDesdeMundo(world));
-  assert.equal(packed.reutilizacionesPaginas, 2);
-  assert.ok(packed.vista().comida.includes(0.73125));
-  tile.x += 16;
-  packed.empaquetar(escenaDesdeMundo(world));
-  assert.equal(packed.reutilizacionesPaginas, 2, 'una coordenada mutada invalida el certificado');
-});
-
 test('V22: diagnóstico de costes en una escena de 85 páginas, 81 personas y 652 animales', t => {
   const world = createWorld(51926);
   for (let i = 0; i < 240; i++) stepWorld(world);
@@ -82,7 +62,7 @@ test('V22: diagnóstico de costes en una escena de 85 páginas, 81 personas y 65
   }
   setParams(world, parseParams('construccion.modular=true'));
   world.animals.forEach((animal, index) => { animal.id = `bench-animal-${String(index).padStart(4, '0')}`; });
-  const people = new EstadoPersonasCompartido(), fauna = new EstadoFaunaCompartido();
+  const fauna = new EstadoFaunaCompartido();
   const state = { occupants: new Map(), counts: new Map() };
   const measure = (fn: () => void): string => {
     fn(); const start = performance.now();
@@ -91,8 +71,6 @@ test('V22: diagnóstico de costes en una escena de 85 páginas, 81 personas y 65
   };
   const costs: Record<string, string | number> = {
     pages: world.tiles.length / 256,
-    personsFullMs: measure(() => people.empaquetar(escenaDesdeMundo(world))),
-    personsMoveMs: measure(() => people.empaquetarSoloMovimiento(world)),
     faunaPackMs: measure(() => fauna.empaquetar(world, world.animals.slice(0, 32), state)),
     faunaSparseDueMs: measure(() => fauna.empaquetar(world, world.animals.slice(0, 16), state)),
     inventionsMs: measure(() => { for (const p of world.people) { constructionSite(world, p); storedMaterialsNear(world, p); repairOpportunity(world, p); } }),

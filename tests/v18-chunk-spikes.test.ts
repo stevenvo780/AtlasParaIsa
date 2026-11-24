@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import type { Tile } from '../src/shared/types.js';
 import {
-  bindWorldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
+  bindWorldContext, closeFaunaParallelPools, closePolicyGpuBatchers,
   createWorld, stepWorld, tileAt, worldContext, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers, initializeEcosystem } from '../src/world/ecosystem.js';
@@ -121,7 +121,6 @@ test('V18 spikes: paridad bit a bit (0 ULP) entre mundo residente y referencia p
 
   await closePolicyGpuBatchers();
   await closeFaunaParallelPools();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

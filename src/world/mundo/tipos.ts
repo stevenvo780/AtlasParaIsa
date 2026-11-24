@@ -1,7 +1,6 @@
 import type { Point } from './geometria.js';
 import type { WorldContext as SpatialWorldContext, ChunkMeta } from '../spatial.js';
 import type { EcologyExecution } from '../ecosystem-kernel.js';
-import type { PersonasExecution } from '../paralelo/personas-motor.js';
 import type { PersonView, Order, MemoryView, Action, Tile, PlaceView, ChronicleEvent, CommunityView, WorldSample } from '../../shared/types.js';
 import type { CompoundLot } from '../../shared/chemistry.js';
 import type { Genome } from '../genetics.js';
@@ -22,7 +21,7 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 export { POPULATION_HARD_LIMIT } from '../../shared/life.js';
 
 /** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
-export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution; personasExecution?: PersonasExecution };
+export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution };
 
 
 // V12 adds opt-in local neighborhood natality (D2), uncapped organic communities (`maxComunidades=0`),

@@ -64,7 +64,7 @@ let chooseDepth = 0;
  * que leen el estado privado, y la elección. Una mejor celda percibida que no cumple las condiciones propias de la
  * persona (esfuerzo asumible, fuente disputada, cisternas, lugares cercanos) se busca otra vez como siempre.
  */
-export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, _precomputed?: unknown, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
+export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   const depth = ++chooseDepth;
   try {
   const own = depth === 1;

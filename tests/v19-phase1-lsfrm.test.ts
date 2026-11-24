@@ -13,7 +13,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cloneWorld, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, migrateWorld,
+  cloneWorld, closeFaunaParallelPools, closePolicyGpuBatchers, createWorld, migrateWorld,
   RULES_VERSION, stepWorld, type Person, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
@@ -28,7 +28,6 @@ import { readSnapshotParams } from '../src/server/snapshot.js';
 after(async () => {
   closePolicyGpuBatchers();
   await closeFaunaParallelPools();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

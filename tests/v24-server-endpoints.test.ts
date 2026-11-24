@@ -16,7 +16,7 @@ import { createApp, MinimapAtlas } from '../src/server/app.js';
 import { createWorkerGateway, type WorkerGatewayOptions } from '../src/server/gateway.js';
 import { Store } from '../src/server/store.js';
 import { projectMirrorWorld, projectTapeFrame } from '../src/server/sim-worker.js';
-import { closeFaunaParallelPools, closePersonasParallelPools, cloneWorld, createWorld, projectWorld, stepWorld, submitWhisper, type Person, type World } from '../src/world/index.js';
+import { closeFaunaParallelPools, cloneWorld, createWorld, projectWorld, stepWorld, submitWhisper, type Person, type World } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
@@ -29,7 +29,7 @@ import type { Chunk } from '../src/world/terrain.js';
 const ORIGIN = 'https://carta.test', PASSWORD = 'private-v24-endpoints-password';
 const params = parseParams('motor.hilos=1,persistencia.cadaTicks=200');
 const OPEN = 'poblacion.natalidadVecindad=true,social.maxComunidades=0,limites.aplicacion=parametros,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296,construccion.modular=true,construccion.poliminosYSinergia=true,terreno.caminosFisicos=true,quimica.emergente=true,motor.soaTerreno=true,motor.particionarPersonas=true';
-after(async () => { await closeFaunaParallelPools(); await closePersonasParallelPools(); await closeEcosystemWorkers(); });
+after(async () => { await closeFaunaParallelPools(); await closeEcosystemWorkers(); });
 type Reply = { status: number; headers: IncomingHttpHeaders; text: string; json(): any };
 
 /** Real Node HTTP parser over in-memory duplex sockets (no TCP bind needed). */

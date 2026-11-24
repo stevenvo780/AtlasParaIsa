@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bindWorldContext, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld,
+  bindWorldContext, closePolicyGpuBatchers, createWorld, stepWorld,
 } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { residentFaunaCapacity, TileStore } from '../src/world/soa/terreno.js';
-import { EstadoPersonasCompartido } from '../src/world/paralelo/personas-motor.js';
-import { CELDA_CAMINABLE, celdaDe } from '../src/world/paralelo/personas-worker.js';
 import { PolicyGpuBatcher } from '../src/world/gpu/politica-gpu.js';
 import { POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS } from '../src/world/politica.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
@@ -47,31 +45,6 @@ test('residentFaunaCapacity coincide exactamente con el oráculo y cae al bucle 
   // Al desligar, residentFaunaCapacity devuelve undefined.
   store.releaseParallelObjects();
   assert.equal(residentFaunaCapacity(world.tiles), undefined);
-});
-
-test('PersonasSoa.empaquetarSoloMovimiento reutiliza caché de caminabilidad y la invalida al cambiar terrain o topología', () => {
-  const world = createWorld(7, parseParams('motor.soaTerreno=true,motor.hilos=1'));
-  const owner = new ResidentTopologyOwner();
-  world.tiles = owner.tiles(world.tiles.map(t => owner.tile(t)));
-
-  const estado = new EstadoPersonasCompartido();
-  estado.empaquetarSoloMovimiento(world);
-  const vista1 = estado.vista();
-  const sample = world.tiles.find(t => t.terrain !== 'water')!;
-  const celda1 = celdaDe(vista1, sample.x, sample.y);
-  assert.ok(celda1 >= 0);
-  assert.ok((vista1.flags[celda1]! & CELDA_CAMINABLE) !== 0);
-
-  // Segunda llamada con topología y terreno intactos: hit de caché, mismo estado exacto.
-  estado.empaquetarSoloMovimiento(world);
-  const vista2 = estado.vista();
-  assert.ok((vista2.flags[celdaDe(vista2, sample.x, sample.y)]! & CELDA_CAMINABLE) !== 0);
-
-  // Mutar terrain a water debe invalidar terrainRevision y reflejarse inmediatamente.
-  sample.terrain = 'water';
-  estado.empaquetarSoloMovimiento(world);
-  const vista3 = estado.vista();
-  assert.equal(vista3.flags[celdaDe(vista3, sample.x, sample.y)]! & CELDA_CAMINABLE, 0);
 });
 
 test('PolicyGpuBatcher no produce aliasing entre llamadas consecutivas al reutilizar SharedArrayBuffer', () => {
@@ -116,7 +89,6 @@ test('paso completo con ResidentTopologyOwner + fast-paths coincide con referenc
     }
   } finally {
     closePolicyGpuBatchers();
-    await closePersonasParallelPools();
     await closeEcosystemWorkers();
   }
 });

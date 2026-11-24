@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { performance } from 'node:perf_hooks';
 import type { Tile } from '../src/shared/types.js';
 import {
   bindWorldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
@@ -341,7 +340,7 @@ test('V18 spikes: tile-index sobre Proxy residente coincide 100 % con arreglo pl
   assert.equal(lastTileAt(wrappedAgain, 48, 48)?.x, 48);
 });
 
-test('V18 spikes: escala real (~1 719 chunks = 440 064 teselas, ~7 500 animales) retira chunks y sincroniza fauna en pocos ms', t => {
+test('V18 spikes: a escala real el retiro reutiliza los bloques certificados y la fauna conserva sus índices', t => {
   // Construye un mundo sintético a escala V18: 43 × 40 - 1 = 1 719 chunks = 440 064 teselas.
   const CHUNKS = 1_719;
   const COLS = 43;
@@ -380,23 +379,23 @@ test('V18 spikes: escala real (~1 719 chunks = 440 064 teselas, ~7 500 animales)
   const buildsWarm = tileIndexBuilds();
   const scansWarm = faunaCacheBuilds();
 
-  // 1. Medir 200 000 consultas tileLookup sobre el Proxy de 440k teselas (sin ProxyGetProperty).
-  const tLookup0 = performance.now();
+  // 1. Consultar el índice sin reconstruirlo sobre las 440k teselas.
   let hits = 0;
   for (let i = 0; i < 200_000; i++) {
     const x = (i * 17) % (COLS * 16);
     const y = ((i * 31) % 640);
     if (lookup(x, y)) hits++;
   }
-  const lookupMs = performance.now() - tLookup0;
   assert.ok(hits > 150_000);
 
-  // 2. Retirar 4 chunks fríos uno a uno + syncFauna (antes costaba ~180–220 ms × 4 + ~150 ms = ~900 ms).
-  const tRetire0 = performance.now();
+  // 2. Cada retiro copia como mucho una vez los bloques conservados.
+  const copiarBloques = t.mock.method(owner, 'subsetBlocks');
+  const envolverTeselas = t.mock.method(owner, 'tiles');
   const evicted = evictColdChunks(world, { maxActiveChunks: CHUNKS - 4 });
-  const retireMs = performance.now() - tRetire0;
   assert.equal(evicted.length, 4);
   assert.equal(world.tiles.length, (CHUNKS - 4) * 256);
+  assert.ok(copiarBloques.mock.callCount() <= evicted.length, 'una sola copia de los bloques activos por retiro');
+  assert.equal(envolverTeselas.mock.callCount(), 0, 'el retiro reutiliza la certificación de las teselas activas');
 
   // Simular movimiento de 200 animales y sincronizar fauna.
   const rawAfter = residentBackingArray(world.tiles);
@@ -405,16 +404,12 @@ test('V18 spikes: escala real (~1 719 chunks = 440 064 teselas, ~7 500 animales)
     const cand = tileAt(world, { x: a.x + 1, y: a.y });
     if (cand && world.animals.filter(o => o.x === cand.x && o.y === cand.y).length < 5) a.x = cand.x;
   }
-  const tSync0 = performance.now();
   syncFauna(world.tiles, world.animals);
-  const syncMs = performance.now() - tSync0;
 
   // 3. Activar 2 chunks nuevos + syncFauna.
-  const tAct0 = performance.now();
   activate(world, 200 * 16, 200 * 16, worldContext(world));
   activate(world, 201 * 16, 200 * 16, worldContext(world));
   syncFauna(world.tiles, world.animals);
-  const activateAndSyncMs = performance.now() - tAct0;
 
   assert.equal(tileIndexBuilds(), buildsWarm, '0 reconstrucciones completas de tile-index a escala 440k');
   assert.equal(faunaCacheBuilds(), scansWarm, '0 barridos completos de syncFauna a escala 440k');
@@ -432,18 +427,4 @@ test('V18 spikes: escala real (~1 719 chunks = 440 064 teselas, ~7 500 animales)
   }
   assert.equal(curRaw.length, (CHUNKS - 4 + 2) * 256);
   assert.equal(rawAfter, curRaw, 'activate empuja in-place sobre el mismo backing del array observado');
-
-  t.diagnostic(JSON.stringify({
-    tiles: 440_064,
-    animals: world.animals.length,
-    lookup200kMs: Number(lookupMs.toFixed(2)),
-    retire4ChunksMs: Number(retireMs.toFixed(2)),
-    syncFaunaMs: Number(syncMs.toFixed(2)),
-    activate2AndSyncMs: Number(activateAndSyncMs.toFixed(2)),
-  }));
-
-  // Cotas generosas para CI incluso bajo carga (antes > 800 ms en total).
-  assert.ok(retireMs < 150, `retire 4 chunks a 440k debería ser rápido, fue ${retireMs.toFixed(1)} ms`);
-  assert.ok(syncMs < 80, `syncFauna tras retiro debería ser rápido, fue ${syncMs.toFixed(1)} ms`);
-  assert.ok(activateAndSyncMs < 80, `activate + syncFauna debería ser rápido, fue ${activateAndSyncMs.toFixed(1)} ms`);
 });

@@ -442,3 +442,43 @@ test('benchmark: sparse 500k-tile keyframes, persistent changed cells, compact d
   }
   t.diagnostic(`500k tiles / 1500 people: write ${writeMs.toFixed(1)} ms; seeks ${(performance.now() - seekStart).toFixed(1)} ms; keyframe ${sizes.keyframe} B; delta ${sizes.delta} B (${(sizes.keyframe / sizes.delta).toFixed(1)}x smaller)`);
 });
+
+test('partialTiles delta frames preserve unchanged resident tiles while recording changed chunks', t => {
+  const f = fixture(t, { keyframeInterval: 60 }); const writer = f.writer(); const reader = f.reader();
+  const base = viewAt(0);
+  base.tiles = [
+    { ...tile(0, 0), terrain: 'shelter' },
+    { ...tile(1, 0), paved: 1 },
+    { ...tile(2, 0), cultivation: 0.6, food: 0.4 },
+  ];
+  writer.record(base, 50, false);
+  // Tick 1: only tile (2,0) changed; unchanged tiles (0,0) and (1,0) are omitted via partialTiles=true.
+  const t1 = viewAt(1);
+  t1.tiles = [{ ...tile(2, 0), cultivation: 0.9, food: 0.8 }];
+  writer.record(t1, 60, true);
+  // Tick 2: empty changed-chunk list on an idle tick still keeps all prior modified tiles intact.
+  const t2 = viewAt(2);
+  t2.tiles = [];
+  writer.record(t2, 70, true);
+  // Tick 3: full keyframe refresh retires (1,0) cleanly when partialTiles=false.
+  const t3 = viewAt(3);
+  t3.tiles = [
+    { ...tile(0, 0), terrain: 'shelter' },
+    { ...tile(2, 0), cultivation: 0.9, food: 0.8 },
+  ];
+  writer.record(t3, 80, false);
+  writer.flush();
+
+  const frames = reader.readChunk(0, 4).frames;
+  assert.equal(frames.length, 4);
+  for (const tick of [0, 1, 2]) {
+    const byKey = new Map(frames[tick].tiles.map(cell => [`${cell.x},${cell.y}`, cell]));
+    assert.equal(byKey.get('0,0')?.terrain, 'shelter', `tick ${tick} keeps shelter`);
+    assert.equal(byKey.get('1,0')?.paved, 1, `tick ${tick} keeps paved road`);
+    assert.equal(byKey.get('2,0')?.cultivation, tick === 0 ? 0.6 : 0.9, `tick ${tick} tracks updated crop`);
+  }
+  const byKey3 = new Map(frames[3].tiles.map(cell => [`${cell.x},${cell.y}`, cell]));
+  assert.equal(byKey3.has('0,0'), true);
+  assert.equal(byKey3.has('1,0'), false, 'full frame retires omitted tiles');
+  assert.equal(byKey3.get('2,0')?.food, 0.8);
+});

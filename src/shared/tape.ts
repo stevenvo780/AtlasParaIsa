@@ -87,8 +87,9 @@ export interface TapeReaderOptions {
 
 /** Shared writer contract implemented by src/server/tape-store.ts. */
 export interface ITapeWriter {
-  /** Record one full projected world snapshot (already stripped of private fields). */
-  record(view: WorldView, simHz: number): void;
+  /** Record one projected world snapshot (already stripped of private fields).
+   * Pass `partialTiles = true` when `view.tiles` contains only changed chunks so unchanged resident tiles are preserved. */
+  record(view: WorldView, simHz: number, partialTiles?: boolean): void;
   /** Flush any buffered frames to SQLite synchronously in one transaction. */
   flush(): void;
   /** Total frames recorded in this DB (including buffered). */

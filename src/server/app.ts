@@ -535,7 +535,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, ultimoTickGrabado < 0);
       const tiles: Tile[] = [];
       for (const [key, chunk] of chunks) if (keyframe || changed.has(key)) for (const tile of chunk) tiles.push(projectMirrorTile(tile, fast));
-      tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz);
+      tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz, !keyframe);
       ultimoTickGrabado = world.tick;
     } catch (error) {
       // A DVR is an observer: it never pauses the world. It stops recording and says so once.

@@ -282,14 +282,18 @@ test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, 
   const meta = (await f.http('/api/tape/meta')).json() as TapeMetaResponse;
   assert.equal(meta.enabled, true); assert.equal(meta.turbo, true);
   assert.equal(meta.minTick, tick0, 'the tape starts at the initial frame');
-  assert.ok(meta.maxTick >= tick0 + ticks - 1 && meta.totalFrames >= ticks, JSON.stringify({ ...meta, timeline: meta.timeline.length }));
+  // TapeWriter commits in batches of 25 frames (or every 250 ms), so at most one partial batch may still be buffered before close().
+  assert.ok(meta.maxTick >= tick0 + Math.max(0, ticks - 25) && meta.totalFrames >= Math.max(1, ticks - 25),
+    JSON.stringify({ ticks, ...meta, timeline: meta.timeline.length }));
   assert.ok(meta.timeline.length > 0 && meta.timeline.length <= 240);
-  const res = await f.http(`/api/tape/chunk?fromTick=${tick0}&count=30&x=10&y=6&width=24&height=16`, undefined, { 'Accept-Encoding': 'gzip' });
+  const available = Math.min(30, meta.totalFrames);
+  assert.ok(available >= 20, `at least 20 flushed frames readable during turbo (got ${available})`);
+  const res = await f.http(`/api/tape/chunk?fromTick=${tick0}&count=${available}&x=10&y=6&width=24&height=16`, undefined, { 'Accept-Encoding': 'gzip' });
   assert.equal(res.status, 200, res.text); assert.equal(res.headers['content-encoding'], 'gzip');
   const chunk = res.json() as TapeChunkResponse;
-  assert.equal(chunk.frames.length, 30);
-  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, tick0 + 29);
-  assert.equal(chunk.hasMore, true);
+  assert.equal(chunk.frames.length, available);
+  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, tick0 + available - 1);
+  assert.equal(chunk.hasMore, meta.totalFrames > available);
   for (let i = 1; i < chunk.frames.length; i++) assert.equal(chunk.frames[i]!.tick, chunk.frames[i - 1]!.tick + 1, 'tick-by-tick history');
   const first = chunk.frames[0]!;
   assert.equal(first.originX, 10); assert.equal(first.width, 24);

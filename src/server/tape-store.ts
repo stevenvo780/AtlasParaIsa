@@ -34,7 +34,32 @@ const coord = (t: { x: number; y: number }): string => `${t.x},${t.y}`;
 const encode = (v: unknown): Buffer => gzipSync(JSON.stringify(v), { level: 1 });
 const decode = <T>(data: Uint8Array): T => JSON.parse(gunzipSync(data).toString()) as T;
 const jsonCopy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-const equal = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+const jsonCache = new WeakMap<object, string>();
+function fastJson(v: unknown): string {
+  if (v !== null && typeof v === 'object') {
+    let cached = jsonCache.get(v);
+    if (cached === undefined) { cached = JSON.stringify(v); jsonCache.set(v, cached); }
+    return cached;
+  }
+  return JSON.stringify(v);
+}
+const equal = (a: unknown, b: unknown): boolean => a === b || fastJson(a) === fastJson(b);
+function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.x === b.x && a.y === b.y && a.terrain === b.terrain
+    && a.moisture === b.moisture && a.vegetation === b.vegetation && a.food === b.food
+    && a.biome === b.biome && a.elevation === b.elevation
+    && a.wood === b.wood && a.stone === b.stone && a.feature === b.feature
+    && a.variety === b.variety && a.growth === b.growth && a.fertility === b.fertility
+    && a.cultivation === b.cultivation && a.traffic === b.traffic && a.paved === b.paved
+    && a.drinkingWater === b.drinkingWater && a.species === b.species
+    && a.fauna === b.fauna && a.life === b.life;
+}
+/** `state.tiles` entries are flat immutable Tile records (never mutated in place), so a Map copy suffices. */
+function cloneState(state: State): State {
+  return { view: structuredClone(state.view), tiles: new Map(state.tiles) };
+}
 const interesting = (t: Tile): boolean => t.terrain === 'shelter' || (t.cultivation ?? 0) > 0
   || (t.paved ?? 0) > 0 || (t.traffic ?? 0) >= 0.25 || (t.wood ?? 0) > 0;
 
@@ -164,7 +189,7 @@ export class TapeWriter implements ITapeWriter {
   get frameCount(): number { return this.count; }
   get latestTick(): number { return this.tick; }
 
-  record(view: WorldView, simHz: number): void {
+  record(view: WorldView, simHz: number, partialTiles = false): void {
     if (this.closed) throw new Error('TapeWriter is closed');
     if (!Number.isSafeInteger(view.tick) || view.tick < 0) throw new Error('Tape tick must be a nonnegative safe integer');
     // A tape is append-only. Repeated broadcasts of the same simulation tick add no frame.
@@ -173,24 +198,27 @@ export class TapeWriter implements ITapeWriter {
     const current = jsonCopy(raw);
     delete (current as unknown as Record<string, unknown>).seed;
     const { people, animals, structures, events, ...header } = current;
-    const small = tiles.length <= 4096;
-    const nextTiles = new Map<string, Tile>();
+    const small = !partialTiles && tiles.length <= 4096;
+    const nextTiles = partialTiles ? this.previousTiles : new Map<string, Tile>();
     const tilesPatch: Tile[] = [];
     const removedTiles: string[] = [];
     // Clone only changed cells, never JSON-encode an entire large landscape.
     for (const tile of tiles) {
       const key = coord(tile);
       const old = this.previousTiles.get(key);
-      const changed = old !== undefined && !equal(old, tile);
+      const changed = old !== undefined && !tileEqual(old, tile);
       const copy = old && !changed ? old : { ...tile };
-      nextTiles.set(key, copy);
+      if (!partialTiles || !old || changed) nextTiles.set(key, copy);
       if (small || interesting(tile) || changed || this.recordedTiles.has(key)) {
-        if (!equal(copy, this.recordedTiles.get(key))) tilesPatch.push(copy);
-        this.recordedTiles.set(key, copy);
+        const rec = this.recordedTiles.get(key);
+        if (rec !== copy && !tileEqual(copy, rec)) tilesPatch.push(copy);
+        if (rec !== copy) this.recordedTiles.set(key, copy);
       }
     }
-    for (const key of this.recordedTiles.keys()) {
-      if (!nextTiles.has(key)) { removedTiles.push(key); this.recordedTiles.delete(key); }
+    if (!partialTiles) {
+      for (const key of this.recordedTiles.keys()) {
+        if (!nextTiles.has(key)) { removedTiles.push(key); this.recordedTiles.delete(key); }
+      }
     }
     const tileOrder = small ? [...nextTiles.keys()] : undefined;
     if (small) this.recordedTiles = new Map(nextTiles);
@@ -294,7 +322,7 @@ export class TapeWriter implements ITapeWriter {
 function project(state: State, viewport?: Viewport, backgroundTile?: TapeBackgroundTileFn): WorldView {
   const result = structuredClone(state.view) as WorldView;
   delete (result as unknown as Record<string, unknown>).seed;
-  if (!viewport) return { ...result, tiles: structuredClone([...state.tiles.values()]) };
+  if (!viewport) return { ...result, tiles: [...state.tiles.values()].map(tile => ({ ...tile })) };
   const visible = (p: { x: number; y: number }, margin = 0): boolean => p.x >= viewport.x - margin
     && p.y >= viewport.y - margin && p.x < viewport.x + viewport.width + margin
     && p.y < viewport.y + viewport.height + margin;
@@ -304,7 +332,7 @@ function project(state: State, viewport?: Viewport, backgroundTile?: TapeBackgro
   for (let y = viewport.y; y < viewport.y + viewport.height; y++) {
     for (let x = viewport.x; x < viewport.x + viewport.width; x++) {
       const tile = state.tiles.get(`${x},${y}`) ?? backgroundTile?.(x, y, result.tick);
-      if (tile) result.tiles.push(structuredClone(tile));
+      if (tile) result.tiles.push({ ...tile });
     }
   }
   result.people = result.people.filter(p => visible(p, 1));
@@ -408,14 +436,14 @@ export class TapeReader implements ITapeReader {
             if (value.anchor === row.keyframe_tick && tick <= row.tick && tick > nearest) nearest = tick;
           }
           const cached = this.cache.get(nearest);
-          state = reconstruct(db, row, cached ? structuredClone(cached.state) : undefined, cached ? nearest : undefined);
+          state = reconstruct(db, row, cached ? cloneState(cached.state) : undefined, cached ? nearest : undefined);
           if (cached) { this.cache.delete(nearest); this.cache.set(nearest, cached); }
           anchor = row.keyframe_tick;
         } else apply(state, row.data);
         frames.push(project(state, viewport, backgroundTile));
         if (row.tick === row.keyframe_tick || row === rows[rows.length - 1]) {
           this.cache.delete(row.tick);
-          this.cache.set(row.tick, { anchor, state: structuredClone(state) });
+          this.cache.set(row.tick, { anchor, state: cloneState(state) });
           while (this.cache.size > 4) this.cache.delete(this.cache.keys().next().value!);
         }
       }

@@ -293,7 +293,7 @@ async function runSimulation(options: SimWorkerOptions) {
       }
       frame = projectTapeFrame(world, live.runtime, instanceId, tiles);
       try {
-        tapeWriter.record(frame, lastSimHz);
+        tapeWriter.record(frame, lastSimHz, !keyframe);
         firstTapeFrame = false;
       } catch (error) {
         // A DVR is an observer: it never pauses the world. It stops recording and says so once.

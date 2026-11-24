@@ -1,8 +1,9 @@
 import { makeFloatingPanel, type FloatingPanel } from './panel-manager.js';
-import { loadGraphicsSettings, saveGraphicsSettings, sanitizeGraphicsSettings, applyPreset, renderGraphicsSettingsHtml, minZoomLabel, GRAPHICS_PRESETS, type GraphicsPreset, type GraphicsSettings } from './graphics-settings.js';
+import { GRAPHICS_STORAGE_KEY, loadGraphicsSettings, saveGraphicsSettings, sanitizeGraphicsSettings, applyPreset, renderGraphicsSettingsHtml, minZoomLabel, GRAPHICS_PRESETS, type GraphicsPreset, type GraphicsSettings } from './graphics-settings.js';
 import { MAP_LAYER_CATALOG, isMapLayerId, toggleLayer, clearLayers, activeLayersSummary, renderLayersPopoverHtml, type MapLayerId } from './layers-control.js';
 import { mountMinimap, type MinimapController } from './minimap.js';
 import { SpatialSoundscape } from './soundscape.js';
+import { fetchJson, modoDeAjustes, validDirectory, validMap, validWhisperResult, validWhispers } from './ui-guards.js';
 import { renderMundoDeepStats } from './mundo-dashboard.js';
 import type { WorldMapResponse, WorldDirectoryResponse, DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
@@ -89,6 +90,10 @@ const personaVivo = new Map<string, boolean>();
 let soundscape = new SpatialSoundscape();
 let soundEnabled = false;
 let graphicsSettings = loadGraphicsSettings();
+/** `true` cuando el visitante ya eligió en Ajustes: desde entonces el perfil manda sobre la heurística del aparato. */
+let graphicsChosen = false;
+let sessionFlags: SessionFlags = {};
+let soundBusy = false;
 let activeLayers = clearLayers();
 const panels: Partial<Record<NotebookPage, FloatingPanel>> = {};
 let panelQuery: MediaQueryList | null = null, panelSync: (() => void) | null = null;
@@ -97,6 +102,8 @@ let uiSession: AbortController | null = null;
 const uiTimers: ReturnType<typeof setInterval>[] = [];
 let uiRaf = 0;
 let directory: WorldDirectoryResponse | null = null;
+/** Antes de la primera respuesta del directorio no es lo mismo que tras un fallo. */
+let directoryState: 'loading' | 'ready' | 'failed' = 'loading';
 let recentWhispers: DivineWhisper[] = [];
 let directoryBusy = false, mapBusy = false, whispersBusy = false;
 let pickingWhisper = false;
@@ -120,7 +127,7 @@ function saveVisit(): void {
   } catch { /* Optional. */ }
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
-function stopSound(): void { soundEnabled = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
+function stopSound(): void { soundEnabled = false; soundBusy = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
 function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
@@ -144,12 +151,24 @@ async function readSessionFlags(): Promise<SessionFlags> {
   } catch { return {}; }
 }
 
+/** Sin elección guardada manda la heurística del aparato (pantalla pequeña, poca memoria, sin WebGL2, `?modo=`) y se muestra como perfil Ligero. */
+function startupSettings(): GraphicsSettings {
+  if (graphicsChosen) return graphicsSettings;
+  const loaded = loadGraphicsSettings();
+  let saved = false;
+  try { saved = localStorage.getItem(GRAPHICS_STORAGE_KEY) !== null; } catch { /* Sin almacenamiento: no hay elección guardada. */ }
+  return !saved && decidirModo() === 'observador' ? applyPreset('ligero', loaded) : loaded;
+}
+
 function enterWorld(flags: SessionFlags = {}): void {
+  sessionFlags = flags;
   clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
-  const modo = decidirModo(); modoActual = modo;
+  // El perfil de Ajustes decide el modo de dibujo (Ligero = observador); ya no hay otro conmutador que lo deje atrapado.
+  graphicsSettings = startupSettings();
+  const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
@@ -236,6 +255,7 @@ type Drawer = NotebookPage;
 function drawer(name: Drawer, open?: boolean): void {
   const next = notebook?.show(name, open) ?? false;
   if (next && mobile()) { el('layers-popover').hidden = true; el('layers-toggle').setAttribute('aria-expanded', 'false'); }
+  if (name === 'whisper' && !next && pickingWhisper) setPickingWhisper(false);
   syncPickingMode();
   if (name === 'population' && next) { renderPopulation(); void refreshDirectory(); el('population-search').focus(); }
   if (name === 'whisper' && next) { if (!whisperPicked) followWhisperTile(); renderWhisperPeople(); renderWhispers(); void refreshDirectory(); void refreshWhispers(); }
@@ -244,9 +264,16 @@ function drawer(name: Drawer, open?: boolean): void {
 function setWhisperTile(x: number, y: number, picked: boolean): void {
   whisperTile = { x: Math.floor(x), y: Math.floor(y) }; whisperPicked = picked;
   el('whisper-coordinates').textContent = `${whisperTile.x}, ${whisperTile.y}`;
+  el('whisper-place-label').textContent = picked ? 'Lugar: casilla elegida' : 'Lugar: centro de la cámara';
 }
 /** Sin casilla elegida, el lugar del susurro es el centro de lo que se está mirando. */
 function followWhisperTile(): void { const camera = landscape?.camera(); if (camera) setWhisperTile(camera.x, camera.y, false); }
+/** Elegir casilla para un susurro no queda armado: Esc, cerrar Susurros, elegir otra cosa o volver a Mapa lo cancelan. */
+function setPickingWhisper(active: boolean): void {
+  pickingWhisper = active;
+  el('whisper-pick').setAttribute('aria-pressed', String(active)); el('pick-hint').hidden = !active;
+  syncPickingMode();
+}
 function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && !pickingWhisper ? 'inspect' : 'ground'); }
 function choosePerson(id: string, focus = true): void {
   const person = world?.people.find(p => p.id === id); if (!person) { irAPersona(id); return; }
@@ -283,9 +310,9 @@ function chooseAnimal(id: string, focus = true): void {
 }
 function pick(selection: Selection): void {
   if (pickingWhisper && selection.kind === 'tile') {
-    setWhisperTile(selection.x, selection.y, true); pickingWhisper = false;
-    el('whisper-pick').setAttribute('aria-pressed', 'false'); syncPickingMode(); drawer('whisper', true); return;
+    setWhisperTile(selection.x, selection.y, true); setPickingWhisper(false); drawer('whisper', true); return;
   }
+  if (pickingWhisper) setPickingWhisper(false); // eligió otra cosa: el susurro ya no espera casilla
   if (control === 'direct' && selection.kind === 'tile') { sendCommand('move', selection); return; }
   selected = selection; landscape?.select(selection);
   if (selection.kind === 'person') { choosePerson(selection.id, false); return; }
@@ -358,10 +385,10 @@ function wire(): void {
   el('follow-toggle').addEventListener('click', () => { if (selected.kind === 'tile') return; following = !following; landscape?.follow(following ? selected.id : null, selected.kind); renderControls(); if (mobile()) drawer('inspector', false); });
   el('direct-toggle').addEventListener('click', () => { if (observerOnly) return; control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.addEventListener('click', () => sendCommand(button.dataset.order as Order));
-  el('observe-tool').addEventListener('click', () => { control = 'inspect'; notebook?.close(); el('observe-tool').setAttribute('aria-pressed', 'true'); renderControls(); });
+  el('observe-tool').addEventListener('click', () => { control = 'inspect'; if (pickingWhisper) setPickingWhisper(false); notebook?.close(); el('observe-tool').setAttribute('aria-pressed', 'true'); renderControls(); });
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; focusTile(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); if (!el('layers-popover').hidden) toggleLayers(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
-  el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('layers-popover').hidden) { toggleLayers(); el('layers-toggle').focus(); return; } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
+  el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (pickingWhisper) { setPickingWhisper(false); return; } if (!el('layers-popover').hidden) { toggleLayers(); el('layers-toggle').focus(); return; } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
   el('game').addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
@@ -372,15 +399,20 @@ function wire(): void {
     toggleLayers();
   });
   el('sound-toggle').addEventListener('click', async () => {
-    const session = uiSession, audio = soundscape;
+    // Un arranque en curso no admite otra pulsación: dos start() simultáneos abrirían dos AudioContext y solo se guardaría el último.
+    if (soundBusy) return;
+    const session = uiSession, audio = soundscape, button = el('sound-toggle');
     if (soundEnabled) { soundEnabled = false; soundscape.setMuted(true); }
     else {
-      soundEnabled = true; soundscape.setMuted(false); soundscape.setHidden(document.hidden);
-      const started = await audio.start();
+      soundEnabled = true; soundBusy = true; button.setAttribute('aria-busy', 'true');
+      soundscape.setMuted(false); soundscape.setHidden(document.hidden);
+      let started = false;
+      try { started = await audio.start(); }
+      finally { if (session === uiSession) { soundBusy = false; button.removeAttribute('aria-busy'); } }
       if (session !== uiSession) { audio.stop(); return; }
       if (!started) { soundEnabled = false; message('No se pudo activar el sonido. Puedes explorar sin él.', false); }
     }
-    el('sound-toggle').setAttribute('aria-pressed', String(soundEnabled));
+    button.setAttribute('aria-pressed', String(soundEnabled));
   });
 }
 
@@ -413,11 +445,12 @@ function navigateEntity(event: MouseEvent): void {
 function startClientUi(): void {
   const vw = window.innerWidth, vh = window.innerHeight;
   const rects = {
-    population: { x: 86, y: 96, width: 390, height: 560 },
-    inspector: { x: vw - 420, y: 96, width: 390, height: 580 },
-    stats: { x: 90, y: 88, width: Math.min(920, vw - 120), height: Math.min(720, vh - 160) },
-    settings: { x: vw - 390, y: 96, width: 360, height: 520 },
-    whisper: { x: 96, y: 108, width: 380, height: 500 },
+    // Cascada inicial: cada ventana nace con su cabecera a la vista (Vidas y Susurros a la izquierda, Inspector y Ajustes a la derecha).
+    population: { x: 24, y: 96, width: 390, height: 560 },
+    whisper: { x: 64, y: 140, width: 380, height: 500 },
+    inspector: { x: vw - 414, y: 96, width: 390, height: 580 },
+    settings: { x: vw - 454, y: 140, width: 360, height: 520 },
+    stats: { x: Math.max(24, Math.round((vw - 920) / 2)), y: 88, width: Math.min(920, vw - 48), height: Math.min(720, vh - 160) },
   };
   // Ventanas libres solo en escritorio; en móvil rige la hoja única del cuaderno (sin estilos en línea).
   const syncPanels = (): void => {
@@ -430,7 +463,6 @@ function startClientUi(): void {
   syncPanels();
   panelQuery = matchMedia('(max-width: 760px)'); panelQuery.addEventListener('change', syncPanels); panelSync = syncPanels;
   notebook = new Notebook(el('game'), panels);
-  graphicsSettings = loadGraphicsSettings();
   soundscape = new SpatialSoundscape();
   el('settings-body').innerHTML = renderGraphicsSettingsHtml(graphicsSettings);
   landscape?.setGraphicsSettings(graphicsSettings); soundscape.setVolume(graphicsSettings.soundVolume);
@@ -455,8 +487,10 @@ function startClientUi(): void {
         previous = key; minimap?.updateViewport(viewport);
         // V24: la ventana pedida al servidor ya no sigue a la cámara paso a paso; las coordenadas salen de la cámara.
         el('camera-coordinates').textContent = `${Math.floor(camera.x)}, ${Math.floor(camera.y)}`;
+        if (!whisperPicked && !el('whisper-drawer').hidden) followWhisperTile(); // lo que se ve en el formulario es lo que se envía
       }
-      soundscape.update(world, { ...viewport, zoom: camera.zoom });
+      // Con el mundo en pausa (o la cinta detenida) el paisaje conserva sus camas pero no repite golpes sobre un fotograma congelado.
+      if (!world.paused && !(dvr?.enabled && !dvr.playing)) soundscape.update(world, { ...viewport, zoom: camera.zoom });
     } catch { /* La cámara visible manda; el minimapa y el sonido son accesorios. */ }
   };
   uiRaf = requestAnimationFrame(frame);
@@ -469,30 +503,20 @@ function stopClientUi(): void {
   if (panelQuery && panelSync) panelQuery.removeEventListener('change', panelSync);
   panelQuery = null; panelSync = null;
   for (const page of Object.keys(panels) as NotebookPage[]) { panels[page]?.destroy(); delete panels[page]; }
-  directory = null; recentWhispers = []; pickingWhisper = false; whisperTile = { x: 0, y: 0 }; whisperPicked = false;
+  directory = null; directoryState = 'loading'; recentWhispers = []; pickingWhisper = false; whisperTile = { x: 0, y: 0 }; whisperPicked = false;
   directoryBusy = mapBusy = whispersBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
 }
-const isArr = (value: unknown): boolean => Array.isArray(value);
-/** Una respuesta con forma inesperada se trata como fallo: nunca llega al minimapa ni a las listas. */
-const validMap = (data: WorldMapResponse): boolean => !!data && typeof data === 'object' && isArr(data.chunks) && !!data.bounds && [data.bounds.minCx, data.bounds.maxCx, data.bounds.minCy, data.bounds.maxCy].every(Number.isFinite);
-const validDirectory = (data: WorldDirectoryResponse): boolean => !!data && typeof data === 'object' && isArr(data.people) && isArr(data.communities) && isArr(data.structures) && isArr(data.herds);
-async function uiJson<T>(url: string, session: AbortController, valid: (data: T) => boolean = () => true): Promise<T> {
-  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([session.signal, AbortSignal.timeout(8000)]) });
-  if (!response.ok) throw new Error('Información no disponible.');
-  const data = await response.json() as T;
-  if (!valid(data)) throw new Error('Información con forma inesperada.');
-  return data;
-}
+const uiJson = <T>(url: string, session: AbortController, valid: (data: unknown) => data is T): Promise<T> => fetchJson(url, session.signal, valid);
 async function refreshMap(): Promise<void> {
   const session = uiSession; if (!session || mapBusy || document.hidden || Date.now() < mapRetryAt) return; mapBusy = true;
-  try { const data = await uiJson<WorldMapResponse>('/api/worldmap', session, validMap); if (session !== uiSession) return; mapFailures = 0; minimap?.updateMap(data); el('minimap-status').textContent = `${number(data.discoveredChunks)} regiones descubiertas`; }
+  try { const data = await uiJson('/api/worldmap', session, validMap); if (session !== uiSession) return; mapFailures = 0; minimap?.updateMap(data); el('minimap-status').textContent = `${number(data.discoveredChunks)} regiones descubiertas`; }
   catch { if (session === uiSession) { mapFailures = Math.min(mapFailures + 1, 5); mapRetryAt = Date.now() + 3000 * 2 ** mapFailures; el('minimap-status').textContent = 'Mapa sin actualizar · reintentando'; } }
   finally { if (session === uiSession) mapBusy = false; }
 }
 async function refreshDirectory(): Promise<void> {
   const session = uiSession; if (!session || directoryBusy || document.hidden) return; directoryBusy = true;
-  try { const data = await uiJson<WorldDirectoryResponse>('/api/directory', session, validDirectory); if (session !== uiSession) return; directory = data; }
-  catch { if (session === uiSession) directory = null; }
+  try { const data = await uiJson('/api/directory', session, validDirectory); if (session !== uiSession) return; directory = data; directoryState = 'ready'; }
+  catch { if (session === uiSession) directoryState = 'failed'; } // se conserva el último directorio válido: su paso dice cuán viejo es
   finally {
     if (session === uiSession) {
       directoryBusy = false;
@@ -504,7 +528,7 @@ async function refreshDirectory(): Promise<void> {
 }
 async function refreshWhispers(): Promise<void> {
   const session = uiSession; if (!session || whispersBusy || document.hidden) return; whispersBusy = true;
-  try { const data = await uiJson<{ tick: number; whispers: DivineWhisper[] }>('/api/whispers', session, data => !!data && isArr(data.whispers)); if (session !== uiSession) return; recentWhispers = data.whispers; }
+  try { const data = await uiJson('/api/whispers', session, validWhispers); if (session !== uiSession) return; recentWhispers = data.whispers; }
   catch { /* Received world whispers remain available offline. */ }
   finally { if (session === uiSession) { whispersBusy = false; renderWhispers(); } }
 }
@@ -514,7 +538,8 @@ function renderWhisperPeople(): void {
   // Un mundo grande no cabe en un desplegable: S, I y la persona elegida primero, luego por nombre hasta el tope.
   const rank = (p: { id: string; role: string }): number => p.id === previous ? 0 : p.role === 'S' ? 1 : p.role === 'I' ? 2 : 3;
   const people = all.length > DIRECTORY_ROWS ? [...all].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'es')).slice(0, DIRECTORY_ROWS) : all;
-  const html = people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.role === 'S' || p.role === 'I' ? ` (${esc(p.role)})` : ''} · ${esc(p.x)}, ${esc(p.y)}</option>`).join('');
+  const html = people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.role === 'S' || p.role === 'I' ? ` (${esc(p.role)})` : ''} · ${esc(p.x)}, ${esc(p.y)}</option>`).join('')
+    + (all.length > people.length ? `<option disabled>… y ${esc(number(all.length - people.length))} más (solo se listan 300): usa «A quien pase por el lugar»</option>` : '');
   if (select.innerHTML !== html) { select.innerHTML = html; if (people.some(p => p.id === previous)) select.value = previous; }
 }
 function renderWhispers(): void {
@@ -555,6 +580,9 @@ function wireClientUi(): void {
   const applyGraphics = (): void => {
     graphicsSettings = sanitizeGraphicsSettings(graphicsSettings);
     try { saveGraphicsSettings(localStorage, graphicsSettings); } catch { /* Private browsing. */ }
+    graphicsChosen = true;
+    // Ligero ⇄ Ultra/Equilibrado cambia el modo de dibujo (GPU, dpr, fps y cadencia del mundo), que se decide al entrar: se reentra.
+    if (modoDeAjustes(graphicsSettings) !== modoActual) { enterWorld(sessionFlags); return; }
     landscape?.setGraphicsSettings(graphicsSettings); soundscape.setVolume(graphicsSettings.soundVolume);
     el('setting-min-zoom-out').textContent = minZoomLabel(graphicsSettings.minZoom);
     el('setting-sound-volume-out').textContent = `${Math.round(graphicsSettings.soundVolume * 100)} %`;
@@ -573,7 +601,7 @@ function wireClientUi(): void {
   el('minimap-expand').addEventListener('click', () => { const expanded = el('world-minimap').classList.toggle('is-expanded'); el('minimap-expand').setAttribute('aria-expanded', String(expanded)); el('minimap-expand').textContent = expanded ? 'Reducir mapa' : 'Ampliar mapa'; const bounds = landscape?.getViewportBounds(); if (bounds) minimap?.updateViewport({ x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY }); });
   el('tame-filter').addEventListener('change', renderPopulation);
   el('whisper-mode').addEventListener('change', () => { el('whisper-person-label').hidden = el<HTMLSelectElement>('whisper-mode').value === 'place'; });
-  el('whisper-pick').addEventListener('click', () => { pickingWhisper = !pickingWhisper; control = 'inspect'; el('whisper-pick').setAttribute('aria-pressed', String(pickingWhisper)); syncPickingMode(); if (pickingWhisper && mobile()) drawer('whisper', false); });
+  el('whisper-pick').addEventListener('click', () => { const next = !pickingWhisper; control = 'inspect'; if (next && mobile()) drawer('whisper', false); setPickingWhisper(next); });
   el('whisper-list').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLElement>('[data-whisper-x]'); if (button) focusTile(Number(button.dataset.whisperX), Number(button.dataset.whisperY)); });
   el('whisper-form').addEventListener('submit', async event => {
     event.preventDefault(); const session = uiSession; if (!session) return;
@@ -582,15 +610,15 @@ function wireClientUi(): void {
     const recipient = (directory?.people ?? world?.people ?? []).find(p => p.id === id);
     if (isPerson && !recipient) { el('whisper-status').textContent = 'Elige un habitante recibido.'; return; }
     // El lugar es el destino del susurro; la persona solo decide quién lo puede escuchar.
-    if (!whisperPicked) followWhisperTile();
     const request: DivineWhisperRequest = { personId: isPerson ? id : null, x: whisperTile.x, y: whisperTile.y, intent: el<HTMLSelectElement>('whisper-intent').value as DivineWhisperIntent, note: el<HTMLInputElement>('whisper-note').value.slice(0, 120) };
     const button = el<HTMLButtonElement>('whisper-submit'); button.disabled = true; el('whisper-status').textContent = 'Enviando susurro…';
     try {
       const response = await fetch('/api/whisper', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.any([session.signal, AbortSignal.timeout(10000)]) });
       if (session !== uiSession) return;
       if (response.status !== 201) throw new Error(response.status === 401 || response.status === 403 ? 'La sesión no permite enviar el susurro.' : 'El mundo no aceptó el susurro.');
-      const result = await response.json() as { ok: true; whisper: DivineWhisper };
+      const result: unknown = await response.json();
       if (session !== uiSession) return;
+      if (!validWhisperResult(result)) { el('whisper-status').textContent = 'El mundo recibió el susurro, pero su confirmación llegó ilegible; míralo en la lista.'; void refreshWhispers(); return; }
       recentWhispers = [...recentWhispers.filter(w => w.id !== result.whisper.id), result.whisper]; renderWhispers();
       el('whisper-status').textContent = 'Susurro recibido por el mundo; escucharlo y actuar dependen de cada vida.';
     } catch (error) { if (session === uiSession) el('whisper-status').textContent = error instanceof Error && error.message.startsWith('El mundo') ? error.message : 'No se pudo confirmar el envío. Revisa los susurros antes de reintentar.'; }
@@ -652,7 +680,7 @@ function renderPopulation(): void {
     rows = (directory?.people ?? world.people).map<Row>(p => {
       const specialty = 'craftFocus' in p ? p.craftFocus : 'specialty' in p ? p.specialty : '';
       const community = (directory?.communities ?? world!.communities ?? []).find(c => c.id === p.communityId)?.name ?? p.communityId ?? '';
-      return { id: p.id, kind: 'person', name: p.name, role: p.role, x: p.x, y: p.y, detail: `${specialty ?? ''} · ${community} · ${p.role} · ${p.action}` };
+      return { id: p.id, kind: 'person', name: p.name, role: p.role, x: p.x, y: p.y, detail: `${specialty ?? ''} · ${community} · ${p.role === 'S' || p.role === 'I' ? p.role : 'Vecino'} · ${actions[p.action as PersonView['action']] ?? p.action}` };
     }).sort((a, b) => (a.role === 'S' ? 0 : a.role === 'I' ? 1 : 2) - (b.role === 'S' ? 0 : b.role === 'I' ? 1 : 2) || a.name.localeCompare(b.name, 'es'));
   } else if (fauna) {
     if (directory) rows = directory.herds.map(h => ({ kind: 'herd', name: speciesPlural[h.species as AnimalView['species']] ?? h.species, species: h.species, x: h.x, y: h.y, tame: h.tameCount > 0 || h.avgHabituation >= .45, detail: `${h.count} individuos · ${h.tameCount} mansos · habituación ${percentage(h.avgHabituation)}` }));
@@ -667,7 +695,7 @@ function renderPopulation(): void {
   const found = `${number(matches.length)} coincidencias${matches.length > shown.length ? ` · se muestran ${number(shown.length)}` : ''}`;
   // Sin directorio global, el recuento honesto de siempre: lo recibido por la cámara frente al censo del mundo.
   el('population-count').textContent = !directory && populationKind === 'people' ? `${rotuloRecuento(world)}${query ? ` · ${found}` : ''}` : `${number(totals ?? rows.length)}${directory ? ' en el mundo' : ' recibidos'} · ${found}`;
-  el('population-note').textContent = observerNote(directory ? `Directorio global · paso ${directory.tick}.${fauna ? ' La fauna está agrupada en rebaños; toca uno para inspeccionar el lugar y sus individuos recibidos.' : ''}` : 'Directorio global no disponible. Se muestra solo la instantánea recibida por la cámara.');
+  el('population-note').textContent = observerNote(directory ? `Directorio global · paso ${directory.tick}${directoryState === 'failed' ? ' (no se pudo actualizar; se reintenta solo)' : ''}.${fauna ? ' La fauna está agrupada en rebaños; toca uno para inspeccionar el lugar y sus individuos recibidos.' : ''}` : directoryState === 'loading' ? 'Cargando el directorio global… mientras tanto se muestra lo recibido por la cámara.' : 'Directorio global no disponible. Se muestra solo la instantánea recibida por la cámara; se reintenta solo.');
   const html = shown.map(row => `<button type="button" class="population-person${row.kind === 'animal' ? ' animal-row' : ''}"${row.kind === 'person' && row.id ? ` data-person="${esc(row.id)}" aria-pressed="${row.id === activePersonId && selected.kind === 'person'}"` : row.kind === 'animal' && row.id ? ` data-animal="${esc(row.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === row.id}"` : ''} data-directory-kind="${row.kind}" data-directory-id="${esc(row.id ?? '')}" data-directory-x="${esc(row.x)}" data-directory-y="${esc(row.y)}"><span><strong>${esc(row.name)}${row.tame ? ' <b class="tame-badge">Habituado / manso</b>' : ''}</strong><small>${esc(row.detail)}</small><small>${esc(row.x)}, ${esc(row.y)}</small></span>${icon.arrow}</button>`).join('') + (matches.length > shown.length ? '<p class="drawer-note">Hay más resultados: escribe un nombre, oficio, comunidad o coordenadas para afinar la búsqueda.</p>' : '') || '<p class="drawer-note">No hay coincidencias en la información recibida.</p>';
   if (populationSignature !== html) { populationSignature = html; el('population-list').innerHTML = html; }
 }

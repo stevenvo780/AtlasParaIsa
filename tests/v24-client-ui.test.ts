@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { worldShell, OBSERVER_HIDDEN_IDS, applyObserverOnly } from '../src/client/world-shell.js';
 import { Notebook, type NotebookPage } from '../src/client/notebook.js';
 import type { FloatingPanel } from '../src/client/panel-manager.js';
@@ -266,6 +266,7 @@ test('chemical glint preference affects actual person pixels without removing ma
 test('Mundo hooks the exact dashboard API, refreshes with the directory, and a failure cannot break the panel', () => {
   const code = source('game.ts');
   assert.match(code, /import \{ renderMundoDeepStats \} from '\.\/mundo-dashboard\.js'/);
+  assert.ok(existsSync(new URL('../src/client/mundo-dashboard.ts', import.meta.url)), 'el módulo importado por game.ts debe existir (integrar sprint/v24-mundo-dashboard)');
   assert.match(code, /renderMundoDeepStats\(world, statsTab, directory\)/);
   assert.match(code, /try \{ deepStats\.innerHTML = world \? renderMundoDeepStats/);
   assert.match(code, /\$\{directory\?\.tick \?\? -1\}/, 'the stats signature follows the directory');
@@ -284,7 +285,8 @@ test('Vidas draws a bounded window of a global directory, and failing endpoints 
   assert.match(code, /const DIRECTORY_ROWS = 300/);
   assert.match(code, /matches\.slice\(0, DIRECTORY_ROWS\)/);
   assert.match(code, /mapRetryAt = Date\.now\(\) \+ 3000 \* 2 \*\* mapFailures/);
-  assert.match(code, /AbortSignal\.any\(\[session\.signal, AbortSignal\.timeout\(8000\)\]\)/);
+  assert.match(source('ui-guards.ts'), /AbortSignal\.any\(\[session, AbortSignal\.timeout\(timeoutMs\)\]\)/);
+  assert.match(code, /fetchJson\(url, session\.signal, valid\)/);
   assert.match(code, /if \(!el\('population-drawer'\)\.hidden\) renderPopulation\(\);\n  renderInspector/, 'a closed Vidas panel is not rebuilt on every world');
 });
 

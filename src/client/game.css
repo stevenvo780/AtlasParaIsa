@@ -167,6 +167,8 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 #stats-drawer .stats-tabs { flex-wrap:wrap; flex-shrink:0; }
 #stats-drawer .stats-tabs button { flex:1; min-height:44px; }
 #stats-drawer .stats-two-columns,#stats-drawer .stats-chart-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr)); gap:18px; }
+/* La cifra principal de «Vivos» (27 px) y la línea de resumen no caben en 56 px: el pulso crece con su contenido en vez de recortarlo. */
+#hud-telemetry { height:auto; min-height:56px; }
 #hud-telemetry .hud-kpi-primary { background:#294a3a; color:#fffbe9; border-radius:8px; min-width:126px; }
 #hud-telemetry .hud-kpi-primary > span { font-weight:800; text-transform:uppercase; letter-spacing:1px; color:inherit; }
 #hud-telemetry .hud-kpi-primary strong { font-size:27px; color:inherit; }

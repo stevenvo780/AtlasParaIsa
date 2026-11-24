@@ -123,6 +123,8 @@ const MAP_ZOOM = 7;
  * pixel-art (copas a escala 1) sin vaivén ni sombras. Así el coste cercano lo acota la pantalla y no el zoom.
  */
 const NEAR_TILE_CAP = 6400;
+/** Teselas de más por eje que puede tener la rejilla de cerca antes de recomponerla (≥ 2·WINDOW_MARGIN + 2·alineación). */
+const NEAR_GRID_SLACK = 48;
 const FAR_CHUNK_CAP = 900;
 const MAP_ART = 4;
 /** Bloques del mapa de 32×32 teselas (128×128 px): a 1080p y 4 px/tesela, ≈ 150 volcados por fotograma en vez de 2.000. */
@@ -576,6 +578,7 @@ export class Landscape {
   private readonly canopyCache = new BoundedCache<CanopyChunk>(CANOPY_CACHE_LIMIT, chunk => { if (chunk.canvas) chunk.canvas.width = chunk.canvas.height = 0; });
   private readonly mapCache = new BoundedCache<MapChunk>(MAP_CACHE_LIMIT, chunk => { chunk.canvas.width = chunk.canvas.height = 0; });
   private personSprites: BoundedCache<HTMLCanvasElement> | null = null;
+  private spriteHits = 0; private spriteDirect = 0; private spriteFresh = 0;
   private communityColors = new Map<string, string>();
   private readonly layerImages: Record<'data' | 'legacy', LayerImage | null> = { data: null, legacy: null };
   private heatImage: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; key: string; x: number; y: number; w: number; h: number } | null = null;
@@ -1197,7 +1200,11 @@ export class Landscape {
     const world = this.curr;
     if (!world || !this.groundBaked || !this.tileCache || !this.serverWindow) return;
     const view = this.visibleBounds();
-    if (!this.windowCovers({ x: this.originX, y: this.originY, w: this.worldW, h: this.worldH }, view)) this.composeWindow(view, world.tiles);
+    const grid = { x: this.originX, y: this.originY, w: this.worldW, h: this.worldH };
+    // Al volver a acercar, una rejilla compuesta lejos sigue «cubriendo» la cámara pero haría un lienzo de escena de cientos de MiB:
+    // se recompone a la medida de lo visible (la holgura cercana es de ±WINDOW_MARGIN + alineación a trozos).
+    const oversized = this.lodTier() === 'near' && (grid.w > view.x1 - view.x0 + NEAR_GRID_SLACK || grid.h > view.y1 - view.y0 + NEAR_GRID_SLACK);
+    if (oversized || !this.windowCovers(grid, view)) this.composeWindow(view, world.tiles);
     if (this.windowCovers(this.serverWindow, view)) { this.viewCoverage = 1; this.loadingSince = 0; return; }
     if (now - this.coverageAt > 250) this.measureCoverage(view, now);
     if (this.viewCoverage < 1 && now - this.cameraMovedAt < LOADING_MAX_MS) { if (!this.loadingSince) this.loadingSince = now; } else this.loadingSince = 0;
@@ -1348,7 +1355,8 @@ export class Landscape {
     const signature = this.chunkSignature(x0, y0);
     if (chunk && chunk.signature === signature && chunk.canvas.width > 0) { chunk.stamp = stamp; return chunk; }
     const canvas = chunk && chunk.canvas.width > 0 ? chunk.canvas : document.createElement('canvas');
-    if (canvas.width === 0 || canvas.height === 0) canvas.width = canvas.height = CHUNK_ART_TILES * ART;
+    // Un lienzo nuevo mide 300×150: se dimensiona siempre al trozo (si no, Canvas2D lo comprimiría y deformaría el suelo).
+    if (canvas.width !== CHUNK_ART_TILES * ART || canvas.height !== CHUNK_ART_TILES * ART) canvas.width = canvas.height = CHUNK_ART_TILES * ART;
     const g = canvas.getContext('2d')!;
     g.clearRect(0, 0, canvas.width, canvas.height); g.save(); g.translate(-x0 * ART, -y0 * ART);
     for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
@@ -2101,6 +2109,7 @@ export class Landscape {
       else if (s.tile) this.drawFauna(g, s.tile, t);
       else if (s.person) this.drawPerson(g, s.person, t);
     }
+    this.settlePersonSprites();
     // A selected facility or water patch is a local cutaway, like the existing body reveal.
     // Redraw received material within its footprint; no state, roots or hit targets change.
     if (site && this.graphicsSettings.cutaways) {
@@ -2638,6 +2647,7 @@ export class Landscape {
     this.perf.bodiesDrawn += bodies.length;
     if (tier === 'far') {
       for (const body of bodies) if ('role' in body.view) this.drawPerson(ctx, body as RenderPerson, t); else this.drawAnimal(ctx, body as RenderAnimal, t);
+      this.settlePersonSprites();
     } else {
       // Mapa: un punto con contorno por cuerpo (≥ 2 px de pantalla); la ropa y la especie dan el color.
       const unit = Math.max(2 / k, 4);
@@ -2934,18 +2944,29 @@ export class Landscape {
         + `|${view.controlMode === 'directed' ? 1 : 0}|${(view.thirst ?? 0) >= .82 ? 1 : (view.hunger ?? 0) >= .82 ? 2 : 0}|${health}`;
       const cache = this.personSprites ??= new BoundedCache<HTMLCanvasElement>(PERSON_SPRITE_LIMIT, canvas => { canvas.width = canvas.height = 0; });
       let sprite = cache.get(key);
-      if (!sprite || sprite.width === 0) {
+      if (sprite && sprite.width > 0) { this.spriteHits++; g.drawImage(sprite, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy); this.drawCalls++; }
+      else if (cache.size >= cache.capacity) {
+        // Caché llena: un recorrido cíclico más largo que ella la expulsaría entera en cada fotograma (0 aciertos).
+        // Lo que no cabe se pinta directo y lo ya guardado se conserva; `settlePersonSprites` la vacía si solo quedan obsoletos.
+        this.spriteDirect++; this.paintPerson(g, p, ax, ay, pose);
+      } else {
         sprite = document.createElement('canvas'); sprite.width = PERSON_SPRITE.w; sprite.height = PERSON_SPRITE.h;
         this.paintPerson(sprite.getContext('2d')!, p, PERSON_SPRITE.ox, PERSON_SPRITE.oy, pose);
         cache.set(key, sprite);
-        this.perf.personSpriteBuilds++;
+        this.perf.personSpriteBuilds++; this.spriteFresh++;
+        g.drawImage(sprite, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy); this.drawCalls++;
       }
-      g.drawImage(sprite, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy); this.drawCalls++;
     }
     if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
       px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
     }
     if (cropWork) drawCropWork(g, { mode: cropWork, ax, baseY, t, seed: p.seed, animate: !this.reduceMotion && this.actionActive, workProgress: view.workProgress, ring: this.cam.zoom >= 18 });
+  }
+
+  /** Tras dibujar los cuerpos: si la caché está llena, no acertó ni una vez y no admitió ninguna pose nueva, solo guarda poses obsoletas y se vacía. */
+  private settlePersonSprites(): void {
+    if (this.spriteDirect > 0 && this.spriteHits === 0 && this.spriteFresh === 0) this.personSprites?.clear();
+    this.spriteHits = this.spriteDirect = this.spriteFresh = 0;
   }
 
   /** Cuerpo de un habitante con su pie en (`ax`, `ay`) de arte (sin barra de trabajo ni labor agrícola). */

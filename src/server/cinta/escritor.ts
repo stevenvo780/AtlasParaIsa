@@ -65,7 +65,7 @@ export class EscritorCinta {
       sincronizarDirectorio(dirname(path));
       this.catalogo = new CatalogoCinta(path, this.opciones.puntoEscritura);
     }
-    podar(this.catalogo, this.tope, undefined, 0, this.margen);
+    podar(this.catalogo, this.tope, undefined, 0, { margen: this.margen });
     this.epoca = this.catalogo.abrir(a);
     this.entradaEpoca = a.epoca;
     this.tMundo = a.tMundo;
@@ -173,7 +173,7 @@ export class EscritorCinta {
     const data = codificarBloque(nivel, bloque.base, bloque.deltas);
     const ultimo = this.catalogo.segmentos().filter(s => s.nivel === nivel).at(-1);
     const segmento = ultimo?.epoca === this.epoca && ultimo.bytes + data.length <= MAX_SEGMENTO ? ultimo : undefined;
-    podar(this.catalogo, this.tope, nivel, data.length, this.margen);
+    podar(this.catalogo, this.tope, nivel, data.length, { margen: this.margen });
     this.catalogo.escribirBloque(this.epoca, data, segmento);
     this.bloques[nivel] = undefined;
   }
@@ -182,7 +182,7 @@ export class EscritorCinta {
     if (this.serie.length || this.hitos.length || this.entradas.length) {
       // Los flujos sin adelgazamiento también ocupan disco. Reserva sus páginas antes de publicar el lote.
       const bytes = Buffer.byteLength(JSON.stringify([this.serie, this.hitos, this.entradas]));
-      podar(this.catalogo, this.tope, undefined, bytes * 3, this.margen);
+      podar(this.catalogo, this.tope, undefined, bytes * 3, { margen: this.margen });
       this.catalogo.flujos(this.epoca, this.serie, this.hitos, this.entradas);
       this.serie.length = this.hitos.length = this.entradas.length = 0;
     }

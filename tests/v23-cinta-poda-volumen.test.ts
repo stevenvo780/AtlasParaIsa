@@ -12,7 +12,7 @@ import type { WorldView } from '../src/shared/types.js';
 import { TICKS_PER_DAY } from '../src/world/mundo/tipos.js';
 
 const TOPE = 2e9;
-const VOLUMEN = 10e9;
+const VOLUMEN = Number(process.env.ATLAS_V23_CINTA_VOLUMEN_BYTES ?? 10e9);
 const MARGEN = 16 * 1024 ** 2;
 const CABECERA = 33;
 const CRC = 25;
@@ -119,7 +119,7 @@ test('I4: poda en disco real tras escribir 10 GB con tope estricto de 2 GB', {
     const data = bloque(nivel, tick);
     const meta = verificarBloque(data);
     comprobarUltimos();
-    podar(catalogo, TOPE, nivel, data.length, MARGEN);
+    podar(catalogo, TOPE, nivel, data.length, { margen: MARGEN });
     catalogo.escribirBloque(epoca, data, undefined);
     const recienConfirmado = ultimo(nivel)!;
     const ruta = rutaSegmento(directorio, nivel, recienConfirmado.segmento);

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { CatalogoCinta, INDICE_CINTA, NIVELES, rutaSegmento, type PuntoEscritura } from '../src/server/cinta/catalogo.js';
 import { codificarBloque, verificarBloque } from '../src/server/cinta/formato.js';
 import { podar } from '../src/server/cinta/poda.js';
@@ -166,6 +167,37 @@ if (process.argv[2] === '--hijo') {
     confirmados.delete(viejo);
     recuperar(dir, confirmados);
     assert.equal(existsSync(viejo), false);
+  });
+
+  test('con el disco casi lleno la poda conserva la reserva del mundo y el último bloque de cada nivel', t => {
+    const dir = temporal(t);
+    // Un disco de 24 MiB sobre los ficheros reales del directorio: /tmp lo comparten otros procesos.
+    const capacidad = 24 * 1024 ** 2, reservaDisco = 4 * 1024 ** 2;
+    const usado = () => readdirSync(dir, { recursive: true, withFileTypes: true }).filter(e => e.isFile())
+      .reduce((suma, e) => suma + statSync(join(e.parentPath, e.name)).size, 0);
+    const holguras = { margen: 64 * 1024, reservaDisco, libre: () => capacidad - usado() };
+    const relleno = randomBytes(768 * 1024).toString('base64');
+    const catalogo = new CatalogoCinta(dir);
+    try {
+      const epoca = catalogo.abrir({ instanciaId: 'disco', epoca: 0, tMundo: 0, motivo: 'reinicio' });
+      const ultimos = new Map<Nivel, number>();
+      for (let i = 0; i < 60; i++) {
+        const nivel = (i % 5) as Nivel, tick = Math.floor(i / 5) * CINTA.pasos[nivel];
+        const vista: WorldView = { version: 10, sequence: tick, tick, day: 1, phase: 'day', weather: 'clear', width: 1, height: 1,
+          tiles: [], people: [], events: [], memories: [], places: [], pauseReason: relleno + i };
+        const datos = codificarBloque(nivel, vista, []);
+        // Con un tope enorme solo el disco obliga a podar.
+        podar(catalogo, 1e15, nivel, datos.length, holguras);
+        catalogo.escribirBloque(epoca, datos, undefined);
+        ultimos.set(nivel, tick);
+        assert.ok(capacidad - usado() >= reservaDisco, `bloque ${i}: la cinta invadió la reserva del disco`);
+        for (const [n, t0] of ultimos) {
+          assert.ok(catalogo.db.prepare('SELECT 1 FROM bloques WHERE nivel=? AND t0=?').get(n, t0), `bloque ${i}: falta el último de L${n}`);
+        }
+      }
+      assert.ok(catalogo.segmentos().length < 60, 'hubo poda por disco');
+      assert.throws(() => podar(catalogo, 1e15, 0, capacidad, holguras), /el disco/);
+    } finally { catalogo.db.close(); }
   });
 
   test('I6: abrir rechaza CRC inválido o truncado en un bloque confirmado', async t => {

@@ -5,7 +5,7 @@ import { effectiveLimits, paramsOf } from './params.js';
 import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
-import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';
+import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, structureDistance, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
@@ -436,7 +436,9 @@ export function settlementOpportunity(world: World, person: Person): { target: {
         if (r > 0) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }
       }
     }
-    const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
+    const facilities = paramsOf(world).construccion.poliminosYSinergia
+      ? filtrarCerca(world.structures, place, 5, s => (!s.site || !!s.site.expansion) && structureDistance(place, s) <= 3 && s.condition > 0.1)
+      : filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
     const peers = vecinos(world, place, 7, p=>p!==person && distance(p,place)<=6, 'settlementOpportunity');
     const trust = peers.reduce((sum,p)=>sum+(person.bonds[p.id]??0.15),0)/Math.max(1,peers.length);

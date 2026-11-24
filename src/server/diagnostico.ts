@@ -9,9 +9,9 @@ import { lastTileAt } from '../world/tile-index.js';
 
 export interface OpcionesMuestreador {
   directorio: string;
-  cadaTicks?: number;
   fraccionPaso?: number;
   commit?: string;
+  maxBitacoraBytes?: number;
 }
 
 export interface ResumenDiagnostico {
@@ -47,6 +47,9 @@ const MAX_BITACORA_BYTES = 64 * 1024 * 1024;
 const ARCHIVOS_BITACORA = 8;
 const MAX_CREDITO_MS = 10;
 const MAX_PENDIENTES = 1024;
+/** Cada registro construye su entorno de forma síncrona: un mundo corrupto no puede bloquear el paso con miles. */
+const MAX_REGISTROS_POR_COMPROBACION = 8;
+const MAX_REGIONES_POR_RONDA = 16;
 
 /** Acota también las muestras que aporte un carril; NaN/Infinity deben sobrevivir al JSON. */
 function pequeno(valor: unknown, profundidad = 0, vistos = new Set<object>()): unknown {
@@ -93,9 +96,9 @@ function entorno(mundo: World, violacion: Violacion, region?: RegionRef): unknow
 /** Llamar en el coordinador, después de la barrera de fin de paso. No modifica el mundo. */
 export class Muestreador {
   readonly fichero: string;
-  private readonly cadaTicks: number;
   private readonly fraccionPaso: number;
   private readonly commit: string;
+  private readonly maxBitacoraBytes: number;
   private cursor = 0;
   private readonly cursoresTeselas = new Map<string, number>();
   private creditoMs = 0;
@@ -116,9 +119,8 @@ export class Muestreador {
   private bytesBitacora: number | undefined;
 
   constructor(opciones: OpcionesMuestreador) {
-    this.cadaTicks = opciones.cadaTicks ?? 60;
     this.fraccionPaso = opciones.fraccionPaso ?? 0.01;
-    if (!Number.isInteger(this.cadaTicks) || this.cadaTicks < 1) throw new RangeError('cadaTicks debe ser un entero positivo.');
+    this.maxBitacoraBytes = opciones.maxBitacoraBytes ?? MAX_BITACORA_BYTES;
     if (!Number.isFinite(this.fraccionPaso) || this.fraccionPaso <= 0 || this.fraccionPaso > 1)
       throw new RangeError('fraccionPaso debe estar entre 0 y 1.');
     this.commit = opciones.commit ?? 'desconocido';
@@ -137,7 +139,7 @@ export class Muestreador {
       this.ultimoTick = this.tick = mundo.tick;
       this.pasosMs += stepMs;
       this.creditoMs = Math.min(MAX_CREDITO_MS, this.creditoMs + stepMs * this.fraccionPaso);
-      if (mundo.tick % this.cadaTicks !== 0 || this.creditoMs <= 0) return [];
+      if (this.creditoMs <= 0) return [];
       if (this.pendientes >= MAX_PENDIENTES) { this.diferidos++; return []; }
       const invariantes = listaInvariantes();
       const violaciones: Violacion[] = [];
@@ -147,24 +149,26 @@ export class Muestreador {
         const indice = (comienzo + n) % invariantes.length;
         const inv = invariantes[indice]!;
         if (mundo.tick < (this.siguientes.get(inv.id) ?? 0)) continue;
-        const estimado = this.costes.get(inv.id) ?? 0.05;
-        // Una comprobación JS es indivisible: si excede el crédito, la deuda difiere las siguientes.
-        if (performance.now() - inicio + Math.min(estimado, MAX_CREDITO_MS / 2) > this.creditoMs) continue;
-        const cursorTeselas = this.cursoresTeselas.get(inv.id) ?? 0;
-        const tile = mundo.tiles[cursorTeselas % Math.max(1, mundo.tiles.length)];
-        const region = inv.alcance === 'region' && tile
-          ? { chunkX: Math.floor(tile.x / CHUNK_SIZE), chunkY: Math.floor(tile.y / CHUNK_SIZE) } : undefined;
-        if (inv.alcance === 'region' && !region) continue;
-        if (region) this.cursoresTeselas.set(inv.id, cursorTeselas + CHUNK_SIZE * CHUNK_SIZE + 1);
-        const antes = performance.now();
-        const encontrados = comprobarInvariante(inv, mundo, region);
-        const coste = performance.now() - antes;
-        this.costes.set(inv.id, Math.max(coste, estimado * 0.8 + coste * 0.2));
-        this.siguientes.set(inv.id, mundo.tick + inv.cadaTicks);
-        this.cursor = (indice + 1) % invariantes.length;
-        this.cobertura.set(inv.id, (this.cobertura.get(inv.id) ?? 0) + 1);
-        if (encontrados.length > 0) this.registrar(mundo, encontrados, region);
-        for (const violacion of encontrados) violaciones.push(violacion);
+        const rondas = inv.alcance === 'region' ? MAX_REGIONES_POR_RONDA : 1;
+        let ejecutadas = 0;
+        for (; ejecutadas < rondas; ejecutadas++) {
+          const estimado = this.costes.get(inv.id) ?? 0.05;
+          // Una comprobación JS es indivisible: si excede el crédito, la deuda difiere las siguientes.
+          if (performance.now() - inicio + Math.min(estimado, MAX_CREDITO_MS / 2) > this.creditoMs) break;
+          const region = inv.alcance === 'region' ? this.siguienteRegion(mundo, inv.id) : undefined;
+          if (inv.alcance === 'region' && !region) break;
+          const antes = performance.now();
+          const encontrados = comprobarInvariante(inv, mundo, region);
+          const coste = performance.now() - antes;
+          this.costes.set(inv.id, Math.max(coste, estimado * 0.8 + coste * 0.2));
+          this.cobertura.set(inv.id, (this.cobertura.get(inv.id) ?? 0) + 1);
+          if (encontrados.length > 0) this.registrar(mundo, encontrados, region);
+          for (const violacion of encontrados) violaciones.push(violacion);
+        }
+        if (ejecutadas > 0) {
+          this.siguientes.set(inv.id, mundo.tick + inv.cadaTicks);
+          this.cursor = (indice + 1) % invariantes.length;
+        }
       }
       return violaciones;
     } finally {
@@ -172,6 +176,15 @@ export class Muestreador {
       this.creditoMs -= duracion;
       this.costeMs += duracion;
     }
+  }
+
+  /** Las teselas se guardan por chunks completos: avanzar CHUNK_SIZE² + 1 posiciones pasa al chunk siguiente. */
+  private siguienteRegion(mundo: World, id: string): RegionRef | undefined {
+    const cursor = this.cursoresTeselas.get(id) ?? 0;
+    const tile = mundo.tiles[cursor % Math.max(1, mundo.tiles.length)];
+    if (!tile) return undefined;
+    this.cursoresTeselas.set(id, cursor + CHUNK_SIZE * CHUNK_SIZE + 1);
+    return { chunkX: Math.floor(tile.x / CHUNK_SIZE), chunkY: Math.floor(tile.y / CHUNK_SIZE) };
   }
 
   private registrar(mundo: World, violaciones: Violacion[], region?: RegionRef): void {
@@ -188,7 +201,7 @@ export class Muestreador {
     const registro: Omit<RegistroBitacora, 'violacion' | 'entorno'> = { t: new Date(ahora).toISOString(), tick: mundo.tick,
       reglas: mundo.version, commit: this.commit, hilos: motor.hilos, gpu: [...motor.gpu],
       rssMiB: process.memoryUsage.rss() / 1024 ** 2 };
-    const registros = violaciones.map(violacion => ({ violacion: pequeno(violacion), entorno: entorno(mundo, violacion, region) }));
+    const registros = violaciones.slice(0, MAX_REGISTROS_POR_COMPROBACION).map(violacion => ({ violacion: pequeno(violacion), entorno: entorno(mundo, violacion, region) }));
     let escritos = 0;
     this.pendientes += registros.length;
     this.cola = this.cola.then(async () => {
@@ -212,7 +225,7 @@ export class Muestreador {
       }
     }
     const bytes = Buffer.byteLength(linea);
-    if (this.bytesBitacora + bytes > MAX_BITACORA_BYTES) {
+    if (this.bytesBitacora + bytes > this.maxBitacoraBytes) {
       await unlink(`${this.fichero}.${ARCHIVOS_BITACORA - 1}`).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       });

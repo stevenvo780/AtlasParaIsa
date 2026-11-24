@@ -127,7 +127,7 @@ export function evaluarPanel(corridas: CorridaPanel[], u: UmbralesPanel = UMBRAL
 }
 
 export interface GrupoPermutacion { semilla: number; valores: number[] }
-export function permutacionEstratificada(a: GrupoPermutacion[], b: GrupoPermutacion[], opciones: { iteraciones?: number; semilla?: number; alfa?: number; margen?: number; replicasDeterministas?: boolean } = {}) {
+export function permutacionEstratificada(a: GrupoPermutacion[], b: GrupoPermutacion[], opciones: { iteraciones?: number; semilla?: number; alfa?: number; margen?: number } = {}) {
   const iteraciones = opciones.iteraciones ?? 10_000, alfa = opciones.alfa ?? 0.01 / 8, margen = opciones.margen ?? 0.2;
   if (!Number.isSafeInteger(iteraciones) || iteraciones < 1 || !Number.isFinite(alfa) || alfa <= 0 || alfa >= 1 || !Number.isFinite(margen) || margen < 0) throw new Error('Parámetros de permutación inválidos');
   if (a.length !== b.length || new Set(a.map(g => g.semilla)).size !== a.length || new Set(b.map(g => g.semilla)).size !== b.length) return { estado: 'desconocido' as Estado, motivo: 'Estratos repetidos o distintos entre brazos' };
@@ -136,10 +136,9 @@ export function permutacionEstratificada(a: GrupoPermutacion[], b: GrupoPermutac
     return { estado: 'desconocido' as Estado, motivo: 'Faltan réplicas finitas de alguna semilla en un brazo' };
   }
   const media = (xs: number[]) => xs.reduce((n, x) => n + x, 0) / xs.length;
-  // En T=1 las copias de una semilla no añaden observaciones independientes.
-  if (opciones.replicasDeterministas) for (const grupo of grupos) {
-    grupo.a = [media(grupo.a)]; grupo.b = [media(grupo.b)];
-  }
+  // Réplicas idénticas (T=1 con semilla, o un motor aún determinista) son pseudorréplicas: cuentan como una observación.
+  const sinCopias = (valores: number[]) => valores.every(v => v === valores[0]) ? [valores[0]!] : valores;
+  for (const grupo of grupos) { grupo.a = sinCopias(grupo.a); grupo.b = sinCopias(grupo.b); }
   const observado = media(grupos.map(g => media(g.b) - media(g.a)));
   let azar = (opciones.semilla ?? 51926) >>> 0, extremos = 0;
   const siguiente = () => { azar = (Math.imul(azar, 1664525) + 1013904223) >>> 0; return azar / 4294967296; };
@@ -323,12 +322,18 @@ async function panel(o: Opciones): Promise<void> {
     for (const metrica of ['mortales', 'nacimientos', 'biomasaMedia', 'diversidad'] as const) {
       const grupos = nombres.map(brazo => o.semillas.map(semilla => ({ semilla, valores: corridas.filter(r => r.brazo === brazo && r.semilla === semilla && r.estado === 'completo').flatMap(r => { const final = r.censos.find(c => c.dia === o.dias); return final ? [final[metrica]] : []; }) })));
       comparacion[metrica] = grupos.some(gs => gs.some(g => g.valores.length !== o.replicas)) ? { estado: 'desconocido', motivo: 'Faltan réplicas completas' }
-        : permutacionEstratificada(grupos[0]!, grupos[1]!, { replicasDeterministas: o.hilos === 1 && o.gpu.length === 0 });
+        : permutacionEstratificada(grupos[0]!, grupos[1]!);
     }
   }
-  const informe = { brazos, comparacion, corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas T=1 idénticas no aportan observaciones independientes dentro de una semilla', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide persistencia, gobernador ni el catálogo tecnológico de producción'] };
+  // Una semilla cuyas réplicas completas dan el mismo censo biológico aporta una sola observación independiente.
+  const huella = (r: CorridaPanel) => JSON.stringify(r.censos.map(({ replica, ticksPorSegundo, pasoP95Ms, pasoMaxMs, rssMiB, ...biologia }) => biologia));
+  const pseudorreplicas = [...new Set(corridas.map(r => `${r.brazo}/${r.semilla}`))].filter(clave => {
+    const huellas = corridas.filter(r => `${r.brazo}/${r.semilla}` === clave && r.estado === 'completo').map(huella);
+    return huellas.length > 1 && new Set(huellas).size === 1;
+  });
+  const informe = { brazos, comparacion, pseudorreplicas, corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas idénticas dentro de una semilla (pseudorreplicas) cuentan como una en la permutación, pero no en las proporciones M1-M6', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide persistencia, gobernador ni el catálogo tecnológico de producción'] };
   writeFileSync(join(o.salida, 'panel.json'), JSON.stringify(informe, null, 2));
-  process.stdout.write(`${JSON.stringify({ salida: o.salida, brazos, comparacion })}\n`);
+  process.stdout.write(`${JSON.stringify({ salida: o.salida, brazos, comparacion, pseudorreplicas })}\n`);
   if (corridas.some(r => r.estado === 'error')) process.exitCode = 1;
 }
 

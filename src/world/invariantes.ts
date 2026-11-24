@@ -18,6 +18,7 @@ export interface Violacion {
 export interface Invariante {
   id: string; carril: string; gravedad: Gravedad; cadaTicks: number;
   alcance: 'global' | 'region';
+  /** Solo lectura. Sin `region` comprueba el mundo entero; con ella, solo esa región de CHUNK_SIZE². */
   comprobar(mundo: World, region?: RegionRef): Violacion[];
 }
 
@@ -52,7 +53,9 @@ export function comprobarInvariantes(mundo: World, opciones: { region?: RegionRe
 }
 
 type Punto = { x: number; y: number };
-const enRegion = (p: Punto, r?: RegionRef): boolean => !r || Math.floor(p.x / CHUNK_SIZE) === r.chunkX && Math.floor(p.y / CHUNK_SIZE) === r.chunkY;
+// Una coordenada no finita no pertenece a ninguna región: se examina en todas, porque es la corrupción más probable.
+const enRegion = (p: Punto, r?: RegionRef): boolean => !r || !Number.isFinite(p.x) || !Number.isFinite(p.y)
+  || Math.floor(p.x / CHUNK_SIZE) === r.chunkX && Math.floor(p.y / CHUNK_SIZE) === r.chunkY;
 function teselas(m: World, r?: RegionRef): World['tiles'] {
   if (!r) return m.tiles;
   const encontrar = tileLookup(m.tiles), resultado: World['tiles'] = [];
@@ -66,9 +69,12 @@ function teselas(m: World, r?: RegionRef): World['tiles'] {
 function inicial(id: string, alcance: Invariante['alcance'], comprobar: Invariante['comprobar'], cadaTicks = 60): void {
   registrar({ id, carril: '0C', gravedad: 'dura', cadaTicks, alcance, comprobar });
 }
+/** Un mundo corrupto puede tener millones de fallos: basta una muestra para diagnosticar. */
+const MAX_HALLAZGOS = 64;
 function hallazgos(id: string, m: World, region?: RegionRef) {
   const resultado: Violacion[] = [];
   const fallo = (detalle: string, contexto: Record<string, unknown>, esperado?: number, observado?: number): void => {
+    if (resultado.length >= MAX_HALLAZGOS) return;
     resultado.push({ id, gravedad: 'dura', tick: m.tick, detalle, contexto, esperado, observado,
       ...(region ? { region: `${region.chunkX},${region.chunkY}` } : {}) });
   };

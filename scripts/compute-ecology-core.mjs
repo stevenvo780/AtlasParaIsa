@@ -123,11 +123,8 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // SHA256 del cuerpo de step() con comentarios /* */, // y secuencias de
   // espacios colapsadas. Hay que bumpear la versión (y este hash) junto con
   // cualquier cambio intencional de reglas.
-  // Recalculado tras T112 (topología SoA behind motor.soaTerreno, ecosystem-kernel.ts): las fórmulas
-  // no cambian (mismas operaciones, mismo orden; T112 lo prueba en tests/soa-terreno.test.ts), pero el
-  // texto normalizado de step() sí, por la rama `store` y `livingNeighborCounts(0.45)`. No se bumpea la
-  // versión: no es un cambio de regla, es la forma en que se llega al mismo umbral de vecino vivo.
-  canonicalStepBodyHash: '441d8a77707728c712ab3660954565a5b08bdd0d994ae615430742cfcbac2957',
+  // La recuperación de GPU a CPU de 0D cambia el despacho de step(), sin cambiar las fórmulas.
+  canonicalStepBodyHash: '934b43f99d86d36aaa3af818d8273cce921131d2e0a13ac3fc863f32d104db24',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas

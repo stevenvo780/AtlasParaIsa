@@ -228,6 +228,8 @@ export function depositMaterials(world: World, person: Person, structure: Struct
   if (!paramsOf(world).construccion.modular || !world.people.includes(person) || !world.structures.includes(structure)
     || !hasCompletedBuilding(structure) || structure.condition <= BROKEN_CONDITION || tileAt(world, structure)?.terrain !== 'shelter'
     || structureDistance(person, structure) > 1.5) return false;
+  // A builder walking to its own site carries that trip's load; it is delivered there, not banked on the way.
+  if (person.action === 'build') return false;
   const capacity = materialCapacity(structure);
   const wood = person.materials.wood >= 8 ? Math.max(0, Math.min(Math.floor(person.materials.wood - 4), capacity.wood - (structure.storedWood ?? 0))) : 0;
   const stone = person.materials.stone >= 5 ? Math.max(0, Math.min(Math.floor(person.materials.stone - 3), capacity.stone - (structure.storedStone ?? 0))) : 0;
@@ -454,7 +456,9 @@ export function partnerConstructionCost(world: World, person: Person): Blueprint
 
 export function constructionSite(world: World, person: Point): StructureView | undefined {
   if (!paramsOf(world).construccion.modular) return;
-  const radius = structureSearchRadius(world, 7);
+  // V20 keeps the V19 reach for active sites: anchor 7 + warehouse anchor 7 from the site <= HALO 14.
+  // Shrinking it to 3 left half-paid sites invisible a few steps away, so neighbours started new ones.
+  const radius = 7;
   return filtrarCerca(world.structures, person, radius + 1, s => !!s.site && distance(person, s) <= radius)
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
 }
@@ -507,7 +511,7 @@ function serviceValue(services: Services, context: ReturnType<typeof constructio
     + clamp(services.irrigation / 0.012) * context.rainPotential * (1 - context.moisture) * context.food * 0.65;
 }
 
-function localMaterials(world: World, person: Person): Person['materials'] {
+function localMaterials(world: World, person: Person, stored?: { wood: number; stone: number }): Person['materials'] {
   const materials = { ...person.materials };
   const fast = residentFastAccess(world.tiles), exact = fast?.exact;
   for (let dy = -CONSTRUCTION_RADIUS; dy <= CONSTRUCTION_RADIUS; dy++) for (let dx = -CONSTRUCTION_RADIUS; dx <= CONSTRUCTION_RADIUS; dx++) {
@@ -527,6 +531,7 @@ function localMaterials(world: World, person: Person): Person['materials'] {
     for (const s of filtrarCerca(world.structures, person, radius + 1, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
       && distance(person, s) <= radius && tileAt(world, s)?.terrain === 'shelter')) {
       materials.wood += s.storedWood ?? 0; materials.stone += s.storedStone ?? 0;
+      if (stored) { stored.wood += s.storedWood ?? 0; stored.stone += s.storedStone ?? 0; }
     }
   }
   return materials;
@@ -555,15 +560,58 @@ function usefulRepairs(world: World, person: Person, context?: ReturnType<typeof
   }).sort((a, b) => b.efficiency - a.efficiency || distance(person, a.structure) - distance(person, b.structure) || a.structure.id.localeCompare(b.structure.id));
 }
 
+export interface ConstructionOpportunity { score: number; reason: string; target?: Point; delivery?: 'site' | 'expansion'; workLeft?: boolean }
+
+/** Loads one person carries (the gather and delivery caps). */
+const CARRY = { wood: 12, stone: 8 } as const;
+/** Smallest worthwhile delivery trip while more material can still be gathered nearby. */
+const TRIP_LOAD = 4;
+
+/** V20 modular: whether a trip to the chosen work is worth starting now. Sites and extensions accept
+ * partial deliveries (contributeConstruction debits only what is carried or stored beside them), so
+ * a builder need not carry the whole remaining bill. `cost` is the trip bill of constructionCost. */
+export function modularBuildReady(person: Person, construction: ConstructionOpportunity, cost: BlueprintView['cost'], canGather: boolean): boolean {
+  const needed = cost.wood + cost.stone;
+  const deliverable = Math.min(Math.floor(person.materials.wood), cost.wood) + Math.min(Math.floor(person.materials.stone), cost.stone);
+  if (needed === 0 || deliverable >= needed) return true;
+  // Paid work on a standing site is a real contribution even with empty hands.
+  if (construction.delivery === 'site' && construction.workLeft) return true;
+  return deliverable >= Math.min(needed, TRIP_LOAD) || (deliverable > 0 && !canGather);
+}
+
+/** Cells a fresh build of this genotype occupies (same rule as fittingPolyomino). */
+function plannedArea(components: readonly StructureComponent[]): number {
+  const n = counts(components);
+  return n.frame >= 6 && n.roof + n.hearth >= n.cistern + n.garden ? 6 : n.frame <= 2 ? 1 : n.frame - 1;
+}
+/** Full paid bill of a fresh build, including the polyomino area surcharge. */
+function plannedCost(world: World, components: readonly StructureComponent[]): BlueprintView['cost'] {
+  return paramsOf(world).construccion.poliminosYSinergia ? polyominoCost(components, plannedArea(components)) : blueprintCost(components, true);
+}
+/** Cheapest real way to obtain the design here: a fresh build or the paid extension of a nearby building. */
+function adoptionCost(world: World, person: Person, blueprint: BlueprintView): BlueprintView['cost'] {
+  const fresh = plannedCost(world, blueprint.components), extension = expansionCandidate(world, person, blueprint)?.cost;
+  return extension && normalizedCost(extension) < normalizedCost(fresh) ? extension : fresh;
+}
+/** What can physically reach a work started here: one carried load (own load plus reachable ground)
+ * and the stock already banked in nearby warehouses. */
+function constructionBudget(world: World, person: Person): { wood: number; stone: number } {
+  const stored = { wood: 0, stone: 0 }, local = localMaterials(world, person, stored);
+  return { wood: Math.min(CARRY.wood, local.wood - stored.wood) + stored.wood, stone: Math.min(CARRY.stone, local.stone - stored.stone) + stored.stone };
+}
+
 /** Autonomous admission only. Explicit construction still uses completeConstruction
  * and pays the same material/work costs. No distant archive, historical uses or
  * invented number of occupants contributes to this local marginal comparison. */
-export function constructionOpportunity(world: World, person: Person): { score: number; reason: string; target?: Point } | undefined {
+export function constructionOpportunity(world: World, person: Person, placed = true): ConstructionOpportunity | undefined {
   const site = constructionSite(world, person);
   if (site) return { target: { x: site.x, y: site.y }, score: 0.6 + person.traits.industriousness * 0.2,
-    reason: 'Una obra local aún necesita entregas de materiales y trabajo pagado.' };
+    reason: 'Una obra local aún necesita entregas de materiales y trabajo pagado.',
+    delivery: 'site', workLeft: site.site!.completedWork < site.site!.requiredWork };
   const modular = paramsOf(world).construccion.modular, blueprint = selectedBlueprint(world, person);
   const expansion = modular ? expansionCandidate(world, person, blueprint) : undefined;
+  // Without free ground of its own, only an existing work (site or extension) can be continued.
+  if (!placed && !expansion) return;
   if (!expansion && world.structures.length >= structureCap(world)) return;
   const cells = !expansion && modular && paramsOf(world).construccion.poliminosYSinergia ? fittingPolyomino(world, person, blueprint.components) : false;
   const cost = expansion?.cost ?? (cells ? polyominoCost(blueprint.components, cells.length) : blueprintCost(blueprint.components, modular)), materials = localMaterials(world, person);
@@ -580,7 +628,8 @@ export function constructionOpportunity(world: World, person: Person): { score: 
       + Math.max(0, upgraded.foodCapacity - old.foodCapacity) * context.foodSurplus * context.food;
     if (gain >= MIN_SERVICE_GAIN || storageNeeded) {
       return { target: { x: expansion.structure.x, y: expansion.structure.y }, score: 0.6 + person.traits.industriousness * 0.2,
-        reason: 'Ampliar una obra local conserva sus materiales y servicios; la nueva sección exige terreno libre y costes adicionales.' };
+        reason: 'Ampliar una obra local conserva sus materiales y servicios; la nueva sección exige terreno libre y costes adicionales.',
+        delivery: 'expansion', workLeft: true };
     }
     return;
   }
@@ -767,7 +816,11 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
   // Intern a remote signature only AFTER the paid local discovery passed its own frontier.
   const existing = paramsOf(world).construccion.modular ? world.blueprints.find(b => blueprintSignature(b.components) === blueprintSignature(candidate.components)) : undefined;
   if (!existing) { world.blueprintCounter = identity.counter; world.blueprints.push(blueprint); }
-  person.blueprintId = existing?.id ?? blueprint.id; world.inventionDynamics.accepted++;
+  // V20 modular: a design larger than one carried load is kept as known culture (inventorId); adopting
+  // it is the cost-aware choice of stepStructures, once warehouses or an extendable building can pay it.
+  const adopted = existing ?? blueprint, bill = paramsOf(world).construccion.modular ? plannedCost(world, adopted.components) : undefined;
+  if (!bill || (bill.wood <= CARRY.wood && bill.stone <= CARRY.stone)) person.blueprintId = adopted.id;
+  world.inventionDynamics.accepted++;
   const event = emit({ kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation',
     text: `${person.name} ideó ${blueprint.name.toLocaleLowerCase('es')}, generación ${blueprint.generation}.`,
     cause: `Ensayo real: −1 madera y ${RESEARCH_WORK} trabajo; selección Pareto entre combinaciones válidas; receta cultural derivada de ${blueprint.parents.join(', ')}. La utilidad deberá comprobarse al usarla.` });
@@ -1188,8 +1241,28 @@ export function stepStructures(world: World, _emit: Emit): void {
     const current = selectedBlueprint(world, person), candidates = knownBlueprints(world, person);
     if (candidates.length === 0 || (candidates.length === 1 && candidates[0]!.id === current.id)) continue;
     const context = inventionContext(world, person);
-    const value = (b: BlueprintView) => paramsOf(world).construccion.modular ? expectedValue(b.components, context)
-      : expectedValue(b.components, context) + b.usefulness * 0.12;
+    if (paramsOf(world).construccion.modular) {
+      // Value net of its paid bill, among designs this place can actually pay (one carried load plus
+      // banked stock, or the extension of a nearby building). Same expense weight as constructionOpportunity.
+      // When carrying material surplus under polyominoes, physical warehouse volume counts toward adoption
+      // so settlements organically graduate from 1×1 shelters to multi-cell halls once locally affordable.
+      const budget = constructionBudget(world, person);
+      const carryLoad = clamp((person.materials.wood + person.materials.stone) / 14);
+      const net = (b: BlueprintView) => {
+        const bill = adoptionCost(world, person, b);
+        if (bill.wood > budget.wood || bill.stone > budget.stone) return undefined;
+        const cap = polyomino ? (counts(b.components).frame >= 2 ? plannedArea(b.components) * 20 : counts(b.components).granary > 0 ? 7 : 0) : 0;
+        const storageValue = polyomino ? clamp(cap / 80) * carryLoad * 0.16 : 0;
+        return expectedValue(b.components, context) + storageValue - normalizedCost(bill) * 0.005;
+      };
+      const options = candidates.map(blueprint => ({ blueprint, value: net(blueprint) }))
+        .filter((o): o is { blueprint: BlueprintView; value: number } => o.value !== undefined)
+        .sort((a, b) => b.value - a.value || a.blueprint.id.localeCompare(b.blueprint.id));
+      const best = options[0], own = options.find(o => o.blueprint.id === current.id)?.value ?? net(current);
+      if (best && best.blueprint.id !== current.id && (own === undefined || best.value > own + 0.025)) person.blueprintId = best.blueprint.id;
+      continue;
+    }
+    const value = (b: BlueprintView) => expectedValue(b.components, context) + b.usefulness * 0.12;
     const observed = candidates.map(blueprint => ({ blueprint, value: value(blueprint) }))
       .sort((a, b) => b.value - a.value || a.blueprint.id.localeCompare(b.blueprint.id))[0];
     if (observed && observed.blueprint.id !== current.id && observed.value > value(current) + 0.025) person.blueprintId = observed.blueprint.id;

@@ -17,7 +17,7 @@ import { animalesVivosEnCelda, conRejillaFauna, materializeAnimals, stepAnimals,
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody, type BodyRates, type BodyState } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
-import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
+import { defaultBlueprint, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
@@ -1144,18 +1144,26 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     reason: recoverWater ? 'Lleva agua pero necesita recuperar aquí el esfuerzo para manipularla; descansa antes de volver a intentar beber.'
       : shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' };
   candidates.push(restCandidate);
+  const cost = constructionCost(world,person);
+  const modularWorks = params.construccion.modular;
   const needWood = person.materials.wood < 12, needStone = person.materials.stone < 8, preferWood = person.materials.wood < 6;
-  let resource: Tile | undefined, resourceKey = 0;
+  // V20 modular: the autonomous trip gathers only the material it still lacks. Extra wood while stone
+  // is the shortfall was banked by the nearest warehouse and sent its carrier straight back out.
+  const tripWood = modularWorks && person.materials.wood < Math.min(12, cost.wood), tripStone = modularWorks && person.materials.stone < Math.min(8, cost.stone);
+  const tripPrefersWood = tripWood && (!tripStone || preferWood);
+  let resource: Tile | undefined, resourceKey = 0, tripResource: Tile | undefined, tripKey = 0;
   if (needWood || needStone) {
     for (let i = 0; i < nearbyTiles.length; i++) {
       const tile = nearbyTiles[i]!, w = woodOf(tile, fast ? nearbyCells[i]! : -1), s = tile.stone ?? 0;
       if (!((w >= 1 && needWood) || (s >= 1 && needStone))) continue;
       const key = nearbyDist[i]! + ((preferWood ? w >= 1 : s >= 1) ? 0 : 20);
       if (!resource || key < resourceKey) { resource = tile; resourceKey = key; }
+      if (!((w >= 1 && tripWood) || (s >= 1 && tripStone))) continue;
+      const trip = nearbyDist[i]! + ((tripPrefersWood ? w >= 1 : s >= 1) ? 0 : 20);
+      if (!tripResource || trip < tripKey) { tripResource = tile; tripKey = trip; }
     }
   }
   const workBias = person.traits.industriousness;
-  const cost = constructionCost(world,person);
   let buildable: Tile | undefined, buildableKey = 0;
   for (let i = 0; i < nearbyTiles.length; i++) {
     const tile = nearbyTiles[i]!;
@@ -1167,9 +1175,16 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       buildable = tile; buildableKey = key;
     }
   }
-  if (resource && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: resource, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
-  const construction = buildable ? constructionOpportunity(world, person) : undefined;
-  if (buildable && construction && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, ...construction });
+  const gatherAt = modularWorks ? tripResource : resource;
+  if (gatherAt && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: gatherAt, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
+  // V20 modular: an active site or extension supplies its own target, so free ground is not required to
+  // continue it, and partial loads (or paid work) are accepted deliveries rather than a full backpack.
+  const construction = buildable ? constructionOpportunity(world, person) : modularWorks ? constructionOpportunity(world, person, false) : undefined;
+  if (modularWorks) {
+    const target = construction?.target ?? buildable;
+    if (construction && target && modularBuildReady(person, construction, cost, !!tripResource))
+      candidates.push({ action: 'build', target, score: construction.score, reason: construction.reason });
+  } else if (buildable && construction && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, ...construction });
   const invention = inventionOpportunity(world,person);
   if(invention) candidates.push({action:'invent',...invention});
   const technology = technologyOpportunity(world,person);

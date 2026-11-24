@@ -91,7 +91,7 @@ const ALCANCES: readonly Alcance[] = [...actualizarSitios(ALCANCES_BASE, {
 }, {
   id: 'obra.sitios', coleccion: 'estructuras', centro: 'entrada', radio: 7,
   fichero: 'inventions.ts', funcion: 'constructionSite', patrones: [
-    'const radius = structureSearchRadius(world, 7);',
+    'const radius = 7;',
     'return filtrarCerca(world.structures, person, radius + 1, s => !!s.site && distance(person, s) <= radius)\n    .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];',
   ],
 }, {
@@ -172,6 +172,8 @@ const LLAMADAS: readonly Llamada[] = [...actualizarSitios(LLAMADAS_BASE.filter(l
   'evaluateCooperation→practicedRecipeToTeach': ['practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census)'],
   'practicedRecipeToTeach→recipeHolders': ['const holders = rareza > 0 ? census ? census.counts ??= recipeHolders(world) : recipeHolders(world) : undefined;'],
   'constructionOpportunity→selectedBlueprint': ['selectedBlueprint(world, person)'],
+  // V20 modular: without free ground an active site or extension is still continued (placed = false).
+  'choose→constructionOpportunity': ['constructionOpportunity(world, person)', 'constructionOpportunity(world, person, false)'],
   'usefulRepairs→localServices': ['serviceValue(localServices(world, person), perceived)',
     'serviceValue(localServices(world, person, { structure, condition }, undefined, Math.max(0, person.materials.wood - steps * load)), perceived)'],
   'chooseInvention→candidatesFromKnown': ['candidatesFromKnown(world, person, context, known)'],

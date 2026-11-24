@@ -225,11 +225,10 @@ export function withdrawMaterials(world: World, person: Point, requested: { wood
 
 /** Deposit surplus only; moving stock is not evidence of utility. */
 export function depositMaterials(world: World, person: Person, structure: StructureView): boolean {
-  if (!paramsOf(world).construccion.modular || !world.people.includes(person) || !world.structures.includes(structure)
+  if (!paramsOf(world).construccion.modular || person.action === 'build' || !world.people.includes(person) || !world.structures.includes(structure)
     || !hasCompletedBuilding(structure) || structure.condition <= BROKEN_CONDITION || tileAt(world, structure)?.terrain !== 'shelter'
     || structureDistance(person, structure) > 1.5) return false;
   // A builder walking to its own site carries that trip's load; it is delivered there, not banked on the way.
-  if (person.action === 'build') return false;
   const capacity = materialCapacity(structure);
   const wood = person.materials.wood >= 8 ? Math.max(0, Math.min(Math.floor(person.materials.wood - 4), capacity.wood - (structure.storedWood ?? 0))) : 0;
   const stone = person.materials.stone >= 5 ? Math.max(0, Math.min(Math.floor(person.materials.stone - 3), capacity.stone - (structure.storedStone ?? 0))) : 0;

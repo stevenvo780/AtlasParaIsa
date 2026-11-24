@@ -409,6 +409,22 @@ export class EstadoFaunaCompartido {
     let ordenado = true;
     for (let i = 1; i < mundo.length; i++) if (!(mundo[i - 1]!.id < mundo[i]!.id)) { ordenado = false; break; }
     if (ordenado) {
+      // Una cohorte pequeña no necesita construir un Map de toda la fauna viva. El índice
+      // binario exige también identidad de objeto: un clon con igual id usa la vía general.
+      if (mundo.length >= 2048 && objetos.length < mundo.length / 8) {
+        let completo = true;
+        for (let i = 0; i < objetos.length; i++) {
+          const objeto = objetos[i]!;
+          let lo = 0, hi = mundo.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (mundo[mid]!.id < objeto.id) lo = mid + 1; else hi = mid;
+          }
+          if (lo === mundo.length || mundo[lo] !== objeto) { completo = false; break; }
+          rangos[i] = lo;
+        }
+        if (completo) return;
+      }
       const posicion = new Map<Animal, number>();
       for (let i = 0; i < mundo.length; i++) posicion.set(mundo[i]!, i);
       let completo = true;

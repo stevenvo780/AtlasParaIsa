@@ -256,7 +256,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   // Una sola resolución de celdas SoA para las cuatro métricas caras y el recorrido de biomas (`undefined` sin vía rápida).
   const lectura = lecturaResidente(world.tiles);
   const caras = estadisticasCaras(world, lectura);
-  const current = sample(world), actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
+  const actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
   const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0, pavedTiles = 0;
   // T134 (FR-026): censo sobre TODA la población, no solo la de la cámara — `people` ahora se
   // recorta por viewport (`projectWorld`), así que el recuento y las etapas de vida deben salir
@@ -264,7 +264,10 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   const cuerpo = paramsOf(world).cuerpo;
   const lifeStage = { juvenile: 0, adult: 0, senescent: 0, unknown: 0 };
   let neighbors = 0, identities = 0, protectedCount = 0;
+  // Las cuatro sumas mantienen el orden original de `sample`, en esta misma pasada censal.
+  let hunger = 0, energy = 0, fatigue = 0, thirst = 0;
   for (const p of world.people) {
+    hunger += p.hunger; energy += p.energy; fatigue += p.fatigue; thirst += p.thirst;
     actions[p.action] = (actions[p.action] ?? 0) + 1; generations[p.genome.generation] = (generations[p.genome.generation] ?? 0) + 1; materials.wood += p.materials.wood; materials.stone += p.materials.stone;
     if (p.role === 'neighbor') {
       neighbors++;
@@ -277,6 +280,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
       identities++; protectedCount++;
     }
   }
+  const population = world.people.length, n = Math.max(1, population);
   // Biomas y rasgos se cuentan por rachas (las teselas contiguas repiten valor) y se vuelcan al cambiar:
   // son enteros, así que los totales y el orden de primera aparición de las claves no cambian.
   let lastBiome: string | undefined, biomeRun = 0;
@@ -353,7 +357,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   }
   const chemistry = world.chemistry as { formulas?: unknown[] } | undefined;
   const chemicalFormulas = chemistry?.formulas?.length ?? 0;
-  return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad },
+  return { population, meanEnergy: energy / n, meanHunger: hunger / n, meanFatigue: fatigue / n, meanThirst: thirst / n, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad },
     census: { neighbors, identities, protectedCount, lifeStage: { ...lifeStage } },
     ...(pavedTiles > 0 ? { pavedTiles } : {}), ...(polyominoStructures > 0 ? { polyominoStructures } : {}),
     ...(synergyLinks > 0 ? { synergyLinks } : {}), ...(chemicalFormulas > 0 ? { chemicalFormulas } : {}) };

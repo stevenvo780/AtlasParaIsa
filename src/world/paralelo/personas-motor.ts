@@ -105,6 +105,7 @@ export class EstadoPersonasCompartido {
   #regiones: StaticRegion[] = [];
   #regionesMorton = 0;
   #reasignaciones = 0;
+  #reutilizacionesPaginas = 0;
   #regionSide: RegionSidePersonas = 256;
   #walkCache: {
     tiles: Tile[]; length: number; token: ResidentTopologyToken; inPlaceRev: object; terrainRev: object; paginas: number; capHash: number;
@@ -115,6 +116,7 @@ export class EstadoPersonasCompartido {
       pass: number;
     };
   } | null = null;
+  #fullCache: { tiles: readonly TeselaEntrada[]; length: number; token: ResidentTopologyToken; cells: Int32Array; paginas: number; capHash: number } | null = null;
   #bucketNext = new Int32Array(0);
 
   constructor() { this.#asignar(1, 2, 1); }
@@ -129,6 +131,8 @@ export class EstadoPersonasCompartido {
   get regionesMorton(): number { return this.#regionesMorton; }
   /** Veces que hubo que crear SAB nuevos (diagnóstico de reutilización). */
   get reasignaciones(): number { return this.#reasignaciones; }
+  /** Disposiciones certificadas reutilizadas sin volver a paginar el terreno. */
+  get reutilizacionesPaginas(): number { return this.#reutilizacionesPaginas; }
 
   vista(): VistaPersonas { return crearVista(this.#buffers, this.#params); }
 
@@ -146,6 +150,7 @@ export class EstadoPersonasCompartido {
     this.#capPaginas = capPaginas; this.#capHash = capHash; this.#capPersonas = capPersonas;
     this.#reasignaciones++;
     this.#walkCache = null;
+    this.#fullCache = null;
   }
 
   #crearVista(personas: number, capHash: number, escena?: EscenaPersonas): VistaPersonas {
@@ -222,23 +227,52 @@ export class EstadoPersonasCompartido {
     this.#walkCache = null;
     const { regionSide, bloque } = opcionesReparto(opciones);
     const { tiles, personas } = escena;
-    const { vista, paginaDe, paginas } = this.#paginar(tiles, personas.length, true, escena);
+    const token = residentTopologyToken(tiles as Tile[]);
+    let cache = this.#fullCache;
+    let vista: VistaPersonas, paginas: number;
+    let paginaDe: Map<number, number> | undefined;
+    if (cache && token && cache.tiles === tiles && cache.length === tiles.length
+      && sameResidentTopology(cache.token, token) && personas.length <= this.#capPersonas) {
+      vista = this.#crearVista(personas.length, cache.capHash, escena);
+      paginas = cache.paginas;
+      this.#reutilizacionesPaginas++;
+    } else {
+      const paginado = this.#paginar(tiles, personas.length, true, escena);
+      vista = paginado.vista; paginas = paginado.paginas;
+      paginaDe = paginado.paginaDe;
+      const cells = token ? new Int32Array(tiles.length) : undefined;
+      if (cells) for (let i = 0; i < tiles.length; i++) {
+        const tile = tiles[i]!;
+        const slot = paginado.paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
+        cells[i] = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
+      }
+      cache = cells ? { tiles, length: tiles.length, token: token!, cells, paginas, capHash: paginado.capHash } : null;
+      this.#fullCache = cache;
+    }
 
     // Celdas: la última tesela de una coordenada gana, como `tileAt`/`lastTileAt`.
     const percibida = escena.aguaPercibida;
-    for (const tile of tiles) {
-      const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
-      const celda = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
-      const terreno = TERRENOS.indexOf(tile.terrain as typeof TERRENOS[number]);
-      const bioma = tile.biome === undefined ? -1 : BIOMAS.indexOf(tile.biome as typeof BIOMAS[number]);
-      vista.flags[celda] = CELDA_PRESENTE | (tile.terrain !== 'water' ? CELDA_CAMINABLE : 0)
-        | (tile.terrain === 'shelter' ? CELDA_REFUGIO : 0) | (tile.biome === 'desert' ? CELDA_DESIERTO : 0);
+    const fast = token ? residentFastAccess(tiles as Tile[]) : undefined;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
+      const celda = cache ? cache.cells[i]! : paginaDe!.get(clavePagina(tile.x >> 4, tile.y >> 4))! * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
+      const resident = fast?.cellOf(tile as Tile) ?? -1;
+      const tc = resident >= 0 ? fast!.terrainArr[resident]! : -1;
+      const bc = resident >= 0 ? fast!.biomeArr[resident]! : -1;
+      const terrain = tc > 0 ? fast!.TERRAIN_NAMES[tc - 1]! : tile.terrain;
+      const biome = bc > 0 ? fast!.BIOME_NAMES[bc - 1]! : tile.biome;
+      const terreno = tc > 0 ? tc - 1 : TERRENOS.indexOf(terrain as typeof TERRENOS[number]);
+      const bioma = bc > 0 ? bc - 1 : biome === undefined ? -1 : BIOMAS.indexOf(biome as typeof BIOMAS[number]);
+      vista.flags[celda] = CELDA_PRESENTE | (terrain !== 'water' ? CELDA_CAMINABLE : 0)
+        | (terrain === 'shelter' ? CELDA_REFUGIO : 0) | (biome === 'desert' ? CELDA_DESIERTO : 0);
       vista.terreno[celda] = terreno < 0 ? 255 : terreno;
       vista.bioma[celda] = bioma < 0 ? 255 : bioma;
-      vista.comida[celda] = tile.food;
-      vista.aguaPotable[celda] = tile.drinkingWater ?? 0;
-      vista.agua[celda] = percibida ? percibida(tile) : tile.drinkingWater ?? 0;
-      vista.madera[celda] = tile.wood ?? 0;
+      vista.comida[celda] = resident >= 0 ? fast!.foodArr[resident]! : tile.food;
+      const water = resident >= 0 ? fast!.drinkingWaterArr[resident]! : tile.drinkingWater;
+      vista.aguaPotable[celda] = water === water ? water ?? 0 : 0;
+      vista.agua[celda] = percibida ? percibida(tile) : water === water ? water ?? 0 : 0;
+      const wood = resident >= 0 ? fast!.woodArr[resident]! : tile.wood;
+      vista.madera[celda] = wood === wood ? wood ?? 0 : 0;
       vista.piedra[celda] = tile.stone ?? 0;
     }
 
@@ -449,7 +483,11 @@ export function escenaDesdeMundo(world: World): EscenaPersonas {
   const { memoriaDisputa, disputaDestino } = params.social;
   // `waterAvailable` suma cisternas funcionales a ≤ 0,5 celdas: solo difiere de `drinkingWater`
   // donde hay estructuras; allí se usa la ley real, en el resto la lectura directa.
-  const conEstructura = new Set(world.structures.map(s => `${s.x},${s.y}`));
+  // Misma condición existencial que las 25 consultas por tesela, calculada una vez por obra.
+  const cercaDeEstructura = new Set<string>();
+  for (const s of world.structures) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    cercaDeEstructura.add(`${s.x - dx},${s.y - dy}`);
+  }
   const personas = world.people.map((person: Person): PersonaEntrada => {
     const physiology = demographicTraits(person.genome, params.cuerpo);
     const memoria = memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick < TICKS_PER_DAY
@@ -471,12 +509,8 @@ export function escenaDesdeMundo(world: World): EscenaPersonas {
   });
   return {
     tiles: world.tiles, personas, lluvia: world.weather === 'rain', memoriaDisputa, disputaDestino,
-    aguaPercibida: conEstructura.size === 0 ? undefined : tile => {
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        if (conEstructura.has(`${tile.x + dx},${tile.y + dy}`)) return waterAvailable(world, tile as Tile);
-      }
-      return tile.drinkingWater ?? 0;
-    },
+    aguaPercibida: cercaDeEstructura.size === 0 ? undefined : tile => cercaDeEstructura.has(`${tile.x},${tile.y}`)
+      ? waterAvailable(world, tile as Tile) : tile.drinkingWater ?? 0,
   };
 }
 

@@ -25,7 +25,7 @@ import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
-import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
+import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import { createChunkObserver, projectMirrorTile, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
 export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
@@ -51,14 +51,17 @@ export interface AppOptions {
    * (`/ws?ack=1`) cuyo enlace no es de LAN; ver `compresion` en `createApp`, con la cifra. */
   perMessageDeflate?: boolean;
   /** Worker lifecycle hooks; never change simulation inputs or arithmetic. `afterStep` receives the
-   * live simulation rate (EMA of steps per wall-clock second). */
-  beforeStep?: () => void;
+   * live simulation rate (EMA of steps per wall-clock second). Returning false from beforeStep
+   * yields one scheduling turn for bounded recorder backpressure without dropping a tick. */
+  beforeStep?: () => void | boolean;
   afterStep?: (simHz: number) => void;
   /** V21: uncapped loop. `tickMs = 0` (also implied by `tickMs: 0`): one step per `setImmediate`,
    * never an idle sleep, so I/O still interleaves between steps. Steps never clone the world. */
   turbo?: boolean;
+  /** Minimum wall-clock spacing of routine turbo saves; gestures and close always persist. */
+  turboSaveIntervalMs?: number;
   /** V21: record the DVR tape and serve `/api/tape/*` (defaults to `turbo`). In `createApp` the
-   * app owns the writer; behind the worker gateway the simulation worker owns it. */
+   * app owns the writer; behind the worker gateway a dedicated tape thread owns it. */
   tape?: boolean;
   tapeMaxFrames?: number;
   tapeKeyframeInterval?: number;
@@ -79,7 +82,7 @@ export interface ReadOnlyBackend {
   readonly respaldo: unknown;
   /** V21 DVR (read-only, never an RPC to the simulation). Absent when the tape is disabled. */
   tapeMeta?(): TapeMetaResponse;
-  tapeChunk?(fromTick: number, count: number, viewport?: Viewport): TapeChunkResponse;
+  tapeChunk?(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse;
 }
 export type GatewayAppOptions = Omit<AppOptions, 'store' | 'params' | 'beforeStep' | 'afterStep'>;
 export function createReadOnlyApp(options: GatewayAppOptions, gateway: ReadOnlyBackend) {
@@ -367,6 +370,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     world.events = world.events.slice(-120);
   }
   if (!gateway) store.save(world);
+  let lastWorldSaveAt = monotonicNow();
+  const turboSaveIntervalMs = Math.max(0, options.turboSaveIntervalMs ?? 30_000);
   const instanceId = gateway ? undefined : existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
@@ -559,9 +564,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       return fondo.get(`${x},${y}`) ?? projectWorld(world, { x, y, width: 1, height: 1 }, context).tiles[0]!;
     };
   }
-  const cinta: { meta(): TapeMetaResponse; chunk(fromTick: number, count: number, viewport?: Viewport): TapeChunkResponse } | null =
-    gateway ? (gateway.tapeMeta && gateway.tapeChunk ? { meta: () => gateway.tapeMeta!(), chunk: (f, c, v) => gateway.tapeChunk!(f, c, v) } : null)
-      : tapeReader ? { meta: () => tapeReader.readMeta(240), chunk: (f, c, v) => tapeReader.readChunk(f, c, v, fondoDeCinta(v)) } : null;
+  const cinta: { meta(): TapeMetaResponse; chunk(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse } | null =
+    gateway ? (gateway.tapeMeta && gateway.tapeChunk ? { meta: () => gateway.tapeMeta!(), chunk: (f, c, v, e) => gateway.tapeChunk!(f, c, v, e) } : null)
+      : tapeReader ? { meta: () => tapeReader.readMeta(240), chunk: (f, c, v, e) => tapeReader.readChunk(f, c, v, fondoDeCinta(v), e) } : null;
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
@@ -774,9 +779,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   function stepOnce() {
     const desde = relojReal();
-    enPaso = true;
     if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
-    options.beforeStep?.();
+    // A saturated recorder yields this event-loop turn without advancing or dropping a tick.
+    if (options.beforeStep?.() === false) return;
+    enPaso = true;
     try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
     grabarCinta();
     options.afterStep?.(simHz);
@@ -863,11 +869,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // T162: la cadencia vigente puede venir espaciada por la palanca de guardado; el gesto
       // (`valid.length > 0`) sigue forzando el guardado en su propio paso, sin tocar esa invariante.
       const cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(draft).persistencia.cadaTicks;
-      if (valid.length > 0 || draft.tick % cadaTicksEfectivo === 0
+      const routineSaveDue = draft.tick % cadaTicksEfectivo === 0
+        && (!turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
+      if (valid.length > 0 || routineSaveDue
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
+        lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
       world = draft;
@@ -1016,7 +1025,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
           const fromTick = enteroDeConsulta(url.searchParams, 'fromTick', 0, Number.MAX_SAFE_INTEGER, 0);
           const count = enteroDeConsulta(url.searchParams, 'count', 1, 240, 60);
-          const chunk = cinta.chunk(fromTick, count, camaraDeConsulta(url.searchParams));
+          const encoding = url.searchParams.get('encoding') ?? 'full';
+          if (encoding !== 'full' && encoding !== 'delta') throw new HttpError(400, 'Codificación de cinta no válida.');
+          const chunk = cinta.chunk(fromTick, count, camaraDeConsulta(url.searchParams), encoding);
           if (!aceptaGzip(req)) return json(res, 200, chunk);
           const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(chunk)), { level: 3 });
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
@@ -1255,10 +1266,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
           try {
-            // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
-            try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
+            if (!gateway && !failed && !aMedioPaso) store.save(world);
           } finally {
-            if (!gateway) await cerrarPiscinasDeComputo();
+            try {
+              // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
+              try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
+            } finally {
+              if (!gateway) await cerrarPiscinasDeComputo();
+            }
           }
         }
       })();

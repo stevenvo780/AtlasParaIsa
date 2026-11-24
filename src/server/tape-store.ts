@@ -8,6 +8,7 @@ import {
   TAPE_DEFAULT_MAX_FRAMES, TAPE_KEYFRAME_INTERVAL,
   type ITapeReader, type ITapeWriter, type TapeBackgroundTileFn, type TapeChunkResponse,
   type TapeMetaResponse, type TapeReaderOptions, type TapeTimelinePoint, type TapeWriterOptions,
+  type TapeChunkEncoding, type TapeClientDelta,
 } from '../shared/tape.js';
 
 type Header = Omit<WorldView, 'tiles' | 'people' | 'animals' | 'structures' | 'events'>;
@@ -185,10 +186,11 @@ function applyPatch<T extends Identified>(current: T[], change: Patch<T>): T[] {
   return change.order ? change.order.map(id => values.get(id)!) : [...values.values()];
 }
 
-function apply(state: State, data: Uint8Array): void {
+function apply(state: State, data: Uint8Array): Delta {
+  const delta = decode<Delta>(data);
   const { peoplePatch, animalsPatch, structuresPatch, blueprintsPatch, communitiesPatch,
     techPatch, statsPatch, tilesPatch, removedTiles, tileOrder,
-    newEvents, eventOrder, unset, ...header } = decode<Delta>(data);
+    newEvents, eventOrder, unset, ...header } = delta;
   Object.assign(state.view, header);
   if (peoplePatch) state.view.people = applyPatch(state.view.people, peoplePatch);
   if (animalsPatch) state.view.animals = applyPatch(state.view.animals ?? [], animalsPatch);
@@ -217,6 +219,7 @@ function apply(state: State, data: Uint8Array): void {
   else if (newEvents?.length) state.view.events = [...events.values()];
   for (const key of unset ?? []) delete (state.view as unknown as Record<string, unknown>)[key];
   delete (state.view as unknown as Record<string, unknown>).seed;
+  return delta;
 }
 
 function reconstruct(db: DatabaseSync, row: FrameRow, cached?: State, after?: number): State {
@@ -452,17 +455,20 @@ export class TapeWriter implements ITapeWriter {
   }
 }
 
-function project(state: State, viewport?: Viewport, backgroundTile?: TapeBackgroundTileFn): WorldView {
-  const result = structuredClone(state.view) as WorldView;
+function project(state: State, viewport?: Viewport, backgroundTile?: TapeBackgroundTileFn, headerOnly = false): WorldView {
+  // Reconstructed records are immutable: apply() replaces rather than mutates nested values.
+  // Delta mode only needs a shallow projection, with no background landscape materialization.
+  const result = (headerOnly ? { ...state.view, ...(state.view.technology ? { technology: { ...state.view.technology } } : {}) }
+    : structuredClone(state.view)) as WorldView;
   delete (result as unknown as Record<string, unknown>).seed;
-  if (!viewport) return { ...result, tiles: [...state.tiles.values()].map(tile => ({ ...tile })) };
+  if (!viewport) return { ...result, tiles: headerOnly ? [] : [...state.tiles.values()].map(tile => ({ ...tile })) };
   const visible = (p: { x: number; y: number }, margin = 0): boolean => p.x >= viewport.x - margin
     && p.y >= viewport.y - margin && p.x < viewport.x + viewport.width + margin
     && p.y < viewport.y + viewport.height + margin;
   result.originX = viewport.x; result.originY = viewport.y;
   result.width = viewport.width; result.height = viewport.height;
   result.tiles = [];
-  for (let y = viewport.y; y < viewport.y + viewport.height; y++) {
+  if (!headerOnly) for (let y = viewport.y; y < viewport.y + viewport.height; y++) {
     for (let x = viewport.x; x < viewport.x + viewport.width; x++) {
       const tile = state.tiles.get(`${x},${y}`) ?? backgroundTile?.(x, y, result.tick);
       if (tile) result.tiles.push({ ...tile });
@@ -486,6 +492,56 @@ function project(state: State, viewport?: Viewport, backgroundTile?: TapeBackgro
     if (result.technology.knowledge) result.technology.knowledge = result.technology.knowledge.filter(k => ids.has(k.actorId));
   }
   return result;
+}
+
+/** Diff projected public records, including optional-field deletion and entity ordering. */
+function clientDelta(previous: WorldView, current: WorldView): TapeClientDelta {
+  const delta: TapeClientDelta = { tick: current.tick, sequence: current.sequence,
+    day: current.day, phase: current.phase, weather: current.weather };
+  const special = new Set(['tiles', 'people', 'animals', 'structures', 'places', 'blueprints',
+    'communities', 'technology', 'stats', 'events']);
+  const old = previous as unknown as Record<string, unknown>;
+  const changes = delta as unknown as Record<string, unknown>;
+  const unset = Object.keys(previous).filter(key => !(key in current));
+  for (const [key, value] of Object.entries(current)) {
+    if (!special.has(key) && !equal(value, old[key])) changes[key] = value;
+  }
+  for (const field of ['people', 'animals', 'structures', 'places', 'blueprints', 'communities'] as const) {
+    const values = current[field];
+    if (values) {
+      const p = patch<Identified>(values, previous[field] ?? []);
+      // An absent optional list must become [] even when the patch is otherwise empty.
+      if (!previous[field] || patchNonEmpty(p)) changes[`${field}Patch`] = p;
+    }
+  }
+  const tech = current.technology, prevTech = previous.technology;
+  if (tech && prevTech) {
+    const tp: TechPatch = {};
+    const items = patch(tech.items, prevTech.items), recipes = patch(tech.recipes, prevTech.recipes);
+    if (patchNonEmpty(items)) tp.itemsPatch = items;
+    if (patchNonEmpty(recipes)) tp.recipesPatch = recipes;
+    if (!equal(tech.knowledge, prevTech.knowledge)) {
+      if (tech.knowledge === undefined) tp.unsetKnowledge = true;
+      else tp.knowledge = tech.knowledge;
+    }
+    if (!equal(tech.dynamics, prevTech.dynamics)) tp.dynamics = tech.dynamics;
+    if (!equal(tech.budgets, prevTech.budgets)) tp.budgets = tech.budgets;
+    // The shared patch has no unset for dynamics/budgets; replacement preserves exact absence.
+    if (Object.keys(prevTech).some(key => !(key in tech) && key !== 'knowledge')) delta.technology = tech;
+    else if (Object.keys(tp).length) delta.techPatch = tp;
+  } else if (tech) delta.technology = tech;
+  if (current.stats && previous.stats) {
+    const sp = diffObject(current.stats as unknown as Record<string, unknown>, previous.stats as unknown as Record<string, unknown>);
+    if (sp) delta.statsPatch = sp;
+  } else if (current.stats) delta.stats = current.stats;
+  const events = new Map(previous.events.map(event => [event.id, event]));
+  const newEvents = current.events.filter(event => !equal(event, events.get(event.id)));
+  if (newEvents.length) delta.newEvents = newEvents;
+  if (!equal(current.events.map(event => event.id), previous.events.map(event => event.id))) {
+    delta.eventOrder = current.events.map(event => event.id);
+  }
+  if (unset.length) delta.unset = unset;
+  return delta;
 }
 
 export class TapeReader implements ITapeReader {
@@ -549,8 +605,9 @@ export class TapeReader implements ITapeReader {
     });
   }
 
-  readChunk(fromTick: number, count: number, viewport?: Viewport, backgroundTile?: TapeBackgroundTileFn): TapeChunkResponse {
-    const empty: TapeChunkResponse = { fromTick, toTick: fromTick, minTick: 0, maxTick: 0, simHz: 0, hasMore: false, frames: [] };
+  readChunk(fromTick: number, count: number, viewport?: Viewport, backgroundTile?: TapeBackgroundTileFn, encoding: TapeChunkEncoding = 'full'): TapeChunkResponse {
+    const empty: TapeChunkResponse = { fromTick, toTick: fromTick, minTick: 0, maxTick: 0, simHz: 0, hasMore: false, frames: [],
+      ...(encoding === 'delta' ? { encoding, deltas: [] } : {}) };
     const db = this.open();
     if (!db) return empty;
     return this.transaction(db, () => {
@@ -560,10 +617,15 @@ export class TapeReader implements ITapeReader {
       const rows = db.prepare('SELECT tick,keyframe_tick,data FROM tape_frames WHERE tick>=? ORDER BY tick LIMIT ?')
         .all(Number.isFinite(fromTick) ? fromTick : saved.minTick, Math.min(240, positive(count, 1))) as FrameRow[];
       const frames: WorldView[] = [];
+      let baseFrame: WorldView | undefined, previous: WorldView | undefined;
+      const deltas: TapeClientDelta[] = [];
+      let projectedTiles = new Map<string, Tile>();
       let state: State | undefined;
       let anchor = -1;
       for (const row of rows) {
+        let candidates: Iterable<string> = [];
         if (!state || anchor !== row.keyframe_tick) {
+          const oldTiles = state?.tiles;
           let nearest = -1;
           for (const [tick, value] of this.cache) {
             if (value.anchor === row.keyframe_tick && tick <= row.tick && tick > nearest) nearest = tick;
@@ -572,8 +634,50 @@ export class TapeReader implements ITapeReader {
           state = reconstruct(db, row, cached ? cloneState(cached.state) : undefined, cached ? nearest : undefined);
           if (cached) { this.cache.delete(nearest); this.cache.set(nearest, cached); }
           anchor = row.keyframe_tick;
-        } else apply(state, row.data);
-        frames.push(project(state, viewport, backgroundTile));
+          if (previous) candidates = new Set([...(oldTiles?.keys() ?? []), ...state.tiles.keys()]);
+        } else {
+          const change = apply(state, row.data);
+          candidates = new Set([...(change.tilesPatch?.map(coord) ?? []), ...(change.removedTiles ?? [])]);
+        }
+        if (encoding !== 'delta') frames.push(project(state, viewport, backgroundTile));
+        else if (!previous) {
+          baseFrame = previous = project(state, viewport, backgroundTile);
+          projectedTiles = new Map(baseFrame.tiles.map(tile => [coord(tile), tile]));
+        } else {
+          const current = project(state, viewport, undefined, true);
+          const delta = clientDelta(previous, current);
+          const tilesPatch: Tile[] = [], removedTiles: string[] = [];
+          const oldOrder = [...projectedTiles.keys()];
+          let membershipChanged = false;
+          for (const key of candidates) {
+            const [x, y] = key.split(',').map(Number) as [number, number];
+            if (viewport && (x < viewport.x || y < viewport.y || x >= viewport.x + viewport.width || y >= viewport.y + viewport.height)) continue;
+            const tile = state.tiles.get(key) ?? (viewport ? backgroundTile?.(x, y, current.tick) : undefined);
+            const oldTile = projectedTiles.get(key);
+            if (tileEqual(tile, oldTile)) continue;
+            if (tile) {
+              tilesPatch.push(tile);
+              projectedTiles.set(key, tile);
+              if (!oldTile) membershipChanged = true;
+            } else if (oldTile) {
+              removedTiles.push(key); projectedTiles.delete(key); membershipChanged = true;
+            }
+          }
+          // A camera is row-major; without a camera preserve the tape's recorded tile order.
+          // Rare reordered/inserted sparse cells need replacement because the frozen wire has no tileOrder.
+          const desired = viewport ? (membershipChanged ? [...projectedTiles.values()].sort((a, b) => a.y - b.y || a.x - b.x).map(coord) : undefined)
+            : [...state.tiles.keys()];
+          if (desired && !equal(desired, [...projectedTiles.keys()])) {
+            delta.removedTiles = oldOrder;
+            delta.tilesPatch = desired.map(key => projectedTiles.get(key)!);
+            projectedTiles = new Map(delta.tilesPatch.map(tile => [coord(tile), tile]));
+          } else {
+            if (tilesPatch.length) delta.tilesPatch = tilesPatch;
+            if (removedTiles.length) delta.removedTiles = removedTiles;
+          }
+          deltas.push(delta);
+          previous = current;
+        }
         if (row.tick === row.keyframe_tick || row === rows[rows.length - 1]) {
           this.cache.delete(row.tick);
           this.cache.set(row.tick, { anchor, state: cloneState(state) });
@@ -581,9 +685,10 @@ export class TapeReader implements ITapeReader {
         }
       }
       return {
-        fromTick: frames[0]?.tick ?? fromTick, toTick: frames.at(-1)?.tick ?? fromTick,
+        fromTick: baseFrame?.tick ?? frames[0]?.tick ?? fromTick, toTick: previous?.tick ?? frames.at(-1)?.tick ?? fromTick,
         minTick: saved.minTick, maxTick: saved.maxTick, simHz: hz,
-        hasMore: !!frames.length && frames.at(-1)!.tick < saved.maxTick, frames,
+        hasMore: !!rows.length && rows.at(-1)!.tick < saved.maxTick, frames,
+        ...(encoding === 'delta' ? { encoding, ...(baseFrame ? { baseFrame } : {}), deltas } : {}),
       };
     });
   }

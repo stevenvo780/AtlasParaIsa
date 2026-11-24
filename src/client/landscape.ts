@@ -67,6 +67,15 @@ const DESTINATION_MS = 12_000;
 const WINDOW_ALIGN = CHUNK_ART_TILES, WINDOW_MARGIN = 8;
 /** Retraso mínimo antes de mostrar «cargando» (un instante no merece aviso) y vigencia máxima del aviso. */
 const LOADING_DELAY_MS = 250, LOADING_MAX_MS = 6000;
+/** V22: por debajo de estos px/tesela (zoom lejano) no se dibujan recortes, vaivenes ni sombras y el arbolado va en una capa estática. */
+const FAR_ZOOM = 14;
+/** V22: la animación de los salones modulares (humo, brasas) se re-pinta a esta cadencia, no en cada fotograma. */
+const HALL_POSES_PER_SEC = 12;
+const HALL_SLOT_LIMIT = 192;
+/** Holgura (px de arte) alrededor de `structureExtent` para humo, chimeneas, bodega y contrafuertes del salón cacheado. */
+const HALL_PAD = { x: 14, top: 30, bottom: 14 } as const;
+/** Margen (teselas) de la rejilla espacial de cuerpos para `behind()`. */
+const BODY_GRID_MARGIN = 6;
 
 /* ------------------------------------------------------------------ */
 /* Utilidades de color                                                 */
@@ -218,6 +227,20 @@ interface Tint {
 
 const RAIN_TINT: Tint = { color: 'rgb(159,179,189)', alpha: 0.2 };
 
+/** Fusiona dos listas ya ordenadas por `sortY`; a igualdad gana `first` (el orden estable de antes de V22). */
+function mergeBySortY<T extends { sortY: number }>(first: readonly T[], second: readonly T[]): T[] {
+  if (!second.length) return first as T[];
+  const out = new Array<T>(first.length + second.length);
+  let i = 0, j = 0, k = 0;
+  while (i < first.length && j < second.length) out[k++] = second[j]!.sortY < first[i]!.sortY ? second[j++]! : first[i++]!;
+  while (i < first.length) out[k++] = first[i++]!;
+  while (j < second.length) out[k++] = second[j++]!;
+  return out;
+}
+
+/** Clave numérica de una celda (|coordenada| < 2^24): evita construir cadenas `x,y` en el camino caliente. */
+function cellKey(x: number, y: number): number { return (x + 16777216) * 33554432 + (y + 16777216); }
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -288,6 +311,28 @@ interface RenderPerson {
 }
 interface RenderAnimal { view: AnimalView; x: number; y: number; moving: boolean; left: boolean; stride: number; }
 interface ViewBounds { x0: number; x1: number; y0: number; y1: number; }
+
+/** V22: decoración por tesela que se anima (ondas, destellos, cañas), precalculada una vez por cambio de rejilla/vista. */
+interface AnimatedTile { kind: 0 | 1 | 2; tile: Tile; x: number; y: number; }
+/** V22: todo lo que `drawScene` deriva SOLO de la rejilla, las estructuras y la ventana visible (no del reloj ni de los cuerpos). */
+interface SceneProps {
+  key: string;
+  visibleTiles: number;
+  animated: AnimatedTile[];
+  /** Árboles + cabañas + fauna antigua, ya ordenados por `sortY` (orden estable de inserción por teselas). */
+  sprites: Sprite[];
+  /** Solo árboles y cabañas (lo que va a la capa estática en zoom lejano). */
+  props: Sprite[];
+  fauna: Sprite[];
+}
+interface HallSlot { canvas: HTMLCanvasElement; sig: string; pose: number; left: number; top: number; }
+export interface PerfCounters {
+  dvrMode: boolean; farLod: boolean;
+  structuredTileBuilds: number; scenePropsBuilds: number; canopyBuilds: number; canopyBlits: number;
+  hallBuilds: number; hallBlits: number; sceneBuilds: number;
+  bodyGridBuilds: number; behindQueries: number; behindCandidateTests: number; behindSkipped: number;
+  gridRevision: number; spritesSorted: number;
+}
 
 const enum SpriteKind {
   Tree = 0,
@@ -389,6 +434,25 @@ export class Landscape {
   private bodyCutaways = 0;
   private drawCalls = 0;
   private sceneRevision = 0;
+  /* V22 — rendimiento a 60 fps con zoom lejano */
+  private dvrMode = false;
+  private gridRevision = 0;
+  private gridTilesRef: readonly Tile[] | null = null;
+  private bakedSeed: number | undefined;
+  private veilKey = '';
+  private gridOriginX = 0;
+  private gridOriginY = 0;
+  private structuresRef: readonly StructureView[] | undefined | null = null;
+  private structureRevision = 0;
+  private structuredTiles = new Set<number>();
+  private sceneProps: SceneProps | null = null;
+  private staticPropsCanvas: HTMLCanvasElement | null = null;
+  private staticPropsOwner: SceneProps | null = null;
+  private readonly hallSlots = new Map<string, HallSlot>();
+  private readonly hallSigs = new WeakMap<object, string>();
+  private bodyHead = new Int32Array(0);
+  private bodyNext = new Int32Array(0);
+  private perf: PerfCounters = { dvrMode: false, farLod: false, structuredTileBuilds: 0, scenePropsBuilds: 0, canopyBuilds: 0, canopyBlits: 0, hallBuilds: 0, hallBlits: 0, sceneBuilds: 0, bodyGridBuilds: 0, behindQueries: 0, behindCandidateTests: 0, behindSkipped: 0, gridRevision: 0, spritesSorted: 0 };
   /** V20: semilla del mundo para la geología latente (veta de hierro/cal/sal) horneada en el suelo. */
   private worldSeed: number | undefined;
   private sceneKey = '';
@@ -576,11 +640,15 @@ export class Landscape {
 
     const now = performance.now();
     const first = this.curr === null;
+    const resubmitted = this.curr === world; // el mismo objeto otra vez: su contenido pudo mutarse en sitio
     // Un eco de cámara (misma `sequence`) no es un paso del servidor: no mide cadencia.
     this.cadence.observe(world.sequence, world.tick, now);
     this.interval = this.cadence.tickIntervalMs;
     // Un eco de cámara (misma `sequence`) sustituye la vista del fotograma sin avanzar el reloj de reproducción.
-    this.playback.push(world, world.sequence, world.tick, now);
+    // V22: con la cinta DVR el reproductor ya entrega los fotogramas a su ritmo exacto: no hay colchón V18 que llenar.
+    // Los cuerpos se alimentan al llegar (A→B por `MotionTracker`, sin los 3–6 s de retraso del colchón).
+    if (this.dvrMode) { if (!this.reduceMotion) { this.peopleMotion.ingest(world.people, now); this.animalMotion.ingest(world.animals ?? [], now); } }
+    else this.playback.push(world, world.sequence, world.tick, now);
 
     // A new camera window at the same tick must not restart body interpolation.
     if (!this.curr || this.curr.tick !== world.tick) {
@@ -620,13 +688,14 @@ export class Landscape {
       }
     }
     this.sceneRevision++;
+    this.syncStructures(world);
 
     this.serverWindow = { x: world.originX ?? 0, y: world.originY ?? 0, w: Math.max(0, Math.floor(world.width)), h: Math.max(0, Math.floor(world.height)) };
     // La cámara pudo moverse mientras el servidor terminaba el paso: si su ventana ya no cubre lo que se ve,
     // se compone con la caché (verdad fresca encima) en vez de dejar el hueco hasta el siguiente estado.
     const view = !first && this.tileCache ? this.visibleBounds() : null;
     if (view && !this.windowCovers(this.serverWindow, view)) this.composeWindow(view, world.tiles);
-    else { this.rebuildGrid(world); this.bakeGround(); }
+    else if (this.rebuildGrid(world, resubmitted)) this.bakeGround();
 
     if (first) {
       this.fitWorld();
@@ -635,6 +704,21 @@ export class Landscape {
 
   /** V18 capa 1.5: colapsa el colchón al estado más reciente (cámara movida u orden directa); luego se vuelve a llenar. */
   flushPlayback(): void { this.playback.flushToLatest(); }
+
+  /**
+   * V22: `true` cuando `DvrPlayer` conduce la reproducción. El colchón V18 (`PlaybackBuffer`, 3–6 s de retraso) se
+   * puentea —el DVR ya da un ritmo regular— pero `MotionTracker` sigue interpolando A→B entre ticks consecutivos.
+   */
+  setDvrMode(active: boolean): void {
+    if (this.dvrMode === active) return;
+    this.dvrMode = active; this.perf.dvrMode = active;
+    this.playback.clear(); this.peopleMotion.clear(); this.animalMotion.clear();
+    this.sceneKey = '';
+    if (active && this.curr && !this.reduceMotion) { const now = performance.now(); this.peopleMotion.ingest(this.curr.people, now); this.animalMotion.ingest(this.curr.animals ?? [], now); }
+  }
+
+  /** V22: contadores internos (pruebas y diagnóstico): cuántas veces se rehízo cada caché y cuánto trabajo evitó el LOD. */
+  getPerfCounters(): PerfCounters { return { ...this.perf, dvrMode: this.dvrMode, farLod: this.cam.zoom < FAR_ZOOM, gridRevision: this.gridRevision }; }
 
   /** Un paneo o zoom manual deja el colchón en vivo para ver el terreno y a la gente donde están ya. Seguir a alguien no. */
   private syncPlaybackCamera(): void {
@@ -768,6 +852,8 @@ export class Landscape {
     this.prev = null;
     this.curr = null;
     this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
+    for (const slot of this.hallSlots.values()) slot.canvas.width = slot.canvas.height = 0;
+    this.hallSlots.clear(); this.sceneProps = null; this.staticPropsOwner = null; if (this.staticPropsCanvas) this.staticPropsCanvas.width = this.staticPropsCanvas.height = 0;
     this.groundStamp.width = this.groundStamp.height = 0;
     this.restVeil.width = this.restVeil.height = 0;
     this.scene.width = this.scene.height = 0;
@@ -778,8 +864,26 @@ export class Landscape {
   /* Mundo y rejilla                                                  */
   /* ---------------------------------------------------------------- */
 
-  private rebuildGrid(world: WorldView): void {
-    this.setWindow(world.originX ?? 0, world.originY ?? 0, Math.max(0, Math.floor(world.width)), Math.max(0, Math.floor(world.height)), world.tiles);
+  /**
+   * `false` si la rejilla ya era exactamente `world.tiles` (mismo arreglo y ventana en un fotograma NUEVO, p. ej. un tick de
+   * la cinta sin cambios de teselas): no hay nada que rehornear. Reenviar el mismo objeto fuerza el rehorneado completo.
+   */
+  private rebuildGrid(world: WorldView, force = false): boolean {
+    const ox = world.originX ?? 0, oy = world.originY ?? 0, w = Math.max(0, Math.floor(world.width)), h = Math.max(0, Math.floor(world.height));
+    if (!force && this.groundBaked && this.bakedSeed === this.worldSeed && world.tiles === this.gridTilesRef && ox === this.originX && oy === this.originY && w === this.worldW && h === this.worldH) return false;
+    this.setWindow(ox, oy, w, h, world.tiles);
+    if (force) this.gridRevision++;
+    return true;
+  }
+
+  /** V22: celdas ocupadas por estructuras, una vez por cambio de `world.structures` (no 60×/s en `drawScene`). */
+  private syncStructures(world: WorldView): void {
+    const structures = world.structures;
+    if (structures === this.structuresRef) return;
+    this.structuresRef = structures; this.structureRevision++; this.perf.structuredTileBuilds++;
+    const cells = new Set<number>();
+    for (const structure of structures ?? []) for (const cell of footprintCells(structure as ExtendedStructure)) cells.add(cellKey(cell.x, cell.y));
+    this.structuredTiles = cells;
   }
 
   private setWindow(originX: number, originY: number, w: number, h: number, tiles: readonly Tile[]): void {
@@ -795,14 +899,20 @@ export class Landscape {
       this.recomputeMinZoom();
     }
     const cells = w * h;
-    if (this.grid.length !== cells) this.grid = new Array<Tile | undefined>(cells);
-    this.grid.fill(undefined);
+    const previous = this.grid;
+    const next = new Array<Tile | undefined>(cells);
     for (const t of tiles) {
       const tx = Math.floor(t.x) - this.originX;
       const ty = Math.floor(t.y) - this.originY;
       if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
-      this.grid[ty * w + tx] = t;
+      next[ty * w + tx] = t;
     }
+    // V22: la revisión solo avanza si cambió alguna tesela (identidad) o la ventana; las cachés de escena cuelgan de ella.
+    let changed = previous.length !== cells || originX !== this.gridOriginX || originY !== this.gridOriginY;
+    for (let i = 0; !changed && i < cells; i++) if (previous[i] !== next[i]) changed = true;
+    if (changed) this.gridRevision++;
+    this.gridOriginX = originX; this.gridOriginY = originY;
+    this.grid = next; this.gridTilesRef = tiles;
   }
 
   /** Teselas que `drawScene` pinta con la cámara de ahora (misma holgura que allí: copas altas). */
@@ -943,7 +1053,7 @@ export class Landscape {
         this.chunks.push(chunk);
       }
     }
-    this.groundBaked = true;
+    this.groundBaked = true; this.bakedSeed = this.worldSeed;
   }
 
   private groundMaterial(tile: Tile): GroundMaterial {
@@ -1403,7 +1513,7 @@ export class Landscape {
     }
     this.lastFrameAt = now;
     this.tickFocus(now);
-    if (!this.reduceMotion) {
+    if (!this.reduceMotion && !this.dvrMode) {
       this.syncPlaybackCamera(); this.playback.advance(now, this.cadence.tickIntervalMs);
       // Los fotogramas que el colchón libera alimentan a los rastreadores: cada casilla se reparte en ≈ 5,2 pasos y el servidor, aunque se atrase, no deja a nadie parado.
       for (const frame of this.playback.takeReleased()) {
@@ -1412,7 +1522,7 @@ export class Landscape {
       }
     }
     // Reloj con el que se muestrean los cuerpos (el virtual del colchón); con movimiento reducido no se interpola.
-    this.motionClock = this.playback.visualMs;
+    this.motionClock = this.dvrMode ? performance.now() : this.playback.visualMs;
     if (this.followedId) {
       const body = this.bodyPosition(this.followedId, this.followedKind, this.motionClock);
       if (body) { this.cam.x = body.x + 0.5; this.cam.y = body.y + 0.5; }
@@ -1461,8 +1571,8 @@ export class Landscape {
       // V18: la fase del día y la lluvia se acercan a lo recibido en ~1,5 s en vez de saltar entre amanecer/día/noche.
       if (this.reduceMotion) this.atmosphere.reset();
       // Con colchón, la luz y la lluvia siguen al mismo instante A→B que se dibuja (no al más reciente).
-      const shownTime = this.reduceMotion ? null : this.playback.bracket();
-      const shownTick = this.reduceMotion ? world.tick : this.playback.shownTick(world.tick);
+      const shownTime = this.reduceMotion || this.dvrMode ? null : this.playback.bracket();
+      const shownTick = this.reduceMotion || this.dvrMode ? world.tick : this.playback.shownTick(world.tick);
       const shownWeather = shownTime ? (shownTime.alpha < .5 ? shownTime.a.view : shownTime.b.view).weather : world.weather;
       const light = this.atmosphere.step(daylightAt(shownTick), shownWeather === 'rain', now);
       this.lighting = { shadowX: light.shadowX, shadowY: light.shadowY, shadowAlpha: light.shadowAlpha * (1 - .6 * light.rain) };
@@ -1505,9 +1615,10 @@ export class Landscape {
     const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
     const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
     const selectedTile = this.selection?.kind === 'tile' ? this.selection : null;
-    const sceneKey = `${this.sceneRevision}:${this.layer}:${this.capaCalor ?? ''}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`;
+    const far = this.cam.zoom < FAR_ZOOM;
+    const sceneKey = `${this.sceneRevision}:${this.layer}:${this.capaCalor ?? ''}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}:${far ? 'far' : 'near'}`;
     if (sceneKey === this.sceneKey) return;
-    this.sceneKey = sceneKey;
+    this.sceneKey = sceneKey; this.perf.sceneBuilds++;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
     g.save(); g.translate(-this.originX * ART, -this.originY * ART);
 
@@ -1515,70 +1626,56 @@ export class Landscape {
     // y debajo de decoración, animales y personas de esta escena.
     pintarCalor(g, this.teselasVisibles(x0, x1, y0, y1), this.capaCalor, this.rangoCalor);
 
-    const sprites: Sprite[] = [];
     this.effects.water = this.effects.vegetation = this.effects.shadows = 0;
-    this.visibleTiles = 0;
     this.visibleAnimals = 0; this.visibleStructures = 0;
-    const structuredTiles = new Set((world.structures ?? []).flatMap(s => footprintCells(s as ExtendedStructure).map(c => `${c.x},${c.y}`)));
-
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const tile = this.tileAt(x, y);
-        if (!tile) continue;
-        this.visibleTiles++;
-        const ox = x * ART;
-        const oy = y * ART;
-
-        if (tile.terrain === 'water') {
-          if (rnd(x, y, 712) > .6 && this.effects.water < VISUAL_BUDGET.water) { this.drawRipples(g, x, y, ox, oy, t); this.effects.water++; }
-        } else {
-          if ((tile.feature === 'pool' || tile.feature === 'spring') && (tile.drinkingWater ?? 0) > .04 && this.effects.water < VISUAL_BUDGET.water) {
-            const shift = this.reduceMotion ? 0 : Math.floor(t * 2 + rnd(x, y, 917) * 4) % 3;
-            px(g, ox + 8 + shift, oy + 10, 2, 1, css(P.waterGleam, .55)); this.effects.water++;
-          }
-          if (tile.feature === 'reeds' || tile.feature === 'flowers') this.drawPlantMovement(g, tile, t);
-          if (tile.terrain === 'shelter' && !structuredTiles.has(`${x},${y}`)) {
-            sprites.push({
-              kind: SpriteKind.Hut,
-              sortY: oy + 13,
-              ax: ox + 8,
-              ay: oy + 13,
-              seed: hash3(x, y, 900),
-              size: 0,
-              person: null,
-            });
-          } else if (!structuredTiles.has(`${x},${y}`)) {
-            this.collectTrees(sprites, x, y, ox, oy);
-          }
+    // V22: lo que solo depende de rejilla + estructuras + ventana se calcula una vez por cambio, no por fotograma.
+    const props = this.scenePropsFor(world, x0, x1, y0, y1);
+    this.visibleTiles = props.visibleTiles;
+    for (const item of props.animated) {
+      if (item.kind === 0) {
+        if (this.effects.water < VISUAL_BUDGET.water) { this.drawRipples(g, item.x, item.y, item.x * ART, item.y * ART, t); this.effects.water++; }
+      } else if (item.kind === 1) {
+        if (this.effects.water < VISUAL_BUDGET.water) {
+          const shift = this.reduceMotion ? 0 : Math.floor(t * 2 + rnd(item.x, item.y, 917) * 4) % 3;
+          px(g, item.x * ART + 8 + shift, item.y * ART + 10, 2, 1, css(P.waterGleam, .55)); this.effects.water++;
         }
-        if (world.animals === undefined && tile.species && (tile.fauna ?? 0) > .04) sprites.push({kind: SpriteKind.Fauna, sortY: oy + 11, ax: ox + 8, ay: oy + 11, seed: 0, size: 0, person: null, tile});
-      }
+      } else if (!far) this.drawPlantMovement(g, item.tile, t); // < 14 px/tesela una caña de 1 px no se distingue
     }
 
     this.drawPlaces(g, world.places, x0, x1, y0, y1);
 
+    // Sprites vivos: estructuras, animales y personas (y la fauna antigua en zoom lejano, que sí se anima por reloj).
+    const dynamic: Sprite[] = far ? props.fauna.slice() : [];
     for (const structure of world.structures ?? []) {
       const box = footprintBox(structure as ExtendedStructure);
       if (box.x0 + box.w - 1 < x0 || box.x0 > x1 || box.y0 + box.h - 1 < y0 || box.y0 > y1) continue;
       this.visibleStructures++;
       const foot = structureExtent(structure as ExtendedStructure).foot;
-      sprites.push({ kind: SpriteKind.Structure, sortY: foot, ax: (box.x0 + box.w / 2) * ART, ay: foot, seed: 0, size: 0, person: null, structure });
+      dynamic.push({ kind: SpriteKind.Structure, sortY: foot, ax: (box.x0 + box.w / 2) * ART, ay: foot, seed: 0, size: 0, person: null, structure });
     }
     for (const animal of animals) {
       if (animal.x < x0 || animal.x > x1 || animal.y < y0 || animal.y > y1) continue;
       this.visibleAnimals++;
-      sprites.push({ kind: SpriteKind.Animal, sortY: animal.y * ART + 12, ax: animal.x * ART + 8, ay: animal.y * ART + 12, seed: 0, size: 0, person: null, animal });
+      dynamic.push({ kind: SpriteKind.Animal, sortY: animal.y * ART + 12, ax: animal.x * ART + 8, ay: animal.y * ART + 12, seed: 0, size: 0, person: null, animal });
     }
 
     for (const p of people) {
       if (p.x < x0 - 2 || p.x > x1 + 2 || p.y < y0 - 2 || p.y > y1 + 2) continue;
       const ax = p.x * ART + ART / 2;
       const ay = p.y * ART + ART / 2 + 4;
-      sprites.push({ kind: SpriteKind.Person, sortY: ay, ax, ay, seed: p.seed, size: 0, person: p });
+      dynamic.push({ kind: SpriteKind.Person, sortY: ay, ax, ay, seed: p.seed, size: 0, person: p });
     }
 
-    // Y-sort: quien está más al sur tapa a quien está al norte.
-    sprites.sort((a, b) => a.sortY - b.sortY);
+    // Y-sort: quien está más al sur tapa a quien está al norte. Lo estático ya viene ordenado: solo se ordena lo vivo (≈ cientos)
+    // y se fusiona (a igualdad de `sortY` gana lo estático, igual que el orden de inserción de antes).
+    dynamic.sort((a, b) => a.sortY - b.sortY);
+    let sprites: Sprite[];
+    if (far) {
+      // Zoom lejano: arbolado y cabañas = UNA capa estática (un `drawImage`); encima, solo lo que se mueve o cambia.
+      this.blitCanopy(g, props, x0, x1, y0, y1);
+      sprites = dynamic;
+    } else sprites = mergeBySortY(props.sprites, dynamic);
+    this.perf.spritesSorted += dynamic.length;
     if (this.cam.zoom >= 18) {
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && (sprite.kind === SpriteKind.Structure || sprite.kind === SpriteKind.Person)) this.drawCastShadow(g, sprite);
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
@@ -1594,19 +1691,34 @@ export class Landscape {
       top: selectedTile.y * ART + (inspectedStructures.length ? -16 : 0), bottom: selectedTile.y * ART + 16,
       foot: selectedTile.y * ART + 13,
     } : null;
-    const revealedBodies = [...people, ...(inspectedAnimal ? [inspectedAnimal] : [])];
+    const revealedBodies: (RenderPerson | RenderAnimal)[] = inspectedAnimal ? [...people, inspectedAnimal] : people;
     const coveredPeople = new Set<string>();
+    // V22: `behind()` mira solo los cuerpos de las celdas que el sprite puede tocar (rejilla espacial), no a todos.
+    // En zoom lejano (< 14 px/tesela) los recortes miden menos de un píxel: se omiten (queda el recorte de la selección).
+    if (!far) this.indexBodies(revealedBodies, x0, x1, y0, y1);
+    const bodyGrid = this.bodyGridInfo;
     const behind = (sprite: Sprite, height: number, width: number) => {
       let intersects = !!site && sprite.ay > site.foot && sprite.ax + width / 2 > site.left
         && sprite.ax - width / 2 < site.right && sprite.ay > site.top && sprite.ay - height < site.bottom;
-      for (const body of revealedBodies) {
+      if (far) { this.perf.behindSkipped++; return intersects; }
+      this.perf.behindQueries++;
+      const halfW = width / 2 + 4;
+      const cx0 = Math.floor((sprite.ax - halfW) / ART) - bodyGrid.gx0, cx1 = Math.floor((sprite.ax + halfW) / ART) - bodyGrid.gx0;
+      const cy0 = Math.floor((sprite.ay - height - 2) / ART) - bodyGrid.gy0, cy1 = Math.floor(sprite.ay / ART) - bodyGrid.gy0;
+      const test = (body: RenderPerson | RenderAnimal): void => {
+        this.perf.behindCandidateTests++;
         const x = body.x * ART + 8, foot = body.y * ART + 12;
         if (foot < sprite.ay && Math.abs(x - sprite.ax) < width / 2 + 4
           && foot + 2 > sprite.ay - height && foot - 14 < sprite.ay - 8) {
           intersects = true;
           if ('role' in body.view) coveredPeople.add(body.view.id);
         }
+      };
+      for (let cy = Math.max(0, cy0); cy <= Math.min(bodyGrid.gh - 1, cy1); cy++) for (let cx = Math.max(0, cx0); cx <= Math.min(bodyGrid.gw - 1, cx1); cx++) {
+        for (let i = this.bodyHead[cy * bodyGrid.gw + cx]!; i >= 0; i = this.bodyNext[i]!) test(revealedBodies[i]!);
       }
+      // Cuerpos fuera de la rejilla solo cuentan si el sprite también sale de ella (estructuras enormes en el borde).
+      if ((cx0 < 0 || cy0 < 0 || cx1 >= bodyGrid.gw || cy1 >= bodyGrid.gh) && bodyGrid.outside.length) for (const i of bodyGrid.outside) test(revealedBodies[i]!);
       return intersects;
     };
     for (const s of sprites) {
@@ -1663,25 +1775,141 @@ export class Landscape {
       // visible edge blends against its real neighbours. Reuse the mask storage.
       const maskX = x0 - 1, maskY = y0 - 1;
       const maskW = x1 - x0 + 3, maskH = y1 - y0 + 3;
+      let resized = false;
       if (this.restVeil.width < maskW || this.restVeil.height < maskH || !this.restVeilPixels) {
         this.restVeil.width = Math.max(this.restVeil.width, maskW);
         this.restVeil.height = Math.max(this.restVeil.height, maskH);
         this.restVeilPixels = this.restVeilContext.createImageData(this.restVeil.width, this.restVeil.height);
+        resized = true;
       }
-      const mask = this.restVeilPixels.data;
-      const stride = this.restVeil.width;
-      for (let y = 0; y < maskH; y++) for (let x = 0; x < maskW; x++) {
-        const worldX = maskX + x, worldY = maskY + y;
-        const offset = (y * stride + x) * 4;
-        mask[offset] = 24; mask[offset + 1] = 38; mask[offset + 2] = 32;
-        mask[offset + 3] = this.tileAt(worldX, worldY) && !this.vivas.has(claveRegion(worldX, worldY)) ? 87 : 0;
+      // V22: la máscara solo depende de la rejilla, las regiones vivas y los límites: no se rehace 60×/s.
+      const veilKey = `${this.gridRevision}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}`;
+      if (resized || veilKey !== this.veilKey) {
+        this.veilKey = veilKey;
+        const mask = this.restVeilPixels.data;
+        const stride = this.restVeil.width;
+        for (let y = 0; y < maskH; y++) for (let x = 0; x < maskW; x++) {
+          const worldX = maskX + x, worldY = maskY + y;
+          const offset = (y * stride + x) * 4;
+          mask[offset] = 24; mask[offset + 1] = 38; mask[offset + 2] = 32;
+          mask[offset + 3] = this.tileAt(worldX, worldY) && !this.vivas.has(claveRegion(worldX, worldY)) ? 87 : 0;
+        }
+        this.restVeilContext.putImageData(this.restVeilPixels, 0, 0, 0, 0, maskW, maskH);
       }
-      this.restVeilContext.putImageData(this.restVeilPixels, 0, 0, 0, 0, maskW, maskH);
       g.save(); g.imageSmoothingEnabled = true;
       g.drawImage(this.restVeil, 0, 0, maskW, maskH, maskX * ART, maskY * ART, maskW * ART, maskH * ART);
       g.restore();
     }
     g.restore();
+  }
+
+  /* ----------------- V22: cachés de escena (60 fps lejos) ---------------- */
+
+  private bodyGridInfo = { gx0: 0, gy0: 0, gw: 0, gh: 0, outside: [] as number[] };
+
+  /** Rejilla de cubos por tesela con los cuerpos que pueden tapar/ser tapados: una vez por fotograma, O(cuerpos). */
+  private indexBodies(bodies: readonly (RenderPerson | RenderAnimal)[], x0: number, x1: number, y0: number, y1: number): void {
+    const gx0 = x0 - BODY_GRID_MARGIN, gy0 = y0 - BODY_GRID_MARGIN, gw = x1 - x0 + 1 + 2 * BODY_GRID_MARGIN, gh = y1 - y0 + 1 + 2 * BODY_GRID_MARGIN;
+    if (this.bodyHead.length < gw * gh) this.bodyHead = new Int32Array(gw * gh);
+    if (this.bodyNext.length < bodies.length) this.bodyNext = new Int32Array(Math.max(bodies.length, this.bodyNext.length * 2));
+    this.bodyHead.fill(-1, 0, gw * gh);
+    const outside: number[] = [];
+    for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i]!;
+      const cx = Math.floor((body.x * ART + 8) / ART) - gx0, cy = Math.floor((body.y * ART + 12) / ART) - gy0;
+      if (!(cx >= 0 && cy >= 0 && cx < gw && cy < gh)) { outside.push(i); continue; }
+      this.bodyNext[i] = this.bodyHead[cy * gw + cx]!; this.bodyHead[cy * gw + cx] = i;
+    }
+    this.bodyGridInfo = { gx0, gy0, gw, gh, outside };
+    this.perf.bodyGridBuilds++;
+  }
+
+  /** Decoración por tesela de la ventana visible: se rehace solo si cambia la rejilla, las estructuras o los límites. */
+  private scenePropsFor(world: WorldView, x0: number, x1: number, y0: number, y1: number): SceneProps {
+    const key = `${this.gridRevision}:${this.structureRevision}:${x0}:${x1}:${y0}:${y1}:${world.animals === undefined ? 1 : 0}`;
+    const cached = this.sceneProps;
+    if (cached && cached.key === key) return cached;
+    this.perf.scenePropsBuilds++;
+    const sprites: Sprite[] = [], animated: AnimatedTile[] = [];
+    let visibleTiles = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const tile = this.tileAt(x, y);
+        if (!tile) continue;
+        visibleTiles++;
+        const ox = x * ART, oy = y * ART;
+        if (tile.terrain === 'water') {
+          if (rnd(x, y, 712) > .6) animated.push({ kind: 0, tile, x, y });
+        } else {
+          if ((tile.feature === 'pool' || tile.feature === 'spring') && (tile.drinkingWater ?? 0) > .04) animated.push({ kind: 1, tile, x, y });
+          if (tile.feature === 'reeds' || tile.feature === 'flowers') animated.push({ kind: 2, tile, x, y });
+          const structured = this.structuredTiles.has(cellKey(x, y));
+          if (tile.terrain === 'shelter' && !structured) {
+            sprites.push({ kind: SpriteKind.Hut, sortY: oy + 13, ax: ox + 8, ay: oy + 13, seed: hash3(x, y, 900), size: 0, person: null });
+          } else if (!structured) {
+            this.collectTrees(sprites, x, y, ox, oy);
+          }
+        }
+        if (world.animals === undefined && tile.species && (tile.fauna ?? 0) > .04) sprites.push({ kind: SpriteKind.Fauna, sortY: oy + 11, ax: ox + 8, ay: oy + 11, seed: 0, size: 0, person: null, tile });
+      }
+    }
+    sprites.sort((a, b) => a.sortY - b.sortY);
+    const props = sprites.filter(sprite => sprite.kind === SpriteKind.Tree || sprite.kind === SpriteKind.Hut);
+    const fauna = sprites.filter(sprite => sprite.kind === SpriteKind.Fauna);
+    return this.sceneProps = { key, visibleTiles, animated, sprites, props, fauna };
+  }
+
+  /** Capa estática de arbolado + cabañas (pose fija, sin recortes): se repinta solo cuando cambia su `SceneProps`. */
+  private blitCanopy(g: CanvasRenderingContext2D, props: SceneProps, x0: number, x1: number, y0: number, y1: number): void {
+    const canvas = this.staticPropsCanvas ?? (this.staticPropsCanvas = document.createElement('canvas'));
+    if (this.staticPropsOwner !== props || canvas.width !== this.scene.width || canvas.height !== this.scene.height) {
+      if (canvas.width !== this.scene.width || canvas.height !== this.scene.height) { canvas.width = this.scene.width; canvas.height = this.scene.height; }
+      const c = canvas.getContext('2d')!;
+      c.imageSmoothingEnabled = false;
+      c.clearRect(0, 0, canvas.width, canvas.height);
+      c.save(); c.translate(-this.originX * ART, -this.originY * ART);
+      for (const sprite of props.props) {
+        if (sprite.kind === SpriteKind.Tree) c.drawImage(this.treeRaster(sprite.tree!, 1), Math.round(sprite.ax) - 16, Math.round(sprite.ay) - 44);
+        else this.drawHut(c, sprite.ax, sprite.ay, sprite.seed);
+      }
+      c.restore();
+      this.staticPropsOwner = props; this.perf.canopyBuilds++;
+    }
+    // Solo la banda visible (con la misma holgura de copas altas que `visibleBounds`).
+    const sx = Math.max(0, (x0 - this.originX - 1) * ART), sy = Math.max(0, (y0 - this.originY) * ART);
+    const ex = Math.min(canvas.width, (x1 - this.originX + 2) * ART), ey = Math.min(canvas.height, (y1 - this.originY + 1) * ART + ART);
+    if (ex > sx && ey > sy) { g.drawImage(canvas, sx, sy, ex - sx, ey - sy, sx + this.originX * ART, sy + this.originY * ART, ex - sx, ey - sy); this.drawCalls++; this.perf.canopyBlits++; }
+  }
+
+  /**
+   * Salón modular (polyomino o rectangular) como un único `drawImage`: se hornea en un lienzo propio y solo se repinta si cambió
+   * la estructura (firma completa) o, con animación, la pose de humo/brasas (≈ 12/s). Pixel a pixel igual que pintarlo directo.
+   */
+  private drawModularHall(g: CanvasRenderingContext2D, ext: ExtendedStructure, t: number, animate: boolean): void {
+    const animated = animate && this.cam.zoom >= FAR_ZOOM;
+    const pose = animated ? Math.floor(t * HALL_POSES_PER_SEC) : -1;
+    let sig = this.hallSigs.get(ext);
+    if (sig === undefined) { sig = JSON.stringify(ext); this.hallSigs.set(ext, sig); }
+    const extent = structureExtent(ext);
+    const left = extent.left - HALL_PAD.x, top = extent.top - HALL_PAD.top;
+    const width = extent.right + HALL_PAD.x - left, height = extent.bottom + HALL_PAD.bottom - top;
+    let slot = this.hallSlots.get(ext.id);
+    if (!slot) {
+      slot = { canvas: document.createElement('canvas'), sig: '', pose: -2, left, top };
+      this.hallSlots.set(ext.id, slot);
+      if (this.hallSlots.size > HALL_SLOT_LIMIT) { const oldest = this.hallSlots.keys().next().value!; const dead = this.hallSlots.get(oldest)!; dead.canvas.width = dead.canvas.height = 0; this.hallSlots.delete(oldest); }
+    }
+    if (slot.sig !== sig || slot.pose !== pose || slot.left !== left || slot.top !== top || slot.canvas.width !== width) {
+      const canvas = slot.canvas;
+      canvas.width = width; canvas.height = height; // redimensionar también limpia
+      const c = canvas.getContext('2d')!;
+      c.imageSmoothingEnabled = false;
+      c.translate(-left, -top);
+      paintModularHall(c, ext, pose >= 0 ? pose / HALL_POSES_PER_SEC : 0, animated);
+      slot.sig = sig; slot.pose = pose; slot.left = left; slot.top = top;
+      this.perf.hallBuilds++;
+    }
+    g.drawImage(slot.canvas, left, top); this.drawCalls++; this.perf.hallBlits++;
   }
 
   /* -------------------------- decorado vivo ------------------------ */
@@ -1773,7 +2001,7 @@ export class Landscape {
   private drawStructure(g: CanvasRenderingContext2D, structure: StructureView, t = 0): void {
     const ext = structure as ExtendedStructure, animate = !this.reduceMotion && this.actionActive;
     if (ext.site) { paintConstructionSite(g, ext, ext.site, t, animate); this.drawCalls++; return; }
-    if (isModular(ext)) { paintModularHall(g, ext, t, animate); this.drawCalls++; return; }
+    if (isModular(ext)) { this.drawModularHall(g, ext, t, animate); return; }
     const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
     paintCompactAccessories(g, ext, t, animate);

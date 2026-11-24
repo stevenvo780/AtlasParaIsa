@@ -1,4 +1,4 @@
-import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
@@ -161,8 +161,11 @@ async function tapeJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 /** Con la cinta, el HUD pesado se rehace a ≈ 6 Hz (y en cada salto); el paisaje recibe todos los fotogramas. */
 function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   const now = performance.now();
-  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame); }
-  else { recordarVistos(frame); tileCache.ingest(frame.tiles, frame.tick); world = frame; landscape?.update(frame); cronica.acumular(frame.events); }
+  // V22: con trozos delta solo se ingieren las teselas que cambiaron (10–50) en vez de las ~6.000 de la vista.
+  // Sin `changedTiles` (fotograma completo, base de trozo, salto) se ingiere la vista entera como siempre.
+  const tiles = info.changedTiles ?? frame.tiles;
+  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles); }
+  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame); cronica.acumular(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
 }
 
@@ -175,7 +178,7 @@ function startTape(): void {
   });
   const player = new DvrPlayer({
     fetchMeta: () => tapeJson<TapeMetaResponse>('/api/tape/meta'),
-    fetchChunk: request => tapeJson<TapeChunkResponse>(`/api/tape/chunk?${new URLSearchParams({ fromTick: String(request.fromTick), count: String(request.count), ...(request.viewport ? Object.fromEntries(Object.entries(request.viewport).map(([key, value]) => [key, String(value)])) : {}) })}`, request.signal),
+    fetchChunk: request => tapeJson<TapeChunkResponse>(`/api/tape/chunk?${new URLSearchParams({ fromTick: String(request.fromTick), count: String(request.count), encoding: 'delta', ...(request.viewport ? Object.fromEntries(Object.entries(request.viewport).map(([key, value]) => [key, String(value)])) : {}) })}`, request.signal),
     onFrame: receiveTapeFrame,
     onStateChange: state => { dvrBar?.update(state); },
   });
@@ -183,8 +186,9 @@ function startTape(): void {
   void player.start().then(active => {
     if (dvr !== player) return; // se salió del mundo mientras cargaba
     if (!active) { // cinta apagada o sin respuesta: de vuelta al modo vivo clásico por WebSocket
-      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); return;
+      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); return;
     }
+    landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
     if (player.observerOnly && !observerOnly) { observerOnly = true; applyObserverOnly(document, true); }
     container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
     const loop = (now: number): void => { player.advance(now); dvrRaf = requestAnimationFrame(loop); };
@@ -195,6 +199,7 @@ function startTape(): void {
 function stopTape(): void {
   cancelAnimationFrame(dvrRaf); dvrRaf = 0;
   dvr?.stop(); dvr = null; dvrBar?.destroy(); dvrBar = null;
+  landscape?.setDvrMode(false);
   document.getElementById('game')?.classList.remove('has-dvr');
 }
 
@@ -418,13 +423,13 @@ function sound(): void {
   soundTimer = setTimeout(sound, 12_000);
 }
 
-function receiveWorld(next: WorldView): void {
+function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
   // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
   // son inmutables por id y nunca se invalidan por tick (T041).
   recordarVistos(next);
-  tileCache.ingest(next.tiles, next.tick);
+  tileCache.ingest(tilesToIngest, next.tick);
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;

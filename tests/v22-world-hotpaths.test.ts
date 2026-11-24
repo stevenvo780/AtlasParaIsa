@@ -15,9 +15,11 @@ const OPEN = 'poblacion.natalidadVecindad=true,social.maxComunidades=0,limites.a
 const GOLDEN: Record<string, string> = {
   // Capturados del HEAD previo a V22 Front 4, antes de optimizar los seis ficheros propios.
   'default/51926': '2b8e9989d92aa4db168af6d5383e284ce5a80c7aa2bc4abbf7a7b54034f432cb',
-  'open/51926': '218b1a3bf33b698d1eac646cecda55b815e4e8c3c2ffb200669247a8cc176e14',
+  // open/*: digestos de las leyes v23/V24 (química universal, caza/ganadería, morfología, sonido; RULES_VERSION 14), mundo abierto, 240 pasos.
+  // Los de V22 (218b1a3b…, 147d961c…) cambiaron a propósito con las leyes v23; los de default/* siguen intactos.
+  'open/51926': '2e8a623166638a4f9857600cbcb2398900ad4f3ca572fbdcb45d09e32239bc23',
   'default/7': '9bf7b3c09f36ba65c1ac37285f9fc6522e02c02137442de72110720916fa5bbd',
-  'open/7': '147d961c874d259cfa7a2fc76cfddf591eca052ef5aff6b3be7c66bbd527a813',
+  'open/7': 'b4eca3749001f5db534a2b0eaf82ab8b4cbc9f26182232a6cf84b7d54ed64189',
 };
 
 function normalizedDigest(world: World): string {
@@ -36,8 +38,7 @@ test('V22: RULES_VERSION 14; 0 ULP, dos semillas y dos regímenes durante 240 pa
     for (let tick = 0; tick < 240; tick++) { stepWorld(serial); stepWorld(parallel); }
     const digest = normalizedDigest(serial);
     assert.equal(normalizedDigest(parallel), digest, `${name}/${seed}: mundo, demografía, obras, química y eventos`);
-    if (name === 'default') assert.equal(digest, GOLDEN[`${name}/${seed}`], `${name}/${seed}: digesto canónico histórico (V8/V22)`);
-    else assert.match(digest, /^[0-9a-f]{64}$/, `${name}/${seed}: digesto determinista V23`);
+    assert.equal(digest, GOLDEN[`${name}/${seed}`], `${name}/${seed}: digesto GOLDEN (${name === 'default' ? 'histórico V8/V22' : 'leyes v23/V24'})`);
   }
 });
 

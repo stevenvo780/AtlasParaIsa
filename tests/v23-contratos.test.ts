@@ -9,6 +9,7 @@ import * as materia from '../src/shared/materia.js';
 import * as naturaleza from '../src/shared/naturaleza.js';
 import * as cinta from '../src/shared/cinta.js';
 import * as fotograma from '../src/shared/fotograma.js';
+import { POLICY_ACTIONS, POLICY_HIDDEN, POLICY_INPUTS, POLICY_WEIGHTS } from '../src/world/politica.js';
 
 // Si dos contratos exportan el mismo nombre, sea tipo o valor, `npm run typecheck` falla aquí (TS2308).
 export type * from '../src/world/motor/contratos.js';
@@ -137,9 +138,15 @@ test('la columna cuerpo del frente reparte VistaCuerpo sin huecos ni solapes', (
   assert.equal(contratos.GENOMA_ANCHO, 2 * contratos.RASGOS_ANCHO);
 });
 
+test('las columnas del cerebro tienen las dimensiones de la red de politica.ts', () => {
+  const { CEREBRO, COLUMNAS_CEREBRO } = contratos;
+  assert.deepEqual([CEREBRO.entradas, CEREBRO.ocultas, CEREBRO.acciones], [POLICY_INPUTS, POLICY_HIDDEN, POLICY_ACTIONS.length]);
+  assert.deepEqual(COLUMNAS_CEREBRO, { observacion: POLICY_INPUTS, politica: POLICY_WEIGHTS, sesgo: POLICY_ACTIONS.length });
+});
+
 test('los códigos de intento, de rol y de las posiciones de dato no se repiten', () => {
   const distintos = (o: object) => new Set(Object.values(o)).size === Object.keys(o).length;
-  for (const o of [contratos.TipoIntento, contratos.Clase, tipos.Rol, tipos.Parte, contratos.DATO_TOMAR, contratos.DATO_GOLPEAR, materia.ClaseSustancia]) assert.ok(distintos(o));
+  for (const o of [contratos.TipoIntento, contratos.Clase, tipos.Rol, tipos.Parte, contratos.DATO_TOMAR, contratos.DATO_GOLPEAR, contratos.DATO_MATERIA, materia.ClaseSustancia]) assert.ok(distintos(o));
   assert.ok(!Object.values(contratos.TipoIntento).includes(0 as never), '0 queda para «sin intento»');
 });
 
@@ -163,14 +170,51 @@ test('nivelDeT y tDeNivel son coherentes y cubren de 200 K a 3.200 K', () => {
   assert.ok(nivelDeT(290) < nivelDeT(373) && nivelDeT(373) < nivelDeT(1800));
 });
 
-test('los esquemas del fotograma tienen nombres únicos y una disposición contigua', () => {
+test('los esquemas del fotograma tienen nombres únicos y cada campo alineado a su tamaño', () => {
   for (const esquema of [fotograma.ESQUEMA_ORGANISMO, fotograma.ESQUEMA_CELDA]) {
     assert.equal(new Set(esquema.map(c => c.nombre)).size, esquema.length);
     const { ancho, desde } = fotograma.disposicion(esquema);
-    let esperado = 0;
-    for (const c of esquema) { assert.equal(desde[c.nombre], esperado); esperado += fotograma.BYTES_CAMPO[c.tipo]; }
-    assert.equal(ancho, esperado);
+    let fin = 0, mayor = 1;
+    for (const c of esquema) {
+      const bytes = fotograma.BYTES_CAMPO[c.tipo];
+      assert.equal(desde[c.nombre]! % bytes, 0, c.nombre);
+      assert.ok(desde[c.nombre]! >= fin, `${c.nombre} pisa al anterior`);
+      fin = desde[c.nombre]! + bytes; mayor = Math.max(mayor, bytes);
+    }
+    assert.ok(ancho >= fin && ancho % mayor === 0 && ancho - fin < mayor);
   }
+});
+
+test('el enlace cruza hilos como SABs y sus contadores no se solapan', () => {
+  const ranura = new SharedArrayBuffer(fotograma.regionesRanura(4, 2).total);
+  const d = { control: new SharedArrayBuffer(fotograma.CONTROL_ENLACE_BYTES), ranuras: [ranura], sucesos: new SharedArrayBuffer(64) };
+  const otro = fotograma.enlaceCinta(structuredClone(d)), este = fotograma.enlaceCinta(d);
+  const contadores = [este.creditos, este.pedirCompleto, este.cadencia, este.entregados, este.sucesosEscritos, este.sucesosLeidos];
+  const tramos = contadores.map(c => [c.byteOffset, c.byteOffset + c.byteLength] as const).sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < tramos.length; i++) assert.ok(tramos[i]![0] >= tramos[i - 1]![1]);
+  assert.ok(tramos.at(-1)![1] <= fotograma.CONTROL_ENLACE_BYTES);
+  Atomics.add(este.entregados, 0, 1n); Atomics.store(este.cadencia, 0, 4);
+  assert.equal(Atomics.load(otro.entregados, 0), 1n); assert.equal(otro.cadencia[0], 4);
+});
+
+test('fotogramaDe lee de la ranura lo que el motor escribió', () => {
+  const r = fotograma.regionesRanura(3, 2), ranura = new SharedArrayBuffer(r.total);
+  const i32 = new Int32Array(ranura, 0, 8), f64 = new Float64Array(ranura, 0, 8);
+  const { n, paginas, completo, saltados, capOrganismos, capPaginas } = fotograma.RANURA_I32;
+  i32[capOrganismos] = 3; i32[capPaginas] = 2; i32[n] = 2; i32[paginas] = 1; i32[completo] = 1; i32[saltados] = 5;
+  f64[fotograma.RANURA_F64.tick] = 2401; f64[fotograma.RANURA_F64.epoca] = 3;
+  f64[fotograma.RANURA_F64.sucesosDesde] = 10; f64[fotograma.RANURA_F64.sucesosHasta] = 12;
+  new Int32Array(ranura, r.paginas, 2).set([7, -2]);
+  new Int16Array(ranura, r.reparto, 1)[0] = 9;
+  const { ancho, desde } = fotograma.disposicion(fotograma.ESQUEMA_ORGANISMO);
+  new DataView(ranura).setFloat64(r.organismos + ancho + desde.uid!, 42, true);
+  const f = fotograma.fotogramaDe(ranura);
+  assert.deepEqual([f.tick, f.epoca, f.completo, f.saltados, f.n, f.sucesos], [2401, 3, true, 5, 2, [10, 12]]);
+  assert.deepEqual([...f.paginas], [7, -2]); assert.deepEqual([...f.reparto!], [9]);
+  assert.equal(f.organismos.length, 2 * ancho); assert.equal(f.serie.length, fotograma.SERIE_CAMPOS.length);
+  assert.equal(new DataView(f.organismos.buffer, f.organismos.byteOffset).getFloat64(ancho + desde.uid!, true), 42);
+  for (const [a, b] of [[r.serie, r.organismos], [r.organismos, r.paginas], [r.paginas, r.celdas], [r.celdas, r.reparto], [r.reparto, r.total]] as const)
+    assert.ok(a % 8 === 0 && a <= b);
 });
 
 test('los niveles de la cinta crecen y sus cuotas dejan margen', () => {

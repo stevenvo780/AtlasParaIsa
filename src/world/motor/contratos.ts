@@ -1,30 +1,32 @@
+// CONGELADOS desde el 2026-11-24: cambiar cualquier contrato de V23 (este fichero, materia/tipos.ts y shared/{materia,naturaleza,cinta,fotograma}.ts) exige pasar por el integrador.
 /**
  * Contratos del motor V23 (ARQ-motor §2), congelados en la ola 0 con la reconciliación de PLAN-V23 §1.2 y
  * AJUSTES-ORQUESTADOR aplicadas: un solo `Intento` (la materia viaja como pares [SustanciaId, cuantos]), sin
  * protocolo de cría (la pareja aporta su genoma por las columnas `genoma` y `pareja` del frente), un solo `Libro`
  * (el de la materia), `decisionGpu: 'siempre'`, canal con la GPU por memoria compartida, tick global y un modo
- * de un solo dueño con semilla que reproduce. Cambiar un contrato pasa por el integrador.
+ * de un solo dueño con semilla que reproduce.
  *
- * Fases de un tick: F0 coordinador · F1 adoptar y vaciar B · F2 percibir (cualquier hilo o GPU) · F3 elegir ·
- * F4 actuar · F5 aplicar intentos · F6 publicar. Un chunk es una página 16×16 de la arena.
+ * Fases de un tick: F0 coordinador · F1 adoptar y vaciar la cola B · F2 percibir (cualquier hilo o GPU) · F3 elegir ·
+ * F4 actuar · F5 vaciar la cola A y aplicar · F6 publicar. Un chunk es una página 16×16 de la arena.
  */
-import type { EnlaceCinta } from '../../shared/fotograma.js';
+import type { DescriptorEnlace, SucesoVisible } from '../../shared/fotograma.js';
 import type { ChronicleEvent, CommunityView, Gesture, GestureResult, PlaceView } from '../../shared/types.js';
 import type { World, Person } from '../index.js';
-import type { ArenaMateria, Libro, MateriaCheckpoint, ServicioQuimico, VistaCuerpo } from '../materia/tipos.js';
+import type { ArenaMateria, Libro, LoteRef, MateriaCheckpoint, ServicioQuimico, VistaCuerpo } from '../materia/tipos.js';
 
 // ── Identidades ──────────────────────────────────────────────────────────────────────────────────────────
 
 /** Fila estable de por vida de un organismo en la tabla. */
 export type Slot = number;
-/** gen·2³² + slot (gen < 2²¹: cabe exacta en un double). Caduca cuando la fila cambia de generación. */
+/** gen·2³² + slot (gen < 2²¹: cabe exacta en un double). Caduca cuando la fila cambia de generación; una fila que
+ * llega a gen 2²¹ − 1 se retira y no se vuelve a usar. */
 export type Ref = number;
 /** Hilo dueño; 0 = coordinador, que además es dueño 0. */
 export type Hilo = number;
 /** Ranura de una página 16×16 de la arena: cada chunk es una página. */
 export type ChunkId = number;
 
-/** Destino o referencia ausente: «a» de un intento sobre una celda, `CtxLectura.ref` de un uid que no vive. */
+/** Destino o referencia ausente: «a» o «lote» de un intento que no los usa, `CtxLectura.ref` de un uid que no vive. */
 export const REF_NULA = -1;
 export const refDe = (s: Slot, gen: number): Ref => gen * 4294967296 + s;
 export const slotDe = (r: Ref): Slot => r % 4294967296;
@@ -89,6 +91,27 @@ export interface TablaOrganismos {
   baja(h: Hilo, r: Ref): void;           // gen++ y vivo = 0 en el frente t+1
 }
 
+// ── Cerebro ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Red de política de las personas (hoy `politica.ts`, que tomará de aquí sus dimensiones): entradas → ocultas → acciones,
+ * con las acciones en el orden de `POLICY_ACTIONS`. */
+export const CEREBRO = { entradas: 12, ocultas: 8, acciones: 12 } as const;
+
+/**
+ * Columnas f32 del cerebro, con su ancho. Las registra M2b con `TablaOrganismos.columna`; M3 las sube a la tarjeta
+ * por filas sucias. La fauna no las usa (sus filas quedan a 0).
+ * - `observacion`: las 12 entradas, en el orden de `LocalObservationInput` (politica.ts). La escribe el dueño en F6
+ *   con el estado de t: quien decide en t+1 decide con lo que vio en t.
+ * - `politica`: los pesos heredados con la disposición de `PolicyGenome.weights` (W1[oculta][entrada], b1,
+ *   W2[acción][oculta], b2). Se escriben al nacer y no cambian.
+ * - `sesgo`: la plasticidad adquirida (`PolicyPlasticity.bias`), por acción. El dueño la pone al día en F6.
+ */
+export const COLUMNAS_CEREBRO = {
+  observacion: CEREBRO.entradas,
+  politica: CEREBRO.entradas * CEREBRO.ocultas + CEREBRO.ocultas + CEREBRO.ocultas * CEREBRO.acciones + CEREBRO.acciones,
+  sesgo: CEREBRO.acciones,
+} as const;
+
 // ── Terreno ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Celdas en la arena de páginas 16×16 (SAB crecible: las vistas siguen su longitud). La arena crece solo en F0.
@@ -111,15 +134,18 @@ export interface TerrenoDueno extends Terreno {
 /**
  * Un actor escribe directo solo su propio estado y las celdas del chunk donde empezó el tick. Todo lo demás, otros
  * organismos del mismo chunk incluidos, es un intento al buzón de su dueño aunque lo tenga el mismo hilo: el dueño lo
- * aplica contra su estado actual en F5 (la regla depende del chunk, nunca del hilo). Lo que va en `dato` por tipo:
+ * aplica contra su estado actual (la regla depende del chunk, nunca del hilo). Lo que va en `dato` por tipo:
  * - Tomar: `DATO_TOMAR`; siempre se contesta con Concedido (con lo que hubo, quizá nada).
- * - Depositar, Dar, Concedido, Devuelto: llevan `materia`; dato[0] = Rol del lote que la recibe (null: Suelo).
+ * - Depositar, Dar, Concedido, Devuelto: llevan `materia` y `DATO_MATERIA` (dato null: Suelo, sin forma).
  * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] = cuánto sube el vínculo del receptor hacia el emisor.
  * - Ensenar, Migrante, Gesto, Global: `bytes` (v8.serialize). Activar: dato = [cx, cy] del chunk nuevo.
- * Las respuestas llevan el nonce del intento que contestan. Toda garantía termina en ≤ 2 ticks (I-B).
+ * Si `a` ya no vive o no es de este dueño, o `lote` caducó, la materia se deposita en el Suelo de `celda` (o de la celda
+ * de `a` en el frente), reenviada como Depositar si esa celda es ajena, y un Tomar se contesta con Concedido vacío.
+ * Las respuestas llevan el nonce del intento que contestan; un dueño descarta el (nonce, tipo) que ya aplicó.
+ * Toda garantía termina en ≤ 2 ticks (I-B).
  */
 export const TipoIntento = {
-  Tomar: 1, Depositar: 2, Dar: 3, Golpear: 4, Vincular: 5, Ensenar: 6, // sobre otro organismo o celda de otro chunk
+  Tomar: 1, Depositar: 2, Dar: 3, Golpear: 4, Vincular: 5, Ensenar: 6, // sobre otro organismo, lote o celda de otro chunk
   Concedido: 7, Devuelto: 8,                                           // respuestas que llevan garantía
   Migrante: 9, Gesto: 10, Activar: 11, Global: 12,                     // motor: migración, gesto, chunk nuevo, coordinador
 } as const;
@@ -129,33 +155,49 @@ export type TipoIntento = (typeof TipoIntento)[keyof typeof TipoIntento];
 export interface Intento {
   tipo: TipoIntento;
   de: Ref;
-  a: Ref;                        // REF_NULA si el destino es una celda
-  celda: number;                 // `Terreno.celda`; −1 si no aplica
-  nonce: number;                 // slot(de)·2²⁰ + contador propio: repetir no duplica efectos
+  a: Ref;                        // organismo destino; REF_NULA si el destino es un lote o una celda
+  celda: number;                 // `Terreno.celda` del destino; −1 si no aplica
+  lote: LoteRef;                 // lote destino (la arena verifica su generación); REF_NULA: el de rol DATO_MATERIA.rol de `a` o de `celda`
+  nonce: number;                 // `CtxDueno.id('nonce')`: único en la vida del mundo; repetir no duplica efectos
   materia: Float64Array | null;  // garantía ya debitada del emisor: pares [SustanciaId, cuantos]; [0, j] = j J de calor
   dato: Float64Array | null;
   bytes: Uint8Array | null;
 }
 
-/** Posiciones en `dato` de un Tomar: qué lote del destino (Rol), qué `Parte`, de qué sustancia, cuántos cuantos,
- * en qué lote propio se abonará (eco en el Concedido) y, solo con Parte.Digerible, los 3 κ del comedor. */
-export const DATO_TOMAR = { rol: 0, parte: 1, esp: 2, cuantos: 3, rolDestino: 4, kappa: 5 } as const;
+/** Posiciones en `dato` de los intentos con materia: Rol del lote que la recibe cuando `lote` es REF_NULA y forma
+ * (`codigoForma`, 0 = ninguna) del lote nuevo si hay que crearlo, para que un objeto no pierda su forma al cruzar. */
+export const DATO_MATERIA = { rol: 0, forma: 1 } as const;
+/** Posiciones en `dato` de un Tomar: qué lote del destino (Rol, si `lote` es REF_NULA), qué `Parte`, de qué sustancia,
+ * cuántos cuantos, el lote propio donde se abonará (lo crea antes quien pide; vuelve como `lote` del Concedido) y,
+ * solo con Parte.Digerible, los 3 κ del comedor. */
+export const DATO_TOMAR = { rol: 0, parte: 1, esp: 2, cuantos: 3, loteDestino: 4, kappa: 5 } as const;
 /** Posiciones en `dato` de un Golpear: el trabajo en J y lo que la ley de romper necesita del útil o cuerpo que golpea. */
 export const DATO_GOLPEAR = { trabajo: 0, filo: 1, tenacidad: 2, esbeltez: 3, dureza: 4 } as const;
 
+/** Colas de cada dueño: A se vacía en F5 del mismo tick; B, en F1 del siguiente; F0, solo la del coordinador. */
+export type Cola = 'A' | 'B' | 'F0';
+
 /** MPSC sobre SAB crecible. Implementa: M1 (`motor/buzon.ts`). Consumen: M4a, M4b, M5, W, N, F, S, E, T1. */
 export interface Buzon {
-  enviar(destino: Hilo, i: Intento): void; // Atomics.add reserva sitio; el SAB crece sin copiar
-  vaciar(f: (i: Intento) => void): number; // solo el dueño, en su fase; orden barajado con su azar
+  /** Lo enviado en F1–F4 va a la cola A del destino; en F5 y F6, a la B; los gestos de F0, a la B (F1 del mismo tick).
+   * Activar y Global van a la cola F0 del coordinador, que los aplica en F0 de t+1. `enviar` copia el intento al SAB:
+   * al volver, el emisor puede reutilizar sus arrays. */
+  enviar(destino: Hilo, i: Intento): void;
+  /** Solo el dueño, en la fase de esa cola; orden barajado con su azar. Los arrays del intento entregado son vistas
+   * del SAB: valen solo durante la llamada a `f`. */
+  vaciar(cola: Cola, f: (i: Intento) => void): number;
 }
 
 // ── Globales ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Registro abierto direccionado por contenido (recetas, planos, plantillas): id = hash64 de los bytes canónicos,
- * idempotente desde cualquier hilo (CAS). Se guarda como hexadecimal de 16 cifras. Implementa: M1. Consumen: T1, T2, L, M4a. */
+/** Registro abierto direccionado por contenido (plantillas, recetas, planos): los mismos bytes canónicos dan el mismo id
+ * desde cualquier hilo (CAS). Los ids son enteros ≥ 0 (< 2⁵³), nunca reutilizados: son el `Plantilla.id`, el id de receta y el
+ * de plano. Lo guarda `MateriaCheckpoint.registro` y la carga lo reinserta con los mismos ids.
+ * Implementa: M1. Consumen: T1, T2, L, M4a, A (punto de control). */
 export interface Registro {
-  insertar(canonico: Uint8Array): bigint;
-  leer(id: bigint): Uint8Array | undefined;
+  insertar(canonico: Uint8Array): number;
+  leer(id: number): Uint8Array | undefined;
+  readonly n: number;                    // cota de los ids asignados: todos son < n
 }
 
 /** Réplica de solo lectura por hilo; la cambia el coordinador en F0 por peticiones. Implementa: M2b (T=1), M4a. Consumen: M2b, S, T1, T2. */
@@ -187,9 +229,13 @@ export interface CtxDueno extends CtxLectura {
   readonly buzon: Buzon;
   readonly libro: Libro;                 // el del hilo: el único `Libro` (materia/tipos.ts)
   azar(): number;                        // del hilo; sembrado de MotorConfig.semilla o de entropía real
-  id(tipo: 'uid' | 'suceso' | 'comunidad' | 'estructura'): number; // único, sin orden
+  /** Único, sin orden y < 2⁵³ (llegar ahí es fatal). 'nonce' arranca tras `cargar` por encima del mayor nonce de
+   * `MateriaCheckpoint.enVuelo`. */
+  id(tipo: 'uid' | 'suceso' | 'comunidad' | 'estructura' | 'nonce'): number;
   suceso(e: Omit<ChronicleEvent, 'id' | 'tick'>): string;
-  pedirGlobal(tipo: 'lugar' | 'comunidad', datos: Uint8Array): void; // lo aplica F0 de t+1
+  publicar(s: SucesoVisible): void;      // textos y vistas lentas que cambiaron, para la cinta (solo al cambiar)
+  /** Lo aplica F0 de t+1. S manda así las aristas ≥ θ de sus personas; F0 junta las mutuas y arma las componentes. */
+  pedirGlobal(tipo: 'lugar' | 'comunidad', datos: Uint8Array): void;
 }
 
 /** El contexto del dueño cuando la materia ya está en el mundo (ola 2). Implementa: M4a. Consumen: M5, W, B, N, F, T1, T2. */
@@ -209,12 +255,16 @@ export interface Consulta {
 /** Organismo en `radio`: el más cercano (criterio 0) o el de mayor valor en la columna `columna` (criterio 1);
  * `filtros` son tripletas [columna, mínimo, máximo] sobre `FrentePublico.columnas`. */
 export interface ConsultaOrganismo { radio: number; clase: Clase; filtros: Float32Array; criterio: 0 | 1; columna: number }
-/** Lo que un actor necesita percibir para decidir. Los definen M2b (`decision/planes.ts`) y M2a (fauna); los ejecutan M2b (CPU) y M3 (GPU). */
-export interface Plan { id: number; celdas: readonly Consulta[]; organismos: readonly ConsultaOrganismo[]; acciones: number }
+/** Lo que un actor necesita percibir para decidir. Los definen M2b (`decision/planes.ts`) y M2a (fauna); los ejecutan M2b (CPU) y M3 (GPU).
+ * Con cerebro, `acciones` = CEREBRO.acciones y `w` es la tabla W (acciones × RASGOS_ANCHO, por filas); sin él, 0 y null. */
+export interface Plan {
+  id: number; celdas: readonly Consulta[]; organismos: readonly ConsultaOrganismo[];
+  acciones: number; w: Float32Array | null;
+}
 /** Vencidos de un tick que van a un mismo percibidor (lotes de 64 slots en CPU, miles en GPU). */
 export interface LotePercepcion { tick: number; slots: Int32Array; plan: Uint16Array }
 /** Alineada con `slots`: N×Q celdas, pasos y valores, N×V organismos (Ref) y N×A utilidades; Q, V y A son los máximos
- * de los planes del lote y lo que sobra queda a −1. */
+ * de los planes del lote y lo que sobra queda a −1. utilidad[a] = red(observacion)[a] + sesgo[a] + Σₖ w[a·RASGOS_ANCHO + k]·rasgos[k]. */
 export interface Percepcion { celda: Int32Array; pasos: Int16Array; valor: Float32Array; organismo: Float64Array; utilidad: Float32Array }
 
 export type Dispositivo = 'cpu' | `gpu${number}`;
@@ -263,8 +313,9 @@ export interface Instantanea { world: World; materia: MateriaCheckpoint | null }
 export interface Motor {
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] };
   instantanea(): Instantanea;
-  cargar(i: Instantanea, epoca: number): void; // reparte tras Store.load o una recuperación y abre la época
-  enlazar(cinta: EnlaceCinta): void;     // desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito
+  cargar(i: Instantanea, epoca: number): void; // reparte tras Store.load o una recuperación y abre la época: su primer fotograma es completo
+  /** Desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito (protocolo en shared/fotograma.ts). */
+  enlazar(cinta: DescriptorEnlace): void;
   detalle(uid: number): Promise<Person | null>; // inspector: lo serializa el dueño en el F1 siguiente
   telemetria(): TelemetriaMotor;
   cerrar(): Promise<void>;

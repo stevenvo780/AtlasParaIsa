@@ -32,17 +32,31 @@ export const nivelDeT = (T: number): number =>
 /** Temperatura representativa (centro geométrico) del nivel ℓ: la T con que Q calcula los productos. */
 export const tDeNivel = (nivel: number): number => T_NIVEL_MIN * Math.exp((nivel + 0.5) * RAZON_NIVEL);
 
-/** Reparto de menor energía libre de a + b (b = 0: a sola) al nivel de temperatura `nivelT`. Lo calcula Q; lo aplica P. */
-export interface Reaccion {
+/** Transformación balanceada en átomos: aplicarla `veces` consume veces·nu de cada entrada, produce veces·nu de cada
+ * salida y resta veces·dH al calor del lote. Exige dH = Σ energía de las salidas − Σ de las entradas (así el libro no cambia). */
+export interface Ecuacion {
+  entradas: readonly { id: SustanciaId; nu: number }[];
+  salidas: readonly { id: SustanciaId; nu: number }[];
+  dH: number; // J por vez (un cuanto de reacción)
+}
+
+/**
+ * Reparto de menor energía libre de a + b al nivel de temperatura `nivelT`, como `Ecuacion`: entradas a y b con nu 1
+ * (a + a: a con nu 2; b = 0: a sola) y salidas los productos. Lo calcula Q; lo aplica P con Arrhenius:
+ * x = ν·exp(−max(0, ea − κ[catalisis])/(R·T))·… (ARQ-materia §3.1). `quemar` (L) no es cinético: el cuerpo paga su trabajo
+ * aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
+ */
+export interface Reaccion extends Ecuacion {
   a: SustanciaId; b: SustanciaId; nivelT: number;
-  productos: readonly { id: SustanciaId; nu: number }[];
-  dH: number;                  // J por cuanto de reacción: E(productos) − E(a) − E(b)
-  ea: number;                  // J por cuanto: barrera, GAMMA·D del enlace más fuerte que disminuye
-  catalisis: -1 | 0 | 1 | 2;   // familia del enlace roto más fuerte, índice de `Plantilla.kappa`; −1 = ninguna catalizable
+  ea: number;                  // J por cuanto de reacción: barrera, GAMMA·D del enlace más fuerte que disminuye
+  /** Familia del enlace catalizable más fuerte que disminuye, índice de `Plantilla.kappa` (C–O, C–N, C–C/C–H); los
+   * enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = no disminuye ninguno catalizable. */
+  catalisis: -1 | 0 | 1 | 2;
 }
 
 /** Servicio de un solo escritor en su propio worker. Implementa: Q (`materia/{quimica,servicio}.ts`). Consumen: P, L, W, T1, G. */
 export interface ServicioQuimico {
+  /** En el hilo del servicio o antes de arrancar (creación del mundo); las sustancias nuevas solo salen de reacciones. */
   internar(enlaces: Uint16Array): SustanciaId;
   sustancia(id: SustanciaId): Readonly<Sustancia>;
   /** null = no reaccionan; undefined = encolada: el resultado se publica en la barrera siguiente. */
@@ -51,10 +65,10 @@ export interface ServicioQuimico {
 
 // ── Lotes ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Referencia a un lote de la arena; la codifica A (ranura y generación) y el resto la trata como opaca. */
+/** Referencia a un lote de la arena: entero ≥ 0 (≤ 2⁵³) que A codifica con ranura y generación; caduca al liberarse la ranura. */
 export type LoteRef = number;
 
-/** Dónde está un lote: tesela (Suelo, Agua, Vida), aire por página, roca latente, cuerpo o lote con forma. */
+/** Dónde está un lote: tesela (Suelo, Agua, Vida), aire por página, roca, cuerpo o lote con forma. */
 export const Rol = {
   Suelo: 0, Agua: 1, Vida: 2, Aire: 3, Roca: 4,
   Tejido: 5, Reserva: 6, Digestivo: 7, Embrion: 8,
@@ -79,18 +93,22 @@ export interface VistaLote {
 /** Traslado entre dos lotes del mismo dueño (entre dueños: `Intento` con garantía). */
 export interface Traslado { de: LoteRef; a: LoteRef; esp: SustanciaId; cuantos: number }
 
-/** Qué parte de un lote se pide al tomar (va en `Intento.dato`, ver `DATO_TOMAR`). */
-export const Parte = { Exacta: 0, Digerible: 1, Agua: 2 } as const;
+/** Qué parte de un lote se pide al tomar o se garantiza al dar (va en `Intento.dato`, ver `DATO_TOMAR`). */
+export const Parte = { Exacta: 0, Digerible: 1, Agua: 2, Todo: 3 } as const;
 export type Parte = (typeof Parte)[keyof typeof Parte];
 
-/** Pedido al lote de otro: `cuantos` de `esp` (Exacta), de lo que digiere `kappa` (Digerible) o de agua (Agua). */
+/** `cuantos` de `esp` (Exacta), de lo que digiere `kappa` (Digerible), de agua (Agua) o el lote entero con su calor (Todo). */
 export interface Pedido { parte: Parte; esp: SustanciaId; cuantos: number; kappa: readonly [number, number, number] | null }
 
 /**
  * Libro único de conservación (§1.2), uno por hilo; el motor, la poda y la materia usan este mismo.
- * Cada campo es un Float64Array(NE + 1) de enteros ≤ 2⁵³: las NE primeras posiciones son mmol de átomos por
- * elemento y la última (`ENERGIA`) J de energía química (cuantos × `Sustancia.energia`) más calor.
- * En F0 el coordinador los suma: Σ lotes + Σ enVuelo = inicial + fuentes − sumideros, exacto (I1, I2, I-C).
+ * Cada campo es un Float64Array(NE + 1): las NE primeras posiciones son mmol de átomos por elemento y la última
+ * (`ENERGIA`) J de energía química (cuantos × `Sustancia.energia`) más calor.
+ * Exactitud: todo asiento, cantidad y calor de un lote es un entero seguro (|v| ≤ 2⁵³ − 1); una operación que daría
+ * otra cosa es fatal (I3), nunca se redondea. Para que los asientos no crezcan sin fin, el coordinador pliega en cada F0
+ * que comprueba: suma los libros de los hilos en bigint, añade fuentes − sumideros a los totales del mundo
+ * (`MateriaCheckpoint`) y deja a cero los libros de los hilos, salvo el enVuelo total, que queda en el hilo 0.
+ * Así comprueba Σ lotes + Σ enVuelo = inicial + fuentes − sumideros, exacto (I1, I2, I-C), con las sumas del mundo en bigint.
  * Implementa: A (`materia/libro.ts`). Consumen: M1, M4a, M5, W, B, N, 0C (invariantes).
  */
 export interface Libro { readonly enVuelo: Float64Array; readonly fuentes: Float64Array; readonly sumideros: Float64Array }
@@ -99,38 +117,51 @@ export const libroVacio = (): Libro =>
   ({ enVuelo: new Float64Array(NE + 1), fuentes: new Float64Array(NE + 1), sumideros: new Float64Array(NE + 1) });
 
 /**
- * Arena de lotes sobre el SAB crecible de M1 (lotes de 120 B, ARQ-materia §2). Solo el dueño del lote lo toca.
- * Implementa: A (`materia/arena.ts`). Consumen: P, L, W, B, N, F, T1, T2, M5.
+ * Arena de lotes de tamaño fijo sobre el SAB crecible de M1 (ARQ-materia §2). Solo el dueño de un lote lo modifica (el de
+ * su página o el de su organismo; en modo verificar la arena lo comprueba); leer uno ajeno es una carrera tolerada
+ * (ARQ-motor §3.3). Lo que entra o sale del mundo pasa por `fuente` y
+ * `sumidero`; lo demás se conserva por construcción. Implementa: A (`materia/arena.ts`). Consumen: P, L, W, B, N, F, T1, T2, M5.
  */
 export interface ArenaMateria {
-  /** `pagina`: ChunkId de la página que lo guarda; −1 para los lotes de un cuerpo (van con su organismo). */
-  nuevo(rol: Rol, pagina: number, forma: number): LoteRef;
-  liberar(l: LoteRef): void; // solo en barrera; la ranura vuelve con gen++
+  /** Lote vacío en `celda` (`Terreno.celda`); −1 para los de un cuerpo, que van con su organismo. */
+  nuevo(rol: Rol, celda: number, forma: number): LoteRef;
+  liberar(l: LoteRef): void;   // solo en barrera; la ranura vuelve con gen++
+  vivo(l: LoteRef): boolean;   // false si la referencia caducó
+  /** Lotes de `rol` en `celda` (Suelo, Agua y Vida: uno por tesela; Aire: el de su página). Los escribe en `destino` y
+   * devuelve cuántos hay; si son más que destino.length, solo escribe los que caben. */
+  lotes(celda: number, rol: Rol, destino: Float64Array): number;
+  /** Sustancias presentes (las 8 ranuras y el desborde), como `lotes`. */
+  especies(l: LoteRef, ids: Uint32Array): number;
   cuantos(l: LoteRef, id: SustanciaId): number;
-  mover(t: Traslado): number; // recorta a existencias y devuelve lo movido
-  moverCalor(de: LoteRef, a: LoteRef, j: number): number;
+  calor(l: LoteRef): number;   // J
   vista(l: LoteRef): VistaLote;
+  formar(l: LoteRef, forma: number): void; // `codigoForma` nuevo (romper con patrón, unir)
+  mover(t: Traslado): number;  // recorta a existencias y devuelve lo movido
+  moverCalor(de: LoteRef, a: LoteRef, j: number): number;
+  /** Aplica `e` hasta `veces` veces, recortado a existencias y a calor ≥ 0; devuelve las que aplicó. Reacciones (P),
+   * síntesis de plantillas (L) y `quemar`. */
+  aplicar(l: LoteRef, e: Ecuacion, veces: number): number;
   /** Saca de `l` lo pedido (recortado a existencias) como garantía para un `Intento`: pares [SustanciaId, cuantos] y
    * [0, j] con su parte del calor. Lo suma a `libro.enVuelo`. Puede volver vacío. */
   garantizar(l: LoteRef, p: Pedido, libro: Libro): Float64Array;
   /** Abona en `l` una garantía recibida y la resta de `libro.enVuelo`. */
   abonar(l: LoteRef, garantia: Float64Array, libro: Libro): void;
+  /** Entrada declarada (sol, roca que se materializa, chunk nuevo, S/I), en pares como la garantía: `libro.fuentes`. */
+  fuente(l: LoteRef, pares: Float64Array, libro: Libro): void;
+  /** Salida declarada (radiación, el sumidero de comer de la ola 2), recortada a existencias: `libro.sumideros`.
+   * Devuelve lo que salió. */
+  sumidero(l: LoteRef, pares: Float64Array, libro: Libro): Float64Array;
 }
 
 // ── Plantillas y cuerpos ─────────────────────────────────────────────────────────────────────────────────
 
-/** Reacción balanceada por eliminación entera. La construye L (`copiar.ts`) al crear una plantilla. */
-export interface Ecuacion {
-  entradas: readonly { id: SustanciaId; nu: number }[];
-  salidas: readonly { id: SustanciaId; nu: number }[];
-  dH: number; // J por cuanto de síntesis
-}
-
 /** Lo que se copia al crecer: 6 linajes animales y 1 plantilla vegetal por bioma al fundar (§1.2); después, genes continuos.
  * Implementa: L. Consumen: W (vegetación), B, N, F. */
 export interface Plantilla {
-  id: number;
-  partes: readonly { id: SustanciaId; fraccion: number }[];
+  id: number;         // `Registro.insertar` de sus bytes canónicos
+  /** Una unidad de plantilla: cuantos enteros de cada sustancia del tejido. Su masa es Σ nu·masa (mg); `sintesis` la
+   * produce entera (sus salidas son estas partes más los subproductos, como O₂ y H₂O). */
+  partes: readonly { id: SustanciaId; nu: number }[];
   sintesis: Ecuacion;
   kappa: readonly [number, number, number]; // J por cuanto de rebaja de barrera: C–O, C–N, C–C/C–H
   captura: number;    // fracción de la luz que fija (plantas)
@@ -163,8 +194,14 @@ export interface VistaCuerpo {
 
 // ── Procesos técnicos ────────────────────────────────────────────────────────────────────────────────────
 
-export type Operacion = 'romper' | 'unir' | 'calentar' | 'mojar';
-export interface Paso { op: Operacion; patron?: keyof Forma; hasta: { T?: number; ticks?: number } }
+/** Un paso de un proceso. Romper talla el lote hasta `forma` con el trabajo de quien lo hace; unir le añade `masa` kg de
+ * un lote propio o del suelo de la celda cuyo `principal` es `insumo` y cuya forma es `forma` (0 = cualquiera), y espera
+ * si no lo hay; calentar (junto a un fuego) y mojar (en agua) duran hasta `T` K o `ticks` ticks, lo primero que llegue. */
+export type Paso =
+  | { op: 'romper'; forma: Forma }
+  | { op: 'unir'; insumo: SustanciaId; forma: number; masa: number }
+  | { op: 'calentar' | 'mojar'; hasta: { T?: number; ticks?: number } };
+export type Operacion = Paso['op'];
 /** Proceso que ocurre en el mundo paso a paso; si se interrumpe, el lote intermedio queda en el sitio.
  * Implementa: T1 (`materia/proceso.ts`). Consumen: T2, V3. */
 export interface ProcesoMaterial { lote: LoteRef; pasos: readonly Paso[]; i: number; desde: number; x: number; y: number }
@@ -173,15 +210,16 @@ export interface ProcesoMaterial { lote: LoteRef; pasos: readonly Paso[]; i: num
 
 /**
  * Materia guardada en la misma operación que el `World` (cada 2.400 ticks, §1.2), fuera del JSON: binario y con el
- * sello de la época. Al cargar se exige el sello en todas las páginas y Σ lotes + enVuelo = inicial + fuentes − sumideros.
+ * sello de la época. Al cargar se exige el sello en todas las páginas y Σ lotes + Σ garantías de `enVuelo` =
+ * inicial + fuentes − sumideros, por posición del libro.
  * Implementa: A (`materia/checkpoint.ts`). Consumen: PS (`Store`), M4a (`instantanea`, `cargar`).
  */
 export interface MateriaCheckpoint {
   epoca: number; tick: number;
   sustancias: Uint8Array; // registro de Q (solo crece)
-  plantillas: Uint8Array;
+  registro: Uint8Array;   // el `Registro` del motor (plantillas, recetas, planos) con sus ids
   paginas: Uint8Array;    // lotes por página
   enVuelo: Uint8Array;    // intentos con garantía aún en los buzones
-  libro: Libro;           // suma de los libros de los hilos
-  inicial: Float64Array;  // NE + 1: Σ lotes al crear el mundo
+  /** Totales del mundo ya plegados (NE + 1 cada uno), en bigint: la suma del mundo puede pasar de 2⁵³. */
+  inicial: readonly bigint[]; fuentes: readonly bigint[]; sumideros: readonly bigint[];
 }

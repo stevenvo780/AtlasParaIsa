@@ -32,7 +32,8 @@ export interface ConstantesElemento {
   masa: number;
 }
 
-/** Una fila por elemento, en el orden de `ELEMENTOS`. */
+/** Una fila por elemento, en el orden de `ELEMENTOS`. Con un mundo creado, las valencias y qué π son 0 ya no cambian:
+ * fijan cuántos `TIPOS` hay y sus índices, que son la clave de toda sustancia guardada. Los demás valores se calibran. */
 export const TABLA: readonly ConstantesElemento[] = [
   { valencia: 1, chi: 2.20, dPropia: 436, pi: 0, masa: 1.008 },    // H
   { valencia: 4, chi: 2.55, dPropia: 346, pi: 266, masa: 12.011 }, // C
@@ -61,13 +62,16 @@ export const R = 0.008314;
 export const CAPACIDAD_ATOMO = 0.025;
 /** ν: factor de frecuencia de Arrhenius, en L/(cuanto·tick) entre dos sustancias y en 1/tick para una sola. */
 export const NU = 1e9;
-/** γ: la barrera de una reacción es γ·D del enlace más fuerte que disminuye (adimensional). */
+/** γ: la barrera de una reacción es γ·D del enlace más fuerte que disminuye (adimensional). La paga la cinética de P, no
+ * `quemar`. Con O₂ el más fuerte es O=O (494): Q la calibra con ν y κ₀ para que el combustible aguante en frío, arda en
+ * un fuego y la digestión y la descomposición avancen a temperatura del cuerpo y del suelo. */
 export const GAMMA = 0.35;
 /** s: J/(cuanto·K) de entropía por cuanto de molécula gaseosa en los productos; G = −Σd·b − T·s·#gas. */
 export const S_GAS = 0.12;
 /** ε: J por cuanto de energía libre que un reparto debe ganar a los reactivos para que haya reacción. */
 export const EPSILON_G = 1;
-/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de la familia de enlace que rompe. */
+/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de las reacciones de su familia de enlace
+ * (`Reaccion.catalisis`). */
 export const KAPPA0 = 60;
 
 // ── Propiedades por estructura ───────────────────────────────────────────────────────────────────────────

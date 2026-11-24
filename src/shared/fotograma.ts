@@ -1,8 +1,14 @@
 /**
  * Fotograma: lo visible del mundo tras el F6 de un tick, en binario (ARQ-motor §3.6, PLAN-V23 §1.2). Lo escriben
- * los dueños en paralelo en una ranura compartida, sin campos privados ni átomos; el hilo `carta-tape` lo convierte
- * en `Corte` (shared/cinta.ts) fuera del hilo de simulación. El motor nunca espera a quien mira: sin crédito, salta.
+ * los dueños en paralelo en una ranura compartida, sin campos privados ni átomos; el hilo `carta-tape` lo convierte,
+ * junto con los sucesos, en `Corte` (shared/cinta.ts) fuera del hilo de simulación. El motor nunca espera a quien
+ * mira: sin crédito, salta. Todo el binario del fotograma y del enlace es little-endian (el de la torre).
  */
+import type { BlueprintView, StructureView } from './life.js';
+import type { SustanciaVista } from './materia.js';
+import type { OrganizationSummary } from './organization.js';
+import type { TechnologyView } from './technology.js';
+import type { ChronicleEvent, CommunityView, MemoryView, PlaceView } from './types.js';
 
 export type TipoCampo = 'u8' | 'u16' | 'i16' | 'u32' | 'i32' | 'f32' | 'f64';
 export const BYTES_CAMPO: Readonly<Record<TipoCampo, number>> = { u8: 1, u16: 2, i16: 2, u32: 4, i32: 4, f32: 4, f64: 8 };
@@ -12,11 +18,19 @@ export interface CampoVisible { nombre: string; tipo: TipoCampo; escala?: number
 /** Bytes por fila y desplazamiento de cada campo, en el orden del esquema. */
 export interface Disposicion { ancho: number; desde: Readonly<Record<string, number>> }
 
+/** Cada campo empieza en un múltiplo de su tamaño y la fila mide un múltiplo del campo mayor: con las filas desde un
+ * desplazamiento múltiplo de 8, todo campo se lee con DataView o con una vista tipada del mismo tamaño. */
 export function disposicion(esquema: readonly CampoVisible[]): Disposicion {
   const desde: Record<string, number> = {};
-  let ancho = 0;
-  for (const campo of esquema) { desde[campo.nombre] = ancho; ancho += BYTES_CAMPO[campo.tipo]; }
-  return { ancho, desde };
+  let ancho = 0, mayor = 1;
+  for (const campo of esquema) {
+    const bytes = BYTES_CAMPO[campo.tipo];
+    ancho = Math.ceil(ancho / bytes) * bytes;
+    desde[campo.nombre] = ancho;
+    ancho += bytes;
+    mayor = Math.max(mayor, bytes);
+  }
+  return { ancho: Math.ceil(ancho / mayor) * mayor, desde };
 }
 
 /**
@@ -42,11 +56,14 @@ export const ESQUEMA_CELDA: readonly CampoVisible[] = [
   { nombre: 'T', tipo: 'f32' },
 ];
 
-/** Serie que no se adelgaza nunca (una fila por fotograma). Escribe: M6. Leen: C1a (tabla `serie`), C1b, C2a, V1. */
+/** Serie de cada fotograma. Población, fauna y estructuras son del momento; nacimientos y muertes, acumulados desde que
+ * abrió la época, para que saltar fotogramas no pierda nada; sustancias, las internadas hasta ahora. La cinta guarda una
+ * fila cada `CINTA.seriePaso` ticks. Escribe: M6. Leen: C1a (tabla `serie`), C1b, C2a, V1. */
 export const SERIE_CAMPOS = ['poblacion', 'nacimientos', 'muertes', 'fauna', 'estructuras', 'sustancias', 'hz'] as const;
 export type CampoSerie = (typeof SERIE_CAMPOS)[number];
 
-/** Estado visible tras el F6 del tick `tick`. Escribe: M6 (`motor/fotograma.ts`). Lee: M6 (adaptador a `Corte`) en `carta-tape`. */
+/** Estado visible tras el F6 del tick `tick`, leído de una ranura con `fotogramaDe`. Escribe: M6 (`motor/fotograma.ts`).
+ * Lee: M6 (adaptador a `Corte`) en `carta-tape`. Los arrays son vistas de la ranura: valen hasta devolver su crédito. */
 export interface Fotograma {
   tick: number;
   epoca: number;                         // la que abrió `Motor.cargar`
@@ -56,20 +73,99 @@ export interface Fotograma {
   organismos: Uint8Array;                // n filas de ESQUEMA_ORGANISMO
   paginas: Int32Array;                   // pares (px, py) de páginas 16×16 con cambio visible desde el último entregado
   celdas: Uint8Array;                    // por página, 256 celdas de ESQUEMA_CELDA en orden (y·16 + x)
-  sucesos: [desde: number, hasta: number]; // rango [desde, hasta) del registro de sucesos sin pérdida
+  sucesos: [desde: number, hasta: number]; // números de suceso [desde, hasta): la cinta los lee antes de aplicar el fotograma
   serie: Float64Array;                   // SERIE_CAMPOS
   reparto: Int16Array | null;            // dueño de cada página de `paginas`; solo en fotogramas completos
 }
 
+// ── Sucesos: lo que cambia sin pérdida ───────────────────────────────────────────────────────────────────
+
+/** Vistas lentas que la cinta necesita para rehacer el `WorldView`: se mandan enteras al nacer o cambiar (null = baja).
+ * Tecnología y organización son únicas en el mundo (id ''). M6 puede añadir clases al final. */
+export interface VistasLentas {
+  lugar: PlaceView; comunidad: CommunityView; estructura: StructureView; plano: BlueprintView;
+  recuerdo: MemoryView; tecnologia: TechnologyView; organizacion: OrganizationSummary;
+}
+export type SucesoVista = { [K in keyof VistasLentas]: { tipo: K; id: string; vista: VistasLentas[K] | null } }[keyof VistasLentas];
+/** Texto visible de un organismo (nombre, razón, necesidad, color…: los campos de texto de su vista), solo al cambiar. */
+export interface SucesoTexto { tipo: 'texto'; uid: number; campo: string; valor: string }
+/** Lo que publican los dueños con `CtxDueno.publicar`. */
+export type SucesoVisible = SucesoVista | SucesoTexto;
+/** Registro sin pérdida: la crónica (`CtxDueno.suceso`), las sustancias que Q internó y lo visible. Lo junta el coordinador
+ * en F0. Todo fotograma completo va precedido del estado lento entero (cada vista y cada texto vivos): con eso, quien
+ * empieza a leer en una época nueva o tras pedir un completo rehace todo. */
+export type Suceso = { tipo: 'cronica'; evento: ChronicleEvent } | { tipo: 'sustancia'; sustancia: SustanciaVista } | SucesoVisible;
+
+// ── Enlace entre el motor y la cinta ─────────────────────────────────────────────────────────────────────
+
 /**
- * SAB compartido entre el motor y el hilo de la cinta (§1.2: créditos, `pedirCompleto` y la cadencia de la cinta).
- * Lo crea C1a (cadencia, ola 1) y lo completa M6 (ranuras, ola 2). Escribe fotogramas: M6. Los consume: `carta-tape`.
+ * Lo que cruza entre hilos (postMessage): solo SABs; cada lado arma sus vistas con `enlaceCinta`. Lo crea C1a con el
+ * control (créditos = ranuras.length, cadencia = CINTA.pasos[0]) en la ola 1 y M6 le añade ranuras y sucesos en la 2.
+ * - `control`: CONTROL_ENLACE_BYTES.
+ * - `ranuras`: una por fotograma en vuelo, SAB crecible con la disposición de `regionesRanura`.
+ * - `sucesos`: anillo de bytes (≤ 256 MiB: el único freno físico) con registros u32 de longitud + v8.serialize(Suceso),
+ *   que pueden dar la vuelta al final.
+ */
+export interface DescriptorEnlace { control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null }
+
+/** Int32 [créditos, pedirCompleto, cadencia, —] y BigInt64 desde el byte 16 [entregados, sucesosEscritos, sucesosLeidos]. */
+export const CONTROL_ENLACE_BYTES = 40;
+
+/**
+ * Protocolo. Motor: si `creditos[0] > 0`, resta uno y escribe el fotograma en la ranura `entregados % ranuras`; al acabar,
+ * Atomics.add(entregados, 0, 1n) y Atomics.notify. Antes de cada fotograma escribe sus sucesos en el anillo
+ * (sucesosEscritos, en bytes) y espera si no caben. Cinta: lee en orden la ranura `leidos % ranuras` mientras
+ * leidos < entregados (Atomics.load), lee antes los sucesos hasta `Fotograma.sucesos[1]`, sube sucesosLeidos y, al
+ * soltar la ranura, Atomics.add(creditos, 0, 1). Los contadores BigInt64 no desbordan en la vida del mundo.
+ * `pedirCompleto[0] = 1` lo pone la cinta y lo baja el motor; `cadencia[0]` son ticks entre fotogramas y la cinta lo sube si se atrasa.
  */
 export interface EnlaceCinta {
-  readonly ranuras: number;
-  readonly creditos: Int32Array;      // [0] ranuras libres: el motor resta al escribir y la cinta suma al soltar; con 0 el motor salta
-  readonly entregados: Int32Array;    // [0] fotogramas entregados (Atomics.notify): la cinta lee la ranura leídos % ranuras, en orden
-  readonly pedirCompleto: Int32Array; // [0] = 1: el siguiente fotograma es completo (lo pone la cinta, lo baja el motor)
-  readonly cadencia: Int32Array;      // [0] ticks entre fotogramas: CINTA.pasos[0] en reposo; la cinta lo sube si se atrasa
-  ranura(i: number): Fotograma;
+  readonly ranuras: readonly SharedArrayBuffer[];
+  readonly sucesos: Uint8Array | null;
+  readonly creditos: Int32Array; readonly pedirCompleto: Int32Array; readonly cadencia: Int32Array;
+  readonly entregados: BigInt64Array; readonly sucesosEscritos: BigInt64Array; readonly sucesosLeidos: BigInt64Array;
+}
+
+export function enlaceCinta(d: DescriptorEnlace): EnlaceCinta {
+  const i32 = (i: number) => new Int32Array(d.control, 4 * i, 1);
+  const i64 = (i: number) => new BigInt64Array(d.control, 16 + 8 * i, 1);
+  return {
+    ranuras: d.ranuras, sucesos: d.sucesos && new Uint8Array(d.sucesos),
+    creditos: i32(0), pedirCompleto: i32(1), cadencia: i32(2),
+    entregados: i64(0), sucesosEscritos: i64(1), sucesosLeidos: i64(2),
+  };
+}
+
+/** Cabecera de una ranura: Int32 en los bytes 0–31 (los dueños reservan filas y páginas con Atomics.add sobre `n` y
+ * `paginas`; las capacidades las fija el coordinador en F0 al dimensionarla) y Float64 en los bytes 32–63. */
+export const RANURA_I32 = { n: 0, paginas: 1, completo: 2, saltados: 3, capOrganismos: 4, capPaginas: 5 } as const;
+export const RANURA_F64 = { tick: 4, epoca: 5, sucesosDesde: 6, sucesosHasta: 7 } as const;
+
+const alinear8 = (bytes: number) => Math.ceil(bytes / 8) * 8;
+
+/** Desplazamiento en bytes de cada región de una ranura con esas capacidades, en orden: serie, organismos, páginas,
+ * celdas y reparto; `total` es lo que debe medir la ranura. */
+export function regionesRanura(capOrganismos: number, capPaginas: number) {
+  const serie = 64;
+  const organismos = serie + 8 * SERIE_CAMPOS.length;
+  const paginas = organismos + alinear8(capOrganismos * disposicion(ESQUEMA_ORGANISMO).ancho);
+  const celdas = paginas + alinear8(capPaginas * 8);
+  const reparto = celdas + alinear8(capPaginas * 256 * disposicion(ESQUEMA_CELDA).ancho);
+  return { serie, organismos, paginas, celdas, reparto, total: reparto + alinear8(capPaginas * 2) };
+}
+
+/** Vista de lo publicado en una ranura. */
+export function fotogramaDe(ranura: SharedArrayBuffer): Fotograma {
+  const i32 = new Int32Array(ranura, 0, 8), f64 = new Float64Array(ranura, 0, 8);
+  const n = i32[RANURA_I32.n]!, p = i32[RANURA_I32.paginas]!, completo = i32[RANURA_I32.completo] === 1;
+  const r = regionesRanura(i32[RANURA_I32.capOrganismos]!, i32[RANURA_I32.capPaginas]!);
+  return {
+    tick: f64[RANURA_F64.tick]!, epoca: f64[RANURA_F64.epoca]!, completo, saltados: i32[RANURA_I32.saltados]!, n,
+    organismos: new Uint8Array(ranura, r.organismos, n * disposicion(ESQUEMA_ORGANISMO).ancho),
+    paginas: new Int32Array(ranura, r.paginas, 2 * p),
+    celdas: new Uint8Array(ranura, r.celdas, p * 256 * disposicion(ESQUEMA_CELDA).ancho),
+    sucesos: [f64[RANURA_F64.sucesosDesde]!, f64[RANURA_F64.sucesosHasta]!],
+    serie: new Float64Array(ranura, r.serie, SERIE_CAMPOS.length),
+    reparto: completo ? new Int16Array(ranura, r.reparto, p) : null,
+  };
 }

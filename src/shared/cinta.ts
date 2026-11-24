@@ -20,10 +20,11 @@ export const CINTA = {
   topeBytes: 50e9,
   cuotas: [0.48, 0.24, 0.12, 0.08, 0.06], // fracción de topeBytes por nivel; el 2 % restante es margen
   maxFotogramas: 120,                    // por respuesta de /api/cinta/chunk
+  seriePaso: 200,                        // ticks entre filas de la serie, que no se adelgaza nunca
 } as const;
 
-/** Lo que el escritor recibe: lo construye `carta-tape` desde el Fotograma (M6, ola 2) o, en la ola 1, desde
- * `projectTapeFrame` (C1a). Lo consume el escritor (C1a). */
+/** Lo que el escritor recibe: lo construye `carta-tape` desde el Fotograma y los sucesos (M6, ola 2) o, en la ola 1,
+ * desde `projectTapeFrame` (C1a). Lo consume el escritor (C1a). */
 export interface Corte {
   seq: number;                           // monótono, uno por corte (no es un tick)
   epoca: number;
@@ -53,6 +54,7 @@ export interface Apertura { instanciaId: string; epoca: number; tMundo: number; 
 export interface Bifurcacion { epoca: number; desde: number; hasta: number; motivo: Apertura['motivo'] }
 export interface Laguna { t0: number; t1: number }
 
+/** Nacimientos y muertes van acumulados por época: entre dos puntos de una época, Δpoblación = Δnacimientos − Δmuertes (I9). */
 export type SeriePunto = { t: number } & Record<CampoSerie, number>;
 
 export interface CintaMeta {

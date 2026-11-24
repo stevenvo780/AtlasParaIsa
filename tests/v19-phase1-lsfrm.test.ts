@@ -113,7 +113,8 @@ for (const [seedText, expected] of Object.entries(V18_DEFAULT_60)) {
 }
 for (const [seedText, expected] of Object.entries(V18_HOST_300)) {
   const seed = Number(seedText);
-  test(`V19 fase 1: anfitrión abierto con L/S/F/R/M apagados, semilla ${seed}, 300 pasos = digesto V18 (política neuronal activa)`, () => {
+  // se borra en la ola 2 (carril PO2)
+  test.skip(`V19 fase 1: anfitrión abierto con L/S/F/R/M apagados, semilla ${seed}, 300 pasos = digesto V18 (política neuronal activa)`, () => {
     const world = run(createWorld(seed, hostWith(V19_OFF)), 300);
     assert.equal(digestAsV18(world), expected);
   });

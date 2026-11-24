@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { request, type IncomingHttpHeaders, type Server } from 'node:http';
+import { loadavg } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
 import { crc32, gunzipSync, gzipSync } from 'node:zlib';
+import { createWorkerGateway } from '../src/server/gateway.js';
 import { createApp, createReadOnlyApp, DIAGNOSTICO_VACIO, type ReadOnlyBackend } from '../src/server/app.js';
 import { CatalogoCinta, INDICE_CINTA, MAX_SEGMENTO, NIVELES } from '../src/server/cinta/catalogo.js';
 import { clientDelta, decodificarBloque } from '../src/server/cinta/formato.js';
@@ -133,6 +135,9 @@ test('I1 lector: los tramos reconstruyen cada fotograma de L0, cruzando bloques,
   assert.equal(frames.filter(f => f.tick >= 130).length, 100);
   assert.equal(tramo.t1, frames.at(-1)!.tick); assert.equal(tramo.hayMas, true);
   for (const f of frames) igualFotograma(f, esperado.get(f.tick)!, `tick ${f.tick}`);
+  const entre = JSON.parse(lector.chunk({ t: 126, n: 2 })) as ChunkResp;
+  assert.equal(entre.t0, 0, 'entre dos bloques, la base sigue siendo la clave ≤ t');
+  assert.deepEqual(reproducir(entre.baseFrame, entre.deltas).filter(f => f.tick >= 126).map(f => f.tick), [128, 132]);
 
   // Con cámara: recorte exacto, fondo donde la cinta no grabó y deltas que cruzan bloques.
   const camara = { x: 20, y: 8, w: 24, h: 30 }, vista = { x: 20, y: 8, width: 24, height: 30 };
@@ -390,6 +395,29 @@ test('createApp directo: recargar tras un fallo de paso abre una época con su b
   try { assert.ok(hitos.prepare("SELECT 1 FROM hitos WHERE epoca=1 AND tipo='bifurcacion'").get()); } finally { hitos.close(); }
 });
 
+test('pasarela: la cinta perdida en el hilo de la simulación se muestra con estado error', { timeout: 180_000 }, async t => {
+  const dir = directorio(t);
+  const pasarela = createWorkerGateway({ worldPath: join(dir, 'world.sqlite'), origin: 'https://carta.test', secure: true,
+    password: 'lector-c1b-password', seed: 42, params, manual: true, turbo: true, tape: true });
+  t.after(() => pasarela.close());
+  await pasarela.ready;
+  const http = cliente(pasarela.server);
+  await http.escuchar();
+  assert.equal((await http.pedir('/api/login', { password: 'lector-c1b-password' })).status, 200);
+  pasarela.start();
+  const meta = async () => JSON.parse((await http.pedir('/api/cinta/meta')).texto) as CintaMeta;
+  let antes = await meta();
+  for (let i = 0; i < 200 && !(antes.niveles[0]?.fotogramas > 1); i++) { await new Promise(r => setTimeout(r, 100)); antes = await meta(); }
+  assert.equal(antes.estado, 'ok');
+  // Sin su directorio, el siguiente bloque de L0 no se puede escribir: el hilo de la cinta cae.
+  renameSync(join(dir, 'cinta', 'n0'), join(dir, 'n0-fuera'));
+  let despues = antes;
+  for (let i = 0; i < 300 && despues.estado === 'ok'; i++) { await new Promise(r => setTimeout(r, 100)); despues = await meta(); }
+  assert.equal(despues.estado, 'error');
+  await assert.rejects(pasarela.flushTape(), 'la simulación ya no tiene cinta que vaciar');
+  assert.equal((await http.pedir('/api/tape/meta')).status, 200, 'lo grabado sigue a la vista');
+});
+
 const ARCHIVO = resolve(import.meta.dirname, '../../../archivo/tmp-v23-c1b');
 // Cabecera CNT1 (formato.ts): magia, nivel, fotogramas, t0, t1, crc y longitud de la clave; cada delta lleva tick y longitud.
 const CABECERA = 33, CRC = 25, LONGITUD_KF = 29;
@@ -480,20 +508,25 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
   const meta = lector.meta();
   const camara = { x: 0, y: 0, w: 96, h: 64 };
   const azar = (() => { let s = 12345; return () => (s = Math.imul(s, 1664525) + 1013904223 >>> 0) / 2 ** 32; })();
+  // La CPU del hilo separa el coste del lector de la espera: las pruebas corren en SCHED_IDLE con la torre cargada.
+  const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
+  const p95 = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(0.95 * (v.length - 1))]!;
+  const lentos: string[] = [];
   for (const n of meta.niveles) {
-    const tiempos: number[] = [], completo: number[] = [];
+    const pared: number[] = [], cpus: number[] = [], sinCamara: number[] = [];
     for (let i = 0; i < 1000; i++) {
       const tick = n.t0 + Math.floor(azar() * (n.t1 - n.t0 + 1));
       let inicio = performance.now();
+      const c = cpu();
       const r = JSON.parse(lector.chunk({ t: tick, n: 1, nivel: n.nivel, ...camara })) as ChunkResp;
-      tiempos.push(performance.now() - inicio);
-      // Entre dos bloques, el primer fotograma ≥ t es la clave del siguiente.
-      assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 <= tick + CINTA.pasos[n.nivel], JSON.stringify({ tick, ...r, baseFrame: !!r.baseFrame }));
-      if (i % 10 === 0) { inicio = performance.now(); lector.chunk({ t: tick, n: 1, nivel: n.nivel }); completo.push(performance.now() - inicio); }
+      pared.push(performance.now() - inicio); cpus.push(cpu() - c);
+      assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 <= tick, JSON.stringify({ tick, ...r, baseFrame: !!r.baseFrame }));
+      if (i % 10 === 0) { inicio = performance.now(); lector.chunk({ t: tick, n: 1, nivel: n.nivel }); sinCamara.push(performance.now() - inicio); }
     }
-    const orden = [...tiempos].sort((a, b) => a - b), p = (q: number) => orden[Math.floor(q * (orden.length - 1))]!;
-    t.diagnostic(JSON.stringify({ nivel: n.nivel, bytes: n.bytes, fotogramas: n.fotogramas, p50: p(0.5).toFixed(1), p95: p(0.95).toFixed(1),
-      max: orden.at(-1)!.toFixed(1), sinCamaraP95: [...completo].sort((a, b) => a - b)[Math.floor(0.95 * (completo.length - 1))]!.toFixed(1) }));
-    assert.ok(p(0.95) < 100, `nivel ${n.nivel}: p95 ${p(0.95).toFixed(1)} ms`);
+    const orden = [...pared].sort((a, b) => a - b);
+    t.diagnostic(JSON.stringify({ nivel: n.nivel, bytes: n.bytes, fotogramas: n.fotogramas, p50: orden[499]!.toFixed(1), p95: p95(pared).toFixed(1),
+      max: orden.at(-1)!.toFixed(1), cpuP95: p95(cpus).toFixed(1), sinCamaraP95: p95(sinCamara).toFixed(1), carga: loadavg()[0]!.toFixed(0) }));
+    if (p95(pared) >= 100) lentos.push(`nivel ${n.nivel}: p95 ${p95(pared).toFixed(1)} ms`);
   }
+  assert.deepEqual(lentos, []);
 });

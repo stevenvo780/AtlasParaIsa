@@ -345,18 +345,22 @@ export class LectorCinta {
     return r;
   }
 
-  /** El bloque de la lista con fotogramas en o después de `t`: el que lo contiene o el siguiente (tras una laguna). */
-  private bloqueDesde(lista: Bloque[], t: number): number {
-    const i = this.bloqueEn(lista, t);
-    return lista[i] && lista[i]!.t1 < t ? i + 1 : i;
+  /**
+   * El bloque desde el que leer `t`. Con `clave` es el del fotograma clave más cercano ≤ `t`, salvo que entre ese bloque
+   * y `t` haya una laguna; sin ella, el primero con fotogramas en o después de `t`.
+   */
+  private bloqueDesde(epoca: number, lista: Bloque[], t: number, clave: boolean): number {
+    const i = this.bloqueEn(lista, t), b = lista[i], siguiente = lista[i + 1];
+    if (!b || b.t1 >= t) return i;
+    return !clave || siguiente && this.lagunaEntre(epoca, b, siguiente) ? i + 1 : i;
   }
 
-  /** Primera época, desde la que se ve `t`, con fotogramas del nivel en o después de `t`. */
-  private ubicar(nivel: Nivel, t: number): { e: Epoca; i: number; desde: number } | undefined {
+  /** Primera época, desde la que se ve `t`, con un bloque del nivel desde el que leerlo. */
+  private ubicar(nivel: Nivel, t: number, clave: boolean): { e: Epoca; i: number; desde: number } | undefined {
     for (let k = this.epocaEn(t); k < this.epocas.length; k++) {
       const e = this.epocas[k]!, desde = Math.max(t, e.tMundo), lista = this.lista(e.id, nivel);
       if (desde >= e.fin) continue;
-      const i = this.bloqueDesde(lista, desde);
+      const i = this.bloqueDesde(e.id, lista, desde, clave);
       if (i < lista.length && lista[i]!.t0 < e.fin) return { e, i, desde };
     }
     return undefined;
@@ -418,13 +422,13 @@ export class LectorCinta {
         const lista = this.lista(e.id, nivel);
         if (t < e.fin) limite = e.fin;
         else clave = false;
-        const i = this.bloqueDesde(lista, t);
+        const i = this.bloqueDesde(e.id, lista, t, clave);
         if (i < lista.length) sitio = { e, i, desde: t };
       } else {
         const niveles = req.nivel === undefined || req.nivel === 'auto' ? NIVELES : [req.nivel];
         // El más fino que cubre t o, si ninguno lo cubre, el más fino con fotogramas después.
         for (const k of niveles) {
-          const s = this.ubicar(k, t);
+          const s = this.ubicar(k, t, true);
           if (!s) continue;
           const cubre = this.cobertura(s.e, k)!.t0 <= s.desde;
           if (cubre || !sitio) { sitio = s; nivel = k; }
@@ -482,7 +486,7 @@ export class LectorCinta {
   chunkAntiguo(fromTick: number, count: number, camara?: Viewport, encoding: TapeChunkEncoding = 'full', fondo?: Fondo): string {
     return this.reintentar(() => {
       const c = this.refrescar() ? this.coberturaTotal(0) : undefined;
-      const sitio = c && this.ubicar(0, fromTick);
+      const sitio = c && this.ubicar(0, fromTick, false);
       const tramo = sitio && this.tramo(sitio.e, 0, sitio.i, sitio.desde, { clave: false, n: count, hasta: sitio.e.fin, camara,
         fondo, completos: encoding !== 'delta' });
       // El resto del bloque es huérfano: lo siguiente visible empieza donde la época deja de verse.

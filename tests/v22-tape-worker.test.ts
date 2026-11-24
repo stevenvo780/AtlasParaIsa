@@ -6,14 +6,12 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { Duplex } from 'node:stream';
 import type { Socket } from 'node:net';
-import { setTimeout as delay } from 'node:timers/promises';
 import { createWorld } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { projectMirrorWorld } from '../src/server/sim-worker.js';
-import { TapeReader, TapeWriter, tapePathForWorld } from '../src/server/tape-store.js';
+import { TapeReader, TapeWriter } from '../src/server/tape-store.js';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
-import { createWorkerGateway } from '../src/server/gateway.js';
 import { applyClientTapeDelta, indexTiles, type TapeChunkResponse } from '../src/shared/tape.js';
 import type { Tile, Viewport, WorldView } from '../src/shared/types.js';
 
@@ -181,53 +179,20 @@ function http(server: import('node:http').Server) {
   });
 }
 
-test('HTTP full/delta validation in createApp and gateway; async writer flush and shutdown lose no ticks', { timeout: 30_000 }, async t => {
+test('HTTP full/delta validation in the legacy createApp reader', { timeout: 30_000 }, async t => {
   const dir = directory(t);
-  const worldPath = join(dir, 'worker.sqlite');
-  const gateway = createWorkerGateway({ worldPath, params, seed: 42, manual: true, turbo: true, tape: true,
-    origin: 'https://carta.test', password: 'v22-test-password', tapeKeyframeInterval: 17 });
-  t.after(() => gateway.close());
-  await gateway.ready;
-  assert.deepEqual(await gateway.flushTape(), { enabled: true, frames: 1, latestTick: 0 });
-  const workerHttp = http(gateway.server);
-  assert.equal((await workerHttp('/api/login', { password: 'v22-test-password' })).status, 200);
-  gateway.start();
-  await delay(1500);
-  const flushed = await gateway.flushTape();
-  assert.ok(flushed.latestTick > 30, `turbo advances smoothly (${flushed.latestTick} ticks)`);
-  assert.equal(flushed.frames, flushed.latestTick + 1);
-  const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
-  assert.ok(reader.readMeta().maxTick >= flushed.latestTick, 'flush is a durable FIFO barrier');
-  reader.close();
-
   const store = new Store(join(dir, 'app.sqlite'));
   const app = createApp({ store, params, seed: 42, manual: true, tape: true, origin: 'https://carta.test', password: 'v22-test-password' });
   t.after(async () => { try { await app.close(); } finally { store.close(); } });
   const appHttp = http(app.server);
   assert.equal((await appHttp('/api/login', { password: 'v22-test-password' })).status, 200);
-  for (const query of [appHttp, workerHttp]) {
-    const res = await query('/api/tape/chunk?fromTick=0&count=10&encoding=delta');
-    assert.equal(res.status, 200); assert.equal(res.value.encoding, 'delta');
-    assert.ok(res.value.baseFrame); assert.ok(Array.isArray(res.value.deltas)); assert.deepEqual(res.value.frames, []);
-    const full = await query('/api/tape/chunk?fromTick=0&count=1&encoding=full');
-    assert.equal(full.status, 200); assert.equal(full.value.frames.length, 1);
-    for (const encoding of ['bogus', '', 'DELTA']) assert.equal((await query(`/api/tape/chunk?encoding=${encoding}`)).status, 400);
-  }
-  await gateway.close();
-  assert.equal(gateway.workerExited, true);
-  const saved = new Store(worldPath, { readOnly: true });
-  const finalTick = saved.load()!.world.tick; saved.close();
-  const finalReader = new TapeReader({ path: tapePathForWorld(worldPath) });
-  try {
-    const meta = finalReader.readMeta();
-    assert.ok(finalTick >= flushed.latestTick);
-    assert.equal(meta.maxTick, finalTick); assert.equal(meta.totalFrames, finalTick + 1);
-    for (let start = 0; start <= finalTick; start += 90) {
-      const frames = expand(finalReader.readChunk(start, 90, undefined, undefined, 'delta'));
-      frames.forEach((frame, i) => assert.equal(frame.tick, start + i));
-    }
-  } finally { finalReader.close(); }
-  await assert.rejects(gateway.flushTape());
+  // La grabación del worker se comprueba en v23-cinta-recarga con el catálogo CNT1.
+  const res = await appHttp('/api/tape/chunk?fromTick=0&count=10&encoding=delta');
+  assert.equal(res.status, 200); assert.equal(res.value.encoding, 'delta');
+  assert.ok(res.value.baseFrame); assert.ok(Array.isArray(res.value.deltas)); assert.deepEqual(res.value.frames, []);
+  const full = await appHttp('/api/tape/chunk?fromTick=0&count=1&encoding=full');
+  assert.equal(full.status, 200); assert.equal(full.value.frames.length, 1);
+  for (const encoding of ['bogus', '', 'DELTA']) assert.equal((await appHttp(`/api/tape/chunk?encoding=${encoding}`)).status, 400);
 });
 
 test('turbo persistence honors tick cadence AND wall time, but gestures and close save immediately', async t => {

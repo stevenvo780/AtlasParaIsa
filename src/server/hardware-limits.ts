@@ -16,8 +16,8 @@ import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from 
  * `previous`, migración ni validación de respaldos.
  *
  * Es un límite de ADMISIÓN, no una promesa de RSS: dice hasta dónde se acepta un mundo antes
- * de considerarlo corrupto, no que ese mundo quepa cómodo ni que el paso llegue a tiempo
- * (de eso responde el gobernador por p95, ruling R17).
+ * de considerarlo corrupto, no que ese mundo quepa cómodo ni que el paso llegue a tiempo:
+ * a esa velocidad no la frena ningún software, la pone el hardware.
  */
 const TILES_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE;
 /**
@@ -197,7 +197,7 @@ export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor 
 
 /**
  * Combina los límites de admisión del anfitrión (`hostParams`) con el despacho real para todos los
- * chips detectados, gobernador por hardware (`techo` a 100 ms) y cadencia de persistencia de producción.
+ * chips detectados y la cadencia de persistencia de producción.
  */
 export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
   const hw = detectHostHardware(probe);

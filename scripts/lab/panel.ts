@@ -3,8 +3,10 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realp
 import { loadavg, totalmem } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { deserialize, serialize } from 'node:v8';
 import type { World } from '../../src/world/index.js';
 import type { WorldParams } from '../../src/world/params.js';
+import type { Chunk } from '../../src/world/terrain.js';
 import type { Violacion } from '../../src/world/invariantes.js';
 
 type Estado = 'cumple' | 'falla' | 'desconocido';
@@ -186,6 +188,16 @@ async function replica(trabajo: Trabajo): Promise<void> {
   params = parseParams({ motor: { ...params.motor, hilos: trabajo.hilos, gpu: trabajo.gpu } }, params);
   if (TICKS_PER_DAY !== 2400) throw new Error(`El brazo usa ${TICKS_PER_DAY} ticks/día; se esperaban 2400`);
   const mundo = createWorld(trabajo.semilla, params), fundadores = new Set(mundo.people.filter(p => p.role === 'neighbor').map(p => p.id));
+  // Sin almacén, el territorio que se retira se quedaría en memoria como objetos durante toda la corrida (≈ 25 MB por
+  // día simulado). Se archiva serializado cada día, como hace el Store al guardar, y `loadChunk` lo devuelve al volver.
+  const { bindWorldContext } = await importar(trabajo.raiz, 'world/spatial.ts') as typeof import('../../src/world/spatial.js');
+  const archivo = new Map<string, Buffer>();
+  bindWorldContext(mundo, { loadChunk: clave => { const guardado = archivo.get(clave); return guardado ? deserialize(guardado) as Chunk : null; } });
+  const archivar = () => {
+    const vistos = new Set<string>();
+    for (const chunk of mundo.retiredChunks) if (!vistos.has(chunk.key)) { vistos.add(chunk.key); archivo.set(chunk.key, serialize(chunk)); }
+    mundo.retiredChunks = [];
+  };
   const tiempos: number[] = [];
   let duras = 0, blandas = 0, comprobacionesRegion = 0, pasoMaxMs = 0, desde = performance.now(), tickDesde = 0;
   const revisar = () => {
@@ -222,7 +234,7 @@ async function replica(trabajo: Trabajo): Promise<void> {
         if (mundo.tick % trabajo.cadaTicks === 0) revisar();
       }
       if (mundo.tick % trabajo.cadaTicks !== 0) revisar();
-      censo(dia);
+      censo(dia); archivar();
     }
     escribir(trabajo.salida, { tipo: 'fin', estado: 'completo', presupuestoMs: params.gobernador.presupuestoMs, maxRssMiB: process.resourceUsage().maxRSS / 1024 });
   } catch (error) {

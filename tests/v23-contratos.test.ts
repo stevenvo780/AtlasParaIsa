@@ -342,3 +342,32 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
   const energiaChunk = cuantosChunk * (4 * D('Si', 'O')) + Math.round(CAPACIDAD_ATOMO * cuantosChunk * 3 * 300);
   assert.ok(Number.isSafeInteger(cuantosChunk) && Number.isSafeInteger(energiaChunk));
 });
+
+test('los índices de los 52 tipos de enlace son los de la congelación: la clave de toda sustancia guardada', () => {
+  // e, f y k de cada índice: solo dependen de las valencias y de qué π son 0, que no cambian con un mundo creado.
+  const congelados = '001 011 021 031 041 051 061 071 111 112 113 121 122 123 131 132 141 142 143 151 161 171 221 222 223 231 232 ' +
+    '241 242 243 251 261 271 331 332 341 342 351 361 371 441 442 443 451 461 471 551 561 571 661 671 771';
+  assert.equal(materia.TIPOS.map(t => `${t.e}${t.f}${t.k}`).join(' '), congelados);
+});
+
+test('las columnas fijas del frente son exactamente las Col de FrentePublico', () => {
+  type ColumnasFrente = { [K in keyof contratos.FrentePublico]-?: contratos.FrentePublico[K] extends contratos.Col ? K : never }[keyof contratos.FrentePublico];
+  type Fijas = (typeof contratos.COLUMNAS_FIJAS)[number][0];
+  const sinFija: [Exclude<ColumnasFrente, Fijas>] extends [never] ? true : false = true;
+  const sinCampo: [Exclude<Fijas, ColumnasFrente>] extends [never] ? true : false = true;
+  assert.ok(sinFija && sinCampo);
+  assert.equal(contratos.COLUMNAS_FIJAS.length, 15);
+});
+
+test('el metano rinde más por masa que la grasa y su llama en aire también pasa de 1.000 K', () => {
+  const { TIPOS } = materia;
+  const D = (a: string, b: string, k = 1): number => {
+    const [e, f] = [ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never)].sort((x, y) => x - y);
+    return TIPOS.find(t => t.e === e && t.f === f && t.k === k)!.d;
+  };
+  const qMetano = 2 * D('C', 'O', 2) + 4 * D('O', 'H') - 4 * D('C', 'H') - 2 * D('O', 'O', 2);
+  const qGrasa = 2 * D('C', 'O', 2) + 2 * D('O', 'H') - D('C', 'C') - 2 * D('C', 'H') - 1.5 * D('O', 'O', 2);
+  assert.ok(qMetano / 16.04 > qGrasa / 14.03, 'MJ/kg: grasa < metano');
+  // CH₄ + 2 O₂ + 8 N₂: 25 átomos.
+  assert.ok(295 + qMetano / (25 * naturaleza.CAPACIDAD_ATOMO) > 1000);
+});

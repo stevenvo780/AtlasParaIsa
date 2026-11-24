@@ -33,7 +33,7 @@ export interface Corte {
   tilesCambiadas: Tile[] | 'todas';      // desde el corte anterior; 'todas' solo tras abrir o bifurcar
   hitos: Hito[];                         // sin pérdida desde el corte anterior
   catalogo: EntradaCatalogo[];           // sustancias nuevas desde el corte anterior
-  serie: Record<CampoSerie, number>;     // contadores de la época (nacimientos y muertes acumulados para I9)
+  serie: Record<CampoSerie, number>;     // fila SERIE_CAMPOS del corte: nacimientos y muertes acumulados en la época (I9); serie.hz = hz
   hz: number;
 }
 

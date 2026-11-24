@@ -1,4 +1,4 @@
-// CONGELADOS desde el 2026-11-24: cambiar cualquier contrato de V23 (este fichero, materia/tipos.ts y shared/{materia,naturaleza,cinta,fotograma}.ts) exige pasar por el integrador.
+// CONGELADOS desde el 2026-11-24 (firma de Claude Opus tras la revisión de GPT-6.1 Sol; refirmados por Claude Opus el mismo día tras la pasada adversarial de Gemini 4 Neon): cambiar cualquier contrato de V23 (este fichero, materia/tipos.ts y shared/{materia,naturaleza,cinta,fotograma}.ts) exige pasar por el integrador.
 /**
  * Contratos del motor V23 (ARQ-motor §2), congelados en la ola 0 con la reconciliación de PLAN-V23 §1.2 y
  * AJUSTES-ORQUESTADOR aplicadas: un solo `Intento` (la materia viaja como pares [SustanciaId, cuantos]), sin
@@ -83,7 +83,7 @@ export interface FrentePublico {
   readonly cuerpo: Col;                  // CUERPO_ANCHO f32, en el orden de CAMPOS_CUERPO
   readonly rasgos: Col;                  // RASGOS_ANCHO f32
   readonly genoma: Col;                  // GENOMA_ANCHO f32: la pareja lo aporta al concebir
-  readonly pareja: Col;                  // consentimiento de cría: −1 = no fértil/no consiente; 0 = cualquiera compatible (fauna); uid > 0 = mejor vínculo fértil en alcance (personas; mutuo en el mismo tick desempata por mayor reserva, luego menor uid)
+  readonly pareja: Col;                  // consentimiento de cría: −1 = no fértil/no consiente; 0 = cualquiera compatible (fauna); uid > 0 = mejor vínculo fértil en alcance (personas). Quién concibe en una pareja mutua lo decide la ley de N
   col(nombre: string): Col;              // columnas registradas por los demás carriles
 }
 
@@ -256,7 +256,8 @@ export interface CtxDueno extends CtxLectura {
   /** Único, sin orden y < 2⁵³ (llegar ahí es fatal). 'nonce' arranca tras `cargar` por encima del mayor nonce de
    * `MateriaCheckpoint.enVuelo`. 'uid' arranca en ≥ 1 (0 queda reservado en `FrentePublico.pareja`). */
   id(tipo: 'uid' | 'suceso' | 'comunidad' | 'estructura' | 'nonce'): number;
-  /** Da de alta una cría en la tabla de organismos (y registra `persona` en este dueño si `clase === Clase.Persona`). */
+  /** Da de alta una cría en este dueño, en F4–F5 (y registra `persona` si `clase === Clase.Persona`). El llamador le da
+   * `id('uid')` y escribe su fila en F6, como las demás de este dueño. */
   alta(clase: Clase, persona?: Person): Ref;
   /** Da de baja un organismo propio (gen++ y vivo = 0 en el frente t+1, y lo retira de `personas` si es Persona). */
   baja(r: Ref): void;
@@ -329,7 +330,8 @@ export class ErrorDispositivo extends Error {
  * Canal con el servidor de una tarjeta. Los datos van por un fichero de /dev/shm abierto por ambos lados; la tubería
  * solo lleva órdenes y respuestas de pocos bytes (AJUSTES §2: por tubería, 1 M de agentes costaba 1,3 s con un kernel de 6 ms).
  * `enviar` y `recibir` van separados para que F0 lance todas las tarjetas sin bloquear y B2 recoja las respuestas en
- * paralelo con F1–F2 de CPU. Ambos lanzan `ErrorDispositivo` si cae el servidor o vence el plazo.
+ * paralelo con F1–F2 de CPU. Las respuestas llegan en el orden de las órdenes: cada `recibir` devuelve la de la `enviar`
+ * más antigua sin contestar. Ambos lanzan `ErrorDispositivo` si cae el servidor; `recibir`, también si vence el plazo.
  * Implementa: M3 (`gpu/canal.ts`). Consumen: M3 (`percibir-gpu.ts`) y G (`materia-gpu.ts`).
  */
 export interface CanalGpu {
@@ -338,8 +340,8 @@ export interface CanalGpu {
   crecer(bytes: number): void;
   escribir(desde: number, datos: ArrayBufferView): void;
   leer(desde: number, destino: ArrayBufferView): void;
-  enviar(orden: Uint8Array): void;                       // no bloquea: ErrorDispositivo si el servidor cayó
-  recibir(plazoMs: number): Uint8Array;                  // ErrorDispositivo si vence el plazo o cae el servidor
+  enviar(orden: Uint8Array): void;                       // no bloquea
+  recibir(plazoMs: number): Uint8Array;                  // bloquea hasta la respuesta o el plazo
   cerrar(): void;
 }
 

@@ -105,7 +105,8 @@ export type Suceso = { tipo: 'cronica'; evento: ChronicleEvent } | { tipo: 'sust
  * control (créditos = ranuras.length, cadencia = CINTA.pasos[0]) en la ola 1 y M6 le añade ranuras y sucesos en la 2.
  * - `control`: CONTROL_ENLACE_BYTES.
  * - `ranuras`: una por fotograma en vuelo, SAB crecible con la disposición de `regionesRanura`.
- * - `sucesos`: anillo de bytes (≤ 256 MiB: el único freno físico) con registros [u32 len LE][len bytes de v8.serialize(Suceso)],
+ * - `sucesos`: anillo de bytes de tamaño fijo (≤ 256 MiB: el único freno físico; no crece, porque las posiciones son
+ *   módulo su longitud) con registros [u32 len LE][len bytes de v8.serialize(Suceso)],
  *   envueltos byte a byte módulo `sucesos.byteLength` (también la cabecera u32 si cae en el borde).
  */
 export interface DescriptorEnlace { control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null }

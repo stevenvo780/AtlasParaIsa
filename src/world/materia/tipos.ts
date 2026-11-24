@@ -50,8 +50,9 @@ export interface Reaccion extends Ecuacion {
   a: SustanciaId; b: SustanciaId; nivelT: number;
   ea: number;                  // J por cuanto de reacción: barrera, GAMMA·D del enlace más fuerte que disminuye
   /** Familia del enlace catalizable más débil que disminuye, índice de `Plantilla.kappa` (0 = C–O, 1 = C–N,
-   * 2 = C–C/C–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. Tomar el más débil
-   * evita que C–H (403) tape siempre a C–N (280, proteínas) y C–O (320, azúcares/celulosa). −1 = ninguno catalizable. */
+   * 2 = C–C/C–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
+   * catalizable. Sustituye al «más fuerte» de ARQ-materia §3.1, con el que C–C y C–H tapaban a C–O (azúcares, celulosa)
+   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H), que fija tests/v23-contratos.test.ts. */
   catalisis: -1 | 0 | 1 | 2;
 }
 
@@ -126,7 +127,8 @@ export const libroVacio = (): Libro =>
 export interface ArenaMateria {
   /** Lote vacío en `celda` (`Terreno.celda`); −1 para los de un cuerpo u objeto llevado, que van con su organismo. */
   nuevo(rol: Rol, celda: number, forma: number): LoteRef;
-  /** Marca inactivo y encola el reciclaje (puede llamarse en F1/F4/F5): la ranura solo se reutiliza en barrera con gen++. */
+  /** Libera un lote vacío (sin cuantos ni calor: liberar materia es fatal, I1) en F1, F4 o F5: deja de estar vivo al
+   * momento y la ranura solo se reutiliza en barrera con gen++. */
   liberar(l: LoteRef): void;
   vivo(l: LoteRef): boolean;   // false si la referencia caducó
   propio(l: LoteRef): boolean; // vivo(l) y pertenece a este hilo dueño (para validar `Intento.lote` en M5)
@@ -143,7 +145,7 @@ export interface ArenaMateria {
   formar(l: LoteRef, forma: number): void; // `codigoForma` nuevo (romper con patrón, unir)
   mover(t: Traslado): number;  // recorta a existencias y devuelve lo movido
   /** Traslado local con la misma selección que `garantizar` (Exacta, Digerible, Agua o Todo, con su parte del calor):
-   * evita duplicar la regla de `Parte` entre el mismo dueño y entre dueños. Devuelve los cuantos movidos. */
+   * evita duplicar la regla de `Parte` entre el mismo dueño y entre dueños. Devuelve los cuantos movidos (Σ de sus sustancias). */
   moverParte(de: LoteRef, a: LoteRef, p: Pedido): number;
   moverCalor(de: LoteRef, a: LoteRef, j: number): number;
   /** Aplica `e` hasta `veces` veces, recortado a existencias y a calor ≥ 0; devuelve las que aplicó. Reacciones (P),

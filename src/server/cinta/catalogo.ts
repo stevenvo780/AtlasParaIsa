@@ -41,7 +41,9 @@ function escribir(fd: number, buffer: Buffer, offset: number, desde: number, has
   }
 }
 
-function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: BloqueCinta[]): void {
+// Solo el último segmento de cada nivel recibe anexos, así que solo él puede traer una cola a medias; los demás se
+// sellaron con sus bloques ya sincronizados y basta con su tamaño. Releerlos todos costaría la cinta entera al abrir.
+function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: BloqueCinta[], leer: boolean): void {
   const fd = openSync(path, 'r+');
   try {
     const size = fstatSync(fd).size;
@@ -52,6 +54,7 @@ function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: Bloqu
         || fila.bytes <= 0 || fila.bytes > segmento.bytes - offset || fila.t0 <= t1) {
         throw new Error(`Índice de bloque incoherente: ${segmento.id}/${fila.offset}.`);
       }
+      if (!leer) { offset += fila.bytes; t1 = fila.t1; continue; }
       const data = Buffer.allocUnsafe(fila.bytes);
       for (let cursor = 0; cursor < data.length;) {
         const n = readSync(fd, data, cursor, data.length - cursor, offset + cursor);
@@ -143,9 +146,10 @@ export class CatalogoCinta {
       || this.db.prepare('PRAGMA foreign_key_check').get()) throw new Error('Catálogo de cinta corrupto.');
     const segmentos = this.segmentos();
     const referenciados = new Set(segmentos.map(s => rutaSegmento(this.directorio, s.nivel, s.id)));
+    const ultimos = new Set(new Map(segmentos.map(s => [s.nivel, s.id])).values());
     const bloques = this.db.prepare('SELECT * FROM bloques WHERE segmento=? ORDER BY offset');
     for (const s of segmentos) {
-      verificarSegmento(rutaSegmento(this.directorio, s.nivel, s.id), s, bloques.all(s.id) as unknown as BloqueCinta[]);
+      verificarSegmento(rutaSegmento(this.directorio, s.nivel, s.id), s, bloques.all(s.id) as unknown as BloqueCinta[], ultimos.has(s.id));
     }
     const solape = this.db.prepare(`SELECT 1 FROM (
       SELECT t0,lag(t1) OVER (PARTITION BY epoca,nivel ORDER BY t0) AS anterior FROM bloques

@@ -65,6 +65,12 @@ test('390×844 y escritorio: la barra cabe y la salud se actualiza aun sin nuevo
       await expect(panel).toHaveAttribute('data-estado', 'parado');
       await expect(panel).toContainText('GPU 0 → CPU');
       await expect(panel.locator('span').filter({ hasText: 'Recargas' }).locator('strong')).toHaveText('2');
+      // El panel vive en Rendimiento; en las demás pestañas la salud sigue a la vista en el chip de la barra.
+      await expect(panel).toBeVisible();
+      await page.locator('#stats-tab-life').click();
+      await expect(page.locator('#stats-tab-life')).toHaveAttribute('aria-selected', 'true');
+      await expect(panel).toBeHidden();
+      await expect(chip).toBeVisible();
       assert.deepEqual(errors, []); await context.close();
     }
   } finally { await browser?.close(); await server?.close(); }

@@ -9,7 +9,7 @@
  *    entrada —válida, corrupta o mutada en sitio entre dos llamadas— el código vigente tiene que aceptar
  *    lo mismo y lanzar el mismo tipo de error con el mismo mensaje.
  * 3. Coste: un paso de `advancePopulation` con 3 000 habitantes, 2 500 legados citados, 200 pendientes,
- *    600 refugios techados y lluvia, con recorridos lineales de estructuras y legados.
+ *    600 refugios techados y lluvia, con recorridos lineales de habitantes, estructuras y legados.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -690,7 +690,7 @@ function contarLecturas<T>(filas: T[]) {
   return { observadas, get lecturas() { return lecturas; } };
 }
 
-test('V18 coste: advancePopulation indexa los refugios y recorre los legados un número acotado de veces', () => {
+test('V18 coste: advancePopulation recorre habitantes, refugios y legados un número acotado de veces', () => {
   const world = createWorld(20261122, DEFAULT_TOOLS);
   const land = world.tiles.filter(tile => tile.terrain !== 'water').length;
   assert.ok(land >= 900, `hacen falta teselas de tierra (${land})`);
@@ -715,10 +715,15 @@ test('V18 coste: advancePopulation indexa los refugios y recorre los legados un 
   world.structures = estructuras.observadas;
   world.legacy = legados.observadas;
   world.retiredLegacy = pendientes.observadas;
+  const personas = contarLecturas(world.people);
+  world.people = personas.observadas;
 
   world.tick++;
   advancePopulation(world, { emit: emitFor(world), beforeDeath: settle });
 
+  // Cada pasada por la población es lineal; ninguna persona recorre a las demás.
+  assert.ok(personas.lecturas <= 8 * personas.observadas.length, `habitantes: ${personas.lecturas} lecturas`);
+  assert.ok(estructuras.lecturas > 0, 'el paso medido pasa por el beneficio del refugio');
   assert.ok(estructuras.lecturas <= estructuras.observadas.length,
     `las estructuras se indexan una vez para toda la población (${estructuras.lecturas} lecturas)`);
   // Un recorrido impide que reaparezcan fallecidos y otro valida los registros retenidos.

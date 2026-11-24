@@ -107,6 +107,8 @@ export interface WorldView {
   geologyKey?: number;
   /** V20: emergent algebraic chemistry summary (discovered formulas, active lots, highest temperature tier). */
   chemistry?: import('./chemistry.js').ChemistrySummaryView;
+  /** V24: active/recent asynchronous Divine Whispers (non-coercive inspirations awaiting reception). */
+  whispers?: import('./worldmap.js').DivineWhisper[];
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
   /** M10: claves «cx,cy» (regiones de 16 × 16) que el servidor simula ahora dentro de esta ventana; el resto

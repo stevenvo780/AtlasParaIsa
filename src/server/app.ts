@@ -15,7 +15,7 @@ import { technologyRecipeDetail } from '../world/technology.js';
 import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
 import { technologyJournalNearCapacity } from '../world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
-import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
+import type { ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
@@ -24,6 +24,9 @@ import { Gobernador, teselasPorHabitante } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
+import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
+import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
+import { createChunkObserver, projectMirrorTile, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
 export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -47,9 +50,20 @@ export interface AppOptions {
    * (producción): se negocia y solo se comprimen los `state` hacia clientes con acuse
    * (`/ws?ack=1`) cuyo enlace no es de LAN; ver `compresion` en `createApp`, con la cifra. */
   perMessageDeflate?: boolean;
-  /** Worker lifecycle hooks; never change simulation inputs or arithmetic. */
+  /** Worker lifecycle hooks; never change simulation inputs or arithmetic. `afterStep` receives the
+   * live simulation rate (EMA of steps per wall-clock second). */
   beforeStep?: () => void;
-  afterStep?: () => void;
+  afterStep?: (simHz: number) => void;
+  /** V21: uncapped loop. `tickMs = 0` (also implied by `tickMs: 0`): one step per `setImmediate`,
+   * never an idle sleep, so I/O still interleaves between steps. Steps never clone the world. */
+  turbo?: boolean;
+  /** V21: record the DVR tape and serve `/api/tape/*` (defaults to `turbo`). In `createApp` the
+   * app owns the writer; behind the worker gateway the simulation worker owns it. */
+  tape?: boolean;
+  tapeMaxFrames?: number;
+  tapeKeyframeInterval?: number;
+  /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
+  observerOnly?: boolean;
 }
 /** Shared HTTP/WS security and transport, without a World or a SQLite writer. */
 export interface ReadOnlyBackend {
@@ -63,6 +77,9 @@ export interface ReadOnlyBackend {
   readonly deltas: boolean;
   readonly failed: boolean;
   readonly respaldo: unknown;
+  /** V21 DVR (read-only, never an RPC to the simulation). Absent when the tape is disabled. */
+  tapeMeta?(): TapeMetaResponse;
+  tapeChunk?(fromTick: number, count: number, viewport?: Viewport): TapeChunkResponse;
 }
 export type GatewayAppOptions = Omit<AppOptions, 'store' | 'params' | 'beforeStep' | 'afterStep'>;
 export function createReadOnlyApp(options: GatewayAppOptions, gateway: ReadOnlyBackend) {
@@ -208,6 +225,35 @@ export function parseGesture(value: unknown): Gesture {
     Object.keys(g).some(k => !['id', 'kind', 'x', 'y', 'memoryId', 'agentId', 'order'].includes(k))) throw new HttpError(400, 'La forma o el destino del gesto no es válido.');
   return { id: g.id, kind: g.kind as Gesture['kind'], x: g.x as number, y: g.y as number, ...(g.memoryId === undefined ? {} : { memoryId: g.memoryId as string }), ...(g.kind === 'command' ? { agentId: g.agentId as string, order: g.order as Gesture['order'] } : {}) };
 }
+/** V21: what an observer-only world answers to a direct order to an inhabitant. */
+export const MENSAJE_MODO_OBSERVADOR = 'Modo observador: los habitantes actúan de forma autónoma sin órdenes directas.';
+/** Direct NPC control: the `command` gesture (an `order` to one inhabitant), and the V21 alias `order`. */
+function esOrdenDirecta(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === 'command' || kind === 'order';
+}
+/** Ventana de cámara opcional en la consulta (`x`, `y`, `width`, `height`): o las cuatro o ninguna. */
+function camaraDeConsulta(params: URLSearchParams): Viewport | undefined {
+  const keys = ['x', 'y', 'width', 'height'] as const;
+  const present = keys.filter(k => params.has(k));
+  if (!present.length) return undefined;
+  if (present.length !== keys.length) throw new HttpError(400, 'Ventana de cámara no válida.');
+  try { return normalizeViewport({ x: Number(params.get('x')), y: Number(params.get('y')), width: Number(params.get('width')), height: Number(params.get('height')) }); }
+  catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+}
+/** Entero de la consulta dentro de [min, max]; `fallback` si falta. */
+function enteroDeConsulta(params: URLSearchParams, key: string, min: number, max: number, fallback?: number): number {
+  const raw = params.get(key);
+  if (raw === null) {
+    if (fallback === undefined) throw new HttpError(400, `Falta el parámetro ${key}.`);
+    return fallback;
+  }
+  if (!/^\d{1,15}$/.test(raw)) throw new HttpError(400, `Parámetro ${key} no válido.`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max) throw new HttpError(400, `Parámetro ${key} no válido.`);
+  return value;
+}
 async function body(req: IncomingMessage) {
   if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Se requiere JSON.');
   let size = 0;
@@ -278,6 +324,10 @@ export function createApp(options: AppOptions) {
 function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; gateway?: ReadOnlyBackend }) {
   const store = options.store!, gateway = options.gateway;
   const sessions = gateway?.sessions ?? store;
+  /** V21. `tickMs: 0` is the uncapped loop too; the tape follows turbo unless it is set explicitly. */
+  const turbo = !!options.turbo || options.tickMs === 0;
+  const observerOnly = !!options.observerOnly;
+  const tapeRequested = options.tape ?? turbo;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const verifyPassword = passwordVerifier(options);
   const primaryUrl = new URL(options.origin);
@@ -363,7 +413,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
   const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
-  const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
+  const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: turbo ? 0 : 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
       politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
@@ -469,6 +519,49 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
   }
   if (!gateway) renovarReserva();
+  /** V21 DVR of a world simulated in this thread (`createApp`). Behind the gateway the worker records
+   * and `gateway.tapeMeta/tapeChunk` read; here the app owns both ends of the same tape. */
+  const tapePath = !gateway && tapeRequested ? (store.path === ':memory:' ? ':memory:' : tapePathForWorld(store.path)) : undefined;
+  let tapeWriter = tapePath ? new TapeWriter({ path: tapePath, maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval }) : undefined;
+  const observadorCinta = createChunkObserver();
+  let ultimoTickGrabado = -1;
+  /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
+  let simHz = 0, ultimoLatidoPaso: number | null = null;
+  let ultimaDifusionTurbo = -Infinity;
+  function grabarCinta() {
+    if (!tapeWriter || failed || aMedioPaso || world.tick === ultimoTickGrabado) return;
+    try {
+      const { chunks, changed, fast } = observadorCinta.scan(world);
+      const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, ultimoTickGrabado < 0);
+      const tiles: Tile[] = [];
+      for (const [key, chunk] of chunks) if (keyframe || changed.has(key)) for (const tile of chunk) tiles.push(projectMirrorTile(tile, fast));
+      tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz);
+      ultimoTickGrabado = world.tick;
+    } catch (error) {
+      // A DVR is an observer: it never pauses the world. It stops recording and says so once.
+      console.warn(`La cinta dejó de grabar: ${error instanceof Error ? error.message : 'error desconocido'}.`);
+      try { tapeWriter.close(); } catch { /* ya está perdida */ }
+      tapeWriter = undefined;
+    }
+  }
+  grabarCinta();
+  tapeWriter?.flush();
+  const tapeReader = tapePath ? new TapeReader({ path: tapePath, observerOnly, turbo }) : undefined;
+  /** Static/unmodified tiles of one chunk request: one projection of the camera, not one per frame. */
+  function fondoDeCinta(viewport?: Viewport) {
+    if (!viewport || aMedioPaso) return undefined;
+    let fondo: Map<string, Tile> | undefined;
+    return (x: number, y: number): Tile => {
+      if (!fondo) {
+        fondo = new Map();
+        for (const tile of projectWorld(world, viewport, context).tiles) fondo.set(`${tile.x},${tile.y}`, tile);
+      }
+      return fondo.get(`${x},${y}`) ?? projectWorld(world, { x, y, width: 1, height: 1 }, context).tiles[0]!;
+    };
+  }
+  const cinta: { meta(): TapeMetaResponse; chunk(fromTick: number, count: number, viewport?: Viewport): TapeChunkResponse } | null =
+    gateway ? (gateway.tapeMeta && gateway.tapeChunk ? { meta: () => gateway.tapeMeta!(), chunk: (f, c, v) => gateway.tapeChunk!(f, c, v) } : null)
+      : tapeReader ? { meta: () => tapeReader.readMeta(240), chunk: (f, c, v) => tapeReader.readChunk(f, c, v, fondoDeCinta(v)) } : null;
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
@@ -659,6 +752,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     } finally { if (!enPaso) anotarOcupado(desde); }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
+    if (observerOnly && esOrdenDirecta(gesture)) throw new HttpError(410, MENSAJE_MODO_OBSERVADOR);
     if (gateway) return gateway.gesture(gesture, hash);
     if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
     let saved: GestureResult | null;
@@ -684,7 +778,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
     options.beforeStep?.();
     try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
-    options.afterStep?.();
+    grabarCinta();
+    options.afterStep?.(simHz);
   }
   function avanzar() {
     if (failed || stopped) return;
@@ -695,6 +790,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     beats.push(stepStarted); if (beats.length > 120) beats.shift();
     const span = beats.length > 1 ? beats[beats.length - 1]! - beats[0]! : 0;
     runtime.tickHz = span > 0 ? (beats.length - 1) * 1000 / span : 0;
+    if (ultimoLatidoPaso !== null && stepStarted > ultimoLatidoPaso) {
+      const instantaneo = 1000 / (stepStarted - ultimoLatidoPaso);
+      simHz = simHz > 0 ? simHz * 0.8 + instantaneo * 0.2 : instantaneo;
+    }
+    ultimoLatidoPaso = stepStarted;
+    // Turbo publishes the live EMA: with no sleep between steps, a 120-step window lags by seconds.
+    if (turbo && simHz > 0) runtime.tickHz = simHz;
     const batch = [...pending.values()];
     const valid: Pending[] = [];
     // T104: sin clon, el paso corre sobre el mundo vigente y la atomicidad la sostiene esto.
@@ -718,8 +820,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       //   guarda. Copiar el mundo costaba 40–245 ms por paso y casi nunca se usaba.
       // · `false` (T104): punto de restauración en todo paso y simulación sobre el mundo vigente.
       // `cloneMs` mide lo que costó reservar la vuelta atrás (0 sin reserva).
-      const clonar = paramsOf(world).motor.clonPorPaso;
-      if (!clonar) punto = puntoDeRestauracion(world);
+      // V21: turbo and observer-only steps never copy the world (`clonPorPaso` off). A step with gestures
+      // still keeps its undo (`SessionRevoked`) with a restoration point; one without runs in place.
+      const sinClon = turbo || observerOnly;
+      const clonar = !sinClon && paramsOf(world).motor.clonPorPaso;
+      if (sinClon) { if (valid.length) punto = puntoDeRestauracion(world); else sinReserva = true; }
+      else if (!clonar) punto = puntoDeRestauracion(world);
       else sinReserva = valid.length === 0;
       const draft = clonar && !sinReserva ? cloneWorld(world, context) : world;
       runtime.cloneMs = monotonicNow() - cloneStarted;
@@ -783,7 +889,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // Reloj real, no `monotonicNow` — mismo motivo que `medicion` arriba.
       const fases = fasesEnCero();
       Object.assign(fases, medicion.fases, { save: runtime.saveMs });
-      if (world.tick % 5 === 0 || valid.length) {
+      // Turbo: a step every event-loop turn would project for every viewer at 100–300 Hz; viewers get
+      // the live world at most every `TURBO_MIRROR_MS` (the DVR tape keeps every tick).
+      const difundir = turbo ? valid.length > 0 || relojReal() - ultimaDifusionTurbo >= TURBO_MIRROR_MS : world.tick % 5 === 0 || valid.length > 0;
+      if (difundir) {
+        if (turbo) ultimaDifusionTurbo = relojReal();
         const broadcastStarted = performance.now();
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
@@ -855,7 +965,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         armarGraciaCarga();
-        return json(res, 200, { authenticated: !!hash && sessions.sessionValid(hash) });
+        // V21 flags travel only when set: a classic world answers exactly what it always did.
+        return json(res, 200, { authenticated: !!hash && sessions.sessionValid(hash),
+          ...(observerOnly ? { observerOnly: true } : {}), ...(cinta ? { tapeEnabled: true } : {}), ...(turbo ? { turbo: true } : {}) });
       }
       if (req.method === 'POST') checkOrigin(req, expectedOrigin);
       if (req.method === 'POST' && url.pathname === '/api/login') {
@@ -895,8 +1007,25 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           return res.end(cuerpo);
         }
         if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
+        // V21 DVR: read-only, from the tape alone (never an RPC to the simulation).
+        if (req.method === 'GET' && url.pathname === '/api/tape/meta') {
+          if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
+          return json(res, 200, cinta.meta());
+        }
+        if (req.method === 'GET' && url.pathname === '/api/tape/chunk') {
+          if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
+          const fromTick = enteroDeConsulta(url.searchParams, 'fromTick', 0, Number.MAX_SAFE_INTEGER, 0);
+          const count = enteroDeConsulta(url.searchParams, 'count', 1, 240, 60);
+          const chunk = cinta.chunk(fromTick, count, camaraDeConsulta(url.searchParams));
+          if (!aceptaGzip(req)) return json(res, 200, chunk);
+          const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(chunk)), { level: 3 });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+          return res.end(cuerpo);
+        }
         if (req.method === 'POST' && (url.pathname === '/api/gesture' || (gateway && url.pathname === '/api/gestures'))) {
-          const gesture = parseGesture(await body(req));
+          const raw = await body(req);
+          if (observerOnly && esOrdenDirecta(raw)) throw new HttpError(410, MENSAJE_MODO_OBSERVADOR);
+          const gesture = parseGesture(raw);
           return json(res, 200, await requestGesture(gesture, hash));
         }
         throw new HttpError(404, 'Ruta no encontrada.');
@@ -1001,6 +1130,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
               return;
             }
             if (!parsed || parsed.type !== 'gesture') throw new HttpError(400, 'Mensaje desconocido.');
+            if (observerOnly && esOrdenDirecta(parsed.gesture)) throw new HttpError(410, MENSAJE_MODO_OBSERVADOR);
             const result = await requestGesture(parseGesture(parsed.gesture), hash);
             if (sessions.sessionValid(hash)) send(client, { type: 'result', result });
           } catch (error) { send(client, { type: 'error', message: error instanceof HttpError ? error.message : 'No se pudo aplicar el gesto.' }); }
@@ -1014,16 +1144,30 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   // tickMs`, no «tickMs después de terminar», así un paso lento no desplaza para
   // siempre el reloj del mundo. Tras una pausa larga se recita, nunca se recupera
   // el retraso con una ráfaga de pasos: el mundo no salta hacia atrás ni adelante.
-  const tickMs = options.tickMs ?? 100;
+  const tickMs = turbo ? 0 : options.tickMs ?? 100;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** V21 turbo: the pending `setImmediate` of the uncapped loop (one step per event-loop turn). */
+  let inmediato: ReturnType<typeof setImmediate> | undefined;
+  let bucleTurbo = false;
   let next = monotonicNow() + tickMs;
   /** Tras un paso que se pasó del intervalo: hasta cuándo puede esperar el siguiente a que acabe la E/S. */
   let cederHasta: number | null = null;
   /** Citas cedidas desde ese paso: con clientes WS, nunca menos de `VUELTAS_CON_CLIENTES_WS`. */
   let cedidas = 0;
-  function citar(ms: number) { timer = setTimeout(tic, ms); timer.unref(); }
+  function citar(ms: number) {
+    if (turbo) { bucleTurbo = true; inmediato = setImmediate(tic); return; }
+    timer = setTimeout(tic, ms); timer.unref();
+  }
   function tic() {
     if (stopped) return;
+    if (turbo) {
+      // Uncapped: never an idle sleep. `setImmediate` runs after the poll phase, so every step leaves
+      // a full event-loop turn to HTTP, WS and worker RPCs. A failed world stops spinning.
+      inmediato = undefined;
+      stepOnce();
+      if (!stopped && !failed) citar(0);
+      return;
+    }
     // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
     const enGraciaCarga = graciaCargaHasta > 0 && (() => {
       const ahora = relojReal();
@@ -1077,7 +1221,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     server, stepOnce, broadcast, requestGesture, view,
     get respaldo() { return respaldo; },
     /** Arranca el bucle de pasos cuando `createApp` se creó con `manual: true` (p. ej. tras la autoprueba GPU). */
-    start() { if (!gateway && !stopped && !timer) { next = monotonicNow() + tickMs; citar(Math.max(0, next - monotonicNow())); } },
+    start() { if (!gateway && !stopped && !timer && !bucleTurbo) { next = monotonicNow() + tickMs; citar(Math.max(0, next - monotonicNow())); } },
     get world() { return world; }, get failed() { return failed; },
     /** Gestos aceptados que esperan su paso (bancos y pruebas: saber que un gesto ya está en el lote
      * del paso siguiente sin adivinarlo por tiempo). */
@@ -1095,7 +1239,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; runtime.gobernador!.estado = 'manual'; runtime.gobernador!.palancaActiva = null; gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; } },
     close() {
       if (cierre) return cierre;
-      stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat); clearInterval(latido);
+      stopped = true; if (timer) clearTimeout(timer); if (inmediato) clearImmediate(inmediato); clearInterval(heartbeat); clearInterval(latido);
       for (const item of pending.values()) { item.promise.catch(() => undefined); item.reject(new HttpError(503, 'El servicio se está cerrando.')); }
       pending.clear();
       for (const socket of clients.keys()) socket.terminate();
@@ -1110,7 +1254,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         try {
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
-          if (!gateway) await cerrarPiscinasDeComputo();
+          try {
+            // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
+            try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
+          } finally {
+            if (!gateway) await cerrarPiscinasDeComputo();
+          }
         }
       })();
       return cierre;

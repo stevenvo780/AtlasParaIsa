@@ -137,6 +137,8 @@ import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardw
 import { resumenDespacho } from './resumen-vivo.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
+import { TapeWriter, tapePathForWorld } from './tape-store.js';
+import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
 import type { AppOptions } from './app.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
@@ -150,6 +152,15 @@ export interface SimWorkerOptions {
   deployment?: boolean;
   /** Test-only synchronous block, deliberately occupying the worker event loop. */
   testStepDelayMs?: number;
+  /** V21: uncapped loop (`tickMs = 0`, a step per `setImmediate`); the live mirror is throttled to
+   * `TURBO_MIRROR_MS` while the tape still records every tick. */
+  turbo?: boolean;
+  /** V21: record every step in the DVR tape (`tapePathForWorld(worldPath)`). Defaults to `turbo`. */
+  tape?: boolean;
+  tapeMaxFrames?: number;
+  tapeKeyframeInterval?: number;
+  /** V21: inhabitants act autonomously; direct NPC orders are rejected. */
+  observerOnly?: boolean;
 }
 export interface SessionMirror { hash: string; expires: number; validity: SharedArrayBuffer; }
 export type MirrorPageField = 'people' | 'places' | 'animals' | 'structures' | 'blueprints' | 'communities'
@@ -176,6 +187,62 @@ function packed(value: unknown): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(serialize(value));
 }
 
+/** Independent per-observer change tracker over the resident tiles, grouped by 16×16 chunk.
+ * Never drains the TileStore's change channel: revisions and the SAB gate are read-only stamps. */
+export function createChunkObserver() {
+  const revisions = new WeakMap<Tile, number | undefined>();
+  let previousKeys = new Set<string>(), lastWorld: World | undefined;
+  let lastGate: ReturnType<typeof residentSnapshotGate>;
+  let lastGateSerial = 0;
+  return {
+    /** Chunks of `world` (all resident tiles) and the keys changed since the previous scan. */
+    scan(world: World) {
+      const gate = residentSnapshotGate(world.tiles);
+      const raw = residentBackingArray(world.tiles);
+      const changed = new Set<string>();
+      const chunks = new Map<string, Tile[]>();
+      const force = lastWorld !== world || gate?.identity !== lastGate?.identity || gate?.epoch !== lastGate?.epoch;
+      const parallelChanged = !!gate && gate.serial !== lastGateSerial;
+      for (const tile of raw) {
+        const key = `${Math.floor(tile.x / 16)},${Math.floor(tile.y / 16)}`;
+        let chunk = chunks.get(key);
+        if (!chunk) { chunk = []; chunks.set(key, chunk); }
+        chunk.push(tile);
+        const revision = residentTileRevision(tile);
+        // The SAB stamp covers kernel/ecology writes which bypass the JS setters.
+        if (force || !previousKeys.has(key) || revision === undefined || revisions.get(tile) !== revision
+          || parallelChanged && gate!.stampOfTile(tile) > lastGateSerial) changed.add(key);
+        revisions.set(tile, revision);
+      }
+      previousKeys = new Set(Object.keys(world.chunks)); lastWorld = world; lastGate = gate; lastGateSerial = gate?.serial ?? 0;
+      return { chunks, changed, force, fast: residentFastAccess(world.tiles) };
+    },
+  };
+}
+
+/**
+ * V21 DVR frame: the full-population mirror projection (no private fields), with its own copies of
+ * everything that still aliases live world state, plus the tiles given by the caller (changed chunks,
+ * or every resident tile on a keyframe). `tapeWriter.record` may buffer it by reference.
+ */
+export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
+  const view = projectMirrorWorld(world, undefined, worldContext(world));
+  if (instanceId !== undefined) view.instanceId = instanceId;
+  view.performance = { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) };
+  // `projectMirrorWorld` hands out the live structures array: the step after this one mutates it.
+  if (view.structures) view.structures = structuredClone(view.structures);
+  view.tiles = tiles;
+  return view;
+}
+
+/** Ticks at which a tape frame carries every resident tile instead of only the changed chunks. */
+export function tapeKeyframeDue(tick: number, interval: number | undefined, first: boolean): boolean {
+  return first || tick % Math.max(1, interval ?? TAPE_KEYFRAME_INTERVAL) === 0;
+}
+
+/** Minimum spacing between live mirror posts while the turbo loop runs uncapped. */
+export const TURBO_MIRROR_MS = 250;
+
 async function runSimulation(options: SimWorkerOptions) {
   const port = parentPort!;
   const store = new Store(options.worldPath);
@@ -186,46 +253,70 @@ async function runSimulation(options: SimWorkerOptions) {
   store.sessionValid = hash => (!sessionFlags.has(hash) || Atomics.load(sessionFlags.get(hash)!, 0) === 1) && realSessionValid(hash);
   const initialSessions = (store.db.prepare('SELECT hash,expires FROM sessions WHERE expires>?').all(Date.now()) as { hash: string; expires: number }[])
     .map(row => { const validity = new SharedArrayBuffer(4); const flag = new Int32Array(validity); flag[0] = 1; sessionFlags.set(row.hash, flag); return { ...row, validity }; });
-  const revisions = new WeakMap<Tile, number | undefined>();
-  let previousKeys = new Set<string>(), lastWorld: World | undefined;
-  let lastGate: ReturnType<typeof residentSnapshotGate>;
-  let lastGateSerial = 0;
+  const observer = createChunkObserver();
+  const turbo = !!options.turbo || options.tickMs === 0;
+  const tapeEnabled = options.tape ?? turbo;
+  let tapeWriter: TapeWriter | undefined;
+  let tapeClosed = false;
+  let firstTapeFrame = true;
+  let lastSimHz = 0;
+  /** Projected chunk pages changed since the last mirror post (turbo accumulates across throttled ticks). */
+  const unpostedChunks = new Map<string, Tile[]>();
+  let lastPostAt = -Infinity;
   let previousPaused = false;
-  function publish() {
+  function closeTape() {
+    if (!tapeWriter || tapeClosed) return;
+    tapeClosed = true;
+    tapeWriter.close();
+  }
+  let instanceId: string | undefined;
+  function publish({ forcePost = false, record = true }: { forcePost?: boolean; record?: boolean } = {}) {
     const live = app!;
-    // A failed in-place step must NEVER leak its partially mutated world into the mirror.
+    // A failed in-place step must NEVER leak its partially mutated world into the mirror (nor the tape).
     if (live.failed) {
       if (!previousPaused) { previousPaused = true; port.postMessage({ type: 'paused' }); }
       return;
     }
-    const world = live.world, gate = residentSnapshotGate(world.tiles);
-    const raw = residentBackingArray(world.tiles);
-    const changed = new Set<string>();
-    const chunks = new Map<string, Tile[]>();
-    const force = lastWorld !== world || gate?.identity !== lastGate?.identity || gate?.epoch !== lastGate?.epoch;
-    const parallelChanged = !!gate && gate.serial !== lastGateSerial;
-    for (const tile of raw) {
-      const key = `${Math.floor(tile.x / 16)},${Math.floor(tile.y / 16)}`;
-      let chunk = chunks.get(key);
-      if (!chunk) { chunk = []; chunks.set(key, chunk); }
-      chunk.push(tile);
-      const revision = residentTileRevision(tile);
-      // This is an independent observer. Never drain the TileStore's change channel.
-      // The SAB stamp covers kernel/ecology writes which bypass the JS setters.
-      if (force || !previousKeys.has(key) || revision === undefined || revisions.get(tile) !== revision
-        || parallelChanged && gate!.stampOfTile(tile) > lastGateSerial) changed.add(key);
-      revisions.set(tile, revision);
+    const world = live.world;
+    const { chunks, changed, force, fast } = observer.scan(world);
+    for (const key of changed) unpostedChunks.set(key, chunks.get(key)!.map(tile => projectMirrorTile(tile, fast)));
+    // The world's identity never changes under its single writer: read once, not per (turbo) tick.
+    instanceId ??= readWorldInstance(store.db)!;
+    let frame: WorldView | undefined;
+    if (record && tapeWriter && !tapeClosed) {
+      // Every tick reaches the tape, even when the live mirror is throttled.
+      const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, firstTapeFrame);
+      const tiles: Tile[] = [];
+      for (const [key, chunk] of chunks) {
+        const projected = changed.has(key) ? unpostedChunks.get(key)! : keyframe ? chunk.map(tile => projectMirrorTile(tile, fast)) : undefined;
+        if (projected) for (const tile of projected) tiles.push(tile);
+      }
+      frame = projectTapeFrame(world, live.runtime, instanceId, tiles);
+      try {
+        tapeWriter.record(frame, lastSimHz);
+        firstTapeFrame = false;
+      } catch (error) {
+        // A DVR is an observer: it never pauses the world. It stops recording and says so once.
+        port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error instanceof Error ? error.message : String(error) } });
+        try { closeTape(); } catch { /* ya está perdida */ }
+      }
     }
-    const fast = residentFastAccess(world.tiles);
+    const now = performance.now();
+    if (turbo && !forcePost && !force && now - lastPostAt < TURBO_MIRROR_MS) return;
+    lastPostAt = now;
     const updates: MirrorUpdate['chunks'] = [];
     const transfers: ArrayBuffer[] = [];
-    for (const key of changed) {
-      const data = packed(chunks.get(key)!.map(tile => projectMirrorTile(tile, fast)));
+    for (const [key, tiles] of unpostedChunks) {
+      // A chunk that changed and then left the resident set before this post is no longer a page.
+      if (!chunks.has(key)) continue;
+      const data = packed(tiles);
       updates.push({ key, data }); transfers.push(data.buffer as ArrayBuffer);
     }
-    const view = projectMirrorWorld(world, undefined, worldContext(world));
-    view.instanceId = readWorldInstance(store.db)!;
-    view.performance = live.runtime;
+    unpostedChunks.clear();
+    // The tape frame is reused as the mirror's base; only this shallow copy is emptied into pages.
+    const base = frame ?? projectMirrorWorld(world, undefined, worldContext(world));
+    const view: WorldView = { ...base, tiles: [], instanceId, performance: live.runtime,
+      ...(base.technology ? { technology: { ...base.technology } } : {}) };
     const pages: MirrorUpdate['pages'] = [];
     function packPages(field: MirrorPageField, values: readonly unknown[], count = 64) {
       for (let offset = 0; offset < values.length; offset += count) {
@@ -257,13 +348,14 @@ async function runSimulation(options: SimWorkerOptions) {
     const started = performance.now();
     port.postMessage(update, transfers);
     port.postMessage({ type: 'published', ms: performance.now() - started });
-    previousKeys = new Set(update.activeKeys); lastWorld = world; lastGate = gate; lastGateSerial = gate?.serial ?? 0;
   }
   try {
     const base = () => process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams()
       : process.env.CARTA_FULL_HARDWARE === '1' ? hostFullHardwareParams() : hostParams();
     app = createApp({ store, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
-      manual: true, seed: options.seed, tickMs: options.tickMs,
+      manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
+      // This worker owns the only TapeWriter of the world (`publish`); the inner app must not open another.
+      tape: false,
       params: options.deployment ? () => deploymentParams(base()) : options.params,
       beforeStep: () => {
         if (options.testStepDelayMs) {
@@ -271,7 +363,7 @@ async function runSimulation(options: SimWorkerOptions) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.testStepDelayMs);
         }
       },
-      afterStep: publish });
+      afterStep: simHz => { lastSimHz = simHz; publish(); } });
     if (options.deployment) setParams(app.world, deploymentParams(paramsOf(app.world)));
     const motor = paramsOf(app.world).motor;
     if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
@@ -284,11 +376,15 @@ async function runSimulation(options: SimWorkerOptions) {
       port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: parity, v15: resumenDespacho(app.world) } });
     }
     if (motor.gpu.length === 0) port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: null, v15: resumenDespacho(app.world) } });
-    publish();
+    if (tapeEnabled) tapeWriter = new TapeWriter({ path: tapePathForWorld(options.worldPath),
+      maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval });
+    publish({ forcePost: true });
+    // The gateway opens its read-only TapeReader on `ready`: the initial frame must already be durable.
+    tapeWriter?.flush();
     port.on('message', (message: SimRpc) => { void handle(message); });
     port.postMessage({ type: 'ready', sessions: initialSessions });
   } catch (error) {
-    try { await app?.close(); } finally { store.close(); }
+    try { await app?.close(); } finally { try { closeTape(); } finally { store.close(); } }
     throw error;
   }
   async function handle(message: SimRpc) {
@@ -314,10 +410,20 @@ async function runSimulation(options: SimWorkerOptions) {
           if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
           value = technologyRecipeDetail(app!.world, args[0] as string) ?? null; break;
         }
+        case 'flushTape':
+          if (tapeWriter && !tapeClosed) tapeWriter.flush();
+          value = { enabled: !!tapeWriter && !tapeClosed, frames: tapeWriter?.frameCount ?? 0, latestTick: tapeWriter?.latestTick ?? -1 };
+          break;
         case 'shutdown':
           closing = true;
-          try { await app!.close(); if (!app!.failed) store.save(app!.world); }
-          finally { store.close(); }
+          try {
+            await app!.close();
+            if (!app!.failed) {
+              // Turbo throttles the mirror: the last steps reach the gateway before it goes away.
+              if (turbo) publish({ forcePost: true, record: false });
+              store.save(app!.world);
+            }
+          } finally { try { closeTape(); } finally { store.close(); } }
           break;
         default: throw new HttpError(400, 'RPC desconocido.');
       }

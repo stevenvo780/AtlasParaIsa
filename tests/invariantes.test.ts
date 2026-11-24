@@ -6,6 +6,9 @@ import { createWorld, type World } from '../src/world/index.js';
 import { comprobarInvariantes, crearComprobador, registrar, listaInvariantes } from '../src/world/invariantes.js';
 import { Muestreador } from '../src/server/diagnostico.js';
 import { AzarPropiedades } from './lib/propiedades.js';
+import { conRejilla, vecinos } from '../src/world/rejilla.js';
+import { conRejillaFauna, animalesVivosEnCelda } from '../src/world/animals.js';
+import { chunkKey } from '../src/world/terrain.js';
 import { intervaloWilson, resumirIntentos, ejecutarIntento } from '../scripts/lab/reproducir.js';
 import { evaluarPanel, configurarPanel, permutacionEstratificada } from '../scripts/lab/panel.js';
 
@@ -34,7 +37,7 @@ test('cada invariante nativa detecta una corrupción inyectada con contexto', ()
     'demografia.causas': m => { m.events.push({ ...m.events[0]!, id: 'muerte-inyectada', kind: 'death' }); },
     'balances.actuales': m => { m.technology.ledger.imported.wood++; },
   };
-  assert.deepEqual(listaInvariantes().map(inv => inv.id).sort(), Object.keys(inyecciones).sort());
+  assert.deepEqual(listaInvariantes().filter(inv => inv.carril === '0C').map(inv => inv.id).sort(), Object.keys(inyecciones).sort());
   for (const [id, inyectar] of Object.entries(inyecciones)) detecta(id, inyectar);
 });
 
@@ -61,6 +64,32 @@ test('balances de nacimientos y agua contenida detectan sus propias diferencias'
   detecta('balances.actuales', m => { m.totals.births++; });
   detecta('balances.actuales', m => { m.technology.water!.filled++; });
   detecta('demografia.causas', m => { m.demographyDynamics.causes.senescence++; });
+});
+
+test('los recuerdos resuelven asentamientos y lugares de regiones archivadas', () => {
+  const m = createWorld(51926), p = m.people[0]!;
+  const lugar = { id: 'settlement-27--97', x: 27, y: -97, name: 'Archivo', description: 'prueba', gatherings: 0 };
+  m.retiredChunks.push({ key: chunkKey(lugar.x, lugar.y), cx: 1, cy: -7, tiles: [], places: [lugar], discovered: true, lastTick: 0 });
+  p.experiences.push({ tick: 0, text: 'prueba', causeId: '', placeId: lugar.id });
+  assert.deepEqual(comprobarInvariantes(m, { ids: ['referencias.validas'] }), []);
+  m.retiredChunks[0]!.places = [];
+  assert.ok(comprobarInvariantes(m, { ids: ['referencias.validas'] }).some(v => v.contexto?.destino === lugar.id));
+});
+
+test('la comprobación dentro del ámbito detecta rejillas desactualizadas', () => {
+  const m = createWorld(51926), p = m.people[0]!, a = m.animals[0]!;
+  conRejilla(m, () => {
+    vecinos(m, p, 0, q => q === p);
+    p.x += 1000;
+    assert.ok(comprobarInvariantes(m, { ids: ['indices.coherentes'] }).some(v => v.detalle.includes('Rejilla de personas')));
+    p.x -= 1000;
+  });
+  conRejillaFauna(m, () => {
+    animalesVivosEnCelda(m, a.x, a.y);
+    const destino = m.tiles.find(t => t.x !== a.x || t.y !== a.y)!;
+    a.x = destino.x; a.y = destino.y;
+    assert.ok(comprobarInvariantes(m, { ids: ['indices.coherentes'] }).some(v => v.detalle.includes('Rejilla de fauna')));
+  });
 });
 
 test('el observador detecta pérdida de población y acumulados decrecientes entre pasos', () => {

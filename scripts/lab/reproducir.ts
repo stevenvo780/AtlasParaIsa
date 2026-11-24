@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../../src/server/store.js';
 import { createWorld, stepWorld, closePersonasParallelPools, closeFaunaParallelPools, closePolicyGpuBatchers, type World } from '../../src/world/index.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
-import { comprobarInvariantes } from '../../src/world/invariantes.js';
+import { crearComprobador } from '../../src/world/invariantes.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../../src/world/params.js';
 
@@ -74,8 +74,9 @@ export async function ejecutarIntento(opciones: OpcionesIntento): Promise<Result
     const base = parseParams(opciones.params, paramsOf(mundo));
     setParams(mundo, parseParams({ motor: { hilos: opciones.hilos, gpu: [] } }, base));
     if (opciones.hastaTick < mundo.tick) throw new Error(`El respaldo empieza en ${mundo.tick}, posterior a --hasta-tick.`);
+    const comprobar = crearComprobador();
     while (true) {
-      const violaciones = comprobarInvariantes(mundo).filter(v => !opciones.invariante || v.id === opciones.invariante);
+      const violaciones = comprobar(mundo).filter(v => !opciones.invariante || v.id === opciones.invariante);
       if (violaciones.length) return { ocurre: true, tick: mundo.tick, invariantes: [...new Set(violaciones.map(v => v.id))].sort() };
       if (mundo.tick >= opciones.hastaTick) break;
       stepWorld(mundo);

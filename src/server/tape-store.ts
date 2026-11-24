@@ -13,7 +13,8 @@ import {
 type Header = Omit<WorldView, 'tiles' | 'people' | 'animals' | 'structures' | 'events'>;
 type Compact = Omit<WorldView, 'tiles'> & { modifiedTiles: Tile[] };
 type Identified = { id: string };
-type Patch<T> = { upserts: T[]; removed: string[]; order?: string[] };
+type PartialUpsert = { id: string; _p: 1; _u?: string[] } & Record<string, unknown>;
+type Patch<T extends Identified> = { upserts: (T | PartialUpsert)[]; removed: string[]; order?: string[] };
 type Delta = Partial<Header> & {
   unset?: string[];
   peoplePatch?: Patch<WorldView['people'][number]>;
@@ -89,8 +90,27 @@ function unpack(data: Uint8Array): State {
 function patch<T extends Identified>(current: T[], previous: T[]): Patch<T> {
   const old = new Map(previous.map(v => [v.id, v]));
   const ids = new Set(current.map(v => v.id));
+  const upserts: (T | PartialUpsert)[] = [];
+  for (const v of current) {
+    const prev = old.get(v.id);
+    if (!prev) { upserts.push(v); continue; }
+    const curRec = v as Record<string, unknown>;
+    const prevRec = prev as Record<string, unknown>;
+    let diff: PartialUpsert | undefined;
+    let unset: string[] | undefined;
+    for (const key in curRec) {
+      if (key === 'id') continue;
+      const val = curRec[key];
+      if (!equal(val, prevRec[key])) (diff ??= { id: v.id, _p: 1 })[key] = val;
+    }
+    for (const key in prevRec) {
+      if (key !== 'id' && !(key in curRec)) (unset ??= []).push(key);
+    }
+    if (unset) (diff ??= { id: v.id, _p: 1 })._u = unset;
+    if (diff) upserts.push(diff);
+  }
   const result: Patch<T> = {
-    upserts: current.filter(v => !equal(v, old.get(v.id))),
+    upserts,
     removed: previous.filter(v => !ids.has(v.id)).map(v => v.id),
   };
   const naturalOrder = previous.filter(v => ids.has(v.id)).map(v => v.id)
@@ -102,7 +122,20 @@ function patch<T extends Identified>(current: T[], previous: T[]): Patch<T> {
 function applyPatch<T extends Identified>(current: T[], change: Patch<T>): T[] {
   const values = new Map(current.map(v => [v.id, v]));
   for (const id of change.removed) values.delete(id);
-  for (const v of change.upserts) values.set(v.id, v);
+  for (const v of change.upserts) {
+    if ('_p' in v && v._p === 1) {
+      const prev = values.get(v.id);
+      const next = (prev ? { ...prev } : { id: v.id }) as Record<string, unknown>;
+      for (const [k, val] of Object.entries(v)) {
+        if (k === '_p' || k === '_u') continue;
+        next[k] = val;
+      }
+      for (const k of (v._u as string[] | undefined) ?? []) delete next[k];
+      values.set(v.id, next as T);
+    } else {
+      values.set(v.id, v as T);
+    }
+  }
   return change.order ? change.order.map(id => values.get(id)!) : [...values.values()];
 }
 

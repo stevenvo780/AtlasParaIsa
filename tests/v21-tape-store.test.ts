@@ -482,3 +482,28 @@ test('partialTiles delta frames preserve unchanged resident tiles while recordin
   assert.equal(byKey3.has('1,0'), false, 'full frame retires omitted tiles');
   assert.equal(byKey3.get('2,0')?.food, 0.8);
 });
+
+test('field-level entity patches omit unchanged heavy fields while preserving exact reconstruction and key removal', t => {
+  const f = fixture(t, { keyframeInterval: 60 }); const writer = f.writer(); const reader = f.reader();
+  const v0 = viewAt(0);
+  v0.people[0] = { ...v0.people[0], thirst: 0.25, recentMemory: 'orilla calma' };
+  const v1 = structuredClone(v0);
+  v1.tick = 1; v1.sequence = 1;
+  v1.people[0].hunger = 0.42;
+  delete v1.people[0].thirst;
+  v1.animals![0].energy = 0.77;
+  writer.record(v0, 100);
+  writer.record(v1, 100);
+  writer.flush();
+
+  const delta = blob(f.sql(), 'tape_frames', 1);
+  assert.equal(delta.peoplePatch.upserts.length, 1);
+  assert.equal(delta.peoplePatch.upserts[0]._p, 1);
+  assert.equal(delta.peoplePatch.upserts[0].hunger, 0.42);
+  assert.deepEqual(delta.peoplePatch.upserts[0]._u, ['thirst']);
+  assert.equal('name' in delta.peoplePatch.upserts[0], false, 'unchanged person fields are omitted');
+  assert.equal('recentMemory' in delta.peoplePatch.upserts[0], false, 'unchanged heavy person fields are omitted');
+  assert.equal(delta.animalsPatch.upserts[0]._p, 1);
+  assert.equal('genes' in delta.animalsPatch.upserts[0], false, 'unchanged animal genes are omitted');
+  assert.deepEqual(reader.readChunk(0, 2).frames, [v0, v1]);
+});

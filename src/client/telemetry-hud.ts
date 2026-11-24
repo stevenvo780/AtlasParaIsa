@@ -6,7 +6,7 @@ import { ELEMENTS, geologyAt, type ChemOperator, type ChemistrySummaryView, type
 
 export type HudNav = 'people' | 'life' | 'communities' | 'animals' | 'land' | 'technology' | 'performance';
 export type PulseHealth = 'unknown' | 'healthy' | 'warn' | 'hot';
-export interface TelemetryKpi { nav: HudNav; label: string; value: string; detail: string; health?: PulseHealth; }
+export interface TelemetryKpi { nav: HudNav; label: string; value: string; detail: string; summary?: string; health?: PulseHealth; }
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const count = (value: number | undefined): number => finite(value) ? Math.max(0, value) : 0;
 const sum = (values: number[]): number => values.reduce((total, value) => total + count(value), 0);
@@ -78,23 +78,29 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
   const runtime = world?.performance;
   const herds = habituatedFauna(world?.animals), forged = forgedToolsCount(world?.technology?.items);
   return [
-    { nav: 'people', label: 'Población · linaje', value: `${number(census?.total ?? stats?.population)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
+    { nav: 'people', label: 'Vivos', value: `${number(world ? stats?.population ?? world.people.length : undefined)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
+      summary: stats ? 'Población viva · todo el mundo' : world ? 'Habitantes recibidos · sin censo global' : 'Esperando el censo',
       detail: census ? `${number(census.neighbors)} vecinos · ${number(census.identities)} S/I · J/A/M: ${number(census.lifeStage.juvenile)}/${number(census.lifeStage.adult)}/${number(census.lifeStage.senescent)} · sin etapa: ${number(census.lifeStage.unknown)}. Mundo › Vidas.` : 'Censo no recibido. Abrir Vidas.' },
     { nav: 'life', label: 'Faena / descanso', value: `${percentage(activity.working)} / ${percentage(activity.resting)}`,
+      summary: `Nacimientos ${number(stats?.totals?.births)} / muertes ${number(world?.demography?.deaths)} · acumulados`,
       detail: `Actividad viva · faena ${percentage(activity.working)} · descanso ${percentage(activity.resting)} · diversidad de conducta ${percentage(stats?.diversidad?.conducta)}. Abrir Mundo › Vida.` },
-    { nav: 'communities', label: 'Sociedad · coop/desac', value: `${number(community.total)} · ${number(community.cooperation)}/${number(community.disputes)}`,
+    { nav: 'communities', label: 'Comunidades · coop/desac', value: `${number(community.total)} · ${number(community.cooperation)}/${number(community.disputes)}`,
       detail: `${number(community.total)} comunidades · ${number(community.cooperation)} cooperaciones · ${number(community.disputes)} desacuerdos · apertura media ${percentage(community.cultures.find(c => c.axis === 'openness')?.mean)}. Abrir Mundo › Comunidades.` },
-    { nav: 'animals', label: 'Fauna · depred.', value: `${number(wildlife)} · ${number(predators)} dep.${herds.known ? ` · ${herds.tame} mans. / ${herds.calming} hab.` : ''}`, detail: `Regiones activas: ${number(wildlife)} animales · ${number(predators)} depredadores (zorros y lobos). En vista: ${herds.known ? `${herds.tame} mansos y ${herds.calming} habituándose (individuos recibidos)` : 'habituación no recibida'}. Abrir Vidas › Fauna.` },
+    { nav: 'animals', label: 'Fauna · depred.', value: `${number(wildlife)} · ${number(predators)} dep.${herds.known ? ` · ${herds.tame} mans. / ${herds.calming} hab.` : ''}`,
+      summary: `Rebaños mansos / habituados ≥45%: ${herds.known ? number(herds.tame + herds.calming) : '—'} individuos vivos en vista`,
+      detail: `Regiones activas: ${number(wildlife)} animales · ${number(predators)} depredadores (zorros y lobos). En vista: ${herds.known ? `${herds.tame} mansos y ${herds.calming} habituándose (individuos recibidos)` : 'habituación no recibida'}. Abrir Vidas › Fauna.` },
     { nav: 'land', label: 'Cultivos · planos', value: `${number(stats?.cultivatedTiles)} · ${number(stats?.blueprints)}${count(stats?.pavedTiles) > 0 ? ` · ${number(stats?.pavedTiles)} calz.` : ''}`,
+      summary: `Obras ${number(stats?.structures ? sum(Object.values(stats.structures)) : world?.structures?.length)}${stats?.structures ? ' globales' : ' en vista'} · poliominós ${number(stats?.polyominoStructures)} · calzadas ${number(stats?.pavedTiles)}`,
       detail: `${number(stats?.cultivatedTiles)} cultivos en regiones activas · ${number(stats?.blueprints)} planos conocidos · ${number(world?.structures?.length)} obras en esta vista${stats?.pavedTiles !== undefined ? ` · ${number(stats.pavedTiles)} calzadas empedradas` : ''}${stats?.polyominoStructures !== undefined ? ` · ${number(stats.polyominoStructures)} edificios poliominó` : ''}. Abrir Mundo › Paisaje.` },
     { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${forged === undefined ? '' : ` · ${forged} forj.`}${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
+      summary: `Fórmulas químicas ${number(stats?.chemicalFormulas)}`,
       detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
     { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`, health: pulseHealth(runtime),
       detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms / presupuesto ${number(runtime?.gobernador?.presupuestoMs)} ms · ${number(runtime?.tickHz, 2)} Hz · ${pulseHealth(runtime) === 'hot' ? 'Presupuesto superado' : pulseHealth(runtime) === 'warn' ? 'Cerca del presupuesto' : pulseHealth(runtime) === 'healthy' ? 'Con margen' : 'Sin presupuesto medido'}. Abrir Mundo › Rendimiento.` },
   ];
 }
 export function renderTelemetry(world: WorldView | null): string {
-  return telemetryKpis(world).map(kpi => `<button type="button" class="hud-kpi" data-hud-nav="${kpi.nav}" data-health="${kpi.health ?? 'unknown'}" title="${esc(kpi.detail)}" aria-label="${esc(`${kpi.label}: ${kpi.value}. ${kpi.detail}`)}"><span>${esc(kpi.label)}</span><strong data-hud-value>${esc(kpi.value)}</strong></button>`).join('');
+  return telemetryKpis(world).map(kpi => `<button type="button" class="hud-kpi${kpi.nav === 'people' ? ' hud-kpi-primary' : ''}" data-hud-nav="${kpi.nav}" data-health="${kpi.health ?? 'unknown'}" title="${esc(kpi.detail)}" aria-label="${esc(`${kpi.label}: ${kpi.value}. ${kpi.summary ?? ''} ${kpi.detail}`)}"><span>${esc(kpi.label)}</span><strong data-hud-value>${esc(kpi.value)}</strong><small data-hud-extra>${esc(kpi.summary ?? '')}</small></button>`).join('');
 }
 
 function facts(entries: [string, string][]): string {

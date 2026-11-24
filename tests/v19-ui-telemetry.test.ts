@@ -156,7 +156,7 @@ test('shell keeps the functional HUD, camera census and every notebook hook with
   const html = worldShell();
   assert.match(html, /<section id="hud-telemetry" class="hud-telemetry hud-surface" aria-label="Pulso del mundo">/);
   assert.doesNotMatch(html, /UN MUNDO PARA VOLVER|class="game-brand/);
-  for (const id of ['world-day', 'world-phase', 'connection-label', 'world-rhythm', 'growth-chip', 'stats-drawer', 'population-drawer', 'inspector-drawer', 'layer-drawer', 'tool-drawer', 'landscape', 'camera-coordinates', 'world-extent', 'viewport-census', 'letter-button', 'letter-dialog', 'population-list', 'inspector-tabs', 'inhabitant-card', 'stats-content']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, id);
+  for (const id of ['world-day', 'world-phase', 'connection-label', 'world-rhythm', 'growth-chip', 'stats-drawer', 'population-drawer', 'inspector-drawer', 'layers-popover', 'settings-drawer', 'whisper-drawer', 'landscape', 'camera-coordinates', 'world-extent', 'viewport-census', 'letter-button', 'letter-dialog', 'population-list', 'inspector-tabs', 'inhabitant-card', 'stats-content']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, id);
 });
 
 test('telemetry helpers leave the received world untouched', () => {

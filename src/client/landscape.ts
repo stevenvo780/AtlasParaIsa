@@ -10,6 +10,10 @@
  * Ajusta esta ruta a donde viva el contrato compartido; conserva la extensión
  * `.js` (resolución ESM / NodeNext).
  */
+import { sanitizeGraphicsSettings, PRESET_SETTINGS, type GraphicsSettings } from './graphics-settings.js';
+import { MAP_LAYER_CATALOG, isMapLayerId, type MapLayerId } from './layers-control.js';
+import { valorCrudo, posicionEnRampa, type Capa as LegacyCapa } from './calor.js';
+import { geologyAt } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
@@ -551,6 +555,8 @@ export class Landscape {
 
   private cam: Camera = { x: 0, y: 0, zoom: 24 };
   private minZoom = 8;
+  private graphicsSettings: GraphicsSettings = { ...PRESET_SETTINGS.equilibrado };
+  private activeLayers: ReadonlySet<MapLayerId> = new Set();
   private focusFrom: Camera | null = null;
   private focusTo: { x: number; y: number } | null = null;
   private focusStart = 0;
@@ -807,6 +813,31 @@ export class Landscape {
     this.setZoom(this.cam.zoom * Math.pow(1.18, delta), this.cssW / 2, this.cssH / 2);
   }
 
+  /** Rendering preferences only; no world mutation. Invalidate caches so every flag applies now. */
+  setGraphicsSettings(settings: GraphicsSettings): void {
+    this.graphicsSettings = sanitizeGraphicsSettings(settings);
+    this.sceneKey = ''; this.ambientKey = ''; this.staticPropsOwner = null;
+    this.spriteCache.clear(); this.hallSlots.clear();
+    this.phaseLayer.style.opacity = '0'; this.rainLayer.style.opacity = '0';
+    this.resize();
+  }
+
+  setActiveLayers(layers: ReadonlySet<MapLayerId>): void {
+    this.activeLayers = new Set([...layers].filter(isMapLayerId));
+    this.layer = 'none'; this.capaCalor = null; this.sceneKey = '';
+  }
+
+  setOverlay(layer: OverlayLayer): void { this.setLayer(layer); }
+  setHeatMode(capa: Capa | null): void { this.setCapaCalor(capa); }
+  focusTile(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.follow(null); this.focus(x, y);
+  }
+  getViewportBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+    const halfW = this.cssW / this.cam.zoom / 2, halfH = this.cssH / this.cam.zoom / 2;
+    return { minX: this.cam.x - halfW, minY: this.cam.y - halfH, maxX: this.cam.x + halfW, maxY: this.cam.y + halfH };
+  }
+
   setLayer(layer: OverlayLayer): void {
     this.layer = layer;
   }
@@ -862,7 +893,7 @@ export class Landscape {
     const h = Math.max(1, Math.round(rect.height));
     // R5: techo de dpr por `this.modo` (ver `rendererProfile`, sin DOM) — completo hasta 3×,
     // observador ≤ 1,5× (P1: sin techo, un móvil de dpr 3 redibujaba > 3 MPx por frame).
-    this.dpr = clamp(window.devicePixelRatio || 1, 1, rendererProfile(this.modo).dprCeiling);
+    this.dpr = clamp(window.devicePixelRatio || 1, 1, Math.min(this.graphicsSettings.maxDpr, rendererProfile(this.modo).dprCeiling));
     this.cssW = w;
     this.cssH = h;
     const dw = Math.round(w * this.dpr);
@@ -1431,8 +1462,8 @@ export class Landscape {
   /* ---------------------------------------------------------------- */
 
   private recomputeMinZoom(): void {
-    // The window cap bounds work, not geography. Zoom-out must fit within 96 × 64 tiles.
-    this.minZoom = Math.max(10, this.cssW / 88, this.cssH / 56);
+    // User camera preference; the subscription window cap still bounds server projection work.
+    this.minZoom = this.graphicsSettings.minZoom;
   }
 
   /** Encuadre inicial: llena el panel y, aun así, cabe la isla entera. */
@@ -1640,7 +1671,8 @@ export class Landscape {
       );
       this.drawCalls++;
 
-      this.drawAmbient(cw, ch, now, light);
+      if (this.graphicsSettings.atmosphere) this.drawAmbient(cw, ch, now, light);
+      else { this.effects.rain = 0; this.drawEventAccents(now); }
       this.drawOverlaysScreen(people, animals);
     }
   }
@@ -1662,7 +1694,7 @@ export class Landscape {
     const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
     const selectedTile = this.selection?.kind === 'tile' ? this.selection : null;
     const far = this.cam.zoom < FAR_ZOOM;
-    const sceneKey = `${this.sceneRevision}:${this.layer}:${this.capaCalor ?? ''}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}:${far ? 'far' : 'near'}`;
+    const sceneKey = `${this.sceneRevision}:${[...(this.activeLayers ?? [])].join(',')}:${this.layer}:${this.capaCalor ?? ''}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}:${far ? 'far' : 'near'}`;
     if (sceneKey === this.sceneKey) return;
     this.sceneKey = sceneKey; this.perf.sceneBuilds++;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
@@ -1670,6 +1702,7 @@ export class Landscape {
 
     // Mapa de calor: sobre el terreno ya pintado (los chunks van al lienzo principal)
     // y debajo de decoración, animales y personas de esta escena.
+    this.drawActiveLayers(g, x0, x1, y0, y1);
     pintarCalor(g, this.teselasVisibles(x0, x1, y0, y1), this.capaCalor, this.rangoCalor);
 
     this.effects.water = this.effects.vegetation = this.effects.shadows = 0;
@@ -1679,13 +1712,13 @@ export class Landscape {
     this.visibleTiles = props.visibleTiles;
     for (const item of props.animated) {
       if (item.kind === 0) {
-        if (this.effects.water < VISUAL_BUDGET.water) { this.drawRipples(g, item.x, item.y, item.x * ART, item.y * ART, t); this.effects.water++; }
+        if (this.graphicsSettings.waterRipples && this.effects.water < VISUAL_BUDGET.water) { this.drawRipples(g, item.x, item.y, item.x * ART, item.y * ART, t); this.effects.water++; }
       } else if (item.kind === 1) {
-        if (this.effects.water < VISUAL_BUDGET.water) {
+        if (this.graphicsSettings.waterRipples && this.effects.water < VISUAL_BUDGET.water) {
           const shift = this.reduceMotion ? 0 : Math.floor(t * 2 + rnd(item.x, item.y, 917) * 4) % 3;
           px(g, item.x * ART + 8 + shift, item.y * ART + 10, 2, 1, css(P.waterGleam, .55)); this.effects.water++;
         }
-      } else if (!far) this.drawPlantMovement(g, item.tile, t); // < 14 px/tesela una caña de 1 px no se distingue
+      } else if (!far && this.graphicsSettings.vegetationSway) this.drawPlantMovement(g, item.tile, t); // < 14 px/tesela una caña de 1 px no se distingue
     }
 
     this.drawPlaces(g, world.places, x0, x1, y0, y1);
@@ -1722,7 +1755,7 @@ export class Landscape {
       sprites = dynamic;
     } else sprites = mergeBySortY(props.sprites, dynamic);
     this.perf.spritesSorted += dynamic.length;
-    if (this.cam.zoom >= 18) {
+    if (this.graphicsSettings.shadows && this.cam.zoom >= 18) {
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && (sprite.kind === SpriteKind.Structure || sprite.kind === SpriteKind.Person)) this.drawCastShadow(g, sprite);
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
     }
@@ -1744,6 +1777,7 @@ export class Landscape {
     if (!far) this.indexBodies(revealedBodies, x0, x1, y0, y1);
     const bodyGrid = this.bodyGridInfo;
     const behind = (sprite: Sprite, height: number, width: number) => {
+      if (this.graphicsSettings?.cutaways === false) return false;
       let intersects = !!site && sprite.ay > site.foot && sprite.ax + width / 2 > site.left
         && sprite.ax - width / 2 < site.right && sprite.ay > site.top && sprite.ay - height < site.bottom;
       if (far) { this.perf.behindSkipped++; return intersects; }
@@ -1785,7 +1819,7 @@ export class Landscape {
     }
     // A selected facility or water patch is a local cutaway, like the existing body reveal.
     // Redraw received material within its footprint; no state, roots or hit targets change.
-    if (site) {
+    if (site && this.graphicsSettings.cutaways) {
       g.save(); g.beginPath(); g.rect(site.left, site.top, site.right - site.left, site.bottom - site.top); g.clip();
       if (inspectedWater) { this.bakeTileBase(g, inspectedWater.x, inspectedWater.y); this.bakeFeatures(g, inspectedWater); }
       for (const structure of inspectedStructures) this.drawStructure(g, structure, t);
@@ -2153,7 +2187,7 @@ export class Landscape {
   }
 
   private drawCachedTree(g: CanvasRenderingContext2D, sprite: Sprite, t: number, occluded = false): void {
-    const moving = !this.reduceMotion && sprite.seed % 11 === 0 && this.effects.vegetation < VISUAL_BUDGET.vegetation;
+    const moving = this.graphicsSettings?.vegetationSway !== false && !this.reduceMotion && sprite.seed % 11 === 0 && this.effects.vegetation < VISUAL_BUDGET.vegetation;
     if (moving) this.effects.vegetation++;
     const pose = moving ? Math.round(Math.sin(t * .65 + sprite.ax * .013 + sprite.ay * .007) + 1) : 1;
     const art = this.treeRaster(sprite.tree!, pose);
@@ -2241,6 +2275,32 @@ export class Landscape {
         px(g, Math.round(cx) - 1, Math.round(cy), 2, 2, css(P.amber, 0.72));
       }
     }
+  }
+
+  private drawActiveLayers(g: CanvasRenderingContext2D, x0: number, x1: number, y0: number, y1: number): void {
+    const layers = MAP_LAYER_CATALOG.filter(meta => this.activeLayers?.has(meta.id));
+    if (!layers.length) return;
+    g.save();
+    for (const meta of layers) {
+      g.fillStyle = meta.color;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const tile = this.tileAt(x, y); if (!tile) continue;
+        let intensity = 0;
+        if (meta.id === 'moisture') intensity = tile.moisture;
+        else if (meta.id === 'activeRegions') intensity = this.vivas?.has(claveRegion(x, y)) ? 1 : 0;
+        else if (meta.id === 'geology') {
+          if (this.worldSeed === undefined) continue;
+          const geology = geologyAt(this.worldSeed, x, y, tile.biome, tile.feature);
+          intensity = Math.max(geology.Fe, geology.Ca, geology.S);
+        } else if (meta.legacyCapa) {
+          const capa = meta.legacyCapa as LegacyCapa;
+          intensity = posicionEnRampa(valorCrudo(tile, capa), capa);
+        }
+        g.globalAlpha = clamp01(intensity) * Math.min(.36, .7 / Math.sqrt(layers.length));
+        g.fillRect(x * ART, y * ART, ART, ART);
+      }
+    }
+    g.restore();
   }
 
   private drawLayerCell(g: CanvasRenderingContext2D, tile: Tile, ox: number, oy: number): void {
@@ -2535,7 +2595,7 @@ export class Landscape {
       }
     }
 
-    if (product && craft?.glint) add(ax - 7, baseY - 5, 1, 1, '#f4ffff', false);
+    if (product && (this.graphicsSettings?.chemicalGlint !== false && craft?.glint)) add(ax - 7, baseY - 5, 1, 1, '#f4ffff', false);
 
     const hasInventoryView = this.curr?.technology?.items !== undefined;
     const hasRealTool = product !== undefined && product !== 'material';
@@ -2552,14 +2612,14 @@ export class Landscape {
       if (showActionTool) {
         add(ax + 5 + beat, baseY - 13 + beat * 3, 1, 13, css(P.trunkLight), true);
         add(ax + 4 + beat, baseY - 15 + beat * 3, 3, 3, toolHex, true);
-        add(ax + 5 + beat, baseY - 16 + beat * 3, 1, 1, craft?.glint ? '#f4ffff' : toolHex, false);
+        add(ax + 5 + beat, baseY - 16 + beat * 3, 1, 1, (this.graphicsSettings?.chemicalGlint !== false && craft?.glint) ? '#f4ffff' : toolHex, false);
       } else {
         add(ax + 3 + beat, baseY - 7 + beat * 2, 3, 2, skinHex, true);
       }
     } else if (view.action === 'drink') {
       const lift = p.moving ? 4 : beat;
       add(ax + 3, headTop + 3 + lift, 3, 3, craft?.tint ?? css(P.waterGleam), true);
-      if (craft?.glint) add(ax + 3, headTop + 3 + lift, 1, 1, '#f4ffff', false);
+      if ((this.graphicsSettings?.chemicalGlint !== false && craft?.glint)) add(ax + 3, headTop + 3 + lift, 1, 1, '#f4ffff', false);
       add(ax + 3, headTop + 5 + lift, 3, 1, css(P.water), false);
     } else if (view.action === 'eat') {
       add(ax + 3, headTop + 4 + beat, 2, 2, css(P.amber), true);
@@ -2580,7 +2640,7 @@ export class Landscape {
       if (showActionTool) {
         add(ax + 6, hand - 3, 1, 5, css(P.trunkLight), true);
         add(ax + 5, hand - 4, 4, 2, toolHex, true);
-        if (craft?.glint) add(ax + 5, hand - 4, 1, 1, '#f4ffff', false);
+        if ((this.graphicsSettings?.chemicalGlint !== false && craft?.glint)) add(ax + 5, hand - 4, 1, 1, '#f4ffff', false);
       } else {
         const hasStone = (view.materials?.stone ?? 0) > 0;
         add(ax + 5, hand - 2, 3, 2, css(hasStone ? P.stone : P.trunkLight), true);
@@ -3100,7 +3160,7 @@ export class Landscape {
     }
 
     // Tall artwork belongs to its root cell; overlays explicitly inspect the ground beneath it.
-    if (this.pickMode === 'inspect' && this.layer === 'none') {
+    if (this.pickMode === 'inspect' && this.layer === 'none' && !this.activeLayers.size) {
       const decorations: { x: number; y: number; foot: number; left: number; top: number; raster: () => HTMLCanvasElement }[] = [];
       const cellX = Math.floor(w.x), cellY = Math.floor(w.y);
       for (let y = cellY; y <= cellY + 3; y++) for (let x = cellX - 1; x <= cellX + 1; x++) {

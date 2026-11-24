@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersonView, StructureView, Tile, WorldStats, WorldView } from '../src/shared/types.js';
 import { geologyAt, type ChemistrySummaryView, type CompoundLot, type ElementVector } from '../src/shared/chemistry.js';
+import { MAP_LAYER_CATALOG } from '../src/client/layers-control.js';
 import { hexToRgba, paintGeologyVeins, paintRoadTile, roadKind, roadLinks, veinsAt } from '../src/client/road-geology-art.js';
 import {
   footprintBox, footprintCells, footprintLabel, isModular, mixHex, paintCompactAccessories, paintModularHall, paintPolyominoStructure, polyominoShape,
@@ -376,7 +377,7 @@ test('capa de calor «caminos»: tráfico y empedrado dibujan la red de caminos 
   assert.equal(valorCrudo(tile({ traffic: .5, paved: .2 }), 'caminos'), Math.min(1, .5 * .7 + .2 * .5));
   assert.equal(valorCrudo(tile({ traffic: 1, paved: 1 }), 'caminos'), 1, 'acotada a 1');
   assert.equal(valorCrudo(tile(), 'caminos'), 0);
-  assert.ok(worldShell().includes('<option value="caminos">Caminos y calzadas</option>'));
+  assert.ok(MAP_LAYER_CATALOG.some(layer => layer.id === 'roads' && layer.label === 'Caminos y calzadas'));
   const tiles = [tile({ x: 0, y: 0 }), tile({ x: 1, y: 0, traffic: .6 }), tile({ x: 2, y: 0, paved: 1 })];
   const llamadas: { color: string }[] = [], state = { fillStyle: '' };
   const ctx = { get fillStyle() { return state.fillStyle; }, set fillStyle(v: string) { state.fillStyle = v; }, fillRect() { llamadas.push({ color: state.fillStyle }); } } as unknown as CanvasRenderingContext2D;

@@ -1,29 +1,41 @@
-export type NotebookPage = 'population' | 'inspector' | 'layer' | 'tool' | 'stats';
+import type { FloatingPanel } from './panel-manager.js';
+export type NotebookPage = 'population' | 'inspector' | 'settings' | 'whisper' | 'stats';
 
 const triggers: Record<NotebookPage, string> = {
-  population: 'population-toggle', inspector: 'inspector-toggle', layer: 'layer-toggle',
-  tool: 'intervene-toggle', stats: 'stats-toggle',
+  population: 'population-toggle', inspector: 'inspector-toggle', settings: 'settings-toggle',
+  whisper: 'whisper-toggle', stats: 'stats-toggle',
 };
 
-/** One visible page, one return point. Opening the notebook never changes the world. */
+/** Desktop windows coexist; mobile keeps one sheet and a return point. */
 export class Notebook {
-  private active: NotebookPage | null = null;
-  constructor(private readonly root: HTMLElement) {}
+  private readonly opened = new Set<NotebookPage>();
+  private readonly onResize = (): void => {
+    if ((this.root.ownerDocument?.defaultView?.innerWidth ?? 761) > 760 || this.opened.size < 2) return;
+    const last = [...this.opened].at(-1)!;
+    this.show(last, true);
+  };
+  constructor(private readonly root: HTMLElement, private readonly panels: Partial<Record<NotebookPage, FloatingPanel>> = {}) {
+    root.ownerDocument?.defaultView?.addEventListener('resize', this.onResize);
+  }
 
-  show(page: NotebookPage, open = this.active !== page): boolean {
-    this.active = open ? page : this.active === page ? null : this.active;
+  show(page: NotebookPage, open = !this.opened.has(page)): boolean {
+    if (open && (this.root.ownerDocument?.defaultView?.innerWidth ?? 761) <= 760) this.opened.clear();
+    if (open) { this.opened.delete(page); this.opened.add(page); this.panels[page]?.bringToFront(); }
+    else this.opened.delete(page);
     for (const [name, trigger] of Object.entries(triggers)) {
-      const visible = this.active === name;
-      this.root.querySelector<HTMLElement>(`#${name}-drawer`)!.hidden = !visible;
-      this.root.querySelector(`#${trigger}`)!.setAttribute('aria-expanded', String(visible));
+      const visible = this.opened.has(name as NotebookPage);
+      const panel = this.root.querySelector<HTMLElement>(`#${name}-drawer`);
+      if (panel) panel.hidden = !visible;
+      this.root.querySelector(`#${trigger}`)?.setAttribute('aria-expanded', String(visible));
     }
-    this.root.classList.toggle('notebook-open', this.active !== null);
-    this.root.querySelector('#observe-tool')!.setAttribute('aria-pressed', String(this.active === null));
-    if (!open && this.active === null) this.root.querySelector<HTMLElement>(`#${triggers[page]}`)?.focus({ preventScroll: true });
+    this.root.classList.toggle('notebook-open', this.opened.size > 0);
+    this.root.querySelector('#observe-tool')?.setAttribute('aria-pressed', String(this.opened.size === 0));
+    if (!open) this.root.querySelector<HTMLElement>(`#${triggers[page]}`)?.focus({ preventScroll: true });
     return open;
   }
 
-  close(): void { if (this.active) this.show(this.active, false); }
+  close(): void { for (const page of [...this.opened]) this.show(page, false); }
+  destroy(): void { this.root.ownerDocument?.defaultView?.removeEventListener('resize', this.onResize); }
 }
 
 /** The focused tab follows the selected tab; no trap and no positive tabindex. */

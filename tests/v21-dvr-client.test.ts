@@ -438,7 +438,7 @@ test('observerOnly: oculta la UI de dirección e intervención y reescribe las a
   const doc = fakeDocument(ids);
   applyObserverOnly(doc, true);
   assert.ok(doc.nodes.get('game')!.classes.has('is-observer-only'));
-  for (const id of ['direct-toggle', 'person-controls', 'task-palette', 'intervene-toggle', 'tool-drawer']) { assert.equal(doc.nodes.get(id)!.hidden, true, id); assert.equal(doc.nodes.get(id)!.attributes['aria-hidden'], 'true'); }
+  for (const id of ['direct-toggle', 'person-controls', 'task-palette']) { assert.equal(doc.nodes.get(id)!.hidden, true, id); assert.equal(doc.nodes.get(id)!.attributes['aria-hidden'], 'true'); }
   assert.equal(OBSERVER_NOTE, 'Observación pura: cada habitante decide por su cuenta.');
   assert.equal(doc.nodes.get('population-note')!.textContent, OBSERVER_NOTE);
   assert.equal(doc.nodes.get('control-help')!.textContent, OBSERVER_NOTE);
@@ -460,17 +460,17 @@ test('worldShell: monta #dvr-bar oculto y conserva todo lo existente (modo vivo 
   assert.match(html, /<div id="dvr-bar" class="dvr-bar hud-surface"[^>]*hidden><\/div>/);
   assert.doesNotMatch(html, /is-observer-only/);
   for (const id of OBSERVER_HIDDEN_IDS) assert.ok(html.includes(`id="${id}"`), `${id} sigue en el shell por defecto`);
-  for (const label of ['Mapa', 'Vidas', 'Mundo', 'Explorar', 'Calor', 'Crónica']) assert.ok(html.includes(label), label);
+  for (const label of ['Mapa', 'Vidas', 'Mundo', 'Capas', 'Ajustes', 'Susurros', 'Crónica']) assert.ok(html.includes(label), label);
   for (const id of ['focus-s', 'focus-i', 'follow-toggle', 'letter-button', 'inspector-tab-now', 'inspector-tab-kit', 'inspector-tab-story', 'world-coordinates'.replace('world-coordinates', 'camera-coordinates')]) assert.ok(html.includes(`id="${id}"`), id);
   assert.ok(html.indexOf('id="dvr-bar"') < html.indexOf('class="world-coordinates'), 'la barra va antes de las coordenadas en el DOM');
-  assert.ok(html.includes('<option value="caminos">Caminos y calzadas</option>'));
+  assert.ok(html.includes('id="layers-popover"')); // V24 mounts the multi-select catalogue here.
 });
 
 test('game.css: barra DVR flotante y reglas de observador puro presentes', () => {
   const css = readFileSync(new URL('../src/client/game.css', import.meta.url), 'utf8');
   assert.match(css, /\.dvr-bar\{position:absolute;left:50%;bottom:92px/);
   assert.match(css, /\.dvr-bar\[hidden\]\{display:none\}/);
-  assert.match(css, /\.game-shell\.is-observer-only :is\(#direct-toggle,#person-controls,#task-palette,#intervene-toggle,#tool-drawer\)\{display:none!important\}/);
+  assert.match(css, /\.game-shell\.is-observer-only :is\(#direct-toggle,#person-controls,#task-palette\)\{display:none!important\}/);
   assert.match(css, /@media\(max-width:760px\)\{\s*\.dvr-bar\{left:8px;right:8px/);
 });
 

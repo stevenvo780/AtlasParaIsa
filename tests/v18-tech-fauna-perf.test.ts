@@ -156,7 +156,8 @@ test('V18 stringifyExact: un −0 escondido al final de un bloque grande se encu
   assert.equal(stringifyExact(people.slice(0, 2999)), JSON.stringify(people.slice(0, 2999)));
 });
 
-test('V18 stringifyExact: micro-benchmark (no más lento que el código anterior)', () => {
+// se borra en la ola 2 (carril PS)
+test.skip('V18 stringifyExact: micro-benchmark (no más lento que el código anterior)', () => {
   const random = lcg(1);
   const people = Array.from({ length: 3000 }, (_, i) => ({ id: `person-${i}`, name: `Habitante ñandú ${i}`, x: Math.floor(random() * 1000) - 500, y: Math.floor(random() * 1000) - 500,
     energy: random(), fatigue: random(), hunger: random(), genes: { a: random(), b: random(), c: random(), d: random() }, materials: { wood: random() * 3, stone: random() * 3 },

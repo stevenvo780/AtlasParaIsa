@@ -147,6 +147,8 @@ export function computeLocalPolicyObservation(
   tileIn: (x: number, y: number) => Tile | undefined,
   nearbyPeople: readonly { id: string }[],
   fast?: ResidentFastAccess,
+  out: Float64Array = new Float64Array(12),
+  offset = 0,
 ): Float64Array {
   void world;
   let land = 0, foodSum = 0, waterTiles = 0, shelterTiles = 0, materialSum = 0, unvisited = 0;
@@ -220,18 +222,17 @@ export function computeLocalPolicyObservation(
   const bonds = person.bonds;
   for (let i = 0; i < nearbyPeople.length; i++) trustSum += bonds[nearbyPeople[i]!.id] ?? 0;
   const denom = Math.max(1, land);
-  const out = new Float64Array(12);
-  out[0] = encodeObs(person.hunger, 'hunger');
-  out[1] = encodeObs(person.thirst, 'thirst');
-  out[2] = encodeObs(person.fatigue, 'fatigue');
-  out[3] = encodeObs(person.energy, 'energy');
-  out[4] = encodeObs(person.inventory / 0.25, 'inventoryFrac');
-  out[5] = encodeObs(foodSum / denom, 'localFood');
-  out[6] = encodeObs((waterTiles / denom) * 3, 'localWater');
-  out[7] = encodeObs(nearbyPeople.length / 16, 'localCrowd');
-  out[8] = encodeObs(shelterTiles / 4, 'localShelter');
-  out[9] = encodeObs(materialSum / 24, 'localResources');
-  out[10] = encodeObs(nearbyPeople.length > 0 ? trustSum / nearbyPeople.length : 0, 'communityTrust');
-  out[11] = encodeObs(unvisited / denom, 'biomeNovelty');
+  out[offset] = encodeObs(person.hunger, 'hunger');
+  out[offset + 1] = encodeObs(person.thirst, 'thirst');
+  out[offset + 2] = encodeObs(person.fatigue, 'fatigue');
+  out[offset + 3] = encodeObs(person.energy, 'energy');
+  out[offset + 4] = encodeObs(person.inventory / 0.25, 'inventoryFrac');
+  out[offset + 5] = encodeObs(foodSum / denom, 'localFood');
+  out[offset + 6] = encodeObs((waterTiles / denom) * 3, 'localWater');
+  out[offset + 7] = encodeObs(nearbyPeople.length / 16, 'localCrowd');
+  out[offset + 8] = encodeObs(shelterTiles / 4, 'localShelter');
+  out[offset + 9] = encodeObs(materialSum / 24, 'localResources');
+  out[offset + 10] = encodeObs(nearbyPeople.length > 0 ? trustSum / nearbyPeople.length : 0, 'communityTrust');
+  out[offset + 11] = encodeObs(unvisited / denom, 'biomeNovelty');
   return out;
 }

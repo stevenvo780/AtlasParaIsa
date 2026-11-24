@@ -118,20 +118,23 @@ function checkedRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe, 
  * únicos (lo exige `assertTechnologyCatalogueState`); si no, vuelve el recorrido lineal de siempre.
  * Misma respuesta que `find`, mismo contenido y orden de la ventana tras cada toque, mismos objetos.
  */
-interface RecipeIndex { length: number; byId: Map<string, TechnologyRecipe> | null; }
+interface RecipeIndex { length: number; byId: Map<string, TechnologyRecipe> | null; bySignature?: Map<string, TechnologyRecipe>; }
 const pendingIndexes = new WeakMap<TechnologyRecipe[], RecipeIndex>();
 const windowIndexes = new WeakMap<TechnologyRecipe[], RecipeIndex>();
 const indexable = (recipe: unknown): recipe is TechnologyRecipe =>
   !!recipe && typeof recipe === 'object' && typeof (recipe as TechnologyRecipe).id === 'string';
 function pendingIndex(pending: TechnologyRecipe[]): Map<string, TechnologyRecipe> | null {
   let index = pendingIndexes.get(pending);
-  if (!index || index.length > pending.length) { index = { length: 0, byId: new Map() }; pendingIndexes.set(pending, index); }
+  if (!index || index.length > pending.length) { index = { length: 0, byId: new Map(), bySignature: new Map() }; pendingIndexes.set(pending, index); }
   if (index.byId && index.length < pending.length) {
     const byId = index.byId;
     for (let n = index.length; n < pending.length; n++) {
       const recipe = pending[n];
       if (!(n in pending) || !indexable(recipe)) { index.byId = null; break; }
       if (!byId.has(recipe.id)) byId.set(recipe.id, recipe);
+      // Definitions have immutable signatures; stats updates leave them intact. Keep
+      // the first match, exactly like find, extending only the append-only suffix.
+      if (!index.bySignature!.has(recipe.signature)) index.bySignature!.set(recipe.signature, recipe);
     }
     index.length = pending.length;
   }
@@ -396,7 +399,13 @@ function resolveInSession(host: TechnologyCatalogueHost, session: RecipeSession,
 export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: string): TechnologyRecipe | undefined {
   const state = host.technology;
   endRecipeSession(state);
-  const local = state.catalogue?.pending.find(recipe => recipe.signature === signature) ?? state.recipes.find(recipe => recipe.signature === signature);
+  let local: TechnologyRecipe | undefined;
+  const pending = state.catalogue?.pending;
+  if (pending) {
+    if (pendingIndex(pending)) local = pendingIndexes.get(pending)!.bySignature!.get(signature);
+    else for (const recipe of pending) if (recipe.signature === signature) { local = recipe; break; }
+  }
+  if (!local) for (const recipe of state.recipes) if (recipe.signature === signature) { local = recipe; break; }
   if (local) return resolveTechnologyRecipe(host, local.id);
   if (!catalogueEnabled(state)) return undefined;
   const reader = readers.get(state); if (!reader) fail('signature lookup requires its host reader');

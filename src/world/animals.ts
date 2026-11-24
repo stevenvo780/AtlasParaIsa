@@ -6,7 +6,7 @@ import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, paramsOf } from './params.js';
 import { tileLookup, verifiedChunkBlocks } from './tile-index.js';
-import { residentFaunaCapacity, residentTileReader, type ResidentTileReader } from './soa/terreno.js';
+import { residentFaunaCapacity, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from './soa/terreno.js';
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
 import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
 import { primero, primerosDos } from './orden.js';
@@ -403,20 +403,27 @@ function takeWater(animal: Animal, tile: Tile, requested: number): number {
 }
 /** `habitat`, `tile.growth ?? tile.vegetation` y `waterAt` leídos en la celda residente `at` (los mismos
  * valores que los getters de la tesela, sin pasar por ellos); con `at` < 0, en la tesela. */
-function livable(animal: Animal, tile: Tile, reader: ResidentTileReader | undefined, at: number): boolean {
-  if (!reader || at < 0) return habitat(animal, tile);
-  const terrain = reader.terrainCode(at);
-  return animal.species === 'fish' ? terrain === reader.TERRAIN_WATER : terrain !== reader.TERRAIN_WATER && terrain !== reader.TERRAIN_SHELTER;
+function livable(animal: Animal, tile: Tile, reader: ResidentTileReader | undefined, fast: ResidentFastAccess | undefined, at: number): boolean {
+  const cell = reader ? at : fast?.cellOf(tile) ?? -1;
+  if (cell < 0) return habitat(animal, tile);
+  const terrain = reader ? reader.terrainCode(cell) : fast!.terrainCode(cell);
+  const water = reader?.TERRAIN_WATER ?? fast!.TERRAIN_WATER, shelter = reader?.TERRAIN_SHELTER ?? fast!.TERRAIN_SHELTER;
+  return animal.species === 'fish' ? terrain === water : terrain !== water && terrain !== shelter;
 }
-function desertIn(tile: Tile, reader: ResidentTileReader | undefined, at: number): boolean {
-  return !reader || at < 0 ? tile.biome === 'desert' : reader.biomeCode(at) === reader.BIOME_DESERT;
+function desertIn(tile: Tile, reader: ResidentTileReader | undefined, fast: ResidentFastAccess | undefined, at: number): boolean {
+  const cell = reader ? at : fast?.cellOf(tile) ?? -1;
+  return cell < 0 ? tile.biome === 'desert' : (reader ? reader.biomeCode(cell) : fast!.biomeCode(cell)) === (reader?.BIOME_DESERT ?? fast!.BIOME_DESERT);
 }
-function plantIn(tile: Tile, reader: ResidentTileReader | undefined, at: number): number {
-  return !reader || at < 0 ? tile.growth ?? tile.vegetation : reader.growth(at) ?? reader.vegetation(at)!;
+function plantIn(tile: Tile, reader: ResidentTileReader | undefined, fast: ResidentFastAccess | undefined, at: number): number {
+  const cell = reader ? at : fast?.cellOf(tile) ?? -1;
+  return cell < 0 ? tile.growth ?? tile.vegetation : (reader ? reader.growth(cell) ?? reader.vegetation(cell)! : fast!.growth(cell) ?? fast!.vegetation(cell)!);
 }
-function waterIn(animal: Animal, tile: Tile, reader: ResidentTileReader | undefined, at: number): number {
-  if (!reader || at < 0) return waterAt(animal, tile);
-  return animal.species === 'fish' ? reader.moisture(at)! : reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
+function waterIn(animal: Animal, tile: Tile, reader: ResidentTileReader | undefined, fast: ResidentFastAccess | undefined, at: number): number {
+  const cell = reader ? at : fast?.cellOf(tile) ?? -1;
+  if (cell < 0) return waterAt(animal, tile);
+  if (animal.species === 'fish') return reader ? reader.moisture(cell)! : fast!.moisture(cell)!;
+  const ocean = reader ? reader.biomeCode(cell) === reader.BIOME_OCEAN : fast!.biomeCode(cell) === fast!.BIOME_OCEAN;
+  return ocean ? 0 : reader ? reader.drinkingWater(cell) ?? 0 : fast!.drinkingWater(cell) ?? 0;
 }
 function remember(animal: Animal, tile: Point, tick: number, visited: boolean, food: number, water: number): void {
   const memory = animal.memory, x = tile.x, y = tile.y;
@@ -445,6 +452,7 @@ const MAX_RADIUS = 6, SEEN_SIDE = 2 * MAX_RADIUS + 1;
 interface LocalState {
   tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>; counts: Map<Cell, number>;
   reader: ResidentTileReader | undefined;
+  fast: ResidentFastAccess | undefined;
   visible: VisibleTile[]; pool: VisibleTile[]; resources: Resource[]; adjacent: VisibleTile[]; neighbors: Step[]; steps: Step[];
   /** Desplazamientos (dx, dy) de la última `localTiles` que entraron en lo visible: valen `stamp`. */
   seen: Int32Array; stamp: number;
@@ -456,7 +464,7 @@ interface LocalState {
 const seenAt = (state: LocalState, dx: number, dy: number): boolean => Math.abs(dx) <= MAX_RADIUS && Math.abs(dy) <= MAX_RADIUS
   && state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] === state.stamp;
 function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
-  const radius = 2 + Math.floor(animal.genes.perception * 4), result = state.visible, reader = state.reader, stamp = ++state.stamp;
+  const radius = 2 + Math.floor(animal.genes.perception * 4), result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
   result.length = 0;
   for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
     if (Math.abs(dx) + Math.abs(dy) > radius) continue;
@@ -475,8 +483,20 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
       if (x === 0 || y === 0) { const original = state.tile(x, y)!; x = original.x; y = original.y; }
     } else {
       const tile = state.tile(animal.x + dx, animal.y + dy);
-      if (!tile || !habitat(animal, tile)) continue;
-      x = tile.x; y = tile.y; growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
+      if (!tile) continue;
+      const at = fast?.cellOf(tile) ?? -1;
+      if (at < 0) {
+        if (!habitat(animal, tile)) continue;
+        growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
+      } else {
+        const terrain = fast!.terrainCode(at);
+        if (animal.species === 'fish' ? terrain !== fast!.TERRAIN_WATER
+          : terrain === fast!.TERRAIN_WATER || terrain === fast!.TERRAIN_SHELTER) continue;
+        growth = fast!.growth(at); vegetation = fast!.vegetation(at)!;
+        water = animal.species === 'fish' ? fast!.moisture(at)!
+          : fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
+      }
+      x = tile.x; y = tile.y;
     }
     // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
     // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
@@ -557,7 +577,7 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < interval || animal.energy < 0.06) return;
-  const neighbors = state.neighbors, reader = state.reader;
+  const neighbors = state.neighbors, reader = state.reader, fast = state.fast;
   neighbors.length = 0;
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
@@ -566,7 +586,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
     // Las coordenadas de la consulta valen lo mismo que las de la tesela (salvo el signo de un cero, que
     // ni `cellXY` ni las restas del comparador distinguen); la posición nueva se copia de la tesela.
     const x = animal.x + dx, y = animal.y + dy, at = reader ? reader.cellAt(x, y) : -1;
-    if (!livable(animal, t, reader, at) || (state.counts.get(cellXY(x, y)) ?? 0) >= MAX_ANIMALS_PER_TILE) continue;
+    if (!livable(animal, t, reader, fast, at) || (state.counts.get(cellXY(x, y)) ?? 0) >= MAX_ANIMALS_PER_TILE) continue;
     const step = state.steps[neighbors.length] ??= { x, y, tile: t, at };
     step.x = x; step.y = y; step.tile = t; step.at = at;
     neighbors.push(step);
@@ -574,7 +594,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const next = primero(neighbors, (a, b) => distance(a, animal.target) - distance(b, animal.target) || a.y - b.y || a.x - b.x);
   if (!next) return;
   const current = state.tile(animal.x, animal.y)!, here = reader ? reader.cellAt(animal.x, animal.y) : -1;
-  remember(animal, current, world.tick, true, plantIn(current, reader, here), waterIn(animal, current, reader, here));
+  remember(animal, current, world.tick, true, plantIn(current, reader, fast, here), waterIn(animal, current, reader, fast, here));
   const from = cell(animal);
   state.counts.set(from, state.counts.get(from)! - 1);
   // Nadie conserva los arreglos de ocupantes (quien los lee copia sus elementos): quitar y añadir en el
@@ -589,7 +609,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const arrived = state.occupants.get(arrival);
   if (arrived) arrived.push(animal); else state.occupants.set(arrival, [animal]);
   exertBody(animal, { energy: animal.action === 'flee' ? 0.003 : 0.0015, fatigue: animal.action === 'flee' ? 0.004 : 0.002 });
-  remember(animal, to, world.tick, true, plantIn(to, reader, next.at), waterIn(animal, to, reader, next.at));
+  remember(animal, to, world.tick, true, plantIn(to, reader, fast, next.at), waterIn(animal, to, reader, fast, next.at));
 }
 function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalEmitter, hunter?: string): void {
   animal.health = 0; world.animalDynamics.deaths++;
@@ -861,7 +881,7 @@ export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]):
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map(),
-    reader: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
+    reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
     contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
   const { fauna: leyesFauna } = paramsOf(world);
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
@@ -877,10 +897,11 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   const piensan = todos ? null : mascara?.ids ?? new Set(seleccion.map(a => a.id));
   // Vista residente validada (o ninguna) para todo el paso: la fauna no cambia la topología ni el SoA.
   const reader = state.reader = residentTileReader(world.tiles);
+  state.fast = residentFastAccess(world.tiles);
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    if (!piensan || piensan.has(animal.id)) physiology(animal, desertIn(tile, reader, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
+    if (!piensan || piensan.has(animal.id)) physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
     if (animal.health <= 0) continue;
     const p = cell(animal), here = state.occupants.get(p);
     if (here) here.push(animal); else state.occupants.set(p, [animal]);

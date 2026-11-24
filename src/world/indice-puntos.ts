@@ -146,20 +146,29 @@ export function primeroCerca<T extends Punto>(puntos: readonly T[], centro: Punt
   }
   return mejor >= 0 ? puntos[mejor] : undefined;
 }
-export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punto, alcance: number, pred: (punto: T) => boolean): T[] {
-  if (puntos.length === 0) return [];
+/** Optional distinct caller-owned result; default calls still return a fresh mutable array. */
+function filtrarEn<T extends Punto>(puntos: readonly T[], pred: (punto: T) => boolean, out?: T[]): T[] {
+  const result = out ?? [];
+  result.length = 0;
+  for (let i = 0; i < puntos.length; i++) if (i in puntos && pred(puntos[i]!)) result.push(puntos[i]!);
+  return result;
+}
+
+export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punto, alcance: number, pred: (punto: T) => boolean, out?: T[]): T[] {
+  if (out) out.length = 0;
+  if (puntos.length === 0) return out ?? [];
   const ind = obtenerIndice(puntos), mapa = ind.celdas;
   if (!mapa || !(Number.isFinite(centro.x) && Number.isFinite(centro.y) && Number.isFinite(alcance) && alcance >= 0)) {
-    return puntos.filter(punto => pred(punto));
+    return filtrarEn(puntos, pred, out);
   }
   const x0 = casilla(centro.x - alcance), x1 = casilla(centro.x + alcance);
   const y0 = casilla(centro.y - alcance), y1 = casilla(centro.y + alcance);
   if (!(Math.abs(x0) < MAXIMO && Math.abs(x1) < MAXIMO && Math.abs(y0) < MAXIMO && Math.abs(y1) < MAXIMO)) {
-    return puntos.filter(punto => pred(punto));
+    return filtrarEn(puntos, pred, out);
   }
   const cx0 = x0 > ind.minCx ? x0 : ind.minCx, cx1 = x1 < ind.maxCx ? x1 : ind.maxCx;
   const cy0 = y0 > ind.minCy ? y0 : ind.minCy, cy1 = y1 < ind.maxCy ? y1 : ind.maxCy;
-  if (cx0 > cx1 || cy0 > cy1) return [];
+  if (cx0 > cx1 || cy0 > cy1) return out ?? [];
   const paso = ind.smi ? SMI_SPAN : SPAN;
   let claveFila = ind.smi ? (((cx0 + SMI_BIAS) << 15) | (cy0 + SMI_BIAS)) : clave(cx0, cy0);
   let count = 0, i0 = -1, i1 = -1, ultimo = -1, ordenado = true;
@@ -199,10 +208,11 @@ export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punt
         }
       }
     }
-    if (count === 0) return [];
-    if (count === 1) return [puntos[i0]!];
-    if (count === 2) return ordenado ? [puntos[i0]!, puntos[i1]!] : [puntos[i1]!, puntos[i0]!];
-    const resultado = new Array<T>(count);
+    const resultado = out ?? new Array<T>(count);
+    resultado.length = count;
+    if (count === 0) return resultado;
+    if (count === 1) { resultado[0] = puntos[i0]!; return resultado; }
+    if (count === 2) { resultado[0] = puntos[ordenado ? i0 : i1]!; resultado[1] = puntos[ordenado ? i1 : i0]!; return resultado; }
     if (useScratch) {
       if (!ordenado) {
         if (count <= 32) {

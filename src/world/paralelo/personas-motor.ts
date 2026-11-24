@@ -684,19 +684,34 @@ let snapTargetY = new Int32Array(0);
 let decisiones = new Uint8Array(0);
 
 /** Lookup sin Map. Una fila ausente o una posición cambiada obliga al BFS serial de choose. */
+export class PrecomputedRouteReader {
+  #pasos!: Int16Array;
+  #inicio = 0;
+  #x = 0;
+  #y = 0;
+
+  prepare(person: { x: number; y: number }, precomputed?: PrecomputedMoves, slot?: number): boolean {
+    const rutas = precomputed?.rutas;
+    if (!precomputed || !rutas || slot === undefined || slot < 0 || slot >= precomputed.count || !rutas.listas[slot]
+      || person.x !== rutas.x[slot] || person.y !== rutas.y[slot]) return false;
+    this.#pasos = rutas.pasos; this.#inicio = slot * CELDAS_PERCEPCION;
+    this.#x = person.x; this.#y = person.y;
+    return true;
+  }
+
+  at(point: { x: number; y: number }): number | undefined {
+    const dx = point.x - this.#x + RADIO_PERCEPCION, dy = point.y - this.#y + RADIO_PERCEPCION;
+    if (dx !== (dx | 0) || dy !== (dy | 0) || dx < 0 || dy < 0 || dx >= LADO_PERCEPCION || dy >= LADO_PERCEPCION) return undefined;
+    const pasos = this.#pasos[this.#inicio + dy * LADO_PERCEPCION + dx]!;
+    return pasos < 0 ? undefined : pasos;
+  }
+}
+
 export function precomputedRouteLookup(
   person: { x: number; y: number }, precomputed?: PrecomputedMoves, slot?: number,
 ): ((point: { x: number; y: number }) => number | undefined) | undefined {
-  const rutas = precomputed?.rutas;
-  if (!precomputed || !rutas || slot === undefined || slot < 0 || slot >= precomputed.count || !rutas.listas[slot]
-    || person.x !== rutas.x[slot] || person.y !== rutas.y[slot]) return undefined;
-  const x = person.x, y = person.y, inicio = slot * CELDAS_PERCEPCION;
-  return point => {
-    const dx = point.x - x + RADIO_PERCEPCION, dy = point.y - y + RADIO_PERCEPCION;
-    if (!Number.isInteger(dx) || !Number.isInteger(dy) || dx < 0 || dy < 0 || dx >= LADO_PERCEPCION || dy >= LADO_PERCEPCION) return undefined;
-    const pasos = rutas.pasos[inicio + dy * LADO_PERCEPCION + dx]!;
-    return pasos < 0 ? undefined : pasos;
-  };
+  const reader = new PrecomputedRouteReader();
+  return reader.prepare(person, precomputed, slot) ? point => reader.at(point) : undefined;
 }
 
 /**

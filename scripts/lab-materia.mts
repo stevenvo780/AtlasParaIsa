@@ -15,13 +15,13 @@
  */
 import { performance } from 'node:perf_hooks';
 import {
-  CAPACIDAD_ATOMO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE,
+  CAPACIDAD_ATOMO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, NU, R,
 } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS, type SustanciaId } from '../src/shared/materia.js';
 import { nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import {
   ContextoSolver, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO,
-  esGasA, indiceTipoEnlace, productos, tasaArrhenius,
+  esGasA, indiceTipoEnlace, productos,
 } from '../src/world/materia/quimica.js';
 import { crearServicioQuimico, verificarI4, type ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 
@@ -40,6 +40,17 @@ function vec(pares: readonly [number, number][]): Uint16Array {
     out[2 * i + 1] = pares[i]![1];
   }
   return out;
+}
+
+/** Tasa de Arrhenius de ARQ-materia §3.1, k(T) = ν·exp(−max(0, ea − κ)/(R·T)), en 1/tick o L/(cuanto·tick). */
+export function tasaArrhenius(
+  T: number,
+  ea: number,
+  catalisis: -1 | 0 | 1 | 2,
+  kappa: readonly [number, number, number] | number = 0,
+): number {
+  const kEff = catalisis === -1 ? 0 : typeof kappa === 'number' ? kappa : kappa[catalisis]!;
+  return NU * Math.exp(-Math.max(0, ea - kEff) / (R * T));
 }
 
 function formula(s: Readonly<Sustancia>): string {
@@ -410,7 +421,8 @@ if (esCli) {
       console.log(`\n  I4: ${violacionesI4.length} violaciones (${servicio.totalSustancias()} sustancias, ${servicio.totalMemo()} filas de memo)`);
       if (violacionesI4.length > 0) console.log(violacionesI4.slice(0, 5));
       console.log('\n  Sustancias base:');
-      for (const s of servicio.todasSustancias().slice(0, 12)) {
+      for (let id = 1; id <= Math.min(12, servicio.totalSustancias()); id++) {
+        const s = servicio.sustancia(id);
         console.log(`    #${String(s.id).padStart(2)} ${formula(s).padEnd(8)} ${s.clase === ClaseSustancia.Molecula ? 'MOL' : 'UNI'} E=${String(s.energia).padStart(6)} r=${s.prop.r.toFixed(2)} Tf=${s.prop.tFusion.toFixed(0).padStart(4)}K Teb=${s.prop.tEbullicion.toFixed(0).padStart(4)}K dur=${s.prop.dureza.toFixed(3)} ten=${s.prop.tenacidad.toFixed(2)} dens=${s.prop.densidad.toFixed(2)} ${describirEnlaces(s.enlaces)}`);
       }
     }

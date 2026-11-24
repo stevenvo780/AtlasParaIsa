@@ -1,21 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, S_GAS } from '../src/shared/naturaleza.js';
+import type { Worker } from 'node:worker_threads';
+import { ELEMENTOS, GAMMA, KAPPA0, KAPPA_SUELO, NE, S_GAS, TABLA } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS } from '../src/shared/materia.js';
 import { createWorld } from '../src/world/index.js';
 import { comprobarInvariantes, listaInvariantes } from '../src/world/invariantes.js';
-import { nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
+import { NIVELES_T, nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import {
-  ContextoSolver, atomosDeEnlaces, construirSustancia, energiaRed,
-  esGasA, indiceTipoEnlace, minimoGlobalFuerzaBruta, normalizarEnlaces,
-  productos, realizable, tasaArrhenius,
+  ContextoSolver, atomosDeEnlaces, calcularCinetica, construirSustancia, energiaRed,
+  esGasA, grafoElementosConexo, indiceTipoEnlace, normalizarEnlaces,
+  productos, realizable,
 } from '../src/world/materia/quimica.js';
 import {
   asociarServicioQuimico, cargarSustancias, crearServicioQuimico,
-  serializarSustancias, verificarI4,
+  serializarSustancias, verificarI4, verificarI4Acotado,
   type FilaMemoQuimico, type ServicioQuimicoAuditable,
 } from '../src/world/materia/servicio.js';
-import { ejecutarBancoRendimiento, ejecutarTablaCordura } from '../scripts/lab-materia.mjs';
+import {
+  ejecutarBancoRendimiento, ejecutarTablaCordura, registrarSustanciasBase, tasaArrhenius,
+} from '../scripts/lab-materia.mjs';
 
 function E(a: string, b: string, k: 1 | 2 | 3 = 1): number {
   const i = indiceTipoEnlace(ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never), k);
@@ -25,6 +28,63 @@ function E(a: string, b: string, k: 1 | 2 | 3 = 1): number {
 
 function B(pares: readonly [number, number][]): Uint16Array {
   return normalizarEnlaces(Uint16Array.from(pares.flat()));
+}
+
+/**
+ * Oráculo sin poda e independiente del solver: todos los vectores saturados y conexos de cada sub-estequiometría,
+ * evaluados con `construirSustancia`, y una programación dinámica sobre todas las particiones (≤ 6 átomos).
+ */
+function minimoFuerzaBruta(objetivo: Uint8Array, nivelT: number): { g: number; gases: number } | null {
+  const Ts = tDeNivel(nivelT) * S_GAS;
+  const g = (s: Sustancia) => s.energia - (esGasA(s, tDeNivel(nivelT)) ? Ts : 0);
+  function mejorDe(u: Uint8Array): { g: number; gases: number } | null {
+    const rem = Array.from(u, (n, e) => n * TABLA[e]!.valencia);
+    const tipos = TIPOS.flatMap((t, i) => (u[t.e]! > 0 && u[t.f]! > 0 ? [i] : []));
+    const cuentas = new Array<number>(tipos.length).fill(0);
+    let mejor: { g: number; gases: number } | null = null;
+    function rec(pos: number): void {
+      if (pos === tipos.length) {
+        if (rem.some(r => r !== 0)) return;
+        const en = B(tipos.flatMap((t, i) => (cuentas[i]! > 0 ? [[t, cuentas[i]!] as [number, number]] : [])));
+        const at = atomosDeEnlaces(en);
+        if (!at || at.some((n, e) => n !== u[e]) || !grafoElementosConexo(en, at)) return;
+        const s = construirSustancia(1, en);
+        const cand = { g: g(s), gases: esGasA(s, tDeNivel(nivelT)) ? 1 : 0 };
+        if (!mejor || cand.g < mejor.g - 1e-9 || (Math.abs(cand.g - mejor.g) <= 1e-9 && cand.gases > mejor.gases)) mejor = cand;
+        return;
+      }
+      const t = TIPOS[tipos[pos]!]!;
+      const paso = t.e === t.f ? 2 * t.k : t.k;
+      for (let c = 0; t.e === t.f ? rem[t.e]! >= c * paso : rem[t.e]! >= c * t.k && rem[t.f]! >= c * t.k; c++) {
+        cuentas[pos] = c;
+        rem[t.e]! -= c * t.k; rem[t.f]! -= c * t.k;
+        rec(pos + 1);
+        rem[t.e]! += c * t.k; rem[t.f]! += c * t.k;
+      }
+      cuentas[pos] = 0;
+    }
+    rec(0);
+    return mejor;
+  }
+  const pasos = Array.from(objetivo, (_, e) => objetivo.slice(0, e).reduce((p, n) => p * (n + 1), 1));
+  const estados = objetivo.reduce((p, n) => p * (n + 1), 1);
+  const dp: ({ g: number; gases: number } | null)[] = new Array(estados).fill(null);
+  dp[0] = { g: 0, gases: 0 };
+  const sub = (idx: number) => Uint8Array.from(objetivo, (n, e) => Math.floor(idx / pasos[e]!) % (n + 1));
+  const opt = Array.from({ length: estados }, (_, i) => (i === 0 ? null : mejorDe(sub(i))));
+  for (let i = 1; i < estados; i++) {
+    const ui = sub(i);
+    for (let j = 1; j <= i; j++) {
+      const uj = sub(j);
+      if (!opt[j] || uj.some((n, e) => n > ui[e]!)) continue;
+      const resto = dp[i - j];
+      if (!resto) continue;
+      const cand = { g: resto.g + opt[j]!.g, gases: resto.gases + opt[j]!.gases };
+      const d = dp[i];
+      if (!d || cand.g < d.g - 1e-9 || (Math.abs(cand.g - d.g) <= 1e-9 && cand.gases > d.gases)) dp[i] = cand;
+    }
+  }
+  return dp[estados - 1]!;
 }
 
 test('normalizarEnlaces, saturación y rechazo de vectores inválidos o > 8 átomos', () => {
@@ -175,14 +235,14 @@ test('el solver exacto MRV+LP-dual coincide al 100 % con el oráculo de fuerza b
 
     for (const lvl of niveles) {
       const T = tDeNivel(lvl);
-      const bruto = minimoGlobalFuerzaBruta(objetivo, lvl);
+      const bruto = minimoFuerzaBruta(objetivo, lvl);
       assert.ok(bruto !== null, `Fuerza bruta nula para ${nombre}`);
 
       const res = productos(sA, sB, lvl, ctx);
       const gA = sA.energia - (esGasA(sA, T) ? T * S_GAS : 0);
       const gB = sB ? sB.energia - (esGasA(sB, T) ? T * S_GAS : 0) : 0;
-      const brutoA = minimoGlobalFuerzaBruta(sA.atomos, lvl)!;
-      const brutoB = sB ? minimoGlobalFuerzaBruta(sB.atomos, lvl)! : null;
+      const brutoA = minimoFuerzaBruta(sA.atomos, lvl)!;
+      const brutoB = sB ? minimoFuerzaBruta(sB.atomos, lvl)! : null;
       const gRefBruto = sB ? Math.min(gA + gB, brutoA.g + brutoB!.g) : gA;
 
       if (bruto.g < gRefBruto - 1 - 1e-6) {
@@ -341,10 +401,7 @@ test('invariante I4 registrada en invariantes.ts detecta corrupciones e integra 
       totalSustancias: () => 2,
       totalMemo: () => 1,
       pendientes: () => 0,
-      todasSustancias: () => [sustCorrupta, sustO2],
-      *todasReacciones(): IterableIterator<FilaMemoQuimico> {
-        yield { a: idC, b: idO2, nivelT: nivelDeT(1095), reaccion: reacCorrupta };
-      },
+      filasMemo: (): readonly FilaMemoQuimico[] => [{ a: idC, b: idO2, nivelT: nivelDeT(1095), reaccion: reacCorrupta }],
       publicarBarrera: () => 0,
       esperarBarrera: async () => 0,
       cerrar: async () => {},
@@ -390,3 +447,146 @@ test('banco de rendimiento de productos() cumple p99 < 50 ms hasta 16 átomos en
   assert.ok(banco.frioMs.p99 < 50, `p99 frío=${banco.frioMs.p99.toFixed(2)} ms supera 50 ms`);
   assert.ok(banco.calienteMs.p99 < 1, `p99 caliente=${banco.calienteMs.p99.toFixed(3)} ms supera 1 ms`);
 });
+
+test('cinética: ninguna barrera es menor que dH ni nula al partir una especie; la asociación pura no tiene barrera', async () => {
+  const serv = crearServicioQuimico({ modo: 'inmediato' });
+  try {
+    const S = registrarSustanciasBase(serv);
+    const r = (a: number, b: number, l: number) => serv.reaccion(a, b, l) ?? null;
+    const dCC = TIPOS[E('C', 'C')]!.d;
+
+    // 2 CH₂ → CH₄ + C conserva el vector de enlaces: hay que cortar al menos un C–C para partir la grasa.
+    const rGrasa = r(S.CH2, S.CH2, nivelDeT(259));
+    assert.ok(rGrasa && rGrasa.dH === 0);
+    assert.ok(Math.abs(rGrasa.ea - GAMMA * dCC) < 1e-9, `2 CH₂ → CH₄ + C con ea=${rGrasa.ea}`);
+    assert.ok(tasaArrhenius(259, rGrasa.ea, rGrasa.catalisis, 0) < 1e-12, 'la grasa no se desproporciona en frío');
+    // Arcilla + cal: sin cocer, no hay cerámica a 295 K.
+    const rArcCal = r(S.arcilla, S.CaO, nivelDeT(295));
+    assert.ok(rArcCal && tasaArrhenius(295, rArcCal.ea, rArcCal.catalisis, 0) < 1e-12, `arcilla + CaO con ea=${rArcCal?.ea}`);
+    // 2 H₃PO₄ → 3 H₂O + P₂O₅ se parte: tiene barrera.
+    const rFosf = r(S.H3PO4, S.H3PO4, nivelDeT(436));
+    assert.ok(rFosf && rFosf.ea > 100, `2 H₃PO₄ con ea=${rFosf?.ea}`);
+    // CaO + H₂O → Ca(OH)₂ es una asociación (un solo producto, mismo vector): el apagado sigue siendo inmediato.
+    const rApagado = r(S.CaO, S.H2O, nivelDeT(295));
+    assert.ok(rApagado && rApagado.salidas.length === 1 && rApagado.ea === 0);
+    // Su vuelta, Ca(OH)₂ → CaO + H₂O, es endotérmica: su barrera no puede ser menor que dH.
+    const rDesh = r(S.CaOH2, 0, nivelDeT(1037));
+    assert.ok(rDesh && rDesh.dH > 0 && rDesh.ea >= rDesh.dH, `Ca(OH)₂ → CaO + H₂O con ea=${rDesh?.ea}, dH=${rDesh?.dH}`);
+    const rCal = r(S.CaCO3, 0, nivelDeT(1250));
+    assert.ok(rCal && rCal.ea >= rCal.dH);
+
+    // En el cierre de la base, en los 16 niveles, ninguna reacción publicada tiene ea < max(0, dH).
+    const n = serv.totalSustancias();
+    for (let a = 1; a <= n; a++) for (let b = 0; b <= a; b++) for (let l = 0; l < NIVELES_T; l++) {
+      const x = r(a, b, l);
+      if (x) assert.ok(x.ea >= 0 && x.ea >= x.dH, `(${a}, ${b}) @L${l}: ea=${x.ea} < dH=${x.dH}`);
+    }
+    assert.deepEqual(verificarI4(serv), []);
+  } finally {
+    await serv.cerrar();
+  }
+
+  // Un triple que pasa a simple sin perder enlaces del par solo corta sus dos componentes π.
+  const n2 = B([[E('N', 'N', 3), 1]]), nn = B([[E('N', 'N'), 1], [E('H', 'N'), 4]]), h2 = B([[E('H', 'H'), 1]]);
+  const { ea } = calcularCinetica([{ enlaces: n2, nu: 1 }, { enlaces: h2, nu: 2 }], [{ enlaces: nn, nu: 1 }], 0);
+  const d = (k: 1 | 2 | 3) => TIPOS[E('N', 'N', k)]!.d;
+  assert.equal(ea, GAMMA * Math.max(d(3) - d(1), TIPOS[E('H', 'H')]!.d));
+});
+
+test('productos(): con ΔG = −ε exacto decide la aritmética entera, no el redondeo', () => {
+  // ΔE = −1 y los mismos gases que la mejor referencia (caso de la auditoría): debe ser null.
+  const a = construirSustancia(1, B([[E('H', 'C'), 1], [E('H', 'P'), 1], [E('C', 'C'), 2], [E('C', 'N'), 1], [E('C', 'P'), 2], [E('N', 'N'), 1], [E('P', 'P'), 1]]));
+  const b = construirSustancia(2, B([[E('H', 'N'), 1], [E('H', 'O'), 1], [E('C', 'N', 2), 2], [E('N', 'O'), 1]]));
+  assert.equal(productos(a, b, 4, new ContextoSolver()), null);
+  assert.equal(productos(b, a, 4, new ContextoSolver()), null);
+});
+
+test('los tres modos del servicio publican las mismas reacciones; worker y diferido, los mismos ids', async () => {
+  const modos = (['inmediato', 'diferido', 'worker'] as const).map(modo => crearServicioQuimico({ modo }));
+  try {
+    const consultas: [string, string, number][] = [
+      ['CH4', 'O2', 9], ['madera', '', 8], ['madera', 'N2', 8], ['CaCO3', '', 10], ['CaOH2', 'CO2', 2],
+      ['Fe2O3', 'C', 10], ['proteina', '', 2], ['arcilla', 'CaO', 2], ['CH2', 'CH2', 1], ['H2', 'O2', 0],
+    ];
+    const vistas: string[][] = [];
+    for (const s of modos) {
+      const S = registrarSustanciasBase(s) as Record<string, number>;
+      for (const [x, y, l] of consultas) s.reaccion(S[x]!, y ? S[y]! : 0, l);
+      await s.esperarBarrera();
+      assert.equal(s.pendientes(), 0);
+      vistas.push(consultas.map(([x, y, l]) => {
+        const r = s.reaccion(S[x]!, y ? S[y]! : 0, l);
+        assert.notEqual(r, undefined, 'tras la barrera no queda nada encolado');
+        if (!r) return 'null';
+        const lado = (xs: Reaccion['salidas']) => xs.map(p => `${p.nu}·${[...s.sustancia(p.id).enlaces]}`).join('+');
+        return `${lado(r.entradas)}→${lado(r.salidas)} dH=${r.dH} ea=${r.ea} cat=${r.catalisis}`;
+      }));
+    }
+    assert.deepEqual(vistas[1], vistas[0]);
+    assert.deepEqual(vistas[2], vistas[0]);
+    assert.deepEqual(serializarSustancias(modos[2]!), serializarSustancias(modos[1]!));
+  } finally {
+    for (const s of modos) await s.cerrar();
+  }
+});
+
+test('si el worker muere, el servicio falla en vez de colgarse o perder peticiones', async () => {
+  const s = crearServicioQuimico({ modo: 'worker' });
+  try {
+    const S = registrarSustanciasBase(s);
+    assert.equal(s.reaccion(S.CH4, S.O2, 9), undefined);
+    await (s as unknown as { worker: Worker }).worker.terminate();
+    await assert.rejects(s.esperarBarrera(), /worker de química/);
+    assert.throws(() => s.reaccion(S.madera, 0, 8), /worker de química/);
+  } finally {
+    await s.cerrar();
+  }
+});
+
+test('códec de sustancias: cualquier bit cambiado falla y otra química no se carga en silencio', async () => {
+  const { servicio } = ejecutarTablaCordura();
+  try {
+    const bytes = serializarSustancias(servicio);
+    for (let bit = 0; bit < bytes.length * 8; bit++) {
+      const malo = new Uint8Array(bytes);
+      malo[bit >> 3]! ^= 1 << (bit & 7);
+      assert.throws(() => cargarSustancias(malo, { modo: 'inmediato' }), Error, `bit ${bit} sin detectar`);
+    }
+    // Misma clave y CRC correcto, pero otra energía guardada: es otra química (otra TABLA o constantes de red).
+    const otra = new Uint8Array(bytes);
+    const vista = new DataView(otra.buffer);
+    const finPrimera = 12 + 1 + otra[12]! * 2 + 1;
+    vista.setInt32(finPrimera, vista.getInt32(finPrimera, true) + 1, true);
+    vista.setUint32(otra.length - 4, crc32(otra.subarray(0, otra.length - 4)), true);
+    assert.throws(() => cargarSustancias(otra, { modo: 'inmediato' }), /Química incompatible/);
+  } finally {
+    await servicio.cerrar();
+  }
+});
+
+test('I4 registrada: coste acotado por llamada y un servicio de producción sin asociar no queda sin comprobar', async () => {
+  const mundo = createWorld(51926);
+  const huerfano = crearServicioQuimico({ modo: 'diferido' });
+  try {
+    const viols = comprobarInvariantes(mundo, { ids: ['materia.quimica.i4'] });
+    assert.ok(viols.some(v => v.detalle.includes('sin asociar')), 'un servicio vivo sin mundo debe denunciarse');
+    const quitar = asociarServicioQuimico(mundo, huerfano);
+    registrarSustanciasBase(huerfano);
+    assert.deepEqual(comprobarInvariantes(mundo, { ids: ['materia.quimica.i4'] }), []);
+    assert.deepEqual(verificarI4Acotado(huerfano, 1), [], 'la rueda vuelve sobre lo ya revisado sin falsos positivos');
+    quitar();
+    assert.ok(comprobarInvariantes(mundo, { ids: ['materia.quimica.i4'] }).some(v => v.detalle.includes('sin asociar')));
+  } finally {
+    await huerfano.cerrar();
+  }
+  assert.deepEqual(comprobarInvariantes(mundo, { ids: ['materia.quimica.i4'] }), [], 'cerrado, ya no hay nada que comprobar');
+});
+
+function crc32(datos: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const byte of datos) {
+    c ^= byte;
+    for (let k = 0; k < 8; k++) c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}

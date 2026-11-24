@@ -8,7 +8,7 @@
  */
 import {
   ANCHO_RIGIDEZ, DCHI_IONICO, EBULLICION_MASA, EBULLICION_POLAR, EPSILON_G, FUSION_RED,
-  GAMMA, NE, NU, R, R_RIGIDEZ, S_GAS, TABLA,
+  GAMMA, NE, R_RIGIDEZ, S_GAS, TABLA,
 } from '../../shared/naturaleza.js';
 import {
   ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS,
@@ -16,26 +16,29 @@ import {
 } from '../../shared/materia.js';
 import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type Sustancia } from './tipos.js';
 
-// ── Constantes de red iónica (propuestas para mover a `src/shared/naturaleza.ts` en integración) ────────
+// ── Constantes elegidas por Q, por mover a `src/shared/naturaleza.ts` en la integración ──────────────────
+// Los intervalos son los que mantienen verde la tabla de cordura con las demás constantes fijas (auditoría de Q).
 
-/**
- * Estabilización reticular de oxoaniones/nitruros iónicos resonantes (J/cuanto por puente M–X–Y=X):
- * Con energías puramente aditivas, CaCO₃ → CaO + CO₂ y H₂CO₃ → H₂O + CO₂ comparten dH = 2·D(C–O) − D(C=O) = −63
- * (imposible tener a la vez D(C–O) < D(C–C), llama > 1.000 K y caliza estable a 295 K).
- * Este término es homogéneo de grado 1 (E(m·b) = m·E(b)), entero, nulo en toda especie covalente y acotado por
- * min(I_X, C_X): fija dH(CaCO₃ → CaO + CO₂) = +207 J/cuanto (T_eq = 1.150 K, nivel 10 = 1.234 K) sin afectar CO₂.
- */
+/** J por cuanto y por puente M–X–Y=X: red de un oxoanión resonante (CaCO₃, CaHPO₄). Sin ella dH(CaCO₃ → CaO + CO₂) =
+ * 2·D(C–O) − D(C=O) = −63 y no hay caliza; con 135 vale +207 y calcina en el nivel 10 a 1,7/tick. Intervalo: 110..137
+ * (por encima, ea ≥ dH deja la calcinación en horno por debajo de 1/tick). */
 export const E_RES_IONICO = 135;
-
-/** Estabilización reticular de hidróxidos iónicos (J/cuanto por puente M–X–H): CaO + H₂O → Ca(OH)₂ (dH = −100, T_eq = 556 K). */
+/** J por cuanto y por puente M–X–H: red de un hidróxido iónico (CaO + H₂O → Ca(OH)₂, dH = −100). Intervalo: 1..75. */
 export const E_HID_IONICO = 50;
-
-/**
- * Rebaja de barrera por adición nucleofílica iónica sobre un enlace π polarizado cuando NO se rompe ningún enlace σ
- * (p. ej. CaO + CO₂ → CaCO₃ y Ca(OH)₂ + CO₂ → CaCO₃ + H₂O): permite que la cal fragüe a 295 K (k ~ 0,06/tick)
- * sin tocar la barrera de ninguna combustión, pirólisis ni reducción covalente.
- */
+/** J por cuanto: rebaja de la barrera al abrir un enlace π sobre un sólido iónico sin perder ningún σ (CaO + CO₂,
+ * fraguado del mortero a 295 K). Es una regla calibrada para la cal, no un principio general. Intervalo: ≥ 67. */
 export const E_CAT_IONICO = 75;
+/** T_f/T_eb de una molécula (regla de Beaman–Walden), adimensional: agua líquida en [271, 371] K. */
+export const FUSION_MOLECULA = 0.73;
+/** mL/mol (µL por cuanto) de cada átomo en fase condensada, en el orden de `ELEMENTOS`: fija la densidad. */
+export const VOLUMEN_ATOMO: readonly number[] = [5.0, 7.0, 7.5, 7.5, 15.0, 12.0, 18.0, 8.5];
+/** Fracción de volumen ocupada por una red: EMPAQUETADO_BASE + EMPAQUETADO_POR_R·min(4, r); las moléculas, 1. */
+export const EMPAQUETADO_BASE = 0.65;
+export const EMPAQUETADO_POR_R = 0.15;
+/** Tenacidad de una red = TENACIDAD_RED·exp(−((r − R_RIGIDEZ)/TENACIDAD_ANCHO)²) + TENACIDAD_METAL·fracción metálica. */
+export const TENACIDAD_RED = 0.6;
+export const TENACIDAD_ANCHO = 0.8;
+export const TENACIDAD_METAL = 0.4;
 
 // ── Tablas derivadas de TABLA y TIPOS (sin números mágicos duplicados) ──────────────────────────────────
 
@@ -103,9 +106,6 @@ const E_OX_POR_ATOMO = Float64Array.from([
   -2 * T_D[indiceTipoEnlace(3, 6, 1)]!,       // Ca: −2·D(O–Ca)
   -3 * T_D[indiceTipoEnlace(3, 7, 1)]!,       // Fe: −3·D(O–Fe)
 ]);
-
-// Volúmenes molares atómicos (mL/mol = cm³/mol) derivados de radios covalentes para densidad condensada.
-const VOL_ATOMO = Float64Array.from([5.0, 7.0, 7.5, 7.5, 15.0, 12.0, 18.0, 8.5]);
 
 // Colores base por elemento (RGB en [0, 255]) para mezclar el color emergente de cada sustancia.
 const RGB_ELEM: readonly [number, number, number][] = [
@@ -242,16 +242,16 @@ export function grafoElementosConexo(enlaces: Uint16Array, atomos: Uint8Array): 
 /**
  * Decide si un vector saturado de enlaces puede existir como molécula aislada (`ClaseSustancia.Molecula`).
  *
- * Condición necesaria y suficiente (exacta para N ≤ 8):
- * 1. Sin metales Ca ni Fe y sin enlaces iónicos (Δχ ≥ DCHI_IONICO).
- * 2. N ∈ [2, 8] y coordinación media del núcleo r = 2·E_core / N_core < R_RIGIDEZ (2,4): excluye jaulas 3D
- *    hiperrestringidas (K₅ de carbono, K₂,₄ de sílice, K₃,₄ de Si₃N₄, K₂,₅ de P₂O₅) que de otro modo
- *    sublimarían rocas y carbón en frío con idéntica energía de enlace.
- * 3. Ningún enlace saturado por sí solo (k = v_e = v_f, es decir H–H, O=O, N≡N) salvo el dímero exacto N = 2.
- * 4. Teorema de eliminación de hojas: con N > 2 y sin H–H, todo H (valencia 1) es una hoja; existe un grafo
- *    simple conexo con las valencias exactas si y solo si existe un grafo simple conexo sobre los N_core ≤ 8
- *    vértices del núcleo con los E_core ≤ 9 enlaces núcleo-núcleo y valencia residual ≥ 0 en cada vértice
- *    (la suma residual por elemento iguala b_{H,e} automáticamente por saturación).
+ * Es un teorema de grafos más dos reglas físicas (la auditoría lo comprobó en los 4.038.407 vectores de ≤ 8 átomos):
+ * - Teorema: existe un grafo simple conexo con esas valencias exactas. Un enlace que agota a sus dos átomos (H–H, O=O,
+ *   N≡N) es una componente aislada, así que solo vale como dímero; todo H es una hoja, y basta buscar el grafo del
+ *   núcleo (átomos de valencia > 1, ≤ 8 vértices) con valencia residual ≥ 0.
+ * - Regla de ARQ-materia §2: Ca, Fe y los enlaces iónicos (Δχ ≥ DCHI_IONICO) forman red. Con la TABLA de hoy el
+ *   único enlace iónico es el de Ca, así que el corte por Δχ no decide nada; queda por si se recalibra χ.
+ * - Regla de Q: coordinación media del núcleo r < R_RIGIDEZ. Sin ella las jaulas K₅ (C₅), K₂,₄ (Si₂O₄) o K₂,₅ (P₂O₅)
+ *   serían gas con la misma energía de enlace que su red (falla la fila de roca estable de la tabla de cordura). Es
+ *   un sustituto de la energía de tensión que el modelo no tiene, y depende de la unidad elegida: C₃{C=C:3} es
+ *   molécula y C₂{C–C:4} no, así que una red de carbono puede volatilizarse según cómo se escriba su unidad.
  *
  * Contraejemplos que descarta respecto a la condición relajada E ≥ N − 1 + cotas por par:
  * - {C=C:3, O=O:1} (N=5, E=4): grafo de elementos disconexo.
@@ -283,11 +283,7 @@ export function realizable(enlaces: Uint16Array, atomosPre?: Uint8Array): boolea
     E += c;
     parE[e * NE + f]! += c;
     if (T_CORE[ti]) eCore += c;
-    if (k === VAL[e]! && k === VAL[f]!) {
-      // H–H, O=O o N≡N agotan sus dos átomos: solo conexo si es el dímero exacto.
-      return N === 2 && E === 1 && c === 1;
-    }
-    if (VAL[e] === 1 && VAL[f] === 1) return false;
+    if (k === VAL[e]! && k === VAL[f]!) return N === 2 && c === 1; // H–H, O=O o N≡N: solo el dímero
   }
   if (E < N - 1) return false;
 
@@ -453,7 +449,7 @@ export function propiedadesSustancia(
     nTot += ne;
     if (VAL[e]! > 1) nCore += ne;
     masa += ne * MASA[e]!;
-    volMolar += ne * VOL_ATOMO[e]!;
+    volMolar += ne * VOLUMEN_ATOMO[e]!;
     oReq += ne * O_REQ_POR_ATOMO[e]!;
     eOx += ne * E_OX_POR_ATOMO[e]!;
   }
@@ -477,11 +473,10 @@ export function propiedadesSustancia(
   let tEbullicion: number;
   if (clase === ClaseSustancia.Molecula) {
     tEbullicion = EBULLICION_MASA * Math.sqrt(masa) + sumaPolarH;
-    // Regla de Beaman/Walden (~0,73·T_eb): fija agua líquida en [271 K, 371 K] y tFusion < tEbullicion siempre.
-    tFusion = 0.73 * tEbullicion;
+    tFusion = FUSION_MOLECULA * tEbullicion;
   } else {
     tFusion = FUSION_RED * Math.max(0.25, r - 1) * dMedia;
-    // Una red condensada no se volatiliza como especie gaseosa en el rango térmico de la simulación.
+    // Una red nunca es gas (`esGasA`): su ebullición solo se informa, fuera del rango de niveles.
     tEbullicion = Math.max(tFusion * 1.8, T_NIVEL_MAX * 2);
   }
 
@@ -496,13 +491,13 @@ export function propiedadesSustancia(
 
   const fMetal = eTot > 0 ? eMetal / eTot : 0;
   const tenacidad = clase === ClaseSustancia.Unidad
-    ? clamp01(0.6 * Math.exp(-(((r - R_RIGIDEZ) / 0.8) ** 2)) + 0.4 * fMetal)
+    ? clamp01(TENACIDAD_RED * Math.exp(-(((r - R_RIGIDEZ) / TENACIDAD_ANCHO) ** 2)) + TENACIDAD_METAL * fMetal)
     : 0;
 
   const flexibilidad = clamp01(1 - Math.max(0, r - 1) / (R_RIGIDEZ - 1));
   const polaridad = eTot > 0 ? clamp01(sumaDchi / (eTot * DCHI_IONICO)) : 0;
 
-  const empaquetado = clase === ClaseSustancia.Unidad ? 0.65 + 0.15 * Math.min(4, r) : 1;
+  const empaquetado = clase === ClaseSustancia.Unidad ? EMPAQUETADO_BASE + EMPAQUETADO_POR_R * Math.min(4, r) : 1;
   const densidad = volMolar > 0 ? (masa * empaquetado) / volMolar : 1;
 
   let cr = 0, cg = 0, cb = 0;
@@ -562,17 +557,19 @@ export function familiaCatalitica(tipo: number): -1 | 0 | 1 | 2 {
 export interface EntradaSalidaEnlaces { enlaces: Uint16Array; nu: number }
 
 /**
- * Calcula la barrera `ea` (J/cuanto) y la familia catalítica `catalisis` de una reacción balanceada:
- * - `catalisis`: familia del enlace catalizable MÁS DÉBIL cuyo conteo disminuye (contrato `tipos.ts`).
- * - `ea`: GAMMA·D del enlace más fuerte que disminuye. Cuando un enlace múltiple (e,f,k) baja de orden
- *   mientras (e,f,k−1) sube sin perder enlaces totales entre (e,f), se abre su componente π (D_k − D_{k−1});
- *   si además participa un sólido iónico y no se rompe ningún enlace σ, la superficie iónica rebaja en `E_CAT_IONICO`.
- * - En deshidrataciones/reordenamientos covalentes que conservan exactamente el vector de enlaces (p. ej.
- *   arcilla H₂SiO₃ → SiO₂ + H₂O), se toma GAMMA·min(D) de los enlaces redistribuidos (cocción en horno, no a 373 K).
+ * Barrera `ea` (J por cuanto de reacción) y familia `catalisis` de una reacción balanceada. La barrera es GAMMA por la
+ * energía del enlace que hay que cortar, y nunca menor que dH: si lo fuera, la reacción inversa tendría barrera negativa.
+ * - Si algún tipo disminuye, cuenta el más fuerte. Si solo baja de orden (k → k′ < k sin que su par pierda enlaces),
+ *   se corta su parte π, D_k − D_k′; con un sólido iónico entre las entradas y ningún σ perdido se rebaja E_CAT_IONICO.
+ * - Si el vector de enlaces se conserva y sale una sola especie, es una asociación (CaO + H₂O → Ca(OH)₂): no se corta
+ *   nada. Con dos o más productos alguna entrada se parte, así que se corta y se rehace al menos un enlace suyo: cuenta
+ *   el más débil de las entradas, como cota inferior (arcilla → SiO₂ + H₂O, 2 CH₂ → CH₄ + C, arcilla + CaO).
+ * `catalisis` es la familia del enlace catalizable más débil que disminuye (contrato de `Reaccion`), −1 si no hay.
  */
 export function calcularCinetica(
   entradas: readonly EntradaSalidaEnlaces[],
   salidas: readonly EntradaSalidaEnlaces[],
+  dH: number,
 ): { ea: number; catalisis: -1 | 0 | 1 | 2 } {
   const bIn = new Int32Array(NT);
   const bOut = new Int32Array(NT);
@@ -613,10 +610,11 @@ export function calcularCinetica(
     const e = T_E[ti]!, f = T_F[ti]!, k = T_K[ti]!;
     const par = e * NE + f;
     let dRoto = T_D[ti]!;
-    // Apertura pura de enlace π (k → k−1 sin pérdida de enlaces totales entre e y f).
     if (k > 1 && parOut[par]! >= parIn[par]!) {
-      const tiMenor = indiceTipoEnlace(e, f, (k - 1) as 1 | 2);
-      if (tiMenor >= 0 && bOut[tiMenor]! > bIn[tiMenor]!) dRoto = T_D[ti]! - T_D[tiMenor]!;
+      for (let kMenor = k - 1; kMenor >= 1; kMenor--) {
+        const tiMenor = indiceTipoEnlace(e, f, kMenor as 1 | 2);
+        if (bOut[tiMenor]! > bIn[tiMenor]!) { dRoto = T_D[ti]! - T_D[tiMenor]!; break; }
+      }
     }
     if (dRoto > maxD) maxD = dRoto;
     const fam = familiaCatalitica(ti);
@@ -626,33 +624,16 @@ export function calcularCinetica(
     }
   }
 
-  let ea: number;
+  let ea = 0;
   if (huboDescenso) {
     ea = GAMMA * maxD;
     if (!sigmaRoto && hayIonicoEntrada) ea = Math.max(0, ea - E_CAT_IONICO);
-  } else if (!hayIonicoEntrada && entradas.length === 1 && entradas[0]!.nu === 1 && salidas.length >= 2) {
-    // Escisión covalente sin cambio neto de vector de enlaces (p. ej. H₂SiO₃ → SiO₂ + H₂O).
+  } else if (salidas.length > 1 || salidas[0]!.nu > 1) {
     let minD = Infinity;
-    for (let ti = 0; ti < NT; ti++) {
-      if (bIn[ti]! > 0 && T_D[ti]! < minD) minD = T_D[ti]!;
-    }
-    ea = minD < Infinity ? GAMMA * minD : 0;
-  } else {
-    ea = 0;
+    for (let ti = 0; ti < NT; ti++) if (bIn[ti]! > 0 && T_D[ti]! < minD) minD = T_D[ti]!;
+    ea = GAMMA * minD;
   }
-
-  return { ea, catalisis };
-}
-
-/** Tasa de Arrhenius k(T) = ν·exp(−max(0, ea − κ)/(R·T)), en 1/tick o L/(cuanto·tick). */
-export function tasaArrhenius(
-  T: number,
-  ea: number,
-  catalisis: -1 | 0 | 1 | 2,
-  kappa: readonly [number, number, number] | number = 0,
-): number {
-  const kEff = catalisis === -1 ? 0 : typeof kappa === 'number' ? kappa : kappa[catalisis]!;
-  return NU * Math.exp(-Math.max(0, ea - kEff) / (R * T));
+  return { ea: Math.max(ea, dH), catalisis };
 }
 
 // ── Mínimo global exacto de energía libre: productos(A, B, nivelT) ──────────────────────────────────────
@@ -755,48 +736,16 @@ export class ContextoSolver {
   readonly pi = new Float64Array(NE);
   readonly piTry = new Float64Array(NE);
   readonly availIdx = new Int32Array(NT);
-
-  limpiar(): void {
-    this.cacheEstequiometria.clear();
-  }
 }
 
 /**
  * Cota superior dual de relajación lineal para Σ D_i·c_i sujeta a capacidades de valencia `rem`:
  * cualquier vector π ≥ 0 con π[e_i] + π[f_i] ≥ D_i/k_i en todos los enlaces disponibles satisface
  *   Σ D_i·c_i = Σ k_i·c_i·(D_i/k_i) ≤ Σ k_i·c_i·(π[e_i] + π[f_i]) = Σ_e rem[e]·π[e].
- * Devuelve −1 si algún elemento con rem[e] > 0 carece de enlaces disponibles (infactible).
+ * Parte de π[e] = máx D/(2k) de sus enlaces; con `refinar`, baja precios por descenso de coordenadas sin perder la
+ * factibilidad (aprieta elementos escasos como Ca). Devuelve −1 si a un elemento con rem > 0 no le cabe ningún enlace.
  */
-function cotaDualMedia(ctx: ContextoSolver, rem: Int32Array, activos: readonly number[], enlaces: readonly number[]): number {
-  const pi = ctx.pi;
-  const na = activos.length;
-  for (let j = 0; j < na; j++) pi[activos[j]!] = 0;
-  for (let i = 0; i < enlaces.length; i++) {
-    const ti = enlaces[i]!, e = T_E[ti]!, f = T_F[ti]!, k = T_K[ti]!;
-    if (e === f) {
-      if (rem[e]! < 2 * k) continue;
-      const mitad = D_PER_K[ti]! * 0.5;
-      if (mitad > pi[e]!) pi[e] = mitad;
-    } else {
-      if (rem[e]! < k || rem[f]! < k) continue;
-      const mitad = D_PER_K[ti]! * 0.5;
-      if (mitad > pi[e]!) pi[e] = mitad;
-      if (mitad > pi[f]!) pi[f] = mitad;
-    }
-  }
-  let val = 0;
-  for (let j = 0; j < na; j++) {
-    const e = activos[j]!, r = rem[e]!;
-    if (r > 0) {
-      if (pi[e]! === 0) return -1;
-      val += r * pi[e]!;
-    }
-  }
-  return val;
-}
-
-/** Refinamiento dual-factible por descenso de coordenadas (ajusta precios de elementos escasos como Ca). */
-function cotaDualApretada(ctx: ContextoSolver, rem: Int32Array, activos: readonly number[], enlaces: readonly number[]): number {
+function cotaDual(ctx: ContextoSolver, rem: Int32Array, activos: readonly number[], enlaces: readonly number[], refinar: boolean): number {
   const pi = ctx.pi;
   const piTry = ctx.piTry;
   const avail = ctx.availIdx;
@@ -828,7 +777,7 @@ function cotaDualApretada(ctx: ContextoSolver, rem: Int32Array, activos: readonl
       mejor += r * pi[e]!;
     }
   }
-  if (na <= 1 || np <= 1) return mejor;
+  if (!refinar || na <= 1 || np <= 1) return mejor;
 
   for (let paso = 0; paso < 3; paso++) {
     let mejoro = false;
@@ -978,7 +927,7 @@ function resolverEstequiometria(
   );
   const umbralRaiz = puedeGanarEmpate ? cg + 1e-9 : cg - 1e-6;
 
-  const dualRaiz = cotaDualApretada(ctx, rem, presentes, relTypes);
+  const dualRaiz = cotaDual(ctx, rem, presentes, relTypes, true);
   if (dualRaiz < 0) {
     ctx.cacheEstequiometria.set(clave, null);
     return null;
@@ -1019,9 +968,7 @@ function resolverEstequiometria(
       s++;
       pos = inicioEtapa[s]!;
       if (s < np) {
-        const ub = s <= 2
-          ? cotaDualApretada(ctx, rem, activosEtapa[s]!, tramoEtapa[s]!)
-          : cotaDualMedia(ctx, rem, activosEtapa[s]!, tramoEtapa[s]!);
+        const ub = cotaDual(ctx, rem, activosEtapa[s]!, tramoEtapa[s]!, s <= 2);
         if (ub < 0) return;
         const subMaxEred = (curIon > 0 || etapaTieneIon[s]!) ? maxEred : 0;
         const subCanMol = puedeSerMol && curIon === 0 && (nCore === 0 || (2 * curECore) / nCore < R_RIGIDEZ);
@@ -1242,6 +1189,9 @@ export interface ResultadoProductos {
 
 const CONTEXTO_DEFECTO = new ContextoSolver();
 
+/** G(E₁, gases₁) − G(E₂, gases₂) con Ts = T·S_GAS: resta de enteros más un solo producto. */
+const difG = (e1: number, gas1: number, e2: number, gas2: number, Ts: number): number => (e1 - e2) - Ts * (gas1 - gas2);
+
 /**
  * Calcula los productos de menor energía libre de `a` (si `b === null`) o `a + b` al nivel de temperatura `nivelT`.
  *
@@ -1267,17 +1217,20 @@ export function productos(
   const opt = minimizarParticion(objetivo, nivelT, ctx);
   if (!opt) return null;
 
+  // La decisión se toma con energías y cuentas de gases enteras: G = E − T·s·#gas, así que con los mismos gases la
+  // comparación con ε es exacta y no la decide el redondeo de sumas de T·s.
   const mismaSustancia = b !== null && compararEnlaces(a.enlaces, b.enlaces) === 0;
-  const gA = a.energia - (esGasA(a, T) ? Ts : 0);
-  const gB = b ? b.energia - (esGasA(b, T) ? Ts : 0) : 0;
-  let gRef = gA + gB;
+  let eRef = a.energia + (b ? b.energia : 0);
+  let gasRef = (esGasA(a, T) ? 1 : 0) + (b && esGasA(b, T) ? 1 : 0);
   if (b !== null) {
     const optA = minimizarParticion(a.atomos, nivelT, ctx);
     const optB = mismaSustancia ? optA : minimizarParticion(b.atomos, nivelT, ctx);
-    if (optA && optB) gRef = Math.min(gRef, optA.g + optB.g);
+    if (optA && optB && difG(optA.energia + optB.energia, optA.gases + optB.gases, eRef, gasRef, Ts) < 0) {
+      eRef = optA.energia + optB.energia;
+      gasRef = optA.gases + optB.gases;
+    }
   }
-
-  if (!(opt.g < gRef - EPSILON_G)) return null;
+  if (!(difG(opt.energia, opt.gases, eRef, gasRef, Ts) < -EPSILON_G)) return null;
 
   // Agrupar productos idénticos en orden canónico por enlaces.
   const mapa = new Map<string, { enlaces: Uint16Array; nu: number }>();
@@ -1296,111 +1249,6 @@ export function productos(
       : [{ enlaces: a.enlaces, nu: 1 }, { enlaces: b.enlaces, nu: 1 }];
 
   const dH = opt.energia - (a.energia + (b ? b.energia : 0));
-  const { ea, catalisis } = calcularCinetica(entradas, salidas);
+  const { ea, catalisis } = calcularCinetica(entradas, salidas, dH);
   return { productos: salidas, dH, ea, catalisis };
-}
-
-/**
- * Oráculo de fuerza bruta sin poda para verificar optimalidad global en pruebas sobre sistemas pequeños (≤ 6 átomos).
- * Enumera TODOS los vectores saturados de cada sub-estequiometría sin cota dual ni MRV y elige el mínimo global exacto.
- */
-export function minimoGlobalFuerzaBruta(objetivo: Uint8Array, nivelT: number): { g: number; energia: number; gases: number } | null {
-  const T = T_NIVEL[nivelT]!;
-  const Ts = TS_NIVEL[nivelT]!;
-  let totalAtomos = 0;
-  for (let e = 0; e < NE; e++) totalAtomos += objetivo[e]!;
-  if (totalAtomos === 0 || totalAtomos > 6) throw new RangeError('El oráculo de fuerza bruta está acotado a ≤ 6 átomos.');
-
-  function mejorBrutoEstequio(u: Uint8Array): { g: number; energia: number; gases: number } | null {
-    const rem = new Int32Array(NE);
-    let totV = 0;
-    for (let e = 0; e < NE; e++) { rem[e] = u[e]! * VAL[e]!; totV += rem[e]!; }
-    if ((totV & 1) !== 0) return null;
-    const rel: number[] = [];
-    for (let i = 0; i < NT; i++) {
-      const e = T_E[i]!, f = T_F[i]!, k = T_K[i]!;
-      if (u[e]! === 0 || u[f]! === 0) continue;
-      if (e === f ? 2 * k > rem[e]! : (k > rem[e]! || k > rem[f]!)) continue;
-      rel.push(i);
-    }
-    const counts = new Int32Array(rel.length);
-    let best: { g: number; energia: number; gases: number } | null = null;
-    function rec(pos: number, remTot: number): void {
-      if (remTot === 0) {
-        let p = 0;
-        for (let i = 0; i < rel.length; i++) if (counts[i]! > 0) p++;
-        const en = new Uint16Array(p * 2);
-        let w = 0;
-        for (let i = 0; i < rel.length; i++) if (counts[i]! > 0) { en[w++] = rel[i]!; en[w++] = counts[i]!; }
-        const canon = normalizarEnlaces(en);
-        if (!grafoElementosConexo(canon, u)) return;
-        const sp = evaluarEspecieOpt(canon, u);
-        const esGas = sp.clase === ClaseSustancia.Molecula && T > sp.tEb;
-        const g = sp.energia - (esGas ? Ts : 0);
-        const gases = esGas ? 1 : 0;
-        if (!best || g < best.g - 1e-9 || (Math.abs(g - best.g) <= 1e-9 && gases > best.gases)) {
-          best = { g, energia: sp.energia, gases };
-        }
-        return;
-      }
-      if (pos === rel.length) return;
-      const ti = rel[pos]!, e = T_E[ti]!, f = T_F[ti]!, k = T_K[ti]!;
-      const maxC = e === f ? Math.floor(rem[e]! / (2 * k)) : Math.min(Math.floor(rem[e]! / k), Math.floor(rem[f]! / k));
-      for (let c = 0; c <= maxC; c++) {
-        counts[pos] = c;
-        if (c > 0) { rem[e]! -= k * c; rem[f]! -= k * c; }
-        rec(pos + 1, remTot - 2 * k * c);
-        if (c > 0) { rem[e]! += k * c; rem[f]! += k * c; }
-      }
-      counts[pos] = 0;
-    }
-    rec(0, totV);
-    return best;
-  }
-
-  // DP sobre todas las sub-estequiometrías de objetivo.
-  const strides = new Int32Array(NE);
-  let totalEstados = 1;
-  for (let e = 0; e < NE; e++) { strides[e] = totalEstados; totalEstados *= objetivo[e]! + 1; }
-  const dpG = new Float64Array(totalEstados).fill(Infinity);
-  const dpE = new Int32Array(totalEstados);
-  const dpGas = new Int32Array(totalEstados);
-  dpG[0] = 0;
-
-  const cur = new Uint8Array(NE);
-  const sub: { idx: number; u: Uint8Array; opt: { g: number; energia: number; gases: number } }[] = [];
-  function gen(e: number, sumA: number, idxV: number): void {
-    if (e === NE) {
-      if (sumA === 0) return;
-      const u = new Uint8Array(cur);
-      const opt = mejorBrutoEstequio(u);
-      if (opt) sub.push({ idx: idxV, u, opt });
-      return;
-    }
-    for (let c = 0; c <= objetivo[e]!; c++) { cur[e] = c; gen(e + 1, sumA + c, idxV + c * strides[e]!); }
-    cur[e] = 0;
-  }
-  gen(0, 0, 0);
-
-  const activos: number[] = [];
-  for (let e = 0; e < NE; e++) if (objetivo[e]! > 0) activos.push(e);
-  for (const it of sub) {
-    function rel(pos: number, baseIdx: number): void {
-      if (pos === activos.length) {
-        if (dpG[baseIdx] === Infinity) return;
-        const ni = baseIdx + it.idx;
-        const ng = dpG[baseIdx]! + it.opt.g;
-        const ngas = dpGas[baseIdx]! + it.opt.gases;
-        if (ng < dpG[ni]! - 1e-9 || (Math.abs(ng - dpG[ni]!) <= 1e-9 && ngas > dpGas[ni]!)) {
-          dpG[ni] = ng; dpE[ni] = dpE[baseIdx]! + it.opt.energia; dpGas[ni] = ngas;
-        }
-        return;
-      }
-      const e = activos[pos]!, lim = objetivo[e]! - it.u[e]!, st = strides[e]!;
-      for (let v = 0; v <= lim; v++) rel(pos + 1, baseIdx + v * st);
-    }
-    rel(0, 0);
-  }
-  const meta = totalEstados - 1;
-  return dpG[meta] === Infinity ? null : { g: dpG[meta]!, energia: dpE[meta]!, gases: dpGas[meta]! };
 }

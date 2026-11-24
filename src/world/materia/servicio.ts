@@ -1,15 +1,17 @@
 /**
  * Servicio químico de un solo escritor (V23, carril Q; ARQ-materia §3.1):
- * - Registro append-only de sustancias (`SustanciaId` u32 ≥ 1, nunca reutilizado).
- * - Memo de reacciones `(a, b, nivelT)` con simetría en `(a, b)` para `b > 0`.
- * - En modo `'worker'` (hilo propio), los fallos de memo se encolan sin bloquear el paso y se publican en la
- *   barrera siguiente: primero se internan los productos nuevos y después se escribe la fila del memo.
- * - Códec binario compacto para `MateriaCheckpoint.sustancias` e invariante I4 registrada en `invariantes.ts`.
+ * - Registro append-only de sustancias (`SustanciaId` u32 ≥ 1, nunca reutilizado) y memo de reacciones
+ *   `(a, b, nivelT)`, simétrico en `(a, b)` para `b > 0`. Los dos viven en el hilo que crea el servicio, su único escritor.
+ * - En modo `'worker'` solo `productos()` corre en un hilo propio: un fallo de memo se encola sin bloquear el paso y su
+ *   resultado se publica en la barrera siguiente, primero los productos internados y después la fila. `'diferido'` hace
+ *   lo mismo en el hilo actual y, con `esperarBarrera`, es el modo reproducible de un hilo; `'inmediato'` es el del
+ *   laboratorio. Los tres dan las mismas reacciones.
+ * - Códec binario para `MateriaCheckpoint.sustancias` e invariante I4 registrada en `invariantes.ts`.
  */
 import { existsSync } from 'node:fs';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { EPSILON_G, NE, S_GAS, TABLA } from '../../shared/naturaleza.js';
-import { ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS, type SustanciaId } from '../../shared/materia.js';
+import { ClaseSustancia, TIPOS, type SustanciaId } from '../../shared/materia.js';
 import type { World } from '../index.js';
 import { registrar, type Violacion } from '../invariantes.js';
 import {
@@ -42,8 +44,8 @@ export interface ServicioQuimicoAuditable extends ServicioQuimico {
   totalSustancias(): number;
   totalMemo(): number;
   pendientes(): number;
-  todasSustancias(): readonly Readonly<Sustancia>[];
-  todasReacciones(): IterableIterator<FilaMemoQuimico>;
+  /** Filas del memo en orden de publicación; solo crece. */
+  filasMemo(): readonly FilaMemoQuimico[];
   publicarBarrera(): number;
   esperarBarrera(): Promise<number>;
   cerrar(): Promise<void>;
@@ -114,6 +116,9 @@ if (!isMainThread && workerData?.role === 'carta-quimica') {
 
 // ── Implementación del servicio de un solo escritor ─────────────────────────────────────────────────────
 
+/** Servicios de producción (worker o diferido) vivos que ningún mundo comprueba: I4 los denuncia. */
+const sinAsociar = new Set<ServicioQuimicoAuditable>();
+
 interface TrabajoPendiente {
   readonly seq: number;
   readonly clave: number;
@@ -127,6 +132,7 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
   private readonly sustancias: (Readonly<Sustancia> | undefined)[] = [undefined]; // índice 0 reservado (ninguna)
   private readonly porClave = new Map<string, SustanciaId>();
   private readonly memo = new Map<number, FilaMemoQuimico>();
+  private readonly filas: FilaMemoQuimico[] = [];
   private readonly enCola = new Set<number>();
   private readonly colaLocal: TrabajoPendiente[] = [];
   private readonly listos: ResultadoWorker[] = [];
@@ -141,6 +147,7 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
   constructor(opciones: OpcionesServicioQuimico = {}) {
     this.modo = opciones.modo ?? 'worker';
     if (this.modo === 'worker') this.arrancarWorker();
+    if (this.modo !== 'inmediato') sinAsociar.add(this);
   }
 
   private arrancarWorker(): void {
@@ -175,17 +182,17 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
       }
     });
     const fallar = (err: Error) => {
-      if (this.cerrado) return;
+      if (this.cerrado || this.errorWorker) return;
       this.errorWorker = err;
       for (const [, p] of this.barreras) p.reject(err);
       this.barreras.clear();
     };
     worker.on('error', err => fallar(err instanceof Error ? err : new Error(String(err))));
-    worker.on('exit', code => {
-      if (!this.cerrado && code !== 0) fallar(new Error(`Worker de química terminó inesperadamente (código ${code}).`));
-    });
+    worker.on('exit', code => fallar(new Error(`El worker de química terminó sin cerrar el servicio (código ${code}).`)));
     this.worker = worker;
   }
+
+  estaCerrado(): boolean { return this.cerrado; }
 
   private comprobarVivo(): void {
     if (this.errorWorker) throw this.errorWorker;
@@ -286,7 +293,9 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
         catalisis: res.catalisis,
       });
     }
-    this.memo.set(clave, Object.freeze({ a, b, nivelT, reaccion: reac }));
+    const fila = Object.freeze({ a, b, nivelT, reaccion: reac });
+    this.memo.set(clave, fila);
+    this.filas.push(fila);
     this.enCola.delete(clave);
     return reac;
   }
@@ -337,12 +346,12 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
   totalSustancias(): number { return this.sustancias.length - 1; }
   totalMemo(): number { return this.memo.size; }
   pendientes(): number { return this.enCola.size; }
-  todasSustancias(): readonly Readonly<Sustancia>[] { return this.sustancias.slice(1) as readonly Readonly<Sustancia>[]; }
-  todasReacciones(): IterableIterator<FilaMemoQuimico> { return this.memo.values(); }
+  filasMemo(): readonly FilaMemoQuimico[] { return this.filas; }
 
   async cerrar(): Promise<void> {
     if (this.cerrado) return;
     this.cerrado = true;
+    sinAsociar.delete(this);
     for (const [, p] of this.barreras) p.reject(new Error('Servicio químico cerrado.'));
     this.barreras.clear();
     if (this.worker) {
@@ -381,51 +390,56 @@ function crc32(datos: Uint8Array, fin: number): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** Codifica el registro append-only de sustancias en binario compacto con cabecera y CRC32. */
+/**
+ * Codifica el registro de sustancias: cabecera (magia, versión, TIPOS.length, N), por sustancia sus pares [tipo, cuenta]
+ * en u8 más su clase (u8) y su energía (i32), y un CRC32 al final. La clase y la energía no hacen falta para
+ * reconstruir la sustancia: están para que cargar con otra química (otra TABLA, otras constantes de red) falle en vez
+ * de cambiar en silencio la energía de cuantos que ya están en los lotes (I2).
+ */
 export function serializarSustancias(servicio: ServicioQuimicoAuditable): Uint8Array {
-  const lista = servicio.todasSustancias();
+  const total = servicio.totalSustancias();
   let cuerpoBytes = 0;
-  for (const s of lista) {
-    const nPares = s.enlaces.length >>> 1;
-    if (nPares > 255) throw new RangeError(`Sustancia ${s.id} supera 255 pares de enlaces.`);
-    cuerpoBytes += 1 + nPares * 2;
-  }
+  for (let id = 1; id <= total; id++) cuerpoBytes += 1 + servicio.sustancia(id).enlaces.length + 1 + 4;
 
   const out = new Uint8Array(CABECERA_BYTES + cuerpoBytes + PIE_BYTES);
   const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
   view.setUint32(0, MAGIA_SUSTANCIAS, true);
   view.setUint16(4, VERSION_CODEC, true);
   view.setUint16(6, TIPOS.length, true);
-  view.setUint32(8, lista.length, true);
+  view.setUint32(8, total, true);
 
   let pos = CABECERA_BYTES;
-  for (const s of lista) {
+  for (let id = 1; id <= total; id++) {
+    const s = servicio.sustancia(id);
     const nPares = s.enlaces.length >>> 1;
+    if (nPares > 255) throw new RangeError(`Sustancia ${s.id} supera 255 pares de enlaces.`);
     out[pos++] = nPares;
-    for (let i = 0; i < s.enlaces.length; i += 2) {
-      const tipo = s.enlaces[i]!, cuenta = s.enlaces[i + 1]!;
-      if (tipo > 255 || cuenta > 255) throw new RangeError(`Enlace fuera de u8 en sustancia ${s.id}: ${tipo}:${cuenta}`);
-      out[pos++] = tipo;
-      out[pos++] = cuenta;
+    for (let i = 0; i < s.enlaces.length; i++) {
+      if (s.enlaces[i]! > 255) throw new RangeError(`Enlace fuera de u8 en sustancia ${s.id}.`);
+      out[pos++] = s.enlaces[i]!;
     }
+    out[pos++] = s.clase;
+    view.setInt32(pos, s.energia, true);
+    pos += 4;
   }
   view.setUint32(pos, crc32(out, pos), true);
   return out;
 }
 
-/** Restaura un registro desde `MateriaCheckpoint.sustancias` conservando exactamente los `SustanciaId` 1..N. */
+/** Restaura un registro desde `MateriaCheckpoint.sustancias` con los mismos `SustanciaId` 1..N, la misma clase y la
+ * misma energía; cualquier diferencia, o un bit cambiado, es un error. */
 export function cargarSustancias(bytes: Uint8Array, opciones?: OpcionesServicioQuimico): ServicioQuimicoImpl {
   if (bytes.byteLength < CABECERA_BYTES + PIE_BYTES) {
     throw new Error('Punto de control de sustancias truncado.');
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const posCrc = bytes.byteLength - PIE_BYTES;
+  if (view.getUint32(posCrc, true) !== crc32(bytes, posCrc)) throw new Error('CRC32 inválido en sustancias.');
   if (view.getUint32(0, true) !== MAGIA_SUSTANCIAS) throw new Error('Cabecera inválida en sustancias.');
   if (view.getUint16(4, true) !== VERSION_CODEC) throw new Error(`Versión de códec no soportada: ${view.getUint16(4, true)}`);
   if (view.getUint16(6, true) !== TIPOS.length) {
     throw new Error(`Cantidad de TIPOS incompatible: ${view.getUint16(6, true)} ≠ ${TIPOS.length}`);
   }
-  const posCrc = bytes.byteLength - PIE_BYTES;
-  if (view.getUint32(posCrc, true) !== crc32(bytes, posCrc)) throw new Error('CRC32 inválido en sustancias.');
 
   const total = view.getUint32(8, true);
   const servicio = new ServicioQuimicoImpl(opciones);
@@ -434,12 +448,19 @@ export function cargarSustancias(bytes: Uint8Array, opciones?: OpcionesServicioQ
     for (let esperadoId = 1; esperadoId <= total; esperadoId++) {
       if (pos >= posCrc) throw new Error(`Fin inesperado al leer la sustancia ${esperadoId}.`);
       const nPares = bytes[pos++]!;
-      if (pos + nPares * 2 > posCrc) throw new Error(`Sustancia ${esperadoId} truncada.`);
-      const enlaces = new Uint16Array(nPares * 2);
-      for (let i = 0; i < nPares * 2; i++) enlaces[i] = bytes[pos++]!;
-      if (!esEnlaceCanonico(enlaces)) throw new Error(`Enlaces no canónicos al cargar la sustancia ${esperadoId}.`);
-      const id = servicio.internar(enlaces);
+      if (pos + nPares * 2 + 5 > posCrc) throw new Error(`Sustancia ${esperadoId} truncada.`);
+      const enlaces = bytes.slice(pos, pos + nPares * 2);
+      pos += nPares * 2;
+      const enlaces16 = Uint16Array.from(enlaces);
+      if (!esEnlaceCanonico(enlaces16)) throw new Error(`Enlaces no canónicos al cargar la sustancia ${esperadoId}.`);
+      const id = servicio.internar(enlaces16);
       if (id !== esperadoId) throw new Error(`Sustancia duplicada o desordenada al cargar: esperado ${esperadoId}, recibido ${id}.`);
+      const s = servicio.sustancia(id);
+      const clase = bytes[pos++]!, energia = view.getInt32(pos, true);
+      pos += 4;
+      if (s.clase !== clase || s.energia !== energia) {
+        throw new Error(`Química incompatible con el punto de control en la sustancia ${id}: clase ${clase} → ${s.clase}, energía ${energia} → ${s.energia}.`);
+      }
     }
     if (pos !== posCrc) throw new Error('Bytes sobrantes al final del punto de control de sustancias.');
     return servicio;
@@ -452,142 +473,169 @@ export function cargarSustancias(bytes: Uint8Array, opciones?: OpcionesServicioQ
 // ── Invariante I4 (ARQ-materia §7) y registro en `src/world/invariantes.ts` ─────────────────────────────
 
 const MAX_HALLAZGOS_I4 = 64;
+/** Sustancias y filas que revisa cada llamada del invariante registrado: primero las nuevas, luego en rueda. */
+export const PRESUPUESTO_I4 = 1024;
+
+type Fallo = (detalle: string, contexto: Record<string, unknown>, esperado?: number, observado?: number) => void;
+
+function revisarSustancia(servicio: ServicioQuimicoAuditable, id: SustanciaId, claves: Map<string, SustanciaId>, fallo: Fallo): void {
+  let s: Readonly<Sustancia>;
+  try { s = servicio.sustancia(id); }
+  catch { fallo('SustanciaId faltante en el registro contiguo.', { id }); return; }
+
+  if (s.id !== id) fallo('Identificador de sustancia incoherente.', { id }, id, s.id);
+  if (!esEnlaceCanonico(s.enlaces)) fallo('Vector de enlaces no canónico.', { id });
+  const clave = claveEnlaces(s.enlaces);
+  const previo = claves.get(clave);
+  if (previo !== undefined && previo !== id) fallo('Vector de enlaces duplicado en el registro.', { id, previo, clave });
+  claves.set(clave, id);
+
+  const atomos = atomosDeEnlaces(s.enlaces);
+  if (!atomos) {
+    fallo('Sustancia no saturada o con más de 8 átomos.', { id, clave });
+    return;
+  }
+  let masaEsperada = 0;
+  for (let e = 0; e < NE; e++) {
+    masaEsperada += atomos[e]! * TABLA[e]!.masa;
+    if (s.atomos[e] !== atomos[e]) fallo('Vector de átomos incoherente.', { id, elemento: e }, atomos[e], s.atomos[e]);
+  }
+  if (!grafoElementosConexo(s.enlaces, atomos)) fallo('Grafo de elementos disconexo.', { id, clave });
+
+  const claseEsperada = realizable(s.enlaces, atomos) ? ClaseSustancia.Molecula : ClaseSustancia.Unidad;
+  if (s.clase !== claseEsperada) fallo('Clase de sustancia incoherente con realizable().', { id, clave }, claseEsperada, s.clase);
+  const eEsperada = energiaSustancia(s.enlaces, s.clase);
+  if (!Number.isSafeInteger(s.energia) || s.energia !== eEsperada) {
+    fallo('Energía de sustancia incoherente o no entera.', { id, clave }, eEsperada, s.energia);
+  }
+  if (!Number.isFinite(s.masa) || Math.abs(s.masa - masaEsperada) > 1e-9) {
+    fallo('Masa de sustancia incoherente.', { id, clave }, masaEsperada, s.masa);
+  }
+
+  const p = s.prop;
+  for (const campo of ['r', 'dMedia', 'tFusion', 'tEbullicion', 'qOxidacion', 'dureza', 'tenacidad', 'flexibilidad', 'polaridad', 'densidad'] as const) {
+    if (!Number.isFinite(p[campo])) fallo('Propiedad no finita.', { id, campo, valor: p[campo] });
+  }
+  for (const campo of ['dureza', 'tenacidad', 'flexibilidad', 'polaridad'] as const) {
+    if (p[campo] < 0 || p[campo] > 1) fallo('Propiedad unitaria fuera de [0, 1].', { id, campo, valor: p[campo] });
+  }
+  if (p.tFusion <= 0 || p.tEbullicion <= p.tFusion || p.densidad <= 0 || p.qOxidacion < 0) {
+    fallo('Rango físico inválido en propiedades.', { id, tFusion: p.tFusion, tEbullicion: p.tEbullicion, densidad: p.densidad, qOxidacion: p.qOxidacion });
+  }
+  if (!Number.isInteger(p.color) || p.color < 0 || p.color > 0xffffff) fallo('Color RGB fuera de rango.', { id, color: p.color });
+}
+
+function revisarFila(servicio: ServicioQuimicoAuditable, fila: FilaMemoQuimico, fallo: Fallo): void {
+  const r = fila.reaccion;
+  if (r === null) return;
+  if (r.a !== fila.a || r.b !== fila.b || r.nivelT !== fila.nivelT) {
+    fallo('Metadatos de fila de memo incoherentes.', { fila: { a: fila.a, b: fila.b, nivelT: fila.nivelT } });
+    return;
+  }
+  if (r.b > 0 && servicio.reaccion(r.b, r.a, r.nivelT) !== r) {
+    fallo('Simetría de reaccion(a, b) rota en el memo.', { a: r.a, b: r.b, nivelT: r.nivelT });
+  }
+  const total = servicio.totalSustancias();
+  const T = tDeNivel(r.nivelT);
+  const atomosNetos = new Int32Array(NE);
+  let eNeta = 0, gasNeto = 0;
+  const sumar = (lado: Reaccion['entradas'], signo: 1 | -1, nombre: string): boolean => {
+    for (const { id, nu } of lado) {
+      if (!Number.isSafeInteger(nu) || nu <= 0 || !Number.isSafeInteger(id) || id <= 0 || id > total) {
+        fallo(`${nombre} inválida en reacción.`, { a: r.a, b: r.b, id, nu });
+        return false;
+      }
+      const s = servicio.sustancia(id);
+      for (let e = 0; e < NE; e++) atomosNetos[e]! += signo * s.atomos[e]! * nu;
+      eNeta += signo * s.energia * nu;
+      if (esGasA(s, T)) gasNeto += signo * nu;
+    }
+    return true;
+  };
+  if (!sumar(r.salidas, 1, 'Salida') || !sumar(r.entradas, -1, 'Entrada')) return;
+
+  for (let e = 0; e < NE; e++) {
+    if (atomosNetos[e] !== 0) fallo('La fila de memo no conserva átomos.', { a: r.a, b: r.b, nivelT: r.nivelT, elemento: e }, 0, atomosNetos[e]);
+  }
+  if (!Number.isSafeInteger(r.dH) || r.dH !== eNeta) {
+    fallo('dH de reacción incoherente con las energías.', { a: r.a, b: r.b, nivelT: r.nivelT }, eNeta, r.dH);
+  }
+  // Con los mismos gases a ambos lados la comparación es entera y exacta, como en `productos`.
+  const dG = eNeta - T * S_GAS * gasNeto;
+  if (!(dG < -EPSILON_G + (gasNeto === 0 ? 0 : 1e-9))) {
+    fallo('La reacción publicada no baja la energía libre en más de ε.', { a: r.a, b: r.b, nivelT: r.nivelT, dG });
+  }
+  if (!Number.isFinite(r.ea) || r.ea < 0 || r.ea < r.dH) fallo('Barrera ea inválida o menor que dH.', { a: r.a, b: r.b, ea: r.ea, dH: r.dH });
+  if (r.catalisis !== -1 && r.catalisis !== 0 && r.catalisis !== 1 && r.catalisis !== 2) {
+    fallo('Familia catalítica inválida.', { a: r.a, b: r.b, catalisis: r.catalisis });
+  }
+}
+
+function recolector(tick: number): { hallazgos: Violacion[]; fallo: Fallo } {
+  const hallazgos: Violacion[] = [];
+  const fallo: Fallo = (detalle, contexto, esperado, observado) => {
+    if (hallazgos.length < MAX_HALLAZGOS_I4) hallazgos.push({ id: 'materia.quimica.i4', gravedad: 'dura', tick, detalle, contexto, esperado, observado });
+  };
+  return { hallazgos, fallo };
+}
 
 /**
- * Comprueba la invariante dura I4:
- * - Toda sustancia internada tiene enlaces canónicos, satura exactamente todas las valencias, tiene ≤ 8 átomos,
- *   grafo de elementos conexo, clase coherente con `realizable()`, energía entera exacta y propiedades finitas.
- * - Toda fila publicada del memo conserva exactamente los átomos por elemento, cumple dH = ΣE_sal − ΣE_ent,
- *   mejora la energía libre en más de EPSILON_G y es simétrica en `(a, b)` cuando `b > 0`.
+ * Invariante dura I4 sobre todo el registro y todo el memo (laboratorio y pruebas):
+ * - Toda sustancia tiene enlaces canónicos y únicos, satura sus valencias con ≤ 8 átomos, tiene el grafo de elementos
+ *   conexo, la clase de `realizable()`, la energía entera de su vector y propiedades finitas y en rango.
+ * - Toda fila publicada conserva los átomos, cumple dH = ΣE_salidas − ΣE_entradas, baja la energía libre en más de ε,
+ *   tiene ea ≥ max(0, dH) y es simétrica en (a, b) cuando b > 0.
  */
 export function verificarI4(servicio: ServicioQuimicoAuditable, tick = 0): Violacion[] {
-  const hallazgos: Violacion[] = [];
-  const fallo = (detalle: string, contexto: Record<string, unknown>, esperado?: number, observado?: number): void => {
-    if (hallazgos.length >= MAX_HALLAZGOS_I4) return;
-    hallazgos.push({ id: 'materia.quimica.i4', gravedad: 'dura', tick, detalle, contexto, esperado, observado });
-  };
+  const { hallazgos, fallo } = recolector(tick);
+  const claves = new Map<string, SustanciaId>();
+  for (let id = 1; id <= servicio.totalSustancias(); id++) revisarSustancia(servicio, id, claves, fallo);
+  for (const fila of servicio.filasMemo()) revisarFila(servicio, fila, fallo);
+  return hallazgos;
+}
+
+/** Por dónde va el invariante registrado en un servicio: lo nuevo se revisa entero; con el presupuesto que sobra, la rueda
+ * vuelve sobre lo antiguo, así que todo se revisa otra vez cada ⌈N/PRESUPUESTO_I4⌉ llamadas. */
+interface CursorI4 { sustancia: number; fila: number; ruedaSustancia: number; ruedaFila: number; claves: Map<string, SustanciaId> }
+const cursores = new WeakMap<ServicioQuimicoAuditable, CursorI4>();
+
+/** I4 con coste acotado (≤ PRESUPUESTO_I4 sustancias y filas por llamada), para el muestreador del mundo. */
+export function verificarI4Acotado(servicio: ServicioQuimicoAuditable, tick = 0): Violacion[] {
+  const { hallazgos, fallo } = recolector(tick);
+  let c = cursores.get(servicio);
+  if (!c) cursores.set(servicio, c = { sustancia: 1, fila: 0, ruedaSustancia: 1, ruedaFila: 0, claves: new Map() });
 
   const total = servicio.totalSustancias();
-  const clavesVistas = new Set<string>();
-
-  for (let id = 1; id <= total; id++) {
-    let s: Readonly<Sustancia>;
-    try { s = servicio.sustancia(id); }
-    catch { fallo('SustanciaId faltante en el registro contiguo.', { id }); continue; }
-
-    if (s.id !== id) fallo('Identificador de sustancia incoherente.', { id }, id, s.id);
-    if (!esEnlaceCanonico(s.enlaces)) fallo('Vector de enlaces no canónico.', { id });
-    const clave = claveEnlaces(s.enlaces);
-    if (clavesVistas.has(clave)) fallo('Vector de enlaces duplicado en el registro.', { id, clave });
-    clavesVistas.add(clave);
-
-    const atomos = atomosDeEnlaces(s.enlaces);
-    if (!atomos) {
-      fallo('Sustancia no saturada o supera 8 átomos.', { id, clave });
-      continue;
-    }
-    let sumaAtomos = 0;
-    let masaEsperada = 0;
-    for (let e = 0; e < NE; e++) {
-      sumaAtomos += atomos[e]!;
-      masaEsperada += atomos[e]! * TABLA[e]!.masa;
-      if (s.atomos[e] !== atomos[e]) fallo('Vector de átomos incoherente.', { id, elemento: e }, atomos[e], s.atomos[e]);
-    }
-    if (sumaAtomos < 1 || sumaAtomos > ATOMOS_POR_UNIDAD) {
-      fallo('Cantidad total de átomos fuera de [1, 8].', { id }, ATOMOS_POR_UNIDAD, sumaAtomos);
-    }
-    if (!grafoElementosConexo(s.enlaces, atomos)) fallo('Grafo de elementos disconexo.', { id, clave });
-
-    const claseEsperada = realizable(s.enlaces, atomos) ? ClaseSustancia.Molecula : ClaseSustancia.Unidad;
-    if (s.clase !== claseEsperada) fallo('Clase de sustancia incoherente con realizable().', { id, clave }, claseEsperada, s.clase);
-
-    const eEsperada = energiaSustancia(s.enlaces, s.clase);
-    if (!Number.isSafeInteger(s.energia) || s.energia !== eEsperada) {
-      fallo('Energía de sustancia incoherente o no entera.', { id, clave }, eEsperada, s.energia);
-    }
-    if (!Number.isFinite(s.masa) || Math.abs(s.masa - masaEsperada) > 1e-9) {
-      fallo('Masa de sustancia incoherente.', { id, clave }, masaEsperada, s.masa);
-    }
-
-    const p = s.prop;
-    for (const campo of ['r', 'dMedia', 'tFusion', 'tEbullicion', 'qOxidacion', 'dureza', 'tenacidad', 'flexibilidad', 'polaridad', 'densidad'] as const) {
-      if (!Number.isFinite(p[campo])) fallo('Propiedad no finita.', { id, campo, valor: p[campo] });
-    }
-    for (const campo of ['dureza', 'tenacidad', 'flexibilidad', 'polaridad'] as const) {
-      if (p[campo] < 0 || p[campo] > 1) fallo('Propiedad unitaria fuera de [0, 1].', { id, campo, valor: p[campo] });
-    }
-    if (p.tFusion <= 0 || p.tEbullicion <= p.tFusion || p.densidad <= 0 || p.qOxidacion < 0) {
-      fallo('Rango físico inválido en propiedades.', { id, tFusion: p.tFusion, tEbullicion: p.tEbullicion, densidad: p.densidad, qOxidacion: p.qOxidacion });
-    }
-    if (!Number.isInteger(p.color) || p.color < 0 || p.color > 0xffffff) {
-      fallo('Color RGB fuera de rango.', { id, color: p.color });
-    }
+  const finNuevas = Math.min(total + 1, c.sustancia + PRESUPUESTO_I4);
+  for (let id = c.sustancia; id < finNuevas; id++) revisarSustancia(servicio, id, c.claves, fallo);
+  for (let n = PRESUPUESTO_I4 - (finNuevas - c.sustancia); n > 0 && c.sustancia > 1; n--) {
+    if (c.ruedaSustancia >= c.sustancia) c.ruedaSustancia = 1;
+    revisarSustancia(servicio, c.ruedaSustancia++, c.claves, fallo);
   }
+  c.sustancia = finNuevas;
 
-  for (const fila of servicio.todasReacciones()) {
-    const r = fila.reaccion;
-    if (r === null) continue;
-    if (r.a !== fila.a || r.b !== fila.b || r.nivelT !== fila.nivelT) {
-      fallo('Metadatos de fila de memo incoherentes.', { fila: { a: fila.a, b: fila.b, nivelT: fila.nivelT } });
-      continue;
-    }
-    if (r.b > 0 && servicio.reaccion(r.b, r.a, r.nivelT) !== r) {
-      fallo('Simetría de reaccion(a, b) rota en el memo.', { a: r.a, b: r.b, nivelT: r.nivelT });
-    }
-    const atomosIn = new Int32Array(NE);
-    const atomosOut = new Int32Array(NE);
-    let eIn = 0, eOut = 0, gasIn = 0, gasOut = 0;
-    const T = tDeNivel(r.nivelT);
-
-    for (const { id, nu } of r.entradas) {
-      if (!Number.isSafeInteger(nu) || nu <= 0 || id <= 0 || id > total) {
-        fallo('Entrada inválida en reacción.', { a: r.a, b: r.b, id, nu });
-        continue;
-      }
-      const s = servicio.sustancia(id);
-      for (let e = 0; e < NE; e++) atomosIn[e]! += s.atomos[e]! * nu;
-      eIn += s.energia * nu;
-      if (esGasA(s, T)) gasIn += nu;
-    }
-    for (const { id, nu } of r.salidas) {
-      if (!Number.isSafeInteger(nu) || nu <= 0 || id <= 0 || id > total) {
-        fallo('Salida inválida en reacción.', { a: r.a, b: r.b, id, nu });
-        continue;
-      }
-      const s = servicio.sustancia(id);
-      for (let e = 0; e < NE; e++) atomosOut[e]! += s.atomos[e]! * nu;
-      eOut += s.energia * nu;
-      if (esGasA(s, T)) gasOut += nu;
-    }
-
-    for (let e = 0; e < NE; e++) {
-      if (atomosIn[e] !== atomosOut[e]) {
-        fallo('La fila de memo no conserva átomos.', { a: r.a, b: r.b, nivelT: r.nivelT, elemento: e }, atomosIn[e], atomosOut[e]);
-      }
-    }
-    const dHEsperado = eOut - eIn;
-    if (!Number.isSafeInteger(r.dH) || r.dH !== dHEsperado) {
-      fallo('dH de reacción incoherente con las energías.', { a: r.a, b: r.b, nivelT: r.nivelT }, dHEsperado, r.dH);
-    }
-    const dG = (eOut - T * S_GAS * gasOut) - (eIn - T * S_GAS * gasIn);
-    if (!(dG < -EPSILON_G + 1e-6)) {
-      fallo('La reacción publicada no baja la energía libre en más de ε.', { a: r.a, b: r.b, nivelT: r.nivelT, dG });
-    }
-    if (!Number.isFinite(r.ea) || r.ea < 0) fallo('Barrera ea inválida.', { a: r.a, b: r.b, ea: r.ea });
-    if (r.catalisis !== -1 && r.catalisis !== 0 && r.catalisis !== 1 && r.catalisis !== 2) {
-      fallo('Familia catalítica inválida.', { a: r.a, b: r.b, catalisis: r.catalisis });
-    }
+  const filas = servicio.filasMemo();
+  const finFilas = Math.min(filas.length, c.fila + PRESUPUESTO_I4);
+  for (let i = c.fila; i < finFilas; i++) revisarFila(servicio, filas[i]!, fallo);
+  for (let n = PRESUPUESTO_I4 - (finFilas - c.fila); n > 0 && c.fila > 0; n--) {
+    if (c.ruedaFila >= c.fila) c.ruedaFila = 0;
+    revisarFila(servicio, filas[c.ruedaFila++]!, fallo);
   }
-
+  c.fila = finFilas;
   return hallazgos;
 }
 
 const serviciosPorMundo = new WeakMap<World, ServicioQuimicoAuditable>();
 
-/** Asocia un `ServicioQuimico` a un `World` para que el muestreador compruebe I4 automáticamente. */
+/** Asocia un `ServicioQuimico` a un `World` para que el muestreador compruebe I4; devuelve la desasociación. */
 export function asociarServicioQuimico(mundo: World, servicio: ServicioQuimicoAuditable): () => void {
   serviciosPorMundo.set(mundo, servicio);
-  return () => { if (serviciosPorMundo.get(mundo) === servicio) serviciosPorMundo.delete(mundo); };
+  sinAsociar.delete(servicio);
+  return () => {
+    if (serviciosPorMundo.get(mundo) !== servicio) return;
+    serviciosPorMundo.delete(mundo);
+    if (servicio instanceof ServicioQuimicoImpl && servicio.modo !== 'inmediato' && !servicio.estaCerrado()) sinAsociar.add(servicio);
+  };
 }
 
 if (isMainThread || workerData?.role !== 'carta-quimica') {
@@ -599,7 +647,13 @@ if (isMainThread || workerData?.role !== 'carta-quimica') {
     alcance: 'global',
     comprobar: mundo => {
       const servicio = serviciosPorMundo.get(mundo);
-      return servicio ? verificarI4(servicio, mundo.tick) : [];
+      if (servicio) return verificarI4Acotado(servicio, mundo.tick);
+      // Un servicio de producción que ningún mundo comprueba dejaría I4 sin comprobar en silencio.
+      return sinAsociar.size === 0 ? [] : [{
+        id: 'materia.quimica.i4', gravedad: 'dura', tick: mundo.tick,
+        detalle: 'Hay un servicio químico vivo sin asociar a ningún mundo: falta asociarServicioQuimico().',
+        contexto: { sinAsociar: sinAsociar.size },
+      }];
     },
   });
 }

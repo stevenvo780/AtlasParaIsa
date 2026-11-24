@@ -115,7 +115,10 @@ function rastrear(base: Percibidor, dispositivo: Dispositivo) {
   return {
     dispositivo, lotes,
     lanzar(lote: LotePercepcion, planes: readonly Plan[]) { lotes.push(lote); base.lanzar(lote, planes); },
-    esperar(plazoMs: number) { return base.esperar(plazoMs); },
+    esperar(plazoMs: number) {
+      if (dispositivo === 'cpu') assert.equal(plazoMs, Infinity, 'la recomputación completa el mismo tick sin plazo de GPU');
+      return base.esperar(plazoMs);
+    },
   };
 }
 

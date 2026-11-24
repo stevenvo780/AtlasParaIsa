@@ -121,7 +121,8 @@ export class PuentePercepcion implements Percibidor {
       if (!percepcion) {
         const inicio = performance.now();
         this.cpu.lanzar(lote, planes);
-        percepcion = this.cpu.esperar(0);
+        // El plazo pertenece a la tarjeta. El mismo tick aún necesita el resultado de CPU.
+        percepcion = this.cpu.esperar(Infinity);
         this.#ultimos.push({ dispositivo: 'cpu', actores: lote.slots.length,
           subidos: 0, bajados: 0, ms: performance.now() - inicio });
       }

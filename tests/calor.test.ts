@@ -22,8 +22,8 @@ function ctxFalso(): { ctx: CanvasRenderingContext2D; llamadas: RegistroFillRect
 
 const VISTA: VistaCalor = { x0: 0, y0: 0, tileSize: 16, scale: 1 };
 
-test('capasDeCalor enumera exactamente las 5 capas del brief', () => {
-  assert.deepEqual(capasDeCalor, ['comida', 'vegetacion', 'agua', 'fertilidad', 'madera']);
+test('capasDeCalor enumera las 5 capas del brief y la capa V20 de caminos', () => {
+  assert.deepEqual(capasDeCalor, ['comida', 'vegetacion', 'agua', 'fertilidad', 'madera', 'caminos']);
 });
 
 test('dibujarCalor pinta un rectángulo por cada tesela visible recibida', () => {

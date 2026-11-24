@@ -1,0 +1,62 @@
+{
+  "capturedAt": "2026-11-23T18:09:45-05:00",
+  "status": "published",
+  "kind": "hot update V18-r2 (same open-world V18 world, no reset; publico-v18-r2; public + VPN + LAN)",
+  "reason": "Cerrar la actualización V18-r2 sobre el mundo V18 existente, incorporando las dos olas de optimización de motores, cachés de fauna y chunks, persistencia y proyección con paridad exacta; el proceso y la identidad durable del mundo se conservaron.",
+  "commit": "4c97666ff613cb5c4c40a51282ecc2082623cbe4",
+  "codeRevision": "4c97666 (Wave 1 4d919d5 + Wave 2 4c97666; documentación e3e43be)",
+  "previousCodeRevision": "8be94ea (publico-v18 conservado para rollback)",
+  "rulesVersion": 12,
+  "world": {
+    "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v18-20261122",
+    "worldInstanceId": "13501d91-56f1-4df3-abe2-67b1620c7042",
+    "seed": 51926,
+    "reset": false
+  },
+  "worktree": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v18-r2",
+  "preDeployBackup": {
+    "path": "/mnt/Data2/respaldos-atlas-v18/world-20261123-1804.sqlite.gz",
+    "size": "597 MiB"
+  },
+  "deployCheck": {
+    "command": "bash scripts/deploy-check.sh 4c97666",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "smokeGates": { "all10": true }
+  },
+  "testsVerified": {
+    "typecheck": "npm run typecheck PASS",
+    "targetedParity": "94/94 Wave 1 + Wave 2 targeted parity tests PASS",
+    "extendedParity": "336/336 extended 0-ULP SoA/parallel/snapshot/server tests PASS",
+    "waterAndStats": "22/22 agua/stats tests PASS",
+    "total": "452/452 PASS, 0 failures"
+  },
+  "gpuAutoprueba": {
+    "gpu0": "9.67 ms PASS; resident sidecar active",
+    "gpu1": "9.29 ms PASS; resident sidecar active",
+    "activeDevices": [0, 1]
+  },
+  "measuredImprovements": {
+    "lanWaterfall": "192.168.78.211:3443: GET / 4.82 s → 0.494 s; CSS 3.2 ms, JS 4.8 ms, /api/session 2.0 ms; waterfall total ~8–12 s → 0.504 s",
+    "worldStatistics440kTiles": "273.6 ms → 16–19 ms",
+    "encodeSnapshotTileRows438784Tiles": "2093 ms → 304.7 ms (6.9×)",
+    "stringifyExactMetadata30MB": "1537 ms → ~250 ms (~6×)",
+    "storeSaveAfterEcologyTickSchedIdle": "3379–6547 ms → 2340 ms",
+    "maintainRegionsChunkRetirement": "154–216 ms → 22–36 ms (6–8×); syncFauna +150 ms spike eliminated (5.95 ms)",
+    "clientLandscapeUpdate695People": "35.8 ms → 5.4 ms (6.6×; 0 false re-bakes)",
+    "liveRamAfter3h09m": "14.9 GiB (peak 17.7 GiB) → 6.7–8.0 GiB (peak 9.4 GiB); 0 errors"
+  },
+  "operation": {
+    "deployedAt": "2026-11-23T18:09:45-05:00",
+    "deployment": "Actualización en caliente de código y activos de V18-r2 sobre mundos/v18-20261122, sin reinicio del mundo; identidad 13501d91-56f1-4df3-abe2-67b1620c7042 conservada.",
+    "towerCode": "worktree detached /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v18-r2 en 4c97666, con node_modules propio; publico-v18 en 8be94ea conservado para rollback.",
+    "previousWorldBackup": {
+      "world": "V18 en ejecución, respaldado antes de la actualización",
+      "path": "/mnt/Data2/respaldos-atlas-v18/world-20261123-1804.sqlite.gz",
+      "size": "597 MiB"
+    },
+    "deployCheck": "bash scripts/deploy-check.sh 4c97666 → salida 0; build y smoke exit 0; 10/10 gates PASS.",
+    "gpuAutoprueba": "GPU 0: 9.67 ms PASS; GPU 1: 9.29 ms PASS; ambos sidecars residentes activos en [0,1]."
+  }
+}

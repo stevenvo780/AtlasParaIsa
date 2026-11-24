@@ -1,13 +1,14 @@
 import { renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual as igual } from 'node:util';
 import { CINTA, type Apertura, type Corte, type EntradaCatalogo, type Hito, type Nivel, type SeriePunto } from '../../shared/cinta.js';
 import type { TapeClientDelta } from '../../shared/tape-delta.js';
-import type { Tile, WorldView } from '../../shared/types.js';
+import type { PersonView, Tile, WorldView } from '../../shared/types.js';
 import { CatalogoCinta, MAX_SEGMENTO, NIVELES, sincronizarDirectorio, type PuntoEscritura } from './catalogo.js';
 import { clientDelta, codificarBloque } from './formato.js';
 import { podar } from './poda.js';
-import { reducir } from './reducir.js';
+import { reducir, reducirTesela } from './reducir.js';
 
 const FOTOGRAMAS_BLOQUE = 32;
 export const PASO_MAXIMO = 32;
@@ -24,7 +25,11 @@ export class EscritorCinta {
   private catalogo: CatalogoCinta;
   private readonly tope: number;
   private readonly margen: number;
+  // Las teselas se siguen por coordenada para que un fotograma cueste lo que cambió y no lo que el mundo mide:
+  // el espejo de L0, lo último grabado en L1 y L2, y lo tocado desde el último fotograma de L0, L1 y L2.
   private readonly teselas = new Map<string, Tile>();
+  private readonly grabadas = [new Map<string, Tile>(), new Map<string, Tile>()];
+  private readonly sucias = [new Set<string>(), new Set<string>(), new Set<string>()];
   private readonly notables = new Set<string>();
   private readonly bloques: (BloquePendiente | undefined)[] = [];
   private readonly proximos: number[] = [];
@@ -67,9 +72,44 @@ export class EscritorCinta {
     this.ultimoTick = -1;
     this.proximos.fill(0);
     this.proximaSerie = 0;
-    this.teselas.clear();
+    this.olvidarTeselas();
     this.notables.clear();
     return this.epoca;
+  }
+
+  private olvidarTeselas(): void {
+    this.teselas.clear();
+    for (const mapa of this.grabadas) mapa.clear();
+    for (const claves of this.sucias) claves.clear();
+  }
+
+  /** Teselas del nivel que cambiaron desde su fotograma anterior; el orden de inserción es el del aplicador compartido. */
+  private parcheTeselas(nivel: Nivel): Tile[] {
+    const sucias = this.sucias[nivel];
+    if (!sucias) return [];
+    const grabadas = nivel === 0 ? undefined : this.grabadas[nivel - 1]!;
+    const parche: Tile[] = [];
+    for (const clave of sucias) {
+      const tesela = reducirTesela(nivel, this.teselas.get(clave)!)!;
+      if (grabadas) {
+        if (igual(grabadas.get(clave), tesela)) continue;
+        grabadas.set(clave, tesela);
+      }
+      parche.push(tesela);
+    }
+    sucias.clear();
+    return parche;
+  }
+
+  // Quien ya no vive no vuelve a L3: el conjunto no crece con la historia de la época.
+  private olvidarAusentes(personas: readonly PersonView[]): void {
+    const vivas = new Set(personas.map(p => p.id));
+    for (const id of this.notables) if (!vivas.has(id)) this.notables.delete(id);
+  }
+
+  private teselasDe(nivel: Nivel): Tile[] {
+    if (nivel === 0) return [...this.teselas.values()];
+    return [...this.grabadas[nivel - 1]?.values() ?? []];
   }
 
   registrar(corte: Corte): void {
@@ -85,9 +125,11 @@ export class EscritorCinta {
     }
     this.ultimaSecuencia = corte.seq;
     this.ultimoTick = corte.t;
-    if (completo) this.teselas.clear();
+    if (completo) this.olvidarTeselas();
     for (const tesela of corte.tilesCambiadas === 'todas' ? corte.vista.tiles : corte.tilesCambiadas) {
-      this.teselas.set(`${tesela.x},${tesela.y}`, tesela);
+      const clave = `${tesela.x},${tesela.y}`;
+      this.teselas.set(clave, tesela);
+      for (const claves of this.sucias) claves.add(clave);
     }
     for (const hito of corte.hitos) {
       this.hitos.push(hito);
@@ -95,16 +137,21 @@ export class EscritorCinta {
     }
     for (const entrada of corte.catalogo) this.entradas.push(entrada);
     if (corte.t >= this.proximaSerie) this.registrarSerie(corte.epoca, { t: corte.t, ...corte.serie });
-    const estado = { ...corte.vista, tiles: [...this.teselas.values()] };
+    const sinTeselas = { ...corte.vista, tiles: [] };
     for (const nivel of NIVELES) {
       if (nivel > 0 && corte.t < (this.proximos[nivel] ?? 0)) continue;
       const paso = CINTA.pasos[nivel];
       this.proximos[nivel] = (Math.floor(corte.t / paso) + 1) * paso;
-      const vista = reducir(nivel, estado, this.notables);
+      if (nivel === 3) this.olvidarAusentes(corte.vista.people);
+      // Las deltas se calculan sin teselas y llevan aparte el parche por coordenada.
+      const vista = reducir(nivel, sinTeselas, this.notables);
+      const parche = this.parcheTeselas(nivel);
       const bloque = this.bloques[nivel];
-      if (!bloque) this.bloques[nivel] = { base: vista, previo: vista, deltas: [] };
+      if (!bloque) this.bloques[nivel] = { base: { ...vista, tiles: this.teselasDe(nivel) }, previo: vista, deltas: [] };
       else {
-        bloque.deltas.push(clientDelta(bloque.previo, vista));
+        const delta = clientDelta(bloque.previo, vista);
+        if (parche.length) delta.tilesPatch = parche;
+        bloque.deltas.push(delta);
         bloque.previo = vista;
       }
       if (this.bloques[nivel]!.deltas.length + 1 >= FOTOGRAMAS_BLOQUE) this.escribir(nivel);

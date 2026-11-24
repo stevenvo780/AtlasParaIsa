@@ -90,6 +90,13 @@ function densidades(personas: readonly PersonView[], fauna: readonly AnimalView[
   return [...celdas.values()].sort((a, b) => a.chunkY - b.chunkY || a.chunkX - b.chunkX);
 }
 
+/** La tesela tal como la graba cada nivel; L3 y L4 no graban teselas. */
+export function reducirTesela(nivel: Nivel, tesela: Tile): Tile | undefined {
+  if (nivel === 0) return tesela;
+  if (nivel === 1) return teselaBandeada(tesela);
+  return nivel === 2 ? terreno(tesela) as Tile : undefined;
+}
+
 /** Los niveles reducidos omiten campos obligatorios de la vista en vivo. El lector debe respetar su escala. */
 export function reducir(nivel: Nivel, vista: WorldView, notables?: ReadonlySet<string>): WorldView & VistaCinta {
   if (nivel === 0) return vista;

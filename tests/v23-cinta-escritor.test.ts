@@ -10,6 +10,8 @@ import { applyClientTapeDelta } from '../src/shared/tape-delta.js';
 import { INDICE_CINTA, NIVELES, rutaSegmento, type BloqueCinta } from '../src/server/cinta/catalogo.js';
 import { EscritorCinta } from '../src/server/cinta/escritor.js';
 import { decodificarBloque } from '../src/server/cinta/formato.js';
+import { reducir } from '../src/server/cinta/reducir.js';
+import type { PersonView, Tile, WorldView } from '../src/shared/types.js';
 import { ajustarCadencia, crearEnlaceCortes } from '../src/server/tape-worker.js';
 
 function directorio(t: TestContext) {
@@ -164,4 +166,60 @@ test('I4: una ráfaga a dos veces la capacidad del consumidor sube y luego devue
     atraso = ajustarCadencia(enlace, leidos, atraso + 2000, atraso);
     assert.equal(Atomics.load(enlace.cadencia, 0), paso);
   }
+});
+
+test('I1/I3: cada nivel reconstruye reducir(k, L0) mientras las teselas cambian, aparecen y cruzan bloques', t => {
+  const path = directorio(t);
+  const teselas = new Map<string, Tile>();
+  const tesela = (x: number, y: number, food: number): Tile => ({ x, y, terrain: 'meadow', moisture: 0.5, vegetation: 0.3, food });
+  for (let i = 0; i < 20; i++) teselas.set(`${i},0`, tesela(i, 0, 0.1));
+  const persona = (t: number): PersonView => ({ id: 'p', name: 'p', role: 'neighbor', x: t / 100, y: 0, color: '#fff',
+    action: 'rest', reason: 'r', energy: 1, hunger: t / 2000, fatigue: 0, need: 'n', recentMemory: null });
+  const estados = new Map<number, Tile[]>();
+  const escritor = new EscritorCinta({ directorio: path });
+  try {
+    escritor.abrir({ instanciaId: 'mundo', epoca: 0, tMundo: 0, motivo: 'reinicio' });
+    for (let tick = 0, seq = 1; tick <= 1300; tick += 4, seq++) {
+      const cambiadas: Tile[] = [];
+      if (tick > 0) {
+        // Un cambio pequeño (dentro de la banda de L1), uno grande y, a veces, una tesela nueva.
+        const k = tick / 4;
+        cambiadas.push({ ...teselas.get(`${k % 20},0`)!, food: 0.1 + (k % 3) * 0.01 });
+        cambiadas.push({ ...teselas.get(`${(k * 7) % 20},0`)!, food: (k % 10) / 10 });
+        if (k % 9 === 0) cambiadas.push(tesela(100 + k, 1, 0.2));
+        for (const c of cambiadas) teselas.set(`${c.x},${c.y}`, c);
+      }
+      const c = corte(seq, 0, tick, tick === 0);
+      c.vista.tiles = [...teselas.values()];
+      estados.set(tick, c.vista.tiles);
+      c.vista.people = [persona(tick)];
+      if (tick > 0) c.tilesCambiadas = cambiadas;
+      escritor.registrar(c);
+    }
+  } finally { escritor.close(); }
+
+  const db = new DatabaseSync(join(path, INDICE_CINTA), { readOnly: true });
+  try {
+    const fotogramas = new Map(NIVELES.map(n => [n, new Map<number, WorldView>()]));
+    for (const f of db.prepare('SELECT * FROM bloques ORDER BY nivel,t0').all() as unknown as BloqueCinta[]) {
+      const bloque = decodificarBloque(readFileSync(rutaSegmento(path, f.nivel, f.segmento)).subarray(f.offset, f.offset + f.bytes));
+      let frame = bloque.baseFrame;
+      fotogramas.get(f.nivel)!.set(frame.tick, frame);
+      for (const delta of bloque.deltas) {
+        frame = applyClientTapeDelta(frame, delta).frame;
+        fotogramas.get(f.nivel)!.set(frame.tick, frame);
+      }
+    }
+    const l0 = fotogramas.get(0)!;
+    assert.deepEqual([...l0].map(([tick, frame]) => [tick, frame.tiles]), [...estados]);
+    assert.ok(db.prepare('SELECT count(*) AS n FROM bloques WHERE nivel=0').get()!.n as number > 1, 'L0 cruza varios bloques');
+    assert.equal(l0.get(1300)!.tiles.length, 20 + Math.floor(325 / 9));
+    for (const nivel of [1, 2, 3, 4] as const) {
+      const esperados = [...l0.keys()].filter(tick => tick % CINTA.pasos[nivel] < 4);
+      assert.deepEqual([...fotogramas.get(nivel)!.keys()], esperados, `ticks de L${nivel}`);
+      for (const tick of esperados) {
+        assert.deepEqual(fotogramas.get(nivel)!.get(tick), reducir(nivel, l0.get(tick)!, new Set()), `L${nivel} en el tick ${tick}`);
+      }
+    }
+  } finally { db.close(); }
 });

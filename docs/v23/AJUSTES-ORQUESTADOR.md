@@ -40,3 +40,30 @@ Cada carril borra lo que sustituye. Cada entrega pasa una revisión de un modelo
 - Herramienta: `archivo/v23-orquesta/portatil.sh` (sube el HEAD de un worktree, lanza en tmux, trae resultados, limpia). Límite: 8 corridas del panel a la vez (cada una llega a ≈ 1 GB). Todo vive en `~/atlas-computo` del portátil y se borra al cerrar cada ola.
 - Mientras el motor base siga siendo determinista con una semilla, las réplicas de una misma semilla son idénticas: los paneles usan semillas distintas con una réplica cada una (12 × 1), no 4 × 3. Las réplicas vuelven a tener sentido con el motor libre de la ola 1.
 - No se lanza nada solo por ocupar el equipo: cada corrida responde a una puerta o a una decisión.
+
+## 8. Resultados antes que agilidad (Steven, 24-nov tarde)
+Ante el tamaño del cambio (≈ 28.000 líneas nuevas y ≈ 27.000 borradas; se sustituye cerca del 40 % del motor y del mundo), Steven decidió: «aplica lo que nos dé mejores resultados, no más agilidad». En consecuencia:
+- **No se recorta nada del plan** para ir más rápido: todo hecho de átomos, dueños por zona, cinta de vida entera y pantalla para cada función. El kernel de materia en GPU (carril G) sigue dependiendo del perfil, porque escribirlo sin necesidad no mejora el resultado.
+- **Las puertas no se relajan ni se adelantan**: ningún carril de una ola arranca antes de que la anterior cierre su puerta (contratos firmados, suite, panel).
+- **Cada carril va al modelo más capaz para ese tipo de trabajo**, no al más rápido ni al más barato, y lo revisa otro modelo fuerte de otro proveedor. Los modelos ligeros (Haiku, Luna, Grok) quedan para trabajo mecánico con revisión.
+- **Cuotas** (medidas el 24-nov a las 15:55): a Gemini le queda un 18 % semanal hasta el 30-nov y cada carril de Neon gasta 4–5 puntos, así que Neon se reserva para un carril extremo por ola.
+
+Reparto de la ola 1 (sustituye las columnas «Implementa» y «Revisa» de la tabla del plan):
+
+| Carril | Implementa | Revisa |
+|---|---|---|
+| M1 Núcleo | GPT-6.2 Sol ultra | Opus |
+| M2a Fauna SoA | GPT-6.2 Sol ultra (cuenta 2) | Opus |
+| M2b `choose` troceado | Opus | GPT-6.2 Sol ultra |
+| M3 GPU de decisión | GPT-6.2 Sol ultra | Opus |
+| M8 Pruebas y banco | Sonnet | GPT-6.2 Sol |
+| Q Química | Gemini 4 Neon XHigh | Fable (solo la matemática) y Opus (código) |
+| A Arena y libro | GPT-6.2 Sol ultra (cuenta 2) | Opus |
+| P Cinética y transporte | Opus | GPT-6.2 Sol |
+| L Leyes de uso | Opus | GPT-6.2 Sol |
+| S Comunidades | Sonnet | GPT-6.2 Sol |
+| E Escucha | Sonnet | Opus |
+| C1a Cinta: escritor | GPT-6.2 Sol ultra | Opus |
+| C1b Cinta: lector | Sonnet | GPT-6.2 Sol |
+| V1 Pantalla | Opus | Muse wonder-full (experiencia de uso) |
+| I1 Integración | Sonnet | Opus, y revisión final del orquestador |

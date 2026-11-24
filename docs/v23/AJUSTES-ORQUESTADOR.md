@@ -67,3 +67,9 @@ Reparto de la ola 1 (sustituye las columnas «Implementa» y «Revisa» de la ta
 | C1b Cinta: lector | Sonnet | GPT-6.2 Sol |
 | V1 Pantalla | Opus | Muse wonder-full (experiencia de uso) |
 | I1 Integración | Sonnet | Opus, y revisión final del orquestador |
+
+## 9. La puerta 0 se parte en dos y las puertas son de integración (24-nov, noche)
+Lo que frena no es escribir código sino los paneles: cada mundo vivo de 500 habitantes tarda horas en llegar al día 45. Para no parar el camino crítico por eso, sin relajar nada:
+- **Puerta 0a (base técnica):** contratos firmados, partición verificada, poda y suite completa en verde y revisada. Al cerrarse, pueden empezar a ESCRIBIR todos los carriles de la ola 1, también los del motor (M1, M2a, M2b, M3, M8): ninguno toca `mundo/crear.ts` ni depende de las cifras del control.
+- **Puerta 0b (demografía):** fundadores validado con 12 semillas y panel de control medido. Hace falta antes de INTEGRAR la ola 1 (la equivalencia de I1 se mide contra ese control), no antes de escribirla.
+- **Regla general:** las puertas gobiernan lo que se integra en `sprint/v23l-core`. Un carril puede escribirse por adelantado en su worktree cuando sus entradas están congeladas (contratos y librerías ya revisadas). El mundo material (W) se adelanta así en cuanto la química esté revisada, porque está en el camino crítico; cuerpos, natalidad, fauna y técnica (B, N, F, T1, T2) esperan a que W esté integrado, porque dependen de su calibración.

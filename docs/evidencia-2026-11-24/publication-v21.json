@@ -1,0 +1,134 @@
+{
+  "capturedAt": "2026-11-24T10:21:18-05:00",
+  "status": "published",
+  "kind": "new world V21 (Uncapped Turbo Simulation + Recorded DVR Tape + 60 fps Cinema Player + Observer-Only Mode + V20 Modular Demography Fix; public + VPN + LAN)",
+  "reason": "Resolver la extinción demográfica de V19/V20 causada por construccion.modular (verificada en ablación de 9 brazos y 4/4 semillas) y evolucionar el motor a arquitectura desacoplada Turbo sin tope de FPS + cinta DVR grabada en SQLite WAL independiente (world.tape.sqlite) + reproductor cine a 60 fps en cliente + modo observador puro sin órdenes directas a NPC.",
+  "commit": "2b932500924f8cdeba53f82de692b6fd241e1236",
+  "codeRevision": "2b93250 (V21 núcleo ebcabe0 + parches por campo 626558f + compactación de cinta / auto_vacuum 2b93250)",
+  "previousCodeRevision": "e7331ed (V20, publico-v20 conservado para rollback; publico-v21 ebcabe0 conservado para rollback)",
+  "rulesVersion": 14,
+  "protocolVersion": 10,
+  "sqliteUserVersion": 5,
+  "tapeSqliteUserVersion": 1,
+  "world": {
+    "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v21-20261124",
+    "worldInstanceId": "8eed7817-14f4-44c2-8aca-8ceb14dbd411",
+    "seed": 51926,
+    "reset": true,
+    "credentialSource": "access.scrypt copiado con cp -p desde mundos/v20-20261124 (mismo hash, sin manejar contraseña en claro)"
+  },
+  "worktree": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v21-r3",
+  "preCutoverBackupV20": {
+    "path": "/mnt/Data2/respaldos-atlas-v20/world-20261124-0954.sqlite.gz",
+    "size": "50 MiB",
+    "gzipOk": true
+  },
+  "firstBackupV21": {
+    "path": "/mnt/Data2/respaldos-atlas-v21/world-20261124-1020.sqlite.gz",
+    "size": "17 MiB",
+    "gzipOk": true
+  },
+  "deployCheck": {
+    "command": "bash scripts/deploy-check.sh 2b932500924f8cdeba53f82de692b6fd241e1236",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "smokeGates": { "all10": true }
+  },
+  "demographyFixValidation": {
+    "rootCause": "construccion.modular=true (V19/B) inducía bucles de adopción de planos sobredimensionados y atascos de acarreo/obra, extinguiendo a los mortales en el día 17 en V20 (ablation de 9 brazos en semilla 51926: V20_ALL pop=8 vs NO_B_modular pop=93).",
+    "fix": "Adopción acotada al presupuesto local (constructionBudget/adoptionCost + storageValue para bodegas poliominó), entregas parciales TRIP_LOAD=4 en obra activa sin requerir tesela buildable libre adicional, acarreo enfocado tripWood/tripStone, depositMaterials evita person.action==='build' y radio de obra restaurado a 7 (<= HALO 14).",
+    "fourSeedDay15Verification": {
+      "seed51926": { "pop": 47, "births": 52, "communities": 5, "structures": 75, "warehousesStocked": 13, "workshops": 37, "roadsPaved": 26, "chemFormulas": 209, "maxChemTier": 2 },
+      "seed19104": { "pop": 29, "births": 31, "communities": 8, "structures": 90, "roadsPaved": 59, "chemFormulas": 160, "maxChemTier": 2 },
+      "seed19101": { "pop": 23, "births": 25, "communities": 6, "structures": 54, "warehousesStocked": 7, "polyomino": 1, "roadsPaved": 29, "chemFormulas": 103 },
+      "seed19103": { "pop": 21, "births": 29, "communities": 4, "structures": 24, "roadsPaved": 17, "chemFormulas": 64 }
+    }
+  },
+  "testsVerified": {
+    "typecheck": "npm run typecheck PASS",
+    "v21Suites": "53/53 PASS (v21-tape-store 17/17, v21-turbo-server 8/8, v21-dvr-client 28/28)",
+    "unified25Suites": "180/180 PASS (1 benchmark sintético 440k omitido por bandera de entorno), 0 failures",
+    "benchmarks": {
+      "tape500kTiles1500People": "keyframe 47851 B, delta 262 B (182.6x menor), seeks 80.5–174.6 ms",
+      "createAppTurboWithTape": "256 ticks en 1499 ms (149.2 Hz)"
+    }
+  },
+  "gpuAutoprueba": {
+    "gpu0": "14.20 ms PASS; resident sidecar active",
+    "gpu1": "7.25 ms PASS; resident sidecar active",
+    "activeDevices": [0, 1]
+  },
+  "liveVerification": {
+    "publicHealth": "https://atlas.humanizar.tech/health -> 200 (0.588 s)",
+    "lanWaterfall": "https://192.168.78.211:3443: GET / 3.6–5.0 ms, /api/session 2.0 ms ({authenticated:false, observerOnly:true, tapeEnabled:true, turbo:true}), JS 109.9 KB gzip 4.6 ms, CSS 15.8 KB gzip 2.3 ms",
+    "securityChecks": {
+      "crossOriginPostLogin": 403,
+      "unauthTapeMeta": 401,
+      "unauthTapeChunk": 401
+    },
+    "liveTelemetryAtDay8": {
+      "tick": 17897,
+      "day": 8,
+      "simHz": 18.6,
+      "p50StepMs": 8.68,
+      "p95StepMs": 69.99,
+      "rssMiB": 1637.7,
+      "pop": 44,
+      "births": 30,
+      "deaths": 2,
+      "communities": 7,
+      "structures": 45,
+      "formulas": 130,
+      "paved": 25,
+      "activeChunks": 83,
+      "discoveredChunks": 388,
+      "tapeAutoVacuum": "INCREMENTAL (2)",
+      "tapeMaxFrames": 20000,
+      "tapeDeltaAvgBytes": 17054,
+      "tapeSizeAt1378FramesMiB": 36.4
+    }
+  },
+  "archivedPreviousWorlds": {
+    "v18": {
+      "code": "4c97666",
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v18-20261122",
+      "finalBackup": "/mnt/Data2/respaldos-atlas-v18/world-20261124-0054.sqlite.gz",
+      "tick": 220200,
+      "day": 91.75,
+      "people": 10210,
+      "births": 16500,
+      "communities": 1210,
+      "structures": 2033,
+      "sizeMiB": 5424.9
+    },
+    "v19": {
+      "code": "f953b11",
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v19-20261124",
+      "finalBackup": "/mnt/Data2/respaldos-atlas-v19/world-20261124-0155.sqlite.gz",
+      "tick": 35174,
+      "day": 14.66,
+      "people": 3,
+      "births": 13,
+      "sizeMiB": 99.9
+    },
+    "v20": {
+      "code": "e7331ed",
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v20-20261124",
+      "finalBackup": "/mnt/Data2/respaldos-atlas-v20/world-20261124-0954.sqlite.gz",
+      "tick": 284044,
+      "day": 118.35,
+      "people": 2,
+      "births": 14,
+      "formulas": 90,
+      "archivedRecipes": 373,
+      "sizeMiB": 171.3
+    }
+  },
+  "operation": {
+    "deployedAt": "2026-11-24T09:56:45-05:00",
+    "hotOptimizedAt": "2026-11-24T10:19:13-05:00",
+    "envFlags": "CARTA_OPEN_WORLD=1 CARTA_SIM_WORKER=1 CARTA_TURBO=1 CARTA_TAPE=1 CARTA_OBSERVER_ONLY=1 CARTA_TAPE_MAX_FRAMES=20000",
+    "towerCode": "worktree detached /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v21-r3 en 2b93250, con node_modules propio; publico-v21 en ebcabe0 y publico-v20 en e7331ed conservados para rollback."
+  }
+}

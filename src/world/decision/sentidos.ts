@@ -8,7 +8,6 @@ import { filtrarCerca } from '../indice-puntos.js';
 import { BROKEN_CONDITION, foodAvailable, waterAvailable, facilityRestQuality, REST_FATIGUE_RATE, REST_ENERGY_RATE } from '../inventions.js';
 import { paramsOf } from '../params.js';
 import { updateDemography, demographicTraits } from '../demography.js';
-import { cellIntKey } from '../politica-obs.js';
 import { type BodyState, hydrateBody, exertBody, type BodyRates, restBody } from '../body.js';
 import { SED_POR_UNIDAD, HAMBRE_POR_PASO, SED_POR_PASO } from '../ecologia-constantes.js';
 import { canHandleContainedWater, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from '../technology-water.js';
@@ -132,75 +131,8 @@ export function immediateMeal(world: World, person: { x: number; y: number; inve
 }
 
 
-/** Bounded perceived land routes. Planning cannot borrow a path through unseen cells.
- * Integer keys keep the same FIFO order (este, norte, oeste, sur) and the same distances.
- * A coordinate that is not an admissible integer falls back to the original string keys. */
-export function perceivedRoutes(person: Person, tiles: Tile[]): (point: Point) => number | undefined {
-  const ints = perceivedRouteInts(person, tiles);
-  if (ints) return ints;
-  const land = new Set(tiles.map(t => `${t.x},${t.y}`)), steps = new Map([[`${person.x},${person.y}`, 0]]), queue: Point[] = [person];
-  for (let i = 0; i < queue.length; i++) {
-    const p = queue[i]!, n = steps.get(`${p.x},${p.y}`)! + 1;
-    for (const next of [{ x: p.x + 1, y: p.y }, { x: p.x, y: p.y + 1 }, { x: p.x - 1, y: p.y }, { x: p.x, y: p.y - 1 }]) {
-      const key = `${next.x},${next.y}`;
-      if (land.has(key) && !steps.has(key)) { steps.set(key, n); queue.push(next); }
-    }
-  }
-  return point => steps.get(`${point.x},${point.y}`);
-}
-
-
-/** Colas de trabajo de la BFS percibida: sólo viven mientras se construye la rejilla (ningún
- * cierre devuelto las captura), así que se reutilizan entre decisiones; la guarda reserva un
- * arreglo nuevo si alguna vez hubiera una construcción reentrante. `steps` sí es del cierre
- * devuelto y se asigna nuevo en cada llamada, como siempre. */
+/** Posiciones de la ventana 15×15 de percepción de `choose`. */
 export const ROUTE_CELLS = (2 * RADIUS + 1) * (2 * RADIUS + 1);
-
-const routeQueueScratch = new Int16Array(ROUTE_CELLS), routeQueueXScratch = new Int16Array(ROUTE_CELLS), routeQueueYScratch = new Int16Array(ROUTE_CELLS);
-
-let routeQueueInUse = false;
-
-
-function perceivedRouteInts(person: Person, tiles: Tile[]): ((point: Point) => number | undefined) | undefined {
-  if (cellIntKey(person.x, person.y) === undefined) return undefined;
-  const side = 2 * RADIUS + 1, originX = person.x - RADIUS, originY = person.y - RADIUS;
-  const steps = new Int16Array(side * side).fill(-2);
-  for (const tile of tiles) {
-    if (cellIntKey(tile.x, tile.y) === undefined) return undefined;
-    const x = tile.x - originX, y = tile.y - originY;
-    if (x < 0 || x >= side || y < 0 || y >= side) return undefined;
-    steps[y * side + x] = -1;
-  }
-  const scratch = !routeQueueInUse;
-  const queue = scratch ? routeQueueScratch : new Int16Array(steps.length);
-  const queueX = scratch ? routeQueueXScratch : new Int16Array(steps.length);
-  const queueY = scratch ? routeQueueYScratch : new Int16Array(steps.length);
-  if (scratch) routeQueueInUse = true;
-  const origin = RADIUS * side + RADIUS;
-  steps[origin] = 0; queue[0] = origin; queueX[0] = RADIUS; queueY[0] = RADIUS;
-  let tail = 1;
-  for (let head = 0; head < tail; head++) {
-    const cell = queue[head]!, x = queueX[head]!, y = queueY[head]!, n = steps[cell]! + 1;
-    let next = cell + 1;
-    if (x + 1 < side && steps[next] === -1) { steps[next] = n; queue[tail] = next; queueX[tail] = x + 1; queueY[tail] = y; tail++; }
-    next = cell + side;
-    if (y + 1 < side && steps[next] === -1) { steps[next] = n; queue[tail] = next; queueX[tail] = x; queueY[tail] = y + 1; tail++; }
-    next = cell - 1;
-    if (x > 0 && steps[next] === -1) { steps[next] = n; queue[tail] = next; queueX[tail] = x - 1; queueY[tail] = y; tail++; }
-    next = cell - side;
-    if (y > 0 && steps[next] === -1) { steps[next] = n; queue[tail] = next; queueX[tail] = x; queueY[tail] = y - 1; tail++; }
-  }
-  if (scratch) routeQueueInUse = false;
-  return point => {
-    const x = point.x - originX, y = point.y - originY;
-    // El origen es un entero admisible (`cellIntKey` de la persona): un punto con desplazamiento
-    // entero dentro de la ventana es un entero seguro, y cualquier otro desplazamiento —fracción,
-    // `NaN` o fuera de la ventana— se rechaza aquí igual que con `Number.isSafeInteger`.
-    if (x < 0 || x >= side || y < 0 || y >= side || x !== (x | 0) || y !== (y | 0)) return undefined;
-    const n = steps[y * side + x]!;
-    return n < 0 ? undefined : n;
-  };
-}
 
 
 /** Predict the exact finite drinking dose without touching stocks or receipts.

@@ -38,6 +38,8 @@ export interface CensoPanel {
 export interface CorridaPanel {
   brazo: string; semilla: number; replica: number; estado: 'completo' | 'error'; error?: string;
   censos: CensoPanel[]; ramBytes: number; maxRssMiB: number;
+  /** Día en que la corrida se detuvo por pasar de `--tope-mortales`: viva, con lo posterior desconocido. */
+  tope?: number;
 }
 interface Veredicto { estado: Estado; motivo: string; puerta?: boolean; valores?: unknown }
 type ConfigParcial = { [K in keyof UmbralesPanel]?: Partial<UmbralesPanel[K]> };
@@ -81,7 +83,7 @@ const decidir = (ok: boolean): Estado => ok ? 'cumple' : 'falla';
 export function evaluarPanel(corridas: CorridaPanel[], u: UmbralesPanel = UMBRALES_PANEL): Record<keyof UmbralesPanel, Veredicto> {
   const dia = (r: CorridaPanel, n: number) => r.censos.find(c => c.dia === n);
   const extintas = corridas.filter(r => r.censos.some(c => c.dia <= u.M1.dia && c.mortales === 0)).length;
-  const m1 = extintas > u.M1.extincionesMax ? 'falla' : corridas.length > 0 && corridas.every(r => dia(r, u.M1.dia)) ? 'cumple' : 'desconocido';
+  const m1 = extintas > u.M1.extincionesMax ? 'falla' : corridas.length > 0 && corridas.every(r => dia(r, u.M1.dia) || r.tope !== undefined) ? 'cumple' : 'desconocido';
   const m2Final = corridas.map((r): Estado => { const final = dia(r, u.M2.dia); return final ? decidir(final.mortales >= u.M2.poblacionMin) : 'desconocido'; });
   const m2Ventana = corridas.map((r): Estado => {
     const ventana = r.censos.filter(c => c.dia >= u.M2.desde && c.dia <= u.M2.dia);
@@ -160,11 +162,11 @@ export function permutacionEstratificada(a: GrupoPermutacion[], b: GrupoPermutac
 
 interface Trabajo {
   raiz: string; brazo: string; semilla: number; replica: number; dias: number; salida: string;
-  regimen: 'abierto' | 'defecto'; hilos: number; gpu: number[]; cadaTicks: number; params?: string;
+  regimen: 'abierto' | 'defecto'; hilos: number; gpu: number[]; cadaTicks: number; params?: string; topeMortales?: number;
 }
 interface Opciones {
   semillas: number[]; replicas: number; dias: number; paralelo: number; salida: string; brazos: string[];
-  regimen: Trabajo['regimen']; hilos: number; gpu: number[]; cadaTicks: number; config?: string; params?: string;
+  regimen: Trabajo['regimen']; hilos: number; gpu: number[]; cadaTicks: number; config?: string; params?: string; topeMortales?: number;
 }
 const importar = (raiz: string, ruta: string) => import(pathToFileURL(join(raiz, 'src', ruta)).href);
 const escribir = (ruta: string, valor: unknown) => appendFileSync(ruta, `${JSON.stringify(valor)}\n`);
@@ -235,6 +237,12 @@ async function replica(trabajo: Trabajo): Promise<void> {
       }
       if (mundo.tick % trabajo.cadaTicks !== 0) revisar();
       censo(dia); archivar();
+      // Con un solo hilo, un mundo de cientos de habitantes no llega al horizonte en un tiempo razonable: se detiene
+      // aquí y cuenta como vivo; lo que pase después queda desconocido, no supuesto.
+      if (trabajo.topeMortales && mundo.people.filter(p => p.role === 'neighbor').length >= trabajo.topeMortales) {
+        escribir(trabajo.salida, { tipo: 'fin', estado: 'tope', dia, maxRssMiB: process.resourceUsage().maxRSS / 1024 });
+        return;
+      }
     }
     escribir(trabajo.salida, { tipo: 'fin', estado: 'completo', maxRssMiB: process.resourceUsage().maxRSS / 1024 });
   } catch (error) {
@@ -268,6 +276,7 @@ function argumentos(args: string[]): Opciones {
       case '--gpu': o.gpu = valor === 'sin' ? [] : valor.split(',').map(s => numero(s, bandera, 0)); break;
       case '--cada-ticks': o.cadaTicks = numero(valor, bandera); break;
       case '--config': o.config = resolve(valor); break;
+      case '--tope-mortales': o.topeMortales = numero(valor, bandera); break;
       case '--params': o.params = resolve(valor); break;
       default: throw new Error(`Opción desconocida: ${bandera}`);
     }
@@ -281,7 +290,7 @@ function leerCorrida(trabajo: Trabajo): CorridaPanel {
   const filas = readFileSync(trabajo.salida, 'utf8').trim().split('\n').filter(Boolean).map(f => JSON.parse(f));
   const inicio = filas.find(f => f.tipo === 'inicio'), fin = filas.filter(f => f.tipo === 'fin').at(-1), falloProceso = filas.find(f => f.tipo === 'proceso-error');
   return { brazo: trabajo.brazo, semilla: trabajo.semilla, replica: trabajo.replica, censos: filas.filter(f => f.tipo === 'censo'),
-    estado: fin?.estado === 'completo' ? 'completo' : 'error', error: fin?.error ?? falloProceso?.error ?? (!fin ? 'El proceso terminó sin fila fin' : undefined),
+    estado: fin?.estado === 'completo' || fin?.estado === 'tope' ? 'completo' : 'error', tope: fin?.estado === 'tope' ? fin.dia : undefined, error: fin?.error ?? falloProceso?.error ?? (!fin ? 'El proceso terminó sin fila fin' : undefined),
     ramBytes: inicio?.ramBytes ?? totalmem(), maxRssMiB: fin?.maxRssMiB ?? Infinity };
 }
 
@@ -293,7 +302,7 @@ async function panel(o: Opciones): Promise<void> {
     const brazo = `${indice + 1}-${basename(raiz)}`;
     const salida = join(o.salida, `${brazo}-${semilla}-${replica}.jsonl`);
     if (existsSync(salida)) throw new Error(`La salida ya existe: ${salida}`);
-    trabajos.push({ raiz, brazo, semilla, replica, dias: o.dias, salida, regimen: o.regimen, hilos: o.hilos, gpu: o.gpu, cadaTicks: o.cadaTicks, params: o.params });
+    trabajos.push({ raiz, brazo, semilla, replica, dias: o.dias, salida, regimen: o.regimen, hilos: o.hilos, gpu: o.gpu, cadaTicks: o.cadaTicks, params: o.params, topeMortales: o.topeMortales });
   }
   writeFileSync(join(o.salida, 'config.json'), JSON.stringify({ ...o, umbrales, carga: loadavg(), ramBytes: totalmem() }, null, 2));
   mkdirSync('/tmp/atlas-v23-0c', { recursive: true });
@@ -351,7 +360,7 @@ async function panel(o: Opciones): Promise<void> {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--help')) {
-    process.stdout.write('tsx scripts/lab/panel.ts [--semillas 51926,19104,19101,19103] [--replicas 3] [--dias 30] [--paralelo 4] [--regimen abierto|defecto] [--hilos 1] [--gpu sin] [--cada-ticks 120] [--config umbrales.json] [--params params.json] [--brazo directorio (hasta dos)] [--salida directorio]\n');
+    process.stdout.write('tsx scripts/lab/panel.ts [--semillas 51926,19104,19101,19103] [--replicas 3] [--dias 30] [--paralelo 4] [--regimen abierto|defecto] [--hilos 1] [--gpu sin] [--cada-ticks 120] [--config umbrales.json] [--params params.json] [--tope-mortales N] [--brazo directorio (hasta dos)] [--salida directorio]\n');
   } else if (process.argv[2] === '--worker') {
     replica(JSON.parse(process.argv[3]!)).then(() => process.exit(0)).catch(error => { process.stderr.write(`${String(error)}\n`); process.exit(1); });
   } else {

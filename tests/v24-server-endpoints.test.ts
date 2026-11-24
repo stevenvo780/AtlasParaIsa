@@ -252,7 +252,7 @@ test('whispers: confirmed only once durable (also as a replayed delta), a revoke
     const path = join(dir, 'replay.sqlite');
     const store = new Store(path);
     const app = createApp({ store, password: PASSWORD, origin: ORIGIN, secure: true, seed: 42, manual: true, observerOnly: true,
-      params: parseParams('motor.hilos=1,persistencia.cadaTicks=200,persistencia.paginasSucias=true,gobernador.presupuestoMs=5000') });
+      params: parseParams('motor.hilos=1,persistencia.cadaTicks=200,persistencia.paginasSucias=true') });
     // Pre-existing and unrelated to whispers: the direct host does not record its own host changes as replay
     // changes, so a later routine/close save of this reserved mode can fail. Only the whisper delta is asserted.
     t.after(async () => { try { await app.close().catch(() => undefined); } finally { store.close(); } });

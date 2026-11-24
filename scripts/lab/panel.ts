@@ -37,7 +37,7 @@ export interface CensoPanel {
 }
 export interface CorridaPanel {
   brazo: string; semilla: number; replica: number; estado: 'completo' | 'error'; error?: string;
-  censos: CensoPanel[]; presupuestoMs: number; ramBytes: number; maxRssMiB: number;
+  censos: CensoPanel[]; ramBytes: number; maxRssMiB: number;
 }
 interface Veredicto { estado: Estado; motivo: string; puerta?: boolean; valores?: unknown }
 type ConfigParcial = { [K in keyof UmbralesPanel]?: Partial<UmbralesPanel[K]> };
@@ -113,8 +113,8 @@ export function evaluarPanel(corridas: CorridaPanel[], u: UmbralesPanel = UMBRAL
   const m6 = corridas.map((r): Estado => {
     const final = r.censos.at(-1);
     if (!final) return 'desconocido';
-    if (![final.pasoP95Ms, final.pasoMaxMs, u.M6.presupuestoMs ?? r.presupuestoMs, r.maxRssMiB, r.ramBytes].every(Number.isFinite)) return 'desconocido';
-    if (final.pasoP95Ms > (u.M6.presupuestoMs ?? r.presupuestoMs) || final.pasoMaxMs > u.M6.pasoMaxMs
+    if (![final.pasoP95Ms, final.pasoMaxMs, r.maxRssMiB, r.ramBytes].every(Number.isFinite)) return 'desconocido';
+    if ((u.M6.presupuestoMs !== null && final.pasoP95Ms > u.M6.presupuestoMs) || final.pasoMaxMs > u.M6.pasoMaxMs
       || r.maxRssMiB * 1048576 > u.M6.fraccionRamMax * r.ramBytes) return 'falla';
     return r.estado === 'completo' && final.tick > 0 ? 'cumple' : 'desconocido';
   });
@@ -236,9 +236,9 @@ async function replica(trabajo: Trabajo): Promise<void> {
       if (mundo.tick % trabajo.cadaTicks !== 0) revisar();
       censo(dia); archivar();
     }
-    escribir(trabajo.salida, { tipo: 'fin', estado: 'completo', presupuestoMs: params.gobernador.presupuestoMs, maxRssMiB: process.resourceUsage().maxRSS / 1024 });
+    escribir(trabajo.salida, { tipo: 'fin', estado: 'completo', maxRssMiB: process.resourceUsage().maxRSS / 1024 });
   } catch (error) {
-    escribir(trabajo.salida, { tipo: 'fin', estado: 'error', error: String(error), presupuestoMs: params.gobernador.presupuestoMs, maxRssMiB: process.resourceUsage().maxRSS / 1024 });
+    escribir(trabajo.salida, { tipo: 'fin', estado: 'error', error: String(error), maxRssMiB: process.resourceUsage().maxRSS / 1024 });
     throw error;
   }
 }
@@ -282,7 +282,7 @@ function leerCorrida(trabajo: Trabajo): CorridaPanel {
   const inicio = filas.find(f => f.tipo === 'inicio'), fin = filas.filter(f => f.tipo === 'fin').at(-1), falloProceso = filas.find(f => f.tipo === 'proceso-error');
   return { brazo: trabajo.brazo, semilla: trabajo.semilla, replica: trabajo.replica, censos: filas.filter(f => f.tipo === 'censo'),
     estado: fin?.estado === 'completo' ? 'completo' : 'error', error: fin?.error ?? falloProceso?.error ?? (!fin ? 'El proceso terminó sin fila fin' : undefined),
-    presupuestoMs: fin?.presupuestoMs ?? inicio?.params?.gobernador?.presupuestoMs ?? NaN, ramBytes: inicio?.ramBytes ?? totalmem(), maxRssMiB: fin?.maxRssMiB ?? Infinity };
+    ramBytes: inicio?.ramBytes ?? totalmem(), maxRssMiB: fin?.maxRssMiB ?? Infinity };
 }
 
 async function panel(o: Opciones): Promise<void> {
@@ -326,7 +326,7 @@ async function panel(o: Opciones): Promise<void> {
   } finally {
     detener(); process.removeListener('SIGTERM', detener); process.removeListener('SIGINT', detener); rmSync(temporal, { recursive: true, force: true });
   }
-  const corridas = trabajos.map(trabajo => existsSync(trabajo.salida) ? leerCorrida(trabajo) : { brazo: trabajo.brazo, semilla: trabajo.semilla, replica: trabajo.replica, censos: [], estado: 'error' as const, error: 'Cancelada antes del arranque', presupuestoMs: NaN, ramBytes: totalmem(), maxRssMiB: Infinity });
+  const corridas = trabajos.map(trabajo => existsSync(trabajo.salida) ? leerCorrida(trabajo) : { brazo: trabajo.brazo, semilla: trabajo.semilla, replica: trabajo.replica, censos: [], estado: 'error' as const, error: 'Cancelada antes del arranque', ramBytes: totalmem(), maxRssMiB: Infinity });
   const brazos = Object.fromEntries([...new Set(corridas.map(r => r.brazo))].map(brazo => [brazo, evaluarPanel(corridas.filter(r => r.brazo === brazo), umbrales)]));
   const comparacion: Record<string, unknown> = {};
   if (o.brazos.length === 2) {
@@ -343,7 +343,7 @@ async function panel(o: Opciones): Promise<void> {
     const huellas = corridas.filter(r => `${r.brazo}/${r.semilla}` === clave && r.estado === 'completo').map(huella);
     return huellas.length > 1 && new Set(huellas).size === 1;
   });
-  const informe = { brazos, comparacion, pseudorreplicas, corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas idénticas dentro de una semilla (pseudorreplicas) cuentan como una en la permutación, pero no en las proporciones M1-M6', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide persistencia, gobernador ni el catálogo tecnológico de producción'] };
+  const informe = { brazos, comparacion, pseudorreplicas, corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas idénticas dentro de una semilla (pseudorreplicas) cuentan como una en la permutación, pero no en las proporciones M1-M6', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide la persistencia ni el catálogo tecnológico de producción'] };
   writeFileSync(join(o.salida, 'panel.json'), JSON.stringify(informe, null, 2));
   process.stdout.write(`${JSON.stringify({ salida: o.salida, brazos, comparacion, pseudorreplicas })}\n`);
   if (corridas.some(r => r.estado === 'error')) process.exitCode = 1;

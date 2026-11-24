@@ -23,7 +23,8 @@ import { createTileObserver, projectMirrorTile, projectTapeFrame } from '../src/
 import { TapeReader, TapeWriter, tapePathForWorld, tileEqual } from '../src/server/tape-store.js';
 import { CARRIED_VIEW_FIELDS, withCarriedFields } from '../src/server/tape-worker.js';
 import { cerrarPiscinasDeComputo } from '../src/server/app.js';
-import { createWorkerGateway } from '../src/server/gateway.js';
+import { createWorkerGateway, saludDelEspejo } from '../src/server/gateway.js';
+import type { OperacionSalud, Salud } from '../src/shared/salud.js';
 import type { Tile, WorldView } from '../src/shared/types.js';
 
 function directory(t: TestContext) {
@@ -174,6 +175,39 @@ test('carried fields: completed in the previous key order, new fields appended, 
   assert.equal(merged.tick, 2);
 });
 
+test('la salud del worker vence por falta de progreso, aunque una operación siga declarada', () => {
+  const salud: Salud = { estado: 'ok', tick: 12, ticksPorSegundo: 3, segundosDesdeUltimoPaso: 1, ultimoGuardado: 500,
+    gpu: [{ dispositivo: 0, estado: 'cpu' }], recargas: 2, operacion: null,
+    diagnostico: { duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0 } };
+  const medicion = { salud, saludMedidaEn: 1000 };
+  const operacion: OperacionSalud = { tipo: 'recargando', inicio: 50_000, progresoEn: 80_000 };
+  const avance = { type: 'operacion' as const, operacion, medidaEn: 700_000 };
+  const avanzando = saludDelEspejo(medicion, avance, false, 720_000);
+  assert.deepEqual(avanzando, { ...salud, segundosDesdeUltimoPaso: 720, estado: 'degradado', operacion });
+  assert.equal(saludDelEspejo(medicion, avance, false, 760_001).estado, 'parado');
+  assert.equal(saludDelEspejo(medicion, avance, true, 720_000).estado, 'parado');
+  const fin = { ...avance, operacion: null, medidaEn: 720_000 };
+  assert.equal(saludDelEspejo(medicion, { ...fin, medidaEn: 0 }, false, 61_001).estado, 'parado');
+  const recienTerminada = saludDelEspejo(medicion, fin, false, 720_001);
+  assert.equal(recienTerminada.estado, 'degradado', 'da tiempo al siguiente paso tras la operación');
+  assert.ok(recienTerminada.segundosDesdeUltimoPaso > 60);
+  assert.equal(saludDelEspejo(medicion, fin, false, 780_001).estado, 'parado');
+});
+
+test('un guardado rutinario no degrada la salud, pero uno que deja el paso parado más de un minuto sí', () => {
+  const salud: Salud = { estado: 'ok', tick: 12, ticksPorSegundo: 10, segundosDesdeUltimoPaso: 0.1, ultimoGuardado: 500, gpu: [],
+    recargas: 0, operacion: null,
+    diagnostico: { duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0 } };
+  const medicion = { salud, saludMedidaEn: 1000 };
+  const operacion: OperacionSalud = { tipo: 'guardando', inicio: 1_000, progresoEn: 1_000 };
+  const guardando = saludDelEspejo(medicion, { type: 'operacion', operacion, medidaEn: 1_500 }, false, 3_000);
+  assert.equal(guardando.estado, 'ok');
+  assert.deepEqual(guardando.operacion, operacion, 'la operación sigue visible aunque no degrade');
+  const largo = saludDelEspejo(medicion, { type: 'operacion', operacion, medidaEn: 61_000 }, false, 62_000);
+  assert.equal(largo.estado, 'degradado');
+  assert.equal(saludDelEspejo(medicion, { type: 'operacion', operacion: { ...operacion, tipo: 'arrancando' }, medidaEn: 1_500 }, false, 3_000).estado, 'degradado');
+});
+
 test('turbo gateway: every tick on the tape in order, summaries on every frame, live mirror at its cadence', { timeout: 120_000 }, async t => {
   const dir = directory(t);
   const worldPath = join(dir, 'world.sqlite');
@@ -182,7 +216,10 @@ test('turbo gateway: every tick on the tape in order, summaries on every frame, 
   t.after(() => gateway.close());
   let mirrorTick = -1;
   gateway.events.on('mirror', (tick: number) => { mirrorTick = tick; });
+  assert.equal(gateway.salud().operacion?.tipo, 'arrancando');
   await gateway.ready;
+  assert.equal(gateway.salud().operacion, null);
+  assert.ok(gateway.salud().ultimoGuardado);
   const start = await gateway.flushTape();
   gateway.start();
   await new Promise(resolve => setTimeout(resolve, 3000));
@@ -213,6 +250,10 @@ test('turbo gateway: every tick on the tape in order, summaries on every frame, 
   } finally { reader.close(); }
   // The live mirror follows the world (throttled, never stalled).
   assert.ok(mirrorTick >= start.latestTick + 1, `mirror tick ${mirrorTick} moved past ${start.latestTick}`);
+  assert.equal(gateway.salud().estado, 'ok');
+  assert.ok(gateway.salud().tick >= mirrorTick);
+  assert.ok(gateway.salud().ticksPorSegundo > 0);
+  assert.equal(gateway.salud().diagnostico.duras24h, 0);
 });
 
 test('carried frames still project per tick what must agree with that tick\'s people', () => {
@@ -228,9 +269,9 @@ test('turbo gateway: the first frame a reopened tape accepts is a full keyframe 
   const worldPath = join(dir, 'world.sqlite');
   const options = { worldPath, origin: 'https://carta.test', secure: true, password: 'private-v24-hz-password', seed: 42,
     params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true, tapeKeyframeInterval: 100_000 };
-  const tilesAt = (tick: number) => {
+  const frameAt = (tick: number) => {
     const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
-    try { return reader.readChunk(tick, 1).frames.find(frame => frame.tick === tick)?.tiles.length ?? -1; } finally { reader.close(); }
+    try { return reader.readChunk(tick, 1).frames.find(frame => frame.tick === tick); } finally { reader.close(); }
   };
   let gateway = createWorkerGateway(options);
   await gateway.ready;
@@ -240,8 +281,7 @@ test('turbo gateway: the first frame a reopened tape accepts is a full keyframe 
   const first = new TapeReader({ path: tapePathForWorld(worldPath) });
   const before = first.readMeta();
   first.close();
-  const fullBefore = tilesAt(before.maxTick);
-  assert.ok(fullBefore > 100, `resident terrain on the tape before the restart (${fullBefore})`);
+  assert.ok((frameAt(before.maxTick)?.tiles.length ?? 0) > 100, 'resident terrain on the tape before the restart');
   gateway = createWorkerGateway(options);
   t.after(() => gateway.close());
   await gateway.ready;
@@ -251,7 +291,11 @@ test('turbo gateway: the first frame a reopened tape accepts is a full keyframe 
     await new Promise(resolve => setTimeout(resolve, 100));
     after = await gateway.flushTape();
   }
-  const resumed = tilesAt(before.maxTick + 1);
-  t.diagnostic(`tiles at ${before.maxTick} (before restart): ${fullBefore}; at ${before.maxTick + 1} (first frame after): ${resumed}`);
-  assert.ok(resumed >= fullBefore * 0.9, `the first frame after the restart keeps the whole terrain (${resumed} vs ${fullBefore})`);
+  const resumed = frameAt(before.maxTick + 1);
+  assert.ok(resumed?.performance?.activeTiles);
+  // El terreno residente puede cambiar al paso siguiente, incluso sin reiniciar.
+  assert.equal(resumed.tiles.length, resumed.performance.activeTiles, 'the reopened frame keeps every resident tile of its own tick');
+  const reopened = new TapeReader({ path: tapePathForWorld(worldPath) });
+  try { assert.ok(reopened.readMeta().keyframeTicks.includes(resumed.tick)); }
+  finally { reopened.close(); }
 });

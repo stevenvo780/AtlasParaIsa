@@ -76,7 +76,7 @@ export function fertilidad(world: World, person: Person): Fertil {
   }
   if (person.inventory < RESERVA_PARA_CRIAR) return { ahora: false, bloqueo: 'reserva', ...base };
   if (paramsOf(world).poblacion.exigeComunidad && !person.communityId) return { ahora: false, bloqueo: 'comunidad', ...base };
-  if (!world.reproductionEnabled) return { ahora: false, bloqueo: 'techo', ...base };
+  if (!world.reproductionEnabled) return { ahora: false, bloqueo: 'pausa-manual', ...base };
   return { ahora: true, bloqueo: null, ...base };
 }
 

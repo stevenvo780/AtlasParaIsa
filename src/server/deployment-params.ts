@@ -10,14 +10,9 @@ import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../world/params.j
  * `main.ts`, para que las pruebas ejerciten la receta REAL de producción en vez de una
  * copia parecida: la ronda de corrección R2 encontró el fallo justo en esa diferencia.
  *
- * En producción el mundo se persiste cada 100 pasos (10 s, ruling R19) y siempre que llega un
- * gesto; un corte arriesga esos 10 s de simulación, nunca un gesto confirmado. `CARTA_PARAMS` ajusta
- * cualquier parámetro (y abre la ventana de poda) sin tocar código.
+ * Por defecto se guarda cada 100 pasos (ruling R19) y siempre que llega un gesto. `CARTA_PARAMS`
+ * permite ajustar los parámetros admitidos, incluida la cadencia de guardado y la ventana de poda.
  */
-// Ruling R19 (2026-09-19 16:30): cadencia 100 pasos (10 s). Con 20, a 40 habitantes el guardado
-// (350–500 ms) entraba 6 veces en la ventana de 120 pasos del gobernador y fijaba su p95, así que
-// los nacimientos quedaban pausados para siempre; con 100 entra una vez y el p95 mide el paso.
-// Coste si está mal: hasta 10 s de mundo perdidos en un corte (antes 2 s).
 export const PRODUCTION_PARAMS = 'persistencia.cadaTicks=100,persistencia.ventanaEventosTicks=24000';
 
 /**

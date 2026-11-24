@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../src/shared/types.js';
-import { activitySplit, communitySummary, cropCounts, cropStage, pulseHealth, renderAnimalTelemetry, renderCommunityTelemetry, renderLandTelemetry, renderLifeTelemetry, renderPersonTelemetry, renderTelemetry, renderTileTelemetry, structureRollup, telemetryKpis, viewportCensus, viewportCensusText, type StructureTelemetry } from '../src/client/telemetry-hud.js';
+import { activitySplit, communitySummary, cropCounts, cropStage, renderAnimalTelemetry, renderCommunityTelemetry, renderLandTelemetry, renderLifeTelemetry, renderPersonTelemetry, renderTelemetry, renderTileTelemetry, structureRollup, telemetryKpis, viewportCensus, viewportCensusText, type StructureTelemetry } from '../src/client/telemetry-hud.js';
 import { worldShell } from '../src/client/world-shell.js';
 
 function statsFixture(): WorldStats {
@@ -70,16 +70,11 @@ test('activity fractions include every work action and keep movement and surviva
   assert.equal(activitySplit().total, 0);
 });
 
-test('pulse state follows the governor ratio and distinguishes a missing budget', () => {
-  const p = worldFixture().performance!;
-  assert.equal(pulseHealth(p), 'unknown');
-  const withBudget = { ...p, gobernador: { activo: false, presupuestoMs: 100, p95StepMs: 30, manual: null, politica: 'techo' as const } };
-  assert.equal(pulseHealth(withBudget), 'healthy');
-  assert.equal(pulseHealth({ ...withBudget, p95StepMs: 70 }), 'warn');
-  assert.equal(pulseHealth({ ...withBudget, p95StepMs: 100 }), 'warn');
-  assert.equal(pulseHealth({ ...withBudget, p95StepMs: 101 }), 'hot');
-  assert.equal(pulseHealth({ ...withBudget, gobernador: { ...withBudget.gobernador, presupuestoMs: 0 } }), 'unknown');
-  assert.match(renderTelemetry({ ...worldFixture(), performance: { ...withBudget, p95StepMs: 101 } }), /data-health="hot"/);
+test('performance KPI shows the measured pace and p95 from the received state', () => {
+  const world = worldFixture();
+  world.performance!.p95StepMs = 101;
+  const kpi = telemetryKpis(world).find(kpi => kpi.nav === 'performance')!;
+  assert.match(kpi.detail, /Paso p95 101 ms · 9,5 Hz en el estado recibido/);
 });
 
 test('life telemetry renders hidden diversity and resource access metrics including the no-water sentinel', () => {
@@ -156,7 +151,7 @@ test('shell keeps the functional HUD, camera census and every notebook hook with
   const html = worldShell();
   assert.match(html, /<section id="hud-telemetry" class="hud-telemetry hud-surface" aria-label="Pulso del mundo">/);
   assert.doesNotMatch(html, /UN MUNDO PARA VOLVER|class="game-brand/);
-  for (const id of ['world-day', 'world-phase', 'connection-label', 'world-rhythm', 'growth-chip', 'stats-drawer', 'population-drawer', 'inspector-drawer', 'layers-popover', 'settings-drawer', 'whisper-drawer', 'landscape', 'camera-coordinates', 'world-extent', 'viewport-census', 'letter-button', 'letter-dialog', 'population-list', 'inspector-tabs', 'inhabitant-card', 'stats-content']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, id);
+  for (const id of ['world-day', 'world-phase', 'connection-label', 'world-rhythm', 'salud-chip', 'panel-salud', 'stats-drawer', 'population-drawer', 'inspector-drawer', 'layers-popover', 'settings-drawer', 'whisper-drawer', 'landscape', 'camera-coordinates', 'world-extent', 'viewport-census', 'letter-button', 'letter-dialog', 'population-list', 'inspector-tabs', 'inhabitant-card', 'stats-content']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, id);
 });
 
 test('telemetry helpers leave the received world untouched', () => {

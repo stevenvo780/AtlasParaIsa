@@ -210,7 +210,6 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
   const motor = recommendedMotorForHost(hw);
   return parseParams({
     motor,
-    gobernador: { ...base.gobernador, politica: 'techo', presupuestoMs: 100 },
     persistencia: { ...base.persistencia, cadaTicks: 100, ventanaEventosTicks: 24000 },
   }, withLimits);
 }

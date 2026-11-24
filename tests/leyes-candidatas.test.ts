@@ -79,15 +79,14 @@ function digestoConParamsDeMain(world: World): string {
   // `social` entero no existe en `main`: con él se van también las claves que las hipótesis de la noche
   // añadieron al grupo (vinculoConvivencia, radioConvivencia y memoriaDisputa, CONFL); con su default no actúan.
   delete comoMain.conducta; delete comoMain.social; delete comoMain.tecnologia;
-  // Claves nuevas de la integración de la noche (gobernador techo, cortejo, maxComunidades):
-  // tampoco existen en `main`, y con su default tampoco actúan.
-  delete (comoMain.gobernador as Record<string, unknown>).politica;
+  // Las claves de natalidad añadidas esa noche tampoco existen en `main`.
   const poblacion = comoMain.poblacion as Record<string, unknown>;
   for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo', 'natalidadVecindad', 'radioVecindadNatalidad']) delete poblacion[clave];
   delete (comoMain.agua as Record<string, unknown>).memoria;
   for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete (comoMain.genes as Record<string, unknown>)[clave];
   setParams(world, comoMain as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  try { return digestoCanonico(world, { presupuestoMs: 50, senales: ['p95'] }); }
+  finally { setParams(world, vigentes); }
 }
 
 // Medidos en `main` @694f6b6 (reglas 9) ANTES de tocar nada, con la réplica de arriba (seed 51926,

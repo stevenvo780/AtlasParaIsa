@@ -202,21 +202,19 @@ function technology(world: WorldView): string {
 }
 
 function performance(world: WorldView): string {
-  const p = world.performance, g = p?.gobernador;
+  const p = world.performance;
   const ms = (n?: number): string => finite(n) ? `${number(n, 6)} ms` : '—';
-  const phases = g?.fasesP95 ?? p?.fases;
-  const rows = Object.entries(phases ?? {}).filter((r): r is [string, number] => finite(r[1])).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const rows = Object.entries(p?.fases ?? {}).filter((r): r is [string, number] => finite(r[1])).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   return section('Motor y paralelismo de hardware', cards([
     ['Frecuencia real', finite(p?.tickHz) ? `${number(p.tickHz, 3)} Hz` : '—'], ['Frecuencia objetivo', finite(p?.tickHzObjetivo) ? `${number(p.tickHzObjetivo, 3)} Hz` : '—'],
-    ['Paso actual', ms(p?.stepMs)], ['p50', ms(g?.p50Ms)], ['p95', ms(g?.p95Ms)], ['p99', ms(g?.p99Ms)], ['Máximo', ms(g?.maxMs)], ['Fase del máximo', g?.faseMax ?? '—'],
+    ['Paso actual', ms(p?.stepMs)], ['p95', ms(p?.p95StepMs)],
     ['Ocupación de workers', percentage(p?.ocupacionWorkers)], ['Fracción serial real', percentage(p?.fraccionSerialReal)],
     ['Tiempo paralelo', ms(p?.tiempoParaleloMs)], ['Tiempo de barrera', ms(p?.tiempoBarreraMs)], ['Clon', ms(p?.cloneMs)], ['Simulación', ms(p?.simulationMs)],
     ['Guardado', ms(p?.saveMs)], ['Proyección', ms(p?.projectionMs)], ['Memoria RSS', finite(p?.processRssMiB) ? `${number(p.processRssMiB, 3)} MiB` : '—'],
-    ['Instantánea', finite(p?.snapshotBytes) ? `${number(p.snapshotBytes / 1024, 3)} KiB` : '—'], ['Teselas activas', number(p?.activeTiles)], ['Teselas por habitante', number(g?.teselasPorHabitante, 3)],
+    ['Instantánea', finite(p?.snapshotBytes) ? `${number(p.snapshotBytes / 1024, 3)} KiB` : '—'], ['Teselas activas', number(p?.activeTiles)],
   ]), 'Telemetría medida; los campos no recibidos se muestran como —.')
-    + section(g?.fasesP95 ? 'Desglose por fase (p95 ms)' : 'Desglose por fase (último paso, ms)',
-      rows.length ? bars(rows, 'ms', 20) : note('No se recibieron mediciones por fase.'),
-      g?.fasesP95 ? 'p95 de cada fase, ordenado de mayor a menor. Los percentiles individuales no se suman como un paso.' : 'El servidor no envió p95 por fase; se muestran los costes del último paso recibido.');
+    + section('Desglose por fase (último paso, ms)',
+      rows.length ? bars(rows, 'ms', 20) : note('No se recibieron mediciones por fase.'));
 }
 
 export function renderMundoDeepStats(world: WorldView, tab: MundoTab, directory?: WorldDirectoryResponse | null): string {

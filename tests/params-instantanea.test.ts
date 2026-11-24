@@ -66,10 +66,11 @@ test('unos parámetros fuera de rango en la instantánea fallan cerrado en vez d
 });
 
 test('createApp genera el mundo nuevo con los parámetros recibidos y respeta los de la instantánea al recargar', async t => {
+  let app: ReturnType<typeof createApp> | undefined;
+  t.after(() => app?.close());
   const { store, path } = laboratory(t);
   const params = parseParams('agua.cuencas=1');
-  const app = createApp({ store, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params });
-  t.after(async () => { await app.close(); });
+  app = createApp({ store, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params });
   const conAgua = (world: World) => world.tiles.filter(tile => (tile.drinkingWater ?? 0) > 0).length;
   assert.deepEqual(paramsOf(app.world), params, 'los params llegan antes de que createApp genere el mundo');
   assert.equal(conAgua(app.world), conAgua(createWorld(42, params)));
@@ -77,10 +78,10 @@ test('createApp genera el mundo nuevo con los parámetros recibidos y respeta lo
 
   // Al recargar, los params de la instantánea mandan sobre los de createApp…
   const reopened = new Store(path);
-  t.after(() => reopened.close());
+  let resumed: ReturnType<typeof createApp> | undefined;
+  t.after(async () => { try { await resumed?.close(); } finally { reopened.close(); } });
   const otros = parseParams('agua.cuencas=0.2');
-  const resumed = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params: otros });
-  t.after(async () => { await resumed.close(); });
+  resumed = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params: otros });
   assert.deepEqual(paramsOf(resumed.world), params, 'un mundo cargado conserva los params con los que se generó');
   // …y la configuración explícita del despliegue se aplica ENCIMA, clave a clave, con la
   // receta literal de `main.ts`: no reemplaza el objeto entero (eso borraría la instantánea).
@@ -99,9 +100,9 @@ test('la receta del despliegue conserva del mundo cargado toda clave que no nomb
   store.save(createWorld(51926, generados));
 
   const reopened = new Store(path);
-  t.after(() => reopened.close());
-  const app = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 51926, params: deploymentParams() });
-  t.after(async () => { await app.close(); });
+  let app: ReturnType<typeof createApp> | undefined;
+  t.after(async () => { try { await app?.close(); } finally { reopened.close(); } });
+  app = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 51926, params: deploymentParams() });
   // Exactamente lo que corre en producción sin CARTA_PARAMS.
   setParams(app.world, deploymentParams(paramsOf(app.world), undefined));
   const vigentes = paramsOf(app.world);
@@ -131,7 +132,7 @@ test('T102: parámetros tipados sobreviven a guardado, reinicio, clon y override
   try {
     const loaded = reopened.load()!.world, effective = paramsOf(loaded);
     assert.deepEqual(effective, params);
-    assert.ok(Object.isFrozen(effective.motor.gpu)); assert.ok(Object.isFrozen(effective.gobernador.senales));
+    assert.ok(Object.isFrozen(effective.motor.gpu));
     assert.equal(paramsOf(cloneWorld(loaded)), effective);
     reopened.save(loaded);
     assert.equal(filaInstantanea(reopened).body, saved.body, 'roundtrip tipado conserva los bytes');
@@ -166,7 +167,8 @@ test('T102: snapshot params-v1 anterior completa sólo los campos nuevos con def
   const saved = JSON.parse(filaInstantanea(store).body);
   delete saved.limitsProfile;
   for (const key of ['motor', 'red', 'limites']) delete saved.params[key];
-  delete saved.params.persistencia.paginasSucias; delete saved.params.gobernador.senales;
+  delete saved.params.persistencia.paginasSucias;
+  saved.params.gobernador = { presupuestoMs: 5000, politica: 'techo' };
   reescribirInstantanea(store, JSON.stringify(saved));
   const reopened = new Store(path);
   try {
@@ -176,6 +178,7 @@ test('T102: snapshot params-v1 anterior completa sólo los campos nuevos con def
     const expanded = JSON.parse(filaInstantanea(reopened).body).params;
     assert.equal(expanded.agua.cuencas, 0.8); assert.equal(expanded.persistencia.cadaTicks, 20);
     assert.deepEqual(expanded.motor, DEFAULT_PARAMS.motor);
+    assert.equal(Object.hasOwn(expanded, 'gobernador'), false, 'se retira al volver a guardar');
   } finally { reopened.close(); }
 });
 
@@ -188,7 +191,7 @@ test('T102: checksum recalculado no legitima flags, arrays o señales corruptos 
     ['motor', 'gpu', ['0']], ['motor', 'gpu', [null]], ['motor', 'orden', 'azar'],
     ['gobernador', 'senales', []], ['gobernador', 'senales', ['inventada']], ['limites', 'fauna', -1],
   ] as const) {
-    const corrupted = structuredClone(saved); corrupted.params[section][key] = value;
+    const corrupted = structuredClone(saved); (corrupted.params[section] ??= {})[key] = value;
     reescribirInstantanea(store, JSON.stringify(corrupted));
     assert.throws(() => store.load(), /Invalid snapshot parameters/, `${section}.${key}`);
   }

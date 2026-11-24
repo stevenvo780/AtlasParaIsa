@@ -1,6 +1,7 @@
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export { closePersonasParallelPools } from './paralelo/personas-motor.js';
 export { closeFaunaParallelPools } from './paralelo/fauna-motor.js';
+export type { Animal } from './animals.js';
 export { closePolicyGpuBatchers } from './gpu/politica-gpu.js';
 export { cloneWorld, puntoDeRestauracion, type PuntoDeRestauracion } from './clon.js';
 export { projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES } from './projection.js';

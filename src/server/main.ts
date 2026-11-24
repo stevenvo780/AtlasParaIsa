@@ -1,4 +1,6 @@
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { cerrarPiscinasDeComputo, createApp } from './app.js';
 import { createWorkerGateway } from './gateway.js';
 import { Store } from './store.js';
@@ -41,6 +43,14 @@ const v21 = {
   ...(tapeKeyframeInterval === undefined ? {} : { tapeKeyframeInterval }),
 };
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
+function commitEnEjecucion(): string | undefined {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fileURLToPath(new URL('.', import.meta.url)), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch { return undefined; }
+}
+const commit = commitEnEjecucion();
 const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
 let app: ReturnType<typeof createApp> | ReturnType<typeof createWorkerGateway> | undefined;
@@ -69,9 +79,14 @@ function shutdown(code?: number): Promise<void> {
 }
 process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
+function escuchar(instancia: NonNullable<typeof app>) {
+  instancia.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
+  instancia.server.listen(port, host, () => console.log(`Carta disponible en ${[origin, ...extraOrigins].join(', ')}; acceso privado requerido.`));
+}
+const conWorker = process.env.CARTA_SIM_WORKER === '1';
 try {
-  if (process.env.CARTA_SIM_WORKER === '1') {
-    const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
+  if (conWorker) {
+    const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true, commit,
       password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, ...v21 });
     // Un worker caído deja el transporte sirviendo un espejo fosilizado para siempre: se sale con 75
     // y systemd reinicia el servicio sobre el último guardado.
@@ -80,6 +95,7 @@ try {
       process.exit(75);
     });
     app = pasarela;
+    escuchar(pasarela);
     await app.ready;
   } else {
   store = new Store(resolve(dataPath, 'world.sqlite'));
@@ -99,7 +115,7 @@ try {
     // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
     // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
     // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
-    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
+    app = createApp({ store, manual: true, commit, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
     // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
     // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
     // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
@@ -121,10 +137,8 @@ try {
   }
   if (abortado || !app) await shutdown(abortado ? undefined : 1);
   else {
-    const escuchando = app;
-    escuchando.start();
-    escuchando.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
-    escuchando.server.listen(port, host, () => console.log(`Carta disponible en ${[origin, ...extraOrigins].join(', ')}; acceso privado requerido.`));
+    if (!conWorker) escuchar(app);
+    app.start();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'No se pudo iniciar el mundo.');

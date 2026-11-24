@@ -20,17 +20,11 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
   histórica, también en una exportación (`git archive`) de un commit anterior.
 - `--salida <dir>` (obligatorio): directorio donde se escriben `dia-NNN.json` (uno por día) y, al
   terminar, `replica.json`. Se crea si no existe.
-- `--gobernador no|servidor` (opcional, por defecto `no`): ver «Gobernador consciente del servidor»
-  más abajo. `no` es EXACTAMENTE el comportamiento de siempre (salida bit a bit idéntica); pasar
-  explícitamente `no` es equivalente a omitir la bandera.
+- `--servidor si|no` (opcional, por defecto `no`) incluye la reserva y el guardado en la medición
+  del paso cuando se activa. Pasar `no` equivale a omitir la opción. Ver «Modo servidor».
 - `--instrumentos si|no` (opcional, por defecto `si`): instrumentos de medida de solo lectura
   (conducta por tiempo y comida compartida), ver «Instrumentos de medida» más abajo. `no` da
   exactamente los `dia-NNN.json` de antes (mismas claves, mismos valores).
-- `--techo-lab N` (opcional, solo dígitos, ≥ 16): techo **determinista** de laboratorio, ver «Techo de
-  laboratorio» más abajo. Sin la bandera no cambia nada (ni el mundo ni las claves de salida). La
-  bandera sin valor (p. ej. al final de la línea) o con un valor que no sea solo dígitos (` 18`, `1e2`,
-  `0x14`, `+18`, `18.0`) es un error, no «sin techo». Incompatible con `--gobernador servidor` (error
-  explícito).
 - `--hilos N` (opcional, entero en `[1, 512]`): aplica `params.motor.hilos = N` validado por `parseParams`
   (T118). `barrido.ts` también lo acepta y lo reenvía a cada réplica (además de permitir barridos con
   `--param motor.hilos=1,2`).
@@ -122,8 +116,8 @@ corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
 - `gini`/`fraccionComida`/`distanciaAgua`: de `worldStatistics(world)` si T013 ya añadió
   `giniRecursosPorRegion`/`fraccionCeldasConComida`/`distanciaMediaAgua`; si no, `null` (comprobación
   dinámica con `typeof`, no un import estático — no se edita `statistics.ts`).
-- `p50Ms`/`p95Ms`: percentiles del coste de `stepWorld` en milisegundos reales, medidos con
-  `performance.now()` **sobre los 2400 ticks de ese día** (no acumulado entre días).
+- `p50Ms`/`p95Ms`: percentiles del tiempo de paso en milisegundos, sobre los 2400 ticks del día.
+  Con `--servidor si` incluyen la reserva y el guardado ordinario del paso.
 - `rss`: `process.memoryUsage().rss` al final del día, en bytes.
 
 `replica.json` (al terminar todos los días):
@@ -159,44 +153,22 @@ si alguna diverge, es `🔴 ROTO` (`semaforo: "🔴"`) nombrando los backends y 
 Además `resumen.json` y `resumen.md` incluyen la tabla/curva `p95(teselasActivas)` y
 `teselasPorHabitante` por grupo y backend.
 
-**Salida determinista salvo tiempos**: con la misma semilla, params y código, dos réplicas dan
-exactamente los mismos valores en todas las claves salvo `p50Ms`, `p95Ms`, `rss` y `rssMaximo`
-(dependen del reloj de pared y del asignador de memoria del proceso, no de la simulación).
+Con la misma semilla, parámetros y código, dos réplicas deterministas dan las mismas métricas del mundo.
+Los tiempos y el RSS dependen del reloj de pared y del asignador de memoria del proceso.
 
-## Gobernador consciente del servidor (`--gobernador servidor`)
+## Modo servidor (`--servidor si`)
 
-Por defecto (`--gobernador no`, o sin la bandera) esta réplica corre las LEYES del mundo
-(`stepWorld` sobre el mismo objeto, sin clonar) pero **no** el gobernador de población de
-`src/server/app.ts` (R17: el hardware pone el límite vía `gobernador.presupuestoMs` y
-`decideReproduction`). Eso es adecuado para medir ciencia pura, pero no reproduce la dinámica de
-extinción del mundo público V7 (`docs/EVIDENCIA.md` §"Mundo público V7: recambio insuficiente",
-`docs/ANALISIS-DINAMICAS-2026-09-21.md` §2.1): el mundo público SÍ clona por paso y SÍ apaga/reenciende
-la reproducción según el p95 de los últimos 120 pasos.
+La réplica por defecto mide `stepWorld` en el sitio. Con `--servidor si` mide el tramo de `stepOnce`
+(`src/server/app.ts`) en una simulación sin entradas y sin turbo. Con `motor.clonPorPaso=true` el mundo
+avanza en el sitio. Con `false` se toma un punto de restauración antes de avanzar. El cronómetro incluye
+`store.save(world)` cuando toca por cadencia o cuando un diario o el catálogo se acerca al límite de
+pendientes. Los guardados adicionales del laboratorio al cierre del día o de la réplica quedan fuera del tiempo del paso.
 
-`--gobernador servidor` imita `stepOnce` (`src/server/app.ts`) tick a tick:
+Con `--servidor si`, cada `dia-NNN.json` añade estos campos.
 
-1. Si `params.motor.clonPorPaso` (por defecto `true`): `draft = cloneWorld(world, store.context)`,
-   `stepWorld(draft)`, `world = draft`. Si es `false`, `stepWorld(world)` in situ (sin clonar) —
-   `motor.clonPorPaso` es un parámetro ya definido en `src/world/params.ts` que ningún motor
-   consume todavía; esta réplica es el primer consumidor. **Desde PERF3 (2026-09-23) el servidor
-   con `true` solo clona en los pasos con gestos** y el laboratorio no tiene gestos: para imitar el
-   coste del servidor de hoy, `--params motor.clonPorPaso=false` (paso en el sitio); con `true` se mide
-   el servidor anterior (ver `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3).
-2. `store.save(world)` cuando `tick % persistencia.cadaTicks === 0`, **dentro** de la ventana
-   medida (igual que `stepOnce`: el coste de guardar cuenta para el presupuesto del gobernador).
-3. `p95 = new RollingStepPerformance().record(stepMs)` (ventana de 120 pasos, `src/server/governor.ts`,
-   el MISMO módulo que usa el servidor — no se reimplementa la política).
-4. `world.reproductionEnabled = decideReproduction(p95, params.gobernador.presupuestoMs,
-   world.reproductionEnabled)` — de nuevo, importado de `governor.ts`, nunca redefinido aquí.
-
-Con `--gobernador servidor`, cada `dia-NNN.json` añade (ninguno de estos campos existe con
-`--gobernador no`):
-
-- `reproduccionActivaFraccion`: fracción de los ticks **de ese día** con `reproductionEnabled`
-  (no acumulado desde el día 1: es la señal de si el gobernador estuvo cortando nacimientos hoy).
-- `p95GobernadorFinal`: el p95 de la ventana de 120 pasos al final del día.
-- `cloneMsP50`/`saveMsP50`: medianas de `cloneWorld`/`store.save` sobre los ticks de ese día
-  (0 en `cloneMsP50` si `motor.clonPorPaso=false`).
+- `p95PasoFinal` es el p95 de los últimos 120 pasos del día, con la misma ventana que la telemetría del servidor.
+- `cloneMsP50` y `saveMsP50` son las medianas del tiempo de reserva y de guardado sobre todos los pasos
+  del día. Los pasos sin reserva o sin guardado aportan cero a la mediana correspondiente.
 - Ciencia barata leída del estado, sin recorridos nuevos caros:
   - `indiceDiversidad`: `{conducta, oficios, total}` de `src/world/diversidad.ts` (función real,
     la misma que cablea `src/world/statistics.ts`).
@@ -207,15 +179,9 @@ Con `--gobernador servidor`, cada `dia-NNN.json` añade (ninguno de estos campos
     `sociability`/`care` (`person.traits`) y `learningRate` (`person.genome`).
   - `varianzaGenetica`: varianza media de los 14 alelos (`GENE_COUNT*2`, `src/world/genetics.ts`)
     entre los vivos.
-- `transmisionCultural` **no** se añade: `durableActivityMetrics` (`scripts/lab/metrics.ts`,
-  ya incluido en `dailyMetrics` en ambos regímenes) no expone ningún campo con ese nombre —
-  lo más cercano es `usosConEnsenanzaRecordada`, que ya viaja siempre.
 
-`replica.json.gobernador` describe el modo usado en texto libre (antes decía siempre
-"no-ejecutado"; ahora distingue "no-ejecutado" de "servidor; imita stepOnce…").
-
-`scripts/lab/barrido.ts` acepta `--gobernador no|servidor` y lo reenvía tal cual a cada réplica del
-barrido (omitido ⇒ no se pasa nada ⇒ comportamiento de siempre).
+`replica.json.servidor` describe el modo usado. `scripts/lab/barrido.ts` reenvía `--servidor si|no`
+a cada réplica cuando se indica explícitamente.
 
 ## Observador de comunidades (`observa-comunidades.ts`, hipótesis COM 2026-09-22)
 
@@ -424,60 +390,8 @@ ascendente es indistinguible de una tendencia con 26-56 días; la corrección lo
 corrección. Un crecimiento que **se aplana** (satura) conserva la potencia (99 % y 96 %) aunque la
 corrección AR(1) lea la curvatura como autocorrelación.
 
-## Techo de laboratorio (`--techo-lab N`, noche 2026-09-22)
-
-`replica.ts --techo-lab N` emula la política `techo` del gobernador del servidor
-(`gobernador.politica = 'techo'`, `decidirConTecho` en `src/server/governor.ts`) con el techo **ya
-fijado en N**, en lugar del que dispara el p95 del paso. Antes de cada paso:
-
-```
-world.reproductionEnabled = decidirConTecho(rojo, presupuesto, población, { techo: N }).reproduccion
-                          = población < N
-```
-
-con la población contada **exactamente** como la cuenta el servidor: `world.people.length`, todas las
-personas vivas con S e I incluidas (`governReproduction` en `src/server/app.ts` pasa
-`draft.people.length` a `gobernador.decidir`). Se reutiliza la función del servidor, no se reimplementa
-(`scripts/lab/techo-lab.ts`). El servidor decide tras cada paso para el siguiente; aquí se decide antes
-de cada paso sobre la misma población (la del final del paso anterior).
-
-**Por qué**: el techo del servidor depende del reloj de pared (carga de la torre, otras réplicas en
-paralelo), así que dos corridas de la misma semilla no frenan en el mismo sitio. Para corridas de 60
-días **comparables** entre semillas y brazos y **reproducibles** bit a bit hace falta un techo fijo:
-con él, una vez alcanzado N los nacimientos solo reponen muertes, como en el servidor bajo rojo.
-
-**Qué NO es**: no es una ley del mundo (no toca `src/world` ni los params; solo `reproductionEnabled`,
-el mismo interruptor que ya gobierna el servidor) ni un tope del servidor. El servidor sigue gobernado
-por hardware (ruling R17, FR-013: sin topes fijos de población; `POPULATION_HARD_LIMIT` es solo
-anticorrupción). N es una condición experimental del laboratorio y debe declararse junto a cada
-resultado que la use.
-
-**Cota que garantiza** (`techoLabCota`): solo `reproduce()` (`src/world/index.ts`) añade personas y solo
-con `reproductionEnabled`; en un paso nacen como mucho `poblacion.nacimientosPorComprobacion` (2 por
-defecto: el cupo menos los nacidos en la ventana de `intervaloComprobacionTicks`). Si antes del paso
-hay P ≥ N no nace nadie; si P ≤ N − 1, tras el paso hay ≤ N − 1 + nacidos del paso. Por inducción, tras
-cualquier paso:
-
-```
-población ≤ max(poblaciónInicial, N − 1 + nacimientosPorComprobacion)
-```
-
-Es decir, se pasa de N como mucho en los nacidos de **un** paso menos uno (los que ya estaban
-decididos cuando aún había sitio). `tests/lab-techo.test.ts` lo comprueba a resolución de paso con
-N = 18 en la semilla 42 (etapa 1): máximo 18 ≤ 19, reproducción habilitada el 7 % de los ticks del
-día; sin techo el mismo mundo llega a 23. Dos corridas dan el mismo `digestoMundoFinal`.
-
-Efectos colaterales, los mismos que en el servidor con el techo puesto: `reproductionEnabled = false`
-también apaga la cría de fauna (`src/world/animals.ts`), el cortejo (`poblacion.cortejo`) y la
-intención de reservar comida para criar (`familyOpportunity`, `src/world/family.ts`).
-
-Salida (solo con la bandera):
-
-- cada `dia-NNN.json`: `techoLab` (N), `reproduccionActivaFraccion` (fracción de los ticks **de ese
-  día** con `reproductionEnabled`, mismo nombre que con `--gobernador servidor`) y `poblacionMaximaDia`
-  (máximo de `world.people.length` tras cada paso del día);
-- `replica.json`: `techoLab`, `techoLabDetalle` (`reproduccionActivaFraccion` de toda la réplica,
-  `poblacionMaxima`, `cotaPoblacion`, cómo se cuenta la población) y `gobernador` lo describe.
+El techo experimental de población se retiró en V23. Las condiciones y resultados de las campañas
+que lo usaron están en la [evidencia histórica](../../docs/EVIDENCIA.md) y la [revisión del 22 de septiembre](../../docs/REVISION-NOCHE-2026-09-22.md).
 
 ## Instrumentos de medida (`instrumentos.ts`, ronda INSTR 2026-09-22)
 
@@ -555,8 +469,7 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
 - Medición de la ronda: 4 semillas (7, 42, 2024, 31337) × 4 días con el paquete de la etapa 1: los 16
   `dia-NNN.json` coinciden campo a campo (salvo tiempos) con los de `r2/Psinagua-<semilla>`, que
   corrieron SIN instrumentos y con `Store`, sobre el árbol anterior a la optimización del paso.
-- Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
-  gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
+- Con `--servidor si` el tiempo del observador se descuenta de la duración medida del paso.
 
 ### 3. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23 (RETIRADA en la poda ola 1, 2026-09-27)
 
@@ -599,7 +512,7 @@ se usa ese estado inicial y no su historia; sus cisternas no cuentan.
 Estos campos se escriben al cierre en cada `dia-NNN.json` con los instrumentos activos. `censoComunidades`
 es `{n, tamanos, sinComunidad}`: número de comunidades registradas al cierre, tamaños de sus
 miembros mortales vivos ordenados de mayor a menor y mortales vivos sin `communityId`. S e I
-quedan fuera de los tamaños; una comunidad vacía aporta un cero. Va con otro nombre para no chocar con el contador numérico `comunidades` de `--gobernador servidor`.
+quedan fuera de los tamaños y una comunidad vacía aporta un cero. El contador `comunidades` de `--servidor si` solo indica el total.
 
 `repertorioAbierto` (B) lee los **mismos** recibos durables del día que `usosUtiles`:
 `kind=use`, `success=true`, `recipeId` presente y `benefit>0`, con
@@ -727,28 +640,4 @@ TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --seed 7 --pas
 
 Cifras: `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3.
 
-**La E/S entre pasos largos** (verificación del planificador de PERF3, 2026-09-23): `es-servidor.ts` levanta el
-servidor real con el planificador y alarga cada paso `--lento` ms de CPU; `es-sonda.ts` (cadena HTTP, pong y
-`state` por WS) y `es-cliente.ts` (como `src/client/connection.ts`, con el aborto de 10 s) lo miden desde otro
-proceso. Para comparar dos árboles se corren a la vez, cada uno con su servidor:
-
-```bash
-TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-servidor.ts --lento 250 --info i.json &
-TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-sonda.ts --info i.json --segundos 30 [--rtt 90] --salida s.json
-TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-cliente.ts --info i.json --segundos 90 --salida c.json
-pkill -TERM -f '^/usr/bin/node.*es-servidor.ts'   # deja pasos/s en i.json.srv
-```
-
-## El techo del hardware — `../curva-techo.mts` (T109)
-
-`replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con
-`../curva-techo.mts` (`npm run techo -- --seed S --escala habitantes|teselas --hasta N --salida
-<dir>`), que en cambio hace **crecer la escala** (habitantes o teselas activas, clonando
-estructuralmente fundadores reales — no una fábrica de personas paralela) hasta que el p95 del
-paso, medido con la MISMA ventana de 120 pasos y el MISMO percentil que usa el gobernador de
-producción (`RollingStepPerformance`, `src/server/governor.ts`), toca `gobernador.presupuestoMs`.
-Igual que aquí, SIEMPRE adjunta un `Store` temporal (P3): sin él se mediría una física de
-tecnología distinta, y `persistencia.cadaTicks=1` (el guardado en cada paso) es justo lo que hace
-caro «el paso» que el gobernador vigila. Escribe un `punto-NNN.json` por escalón y un `curva.json`
-resumen; ver la cabecera del propio fichero para el detalle de cómo se coloca cada sintético sin
-violar `assertWorld` (siempre sobre tesela transitable, nunca duplicando los roles únicos S/I).
+La medición histórica de E/S entre pasos largos se conserva en el apartado PERF3 de [Reglas](../../docs/REGLAS.md).

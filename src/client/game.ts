@@ -27,7 +27,8 @@ import { enClaro } from './textos.js';
 import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, type Modo } from './modo.js';
 import { ausenteEstado, comunidadesOrdenadas, demographicSummary, ejeDominante, ejesCultura, miembrosNombrados, resumenCultural, rotuloRecuento, ventanaLista } from './censo-view.js';
-import { estadoCrecimiento, renderPanelGobernador, ritmo, seccionFases, ultimoFrenazo } from './gobernador-view.js';
+import { ritmo, seccionFases } from './rendimiento-view.js';
+import { etiquetaSalud, pedirSalud, renderPanelSalud, type SaludVisible } from './salud-view.js';
 import { distribution, sparkline, statCard } from './charts.js';
 import { notaAcercamientos, seccionNacimientos } from './natalidad-view.js';
 import { seccionDesacuerdos, seccionJuntos } from './cooperacion-view.js';
@@ -105,7 +106,7 @@ let directory: WorldDirectoryResponse | null = null;
 /** Antes de la primera respuesta del directorio no es lo mismo que tras un fallo. */
 let directoryState: 'loading' | 'ready' | 'failed' = 'loading';
 let recentWhispers: DivineWhisper[] = [];
-let directoryBusy = false, mapBusy = false, whispersBusy = false;
+let directoryBusy = false, mapBusy = false, whispersBusy = false, saludBusy = false;
 let pickingWhisper = false;
 let whisperTile = { x: 0, y: 0 };
 /** El lugar del susurro sigue a la cámara hasta que se elige una casilla a propósito. */
@@ -389,7 +390,7 @@ function wire(): void {
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; focusTile(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); if (!el('layers-popover').hidden) toggleLayers(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
   el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (pickingWhisper) { setPickingWhisper(false); return; } if (!el('layers-popover').hidden) { toggleLayers(); el('layers-toggle').focus(); return; } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
-  el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
+  el('salud-chip').addEventListener('click', () => { selectStatsTab('performance'); drawer('stats', true); });
   el('game').addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const focus = event.target as HTMLElement | null;
@@ -469,7 +470,12 @@ function startClientUi(): void {
   minimap = mountMinimap(el<HTMLCanvasElement>('minimap-canvas'), focusTile);
   uiSession = new AbortController();
   void refreshMap();
-  uiTimers.push(setInterval(() => { if (!document.hidden) void refreshMap(); }, 3000));
+  void refreshSalud();
+  uiTimers.push(setInterval(() => {
+    if (document.hidden) return;
+    void refreshMap();
+    void refreshSalud();
+  }, 3000));
   uiTimers.push(setInterval(() => {
     if (document.hidden) return;
     if (!el('population-drawer').hidden || !el('whisper-drawer').hidden) void refreshDirectory();
@@ -504,7 +510,7 @@ function stopClientUi(): void {
   panelQuery = null; panelSync = null;
   for (const page of Object.keys(panels) as NotebookPage[]) { panels[page]?.destroy(); delete panels[page]; }
   directory = null; directoryState = 'loading'; recentWhispers = []; pickingWhisper = false; whisperTile = { x: 0, y: 0 }; whisperPicked = false;
-  directoryBusy = mapBusy = whispersBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
+  directoryBusy = mapBusy = whispersBusy = saludBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
 }
 const uiJson = <T>(url: string, session: AbortController, valid: (data: unknown) => data is T): Promise<T> => fetchJson(url, session.signal, valid);
 async function refreshMap(): Promise<void> {
@@ -512,6 +518,21 @@ async function refreshMap(): Promise<void> {
   try { const data = await uiJson('/api/worldmap', session, validMap); if (session !== uiSession) return; mapFailures = 0; minimap?.updateMap(data); el('minimap-status').textContent = `${number(data.discoveredChunks)} regiones descubiertas`; }
   catch { if (session === uiSession) { mapFailures = Math.min(mapFailures + 1, 5); mapRetryAt = Date.now() + 3000 * 2 ** mapFailures; el('minimap-status').textContent = 'Mapa sin actualizar · reintentando'; } }
   finally { if (session === uiSession) mapBusy = false; }
+}
+async function refreshSalud(): Promise<void> {
+  const session = uiSession;
+  if (!session || saludBusy || document.hidden) return;
+  saludBusy = true;
+  let salud: SaludVisible | null = null;
+  try { salud = await pedirSalud(session.signal); }
+  catch { /* Sin una respuesta válida no se conoce el estado actual. */ }
+  if (session !== uiSession) return;
+  saludBusy = false;
+  const chip = el('salud-chip');
+  chip.dataset.estado = salud?.estado ?? 'sin-datos';
+  const etiqueta = etiquetaSalud(salud);
+  if (chip.textContent !== etiqueta) chip.textContent = etiqueta;
+  el('panel-salud').innerHTML = renderPanelSalud(salud);
 }
 async function refreshDirectory(): Promise<void> {
   const session = uiSession; if (!session || directoryBusy || document.hidden) return; directoryBusy = true;
@@ -660,7 +681,6 @@ function renderTelemetryHud(current: WorldView): void {
     if (extra && extra.textContent !== (kpi.summary ?? '')) extra.textContent = kpi.summary ?? '';
     button.title = kpi.detail;
     button.setAttribute('aria-label', `${kpi.label}: ${kpi.value}. ${kpi.summary ?? ''} ${kpi.detail}`);
-    button.dataset.health = kpi.health ?? 'unknown';
   }
   el('viewport-census').textContent = viewportCensusText(current);
 }
@@ -812,22 +832,12 @@ function renderStatus(): void {
   el('connection-notice').hidden = (status === 'live' || tape) && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
   renderRhythm(); renderControls(); if (!el('stats-drawer').hidden) renderStats();
 }
-/** M2: el HUD dice cómo llega el mundo (cada 5 s en modo ligero, o más lento de lo pedido) y si su
- * crecimiento está frenado por el gobernador. Todo sale de `performance` y del modo elegido. */
+/** M2: cadencia de la vista en modo ligero y ritmo del mundo frente al pedido. */
 function renderRhythm(): void {
   const rhythm = el('world-rhythm'), live = status === 'live' && !world?.paused;
   const pace = ritmo(world?.performance?.tickHz, world?.performance?.tickHzObjetivo);
   const text = !live ? '' : modoActual === 'observador' ? (pace?.lento ? 'cada 5 s · mundo lento' : 'cada 5 s · modo ligero') : pace?.lento ? `${pace.pasosPorSegundo} · más lento` : '';
   rhythm.hidden = !text; rhythm.textContent = text; rhythm.dataset.kind = modoActual === 'observador' ? 'light' : 'slow';
-  const growth = estadoCrecimiento(world?.performance?.gobernador, world?.stats?.population);
-  const chip = el('growth-chip');
-  chip.hidden = !growth?.chip;
-  if (growth?.chip) {
-    chip.dataset.growth = growth.estado;
-    el('growth-chip-text').textContent = growth.chip;
-    el('growth-chip-detail').textContent = growth.detalle;
-    chip.title = `${growth.detalle} Toca para ver Mundo › Vida.`;
-  }
 }
 /** M5: «Desde tu última visita» con lo que cambió (contadores del estado real) y los hitos, no 3 episodios al azar. */
 function returnCard(current: WorldView, since: number): void {
@@ -885,33 +895,15 @@ function populationWindow(points: { tick: number; value: number }[]): string {
   const days = (last - first) / 2400;
   return `<p class="stats-note stats-scope-note" data-population-window>Ventana recibida: pasos ${number(first)}–${number(last)} · ${number(days, 2)} días simulados entre muestras (${samples.length} ${samples.length === 1 ? 'muestra' : 'muestras'}). La curva incluye S/I y vecinos; no es un registro completo de nacimientos y muertes.</p>`;
 }
-/** M2: Rendimiento honesto. El p95 frente al presupuesto con barra, el ritmo real y cuánto dura un día,
- * el gobernador en claro (mismo módulo que el HUD), el último frenazo compuesto desde sus campos y lo
- * que recibe este navegador. Todo sale de `performance` y de la conexión; nada se supone. */
+/** Rendimiento del estado recibido y medidas de la conexión. */
 function serverPerformance(runtime: WorldView['performance']): string {
   if (!runtime) return '<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-empty">El servidor todavía no envió sus medidas de rendimiento.</p></section>';
-  const g = runtime.gobernador, growth = estadoCrecimiento(g, world?.stats?.population), frenazo = ultimoFrenazo(g);
   const pace = ritmo(runtime.tickHz, runtime.tickHzObjetivo);
-  const budget = g?.presupuestoMs;
-  const p95Card = budget !== undefined && Number.isFinite(budget) && budget > 0
-    ? `<article class="stat-card" data-p95><span>Paso p95</span><strong>${esc(number(runtime.p95StepMs, 1))} ms <small>de ${esc(number(budget, 0))} ms</small></strong><meter class="stat-meter" min="0" max="${esc(budget)}" low="${esc(budget * 0.7)}" high="${esc(budget)}" optimum="0" value="${esc(Math.min(runtime.p95StepMs, budget * 1.5))}" aria-label="Paso p95 frente al presupuesto del gobernador"></meter><small>Presupuesto del gobernador; por encima frena el crecimiento.</small></article>`
-    : statCard('Paso p95', `${number(runtime.p95StepMs, 2)} ms`, 'Ventana medida por el servidor');
+  const p95Card = `<article class="stat-card" data-p95><span>Paso p95</span><strong>${esc(number(runtime.p95StepMs, 2))} ms</strong><small>Ventana medida por el servidor</small></article>`;
   const paceCard = pace ? `<article class="stat-card" data-rhythm><span>Ritmo real</span><strong>${esc(pace.pasosPorSegundo)}</strong><small>Un día del mundo dura ~${esc(pace.diaDura)}.${pace.lento && runtime.tickHzObjetivo ? ` Más lento de lo pedido (${esc(number(runtime.tickHzObjetivo, 1))} pasos/s).` : ''}</small></article>` : statCard('Ritmo real', '—', 'Aún sin pasos medidos');
-  const growthCard = growth ? `<article class="stat-card" data-growth-card="${esc(growth.estado)}"><span>Gobernador · crecimiento</span><strong>${esc(growth.titulo)}</strong><small>${esc(growth.explicacion)}</small></article>` : '';
-  // El titular es lo vigente (el techo del chip); el registro del último frenazo va aparte, como historia.
-  const brakeCard = frenazo ? '<article class="stat-card" data-last-brake><span>Último frenazo '
-    + `<b class="stat-state" data-vigente="${frenazo.vigente}">${frenazo.vigente ? 'freno vigente' : 'ya retirado'}</b></span>`
-    + `<strong>${esc(frenazo.titular)}</strong>`
-    + `<small data-brake-history>Registro histórico · ${esc(frenazo.texto)}</small></article>` : '';
   const received = connection?.reception();
   const receivedCard = received ? statCard('Recibido por este navegador', `≈ ${number(received.meanBytes / 1024, 0)} KiB`, `Por actualización (media de las últimas)${received.perSecond ? ` · ${number(received.perSecond, 1)} actualizaciones/s` : ''}. Tamaño del JSON recibido, sin cabeceras.`) : statCard('Recibido por este navegador', '—', 'Aún no llegó ninguna actualización por la conexión en vivo.');
-  return `<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p><div class="stats-grid">${p95Card}${paceCard}${growthCard}${brakeCard}${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Instantánea guardada en disco', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño del último guardado del mundo')}${receivedCard}</div></section>${seccionFases(runtime)}`;
-}
-/** T165: panel del gobernador en el cajón Mundo, visible en escritorio y en modo observador. */
-function renderPanelGobernadorEnDom(): void {
-  const contenedor = document.getElementById('panel-gobernador'); if (!contenedor) return;
-  const html = world ? renderPanelGobernador(world.performance, world.stats?.population) : '';
-  contenedor.innerHTML = html; contenedor.hidden = !html;
+  return `<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p><div class="stats-grid">${p95Card}${paceCard}${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Instantánea guardada en disco', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño del último guardado del mundo')}${receivedCard}</div></section>${seccionFases(runtime)}`;
 }
 /**
  * V24: el panel de estadísticas solo se rehace si está abierto y algo cambió. Lo que cambia con cada paso del mundo
@@ -933,7 +925,6 @@ function renderStats(): void {
   }
   if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; }
   statsSignature = sig; statsRenderedAt = now;
-  renderPanelGobernadorEnDom();
   const restore = retainViewState(panel);
   const deepStats = document.getElementById('mundo-deep-stats') ?? Object.assign(document.createElement('div'), { id: 'mundo-deep-stats' });
   renderStatsContent();
@@ -997,11 +988,19 @@ function renderStatsContent(): void {
   const actionLabels = Object.fromEntries(Object.entries(actions).map(([key, text]) => [key, text]));
   // M7: cooperación por tipo (identidad de society.ts), comida compartida, graneros y desacuerdos con quién cedió.
   const accumulated = `${seccionJuntos(world, cronica.todos())}${seccionDesacuerdos(world, cronica.todos())}`;
-  const growth = estadoCrecimiento(world.performance?.gobernador, stats.population);
-  const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
-  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
+  panel.innerHTML = `${stamp}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
-window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { soundscape.setHidden(document.hidden); if (document.hidden) saveVisit(); else if (uiSession) { void refreshMap(); if (!el('population-drawer').hidden) void refreshDirectory(); if (!el('whisper-drawer').hidden) void refreshWhispers(); } });
+window.addEventListener('pagehide', saveVisit);
+document.addEventListener('visibilitychange', () => {
+  soundscape.setHidden(document.hidden);
+  if (document.hidden) saveVisit();
+  else if (uiSession) {
+    void refreshMap();
+    void refreshSalud();
+    if (!el('population-drawer').hidden) void refreshDirectory();
+    if (!el('whisper-drawer').hidden) void refreshWhispers();
+  }
+});
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean } & SessionFlags; if (response.ok && session.authenticated) enterWorld({ tapeEnabled: session.tapeEnabled, observerOnly: session.observerOnly }); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
 void boot();

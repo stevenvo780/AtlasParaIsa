@@ -3,7 +3,7 @@
  * cuánto tarda y qué mundo deja. Sirve a la vez de banco y de control de identidad.
  *
  *   TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts (--db <world.sqlite> | --seed S)
- *       [--pasos 600] [--gestos K] [--cada 100] [--presupuesto 5000] [--planificado] [--salida j.json]
+ *       [--pasos 600] [--gestos K] [--cada 100] [--planificado] [--salida j.json]
  *
  * · `--db`: se trabaja sobre una copia en TMPDIR (el original solo se lee) y, como `main.ts`, los
  *   params de la instantánea con los del despliegue encima (`deploymentParams`). `--seed`: mundo nuevo
@@ -13,8 +13,6 @@
  *   distintas. Sin `--gestos` el paso nunca lleva gestos.
  * · `--cada C`: `digestoCanonico` del mundo cada C pasos (0: solo al final), fuera de la medida.
  *   Al final, también el digesto de lo DURABLE (`store.load()`).
- * · `--presupuesto`: el del gobernador; 5000 por defecto porque es el único punto por el que el reloj
- *   de pared entra en el mundo y dos motores de velocidad distinta divergirían por el host.
  * · `--planificado`: en vez de `stepOnce` seguido, el planificador real (`tickMs` 100) hasta `--pasos`
  *   pasos; mide pasos por segundo de pared tal como los da el servidor.
  *
@@ -43,11 +41,11 @@ function arg(flag: string): string | undefined {
 }
 const db = arg('--db'), seed = arg('--seed') === undefined ? undefined : Number(arg('--seed'));
 const pasos = Number(arg('--pasos') ?? 600), gestos = Number(arg('--gestos') ?? 0), cada = Number(arg('--cada') ?? 100);
-const presupuesto = Number(arg('--presupuesto') ?? 5000), planificado = process.argv.includes('--planificado'), salida = arg('--salida');
+const planificado = process.argv.includes('--planificado'), salida = arg('--salida');
 if ((db === undefined) === (seed === undefined) || (db !== undefined && !existsSync(db)) || (seed !== undefined && !Number.isInteger(seed))
-  || !(pasos > 0) || !Number.isInteger(gestos) || gestos < 0 || !Number.isInteger(cada) || cada < 0 || !(presupuesto > 0)
+  || !(pasos > 0) || !Number.isInteger(gestos) || gestos < 0 || !Number.isInteger(cada) || cada < 0
   || (planificado && gestos)) {
-  throw new Error('Uso: paso-servidor.ts (--db <world.sqlite> | --seed S) [--pasos N] [--gestos K] [--cada C] [--presupuesto ms]'
+  throw new Error('Uso: paso-servidor.ts (--db <world.sqlite> | --seed S) [--pasos N] [--gestos K] [--cada C]'
     + ' [--planificado] [--salida json]');
 }
 if (!process.env.TMPDIR || process.env.TMPDIR.startsWith('/tmp')) {
@@ -87,11 +85,11 @@ try {
   const origin = `http://127.0.0.1:${port}`, password = 'perf3-banco-paso-servidor';
   const cargaInicio = performance.now();
   const nuevo = seed === undefined ? {}
-    : { seed, params: parseParams(`${PRODUCTION_PARAMS},gobernador.presupuestoMs=${presupuesto}`, DEFAULT_PARAMS) };
+    : { seed, params: parseParams(PRODUCTION_PARAMS, DEFAULT_PARAMS) };
   app = conAzarFijo(() => createApp({ store: store!, origin, password, manual: !planificado, tickMs: 100, ...nuevo }));
   const cargaMs = performance.now() - cargaInicio;
-  // Como `main.ts`: el despliegue manda sobre los params de la instantánea (y el presupuesto de este banco encima).
-  if (db) setParams(app.world, parseParams(`gobernador.presupuestoMs=${presupuesto}`, deploymentParams(paramsOf(app.world))));
+  // Como `main.ts`: el despliegue manda sobre los params de la instantánea.
+  if (db) setParams(app.world, deploymentParams(paramsOf(app.world)));
   const tickInicial = app.world.tick, poblacionInicial = app.world.people.length, teselas = app.world.tiles.length;
   const digestoInicial = digestoCanonico(app.world);
 
@@ -162,7 +160,7 @@ try {
   const cargado = store.load();
   const durable = cargado ? { tick: cargado.world.tick, digesto: digestoCanonico(cargado.world) } : null;
   const resultado = {
-    codigo: process.cwd(), origen: db ?? `semilla ${seed}`, planificado, pasos, gestos, cada, presupuestoMs: presupuesto,
+    codigo: process.cwd(), origen: db ?? `semilla ${seed}`, planificado, pasos, gestos, cada,
     cargaMs: r2(cargaMs), tickInicial, poblacionInicial, teselas, digestoInicial,
     ...(planificado ? { pasosPorSegundo: r2(pasos / (muroMs / 1000)), tickHzServidor: r2(rt.tickHz), p95StepMsServidor: r2(rt.p95StepMs) }
       : {

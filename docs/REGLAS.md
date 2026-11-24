@@ -20,7 +20,7 @@ HOG (`social.hogarTrabajo`, decisión pendiente), `agua.memoria=1` ni las reglas
 | Clave | Default / Histórico | Modo abierto (`CARTA_OPEN_WORLD=1` / `hostOpenWorldParams`) | Ley |
 | :--- | ---: | ---: | :--- |
 | `poblacion.natalidadVecindad` | `false` | `true` | D2 (`natalidad-local.ts`): el cupo planetario (2 cada 120 pasos = 40/día) pasa a un cupo local por disco de vecindad, si el alimento medio caminable cumple `meanFood ≥ 0,08`. |
-| `poblacion.radioVecindadNatalidad` | `16` | `16` | Radio del disco, en celdas (`[4, 64]`). Colonias más allá de ese radio conciben en paralelo; el tope lo ponen el suelo local o `gobernador.politica=techo`. |
+| `poblacion.radioVecindadNatalidad` | `16` | `16` | Radio del disco, en celdas (`[4, 64]`). Colonias más allá de ese radio conciben en paralelo y el suelo local limita los nacimientos. |
 | `social.maxComunidades` | `8` (hist.) / `64` (V14) | `0` | `[0, Number.MAX_SAFE_INTEGER]`. `0` = sin tope de conducta: `effectiveCommunityCap` usa solo la admisión de RAM (`limites.comunidades`). Con valor `> 0` sigue mandando la ley de fundación (T100). |
 | `conducta.politicaPeso` | `0` | `0,35` | Red local `12→8→12` (`politica.ts`, `Person.policy` / `policyPlasticity`), activación `softSign` (`x/(1+abs(x))`). Observa `R ≤ 4` teselas y `R ≤ 7` personas; el sesgo solo corre si `hunger` y `thirst ≤ 0,75`. Plasticidad Baldwin, no heredada en `reproduce()`. Lote FP64 con `Object.is` exacto entre CPU y Dual-GPU (`--fmad=false`, `politica-gpu.ts`). |
 | `conducta.aptitud` | `0` | `0,35` | Ventaja de oficios (DIV), solo con `thirst`, `hunger` y `fatigue ≤ 0,5`. |
@@ -68,8 +68,7 @@ muestra, bitácora 16:20: en 6 semillas no usadas para ajustarla, «sed 8 → 11
 la mejora medida antes era ajuste a las semillas del diagnóstico), `conducta.aptitud` = 0, `social.radioConvivencia` = 0,
 `social.vinculoConvivencia` = 0, `genes.edadFundadoresMinDias`/`MaxDias` = 2/2 (la cohorte escalonada
 empeoró los nacimientos un 23–31 %), `poblacion.radioPareja` = 3, `poblacion.radioLugar` = 4 y las
-disputas en sus valores de entonces. Reglas 11 adopta cuatro de ellas para mundos nuevos;
-`gobernador.politica` sigue en `techo`.
+disputas en sus valores de entonces. Reglas 11 adopta cuatro de ellas para mundos nuevos.
 
 **Evidencia** (laboratorio `scripts/lab/replica.ts`, sin gobernador, `persistencia.cadaTicks=300`; bitácora
 `docs/ops/noche-20260922-bitacora.md`). *Carriles* (6 semillas × 10 días, habitantes vivos al día 10,
@@ -99,10 +98,7 @@ escritores de reglas < 9 omiten el campo sólo si sus params son los históricos
 conserva tal cual los params persistidos (no inyecta ni revierte ninguna ley), y el despliegue
 (`deploymentParams`) sólo pisa las claves que `CARTA_PARAMS` nombra. Un mundo nuevo —`createWorld()` sin
 params, `parseParams()` sin base, el laboratorio sin `--params`, el servidor al generar un mundo— nace con
-los defaults nuevos. Única excepción deliberada: `gobernador.politica` vale `techo` también en
-`HISTORICAL_PARAMS`, porque el gobernador no es una ley del mundo (no entra en `stepWorld`; decide por el
-p95 de reloj del servidor) y su conducta anterior, `apagar`, es el defecto que extinguió el mundo público
-V7. Como cada versión publicada empieza un mundo nuevo, el mundo público de reglas 10 nacerá con estas
+los defaults nuevos. Como cada versión publicada empieza un mundo nuevo, el mundo público de reglas 10 nacerá con estas
 leyes; reiniciar la misma versión conserva su mundo y sus leyes.
 
 Refutación: `tests/reglas10-defaults.test.ts` (una instantánea V9 de antes de esta etapa, sin ninguna clave
@@ -469,7 +465,7 @@ Las comas dentro de JSON pertenecen al valor: en el laboratorio
 Los arrays conservan su orden, se copian y se congelan; tipos incorrectos, valores no finitos,
 claves desconocidas y elementos duplicados en las listas se rechazan.
 
-| Opción (`motor.*`, red, gobernador, límites, tecnología opt-in) | Default | Valores aceptados y estado actual (2026-11-19) |
+| Opción (`motor.*`, red, límites, tecnología opt-in) | Default | Valores aceptados y estado actual (2026-11-19) |
 |---|---|---|
 | `motor.clonPorPaso` | `true` | booleano; `true` reserva por clon en pasos con gestos (PERF3), `false` usa `puntoDeRestauracion` |
 | `motor.hilos` | `1` | entero de 1 a 512; con `> 1` activa `StaticWorkerPool` determinista para las dos pasadas de ecología (T115/T120) |
@@ -479,8 +475,6 @@ claves desconocidas y elementos duplicados en las listas se rechazan.
 | `motor.orden` | `natural` | `natural`, `inverso`, `adversarial`; sólo altera el orden físico del despacho de regiones para pruebas de determinismo (T117), jamás las leyes |
 | `motor.depuracion` | `false` | booleano (T148); activa la guardia de solo lectura `withReadOnlyDecisionGuard` (`src/world/paralelo/guardia.ts`); diagnóstico puro, excluido de `digestoCanonico` |
 | `persistencia.paginasSucias`, `red.deltas` | `false` | booleanos; `red.deltas` activa `state-delta`/`ack`/`resync` (T135/T137, opt-in) |
-| `gobernador.senales` | `["p95"]` | lista no vacía, sin duplicados, sobre `p95`, `max`, `rss`, `colaRed`, `saveMs` (T161/T162) |
-| `gobernador.politica` | `techo` | `apagar` (gobernador de 2026-09-19) o `techo` (2026-09-22: el hardware limita el crecimiento, no el reemplazo) |
 | `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` (T100: el anfitrión deriva su perfil en servidor/lab; `RAW_HISTORICAL` cubre instantáneas sin perfil) |
 | `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` (T100) |
 | `limites.aplicacion` | `parametros` | `historicos` (admisión legacy para instantáneas sin perfil de límites) o `parametros` (T100) |
@@ -490,7 +484,9 @@ claves desconocidas y elementos duplicados en las listas se rechazan.
 | `tecnologia.enfriamiento` | `45` | entero `[1, 2400]`; **opt-in Fase B (no adoptado en defaults)** — ticks mínimos entre intentos autónomos en `technologyOpportunity` (`45` = histórico; candidato probado `300`) |
 | `tecnologia.evitarNoOp` | `false` | booleano; **opt-in Fase B (no adoptado en defaults)** — evita mutaciones no-op obvias en `proposeTechnologyProgram` (`false` = histórico; candidato probado `true`) |
 
-### Gobernador: política `techo` (2026-09-22)
+### Histórico del gobernador y la política `techo` (2026-09-22)
+
+V23 retiró ambas políticas del gobernador y conserva el tiempo del paso como telemetría.
 
 El mundo público V7 se extinguió al día 21 con solo S e I vivos: siete nacimientos y veintiún
 fallecidos, dieciocho por senescencia. La causa material no fue biológica: la política `apagar`
@@ -519,8 +515,7 @@ deshidratación se repone aunque siga en rojo; con `apagar` la misma muerte no s
 simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma (desde PERF3, solo
 en los pasos con gestos: ver el final de este apartado); con `false`
 (T104) toma un `puntoDeRestauracion`, simula sobre el mundo vigente y, si el paso lanza, `restaurar()`.
-Con pocos habitantes esa reserva ya cuesta tanto como el paso, así que el p95 supera los 50 ms del
-gobernador y el techo congela el crecimiento. **Se midió si el punto la abarata. No la abarata, y
+En septiembre de 2026 esa reserva ya costaba tanto como el paso con pocos habitantes y el p95 superaba los 50 ms del antiguo gobernador. **Se midió si el punto la abarata. No la abarata, y
 producción sigue con el clon.**
 
 Medida (`scripts/perf/reserva-paso.ts`): CPU propia del proceso (`process.cpuUsage`), dos copias de cada
@@ -691,8 +686,8 @@ donde dice p95):
 | B 1 100, RTT 0: pong p50 · p95 | 978 · 1 044 ms | 931 · 4 244 ms | 888 · 974 ms |
 | B 2 500: `GET /api/world` del cliente · silencio más largo | 1 400 ms · 5,2 s | 1 308 ms · 7,5 s | 1 313 ms · 5,0 s |
 
-**Lo que queda.** El p95 sigue por encima de los 50 ms del gobernador: 63–67 ms con la torre tranquila y
-167–191 ms con carga. Con 150 habitantes el techo seguirá sin dejar crecer. Ahora lo fijan los pasos más caros
+**Resultado de PERF3.** El p95 quedó por encima de los 50 ms del gobernador de entonces (63–67 ms con la torre tranquila y
+167–191 ms con carga), lo que mantenía el límite de 150 habitantes. Lo fijaban los pasos más caros
 de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En la torre el servidor corría con
 prioridad idle (ananicy) y sus cifras se parecían a las de la torre cargada; el portátil al que se mudó el
 público el 23-09 no está medido con este código.
@@ -794,12 +789,11 @@ el número de hilos, el tamaño de partición ni el throughput medido de una GPU
    con la transacción tecnológica como unidad contigua.
 
 **Activación gradual y compatibilidad de `params-v1`.** En su introducción inicial (T102, 2026-09-22),
-las claves `motor.*`, `limites.*`, `red.*` y `gobernador.senales` eran opciones reservadas sin
+las claves `motor.*`, `limites.*` y `red.*` eran opciones reservadas sin
 consumidores. Desde entonces se han conectado por etapas detrás de sus defaults conservadores: T100
 (límites de admisión derivados del anfitrión en servidor/lab, con `RAW_HISTORICAL` para instantáneas
 antiguas sin perfil), T112/T115/T120/T122 (SoA, workers y puente GPU residente para las dos pasadas
-de ecología), T135/T137 (`red.deltas` opt-in), T148 (`motor.depuracion`, fuera del digesto) y
-T161/T162 (`gobernador.senales`). El rango de un índice GPU en `motor.gpu` no acredita presencia física
+de ecología), T135/T137 (`red.deltas` opt-in) y T148 (`motor.depuracion`, fuera del digesto). El rango de un índice GPU en `motor.gpu` no acredita presencia física
 del dispositivo: la autoprueba verifica capacidad y paridad real al arrancar y cae a CPU sin `COMPUTE_NVRTC`.
 `motor.particionarPersonas` y `tecnologia.*` (Fase B) permanecen desactivados en los defaults (`RULES_VERSION = 12`).
 
@@ -828,7 +822,7 @@ filas —incluidas las cuatro claves opt-in `tecnologia.*` de Fase B— default 
 | `genes.varianzaFundadores` | 0.15 | [0, 1] | Varianza gaussiana del desplazamiento alélico de los fundadores (heterocigosis inicial) | T011 |
 | `genes.tasaMutacion` | 1 | [0, 10] | Multiplicador de la tasa de mutación en linajes | T011 |
 | `genes.edadFundadoresMinDias`, `genes.edadFundadoresMaxDias` | 2, 2 | [0.5, 30] (min ≤ max) | Condición inicial: edad de cada fundador mortal repartida de forma determinista en `[min, max]` días; 2 y 2 = los 4800 ticks de siempre (cohorte escalonada medida y no adoptada) | Hipótesis cohorte, noche 2026-09-22 |
-| `poblacion.maxima` | 1 000 000 | [1, 1 000 000] | Ya no es un tope de diseño (ruling R17, antes 40): el freno lo ponen el entorno y el gobernador; sigue siendo parámetro para el laboratorio | T012 · R17 |
+| `poblacion.maxima` | 1 000 000 | [1, 1 000 000] | El valor por defecto es una barrera anticorrupción y el laboratorio puede fijar un límite inferior. | T012 · R17 |
 | `poblacion.intervaloComprobacionTicks` | 120 | [1, 10000] | Intervalo de ticks entre comprobaciones de reproducción | T001 |
 | `poblacion.nacimientosPorComprobacion` | 2 | [0, 20] | Nacimientos máximos generados por comprobación | T012 |
 | `recursos.capacidadBosque` | 1 | [0, 10] | Capacidad de carga (`K`) de vegetación y comida en bosque | T013 |

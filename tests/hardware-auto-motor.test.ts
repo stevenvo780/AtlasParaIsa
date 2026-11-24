@@ -117,9 +117,9 @@ test('recommendedMotorForHost: mapeo puro por tamaño de máquina y GPUs', () =>
   });
 });
 
-test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y persistencia', () => {
+test('hostFullHardwareParams: integra límites, motor y persistencia', () => {
   const memory: HostMemory = { fisicaBytes: 128 * GiB, heapBytes: 8 * GiB };
-  const customBase = parseParams('social.radioConvivencia=12,gobernador.senales=["p95","rss"],persistencia.paginasSucias=true');
+  const customBase = parseParams('social.radioConvivencia=12,persistencia.paginasSucias=true');
 
   const resolved = hostFullHardwareParams(customBase, {
     cpuThreads: () => 32,
@@ -140,11 +140,7 @@ test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y 
     orden: 'natural',
     depuracion: false,
   });
-  assert.deepEqual(resolved.gobernador, {
-    presupuestoMs: 100,
-    senales: ['p95', 'rss'],
-    politica: 'techo',
-  });
+  assert.equal(Object.hasOwn(resolved, 'gobernador'), false);
   assert.deepEqual(resolved.persistencia, {
     cadaTicks: 100,
     ventanaEventosTicks: 24000,
@@ -153,18 +149,17 @@ test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y 
   assert.equal(resolved.social.radioConvivencia, 12, 'conserva las leyes de la base');
 
   // Precedencia: overrides explícitos de despliegue siguen mandando encima.
-  const deployed = deploymentParams(resolved, 'gobernador.presupuestoMs=60,motor.hilos=8,motor.gpu=[]');
-  assert.equal(deployed.gobernador.presupuestoMs, 60);
+  const deployed = deploymentParams(resolved, 'persistencia.cadaTicks=60,motor.hilos=8,motor.gpu=[]');
+  assert.equal(deployed.persistencia.cadaTicks, 60);
   assert.equal(deployed.motor.hilos, 8);
   assert.deepEqual(deployed.motor.gpu, []);
   assert.equal(deployed.motor.soaTerreno, true);
   assert.equal(deployed.motor.particionarPersonas, true);
   assert.equal(deployed.motor.clonPorPaso, true);
 
-  // Compatibilidad intacta de hostParams(): no toca motor, gobernador ni persistencia.
+  // hostParams() deriva únicamente los límites.
   const legacyHost = hostParams(DEFAULT_PARAMS, memory);
   assert.deepEqual(legacyHost.motor, DEFAULT_PARAMS.motor);
-  assert.deepEqual(legacyHost.gobernador, DEFAULT_PARAMS.gobernador);
   assert.deepEqual(legacyHost.persistencia, DEFAULT_PARAMS.persistencia);
 
   // Un mundo creado con estos params (sin GPU real en el test unitario) avanza sin errores.
@@ -197,8 +192,6 @@ test('anfitrión real: detectHostHardware y hostFullHardwareParams son coherente
   assert.equal(params.motor.soaTerreno, hw.cpuThreads > 1 || hw.cudaDevices.length > 0);
   assert.equal(params.motor.particionarPersonas, hw.cpuThreads >= 4);
   assert.equal(params.motor.clonPorPaso, true);
-  assert.equal(params.gobernador.politica, 'techo');
-  assert.equal(params.gobernador.presupuestoMs, 100);
   assert.equal(params.persistencia.cadaTicks, 100);
   assert.equal(params.persistencia.ventanaEventosTicks, 24000);
   console.log(`Hardware real detectado: ${hw.cpuThreads} hilos CPU → motor.hilos=${params.motor.hilos}, GPUs CUDA=${JSON.stringify(hw.cudaDevices)}.`);

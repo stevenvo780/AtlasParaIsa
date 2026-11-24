@@ -65,8 +65,8 @@ export interface PersonDetail {
    * `vivo` es true cuando la ficha sale de las vidas del mundo servido. Ausentes en servidores antiguos. */
   name?: string; x?: number; y?: number; vivo?: boolean;
   /** M4: si puede criar ahora y, si no, la primera causa con las condiciones de la ley (juventud, vejez,
-   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida, natalidad local o techo del gobernador). */
-  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'techo' | null;
+   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida, natalidad local o pausa manual). */
+  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'pausa-manual' | null;
     faltanPasos?: number; cuerpo?: string[]; reserva: number; necesita: number };
   /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
   busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
@@ -178,19 +178,9 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   tiempoBarreraMs?: number;
   /** T151: duración de pared del último tramo paralelo (ms). */
   tiempoParaleloMs?: number;
-  /**
-   * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
-   * vigente de `world.reproductionEnabled`. Con la política `techo` (la de hoy) el gobernador no
-   * apaga la natalidad: cuando `p95StepMs` supera `presupuestoMs` fija un techo en la población de
-   * ese momento y solo permite nacimientos por debajo de él (reponer, no crecer); `activo` es false
-   * mientras la población está EN el techo. Bajo el 70 % del presupuesto el techo se retira; en la
-   * banda muerta se conserva y nunca baja. Con `apagar` (histórica) lo apaga por encima del
-   * presupuesto y lo reenciende bajo el 70 %.
-   * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
-   */
   /** M4 (resumen-vivo.ts, cada 50 pasos, O(población), tamaño constante): vecinos fértiles ahora, quién
    * corteja, prepara reservas o se reúne para criar (por el `reason` que escribe la ley) y la ley de
-   * natalidad de este mundo en números (si nacer está permitido lo dice `gobernador.activo`). `tick` = paso medido. */
+   * natalidad de este mundo en números. `tick` = paso medido. */
   natalidad?: { tick: number; fertiles: number; cortejando: number; preparando: number; reuniendose: number;
     /** `cupo` = `poblacion.nacimientosPorComprobacion` por ventana de `ventana` =
      * `poblacion.intervaloComprobacionTicks` pasos; `continua` = `poblacion.comprobacionContinua` (ventana
@@ -204,27 +194,7 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   conducta?: { habituacion: number };
   /** M7 (resumen-vivo.ts, mismo ritmo): veces que se compartió comida en los lugares de las regiones vivas. */
   comidaCompartida?: number;
-  gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
-    /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
-     * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */
-    politica?: 'apagar' | 'techo'; techo?: number | null;
-    techoObservado?: { p95: number; maxMs: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: string; tick: number; motivo: string } | null;
-    /** T161: señales de la ventana móvil de 120 pasos y del mundo servido. El máximo por
-     * ventana (`maxMs` + `faseMax`) delata los picos de cadencia larga que el p95 no ve. */
-    p50Ms?: number; p95Ms?: number; p99Ms?: number; maxMs?: number; faseMax?: FaseNombre | null;
-    fasesP95?: Partial<Record<FaseNombre, number>>;
-    tickHz?: number; rssBytes?: number; saveMs?: number;
-    regionesActivas?: number; teselasActivas?: number; teselasPorHabitante?: number;
-    poblacion?: number; nacimientos?: number; muertes?: number;
-    colaRed?: number; maxBufferedAmount?: number;
-    reproductionEnabled?: boolean; techoPoblacion?: number | null;
-    /** T162/T165: estado del gobernador, única palanca activa, señal que disparó y cuenta de
-     * ventanas verdes hacia la salida de rojo. `manual` manda sobre toda señal automática. */
-    estado?: 'verde' | 'amarillo' | 'rojo' | 'manual';
-    senal?: string;
-    palancaActiva?: 'area' | 'nacimientos' | 'red' | 'guardado' | null;
-    senalDisparadora?: string | null; ventanasVerdesConsecutivas?: number;
-    solicitarRetiroPaginasFrias?: boolean; subscribeMsEfectivo?: number; cadaTicksEfectivo?: number }; }
+}
 /** T135/T137: delta tras la cuantización `r3` de `projectWorld`. Solo viajan los campos
  * cambiados de cada tesela (con `x,y`); un campo que desaparece viaja como `null` y el cliente
  * lo borra. `tileUpserts` también se acepta como `Record<"x,y", Partial<Tile>>`. */

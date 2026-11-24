@@ -60,8 +60,6 @@ test('V12: hostOpenWorldParams activa todos los chips y todas las leyes de evolu
   assert.equal(params.motor.soaTerreno, true);
   assert.equal(params.motor.particionarPersonas, true);
   assert.equal(params.motor.clonPorPaso, true);
-  assert.equal(params.gobernador.politica, 'techo');
-  assert.equal(params.gobernador.presupuestoMs, 100);
   assert.equal(params.recursos.capacidadBosque, 0.74);
   assert.equal(params.recursos.capacidadPastizal, 0.52);
   assert.equal(params.recursos.velocidadRegeneracion, 0.66);

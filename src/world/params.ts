@@ -56,21 +56,6 @@ export interface WorldParams {
    * (o donde bebió) cuando la sed prevista AL LLEGAR —sed actual − agua que lleva + sed del camino— supera este
    * umbral, en vez de explorar al azar; el recuerdo se olvida al verlo seco. 1 = nunca (hoy: ni recuerda ni vuelve). */
   agua: { cuencas: number; memoria: number };
-  /**
-   * Ruling R17: el límite de población lo pone el hardware. `presupuestoMs` es el p95
-   * del paso (ms) que el servidor se permite. `politica` decide qué hace el gobernador
-   * por encima del presupuesto (revisión 2026-09-22, extinción del mundo público V7):
-   * · `apagar` = el gobernador de 2026-09-19: apaga la reproducción por encima y la
-   *   reenciende por debajo del 70 %. Con un paso caro por causas ajenas a la población
-   *   (clon + guardado de un mundo envejecido) dejó cero nacimientos durante 15 días y el
-   *   mundo se extinguió por senescencia sin que el hardware estuviera saturado por la gente.
-   * · `techo` (default): el hardware limita el CRECIMIENTO, no el reemplazo. Al cruzar el
-   *   presupuesto se fija un techo = población de ese momento y solo se permiten nacimientos
-   *   mientras la población esté por debajo del techo; el techo nunca baja (bajo carga externa
-   *   la población se mantiene y el servidor corre más lento); por debajo del 70 % se retira.
-   * Default 50 ms = constitución V.
-   */
-  gobernador: { presupuestoMs: number; senales: string[]; politica: 'apagar' | 'techo' };
   /** T102: configuración reservada; todavía no selecciona otro backend. T148: `depuracion` activa la guardia
    * de solo lectura de la fase de decisión (`src/world/paralelo/guardia.ts`). Es diagnóstico: no cambia la
    * dinámica y no entra en el digesto canónico. */
@@ -223,15 +208,14 @@ const RAW_HISTORICAL: WorldParams = {
     riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
   },
   genes: { varianzaFundadores: 0.15, tasaMutacion: 1, edadFundadoresMinDias: 2, edadFundadoresMaxDias: 2 },
-  // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
-  // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
+  // Ruling R17: `maxima` coincide por defecto con la cota anticorrupción. El laboratorio
+  // puede fijar un valor menor para acotar un experimento.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
     exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24,
     natalidadVecindad: false, radioVecindadNatalidad: 16 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1 },
-  gobernador: { presupuestoMs: 50, senales: ['p95'], politica: 'techo' },
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural', depuracion: false },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
@@ -303,11 +287,7 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * antigua que las nombre con valores inertes se carga soltándolas (`snapshot.ts`); con otros
  * valores usó la ley de verdad y se rechaza (`Invalid snapshot parameters`).
  *
- * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
- * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
- * su conducta anterior, `apagar`, es el defecto que extinguió el mundo público V7 (bitácora 09:58,
- * brazo `apagar` 4/4 extinciones). Recargar un mundo viejo con `apagar` reinstalaría ese defecto.
- * `limites.aplicacion` también coincide con el default: el modo histórico de admisión lo declara
+ * `limites.aplicacion` coincide con el default: el modo histórico de admisión lo declara
  * aparte `readSnapshotParams` para las instantáneas sin perfil de límites.
  */
 export const HISTORICAL_PARAMS: WorldParams = deepFreeze(RAW_HISTORICAL);
@@ -393,7 +373,6 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'agua.cuencas': [0.05, 1],
   // Umbral de sed prevista al llegar; 1 apaga la ley (el bloque entero se salta con 1, no sólo el disparo).
   'agua.memoria': [0, 1],
-  'gobernador.presupuestoMs': [5, 5000],
   'motor.hilos': [1, 512],
   'limites.teselasActivas': [1, Number.MAX_SAFE_INTEGER],
   'limites.chunks': [1, Number.MAX_SAFE_INTEGER],
@@ -473,8 +452,6 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'limites.aplicacion': { kind: 'enum', values: ['historicos', 'parametros'] },
   'persistencia.paginasSucias': { kind: 'boolean' },
   'red.deltas': { kind: 'boolean' },
-  'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95', 'max', 'rss', 'colaRed', 'saveMs'] }, minLength: 1, unique: true },
-  'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
   'tecnologia.evitarNoOp': { kind: 'boolean' },
   'tecnologia.efectosHerramientas': { kind: 'boolean' },
   'tecnologia.obrasPorPropiedades': { kind: 'boolean' },

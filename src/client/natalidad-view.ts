@@ -1,6 +1,6 @@
 /**
  * M4: por qué nace (o no nace) nadie. Módulo puro: lee `performance.natalidad` (resumen del servidor
- * cada 50 pasos, con las funciones de la ley), `stats.census`, `stats.history` y el gobernador, y dibuja
+ * cada 50 pasos, con las funciones de la ley), `stats.census` y `stats.history`, y dibuja
  * una escalera causal. En la ficha, `fertil` y `busca` llegan con la ficha a demanda. Nada se supone:
  * si un dato no llegó, se dice.
  */
@@ -8,7 +8,6 @@ import type { PersonDetail, WorldView } from '../shared/types.js';
 import { esc, number } from './ui-catalog.js';
 import { sparkline } from './charts.js';
 import { censoDe } from './censo-view.js';
-import { estadoCrecimiento } from './gobernador-view.js';
 import { personLink } from './world-evidence.js';
 
 const DIA = 2400;
@@ -48,14 +47,7 @@ export function cupoDeNacimientos(ley: Ley): string {
 /** Mundo › Vida › Nacimientos: la escalera causal, la curva y la ley en claro. */
 export function seccionNacimientos(view: WorldView): string {
   const natalidad = view.performance?.natalidad, censo = censoDe(view);
-  const growth = estadoCrecimiento(view.performance?.gobernador, view.stats?.population);
   const pasos: string[] = [];
-  if (growth && growth.estado !== 'libre') {
-    const bloqueado = growth.estado === 'en-techo' || growth.estado === 'apagado' || (growth.estado === 'manual' && view.performance?.gobernador?.activo === false);
-    pasos.push(`<li data-natality-step="gobernador" class="${bloqueado ? 'is-blocked' : ''}"><strong>${esc(growth.titulo)}</strong><span>${bloqueado
-      ? 'Con los nacimientos detenidos nadie corteja ni prepara una crianza: la ley solo lo intenta cuando nacer está permitido.'
-      : growth.estado === 'reponiendo' ? 'Pueden nacer vidas para reponer a quien murió, sin superar el techo.' : esc(growth.explicacion)}</span></li>`);
-  }
   const adultos = censo ? number(censo.lifeStage.adult) : '—';
   pasos.push(`<li data-natality-step="edad"><strong>En edad de criar: ${adultos}</strong><span>Vecinos entre la madurez y la vejez, en todo el mundo.</span></li>`);
   if (natalidad) {
@@ -97,7 +89,7 @@ export function fertilidadFicha(detail: Pick<PersonDetail, 'fertil' | 'busca'> |
     : f.bloqueo === 'cuerpo' ? `No: su cuerpo no está listo${f.cuerpo?.length ? ` (${f.cuerpo.join(', ')})` : ''}.`
     : f.bloqueo === 'reserva' ? `No: le falta reserva de alimento (${number(f.reserva, 2)} de ${number(f.necesita, 2)}).`
     : f.bloqueo === 'comunidad' ? 'No: este mundo exige comunidad para criar y no tiene.'
-    : f.bloqueo === 'techo' ? 'No: el crecimiento está en pausa por el servidor.' : 'Sin dato.';
+    : f.bloqueo === 'pausa-manual' ? 'No: los nacimientos están en pausa por orden manual.' : 'Sin dato.';
   const busca = detail.busca ? `<p class="drawer-note" data-seeking>${detail.busca.motivo === 'cortejo' ? 'Busca a su pareja' : detail.busca.motivo === 'reunion' ? 'Va a reunirse para criar con' : 'Prepara reservas para criar con'}: ${personLink(view, detail.busca.id)}</p>` : '';
   return `<div class="skill-row" data-person-fertility="${f.ahora ? 'si' : esc(f.bloqueo ?? '')}"><span>Puede criar ahora</span><strong>${f.ahora ? 'Sí' : 'No'}</strong></div><p class="drawer-note">${esc(texto)}</p>${busca}`;
 }

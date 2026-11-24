@@ -4,7 +4,7 @@
  *   tsx scripts/perf/instantaneas.ts --seed S --dias 6,9,12 --salida DIR [--params P]
  *   (`--dias` admite fracciones: 12.25 = tick 29 400, el de la copia r2/Psinagua-3)
  *
- * Una sola corrida con el régimen de `scripts/lab/replica.ts` sin gobernador (Store temporal,
+ * Una sola corrida con el régimen de `scripts/lab/replica.ts` en modo de leyes (Store temporal,
  * guardado antes del primer paso y cada `persistencia.cadaTicks`). Al llegar a cada día pedido
  * guarda el mundo y deja en `DIR/dNN/world.sqlite` una copia consistente (`VACUUM INTO`) con su
  * `meta.json` (semilla, params, tick, población, digesto canónico), que `fases.ts --digesto`

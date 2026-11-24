@@ -21,7 +21,7 @@
  *     zlib (corre en el threadpool de libuv, `concurrencyLimit` de `ws`) SÍ
  *     queda contabilizada aquí aunque no bloquee el hilo principal.
  *   - `stepMs` = duración de cada `app.stepOnce()` medida DESDE FUERA (incluye
- *     `broadcast()`). Ojo: `runtime.p95StepMs` (el que usa el gobernador, R17)
+ *     `broadcast()`). Ojo: `runtime.p95StepMs`
  *     NO incluye `broadcast()` — se congela antes de emitir (`src/server/app.ts`,
  *     `runtime.stepMs = monotonicNow() - stepStarted` ocurre antes del
  *     `broadcast()` de fin de paso). Por eso este banco separa los pasos que
@@ -212,6 +212,6 @@ const broadcastOverheadP95Ms = on.broadcastStep.p95Ms - base.broadcastStep.p95Ms
 console.log(`\nResumen T136 (${CLIENT_COUNT} clientes, ${STEP_COUNT} pasos, viewport 40x28):`);
 console.log(`  bytes totales:  sin-deflate ${base.totalBytes} B · con-deflate ${on.totalBytes} B · ahorro ${bytesSavingPct.toFixed(1)}%`);
 console.log(`  CPU proceso:    sin-deflate ${base.cpuTotalMs.toFixed(1)} ms · con-deflate ${on.cpuTotalMs.toFixed(1)} ms · extra ${cpuExtraMs.toFixed(1)} ms`);
-console.log(`  p95 broadcast:  sin-deflate ${base.broadcastStep.p95Ms.toFixed(2)} ms · con-deflate ${on.broadcastStep.p95Ms.toFixed(2)} ms · extra ${broadcastOverheadP95Ms.toFixed(2)} ms (presupuesto gobernador: 50 ms)`);
+console.log(`  p95 broadcast:  sin-deflate ${base.broadcastStep.p95Ms.toFixed(2)} ms · con-deflate ${on.broadcastStep.p95Ms.toFixed(2)} ms · extra ${broadcastOverheadP95Ms.toFixed(2)} ms`);
 console.log(`  mensajes:       sin-deflate ${base.totalMessages}/${base.expectedMessages} (${base.dropped} descartados) · con-deflate ${on.totalMessages}/${on.expectedMessages} (${on.dropped} descartados)`);
 console.log(`  p95 paso llano: sin-deflate ${base.plainStep.p95Ms.toFixed(2)} ms · con-deflate ${on.plainStep.p95Ms.toFixed(2)} ms`);

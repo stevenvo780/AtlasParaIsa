@@ -168,7 +168,6 @@ test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt
   assert.deepEqual(DEFAULT_PARAMS.motor, {
     clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural', depuracion: false,
   });
-  assert.deepEqual(DEFAULT_PARAMS.gobernador, { presupuestoMs: 50, senales: ['p95'], politica: 'techo' });
   assert.equal(DEFAULT_PARAMS.red.deltas, false);
 });
 

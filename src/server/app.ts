@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
-import { resolve, extname, sep } from 'node:path';
+import { dirname, resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
@@ -19,8 +19,10 @@ import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.j
 import { technologyJournalNearCapacity } from '../world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
+import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
+import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
@@ -37,6 +39,7 @@ import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, World
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
+  commit?: string;
   /** Orígenes HTTPS adicionales permitidos explícitamente por el operador (p. ej. acceso LAN/VPN).
    * Nunca relajan la validación: cada solicitud debe emparejar exactamente Host ↔ Origin. */
   extraOrigins?: readonly string[];
@@ -60,6 +63,7 @@ export interface AppOptions {
    * yields one scheduling turn for bounded recorder backpressure without dropping a tick. */
   beforeStep?: () => void | boolean;
   afterStep?: (simHz: number) => void;
+  onOperacion?: (tipo: 'guardando' | 'recargando' | null) => void;
   /** Salida del proceso cuando el paso ya no puede atravesar el tick guardado (código 75:
    * systemd reinicia sobre ese mismo guardado). Por defecto `process.exit`; las pruebas la
    * sustituyen para observar la salida sin morirse. */
@@ -79,19 +83,15 @@ export interface AppOptions {
 }
 /** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
 export const PASO_PARADO_S = 60;
-/** Estado de salud operacional que sirve `GET /health` y consume el vigilante externo. */
-export interface Salud {
-  estado: 'ok' | 'degradado' | 'parado';
-  tick: number;
-  ticksPorSegundo: number;
-  segundosDesdeUltimoPaso: number;
-  /** Epoch ms del último guardado confirmado; `null` si este proceso no lo conoce. */
-  ultimoGuardado: number | null;
-  gpu: { dispositivo: number; estado: 'ok' | 'cpu' | 'sin' }[];
-  recargas: number;
+export const DIAGNOSTICO_VACIO: DiagnosticoSalud = {
+  duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0,
+};
+/** `/health` no exige sesión: del fallo de la bitácora solo sale el código del sistema, nunca rutas ni texto del error. */
+function errorPublico(error: string | undefined): string | null {
+  return error === undefined ? null : /\bE[A-Z0-9]{2,}\b/.exec(error)?.[0] ?? 'ERROR';
 }
 /** `cpu`: la tarjeta cayó en este proceso y su trabajo va por CPU. `sin`: pedida pero no utilizable. */
-export function estadoGpu(dispositivos: readonly number[]): Salud['gpu'] {
+function estadoGpu(dispositivos: readonly number[]): Salud['gpu'] {
   const hayNvrtc = gpuNvrtcAvailable();
   return dispositivos.map(dispositivo => ({ dispositivo,
     estado: dispositivosGpuApagados.has(dispositivo) ? 'cpu' : hayNvrtc ? 'ok' : 'sin' }));
@@ -105,6 +105,7 @@ export interface ReadOnlyBackend {
   recipe(id: string): Promise<Extract<ServerMessage, { type: 'recipe' }>['recipe']>;
   regions(): unknown;
   salud(): Salud;
+  readonly ready: boolean;
   readonly runtime: RuntimeStats;
   readonly deltas: boolean;
   readonly failed: boolean;
@@ -450,6 +451,8 @@ export function createApp(options: AppOptions) {
 }
 function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; gateway?: ReadOnlyBackend }) {
   const store = options.store!, gateway = options.gateway;
+  const muestreador = !gateway && store.path !== ':memory:'
+    ? new Muestreador({ directorio: dirname(store.path), commit: options.commit }) : undefined;
   const sessions = gateway?.sessions ?? store;
   /** V21. `tickMs: 0` is the uncapped loop too; the tape follows turbo unless it is set explicitly. */
   const turbo = !!options.turbo || options.tickMs === 0;
@@ -582,9 +585,27 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const segundos = Math.max(0, (relojReal() - ultimoPasoEn) / 1000);
     const gpu = estadoGpu(paramsOf(world).motor.gpu);
     const parado = failed || stopped || segundos > PASO_PARADO_S;
-    return { estado: parado ? 'parado' : gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
+    const resumen = muestreador?.resumen();
+    const diagnostico = resumen ? { duras24h: resumen.duras24h, blandas24h: resumen.blandas24h,
+      ultimaViolacion: resumen.ultimaViolacion ?? null, errorBitacora: errorPublico(resumen.errorBitacora),
+      registrosSinBitacora: resumen.registrosSinBitacora } : DIAGNOSTICO_VACIO;
+    return { estado: parado ? 'parado' : diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
       tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
-      ultimoGuardado: ultimoGuardadoEn, gpu, recargas };
+      ultimoGuardado: ultimoGuardadoEn, gpu, recargas, diagnostico, operacion: null };
+  }
+  let muestreoFallido = false;
+  /** El diagnóstico observa el paso ya confirmado: un fallo suyo no puede saltarse la difusión ni la telemetría. */
+  function muestrear(): void {
+    try { muestreador?.paso(world, runtime.stepMs); }
+    catch (error) {
+      if (muestreoFallido) return;
+      muestreoFallido = true;
+      console.warn(`El muestreador de invariantes falló y no detiene el mundo: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  function duranteOperacion<T>(tipo: Exclude<OperacionSalud['tipo'], 'arrancando'>, ejecutar: () => T): T {
+    options.onOperacion?.(tipo);
+    try { return ejecutar(); } finally { options.onOperacion?.(null); }
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
@@ -1053,8 +1074,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
         guardando = true;
-        store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
-          [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios);
+        duranteOperacion('guardando', () => store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
+          [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios));
         guardando = false; ultimoGuardadoEn = Date.now(); cambiosPendientes.length = 0;
         lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
@@ -1077,6 +1098,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
       runtime.stepMs = monotonicNow() - stepStarted;
+      muestrear();
       runtime.p95StepMs = registrarPaso(runtime.stepMs);
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
@@ -1181,36 +1203,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         : `Tres fallos seguidos intentando superar el paso ${tickObjetivo} (último: ${motivo}): salgo con 75 para que el servicio reinicie.`);
       failed = true; aMedioPaso = !restaurado; salirFatal(75); return;
     }
-    if (!restaurado) {
-      let cargado: ReturnType<Store['load']> = null;
-      try { cargado = store.load(); } catch { cargado = null; }
-      if (!cargado) {
-        console.error(`El paso falló (${motivo}) y no hay un guardado legible desde el que recargar: salgo con 75.`);
-        failed = true; aMedioPaso = true; salirFatal(75); return;
-      }
-      // El arranque (main.ts, sim-worker.ts) envuelve las teselas con la propiedad residente cuando el motor es
-      // paralelo; el mundo recién cargado no la trae y se le da igual que al descartado.
-      const conPropiedad = !!worldContext(world).tileOwnership;
-      world = cargado.world; recargas++; aMedioPaso = false;
-      if (conPropiedad) {
-        const tileOwnership = new ResidentTopologyOwner();
-        world.tiles = tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)));
-        bindWorldContext(world, { ...worldContext(world), tileOwnership });
-      }
-      // Las cachés por tick y la cinta describían el mundo descartado: el próximo fotograma va completo.
-      mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
-      ultimoTickGrabado = -1;
-      // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
-      cambiosPendientes.length = 0;
-      normalizarReproduccion();
-      world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
-        text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
-        cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
-      world.events = world.events.slice(-120);
-      cambiosPendientes.push(captureReplayChange(world, ['events']));
-      renovarReserva();
-      console.warn(`El paso falló (${motivo}); el mundo se recargó desde su último guardado (paso ${world.tick}, recarga ${recargas}) y sigue.`);
-    } else {
+    if (!restaurado && !duranteOperacion('recargando', () => recargar(motivo))) return;
+    if (restaurado) {
       console.warn(`El paso ${tickObjetivo} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
     }
     // Ni los gestos ni los mensajes del lote llegaron a aplicarse ni a guardarse: esperan al paso
@@ -1220,6 +1214,37 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     }
     rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
     broadcast();
+  }
+  function recargar(motivo: string): boolean {
+    let cargado: ReturnType<Store['load']> = null;
+    try { cargado = store.load(); } catch { cargado = null; }
+    if (!cargado) {
+      console.error(`El paso falló (${motivo}) y no hay un guardado legible desde el que recargar: salgo con 75.`);
+      failed = true; aMedioPaso = true; salirFatal(75); return false;
+    }
+    // El arranque (main.ts, sim-worker.ts) envuelve las teselas con la propiedad residente cuando el motor es
+    // paralelo; el mundo recién cargado no la trae y se le da igual que al descartado.
+    const conPropiedad = !!worldContext(world).tileOwnership;
+    world = cargado.world; recargas++; aMedioPaso = false;
+    if (conPropiedad) {
+      const tileOwnership = new ResidentTopologyOwner();
+      world.tiles = tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)));
+      bindWorldContext(world, { ...worldContext(world), tileOwnership });
+    }
+    // Las cachés por tick y la cinta describían el mundo descartado: el próximo fotograma va completo.
+    mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
+    ultimoTickGrabado = -1;
+    // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
+    cambiosPendientes.length = 0;
+    normalizarReproduccion();
+    world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
+      text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
+      cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
+    world.events = world.events.slice(-120);
+    cambiosPendientes.push(captureReplayChange(world, ['events']));
+    renovarReserva();
+    console.warn(`El paso falló (${motivo}); el mundo se recargó desde su último guardado (paso ${world.tick}, recarga ${recargas}) y sigue.`);
+    return true;
   }
   const server = createServer(async (req, res) => {
     // Hasta que la respuesta termina (o se corta): el planificador cede a ella tras un paso largo.
@@ -1234,11 +1259,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const expectedOrigin = requestOrigin(req);
       const url = new URL(req.url ?? '/', expectedOrigin);
       if (req.method === 'GET' && url.pathname === '/health') {
-        // 503 solo en `parado`: más de `PASO_PARADO_S` sin completar un paso, o la pausa protectora de guardado.
+        // 503 solo en `parado`: silencio de la simulación o una pausa protectora.
         const estado = salud();
         return json(res, estado.estado === 'parado' ? 503 : 200,
           { ...estado, status: estado.estado === 'parado' ? 'paused' : 'ok', ...((gateway?.respaldo ?? respaldo) ? { respaldo: gateway?.respaldo ?? respaldo } : {}) });
       }
+      if (gateway && !gateway.ready) throw new HttpError(503, 'El mundo todavía no está disponible.');
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         armarGraciaCarga();
@@ -1366,6 +1392,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try {
       const expectedOrigin = requestOrigin(req, 'Ruta no autorizada.');
       checkOrigin(req, expectedOrigin);
+      if (gateway && !gateway.ready) throw new HttpError(503, 'El mundo todavía no está disponible.');
       const solicitud = solicitudWs(req.url);
       const hash = authorized(req);
       if (clients.size >= 12) throw new HttpError(429, 'Demasiadas conexiones.');
@@ -1566,13 +1593,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
           try {
-            if (!gateway && !failed && !aMedioPaso) store.save(world);
+            if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => store.save(world));
           } finally {
             try {
               // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
               try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
             } finally {
-              if (!gateway) await cerrarPiscinasDeComputo();
+              try { await muestreador?.vaciar(); }
+              catch (error) { console.warn(`La bitácora de invariantes no se pudo escribir: ${error instanceof Error ? error.message : String(error)}`); }
+              finally { if (!gateway) await cerrarPiscinasDeComputo(); }
             }
           }
         }

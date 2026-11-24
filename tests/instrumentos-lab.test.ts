@@ -23,7 +23,7 @@ import { ACCIONES, censoComunidades, diversidadEntreGrupos, indiceDiversidadConA
 /** Paquete de leyes de la etapa 1 (mismo que las réplicas r2/Psinagua de la noche 2026-09-22). */
 const ETAPA1 = 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
 
-/** Claves de dia-NNN.json SIN instrumentos (las de tests/lab.test.ts, `--gobernador no`). */
+/** Claves de dia-NNN.json SIN instrumentos (las de tests/lab.test.ts, `--servidor no`). */
 const CLAVES_ANTIGUAS = new Set([
   'tick', 'poblacion', 'nacimientos', 'muertesPorCausa', 'fundadoresVivos', 'generacionesVivas',
   'diversidadOficios', 'recetasCreadasAcumuladas', 'diversidadConducta', 'diversidadFuncional',
@@ -250,7 +250,7 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.match(replicaCon.instrumentos as string, /^si/);
   assert.equal(replicaSin.instrumentos, 'no');
   // La réplica ya no escribe nada del techo de laboratorio.
-  for (const r of [replicaCon, replicaSin]) { assert.ok(!('techoLab' in r) && !('techoLabDetalle' in r)); assert.equal(r.gobernador, 'no-ejecutado; replica de leyes, no del servidor'); }
+  for (const r of [replicaCon, replicaSin]) { assert.ok(!('techoLab' in r) && !('techoLabDetalle' in r)); assert.equal(r.servidor, 'no, mide stepWorld en el sitio'); }
 
   // Coherencia de los campos nuevos.
   const componentes = con.diversidadConductaComponentes as { conducta: number; oficios: number };

@@ -200,11 +200,13 @@ import { tapePathForWorld, tileEqual } from './tape-store.js';
 import { CARRIED_VIEW_FIELDS, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
 import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
 import type { AppOptions } from './app.js';
+import type { OperacionSalud, Salud } from '../shared/salud.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
 
 export interface SimWorkerOptions {
   worldPath: string;
+  commit?: string;
   seed?: number;
   params?: Exclude<AppOptions['params'], Function>;
   tickMs?: number;
@@ -229,6 +231,8 @@ export type MirrorPageField = 'people' | 'places' | 'animals' | 'structures' | '
 export interface MirrorUpdate {
   type: 'mirror';
   view: WorldView;
+  salud: Salud;
+  saludMedidaEn: number;
   seed: number;
   cuencas: number;
   activeKeys: string[];
@@ -248,6 +252,8 @@ export interface MirrorUpdate {
 }
 export type SimRpc = { type: 'rpc'; id: number; method: string; args: unknown[] };
 export type SimReply = { type: 'reply'; id: number; value?: unknown; error?: { status: number; message: string } };
+/** La caducidad usa el reloj monotónico común del proceso, las fechas visibles usan tiempo civil. */
+export type OperacionWorker = { type: 'operacion'; operacion: OperacionSalud | null; medidaEn: number };
 function packed(value: unknown): Uint8Array<ArrayBuffer> {
   // Own transferable storage, never a pooled Buffer (which would clone the entire slab).
   return Uint8Array.from(serialize(value));
@@ -368,7 +374,7 @@ export function createTileObserver() {
 export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[], carry = false): WorldView {
   const view = projectMirror(world, worldContext(world), { quantize: true, carry });
   if (instanceId !== undefined) view.instanceId = instanceId;
-  view.performance = { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) };
+  view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.
   view.tiles = tiles;
   return view;
@@ -384,7 +390,25 @@ export const TURBO_MIRROR_MS = 250;
 
 async function runSimulation(options: SimWorkerOptions) {
   const port = parentPort!;
-  const store = new Store(options.worldPath);
+  let operacion: OperacionSalud | null = null;
+  let ultimoAvance = 0;
+  function publicarAvance(medidaEn: number) {
+    ultimoAvance = medidaEn;
+    port.postMessage({ type: 'operacion', operacion, medidaEn } satisfies OperacionWorker);
+  }
+  function publicarOperacion(tipo: OperacionSalud['tipo'] | null) {
+    const ahora = Date.now();
+    operacion = tipo ? { tipo, inicio: ahora, progresoEn: ahora } : null;
+    publicarAvance(performance.now());
+  }
+  function informarAvance() {
+    const ahora = performance.now();
+    if (!operacion || ahora - ultimoAvance < 1000) return;
+    operacion.progresoEn = Date.now();
+    publicarAvance(ahora);
+  }
+  publicarOperacion('arrancando');
+  const store = new Store(options.worldPath, { onProgress: informarAvance });
   let app: ReturnType<typeof createApp> | undefined;
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();
@@ -526,7 +550,7 @@ async function runSimulation(options: SimWorkerOptions) {
       // Resident tile proxies must never be passed to structuredClone/v8.serialize.
       packPages('pendingChunks', [{ ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) }], 1);
     }
-    const update: MirrorUpdate = { type: 'mirror', view, seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
+    const update: MirrorUpdate = { type: 'mirror', view, salud: live.salud(), saludMedidaEn: performance.now(), seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
       activeKeys: Object.keys(world.chunks), activeChunks: world.chunks, chunks: updates, pendingChunks: [], pendingKeys: world.retiredChunks.map(chunk => chunk.key), pages,
       deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap };
     // Terrain preparation stays OFF the HTTP thread. Chunk buffers move, rather than cloning
@@ -538,11 +562,12 @@ async function runSimulation(options: SimWorkerOptions) {
   try {
     const base = () => process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams()
       : process.env.CARTA_FULL_HARDWARE === '1' ? hostFullHardwareParams() : hostParams();
-    app = createApp({ store, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
+    app = createApp({ store, commit: options.commit, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
       // publish sends to the dedicated writer thread; the inner app must not open another writer.
       tape: false,
       turboSaveIntervalMs: options.turboSaveIntervalMs,
+      onOperacion: publicarOperacion,
       params: options.deployment ? () => deploymentParams(base()) : options.params,
       beforeStep: () => {
         if (inFlightFrames >= 64) return false;
@@ -560,9 +585,11 @@ async function runSimulation(options: SimWorkerOptions) {
       app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
       bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
     }
+    informarAvance();
     for (const device of motor.gpu) {
       const parity = await gpuParitySession.initialize(device, { budgetMs: 5000, log: diagnostic => port.postMessage({ type: 'log', level: 'warn', value: diagnostic }) });
       port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: parity, v15: resumenDespacho(app.world) } });
+      informarAvance();
     }
     if (motor.gpu.length === 0) port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: null, v15: resumenDespacho(app.world) } });
     if (tapeEnabled) {
@@ -595,10 +622,12 @@ async function runSimulation(options: SimWorkerOptions) {
       }));
     }
     tapeLatestTick = (await tapeCommand('flush')).latestTick;
+    informarAvance();
     publish({ forcePost: true });
     // The gateway opens its read-only TapeReader on `ready`: the initial frame must already be durable.
     await tapeCommand('flush');
     port.on('message', (message: SimRpc) => { void handle(message); });
+    publicarOperacion(null);
     port.postMessage({ type: 'ready', sessions: initialSessions });
   } catch (error) {
     try { await app?.close(); } finally { try { await closeTape(); } finally { store.close(); } }

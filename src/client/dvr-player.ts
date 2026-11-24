@@ -10,9 +10,13 @@
  *  - El cabezal nunca supera el último tick cargado: si el búfer se vacía espera, no salta ni retrocede.
  *  - A lo sumo UNA petición de trozo en vuelo; un `seek`/cambio de cámara invalida (época + `AbortSignal`) la anterior.
  *  - La cola no pasa de `DVR_LIMITS.maxFrames` fotogramas.
+ *
+ * V22 — trozos `encoding: 'delta'` (`baseFrame` + `deltas[]`): la cola guarda los deltas SIN expandir y cada uno se aplica
+ * (`applyClientTapeDelta`) solo cuando el cabezal lo cruza, así `fetchChunk` no bloquea el hilo con 90 reconstrucciones y
+ * `onFrame` recibe `info.changedTiles` (10–50 teselas) en lugar de las ~6.000 de la vista. Los trozos `full` siguen igual.
  */
-import { TAPE_BASE_TICKS_PER_SEC, TAPE_SPEEDS, type TapeChunkResponse, type TapeMetaResponse, type TapeSpeed, type TapeTimelinePoint } from '../shared/tape.js';
-import type { Viewport, WorldView } from '../shared/types.js';
+import { TAPE_BASE_TICKS_PER_SEC, TAPE_SPEEDS, applyClientTapeDelta, indexTiles, type TapeChunkResponse, type TapeClientDelta, type TapeMetaResponse, type TapeSpeed, type TapeTimelinePoint } from '../shared/tape.js';
+import type { Tile, Viewport, WorldView } from '../shared/types.js';
 
 export const DVR_LIMITS = {
   /** Tamaño de la cola de fotogramas por delante del cabezal (anillo). */
@@ -42,7 +46,20 @@ export interface DvrFrameInfo {
   skipped: number;
   /** `true` si el cabezal saltó de sitio (seek, cámara): el colchón visual debe colapsarse, no interpolar. */
   discontinuity: boolean;
+  /**
+   * V22: teselas que cambiaron respecto al fotograma emitido antes (incluidas las de los fotogramas cruzados sin
+   * emitir). Solo existe cuando el fotograma salió de decodificar deltas; ausente = fotograma completo (`frame.tiles`).
+   */
+  changedTiles?: Tile[];
 }
+
+/**
+ * V22: cadena de decodificación de un trozo `encoding: 'delta'`. Cada delta se aplica sobre el último fotograma
+ * decodificado de SU trozo (`frame`), con el índice de teselas compartido para tocar solo las modificadas.
+ */
+interface DeltaChain { frame: WorldView | null; tileIndex: Map<string, number> | null; }
+/** Entrada de la cola: un fotograma ya completo (`full`/base) o un delta aún sin expandir (`delta`). */
+interface QueuedFrame { tick: number; full?: WorldView; delta?: TapeClientDelta; chain?: DeltaChain; }
 
 export interface DvrChunkRequest { fromTick: number; count: number; viewport: Viewport | null; signal: AbortSignal; }
 
@@ -92,8 +109,10 @@ export class DvrPlayer {
   loading = false;
   error: string | null = null;
 
-  /** Fotogramas ya cargados que aún no se han emitido, en orden de tick (todos > `currentTick`). */
-  private frames: WorldView[] = [];
+  /** Fotogramas ya cargados que aún no se han emitido, en orden de tick (todos > `currentTick`). Los deltas se expanden al cruzarlos. */
+  private frames: QueuedFrame[] = [];
+  /** Deltas expandidos hasta ahora (diagnóstico y pruebas: la decodificación es perezosa). */
+  decodedDeltas = 0;
   private viewport: Viewport | null = null;
   private pendingViewport: Viewport | null = null;
   private viewportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -185,10 +204,12 @@ export class DvrPlayer {
     if (this.playing && !this.jumping && dt > 0) {
       // Nunca más allá de lo cargado: con el búfer vacío el cabezal espera, no salta ni retrocede.
       this.playTick = Math.min(this.playTick + dt / 1000 * TAPE_BASE_TICKS_PER_SEC * this.speed, Math.max(this.currentTick, this.maxLoadedTick));
-      let latest: WorldView | null = null, crossed = 0;
-      while (this.frames.length && this.frames[0]!.tick <= this.playTick) { latest = this.frames.shift()!; crossed++; }
-      // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega (el resto no se reconstruye).
-      if (latest) this.emit(latest, 'play', crossed - 1, false);
+      let crossed = 0;
+      const batch: QueuedFrame[] = [];
+      while (this.frames.length && this.frames[0]!.tick <= this.playTick) { batch.push(this.frames.shift()!); crossed++; }
+      // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega. Los deltas intermedios sí se aplican
+      // (cada uno parte del anterior) pero su fotograma no se emite; sus teselas cambiadas se acumulan en el entregado.
+      if (batch.length && !this.deliver(batch, 'play', crossed - 1)) return;
     }
     this.prefetch();
   }
@@ -223,7 +244,7 @@ export class DvrPlayer {
     if (this.playing) { this.playing = false; this.notify(); }
     if (delta > 0) {
       const next = this.frames.shift();
-      if (next) { this.playTick = next.tick; this.emit(next, 'step', 0, false); this.prefetch(); return; }
+      if (next) { this.playTick = next.tick; if (this.deliver([next], 'step', 0)) this.prefetch(); return; }
       if (this.currentTick >= this.maxTick) return;
       return this.jump(this.currentTick + 1, 'step', false);
     }
@@ -295,12 +316,48 @@ export class DvrPlayer {
     if (Number.isFinite(chunk.simHz) && chunk.simHz > 0) this.simHz = chunk.simHz;
   }
 
-  private emit(frame: WorldView, reason: DvrFrameReason, skipped: number, discontinuity: boolean): void {
+  /**
+   * Expande (si hace falta) la tanda de entradas cruzadas por el cabezal y entrega la última. Devuelve `false` si un
+   * delta corrupto obligó a descartar la cola (el error queda en `error` y se repide desde el tick actual).
+   */
+  private deliver(batch: QueuedFrame[], reason: DvrFrameReason, skipped: number): boolean {
+    let frame: WorldView | null = null, changed: Tile[] | undefined = [];
+    try {
+      for (const entry of batch) {
+        const decoded = this.decode(entry);
+        frame = decoded.frame;
+        if (decoded.changedTiles === undefined) changed = undefined; // base/completo: no hay lista parcial fiable
+        else if (changed) { for (const tile of decoded.changedTiles) changed.push(tile); }
+      }
+    } catch (error) {
+      this.error = describe(error); this.frames = []; this.notify();
+      return false;
+    }
+    if (!frame) return true;
+    this.emit(frame, reason, skipped, false, changed);
+    return true;
+  }
+
+  /** Un fotograma de la cola → `WorldView`. Los completos pasan tal cual; un delta se aplica sobre su cadena. */
+  private decode(entry: QueuedFrame): { frame: WorldView; changedTiles?: Tile[] } {
+    if (entry.full) {
+      if (entry.chain) { entry.chain.frame = entry.full; entry.chain.tileIndex = null; }
+      return { frame: entry.full };
+    }
+    const chain = entry.chain, delta = entry.delta;
+    if (!chain?.frame || !delta) throw new Error('Delta de la cinta sin fotograma base.');
+    if ((delta.tilesPatch?.length || delta.removedTiles?.length) && !chain.tileIndex) chain.tileIndex = indexTiles(chain.frame.tiles);
+    const { frame, changedTiles } = applyClientTapeDelta(chain.frame, delta, chain.tileIndex ?? undefined);
+    chain.frame = frame; this.decodedDeltas++;
+    return { frame, changedTiles };
+  }
+
+  private emit(frame: WorldView, reason: DvrFrameReason, skipped: number, discontinuity: boolean, changedTiles?: Tile[]): void {
     this.currentTick = frame.tick; this.started = true;
     while (this.recent.length && this.recent[this.recent.length - 1]! >= frame.tick) this.recent.pop();
     this.recent.push(frame.tick);
     if (this.recent.length > DVR_LIMITS.recentTicks) this.recent.shift();
-    this.options.onFrame(frame, { reason, tickIntervalMs: this.tickIntervalMs, skipped, discontinuity });
+    this.options.onFrame(frame, { reason, tickIntervalMs: this.tickIntervalMs, skipped, discontinuity, ...(changedTiles ? { changedTiles } : {}) });
     this.notify();
   }
 
@@ -320,13 +377,37 @@ export class DvrPlayer {
     }
   }
 
-  private static ordered(chunk: TapeChunkResponse, after: number): WorldView[] {
-    const out: WorldView[] = [];
+  /**
+   * Fotogramas de un trozo en orden de tick y sin repetidos, a partir de `after` (exclusivo). `'delta'` produce
+   * entradas perezosas (base completa + deltas sin expandir); los deltas anteriores a `after` se aplican ya (son pocos:
+   * el servidor pide desde `fromTick`) para que la cadena siga siendo exacta.
+   */
+  private static ordered(chunk: TapeChunkResponse, after: number): QueuedFrame[] {
+    const out: QueuedFrame[] = [];
+    if (chunk.encoding === 'delta' && chunk.baseFrame) {
+      const chain: DeltaChain = { frame: null, tileIndex: null };
+      const entries: QueuedFrame[] = [{ tick: chunk.baseFrame.tick, full: chunk.baseFrame, chain }];
+      for (const delta of [...(chunk.deltas ?? [])].sort((a, b) => a.tick - b.tick)) entries.push({ tick: delta.tick, delta, chain });
+      for (const entry of entries) {
+        if (!Number.isFinite(entry.tick) || (out.length && out[out.length - 1]!.tick === entry.tick)) continue;
+        if (entry.tick <= after) { DvrPlayer.foldIntoChain(entry); continue; }
+        out.push(entry);
+      }
+      return out;
+    }
     for (const frame of [...(chunk.frames ?? [])].sort((a, b) => a.tick - b.tick)) {
       if (!Number.isFinite(frame.tick) || frame.tick <= after || (out.length && out[out.length - 1]!.tick === frame.tick)) continue;
-      out.push(frame);
+      out.push({ tick: frame.tick, full: frame });
     }
     return out;
+  }
+
+  /** Aplica a la cadena una entrada que no se pondrá en cola (anterior al punto de corte). */
+  private static foldIntoChain(entry: QueuedFrame): void {
+    const chain = entry.chain; if (!chain) return;
+    if (entry.full) { chain.frame = entry.full; chain.tileIndex = null; return; }
+    if (!chain.frame || !entry.delta) return;
+    chain.frame = applyClientTapeDelta(chain.frame, entry.delta).frame; chain.tileIndex = null;
   }
 
   /**
@@ -351,8 +432,16 @@ export class DvrPlayer {
     if (!first) { this.notify(); return; }
     this.frames = list.slice(0, DVR_LIMITS.maxFrames);
     this.playTick = keepPlayTick ? Math.max(this.playTick, first.tick) : first.tick;
-    this.emit(first, reason, 0, true);
-    this.prefetch();
+    if (this.deliverFirst(first, reason)) this.prefetch();
+  }
+
+  /** Primer fotograma tras un salto: siempre completo (la base del trozo), con discontinuidad. */
+  private deliverFirst(first: QueuedFrame, reason: DvrFrameReason): boolean {
+    let decoded: { frame: WorldView };
+    try { decoded = this.decode(first); }
+    catch (error) { this.error = describe(error); this.frames = []; this.notify(); return false; }
+    this.emit(decoded.frame, reason, 0, true);
+    return true;
   }
 
   /** Pide el siguiente trozo si quedan pocos fotogramas por delante y la cinta tiene más. */

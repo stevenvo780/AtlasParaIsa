@@ -1,0 +1,8 @@
+[Unit]
+Description=Consulta de salud del mundo público cada minuto
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=atlas-vigilante.service
+[Install]
+WantedBy=timers.target

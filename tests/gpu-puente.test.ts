@@ -5,7 +5,7 @@ import { parseParams, paramsOf } from '../src/world/params.js';
 import { closeEcosystemWorkers, ecosystemGpuDiagnostics, killGpuSubprocessForTest } from '../src/world/ecosystem.js';
 import { stepEcosystem, stepLocalEcology } from '../src/world/ecosystem.js';
 import { gpuNvrtcAvailable, ResidentGpuBridge, GPU_FIELDS } from '../src/world/gpu/puente.js';
-import { runParallelEcosystem } from '../src/world/ecosystem-kernel.js';
+import { dispositivosGpuApagados, runParallelEcosystem } from '../src/world/ecosystem-kernel.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
 import type { SharedTerrain } from '../src/world/soa/terreno.js';
 import { finalCanonicalDigest } from './hardware/contrato.js';
@@ -54,17 +54,20 @@ test('T122 subida dispersa <= 1 MB/paso y subida/bajada medidas por separado', {
   assert.ok(ecosystemGpuDiagnostics());
 });
 
-test('T122 matar el subproceso GPU aborta antes del swap y el mundo no queda a medias', { skip }, () => {
+test('T122 matar el subproceso GPU no lanza: la fase termina por CPU y la tarjeta queda apagada', { skip }, () => {
   const world = worldWith([0]);
   for (let i = 0; i < 20; i++) stepWorld(world);
-  const before = world.tiles.map(t => ({ ...t }));
-  const digestBefore = finalCanonicalDigest(world);
+  // Gemelo de referencia: la misma fase ecológica sobre la piscina de CPU de 2 hilos.
+  const gemelo = world.tiles.map(t => ({ ...t }));
+  stepLocalEcology(gemelo, 30, world.weather, phaseAt(30), paramsOf(world).recursos, { hilos: 2 });
   killGpuSubprocessForTest();
-  assert.throws(() => stepLocalEcology(world.tiles, 30, world.weather, phaseAt(30), paramsOf(world).recursos,
-    { gpu: [0], hilos: 1 }), /ResidentGpuBridge|GPU|closed|exited|killed/i);
-  const afterTiles = world.tiles.map(t => ({ ...t }));
-  assert.deepStrictEqual(afterTiles, before);
-  assert.equal(finalCanonicalDigest(world), digestBefore);
+  const events: EcosystemBarrierEvent[] = [];
+  assert.doesNotThrow(() => stepLocalEcology(world.tiles, 30, world.weather, phaseAt(30), paramsOf(world).recursos,
+    { gpu: [0], hilos: 1, onBarrier: e => events.push(e) }));
+  assert.equal(events.length, 1, 'la barrera llegó por la vía de CPU');
+  assert.equal(events[0]!.gpuStats, undefined);
+  assert.ok(dispositivosGpuApagados.has(0), 'la tarjeta 0 queda apagada para el proceso');
+  assert.deepStrictEqual(world.tiles.map(t => ({ ...t })), gemelo);
 });
 
 test('T122 VRAM sharded Dual-GPU [0,1] (70/30) produce 0 diferencias Object.is frente a CPU 1 hilo con mutaciones sobre la costura', { skip }, async () => {

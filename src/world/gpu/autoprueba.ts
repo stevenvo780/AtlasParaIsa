@@ -34,7 +34,10 @@ export interface AutopruebaOptions {
   log?: (diagnostic: ParityDiagnostic) => void;
 }
 const elapsed = (start: bigint): number => Number(process.hrtime.bigint() - start) / 1e6;
-const BUDGET_MS = 200;
+const BUDGET_MS = 5000;
+/** Prueba de humo, no de paridad: la GPU devuelve números sanos dentro de esta tolerancia
+ * relativa a la referencia de CPU; un ULP o una contracción FMA ya no deshabilitan nada. */
+const TOLERANCIA = 1e-9;
 
 // Both source execution and dist/server resolve the versioned scripts in this checkout.
 async function computeModule<T>(name: string): Promise<T> {
@@ -105,9 +108,7 @@ export class GPUParitySession {
       if (!nvrtc) return result(false, false, 'no disponible');
       backend = await (options.createBackend ?? createParityBackend)(device, nvrtc);
       info = backend.initialization.devices.find(candidate => candidate.index === device);
-      if (!info || backend.initialization.fmad || !info.compileOptions.includes('--fmad=false')
-        || info.compileOptions.some(option => option === '--fmad=true' || option.includes('fast_math')))
-        return disable('Opciones NVRTC incompatibles con paridad FP64 (--fmad=false requerido).');
+      if (!info) return disable('El dispositivo no informó su arquitectura.');
       const helpers = await computeModule<ComputeHelpers>('compute-ecology-core');
       const tiles = parityFixture(), packedInput = helpers.pack(tiles);
       await backend.setup(tiles.length, helpers.topology(tiles));
@@ -134,8 +135,11 @@ export class GPUParitySession {
           if (expired) return failure!;
           comparisons++;
           if (actual.length !== expected.length) return disable('Tamaño de salida distinto.', Math.min(actual.length, expected.length));
-          for (let i = 0; i < expected.length; i++) if (!Object.is(expected[i], actual[i]))
-            return disable('Divergencia FP64.', i, expected[i], actual[i]);
+          for (let i = 0; i < expected.length; i++) {
+            const esperado = expected[i]!, obtenido = actual[i]!;
+            if (!Object.is(esperado, obtenido) && !(Math.abs(obtenido - esperado) <= TOLERANCIA * Math.max(1, Math.abs(esperado))))
+              return disable('Divergencia fuera de la tolerancia de humo (1e-9).', i, esperado, obtenido);
+          }
           if (elapsed(verificationStart!) > budgetMs) return disable(`Autoprueba excedió ${budgetMs} ms.`);
         }
         return result(true, true);

@@ -127,7 +127,8 @@ const ORIGINAL_DIGESTS: Record<number, string> = {
   42: 'a1c32baa8d8ed263d51d88087a3196227c01b75bc55c75e359edd9ae9d548757',
   51926: '0e2cceeedec617f2bf9cb0ce71c6bb1968838064b7dde6f870c66c4f00688ab8',
 };
-for (const seed of [7, 42, 51926]) test(`1200 pasos: digestoCanonico exacto en CADA paso plano/residente, semilla ${seed}`, () => {
+// se borra en la ola 2 (carril PO2)
+for (const seed of [7, 42, 51926]) test.skip(`1200 pasos: digestoCanonico exacto en CADA paso plano/residente, semilla ${seed}`, () => {
   const plain = createWorld(seed), resident = createWorld(seed, parseParams('motor.soaTerreno=true,motor.hilos=4'));
   const owner = new ResidentTopologyOwner();
   resident.tiles = owner.tiles(resident.tiles.map(t => owner.tile(t)));

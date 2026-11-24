@@ -480,3 +480,5 @@ export function ejecutarRegionesFauna(vista: VistaFauna, regiones: readonly Stat
 export function faunaChooseWorker(job: StaticWorkerHandlerJob<ParamsFauna>): void {
   ejecutarRegionesFauna(crearVistaFauna(job.buffers, job.params), job.regions);
 }
+// V23 settlement/morphology laws run once in the serial coordinator after choose
+// outputs are applied. Workers neither read nor mutate those optional traits.

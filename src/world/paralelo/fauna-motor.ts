@@ -36,6 +36,9 @@
  * las toma `piscina.ts`; con `hilos = 1` sólo se mide si quien llama inyecta `reloj`.
  *
  * Cableado en `stepAnimals` (`animals.ts`) a partir del umbral de animales debidos de allí.
+ * V23: la morfología, el miedo humano y la habituación se aplican en el coordinador
+ * DESPUÉS de estas salidas, tanto en serie como con workers. Ninguna salida SAB
+ * sobrescribe esos rasgos; el kernel sigue siendo la decisión base compartida.
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

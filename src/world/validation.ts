@@ -7,6 +7,20 @@ import type { BlueprintView, StructureView } from '../shared/life.js';
 import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells, polyominoCost } from './inventions.js';
 import { chunkKey } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
+/** Optional V23 traits: legacy snapshots remain valid without adding fields. */
+export function assertAnimalTraits(animal: { morphology?: unknown; habituation?: unknown; tends?: unknown; lastTended?: unknown; lastHunted?: unknown }, tick: number): void {
+  const unit = (n: unknown): boolean => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+  const fail = (): never => { throw new Error('Rasgos animales V23 inválidos.'); };
+  if (animal.morphology !== undefined) {
+    const m = animal.morphology;
+    if (!m || typeof m !== 'object' || Array.isArray(m) || Object.keys(m).length !== 4) fail();
+    for (const k of ['caution', 'size', 'coat', 'defense']) if (!unit((m as Record<string, unknown>)[k])) fail();
+  }
+  if (animal.habituation !== undefined && !unit(animal.habituation)) fail();
+  if (animal.tends !== undefined && !(typeof animal.tends === 'number' && Number.isSafeInteger(animal.tends) && animal.tends >= 0)) fail();
+  for (const t of [animal.lastTended, animal.lastHunted]) if (t !== undefined
+    && !(typeof t === 'number' && Number.isSafeInteger(t) && t >= 0 && t <= tick)) fail();
+}
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
   if (tile.paved !== undefined && (typeof tile.paved !== 'number' || !Number.isFinite(tile.paved) || tile.paved < 0 || tile.paved > 1)) fail();

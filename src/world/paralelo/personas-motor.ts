@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
 import { mortonCode } from '../gpu/reparto.js';
-import { TICKS_PER_DAY, type Person, type World } from '../index.js';
+import { TICKS_PER_DAY, type Person, type World } from '../mundo/tipos.js';
 import { demographicTraits } from '../demography.js';
 import { waterAvailable } from '../inventions.js';
 import { paramsOf } from '../params.js';

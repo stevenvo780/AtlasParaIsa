@@ -380,6 +380,8 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('gesto.testigos', 'gestos', 'personas', 'actor', 7, 'index.ts', 'applyGesture', ['!world.people.some(p => distance(p, gesture) <= RADIUS)']),
   s('gesto.avisados', 'gestos', 'personas', 'actor', 7, 'index.ts', 'applyGesture', ['for (const person of world.people) if (distance(person, gesture) <= RADIUS)'], { veces: 2 }),
   s('gesto.tesela', 'gestos', 'teselas', 'actor', 0, 'index.ts', 'applyGesture', ['const tile = tileAt(world, gesture)!;']),
+  // Susurros (V24): fase serial del coordinador tras los gestos; el actor es el destino del susurro.
+  s('susurro.destino', 'gestos', 'teselas', 'actor', 0, 'index.ts', 'advanceWhispers', ['const tile = tileAt(world, { x, y });']),
   // Estructuras (cada 10 pasos): el actor es la estructura.
   s('estructuras.tesela', 'estructuras', 'teselas', 'actor', 0, 'inventions.ts', 'stepStructures', ['const tile = tileAt(world, structure); if (!tile']),
   s('estructuras.riego', 'estructuras', 'teselas', 'actor', 1, 'inventions.ts', 'stepStructures', ['tileAt(world, { x: structure.x + dx!, y: structure.y + dy! })']),
@@ -639,6 +641,7 @@ export const FUERA_DEL_PASO: readonly Declaracion[] = [
   ...['createWorld', 'migrateWorldState', 'upgradeV3', 'upgradeV5'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Creación o migración de un mundo.' })),
   ...['projectWorld', 'personDetail'].map(funcion => ({ fichero: 'proyeccion.ts', funcion, motivo: 'Proyección a la vista.' })),
   { fichero: 'index.ts', funcion: 'assertCommon', motivo: 'Validación.' },
+  { fichero: 'index.ts', funcion: 'validateWhisper', motivo: 'Validación del anfitrión antes de encolar un susurro (V24): no es una ley del paso.' },
   { fichero: 'index.ts', funcion: 'upgradeV4', motivo: 'Migración de un mundo.' },
   ...['cloneWorld', 'puntoDeRestauracion'].map(funcion => ({ fichero: 'clon.ts', funcion, motivo: 'Copia o restauración del mundo entero por el servidor: no es una ley.' })),
   { fichero: 'technology.ts', funcion: 'projectTechnology', motivo: 'Proyección a la vista: sólo la llama `projectWorld`.' },
@@ -658,6 +661,7 @@ export const FUERA_DEL_PASO: readonly Declaracion[] = [
 export const ESTADO_GLOBAL: Readonly<Record<string, string>> = {
   tick: 'Reloj del paso.', seed: 'Semilla del mundo.', weather: 'Tiempo del paso (lo cambia la ecología, en el coordinador).',
   cooperationEnabled: 'Bandera.', learningEnabled: 'Bandera.', noveltyEnabled: 'Bandera.', reproductionEnabled: 'Bandera.', shelterBenefitEnabled: 'Bandera.',
+  whispers: 'Susurros activos (V24): cola global de solo lectura durante la decisión; `choose` solo busca el de su propia persona por id, sin lectura espacial.',
   technology: 'Catálogo de recetas y archivo tecnológico: global. Lo leen la tecnología y la cooperación; resolver recetas toca el LRU residente (`withRecipeSession`), una escritura global que el halo no resuelve.',
 };
 

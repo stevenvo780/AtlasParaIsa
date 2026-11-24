@@ -5,10 +5,12 @@ import { performance } from 'node:perf_hooks';
 import { KAPPA0, KAPPA_SUELO, NU, R } from '../src/shared/naturaleza.js';
 import { binomial, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
 import { fluir, fluirCalor } from '../src/world/materia/fluir.js';
-import { pasarLotes, tramo } from '../src/world/materia/paso-worker.js';
+import { pasarLotes } from '../src/world/materia/paso-worker.js';
 import {
   ArenaDoble, PiscinaDoble, QuimicaDoble, RECETA, S, buffersArena, ctxDoble, type RecetaReaccion,
 } from './lib/materia-doble.js';
+import type { SustanciaId } from '../src/shared/materia.js';
+import type { ArenaMateria, Reaccion, Sustancia } from '../src/world/materia/tipos.js';
 
 const SIN: Kappa = [0, 0, 0];
 
@@ -59,12 +61,13 @@ test('I2: átomos y energía exactos tras reaccionar y fluir (enteros, sin un á
     const dt = t % 3 === 0 ? 10 : 1;
     for (const l of todos) veces += pasoLote(c, l, dt, kappas[l]!);
     for (const [de, a] of [[0, 2], [2, 4], [4, 1], [3, 5]] as const) {
-      for (const esp of [S.O2, S.CO2, S.H2O, S.Y]) movidos += Math.abs(fluir(c, de, a, esp, 0.05, medir(c, de).V, medir(c, a).V, 0, dt));
+      for (const esp of [S.O2, S.CO2, S.H2O, S.Y]) movidos += Math.abs(fluir(c, de, a, esp, 0.05, 1e3 * (1 + de), 1e3 * (1 + a), 0, dt));
       movidos += Math.abs(fluirCalor(c, de, a, 3, dt));
     }
   }
   assert.ok(veces > 1e6 && movidos > 1e3, `hubo química (${veces}) y transporte (${movidos})`);
   assert.deepEqual(arena.balance(todos), antes);
+  assert.equal(arena.recortes, 0, 'pasoLote nunca pide más de lo que hay');
 });
 
 test('I5: dividir un lote en dos mitades no cambia la distribución de productos (KS, p > 0,01)', () => {
@@ -77,6 +80,10 @@ test('I5: dividir un lote en dos mitades no cambia la distribución de productos
     // con un uniforme (§3.1) no crece con el lote: el segundo caso lo distingue (KS p ≈ 10⁻⁶ con 2.000 réplicas).
     { nombre: 'descomposición de primer orden', contenido: { X: 1e5, H2O: 1e7 }, T: 310, ticks: 4, kappa: [0, 30, 0] as Kappa, mide: [S.X] },
     { nombre: 'descomposición con pocos cuantos', contenido: { X: 2000, H2O: 2e6 }, T: 310, ticks: 40, kappa: [0, 30, 0] as Kappa, mide: [S.X] },
+    // a + a con pocos cuantos (20 por mitad, agua líquida como baño): sortear cuantos y descartar el impar perdía de
+    // media ¼ de vez por lote y paso, el doble con dos mitades.
+    { nombre: 'dimerización con pocos cuantos', contenido: { A: 40, H2O: 1e6 }, T: 320, ticks: 10, kappa: [0, 0, 25] as Kappa, mide: [S.D] },
+    { nombre: 'dimerización de cuatro cuantos', contenido: { A: 4, H2O: 1e6 }, T: 320, ticks: 1, kappa: [0, 0, 35] as Kappa, mide: [S.D] },
   ];
   for (const e of escenarios) {
     const muestras = [1, 2].map(partes => Array.from({ length: replicas }, (_, r) => {
@@ -86,6 +93,7 @@ test('I5: dividir un lote en dos mitades no cambia la distribución de productos
       return e.mide.map(esp => { let q = 0; for (let l = 0; l < partes; l++) q += arena.cuantos(l, esp); return q; });
     }));
     e.mide.forEach((esp, k) => {
+      assert.ok(muestras[0]!.some(v => v[k]! > 0), `${e.nombre}: reacciona`);
       const { d, p } = ks(muestras[0]!.map(v => v[k]!), muestras[1]!.map(v => v[k]!));
       assert.ok(p > 0.01, `${e.nombre}, sustancia ${esp}: KS D = ${d.toFixed(3)}, p = ${p.toExponential(2)}`);
     });
@@ -133,6 +141,25 @@ test('extremo: barrera enorme, frío, sin calor, endotérmica recortada, lote va
   const calor = endo.arena.calor(0);
   assert.equal(pasoLote(endo.c, 0, 1, [0, KAPPA_SUELO, 0]), Math.floor(calor / 20));
   assert.equal(endo.arena.calor(0), calor % 20);
+  assert.equal(endo.arena.recortes, 0, 'el recorte por calor lo hace pasoLote, no la arena');
+  // Bordes de la tabla de niveles: a 5.000 K (ℓ = 15) D → 2A sin catálisis va a ~10⁸/tick; a 150 K (ℓ = 0) A + A con
+  // la barrera anulada se dimeriza entero.
+  const caliente = lotes(1, { D: 1e6 }, 5000);
+  pasoLote(caliente.c, 0, 1, SIN);
+  assert.equal(caliente.arena.cuantos(0, S.D), 0);
+  assert.equal(caliente.arena.cuantos(0, S.A), 2e6);
+  const helado = lotes(1, { A: 1e6 }, 150);
+  pasoLote(helado.c, 0, 1, [0, 0, 90]);
+  assert.equal(helado.arena.cuantos(0, S.D), 5e5);
+  // Lotes de un cuanto: X → 2Y entero, A + O₂ con barrera 0 reacciona, un A solo no tiene con quién dimerizarse.
+  const unX = lotes(1, { X: 1 }, 295, new QuimicaDoble(solo(3)));
+  pasoLote(unX.c, 0, 1, [0, KAPPA_SUELO, 0]);
+  assert.equal(unX.arena.cuantos(0, S.Y), 2);
+  const unPar = lotes(1, { A: 1, O2: 1 }, 295, new QuimicaDoble(solo(0)));
+  pasoLote(unPar.c, 0, 1, [200, 0, 0]);
+  assert.equal(unPar.arena.cuantos(0, S.CO2), 1);
+  const unA = lotes(1, { A: 1 }, 295, new QuimicaDoble(solo(1)));
+  assert.equal(pasoLote(unA.c, 0, 1, [0, 0, 90]), 0);
   // Lote vacío.
   const vacio = lotes(1, {}, 300);
   assert.equal(pasoLote(vacio.c, 0, 1, SIN), 0);
@@ -179,6 +206,110 @@ test('binomial: momentos en las dos ramas y enteros en [0, n] hasta 2⁵³ − 1
   }
 });
 
+test('competencia: canales que comparten reactivo conservan su diferencia de velocidad (frente a la EDO integrada fina)', () => {
+  // Medias de 10 réplicas con dt = 1 frente a RK4 con pasos de ≤ 0,1 % de cambio, a T y V fijos como en pasoLote.
+  const edo = (kc: number, kd: number, A0: number, O0: number, V: number): [number, number] => {
+    let A = A0, O = O0, C = 0, D = 0, t = 0;
+    const tasas = (a: number, o: number) => [kc * a * o / V, kd * a * a / V] as const;
+    while (t < 1) {
+      const [rc, rd] = tasas(A, O), dA = rc + 2 * rd;
+      let h = 1 - t;
+      if (A > 1e-9 && dA > 0) h = Math.min(h, 1e-3 * A / dA);
+      if (O > 1e-9 && rc > 0) h = Math.min(h, 1e-3 * O / rc);
+      const k1 = tasas(A, O);
+      const k2 = tasas(Math.max(0, A - h / 2 * (k1[0] + 2 * k1[1])), Math.max(0, O - h / 2 * k1[0]));
+      const k3 = tasas(Math.max(0, A - h / 2 * (k2[0] + 2 * k2[1])), Math.max(0, O - h / 2 * k2[0]));
+      const k4 = tasas(Math.max(0, A - h * (k3[0] + 2 * k3[1])), Math.max(0, O - h * k3[0]));
+      const c = h * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]) / 6, d = h * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]) / 6;
+      A = Math.max(0, A - c - 2 * d); O = Math.max(0, O - c); C += c; D += d; t += h;
+    }
+    return [C, D];
+  };
+  const casos = [
+    { nombre: 'parecidas', eaC: 60, eaD: 60, A: 1e6, O2: 1e6 },
+    { nombre: 'dímero rápido', eaC: 70, eaD: 40, A: 1e6, O2: 1e6 },
+    { nombre: 'O₂ escaso', eaC: 55, eaD: 55, A: 1e6, O2: 1e3 },
+    { nombre: 'A escaso', eaC: 55, eaD: 55, A: 1e3, O2: 1e6 },
+  ];
+  for (const e of casos) {
+    const q = new QuimicaDoble([
+      { a: S.A, b: S.O2, salidas: [[S.CO2, 1], [S.H2O, 1]], ea: e.eaC, catalisis: -1 },
+      { a: S.A, b: S.A, salidas: [[S.D, 1]], ea: e.eaD, catalisis: -1 },
+    ]);
+    let co2 = 0, d = 0, V = 0, T = 0;
+    for (let r = 0; r < 10; r++) {
+      const { arena } = lotes(1, { A: e.A, O2: e.O2 }, 600, q);
+      const c = ctxDoble(arena, 17 + r);
+      ({ V, T } = medir(c, 0));
+      pasoLote(c, 0, 1, SIN);
+      co2 += arena.cuantos(0, S.CO2) / 10; d += arena.cuantos(0, S.D) / 10;
+    }
+    const k = (ea: number) => NU * Math.exp(-ea / (R * T));
+    const [C, D] = edo(k(e.eaC), k(e.eaD), e.A, e.O2, V);
+    assert.ok(Math.abs(co2 - C) <= 0.05 * C + 3, `${e.nombre}: CO₂ ${co2.toFixed(1)} frente a ${C.toFixed(1)}`);
+    assert.ok(Math.abs(d - D) <= 0.05 * D + 3, `${e.nombre}: D ${d.toFixed(1)} frente a ${D.toFixed(1)}`);
+  }
+  // El caso del revisor: dimerización con k = ν (κ C–C = ea) frente a la combustión con k ≈ 2,9/tick. La EDO da 0,03
+  // cuantos de CO₂; repartir las demandas ya saturadas le daba ~500.000.
+  let co2 = 0;
+  for (let r = 0; r < 10; r++) {
+    const { arena } = lotes(1, { A: 1e6, O2: 1e6 }, 600);
+    pasoLote(ctxDoble(arena, 1 + r), 0, 1, [75, 0, 90]);
+    co2 += arena.cuantos(0, S.CO2);
+    assert.equal(arena.cuantos(0, S.D), 5e5);
+  }
+  assert.ok(co2 <= 3, `CO₂ en 10 réplicas: ${co2}`);
+});
+
+test('calor y existencias: el recorte no depende del orden de las ranuras y reparte en proporción', () => {
+  // D → 2A (+50 J) y 2Y → X (+20 J), los dos con k = ν: con un D, dos Y y 50 J el orden de las ranuras decidía quién se
+  // llevaba el calor.
+  const receta: RecetaReaccion[] = [
+    { a: S.D, b: 0, salidas: [[S.A, 2]], ea: 0, catalisis: -1 },
+    { a: S.Y, b: S.Y, salidas: [[S.X, 1]], ea: 0, catalisis: -1 },
+  ];
+  const correr = (orden: SustanciaId[], d: number, y: number, calor: number, semilla: number) => {
+    const arena = new ArenaDoble(buffersArena(1), new QuimicaDoble(receta));
+    for (const id of orden) arena.poner(0, id, id === S.D ? d : y);
+    arena.ponerCalor(0, calor);
+    const antes = arena.balance([0]);
+    pasoLote(ctxDoble(arena, semilla), 0, 1, SIN);
+    assert.deepEqual(arena.balance([0]), antes);
+    assert.equal(arena.recortes, 0);
+    return [arena.cuantos(0, S.A), arena.cuantos(0, S.X), arena.calor(0)];
+  };
+  for (let semilla = 1; semilla <= 20; semilla++) {
+    assert.deepEqual(correr([S.D, S.Y], 1, 2, 50, semilla), correr([S.Y, S.D], 1, 2, 50, semilla));
+    assert.deepEqual(correr([S.D, S.Y], 1000, 2000, 35_000, semilla), correr([S.Y, S.D], 1000, 2000, 35_000, semilla));
+  }
+  // Piden 50.000 + 20.000 J y hay la mitad: cada una avanza cerca de la mitad de lo pedido y no sobra un D entero de calor.
+  const [a, x, calor] = correr([S.D, S.Y], 1000, 2000, 35_000, 7);
+  assert.ok(Math.abs(a / 2 - 500) <= 2 && Math.abs(x - 500) <= 2 && calor < 50, `A ${a}, X ${x}, calor ${calor}`);
+});
+
+test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico', () => {
+  // n sustancias que reaccionan todas con todas, lentas (nada se aplica): m ≈ n²/2 canales. Recorrer los m canales por
+  // cada sustancia costaba n·m (de 512 a 1.024, ×8); agrupados, m (×4). Se mide la razón: no depende de la carga.
+  const medirMs = (n: number): number => {
+    const tabla = Array.from({ length: n + 1 }, (_, id): Sustancia => ({
+      id, clase: 1, enlaces: new Uint16Array(0), atomos: Uint8Array.from([1, 0, 0, 0, 0, 0, 0, 0]), masa: 10, energia: 0,
+      prop: { r: 0, dMedia: 0, tFusion: 0, tEbullicion: 1e9, qOxidacion: 0, dureza: 0, tenacidad: 0, flexibilidad: 0, polaridad: 0, densidad: 1, color: 0 },
+    }));
+    const r: Reaccion = { a: 1, b: 2, nivelT: 0, entradas: [], salidas: [], dH: 0, ea: 120, catalisis: -1 };
+    const arena = {
+      especies: (_l: number, ids: Uint32Array) => { for (let i = 0; i < Math.min(n, ids.length); i++) ids[i] = i + 1; return n; },
+      cuantos: () => 1000, calor: () => 0.025 * 1000 * n * 300, aplicar: () => assert.fail('nada debería aplicarse'),
+    } as unknown as ArenaMateria;
+    const c: CtxPaso = { arena, quimica: { internar: () => 0, sustancia: id => tabla[id]!, reaccion: () => r }, azar: () => 0.5 };
+    const ms: number[] = [];
+    for (let k = 0; k < 3; k++) { const t0 = performance.now(); pasoLote(c, 0, 1, SIN); ms.push(performance.now() - t0); }
+    return ms.sort((a, b) => a - b)[1]!;
+  };
+  medirMs(256); // calienta
+  const razon = medirMs(1024) / medirMs(512);
+  assert.ok(razon < 6, `de 512 a 1.024 sustancias el coste crece ×${razon.toFixed(1)}`);
+});
+
 test('fluir: relaja hacia el equilibrio sin cruzarlo, con empuje y con el calor de lo que se mueve', () => {
   const { arena, c } = lotes(2, {}, 300, new QuimicaDoble([]));
   arena.poner(0, S.O2, 1_000_000); arena.poner(1, S.CO2, 10); arena.ponerCalor(0, 7_500_000); arena.ponerCalor(1, 1_000);
@@ -200,20 +331,54 @@ test('fluir: relaja hacia el equilibrio sin cruzarlo, con empuje y con el calor 
   assert.deepEqual(arena.balance([0, 1]), antes);
 });
 
-test('reparto: tramos disjuntos que cubren la lista', () => {
-  for (const [n, hilos] of [[0, 3], [5, 8], [100, 28], [1001, 28]] as const) {
-    let siguiente = 0;
-    for (let h = 0; h < hilos; h++) {
-      const [desde, hasta] = tramo(n, hilos, h);
-      assert.equal(desde, siguiente);
-      assert.ok(hasta - desde <= Math.ceil(n / hilos));
-      siguiente = hasta;
-    }
-    assert.equal(siguiente, n);
+test('fluir: capacidad del compartimento (llena uno vacío) y equilibrio discreto sin vaivén del último cuanto', () => {
+  const { arena, c } = lotes(3, {}, 300, new QuimicaDoble([]));
+  // Un lote vacío (ni cuantos ni calor) recibe gas de otro; y entre dos de O₂ puro a la misma T, el denso empuja al
+  // ralo. Con medir(…).V como capacidad las dos cosas daban 0.
+  arena.poner(0, S.O2, 1_000_000); arena.ponerCalor(0, 1_000_000);
+  assert.ok(fluir(c, 0, 1, S.O2, 1e12, 100, 100, 0, 1) >= 499_999);
+  arena.poner(2, S.O2, 1000); arena.ponerCalor(2, Math.round(arena.calor(0) * 1000 / arena.cuantos(0, S.O2)));
+  assert.ok(fluir(c, 0, 2, S.O2, 1e12, 100, 100, 0, 1) > 200_000);
+  // Un cuanto entre capacidades iguales: el equilibrio continuo es medio cuanto y no se mueve en ningún sentido.
+  const dos = lotes(2, {}, 300, new QuimicaDoble([]));
+  dos.arena.poner(0, S.O2, 1);
+  for (let t = 0; t < 200; t++) {
+    assert.equal(fluir(dos.c, 0, 1, S.O2, 1e12, 1, 1, 0, 1), 0);
+    assert.equal(fluir(dos.c, 1, 0, S.O2, 1e12, 1, 1, 0, 1), 0);
   }
+  // Tres cuantos: se asientan en 1 y 2 (o 2 y 1) y ahí se quedan.
+  dos.arena.poner(0, S.O2, 3);
+  fluir(dos.c, 0, 1, S.O2, 1e12, 1, 1, 0, 1);
+  const asentado = [dos.arena.cuantos(0, S.O2), dos.arena.cuantos(1, S.O2)];
+  assert.deepEqual([...asentado].sort(), [1, 2]);
+  for (let t = 0; t < 200; t++) { fluir(dos.c, 0, 1, S.O2, 1e12, 1, 1, 0, 1); fluir(dos.c, 1, 0, S.O2, 1e12, 1, 1, 0, 1); }
+  assert.deepEqual([dos.arena.cuantos(0, S.O2), dos.arena.cuantos(1, S.O2)], asentado);
+  // Calor: con 1 J de diferencia el equilibrio es medio julio, que en coma flotante queda a un lado en los dos sentidos:
+  // no se mueve ni va y viene.
+  dos.arena.poner(1, S.O2, 1); dos.arena.poner(0, S.O2, 1); dos.arena.ponerCalor(0, 1001); dos.arena.ponerCalor(1, 1000);
+  for (let t = 0; t < 200; t++) { assert.equal(fluirCalor(dos.c, 0, 1, 1e12, 1), 0); assert.equal(fluirCalor(dos.c, 1, 0, 1e12, 1), 0); }
 });
 
-test('reparto entre hilos: ms por lote con 1 y 28 hilos, y I2 exacto con los hilos escribiendo a la vez', async t => {
+test('dueños: un hilo solo escribe sus lotes; los caducados se saltan; el doble no deja la arena a medias', () => {
+  const buffers = buffersArena(2);
+  const arena = new ArenaDoble(buffers, new QuimicaDoble(solo(3)));
+  arena.poner(0, S.X, 100); arena.poner(1, S.X, 100); arena.ponerCalor(0, 1000); arena.ponerCalor(1, 1000);
+  new Int32Array(buffers.dueno)[1] = 1;
+  const c = ctxDoble(arena, 3), lista = Float64Array.from([0, 1, 99]), kappas = new Float64Array(9).fill(KAPPA_SUELO);
+  assert.throws(() => pasarLotes(c, lista, kappas, 0, 2, 1), /otro dueño/);
+  assert.equal(arena.cuantos(1, S.X), 100, 'el lote ajeno no se tocó');
+  assert.equal(pasarLotes(c, Float64Array.from([0, 99]), kappas, 0, 2, 1), 1, 'el 99 no existe: se salta');
+  assert.throws(() => arena.moverCalor(0, 1, 1), /es del hilo 1/);
+  // Validar antes de escribir: 1 J hacia un lote con 2⁵³ − 1 J falla sin debitar el origen.
+  new Int32Array(buffers.dueno)[1] = 0;
+  arena.ponerCalor(1, Number.MAX_SAFE_INTEGER);
+  const antes = arena.balance([0, 1]);
+  assert.throws(() => arena.moverCalor(0, 1, 1), /I3/);
+  assert.throws(() => arena.moverParte(0, 1, { parte: 0, esp: S.Y, cuantos: 1, kappa: null }), /I3/);
+  assert.deepEqual(arena.balance([0, 1]), antes);
+});
+
+test('reparto entre hilos: µs por lote con 1 y 28 hilos desde la misma mezcla, cobertura e I2 exacto', async t => {
   const n = 28 * 2000;
   const buffers = buffersArena(n);
   const arena = new ArenaDoble(buffers, new QuimicaDoble());
@@ -221,30 +386,55 @@ test('reparto entre hilos: ms por lote con 1 y 28 hilos, y I2 exacto con los hil
     arena.poner(l, S.A, 2000 + l % 97); arena.poner(l, S.O2, 1500); arena.poner(l, S.H2O, 300); arena.poner(l, S.X, 500 + l % 13);
     arena.ponerCalor(l, Math.round(0.025 * arena.atomos(l) * (650 + l % 200)));
   }
-  const lista = new Float64Array(new SharedArrayBuffer(8 * n)), kappas = new Float64Array(new SharedArrayBuffer(24 * n));
-  for (let l = 0; l < n; l++) { lista[l] = l; kappas[3 * l + 1] = KAPPA0 / 2; }
   const todos = Array.from({ length: n }, (_, l) => l), antes = arena.balance(todos);
+  const foto = { esp: arena.esp.slice(), cant: arena.cant.slice(), cal: arena.cal.slice() };
+  const restaurar = () => { arena.esp.set(foto.esp); arena.cant.set(foto.cant); arena.cal.set(foto.cal); };
+  const productos = () => [S.CO2, S.D, S.Y].map(esp => { let q = 0; for (let l = 0; l < n; l++) q += arena.cuantos(l, esp); return q; });
+  const dueno = new Int32Array(buffers.dueno);
+  // Dueños por bloques contiguos, como las páginas de un chunk (intercalados, varios hilos escribirían la misma línea de
+  // caché del calor del doble), la lista agrupada por dueño y dónde empieza cada grupo.
+  const despacho = (hilos: number) => {
+    const lista = new Float64Array(new SharedArrayBuffer(8 * n)), kappas = new Float64Array(new SharedArrayBuffer(24 * n));
+    const cortes = new Float64Array(new SharedArrayBuffer(8 * (hilos + 1)));
+    for (let l = 0; l < n; l++) dueno[l] = Math.floor(l * hilos / n);
+    let i = 0;
+    for (let h = 0; h < hilos; h++) {
+      cortes[h] = i;
+      for (let l = 0; l < n; l++) if (dueno[l] === h) { lista[i] = l; kappas[3 * i + 1] = KAPPA0 / 2; i++; }
+    }
+    cortes[hilos] = n;
+    return { lotes: lista.buffer as SharedArrayBuffer, kappas: kappas.buffer as SharedArrayBuffer, cortes: cortes.buffer as SharedArrayBuffer };
+  };
   // Referencia en el hilo principal: el mismo bucle que corre cada worker.
+  const uno = despacho(1);
   const t0 = performance.now();
-  pasarLotes(ctxDoble(arena, 5), lista, kappas, 0, n, 1);
-  const principal = performance.now() - t0;
-  const medidas: Record<number, number> = {};
+  assert.equal(pasarLotes(ctxDoble(arena, 5), new Float64Array(uno.lotes), new Float64Array(uno.kappas), 0, n, 1), n);
+  const principal = performance.now() - t0, referencia = productos();
+  assert.deepEqual(arena.balance(todos), antes);
+  const medidas: Record<number, number> = {}, mezcla: Record<number, number[]> = {};
   for (const hilos of [1, 28]) {
+    restaurar();
+    const trabajo = despacho(hilos);
     const piscina = new PiscinaDoble(hilos, buffers, 1000 * hilos);
     try {
-      const trabajo = { lotes: lista.buffer as SharedArrayBuffer, kappas: kappas.buffer as SharedArrayBuffer };
-      await piscina.correr(trabajo, { n, dt: 1, hilos }); // calienta: carga de módulos y JIT
+      await piscina.correr(trabajo, { dt: 1 }); // calienta: carga de módulos y JIT
       const ms: number[] = [];
       for (let r = 0; r < 5; r++) {
-        const { ms: m, veces } = await piscina.correr(trabajo, { n, dt: 1, hilos });
-        assert.ok(veces > 0);
+        restaurar();
+        const { ms: m, lotes: avanzados } = await piscina.correr(trabajo, { dt: 1 });
+        assert.equal(avanzados, n, 'cada lote avanzó una vez');
+        assert.deepEqual(arena.balance(todos), antes);
         ms.push(m);
       }
       medidas[hilos] = ms.sort((a, b) => a - b)[2]!;
+      mezcla[hilos] = productos();
     } finally { await piscina.cerrar(); }
   }
-  assert.deepEqual(arena.balance(todos), antes);
-  const informe = `${n} lotes (A, O₂, H₂O y X; combustión, dimerización y X → 2Y): hilo principal ${(1000 * principal / n).toFixed(2)} µs/lote; `
+  // Misma mezcla de partida: CO₂, D e Y totales coinciden con la referencia dentro del ruido (CO₂ ~2·10⁵, σ ≈ 0,3 %).
+  for (const hilos of [1, 28]) mezcla[hilos]!.forEach((v, k) => assert.ok(Math.abs(v - referencia[k]!) <= 0.01 * referencia[k]!,
+    `${hilos} hilos: ${v} frente a ${referencia[k]} (producto ${k})`));
+  const informe = `${n} lotes (A, O₂, H₂O y X; combustión, dimerización y X → 2Y; CO₂/D/Y = ${referencia.join('/')}): `
+    + `hilo principal ${(1000 * principal / n).toFixed(2)} µs/lote; `
     + `1 hilo ${(1000 * medidas[1]! / n).toFixed(2)} µs/lote (${medidas[1]!.toFixed(1)} ms); `
     + `28 hilos ${(1000 * medidas[28]! / n).toFixed(2)} µs/lote (${medidas[28]!.toFixed(1)} ms), aceleración ${(medidas[1]! / medidas[28]!).toFixed(1)}×; `
     + `carga ${loadavg().map(v => v.toFixed(1)).join(' ')}`;

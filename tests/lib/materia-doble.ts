@@ -93,36 +93,62 @@ const entero = (v: number, que: string): number => {
   return v;
 };
 
-export interface BuffersArena { esp: SharedArrayBuffer; cant: SharedArrayBuffer; calor: SharedArrayBuffer }
+/** `dueno`: hilo dueño de cada lote (Int32), como el reparto por chunk; solo él escribe el lote. */
+export interface BuffersArena { esp: SharedArrayBuffer; cant: SharedArrayBuffer; calor: SharedArrayBuffer; dueno: SharedArrayBuffer }
 export const buffersArena = (lotes: number): BuffersArena => ({
-  esp: new SharedArrayBuffer(lotes * RANURAS * 4), cant: new SharedArrayBuffer(lotes * RANURAS * 8), calor: new SharedArrayBuffer(lotes * 8),
+  esp: new SharedArrayBuffer(lotes * RANURAS * 4), cant: new SharedArrayBuffer(lotes * RANURAS * 8),
+  calor: new SharedArrayBuffer(lotes * 8), dueno: new SharedArrayBuffer(lotes * 4),
 });
 
+/** Un cambio pendiente: Δ cuantos de `id` en `l` (id = 0: Δ julios de calor). */
+type Cambio = [l: LoteRef, id: SustanciaId, delta: number];
+
 export class ArenaDoble implements ArenaMateria {
-  readonly esp: Uint32Array; readonly cant: Float64Array; readonly cal: Float64Array;
+  readonly esp: Uint32Array; readonly cant: Float64Array; readonly cal: Float64Array; readonly dueno: Int32Array;
   readonly n: number;
-  constructor(readonly buffers: BuffersArena, readonly quimica: QuimicaDoble) {
+  /** Veces que `aplicar` tuvo que recortar lo pedido: `pasoLote` debe pedir siempre lo que hay. */
+  recortes = 0;
+  constructor(readonly buffers: BuffersArena, readonly quimica: QuimicaDoble, readonly hilo = 0) {
     this.esp = new Uint32Array(buffers.esp); this.cant = new Float64Array(buffers.cant); this.cal = new Float64Array(buffers.calor);
+    this.dueno = new Int32Array(buffers.dueno);
     this.n = this.cal.length;
   }
-  #ranura(l: LoteRef, id: SustanciaId, crear: boolean): number {
-    let libre = -1;
-    for (let r = l * RANURAS; r < (l + 1) * RANURAS; r++) {
-      if (this.esp[r] === id) return r;
-      if (libre < 0 && this.esp[r] === 0) libre = r;
+  #ranura(l: LoteRef, id: SustanciaId): number {
+    for (let r = l * RANURAS; r < (l + 1) * RANURAS; r++) if (this.esp[r] === id) return r;
+    return -1;
+  }
+  /** Valida todos los cambios (dueño, I3, ranuras libres) y solo entonces escribe: un error deja la arena como estaba.
+   * Son pocos (≤ 6), así que se agrupan con una búsqueda lineal. */
+  #cambiar(cambios: Cambio[]): void {
+    const nuevos: Cambio[] = [];
+    for (const [l, id, delta] of cambios) {
+      if (!this.propio(l)) throw new Error(`el lote ${l} es del hilo ${this.dueno[l]}, no del ${this.hilo}`);
+      const previo = nuevos.find(c => c[0] === l && c[1] === id);
+      if (previo) previo[2] += delta;
+      else nuevos.push([l, id, (id === 0 ? this.cal[l]! : this.cuantos(l, id)) + delta]);
     }
-    if (!crear) return -1;
-    if (libre < 0) throw new Error('el doble no tiene desborde');
-    this.esp[libre] = id;
-    return libre;
+    for (const [l, id, v] of nuevos) {
+      entero(v, id === 0 ? `calor(${l})` : `cant(${l}, ${id})`);
+      if (id === 0 || v === 0 || this.#ranura(l, id) >= 0) continue;
+      let libres = 0;
+      for (let r = l * RANURAS; r < (l + 1) * RANURAS; r++) if (this.esp[r] === 0) libres++;
+      for (const [l2, id2, v2] of nuevos) if (l2 === l && id2 !== 0 && id2 !== id && v2 > 0 && this.#ranura(l2, id2) < 0) libres--;
+      if (libres <= 0) throw new Error('el doble no tiene desborde');
+    }
+    for (const [l, id, v] of nuevos) {
+      if (id === 0) { this.cal[l] = v; continue; }
+      let r = this.#ranura(l, id);
+      if (r < 0) {
+        if (v === 0) continue;
+        for (r = l * RANURAS; this.esp[r] !== 0; r++);
+        this.esp[r] = id;
+      }
+      this.cant[r] = v;
+      if (v === 0) this.esp[r] = 0;
+    }
   }
-  #sumar(l: LoteRef, id: SustanciaId, delta: number): void {
-    const r = this.#ranura(l, id, true);
-    this.cant[r] = entero(this.cant[r]! + delta, `cant(${l}, ${id})`);
-    if (this.cant[r] === 0) this.esp[r] = 0;
-  }
-  poner(l: LoteRef, id: SustanciaId, cuantos: number): void { this.#sumar(l, id, cuantos - this.cuantos(l, id)); }
-  ponerCalor(l: LoteRef, j: number): void { this.cal[l] = entero(j, `calor(${l})`); }
+  poner(l: LoteRef, id: SustanciaId, cuantos: number): void { this.#cambiar([[l, id, cuantos - this.cuantos(l, id)]]); }
+  ponerCalor(l: LoteRef, j: number): void { this.#cambiar([[l, 0, j - this.cal[l]!]]); }
   atomos(l: LoteRef): number {
     let n = 0;
     for (let r = l * RANURAS; r < (l + 1) * RANURAS; r++) if (this.esp[r]) n += this.cant[r]! * this.quimica.sustancia(this.esp[r]!).atomos.reduce((s, v) => s + v, 0);
@@ -148,10 +174,10 @@ export class ArenaDoble implements ArenaMateria {
     for (let r = l * RANURAS; r < (l + 1) * RANURAS; r++) if (this.esp[r]) { if (n < ids.length) ids[n] = this.esp[r]!; n++; }
     return n;
   }
-  cuantos(l: LoteRef, id: SustanciaId): number { const r = this.#ranura(l, id, false); return r < 0 ? 0 : this.cant[r]!; }
+  cuantos(l: LoteRef, id: SustanciaId): number { const r = this.#ranura(l, id); return r < 0 ? 0 : this.cant[r]!; }
   calor(l: LoteRef): number { return this.cal[l]!; }
-  vivo(l: LoteRef): boolean { return l >= 0 && l < this.n; }
-  propio(l: LoteRef): boolean { return this.vivo(l); }
+  vivo(l: LoteRef): boolean { return Number.isInteger(l) && l >= 0 && l < this.n; }
+  propio(l: LoteRef): boolean { return this.vivo(l) && this.dueno[l] === this.hilo; }
 
   aplicar(l: LoteRef, e: Ecuacion, veces: number): number {
     entero(veces, 'veces');
@@ -160,10 +186,9 @@ export class ArenaDoble implements ArenaMateria {
     let v = veces;
     for (const x of e.entradas) v = Math.min(v, Math.floor(this.cuantos(l, x.id) / x.nu));
     if (e.dH > 0) v = Math.min(v, Math.floor(this.cal[l]! / e.dH));
+    if (v < veces) this.recortes++;
     if (v === 0) return 0;
-    for (const x of e.entradas) this.#sumar(l, x.id, -v * x.nu);
-    for (const x of e.salidas) this.#sumar(l, x.id, v * x.nu);
-    this.cal[l] = entero(this.cal[l]! - v * e.dH, `calor(${l})`);
+    this.#cambiar([...e.entradas.map((x): Cambio => [l, x.id, -v * x.nu]), ...e.salidas.map((x): Cambio => [l, x.id, v * x.nu]), [l, 0, -v * e.dH]]);
     return v;
   }
   moverParte(de: LoteRef, a: LoteRef, p: Pedido): number {
@@ -172,21 +197,20 @@ export class ArenaDoble implements ArenaMateria {
     const n = Math.min(p.cuantos, this.cuantos(de, p.esp));
     if (n === 0) return 0;
     const atomosEsp = this.quimica.sustancia(p.esp).atomos.reduce((s, v) => s + v, 0);
-    const j = Math.floor(Number(BigInt(this.cal[de]!) * BigInt(n * atomosEsp) / BigInt(this.atomos(de))));
-    this.#sumar(de, p.esp, -n); this.#sumar(a, p.esp, n);
-    this.cal[de] = entero(this.cal[de]! - j, 'calor'); this.cal[a] = entero(this.cal[a]! + j, 'calor');
+    const j = Number(BigInt(this.cal[de]!) * BigInt(n * atomosEsp) / BigInt(this.atomos(de)));
+    this.#cambiar([[de, p.esp, -n], [a, p.esp, n], [de, 0, -j], [a, 0, j]]);
     return n;
   }
   moverCalor(de: LoteRef, a: LoteRef, j: number): number {
     entero(j, 'j');
     const m = Math.min(j, this.cal[de]!);
-    this.cal[de] = entero(this.cal[de]! - m, 'calor'); this.cal[a] = entero(this.cal[a]! + m, 'calor');
+    this.#cambiar([[de, 0, -m], [a, 0, m]]);
     return m;
   }
   mover(t: { de: LoteRef; a: LoteRef; esp: SustanciaId; cuantos: number }): number {
     entero(t.cuantos, 'cuantos');
     const n = Math.min(t.cuantos, this.cuantos(t.de, t.esp));
-    if (n > 0) { this.#sumar(t.de, t.esp, -n); this.#sumar(t.a, t.esp, n); }
+    if (n > 0) this.#cambiar([[t.de, t.esp, -n], [t.a, t.esp, n]]);
     return n;
   }
   nuevo(): LoteRef { throw new Error('no usado'); }
@@ -205,31 +229,32 @@ export const ctxDoble = (arena: ArenaDoble, semilla: number): CtxPaso => ({ aren
 
 // ── Piscina de prueba ────────────────────────────────────────────────────────────────────────────────────
 
-/** N workers que abren la arena doble sobre los mismos SAB y corren `manejador` de paso-worker por despacho. */
+/** N workers que abren la arena doble sobre los mismos SAB, cada uno como el hilo dueño de su índice, y corren
+ * `manejador` de paso-worker por despacho. */
 export class PiscinaDoble {
   readonly #workers: Worker[];
   constructor(readonly hilos: number, arena: BuffersArena, semilla: number) {
     this.#workers = Array.from({ length: hilos }, (_, h) => new Worker(new URL(import.meta.url), {
-      workerData: { pasoDoble: true, arena, semilla: semilla + h },
+      workerData: { pasoDoble: true, arena, semilla: semilla + h, hilo: h },
     }));
   }
-  /** Un despacho; devuelve la pared (ms) y Σ veces aplicadas. */
-  async correr(buffers: TrabajoPaso['buffers'], params: TrabajoPaso['params']): Promise<{ ms: number; veces: number }> {
+  /** Un despacho; devuelve la pared (ms) y Σ lotes avanzados. */
+  async correr(buffers: TrabajoPaso['buffers'], params: TrabajoPaso['params']): Promise<{ ms: number; lotes: number }> {
     const inicio = performance.now();
     const respuestas = await Promise.all(this.#workers.map((w, workerIndex) => new Promise<number>((resolver, fallar) => {
-      w.once('message', (m: { veces?: number; error?: string }) => m.error ? fallar(new Error(m.error)) : resolver(m.veces!));
+      w.once('message', (m: { lotes?: number; error?: string }) => m.error ? fallar(new Error(m.error)) : resolver(m.lotes!));
       w.postMessage({ buffers, params, workerIndex });
     })));
-    return { ms: performance.now() - inicio, veces: respuestas.reduce((s, v) => s + v, 0) };
+    return { ms: performance.now() - inicio, lotes: respuestas.reduce((s, v) => s + v, 0) };
   }
   cerrar(): Promise<number[]> { return Promise.all(this.#workers.map(w => w.terminate())); }
 }
 
 if (!isMainThread && (workerData as { pasoDoble?: boolean } | null)?.pasoDoble) {
-  const { arena, semilla } = workerData as { arena: BuffersArena; semilla: number };
-  const correr = manejador(() => ctxDoble(new ArenaDoble(arena, new QuimicaDoble()), semilla));
+  const { arena, semilla, hilo } = workerData as { arena: BuffersArena; semilla: number; hilo: number };
+  const correr = manejador(() => ctxDoble(new ArenaDoble(arena, new QuimicaDoble(), hilo), semilla));
   parentPort!.on('message', (t: TrabajoPaso) => {
-    try { parentPort!.postMessage({ veces: correr(t) }); }
+    try { parentPort!.postMessage({ lotes: correr(t) }); }
     catch (e) { parentPort!.postMessage({ error: e instanceof Error ? e.stack : String(e) }); }
   });
 }

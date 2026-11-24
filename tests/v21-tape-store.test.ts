@@ -507,3 +507,42 @@ test('field-level entity patches omit unchanged heavy fields while preserving ex
   assert.equal('genes' in delta.animalsPatch.upserts[0], false, 'unchanged animal genes are omitted');
   assert.deepEqual(reader.readChunk(0, 2).frames, [v0, v1]);
 });
+
+test('incremental techPatch/statsPatch/blueprintsPatch/communitiesPatch and sparse micro-drift suppression', t => {
+  const f = fixture(t, { keyframeInterval: 60 }); const writer = f.writer(); const reader = f.reader();
+  const v0 = viewAt(0);
+  v0.tiles = Array.from({ length: 5000 }, (_, i) => tile(i % 100, Math.floor(i / 100)));
+  v0.tiles[0].terrain = 'shelter';
+  writer.record(v0, 100);
+  const v1 = structuredClone(v0);
+  v1.tick = 1; v1.sequence = 1;
+  // Micro-drift on 4999 ambient tiles must NOT trigger tilesPatch in sparseMode (>4096 tiles):
+  for (let i = 1; i < 5000; i++) v1.tiles[i].moisture += 0.002;
+  // One genuine visual shift MUST register:
+  v1.tiles[5].food = 0.85;
+  // Changing one item + one stat must NOT resend recipes or stats.history:
+  v1.technology!.items[0].x += 1;
+  v1.stats!.population += 1;
+  v1.blueprints![0].uses += 1;
+  v1.communities![0].cooperation += 1;
+  writer.record(v1, 100);
+  writer.flush();
+
+  const delta = blob(f.sql(), 'tape_frames', 1);
+  assert.equal(delta.tilesPatch.length, 1, 'only the genuinely changed tile entered tilesPatch');
+  assert.equal(delta.tilesPatch[0].x, 5);
+  assert.equal('technology' in delta, false);
+  assert.ok(delta.techPatch && delta.techPatch.itemsPatch && !delta.techPatch.recipesPatch);
+  assert.equal('stats' in delta, false);
+  assert.ok(delta.statsPatch && delta.statsPatch.set.population === v1.stats!.population && !('history' in delta.statsPatch.set));
+  assert.equal('blueprints' in delta, false);
+  assert.ok(delta.blueprintsPatch && delta.blueprintsPatch.upserts.length === 1);
+  assert.equal('communities' in delta, false);
+  assert.ok(delta.communitiesPatch && delta.communitiesPatch.upserts.length === 1);
+  const reconstructed = reader.readChunk(1, 1).frames[0];
+  assert.equal(reconstructed.technology!.items[0].x, v1.technology!.items[0].x);
+  assert.deepEqual(reconstructed.technology!.recipes, v1.technology!.recipes);
+  assert.deepEqual(reconstructed.stats, v1.stats);
+  assert.deepEqual(reconstructed.blueprints, v1.blueprints);
+  assert.deepEqual(reconstructed.communities, v1.communities);
+});

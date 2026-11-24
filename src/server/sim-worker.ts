@@ -220,6 +220,8 @@ export function createChunkObserver() {
   };
 }
 
+const q2 = (n: number): number => Math.round(n * 100) / 100;
+
 /**
  * V21 DVR frame: the full-population mirror projection (no private fields), with its own copies of
  * everything that still aliases live world state, plus the tiles given by the caller (changed chunks,
@@ -229,6 +231,30 @@ export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId
   const view = projectMirrorWorld(world, undefined, worldContext(world));
   if (instanceId !== undefined) view.instanceId = instanceId;
   view.performance = { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) };
+  // Quantize fast-drifting continuous body telemetry to 2 decimals (and animal age to 20-tick buckets)
+  // so resting inhabitants and hundreds of grazing fauna don't rewrite unchanged entities on every delta tick.
+  view.people = view.people.map(p => ({
+    ...p,
+    energy: q2(p.energy),
+    hunger: q2(p.hunger),
+    fatigue: q2(p.fatigue),
+    ...(p.thirst !== undefined ? { thirst: q2(p.thirst) } : {}),
+    ...(p.health !== undefined ? { health: q2(p.health) } : {}),
+    ...(p.vitality !== undefined ? { vitality: q2(p.vitality) } : {}),
+    ...(p.foodReserve !== undefined ? { foodReserve: q2(p.foodReserve) } : {}),
+  }));
+  if (view.animals) {
+    view.animals = view.animals.map(a => ({
+      ...a,
+      hunger: q2(a.hunger),
+      thirst: q2(a.thirst),
+      energy: q2(a.energy),
+      fatigue: q2(a.fatigue),
+      health: q2(a.health),
+      ...(a.reproReserve !== undefined ? { reproReserve: q2(a.reproReserve) } : {}),
+      ...(a.age !== undefined ? { age: Math.floor(a.age / 20) * 20 } : {}),
+    }));
+  }
   // `projectMirrorWorld` hands out the live structures array: the step after this one mutates it.
   if (view.structures) view.structures = structuredClone(view.structures);
   view.tiles = tiles;

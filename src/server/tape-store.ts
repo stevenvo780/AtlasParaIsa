@@ -15,11 +15,24 @@ type Compact = Omit<WorldView, 'tiles'> & { modifiedTiles: Tile[] };
 type Identified = { id: string };
 type PartialUpsert = { id: string; _p: 1; _u?: string[] } & Record<string, unknown>;
 type Patch<T extends Identified> = { upserts: (T | PartialUpsert)[]; removed: string[]; order?: string[] };
+type TechPatch = {
+  itemsPatch?: Patch<NonNullable<WorldView['technology']>['items'][number]>;
+  recipesPatch?: Patch<NonNullable<WorldView['technology']>['recipes'][number]>;
+  knowledge?: NonNullable<WorldView['technology']>['knowledge'];
+  unsetKnowledge?: true;
+  dynamics?: NonNullable<WorldView['technology']>['dynamics'];
+  budgets?: NonNullable<WorldView['technology']>['budgets'];
+};
+type ObjectPatch = { set: Record<string, unknown>; unset?: string[] };
 type Delta = Partial<Header> & {
   unset?: string[];
   peoplePatch?: Patch<WorldView['people'][number]>;
   animalsPatch?: Patch<NonNullable<WorldView['animals']>[number]>;
   structuresPatch?: Patch<NonNullable<WorldView['structures']>[number]>;
+  blueprintsPatch?: Patch<NonNullable<WorldView['blueprints']>[number]>;
+  communitiesPatch?: Patch<NonNullable<WorldView['communities']>[number]>;
+  techPatch?: TechPatch;
+  statsPatch?: ObjectPatch;
   tilesPatch?: Tile[];
   removedTiles?: string[];
   tileOrder?: string[];
@@ -56,6 +69,39 @@ function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
     && a.cultivation === b.cultivation && a.traffic === b.traffic && a.paved === b.paved
     && a.drinkingWater === b.drinkingWater && a.species === b.species
     && a.fauna === b.fauna && a.life === b.life;
+}
+function tileChangedSignificantly(a: Tile, b: Tile): boolean {
+  if (
+    a.terrain !== b.terrain || a.biome !== b.biome || a.feature !== b.feature
+    || a.species !== b.species || a.wood !== b.wood || a.stone !== b.stone
+    || a.paved !== b.paved
+  ) return true;
+  if (Math.abs((a.cultivation ?? 0) - (b.cultivation ?? 0)) >= 0.04) return true;
+  if (Math.abs((a.traffic ?? 0) - (b.traffic ?? 0)) >= 0.05 && ((a.traffic ?? 0) >= 0.25 || (b.traffic ?? 0) >= 0.25)) return true;
+  return Math.abs((a.food ?? 0) - (b.food ?? 0)) >= 0.12
+    || Math.abs((a.drinkingWater ?? 0) - (b.drinkingWater ?? 0)) >= 0.12
+    || Math.abs((a.vegetation ?? 0) - (b.vegetation ?? 0)) >= 0.12
+    || Math.abs((a.moisture ?? 0) - (b.moisture ?? 0)) >= 0.15
+    || Math.abs((a.growth ?? 0) - (b.growth ?? 0)) >= 0.12;
+}
+function diffObject(cur: Record<string, unknown>, prev: Record<string, unknown>): ObjectPatch | undefined {
+  const set: Record<string, unknown> = {};
+  let hasChange = false;
+  for (const key in cur) {
+    if (!equal(cur[key], prev[key])) { set[key] = cur[key]; hasChange = true; }
+  }
+  const unset: string[] = [];
+  for (const key in prev) if (!(key in cur)) { unset.push(key); hasChange = true; }
+  if (!hasChange) return undefined;
+  return unset.length ? { set, unset } : { set };
+}
+function applyObjectPatch<T extends Record<string, unknown>>(prev: T, change: ObjectPatch): T {
+  const next: Record<string, unknown> = { ...prev, ...change.set };
+  for (const key of change.unset ?? []) delete next[key];
+  return next as T;
+}
+function patchNonEmpty<T extends Identified>(p: Patch<T>): boolean {
+  return p.upserts.length > 0 || p.removed.length > 0 || p.order !== undefined;
 }
 /** `state.tiles` entries are flat immutable Tile records (never mutated in place), so a Map copy suffices. */
 function cloneState(state: State): State {
@@ -140,12 +186,28 @@ function applyPatch<T extends Identified>(current: T[], change: Patch<T>): T[] {
 }
 
 function apply(state: State, data: Uint8Array): void {
-  const { peoplePatch, animalsPatch, structuresPatch, tilesPatch, removedTiles, tileOrder,
+  const { peoplePatch, animalsPatch, structuresPatch, blueprintsPatch, communitiesPatch,
+    techPatch, statsPatch, tilesPatch, removedTiles, tileOrder,
     newEvents, eventOrder, unset, ...header } = decode<Delta>(data);
   Object.assign(state.view, header);
   if (peoplePatch) state.view.people = applyPatch(state.view.people, peoplePatch);
   if (animalsPatch) state.view.animals = applyPatch(state.view.animals ?? [], animalsPatch);
   if (structuresPatch) state.view.structures = applyPatch(state.view.structures ?? [], structuresPatch);
+  if (blueprintsPatch) state.view.blueprints = applyPatch(state.view.blueprints ?? [], blueprintsPatch);
+  if (communitiesPatch) state.view.communities = applyPatch(state.view.communities ?? [], communitiesPatch);
+  if (techPatch && state.view.technology) {
+    const tech = { ...state.view.technology };
+    if (techPatch.itemsPatch) tech.items = applyPatch(tech.items, techPatch.itemsPatch);
+    if (techPatch.recipesPatch) tech.recipes = applyPatch(tech.recipes, techPatch.recipesPatch);
+    if (techPatch.knowledge !== undefined) tech.knowledge = techPatch.knowledge;
+    else if (techPatch.unsetKnowledge) delete tech.knowledge;
+    if (techPatch.dynamics !== undefined) tech.dynamics = techPatch.dynamics;
+    if (techPatch.budgets !== undefined) tech.budgets = techPatch.budgets;
+    state.view.technology = tech;
+  }
+  if (statsPatch && state.view.stats) {
+    state.view.stats = applyObjectPatch(state.view.stats as unknown as Record<string, unknown>, statsPatch) as unknown as WorldView['stats'];
+  }
   for (const key of removedTiles ?? []) state.tiles.delete(key);
   for (const tile of tilesPatch ?? []) state.tiles.set(coord(tile), tile);
   if (tileOrder) state.tiles = new Map(tileOrder.map(key => [key, state.tiles.get(key)!]));
@@ -191,6 +253,8 @@ export class TapeWriter implements ITapeWriter {
     if (options.path !== ':memory:') mkdirSync(dirname(resolve(options.path)), { recursive: true });
     this.db = new DatabaseSync(options.path);
     try {
+      const preVersion = Number(this.db.prepare('PRAGMA user_version').get()!.user_version);
+      if (preVersion === 0) this.db.exec('PRAGMA auto_vacuum=INCREMENTAL;');
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;');
       const version = Number(this.db.prepare('PRAGMA user_version').get()!.user_version);
       if (version !== 0 && version !== 1) throw new Error(`Unsupported tape schema version: ${version}`);
@@ -230,8 +294,9 @@ export class TapeWriter implements ITapeWriter {
     const { tiles, ...raw } = view;
     const current = jsonCopy(raw);
     delete (current as unknown as Record<string, unknown>).seed;
-    const { people, animals, structures, events, ...header } = current;
-    const small = !partialTiles && tiles.length <= 4096;
+    const { people, animals, structures, events, blueprints, communities, technology, stats, ...header } = current;
+    const sparseMode = tiles.length > 4096 || (partialTiles && this.previousTiles.size > 4096);
+    const small = !partialTiles && !sparseMode;
     const nextTiles = partialTiles ? this.previousTiles : new Map<string, Tile>();
     const tilesPatch: Tile[] = [];
     const removedTiles: string[] = [];
@@ -239,13 +304,16 @@ export class TapeWriter implements ITapeWriter {
     for (const tile of tiles) {
       const key = coord(tile);
       const old = this.previousTiles.get(key);
-      const changed = old !== undefined && !tileEqual(old, tile);
+      const changed = old !== undefined && (sparseMode ? tileChangedSignificantly(old, tile) : !tileEqual(old, tile));
       const copy = old && !changed ? old : { ...tile };
       if (!partialTiles || !old || changed) nextTiles.set(key, copy);
       if (small || interesting(tile) || changed || this.recordedTiles.has(key)) {
         const rec = this.recordedTiles.get(key);
-        if (rec !== copy && !tileEqual(copy, rec)) tilesPatch.push(copy);
-        if (rec !== copy) this.recordedTiles.set(key, copy);
+        const recDiff = rec !== copy && (rec === undefined || (sparseMode ? tileChangedSignificantly(rec, copy) : !tileEqual(copy, rec)));
+        if (recDiff) {
+          tilesPatch.push(copy);
+          this.recordedTiles.set(key, copy);
+        }
       }
     }
     if (!partialTiles) {
@@ -265,7 +333,8 @@ export class TapeWriter implements ITapeWriter {
       keyframe = encode({ ...current, modifiedTiles: [...this.recordedTiles.values()] } satisfies Compact);
       data = encode({ keyframe: true });
     } else {
-      const { people: oldPeople, animals: oldAnimals, structures: oldStructures, events: _oldEvents, ...oldHeader } = this.previous!;
+      const { people: oldPeople, animals: oldAnimals, structures: oldStructures, events: _oldEvents,
+        blueprints: oldBlueprints, communities: oldCommunities, technology: oldTech, stats: oldStats, ...oldHeader } = this.previous!;
       const delta: Delta = {
         tick: view.tick, sequence: view.sequence, day: view.day, phase: view.phase, weather: view.weather,
         peoplePatch: patch(people, oldPeople), tilesPatch, newEvents: events.filter(e => !oldEvents.has(e.id)),
@@ -279,6 +348,35 @@ export class TapeWriter implements ITapeWriter {
       else if (oldAnimals) unset.push('animals');
       if (structures) delta.structuresPatch = patch(structures, oldStructures ?? []);
       else if (oldStructures) unset.push('structures');
+      if (blueprints && oldBlueprints) {
+        const bp = patch(blueprints, oldBlueprints);
+        if (patchNonEmpty(bp)) delta.blueprintsPatch = bp;
+      } else if (blueprints) delta.blueprints = blueprints;
+      else if (oldBlueprints) unset.push('blueprints');
+      if (communities && oldCommunities) {
+        const cp = patch(communities, oldCommunities);
+        if (patchNonEmpty(cp)) delta.communitiesPatch = cp;
+      } else if (communities) delta.communities = communities;
+      else if (oldCommunities) unset.push('communities');
+      if (technology && oldTech) {
+        const tp: TechPatch = {};
+        let techChanged = false;
+        const ip = patch(technology.items, oldTech.items);
+        if (patchNonEmpty(ip)) { tp.itemsPatch = ip; techChanged = true; }
+        const rp = patch(technology.recipes, oldTech.recipes);
+        if (patchNonEmpty(rp)) { tp.recipesPatch = rp; techChanged = true; }
+        if (technology.knowledge !== undefined && !equal(technology.knowledge, oldTech.knowledge)) { tp.knowledge = technology.knowledge; techChanged = true; }
+        else if (technology.knowledge === undefined && oldTech.knowledge !== undefined) { tp.unsetKnowledge = true; techChanged = true; }
+        if (!equal(technology.dynamics, oldTech.dynamics)) { tp.dynamics = technology.dynamics; techChanged = true; }
+        if (!equal(technology.budgets, oldTech.budgets)) { tp.budgets = technology.budgets; techChanged = true; }
+        if (techChanged) delta.techPatch = tp;
+      } else if (technology) delta.technology = technology;
+      else if (oldTech) unset.push('technology');
+      if (stats && oldStats) {
+        const sp = diffObject(stats as unknown as Record<string, unknown>, oldStats as unknown as Record<string, unknown>);
+        if (sp) delta.statsPatch = sp;
+      } else if (stats) delta.stats = stats;
+      else if (oldStats) unset.push('stats');
       if (unset.length) delta.unset = unset;
       if (removedTiles.length) delta.removedTiles = removedTiles;
       if (tileOrder && !equal(tileOrder, [...this.previousTiles.keys()])) delta.tileOrder = tileOrder;
@@ -314,9 +412,10 @@ export class TapeWriter implements ITapeWriter {
         this.setMeta.run('worldInstanceId', this.previous.instanceId ?? '');
         this.setMeta.run('geologyKey', JSON.stringify(this.previous.geologyKey ?? null));
       }
-      this.prune();
+      const pruned = this.prune();
       const retained = bounds(this.db).totalFrames;
       this.db.exec('COMMIT');
+      if (pruned) this.db.exec('PRAGMA incremental_vacuum(200);');
       this.count = retained;
       this.pending = [];
       this.lastFlushAt = Date.now();
@@ -326,10 +425,10 @@ export class TapeWriter implements ITapeWriter {
     }
   }
 
-  private prune(): void {
+  private prune(): boolean {
     const cutoff = this.db.prepare('SELECT tick,keyframe_tick,data,day,pop,saved_at FROM tape_frames ORDER BY tick DESC LIMIT 1 OFFSET ?')
       .get(this.maxFrames - 1) as (FrameRow & { day: number; pop: number; saved_at: number }) | undefined;
-    if (!cutoff) return;
+    if (!cutoff) return false;
     if (cutoff.tick !== cutoff.keyframe_tick) {
       // Keeping just the old anchor is insufficient: intermediate deltas would be lost.
       // Promote the boundary BEFORE removing the prefix, in the same transaction.
@@ -340,8 +439,9 @@ export class TapeWriter implements ITapeWriter {
       this.db.prepare('UPDATE tape_frames SET data=? WHERE tick=?').run(encode({ keyframe: true }), cutoff.tick);
       if (this.anchor === cutoff.keyframe_tick) this.anchor = cutoff.tick;
     }
-    this.db.prepare('DELETE FROM tape_frames WHERE tick<?').run(cutoff.tick);
+    const deleted = this.db.prepare('DELETE FROM tape_frames WHERE tick<?').run(cutoff.tick);
     this.db.exec('DELETE FROM tape_keyframes WHERE tick < (SELECT MIN(keyframe_tick) FROM tape_frames)');
+    return Number(deleted.changes) > 0;
   }
 
   close(): void {

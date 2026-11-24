@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  ALCANCES as ALCANCES_BASE, ALCANCES_SERIALES as SERIALES_BASE, COLECCIONES_POR_NOMBRE, CONSTANTES_DE_RADIO, ESCRITURAS, ESTADO_GLOBAL, FASES_CON_HALO, FUERA_DEL_PASO, HALO_CELDAS, INVENTARIO as INVENTARIO_BASE,
-  LECTURAS_GLOBALES, LECTURAS_POR_IDENTIDAD as IDENTIDAD_BASE, LLAMADAS as LLAMADAS_BASE, PRIMITIVAS, RAICES as RAICES_BASE, RECORRIDOS as RECORRIDOS_BASE, UMBRALES_QUE_NO_SON_LECTURAS,
+  ALCANCES as ALCANCES_BASE, ALCANCES_SERIALES as SERIALES_BASE, COLECCIONES_POR_NOMBRE, CONSTANTES_DE_RADIO as CONSTANTES_BASE, ESCRITURAS, ESTADO_GLOBAL as ESTADO_BASE, FASES_CON_HALO, FUERA_DEL_PASO, HALO_CELDAS, INVENTARIO as INVENTARIO_BASE,
+  LECTURAS_GLOBALES as GLOBALES_BASE, LECTURAS_POR_IDENTIDAD as IDENTIDAD_BASE, LLAMADAS as LLAMADAS_BASE, PRIMITIVAS, RAICES as RAICES_BASE, RECORRIDOS as RECORRIDOS_BASE, UMBRALES_QUE_NO_SON_LECTURAS,
   alcanceSerial, alcancesDeFase, excesos, fraccionBorde, funcionesDeFase, haloRequerido,
-  type Alcance, type ClaveDeRadio, type Fase, type Inventario, type Llamada, type Sitio,
+  type Alcance, type AlcanceSerial, type ClaveDeRadio, type Fase, type Inventario, type LecturaGlobal, type LecturaPorIdentidad, type Llamada, type Sitio,
 } from '../src/world/halo.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams } from '../src/world/params.js';
 import { CHUNK_SIZE } from '../src/world/terrain.js';
@@ -19,6 +19,8 @@ function actualizarSitios<T extends Sitio & { readonly id: string }>(base: reado
   for (const id of Object.keys(patrones)) assert.ok(base.some(s => s.id === id), `entrada desconocida: ${id}`);
   return base.map(s => patrones[s.id] ? { ...s, patrones: patrones[s.id]! } : s);
 }
+const ESTADO_GLOBAL = { ...ESTADO_BASE, adaptationEnabled: 'V19: bandera de adaptación causal, igual para todas las regiones.' };
+const CONSTANTES_DE_RADIO = { ...CONSTANTES_BASE, RADIO_PAREJA: { fichero: 'animals.ts', valor: 12 } };
 const ALCANCES: readonly Alcance[] = [...actualizarSitios(ALCANCES_BASE, {
   'decision.teselas': [
     'const tileIn = tileInArg ?? tileLookup(world.tiles);',
@@ -53,15 +55,79 @@ const ALCANCES: readonly Alcance[] = [...actualizarSitios(ALCANCES_BASE, {
     'if (dx * dx + dy * dy > CONSTRUCTION_RADIUS * CONSTRUCTION_RADIUS) continue;',
     'const tile = cell >= 0 ? tileAt(world, { x, y }) : exact ? undefined : tileAt(world, { x, y });'],
   'agua.disponible': ['let total = tileAt(world, point)?.drinkingWater ?? 0;'],
+  'obra.servicios': ['for (const structure of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1,',
+    "structure => (paramsOf(world).construccion.modular ? hasCompletedBuilding(structure) : !structure.site) && !(distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'))) {",
+    'add(structure.components, replacement?.structure === structure ? replacement.condition : structure.condition, structure.water, structure.food,\n      paramsOf(world).tecnologia.obrasPorPropiedades ? structureAffordances(world, structure) : undefined);'],
+  'obra.reparaciones': ["const structures = filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, structure => !structure.site && !(structure.condition >= REPAIR_CONDITION_LIMIT\n    || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'));"],
+  'invento.planosEstructuras': ['for (const structure of filtrarCerca(world.structures, person, 6, structure => distance(person, structure) <= 5',
+    "&& (paramsOf(world).construccion.modular ? hasCompletedBuilding(structure) : !structure.site) && structure.condition > BROKEN_CONDITION && tileAt(world, structure)?.terrain === 'shelter')) ids.add(structure.blueprintId);"],
+  'estructuras.funcionales': [
+    "? filtrarCerca(world.structures, point, radius + 2, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && structureDistance(point, s) <= radius)",
+    ': filtrarCerca(world.structures, point, radius + 1, s => Math.abs(s.x - point.x) <= radius + 1',
+    "&& Math.abs(s.y - point.y) <= radius + 1 && !s.site && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);",
+  ],
   'ecologia.vecinos': ['const waterAt = (x: number, y: number): boolean => {', 'const tile = tileIn(x, y);',
     'waterAt(tile.x - 1, tile.y) || waterAt(tile.x + 1, tile.y) || waterAt(tile.x, tile.y - 1) || waterAt(tile.x, tile.y + 1)'],
-}), {
+}).map(e => e.id === 'estructuras.funcionales' ? { ...e, radio: 2.5,
+  nota: 'V19: radio de servicio ≤ 1,5 más una celda por eje desde la huella 2×2 hasta el ancla.' } : e), {
   id: 'agua.cisternas', coleccion: 'estructuras', centro: 'entrada', radio: 0.5,
   fichero: 'inventions.ts', funcion: 'waterAvailable', patrones: [
-    'filtrarCerca(world.structures, point, 1.5, structure => Math.abs(structure.x - point.x) <= 1.5\n    && Math.abs(structure.y - point.y) <= 1.5 && structure.condition > BROKEN_CONDITION\n    && tileAt(world, structure)?.terrain === \'shelter\' && distance(structure, point) <= 0.5, candidates);',
+    'filtrarCerca(world.structures, point, 1.5, structure => Math.abs(structure.x - point.x) <= 1.5\n    && Math.abs(structure.y - point.y) <= 1.5 && !structure.site && structure.condition > BROKEN_CONDITION\n    && tileAt(world, structure)?.terrain === \'shelter\' && distance(structure, point) <= 0.5, candidates);',
   ],
+}, {
+  id: 'obra.sitioLocal', coleccion: 'estructuras', centro: 'entrada', radio: 0.5,
+  fichero: 'inventions.ts', funcion: 'activeSiteAt', patrones: [
+    'return filtrarCerca(world.structures, point, 1.5, s => !!s.site && distance(point, s) <= 0.5)\n    .sort((a, b) => distance(point, a) - distance(point, b) || a.id.localeCompare(b.id))[0];',
+  ],
+}, {
+  id: 'obra.sitios', coleccion: 'estructuras', centro: 'entrada', radio: 7,
+  fichero: 'inventions.ts', funcion: 'constructionSite', patrones: [
+    'return filtrarCerca(world.structures, person, 8, s => !!s.site && distance(person, s) <= 7)\n    .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];',
+  ],
+}, {
+  id: 'obra.ampliables', coleccion: 'estructuras', centro: 'entrada', radio: 7,
+  fichero: 'inventions.ts', funcion: 'expansionCandidate', patrones: [
+    "for (const structure of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, s => !s.site && s.condition > 0.5 && distance(person, s) <= CONSTRUCTION_RADIUS\n    && tileAt(world, s)?.terrain === 'shelter')\n    .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))) {\n    const cost = expansionDelta(structure, blueprint.components);",
+  ],
+}, {
+  id: 'obra.centroAlmacen', coleccion: 'punto', centro: 'entrada', radio: 7,
+  fichero: 'inventions.ts', funcion: 'constructionCost', patrones: ['const structure = constructionSite(world, person), site = structure?.site;',
+    'const expansion = site ? undefined : expansionCandidate(world, person), delta = expansion?.cost;'],
+  nota: 'El almacén se consulta desde la obra o ampliación elegida a ≤ 7, no desde la persona.',
+}, {
+  id: 'obra.almacenes', coleccion: 'estructuras', centro: 'entrada', radio: 3.5,
+  fichero: 'inventions.ts', funcion: 'warehousesNear', patrones: [
+    "return filtrarCerca(world.structures, person, 4.5, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION\n    && tileAt(world, s)?.terrain === 'shelter' && structureDistance(person, s) <= 2.5)\n    .sort((a, b) => structureDistance(person, a) - structureDistance(person, b) || a.id.localeCompare(b.id));",
+  ], nota: '2,5 hasta la huella más una celda por eje hasta el ancla de una estructura 2×2.',
+}, {
+  id: 'obra.materialesAlmacenados', coleccion: 'estructuras', centro: 'entrada', radio: 7,
+  fichero: 'inventions.ts', funcion: 'localMaterials', patrones: [
+    "for (const s of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION\n      && distance(person, s) <= CONSTRUCTION_RADIUS && tileAt(world, s)?.terrain === 'shelter')) {\n      materials.wood += s.storedWood ?? 0;",
+  ],
+}, {
+  id: 'obra.huella.celdas', coleccion: 'teselas', centro: 'entrada', radio: 1,
+  fichero: 'inventions.ts', funcion: 'fittingFootprint', patrones: [
+    'const candidates: NonNullable<StructureView[\'footprint\']>[] = frames >= 5 ? [{ width: 2, height: 2 }]\n    : frames >= 3 ? [{ width: 2, height: 1 }, { width: 1, height: 2 }] : [{ width: 1, height: 1 }];',
+    "cells.some(c => tileAt(world, c)!.terrain === 'shelter' && !old.some(o => o.x === c.x && o.y === c.y))",
+  ],
+}, {
+  id: 'obra.huella.terreno', coleccion: 'teselas', centro: 'entrada', radio: 0,
+  fichero: 'inventions.ts', funcion: 'isFootprintFree', patrones: [
+    "cells.some(c => !Number.isSafeInteger(c.x) || !Number.isSafeInteger(c.y)\n    || !tileAt(world, c) || tileAt(world, c)!.terrain === 'water')",
+  ],
+}, {
+  id: 'obra.huella.colisiones', coleccion: 'estructuras', centro: 'entrada', radio: 1,
+  fichero: 'inventions.ts', funcion: 'isFootprintFree', patrones: [
+    'filtrarCerca(world.structures, cell, 2,\n    s => s.id !== ignoreStructureId && structureFootprintCells(s).some(c => keys.has(`${c.x},${c.y}`))).length',
+  ], nota: 'Una huella 2×2 que intersecta una celda tiene el ancla a ≤ 1 por eje de ella.',
+}, {
+  id: 'fauna.pareja', coleccion: 'animales', centro: 'entrada', radio: 12,
+  fichero: 'animals.ts', funcion: 'parejaCercana', patrones: [
+    'for (let dy = -RADIO_PAREJA; dy <= RADIO_PAREJA; dy++) {', 'const span = RADIO_PAREJA - Math.abs(dy);',
+    'for (let dx = -span; dx <= span; dx++) {', 'state.occupants.get(cellXY(animal.x + dx, animal.y + dy))',
+  ], nota: 'Rombo Manhattan de RADIO_PAREJA = 12; cada fila tiene semiancho 12 − |dy|.',
 }];
-const LLAMADAS = actualizarSitios(LLAMADAS_BASE.filter(l => l.id !== 'waterAvailable→functionalNear'), {
+const LLAMADAS: readonly Llamada[] = [...actualizarSitios(LLAMADAS_BASE.filter(l => l.id !== 'evaluateCooperation→constructionCost' && l.id !== 'choose→workDuration' && l.id !== 'workDuration→constructionCost'), {
   'choose→bodilyShelter': ['bodilyShelter(world, person, tileIn, fast)', 'bodilyShelter(world, tile, tileIn, fast)', 'bodilyShelter(world, candidate.target, tileIn, fast)'],
   'choose→immediateMeal': ['immediateMeal(world, person, tileIn, fast)', 'immediateMeal(world, {\n        x: candidate.target.x, y: candidate.target.y,\n        inventory: over.inventory ?? person.inventory, hunger: over.hunger ?? person.hunger,\n      }, tileIn, fast)'],
   'choose→waterAvailable': ['ambient > 0.005 || waterAvailable(world, tile) > 0.005', 'const localWater = waterAvailable(world, person) > 0;', 'waterAvailable(world, recuerdo)'],
@@ -72,15 +138,53 @@ const LLAMADAS = actualizarSitios(LLAMADAS_BASE.filter(l => l.id !== 'waterAvail
   'localPolicyObservation→computeLocalPolicyObservation': ['return computeLocalPolicyObservation(world, person, lookup, nearby, fast, out, offset);'],
   'evaluateCooperation→practicedRecipeToTeach': ['practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census)'],
   'practicedRecipeToTeach→recipeHolders': ['const holders = rareza > 0 ? census ? census.counts ??= recipeHolders(world) : recipeHolders(world) : undefined;'],
-});
-const ALCANCES_SERIALES = actualizarSitios(SERIALES_BASE, {
+  'constructionOpportunity→selectedBlueprint': ['selectedBlueprint(world, person)'],
+  'usefulRepairs→localServices': ['serviceValue(localServices(world, person), perceived)',
+    'serviceValue(localServices(world, person, { structure, condition }, undefined, Math.max(0, person.materials.wood - steps * load)), perceived)'],
+  'chooseInvention→candidatesFromKnown': ['candidatesFromKnown(world, person, context, known)'],
+}),
+  ...([
+    ['animals.ts', 'choose', 'animals.ts:parejaCercana', 'entrada', ['parejaCercana(animal, state)']],
+    ['society.ts', 'evaluateCooperation', 'inventions.ts:activeSiteAt', 'cooperacion.otro', ['activeSiteAt(world, other)']],
+    ['society.ts', 'evaluateCooperation', 'inventions.ts:partnerConstructionCost', 'cooperacion.otro', ['partnerConstructionCost(world, other)']],
+    ['society.ts', 'evaluateCooperation', 'inventions.ts:storedMaterialsNear', 'entrada', ['storedMaterialsNear(world, person)']],
+    ['inventions.ts', 'partnerConstructionCost', 'inventions.ts:selectedBlueprint', 'entrada', ['selectedBlueprint(world, person).components']],
+    ['inventions.ts', 'partnerConstructionCost', 'inventions.ts:activeSiteAt', 'entrada', ['activeSiteAt(world, person)']],
+    ['inventions.ts', 'partnerConstructionCost', 'inventions.ts:storedMaterialsNear', 'entrada', ['storedMaterialsNear(world, person)']],
+    ['inventions.ts', 'constructionCost', 'inventions.ts:constructionSite', 'entrada', ['constructionSite(world, person)']],
+    ['inventions.ts', 'constructionCost', 'inventions.ts:expansionCandidate', 'entrada', ['expansionCandidate(world, person)']],
+    ['inventions.ts', 'constructionCost', 'inventions.ts:storedMaterialsNear', 'obra.centroAlmacen', ['storedMaterialsNear(world, structure ?? expansion?.structure ?? person)']],
+    ['inventions.ts', 'expansionCandidate', 'inventions.ts:selectedBlueprint', 'entrada', ['selectedBlueprint(world, person)']],
+    ['inventions.ts', 'expansionCandidate', 'inventions.ts:fittingFootprint', 'obra.ampliables', ['fittingFootprint(world, structure, blueprint.components, structure)']],
+    ['inventions.ts', 'fittingFootprint', 'inventions.ts:isFootprintFree', 'obra.huella.celdas', ['isFootprintFree(world, cells, existing?.id)']],
+    ['inventions.ts', 'storedMaterialsNear', 'inventions.ts:warehousesNear', 'entrada', ['warehousesNear(world, person)']],
+    ['inventions.ts', 'constructionOpportunity', 'inventions.ts:constructionSite', 'entrada', ['constructionSite(world, person)']],
+    ['inventions.ts', 'constructionOpportunity', 'inventions.ts:expansionCandidate', 'entrada', ['expansionCandidate(world, person, blueprint)']],
+    ['inventions.ts', 'constructionOpportunity', 'inventions.ts:storedMaterialsNear', 'obra.ampliables', ['storedMaterialsNear(world, expansion.structure)']],
+    ['inventions.ts', 'repairOpportunity', 'inventions.ts:storedMaterialsNear', 'entrada', ['storedMaterialsNear(world, person)']],
+  ] as const).map(([fichero, funcion, llama, centro, patrones]) => ({ id: `${funcion}→${llama.split(':')[1]}`, fichero, funcion, llama, centro, patrones })),
+];
+const ALCANCES_SERIALES: readonly AlcanceSerial[] = [...actualizarSitios(SERIALES_BASE, {
   'accion.bfs': ['const tileIn = tileInArg ?? tileLookup(world.tiles);', 'Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) > 24'],
   'accion.caminable': ['const tile = (lookup ?? tileLookup(world.tiles))(p.x, p.y);'],
   'accion.pisada': ['trampleTile(tileIn(person.x, person.y)!)'],
   'accion.aqui': ['const tileIn = tileInArg ?? tileLookup(world.tiles);', 'const tile = tileIn(person.x, person.y)!;', 'const current = moved ? tileIn(person.x, person.y)! : tile;'],
   'accion.destino': ['const targetTile = tileIn(person.target.x, person.target.y);', 'waterAvailable(world,person.target) < 0.003'],
   'accion.cazar': ['world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0)', '!residentBackingArray(world.tiles).some(t => t.x === point.x && t.y === point.y)'],
-});
+}),
+  ...([
+    ['accion.deposito', 'depositMaterials', 2.5, ["tileAt(world, structure)?.terrain !== 'shelter'"]],
+    ['accion.obraModular', 'modularConstruction', 0.5, ['tileAt(world, tile) !== tile', 'world.structures.find(s => s.x === tile.x && s.y === tile.y)']],
+    ['accion.huellaTerminada', 'contributeConstruction', 2.5, ['for (const cell of structureFootprintCells(structure)) tileAt(world, cell)!.terrain = \'shelter\';', 'tileAt(world, structure)!']],
+    ['accion.lugarObra', 'modularConstruction', 5.5, ['algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5 && !world.structures.some(s => p.id === `settlement-${s.x}-${s.y}`))']],
+  ] as const).map(([id, funcion, radio, patrones]) => ({ id, fase: 'accion' as const, coleccion: 'teselas' as const, centro: 'actor', radio, fichero: 'inventions.ts', funcion, patrones })),
+  { id: 'tecnologia.descubrimientoPersonas', fase: 'accion', coleccion: 'personas', centro: 'actor', radio: 5, fichero: 'technology.ts', funcion: 'locallyUsefulDiscovery',
+    patrones: ['for (const other of host.people) if (other === actor || distance(actor, other) <= 5)'] },
+  { id: 'tecnologia.descubrimientoObras', fase: 'accion', coleccion: 'estructuras', centro: 'actor', radio: 5, fichero: 'technology.ts', funcion: 'locallyUsefulDiscovery',
+    patrones: ['for (const structure of host.structures ?? []) if (distance(actor, structure) <= 5)'] },
+  { id: 'estructuras.depositoMaterial', fase: 'estructuras', coleccion: 'personas', centro: 'actor', radio: 2.5, fichero: 'inventions.ts', funcion: 'stepStructures',
+    patrones: ['vecinos(world, structure, 3.5, p => structureDistance(p, structure) <= 1.5)'], nota: 'Radio 1,5 desde una huella 2×2: hasta 2,5 desde el ancla.' },
+];
 const RAICES = RAICES_BASE.map(r => r.fichero === 'index.ts' && r.funcion === 'choose' ? {
   ...r, llamador: { ...r.llamador, patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot, tileIn, fast ?? null);"] },
 } : r);
@@ -91,9 +195,38 @@ const RECORRIDOS = actualizarSitios(RECORRIDOS_BASE, {
     'const tileIn = tileLookup(world.tiles);', 'const fast = residentFastAccess(world.tiles);',
     'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,'],
 });
-const LECTURAS_POR_IDENTIDAD = actualizarSitios(IDENTIDAD_BASE, {
+const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [...actualizarSitios(GLOBALES_BASE, {
+  'planos': ['world.blueprints.find(b => b.id === person.blueprintId && validBlueprint(b.components, paramsOf(world).construccion.modular))',
+    "world.blueprints.find(b => b.id === 'blueprint-base')"],
+  'planos.conocidos': ['return world.blueprints.filter(b => (ids.has(b.id) || b.inventorId === person.id) && validBlueprint(b.components, paramsOf(world).construccion.modular))'],
+  'planos.catalogo': ['const modular = paramsOf(world).construccion.modular, encountered = modular ? known : world.blueprints;'],
+  'estructuras.tope.constructionOpportunity': ['if (!expansion && world.structures.length >= structureCap(world)) return;'],
+}), {
+  id: 'estructuras.tope.modular', fase: 'accion', fichero: 'inventions.ts', funcion: 'modularConstruction', fuente: 'world.structures.length', cota: 'structureCap(world)',
+  patrones: ['world.structures.length >= structureCap(world)'], motivo: 'Tope global de obras activas antes de reservar una obra modular.' }, {
+  id: 'tecnologia.activosFijos', fase: 'checkpoint', fichero: 'technology.ts', funcion: 'fixedTechnologyAssets', fuente: 'host.structures + host.retiredChunks', cota: 'O(obras activas y retiradas)',
+  patrones: ['return [...(host.structures ?? []), ...(host.retiredChunks ?? []).flatMap(c => c.structures ?? [])].flatMap(s => s.installed ?? []);'],
+  motivo: 'Balance global de materia instalada, fuera de las fases con halo.' },
+];
+const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [...actualizarSitios(IDENTIDAD_BASE, {
   'comunidad.pertenencia': ['for (const group of world.communities) comunidadesPorId.set(group.id, group);', 'for (const group of world.communities) gruposActuales.set(group.id, group);'],
-});
+}),
+  ...([
+    ['pertenencia.deposito', 'inventions.ts', 'depositMaterials', 'world.people + world.structures', ['!world.people.includes(person)', '!world.structures.includes(structure)']],
+    ['pertenencia.obraModular', 'inventions.ts', 'modularConstruction', 'world.people', ['!world.people.includes(person)']],
+    ['identidad.obraModular', 'inventions.ts', 'modularConstruction', 'world.structures', ["nextIdentity(world.structureCounter, 'structure', world.structures.map(s => s.id), world)"]],
+    ['pertenencia.contribucion', 'inventions.ts', 'contributeConstruction', 'world.people + world.structures', ['!world.structures.includes(structure)', '!world.people.includes(person)']],
+    ['planos.ampliacion', 'inventions.ts', 'contributeConstruction', 'world.blueprints', ['world.blueprints.find(b => b.id === site.expansion!.blueprintId)!']],
+    ['planos.firmaModular', 'inventions.ts', 'invent', 'world.blueprints', ['world.blueprints.find(b => blueprintSignature(b.components) === blueprintSignature(candidate.components))']],
+    ['lugar.ampliacion', 'inventions.ts', 'contributeConstruction', 'world.places', ['for (const p of world.places) if (p.id === place.id)']],
+    ['lugar.obraCompartida', 'inventions.ts', 'contributeConstruction', 'world.places + world.chunks', ['world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]?.places.push(place);']],
+    ['cooperacion.obraCompartida', 'society.ts', 'cooperate', 'world.structures', ['world.structures.find(s => s.id === opportunity.siteId)']],
+    ['acuerdo.socio', 'society.ts', 'settleAgreement', 'world.people', ['world.people.find(p => p.id === agreement.partner)']],
+    ['acuerdo.fuente', 'society.ts', 'settleAgreement', 'world.tiles', ['tileAt(world, agreement)']],
+    ['pertenencia.instalacion', 'technology.ts', 'installTechnologyItem', 'host.structures + host.people', ['!host.structures?.includes(structure)', '!isHostMember(host.people, actor)']],
+  ] as const).map(([id, fichero, funcion, fuente, patrones]) => ({ id, fase: 'accion' as const, fichero, funcion, fuente, patrones,
+    motivo: 'V19: identidad, pertenencia o coordenada guardada; lectura serial sin cota espacial, nunca una excepción al halo.' })),
+];
 const INVENTARIO: Inventario = { ...INVENTARIO_BASE, alcances: ALCANCES, llamadas: LLAMADAS, raices: RAICES };
 
 const DIRECTORIO = fileURLToPath(new URL('../src/world/', import.meta.url));
@@ -507,14 +640,13 @@ function verificar(textos: Readonly<Record<string, string>>, t: Tablas = TABLAS,
 }
 
 const BASE = verificar(FUENTES);
-writeFileSync('/tmp/a2-halo-problems.txt', BASE.problemas.join('\n'));
-const conHalo = (fase: Fase) => [...alcancesDeFase(fase)].filter(([id]) => !ALCANCES.find(e => e.id === id)!.excepcion);
+const conHalo = (fase: Fase) => [...alcancesDeFase(fase, undefined, INVENTARIO)].filter(([id]) => !ALCANCES.find(e => e.id === id)!.excepcion);
 const maximoSerial = (fase: Fase, params = HISTORICAL_PARAMS) => Math.max(...ALCANCES_SERIALES.filter(e => e.fase === fase).map(e => alcanceSerial(e.id, ALCANCES_SERIALES, params)!));
 
 test('el inventario cubre cada lectura, llamada y barrido de las fases con halo y ninguna entrada está obsoleta', () => {
   assert.deepEqual(BASE.problemas, []);
   const ids = [...lecturasDe(TABLAS), ...LLAMADAS].map(e => (e as { id?: string }).id).filter(Boolean);
-  assert.equal(new Set(ids).size, ids.length, 'ids repetidos en el inventario');
+  assert.deepEqual(ids.filter((id, i) => ids.indexOf(id) !== i), [], 'ids repetidos en el inventario');
   for (const e of ALCANCES) assert.ok(e.centro === 'entrada' || ALCANCES.some(c => c.id === e.centro), `centro desconocido: ${e.id} → ${e.centro}`);
   for (const l of LLAMADAS) assert.ok(l.centro === 'entrada' || ALCANCES.some(c => c.id === l.centro), `centro desconocido: ${l.id} → ${l.centro}`);
   for (const e of ALCANCES_SERIALES) assert.ok(e.centro === 'actor' || ALCANCES_SERIALES.some(c => c.id === e.centro), `centro desconocido: ${e.id} → ${e.centro}`);
@@ -522,26 +654,28 @@ test('el inventario cubre cada lectura, llamada y barrido de las fases con halo 
 
 test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   const tamanos = Object.fromEntries(FASES_CON_HALO.map(fase => [fase, BASE.cierres.get(fase)!.size]));
-  assert.deepEqual(tamanos, { decision: 45, ecologia: 6, fauna: 2 });
-  for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
+  assert.deepEqual(tamanos, { decision: 52, ecologia: 6, fauna: 3 });
+  for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase, INVENTARIO)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;
   for (const k of ['society.ts:itemNeed', 'society.ts:settlementOpportunity', 'inventions.ts:candidatesFromKnown', 'inventions.ts:functionalNear']) assert.ok(decision.has(k), k);
 });
 
 test('el alcance compuesto de las fases con halo no supera HALO_CELDAS, y el máximo es exactamente el halo', () => {
-  assert.deepEqual(excesos(), []);
+  assert.deepEqual(excesos(INVENTARIO), []);
   const decision = new Map(conHalo('decision'));
   const numericos = [...decision].filter(([id]) => typeof ALCANCES.find(e => e.id === id)!.radio === 'number');
   assert.equal(Math.max(...numericos.map(([, v]) => v!)), HALO_CELDAS);
   // 7 + 7 desde el otro de la cooperación; el 13 de G2 (hogar 7 + personas 6), su rama hermana y la obra.
-  assert.deepEqual(numericos.filter(([, v]) => v === HALO_CELDAS).map(([id]) => id).sort(), ['cooperacion.destinoDelOtro', 'cooperacion.insumos', 'cooperacion.necesidad']);
+  assert.deepEqual(numericos.filter(([, v]) => v === HALO_CELDAS).map(([id]) => id).sort(), [
+    'cooperacion.destinoDelOtro', 'cooperacion.insumos', 'cooperacion.necesidad',
+  ]);
   assert.deepEqual(['asentamiento.hogar.personas', 'asentamiento.hogar.teselas', 'asentamiento.hogar.estructuras', 'asentamiento.lugares.personas', 'decision.obra', 'estructuras.funcionales', 'obra.materiales']
-    .map(id => decision.get(id)), [13, 11, 11, 12, 12, 8.5, 7]);
+    .map(id => decision.get(id)), [13, 11, 11, 12, 12, 9.5, 7]);
   const porColeccion = (coleccion: Alcance['coleccion']) => Math.max(...numericos.filter(([id]) => ALCANCES.find(e => e.id === id)!.coleccion === coleccion).map(([, v]) => v!));
   assert.deepEqual({ teselas: porColeccion('teselas'), personas: porColeccion('personas'), estructuras: porColeccion('estructuras'), lugares: porColeccion('lugares') },
     { teselas: 14, personas: 13, estructuras: 11, lugares: 12 });
-  assert.deepEqual(Object.fromEntries(FASES_CON_HALO.map(fase => [fase, Math.max(...conHalo(fase).map(([, v]) => v ?? 0))])), { decision: 14, ecologia: 1, fauna: 6 });
+  assert.deepEqual(Object.fromEntries(FASES_CON_HALO.map(fase => [fase, Math.max(...conHalo(fase).map(([, v]) => v ?? 0))])), { decision: 14, ecologia: 1, fauna: 12 });
   // La memoria de la fauna: 6 celdas vistas + 480 pasos de vida a un paso de celda cada ≥ 4 pasos, sólo presencia.
   assert.equal(alcancesDeFase('fauna').get('fauna.memoria'), 6 + Number(/const MEMORY_TTL = (\d+);/.exec(FUENTES['animals.ts']!)![1]) / (11 - 7));
   assert.match(FUENTES['animals.ts']!, /const interval = Math\.ceil\(11 - animal\.genes\.speed \* 7 \+ animal\.fatigue \* 3\);/);
@@ -563,7 +697,7 @@ test('quién actúa en una fase con halo lo decide la fase serial: el destino pr
 test('alcances fijados de las fases seriales, que el halo no acota', () => {
   const fases: Fase[] = ['faunaSerial', 'accion', 'gestos', 'estructuras', 'encuentros', 'demografia', 'comunidades', 'reproduccion'];
   assert.deepEqual(Object.fromEntries(fases.map(f => [f, maximoSerial(f)])), {
-    faunaSerial: 1, accion: 4096, gestos: 7, estructuras: 1.5, encuentros: 3, demografia: 2, comunidades: 7, reproduccion: 4,
+    faunaSerial: 1, accion: 4096, gestos: 7, estructuras: 2.5, encuentros: 3, demografia: 2, comunidades: 7, reproduccion: 4,
   });
   assert.equal(alcanceSerial('accion.caminable'), 24, 'la búsqueda de ruta de `move` lee terreno y presencia a 24 celdas');
   assert.match(FUENTES['index.ts']!, /Math\.max\(Math\.abs\(x - start\.x\), Math\.abs\(y - start\.y\)\) > 24/);
@@ -586,7 +720,10 @@ test('radios de parámetros: el cortejo de reglas 10 exige 128 celdas y el hist�
       || ALCANCES.some(e => typeof e.radio !== 'number' && e.radio.param === clave && alcancesDeFase('decision', params).get(e.id)! > HALO_CELDAS);
   });
   assert.deepEqual(exceden, ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo']);
-  assert.deepEqual(excesos(INVENTARIO, HALO_CELDAS, DEFAULT_PARAMS), [{ id: 'decision.cortejo', fase: 'decision', alcance: 128 }]);
+  // Este caso fija las reglas históricas sin construcción modular; la composición de
+  // todas las ramas V19 se comprueba arriba con INVENTARIO, también si su bandera está apagada.
+  assert.equal(DEFAULT_PARAMS.construccion.modular, false);
+  assert.deepEqual(excesos(INVENTARIO_BASE, HALO_CELDAS, DEFAULT_PARAMS), [{ id: 'decision.cortejo', fase: 'decision', alcance: 128 }]);
 });
 
 /** Aplica sustituciones literales (cada texto viejo debe aparecer una sola vez) a una copia de las fuentes. */
@@ -606,7 +743,9 @@ const detecta = (textos: Record<string, string>, esperado: RegExp, t: Tablas = T
 test('la prueba muerde: las siete mutaciones de la verificación, una composición 7 + 8 en el código y otras formas de leer más lejos fallan', () => {
   const eleccion = "  const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');";
   // M0: un halo de 13 no basta.
-  assert.deepEqual(excesos(INVENTARIO, 13).map(e => e.id).sort(), ['cooperacion.destinoDelOtro', 'cooperacion.insumos', 'cooperacion.necesidad']);
+  assert.deepEqual(excesos(INVENTARIO, 13).map(e => e.id).sort(), [
+    'cooperacion.destinoDelOtro', 'cooperacion.insumos', 'cooperacion.necesidad',
+  ]);
   // M1: la percepción de `choose` a 3 · RADIUS.
   detecta(mutar([['index.ts', 'for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {\n    if (dx * dx + dy * dy > RADIUS * RADIUS) continue;',
     'for (let dy = -3 * RADIUS; dy <= 3 * RADIUS; dy++) for (let dx = -3 * RADIUS; dx <= 3 * RADIUS; dx++) {\n    if (dx * dx + dy * dy > 9 * RADIUS * RADIUS) continue;']]),
@@ -615,17 +754,17 @@ test('la prueba muerde: las siete mutaciones de la verificación, una composici�
   detecta(mutar([['animals.ts', 'for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {\n    if (Math.abs(dx) + Math.abs(dy) > radius) continue;',
     'for (let dy = -radius * 5; dy <= radius * 5; dy++) for (let dx = -radius * 5; dx <= radius * 5; dx++) {\n    if (Math.abs(dx) + Math.abs(dy) > radius * 5) continue;']]),
   /animals\.ts:\d+ \(localTiles\) barrido dy sin inventariar/);
-  // M3: `itemNeed` compone la comida del destino del otro: 7 + 7 + 1,5.
-  detecta(mutar([['society.ts', "import { constructionCost, waterAvailable } from './inventions.js';", "import { constructionCost, foodAvailable, waterAvailable } from './inventions.js';"],
+  // M3: `itemNeed` compone la comida del destino del otro: 7 + 7 + 2,5 (servicio + huella V19).
+  detecta(mutar([['society.ts', "import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';", "import { activeSiteAt, contributeConstruction, foodAvailable, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';"],
     ['society.ts', '    if (useful && capacities[useful] > Math.max(0.12, powers[useful] + 0.12)) need = Math.max(need, capacities[useful] - powers[useful]);',
       '    if (useful && capacities[useful] > Math.max(0.12, powers[useful] + 0.12)) need = Math.max(need, capacities[useful] - powers[useful]);\n    if (foodAvailable(world, person.target) > 0) need = Math.max(need, 0.1);']]),
   /society\.ts:\d+ \(itemNeed\) llamada a inventions\.ts:foodAvailable sin inventariar/);
   // …y si alguien la inventaría con su centro honesto, la composición supera el halo.
-  const m3 = mutar([['society.ts', "import { constructionCost, waterAvailable } from './inventions.js';", "import { constructionCost, foodAvailable, waterAvailable } from './inventions.js';"],
+  const m3 = mutar([['society.ts', "import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';", "import { activeSiteAt, contributeConstruction, foodAvailable, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';"],
     ['society.ts', '    if (useful && capacities[useful] > Math.max(0.12, powers[useful] + 0.12)) need = Math.max(need, capacities[useful] - powers[useful]);',
       '    if (useful && capacities[useful] > Math.max(0.12, powers[useful] + 0.12)) need = Math.max(need, capacities[useful] - powers[useful]);\n    if (foodAvailable(world, person.target) > 0) need = Math.max(need, 0.1);']]);
   const honesta: Llamada = { id: 'itemNeed→foodAvailable', fichero: 'society.ts', funcion: 'itemNeed', llama: 'inventions.ts:foodAvailable', centro: 'cooperacion.necesidad', patrones: ['foodAvailable(world, person.target)'] };
-  detecta(m3, /estructuras\.funcionales \(decision\) alcanza 15\.5 > 14/, { ...TABLAS, llamadas: [...LLAMADAS, honesta] });
+  detecta(m3, /estructuras\.funcionales \(decision\) alcanza 16\.5 > 14/, { ...TABLAS, llamadas: [...LLAMADAS, honesta] });
   // M4: una suma de estructuras a 30 con `.reduce`.
   detecta(mutar([['society.ts', '    food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);',
     '    food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);\n    food += world.structures.reduce((sum, s) => sum + (Math.abs(s.x - place.x) <= 30 && Math.abs(s.y - place.y) <= 30 ? s.food : 0), 0);']]),

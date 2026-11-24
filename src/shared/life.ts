@@ -16,7 +16,12 @@ export interface BlueprintView {
 export interface StructureView {
   id: string; x: number; y: number; blueprintId: string; name: string; components: StructureComponent[];
   condition: number; water: number; food: number; uses: number; builtAt: number; builderId: string | null;
-  site?: { requiredWood: number; requiredStone: number; depositedWood: number; depositedStone: number; requiredWork: number; completedWork: number };
+  footprint?: { width: 1 | 2; height: 1 | 2 };
+  storedWood?: number;
+  storedStone?: number;
+  site?: { requiredWood: number; requiredStone: number; depositedWood: number; depositedStone: number; requiredWork: number; completedWork: number;
+    /** The old building remains operational; this paid delta reserves the target footprint. */
+    expansion?: { blueprintId: string; components: StructureComponent[]; footprint?: { width: 1 | 2; height: 1 | 2 } } };
   losses?: { water: number; food: number };
   installed?: Array<{ id: string; recipeId: string | null; mass: number; containment: number; insulation: number;
     cohesion: number; binding: number; condition: number;

@@ -40,7 +40,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
-import { listoParaCriar, type Animal, type AnimalMemory } from '../animals.js';
+import { listoParaCriar, listoSalvoEnergia, type Animal, type AnimalMemory } from '../animals.js';
 import { paramsOf } from '../params.js';
 import {
   residentBackingArray, residentInPlaceRevision, residentTopologyToken, sameResidentTopology,
@@ -60,7 +60,8 @@ import {
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import {
   ACCIONES_FAUNA, CELDA_AGUA, CELDA_CRECIMIENTO, CELDA_OCEANO, CELDA_PRESENTE, CELDA_REFUGIO,
-  DESTINO_PAREJA, DESTINO_PRESA, DESTINO_PROPIO, DESTINO_RECUERDO, DESTINO_TESELA, DF, DI, RAZON_PAREJA_FAUNA,
+  DESTINO_PAREJA, DESTINO_PRESA, DESTINO_PROPIO, DESTINO_RECUERDO, DESTINO_REPOSO, DESTINO_TESELA, DF, DI, RADIO_PAREJA_FAUNA, RAZON_PAREJA_FAUNA,
+  RAZON_REPOSO_CRIA_FAUNA,
   MAX_MEMORIA_ANIMAL, MEMORIA_TTL, MF, NDF, NDI, NMF, NSO, NTF, NTI, RAZONES_FAUNA, SO, TF, TI,
   celdaDe, codigoEspecie, crearVistaFauna, ejecutarRegionesFauna, paginable,
   type BuffersFauna, type ParamsFauna, type VistaFauna,
@@ -373,8 +374,9 @@ export class EstadoFaunaCompartido {
     return true;
   }
 
-  /** Sella y relee las páginas que toca la ventana de percepción de algún animal debido. */
-  #releerVentanas(d: DisposicionTerreno, vista: VistaFauna, due: readonly Animal[], token: ResidentTopologyToken | undefined): boolean {
+  /** Sella y relee las páginas que toca la ventana de percepción de algún animal debido. V19/M: la de un animal
+   * listo para criar se amplía al rombo del olor de pareja (`RADIO_PAREJA_FAUNA`), cuyos ocupantes también lee. */
+  #releerVentanas(d: DisposicionTerreno, vista: VistaFauna, due: readonly Animal[], token: ResidentTopologyToken | undefined, listos?: ReadonlySet<Animal>): boolean {
     if (++this.#generacion === 0x7fffffff) { this.#sello.fill(0); this.#generacion = 1; }
     const sello = this.#sello, generacion = this.#generacion;
     const trustedCoords = d.token !== undefined && sameResidentTopology(d.token, token);
@@ -385,7 +387,8 @@ export class EstadoFaunaCompartido {
     for (const a of due) {
       const ax = a.x, ay = a.y;
       if (!paginable(ax) || !paginable(ay)) throw new RangeError(`Animal ${a.id} con coordenadas no enteras.`);
-      const radio = 2 + Math.floor(a.genes.perception * 4);
+      const vision = 2 + Math.floor(a.genes.perception * 4);
+      const radio = listos?.has(a) && !(vision >= RADIO_PAREJA_FAUNA) ? RADIO_PAREJA_FAUNA : vision;
       // Radio no positivo o NaN: `localTiles` no ve nada (sólo puede recordar celdas lejanas, que no leen valores).
       if (!(radio >= 0)) continue;
       if (radio > RADIO_MAXIMO) throw new RangeError(`Animal ${a.id} con percepción fuera de rango.`);
@@ -437,11 +440,15 @@ export class EstadoFaunaCompartido {
     if (!d || d.accessTiles !== tiles || d.length !== tiles.length || (d.token === undefined ? token !== undefined : !sameResidentTopology(d.token, token))) {
       d = this.#disposicion = this.#disponer(tiles, token);
     }
+    // V19: con `encuentroFertil` la decisión lee, de cada vecino, si está listo para criar (sin leer su acción), y un
+    // animal debido listo busca pareja en el rombo de `RADIO_PAREJA_FAUNA`.
+    const leyes = paramsOf(world).fauna, encuentro = leyes?.encuentroFertil === true, reserva = leyes?.reservaReproductiva === true;
+    const listos = encuentro ? new Set(due.filter(a => listoParaCriar(a, reserva))) : undefined;
     let vista = crearVistaFauna(this.#buffers, { ...this.#params, hashMask: d.capHash - 1 });
-    if (!this.#releerVentanas(d, vista, due, token)) {
+    if (!this.#releerVentanas(d, vista, due, token, listos)) {
       d = this.#disposicion = this.#disponer(tiles, token);
       vista = crearVistaFauna(this.#buffers, { ...this.#params, hashMask: d.capHash - 1 });
-      if (!this.#releerVentanas(d, vista, due, token)) throw new Error('Teselas mutadas durante el empaquetado de fauna.');
+      if (!this.#releerVentanas(d, vista, due, token, listos)) throw new Error('Teselas mutadas durante el empaquetado de fauna.');
     }
     const celdasActivas = d.paginas * CELDAS_POR_PAGINA, sello = this.#sello, generacion = this.#generacion;
     /** La celda está en una página releída: sólo ahí puede haber celdas visibles. */
@@ -456,8 +463,6 @@ export class EstadoFaunaCompartido {
       this.#asignarAnimales(crecerCapacidad(this.#capTabla, filas), crecerCapacidad(this.#capDue, due.length),
         crecerCapacidad(this.#capMemoria, memoriaMax), crecerCapacidad(this.#capId, caracteres));
     }
-    // V19: con `encuentroFertil` la decisión lee, de cada vecino, si está listo para criar (sin leer su acción).
-    const leyes = paramsOf(world).fauna, encuentro = leyes?.encuentroFertil === true, reserva = leyes?.reservaReproductiva === true;
     this.#params = {
       capTabla: this.#capTabla, capDue: this.#capDue, due: due.length, capMemoria: this.#capMemoria,
       hashMask: d.capHash - 1, seed: world.seed, tick: world.tick, ...(encuentro ? { encuentro: true } : {}),
@@ -508,6 +513,7 @@ export class EstadoFaunaCompartido {
       di[DI.especie * cap + slot] = codigoEspecie(a.species);
       di[DI.rango * cap + slot] = rangos[filas + slot]!;
       di[DI.listo * cap + slot] = encuentro && listoParaCriar(a, reserva) ? 1 : 0;
+      di[DI.reposo * cap + slot] = encuentro && listoSalvoEnergia(a, reserva) ? 1 : 0;
       di[DI.memorias * cap + slot] = a.memory.length;
       di[DI.idInicio * cap + slot] = caracter; di[DI.idLongitud * cap + slot] = a.id.length;
       for (let k = 0; k < a.id.length; k++) id[caracter++] = a.id.charCodeAt(k);
@@ -550,11 +556,11 @@ export function applyFaunaChooseOutputs(due: readonly Animal[], world: { tick: n
     if (recuerdos >= 1) recordar(animal, tiles[so[o + SO.recuerdo0Tesela]!]!, tick, so[o + SO.recuerdo0Visitado] === 1);
     if (recuerdos >= 2) recordar(animal, tiles[so[o + SO.recuerdo1Tesela]!]!, tick, so[o + SO.recuerdo1Visitado] === 1);
     const codigo = so[o + SO.accion]!, action = ACCIONES_FAUNA[codigo]!, tipo = so[o + SO.destinoTipo]!, ref = so[o + SO.destinoRef]!;
-    const target: { x: number; y: number } = tipo === DESTINO_PROPIO ? animal : tipo === DESTINO_TESELA ? tiles[ref]!
+    const target: { x: number; y: number } = tipo === DESTINO_PROPIO || tipo === DESTINO_REPOSO ? animal : tipo === DESTINO_TESELA ? tiles[ref]!
       : tipo === DESTINO_RECUERDO ? animal.memory[ref] as AnimalMemory : tipo === DESTINO_PRESA || tipo === DESTINO_PAREJA ? tabla[ref]! : animal;
     const presa = so[o + SO.presa]!, preyId = presa >= 0 ? tabla[presa]!.id : null;
     if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
-    animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = tipo === DESTINO_PAREJA ? RAZON_PAREJA_FAUNA : RAZONES_FAUNA[codigo]!; animal.preyId = preyId; animal.lastDecision = tick;
+    animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = tipo === DESTINO_PAREJA ? RAZON_PAREJA_FAUNA : tipo === DESTINO_REPOSO ? RAZON_REPOSO_CRIA_FAUNA : RAZONES_FAUNA[codigo]!; animal.preyId = preyId; animal.lastDecision = tick;
   }
 }
 

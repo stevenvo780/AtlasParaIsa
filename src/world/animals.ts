@@ -1,6 +1,7 @@
 import type { AnimalAction, AnimalDynamics, AnimalGenes, AnimalSpecies, AnimalView } from '../shared/life.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import { FOOD_PER_ANIMAL } from './ecosystem.js';
+import { SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
@@ -33,6 +34,19 @@ export function listoParaCriar(a: Animal, reserva: boolean): boolean {
   return a.age >= MATURITY && a.age - a.lastBirthAge >= MATURITY && a.health > 0.75 && a.energy > 0.65
     && a.hunger < 0.4 && a.thirst < 0.4 && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
 }
+/** V19/M: todas las puertas de `listoParaCriar` salvo la energía, que todavía no supera 0,65. Un animal así ya pagó
+ * la madurez, la recuperación de la última cría, la salud, la saciedad, la hidratación y (con R) la reserva: lo único
+ * que le falta es recuperar fuerzas, y eso sólo lo da el descanso real (`restBody`), que cuesta tiempo con hambre y sed. */
+export function listoSalvoEnergia(a: Animal, reserva: boolean): boolean {
+  return a.age >= MATURITY && a.age - a.lastBirthAge >= MATURITY && a.health > 0.75 && !(a.energy > 0.65)
+    && a.hunger < 0.4 && a.thirst < 0.4 && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
+}
+/** V19/M: alcance (Manhattan, en celdas) del olor o la llamada con que un animal listo detecta a una pareja lista de
+ * su especie más allá de su vista. Es una lectura local de ocupantes, menor que `HALO_CELDAS` (14): la región que
+ * decide la ve completa. `fauna-worker.ts` la repite literal (la prueba lo comprueba). */
+export const RADIO_PAREJA = 12;
+/** Razón del reposo de cría (V19/M); `fauna-worker.ts` la repite literal. */
+export const RAZON_REPOSO_CRIA = 'Saciado y listo para criar salvo por las fuerzas; descansa para recuperarlas, sin dejar de tener hambre y sed.';
 const SPECIES: AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
 const ACTIONS: AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
 const LIFESPAN: Record<AnimalSpecies, number> = { hare: 18000, deer: 36000, boar: 30000, fish: 20000, wolf: 32000, fox: 26000 };
@@ -523,6 +537,26 @@ function novelty(animal: Animal, seed: number, tick: number, t: VisibleTile): nu
   }
   return value;
 }
+/** V19/M: la pareja conespecífica lista (viva, otra identidad) más cercana a ≤ `RADIO_PAREJA` celdas Manhattan, con
+ * desempate canónico. Lee sólo los ocupantes de las celdas del rombo (que `choose` no escribe). */
+function parejaCercana(animal: Animal, state: LocalState): Animal | undefined {
+  let mate: Animal | undefined, best = Infinity;
+  for (let dy = -RADIO_PAREJA; dy <= RADIO_PAREJA; dy++) {
+    const span = RADIO_PAREJA - Math.abs(dy);
+    for (let dx = -span; dx <= span; dx++) {
+      const here = state.occupants.get(cellXY(animal.x + dx, animal.y + dy));
+      if (!here) continue;
+      const d = Math.abs(dx) + Math.abs(dy);
+      if (d > best) continue;
+      for (const other of here) {
+        if (other === animal || other.id === animal.id || !(other.health > 0) || other.species !== animal.species
+          || !listoParaCriar(other, state.reserva)) continue;
+        if (!mate || d < best || canonical(other, mate) < 0) { mate = other; best = d; }
+      }
+    }
+  }
+  return mate;
+}
 function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const visible = localTiles(animal, state), near = visible.flatMap(t => state.occupants.get(cell(t)) ?? []).filter(a => a.id !== animal.id && a.health > 0);
   const threats = near.filter(a => edible(a, animal) && distance(a, animal) <= 1 + Math.floor(animal.genes.perception * 5));
@@ -554,12 +588,15 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
     else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
+    // V19/M: saciado, hidratado, sano, maduro y (con R) con reserva, sólo le faltan fuerzas para criar: descansa en vez
+    // de gastarlas vagando. `feed` lo despierta al superar 0,75 de energía; el hambre y la sed siguen subiendo y, al
+    // cruzar sus umbrales, la caza, el pasto o la bebida vuelven a ganar.
+    else if (state.encuentro && listoSalvoEnergia(animal, state.reserva)) { action = 'rest'; reason = RAZON_REPOSO_CRIA; }
     else {
       // V19/M: sin amenaza ni necesidad urgente, un animal listo para criar se acerca a la pareja conespecífica
-      // lista más cercana que percibe (desempate canónico). Es el movimiento pagado de siempre.
-      const mate = state.encuentro && listoParaCriar(animal, state.reserva)
-        ? primero(near, (a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b),
-          a => a.species === animal.species && listoParaCriar(a, state.reserva)) : undefined;
+      // lista más cercana (desempate canónico) que detecta por olor o llamada a ≤ `RADIO_PAREJA` celdas: incluye a
+      // todas las que ve (su vista es ≤ 6). Es el movimiento pagado de siempre; nadie se traslada ni aparece.
+      const mate = state.encuentro && listoParaCriar(animal, state.reserva) ? parejaCercana(animal, state) : undefined;
       if (mate) { target = mate; reason = RAZON_PAREJA; }
       else {
         const seed = world.seed, tick = world.tick;
@@ -699,7 +736,9 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     if (capacity !== undefined && world.animals.length >= capacity) break;
     if (!eligible(a)) continue;
     const tile = state.tile(a.x, a.y)!;
-    if ((state.counts.get(cell(a)) ?? 0) >= MAX_ANIMALS_PER_TILE || waterAt(a, tile) < 0.012
+    // V19/R: la cría se financia con el cuerpo de los progenitores; el agua natal que la celda no tenga la ponen ellos
+    // (abajo), así que con R la celda no necesita guardar 0,012 de agua.
+    if ((state.counts.get(cell(a)) ?? 0) >= MAX_ANIMALS_PER_TILE || (!reserva && waterAt(a, tile) < 0.012)
       || (!reserva && (tile.growth ?? 0) < 0.08)) continue;
     // La pareja es la primera en orden canónico (`sort(canonical)[0]`) de las elegibles de su vecindad.
     let b: Animal | undefined;
@@ -720,6 +759,9 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
       parent.thirst = clamp(parent.thirst + 0.07); parent.fatigue = clamp(parent.fatigue + 0.1);
     }
     const water = takeWater(a, tile, 0.012); world.animalDynamics.waterConsumed += water;
+    // V19/R: lo que falte de los 0,012 de agua natal sale, a partes iguales, del agua corporal de los dos progenitores
+    // (ambos con sed < 0,4): su sed sube lo que esa agua calmaría (`SED_POR_UNIDAD`). No se crea agua: se transfiere.
+    if (reserva && water < 0.012) for (const parent of [a, b]) parent.thirst = clamp(parent.thirst + (0.012 - water) / 2 * SED_POR_UNIDAD);
     // The natal patch provides limited biomass as well as energy donated by both parents.
     // V19/R: la biomasa de la cría sale de los 0,03 de cada progenitor (conservada: 0,06 en total), no de la celda.
     if (reserva) { for (const parent of [a, b]) parent.reproReserve = Math.max(0, (parent.reproReserve ?? 0) - RESERVA_POR_PROGENITOR); }
@@ -946,6 +988,10 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     state.counts.set(cell(prey), state.counts.get(cell(prey))! - 1);
     const botin = FOOD_PER_ANIMAL[prey.species];
     assimilateFood(animal, state.reserva ? botin - reservar(animal, botin, state.fraccionReserva) : botin, { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
+    // V19/R: una presa es también agua. Como el pasto (`feed`: 3 unidades de agua por unidad de biomasa, 0,3 de sed
+    // por unidad), el cuerpo de la presa aporta la que conservaba: `botín · 3 · (1 − sed de la presa)`. Sale de ESE
+    // cuerpo (que la bebió antes, ya contada en `waterConsumed`), no de un depósito invisible; una presa sedienta da menos.
+    if (state.reserva) hydrateBody(animal, botin * 3 * (1 - prey.thirst), 0.3);
     animal.lastDecision = world.tick - 12;
   }
   // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.

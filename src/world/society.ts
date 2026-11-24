@@ -5,7 +5,7 @@ import { effectiveLimits, paramsOf } from './params.js';
 import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
-import { constructionCost, constructionSite, contributeConstruction, waterAvailable } from './inventions.js';
+import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
@@ -481,10 +481,11 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
     if (other.action === 'build' && paramsOf(world).construccion.modular) {
-      const structure = constructionSite(world, other), site = structure?.site;
+      const structure = activeSiteAt(world, other), site = structure?.site;
+      const stored = structure ? storedMaterialsNear(world, person) : { wood: 0, stone: 0 };
       if (structure && site && distance(other, structure) <= 0.5 && distance(person, structure) <= 1.5
-        && ((site.depositedWood < site.requiredWood && person.materials.wood > 0)
-          || (site.depositedStone < site.requiredStone && person.materials.stone > 0)
+        && ((site.depositedWood < site.requiredWood && person.materials.wood + stored.wood > 0)
+          || (site.depositedStone < site.requiredStone && person.materials.stone + stored.stone > 0)
           || (site.completedWork < site.requiredWork && (person.work > 0 || person.energy >= 0.005)))) {
         opportunities.push({ person: other, kind: 'site', siteId: structure.id, score: score + 0.3 });
       }
@@ -493,7 +494,7 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     // para cada vecino era trabajo puro tirado. La necesidad de proceso fuera de
     // `research`/`craft` es {0,0} sin resolver ninguna receta: mismo valor, sin la llamada.
     let costWood = 0, costStone = 0, costWork = 0;
-    if (other.action === 'build') { const cost = constructionCost(world,other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
+    if (other.action === 'build') { const cost = partnerConstructionCost(world, other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
     const processNeed = ['research', 'craft'].includes(other.action) ? processMaterialNeed(world, other) : { wood: 0, stone: 0 };
     const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
     const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census);
@@ -523,13 +524,13 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
     helperPaid = paid > 0; count(world, 'constructionHelp');
     detail = `Entregó materiales y trabajo pagado en la obra compartida ${structure.name}.`;
   } else if (opportunity.kind === 'supply') {
-    const material = opportunity.supplyMaterial ?? (other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone');
+    const material = opportunity.supplyMaterial ?? (other.materials.wood < partnerConstructionCost(world, other).wood && person.materials.wood > 0 ? 'wood' : 'stone');
     if (person.materials[material] < 1 || other.materials[material] > (material === 'wood' ? 11 : 7) || (opportunity.supplyMaterial && processMaterialNeed(world, other)[material] <= 0)) return false;
     person.materials[material]--; other.materials[material]++;
     detail = `Aportó una unidad de ${material === 'wood' ? 'madera' : 'piedra'} al trabajo de ${other.name}.`;
   } else if (opportunity.kind === 'assist') {
     const before = other.work;
-    const ceiling = (other.action === 'build' ? constructionCost(world,other).work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1;
+    const ceiling = (other.action === 'build' ? partnerConstructionCost(world, other).work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1;
     if (before >= ceiling) return false;
     other.work = Math.min(ceiling, other.work + 12); count(world, 'constructionHelp');
     detail = `Aportó ${other.work - before} unidades de trabajo a ${other.action === 'build' ? 'la obra' : 'la caza'} de ${other.name}.`;

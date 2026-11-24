@@ -78,8 +78,9 @@ export const NTI = 3;
 export const DF = { x: 0, y: 1, hunger: 2, thirst: 3, energy: 4, fatigue: 5, perception: 6, carnivory: 7 } as const;
 export const NDF = 8;
 /** Columnas Int32 de entrada por animal debido. */
-export const DI = { especie: 0, rango: 1, memorias: 2, idInicio: 3, idLongitud: 4, listo: 5 } as const;
-export const NDI = 6;
+/** `reposo` (V19/M): 1 si el animal cumple `listoSalvoEnergia` (todas las puertas de cría salvo la energía); sólo con `encuentro`. */
+export const DI = { especie: 0, rango: 1, memorias: 2, idInicio: 3, idLongitud: 4, listo: 5, reposo: 6 } as const;
+export const NDI = 7;
 /** Campos Float64 por recuerdo (`memoriaF64[(slot · capMemoria + k) · NMF + campo]`). */
 export const MF = { x: 0, y: 1, tick: 2, food: 3, water: 4 } as const;
 export const NMF = 5;
@@ -95,8 +96,14 @@ export const NSO = 9;
 export const DESTINO_PROPIO = 0, DESTINO_TESELA = 1, DESTINO_RECUERDO = 2, DESTINO_PRESA = 3;
 /** V19/M: el destino es el animal de la fila de la tabla (pareja); la acción sigue siendo `roam`. */
 export const DESTINO_PAREJA = 4;
+/** V19/M: reposo de cría; el destino es el propio animal y la acción `rest`, con la razón `RAZON_REPOSO_CRIA_FAUNA`. */
+export const DESTINO_REPOSO = 5;
 /** Razón de la aproximación a pareja: literal de `RAZON_PAREJA` en `animals.ts` (la prueba lo comprueba). */
 export const RAZON_PAREJA_FAUNA = 'Está listo para criar y se acerca, pagando cada paso, a una pareja compatible que percibe.';
+/** Razón del reposo de cría: literal de `RAZON_REPOSO_CRIA` en `animals.ts`. */
+export const RAZON_REPOSO_CRIA_FAUNA = 'Saciado y listo para criar salvo por las fuerzas; descansa para recuperarlas, sin dejar de tener hambre y sed.';
+/** Alcance del olor o la llamada de pareja: literal de `RADIO_PAREJA` en `animals.ts` (≤ `HALO_CELDAS`). */
+export const RADIO_PAREJA_FAUNA = 12;
 
 /** Nombres de los SAB del despacho. */
 export const BUFFERS_FAUNA = [
@@ -409,18 +416,29 @@ export function decidirAnimal(vista: VistaFauna, slot: number): void {
       presa = -1;
       if (hunger > 0.38 && carnivoria < 0.6 && comida >= 0) { accion = ACCION_FAUNA.graze; destinoRecurso(comida); }
       else if (df[DF.energy * cap + slot]! < 0.4 || df[DF.fatigue * cap + slot]! > 0.55) accion = ACCION_FAUNA.rest;
+      else if (params.encuentro === true && di[DI.reposo * cap + slot] === 1) { accion = ACCION_FAUNA.rest; destinoTipo = DESTINO_REPOSO; }
       else {
         // Novedad de cada adyacente (`novelty`), con la cadena exacta del `hash` real.
-        // V19/M: pareja conespecífica lista más cercana (distancia, rango canónico); `listo` ya incluye la reserva de R.
+        // V19/M: pareja conespecífica lista (viva, otra identidad) más cercana a ≤ `RADIO_PAREJA_FAUNA` celdas
+        // (distancia, rango canónico); `listo` ya incluye la reserva de R. El motor empaqueta los ocupantes de ese rombo.
         let pareja = -1;
         if (params.encuentro === true && di[DI.listo * cap + slot] === 1) {
-          for (let i = 0; i < numCercanos; i++) {
-            const fila = cercanos[i]!;
-            if (ti[TI.especie * capT + fila] !== especie || ti[TI.listo * capT + fila] !== 1) continue;
-            if (pareja < 0) { pareja = fila; continue; }
-            const d = distancia(tf[TF.x * capT + fila]!, tf[TF.y * capT + fila]!) - distancia(tf[TF.x * capT + pareja]!, tf[TF.y * capT + pareja]!);
-            const ra = ti[TI.rango * capT + fila]!, rb = ti[TI.rango * capT + pareja]!;
-            if ((d || (ra < rb ? -1 : ra > rb ? 1 : 0)) < 0) pareja = fila;
+          let mejorD = Infinity;
+          for (let dy = -RADIO_PAREJA_FAUNA; dy <= RADIO_PAREJA_FAUNA; dy++) {
+            const span = RADIO_PAREJA_FAUNA - Math.abs(dy);
+            for (let dx = -span; dx <= span; dx++) {
+              const celda = celdaDe(vista, ax + dx, ay + dy);
+              if (celda < 0) continue;
+              const d = Math.abs(dx) + Math.abs(dy);
+              if (d > mejorD) continue;
+              const inicio = vista.inicio[celda]!, fin = inicio + vista.cuenta[celda]!;
+              for (let k = inicio; k < fin; k++) {
+                const fila = vista.ocupantes[k]!;
+                if (ti[TI.rango * capT + fila] === rangoPropio || !(tf[TF.health * capT + fila]! > 0)
+                  || ti[TI.especie * capT + fila] !== especie || ti[TI.listo * capT + fila] !== 1) continue;
+                if (pareja < 0 || d < mejorD || ti[TI.rango * capT + fila]! < ti[TI.rango * capT + pareja]!) { pareja = fila; mejorD = d; }
+              }
+            }
           }
         }
         if (pareja >= 0) { destinoTipo = DESTINO_PAREJA; destinoRef = pareja; }

@@ -921,12 +921,12 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     for (const sourceIndex of sources) {
       const tile = reachableTiles[sourceIndex]!;
       const steps = reachableSteps[sourceIndex]!;
-      const work = Math.max(1, workDuration(world, person, 'forage')
+      const work = Math.max(1, forageDuration(person)
         - (person.action === 'forage' && distance(person.target, tile) === 0 ? person.work : 0));
       if (!planAffordable(person, payload, steps, work)) continue;
       const workers = foragers.get(`${tile.x},${tile.y}`);
       if (workers && earlierForagerExhausts(person, tile, workers, work, {
-        tick: world.tick, radius: RADIUS, duration: other => workDuration(world, other, 'forage'),
+        tick: world.tick, radius: RADIUS, duration: other => forageDuration(other),
         capacity: other => Math.min(FORAGE_AMOUNT, Math.max(0, 0.25 - other.inventory)),
         continues: (other, ticks) => {
           const body = copyBody(other, own ? choosePaid : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 });
@@ -1130,9 +1130,13 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   const rested = copyBody(person, forecastBody);
   restBody(rested, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE });
   const readinessRecovery = clamp((rested.energy - person.energy) / REST_ENERGY_RATE);
+  // V19/L: la noche hace más reparadora una pausa sólo en proporción a lo que queda por recuperar
+  // (`recoveryDemand`); con el cuerpo ya descansado no añade una ventaja fija a no hacer nada.
+  const recoveryDemand = clamp(person.fatigue + (1 - person.energy));
+  const nightRest = phaseAt(world.tick) === 'night' ? (params.conducta.aprendizajeCausal ? 0.1 * recoveryDemand : 0.1) : 0;
+  const restHeuristic = person.fatigue * 1.75 + (1 - person.energy) * 1.2 * readinessRecovery + nightRest;
   const restCandidate: Candidate = { action: 'rest', target: recoverWater ? person : shelter ?? person,
-    score: Math.max(person.fatigue * 1.75 + (1 - person.energy) * 1.2 * readinessRecovery + (phaseAt(world.tick) === 'night' ? 0.1 : 0),
-      recoverWater ? Math.max(0, person.thirst - 0.18) * 3.1 : 0),
+    score: Math.max(restHeuristic, recoverWater ? Math.max(0, person.thirst - 0.18) * 3.1 : 0),
     reason: recoverWater ? 'Lleva agua pero necesita recuperar aquí el esfuerzo para manipularla; descansa antes de volver a intentar beber.'
       : shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' };
   candidates.push(restCandidate);
@@ -1382,6 +1386,12 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
           || candidate.action === 'research' || candidate.action === 'craft' || candidate.action === 'share'
           || candidate.action === 'invent' || candidate.action === 'repair'));
       if (softenHeuristics && strategic) candidate.score *= heuristicScale;
+      // V19/L: la parte de `rest` que no es recuperación pendiente es tan discrecional como una estrategia. Su
+      // heurística corporal se atenúa como las estratégicas en la fracción `1 − recoveryDemand`: cansado, descansar
+      // conserva todo su peso; descansado, no lleva ventaja sin escalar. El alivio físico (techo bajo lluvia, agua)
+      // no se toca: es daño corporal evitado, no preferencia.
+      else if (softenHeuristics && aprendizajeCausal && candidate === restCandidate && !recoverWater && !protectedBond)
+        candidate.score -= restHeuristic * politicaAutonomia * 0.55 * (1 - recoveryDemand);
       candidate.prePolicyScore = candidate.score;
       if (candidate.score > bestPre) { bestPre = candidate.score; heuristicWinnerAction = candidate.action; }
       if ((candidate === candidates[0] && emergencyExplore) || (politicaAutonomia > 0 && protectedBond)) continue;
@@ -1755,6 +1765,11 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
     const beforeRest={fatigue:person.fatigue,energy:person.energy};
     restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
+    // V19/L: como comer (hambre < 0,12) o beber (sed < 0,12), una pausa termina cuando el cuerpo ya recuperó lo que
+    // la motivaba: al cruzar la demanda de recuperación por debajo de `REST_RECOVERED` vuelve a elegir en el paso
+    // siguiente (una sola vez por tramo; si sigue lloviendo y no hay trabajo bajo techo, el techo seguirá ganando).
+    if (params.conducta.aprendizajeCausal && beforeRest.fatigue + (1 - beforeRest.energy) >= REST_RECOVERED
+      && person.fatigue + (1 - person.energy) < REST_RECOVERED) person.decisionAt = Math.min(person.decisionAt, world.tick + 1);
     const { politicaPeso, politicaAutonomia } = params.conducta;
     if (!params.conducta.aprendizajeCausal && politicaAutonomia > 0 && politicaPeso > 0 && world.adaptationEnabled && world.tick % 30 === 0) {
       const gained = (beforeRest.fatigue - person.fatigue) + (person.energy - beforeRest.energy);
@@ -1780,10 +1795,15 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
   person.need = person.thirst > 0.6 ? 'Agua dulce' : person.hunger > 0.6 ? 'Alimento' : person.fatigue > 0.55 || person.energy < 0.35 ? 'Descanso' : person.socialLoad > 0.7 ? 'Espacio propio' : person.closeness > 0.5 && person.role !== 'neighbor' ? 'Compañía' : 'Recorrer';
 }
 
+/** V19/L: demanda de recuperación (fatiga + 1 − energía) por debajo de la cual una pausa ya no tiene qué reparar. */
+const REST_RECOVERED = 0.2;
 const MIN_FORAGE_STOCK = 0.005;
 const FORAGE_AMOUNT = 0.06;
 function workEffort(person: Person, work = 1) {
   return { energy: work * 0.0003, fatigue: work * 0.00025 * (1.2 - person.traits.resilience * 0.4) };
+}
+function forageDuration(person: Person): number {
+  return Math.ceil(18 * (1 - (person.skills.forage ?? 0) * 0.25));
 }
 function workDuration(world: World, person: Person, action = person.action): number {
   const base = action === 'build' ? constructionCost(world, person).work : action === 'invent' ? 60 : action === 'repair' ? 30

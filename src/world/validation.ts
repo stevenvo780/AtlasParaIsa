@@ -3,7 +3,7 @@ import type { World } from './index.js';
 import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
-import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap } from './inventions.js';
+import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells } from './inventions.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
@@ -25,7 +25,7 @@ const coordinate = (v: unknown): v is number => typeof v==='number'&&Number.isSa
 const fail = ():never=>{throw new Error('Estado de vida o estructuras inválido.');};
 export function assertBlueprint(value: unknown,tick: number,maxGeneration=64,modular=false): asserts value is BlueprintView {
   if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,modular)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,modular?Number.MAX_SAFE_INTEGER:12)||!integer(value.cost.stone,modular?Number.MAX_SAFE_INTEGER:8)||!integer(value.cost.work,modular?Number.MAX_SAFE_INTEGER:600)||value.cost.work<1)fail();
-  const b=value as unknown as BlueprintView, cost=blueprintCost(b.components);
+  const b=value as unknown as BlueprintView, cost=blueprintCost(b.components,modular);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
 }
 export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTiles=LEGACY_WORLD_LIMITS.teselasActivas): asserts value is StructureView[] {
@@ -48,16 +48,48 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
       capacity.waterCapacity*=1+containment;capacity.foodCapacity*=1+containment;
     }
     if(s.water>capacity.waterCapacity||s.food>capacity.foodCapacity)fail();
-    const position=`${s.x},${s.y}`;
+    const checkFootprint=(components:StructureView['components'],footprint:StructureView['footprint'])=>{
+      const frames=components.filter(c=>c==='frame').length;
+      if(footprint!==undefined&&(!object(footprint)||Object.keys(footprint).length!==2||![1,2].includes(footprint.width)||![1,2].includes(footprint.height)))fail();
+      const width=footprint?.width??1,height=footprint?.height??1;
+      if(frames<=2?width!==1||height!==1:frames<=4?width*height!==2:width!==2||height!==2)fail();
+    };
+    checkFootprint(s.components,s.footprint);
+    const materials=materialCapacity(s);
+    if((s.storedWood!==undefined&&!integer(s.storedWood,materials.wood))||(s.storedStone!==undefined&&!integer(s.storedStone,materials.stone)))fail();
+    const completedCells=structureFootprintCells({...s,site:undefined});
+    let expansion=false;
     if(s.site!==undefined){
-      const site=s.site,cost=blueprintCost(s.components);
-      if(!object(site)||Object.keys(site).length!==6||site.requiredWood!==cost.wood||site.requiredStone!==cost.stone||site.requiredWork!==cost.work
-        ||!number(site.depositedWood,site.requiredWood)||!number(site.depositedStone,site.requiredStone)||!number(site.completedWork,site.requiredWork)
-        ||s.condition!==0||s.water!==0||s.food!==0||s.uses!==0
+      const site=s.site;let cost=blueprintCost(s.components,true);
+      if(!object(site))fail();
+      if(site.expansion!==undefined){
+        const target=site.expansion;
+        if(!object(target)||!string(target.blueprintId,100)||target.blueprintId===s.blueprintId||!validBlueprint(target.components,true)
+          ||Object.keys(target).some(k=>!['blueprintId','components','footprint'].includes(k)))fail();
+        checkFootprint(target.components,target.footprint);
+        for(const c of ['frame','roof','cistern','granary','garden','hearth'] as const){
+          const old=s.components.filter(v=>v===c).length,next=target.components.filter(v=>v===c).length;
+          if(next<old||(c==='frame'&&next===old))fail();
+        }
+        const targetCost=blueprintCost(target.components,true);
+        cost={wood:targetCost.wood-cost.wood,stone:targetCost.stone-cost.stone,work:targetCost.work-cost.work};
+        const reserved=structureFootprintCells(s);
+        if(!completedCells.every(c=>reserved.some(r=>c.x===r.x&&c.y===r.y)))fail();
+        expansion=true;
+      }
+      if(Object.keys(site).length!==(expansion?7:6)||site.requiredWood!==cost.wood||site.requiredStone!==cost.stone||site.requiredWork!==cost.work
+        ||!integer(site.depositedWood,site.requiredWood)||!integer(site.depositedStone,site.requiredStone)||!number(site.completedWork,site.requiredWork)
+        ||(!expansion&&(s.condition!==0||s.water!==0||s.food!==0||s.uses!==0||(s.storedWood??0)!==0||(s.storedStone??0)!==0))
         ||(site.depositedWood===site.requiredWood&&site.depositedStone===site.requiredStone&&site.completedWork===site.requiredWork))fail();
     }
-    if(!positions.has(position)||(s.site?['water','shelter'].includes(positions.get(position)!.terrain):positions.get(position)!.terrain!=='shelter')||occupied.has(position))fail();
-    ids.add(s.id);occupied.add(position);
+    for(const cell of structureFootprintCells(s)){
+      const position=`${cell.x},${cell.y}`,tile=positions.get(position);
+      const finished=!s.site||(expansion&&completedCells.some(c=>c.x===cell.x&&c.y===cell.y));
+      if(!coordinate(cell.x)||!coordinate(cell.y)||!tile||occupied.has(position)
+        ||(finished?tile.terrain!=='shelter':['water','shelter'].includes(tile.terrain)))fail();
+      occupied.add(position);
+    }
+    ids.add(s.id);
   }
 }
 export function assertChunkLife(chunk: Chunk,tick: number): void {
@@ -99,6 +131,10 @@ export function assertLifeState(world: World): void {
     }
   }
   for(const s of world.structures) if(!ids.has(s.blueprintId)||blueprintSignature(s.components)!==blueprintSignature(world.blueprints.find(b=>b.id===s.blueprintId)!.components))fail();
+  for(const s of [...world.structures,...world.retiredChunks.flatMap(c=>c.structures??[])]){
+    const target=s.site?.expansion;
+    if(target&&(!ids.has(target.blueprintId)||blueprintSignature(target.components)!==blueprintSignature(world.blueprints.find(b=>b.id===target.blueprintId)!.components)))fail();
+  }
   for(const [record,keys] of [[world.animalDynamics,['births','deaths','predations','humanHunts','waterConsumed','plantConsumed']],[world.inventionDynamics,['attempts','accepted','repairs','waterCollected','foodStored','foodTaken']]] as const) {
     if(!object(record)||Object.keys(record).length!==keys.length||keys.some(key=>!number((record as Record<string,unknown>)[key],1e12)))fail();
   }

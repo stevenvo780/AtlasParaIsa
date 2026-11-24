@@ -11,8 +11,8 @@ import { type ConLimpieza, laboratorio } from './lib/store.js';
 
 const laboratory = (t: ConLimpieza) => laboratorio(t, 'atlas-reglas10-');
 
-test('un mundo V9 guardado por Store se recarga como V12 conservando todo salvo la versión', t => {
-  // Control: el MISMO mundo guardado y recargado como V12. El Store archiva terreno dormido y
+test('un mundo V9 guardado por Store se recarga como V13 conservando todo salvo la versión', t => {
+  // Control: el MISMO mundo guardado y recargado como V13. El Store archiva terreno dormido y
   // sella diarios al guardar, así que la comparación justa es contra ese viaje de ida y vuelta.
   const legacy = laboratory(t), control = laboratory(t);
   const world = createWorld(51926, HISTORICAL_PARAMS);
@@ -25,14 +25,14 @@ test('un mundo V9 guardado por Store se recarga como V12 conservando todo salvo 
   try {
     const loaded = reopened.load()!.world, expected = reference.load()!.world;
     assert.equal(RULES_VERSION, 13);
-    assert.equal(loaded.version, 12);
+    assert.equal(loaded.version, 13);
     assert.equal(JSON.stringify(loaded), JSON.stringify(expected));
     assert.deepEqual(paramsOf(loaded), paramsOf(expected));
     stepWorld(loaded); reopened.save(loaded);
   } finally { reopened.close(); reference.close(); }
 });
 
-test('un mundo V10 cargado migra a V12 con el mismo digesto de estado salvo version y los params persistidos intactos', t => {
+test('un mundo V10 cargado migra a V13 con el mismo digesto de estado salvo version y los params persistidos intactos', t => {
   const legacy = laboratory(t), control = laboratory(t);
   const persisted = parseParams('agua.cuencas=0.8,social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.memoriaDisputa=8', HISTORICAL_PARAMS);
   const world = createWorld(404, persisted);
@@ -44,7 +44,7 @@ test('un mundo V10 cargado migra a V12 con el mismo digesto de estado salvo vers
   const reopened = new Store(legacy.path), reference = new Store(control.path);
   try {
     const loaded = reopened.load()!.world, expected = reference.load()!.world;
-    assert.equal(loaded.version, 12);
+    assert.equal(loaded.version, 13);
     assert.deepEqual(loaded, expected);
     assert.deepEqual(paramsOf(loaded), persisted);
     assert.deepEqual(paramsOf(expected), persisted);
@@ -54,12 +54,12 @@ test('un mundo V10 cargado migra a V12 con el mismo digesto de estado salvo vers
   } finally { reopened.close(); reference.close(); }
 });
 
-for (const params of ['poblacion.comprobacionContinua=true', undefined]) test(`V12 conserva la corrección V10: los actores de fundación no cambian (${params ?? 'leyes históricas'})`, { timeout: 900000 }, t => {
+for (const params of ['poblacion.comprobacionContinua=true', undefined]) test(`V13 conserva la corrección V10: los actores de fundación no cambian (${params ?? 'leyes históricas'})`, { timeout: 900000 }, t => {
   // Semilla 42: funda comunidades y pare dentro de 400 pasos; con comprobación continua el
   // nacimiento caía después de archivar el evento y `Store.save` abortaba (defecto de alias).
   const { store } = laboratory(t);
   const world: World = createWorld(42, parseParams(params, HISTORICAL_PARAMS));
-  assert.equal(world.version, 12);
+  assert.equal(world.version, 13);
   const founding = new Map<string, string[]>();
   const record = (): void => { for (const event of world.events) if (event.kind === 'community' && !founding.has(event.id)) founding.set(event.id, [...event.actors]); };
   store.save(world);

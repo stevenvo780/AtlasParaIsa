@@ -9,7 +9,7 @@ import { esc, svg, icon, number, percentage } from './ui-catalog.js';
 import { nombreConocido } from './vistos.js';
 import { ejeDominante, ejesCultura } from './censo-view.js';
 import { footprintCells, footprintLabel, installedCount, siteFractions, type ExtendedStructure } from './structure-art.js';
-import { compoundLotsMarkup, swatch } from './telemetry-hud.js';
+import { compoundLotsMarkup, swatch, phaseLabels, materialPropertiesMarkup } from './telemetry-hud.js';
 
 /** FR-006: the legible context (place, tick, up to 3 prior episodes) of a `death` chronicle event,
  * for a «Historia» detail on an identity that no longer appears in `world.people`. The caller
@@ -88,6 +88,13 @@ function procedureReference(recipeId: string, technology: WorldView['technology'
   return recipe
     ? `<button class="entity-link" data-recipe="${esc(recipe.id)}">${esc(recipeLabel(recipe))} ${icon.arrow}</button>`
     : `<span>Procedimiento ${esc(recipeId)}<br><small>Detalles fuera de esta vista.</small></span>`;
+}
+
+/** Material provenance remains visible even when its formula details are outside the sample. */
+export function forgedToolMarkup(item: NonNullable<WorldView['technology']>['items'][number], world: WorldView): string {
+  const formula = item.chemFormulaId ? world.chemistry?.formulas.find(f => f.id === item.chemFormulaId) : undefined;
+  const chemical = item.materialTint || item.chemFormulaId || item.chemPhase;
+  return `<div data-held-item="${esc(item.id)}"><div class="skill-row"><span>${item.recipeId ? procedureReference(item.recipeId, world.technology) : 'Material sin procedimiento asociado'}</span></div><div class="skill-row"><span>Material del objeto</span><strong>${number(item.mass / 1000, 3)} u. de material</strong></div>${chemical ? `<div data-forged-material>${swatch(item.materialTint)}<span>Procedencia química: ${esc(item.chemFormulaId ?? 'Sin fórmula recibida')}</span>${item.chemPhase ? `<span class="detail-badge">${esc(item.chemPhase === 'vitrified' ? 'vitrificado' : phaseLabels[item.chemPhase] ?? item.chemPhase)}</span>` : ''}${materialPropertiesMarkup(formula?.properties)}${formula ? '' : '<small>Propiedades de la fórmula fuera de esta vista.</small>'}</div>` : ''}${carriedWaterCard(item)}</div>`;
 }
 
 /** M9: de dónde viene un procedimiento que recuerda: lo inventó, de quién lo aprendió y cuándo, o que no consta. */
@@ -243,7 +250,7 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
       : '<p>No recuerda ningún procedimiento ahora.</p>'}
     <p>Este repertorio cambia al aprender y olvidar. Es distinto de los rasgos heredados. Recordar un procedimiento no asegura tener los materiales para realizarlo.</p></details>`;
   const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];
-  const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item=>`<div data-held-item="${esc(item.id)}"><div class="skill-row"><span>${item.recipeId ? procedureReference(item.recipeId, technology) : 'Material sin procedimiento asociado'}</span></div><div class="skill-row"><span>Material del objeto</span><strong>${number(item.mass/1000,3)} u. de material</strong></div>${carriedWaterCard(item)}</div>`).join('')}${products.length > 8 ? `<p>Se muestran 8 de los ${number(products.length)} objetos que lleva.</p>` : ''}<p>La masa del material cambia al usarlo o transformarlo. El agua de su composición es distinta del agua potable transportada. Las unidades de material y de agua del entorno son diferentes. Llevar un objeto no implica recordar cómo se fabrica.</p></details>` : '';
+  const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item => forgedToolMarkup(item, world)).join('')}${products.length > 8 ? `<p>Se muestran 8 de los ${number(products.length)} objetos que lleva.</p>` : ''}<p>La masa del material cambia al usarlo o transformarlo. El agua de su composición es distinta del agua potable transportada. Las unidades de material y de agua del entorno son diferentes. Llevar un objeto no implica recordar cómo se fabrica.</p></details>` : '';
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';

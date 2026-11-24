@@ -12,6 +12,7 @@ import type { MirrorUpdate, SimReply, SimRpc, SimWorkerOptions } from '../src/se
 import { enlaceCinta, type DescriptorEnlace } from '../src/shared/fotograma.js';
 import { CINTA } from '../src/shared/cinta.js';
 import { parseParams } from '../src/world/params.js';
+import { Store } from '../src/server/store.js';
 
 type Mensaje = MirrorUpdate | SimReply | { type: 'ready' }
   | { type: 'barrera'; tick: number }
@@ -117,11 +118,11 @@ function iniciarSimulacion(t: TestContext, extra: Partial<SimWorkerOptions> = {}
     assert.equal(respuesta.error, undefined, respuesta.error?.message);
     return respuesta.value;
   }
-  return { cinta, armarFallo, bloquearCinta, cintaBloqueada, liberarCinta, esperar, pedir, salida };
+  return { worldPath, cinta, armarFallo, bloquearCinta, cintaBloqueada, liberarCinta, esperar, pedir, salida };
 }
 
 test('la recarga real del guardado en carta-sim bifurca la cinta y vuelve a grabar los ticks', async t => {
-  const { cinta, armarFallo, esperar, pedir, salida } = iniciarSimulacion(t);
+  const { worldPath, cinta, armarFallo, esperar, pedir, salida } = iniciarSimulacion(t);
   await esperar('ready');
   await pedir('start');
   await esperar('barrera', m => m.tick >= 20);
@@ -172,6 +173,11 @@ test('la recarga real del guardado en carta-sim bifurca la cinta y vuelve a grab
     const bloque = decodificarBloque(readFileSync(rutaSegmento(cinta, 0, Number(descartado.segmento)))
       .subarray(desde, desde + Number(descartado.bytes)));
     assert.ok(bloque.t1 >= anterior.latestTick, 'el bloque confirmado de la bifurcación aún pasa la verificación');
+    const guardado = new Store(worldPath, { readOnly: true });
+    const tickFinal = guardado.load()!.world.tick;
+    guardado.close();
+    assert.equal(db.prepare('SELECT max(t1) AS t FROM bloques WHERE nivel=0 AND epoca=?').get(nueva!.id!)?.t, tickFinal,
+      'el cierre graba el último tick guardado');
     const serie = db.prepare('SELECT t,nacimientos,muertes FROM serie WHERE epoca=? ORDER BY t LIMIT 1').get(nueva!.id!);
     assert.deepEqual(serie && { ...serie }, { t: recarga.tick, nacimientos: 0, muertes: 0 });
   } finally { db.close(); }

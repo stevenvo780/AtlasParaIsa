@@ -5,8 +5,8 @@
  * 96×64 con cientos de personas y animales, estructuras y arbolado. Cada 10 fotogramas (≈ 6 ticks/s) llega un tick que
  * mueve cuerpos y parchea unas pocas teselas (como un delta de la cinta). Se mide, por zoom (cerca, medio y el máximo
  * alejamiento del perfil Ultra), el tiempo de CPU por fotograma (incluido el volcado del lienzo) y las órdenes de dibujo.
- * Los umbrales fallan si se regresa al coste de antes (LOD que no se activa, escena a resolución de arte completa,
- * rehorneado entero por tick, personas sin caché).
+ * Las cotas de trabajo fallan si se regresa al coste de antes (LOD que no se activa, escena a resolución de arte completa,
+ * rehorneado entero por tick, personas sin caché); las de tiempo de pared solo corren con `V24_FPS_BANCO=1`.
  *
  * También (sin navegador): el reproductor DVR no congela el cabezal ni vacía la cola al mover la cámara.
  */
@@ -20,8 +20,10 @@ import type { TapeChunkResponse, TapeClientDelta, TapeMetaResponse } from '../sr
 import { DVR_LIMITS, DvrPlayer, type DvrChunkRequest, type DvrFrameInfo } from '../src/client/dvr-player.js';
 
 const PRINT = process.env.V24_FPS_PRINT === '1';
+/** Los umbrales de tiempo de pared solo valen en una máquina tranquila: `V24_FPS_BANCO=1` los activa fuera de `npm test`. */
+const BANCO = process.env.V24_FPS_BANCO === '1';
 
-interface ZoomMetrics { zoom: number; frames: number; meanMs: number; p95Ms: number; maxMs: number; opsPerFrame: number; sceneW: number; sceneH: number; farLod: boolean; lod: string; visibleTiles: number; chunks: number; }
+interface ZoomMetrics { zoom: number; frames: number; meanMs: number; p95Ms: number; maxMs: number; opsPerFrame: number; rebakes: number; tilePatches: number; sceneW: number; sceneH: number; farLod: boolean; lod: string; visibleTiles: number; chunks: number; }
 interface BenchResult { zooms: ZoomMetrics[]; layered: ZoomMetrics[]; sweep: { frames: number; meanMs: number; p95Ms: number; maxMs: number }; personBuilds: number; minZoom: number; errors: string[] }
 
 test('Landscape: coste por fotograma acotado al alejar (1920×1080, minZoom real)', { timeout: 300_000 }, async t => {
@@ -138,10 +140,13 @@ test('Landscape: coste por fotograma acotado al alejar (1920×1080, minZoom real
         r.cam.zoom = zoom; r.cam.x = CX; r.cam.y = CY; r.followedId = null;
         for (let i = 0; i < 30; i++) step(i); // calentamiento: ventana, horneado y cachés de esta cámara
         const times: number[] = []; const ops0 = ops;
+        const bakes = () => { const c = r.getPerfCounters(); return { rebakes: c.terrainBakes + c.mapChunkBuilds + c.canopyChunkBuilds, tilePatches: c.tilePatches }; };
+        const work0 = bakes();
         const FRAMES = 120;
         for (let i = 0; i < FRAMES; i++) times.push(step(i));
-        const counters = r.getPerfCounters(), diag = r.getDiagnostics();
+        const counters = r.getPerfCounters(), diag = r.getDiagnostics(), work = bakes();
         return { zoom, frames: FRAMES, meanMs: times.reduce((a, b) => a + b, 0) / FRAMES, p95Ms: percentile(times, .95), maxMs: Math.max(...times), opsPerFrame: (ops - ops0) / FRAMES,
+          rebakes: work.rebakes - work0.rebakes, tilePatches: work.tilePatches - work0.tilePatches,
           sceneW: r.scene.width, sceneH: r.scene.height, farLod: counters.farLod, lod: String(counters.lod ?? (counters.farLod ? 'far' : 'near')), visibleTiles: diag.visibleTiles, chunks: r.chunks.length };
       };
       const minZoom = r.minZoom as number;
@@ -173,22 +178,27 @@ test('Landscape: coste por fotograma acotado al alejar (1920×1080, minZoom real
     assert.equal(far.chunks, 0, 'en el mapa no se hornean ni vuelcan trozos de suelo a resolución completa');
     // La escena nunca se pinta a 16 px/tesela sobre todo lo visible al alejar: su tamaño se acota al de la pantalla.
     for (const z of result.zooms) assert.ok(z.sceneW * z.sceneH <= 1920 * 1080 * 1.6, `zoom ${z.zoom}: escena ${z.sceneW}×${z.sceneH} acotada a la pantalla`);
+    // Trabajo de dibujo acotado: una imagen por capa y por bloque, no una orden por tesela.
+    for (const z of [...result.zooms, ...result.layered]) assert.ok(z.opsPerFrame <= 6000, `zoom ${z.zoom}: ${Math.round(z.opsPerFrame)} órdenes de dibujo por fotograma`);
+    // Trabajo por tick acotado: con la vista ya horneada, cada tesela parcheada rehace a lo sumo sus trozos vecinos
+    // (4 en una esquina), más una sola pasada por lo visible; rehornear la ventana entera en cada tick lo supera.
+    for (const z of [...result.zooms, ...result.layered]) {
+      const vista = Math.max(z.chunks, Math.ceil(z.visibleTiles / (32 * 32)));
+      assert.ok(z.tilePatches > 0, `zoom ${z.zoom}: llegaron ticks con teselas parcheadas`);
+      assert.ok(z.rebakes <= 4 * z.tilePatches + vista, `zoom ${z.zoom}: ${z.rebakes} trozos rehorneados por ${z.tilePatches} teselas parcheadas`);
+    }
+    // Personas cacheadas por identidad + pose: unos pocos cientos de sprites para 600 personas en 400+ fotogramas.
+    assert.ok(result.personBuilds >= 0 && result.personBuilds < 600 * 4, `sprites de persona horneados: ${result.personBuilds}`);
+    if (!BANCO) { t.diagnostic('Umbrales de tiempo de pared omitidos (V24_FPS_BANCO=1 para medirlos).'); return; }
     // Coste por fotograma acotado: alejar no puede costar varias veces más que mirar de cerca.
     assert.ok(far.meanMs <= Math.max(8, near.meanMs * 2.5), `zoom ${far.zoom}: ${far.meanMs.toFixed(2)} ms/fotograma frente a ${near.meanMs.toFixed(2)} de cerca`);
     assert.ok(mid.meanMs <= Math.max(8, near.meanMs * 2.5), `zoom ${mid.zoom}: ${mid.meanMs.toFixed(2)} ms/fotograma`);
-    assert.ok(far.opsPerFrame <= 6000, `zoom ${far.zoom}: ${Math.round(far.opsPerFrame)} órdenes de dibujo por fotograma`);
-    assert.ok(near.opsPerFrame <= 6000, `zoom ${near.zoom}: ${Math.round(near.opsPerFrame)} órdenes de dibujo por fotograma`);
     // Alejar con la rueda (con ticks llegando) no da tirones catastróficos: antes, p95 ≈ 1 s por fotograma (escena de 8192×4864, rehorneado por tick).
     // El barrido parte ahora de una rejilla ajustada a lo cercano (al volver a acercar se recompone, ver `ensureWindow`): antes salía de la
     // rejilla gigante que dejaba la fase de zoom 4 y daba ≈ 30 ms; medido desde una rejilla nueva, base y esta versión rondan 90–250 ms de p95
     // con la torre a carga ≈ 50 (recomponer la ventana al cruzar de nivel es el coste real; reducirlo queda como trabajo aparte).
     assert.ok(result.sweep.p95Ms <= Math.max(400, near.p95Ms * 20), `barrido de zoom: p95 ${result.sweep.p95Ms.toFixed(2)} ms`);
-    for (const z of result.layered) {
-      assert.ok(z.meanMs <= Math.max(8, near.meanMs * 2.5), `con capas, zoom ${z.zoom}: ${z.meanMs.toFixed(2)} ms/fotograma`);
-      assert.ok(z.opsPerFrame <= 6000, `con capas, zoom ${z.zoom}: ${Math.round(z.opsPerFrame)} órdenes de dibujo (una imagen por capa, no una por tesela)`);
-    }
-    // Personas cacheadas por identidad + pose: unos pocos cientos de sprites para 600 personas en 400+ fotogramas.
-    assert.ok(result.personBuilds >= 0 && result.personBuilds < 600 * 4, `sprites de persona horneados: ${result.personBuilds}`);
+    for (const z of result.layered) assert.ok(z.meanMs <= Math.max(8, near.meanMs * 2.5), `con capas, zoom ${z.zoom}: ${z.meanMs.toFixed(2)} ms/fotograma`);
   } finally {
     await browser.close(); await server.close();
   }

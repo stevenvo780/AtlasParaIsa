@@ -4,9 +4,12 @@ import { TapeWriter } from './tape-store.js';
 import type { TapeWriterOptions } from '../shared/tape.js';
 import type { WorldView } from '../shared/types.js';
 
-/** V24: the slow-moving summaries of a view (each walks the world, the catalogues or the chronicle). A turbo
- * frame between two live mirror posts may leave them out: this writer carries the previous frame's values. */
-export const CARRIED_VIEW_FIELDS = ['places', 'memories', 'blueprints', 'stats', 'communities', 'technology', 'organization', 'chemistry', 'demography'] as const;
+/** V24: the costly, slow-moving summaries of a view (each walks every tile or a whole catalogue). A turbo
+ * frame between two live mirror posts may leave them out: this writer carries the previous frame's values,
+ * so they (and the terrain) are SAMPLED at the mirror's cadence, ≤ `TURBO_MIRROR_MS` of wall time behind.
+ * What must agree with the people of the same tick — communities, demography (deaths), places and
+ * memories — is projected on every frame and never carried. */
+export const CARRIED_VIEW_FIELDS = ['blueprints', 'stats', 'technology', 'organization', 'chemistry'] as const;
 const carriedFields: ReadonlySet<string> = new Set(CARRIED_VIEW_FIELDS);
 /** A carried frame completed with the previous frame's summaries, in the previous frame's key order. */
 export function withCarriedFields(view: WorldView, previous: WorldView): WorldView {

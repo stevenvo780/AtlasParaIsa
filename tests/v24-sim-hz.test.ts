@@ -168,7 +168,8 @@ test('carried fields: completed in the previous key order, new fields appended, 
   const previous = { version: 1, tick: 1, people: [], places: ['p'], stats: { population: 3 }, whispers: [1], chemistry: { c: 1 } } as unknown as WorldView;
   const current = { version: 1, tick: 2, people: [{ id: 'x' }], weather: 'rain' } as unknown as WorldView;
   const merged = withCarriedFields(current, previous) as unknown as Record<string, unknown>;
-  assert.deepEqual(Object.keys(merged), ['version', 'tick', 'people', 'places', 'stats', 'chemistry', 'weather']);
+  // `places` is projected on every frame (never carried): a frame without it does not inherit it.
+  assert.deepEqual(Object.keys(merged), ['version', 'tick', 'people', 'stats', 'chemistry', 'weather']);
   assert.equal(merged.stats, (previous as unknown as Record<string, unknown>).stats);
   assert.equal(merged.tick, 2);
 });
@@ -212,4 +213,45 @@ test('turbo gateway: every tick on the tape in order, summaries on every frame, 
   } finally { reader.close(); }
   // The live mirror follows the world (throttled, never stalled).
   assert.ok(mirrorTick >= start.latestTick + 1, `mirror tick ${mirrorTick} moved past ${start.latestTick}`);
+});
+
+test('carried frames still project per tick what must agree with that tick\'s people', () => {
+  const world = createWorld(51926, parseParams('motor.hilos=1'));
+  for (let i = 0; i < 3; i++) stepWorld(world);
+  const frame = projectTapeFrame(world, {} as WorldView['performance'] & object, 'instance', [], true) as unknown as Record<string, unknown>;
+  for (const field of CARRIED_VIEW_FIELDS) assert.equal(Object.hasOwn(frame, field), false, `${field} is carried`);
+  for (const field of ['communities', 'demography', 'places', 'memories']) assert.ok(frame[field] !== undefined, `${field} on every frame`);
+});
+
+test('turbo gateway: the first frame a reopened tape accepts is a full keyframe (terrain not lost after a restart)', { timeout: 180_000 }, async t => {
+  const dir = directory(t);
+  const worldPath = join(dir, 'world.sqlite');
+  const options = { worldPath, origin: 'https://carta.test', secure: true, password: 'private-v24-hz-password', seed: 42,
+    params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true, tapeKeyframeInterval: 100_000 };
+  const tilesAt = (tick: number) => {
+    const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
+    try { return reader.readChunk(tick, 1).frames.find(frame => frame.tick === tick)?.tiles.length ?? -1; } finally { reader.close(); }
+  };
+  let gateway = createWorkerGateway(options);
+  await gateway.ready;
+  gateway.start();
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  await gateway.close();
+  const first = new TapeReader({ path: tapePathForWorld(worldPath) });
+  const before = first.readMeta();
+  first.close();
+  const fullBefore = tilesAt(before.maxTick);
+  assert.ok(fullBefore > 100, `resident terrain on the tape before the restart (${fullBefore})`);
+  gateway = createWorkerGateway(options);
+  t.after(() => gateway.close());
+  await gateway.ready;
+  gateway.start();
+  let after = await gateway.flushTape();
+  for (let i = 0; i < 100 && after.latestTick <= before.maxTick + 2; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    after = await gateway.flushTape();
+  }
+  const resumed = tilesAt(before.maxTick + 1);
+  t.diagnostic(`tiles at ${before.maxTick} (before restart): ${fullBefore}; at ${before.maxTick + 1} (first frame after): ${resumed}`);
+  assert.ok(resumed >= fullBefore * 0.9, `the first frame after the restart keeps the whole terrain (${resumed} vs ${fullBefore})`);
 });

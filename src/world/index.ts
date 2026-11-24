@@ -2201,6 +2201,15 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
   return result(true, text);
 }
 
+/** Lo que sólo el mundo sabe de un mensaje, sin tocarlo: el anfitrión responde 400 en el acto, antes de esperar
+ * al paso que lo aplicará (y que vuelve a comprobarlo, porque el mundo pudo cambiar entre medias). */
+export function validateWhisper(world: World, req: DivineWhisperRequest): Person | undefined {
+  if (!validCoordinate(req.x) || !validCoordinate(req.y)) throw new Error('Coordenadas del mensaje divino fuera del mundo.');
+  const listener = req.personId ? world.people.find(p => p.id === req.personId) : undefined;
+  if (req.personId && !listener) throw new Error('Ese habitante ya no vive en el mundo.');
+  if (tileAt(world, req)?.terrain === 'water') throw new Error('El destino del mensaje divino está en el agua.');
+  return listener;
+}
 /**
  * V24 — Mensajes Divinos. Un mensaje se deja en el mundo entre pasos (nunca dentro de uno) y queda
  * `latent`: nadie lo oye en el acto. Lo valida el anfitrión (`parseWhisperRequest`); aquí se comprueba lo
@@ -2208,10 +2217,7 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
  * destinatario siga vivo. No toca el RNG del mundo.
  */
 export function submitWhisper(world: World, req: DivineWhisperRequest): DivineWhisper {
-  if (!validCoordinate(req.x) || !validCoordinate(req.y)) throw new Error('Coordenadas del mensaje divino fuera del mundo.');
-  const listener = req.personId ? world.people.find(p => p.id === req.personId) : undefined;
-  if (req.personId && !listener) throw new Error('Ese habitante ya no vive en el mundo.');
-  if (tileAt(world, req)?.terrain === 'water') throw new Error('El destino del mensaje divino está en el agua.');
+  const listener = validateWhisper(world, req);
   world.whispers ??= [];
   return enqueueWhisper(world.whispers, req, world.tick, Math.floor(world.tick / TICKS_PER_DAY) + 1, listener?.name);
 }

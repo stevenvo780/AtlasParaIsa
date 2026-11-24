@@ -2,7 +2,7 @@ import { projectChemistry } from '../world/proyeccion.js';
 import { publicGeologyKey } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
-import { phaseAt, submitWhisper, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../world/index.js';
+import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../world/index.js';
 import { bindWorldContext, projectTerrain, worldContext } from '../world/spatial.js';
 import { paramsOf } from '../world/params.js';
 import { demographicTraits } from '../world/demography.js';
@@ -168,14 +168,14 @@ function projectMirror(world: World, context: WorldContext, options: MirrorProje
       projectCraft(p, view);
       return view;
     }),
-    places: carry ? undefined! : projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
-    memories: carry ? undefined! : world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
+    places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
+    memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: carry ? undefined : world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
-    stats: carry ? undefined : worldStatistics(world), communities: carry ? undefined : world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    stats: carry ? undefined : worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: carry ? undefined : projectTechnology(world, peopleInView), organization: carry ? undefined : (({ resources: _resources, ...summary }) => structuredClone(summary))(organization!.value),
     ...(world.chemistry && !carry ? { chemistry: projectChemistry(world) } : {}),
     ...(world.whispers?.length ? { whispers: world.whispers.map(whisperView) } : {}),
-    demography: carry ? undefined : {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
+    demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
   if (carry) for (const field of CARRIED_VIEW_FIELDS) delete (view as unknown as Record<string, unknown>)[field];
   return view;
@@ -404,6 +404,9 @@ async function runSimulation(options: SimWorkerOptions) {
   const tapeCalls = new Map<number, { resolve(value: TapeResult): void; reject(error: Error): void }>();
   let tapeExited: Promise<void> | undefined;
   let firstTapeFrame = true;
+  /** Latest tick a reopened tape already holds: the writer drops frames up to it (append-only), so they are
+   * not even projected, and the first frame it DOES accept must be a full keyframe (it has no base yet). */
+  let tapeLatestTick = -1;
   let lastSimHz = 0;
   /** Chunks changed since the last mirror post (turbo accumulates across throttled ticks). */
   const unpostedChunks = new Set<string>();
@@ -447,7 +450,7 @@ async function runSimulation(options: SimWorkerOptions) {
     // The world's identity never changes under its single writer: read once, not per (turbo) tick.
     instanceId ??= readWorldInstance(store.db)!;
     const now = performance.now();
-    const recording = record && !!tapeWorker && !tapeClosed && !tapeError;
+    const recording = record && !!tapeWorker && !tapeClosed && !tapeError && world.tick > tapeLatestTick;
     const keyframe = recording && tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, firstTapeFrame);
     let postDue = !turbo || forcePost || now - lastPostAt >= TURBO_MIRROR_MS;
     // V24 turbo: the terrain and the slow summaries are sampled at the live mirror's cadence (and on every
@@ -548,7 +551,8 @@ async function runSimulation(options: SimWorkerOptions) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.testStepDelayMs);
         }
       },
-      afterStep: simHz => { lastSimHz = simHz; publish(); } });
+      // A step that applied a Mensaje Divino posts the mirror at once (and still records its frame).
+      afterStep: simHz => { lastSimHz = simHz; publish({ forcePost: app!.susurrosEnUltimoPaso }); } });
     if (options.deployment) setParams(app.world, deploymentParams(paramsOf(app.world)));
     const motor = paramsOf(app.world).motor;
     if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
@@ -590,6 +594,7 @@ async function runSimulation(options: SimWorkerOptions) {
         resolve();
       }));
     }
+    tapeLatestTick = (await tapeCommand('flush')).latestTick;
     publish({ forcePost: true });
     // The gateway opens its read-only TapeReader on `ready`: the initial frame must already be durable.
     await tapeCommand('flush');
@@ -628,10 +633,9 @@ async function runSimulation(options: SimWorkerOptions) {
           let request: DivineWhisperRequest;
           try { request = parseWhisperRequest(args[0]); }
           catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
-          try { value = whisperView(submitWhisper(app!.world, request)); }
-          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
-          // The live mirror shows it at once (posted before the reply on the same FIFO port).
-          publish({ forcePost: true, record: false });
+          // Applied by the next step and confirmed after its save (session checked there too). That step
+          // posts the live mirror (`afterStep`) before this reply on the same FIFO port.
+          value = await app!.requestWhisper(request, args[1] as string);
           break;
         }
         case 'flushTape':

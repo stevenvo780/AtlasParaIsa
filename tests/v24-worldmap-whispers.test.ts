@@ -93,6 +93,16 @@ test('Divine Whispers: fade only on death, unreachable destination or a long dea
   assert.equal(w.status, 'faded');
 });
 
+test('Divine Whispers: ids stay unique when the retained history drops earlier messages of the same tick', () => {
+  const whispers: DivineWhisper[] = [];
+  for (let i = 0; i < 40; i++) enqueueWhisper(whispers, { personId: null, intent: 'explore', x: i, y: 0, note: '' }, 500, 1);
+  assert.equal(whispers.length, 32);
+  assert.equal(new Set(whispers.map(w => w.id)).size, 32, 'no repeated id among the retained messages');
+  assert.equal(whispers.at(-1)!.id, 'w-500-40');
+  // A later tick starts again at 1; an earlier tick's messages never collide with it.
+  assert.equal(enqueueWhisper(whispers, { personId: null, intent: 'explore', x: 0, y: 1, note: '' }, 510, 1).id, 'w-510-1');
+});
+
 test('WorldMapCache & encodeChunkMinimapCells: prioritizes settlements/roads/water cleanly in 16 nibbles', () => {
   const tiles: Tile[] = [];
   for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) tiles.push(tile(x, y, { biome: 'forest', wood: 3 }));

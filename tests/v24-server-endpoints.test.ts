@@ -107,6 +107,15 @@ function assertDirectoryPins(dir: WorldDirectoryResponse) {
   for (const p of dir.people) assert.equal(Object.hasOwn(p, 'genome') || Object.hasOwn(p, 'traits') || Object.hasOwn(p, 'experiences'), false, 'directory never leaks private fields');
 }
 
+/** POST /api/whisper answers only after the step that applied the message saved it: drive a manual app. */
+async function whisperThroughStep(app: ReturnType<typeof createApp>, http: ReturnType<typeof client>['http'], body: unknown): Promise<Reply> {
+  let settled = false;
+  const reply = http('/api/whisper', body).finally(() => { settled = true; });
+  while (!settled && app.susurrosPendientes === 0) await new Promise(resolve => setImmediate(resolve));
+  if (!settled) app.stepOnce();
+  return reply;
+}
+
 /** A land tile at 5–8 cells from `person` (a whisper destination reachable by land in a few steps). */
 function landNear(world: World, person: { x: number; y: number }): { x: number; y: number } {
   const tile = world.tiles.find(t => t.terrain !== 'water' && t.terrain !== 'shelter'
@@ -186,11 +195,14 @@ test('direct app: worldmap, global directory and Mensajes Divinos (observer-only
   const water = world.tiles.find(tile => tile.terrain === 'water');
   if (water) assert.equal((await http('/api/whisper', { intent: 'travel', x: water.x, y: water.y })).status, 400, 'known water is no destination');
   assert.equal((await http('/api/gesture', { id: 'g-v24', kind: 'command', agentId: s.id, order: 'move', x: 1, y: 1 })).status, 410);
-  const created = await http('/api/whisper', { personId: s.id, intent: 'travel', ...target, note: 'Mira hacia allí' });
+  const before = world.tick;
+  const created = await whisperThroughStep(app, http, { personId: s.id, intent: 'travel', ...target, note: 'Mira hacia allí' });
   assert.equal(created.status, 201, created.text);
   assert.equal(created.json().ok, true);
   const whisper = created.json().whisper as DivineWhisper;
   assert.equal(whisper.status, 'latent'); assert.equal(whisper.personName, s.name);
+  assert.equal(whisper.createdTick, before, 'enters the world at the tick of the step that applied it');
+  assert.equal(world.tick, before + 1);
   const listed = (await http('/api/whispers')).json() as { tick: number; whispers: DivineWhisper[] };
   assert.equal(listed.tick, world.tick);
   assert.deepEqual(listed.whispers.map(w => w.id), [whisper.id]);
@@ -232,6 +244,63 @@ test('whispers persist with the world (save on close, load on start)', { timeout
   assert.deepEqual(app.world.whispers?.map(w => ({ id: w.id, status: w.status, x: w.x, y: w.y })), [{ id: created.id, status: 'latent', x: created.x, y: created.y }]);
 });
 
+test('whispers: confirmed only once durable (also as a replayed delta), a revoked session never writes one', { timeout: 300_000 }, async t => {
+  const dir = directory(t);
+  // 1) `persistencia.paginasSucias=true`: the step that applies the whisper saves a replay delta that must
+  //    carry it as a change at its tick (before the fix: «Replay canonical hash mismatch» and a paused world).
+  {
+    const path = join(dir, 'replay.sqlite');
+    const store = new Store(path);
+    const app = createApp({ store, password: PASSWORD, origin: ORIGIN, secure: true, seed: 42, manual: true, observerOnly: true,
+      params: parseParams('motor.hilos=1,persistencia.cadaTicks=200,persistencia.paginasSucias=true,gobernador.presupuestoMs=5000') });
+    // Pre-existing and unrelated to whispers: the direct host does not record its own host changes as replay
+    // changes, so a later routine/close save of this reserved mode can fail. Only the whisper delta is asserted.
+    t.after(async () => { try { await app.close().catch(() => undefined); } finally { store.close(); } });
+    const { http, login } = client(app.server);
+    await login();
+    for (let i = 0; i < 3; i++) app.stepOnce();
+    const s = app.world.people.find(p => p.role === 'S')!;
+    const created = await whisperThroughStep(app, http, { personId: s.id, intent: 'explore', ...landNear(app.world, s), note: 'Allí' });
+    assert.equal(created.status, 201, created.text);
+    assert.equal(app.failed, false, 'the replayed save of the whisper step committed');
+    const whisper = created.json().whisper as DivineWhisper;
+    // Durable at the 201: an independent reader rebuilds the delta (re-simulated, root verified) with it.
+    const reader = new Store(path, { readOnly: true });
+    try {
+      const durable = reader.load()!.world;
+      assert.equal(durable.tick, app.world.tick);
+      assert.deepEqual(durable.whispers?.map(w => w.id), [whisper.id]);
+    } finally { reader.close(); }
+  }
+  // 2) Default persistence: durable at the 201 without waiting for the routine cadence; a session revoked
+  //    while the message waits for its step gets 401 and the world is untouched.
+  const path = join(dir, 'world.sqlite');
+  const store = new Store(path);
+  const app = createApp({ store, password: PASSWORD, origin: ORIGIN, secure: true, seed: 42, params, manual: true, observerOnly: true });
+  t.after(async () => { try { await app.close(); } finally { store.close(); } });
+  const { http, login } = client(app.server);
+  await login();
+  const s = app.world.people.find(p => p.role === 'S')!;
+  const created = await whisperThroughStep(app, http, { personId: s.id, intent: 'travel', ...landNear(app.world, s) });
+  assert.equal(created.status, 201, created.text);
+  const reader = new Store(path, { readOnly: true });
+  try { assert.ok(reader.load()!.world.whispers?.some(w => w.id === created.json().whisper.id), 'saved by its own step (cadaTicks=200)'); }
+  finally { reader.close(); }
+
+  const again = client(app.server);
+  await again.login();
+  const count = app.world.whispers!.length;
+  let settled = false;
+  const pendingReply = again.http('/api/whisper', { intent: 'explore', ...landNear(app.world, s) }).finally(() => { settled = true; });
+  while (!settled && app.susurrosPendientes === 0) await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await again.http('/api/logout', {})).status, 200);
+  app.stepOnce();
+  const revoked = await pendingReply;
+  assert.equal(revoked.status, 401, revoked.text);
+  assert.equal(app.world.whispers!.length, count, 'a revoked session never adds a whisper');
+  assert.equal(app.failed, false);
+});
+
 async function gatewayFixture(t: TestContext, overrides: Partial<WorkerGatewayOptions> = {}) {
   const dir = directory(t);
   const worldPath = join(dir, 'world.sqlite');
@@ -268,16 +337,17 @@ test('sim-worker gateway: worldmap, global directory and whispers via RPC, allow
   assert.equal((await http('/api/whisper', { personId: 'nadie', intent: 'travel', x: 0, y: 0 })).status, 400, 'world-side validation crosses the RPC as 400');
   const tiles = (await http(`/api/world?x=${s.x - 8}&y=${s.y - 8}&width=17&height=17`)).json() as WorldView;
   const land = tiles.tiles.find(tile => tile.terrain !== 'water' && Math.hypot(tile.x - s.x, tile.y - s.y) >= 4 && Math.hypot(tile.x - s.x, tile.y - s.y) <= 7)!;
+  // A message is confirmed by the step that applies and saves it: the world must be running.
+  gateway.start();
   const created = await http('/api/whisper', { personId: s.id, intent: 'explore', x: land.x, y: land.y, note: 'Allí hay agua' });
   assert.equal(created.status, 201, created.text);
   const whisper = created.json().whisper as DivineWhisper;
   assert.equal(whisper.status, 'latent');
-  // The worker posts its mirror before replying: the next read already shows the whisper.
+  // The step that applied it posted the mirror before the reply: the next read already shows the whisper.
   const listed = (await http('/api/whispers')).json() as { whispers: DivineWhisper[] };
-  assert.ok(listed.whispers.some(w => w.id === whisper.id && w.status === 'latent'));
+  assert.ok(listed.whispers.some(w => w.id === whisper.id));
   assert.ok(((await http('/api/worldmap')).json() as WorldMapResponse).markers.some(m => m.kind === 'whisper' && m.id === whisper.id));
 
-  gateway.start();
   let status: DivineWhisper | undefined;
   for (let i = 0; i < 1200; i++) {
     await new Promise(resolve => setTimeout(resolve, 100));

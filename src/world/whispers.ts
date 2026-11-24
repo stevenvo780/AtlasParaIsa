@@ -111,9 +111,15 @@ export function enqueueWhisper(
     oldest.status = 'faded';
     oldest.resolvedTick = tick;
   }
-  // Identificador único aunque la historia retenida ya haya descartado mensajes del mismo paso.
+  // Identificador único aunque la historia retenida ya haya descartado mensajes del mismo paso: el último
+  // mensaje insertado nunca se descarta, así que el mayor número retenido de este paso más uno es siempre
+  // nuevo (contar los retenidos repetía `w-<paso>-33` desde el mensaje 34 de un mismo paso).
   let sequence = 1;
-  for (const w of whispers) if (w.createdTick === tick) sequence++;
+  const prefix = `w-${tick}-`;
+  for (const w of whispers) if (w.createdTick === tick && w.id.startsWith(prefix)) {
+    const n = Number(w.id.slice(prefix.length));
+    if (Number.isSafeInteger(n) && n >= sequence) sequence = n + 1;
+  }
   const created: DivineWhisper = {
     id: `w-${tick}-${sequence}`,
     createdTick: tick,

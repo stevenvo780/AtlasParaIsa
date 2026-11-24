@@ -238,9 +238,11 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     worldmap, directory, whispers,
     whisper: async (request: DivineWhisperRequest, hash: string): Promise<DivineWhisper> => {
       if (!valid(hash)) throw new HttpError(401, 'La sesión terminó.');
-      const created = await rpc<DivineWhisper>('whisper', request);
-      // The worker posted its mirror BEFORE replying (one FIFO port): once that mirror is applied, a
-      // following GET /api/whispers or /api/worldmap already shows the new whisper.
+      // The worker checks the session again when the step applies the message and inside its save
+      // transaction, and replies only once that save committed.
+      const created = await rpc<DivineWhisper>('whisper', request, hash);
+      // The step that applied it posted its mirror BEFORE the reply (one FIFO port): once that mirror is
+      // applied, a following GET /api/whispers or /api/worldmap already shows the new whisper.
       await applying;
       return created;
     },

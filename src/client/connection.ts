@@ -49,6 +49,8 @@ export class Connection {
   private urlViewport = 'null';
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
+  /** V21: con la cinta activa el mundo llega del DVR; el socket sigue vivo (gestos, recetas, fichas) pero sus estados no se entregan. */
+  private tapeMode = false;
   private readonly onOffline = (): void => {
     if (this.stopped) return;
     this.browserOffline = true;
@@ -99,6 +101,20 @@ export class Connection {
     return true;
   }
 
+  /** V21: `true` = el mundo lo dicta la cinta (DVR). Los estados por WebSocket se siguen acusando y encadenando (el servidor no se
+   * atasca) pero NO llegan a `callbacks.world`; recetas y fichas siguen pidiéndose por el mismo socket. Al volver a `false` se
+   * pide un estado completo para reanudar el modo vivo y se retransmite la cámara. */
+  setTapeMode(enabled: boolean): void {
+    if (this.tapeMode === enabled) return;
+    this.tapeMode = enabled;
+    if (this.stopped || enabled) return;
+    this.resyncPendiente = false;
+    this.sendViewport();
+    this.pedirResync();
+  }
+
+  get isTapeMode(): boolean { return this.tapeMode; }
+
   /** Camera requests only change the projection; the server owns exploration. */
   setViewport(viewport: Viewport): void {
     if (this.stopped || ![viewport.x, viewport.y, viewport.width, viewport.height].every(Number.isFinite)) return;
@@ -107,6 +123,7 @@ export class Connection {
     const next = { x: Math.max(-10_000_000, Math.min(10_000_000 - width, Math.floor(viewport.x))), y: Math.max(-10_000_000, Math.min(10_000_000 - height, Math.floor(viewport.y))), width, height };
     if (JSON.stringify(next) === JSON.stringify(this.viewport)) return;
     this.viewport = next;
+    if (this.tapeMode) return; // la cámara de la cinta la gestiona el DVR; el socket no proyecta nada que se vaya a mostrar
     // V18: el temporizador NO se reinicia con cada movimiento. Antes un arrastre continuo lo rearmaba sin parar
     // y el servidor no sabía de la cámara hasta soltar (mapa vacío); ahora sale como mucho cada 150 ms y siempre
     // con la última cámara (los intermedios se funden). El terreno ya visto se pinta desde la caché del cliente.
@@ -188,6 +205,7 @@ export class Connection {
     this.resyncPendiente = false;
     this.operationalState = operationalState;
     this.viewportSignature = viewportSignature;
+    if (this.tapeMode) return; // V21: la base de deltas se mantiene, el mundo mostrado es el de la cinta
     this.callbacks.world(world);
   }
 

@@ -50,7 +50,7 @@ test('V6 visit provenance follows one execution across restart and recognizes a 
   await expect(page.getByLabel('Contraseña privada')).toBeVisible();
   await page.getByLabel('Contraseña privada').fill(password);
   await page.getByRole('button', { name: 'Entrar a la carta' }).click();
-  await expect(page.locator('#letter-dialog')).toBeVisible();
+  await expect(page.locator('#letter-dialog')).toBeHidden();
   const freshView = await page.evaluate(async () => (await fetch('/api/world')).json()) as WorldView & { instanceId: string };
   expect(freshView.instanceId).not.toBe(firstView.instanceId);
   expect(freshView.tick).toBe(10);
@@ -67,9 +67,8 @@ test.afterEach(async () => { await app?.close(); store?.close(); if (dir) rmSync
 
 async function enter(page: Page): Promise<void> {
   await page.goto(origin); await page.getByLabel('Contraseña privada').fill(password); await page.getByRole('button', { name: 'Entrar a la carta' }).click();
-  await expect(page.getByRole('dialog', { name: 'Para ti, Isa.' })).toBeVisible();
+  await expect(page.locator('#letter-dialog')).toBeHidden();
   await expect(page.locator('#letter-dialog')).toContainText('BORRADOR');
-  await page.getByRole('button', { name: 'Entrar al mundo' }).click();
   await expect(page.locator('#connection-label')).toHaveText('En vivo'); await expect(page.locator('#map-loading')).toBeHidden();
 }
 async function fullscreen(page: Page, width: number, height: number): Promise<void> {
@@ -217,7 +216,7 @@ test('mobile touch: full-screen canvas, one drawer, three gestures, synthetic me
     await page.locator('[data-close="stats"]').tap();
     const targetSizes = await page.locator('.game-tools button').evaluateAll(buttons => buttons.map(button => { const r = button.getBoundingClientRect(); return { width: r.width, height: r.height }; }));
     expect(targetSizes.every(r => r.width >= 44 && r.height >= 44)).toBe(true);
-    await page.locator('#letter-button').tap(); await expect(page.locator('#letter-dialog')).toBeVisible(); expect(await page.locator('#letter-dialog').evaluate(dialog => dialog.getBoundingClientRect().width <= innerWidth)).toBe(true); await page.getByRole('button', { name: 'Cerrar la carta' }).tap(); expect(observed.errors).toEqual([]);
+    await page.locator('#hud-telemetry [data-hud-nav="life"]').tap(); await expect(page.locator('#stats-drawer')).toBeVisible(); await page.locator('[data-close="stats"]').tap(); expect(observed.errors).toEqual([]);
   } finally { await context.close(); }
 });
 

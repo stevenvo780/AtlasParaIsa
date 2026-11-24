@@ -55,21 +55,19 @@ const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => M
 function techParams(host: TechnologyHost): WorldParams['tecnologia'] {
   return boundParamsOf(host)?.tecnologia ?? HISTORICAL_PARAMS.tecnologia;
 }
-function synergyWorld(host: TechnologyHost): World | undefined {
-  return boundParamsOf(host)?.construccion.poliminosYSinergia && host.structures && host.tiles && 'blueprints' in host ? host as World : undefined;
+function synergyWorld(host: TechnologyHost): host is TechnologyHost & World {
+  return !!(boundParamsOf(host)?.construccion.poliminosYSinergia && host.structures && host.tiles && 'blueprints' in host);
 }
 /** Physical workshop contact only; never chains a second neighbour search from a decision. */
 export function workshopWorkFactor(host: TechnologyHost, actor: TechnologyActor): number {
-  const world = synergyWorld(host);
-  if (!world) return 1;
-  const workshops = filtrarCerca(world.structures, actor, 5, s => (!s.site || !!s.site.expansion) && s.condition > BROKEN_CONDITION
+  if (!synergyWorld(host)) return 1;
+  const workshops = filtrarCerca(host.structures, actor, 5, s => (!s.site || !!s.site.expansion) && s.condition > BROKEN_CONDITION
     && structureDistance(actor, s) <= 1.5 && (s.synergy?.workshopBonus ?? 0) > 0);
   return 1 - Math.min(0.30, Math.max(0, ...workshops.map(s => s.synergy!.workshopBonus)));
 }
 function availableRawMaterials(host: TechnologyHost, actor: TechnologyActor): TechnologyActor['materials'] {
-  const world = synergyWorld(host);
-  if (!world) return actor.materials;
-  const stored = storedMaterialsNear(world, actor);
+  if (!synergyWorld(host)) return actor.materials;
+  const stored = storedMaterialsNear(host, actor);
   return { wood: actor.materials.wood + stored.wood, stone: actor.materials.stone + stored.stone };
 }
 /** `host.people.includes(x)` on the decision path (T141 inventory: `technology.ts:584,605`): a cache
@@ -280,9 +278,8 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
   return { inputs, imported, fuel, fuelInputs, itemMasses, itemCompositions, residue, waterTile };
 }
 function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal): void {
-  const world = synergyWorld(host);
-  if (world) {
-    const stock = withdrawMaterials(world, actor, {
+  if (synergyWorld(host)) {
+    const stock = withdrawMaterials(host, actor, {
       wood: Math.max(0, Math.ceil(plan.imported.wood / MASS_UNIT - actor.materials.wood - 1e-8)),
       stone: Math.max(0, Math.ceil(plan.imported.stone / MASS_UNIT - actor.materials.stone - 1e-8)),
     });

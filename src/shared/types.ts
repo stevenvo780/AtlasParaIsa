@@ -100,8 +100,8 @@ export interface WorldView {
   communities?: CommunityView[];
   animals?: AnimalView[]; blueprints?: BlueprintView[]; structures?: StructureView[];
   technology?: TechnologyView; organization?: OrganizationSummary;
-  /** V20: world seed for deterministic latent tile geology in client visuals/inspector (zero per-tile wire cost). */
-  seed?: number;
+  /** V20: one-way hashed geology key for deterministic latent tile geology in client visuals/inspector (zero per-tile wire cost, never leaks world.seed). */
+  geologyKey?: number;
   /** V20: emergent algebraic chemistry summary (discovered formulas, active lots, highest temperature tier). */
   chemistry?: import('./chemistry.js').ChemistrySummaryView;
   /** Identity of the served world; the projection omits it and the server adds it. */

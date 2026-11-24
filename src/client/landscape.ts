@@ -598,7 +598,7 @@ export class Landscape {
     if (this.curr && world.tick < this.curr.tick) this.eventAccents = [];
     this.eventAccents = [...this.eventAccents.filter(event => now - event.bornAt < EVENT_LIFETIME_MS), ...newAccents].slice(-VISUAL_BUDGET.events);
     this.curr = world;
-    this.worldSeed = world.seed;
+    this.worldSeed = world.geologyKey;
     this.vivas = world.regionesVivas ? new Set(world.regionesVivas) : null;
     this.vivasKey = world.regionesVivas ? world.regionesVivas.join(';') : '';
     this.carriedProducts.clear();

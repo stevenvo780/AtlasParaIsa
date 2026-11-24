@@ -1,7 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
-import type { ChemicalFormulaView, CompoundLot } from '../src/shared/chemistry.js';
+import { publicGeologyKey, type ChemicalFormulaView, type CompoundLot } from '../src/shared/chemistry.js';
 import {
   cloneWorld, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
   createWorld, projectWorld, roadEffortFactor, stepWorld, tileAt, type World,
@@ -204,7 +204,7 @@ for (const soa of [false, true]) test(`world/mirror projection, V20 statistics a
   const [a, b, c] = world.tiles;
   a!.paved = 0.87654; b!.paved = 0; c!.paved = 0.49;
   world.people[2]!.compounds = [structuredClone(lot)];
-  world.chemistry = { formulas: [structuredClone(formula)], privateLedger: 'must not cross the wire' };
+  world.chemistry = { formulas: [structuredClone(formula)], privateLedger: 'must not cross the wire' } as unknown as typeof world.chemistry;
   const structure = { ...world.structures[0]!, cells: [{ x: 1, y: 1 }, { x: 2, y: 1 }],
     synergy: { sharedEdges: 2, heated: true, irrigated: true, workshopBonus: 0.25 } };
   assert.ok(structure.id);
@@ -224,7 +224,8 @@ for (const soa of [false, true]) test(`world/mirror projection, V20 statistics a
     }
     const view = projectWorld(world), mirror = projectMirrorWorld(world);
     for (const v of [view, mirror]) {
-      assert.equal(v.seed, world.seed);
+      assert.equal(v.geologyKey, publicGeologyKey(world.seed));
+      assert.ok(!('seed' in v));
       assert.equal(v.stats!.pavedTiles, 1);
       assert.equal(v.stats!.polyominoStructures, 2);
       assert.equal(v.stats!.synergyLinks, 5);

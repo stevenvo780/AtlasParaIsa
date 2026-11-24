@@ -437,7 +437,10 @@ export function settlementOpportunity(world: World, person: Person): { target: {
       }
     }
     const facilities = paramsOf(world).construccion.poliminosYSinergia
-      ? filtrarCerca(world.structures, place, 5, s => (!s.site || !!s.site.expansion) && structureDistance(place, s) <= 3 && s.condition > 0.1)
+      // A valid six-cell hall can extend five cells from its anchor. Bound the
+      // anchor as well: the observed home can already be seven cells away.
+      ? filtrarCerca(world.structures, place, 5, s => Math.abs(s.x - place.x) <= 5 && Math.abs(s.y - place.y) <= 5
+        && (!s.site || !!s.site.expansion) && structureDistance(place, s) <= 3 && s.condition > 0.1)
       : filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
     const peers = vecinos(world, place, 7, p=>p!==person && distance(p,place)<=6, 'settlementOpportunity');

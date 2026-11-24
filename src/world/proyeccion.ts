@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
-import type { ChemicalFormulaView, ChemistrySummaryView } from '../shared/chemistry.js';
+import { publicGeologyKey, type ChemicalFormulaView, type ChemistrySummaryView } from '../shared/chemistry.js';
 import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from './index.js';
 import { bindWorldContext, projectTerrain, worldContext } from './spatial.js';
 import { paramsOf } from './params.js';
@@ -122,7 +122,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
   const referencedBlueprintIds = new Set(projected.structures.map(s => s.blueprintId).filter((id): id is string => typeof id === 'string'));
   const fastTiles = residentFastAccess(world.tiles);
   return {
-    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, seed: world.seed, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
+    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, geologyKey: publicGeologyKey(world.seed), day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => projectTile(t, fastTiles)),

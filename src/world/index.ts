@@ -22,6 +22,7 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { CompoundLot } from '../shared/chemistry.js';
+import { assertChemistryState, assertCompoundLots, compoundToolBonus, performChemistryExperiment, type ChemistryState } from './chemistry.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory, constructionWorkFactor, consumeHuntingTools, huntingWorkFactor } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch, withRecipeSession } from './technology-catalogue.js';
@@ -135,7 +136,7 @@ export interface Memory extends MemoryView {
   action: Action; weight: number; roles: ('S' | 'I')[];
 }
 export interface World {
-  chemistry?: unknown;
+  chemistry?: ChemistryState;
   version: number; seed: number; rng: number; tick: number; width: number; height: number;
   weather: 'clear' | 'rain'; tiles: Tile[]; people: Person[]; places: PlaceView[];
   memories: Memory[]; events: ChronicleEvent[]; eventCounter: number; chronicleJournal?: ChronicleJournal;
@@ -1822,6 +1823,13 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
     const beforeRest={fatigue:person.fatigue,energy:person.energy};
     restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
+    if (params.quimica.emergente && world.tick % 40 === 0 && (person.compounds?.length ?? 0) > 0) {
+      const nearbyRestChem = filtrarCerca(world.structures, person, 4, s => distance(person, s) <= 3 && s.condition > BROKEN_CONDITION && (!s.site || !!s.site.expansion));
+      if (nearbyRestChem.some(s => s.components.includes('hearth') || (s.components.includes('cistern') && s.water >= 0.02)) || (current.drinkingWater ?? 0) >= 0.02) {
+        const chem = performChemistryExperiment(world, person, current, nearbyRestChem);
+        if (chem?.isNew) addEvent(world, { kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} obtuvo ${chem.formula.name} (T${chem.temperatureTier}).`, cause: `Química emergente (${chem.operator}) junto al hogar o al agua sin lista fija.` });
+      }
+    }
     // V19/L: como comer (hambre < 0,12) o beber (sed < 0,12), una pausa termina cuando el cuerpo ya recuperó lo que
     // la motivaba: al cruzar la demanda de recuperación por debajo de `REST_RECOVERED` vuelve a elegir en el paso
     // siguiente (una sola vez por tramo; si sigue lloviendo y no hay trabajo bajo techo, el techo seguirá ganando).
@@ -1839,6 +1847,11 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
     const before = person.technology.attempts;
     const completed = person.action === 'research' ? researchTechnology(world,person,event=>addEvent(world,event)) : craftTechnology(world,person,technologyOpportunity(world,person)?.recipeId,event=>addEvent(world,event));
     if (person.technology.attempts > before) {
+      if (params.quimica.emergente) {
+        const nearbyChem = filtrarCerca(world.structures, person, 4, s => distance(person, s) <= 3 && s.condition > BROKEN_CONDITION && (!s.site || !!s.site.expansion));
+        const chem = performChemistryExperiment(world, person, current, nearbyChem);
+        if (chem?.isNew) addEvent(world, { kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} obtuvo ${chem.formula.name} (T${chem.temperatureTier}).`, cause: `Química emergente (${chem.operator}) sobre composición local sin lista fija.` });
+      }
       outcome(world,person,person.action,completed?0.12:-0.12,completed);
       if (person.command?.order === person.action) { person.command=null; person.controlMode='auto'; }
       person.decisionAt=world.tick+1;
@@ -1884,9 +1897,16 @@ function performWork(world: World, person: Person, tile: Tile): void {
       const capacity=(material==='wood'?12:8)-person.materials[material];
       const baseline=Math.min(1,capacity,available);
       const receipt=capacity>1&&available>1 ? useTool(world,person,material==='wood'?'cutting':'abrasion') : undefined;
-      const amount = harvestMaterial(tile, material, Math.min(capacity,1+(receipt?.power??0)));
+      const chemBonus = paramsOf(world).quimica.emergente ? compoundToolBonus(person.compounds, material === 'wood' ? 'cutting' : 'abrasion') : 0;
+      const amount = harvestMaterial(tile, material, Math.min(capacity,1+(receipt?.power??0)+chemBonus));
       person.materials[material] += amount; count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', amount);
-      recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0; break;
+      recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0;
+      if (success && paramsOf(world).quimica.emergente && (person.compounds?.length ?? 0) < 5 && (world.tick + Math.abs(person.x * 7 + person.y * 13)) % 2 === 0) {
+        const nearbyChem = filtrarCerca(world.structures, person, 4, s => distance(person, s) <= 3 && s.condition > BROKEN_CONDITION && (!s.site || !!s.site.expansion));
+        const chem = performChemistryExperiment(world, person, tile, nearbyChem);
+        if (chem?.isNew) addEvent(world, { kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} obtuvo ${chem.formula.name} (T${chem.temperatureTier}).`, cause: `Extracción y proceso químico local (${chem.operator}) desde la geología del lugar.` });
+      }
+      break;
     }
   } else if (person.action === 'forage') {
     const foodBefore = tile.food, harvested = Math.min(foodBefore, FORAGE_AMOUNT, Math.max(0, 0.25 - person.inventory));
@@ -2162,6 +2182,7 @@ function reproduce(world: World): void {
     delete child.home;
     delete child.partnerMemory;
     delete child.agreement;
+    delete child.compounds;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
     delete (child as unknown as Record<string, unknown>).vocacion;
     // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.
@@ -2294,6 +2315,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   const w = value;
   const limits = limitsOf(w, expectedVersion);
   const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
+  if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick);
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
@@ -2342,6 +2364,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
 
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
+    if (p.compounds !== undefined) assertCompoundLots(p.compounds);
     if (p.policy !== undefined) {
       if (expectedVersion < 12) fail();
       assertPolicyGenome(p.policy);
@@ -2353,7 +2376,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
   }
   if (expectedVersion >= 3) {
-    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, 12)) fail();
+    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, expectedVersion >= 14 ? 13 : 12)) fail();
     const communityIds = new Set<string>();
     for (const c of w.communities) {
       if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();

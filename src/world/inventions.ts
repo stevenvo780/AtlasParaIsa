@@ -1,5 +1,6 @@
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
 import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
+import { blendMaterialProfile } from './chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
@@ -194,7 +195,10 @@ export function materialCapacity(structure: StructureView): { wood: number; ston
 }
 
 function warehousesNear(world: World, person: Point): StructureView[] {
-  return filtrarCerca(world.structures, person, paramsOf(world).construccion.poliminosYSinergia ? 5 : 4.5, s => hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
+  // Called for a cooperation partner up to seven cells away. A six-cell hall
+  // may extend five cells: bound its anchor so 7 + 7 stays inside the halo.
+  return filtrarCerca(world.structures, person, paramsOf(world).construccion.poliminosYSinergia ? 5 : 4.5, s => Math.abs(s.x - person.x) <= 7 && Math.abs(s.y - person.y) <= 7
+    && hasCompletedBuilding(s) && s.condition > BROKEN_CONDITION
     && tileAt(world, s)?.terrain === 'shelter' && structureDistance(person, s) <= 2.5)
     .sort((a, b) => structureDistance(person, a) - structureDistance(person, b) || a.id.localeCompare(b.id));
 }
@@ -229,7 +233,15 @@ export function depositMaterials(world: World, person: Person, structure: Struct
   const stone = person.materials.stone >= 5 ? Math.max(0, Math.min(Math.floor(person.materials.stone - 3), capacity.stone - (structure.storedStone ?? 0))) : 0;
   if (wood) { person.materials.wood -= wood; structure.storedWood = (structure.storedWood ?? 0) + wood; }
   if (stone) { person.materials.stone -= stone; structure.storedStone = (structure.storedStone ?? 0) + stone; }
-  return wood + stone > 0;
+  let storedCompound = false;
+  if (paramsOf(world).quimica.emergente && person.compounds && person.compounds.length >= 4 && (structure.storedCompounds?.length ?? 0) < 12
+    && (capacity.wood > 0 || structure.components.includes('hearth') || structure.components.includes('granary'))) {
+    const lot = person.compounds.pop()!;
+    (structure.storedCompounds ??= []).push(lot);
+    structure.materialProfile = blendMaterialProfile(structure.materialProfile, lot, 0.25);
+    storedCompound = true;
+  }
+  return wood + stone > 0 || storedCompound;
 }
 
 /** A roof needs a frame; enclosed storage needs a roof; gardens need captured water.

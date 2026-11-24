@@ -13,7 +13,7 @@
  *   tope de fórmulas (`MAX_FORMULAS`) para que la instantánea no crezca sin límite.
  */
 import {
-  ELEMENTS, emptyVector, evaluateMaterialProperties, geologyAt, normalizeVector, vectorMass,
+  ELEMENTS, emptyVector, evaluateMaterialProperties, geologyAt, normalizeVector, publicGeologyKey, vectorMass,
 } from '../shared/chemistry.js';
 import type {
   ChemOperator, ChemicalFormulaView, ChemistrySummaryView, CompoundLot, ElementSymbol, ElementVector,
@@ -443,7 +443,7 @@ export function performChemistryExperiment(
     }
   }
   const canExtract = lots.length < MAX_PERSON_COMPOUNDS && (person.materials.wood >= 1 || person.materials.stone >= 1);
-  if (canExtract) plans.push({ op: 'extract', a: -1, tier: 0, score: lots.length < 2 ? 0.7 : 0.4 });
+  if (canExtract) plans.push({ op: 'extract', a: -1, tier: 0, score: lots.length === 0 ? 0.7 : lots.length === 1 ? 0.5 : 0.35 });
   if (plans.length === 0) return null;
 
   const [r1, r2] = experimentDraws(world.seed, world.tick, person.id);
@@ -463,7 +463,7 @@ export function performChemistryExperiment(
     let feature: string | undefined;
     if (woodFirst) { person.materials.wood -= 1; feature = ORGANIC_FEATURES.has(tile.feature ?? '') ? tile.feature : 'tree'; }
     else { person.materials.stone -= 1; feature = tile.feature === 'rock' || tile.feature === 'clay' ? tile.feature : 'rock'; }
-    const raw = extractGeologyLot(world.seed, tile.x, tile.y, tile.biome, feature, EXTRACTION_MASS, state);
+    const raw = extractGeologyLot(publicGeologyKey(world.seed), tile.x, tile.y, tile.biome, feature, EXTRACTION_MASS, state);
     extractedMass = raw.mass;
     result = applyChemOperator('grind', raw, { temperatureTier: 0, ...common }, state);
   } else {

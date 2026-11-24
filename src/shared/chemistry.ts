@@ -108,6 +108,21 @@ function strataNoise(seed: number, x: number, y: number, salt: number, scale = 2
 }
 
 /**
+ * One-way deterministic public geology key derived from world.seed.
+ * Sent on WorldView.geologyKey so the client renders exact matching mineral veins & tile geology
+ * without exposing raw world.seed over the wire.
+ */
+export function publicGeologyKey(seed: number): number {
+  let h = (Math.imul(seed | 0, 0x9e3779b1) ^ 0x47454f56) >>> 0;
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d) >>> 0;
+  h ^= h >>> 12;
+  h = Math.imul(h, 0x297a2d39) >>> 0;
+  h ^= h >>> 15;
+  return h >>> 0;
+}
+
+/**
  * Latent deterministic tile geology (normalized 6-element signature summing to 1.0).
  * Server and client compute the exact same composition without sending per-tile mineral fields over the wire.
  */

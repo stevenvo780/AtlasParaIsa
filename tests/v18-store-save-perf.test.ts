@@ -51,7 +51,7 @@ function genericRows(tiles: readonly Tile[], offset = 0, count = tiles.length - 
   const rows: unknown[][] = new Array(count);
   for (let n = 0; n < count; n++) {
     const t = tiles[offset + n]!;
-    const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
+    const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life,t.paved];
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
       if (typeof value === 'number') {

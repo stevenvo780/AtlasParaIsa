@@ -307,7 +307,7 @@ const chemistry = (): ChemistrySummaryView => ({
   totalFormulas: 14, totalLots: 9, maxTemperatureTier: 2, byOperator: { grind: 5, wash: 3, heat: 4, bind: 2 },
   formulas: [{ id: 'f1', signature: 'sig', name: 'Ladrillo cocido', composition: { C: .02, Si: .4, Ca: .1, Fe: .3, S: .03, H: .15 }, phase: 'fired', temperatureTier: 2, operator: 'heat', discoveredAt: 321, discovererId: 'p', uses: 7,
     properties: { hardness: .62, toughness: .41, seal: .33, insulation: .2, fuelPower: .05, colorHex: '#b5532e' } }] });
-const worldFixture = (extra: Partial<WorldView> = {}): WorldView => ({ version: 10, sequence: 0, tick: 250, day: 1, phase: 'day', weather: 'clear', width: 3, height: 1, seed: 7,
+const worldFixture = (extra: Partial<WorldView> = {}): WorldView => ({ version: 10, sequence: 0, tick: 250, day: 1, phase: 'day', weather: 'clear', width: 3, height: 1, geologyKey: 7,
   tiles: [tile({ x: 3, y: 4, biome: 'mountain', feature: 'rock', traffic: .5, paved: .8 }), tile({ x: 4, y: 4, traffic: .3 }), tile({ x: 5, y: 4 })],
   people: [], animals: [], structures: [rich()], places: [], memories: [], events: [], stats: statsFixture({ pavedTiles: 12, polyominoStructures: 3, synergyLinks: 5, chemicalFormulas: 14 }), chemistry: chemistry(), ...extra } as unknown as WorldView);
 

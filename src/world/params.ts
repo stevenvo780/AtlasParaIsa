@@ -168,8 +168,12 @@ export interface WorldParams {
    *   compatible percibida localmente.
    */
   fauna: { contactoContinuo: boolean; reservaReproductiva: boolean; fraccionReservaCria: number; encuentroFertil: boolean };
-  /** V19/B: obras modulares por módulos físicos y sitios compartidos (Fase 2). `false` = V18 exacto. */
-  construccion: { modular: boolean };
+  /** V19/B: obras modulares por módulos físicos y sitios compartidos; V20: poliominós contiguos y sinergia local. */
+  construccion: { modular: boolean; poliminosYSinergia: boolean };
+  /** V20: caminos físicos estigmérgicos (`traffic` reduce esfuerzo/carga, desempate local, empedrado con piedra). */
+  terreno: { caminosFisicos: boolean };
+  /** V20: química algebraica conservada de 6 elementos (`C/Si/Ca/Fe/S/H`) + operadores físicos `grind/wash/heat/bind`. */
+  quimica: { emergente: boolean };
   /** V19/E: estacionalidad hidrológica regional (Fase 2). `amplitudEstacional` 0 = V18 exacto. */
   ecologia: { amplitudEstacional: number; periodoEstacionalDias: number; escalaClimaticaCeldas: number };
   /**
@@ -239,7 +243,9 @@ const RAW_HISTORICAL: WorldParams = {
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0, derivaCultural: 0, vinculoEncuentro: 0, acuerdosMateriales: false, memoriaResultadosDias: 10 },
   fauna: { contactoContinuo: false, reservaReproductiva: false, fraccionReservaCria: 0.15, encuentroFertil: false },
-  construccion: { modular: false },
+  construccion: { modular: false, poliminosYSinergia: false },
+  terreno: { caminosFisicos: false },
+  quimica: { emergente: false },
   ecologia: { amplitudEstacional: 0, periodoEstacionalDias: 20, escalaClimaticaCeldas: 64 },
   tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false, obrasPorPropiedades: false },
 };
@@ -478,6 +484,9 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'fauna.reservaReproductiva': { kind: 'boolean' },
   'fauna.encuentroFertil': { kind: 'boolean' },
   'construccion.modular': { kind: 'boolean' },
+  'construccion.poliminosYSinergia': { kind: 'boolean' },
+  'terreno.caminosFisicos': { kind: 'boolean' },
+  'quimica.emergente': { kind: 'boolean' },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 

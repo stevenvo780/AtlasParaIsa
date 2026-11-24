@@ -77,7 +77,7 @@ function perfWorld(seed: number) {
 
 // Reference digests are captured from 819fc31 before changing the hot paths.
 test('V12 open-world P400: exact reference digests after 600 ticks', () => {
-  assert.equal(RULES_VERSION, 13);
+  assert.equal(RULES_VERSION, 14);
   const references = [
     { seed: 2002, digests: [
       'afd85940347c567f7d25fd0db7268cc4db4dc8c9f575472a643f1ca876a77d84',

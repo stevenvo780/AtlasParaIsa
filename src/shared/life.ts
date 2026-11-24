@@ -18,11 +18,19 @@ export interface StructureView {
   id: string; x: number; y: number; blueprintId: string; name: string; components: StructureComponent[];
   condition: number; water: number; food: number; uses: number; builtAt: number; builderId: string | null;
   footprint?: { width: 1 | 2; height: 1 | 2 };
+  /** V20: contiguous land cells in anchor chunk (polyomino up to 6 cells: L, T, 3×1, 2×2, 3×2). */
+  cells?: Array<{ x: number; y: number }>;
   storedWood?: number;
   storedStone?: number;
+  /** V20: conserved compound lots stored in this warehouse/workshop. */
+  storedCompounds?: import('./chemistry.js').CompoundLot[];
+  /** V20: emergent physical material profile from deposited/installed matter (governs wear, seal, warmth & map tint). */
+  materialProfile?: import('./chemistry.js').StructureMaterialProfile;
+  /** V20: live local inter-structure synergies (shared walls, hearth drying, cistern irrigation, workshop speed). */
+  synergy?: import('./chemistry.js').StructureSynergyView;
   site?: { requiredWood: number; requiredStone: number; depositedWood: number; depositedStone: number; requiredWork: number; completedWork: number;
     /** The old building remains operational; this paid delta reserves the target footprint. */
-    expansion?: { blueprintId: string; components: StructureComponent[]; footprint?: { width: 1 | 2; height: 1 | 2 } } };
+    expansion?: { blueprintId: string; components: StructureComponent[]; footprint?: { width: 1 | 2; height: 1 | 2 }; cells?: Array<{ x: number; y: number }> } };
   losses?: { water: number; food: number };
   installed?: Array<{ id: string; recipeId: string | null; mass: number; containment: number; insulation: number;
     cohesion: number; binding: number; condition: number;

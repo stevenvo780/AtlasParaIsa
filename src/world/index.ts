@@ -57,7 +57,7 @@ export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExe
 
 // V12 adds opt-in local neighborhood natality (D2), uncapped organic communities (`maxComunidades=0`),
 // evolvable 12→8→12 local neural policy + lifetime Baldwin plasticity, and multi-chip CPU+Dual-GPU dispatch.
-export const RULES_VERSION = 13;
+export const RULES_VERSION = 14;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -2366,6 +2366,11 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 13) {
+    assertWorld(value, 13, context);
+    const world = cloneWorld(value, context); upgradeV14(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 12) {
     // V12 → V13 sólo etiqueta: los interruptores V19 ausentes de sus params cargan apagados
     // (`readSnapshotParams` completa con `HISTORICAL_PARAMS`) y el estado V19 opcional queda ausente.
@@ -2409,20 +2414,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); upgradeV14(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); upgradeV14(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); upgradeV14(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); upgradeV14(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -2450,7 +2455,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); upgradeV14(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -2490,3 +2495,5 @@ function upgradeV11(world: World): void { world.version = 11; }
 function upgradeV12(world: World): void { world.version = 12; }
 /** V13 (V19 fase 1) añade interruptores opt-in apagados por defecto; al migrar no altera estado ni params. */
 function upgradeV13(world: World): void { world.version = 13; }
+/** V14 (V20) añade caminos físicos, poliominós/sinergia y química emergente opt-in; al migrar conserva estado y params. */
+function upgradeV14(world: World): void { world.version = 14; }

@@ -24,8 +24,8 @@ test('un mundo V9 guardado por Store se recarga como V13 conservando todo salvo 
   const reopened = new Store(legacy.path), reference = new Store(control.path);
   try {
     const loaded = reopened.load()!.world, expected = reference.load()!.world;
-    assert.equal(RULES_VERSION, 13);
-    assert.equal(loaded.version, 13);
+    assert.equal(RULES_VERSION, 14);
+    assert.equal(loaded.version, 14);
     assert.equal(JSON.stringify(loaded), JSON.stringify(expected));
     assert.deepEqual(paramsOf(loaded), paramsOf(expected));
     stepWorld(loaded); reopened.save(loaded);
@@ -44,7 +44,7 @@ test('un mundo V10 cargado migra a V13 con el mismo digesto de estado salvo vers
   const reopened = new Store(legacy.path), reference = new Store(control.path);
   try {
     const loaded = reopened.load()!.world, expected = reference.load()!.world;
-    assert.equal(loaded.version, 13);
+    assert.equal(loaded.version, 14);
     assert.deepEqual(loaded, expected);
     assert.deepEqual(paramsOf(loaded), persisted);
     assert.deepEqual(paramsOf(expected), persisted);
@@ -59,7 +59,7 @@ for (const params of ['poblacion.comprobacionContinua=true', undefined]) test(`V
   // nacimiento caía después de archivar el evento y `Store.save` abortaba (defecto de alias).
   const { store } = laboratory(t);
   const world: World = createWorld(42, parseParams(params, HISTORICAL_PARAMS));
-  assert.equal(world.version, 13);
+  assert.equal(world.version, 14);
   const founding = new Map<string, string[]>();
   const record = (): void => { for (const event of world.events) if (event.kind === 'community' && !founding.has(event.id)) founding.set(event.id, [...event.actors]); };
   store.save(world);

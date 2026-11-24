@@ -3,6 +3,7 @@ import type { TechnologyRecipe, TechnologyView } from './technology.js';
 import type { OrganizationSummary } from './organization.js';
 export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js';
+export type { ElementSymbol, ElementVector, ThermalPhase, ChemOperator, MaterialProperties, CompoundLot, ChemicalFormulaView, ChemistrySummaryView, StructureMaterialProfile, StructureSynergyView } from './chemistry.js';
 /** 7: `TechnologyView.recipes` carries summaries; the program travels only on request.
  * 8 (T036(h)): dieta del `state`. `PersonView.experiences`, `PersonView.trust` y
  * `TechnologyView.knowledge` ya no viajan en cada instantánea: el inspector los pide con
@@ -23,7 +24,7 @@ export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' |
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
 export type Feature = 'tree' | 'pine' | 'palm' | 'cactus' | 'reeds' | 'berries' | 'flowers' | 'rock' | 'clay' | 'stump' | 'spring' | 'pool' | 'none';
 export type Species = 'hare' | 'deer' | 'boar' | 'fish' | 'wolf' | 'fox';
-export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number; }
+export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; paved?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number; }
 export type Action = 'explore' | 'eat' | 'forage' | 'drink' | 'hunt' | 'rest' | 'approach' | 'accompany' | 'retreat' | 'share' | 'gather' | 'farm' | 'build' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft';
 export type Order = 'move' | 'explore' | 'forage' | 'gather' | 'farm' | 'build' | 'hunt' | 'drink' | 'rest' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft' | 'auto';
 export interface GenomeView { generation: number; parents: string[]; learningRate: number; cooperation: number; mutations: number; }
@@ -47,6 +48,8 @@ export interface PersonView {
   health?: number; vitality?: number; continuityProtected?: boolean;
   /** Server-derived inherited age thresholds; absence means unknown, not reproductive readiness. */
   lifeStage?: 'juvenile' | 'adult' | 'senescent';
+  /** V20: conserved chemical compound lots carried by this inhabitant. */
+  compounds?: import('./chemistry.js').CompoundLot[];
 }
 /** T036(h): lo que el inspector pide por habitante y no viaja en cada `state`. */
 export interface PersonDetail {
@@ -97,6 +100,10 @@ export interface WorldView {
   communities?: CommunityView[];
   animals?: AnimalView[]; blueprints?: BlueprintView[]; structures?: StructureView[];
   technology?: TechnologyView; organization?: OrganizationSummary;
+  /** V20: world seed for deterministic latent tile geology in client visuals/inspector (zero per-tile wire cost). */
+  seed?: number;
+  /** V20: emergent algebraic chemistry summary (discovered formulas, active lots, highest temperature tier). */
+  chemistry?: import('./chemistry.js').ChemistrySummaryView;
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
   /** M10: claves «cx,cy» (regiones de 16 × 16) que el servidor simula ahora dentro de esta ventana; el resto
@@ -130,7 +137,9 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
     lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } };
   /** Paso en que se midieron las estadísticas caras (diversidad, agua, reparto de comida): se recalculan
    * cada 200 pasos y entre medias se reutiliza el último valor (statistics.ts). Ya viajaba; aquí se declara. */
-  statsTick?: number; }
+  statsTick?: number;
+  /** V20: physical roads, polyomino buildings, inter-structure synergies, and emergent chemical formulas. */
+  pavedTiles?: number; polyominoStructures?: number; synergyLinks?: number; chemicalFormulas?: number; }
 /**
  * T107 (perfil por fase y fracción serial): nombres fijos de las fases medidas del paso.
  * `maintainRegions`…`muestreo` se miden dentro de `stepWorld` (`world/index.ts`); `save` y

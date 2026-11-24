@@ -57,7 +57,10 @@ function paramsParaDigesto(world: World): object {
   }
   const fauna = params.fauna;
   if (!fauna || !(fauna.contactoContinuo || fauna.reservaReproductiva || fauna.encuentroFertil)) delete out.fauna;
-  if (!params.construccion || params.construccion.modular === false) delete out.construccion;
+  if (!params.construccion || (!params.construccion.modular && !params.construccion.poliminosYSinergia)) delete out.construccion;
+  else if (!params.construccion.poliminosYSinergia) out.construccion = { modular: params.construccion.modular };
+  if (!params.terreno || !params.terreno.caminosFisicos) delete out.terreno;
+  if (!params.quimica || !params.quimica.emergente) delete out.quimica;
   if (!params.ecologia || params.ecologia.amplitudEstacional === 0) delete out.ecologia;
   return out;
 }

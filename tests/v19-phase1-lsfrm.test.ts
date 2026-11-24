@@ -37,13 +37,13 @@ const probe = { cpuThreads: () => 1, totalRamBytes: () => 128 * GiB, nvrtcAvaila
   memory: () => ({ fisicaBytes: 128 * GiB, heapBytes: 8 * GiB }) };
 const V19_OFF = { conducta: { aprendizajeCausal: false }, social: { acuerdosMateriales: false },
   fauna: { contactoContinuo: false, reservaReproductiva: false, encuentroFertil: false },
-  construccion: { modular: false }, tecnologia: { obrasPorPropiedades: false },
-  ecologia: { amplitudEstacional: 0 } } as const;
+  construccion: { modular: false, poliminosYSinergia: false }, tecnologia: { obrasPorPropiedades: false },
+  ecologia: { amplitudEstacional: 0 }, terreno: { caminosFisicos: false }, quimica: { emergente: false } } as const;
 const hostWith = (overrides: Record<string, unknown> = {}): WorldParams => parseParams(overrides, hostOpenWorldParams(DEFAULT_PARAMS, probe));
 
 // ───────────────────────── 0. esquema de parámetros ─────────────────────────
 test('V19 fase 1: los interruptores nacen apagados en DEFAULT y HISTORICAL; sólo L, S, F, R y M se activan en el anfitrión abierto', () => {
-  assert.equal(RULES_VERSION, 13);
+  assert.equal(RULES_VERSION, 14);
   for (const params of [DEFAULT_PARAMS, HISTORICAL_PARAMS]) {
     assert.deepEqual([params.conducta.aprendizajeCausal, params.social.acuerdosMateriales, params.fauna.contactoContinuo,
       params.fauna.reservaReproductiva, params.fauna.encuentroFertil, params.construccion.modular, params.tecnologia.obrasPorPropiedades,
@@ -102,12 +102,12 @@ for (const [seedText, expected] of Object.entries(V18_DEFAULT_60)) {
   const seed = Number(seedText);
   test(`V19 fase 1: DEFAULT_PARAMS semilla ${seed}, 60 pasos = digesto V18, tanto creado como cargado desde version = 12`, () => {
     const created = run(createWorld(seed, DEFAULT_PARAMS), 60);
-    assert.equal(created.version, 13);
+    assert.equal(created.version, 14);
     assert.equal(digestAsV18(created), expected, 'mundo nuevo con interruptores apagados');
     const legacy = createWorld(seed, DEFAULT_PARAMS);
     legacy.version = 12;
     const loaded = migrateWorld(legacy);
-    assert.equal(loaded.version, 13, 'la carga V12 migra a 13');
+    assert.equal(loaded.version, 14, 'la carga V12 migra a 14');
     assert.equal(digestAsV18(run(loaded, 60)), expected, 'mundo V12 migrado');
   });
 }

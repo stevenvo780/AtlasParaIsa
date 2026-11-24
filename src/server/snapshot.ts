@@ -31,7 +31,7 @@ const LEGACY_PARAMS_BODY = stringifyExact({ ...HISTORICAL_PARAMS, limites: LEGAC
 const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS);
 /** Orden de los campos de cada tupla de tesela. `encodeSnapshotTileRows` escribe el mismo orden a mano
  * (camino caliente de cada guardado); tests/snapshot-tile-fields.test.ts comprueba que coinciden. */
-export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
+export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life','paved'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
@@ -162,13 +162,13 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
     const cell = fast ? fast.cellOf(t) : -1;
     // Keep the historical tuple projection: custom object key order, extra keys
     // and tile.toJSON do not change it. Unbound/opaque tiles take the old reads.
-    const row: unknown[] = cell < 0 ? [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]
+    const row: unknown[] = cell < 0 ? [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life,t.paved]
       : [t.x,t.y,fast!.TERRAIN_NAMES[fast!.terrainArr[cell]! - 1],
         optionalNumber(fast!.moistureArr[cell]!),optionalNumber(fast!.vegetationArr[cell]!),optionalNumber(fast!.foodArr[cell]!),
         fast!.BIOME_NAMES[fast!.biomeArr[cell]! - 1],t.elevation,optionalNumber(fast!.woodArr[cell]!),t.stone,
         fast!.FEATURE_NAMES[fast!.featureArr[cell]! - 1],t.variety,optionalNumber(fast!.growthArr[cell]!),
         optionalNumber(fast!.fertilityArr[cell]!),optionalNumber(fast!.cultivationArr[cell]!),optionalNumber(fast!.trafficArr[cell]!),
-        optionalNumber(fast!.drinkingWaterArr[cell]!),t.species,t.fauna,optionalNumber(fast!.lifeArr[cell]!)];
+        optionalNumber(fast!.drinkingWaterArr[cell]!),t.species,t.fauna,optionalNumber(fast!.lifeArr[cell]!),t.paved];
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
       if (typeof value === 'number') {
@@ -295,9 +295,9 @@ export function parseSnapshotJSON(body: string): unknown {
 }
 export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
   return rows.map(row => {
-    if (!Array.isArray(row) || row.length !== SNAPSHOT_TILE_FIELDS.length) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
+    if (!Array.isArray(row) || (row.length !== SNAPSHOT_TILE_FIELDS.length && row.length !== SNAPSHOT_TILE_FIELDS.length - 1)) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
     const tile: Record<string, unknown> = {};
-    for (let i = 0; i < SNAPSHOT_TILE_FIELDS.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
+    for (let i = 0; i < row.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
     return tile as unknown as Tile;
   });
 }
@@ -362,7 +362,7 @@ export function decodeArchivedChunk(body: string): Chunk {
   // an 18-field row is a 20-field tuple whose x,y are the grid position of its index.
   if (Number.isSafeInteger(record.cx) && Number.isSafeInteger(record.cy)) {
     const x0 = (record.cx as number) * 16, y0 = (record.cy as number) * 16;
-    record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && row.length === SNAPSHOT_TILE_FIELDS.length - 2
+    record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && (row.length === SNAPSHOT_TILE_FIELDS.length - 2 || row.length === SNAPSHOT_TILE_FIELDS.length - 3)
       ? [x0 + i % 16, y0 + Math.floor(i / 16), ...row] : row);
   }
   record.tiles = decodeSnapshotTileRows(record.tiles as unknown[]);

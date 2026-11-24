@@ -44,7 +44,7 @@ Cada carril borra lo que sustituye. Cada entrega pasa una revisión de un modelo
 ## 8. Resultados antes que agilidad (Steven, 24-nov tarde)
 Ante el tamaño del cambio (≈ 28.000 líneas nuevas y ≈ 27.000 borradas; se sustituye cerca del 40 % del motor y del mundo), Steven decidió: «aplica lo que nos dé mejores resultados, no más agilidad». En consecuencia:
 - **No se recorta nada del plan** para ir más rápido: todo hecho de átomos, dueños por zona, cinta de vida entera y pantalla para cada función. El kernel de materia en GPU (carril G) sigue dependiendo del perfil, porque escribirlo sin necesidad no mejora el resultado.
-- **Las puertas no se relajan ni se adelantan**: ningún carril de una ola arranca antes de que la anterior cierre su puerta (contratos firmados, suite, panel).
+- **Las puertas no se relajan**: nada de una ola se integra en `sprint/v23l-core` antes de que la anterior cierre su puerta (contratos firmados, suite, panel). Los carriles que solo dependen de los contratos ya firmados y escriben ficheros nuevos (química, arena, cinética, leyes de uso, cinta) pueden empezar a escribir en su worktree mientras la puerta se cierra; los que tocan el motor o el mundo esperan a la puerta.
 - **Cada carril va al modelo más capaz para ese tipo de trabajo**, no al más rápido ni al más barato, y lo revisa otro modelo fuerte de otro proveedor. Los modelos ligeros (Haiku, Luna, Grok) quedan para trabajo mecánico con revisión.
 - **Cuotas** (medidas el 24-nov a las 15:55): a Gemini le queda un 18 % semanal hasta el 30-nov y cada carril de Neon gasta 4–5 puntos, así que Neon se reserva para un carril extremo por ola.
 

@@ -1,4 +1,6 @@
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { cerrarPiscinasDeComputo, createApp } from './app.js';
 import { createWorkerGateway } from './gateway.js';
 import { Store } from './store.js';
@@ -41,6 +43,14 @@ const v21 = {
   ...(tapeKeyframeInterval === undefined ? {} : { tapeKeyframeInterval }),
 };
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
+function commitEnEjecucion(): string | undefined {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fileURLToPath(new URL('.', import.meta.url)), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch { return undefined; }
+}
+const commit = commitEnEjecucion();
 const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
 let app: ReturnType<typeof createApp> | ReturnType<typeof createWorkerGateway> | undefined;
@@ -71,7 +81,7 @@ process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
 try {
   if (process.env.CARTA_SIM_WORKER === '1') {
-    const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
+    const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true, commit,
       password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, ...v21 });
     // Un worker caído deja el transporte sirviendo un espejo fosilizado para siempre: se sale con 75
     // y systemd reinicia el servicio sobre el último guardado.
@@ -99,7 +109,7 @@ try {
     // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
     // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
     // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
-    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
+    app = createApp({ store, manual: true, commit, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
     // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
     // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
     // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.

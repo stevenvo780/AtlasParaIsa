@@ -7,6 +7,8 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { freePort } from './lib/net.js';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
@@ -17,6 +19,7 @@ import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import { gpuNvrtcAvailable } from '../src/world/gpu/puente.js';
 import { dispositivosGpuApagados } from '../src/world/ecosystem-kernel.js';
 import { closeEcosystemWorkers, killGpuSubprocessForTest } from '../src/world/ecosystem.js';
+import { registrar } from '../src/world/invariantes.js';
 
 /** Lleva a todos los habitantes a un chunk vecino no residente: el paso siguiente reanima terreno. */
 function mudar(world: World, dx: number, dy: number): void {
@@ -208,7 +211,42 @@ test('/health sirve la Salud y responde 200 con el mundo avanzando', async (t) =
   assert.equal(typeof salud.ultimoGuardado, 'number');
   assert.deepEqual(salud.gpu, [], 'sin GPU configurada no hay tarjetas que informar');
   assert.equal(salud.recargas, 0);
+  assert.deepEqual(salud.diagnostico, { duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0 });
   assert.equal(salud.status, 'ok', 'el campo histórico se conserva para quien lo consume');
+});
+
+test('una violación dura degrada /health, deja avanzar y queda en bitácora al cerrar', async (t) => {
+  const base = '/tmp/atlas-v23-i0a';
+  mkdirSync(base, { recursive: true });
+  const directorio = mkdtempSync(join(base, 'diagnostico-'));
+  const store = new Store(join(directorio, 'world.sqlite'));
+  const port = await freePort(), origin = `http://127.0.0.1:${port}`;
+  const id = 'prueba.salud';
+  const retirar = registrar({ id, carril: 'I0a', gravedad: 'dura', alcance: 'global', cadaTicks: 120,
+    comprobar: mundo => [{ id, tick: mundo.tick, gravedad: 'dura', detalle: 'Incidencia de prueba' }] });
+  let ahora = 0;
+  const app = createApp({ store, origin, password: 'recuperacion-0d-password', manual: true, commit: 'commit-prueba',
+    monotonicNow: () => ahora += 1000 });
+  t.after(async () => {
+    retirar();
+    try { await app.close(); } finally { store.close(); rmSync(directorio, { recursive: true, force: true }); }
+  });
+  for (let n = 0; n < 10 && !app.salud().diagnostico.duras24h; n++) app.stepOnce();
+  const tick = app.world.tick;
+  app.stepOnce();
+  assert.equal(app.world.tick, tick + 1);
+  app.server.listen(port, '127.0.0.1');
+  await once(app.server, 'listening');
+  const respuesta = await fetch(`${origin}/health`);
+  assert.equal(respuesta.status, 200);
+  const salud = await respuesta.json();
+  assert.equal(salud.estado, 'degradado');
+  assert.equal(salud.diagnostico.duras24h, 1);
+  assert.equal(salud.diagnostico.ultimaViolacion, id);
+  await app.close();
+  const registro = JSON.parse(readFileSync(join(directorio, 'diagnostico', 'invariantes.jsonl'), 'utf8'));
+  assert.equal(registro.commit, 'commit-prueba');
+  assert.equal(registro.violacion.id, id);
 });
 
 after(async () => { await closeEcosystemWorkers(); });

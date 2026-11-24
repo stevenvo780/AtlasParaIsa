@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { deserialize } from 'node:v8';
-import { createReadOnlyApp, estadoGpu, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type Salud, type WhispersResponse } from './app.js';
+import { createReadOnlyApp, DIAGNOSTICO_VACIO, estadoGpu, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type Salud, type WhispersResponse } from './app.js';
 import { buildWorldDirectory, WorldMapCache } from './worldmap-service.js';
 import { TICKS_PER_DAY } from '../world/index.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapResponse } from '../shared/worldmap.js';
@@ -263,9 +263,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       const segundos = Math.max(0, (Date.now() - (mirror ? tickCambioEn : creadoEn)) / 1000);
       const gpu = estadoGpu(options.params?.motor.gpu ?? []);
       const parado = !!fatal || simulationPaused || !!mirror?.failed || segundos > ESPEJO_PARADO_S;
-      return { estado: parado ? 'parado' : segundos > PASO_PARADO_S || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
+      const diagnostico = mirror?.diagnostico ?? DIAGNOSTICO_VACIO;
+      return { estado: parado ? 'parado' : segundos > PASO_PARADO_S || diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
         tick: mirror?.view.tick ?? 0, ticksPorSegundo: mirror?.view.performance?.tickHz ?? 0,
-        segundosDesdeUltimoPaso: segundos, ultimoGuardado: null, gpu, recargas };
+        segundosDesdeUltimoPaso: segundos, ultimoGuardado: null, gpu, recargas, diagnostico };
     },
     get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
@@ -293,7 +294,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   `, { eval: true, execArgv: [], name: 'carta-simulation',
     workerData: { role: 'carta-sim', moduleURL: moduleURL.href,
       loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
-      options: { worldPath: options.worldPath, seed: options.seed, params: options.params, tickMs: options.tickMs,
+      options: { worldPath: options.worldPath, commit: options.commit, seed: options.seed, params: options.params, tickMs: options.tickMs,
         deployment: options.deployment, testStepDelayMs: options.testStepDelayMs,
         turbo, tape: tapeEnabled, tapeMaxFrames: options.tapeMaxFrames, tapeKeyframeInterval: options.tapeKeyframeInterval,
         turboSaveIntervalMs: options.turboSaveIntervalMs,

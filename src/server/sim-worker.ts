@@ -199,12 +199,13 @@ import { projectAnimal } from '../world/animals.js';
 import { tapePathForWorld, tileEqual } from './tape-store.js';
 import { CARRIED_VIEW_FIELDS, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
 import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
-import type { AppOptions } from './app.js';
+import type { AppOptions, DiagnosticoSalud } from './app.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
 
 export interface SimWorkerOptions {
   worldPath: string;
+  commit?: string;
   seed?: number;
   params?: Exclude<AppOptions['params'], Function>;
   tickMs?: number;
@@ -229,6 +230,7 @@ export type MirrorPageField = 'people' | 'places' | 'animals' | 'structures' | '
 export interface MirrorUpdate {
   type: 'mirror';
   view: WorldView;
+  diagnostico: DiagnosticoSalud;
   seed: number;
   cuencas: number;
   activeKeys: string[];
@@ -526,7 +528,7 @@ async function runSimulation(options: SimWorkerOptions) {
       // Resident tile proxies must never be passed to structuredClone/v8.serialize.
       packPages('pendingChunks', [{ ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) }], 1);
     }
-    const update: MirrorUpdate = { type: 'mirror', view, seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
+    const update: MirrorUpdate = { type: 'mirror', view, diagnostico: live.salud().diagnostico, seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
       activeKeys: Object.keys(world.chunks), activeChunks: world.chunks, chunks: updates, pendingChunks: [], pendingKeys: world.retiredChunks.map(chunk => chunk.key), pages,
       deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap };
     // Terrain preparation stays OFF the HTTP thread. Chunk buffers move, rather than cloning
@@ -538,7 +540,7 @@ async function runSimulation(options: SimWorkerOptions) {
   try {
     const base = () => process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams()
       : process.env.CARTA_FULL_HARDWARE === '1' ? hostFullHardwareParams() : hostParams();
-    app = createApp({ store, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
+    app = createApp({ store, commit: options.commit, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
       // publish sends to the dedicated writer thread; the inner app must not open another writer.
       tape: false,

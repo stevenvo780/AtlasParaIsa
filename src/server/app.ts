@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
-import { resolve, extname, sep } from 'node:path';
+import { dirname, resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
@@ -21,6 +21,7 @@ import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
+import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
@@ -37,6 +38,7 @@ import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, World
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
+  commit?: string;
   /** Orígenes HTTPS adicionales permitidos explícitamente por el operador (p. ej. acceso LAN/VPN).
    * Nunca relajan la validación: cada solicitud debe emparejar exactamente Host ↔ Origin. */
   extraOrigins?: readonly string[];
@@ -89,7 +91,18 @@ export interface Salud {
   ultimoGuardado: number | null;
   gpu: { dispositivo: number; estado: 'ok' | 'cpu' | 'sin' }[];
   recargas: number;
+  diagnostico: DiagnosticoSalud;
 }
+export interface DiagnosticoSalud {
+  duras24h: number;
+  blandas24h: number;
+  ultimaViolacion: string | null;
+  errorBitacora: string | null;
+  registrosSinBitacora: number;
+}
+export const DIAGNOSTICO_VACIO: DiagnosticoSalud = {
+  duras24h: 0, blandas24h: 0, ultimaViolacion: null, errorBitacora: null, registrosSinBitacora: 0,
+};
 /** `cpu`: la tarjeta cayó en este proceso y su trabajo va por CPU. `sin`: pedida pero no utilizable. */
 export function estadoGpu(dispositivos: readonly number[]): Salud['gpu'] {
   const hayNvrtc = gpuNvrtcAvailable();
@@ -450,6 +463,8 @@ export function createApp(options: AppOptions) {
 }
 function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; gateway?: ReadOnlyBackend }) {
   const store = options.store!, gateway = options.gateway;
+  const muestreador = !gateway && store.path !== ':memory:'
+    ? new Muestreador({ directorio: dirname(store.path), commit: options.commit }) : undefined;
   const sessions = gateway?.sessions ?? store;
   /** V21. `tickMs: 0` is the uncapped loop too; the tape follows turbo unless it is set explicitly. */
   const turbo = !!options.turbo || options.tickMs === 0;
@@ -582,9 +597,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const segundos = Math.max(0, (relojReal() - ultimoPasoEn) / 1000);
     const gpu = estadoGpu(paramsOf(world).motor.gpu);
     const parado = failed || stopped || segundos > PASO_PARADO_S;
-    return { estado: parado ? 'parado' : gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
+    const resumen = muestreador?.resumen();
+    const diagnostico = resumen ? { duras24h: resumen.duras24h, blandas24h: resumen.blandas24h,
+      ultimaViolacion: resumen.ultimaViolacion ?? null, errorBitacora: resumen.errorBitacora ?? null,
+      registrosSinBitacora: resumen.registrosSinBitacora } : DIAGNOSTICO_VACIO;
+    return { estado: parado ? 'parado' : diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
       tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
-      ultimoGuardado: ultimoGuardadoEn, gpu, recargas };
+      ultimoGuardado: ultimoGuardadoEn, gpu, recargas, diagnostico };
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
@@ -1077,6 +1096,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
       runtime.stepMs = monotonicNow() - stepStarted;
+      muestreador?.paso(world, runtime.stepMs);
       runtime.p95StepMs = registrarPaso(runtime.stepMs);
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
@@ -1572,7 +1592,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
               // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
               try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
             } finally {
-              if (!gateway) await cerrarPiscinasDeComputo();
+              try { await muestreador?.vaciar(); }
+              finally { if (!gateway) await cerrarPiscinasDeComputo(); }
             }
           }
         }

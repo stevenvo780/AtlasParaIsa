@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../src/world/params.js';
+import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { tileLookup } from '../src/world/tile-index.js';
+import { residentFastAccess } from '../src/world/soa/terreno.js';
 import { distance } from '../src/world/mundo/geometria.js';
 import { RADIUS } from '../src/world/mundo/tipos.js';
 import { evaluatePolicySingle } from '../src/world/politica.js';
@@ -14,8 +16,11 @@ import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararC
 import type { Tile } from '../src/shared/types.js';
 import { PercibidorHilos } from './v23-decision-hilos.js';
 
-function mundo(seed: number, pasos: number): World {
-  const world = createWorld(seed, DEFAULT_PARAMS);
+/** El régimen abierto del panel con un hilo: SoA residente, política activa, química y obras modulares. */
+const ABIERTO = parseParams({ motor: { ...hostOpenWorldParams().motor, hilos: 1, gpu: [] } }, hostOpenWorldParams());
+
+function mundo(seed: number, pasos: number, params: WorldParams = DEFAULT_PARAMS): World {
+  const world = createWorld(seed, params);
   for (let i = 0; i < pasos; i++) stepWorld(world);
   return world;
 }
@@ -25,7 +30,7 @@ function percibirTodos(world: World): { vista: VistaMundo; lote: LotePercepcion;
   const vista = VistaMundo.nueva(), tileIn = tileLookup(world.tiles);
   const slots = Int32Array.from(world.people, (_, s) => s);
   const lote: LotePercepcion = { tick: world.tick, slots, plan: Uint16Array.from(world.people, () => PLAN.conCerebro) };
-  vista.capturar(world.people, world.tick, slots, tileIn);
+  vista.capturar(world.people, world.tick, slots, tileIn, residentFastAccess(world.tiles));
   prepararCerebros(world, vista, lote, tileIn);
   const cpu = new PercibidorCpu(vista);
   cpu.lanzar(lote, planesPersonas(vista.terreno.campos, vista.frente.columnas));
@@ -70,8 +75,8 @@ function referencia(world: World, x: number, y: number) {
 }
 
 test('la ventana, las consultas y los organismos percibidos son los de la búsqueda de siempre', () => {
-  for (const seed of [7, 42]) {
-    const world = mundo(seed, 900);
+  for (const [seed, params] of [[7, DEFAULT_PARAMS], [42, DEFAULT_PARAMS], [51926, ABIERTO]] as const) {
+    const world = mundo(seed, 900, params);
     const { vista, salida } = percibirTodos(world);
     assert.ok(world.people.length > 0);
     let celdasConsultadas = 0;
@@ -101,7 +106,7 @@ test('la ventana, las consultas y los organismos percibidos son los de la búsqu
 });
 
 test('las utilidades del cerebro son las de la red de política redondeadas a f32', () => {
-  const world = mundo(7, 600), tileIn = tileLookup(world.tiles);
+  const world = mundo(51926, 600, ABIERTO), tileIn = tileLookup(world.tiles);
   const { salida } = percibirTodos(world);
   world.people.forEach((person, i) => {
     const { genome, plasticity } = ensurePersonPolicy(world, person);

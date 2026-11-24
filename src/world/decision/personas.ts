@@ -76,7 +76,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const params = paramsOf(world);
   // V19/L: un tramo de descanso se acredita con lo que el cuerpo recuperó DE VERDAD hasta esta nueva decisión.
   if (own && person.action === 'rest' && params.conducta.aprendizajeCausal && params.conducta.politicaPeso > 0 && world.adaptationEnabled) creditCausalOutcome(world, person, 'rest');
-  const { salida, fila, terreno, personas } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, own);
+  const { salida, fila, terreno, personas } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, fast, own);
   const ventana = salida.ventana, ventanaCelda = salida.ventanaCelda, base = fila * CELDAS_VENTANA;
   const percibida = (consulta: number): Tile | undefined => {
     const c = salida.celda[fila * salida.q + consulta]!;
@@ -102,7 +102,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   for (let k = 0; k < CELDAS_VENTANA; k++) {
     const c = ventanaCelda[base + k]!;
     if (c < 0) continue;
-    const t = terreno.teselas[c]!, st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? soaCell(fast, t.x, t.y, t) : -1;
+    const t = terreno.teselas[c]!, st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? terreno.soa[c]! : -1;
     const i = nearbyTiles.length;
     nearbyTiles.push(t); nearbyCells.push(cell); nearbySteps[i] = st; nearbyDist[i] = d;
     if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }

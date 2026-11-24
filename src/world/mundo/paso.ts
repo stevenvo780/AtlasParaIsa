@@ -110,7 +110,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     const fast = residentFastAccess(world.tiles) ?? null;
     // F2
     const percepcion = percepcionDe(world), lote = lotePersonas(world);
-    const salida = percepcion.percibir(world.people, world.tick, lote, tileIn, vista => prepararCerebros(world, vista, lote, tileIn));
+    const salida = percepcion.percibir(world.people, world.tick, lote, tileIn, fast ?? undefined, vista => prepararCerebros(world, vista, lote, tileIn));
     const policyScores = puntuacionesPercibidas(world, lote, salida);
     // F3–F4
     try {
@@ -143,14 +143,15 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
 
 /**
  * F2: quienes pueden decidir en este tick: su decisión vence, o la urgencia corporal de `bodyAndAction` (hambre o sed
- * > 0,9 sin estar comiendo o bebiendo) puede dispararse tras avanzar el cuerpo; el margen 0,85 cubre ese avance. Quien
- * decide sin estar aquí (su objetivo se agotó en este tick) se percibe en el momento (`PercepcionDelPaso.filaDe`).
+ * > 0,9 sin estar comiendo o bebiendo) puede dispararse tras avanzar el cuerpo; el margen 0,01 cubre de sobra el
+ * avance de un tick (≈ 0,0003 en reposo). Quien decide sin estar aquí (su objetivo se agotó en este tick, o el margen
+ * no bastó) se percibe en el momento (`PercepcionDelPaso.filaDe`), sobre el estado de ese momento.
  */
 function lotePersonas(world: World): LotePercepcion {
   const slots: number[] = [], plan: number[] = [];
   for (let slot = 0; slot < world.people.length; slot++) {
     const p = world.people[slot]!;
-    const urgente = (p.hunger > 0.85 && p.action !== 'eat' && p.action !== 'hunt') || (p.thirst > 0.85 && p.action !== 'drink');
+    const urgente = (p.hunger > 0.89 && p.action !== 'eat' && p.action !== 'hunt') || (p.thirst > 0.89 && p.action !== 'drink');
     if (world.tick < p.decisionAt && !urgente) continue;
     slots.push(slot); plan.push(decideConCerebro(world, p) ? PLAN.conCerebro : PLAN.sinCerebro);
   }

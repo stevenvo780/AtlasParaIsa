@@ -8,13 +8,14 @@
  * entera (`PercepcionCpu.ventana`): la elección necesita los pasos hasta objetivos que no salen de ninguna consulta
  * (pareja, hogar, lugar, refugio, caza, exploración).
  */
-import { COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, Clase, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, refDe, type Col, type CtxLectura, type FrentePublico,
+import { CAMPOS_CUERPO, COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, refDe, type Col, type CtxLectura, type FrentePublico,
   type LotePercepcion, type Percepcion, type Percibidor, type Plan, type Terreno, type TipoColumna } from '../motor/contratos.js';
 import { distance, type TileLookup } from '../mundo/geometria.js';
 import { RADIUS, type Person } from '../mundo/tipos.js';
 import type { Tile } from '../../shared/types.js';
 import { softSign } from '../politica.js';
-import { BIOMAS, CAMPOS_PERCEPCION, COLUMNA_PROTEGIDO, PLAN, TERRENOS, planesPersonas } from './planes.js';
+import { CAMPOS_PERCEPCION, COLUMNA_PROTEGIDO, PLAN, TERRENOS, planesPersonas } from './planes.js';
+import type { ResidentFastAccess } from '../soa/terreno.js';
 
 type Lectura = Pick<CtxLectura, 'frente' | 'terreno'>;
 
@@ -265,6 +266,9 @@ export class PercibidorCpu implements Percibidor {
   }
 }
 
+/** Un NaN del SoA es un campo ausente: 0, como lo lee `choose`. */
+const numero = (v: number): number => v === v ? v : 0;
+
 // ── Vista del mundo de la ola 1 ──────────────────────────────────────────────────────────────────────────
 
 type Columna = Int32Array | Uint8Array | Uint16Array | Float32Array | Float64Array;
@@ -284,8 +288,9 @@ export interface DescriptorVista {
   columnas: Record<string, SharedArrayBuffer>; paginaX: SharedArrayBuffer; paginaY: SharedArrayBuffer; campos: SharedArrayBuffer[];
 }
 
-/** Frente de las personas en la ola 1: una fila por persona (slot = índice en `world.people` al capturar), con lo que
- * lee la percepción: posición, hambre, sed, energía, rol protegido y, para quien decide con cerebro, sus tres columnas. */
+/** Frente de las personas en la ola 1: una fila por persona (slot = índice en `world.people` al capturar), con solo lo
+ * que lee la percepción: vida, clase, posición, hambre, sed y energía, rol protegido y, para quien decide con cerebro,
+ * sus tres columnas. Las demás columnas del contrato quedan a cero hasta que M2a dé el frente de verdad. */
 class FrenteMundo implements FrentePublico {
   tick = 0; alta = 0;
   readonly columnas = COLUMNAS_VISTA.map(([nombre]) => nombre);
@@ -312,32 +317,34 @@ class FrenteMundo implements FrentePublico {
   capturar(personas: readonly Person[], tick: number): void {
     this.reservar(personas.length);
     this.tick = tick; this.alta = personas.length;
-    const { gen, vivo, clase, uid, dueno, x, y, chunk, objetivo, decideEn, cuerpo, pareja } = this.datos;
+    const vivo = this.datos.vivo!, clase = this.datos.clase!, x = this.datos.x!, y = this.datos.y!, cuerpo = this.datos.cuerpo!;
     const protegido = this.datos[COLUMNA_PROTEGIDO]!;
     for (let s = 0; s < personas.length; s++) {
       const p = personas[s]!;
-      gen![s] = 0; vivo![s] = 1; clase![s] = Clase.Persona; uid![s] = s + 1; dueno![s] = 0;
-      x![s] = p.x; y![s] = p.y; chunk![s] = -1; objetivo![s] = -1; decideEn![s] = p.decisionAt; pareja![s] = -1;
-      cuerpo![s * 7] = p.hunger; cuerpo![s * 7 + 1] = p.thirst ?? 0; cuerpo![s * 7 + 2] = p.energy;
+      vivo[s] = 1; clase[s] = Clase.Persona; x[s] = p.x; y[s] = p.y;
+      cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.hambre] = p.hunger; cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.sed] = p.thirst;
+      cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.energia] = p.energy;
       protegido[s] = p.role !== 'neighbor' ? 1 : 0;
     }
   }
 }
 
 /** Terreno capturado del mundo de la ola 1: solo los discos r = 7 de quien percibe, en páginas 16×16 con la
- * disposición de celdas del contrato y sobre SAB, para que lo lean otros hilos. Lee las teselas por sus campos, que
- * con el SoA residente son la misma memoria. */
+ * disposición de celdas del contrato y sobre SAB, para que lo lean otros hilos. Con el SoA residente lee sus
+ * arreglos como `choose` (un NaN, campo ausente, vale 0); si no, los campos de la tesela. */
 export class TerrenoMundo implements Terreno {
   paginas = 0;
   paginaX: Int32Array<ArrayBufferLike> = new Int32Array(0); paginaY: Int32Array<ArrayBufferLike> = new Int32Array(0);
   versionPagina = new Uint32Array(0); versionVisible = new Uint32Array(0); duenoChunk = new Int16Array(0);
   readonly campos: readonly string[] = CAMPOS_PERCEPCION;
   valores: Float64Array<ArrayBufferLike>[] = [];
-  /** Tesela de cada celda capturada: solo existe en el hilo que capturó. */
+  /** Tesela y celda del SoA residente (−1 sin él) de cada celda capturada: solo existen en el hilo que capturó. */
   teselas: (Tile | undefined)[] = [];
+  soa = new Int32Array(0);
   #visto: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   #indice = new Map<number, number>();
   #ultimaClave = NaN; #ultimo = -1;
+  readonly #cuadrante = new Int32Array(4);
 
   constructor(d?: DescriptorVista) {
     if (!d) { this.#reservar(4); return; }
@@ -355,11 +362,14 @@ export class TerrenoMundo implements Terreno {
     this.versionPagina = new Uint32Array(cap); this.versionVisible = new Uint32Array(cap); this.duenoChunk = new Int16Array(cap);
     this.valores = CAMPOS_PERCEPCION.map((_, i) => crecer(this.valores[i] ?? new Float64Array(0), new Float64Array(sab(cap * 256 * 8))));
     this.#visto = crecer(this.#visto, new Uint8Array(cap * 256));
+    // Arreglo denso desde el principio: escribir índices sueltos en uno vacío lo pasa a diccionario.
+    this.teselas = Object.assign(new Array<Tile | undefined>(cap * 256).fill(undefined), this.teselas);
+    this.soa = crecer(this.soa, new Int32Array(cap * 256));
   }
   reiniciar(): void {
     // `terreno` = 0 marca la celda como no capturada; los demás campos se sobrescriben al capturarla.
     this.#visto.fill(0, 0, this.paginas * 256); this.valores[0]!.fill(0, 0, this.paginas * 256);
-    this.teselas.length = 0; this.#indice.clear(); this.paginas = 0; this.#ultimaClave = NaN; this.#ultimo = -1;
+    this.#indice.clear(); this.paginas = 0; this.#ultimaClave = NaN; this.#ultimo = -1;
   }
   #pagina(px: number, py: number): number {
     const clave = claveCasilla(px, py);
@@ -381,19 +391,26 @@ export class TerrenoMundo implements Terreno {
     return this.valores[i]!;
   }
   /** Copia las celdas del disco r = 7 de (cx, cy) que aún no estén capturadas. */
-  capturarDisco(cx: number, cy: number, tileIn: TileLookup): void {
+  capturarDisco(cx: number, cy: number, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
     if ((cx | 0) !== cx || (cy | 0) !== cy) return;
     this.#reservar(this.paginas + 4);   // una ventana de 15×15 toca a lo sumo 2×2 páginas
-    const [terreno, bioma, comida, aguaPotable, madera, piedra, humedad, vegetacion, trafico] = this.valores as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
+    const [terreno, comida, aguaPotable, madera, piedra, humedad, vegetacion] = this.valores as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
+    // Las (a lo sumo) 2×2 páginas del disco se buscan una vez y no por celda.
+    const px0 = (cx - RADIUS) >> 4, py0 = (cy - RADIUS) >> 4, cuadrante = this.#cuadrante.fill(-1);
     for (let k = 0; k < CELDAS_VENTANA; k++) {
       if (!EN_DISCO[k]) continue;
       const x = cx + k % LADO_VENTANA - RADIUS, y = cy + ((k / LADO_VENTANA) | 0) - RADIUS;
-      let pagina = this.#pagina(x >> 4, y >> 4);
+      const q = ((y >> 4) - py0) * 2 + (x >> 4) - px0;
+      let pagina = cuadrante[q]!;
       if (pagina < 0) {
-        pagina = this.paginas++;
-        this.paginaX[pagina] = x >> 4; this.paginaY[pagina] = y >> 4;
-        this.#indice.set(claveCasilla(x >> 4, y >> 4), pagina);
-        this.#ultimaClave = NaN;
+        pagina = this.#pagina(x >> 4, y >> 4);
+        if (pagina < 0) {
+          pagina = this.paginas++;
+          this.paginaX[pagina] = x >> 4; this.paginaY[pagina] = y >> 4;
+          this.#indice.set(claveCasilla(x >> 4, y >> 4), pagina);
+          this.#ultimaClave = NaN;
+        }
+        cuadrante[q] = pagina;
       }
       const c = (pagina << 8) | ((y & 15) << 4) | (x & 15);
       if (this.#visto[c]) continue;
@@ -401,9 +418,19 @@ export class TerrenoMundo implements Terreno {
       const tile = tileIn(x, y);
       this.teselas[c] = tile;
       if (!tile) continue;
-      terreno[c] = TERRENOS.indexOf(tile.terrain) + 1; bioma[c] = tile.biome ? BIOMAS.indexOf(tile.biome) + 1 : 0;
-      comida[c] = tile.food ?? 0; aguaPotable[c] = tile.drinkingWater ?? 0; madera[c] = tile.wood ?? 0; piedra[c] = tile.stone ?? 0;
-      humedad[c] = tile.moisture; vegetacion[c] = tile.vegetation; trafico[c] = tile.traffic ?? 0;
+      let s = fast?.exact ? fast.exact.cellAt(x, y) : -1;
+      if (fast && s < 0) s = fast.cellOf(tile);
+      this.soa[c] = s;
+      if (s >= 0) {
+        terreno[c] = fast!.terrainArr[s]!;
+        comida[c] = numero(fast!.foodArr[s]!); aguaPotable[c] = numero(fast!.drinkingWaterArr[s]!); madera[c] = numero(fast!.woodArr[s]!);
+        humedad[c] = numero(fast!.moistureArr[s]!); vegetacion[c] = numero(fast!.vegetationArr[s]!);
+      } else {
+        terreno[c] = TERRENOS.indexOf(tile.terrain) + 1;
+        comida[c] = tile.food; aguaPotable[c] = tile.drinkingWater ?? 0; madera[c] = tile.wood ?? 0;
+        humedad[c] = tile.moisture; vegetacion[c] = tile.vegetation;
+      }
+      piedra[c] = tile.stone ?? 0;
     }
   }
 }
@@ -427,11 +454,11 @@ export class VistaMundo implements Lectura {
   get tick(): number { return this.frente.tick; }
 
   /** Captura el frente de `personas` y el terreno alrededor de las de `discos` (slots). */
-  capturar(personas: readonly Person[], tick: number, discos: Iterable<number>, tileIn: TileLookup): void {
+  capturar(personas: readonly Person[], tick: number, discos: Iterable<number>, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
     this.personas = personas;
     this.frente.capturar(personas, tick);
     this.terreno.reiniciar();
-    for (const s of discos) this.terreno.capturarDisco(personas[s]!.x, personas[s]!.y, tileIn);
+    for (const s of discos) this.terreno.capturarDisco(personas[s]!.x, personas[s]!.y, tileIn, fast);
   }
   /** Columnas del cerebro del slot: observación, pesos heredados y plasticidad. */
   cerebro(slot: number, observacion: ArrayLike<number>, pesos: ArrayLike<number>, sesgo: ArrayLike<number>): void {
@@ -473,8 +500,9 @@ export class PercepcionDelPaso {
   readonly #suelta = { terreno: new TerrenoMundo(), salida: reservarPercepcion(1, this.planes) };
 
   /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro de los slots con plan `conCerebro`. */
-  percibir(personas: readonly Person[], tick: number, lote: LotePercepcion, tileIn: TileLookup, cerebro: (vista: VistaMundo) => void): PercepcionCpu {
-    this.vista.capturar(personas, tick, lote.slots, tileIn);
+  percibir(personas: readonly Person[], tick: number, lote: LotePercepcion, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
+    cerebro: (vista: VistaMundo) => void): PercepcionCpu {
+    this.vista.capturar(personas, tick, lote.slots, tileIn, fast);
     cerebro(this.vista);
     let salida: Percepcion;
     try {
@@ -498,9 +526,10 @@ export class PercepcionDelPaso {
 
   /** La fila de `persona`: la del lote si sigue donde la capturó; si no, la percibe ahora sin cerebro (en búferes
    * propios si `reutilizar` es falso: una decisión anidada no pisa la de quien la llamó). */
-  filaDe(personas: readonly Person[], tick: number, persona: Person, slot: number | undefined, tileIn: TileLookup, reutilizar = true): FilaPercibida {
+  filaDe(personas: readonly Person[], tick: number, persona: Person, slot: number | undefined, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
+    reutilizar = true): FilaPercibida {
     const { frente } = this.vista;
-    if (!this.#activa || frente.tick !== tick) { this.vista.capturar(personas, tick, [], tileIn); this.#fila.fill(-1); this.#activa = false; slot = undefined; }
+    if (!this.#activa || frente.tick !== tick) { this.vista.capturar(personas, tick, [], tileIn, fast); this.#fila.fill(-1); this.#activa = false; slot = undefined; }
     if (slot === undefined || this.vista.personas[slot] !== persona) slot = this.vista.personas.indexOf(persona);
     if (slot < 0) throw new Error(`${persona.id} no está en el frente`);
     const fila = this.#fila[slot] ?? -1;
@@ -510,7 +539,7 @@ export class PercepcionDelPaso {
     const x = frente.x[slot]!, y = frente.y[slot]!;
     frente.x[slot] = persona.x; frente.y[slot] = persona.y;
     terreno.reiniciar();
-    terreno.capturarDisco(persona.x, persona.y, tileIn);
+    terreno.capturarDisco(persona.x, persona.y, tileIn, fast);
     percibirLote({ frente, terreno }, { tick, slots: Int32Array.of(slot), plan: Uint16Array.of(PLAN.sinCerebro) }, this.planes, salida);
     frente.x[slot] = x; frente.y[slot] = y;
     return { salida, fila: 0, terreno, personas: this.vista.personas };

@@ -17,15 +17,12 @@ export const UMBRAL = {
 } as const;
 
 /** Campos del terreno que leen los planes, por nombre (`Terreno.campos`). */
-export const CAMPOS_PERCEPCION = ['terreno', 'bioma', 'comida', 'aguaPotable', 'madera', 'piedra', 'humedad', 'vegetacion', 'trafico'] as const;
+export const CAMPOS_PERCEPCION = ['terreno', 'comida', 'aguaPotable', 'madera', 'piedra', 'humedad', 'vegetacion'] as const;
 
-/** Códigos de `terreno` y `bioma`: posición + 1 (0 = sin tesela), el mismo orden que el SoA residente. */
+/** Códigos de `terreno`: posición + 1 (0 = sin tesela), los mismos que el SoA residente. */
 export const TERRENOS = ['water', 'soil', 'meadow', 'shelter'] as const;
-export const BIOMAS = ['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'] as const;
-export const CODIGO_REFUGIO = TERRENOS.indexOf('shelter') + 1;
-export const CODIGO_DESIERTO = BIOMAS.indexOf('desert') + 1;
 /** Tierra: todo terreno salvo el agua; tierra sin techo: suelo y pradera. */
-const TIERRA = [TERRENOS.indexOf('soil') + 1, CODIGO_REFUGIO] as const;
+const TIERRA = [TERRENOS.indexOf('soil') + 1, TERRENOS.indexOf('shelter') + 1] as const;
 const TIERRA_DESCUBIERTA = [TERRENOS.indexOf('soil') + 1, TERRENOS.indexOf('meadow') + 1] as const;
 
 /** Índices de las consultas de celda y de organismo dentro del plan de personas. */

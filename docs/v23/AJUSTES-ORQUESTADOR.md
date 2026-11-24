@@ -34,3 +34,9 @@ Cada carril borra lo que sustituye. Cada entrega pasa una revisión de un modelo
 ## 6. Modelos disponibles desde la tarde del 24-nov
 - **GPT-6.2 Sol** sustituye a GPT-6.1 Sol en todos los carriles de Codex (el lanzador ya lo usa por defecto; probado en las dos cuentas con esfuerzo hasta `ultra`). También existe GPT-6.1 Terra, que sustituye a Terra 5.6 en los carriles medios.
 - **Gemini 4 Neon (XHigh)** vuelve a estar disponible por `agy -p --model gemini-4-neon-xhigh`. Steven lo considera el más capaz después de Fable. Su cuota semanal está al 27 %, así que se reserva para lo extremo: 0H fundadores, una pasada adversarial sobre los contratos congelados, y en las olas siguientes uno de cada par de carriles extremos (M2b o Q; M4a o W; B o T1), con Opus en el otro y revisión cruzada entre ambos.
+
+## 7. Reparto del cómputo entre la torre y el portátil (24-nov)
+- La torre (32 hilos, GPU) estaba al triple de su capacidad mientras el portátil (`ssh fedora`: 20 hilos, sin GPU, ≈ 9 GB de memoria libres) estaba parado. Desde ahora, lo que es solo CPU y dura más de unos minutos va al portátil: los paneles de las puertas, la suite completa de cada puerta (allí no sufre los fallos de tiempos que provoca la carga de la torre) y los barridos de calibración de Q, W y B. En la torre quedan los agentes, lo que usa GPU y lo corto.
+- Herramienta: `archivo/v23-orquesta/portatil.sh` (sube el HEAD de un worktree, lanza en tmux, trae resultados, limpia). Límite: 8 corridas del panel a la vez (cada una llega a ≈ 1 GB). Todo vive en `~/atlas-computo` del portátil y se borra al cerrar cada ola.
+- Mientras el motor base siga siendo determinista con una semilla, las réplicas de una misma semilla son idénticas: los paneles usan semillas distintas con una réplica cada una (12 × 1), no 4 × 3. Las réplicas vuelven a tener sentido con el motor libre de la ola 1.
+- No se lanza nada solo por ocupar el equipo: cada corrida responde a una puerta o a una decisión.

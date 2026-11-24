@@ -21,6 +21,25 @@ const secure = origin.startsWith('https://');
 if (!['127.0.0.1', 'localhost', '::1'].includes(host) && (!secure || extraOrigins.some(item => !item.startsWith('https://')))) {
   throw new Error('Configura CARTA_ORIGIN y CARTA_EXTRA_ORIGINS con HTTPS antes de escuchar fuera de loopback.');
 }
+/** Entero positivo opcional de entorno; un valor presente pero inválido es un error de configuración. */
+function enteroPositivo(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return undefined;
+  const value = Number(raw);
+  if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(value) || value < 1) throw new Error(`${name} debe ser un entero positivo.`);
+  return value;
+}
+// V21: `CARTA_TURBO=1` corre sin tope (`tickMs = 0`) y graba la cinta; `CARTA_TAPE=1` graba la cinta a
+// ritmo normal; `CARTA_OBSERVER_ONLY=1` quita las órdenes directas a los habitantes.
+const tapeMaxFrames = enteroPositivo('CARTA_TAPE_MAX_FRAMES');
+const tapeKeyframeInterval = enteroPositivo('CARTA_TAPE_KEYFRAME_INTERVAL');
+const v21 = {
+  ...(process.env.CARTA_TURBO === '1' ? { turbo: true, tape: true, tickMs: 0 } : {}),
+  ...(process.env.CARTA_TAPE === '1' ? { tape: true } : {}),
+  ...(process.env.CARTA_OBSERVER_ONLY === '1' ? { observerOnly: true } : {}),
+  ...(tapeMaxFrames === undefined ? {} : { tapeMaxFrames }),
+  ...(tapeKeyframeInterval === undefined ? {} : { tapeKeyframeInterval }),
+};
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
 const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
@@ -53,7 +72,7 @@ process.once('SIGTERM', () => { void shutdown(); });
 try {
   if (process.env.CARTA_SIM_WORKER === '1') {
     app = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
-      password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure });
+      password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, ...v21 });
     await app.ready;
   } else {
   store = new Store(resolve(dataPath, 'world.sqlite'));
@@ -73,7 +92,7 @@ try {
     // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
     // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
     // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
-    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()) });
+    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
     // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
     // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
     // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.

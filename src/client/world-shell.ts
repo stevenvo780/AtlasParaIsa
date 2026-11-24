@@ -4,6 +4,32 @@ import { icon, orders } from './ui-catalog.js';
 import { renderTelemetry } from './telemetry-hud.js';
 import { GRUPOS } from './cronica.js';
 
+/** V21: texto único de ayuda cuando el servidor sólo deja observar (sin órdenes ni gestos). */
+export const OBSERVER_NOTE = 'Observación pura: cada habitante decide por su cuenta.';
+/** V21: controles de dirección directa / intervención que desaparecen en modo observador (`observerOnly`). */
+export const OBSERVER_HIDDEN_IDS = ['direct-toggle', 'person-controls', 'task-palette', 'intervene-toggle', 'tool-drawer'] as const;
+
+interface ShellNode { hidden?: boolean | 'until-found'; textContent: string | null; classList?: { toggle(token: string, force?: boolean): unknown }; setAttribute?(name: string, value: string): void }
+export interface ShellDocument { getElementById(id: string): ShellNode | null }
+
+/**
+ * Modo observador puro: marca `#game` con `is-observer-only` (el CSS lo refuerza), oculta toda la UI de dirección e
+ * intervención y reescribe las ayudas que invitaban a dar órdenes. La observación (Mapa, Vidas, Mundo, Explorar, Calor,
+ * Crónica, La Carta, Seguir, S/I, inspector y la barra DVR) no se toca. `on === false` solo quita la marca: el shell
+ * por defecto ya trae todos los controles y los gestiona `game.ts`.
+ */
+export function applyObserverOnly(doc: ShellDocument, on: boolean): void {
+  doc.getElementById('game')?.classList?.toggle('is-observer-only', on);
+  if (!on) return;
+  for (const id of OBSERVER_HIDDEN_IDS) {
+    const node = doc.getElementById(id);
+    if (!node) continue;
+    node.hidden = true; node.setAttribute?.('aria-hidden', 'true');
+  }
+  const note = doc.getElementById('population-note'); if (note) note.textContent = OBSERVER_NOTE;
+  const help = doc.getElementById('control-help'); if (help) help.textContent = OBSERVER_NOTE;
+}
+
 export function worldShell(): string {
   return `<main id="game" class="game-shell" aria-label="Mundo vivo de la carta">
     <canvas id="landscape" tabindex="0" aria-label="Mundo vivo, arrastra para recorrer"></canvas>
@@ -36,6 +62,7 @@ export function worldShell(): string {
     <div class="game-message-stack"><div id="connection-notice" class="game-notice" role="status">Conectando con el mundo…</div><p id="gesture-result" class="game-result" role="status" aria-live="polite" hidden></p><p id="mode-indicator" class="mode-indicator" hidden></p></div>
     <div class="camera-controls hud-surface" aria-label="Cámara"><button id="zoom-in" class="icon-button" aria-label="Acercar mapa">+</button><button id="zoom-out" class="icon-button" aria-label="Alejar mapa">−</button><button id="map-reset" class="icon-button" aria-label="Volver a S">${icon.focus}</button></div>
     <section id="heat-legend" class="heat-legend hud-surface" hidden aria-label="Leyenda del mapa de calor"></section>
+    <div id="dvr-bar" class="dvr-bar hud-surface" role="region" aria-label="Reproductor del mundo (cinta)" hidden></div>
     <div class="world-coordinates hud-surface"><span id="camera-coordinates">0, 0</span><span id="world-extent">Recibiendo el mundo</span><span id="viewport-census">En vista: — hab · — fauna · — obras · — cultivos</span></div>
     <p class="map-hint" id="map-help">Arrastra para recorrer · toca para descubrir · rueda para acercar</p>
   </main>

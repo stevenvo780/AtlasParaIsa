@@ -4,7 +4,10 @@ import { Landscape, type Selection } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
 import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
-import { worldShell } from './world-shell.js';
+import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
+import { DvrPlayer, type DvrFrameInfo } from './dvr-player.js';
+import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
+import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, type HudNav } from './telemetry-hud.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
 import { personLink, recentEvidence } from './world-evidence.js';
@@ -32,6 +35,14 @@ import './notebook.css';
 const root = document.querySelector<HTMLDivElement>('#app')!;
 let world: WorldView | null = null;
 let connection: Connection | null = null;
+/** V21: reproductor DVR de la cinta (`/api/tape/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
+let dvr: DvrPlayer | null = null;
+let dvrBar: DvrBarController | null = null;
+let dvrRaf = 0;
+let lastTapeHudAt = 0;
+/** V21: el servidor sólo deja observar (sin órdenes ni gestos): la UI de dirección e intervención no existe. */
+let observerOnly = false;
+interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean }
 let landscape: Landscape | null = null;
 /** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
 const tileCache = new ClientTileCache();
@@ -85,7 +96,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { tileCache.clear(); capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { stopTape(); observerOnly = false; tileCache.clear(); capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -95,7 +106,7 @@ function loginScreen(message = ''): void {
       const response = await fetch('/api/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: el<HTMLInputElement>('password').value }), signal: AbortSignal.timeout(10_000) });
       el<HTMLInputElement>('password').value = '';
       if (!response.ok) { el('login-error').textContent = response.status === 429 ? 'Espera un momento antes de volver a intentar.' : 'No pudimos abrir la carta con esa contraseña.'; button.disabled = false; return; }
-      enterWorld();
+      enterWorld(await readSessionFlags());
     } catch { el('login-error').textContent = 'No hay conexión con el servidor. Puedes intentarlo de nuevo.'; button.disabled = false; }
   });
 }
@@ -111,23 +122,99 @@ function syncModo(): Modo {
   return modo;
 }
 
-function enterWorld(): void {
+/** V21: banderas del servidor (`tapeEnabled`, `observerOnly`); sin respuesta válida, modo vivo clásico. */
+async function readSessionFlags(): Promise<SessionFlags> {
+  try {
+    const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) });
+    return response.ok ? await response.json() as SessionFlags : {};
+  } catch { return {}; }
+}
+
+function enterWorld(flags: SessionFlags = {}): void {
   clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
   const modo = syncModo(); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
   if (modo === 'observador') connection.suscribir(5000);
-  wire(); renderTool(); connection.start();
+  wire(); renderTool();
+  observerOnly = !!flags.observerOnly; applyObserverOnly(document, observerOnly);
+  if (flags.tapeEnabled) startTape(); // la cinta manda el mundo; el socket sigue para gestos, recetas y fichas
+  connection.start();
+}
+
+/* ------------------------------------------------------------------ */
+/* V21 — cinta DVR: el mundo se reproduce desde `/api/tape/*` a 60 fps  */
+/* ------------------------------------------------------------------ */
+async function tapeJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: signal ?? AbortSignal.timeout(10_000) });
+  if (response.status === 401 || response.status === 403) { loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'); throw new Error('Sesión terminada.'); }
+  if (!response.ok) throw new Error('La cinta del mundo no está disponible todavía.');
+  return await response.json() as T;
+}
+
+/** Con la cinta, el HUD pesado se rehace a ≈ 6 Hz (y en cada salto); el paisaje recibe todos los fotogramas. */
+function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
+  const now = performance.now();
+  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame); }
+  else { recordarVistos(frame); tileCache.ingest(frame.tiles, frame.tick); world = frame; landscape?.update(frame); cronica.acumular(frame.events); }
+  if (info.discontinuity) landscape?.flushPlayback();
+}
+
+function startTape(): void {
+  const container = document.getElementById('dvr-bar'); if (!container) return;
+  connection?.setTapeMode(true);
+  dvrBar = mountDvrBar(container, {
+    togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
+    seek: tick => void dvr?.seek(tick), jumpLive: () => void dvr?.jumpToLiveEdge(),
+  });
+  const player = new DvrPlayer({
+    fetchMeta: () => tapeJson<TapeMetaResponse>('/api/tape/meta'),
+    fetchChunk: request => tapeJson<TapeChunkResponse>(`/api/tape/chunk?${new URLSearchParams({ fromTick: String(request.fromTick), count: String(request.count), ...(request.viewport ? Object.fromEntries(Object.entries(request.viewport).map(([key, value]) => [key, String(value)])) : {}) })}`, request.signal),
+    onFrame: receiveTapeFrame,
+    onStateChange: state => { dvrBar?.update(state); },
+  });
+  dvr = player;
+  void player.start().then(active => {
+    if (dvr !== player) return; // se salió del mundo mientras cargaba
+    if (!active) { // cinta apagada o sin respuesta: de vuelta al modo vivo clásico por WebSocket
+      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); return;
+    }
+    if (player.observerOnly && !observerOnly) { observerOnly = true; applyObserverOnly(document, true); }
+    container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
+    const loop = (now: number): void => { player.advance(now); dvrRaf = requestAnimationFrame(loop); };
+    dvrRaf = requestAnimationFrame(loop);
+  });
+}
+
+function stopTape(): void {
+  cancelAnimationFrame(dvrRaf); dvrRaf = 0;
+  dvr?.stop(); dvr = null; dvrBar?.destroy(); dvrBar = null;
+  document.getElementById('game')?.classList.remove('has-dvr');
+}
+
+/** Atajos de la cinta (Espacio, «,», «.», «0»): nunca mientras se escribe ni con modificadores. */
+function tapeShortcut(event: KeyboardEvent): void {
+  if (!dvr?.enabled || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+  const focus = event.target as HTMLElement | null, tag = focus?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || focus?.isContentEditable) return;
+  if (event.key === ' ' && (tag === 'BUTTON' || tag === 'A' || focus?.getAttribute?.('role') === 'tab')) return; // Espacio activa el botón enfocado
+  if (event.key === ' ') dvr.togglePlaying();
+  else if (event.key === ',') void dvr.step(-1);
+  else if (event.key === '.') void dvr.step(1);
+  else if (event.key === '0') void dvr.jumpToLiveEdge();
+  else return;
+  event.preventDefault();
 }
 
 type Drawer = NotebookPage;
 function drawer(name: Drawer, open?: boolean): void {
+  if (observerOnly && name === 'tool') return; // sin gestos en observación pura
   const next = notebook?.show(name, open) ?? false;
   syncPickingMode();
   if (name === 'population' && next) el('population-search').focus();
@@ -178,7 +265,7 @@ function person(): PersonView | undefined { return world?.people.find(p => p.id 
 function target(): { x: number; y: number } | null { if (!world) return null; const selection = selected; if (selection.kind === 'tile') return selection; const p = selection.kind === 'animal' ? world.animals?.find(a => a.id === selection.id) : person(); return p ? { x: p.x, y: p.y } : null; }
 function message(text: string, accepted?: boolean): void { const output = document.getElementById('gesture-result'); if (output) { output.textContent = text; output.hidden = !text; output.dataset.accepted = accepted === undefined ? 'pending' : String(accepted); } }
 function send(input: Omit<Gesture, 'id'>): boolean { if (!world || world.paused || status !== 'live' || pending) return false; if (connection?.send({ ...input, id: crypto.randomUUID() })) { landscape?.flushPlayback(); /* V18 capa 1.5: la orden se ve sobre el estado más reciente */ landscape?.setPendingTarget(input); message('Esperando la confirmación del mundo…'); return true; } return false; }
-function sendCommand(order: Order, position?: { x: number; y: number }): void { const p = person(); if (!p || selected.kind === 'animal') return; const x = position?.x ?? p.x, y = position?.y ?? p.y; // V18: el destino se marca al instante; el servidor lo aplica en su siguiente paso.
+function sendCommand(order: Order, position?: { x: number; y: number }): void { if (observerOnly) return; const p = person(); if (!p || selected.kind === 'animal') return; const x = position?.x ?? p.x, y = position?.y ?? p.y; // V18: el destino se marca al instante; el servidor lo aplica en su siguiente paso.
   if (send({ kind: 'command', agentId: p.id, order, x, y }) && order === 'move') landscape?.markDestination({ x, y }, p.id); if (order === 'auto') { control = 'inspect'; renderControls(); } }
 
 function wire(): void {
@@ -186,7 +273,7 @@ function wire(): void {
   root.addEventListener('click', navigateEntity);
   for (const name of ['population', 'inspector', 'layer', 'stats'] as const) el(`${name}-toggle`).addEventListener('click', () => drawer(name));
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-close]')) button.addEventListener('click', () => drawer(button.dataset.close as Drawer, false));
-  el('intervene-toggle').addEventListener('click', () => { control = 'inspect'; renderTool(); renderControls(); drawer('tool'); });
+  el('intervene-toggle').addEventListener('click', () => { if (observerOnly) return; control = 'inspect'; renderTool(); renderControls(); drawer('tool'); });
   el('selection-back').addEventListener('click', () => drawer('population', true));
   wireTabs(el('inspector-tabs'), 'data-inspector-tab', value => selectInspectorTab(value as typeof inspectorTab));
   el('task-toggle').addEventListener('click', () => toggleTasks(!!el('task-palette').hidden));
@@ -234,7 +321,7 @@ function wire(): void {
   // M3: S e I se encuentran aunque estén fuera de la cámara (la ficha a demanda trae su posición).
   for (const role of ['S', 'I'] as const) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => choosePerson(idDeRol(role, world)));
   el('follow-toggle').addEventListener('click', () => { if (selected.kind === 'tile') return; following = !following; landscape?.follow(following ? selected.id : null, selected.kind); renderControls(); if (mobile()) drawer('inspector', false); });
-  el('direct-toggle').addEventListener('click', () => { control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
+  el('direct-toggle').addEventListener('click', () => { if (observerOnly) return; control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.addEventListener('click', () => sendCommand(button.dataset.order as Order));
   el('observe-tool').addEventListener('click', () => { control = 'inspect'; notebook?.close(); root.querySelectorAll('[data-gesture]').forEach(b => b.setAttribute('aria-pressed', 'false')); el('observe-tool').setAttribute('aria-pressed', 'true'); renderControls(); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-gesture]')) button.addEventListener('click', () => { tool = button.dataset.gesture as typeof tool; control = 'inspect'; root.querySelectorAll('[data-gesture]').forEach(item => item.setAttribute('aria-pressed', String((item as HTMLElement).dataset.gesture === tool))); el('observe-tool').setAttribute('aria-pressed', 'false'); renderTool(); renderControls(); drawer('tool', true); });
@@ -355,6 +442,8 @@ function receiveWorld(next: WorldView): void {
   if (capaMapa !== 'none') { if (capaCalor) landscape?.setCapaCalor(capaCalor, rangoRecibido(next.tiles, capaCalor)); renderLeyendaCalor(); }
   renderPopulation(); renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();
 }
+/** V21: en observación pura toda ayuda de la lista se completa con la nota única (sin «dar una orden»). */
+function observerNote(text: string): string { return observerOnly ? `${OBSERVER_NOTE} ${text}` : text; }
 function renderTelemetryHud(current: WorldView): void {
   for (const kpi of telemetryKpis(current)) {
     const button = el('hud-telemetry').querySelector<HTMLButtonElement>(`[data-hud-nav="${kpi.nav}"]`)!;
@@ -378,7 +467,7 @@ function renderPopulation(): void {
     const species = el<HTMLSelectElement>('species-filter').value;
     const animals = (world.animals ?? []).filter(a => (!species || species === a.species) && `${speciesNames[a.species]} ${a.id} ${animalActions[a.action]}`.toLocaleLowerCase('es').includes(search));
     const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = `${number(world.animals?.length ?? 0)} en esta vista`;
-    el('population-note').textContent = `Individuos de la región recibida por la cámara. ${animals.length} coincidencias${animals.length > 80 ? '; se muestran las primeras 80, afina la búsqueda' : ''}. Sus necesidades guían su actividad; puedes observarlos y seguirlos.`;
+    el('population-note').textContent = observerNote(`Individuos de la región recibida por la cámara. ${animals.length} coincidencias${animals.length > 80 ? '; se muestran las primeras 80, afina la búsqueda' : ''}. Sus necesidades guían su actividad; puedes observarlos y seguirlos.`);
     if (signature === populationSignature) return; populationSignature = signature;
     el('population-list').innerHTML = animals.slice(0, 80).map(a => `<button class="population-person animal-row" data-animal="${esc(a.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === a.id}"><span class="animal-avatar" style="--animal-color:${animalColors[a.species]}" aria-hidden="true">${animalSilhouette(a.species)}</span><span><strong>${speciesNames[a.species]}</strong><small>${animalActions[a.action]} · generación ${esc(a.generation)}</small></span></button>`).join('') || '<p class="drawer-note">No hay animales que coincidan en esta región. Puedes recorrer el mapa o ampliar el filtro.</p>';
     return;
@@ -388,7 +477,7 @@ function renderPopulation(): void {
   // el paisaje sigue en Canvas/WebGL2, sin un nodo DOM por habitante fuera de esta lista.
   const ventana = ventanaLista(people);
   el('population-count').textContent = rotuloRecuento(world);
-  el('population-note').textContent = `La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella.${ventana.restantes ? ` Se nombran las primeras ${ventana.visibles.length} coincidencias de ${people.length}; afina la búsqueda para encontrar a alguien concreto.` : ''} Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.`;
+  el('population-note').textContent = observerNote(`La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella.${ventana.restantes ? ` Se nombran las primeras ${ventana.visibles.length} coincidencias de ${people.length}; afina la búsqueda para encontrar a alguien concreto.` : ''} Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.`);
   const signature = JSON.stringify([search, activePersonId, people.length, ventana.visibles.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
   el('population-list').innerHTML = ventana.visibles.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || (world.people.length ? '<p class="drawer-note">No hay habitantes de esta vista que coincidan.</p>' : '<p class="drawer-note">No hay nadie en esta vista. El censo del mundo está en Mundo › Vida; mueve el mapa o usa S e I para encontrar a alguien.</p>');
   const select = el<HTMLSelectElement>('person-select');
@@ -491,7 +580,7 @@ function renderInspector(): void {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
     const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.cells?.length ? s.cells.some(c => c.x === tile.x && c.y === tile.y) : tile.x >= s.x && tile.x < s.x + (s.footprint?.width ?? 1) && tile.y >= s.y && tile.y < s.y + (s.footprint?.height ?? 1)) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
-    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.</p>`);
+    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">${observerOnly ? OBSERVER_NOTE : 'Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.'}</p>`);
   }
 }
 function renderControls(): void {
@@ -506,8 +595,8 @@ function renderControls(): void {
   el('game').classList.toggle('direct-mode', control === 'direct'); renderTool();
 }
 function renderStatus(): void {
-  if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; el('connection-label').textContent = paused ? 'En pausa' : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String(status === 'live' && !paused);
-  el('connection-notice').hidden = status === 'live' && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
+  if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; const tape = !!dvr?.enabled && !!world; el('connection-label').textContent = paused ? 'En pausa' : tape ? (dvr!.atLiveEdge ? 'En vivo · cinta' : 'Cinta') : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String((tape || status === 'live') && !paused);
+  el('connection-notice').hidden = (status === 'live' || tape) && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
   renderRhythm(); renderControls(); if (!el('stats-drawer').hidden) renderStats();
 }
 /** M2: el HUD dice cómo llega el mundo (cada 5 s en modo ligero, o más lento de lo pedido) y si su
@@ -687,6 +776,7 @@ function renderStatsContent(): void {
   const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
   panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
+document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
-async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
+async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean } & SessionFlags; if (response.ok && session.authenticated) enterWorld({ tapeEnabled: session.tapeEnabled, observerOnly: session.observerOnly }); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
 void boot();

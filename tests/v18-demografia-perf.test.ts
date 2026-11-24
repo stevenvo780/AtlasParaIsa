@@ -9,11 +9,10 @@
  *    entrada —válida, corrupta o mutada en sitio entre dos llamadas— el código vigente tiene que aceptar
  *    lo mismo y lanzar el mismo tipo de error con el mismo mensaje.
  * 3. Coste: un paso de `advancePopulation` con 3 000 habitantes, 2 500 legados citados, 200 pendientes,
- *    600 refugios techados y lluvia, medido y acotado.
+ *    600 refugios techados y lluvia, con recorridos lineales de estructuras y legados.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { performance } from 'node:perf_hooks';
 import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits,
   DemographicTransition, LegacyRecord, LongevityLaw, SenescenceLaw } from '../src/shared/demography.js';
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges } from '../src/shared/demography.js';
@@ -680,10 +679,18 @@ test('V18 fail-closed: assertPopulation da el veredicto de siempre', () => {
 
 // ─────────────────────────────────────── 3. Coste ───────────────────────────────────────
 
-const median = (values: number[]) => { const s = [...values].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]!; };
-const p95 = (values: number[]) => { const s = [...values].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]!; };
+function contarLecturas<T>(filas: T[]) {
+  let lecturas = 0;
+  const observadas = new Proxy(filas, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) lecturas++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  return { observadas, get lecturas() { return lecturas; } };
+}
 
-test('V18 coste: advancePopulation con 3 000 habitantes, 2 500 legados citados, 200 pendientes, 600 refugios y lluvia', t => {
+test('V18 coste: advancePopulation indexa los refugios y recorre los legados un número acotado de veces', () => {
   const world = createWorld(20261122, DEFAULT_TOOLS);
   const land = world.tiles.filter(tile => tile.terrain !== 'water').length;
   assert.ok(land >= 900, `hacen falta teselas de tierra (${land})`);
@@ -691,7 +698,8 @@ test('V18 coste: advancePopulation con 3 000 habitantes, 2 500 legados citados, 
   // 299 capas más, copias de la fabricada: el abrigo no depende de quién lo hizo.
   const cloak = world.people[1]!.technology.items[0]!;
   for (let k = 1; k < 300; k++) world.people[1 + 2 * k]!.technology.items = [{ ...structuredClone(cloak), id: `${cloak.id}-copia-${k}` }];
-  // Cuerpos sanos y jóvenes: el coste medido es el de un paso corriente, no el de una mortandad.
+  // El paso incluye el desgaste de los abrigos y cuerpos sanos que no generan nuevos legados.
+  world.tick += 9;
   for (const person of world.people) {
     person.hunger = 0.2; person.thirst = 0.2; person.fatigue = 0.1; person.energy = 0.9;
     person.demography = { ...person.demography, age: 1000 + (person.demography.age % 500), health: 0.95, vitality: 0.95 };
@@ -701,21 +709,21 @@ test('V18 coste: advancePopulation con 3 000 habitantes, 2 500 legados citados, 
   assert.ok(world.legacy.length >= 2400, `los legados citados se conservan (${world.legacy.length})`);
   assert.equal(world.retiredLegacy.length, 200);
   assert.ok(world.structures.length >= 600);
-  // Tres ventanas de 20 pasos tras 10 de calentamiento; cuenta la mejor mediana, porque la suite corre en
-  // paralelo con la carga de la torre y una ventana sola mide también a los vecinos.
-  const emit = emitFor(world), windows: number[][] = [[], [], []], retains: number[] = [];
-  for (let step = 0; step < 70; step++) {
-    world.tick++;
-    const start = performance.now(); advancePopulation(world, { emit, beforeDeath: settle }); const end = performance.now();
-    if (step >= 10) windows[Math.floor((step - 10) / 20)]!.push(end - start);
-    const r0 = performance.now(); retainLegacy(world); retains.push(performance.now() - r0);
-  }
-  const steps = windows.reduce((best, window) => median(window) < median(best) ? window : best);
-  const report = { habitantes: world.people.length, legado: world.legacy.length, pendientes: world.retiredLegacy.length, estructuras: world.structures.length,
-    medianasPorVentanaMs: windows.map(window => +median(window).toFixed(3)),
-    advancePopulation: { medianaMs: +median(steps).toFixed(3), p95Ms: +p95(steps).toFixed(3), maxMs: +Math.max(...steps).toFixed(3) },
-    retainLegacy: { medianaMs: +median(retains).toFixed(3), p95Ms: +p95(retains).toFixed(3), maxMs: +Math.max(...retains).toFixed(3) } };
-  t.diagnostic(`V18 demografía ${JSON.stringify(report)}`);
-  assert.ok(world.people.length > 2900, 'sin mortandad en el paso medido');
-  if (!capture) assert.ok(median(steps) < 15, `advancePopulation debe costar < 15 ms/paso con 3 000 habitantes (mediana ${median(steps).toFixed(2)} ms)`);
+  const estructuras = contarLecturas(world.structures);
+  const legados = contarLecturas(world.legacy);
+  const pendientes = contarLecturas(world.retiredLegacy);
+  world.structures = estructuras.observadas;
+  world.legacy = legados.observadas;
+  world.retiredLegacy = pendientes.observadas;
+
+  world.tick++;
+  advancePopulation(world, { emit: emitFor(world), beforeDeath: settle });
+
+  assert.ok(estructuras.lecturas <= estructuras.observadas.length,
+    `las estructuras se indexan una vez para toda la población (${estructuras.lecturas} lecturas)`);
+  // Un recorrido impide que reaparezcan fallecidos y otro valida los registros retenidos.
+  assert.ok(legados.lecturas <= 2 * legados.observadas.length, `legados: ${legados.lecturas} lecturas`);
+  assert.ok(pendientes.lecturas <= 2 * pendientes.observadas.length, `pendientes: ${pendientes.lecturas} lecturas`);
+  assert.equal(world.people.length, 3000, 'sin mortandad en el paso medido');
+  assertPopulation(world);
 });

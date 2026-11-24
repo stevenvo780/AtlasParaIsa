@@ -13,6 +13,7 @@ import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { primerVecino, vecinos } from './rejilla.js';
 import { tileLookup } from './tile-index.js';
 import { residentFastAccess } from './soa/terreno.js';
+import { defaultChemistryState, exchangeComplementaryCompounds } from './chemistry.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -561,6 +562,13 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
     if (!skill) return false;
     other.skills[skill] = clamp((other.skills[skill] ?? 0) + Math.min(0.012, (person.skills[skill]! - (other.skills[skill] ?? 0)) * other.genome.learningRate)); count(world, 'teaching');
     detail = `Mostró una técnica practicada de ${skill}; ${other.name} aprendió mediante observación.`;
+  }
+  // V23 (`quimica.emergente`): regional elemental deficit trade. Partners carrying complementary compounds
+  // (e.g. Fe/Si from mountains against C fuel or Ca lime from forest/wetland) swap exact half-lots, so
+  // matter flows across regions to distant workshops. Pure halving: elemental mass is conserved bit for bit.
+  if (paramsOf(world).quimica.emergente && person.compounds?.length && other.compounds?.length) {
+    const traded = exchangeComplementaryCompounds(person, other, world.chemistry ??= defaultChemistryState());
+    if (traded) detail += ` Además intercambiaron medio lote químico: ${person.name} dio uno rico en ${traded.elements[0]} y recibió uno rico en ${traded.elements[1]}.`;
   }
   person.lastSocial = world.tick;
   if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }

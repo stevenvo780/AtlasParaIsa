@@ -16,6 +16,8 @@ import { isGenuineFunctionalNovelty } from './tecnologia-complejidad.js';
 import type { World } from './index.js';
 import { BROKEN_CONDITION, storedMaterialsNear, withdrawMaterials, structureDistance } from './inventions.js';
 import { filtrarCerca } from './indice-puntos.js';
+import { blendForgedProfile, compoundHuntBonus, forgeWithCompound } from './chemistry.js';
+import type { CompoundLot } from '../shared/chemistry.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -55,6 +57,12 @@ const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => M
 function techParams(host: TechnologyHost): WorldParams['tecnologia'] {
   return boundParamsOf(host)?.tecnologia ?? HISTORICAL_PARAMS.tecnologia;
 }
+/** V23: química emergente activa en este anfitrión (un host sintético sin params nunca la activa). */
+function chemistryWorld(host: TechnologyHost): boolean {
+  return boundParamsOf(host)?.quimica.emergente === true;
+}
+/** Lotes químicos que lleva el actor (solo existen en mundos con `quimica.emergente`). */
+const actorCompounds = (actor: TechnologyActor): CompoundLot[] | undefined => (actor as TechnologyActor & { compounds?: CompoundLot[] }).compounds;
 function synergyWorld(host: TechnologyHost): host is TechnologyHost & World {
   return !!(boundParamsOf(host)?.construccion.poliminosYSinergia && host.structures && host.tiles && 'blueprints' in host);
 }
@@ -380,9 +388,13 @@ export function portableInsulationPower(actor: TechnologyActor): number {
 /** Fracción del trabajo de caza que queda con lanza o cuchillo (`cutting`) y lazo o trampa (`binding`):
  * 1 sin la ley o sin herramientas; como mucho un 32 % menos. Sólo lectura (se paga en `consumeHuntingTools`). */
 export function huntingWorkFactor(host: TechnologyHost, actor: TechnologyActor): number {
-  if (!toolEffectsEnabled(host)) return 1;
+  // V23 (`quimica.emergente`): a hard and tough carried compound (smelted iron-rich, vitreous silica) is a
+  // blade on its own: up to 30 % less hunt work, combined with the tools' reduction (at most 50 % in total).
+  const chem = chemistryWorld(host) ? compoundHuntBonus(actorCompounds(actor)) * 0.3 : 0;
+  if (!toolEffectsEnabled(host)) return chem > 0 ? 1 - chem : 1;
   const powers = itemCapacities(actor.technology.items);
-  return 1 - Math.min(0.32, toolPower(powers.cutting) * 0.2 + toolPower(powers.binding) * 0.16);
+  const tools = Math.min(0.32, toolPower(powers.cutting) * 0.2 + toolPower(powers.binding) * 0.16);
+  return chem > 0 ? 1 - Math.min(0.5, tools + chem) : 1 - tools;
 }
 /** Tras una caza que rindió `foodGained` con el trabajo acortado por `huntingWorkFactor`: desgasta la mejor
  * herramienta de corte y la de atar (demanda 0,8) y anota a cada una su parte del rendimiento. */
@@ -749,6 +761,8 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
       output.id = `product-${++state.itemCounter}`; output.recipeId = recipe.id; output.madeAt = host.tick; output.generation = recipe.generation;
       output.parentItems = [...new Set(plan.inputs.filter(i => i.recipeId).flatMap(i => i.parentItems.length ? i.parentItems : [i.id]))].slice(0, 16);
       knowledge.items.push(output);
+      // V23: a carried useful compound lot is forged into the product (conserved debit, real tint/provenance).
+      if (chemistryWorld(host)) forgeWithCompound(output, actorCompounds(actor));
       // The completed paid experiment (or an already learned craft) earns instructions.
       // Parent pins end with the project, so a full memory cannot stop a discovery.
       knowledge.project = null;
@@ -867,6 +881,11 @@ export function installTechnologyItem(host: TechnologyHost, actor: TechnologyAct
   (structure.installed ??= []).push({ id: item.id, recipeId: item.recipeId, mass: item.mass,
     composition: { ...item.composition }, containment: item.properties.containment, insulation: item.properties.insulation,
     cohesion: item.properties.cohesion, binding: capabilities.binding, condition: Math.min(1, item.mass / item.initialMass) });
+  // V23: a compound-forged asset carries its real chemical tint and properties into the building's material profile.
+  if (chemistryWorld(host) && item.materialTint) {
+    const profile = blendForgedProfile(structure.materialProfile, item);
+    if (profile) structure.materialProfile = profile;
+  }
   add(host.technology.ledger.estateLoss, item.composition);
   const resources = [{ resourceId: itemResource(item), mass: item.mass }];
   const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
@@ -946,7 +965,9 @@ export function projectTechnology(host: TechnologyHost, itemOwners: readonly Tec
     const affordance = state.water ? containerAffordance(i) : undefined;
     return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: viewCapacities(materialCapacities(i)),
       ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,
-        leakageNumerator: affordance.leakageNumerator } } : {}) };
+        leakageNumerator: affordance.leakageNumerator } } : {}),
+      ...(i.materialTint ? { materialTint: i.materialTint } : {}), ...(i.chemFormulaId ? { chemFormulaId: i.chemFormulaId } : {}),
+      ...(i.chemPhase ? { chemPhase: i.chemPhase } : {}) };
   })),
     dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
       toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,

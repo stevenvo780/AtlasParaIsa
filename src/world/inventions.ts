@@ -1,6 +1,6 @@
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
 import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
-import { blendMaterialProfile } from './chemistry.js';
+import { blendMaterialProfile, compoundCarryUnits, enrichSoilFromLots, KILN_FUEL_POWER, unfiredCompoundShare } from './chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
@@ -184,6 +184,11 @@ export function structureDistance(point: Point, structure: StructureView): numbe
 
 const hasCompletedBuilding = (s: StructureView) => !s.site || !!s.site.expansion;
 const structureSearchRadius = (world: World, legacy: number) => paramsOf(world).construccion.poliminosYSinergia ? Math.min(3, legacy) : legacy;
+/** V23: chemistry-era laws (transport gear, soil enrichment, kilns, settlement halls) need `quimica.emergente`. */
+const chemistryEra = (world: World): boolean => paramsOf(world).quimica.emergente === true;
+/** V23: extra units per trip from the best carried pack (lightness × toughness); 0 without `quimica.emergente`. */
+const carryUnits = (world: World, person: Person): number => chemistryEra(world) ? compoundCarryUnits(person.compounds) : 0;
+const isFuelLot = (lot: { mass: number; properties: { fuelPower: number } }): boolean => lot.mass > 0 && lot.properties.fuelPower >= KILN_FUEL_POWER;
 
 /** Fixed storage section persists when a liner wears out: contents never disappear
  * or exceed a shrinking capacity. Condition controls access, not conserved volume. */
@@ -237,7 +242,9 @@ export function depositMaterials(world: World, person: Person, structure: Struct
   let storedCompound = false;
   if (paramsOf(world).quimica.emergente && person.compounds && person.compounds.length >= 4 && (structure.storedCompounds?.length ?? 0) < 12
     && (capacity.wood > 0 || structure.components.includes('hearth') || structure.components.includes('granary'))) {
-    const lot = person.compounds.pop()!;
+    // V23: a hearth banks the charcoal (dense fuel) the carrier holds; otherwise the last lot, as in V20.
+    const fuelIndex = structure.components.includes('hearth') ? person.compounds.findIndex(isFuelLot) : -1;
+    const lot = fuelIndex >= 0 && chemistryEra(world) ? person.compounds.splice(fuelIndex, 1)[0]! : person.compounds.pop()!;
     (structure.storedCompounds ??= []).push(lot);
     structure.materialProfile = blendMaterialProfile(structure.materialProfile, lot, 0.25);
     storedCompound = true;
@@ -575,7 +582,10 @@ export function modularBuildReady(person: Person, construction: ConstructionOppo
   if (needed === 0 || deliverable >= needed) return true;
   // Paid work on a standing site is a real contribution even with empty hands.
   if (construction.delivery === 'site' && construction.workLeft) return true;
-  return deliverable >= Math.min(needed, TRIP_LOAD) || (deliverable > 0 && !canGather);
+  // V23: a carried pack (fibre, hide, resin: lightness × toughness) makes each trip worth 4..8 units. Compound lots
+  // exist only in `quimica.emergente` worlds, so a historical person always keeps TRIP_LOAD = 4.
+  const tripLoad = TRIP_LOAD + (person.compounds?.length ? compoundCarryUnits(person.compounds) : 0);
+  return deliverable >= Math.min(needed, tripLoad) || (deliverable > 0 && !canGather);
 }
 
 /** Cells a fresh build of this genotype occupies (same rule as fittingPolyomino). */
@@ -595,8 +605,8 @@ function adoptionCost(world: World, person: Person, blueprint: BlueprintView): B
 /** What can physically reach a work started here: one carried load (own load plus reachable ground)
  * and the stock already banked in nearby warehouses. */
 function constructionBudget(world: World, person: Person): { wood: number; stone: number } {
-  const stored = { wood: 0, stone: 0 }, local = localMaterials(world, person, stored);
-  return { wood: Math.min(CARRY.wood, local.wood - stored.wood) + stored.wood, stone: Math.min(CARRY.stone, local.stone - stored.stone) + stored.stone };
+  const stored = { wood: 0, stone: 0 }, local = localMaterials(world, person, stored), extra = carryUnits(world, person);
+  return { wood: Math.min(CARRY.wood + extra, local.wood - stored.wood) + stored.wood, stone: Math.min(CARRY.stone + extra, local.stone - stored.stone) + stored.stone };
 }
 
 /** Autonomous admission only. Explicit construction still uses completeConstruction
@@ -642,7 +652,9 @@ export function constructionOpportunity(world: World, person: Person, placed = t
     reason: 'El plano aporta una función adicional frente a las instalaciones que percibe; fabricarlo exige materiales y trabajo.' };
 }
 
-export interface InventionContext { water: number; food: number; rest: number; rainPotential: number; foodSurplus: number; moisture: number; cold: number; fuel: number; }
+export interface InventionContext { water: number; food: number; rest: number; rainPotential: number; foodSurplus: number; moisture: number; cold: number; fuel: number;
+  /** V23 (`quimica.emergente`): share of carried compound mass still unfired with no roofed hearth within reach. */
+  kiln?: number; }
 /** Perceived local deficits, not global resource omniscience or invented weather history.
  * rainPotential is explicitly a soil/biome prior; only actual rain can fill a built cistern. */
 export function inventionContext(world: World, person: Person): InventionContext {
@@ -660,13 +672,18 @@ export function inventionContext(world: World, person: Person): InventionContext
   const roofRadius = structureSearchRadius(world, 4);
   const roofs = filtrarCerca(world.structures, person, roofRadius + 1, s => distance(person, s) <= roofRadius && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
   const quality = Math.max(0, ...roofs.map(s => blueprintAffordances(s.components).restQuality * s.condition));
-  return { water: clamp(0.65 * (1 - clamp(reserve * 5)) + person.thirst * 0.35),
+  const context: InventionContext = { water: clamp(0.65 * (1 - clamp(reserve * 5)) + person.thirst * 0.35),
     food: clamp(0.65 * (1 - clamp(food * 4)) + person.hunger * 0.35),
     rest: clamp((1 - quality) * 0.6 + person.fatigue * 0.4),
     rainPotential: world.weather === 'rain' ? 1 : clamp(0.15 + moisture * 0.55),
     foodSurplus: clamp(portable * 2 + food * 2), moisture,
     cold: world.weather === 'rain' || world.tick % 2400 >= 1800 ? 1 : 0.15,
     fuel: clamp((person.materials.wood + wood) / 4) };
+  // V23: carried unfired compounds (share of mass) motivate a hearth when none of the roofs already perceived has one.
+  if (chemistryEra(world) && !roofs.some(s => s.components.includes('hearth') && s.components.includes('roof'))) {
+    const kiln = unfiredCompoundShare(person.compounds); if (kiln > 0) context.kiln = kiln;
+  }
+  return context;
 }
 
 /** Cultural parents must be known through ownership, nearby built examples, or trusted contacts. */
@@ -687,7 +704,9 @@ function expectedValue(components: readonly StructureComponent[], context: Inven
     + clamp(a.irrigation / 0.012) * context.rainPotential * (1 - context.moisture) * context.food * 0.65;
   const rest = (a.restQuality - 0.82 + a.hearths * 0.12 * context.cold * context.fuel) * context.rest * 5;
   // A base roof is already known; novelty is evaluated on the additional functions it enables.
-  return water + food + rest + (a.durability - 1) * context.rest * 0.1;
+  const value = water + food + rest + (a.durability - 1) * context.rest * 0.1;
+  // V23: a roofed hearth would fire the unfired compounds this person carries (charcoal, ceramics, smelting).
+  return context.kiln ? value + Math.min(1, a.hearths) * context.kiln * 0.25 : value;
 }
 const normalizedCost = (cost: BlueprintView['cost']) => cost.wood + cost.stone * 1.5 + cost.work / 30;
 const genotypeDistance = (a: readonly StructureComponent[], b: readonly StructureComponent[]) => {
@@ -818,7 +837,8 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
   // V20 modular: a design larger than one carried load is kept as known culture (inventorId); adopting
   // it is the cost-aware choice of stepStructures, once warehouses or an extendable building can pay it.
   const adopted = existing ?? blueprint, bill = paramsOf(world).construccion.modular ? plannedCost(world, adopted.components) : undefined;
-  if (!bill || (bill.wood <= CARRY.wood && bill.stone <= CARRY.stone)) person.blueprintId = adopted.id;
+  const extra = bill ? carryUnits(world, person) : 0;
+  if (!bill || (bill.wood <= CARRY.wood + extra && bill.stone <= CARRY.stone + extra)) person.blueprintId = adopted.id;
   world.inventionDynamics.accepted++;
   const event = emit({ kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation',
     text: `${person.name} ideó ${blueprint.name.toLocaleLowerCase('es')}, generación ${blueprint.generation}.`,
@@ -977,6 +997,10 @@ export function computeStructureSynergy(world: World, structure: StructureView):
     result.kilnTier = n.roof ? 1 : 0;
     if (n.roof && (installed.some(i => i.insulation * i.condition >= 0.35) || n.hearth >= 2
       || (cells.length >= 2 && structure.storedCompounds?.some(c => c.mass > 0 && c.properties.fuelPower >= 0.6)))) result.kilnTier = 2;
+    // V23: a multi-cell hearth hall, or a roofed hearth whose settlement banks dense charcoal (here or in a
+    // neighbour wall-to-wall within three cells), sustains the reducing heat of a tier-2 kiln.
+    else if (n.roof && chemistryEra(world) && (cells.length >= 2 || structure.storedCompounds?.some(isFuelLot)
+      || neighbours.some(s => s.storedCompounds?.some(isFuelLot)))) result.kilnTier = 2;
   }
   return result;
 }
@@ -1225,6 +1249,11 @@ export function stepStructures(world: World, _emit: Emit): void {
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);
         garden.moisture += amount; structure.water -= amount; budget -= amount;
+      }
+      // V23 (`quimica.emergente`): ash, lime and ground organics banked here manure the irrigated garden ground.
+      if (chemistryEra(world) && structure.storedCompounds?.length) {
+        for (const garden of gardens) garden.fertility = enrichSoilFromLots(structure.storedCompounds, garden.fertility ?? 0);
+        if (structure.storedCompounds.length === 0) delete structure.storedCompounds;
       }
     }
     if (a.foodCapacity > 0) for (const person of vecinos(world, structure, 2.5,

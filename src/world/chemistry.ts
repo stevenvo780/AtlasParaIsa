@@ -11,6 +11,11 @@
  * - Determinismo: las decisiones usan un hash puro de `(semilla, paso, id)`; nunca se toca `world.rng`.
  * - Coste O(1) por operación: 6 elementos, firma con índice en `WeakMap` (no viaja en la instantánea) y
  *   tope de fórmulas (`MAX_FORMULAS`) para que la instantánea no crezca sin límite.
+ * - V23: el catálogo ya no se congela al llenarse. La experimentación autónoma poda por utilidad
+ *   (`pruneFormulaCatalog`: menos usos, más antigua, nunca las proyectadas) antes de rozar el tope, así que
+ *   siempre queda sitio para descubrir. Los puentes de propiedades (`compoundCarryBonus`,
+ *   `compoundFertilityBonus`, `compoundHuntBonus`, `dominantCraftProfile`, `forgeWithCompound`) son O(lotes)
+ *   puros y deterministas: leen las 7 propiedades continuas del lote, nunca una tabla de oficios o recetas.
  */
 import {
   ELEMENTS, emptyVector, evaluateMaterialProperties, geologyAt, normalizeVector, publicGeologyKey, vectorMass,
@@ -19,6 +24,7 @@ import type {
   ChemOperator, ChemicalFormulaView, ChemistrySummaryView, CompoundLot, ElementSymbol, ElementVector,
   MaterialProperties, StructureMaterialProfile, ThermalPhase,
 } from '../shared/chemistry.js';
+import type { MaterialBatch } from '../shared/technology.js';
 
 export type TemperatureTier = 0 | 1 | 2;
 
@@ -30,8 +36,13 @@ export interface ChemistryState {
   maxTemperatureTier: TemperatureTier;
 }
 
-/** Tope de fórmulas descubiertas por mundo: al llenarse, una mezcla nueva reutiliza la fórmula más cercana. */
-export const MAX_FORMULAS = 256;
+/** Tope duro de fórmulas por mundo (V23: 512). Si se alcanzara, una mezcla nueva reutiliza la fórmula más
+ * cercana; la experimentación autónoma poda antes (`FORMULA_PRUNE_TRIGGER`), así que el descubrimiento no se congela. */
+export const MAX_FORMULAS = 512;
+/** V23: al llegar a este tamaño, la experimentación autónoma poda el catálogo por utilidad… */
+export const FORMULA_PRUNE_TRIGGER = MAX_FORMULAS - 16;
+/** …hasta este tamaño (la poda por lotes amortiza el orden O(n log n)). */
+export const FORMULA_PRUNE_TARGET = MAX_FORMULAS - 64;
 /** Inventario químico acotado por habitante; el exceso se aglomera (bind) sin perder masa. */
 export const MAX_PERSON_COMPOUNDS = 6;
 /** Fórmulas que viajan en la proyección (`WorldView.chemistry`); el total se informa aparte. */
@@ -180,10 +191,14 @@ function registerFormula(
   // Mezclas distintas con los mismos rasgos dominantes: variante numerada (barrido acotado por MAX_FORMULAS,
   // solo al descubrir).
   const base = emergentName(composition, phase, properties);
-  let homonyms = 0;
-  for (const f of state.formulas) if (f.name === base || f.name.startsWith(`${base} (variante `)) homonyms++;
+  // Número de variante = la mayor vigente + 1 (sin poda coincide con contar homónimos; con poda no repite nombres).
+  let variant = 0;
+  for (const f of state.formulas) {
+    if (f.name === base) variant = Math.max(variant, 1);
+    else if (f.name.startsWith(`${base} (variante `)) variant = Math.max(variant, Number(f.name.slice(base.length + 11, -1)) || 1);
+  }
   const formula: ChemicalFormulaView = {
-    id: `F${++state.formulaCounter}`, signature, name: homonyms === 0 ? base : `${base} (variante ${homonyms + 1})`,
+    id: `F${++state.formulaCounter}`, signature, name: variant === 0 ? base : `${base} (variante ${variant + 1})`,
     composition: rounded, phase, temperatureTier: tier, operator, discoveredAt: tick, discovererId, uses: 1, properties,
   };
   state.formulas.push(formula);
@@ -321,6 +336,8 @@ export interface ChemStructureLike {
   condition: number;
   installed?: readonly { insulation: number }[];
   storedCompounds?: readonly CompoundLot[];
+  /** V23: sinergia de la obra (`computeStructureSynergy`); un horno T2 de asentamiento sostiene la reducción. */
+  synergy?: { kilnTier?: number };
 }
 
 function hasFuel(lots: readonly CompoundLot[] | undefined): boolean {
@@ -342,7 +359,7 @@ export function availableKilnTier(person: { compounds?: readonly CompoundLot[] }
     if (!roof || !(personFuel || hasFuel(s.storedCompounds))) continue;
     let insulation = 0;
     for (const item of s.installed ?? []) if (Number.isFinite(item.insulation) && item.insulation > 0) insulation += item.insulation;
-    if (insulation >= 0.35 || frames >= 2 || hearths >= 2) return 2;
+    if (insulation >= 0.35 || frames >= 2 || hearths >= 2 || s.synergy?.kilnTier === 2) return 2;
   }
   return tier;
 }
@@ -372,6 +389,34 @@ function lotUtility(lot: CompoundLot): number {
 }
 
 const isFuel = (lot: CompoundLot): boolean => lot.properties.fuelPower >= KILN_FUEL_POWER;
+
+/** Orden de relevancia del catálogo: fase más avanzada, más usada, más antigua, id. Es el orden de la proyección. */
+function formulaRelevance(a: ChemicalFormulaView, b: ChemicalFormulaView): number {
+  return PHASE_RANK[b.phase] - PHASE_RANK[a.phase] || b.uses - a.uses || a.discoveredAt - b.discoveredAt || (a.id < b.id ? -1 : 1);
+}
+
+/**
+ * V23 — poda por utilidad del catálogo de fórmulas. Conserva intactas las `PROJECTED_FORMULAS` más relevantes
+ * (las que ve el cliente) y desaloja, entre las demás, las de menos usos y, a igualdad, las más antiguas, hasta
+ * dejar `target` fórmulas. Los lotes que aún citan una fórmula desalojada conservan su composición y fase: si la
+ * mezcla reaparece, se vuelve a registrar por firma. Devuelve cuántas desalojó. Determinista, sin azar.
+ */
+export function pruneFormulaCatalog(state: ChemistryState, target = FORMULA_PRUNE_TARGET): number {
+  const keep = Math.max(PROJECTED_FORMULAS, Math.floor(target));
+  if (state.formulas.length <= keep) return 0;
+  const protectedIds = new Set([...state.formulas].sort(formulaRelevance).slice(0, PROJECTED_FORMULAS).map(f => f.id));
+  const victims = state.formulas.filter(f => !protectedIds.has(f.id))
+    .sort((a, b) => a.uses - b.uses || a.discoveredAt - b.discoveredAt || (a.id < b.id ? -1 : 1))
+    .slice(0, state.formulas.length - keep);
+  if (victims.length === 0) return 0;
+  const evicted = new Set(victims.map(f => f.id));
+  // En sitio: el arreglo conserva su identidad (y el orden de descubrimiento); el índice se reconstruye.
+  let w = 0;
+  for (const f of state.formulas) if (!evicted.has(f.id)) state.formulas[w++] = f;
+  state.formulas.length = w;
+  signatureIndex.delete(state.formulas);
+  return victims.length;
+}
 const ORGANIC_FEATURES = new Set(['tree', 'pine', 'palm', 'stump', 'reeds', 'berries', 'flowers', 'cactus']);
 
 export interface ChemExperimentStructure extends ChemStructureLike { water: number }
@@ -406,6 +451,8 @@ export function performChemistryExperiment(
   // Un mundo con `quimica.emergente` explícitamente apagado nunca gana estado; sin params, decide el llamador.
   if (!world.chemistry && world.params !== undefined && world.params.quimica?.emergente !== true) return null;
   const state = world.chemistry ?? (world.chemistry = defaultChemistryState());
+  // V23: el registro nunca se congela; se poda por utilidad antes de rozar el tope duro.
+  if (state.formulas.length >= FORMULA_PRUNE_TRIGGER) pruneFormulaCatalog(state);
   const lots = person.compounds ?? [];
   const tier = availableKilnTier(person, nearbyStructures);
 
@@ -561,10 +608,297 @@ export function projectChemistry(
   for (const p of people) totalLots += p.compounds?.length ?? 0;
   for (const s of structures) totalLots += s.storedCompounds?.length ?? 0;
   const formulas = [...state.formulas]
-    .sort((a, b) => PHASE_RANK[b.phase] - PHASE_RANK[a.phase] || b.uses - a.uses || a.discoveredAt - b.discoveredAt || (a.id < b.id ? -1 : 1))
+    .sort(formulaRelevance)
     .slice(0, PROJECTED_FORMULAS)
     .map(f => ({ ...f, composition: cloneVector(f.composition), properties: { ...f.properties } }));
   return { formulas, totalFormulas: state.formulas.length, totalLots, maxTemperatureTier: state.maxTemperatureTier, byOperator: { ...state.byOperator } };
+}
+
+// ---------------------------------------------------------------------------------------------
+// V23 — Puentes de propiedades: química → transporte, suelo, caza, oficio, forja e intercambio
+//
+// Escala: la masa de un lote está en unidades de material (una madera o piedra extraída = 1), y una unidad son
+// 1000 cuantos de masa, como `MASS_UNIT` en technology.ts. Todos los puentes leen las 7 propiedades continuas
+// del lote (dureza, tenacidad, sellado, aislamiento, poder calorífico, fertilidad, ligereza): ninguna tabla de
+// materiales, oficios ni recetas. Ninguno toca `world.rng`, relojes ni `Math.random`; los llamadores los activan
+// solo con `quimica.emergente` (un mundo histórico nunca tiene `compounds`).
+
+/** Cuantos de masa por unidad de lote (mismo cuanto que `MASS_UNIT` de technology.ts). */
+export const CHEM_QUANTA_PER_UNIT = 1000;
+/** Un lote útil para un puente conserva al menos 15 cuantos de masa. */
+export const FORGE_MIN_QUANTA = 15;
+/** Una forja consume como mucho 40 cuantos del lote. */
+export const FORGE_MAX_QUANTA = 40;
+const BRIDGE_MIN_MASS = FORGE_MIN_QUANTA / CHEM_QUANTA_PER_UNIT;
+const FORGE_MAX_MASS = FORGE_MAX_QUANTA / CHEM_QUANTA_PER_UNIT;
+
+/** Propiedades completas de un lote: los lotes de V20–V22 no traen fertilidad ni ligereza; se derivan de su
+ * composición y fase (las propiedades son intensivas: no dependen de la masa). */
+function lotProperties(lot: CompoundLot): MaterialProperties {
+  const p = lot.properties;
+  return p.fertility === undefined || p.lightness === undefined ? evaluateMaterialProperties(lot.composition, lot.phase) : p;
+}
+
+function bestLotScore(lots: readonly CompoundLot[] | undefined, score: (p: MaterialProperties) => number): number {
+  if (!lots || lots.length === 0) return 0;
+  let best = 0;
+  for (const lot of lots) {
+    if (!(lot.mass >= BRIDGE_MIN_MASS)) continue;
+    const v = score(lotProperties(lot));
+    if (v > best) best = v;
+  }
+  return best;
+}
+
+/** [0, 1] — fardos de fibra, cuero o resina: ligereza × tenacidad del mejor lote. 1 = +4 unidades por viaje. */
+export function compoundCarryBonus(lots?: readonly CompoundLot[]): number {
+  return round3(clamp01((bestLotScore(lots, p => (p.lightness ?? 0) * p.toughness) - 0.04) / 0.24));
+}
+
+/** Unidades de carga extra por viaje (0..4) que da el mejor fardo que se lleva. */
+export function compoundCarryUnits(lots?: readonly CompoundLot[]): number {
+  return Math.round(compoundCarryBonus(lots) * 4);
+}
+
+/** [0, 1] — ceniza, cal u orgánicos molidos: fertilidad del mejor lote para enriquecer suelo cultivado. */
+export function compoundFertilityBonus(lots?: readonly CompoundLot[]): number {
+  return round3(clamp01((bestLotScore(lots, p => p.fertility ?? 0) - 0.15) / 0.35));
+}
+
+/** [0, 1] — filos duros y tenaces (fundidos férricos, sílice vítrea): dureza × tenacidad del mejor lote. */
+export function compoundHuntBonus(lots?: readonly CompoundLot[]): number {
+  return round3(clamp01((bestLotScore(lots, p => p.hardness * p.toughness) - 0.12) / 0.5));
+}
+
+const CRAFT_ELEMENT: Record<ElementSymbol, string> = { C: 'carbón', Si: 'sílice', Ca: 'cal', Fe: 'metal', S: 'sal', H: 'lodo' };
+const CRAFT_PHASE: Record<ThermalPhase, string> = { raw: 'acopio', ground: 'molienda', washed: 'lavado', fired: 'horno', smelted: 'fundición', vitrified: 'vítreo' };
+/** Rasgo físico → palabra, cada uno normalizado por su rango alcanzable (no es una tabla de oficios). */
+const CRAFT_TRAITS: readonly { word: string; value: (p: MaterialProperties) => number }[] = [
+  { word: 'filo', value: p => p.hardness * p.toughness / 0.6 },
+  { word: 'sellado', value: p => p.seal / 0.8 },
+  { word: 'abrigo', value: p => p.insulation / 0.7 },
+  { word: 'brasa', value: p => p.fuelPower / 0.8 },
+  { word: 'abono', value: p => (p.fertility ?? 0) / 0.5 },
+  { word: 'transporte', value: p => (p.lightness ?? 0) * p.toughness / 0.28 },
+];
+
+/**
+ * Vocación emergente y color de oficio de un habitante a partir de lo que lleva: la composición agregada de sus
+ * lotes (masa ponderada) y la fase que más masa reúne. `craftFocus` describe el elemento dominante (o la mezcla
+ * de los dos), el rasgo físico dominante (o la mezcla) y, si pasó por fuego, la fase: «metal/filo·fundición»,
+ * «cal/sellado·horno», «carbón/brasa·horno», «fibra/transporte», «sílice/sellado·vítreo», «cal+carbón/abono»…
+ * Sin lotes útiles, el tinte del objeto forjado más frecuente. `{}` si no hay nada que describir.
+ */
+export function dominantCraftProfile(
+  lots?: readonly CompoundLot[],
+  items?: readonly { materialTint?: string; chemPhase?: string }[],
+): { craftTint?: string; craftFocus?: string } {
+  const total = emptyVector();
+  const phaseMass = new Map<ThermalPhase, number>();
+  for (const lot of lots ?? []) {
+    if (!(lot.mass >= BRIDGE_MIN_MASS) || !PHASES.includes(lot.phase)) continue;
+    for (const e of ELEMENTS) total[e] += lot.composition[e];
+    phaseMass.set(lot.phase, (phaseMass.get(lot.phase) ?? 0) + lot.mass);
+  }
+  if (vectorMass(total) > 0) {
+    let phase: ThermalPhase = 'raw', best = -1;
+    for (const [ph, m] of phaseMass) if (m > best || (m === best && PHASE_RANK[ph] > PHASE_RANK[phase])) { phase = ph; best = m; }
+    const n = normalizeVector(total), p = evaluateMaterialProperties(total, phase);
+    const elements = dominantElements(n);
+    const word = (e: ElementSymbol) => e === 'C' && PHASE_RANK[phase] < PHASE_RANK.fired ? 'fibra' : CRAFT_ELEMENT[e];
+    const elementText = elements.length === 0 ? 'mezcla'
+      : elements.length > 1 && n[elements[1]!] >= n[elements[0]!] * 0.75 ? `${word(elements[0]!)}+${word(elements[1]!)}` : word(elements[0]!);
+    const traits = CRAFT_TRAITS.map(t => ({ word: t.word, v: t.value(p) })).sort((a, b) => b.v - a.v);
+    const traitText = traits[1]!.v >= traits[0]!.v * 0.9 && traits[1]!.v > 0 ? `${traits[0]!.word}+${traits[1]!.word}` : traits[0]!.word;
+    const phaseText = PHASE_RANK[phase] >= PHASE_RANK.fired ? `·${CRAFT_PHASE[phase]}` : '';
+    return { craftTint: p.colorHex, craftFocus: `${elementText}/${traitText}${phaseText}` };
+  }
+  const tints = new Map<string, { count: number; phase?: string }>();
+  for (const item of items ?? []) {
+    if (typeof item.materialTint !== 'string' || !/^#[0-9a-f]{6}$/i.test(item.materialTint)) continue;
+    const entry = tints.get(item.materialTint) ?? { count: 0, phase: item.chemPhase };
+    entry.count++; tints.set(item.materialTint, entry);
+  }
+  let tint: string | undefined, top = 0, tintPhase: string | undefined;
+  for (const [t, e] of tints) if (e.count > top) { tint = t; top = e.count; tintPhase = e.phase; }
+  if (!tint) return {};
+  const phaseWord = tintPhase && (PHASES as readonly string[]).includes(tintPhase) ? CRAFT_PHASE[tintPhase as ThermalPhase] : 'acopio';
+  return { craftTint: tint, craftFocus: `forja/${phaseWord}` };
+}
+
+/**
+ * Retira `mass` unidades (proporcionales a la composición) del lote `lots[index]` y devuelve el vector retirado.
+ * Si apenas queda nada, retira el lote entero del arreglo. Conservación exacta salvo redondeo binario:
+ * `composición(antes) = composición(después) + retirado`.
+ */
+export function spendCompoundMass(lots: CompoundLot[], index: number, mass: number): ElementVector {
+  const lot = lots[index];
+  if (!lot || !(mass > 0)) return emptyVector();
+  if (mass >= lot.mass - MASS_TOLERANCE) {
+    lots.splice(index, 1);
+    return cloneVector(lot.composition);
+  }
+  const spent = scaleVector(lot.composition, mass / lot.mass);
+  const remaining = emptyVector();
+  for (const e of ELEMENTS) remaining[e] = lot.composition[e] - spent[e];
+  lot.composition = remaining;
+  lot.mass = vectorMass(remaining);
+  return spent;
+}
+
+export interface CompoundInfusion { lotId: string; formulaId: string; phase: ThermalPhase; spent: ElementVector; spentMass: number }
+
+function forgeUtility(p: MaterialProperties): number {
+  return Math.max(p.hardness * p.toughness, p.seal * 0.9, p.insulation * 0.8, (p.lightness ?? 0) * p.toughness * 2.5);
+}
+
+/**
+ * V23 — forja con compuesto: igual que `forgeWithCompound`, pero devuelve el balance (qué lote, qué vector de
+ * elementos pasó del inventario químico al objeto). Elige el lote más útil (≥ 15 cuantos), consume hasta 40
+ * cuantos y mejora el lote fabricado hacia las propiedades del compuesto, sin empeorar ninguna: dureza,
+ * tenacidad, contención (sellado), aislamiento, filo (dureza × tenacidad) y palanca (ligereza × tenacidad).
+ * Estampa `materialTint`, `chemFormulaId` y `chemPhase`. El llamador la activa solo con `quimica.emergente`.
+ */
+export function infuseCompound(batch: MaterialBatch, lots: CompoundLot[] | undefined): CompoundInfusion | null {
+  if (!lots || lots.length === 0 || !batch || !batch.properties) return null;
+  let index = -1, best = 0.25;
+  for (let i = 0; i < lots.length; i++) {
+    const lot = lots[i]!;
+    if (!(lot.mass >= BRIDGE_MIN_MASS)) continue;
+    const u = forgeUtility(lotProperties(lot)) + PHASE_RANK[lot.phase] * 0.04;
+    if (u > best) { best = u; index = i; }
+  }
+  if (index < 0) return null;
+  const lot = lots[index]!, p = lotProperties(lot);
+  const spentMass = Math.min(FORGE_MAX_MASS, lot.mass);
+  const { id: lotId, formulaId, phase } = lot;
+  const spent = spendCompoundMass(lots, index, spentMass);
+  const strength = 0.5 * clamp01(vectorMass(spent) / FORGE_MAX_MASS);
+  const b = batch.properties;
+  const raise = (current: number, target: number): number => {
+    const c = Number.isFinite(current) ? current : 0;
+    return clamp01(c + strength * Math.max(0, clamp01(target) - c));
+  };
+  b.hardness = raise(b.hardness, p.hardness);
+  b.toughness = raise(b.toughness, p.toughness);
+  b.containment = raise(b.containment, p.seal);
+  b.insulation = raise(b.insulation, p.insulation);
+  b.edge = raise(b.edge, p.hardness * p.toughness * 1.6);
+  b.leverage = raise(b.leverage, (p.lightness ?? 0) * p.toughness * 2.5);
+  batch.materialTint = p.colorHex;
+  batch.chemFormulaId = formulaId;
+  batch.chemPhase = phase;
+  return { lotId, formulaId, phase, spent, spentMass: vectorMass(spent) };
+}
+
+/** V23 — `true` si el habitante infundió un compuesto útil en el lote forjado (ver `infuseCompound`). */
+export function forgeWithCompound(batch: MaterialBatch, lots: CompoundLot[] | undefined): boolean {
+  return infuseCompound(batch, lots) !== null;
+}
+
+/** Perfil material de una obra tras instalar un objeto forjado con compuesto (su tinte y sus propiedades). */
+export function blendForgedProfile(
+  current: StructureMaterialProfile | undefined,
+  item: { materialTint?: string; properties: { hardness: number; toughness: number; containment: number; insulation: number } },
+  weight = 0.2,
+): StructureMaterialProfile | undefined {
+  if (!current || typeof item.materialTint !== 'string' || !/^#[0-9a-f]{6}$/i.test(item.materialTint)) return current;
+  const q = item.properties, w = clamp01(weight);
+  const lerp = (x: number, y: number): number => round3(clamp01(x) * (1 - w) + clamp01(y) * w);
+  const from = parseHex(current.tint), to = parseHex(item.materialTint);
+  return {
+    strength: lerp(current.strength, (q.hardness + q.toughness) / 2),
+    insulation: lerp(current.insulation, q.insulation),
+    seal: lerp(current.seal, q.containment),
+    tint: toHex(from.map((c, i) => c * (1 - w) + to[i]! * w)),
+  };
+}
+
+/** V23: fracción de la masa química que se lleva aún sin cocer (crudo, molido o lavado; lotes ≥ 15 cuantos). */
+export function unfiredCompoundShare(lots?: readonly CompoundLot[]): number {
+  if (!lots || lots.length === 0) return 0;
+  let total = 0, unfired = 0;
+  for (const lot of lots) {
+    if (!(lot.mass >= BRIDGE_MIN_MASS)) continue;
+    total += lot.mass;
+    if (PHASE_RANK[lot.phase] < PHASE_RANK.fired) unfired += lot.mass;
+  }
+  return total > 0 ? clamp01(unfired / total) : 0;
+}
+
+/** Masa de compuesto (medio cuanto) que recibe una parcela abonada por paso ecológico. */
+export const ENRICH_SPEND = 0.0005;
+
+/**
+ * V23: abonado con lotes almacenados. El lote más fértil (`compoundFertilityBonus`) entrega `ENRICH_SPEND` de su
+ * masa real a la parcela (se debita: el suelo no gana fertilidad gratis) y la fertilidad sube
+ * `bono · 0,05 · (1 − f)`. Sin lote fértil, o con el suelo ya en 0,9, devuelve `fertility` sin tocar nada.
+ */
+export function enrichSoilFromLots(lots: CompoundLot[], fertility: number): number {
+  const f = Number.isFinite(fertility) ? fertility : 0;
+  if (f >= 0.9) return fertility;
+  let index = -1, bonus = 0;
+  for (let i = 0; i < lots.length; i++) {
+    const b = compoundFertilityBonus([lots[i]!]);
+    if (b > bonus) { bonus = b; index = i; }
+  }
+  if (index < 0) return fertility;
+  spendCompoundMass(lots, index, ENRICH_SPEND);
+  return clamp01(f + bonus * 0.05 * (1 - f));
+}
+
+/** Elemento que más le sobra a `lot` frente a la composición media de `other` y cuánto. */
+function surplusElement(lot: CompoundLot, other: ElementVector): { element: ElementSymbol; gap: number } {
+  const n = normalizeVector(lot.composition);
+  let element: ElementSymbol = 'C', gap = -Infinity;
+  for (const e of ELEMENTS) if (n[e] - other[e] > gap) { gap = n[e] - other[e]; element = e; }
+  return { element, gap };
+}
+
+function inventoryVector(lots: readonly CompoundLot[]): ElementVector {
+  const total = emptyVector();
+  for (const lot of lots) for (const e of ELEMENTS) total[e] += lot.composition[e];
+  return normalizeVector(total);
+}
+
+/** Brecha mínima (fracción elemental) para que un intercambio sea complementario. */
+export const TRADE_MIN_GAP = 0.15;
+
+/**
+ * V23 — comercio regional por déficit elemental. Si `a` lleva un lote rico en un elemento que a `b` le falta
+ * (p. ej. Fe/Si de montaña) y `b` uno rico en OTRO elemento que le falta a `a` (C de bosque, Ca de humedal),
+ * cada uno entrega la MITAD exacta de ese lote al otro (multiplicar por 0,5 es exacto en binario: masa y
+ * composición se conservan bit a bit). La mitad entregada conserva fórmula y fase. Devuelve los dos lotes
+ * nuevos, o `null` si no hay complementariedad o falta sitio (`MAX_PERSON_COMPOUNDS`).
+ */
+export function exchangeComplementaryCompounds(
+  a: { compounds?: CompoundLot[] }, b: { compounds?: CompoundLot[] }, state: ChemistryState,
+): { aToB: CompoundLot; bToA: CompoundLot; elements: [ElementSymbol, ElementSymbol] } | null {
+  const la = a.compounds, lb = b.compounds;
+  if (!la || !lb || la === lb || la.length === 0 || lb.length === 0 || la.length >= MAX_PERSON_COMPOUNDS || lb.length >= MAX_PERSON_COMPOUNDS) return null;
+  const na = inventoryVector(la), nb = inventoryVector(lb);
+  const pick = (lots: readonly CompoundLot[], other: ElementVector) => {
+    let index = -1, element: ElementSymbol = 'C', gap = TRADE_MIN_GAP;
+    lots.forEach((lot, i) => {
+      if (!(lot.mass >= 2 * BRIDGE_MIN_MASS)) return;
+      const s = surplusElement(lot, other);
+      if (s.gap >= gap && (index < 0 || s.gap > gap)) { index = i; element = s.element; gap = s.gap; }
+    });
+    return index < 0 ? undefined : { index, element };
+  };
+  const fromA = pick(la, nb), fromB = pick(lb, na);
+  if (!fromA || !fromB || fromA.element === fromB.element) return null;
+  const half = (lots: CompoundLot[], index: number): CompoundLot => {
+    const lot = lots[index]!;
+    const given = scaleVector(lot.composition, 0.5);
+    const kept = emptyVector();
+    for (const e of ELEMENTS) kept[e] = lot.composition[e] - given[e];
+    lot.composition = kept; lot.mass = vectorMass(kept);
+    return makeLot(state, lot.formulaId, given, lot.phase);
+  };
+  const aToB = half(la, fromA.index), bToA = half(lb, fromB.index);
+  lb.push(aToB); la.push(bToA);
+  return { aToB, bToA, elements: [fromA.element, fromB.element] };
 }
 
 // ---------------------------------------------------------------------------------------------

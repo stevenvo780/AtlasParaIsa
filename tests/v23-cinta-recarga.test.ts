@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { on, once } from 'node:events';
+import { setTimeout } from 'node:timers/promises';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,9 +17,10 @@ type Mensaje = MirrorUpdate | SimReply | { type: 'ready' }
   | { type: 'barrera'; tick: number }
   | { type: 'fallo-inyectado'; tick: number }
   | { type: 'carga-desde-disco'; tick: number; slot: number }
-  | { type: 'enlace-de-prueba'; enlace?: DescriptorEnlace };
+  | { type: 'enlace-de-prueba'; enlace?: DescriptorEnlace }
+  | { type: 'log'; level: string; value: { cinta?: string; motivo?: string } };
 
-function iniciarSimulacion(t: TestContext) {
+function iniciarSimulacion(t: TestContext, extra: Partial<SimWorkerOptions> = {}) {
   const temporal = '/tmp/atlas-v23-c1a';
   mkdirSync(temporal, { recursive: true });
   const directorio = mkdtempSync(join(temporal, 'recarga-'));
@@ -30,7 +32,7 @@ function iniciarSimulacion(t: TestContext) {
   const cintaBloqueada = () => Atomics.load(control, 2) === 1;
   function liberarCinta() { Atomics.store(control, 1, 0); Atomics.notify(control, 1); }
   const options: SimWorkerOptions = { worldPath, seed: 51926, turbo: true, tape: true, turboSaveIntervalMs: 0,
-    params: parseParams('motor.hilos=1,motor.gpu=[],persistencia.cadaTicks=10000') };
+    params: parseParams('motor.hilos=1,motor.gpu=[],persistencia.cadaTicks=10000'), ...extra };
   const worker = new Worker(`
     const hilos = require('node:worker_threads');
     const { parentPort, workerData, Worker: WorkerReal } = hilos;
@@ -202,4 +204,22 @@ test('el motor da más pasos cuando carta-tape está detenido y agotó todos sus
   const db = new DatabaseSync(join(cinta, INDICE_CINTA), { readOnly: true });
   try { assert.ok(db.prepare('SELECT 1 FROM serie WHERE t=?').get(tSerie), 'la serie conserva el tick sin crédito visual'); }
   finally { db.close(); }
+});
+
+test('una cinta que no devuelve crédito se da por perdida sin detener el motor', async t => {
+  const { bloquearCinta, cintaBloqueada, esperar, pedir, salida } = iniciarSimulacion(t, { tapeSinCreditoMs: 1500 });
+  const { enlace } = await esperar('enlace-de-prueba');
+  const { creditos } = enlaceCinta(enlace!);
+  await esperar('ready');
+  await pedir('flushTape');
+  bloquearCinta();
+  await pedir('start');
+  const lleno = await esperar('barrera', () => cintaBloqueada() && Atomics.load(creditos, 0) === 0);
+  const aviso = await Promise.race([esperar('log', m => m.value.cinta === 'detenida'),
+    setTimeout(60_000).then(() => assert.fail('La simulación no dio por perdida la cinta detenida.'))]);
+  assert.match(aviso.value.motivo ?? '', /no devolvió ningún corte en 2 s/);
+  const posterior = await esperar('barrera', m => m.tick >= lleno.tick + 50);
+  assert.ok(posterior.tick > lleno.tick);
+  await pedir('shutdown');
+  assert.deepEqual(await salida, [0]);
 });

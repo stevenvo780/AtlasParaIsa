@@ -226,6 +226,8 @@ export interface SimWorkerOptions {
   /** Graba la cinta multirresolución. Por defecto se activa en turbo. */
   tape?: boolean;
   tapeTopeBytes?: number;
+  /** Tiempo sin que la cinta devuelva un crédito tras el cual se la da por perdida (por defecto, 5 min). */
+  tapeSinCreditoMs?: number;
   // Se retiran del gateway al integrar C1b.
   tapeMaxFrames?: number;
   tapeKeyframeInterval?: number;
@@ -458,6 +460,9 @@ async function runSimulation(options: SimWorkerOptions) {
   let tapeExited: Promise<void> | undefined;
   let epoca = -1, seq = 0, ultimoCorte = -Infinity, ultimoPuntoSerie = -1;
   let recargaPendiente = false;
+  // Sin crédito los hitos se acumulan aquí: una cinta que no vuelve no puede llevarse la memoria del motor.
+  const sinCreditoMaxMs = options.tapeSinCreditoMs ?? 300_000;
+  let sinCreditoDesde: number | undefined;
   let serialCronica = 0;
   let baseDemografia: ReturnType<typeof demografiaCinta>;
   const hitosPendientes: Hito[] = [];
@@ -473,6 +478,8 @@ async function runSimulation(options: SimWorkerOptions) {
   function failTape(error: Error) {
     if (tapeError) return;
     tapeError = error;
+    hitosPendientes.length = 0;
+    teselasPendientes.clear();
     for (const call of tapeCalls.values()) call.reject(error);
     tapeCalls.clear();
     port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error.message } });
@@ -544,6 +551,13 @@ async function runSimulation(options: SimWorkerOptions) {
       observer = createTileObserver();
       unpostedChunks.clear();
       lastSimHz = 0;
+    }
+    if (tapeWorker && !tapeClosed && !tapeError) {
+      if (Atomics.load(enlace.creditos, 0) > 0) sinCreditoDesde = undefined;
+      else if (now - (sinCreditoDesde ??= now) >= sinCreditoMaxMs) {
+        failTape(new Error(`La cinta no devolvió ningún corte en ${Math.round(sinCreditoMaxMs / 1000)} s.`));
+        void tapeWorker.terminate();
+      }
     }
     if (tapeWorker && !tapeClosed && !tapeError) {
       try {

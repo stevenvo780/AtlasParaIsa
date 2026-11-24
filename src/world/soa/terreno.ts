@@ -4,7 +4,7 @@ import { Presence } from './presencia.js';
 import { PAGE_CELLS, RegionTable, admissibleCoordinate } from './region.js';
 import type { StaticRegion } from '../paralelo/particion.js';
 import { maintainResidentTile, observeResidentArray, observeResidentTile, residentBackingArray, residentTopologyOwner,
-  residentTopologyToken, sameResidentTopology, type ResidentTopologyOwner, type ResidentTopologyToken } from './topologia.js';
+  residentInPlaceRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyOwner, type ResidentTopologyToken } from './topologia.js';
 
 /**
  * `TileStore` (T112): el terreno en estructura de arrays, detrás de `motor.soaTerreno`. Un buffer por
@@ -105,6 +105,12 @@ export function residentFaunaCapacity(tiles: readonly Tile[]): number | undefine
   const firstBinding = bindings.get(tiles[0]!);
   if (!firstBinding) return undefined;
   return firstBinding.store.faunaCapacityMixed(tiles);
+}
+
+/** Conserva la foto SoA al retirar bloques completos de un array residente certificado. */
+export function notifyResidentSubset(prevTiles: Tile[], nextTiles: Tile[], retiredTiles: readonly Tile[]): boolean {
+  const store = residentStoreByTiles.get(prevTiles);
+  return store?.syncRetiredSubset(prevTiles, nextTiles, retiredTiles) ?? false;
 }
 
 /** Copia los 6 campos de fauna de una tesela residente directo desde SAB (1 lookup, 0 getters/allocs),
@@ -312,6 +318,7 @@ export class TileStore {
   private snapshotStamps!: Int32Array;
   private residentRevision: object = {};
   private residentTopology: ResidentTopologyToken | undefined;
+  private residentInPlace: object | undefined;
   private residentOwner: ResidentTopologyOwner | undefined;
   private cachedReader: { generation: number; version: number; parity: number; reader: ResidentTileReader } | null = null;
   private cachedFast: { generation: number; parity: number; exact: ResidentTileReader | undefined; fast: ResidentFastAccess } | null = null;
@@ -585,6 +592,7 @@ export class TileStore {
       this.attachResidentAccessor(binding, key); return false;
     });
     this.residentTopology = residentTopologyToken(tiles);
+    this.residentInPlace = residentInPlaceRevision(tiles);
     // Scratch de este despacho. El protocolo sólo se anuncia desde workers que escriben la cola.
     this.residentWoodAddedQueue[0] = 0; this.residentWoodAddedQueue[1] = 0;
     this.refreshResident();
@@ -810,18 +818,30 @@ export class TileStore {
   faunaCapacityMixed(tiles: readonly Tile[]): number | undefined {
     if (this.residentBusy || this.residentModified.size > 0) return undefined;
     if (this.residentGeneration !== this.arena.generation) this.refreshResident();
-    const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;
-    const growth = this.residentCur[GROWTH_IDX] as Float64Array;
-    const vegetation = this.residentCur[VEGETATION_IDX] as Float64Array;
     const raw = residentBackingArray(tiles);
     let count = 0;
-    for (let i = 0; i < raw.length; i++) {
+    const token = residentTopologyToken(tiles as Tile[]);
+    const appendOnly = tiles === this.residentTiles && raw.length >= this.loaded
+      && this.residentInPlace !== undefined && residentInPlaceRevision(tiles as Tile[]) === this.residentInPlace
+      && residentTopologyOwner(tiles as Tile[]) === this.residentOwner
+      && token !== undefined && token.coordinates === this.residentTopology?.coordinates;
+    const prefix = appendOnly ? this.loaded : 0;
+    const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;
+    const growth = this.residentCur[GROWTH_IDX] as Float64Array;
+    if (appendOnly) for (let i = 0; i < prefix; i++) {
+      const cell = this.cellsOf[i]!;
+      if (terrain[cell] !== SHELTER_CODE) {
+        const g = growth[cell]!;
+        if ((g === g ? g : this.residentCur[VEGETATION_IDX]![cell]!) > 0.04) count++;
+      }
+    }
+    for (let i = prefix; i < raw.length; i++) {
       const tile = raw[i]!, b = bindings.get(tile);
       if (b && b.store === this) {
         const cell = b.cell;
-        if (terrain[cell] !== SHELTER_CODE) {
+        if ((this.residentCur[TERRAIN_IDX] as Uint8Array)[cell] !== SHELTER_CODE) {
           const g = growth[cell]!;
-          if ((g === g ? g : vegetation[cell]!) > 0.04) count++;
+          if ((g === g ? g : (this.residentCur[VEGETATION_IDX] as Float64Array)[cell]!) > 0.04) count++;
         }
       } else if (tile.terrain !== 'shelter' && (tile.growth ?? tile.vegetation) > 0.04) {
         count++;
@@ -841,6 +861,55 @@ export class TileStore {
       if (terrain[cell] !== SHELTER_CODE && growth[cell]! > 0.04) count++;
     }
     return count * 3;
+  }
+  syncRetiredSubset(prevTiles: Tile[], nextTiles: Tile[], retiredTiles: readonly Tile[]): boolean {
+    const prevToken = residentTopologyToken(prevTiles), owner = residentTopologyOwner(prevTiles);
+    const nextToken = residentTopologyToken(nextTiles);
+    if (prevTiles !== this.residentTiles || this.residentBusy || this.residentModified.size !== 0
+      || this.residentBindings.length !== this.loaded || !owner || owner !== this.residentOwner
+      || !sameResidentTopology(prevToken, this.residentTopology)
+      || !nextToken || nextToken.coordinates !== prevToken?.coordinates || residentTopologyOwner(nextTiles) !== owner) return false;
+    const removed = new Set<ResidentBinding>();
+    for (const tile of retiredTiles) {
+      const binding = bindings.get(tile);
+      if (!binding || binding.store !== this) return false;
+      removed.add(binding);
+    }
+    if (retiredTiles.length !== removed.size || this.residentBindings.length - removed.size !== nextTiles.length) return false;
+    const kept: ResidentBinding[] = [];
+    const nextCells = new Int32Array(nextTiles.length);
+    let out = 0;
+    for (let i = 0; i < this.residentBindings.length; i++) {
+      const binding = this.residentBindings[i]!;
+      if (removed.has(binding)) continue;
+      kept.push(binding); nextCells[out++] = this.cellsOf[i]!;
+    }
+    const nextRaw = residentBackingArray(nextTiles);
+    for (let i = 0; i < kept.length; i++) if (nextRaw[i] !== kept[i]!.tile) return false;
+    // All checks precede detachment so an invalid token or busy store leaves both snapshots intact.
+    const retiredBindings = [...removed];
+    for (const binding of retiredBindings) {
+      if (this.presence.stamps[binding.cell] === this.version) this.presence.stamps[binding.cell] = 0;
+      this.detachBinding(binding);
+    }
+    this.cellsOf = nextCells;
+    this.loaded = nextTiles.length;
+    this.residentBindings = kept;
+    this.residentTiles = nextTiles;
+    this.residentTopology = nextToken;
+    this.residentInPlace = residentInPlaceRevision(nextTiles);
+    this.residentOwner = owner;
+    residentStoreByTiles.set(nextTiles, this);
+    residentStoreByOwner.set(owner, this);
+    observeResidentArray(nextTiles, () => { if (this.residentBusy) throw new Error(TWO_WRITERS); });
+    this.residentPending = this.residentPending.filter(binding => !removed.has(binding));
+    this.residentAbsent = this.residentAbsent.filter(({ binding }) => !removed.has(binding));
+    for (const [page, holes] of this.residentWoodHoles) {
+      const alive = holes.filter(binding => !removed.has(binding));
+      if (alive.length) this.residentWoodHoles.set(page, alive); else this.residentWoodHoles.delete(page);
+    }
+    this.cachedReader = null; this.cachedFast = null;
+    return true;
   }
   private syncResidentCur(): void {
     const p = this.parity;

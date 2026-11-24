@@ -1,15 +1,100 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  ALCANCES, ALCANCES_SERIALES, COLECCIONES_POR_NOMBRE, CONSTANTES_DE_RADIO, ESCRITURAS, ESTADO_GLOBAL, FASES_CON_HALO, FUERA_DEL_PASO, HALO_CELDAS, INVENTARIO,
-  LECTURAS_GLOBALES, LECTURAS_POR_IDENTIDAD, LLAMADAS, PRIMITIVAS, RAICES, RECORRIDOS, UMBRALES_QUE_NO_SON_LECTURAS,
+  ALCANCES as ALCANCES_BASE, ALCANCES_SERIALES as SERIALES_BASE, COLECCIONES_POR_NOMBRE, CONSTANTES_DE_RADIO, ESCRITURAS, ESTADO_GLOBAL, FASES_CON_HALO, FUERA_DEL_PASO, HALO_CELDAS, INVENTARIO as INVENTARIO_BASE,
+  LECTURAS_GLOBALES, LECTURAS_POR_IDENTIDAD as IDENTIDAD_BASE, LLAMADAS as LLAMADAS_BASE, PRIMITIVAS, RAICES as RAICES_BASE, RECORRIDOS as RECORRIDOS_BASE, UMBRALES_QUE_NO_SON_LECTURAS,
   alcanceSerial, alcancesDeFase, excesos, fraccionBorde, funcionesDeFase, haloRequerido,
   type Alcance, type ClaveDeRadio, type Fase, type Inventario, type Llamada, type Sitio,
 } from '../src/world/halo.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams } from '../src/world/params.js';
 import { CHUNK_SIZE } from '../src/world/terrain.js';
+
+// Wave 2/A2 moved reads to shared lookups and resident arrays. Keep the canonical
+// radii, centres and graph, but pin the exact new expressions here (halo.ts is
+// outside this track's ownership). These are literal expectations, never inferred
+// from the source under test: every mutation below still has to break coverage.
+function actualizarSitios<T extends Sitio & { readonly id: string }>(base: readonly T[], patrones: Readonly<Record<string, readonly string[]>>): T[] {
+  for (const id of Object.keys(patrones)) assert.ok(base.some(s => s.id === id), `entrada desconocida: ${id}`);
+  return base.map(s => patrones[s.id] ? { ...s, patrones: patrones[s.id]! } : s);
+}
+const ALCANCES: readonly Alcance[] = [...actualizarSitios(ALCANCES_BASE, {
+  'decision.teselas': [
+    'const tileIn = tileInArg ?? tileLookup(world.tiles);',
+    'const fast = fastArg === undefined ? residentFastAccess(world.tiles) : fastArg ?? undefined;',
+    'for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {',
+    'if (dx * dx + dy * dy > RADIUS * RADIUS) continue;',
+    'if (cell >= 0 && terrainScan![cell] !== WATER_CODE) { nearbyTiles.push(tileIn(x, y)!); nearbyCells.push(cell); }',
+    'const tile = tileIn(x, y);\n      if (!tile) continue;',
+    "const tile = tileIn(x, y); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);",
+  ],
+  'decision.personas': ["const nearbyPeople = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'choose', own ? choosePeople : undefined);"],
+  'decision.caza': ['for (const animal of world.animals) {\n          if (animal.x !== tile.x || animal.y !== tile.y || !(animal.health > 0)) continue;'],
+  'decision.destinoForrajeo': ["(selected.action!=='forage' || foodStock(tileIn(person.target.x, person.target.y), soaCell(fast, person.target.x, person.target.y, tileIn(person.target.x, person.target.y)), fast)>=MIN_FORAGE_STOCK)"],
+  'decision.sedPorPaso': ['const here = tileIn(person.x, person.y)!;', 'const sedPorPaso = needRates(world, tileIsDesert(here, hereCell, fast), tileIsExposed(here, hereCell, fast), demographicTraits(person.genome, params.cuerpo)).thirst;'],
+  'decision.techo': ['const tileIn = lookup ?? tileLookup(world.tiles);', 'const tile = tileIn(point.x, point.y);',
+    "const roofs = filtrarCerca(world.structures, point, 0,\n    s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'), bodilyRoofs);"],
+  'decision.comidaInmediata': ['const tileIn = lookup ?? tileLookup(world.tiles);', 'const tile = tileIn(person.x, person.y);', 'Math.min(foodStock(tile, soaCell(fast, person.x, person.y, tile), fast), 0.0035)'],
+  'decision.recuperarAgua': ['const tileIn = lookup ?? tileLookup(world.tiles);', 'const here = tileIn(person.x, person.y)!;'],
+  'decision.politicaPersonas': ["const nearby = people ?? vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'policy', policyNearby);"],
+  ...Object.fromEntries(['asentamiento.hogar', 'asentamiento.lugares'].map(centro => [`${centro}.teselas`, [
+    'const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);',
+    'for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {', 'if (dx*dx+dy*dy>16) continue;',
+    'const x = place.x + dx, y = place.y + dy, tile = tileIn(x, y);',
+    'if (r > 0) { const w = fast!.woodArr[cell]!; wood += w === w ? w : 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }',
+    'if (r > 0) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }',
+  ]])),
+  'cooperacion.insumos': ['const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);',
+    'for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {', 'if (dx * dx + dy * dy > 49) continue;',
+    'const x = learner.x + dx, y = learner.y + dy, tile = tileIn(x, y);'],
+  'obra.materiales': ['const fast = residentFastAccess(world.tiles), exact = fast?.exact;',
+    'for (let dy = -CONSTRUCTION_RADIUS; dy <= CONSTRUCTION_RADIUS; dy++) for (let dx = -CONSTRUCTION_RADIUS; dx <= CONSTRUCTION_RADIUS; dx++) {',
+    'if (dx * dx + dy * dy > CONSTRUCTION_RADIUS * CONSTRUCTION_RADIUS) continue;',
+    'const tile = cell >= 0 ? tileAt(world, { x, y }) : exact ? undefined : tileAt(world, { x, y });'],
+  'agua.disponible': ['let total = tileAt(world, point)?.drinkingWater ?? 0;'],
+  'ecologia.vecinos': ['const waterAt = (x: number, y: number): boolean => {', 'const tile = tileIn(x, y);',
+    'waterAt(tile.x - 1, tile.y) || waterAt(tile.x + 1, tile.y) || waterAt(tile.x, tile.y - 1) || waterAt(tile.x, tile.y + 1)'],
+}), {
+  id: 'agua.cisternas', coleccion: 'estructuras', centro: 'entrada', radio: 0.5,
+  fichero: 'inventions.ts', funcion: 'waterAvailable', patrones: [
+    'filtrarCerca(world.structures, point, 1.5, structure => Math.abs(structure.x - point.x) <= 1.5\n    && Math.abs(structure.y - point.y) <= 1.5 && structure.condition > BROKEN_CONDITION\n    && tileAt(world, structure)?.terrain === \'shelter\' && distance(structure, point) <= 0.5, candidates);',
+  ],
+}];
+const LLAMADAS = actualizarSitios(LLAMADAS_BASE.filter(l => l.id !== 'waterAvailable→functionalNear'), {
+  'choose→bodilyShelter': ['bodilyShelter(world, person, tileIn, fast)', 'bodilyShelter(world, tile, tileIn, fast)', 'bodilyShelter(world, candidate.target, tileIn, fast)'],
+  'choose→immediateMeal': ['immediateMeal(world, person, tileIn, fast)', 'immediateMeal(world, {\n        x: candidate.target.x, y: candidate.target.y,\n        inventory: over.inventory ?? person.inventory, hunger: over.hunger ?? person.hunger,\n      }, tileIn, fast)'],
+  'choose→waterAvailable': ['ambient > 0.005 || waterAvailable(world, tile) > 0.005', 'const localWater = waterAvailable(world, person) > 0;', 'waterAvailable(world, recuerdo)'],
+  'choose→canRecoverWaterHandling': ['canRecoverWaterHandling(world, person, tileIn, fast)'],
+  'choose→drinkingBody': ['drinkingBody(world, person, candidate.target, forecastBody)'],
+  'choose→explorationTarget': ["if (command.order === 'explore') directed.target = explorationTarget(world, person, reachableTiles, reachableCells, fast);", 'selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles, reachableCells, fast);'],
+  'choose→localPolicyObservation': ['localPolicyObservation(world, person, tileIn, fast, undefined, 0, nearbyPeople)'],
+  'localPolicyObservation→computeLocalPolicyObservation': ['return computeLocalPolicyObservation(world, person, lookup, nearby, fast, out, offset);'],
+  'evaluateCooperation→practicedRecipeToTeach': ['practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census)'],
+  'practicedRecipeToTeach→recipeHolders': ['const holders = rareza > 0 ? census ? census.counts ??= recipeHolders(world) : recipeHolders(world) : undefined;'],
+});
+const ALCANCES_SERIALES = actualizarSitios(SERIALES_BASE, {
+  'accion.bfs': ['const tileIn = tileInArg ?? tileLookup(world.tiles);', 'Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) > 24'],
+  'accion.caminable': ['const tile = (lookup ?? tileLookup(world.tiles))(p.x, p.y);'],
+  'accion.pisada': ['trampleTile(tileIn(person.x, person.y)!)'],
+  'accion.aqui': ['const tileIn = tileInArg ?? tileLookup(world.tiles);', 'const tile = tileIn(person.x, person.y)!;', 'const current = moved ? tileIn(person.x, person.y)! : tile;'],
+  'accion.destino': ['const targetTile = tileIn(person.target.x, person.target.y);', 'waterAvailable(world,person.target) < 0.003'],
+  'accion.cazar': ['world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0)', '!residentBackingArray(world.tiles).some(t => t.x === point.x && t.y === point.y)'],
+});
+const RAICES = RAICES_BASE.map(r => r.fichero === 'index.ts' && r.funcion === 'choose' ? {
+  ...r, llamador: { ...r.llamador, patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot, tileIn, fast ?? null);"] },
+} : r);
+const RECORRIDOS = actualizarSitios(RECORRIDOS_BASE, {
+  'paso.acciones': ['const tileIn = tileLookup(world.tiles);', 'for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores, tileIn, fast);'],
+  'ecologia': ['const rawTiles = residentBackingArray(world.tiles);', 'for (let i = 0; i < rawTiles.length; i++) {',
+    "if (bound && terrainArr![cell] === WATER) continue;", "if (!bound && tile.terrain === 'water') continue;",
+    'const tileIn = tileLookup(world.tiles);', 'const fast = residentFastAccess(world.tiles);',
+    'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,'],
+});
+const LECTURAS_POR_IDENTIDAD = actualizarSitios(IDENTIDAD_BASE, {
+  'comunidad.pertenencia': ['for (const group of world.communities) comunidadesPorId.set(group.id, group);', 'for (const group of world.communities) gruposActuales.set(group.id, group);'],
+});
+const INVENTARIO: Inventario = { ...INVENTARIO_BASE, alcances: ALCANCES, llamadas: LLAMADAS, raices: RAICES };
 
 const DIRECTORIO = fileURLToPath(new URL('../src/world/', import.meta.url));
 const FUENTES: Readonly<Record<string, string>> = Object.fromEntries(readdirSync(DIRECTORIO).filter(f => f.endsWith('.ts') && f !== 'halo.ts').sort()
@@ -422,6 +507,7 @@ function verificar(textos: Readonly<Record<string, string>>, t: Tablas = TABLAS,
 }
 
 const BASE = verificar(FUENTES);
+writeFileSync('/tmp/a2-halo-problems.txt', BASE.problemas.join('\n'));
 const conHalo = (fase: Fase) => [...alcancesDeFase(fase)].filter(([id]) => !ALCANCES.find(e => e.id === id)!.excepcion);
 const maximoSerial = (fase: Fase, params = HISTORICAL_PARAMS) => Math.max(...ALCANCES_SERIALES.filter(e => e.fase === fase).map(e => alcanceSerial(e.id, ALCANCES_SERIALES, params)!));
 
@@ -566,7 +652,7 @@ test('la prueba muerde: las siete mutaciones de la verificación, una composici�
   // Un alias de una lectura usado de nuevo, una constante de radio cambiada y una raíz llamada desde otro sitio.
   detecta(mutar([['index.ts', 'waterAt(tile.x, tile.y + 1);', 'waterAt(tile.x, tile.y + 1) || waterAt(tile.x + 20, tile.y);']]), /index\.ts:\d+ \(ecology\) alias waterAt sin inventariar/);
   detecta(mutar([['index.ts', 'const RADIUS = 7;', 'const RADIUS = 21;']]), /RADIUS vale 21 en index\.ts/);
-  detecta(mutar([['index.ts', '  const tile = tileAt(world, person)!;\n  const physiology', '  const tile = tileAt(world, person)!;\n  if (world.tick < 0) choose(world, person);\n  const physiology']]),
+  detecta(mutar([['index.ts', '  const tile = tileIn(person.x, person.y)!;\n  const tileCell', '  const tile = tileIn(person.x, person.y)!;\n  if (world.tick < 0) choose(world, person);\n  const tileCell']]),
     /index\.ts:choose se llama fuera de su bucle de fase/);
   // Una lectura fijada que cambia por dentro: umbral 3 → 30 (el patrón casa en frontera de símbolo), un predicado que
   // se amplía, una sentencia antes del filtro que acota un `for`, un desplazamiento reasignado dentro del barrido.

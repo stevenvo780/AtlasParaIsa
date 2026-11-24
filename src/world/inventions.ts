@@ -270,12 +270,18 @@ function serviceValue(services: Services, context: ReturnType<typeof constructio
 
 function localMaterials(world: World, person: Person): Person['materials'] {
   const materials = { ...person.materials };
+  const fast = residentFastAccess(world.tiles), exact = fast?.exact;
   for (let dy = -CONSTRUCTION_RADIUS; dy <= CONSTRUCTION_RADIUS; dy++) for (let dx = -CONSTRUCTION_RADIUS; dx <= CONSTRUCTION_RADIUS; dx++) {
     if (dx * dx + dy * dy > CONSTRUCTION_RADIUS * CONSTRUCTION_RADIUS) continue;
-    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });
+    const x = person.x + dx, y = person.y + dy;
+    const cell = exact?.cellAt(x, y) ?? -1;
+    const tile = cell >= 0 ? tileAt(world, { x, y }) : exact ? undefined : tileAt(world, { x, y });
     // The gathering action requires at least one unit on a tile. Fractional
     // leftovers spread across many tiles are not a reachable material reserve.
-    if (tile && tile.terrain !== 'water') { materials.wood += Math.floor(tile.wood ?? 0); materials.stone += Math.floor(tile.stone ?? 0); }
+    if (tile && (cell < 0 ? tile.terrain !== 'water' : fast!.terrainCode(cell) !== fast!.TERRAIN_WATER)) {
+      materials.wood += Math.floor(cell < 0 ? tile.wood ?? 0 : exact!.wood(cell) ?? 0);
+      materials.stone += Math.floor(tile.stone ?? 0);
+    }
   }
   return materials;
 }
@@ -511,6 +517,7 @@ function observeUse(world: World, structure: StructureView, benefit: number): vo
 // Sprint noche-perf2: los candidatos salen del índice por casillas (indice-puntos.ts), en el orden del arreglo.
 const functionalNear = (world: World, point: Point, radius = 1.5) => filtrarCerca(world.structures, point, radius + 1, s => Math.abs(s.x - point.x) <= radius + 1
   && Math.abs(s.y - point.y) <= radius + 1 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);
+const waterNearScratch = new WeakMap<World, StructureView[]>();
 // `foodCapacity = granary·0.7` es positiva exactamente cuando hay algún granero (y `waterCapacity` con alguna cisterna): basta mirar
 // el componente, sin construir el recuento ni el objeto de capacidades por estructura.
 export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0); }
@@ -531,8 +538,18 @@ export function takeFood(world: World, person: Point, requested: number): number
 
 /** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */
 export function waterAvailable(world: World, point: Point): number {
-  return (tileAt(world, point)?.drinkingWater ?? 0) + functionalNear(world, point, 0.5)
-    .reduce((sum, structure) => sum + (structure.components.includes('cistern') ? structure.water : 0), 0);
+  let total = tileAt(world, point)?.drinkingWater ?? 0;
+  // Reuse a per-world result buffer so the indexed query keeps its narrow scan without allocating
+  // an empty candidate array for every person on every tick.
+  const candidates = waterNearScratch.get(world) ?? [];
+  waterNearScratch.set(world, candidates);
+  filtrarCerca(world.structures, point, 1.5, structure => Math.abs(structure.x - point.x) <= 1.5
+    && Math.abs(structure.y - point.y) <= 1.5 && structure.condition > BROKEN_CONDITION
+    && tileAt(world, structure)?.terrain === 'shelter' && distance(structure, point) <= 0.5, candidates);
+  for (const structure of candidates) {
+    if (structure.components.includes('cistern')) total += structure.water;
+  }
+  return total;
 }
 
 /** Sole drinking debit: use ambient water first, then credit only water delivered by a cistern.

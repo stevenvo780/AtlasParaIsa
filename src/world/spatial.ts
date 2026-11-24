@@ -9,6 +9,7 @@ import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, splitTileBlocksWith, tileIndexAppended, tileLookup } from './tile-index.js';
 import type { ResidentTopologyOwner } from './soa/topologia.js';
+import { notifyResidentSubset } from './soa/terreno.js';
 import { chunkLruFor } from './lru.js';
 
 export interface WorldContext {
@@ -184,6 +185,7 @@ function retireActiveChunks(world: World, keys: readonly string[], context: Worl
       : splitTileBlocks(prevTiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
     if (byBlock) {
       world.tiles = byBlock;
+      if (owner) notifyResidentSubset(prevTiles, byBlock, [...detached.values()].flatMap(chunk => chunk.tiles));
     } else {
       const active: Tile[] = [];
       for (const tile of world.tiles) {

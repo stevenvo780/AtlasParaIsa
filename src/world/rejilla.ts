@@ -202,25 +202,34 @@ export function conRejilla<R>(world: World, fn: () => R): R {
   }
 }
 
-export function vecinos(world: World, centro: CentroRejilla, alcance: number, pred: PredicadoPersona, etiqueta?: string): Person[] {
+/** With `out`, the caller owns a distinct reusable result, valid until its next query. */
+function filtrarEn(people: Person[], pred: PredicadoPersona, out?: Person[]): Person[] {
+  if (!out) return people.filter(pred);
+  out.length = 0;
+  for (let i = 0; i < people.length; i++) if (i in people && pred(people[i]!)) out.push(people[i]!);
+  return out;
+}
+
+export function vecinos(world: World, centro: CentroRejilla, alcance: number, pred: PredicadoPersona, etiqueta?: string, out?: Person[]): Person[] {
+  if (out) out.length = 0;
   const ambito = world === ultimoMundo ? ultimoAmbito : ambitos.get(world);
-  if (!ambito || (desactivadasActivas > 0 && (desactivadas.get(world) ?? 0) > 0)) return world.people.filter(pred);
+  if (!ambito || (desactivadasActivas > 0 && (desactivadas.get(world) ?? 0) > 0)) return filtrarEn(world.people, pred, out);
   const indice = sincronizar(world, ambito), people = world.people;
   const cxCenter = centro.x, cyCenter = centro.y;
   if (!indice.valido || !(Number.isFinite(cxCenter) && Number.isFinite(cyCenter) && Number.isFinite(alcance) && alcance >= 0)) {
-    return people.filter(pred);
+    return filtrarEn(people, pred, out);
   }
   const x0 = casilla(cxCenter - alcance), x1 = casilla(cxCenter + alcance);
   const y0 = casilla(cyCenter - alcance), y1 = casilla(cyCenter + alcance);
   if (!(Math.abs(x0) < MAXIMO && Math.abs(x1) < MAXIMO && Math.abs(y0) < MAXIMO && Math.abs(y1) < MAXIMO)) {
-    return people.filter(pred);
+    return filtrarEn(people, pred, out);
   }
   // Un radio grande o una población dispersa no puede costar más que el filtro original.
-  if ((x1 - x0 + 1) * (y1 - y0 + 1) > Math.max(1, people.length)) return people.filter(pred);
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > Math.max(1, people.length)) return filtrarEn(people, pred, out);
   if (contadoresActivos && etiqueta) registrar(world, etiqueta);
   const cx0 = x0 > indice.minCx ? x0 : indice.minCx, cx1 = x1 < indice.maxCx ? x1 : indice.maxCx;
   const cy0 = y0 > indice.minCy ? y0 : indice.minCy, cy1 = y1 < indice.maxCy ? y1 : indice.maxCy;
-  if (cx0 > cx1 || cy0 > cy1) return [];
+  if (cx0 > cx1 || cy0 > cy1) return out ?? [];
   const celdas = indice.celdas, cabezas = indice.cabezas, siguiente = indice.siguiente;
   const paso = indice.smi ? SMI_SPAN : SPAN;
   let claveFila = indice.smi ? (((cx0 + SMI_BIAS) << 15) | (cy0 + SMI_BIAS)) : claveGrande(cx0, cy0);
@@ -262,10 +271,11 @@ export function vecinos(world: World, centro: CentroRejilla, alcance: number, pr
         }
       }
     }
-    if (count === 0) return [];
-    if (count === 1) return [people[s0]!];
-    if (count === 2) return ordenado ? [people[s0]!, people[s1]!] : [people[s1]!, people[s0]!];
-    const result = new Array<Person>(count);
+    const result = out ?? new Array<Person>(count);
+    result.length = count;
+    if (count === 0) return result;
+    if (count === 1) { result[0] = people[s0]!; return result; }
+    if (count === 2) { result[0] = people[ordenado ? s0 : s1]!; result[1] = people[ordenado ? s1 : s0]!; return result; }
     if (useScratch) {
       if (!ordenado) {
         if (count <= 32) {

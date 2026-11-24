@@ -5,6 +5,14 @@ import { paramsOf } from './params.js';
 type Canonical = null | boolean | number | string | Canonical[] | { [key: string]: Canonical };
 const compareText = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
+export interface GobernadorLegado {
+  presupuestoMs: number;
+  senales: readonly string[];
+  politica?: 'apagar' | 'techo';
+}
+// Parte del formato canónico histórico, aun cuando el mundo ya no tiene esos parámetros.
+export const GOBERNADOR_DIGESTO_HISTORICO = { presupuestoMs: 50, senales: ['p95'], politica: 'techo' } as const;
+
 /** Sort records, never simulation slots or chronological/program arrays. */
 function canonical(value: unknown): Canonical {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -33,10 +41,10 @@ function canonicalWorld(world: World): Canonical {
 /** T148 + V16: `motor.depuracion` es diagnóstico y las claves opt-in de V16 cuando están apagadas
  * (0 / false) no mueven el mundo; omitirlas en su valor neutro conserva byte a byte todos los digestos
  * históricos previos y las incluye en el hash en cuanto cualquier ley V16 se activa. */
-function paramsParaDigesto(world: World): object {
+function paramsParaDigesto(world: World, gobernador: GobernadorLegado = GOBERNADOR_DIGESTO_HISTORICO): object {
   const params = paramsOf(world);
   const { depuracion: _depuracion, ...motor } = params.motor;
-  const out: Record<string, unknown> = { ...params, motor };
+  const out: Record<string, unknown> = { ...params, motor, gobernador };
   const conducta: Record<string, unknown> = { ...params.conducta };
   if (params.conducta && params.conducta.politicaAutonomia === 0) delete conducta.politicaAutonomia;
   // V19: un interruptor apagado deja su constante asociada inerte; ambos se omiten (digestos V18 intactos).
@@ -104,11 +112,11 @@ function emitCanonical(value: unknown, emit: (text: string) => void): void {
   emit('}');
 }
 
-export function digestoCanonico(world: World): string {
+export function digestoCanonico(world: World, gobernadorLegado?: GobernadorLegado): string {
   const hash = createHash('sha256');
   let pieces: string[] = [], length = 0;
   const flush = () => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
-  emitCanonical({ world, params: paramsParaDigesto(world) }, text => {
+  emitCanonical({ world, params: paramsParaDigesto(world, gobernadorLegado) }, text => {
     pieces.push(text); length += text.length;
     // No full-world copy or string: a large valid world can exceed V8's string limit.
     // Flush only between complete JSON tokens so UTF-16 pairs are never split.

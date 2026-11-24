@@ -374,7 +374,7 @@ export function createTileObserver() {
 export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[], carry = false): WorldView {
   const view = projectMirror(world, worldContext(world), { quantize: true, carry });
   if (instanceId !== undefined) view.instanceId = instanceId;
-  view.performance = { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) };
+  view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.
   view.tiles = tiles;
   return view;

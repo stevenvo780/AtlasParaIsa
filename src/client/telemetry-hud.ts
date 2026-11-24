@@ -5,8 +5,7 @@ import { censoDe } from './censo-view.js';
 import { ELEMENTS, geologyAt, type ChemOperator, type ChemistrySummaryView, type CompoundLot, type ElementSymbol, type ElementVector, type ThermalPhase } from '../shared/chemistry.js';
 
 export type HudNav = 'people' | 'life' | 'communities' | 'animals' | 'land' | 'technology' | 'performance';
-export type PulseHealth = 'unknown' | 'healthy' | 'warn' | 'hot';
-export interface TelemetryKpi { nav: HudNav; label: string; value: string; detail: string; summary?: string; health?: PulseHealth; }
+export interface TelemetryKpi { nav: HudNav; label: string; value: string; detail: string; summary?: string; }
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const count = (value: number | undefined): number => finite(value) ? Math.max(0, value) : 0;
 const sum = (values: number[]): number => values.reduce((total, value) => total + count(value), 0);
@@ -61,12 +60,6 @@ export function communitySummary(communities?: CommunityView[]) {
   return { total: communities?.length, cooperation: communities ? sum(values.map(c => c.cooperation)) : undefined,
     disputes: communities ? sum(values.map(c => c.disputes)) : undefined, cultures };
 }
-export function pulseHealth(performance?: WorldView['performance']): PulseHealth {
-  const p95 = performance?.p95StepMs, budget = performance?.gobernador?.presupuestoMs;
-  if (!finite(p95) || p95 < 0 || !finite(budget) || budget <= 0) return 'unknown';
-  return p95 / budget > 1 ? 'hot' : p95 / budget >= .7 ? 'warn' : 'healthy';
-}
-
 export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
   const stats = world?.stats, census = world ? censoDe(world) : null;
   const generations = Object.entries(stats?.generations ?? {}).filter(([g, n]) => finite(Number(g)) && n > 0).map(([g]) => Number(g));
@@ -95,12 +88,12 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
     { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${forged === undefined ? '' : ` · ${forged} forj.`}${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
       summary: `Fórmulas químicas ${number(stats?.chemicalFormulas)}`,
       detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
-    { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`, health: pulseHealth(runtime),
-      detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms / presupuesto ${number(runtime?.gobernador?.presupuestoMs)} ms · ${number(runtime?.tickHz, 2)} Hz · ${pulseHealth(runtime) === 'hot' ? 'Presupuesto superado' : pulseHealth(runtime) === 'warn' ? 'Cerca del presupuesto' : pulseHealth(runtime) === 'healthy' ? 'Con margen' : 'Sin presupuesto medido'}. Abrir Mundo › Rendimiento.` },
+    { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`,
+      detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms · ${number(runtime?.tickHz, 2)} Hz en el estado recibido. Abrir Mundo › Rendimiento.` },
   ];
 }
 export function renderTelemetry(world: WorldView | null): string {
-  return telemetryKpis(world).map(kpi => `<button type="button" class="hud-kpi${kpi.nav === 'people' ? ' hud-kpi-primary' : ''}" data-hud-nav="${kpi.nav}" data-health="${kpi.health ?? 'unknown'}" title="${esc(kpi.detail)}" aria-label="${esc(`${kpi.label}: ${kpi.value}. ${kpi.summary ?? ''} ${kpi.detail}`)}"><span>${esc(kpi.label)}</span><strong data-hud-value>${esc(kpi.value)}</strong><small data-hud-extra>${esc(kpi.summary ?? '')}</small></button>`).join('');
+  return telemetryKpis(world).map(kpi => `<button type="button" class="hud-kpi${kpi.nav === 'people' ? ' hud-kpi-primary' : ''}" data-hud-nav="${kpi.nav}" title="${esc(kpi.detail)}" aria-label="${esc(`${kpi.label}: ${kpi.value}. ${kpi.summary ?? ''} ${kpi.detail}`)}"><span>${esc(kpi.label)}</span><strong data-hud-value>${esc(kpi.value)}</strong><small data-hud-extra>${esc(kpi.summary ?? '')}</small></button>`).join('');
 }
 
 function facts(entries: [string, string][]): string {

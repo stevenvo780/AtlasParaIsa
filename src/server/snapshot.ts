@@ -6,6 +6,7 @@ import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMIT
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 import { residentBackingArray, residentTopologyToken } from '../world/soa/topologia.js';
 import { residentFastAccess } from '../world/soa/terreno.js';
+import { GOBERNADOR_DIGESTO_HISTORICO, type GobernadorLegado } from '../world/digesto.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
@@ -228,8 +229,43 @@ function hasSnapshotLimitMode(record: Record<string, unknown>): boolean {
 /** Preserve a v1 profile's interpretation when its transport marker is removed. */
 function retainSnapshotLimitMode(record: Record<string, unknown>): void {
   if (Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record)) {
-    record.params = readSnapshotParams(record); record.paramsEncoding = PARAMS_ENCODING;
+    const params = readSnapshotParams(record);
+    record.params = { ...record.params as Record<string, unknown>, 'limites.aplicacion': params.limites.aplicacion };
+    record.paramsEncoding = PARAMS_ENCODING;
   }
+}
+
+/** Extrae la configuración retirada del payload durable sin modificar los bytes que valida el replay. */
+export function separarGobernadorLegado(
+  original: Record<string, unknown>, base: GobernadorLegado = GOBERNADOR_DIGESTO_HISTORICO,
+): { params: Record<string, unknown>; gobernador: GobernadorLegado } {
+  const params: Record<string, unknown> = Object.create(null), hojas: Record<string, unknown> = Object.create(null);
+  const invalido = (): never => { throw new SnapshotSemanticError('Invalid snapshot parameters: invalid legacy governor. Explicit recovery required.'); };
+  for (const [clave, valor] of Object.entries(original)) {
+    if (clave === 'gobernador') {
+      if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return invalido();
+      Object.assign(hojas, valor);
+    } else if (clave.startsWith('gobernador.')) hojas[clave.slice('gobernador.'.length)] = valor;
+    else params[clave] = valor;
+  }
+  let { presupuestoMs, senales, politica } = base;
+  for (const [clave, valor] of Object.entries(hojas)) {
+    if (clave === 'presupuestoMs') {
+      const numero = typeof valor === 'string' && valor.trim() ? Number(valor) : valor;
+      if (typeof numero !== 'number' || !Number.isFinite(numero) || numero < 5 || numero > 5000) return invalido();
+      presupuestoMs = numero;
+    } else if (clave === 'senales') {
+      let lista = valor;
+      if (typeof valor === 'string') {
+        try { lista = JSON.parse(valor); } catch { return invalido(); }
+      }
+      if (!Array.isArray(lista) || !lista.length || new Set(lista).size !== lista.length
+        || lista.some(senal => !['p95', 'max', 'rss', 'colaRed', 'saveMs'].includes(senal))) return invalido();
+      senales = lista;
+    } else if (clave === 'politica' && (valor === 'apagar' || valor === 'techo')) politica = valor;
+    else return invalido();
+  }
+  return { params, gobernador: { presupuestoMs, senales, politica } };
 }
 
 /**
@@ -271,7 +307,8 @@ export function readSnapshotParams(value: unknown): WorldParams {
   if (!('params' in record) && !('paramsEncoding' in record)) return base;
   const { params, paramsEncoding } = record;
   if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new SnapshotSemanticError('Invalid snapshot parameter encoding. Explicit recovery required.');
-  try { return parseParams(sinClavesPodadas(params as Record<string, unknown>) as Record<string, string>, base); }
+  const vigentes = separarGobernadorLegado(params as Record<string, unknown>).params;
+  try { return parseParams(sinClavesPodadas(vigentes), base); }
   catch (error) {
     if (!(error instanceof Error) || error.constructor !== Error || 'code' in error) throw error;
     throw new SnapshotSemanticError(`Invalid snapshot parameters: ${error.message} Explicit recovery required.`, { cause: error });

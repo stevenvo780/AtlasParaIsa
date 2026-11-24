@@ -6,10 +6,10 @@ import { performance } from 'node:perf_hooks';
 import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES } from '../src/server/store.js';
 import { captureReplayChange, decodeSnapshot, encodeSnapshot, readSnapshotReplay, takeSnapshotParams } from '../src/server/snapshot.js';
 import { cloneWorld, createWorld, migrateWorld, stepWorld, type World } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
+import { diferenciaCanonica, digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import type { Gesture } from '../src/shared/types.js';
-import { directorioTemporal, filaInstantanea, laboratorio, sha256, todasLasTablas } from './lib/store.js';
+import { directorioTemporal, filaInstantanea, laboratorio, reescribirInstantanea, sha256, todasLasTablas } from './lib/store.js';
 
 const replayParams = parseParams('persistencia.paginasSucias=true');
 const head = (store: Store, slot = 0) => readSnapshotReplay(JSON.parse(filaInstantanea(store, slot).body))!;
@@ -257,6 +257,58 @@ test('replay: deltas de fase 1 con raíz canónica siguen siendo legibles', t =>
   const body = JSON.stringify(legacy);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, sha256(body));
   assert.equal(digestoCanonico(store.load()!.world), digestoCanonico(world));
+});
+
+test('replay: confirma raíces históricas con el gobernador personalizado y permite continuar la cadena', t => {
+  const { store, directory, path } = laboratorio(t, 'atlas-replay-legacy-governor-');
+  const world = createWorld(7, replayParams);
+  store.save(world);
+  const checkpoint = head(store);
+  assert.equal(checkpoint.kind, 'checkpoint');
+  const gobernador = { presupuestoMs: 100, senales: ['rss'], politica: 'apagar' } as const;
+  const instantanea = JSON.parse(checkpoint.body);
+  instantanea.params.gobernador = gobernador;
+  checkpoint.body = JSON.stringify(instantanea);
+  checkpoint.root = digestoCanonico(world, gobernador);
+  const checkpointAnterior = filaInstantanea(store).digest;
+  const cuerpo = JSON.stringify(checkpoint);
+  const clave = (digest: string) => 'snapshot-replay-v1:' + digest;
+  store.db.prepare('UPDATE metadata SET key=?,value=? WHERE key=?')
+    .run(clave(sha256(cuerpo)), cuerpo, clave(checkpointAnterior));
+  reescribirInstantanea(store, cuerpo);
+
+  stepWorld(world, [], store.context);
+  store.save(world);
+  const delta = head(store);
+  assert.equal(delta.kind, 'delta');
+  const params = parseParams('red.deltas=true', replayParams);
+  const nuevo = { ...gobernador, presupuestoMs: 200 };
+  setParams(world, params);
+  delta.changes.push({ tick: world.tick, path: ['$params'], present: true,
+    value: { ...params, 'gobernador.presupuestoMs': nuevo.presupuestoMs } });
+  delta.root = digestoCanonico(world, nuevo);
+  reescribirInstantanea(store, JSON.stringify({ ...delta, root: '0'.repeat(64) }));
+  assert.throws(() => store.load(), /Replay canonical hash mismatch/);
+  reescribirInstantanea(store, JSON.stringify({ ...delta, changes: [{ ...delta.changes[0], value: [] }] }));
+  assert.throws(() => store.load(), /Invalid replay parameter change/);
+  const deltaLegado = JSON.stringify(delta);
+  store.db.prepare('INSERT INTO metadata VALUES (?,?)').run(clave(sha256(deltaLegado)), deltaLegado);
+  reescribirInstantanea(store, deltaLegado);
+
+  const reopened = new Store(path);
+  try {
+    const cargado = reopened.load()!.world;
+    assert.deepEqual(paramsOf(cargado), params);
+    assert.equal(digestoCanonico(cargado), digestoCanonico(world));
+    stepWorld(cargado, [], reopened.context);
+    reopened.save(cargado);
+    assert.deepEqual(diferenciaCanonica(reopened.load()!.world, cargado), null);
+    const previous = join(directory, 'previous.sqlite');
+    reopened.previous(previous);
+    const backup = new Store(previous);
+    try { assert.equal(digestoCanonico(backup.load()!.world), digestoCanonico(world)); }
+    finally { backup.close(); }
+  } finally { reopened.close(); }
 });
 
 test('replay: save() y previous() mantienen beginHostTransaction activo durante prepareReplay/readSnapshot', t => {

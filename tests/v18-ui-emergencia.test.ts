@@ -4,7 +4,8 @@ import { createWorld, projectWorld } from '../src/world/index.js';
 import { PROTOCOL_VERSION, type ChronicleEvent, type PersonView, type RuntimeStats, type ServerMessage, type StateDelta, type WorldView } from '../src/shared/types.js';
 import { MARCA_POLITICA, decisionFicha, inheritedAndLearned, lecturaDecision, vinculoSI, vinculoSIFicha } from '../src/client/inspector-view.js';
 import { comunidadesOrdenadas, divergenciaCultural, ejeDominante, ejesCultura, miembrosNombrados, resumenCultural, ventanaLista } from '../src/client/censo-view.js';
-import { fasesMedidas, formatearPanelGobernador, seccionFases } from '../src/client/gobernador-view.js';
+import { fasesMedidas, seccionFases } from '../src/client/rendimiento-view.js';
+import { fertilidadFicha } from '../src/client/natalidad-view.js';
 import { Connection } from '../src/client/connection.js';
 import { rendererProfile } from '../src/client/modo.js';
 
@@ -148,18 +149,10 @@ test('vínculo S–I: distancia del mismo estado y último encuentro recibido, s
   assert.match(vinculoSIFicha(s, view, []), /no recibió ningún encuentro entre ambas/);
 });
 
-test('panel del gobernador: «Crecimiento libre» frente a «Crecimiento en pausa» con su causa', () => {
-  const libre = formatearPanelGobernador({ activo: true, presupuestoMs: 50, p95StepMs: 20, manual: null, politica: 'techo', techo: null }, 23)!;
-  assert.equal(libre.crecimiento, 'libre');
-  assert.match(libre.texto, /Crecimiento: Crecimiento libre/);
-  const pausa = formatearPanelGobernador({ activo: false, presupuestoMs: 50, p95StepMs: 53.6, manual: null, politica: 'techo', techo: 23 }, 23)!;
-  assert.equal(pausa.crecimiento, 'en-techo');
-  assert.match(pausa.texto, /Crecimiento: Crecimiento en pausa/);
-  assert.match(pausa.texto, /El servidor va lento \(paso p95 53,6 ms > 50 ms de presupuesto\)/);
-  assert.match(pausa.texto, /Solo nacerá alguien si muere otra persona/);
-  const laxo = formatearPanelGobernador({ presupuestoMs: 50, p95Ms: 20 })!;
-  assert.equal(laxo.crecimiento, null, 'sin `activo`/`manual` no se afirma si crece o no');
-  assert.doesNotMatch(laxo.texto, /Crecimiento: Crecimiento/);
+test('la ficha de fertilidad identifica una pausa explícita de los nacimientos', () => {
+  const html = fertilidadFicha({ fertil: { ahora: false, bloqueo: 'pausa-manual', reserva: 0, necesita: 0 } }, mundo([]));
+  assert.match(html, /data-person-fertility="pausa-manual"/);
+  assert.match(html, /los nacimientos están en pausa por orden manual/);
 });
 
 const FASES_CERO: RuntimeStats['fases'] = { maintainRegions: 0, ecologia: 0, kernel: 0, fauna: 0, personas: 0, encuentros: 0,

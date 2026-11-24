@@ -55,6 +55,17 @@ test('parseParams rechaza clave desconocida', () => {
   assert.throws(() => parseParams({ 'no.existe': '1' }), /desconocid/i);
 });
 
+test('el gobernador retirado queda fuera del catálogo y de la configuración activa', () => {
+  assert.equal(Object.hasOwn(DEFAULT_PARAMS, 'gobernador'), false);
+  for (const [clave, valor] of [['presupuestoMs', '50'], ['senales', '["p95"]'], ['politica', 'techo']]) {
+    const ruta = `gobernador.${clave}`;
+    assert.equal(Object.hasOwn(PARAM_RANGES, ruta), false);
+    assert.equal(Object.hasOwn(PARAM_DESCRIPTORS, ruta), false);
+    assert.throws(() => parseParams(`${ruta}=${valor}`), /Parámetro desconocido: "gobernador\./);
+  }
+  assert.throws(() => parseParams({ gobernador: { politica: 'techo' } }), /Parámetro desconocido: "gobernador"/);
+});
+
 test('poda ola 1 (2026-09-27): las leyes refutadas ya no se declaran ni se aceptan', () => {
   for (const clave of ['poblacion.natalidadLocal', 'poblacion.radioProvision', 'conducta.vocacion', 'conducta.vocacionTope']) {
     assert.throws(() => parseParams(`${clave}=1`), /desconocid/i, clave);
@@ -136,7 +147,6 @@ test('T102: defaults deterministas y opciones reservadas sin activar nuevas etap
   assert.deepEqual(DEFAULT_PARAMS.limites, { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' });
   assert.equal(DEFAULT_PARAMS.persistencia.paginasSucias, false);
   assert.equal(DEFAULT_PARAMS.red.deltas, false);
-  assert.deepEqual(DEFAULT_PARAMS.gobernador.senales, ['p95']);
   assert.deepEqual(PARAM_RANGES['motor.hilos'], [1, 512]);
   assert.equal(PARAM_DESCRIPTORS['motor.clonPorPaso']!.kind, 'boolean');
   for (const range of Object.values(PARAM_RANGES)) assert.ok(range.every(Number.isFinite));
@@ -157,12 +167,12 @@ test('T148: motor.depuracion es booleano, default false y no cambia el digesto',
 });
 
 test('T102: cadena, JSON plano/anidado y diccionario dan parámetros tipados equivalentes', () => {
-  const expected = parseParams('motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.orden="inverso",gobernador.senales=["p95"]');
+  const expected = parseParams('motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.orden="inverso"');
   for (const input of [
-    '{"motor":{"hilos":8,"gpu":[1,0],"clonPorPaso":false,"orden":"inverso"},"gobernador":{"senales":["p95"]}}',
-    '{"motor.hilos":8,"motor.gpu":[1,0],"motor.clonPorPaso":false,"motor.orden":"inverso","gobernador.senales":["p95"]}',
-    { 'motor.hilos': '8', 'motor.gpu': '[1,0]', 'motor.clonPorPaso': 'false', 'motor.orden': 'inverso', 'gobernador.senales': '["p95"]' },
-    { motor: { hilos: 8, gpu: [1, 0], clonPorPaso: false, orden: 'inverso' }, gobernador: { senales: ['p95'] } },
+    '{"motor":{"hilos":8,"gpu":[1,0],"clonPorPaso":false,"orden":"inverso"}}',
+    '{"motor.hilos":8,"motor.gpu":[1,0],"motor.clonPorPaso":false,"motor.orden":"inverso"}',
+    { 'motor.hilos': '8', 'motor.gpu': '[1,0]', 'motor.clonPorPaso': 'false', 'motor.orden': 'inverso' },
+    { motor: { hilos: 8, gpu: [1, 0], clonPorPaso: false, orden: 'inverso' } },
   ]) assert.deepEqual(parseParams(input), expected);
   assert.deepEqual(parseParams('motor.gpu=[]').motor.gpu, []);
   assert.equal(parseParams('motor.hilos=512').motor.hilos, 512);
@@ -170,11 +180,11 @@ test('T102: cadena, JSON plano/anidado y diccionario dan parámetros tipados equ
 });
 
 test('T102: arrays propios, congelados, ordenados como la entrada y conservados en el clon', () => {
-  const gpu = [1, 0], senales = ['p95'];
-  const original = parseParams({ motor: { gpu }, gobernador: { senales } });
-  gpu.reverse(); senales.push('invalida');
-  assert.deepEqual(original.motor.gpu, [1, 0]); assert.deepEqual(original.gobernador.senales, ['p95']);
-  for (const array of [DEFAULT_PARAMS.motor.gpu, DEFAULT_PARAMS.gobernador.senales, original.motor.gpu, original.gobernador.senales]) {
+  const gpu = [1, 0];
+  const original = parseParams({ motor: { gpu } });
+  gpu.reverse();
+  assert.deepEqual(original.motor.gpu, [1, 0]);
+  for (const array of [DEFAULT_PARAMS.motor.gpu, original.motor.gpu]) {
     assert.ok(Object.isFrozen(array)); assert.throws(() => (array as unknown[]).push(9), TypeError);
   }
   const override = parseParams('motor.hilos=8,motor.hilos=16', original);
@@ -184,7 +194,7 @@ test('T102: arrays propios, congelados, ordenados como la entrada y conservados 
   assert.equal(paramsOf(cloneWorld(createWorld(4821, original))), original);
 });
 
-test('T102: rechaza tipos, rangos, arrays, señales y claves inválidos sin coerción accidental', () => {
+test('T102: rechaza tipos, rangos, arrays y claves inválidos sin coerción accidental', () => {
   for (const input of [
     'motor.hilos=0', 'motor.hilos=513', 'motor.hilos=1.5', 'motor.hilos=Infinity',
     'motor.clonPorPaso=0', 'motor.clonPorPaso=False', 'motor.clonPorPaso=',
@@ -192,15 +202,12 @@ test('T102: rechaza tipos, rangos, arrays, señales y claves inválidos sin coer
     'motor.gpu=[0.5]', 'motor.gpu=[9007199254740992]', 'motor.gpu=["0"]', 'motor.gpu=[true]',
     'motor.gpu=[null]', 'motor.gpu=[[0]]', 'motor.gpu=[0,]', 'motor.gpu=[0,1',
     'motor.gpu=[0,1}', 'motor.gpu=[0],motor.orden="natural',
-    'gobernador.senales=[]', 'gobernador.senales=["p95","p95"]', 'gobernador.senales=[0]',
     'limites.fauna=0', 'limites.chunks=0.5', 'limites.comunidades=Infinity',
     '{"motor":{"desconocido":{}}}', '{"desconocido":{}}', '{"":{}}', '{"constructor":{}}',
     '{"__proto__":{"motor":{"hilos":8}}}', 'motor.__proto__=1', '[]', 'null',
     { 'poblacion.maxima': [32] }, { 'motor.hilos': true }, { 'motor.gpu': [NaN] },
     { 'motor.gpu': [Infinity] }, { 'motor.gpu': Array(1) }, { 'motor.gpu': null },
   ]) assert.throws(() => parseParams(input), Error, JSON.stringify(input));
-  assert.deepEqual(parseParams('gobernador.senales=["rss"]').gobernador.senales, ['rss'], 'T162: las señales multiseñal ya son configurables');
-  assert.throws(() => parseParams('gobernador.senales=["inventada"]'), /valores permitidos/);
   assert.equal(Object.hasOwn(Object.prototype, 'motor'), false);
   assert.equal(parseParams('poblacion.maxima=3.2e1,persistencia.cadaTicks=20').poblacion.maxima, 32);
 });
@@ -212,12 +219,11 @@ test('el lexer conserva comas y escapes dentro de valores JSON', () => {
 });
 
 test('T102: valida los índices del array, sin ejecutar iteradores ni conversores de entrada', () => {
-  const senales = ['p95'], gpu = [1, 0], invalid = [NaN];
-  senales[Symbol.iterator] = () => [][Symbol.iterator]();
+  const gpu = [1, 0], invalid = [NaN];
   gpu[Symbol.iterator] = () => [0, 1][Symbol.iterator]();
   invalid[Symbol.iterator] = () => [0][Symbol.iterator]();
-  const result = parseParams({ motor: { gpu }, gobernador: { senales } });
-  assert.deepEqual(result.motor.gpu, [1, 0]); assert.deepEqual(result.gobernador.senales, ['p95']);
+  const result = parseParams({ motor: { gpu } });
+  assert.deepEqual(result.motor.gpu, [1, 0]);
   assert.throws(() => parseParams({ 'motor.gpu': invalid }), /no numérico/);
   assert.throws(() => parseParams('{"motor":{"hilos":{"toString":0}}}'), /Valor no numérico/);
 });

@@ -265,7 +265,7 @@ test('in-place V15 production upgrade: old 5092-chunk snapshot reloads, lifts li
 
       const upgraded = deploymentParams(
         paramsOf(loaded),
-        'gobernador.presupuestoMs=5000,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296',
+        'limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296',
       );
       setParams(loaded, upgraded);
       assert.equal(limitsOf(loaded).chunks, 65536);

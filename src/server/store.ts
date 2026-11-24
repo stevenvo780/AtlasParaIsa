@@ -8,8 +8,8 @@ import { assertWorld, bindWorldContext, cloneWorld, migrateWorld, stepWorld, TIC
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk,
-  parseSnapshotJSON, readSnapshotReplay, assertReplayPath, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
-import { digestoCanonico } from '../world/digesto.js';
+  parseSnapshotJSON, readSnapshotReplay, assertReplayPath, separarGobernadorLegado, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
+import { digestoCanonico, type GobernadorLegado } from '../world/digesto.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
@@ -506,7 +506,7 @@ export class Store {
     setParams(committed, paramsOf(world));
     return committed;
   }
-  private replayDelta(world: World, node: Extract<SnapshotReplay, { kind: 'delta' }>): World {
+  private replayDelta(world: World, node: Extract<SnapshotReplay, { kind: 'delta' }>, legado?: { gobernador: GobernadorLegado }): World {
     if (node.tick < world.tick) throw new SnapshotSemanticError('Replay tick regressed. Explicit recovery required.');
     let input = 0, change = 0;
     for (const entry of node.inputs) if (entry.result.tick <= world.tick || entry.result.tick > node.tick)
@@ -521,9 +521,11 @@ export class Store {
         const entry = node.changes[change++]!;
         assertReplayPath(entry.path);
         if (entry.path[0] === '$params') {
-          if (entry.path.length !== 1 || !entry.present || !entry.value || typeof entry.value !== 'object')
+          if (entry.path.length !== 1 || !entry.present || !entry.value || typeof entry.value !== 'object' || Array.isArray(entry.value))
             throw new SnapshotSemanticError('Invalid replay parameter change. Explicit recovery required.');
-          setParams(world, parseParams(entry.value as Record<string, string>, paramsOf(world)));
+          let params = entry.value as Record<string, unknown>;
+          if (legado) ({ params, gobernador: legado.gobernador } = separarGobernadorLegado(params, legado.gobernador));
+          setParams(world, parseParams(params, paramsOf(world)));
           continue;
         }
         let parent = world as unknown as Record<string, unknown>;
@@ -569,17 +571,19 @@ export class Store {
       node = parent;
     }
     if (node.kind !== 'checkpoint') throw new SnapshotSemanticError('Missing replay checkpoint.');
-    let world = this.migrateSnapshot(this.snapshotParts.read(node.body) as World);
-    let root = digestoCanonico(world);
+    const decoded = this.snapshotParts.read(node.body) as World & { params?: Record<string, unknown> };
+    const legado = { gobernador: separarGobernadorLegado(decoded.params ?? {}).gobernador };
+    let world = this.migrateSnapshot(decoded);
+    let root = digestoCanonico(world, legado.gobernador);
     for (const entry of chain.reverse()) {
       if (entry.kind === 'delta') {
         const changed = entry.tick !== world.tick || entry.changes.length !== 0 || entry.inputs.length !== 0;
         const priorRoot = root;
-        world = this.replayDelta(world, entry);
+        world = this.replayDelta(world, entry, legado);
         // Fase 2: compromiso del delta. Fallbacks: la fase 1 guardaba el SHA
         // canónico cuando había cambios y heredaba la raíz si no los había.
         if (replayDeltaRoot(entry) !== entry.root
-          && (changed ? digestoCanonico(world) !== entry.root : priorRoot !== entry.root))
+          && (changed ? digestoCanonico(world, legado.gobernador) !== entry.root : priorRoot !== entry.root))
           throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Explicit recovery required.');
         root = entry.root;
       }

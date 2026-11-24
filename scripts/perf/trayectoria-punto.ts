@@ -7,9 +7,7 @@
  *   TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/trayectoria-punto.ts --seed S \
  *       [--cortes 2400,4800] [--cada 600] [--salida j.json]
  *
- * El presupuesto del gobernador sube a 5000 ms: es el único punto por el que el reloj de pared
- * entra en el mundo, y con dos motores de velocidad distinta la divergencia que se mediría sería
- * la del host. `digestoCanonico` incluye los params efectivos, así que se compara cada mundo con
+ * `digestoCanonico` incluye los params efectivos, así que se compara cada mundo con
  * `motor.clonPorPaso` igualado (cualquier otra diferencia de params sigue contando). Al final
  * también se compara lo DURABLE: lo que cada Store devuelve con `load()`.
  * La CPU propia de cada `stepOnce` se atribuye a su servidor y el orden se alterna en cada paso.
@@ -53,7 +51,7 @@ function digestoDelMundo(world: World): string {
 const dir = mkdtempSync(join(tmpdir(), 'atlas-trayectoria-punto-'));
 const lados = [true, false].map(clonPorPaso => {
   const store = new Store(join(dir, `${clonPorPaso ? 'clon' : 'punto'}.sqlite`));
-  const params = parseParams(`${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000,motor.clonPorPaso=${clonPorPaso}`, DEFAULT_PARAMS);
+  const params = parseParams(`${PRODUCTION_PARAMS},motor.clonPorPaso=${clonPorPaso}`, DEFAULT_PARAMS);
   const app = createApp({ store, origin: 'http://127.0.0.1:9', password: 'trayectoria-punto', manual: true, seed, params });
   return { clonPorPaso, store, app, cpu: [] as number[], reserva: [] as number[], simulacion: [] as number[] };
 });
@@ -79,7 +77,6 @@ try {
     }
   }
   const durables = lados.map(lado => { const cargado = lado.store.load(); return cargado ? digestoDelMundo(cargado.world) : null; });
-  const gobernador = lados.map(lado => lado.app.runtime.gobernador);
   const informe = (lado: typeof clon) => {
     const cola = (xs: number[]) => xs.slice(-Math.min(600, xs.length));
     return { cpuMsPorPaso: r3(media(lado.cpu)), cpuMsP95: r3(p95(lado.cpu)), reservaMsMedia: r3(media(lado.reserva)),
@@ -87,10 +84,9 @@ try {
         reservaMsMedia: r3(media(cola(lado.reserva))), simulacionMsMedia: r3(media(cola(lado.simulacion))) } };
   };
   const resultado = {
-    seed, params: `${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000 sobre DEFAULT_PARAMS`, cortes, comparaciones,
+    seed, params: `${PRODUCTION_PARAMS} sobre DEFAULT_PARAMS`, cortes, comparaciones,
     identico: comparaciones.length > 0 && comparaciones.every(c => c.identico) && comparaciones[comparaciones.length - 1]!.paso === ultimo,
     durableIdentico: durables[0] !== null && durables[0] === durables[1], durable: durables[1],
-    gobernadorVerde: gobernador.every(g => g?.techo === null && g?.activo === true),
     clon: informe(clon), punto: informe(punto),
   };
   const texto = JSON.stringify(resultado, null, 2);

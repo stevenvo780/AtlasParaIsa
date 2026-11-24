@@ -54,8 +54,6 @@ test('V15: mundo nuevo fusiona host abierto y CARTA_PARAMS; uno cargado solo ced
   assert.ok(abierto.poblacion.maxima >= POPULATION_HARD_LIMIT, 'el modo abierto no añade un tope de población por debajo del anticorrupción');
   assert.equal(abierto.persistencia.cadaTicks, 100);
   assert.equal(abierto.persistencia.ventanaEventosTicks, 24000);
-  assert.equal(abierto.gobernador.politica, 'techo');
-  assert.equal(abierto.gobernador.presupuestoMs, 100);
 
   const carta = deploymentParams(hostOpenWorldParams(DEFAULT_PARAMS, probe), 'social.maxComunidades=64,motor.hilos=8,persistencia.cadaTicks=50,poblacion.radioVecindadNatalidad=32');
   assert.equal(carta.social.maxComunidades, 64, 'CARTA_PARAMS pisa la clave que nombra');

@@ -58,11 +58,7 @@ export interface StructureView {
 export interface InventionDynamics { attempts: number; accepted: number; repairs: number; waterCollected: number; foodStored: number; foodTaken: number; }
 
 /**
- * Ruling R17 (2026-09-19): el límite de población lo pone el HARDWARE, no el software.
- * Esta constante NO es un tope de diseño: es la única barandilla contra snapshots
- * corruptos (un `people.length` absurdo tras una lectura dañada). El freno real al
- * crecimiento son el entorno (comida/agua) y el gobernador por p95 del paso
- * (`gobernador.presupuestoMs`), que apaga `reproductionEnabled` cuando el servidor
- * no alcanza. En un servidor más grande, más habitantes.
+ * Cota anticorrupción para `people.length` al validar una instantánea (ruling R17).
+ * La disponibilidad de comida y agua condiciona el crecimiento de la población.
  */
 export const POPULATION_HARD_LIMIT = 1_000_000;

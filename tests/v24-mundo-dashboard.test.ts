@@ -101,11 +101,8 @@ function rich(): WorldView {
     performance: { stepMs: 12.25, p95StepMs: 18, saveMs: 1.1, projectionMs: .6, snapshotBytes: 4096, activeTiles: 6400,
       processRssMiB: 321.5, tickHz: 81.63, tickHzObjetivo: 100, cloneMs: .9, simulationMs: 10.25,
       fraccionSerial: .4, fraccionSerialReal: .25, ocupacionWorkers: .75, tiempoParaleloMs: 8.1, tiempoBarreraMs: .15,
-      fases: { maintainRegions: 0, ecologia: 1, kernel: 0, fauna: 0, personas: 0, encuentros: 0, demografia: 0,
-        comunidades: 0, reproduccion: 0, checkpoint: 0, muestreo: 0, save: 0, broadcast: 0 },
-      gobernador: { activo: true, presupuestoMs: 50, p95StepMs: 18, manual: null, p50Ms: 12, p95Ms: 18, p99Ms: 21,
-        maxMs: 24, faseMax: 'personas', teselasPorHabitante: 52.033,
-        fasesP95: { ecologia: 2.25, kernel: 1.15, fauna: 3.75, personas: 7.5, encuentros: .95, demografia: .45, save: 1.25 } },
+      fases: { maintainRegions: 0, ecologia: 2.25, kernel: 1.15, fauna: 3.75, personas: 7.5, encuentros: .95, demografia: .45,
+        comunidades: 0, reproduccion: 0, checkpoint: .123456789, muestreo: 0, save: 1.25, broadcast: 0 },
     },
   };
 }
@@ -220,27 +217,20 @@ test('chemistry renders eight ranked swatches, all six elements and seven proper
   assert.match(html, /Proceso alfa/); assert.match(html, /0,0125/); assert.match(html, /ejecuciones\/paso/);
 });
 
-test('performance exposes every hardware measurement and descending p95 phases with exact decimals', () => {
-  const w = rich();
-  w.performance!.gobernador!.fasesP95!.checkpoint = .123456789;
-  const html = renderMundoDeepStats(w, 'performance');
+test('performance exposes measured hardware statistics and last-step phases in descending order', () => {
+  const html = renderMundoDeepStats(rich(), 'performance');
   clean(html);
   for (const [label, value] of [['Frecuencia real', '81,63 Hz'], ['Frecuencia objetivo', '100 Hz'], ['Paso actual', '12,25 ms'],
-    ['p50', '12 ms'], ['p95', '18 ms'], ['p99', '21 ms'], ['Máximo', '24 ms'], ['Fase del máximo', 'personas'],
-    ['Ocupación de workers', '75%'], ['Fracción serial real', '25%'], ['Tiempo paralelo', '8,1 ms'], ['Tiempo de barrera', '0,15 ms'],
+    ['p95', '18 ms'], ['Ocupación de workers', '75%'], ['Fracción serial real', '25%'], ['Tiempo paralelo', '8,1 ms'], ['Tiempo de barrera', '0,15 ms'],
     ['Clon', '0,9 ms'], ['Simulación', '10,25 ms'], ['Guardado', '1,1 ms'], ['Proyección', '0,6 ms'],
-    ['Memoria RSS', '321,5 MiB'], ['Instantánea', '4 KiB'], ['Teselas activas', '6.400'], ['Teselas por habitante', '52,033']]) card(html, label, value);
+    ['Memoria RSS', '321,5 MiB'], ['Instantánea', '4 KiB'], ['Teselas activas', '6.400']]) card(html, label, value);
   const phases = html.slice(html.indexOf('Desglose por fase'));
-  assert.match(phases, /p95 ms/); assert.match(phases, /0,123456789/);
+  assert.match(phases, /Desglose por fase \(último paso, ms\)/);
+  assert.match(phases, /0,123456789/);
   assert.ok(phases.indexOf('personas') < phases.indexOf('fauna'));
   assert.ok(phases.indexOf('fauna') < phases.indexOf('ecologia'));
   assert.ok(phases.indexOf('ecologia') < phases.indexOf('save'));
   assert.match(phases, /width:100\.0000%/);
-  delete w.performance!.gobernador!.fasesP95;
-  const fallback = renderMundoDeepStats(w, 'performance');
-  assert.match(fallback, /Desglose por fase \(último paso, ms\)/);
-  assert.match(fallback, /no envió p95 por fase/);
-  assert.doesNotMatch(fallback, /Desglose por fase \(p95 ms\)/);
 });
 
 test('all five tabs handle empty/legacy data with explicit unknowns, without fabricated measurements', () => {

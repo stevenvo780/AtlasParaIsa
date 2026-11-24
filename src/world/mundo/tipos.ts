@@ -17,10 +17,7 @@ import type { Animal } from '../animals.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../../shared/life.js';
 
 /**
- * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
- * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
- * entorno y el gobernador por p95 del paso. Se reexporta para que un único número
- * gobierne crónica, checkpoints y validación.
+ * Cota anticorrupción compartida por la crónica, los checkpoints y `assertWorld` (ruling R17).
  */
 export { POPULATION_HARD_LIMIT } from '../../shared/life.js';
 

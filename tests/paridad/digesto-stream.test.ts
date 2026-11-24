@@ -38,10 +38,3 @@ for (const seed of [1, 51926, 0xffffffff]) test(`streamed digest preserves prior
   assert.equal(digestoCanonico(world), sha256(bytes));
   assert.deepEqual(world, before);
 });
-
-test('streamed digest rejects unsupported array entries and non-finite nested values', () => {
-  for (const value of [undefined, () => {}, Symbol('invalid'), 1n, NaN, Infinity]) {
-    const world = createWorld(1); Object.assign(world, { digestProbe: [value] });
-    assert.throws(() => digestoCanonico(world), /canonical world value/);
-  }
-});

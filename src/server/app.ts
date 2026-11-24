@@ -26,7 +26,7 @@ import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
 export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
-class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
+export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
   /** Orígenes HTTPS adicionales permitidos explícitamente por el operador (p. ej. acceso LAN/VPN).
@@ -47,6 +47,26 @@ export interface AppOptions {
    * (producción): se negocia y solo se comprimen los `state` hacia clientes con acuse
    * (`/ws?ack=1`) cuyo enlace no es de LAN; ver `compresion` en `createApp`, con la cifra. */
   perMessageDeflate?: boolean;
+  /** Worker lifecycle hooks; never change simulation inputs or arithmetic. */
+  beforeStep?: () => void;
+  afterStep?: () => void;
+}
+/** Shared HTTP/WS security and transport, without a World or a SQLite writer. */
+export interface ReadOnlyBackend {
+  sessions: Pick<Store, 'sessionValid' | 'addSession' | 'revoke'>;
+  view(viewport?: Viewport): WorldView;
+  gesture(gesture: Gesture, hash: string): Promise<GestureResult>;
+  person(id: string): Promise<Extract<ServerMessage, { type: 'persona' }>['persona']>;
+  recipe(id: string): Promise<Extract<ServerMessage, { type: 'recipe' }>['recipe']>;
+  regions(): unknown;
+  readonly runtime: RuntimeStats;
+  readonly deltas: boolean;
+  readonly failed: boolean;
+  readonly respaldo: unknown;
+}
+export type GatewayAppOptions = Omit<AppOptions, 'store' | 'params' | 'beforeStep' | 'afterStep'>;
+export function createReadOnlyApp(options: GatewayAppOptions, gateway: ReadOnlyBackend) {
+  return createServerApp({ ...options, manual: true, gateway });
 }
 type Compresion = 'nunca' | 'flujo' | 'siempre';
 /** Contrapresión por cliente (2026-09-22, «por el dominio siempre dice sin conexión»). */
@@ -253,7 +273,11 @@ export async function cerrarPiscinasDeComputo(): Promise<void> {
   if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');
 }
 export function createApp(options: AppOptions) {
-  const { store } = options;
+  return createServerApp(options);
+}
+function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; gateway?: ReadOnlyBackend }) {
+  const store = options.store!, gateway = options.gateway;
+  const sessions = gateway?.sessions ?? store;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const verifyPassword = passwordVerifier(options);
   const primaryUrl = new URL(options.origin);
@@ -268,9 +292,9 @@ export function createApp(options: AppOptions) {
     if (existing && existing !== extraOrigin) throw new Error('Conflicting origins for the same host.');
     allowedOriginByHost.set(extraUrl.host, extraOrigin);
   }
-  const loaded = store.load();
-  const existingInstanceId = readWorldInstance(store.db);
-  let world = loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
+  const loaded = gateway ? null : store.load();
+  const existingInstanceId = gateway ? undefined : readWorldInstance(store.db);
+  let world = gateway ? undefined! as World : loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
   // Arrancar desde un respaldo es un retroceso: la crónica que Isa lee no puede decir que
   // el mundo «retoma desde su último momento guardado», y el operador tiene que ver que el
   // eslabón vigente está podrido. El retroceso solo se puede medir en tiempo de servicio:
@@ -292,8 +316,8 @@ export function createApp(options: AppOptions) {
         : 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
     world.events = world.events.slice(-120);
   }
-  store.save(world);
-  const instanceId = existingInstanceId ?? ensureWorldInstance(store.db);
+  if (!gateway) store.save(world);
+  const instanceId = gateway ? undefined : existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
   /** PERF3: `failed` con `world` a medio paso (un paso sin reserva, o un punto que no se pudo
@@ -332,14 +356,14 @@ export function createApp(options: AppOptions) {
     // (con los 16 KiB por defecto, zlib vuelve al hilo principal por cada 16 KiB de salida).
     perMessageDeflate: compresion === 'nunca' ? false : compresion === 'siempre' ? true : { zlibDeflateOptions: { level: 3, chunkSize: 128 * 1024 } } });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
-  const context = store.context;
+  const context = gateway ? {} : store.context;
   const gobernador = new Gobernador();
   const beats: number[] = [];
   // T107: nombres fijos de `FaseNombre`, listados una vez para no repetir el literal en cada
   // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
   const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
-  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
+  const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
       politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
@@ -425,6 +449,7 @@ export function createApp(options: AppOptions) {
     return { ...projected, instanceId, regionesVivas: clavesVivasEn(world, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   const view = (viewport?: Viewport): WorldView => {
+    if (gateway) return gateway.view(viewport);
     if (!aMedioPaso) return ultimaVista = proyectar(viewport);
     // Ni la cámara pedida ni un mundo a medio paso: la última vista que existió, sea cual sea su cámara.
     if (!ultimaVista) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no hay un estado anterior que mostrar.');
@@ -438,12 +463,12 @@ export function createApp(options: AppOptions) {
    * base servía el mundo en pausa (verificación PERF3, 2026-09-23). Una región ilegible no puede impedir el
    * arranque ni pausar un paso ya confirmado: si esta proyección falla, se conserva la vista anterior y se
    * reintenta a los `VISTA_RESERVA_PASOS` pasos, no en cada paso. */
-  let intentoReserva = world.tick;
+  let intentoReserva = gateway ? 0 : world.tick;
   function renovarReserva() {
     intentoReserva = world.tick;
     try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
   }
-  renovarReserva();
+  if (!gateway) renovarReserva();
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
@@ -452,7 +477,7 @@ export function createApp(options: AppOptions) {
   }
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
-    if (!hash || !store.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
+    if (!hash || !sessions.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
     return hash;
   }
   function requestOrigin(req: IncomingMessage, errorMessage = 'Host no autorizado.'): string {
@@ -571,7 +596,7 @@ export function createApp(options: AppOptions) {
   function broadcast() {
     const now = Date.now();
     for (const [socket, client] of clients) {
-      if (!store.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
+      if (!sessions.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
       // T024 (P1): un cliente suscrito con `intervaloMs` no recibe empujes más seguido que eso.
       // T162: la palanca de red sube ese suelo efectivo antes que descartar mensajes.
       const subscribeEfectivo = Math.max(client.subscribeMs, suscripcionGobernadorMs);
@@ -589,7 +614,7 @@ export function createApp(options: AppOptions) {
       client.lastView = projected;
       client.lastBroadcastAt = Date.now();
       // T135: con `red.deltas=false` (default) el camino es exactamente el de siempre.
-      if (!paramsOf(world).red.deltas) { send(socket, { type: 'state', world: projected }); return; }
+      if (!(gateway ? gateway.deltas : paramsOf(world).red.deltas)) { send(socket, { type: 'state', world: projected }); return; }
       if (!client.delta) client.delta = { prev: null, buffer: [], ackedSequence: -1, needFull: true, viewportKey: '' };
       const deltaState = client.delta;
       const viewportKey = client.viewport ? `${client.viewport.x},${client.viewport.y},${client.viewport.width},${client.viewport.height}` : '';
@@ -634,7 +659,8 @@ export function createApp(options: AppOptions) {
     } finally { if (!enPaso) anotarOcupado(desde); }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
-    if (!store.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
+    if (gateway) return gateway.gesture(gesture, hash);
+    if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
     let saved: GestureResult | null;
     try { saved = store.result(gesture); }
     catch (error) { if (error instanceof GestureConflict) throw new HttpError(409, error.message); throw error; }
@@ -655,7 +681,10 @@ export function createApp(options: AppOptions) {
   function stepOnce() {
     const desde = relojReal();
     enPaso = true;
+    if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
+    options.beforeStep?.();
     try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
+    options.afterStep?.();
   }
   function avanzar() {
     if (failed || stopped) return;
@@ -674,9 +703,9 @@ export function createApp(options: AppOptions) {
     // `true`, un fallo deja `world` a medio paso (ver el `catch`).
     let sinReserva = false;
     try {
-      for (const [socket, client] of clients) if (!store.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
+      for (const [socket, client] of clients) if (!sessions.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
       for (const item of batch) {
-        if (store.sessionValid(item.hash)) valid.push(item);
+        if (sessions.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
       const cloneStarted = monotonicNow();
@@ -789,7 +818,7 @@ export function createApp(options: AppOptions) {
       if (restaurado && error instanceof SessionRevoked) {
         // La sesión se revocó entre aceptar el gesto y confirmarlo: el mundo no avanza con un
         // gesto aplicado y no guardado, así que este paso queda deshecho y se reintenta el siguiente.
-        for (const item of pending.values()) if (!store.sessionValid(item.hash)) {
+        for (const item of pending.values()) if (!sessions.sessionValid(item.hash)) {
           item.reject(new HttpError(401, 'La sesión terminó antes de guardar el gesto.')); pending.delete(item.gesture.id);
         }
         return;
@@ -822,11 +851,11 @@ export function createApp(options: AppOptions) {
     try {
       const expectedOrigin = requestOrigin(req);
       const url = new URL(req.url ?? '/', expectedOrigin);
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, failed ? 503 : 200, { status: failed ? 'paused' : 'ok', ...(respaldo ? { respaldo } : {}) });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, (gateway?.failed ?? failed) ? 503 : 200, { status: (gateway?.failed ?? failed) ? 'paused' : 'ok', ...((gateway?.respaldo ?? respaldo) ? { respaldo: gateway?.respaldo ?? respaldo } : {}) });
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         armarGraciaCarga();
-        return json(res, 200, { authenticated: !!hash && store.sessionValid(hash) });
+        return json(res, 200, { authenticated: !!hash && sessions.sessionValid(hash) });
       }
       if (req.method === 'POST') checkOrigin(req, expectedOrigin);
       if (req.method === 'POST' && url.pathname === '/api/login') {
@@ -838,8 +867,8 @@ export function createApp(options: AppOptions) {
         rate(loginGlobal, '*', 600, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
-        const oldHash = sessionHash(req); if (oldHash) store.revoke(oldHash);
-        const token = makeToken(); store.addSession(hashToken(token), Date.now() + 14 * 86400_000);
+        const oldHash = sessionHash(req); if (oldHash) sessions.revoke(oldHash);
+        const token = makeToken(); sessions.addSession(hashToken(token), Date.now() + 14 * 86400_000);
         res.setHeader('Set-Cookie', cookie(token, !!options.secure));
         armarGraciaCarga();
         return json(res, 200, { ok: true });
@@ -847,7 +876,7 @@ export function createApp(options: AppOptions) {
       if (url.pathname.startsWith('/api/')) {
         const hash = authorized(req);
         if (req.method === 'POST' && url.pathname === '/api/logout') {
-          store.revoke(hash); res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
+          sessions.revoke(hash); res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
           for (const [socket, client] of clients) if (client.hash === hash) socket.close(4001, 'La sesión terminó.');
           return json(res, 200, { ok: true });
         }
@@ -865,7 +894,8 @@ export function createApp(options: AppOptions) {
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
           return res.end(cuerpo);
         }
-        if (req.method === 'POST' && url.pathname === '/api/gesture') {
+        if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
+        if (req.method === 'POST' && (url.pathname === '/api/gesture' || (gateway && url.pathname === '/api/gestures'))) {
           const gesture = parseGesture(await body(req));
           return json(res, 200, await requestGesture(gesture, hash));
         }
@@ -916,7 +946,7 @@ export function createApp(options: AppOptions) {
             const info = clients.get(client)!;
             // Cualquier mensaje prueba que el par vive: el pong puede venir detrás de un `state` grande.
             info.alive = true;
-            if (!store.sessionValid(hash)) { client.close(4001, 'La sesión terminó.'); return; }
+            if (!sessions.sessionValid(hash)) { client.close(4001, 'La sesión terminó.'); return; }
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
             // El acuse que libera el `state` en vuelo no gasta cupo: cada uno responde a un `state`
             // que el servidor eligió mandar. Un acuse suelto o repetido sí cuenta (y no libera nada).
@@ -936,6 +966,8 @@ export function createApp(options: AppOptions) {
               }
               return;
             }
+            if (['viewport', 'persona', 'recipe', 'receta', 'regiones'].includes(parsed?.type ?? '')) armarGraciaCarga();
+            if (gateway && (parsed as { type?: string })?.type === 'regiones') { emitir(client, JSON.stringify({ type: 'regiones', regiones: gateway.regions() }), false); return; }
             if (parsed?.type === 'resync') {
               const req = parsed as { viewport?: Viewport };
               if (req.viewport) { try { info.viewport = normalizeViewport(req.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); } }
@@ -953,13 +985,13 @@ export function createApp(options: AppOptions) {
             // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
             if (parsed?.type === 'persona') {
               if (typeof parsed.id !== 'string' || !/^[A-Za-z0-9_:-]{1,50}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de habitante no válido.');
-              send(client, { type: 'persona', id: parsed.id, persona: enriquecerPersona(mundoConsultable(), parsed.id) ?? null });
+              send(client, { type: 'persona', id: parsed.id, persona: gateway ? await gateway.person(parsed.id) : enriquecerPersona(mundoConsultable(), parsed.id) ?? null });
               return;
             }
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
-            if (parsed?.type === 'recipe') {
+            if (parsed?.type === 'recipe' || (parsed as { type?: string })?.type === 'receta') {
               if (typeof parsed.id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de procedimiento no válido.');
-              send(client, { type: 'recipe', id: parsed.id, recipe: technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null });
+              send(client, { type: 'recipe', id: parsed.id, recipe: gateway ? await gateway.recipe(parsed.id) : technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null });
               return;
             }
             if (parsed?.type === 'suscripcion') {
@@ -970,7 +1002,7 @@ export function createApp(options: AppOptions) {
             }
             if (!parsed || parsed.type !== 'gesture') throw new HttpError(400, 'Mensaje desconocido.');
             const result = await requestGesture(parseGesture(parsed.gesture), hash);
-            if (store.sessionValid(hash)) send(client, { type: 'result', result });
+            if (sessions.sessionValid(hash)) send(client, { type: 'result', result });
           } catch (error) { send(client, { type: 'error', message: error instanceof HttpError ? error.message : 'No se pudo aplicar el gesto.' }); }
         });
         graciaCargaHasta = 0;
@@ -1017,10 +1049,10 @@ export function createApp(options: AppOptions) {
     if (next < now) { next = now; cederHasta = now + tickMs; limiteCargaHasta = relojReal() + TOPE_CARGA_MS; }
     if (!stopped) citar(Math.max(0, next - monotonicNow()));
   }
-  if (!options.manual) citar(Math.max(0, next - monotonicNow()));
+  if (!gateway && !options.manual) citar(Math.max(0, next - monotonicNow()));
   const heartbeat = setInterval(() => {
     for (const [socket, client] of clients) {
-      if (!client.alive || !store.sessionValid(client.hash)) { socket.terminate(); continue; }
+      if (!client.alive || !sessions.sessionValid(client.hash)) { socket.terminate(); continue; }
       client.alive = false; socket.ping();
     }
   }, 20_000);
@@ -1042,9 +1074,10 @@ export function createApp(options: AppOptions) {
     /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
-    server, stepOnce,
+    server, stepOnce, broadcast, requestGesture, view,
+    get respaldo() { return respaldo; },
     /** Arranca el bucle de pasos cuando `createApp` se creó con `manual: true` (p. ej. tras la autoprueba GPU). */
-    start() { if (!stopped && !timer) { next = monotonicNow() + tickMs; citar(Math.max(0, next - monotonicNow())); } },
+    start() { if (!gateway && !stopped && !timer) { next = monotonicNow() + tickMs; citar(Math.max(0, next - monotonicNow())); } },
     get world() { return world; }, get failed() { return failed; },
     /** Gestos aceptados que esperan su paso (bancos y pruebas: saber que un gesto ya está en el lote
      * del paso siguiente sin adivinarlo por tiempo). */
@@ -1057,7 +1090,7 @@ export function createApp(options: AppOptions) {
         comprime: deflateNegociado(socket) && (compresion === 'siempre' || !!c.flujo?.comprimir), bufferedAmount: socket.bufferedAmount }));
     },
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
-    get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
+    get runtime(): RuntimeStats { if (gateway) return gateway.runtime; return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
     /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
     setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; runtime.gobernador!.estado = 'manual'; runtime.gobernador!.palancaActiva = null; gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; } },
     close() {
@@ -1077,7 +1110,7 @@ export function createApp(options: AppOptions) {
         try {
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
-          await cerrarPiscinasDeComputo();
+          if (!gateway) await cerrarPiscinasDeComputo();
         }
       })();
       return cierre;

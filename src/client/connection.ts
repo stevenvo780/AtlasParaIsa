@@ -1,6 +1,8 @@
 import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type PersonDetail, type ServerMessage, type StateDelta, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
 import { applyStateDelta } from '../shared/deltas.js';
 
+/** Ventana de fusión de cámaras: 6–7 mensajes/s como máximo, bajo el cupo de 120 por 10 s del servidor. */
+const VIEWPORT_COALESCE_MS = 150;
 export type ConnectionStatus = 'connecting' | 'live' | 'offline';
 interface Callbacks {
   world: (world: WorldView) => void;
@@ -52,7 +54,7 @@ export class Connection {
     this.browserOffline = true;
     clearTimeout(this.retryTimer);
     clearTimeout(this.silenceTimer);
-    clearTimeout(this.viewportTimer);
+    clearTimeout(this.viewportTimer); this.viewportTimer = undefined;
     clearTimeout(this.acknowledgementTimer);
     this.updateStatus('offline');
     const previous = this.socket; this.socket = null; previous?.close();
@@ -79,7 +81,7 @@ export class Connection {
     clearTimeout(this.retryTimer);
     clearTimeout(this.acknowledgementTimer);
     clearTimeout(this.silenceTimer);
-    clearTimeout(this.viewportTimer);
+    clearTimeout(this.viewportTimer); this.viewportTimer = undefined;
     if (typeof window !== 'undefined') {
       window.removeEventListener('offline', this.onOffline);
       window.removeEventListener('online', this.onOnline);
@@ -105,8 +107,11 @@ export class Connection {
     const next = { x: Math.max(-10_000_000, Math.min(10_000_000 - width, Math.floor(viewport.x))), y: Math.max(-10_000_000, Math.min(10_000_000 - height, Math.floor(viewport.y))), width, height };
     if (JSON.stringify(next) === JSON.stringify(this.viewport)) return;
     this.viewport = next;
-    clearTimeout(this.viewportTimer);
-    this.viewportTimer = setTimeout(() => this.sendViewport(), 150);
+    // V18: el temporizador NO se reinicia con cada movimiento. Antes un arrastre continuo lo rearmaba sin parar
+    // y el servidor no sabía de la cámara hasta soltar (mapa vacío); ahora sale como mucho cada 150 ms y siempre
+    // con la última cámara (los intermedios se funden). El terreno ya visto se pinta desde la caché del cliente.
+    if (this.viewportTimer !== undefined) return;
+    this.viewportTimer = setTimeout(() => { this.viewportTimer = undefined; this.sendViewport(); }, VIEWPORT_COALESCE_MS);
   }
 
   /** Modo ligero móvil (T024/T036a): pide al servidor una cadencia mínima para ESTE cliente.

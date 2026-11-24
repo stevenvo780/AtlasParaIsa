@@ -1,6 +1,7 @@
 import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
+import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
 import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
 import { worldShell } from './world-shell.js';
@@ -31,6 +32,8 @@ const root = document.querySelector<HTMLDivElement>('#app')!;
 let world: WorldView | null = null;
 let connection: Connection | null = null;
 let landscape: Landscape | null = null;
+/** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
+const tileCache = new ClientTileCache();
 let selected: Selection = { kind: 'person', id: 's' };
 let activePersonId = 's';
 let control: 'inspect' | 'direct' = 'inspect';
@@ -81,7 +84,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { tileCache.clear(); capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -115,6 +118,7 @@ function enterWorld(): void {
   const modo = syncModo(); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
+  landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
   if (modo === 'observador') connection.suscribir(5000);
@@ -172,8 +176,9 @@ function pick(selection: Selection): void {
 function person(): PersonView | undefined { return world?.people.find(p => p.id === activePersonId); }
 function target(): { x: number; y: number } | null { if (!world) return null; const selection = selected; if (selection.kind === 'tile') return selection; const p = selection.kind === 'animal' ? world.animals?.find(a => a.id === selection.id) : person(); return p ? { x: p.x, y: p.y } : null; }
 function message(text: string, accepted?: boolean): void { const output = document.getElementById('gesture-result'); if (output) { output.textContent = text; output.hidden = !text; output.dataset.accepted = accepted === undefined ? 'pending' : String(accepted); } }
-function send(input: Omit<Gesture, 'id'>): void { if (!world || world.paused || status !== 'live' || pending) return; if (connection?.send({ ...input, id: crypto.randomUUID() })) { landscape?.setPendingTarget(input); message('Esperando la confirmación del mundo…'); } }
-function sendCommand(order: Order, position?: { x: number; y: number }): void { const p = person(); if (!p || selected.kind === 'animal') return; send({ kind: 'command', agentId: p.id, order, x: position?.x ?? p.x, y: position?.y ?? p.y }); if (order === 'auto') { control = 'inspect'; renderControls(); } }
+function send(input: Omit<Gesture, 'id'>): boolean { if (!world || world.paused || status !== 'live' || pending) return false; if (connection?.send({ ...input, id: crypto.randomUUID() })) { landscape?.setPendingTarget(input); message('Esperando la confirmación del mundo…'); return true; } return false; }
+function sendCommand(order: Order, position?: { x: number; y: number }): void { const p = person(); if (!p || selected.kind === 'animal') return; const x = position?.x ?? p.x, y = position?.y ?? p.y; // V18: el destino se marca al instante; el servidor lo aplica en su siguiente paso.
+  if (send({ kind: 'command', agentId: p.id, order, x, y }) && order === 'move') landscape?.markDestination({ x, y }, p.id); if (order === 'auto') { control = 'inspect'; renderControls(); } }
 
 function wire(): void {
   root.removeEventListener('click', navigateEntity);
@@ -319,6 +324,7 @@ function receiveWorld(next: WorldView): void {
   // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
   // son inmutables por id y nunca se invalidan por tick (T041).
   recordarVistos(next);
+  tileCache.ingest(next.tiles, next.tick);
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;

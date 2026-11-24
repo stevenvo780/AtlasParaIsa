@@ -13,9 +13,9 @@ import { PROTOCOL_VERSION, type ServerMessage, type StateDelta, type Viewport, t
 import { Connection } from '../src/client/connection.js';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
+import { barreraWs } from './lib/net.js';
 
 const KIB = 1024;
-const settle = (ms = 10): Promise<void> => new Promise(r => setTimeout(r, ms));
 const wire = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const sinRendimiento = (v: WorldView): WorldView => { const c = wire(v); delete c.performance; return c; };
 const VIEWPORT: Viewport = { x: 0, y: 0, width: 12, height: 8 };
@@ -138,6 +138,7 @@ async function fixture(t: TestContext, deltas: boolean) {
       mensajes.push({ raw: text, msg });
     });
     await once(socket, 'open');
+    await barreraWs(socket);
     return { socket, mensajes, cookie };
   }
   return { app, connect, origin };
@@ -146,49 +147,63 @@ async function fixture(t: TestContext, deltas: boolean) {
 test('servidor con red.deltas=true: deltas convergen al state completo en ≥100 pasos, payload menor y 0 sockets terminados', async t => {
   const { app, connect, origin } = await fixture(t, true);
   const cliente = await connect();
-  let recon: WorldView | null = null;
+  const reconstruccion: { vista?: WorldView } = {};
   const sizes: { sequence: number; delta: number }[] = [];
   let cursor = 0;
   const drain = (): void => {
     for (; cursor < cliente.mensajes.length; cursor++) {
       const { raw, msg } = cliente.mensajes[cursor]!;
-      if (msg.type === 'state') { recon = wire(msg.world); cliente.socket.send(JSON.stringify({ type: 'ack', sequence: msg.world.sequence })); }
+      if (msg.type === 'state') { reconstruccion.vista = wire(msg.world); cliente.socket.send(JSON.stringify({ type: 'ack', sequence: msg.world.sequence })); }
       else if (msg.type === 'state-delta') {
-        assert.ok(recon, 'delta sin base previa');
-        recon = wire(applyStateDelta(recon!, msg));
+        assert.ok(reconstruccion.vista, 'delta sin base previa');
+        reconstruccion.vista = wire(applyStateDelta(reconstruccion.vista, msg));
         sizes.push({ sequence: msg.sequence, delta: Buffer.byteLength(raw) });
         cliente.socket.send(JSON.stringify({ type: 'ack', sequence: msg.sequence }));
       }
     }
   };
-  await settle(30); drain();
+  drain();
   assert.equal(cliente.mensajes[0]?.msg.type, 'state', 'la primera conexión recibe un state completo');
-  for (let i = 0; i < 120; i++) { app.stepOnce(); await settle(5); drain(); }
-  assert.ok(recon);
+  await barreraWs(cliente.socket);
+  for (let i = 0; i < 120; i++) {
+    app.stepOnce();
+    if (app.world.tick % 5 !== 0) continue;
+    await barreraWs(cliente.socket);
+    drain();
+    await barreraWs(cliente.socket);
+  }
+  const vista = reconstruccion.vista;
+  assert.ok(vista);
   t.diagnostic(`servidor · ${sizes.length} deltas · mayor ${Math.max(...sizes.map(s => s.delta))} B · secuencias eco ${sizes.filter(s => s.sequence % 10 === 0).map(s => s.sequence).join(',')}`);
   assert.ok(sizes.length >= 10, `deltas recibidos: ${sizes.length}`);
   assert.ok(sizes.every(s => s.delta < 120 * KIB), `delta mayor: ${Math.max(...sizes.map(s => s.delta))}`);
   assert.ok(sizes.some(s => s.sequence % 10 === 0), 'hubo deltas tras ticks ecológicos');
   // Convergencia contra un state completo del mismo tick (vía HTTP, mismo viewport).
   const full = await (await fetch(`${origin}/api/world?x=0&y=0&width=12&height=8`, { headers: { Cookie: cliente.cookie } })).json() as WorldView;
-  assert.deepEqual(sinRendimiento(recon!), sinRendimiento(full));
+  assert.equal(vista.sequence, full.sequence, 'ambas vistas corresponden al mismo paso');
+  assert.deepEqual(sinRendimiento(vista), sinRendimiento(full));
   const fullBytes = Buffer.byteLength(JSON.stringify({ type: 'state', world: full }));
   assert.ok(Math.max(...sizes.map(s => s.delta)) < fullBytes, 'el delta mayor sigue por debajo del state completo');
   assert.equal(cliente.socket.readyState, NodeWebSocket.OPEN, '0 sockets terminados');
   // resync del cliente ⇒ state completo de recuperación.
   const antes = cliente.mensajes.length;
   cliente.socket.send(JSON.stringify({ type: 'resync' }));
-  await settle(40); drain();
+  await barreraWs(cliente.socket); drain();
   assert.ok(cliente.mensajes.slice(antes).some(m => m.msg.type === 'state'), 'tras resync llega un state completo');
   cliente.socket.terminate();
 });
 
 test('servidor con red.deltas=false: el protocolo es idéntico al actual (solo state)', async t => {
   assert.equal(parseParams('red.deltas=false').red.deltas, false);
-  const { connect } = await fixture(t, false);
+  const { app, connect } = await fixture(t, false);
   const cliente = await connect();
-  await settle(30);
-  for (let i = 0; i < 10; i++) { await settle(5); }
+  const inicial = cliente.mensajes[0]?.msg;
+  assert.ok(inicial?.type === 'state');
+  cliente.socket.send(JSON.stringify({ type: 'ack', sequence: inicial.world.sequence }));
+  await barreraWs(cliente.socket);
+  for (let i = 0; i < 5; i++) app.stepOnce();
+  await barreraWs(cliente.socket);
+  assert.equal(cliente.mensajes.filter(({ msg }) => msg.type === 'state').length, 2);
   const tipos = new Set(cliente.mensajes.map(m => m.msg.type));
   assert.deepEqual([...tipos].filter(x => x !== 'latido'), ['state']);
   assert.equal(cliente.mensajes.some(m => m.msg.type === 'state-delta'), false);

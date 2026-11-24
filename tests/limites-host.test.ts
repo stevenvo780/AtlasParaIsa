@@ -68,19 +68,24 @@ test('T100/4b: el resolver del host corre al crear y jamás al cargar', async t 
   const memory: HostMemory = { fisicaBytes: 128 * GiB, heapBytes: 4 * GiB };
   let resolutions = 0;
   const factory = () => { resolutions++; return deploymentParams(hostParams(DEFAULT_PARAMS, memory)); };
-  const store = new Store(path);
-  t.after(() => store.close());
-  const app = createApp({ store, password, origin, manual: true, seed: 42, params: factory });
-  t.after(async () => { await app.close(); });
-  assert.equal(resolutions, 1);
-  assert.deepEqual({ ...paramsOf(app.world).limites }, { ...hostLimits(memory), aplicacion: 'parametros' });
+  const conApp = async <T>(usar: (app: ReturnType<typeof createApp>) => T): Promise<T> => {
+    const store = new Store(path);
+    try {
+      const app = createApp({ store, password, origin, manual: true, seed: 42, params: factory });
+      try { return usar(app); } finally { await app.close(); }
+    } finally { store.close(); }
+  };
+  const limitesIniciales = await conApp(app => {
+    const limites = paramsOf(app.world).limites;
+    assert.equal(resolutions, 1);
+    assert.deepEqual({ ...limites }, { ...hostLimits(memory), aplicacion: 'parametros' });
+    return limites;
+  });
 
-  const reopened = new Store(path);
-  t.after(() => reopened.close());
-  const resumed = createApp({ store: reopened, password, origin, manual: true, seed: 42, params: factory });
-  t.after(async () => { await resumed.close(); });
-  assert.equal(resolutions, 1, 'un mundo cargado no vuelve a preguntar por la máquina');
-  assert.deepEqual(paramsOf(resumed.world).limites, paramsOf(app.world).limites);
+  await conApp(app => {
+    assert.equal(resolutions, 1, 'un mundo cargado no vuelve a preguntar por la máquina');
+    assert.deepEqual(paramsOf(app.world).limites, limitesIniciales);
+  });
 });
 
 /** Árbol cgroup v2 sintético. La raíz NUNCA declara `memory.max` (verificado en esta torre:

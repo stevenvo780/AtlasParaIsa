@@ -6,18 +6,18 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Store } from '../src/server/store.js';
-import { encodeSnapshotTileRows } from '../src/server/snapshot.js';
-import { SNAPSHOT_PAGE_TILES } from '../src/server/snapshot-parts.js';
-import { bindWorldContext, createWorld, stepWorld, type World } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { paramsOf, parseParams } from '../src/world/params.js';
-import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { activate, worldContext } from '../src/world/spatial.js';
+import { Store } from '../../src/server/store.js';
+import { encodeSnapshotTileRows } from '../../src/server/snapshot.js';
+import { SNAPSHOT_PAGE_TILES } from '../../src/server/snapshot-parts.js';
+import { bindWorldContext, createWorld, stepWorld, type World } from '../../src/world/index.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { paramsOf, parseParams } from '../../src/world/params.js';
+import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
+import { activate, worldContext } from '../../src/world/spatial.js';
 
 /** Last commit before the save fast paths: the persisted bytes must not change at all. */
 const BASE = 'f53bdc9';
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BASELINE_FILES = ['src/server/store.ts', 'src/server/snapshot.ts', 'src/server/snapshot-parts.ts', 'src/shared/exact-json.ts'];
 type StoreClass = typeof Store;
 

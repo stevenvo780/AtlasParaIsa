@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { TechnologyProgram, TechnologyRecipe } from '../src/shared/technology.js';
-import { assertWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { parseParams } from '../src/world/params.js';
-import { maintainRegions, tileAt } from '../src/world/spatial.js';
-import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial } from '../src/world/technology.js';
-import { bindTechnologyCatalogue, enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
-import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import type { TechnologyProgram, TechnologyRecipe } from '../../src/shared/technology.js';
+import { assertWorld, createWorld, stepWorld, type World } from '../../src/world/index.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { parseParams } from '../../src/world/params.js';
+import { maintainRegions, tileAt } from '../../src/world/spatial.js';
+import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial } from '../../src/world/technology.js';
+import { bindTechnologyCatalogue, enableTechnologyCatalogue } from '../../src/world/technology-catalogue.js';
+import { captureTechnologyCheckpoint } from '../../src/world/technology-checkpoint.js';
 
 // Paridad del reescrito de `society.ts` (enseñanza de recetas) y `demography.ts`: digestos tomados en
 // 49c3c1c, antes del cambio. El digesto incluye el orden de `technology.recipes`, así que también fija

@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { StructureComponent } from '../src/shared/life.js';
-import type { TechnologyProgram } from '../src/shared/technology.js';
-import { assertWorld, createWorld, RULES_VERSION, stepWorld } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { parseParams } from '../src/world/params.js';
-import { maintainRegions, tileAt } from '../src/world/spatial.js';
-import { blueprintAffordances, blueprintCost, defaultBlueprint, validBlueprint } from '../src/world/inventions.js';
-import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial } from '../src/world/technology.js';
-import { bindTechnologyCatalogue, enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
-import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import type { StructureComponent } from '../../src/shared/life.js';
+import type { TechnologyProgram } from '../../src/shared/technology.js';
+import { assertWorld, createWorld, RULES_VERSION, stepWorld } from '../../src/world/index.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { parseParams } from '../../src/world/params.js';
+import { maintainRegions, tileAt } from '../../src/world/spatial.js';
+import { blueprintAffordances, blueprintCost, defaultBlueprint, validBlueprint } from '../../src/world/inventions.js';
+import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial } from '../../src/world/technology.js';
+import { bindTechnologyCatalogue, enableTechnologyCatalogue } from '../../src/world/technology-catalogue.js';
+import { captureTechnologyCheckpoint } from '../../src/world/technology-checkpoint.js';
 
 const openLaws = 'poblacion.natalidadVecindad=true,poblacion.radioVecindadNatalidad=16,social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=0,conducta.aptitud=0.35,conducta.politicaPeso=0.35,tecnologia.evitarNoOp=true,tecnologia.dosisCuanto=50,tecnologia.enfriamiento=240';
 

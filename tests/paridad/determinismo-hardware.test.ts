@@ -2,19 +2,19 @@ import test, { after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
-import { IncrementalRegionHasher } from '../src/world/digesto.js';
-import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
-import { stepWorld } from '../src/world/index.js';
-import { paramsOf, setParams } from '../src/world/params.js';
-import { residentTopologyOwner, residentTopologyToken } from '../src/world/soa/topologia.js';
-import { chunkKey } from '../src/world/terrain.js';
+import { IncrementalRegionHasher } from '../../src/world/digesto.js';
+import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
+import { stepWorld } from '../../src/world/index.js';
+import { paramsOf, setParams } from '../../src/world/params.js';
+import { residentTopologyOwner, residentTopologyToken } from '../../src/world/soa/topologia.js';
+import { chunkKey } from '../../src/world/terrain.js';
 import { HARDWARE_SCENES, HARDWARE_SEEDS, buildHardwareScene, regionGroupedHarvestTotal,
-  sequentialHarvestTotal, type HardwareSceneName } from './hardware/escenas.js';
+  sequentialHarvestTotal, type HardwareSceneName } from '../hardware/escenas.js';
 import { firstHashDisagreement, locateDifference, normalizedCopy, plainWorldCopy,
-  snapshotBarrier, throwDifference } from './hardware/contrato.js';
-import { adversarialWorkerCount, captureReference, compareCandidate, compareGpuCandidate, type ReferenceTrace } from './hardware/matriz.js';
-import { HardwareTileChanges } from './hardware/cambios.js';
-import type { MatrixSceneRequest, MatrixSceneResponse } from './hardware/worker-matriz.js';
+  snapshotBarrier, throwDifference } from '../hardware/contrato.js';
+import { adversarialWorkerCount, captureReference, compareCandidate, compareGpuCandidate, type ReferenceTrace } from '../hardware/matriz.js';
+import { HardwareTileChanges } from '../hardware/cambios.js';
+import type { MatrixSceneRequest, MatrixSceneResponse } from '../hardware/worker-matriz.js';
 
 // The default npm test includes the complete literal 600-step CPU matrix. Opt-in replaces
 // its duration with 2400 steps; it never relabels a shorter trajectory as the long gate.
@@ -33,7 +33,7 @@ function acquireSceneWorker(): Promise<PooledSceneWorker> {
   const idle = scenePool.find(entry => !entry.busy);
   if (idle) { idle.busy = true; return Promise.resolve(idle); }
   if (scenePool.length < MATRIX_CONCURRENCY) {
-    const worker = new Worker(new URL('./hardware/worker-matriz.ts', import.meta.url));
+    const worker = new Worker(new URL('../hardware/worker-matriz.ts', import.meta.url));
     const entry: PooledSceneWorker = { worker, busy: true };
     scenePool.push(entry);
     return Promise.resolve(entry);

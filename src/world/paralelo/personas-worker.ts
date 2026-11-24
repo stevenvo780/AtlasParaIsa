@@ -34,7 +34,7 @@ export const MOVE_RADIO_CHEBYSHEV = 24;
 export const FORAGE_AMOUNT = 0.06;
 export const EAT_AMOUNT = 0.0035;
 
-/** Acciones en el mismo orden que el SoA de personas (`soa/personas.ts`). */
+/** Códigos numéricos de las acciones, en este orden. */
 export const ACCIONES = ['explore', 'eat', 'forage', 'drink', 'hunt', 'rest', 'approach', 'accompany', 'retreat', 'share',
   'gather', 'farm', 'build', 'cooperate', 'invent', 'repair', 'research', 'craft'] as const;
 export const ACCION = Object.fromEntries(ACCIONES.map((accion, codigo) => [accion, codigo])) as { readonly [A in typeof ACCIONES[number]]: number };

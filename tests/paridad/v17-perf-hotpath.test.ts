@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import {
   bindWorldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
   createWorld, stepWorld, worldContext,
-} from '../src/world/index.js';
-import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { primero, primeroConFiltroCaro, primeroPorClave, primeroPorClaveConFiltroCaro } from '../src/world/orden.js';
-import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
-import { EstadoPersonasCompartido, PersonasParallelPool } from '../src/world/paralelo/personas-motor.js';
-import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { activate, maintainRegions } from '../src/world/spatial.js';
-import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
-import { gpuNvrtcAvailable } from '../src/world/gpu/puente.js';
-import { gpuParitySession } from '../src/world/gpu/autoprueba.js';
+} from '../../src/world/index.js';
+import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
+import { primero, primeroConFiltroCaro, primeroPorClave, primeroPorClaveConFiltroCaro } from '../../src/world/orden.js';
+import { DEFAULT_PARAMS, parseParams, setParams } from '../../src/world/params.js';
+import { EstadoPersonasCompartido, PersonasParallelPool } from '../../src/world/paralelo/personas-motor.js';
+import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
+import { activate, maintainRegions } from '../../src/world/spatial.js';
+import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
+import { gpuNvrtcAvailable } from '../../src/world/gpu/puente.js';
+import { gpuParitySession } from '../../src/world/gpu/autoprueba.js';
 
 test('V17 perf: primeroPorClave y primeroPorClaveConFiltroCaro coinciden exactamente con primero*', () => {
   const items = [

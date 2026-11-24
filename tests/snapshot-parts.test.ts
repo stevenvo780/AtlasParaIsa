@@ -71,7 +71,7 @@ function pageBody(store: Store, page: Page): string {
   const rows = JSON.parse(row.body) as unknown[][];
   assert.equal(rows.length, page.count);
   assert.ok(rows.length > 0 && rows.length <= 4096);
-  for (const row of rows) assert.equal(row.length, 20);
+  for (const row of rows) assert.equal(row.length, 21);
   return row.body;
 }
 

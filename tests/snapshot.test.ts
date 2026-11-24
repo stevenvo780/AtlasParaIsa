@@ -28,6 +28,14 @@ test('unknown tuple versions, truncated rows and semantically malformed fields f
   const store=new Store(':memory:');try{store.save(w);reescribirInstantanea(store, body);assert.throws(()=>store.load());}finally{store.close();}
 });
 
+test('rules 13 compact snapshots still decode with the historical tile width', () => {
+  const world = createWorld(51926);
+  world.version = 13;
+  const historical = JSON.parse(encodeSnapshot(world)) as { tiles: unknown[][] };
+  for (const row of historical.tiles) row.pop();
+  assert.deepEqual(restore(JSON.stringify(historical)), world);
+});
+
 test('invalid genealogies, incomplete history and asymmetric community membership are rejected', () => {
   for(const mutate of [
     (w:ReturnType<typeof createWorld>)=>{w.history=[{tick:0,population:16} as never];},

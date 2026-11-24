@@ -155,7 +155,7 @@ for (const format of formats) for (const boundary of boundaries) {
       assert.equal(saved.digest, sha256(saved.body));
       if (control === 'ordinary bytes') {
         const tuples = draft.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
-          t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
+          t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life,t.paved]);
         if (format === 'inline default') {
           const { aplicacion, ...limits } = paramsOf(draft).limites;
           assert.ok(saved.body === JSON.stringify({ ...draft, retiredChunks: [], retiredLegacy: [], tiles: tuples,

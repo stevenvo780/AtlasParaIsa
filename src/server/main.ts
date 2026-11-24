@@ -71,8 +71,15 @@ process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
 try {
   if (process.env.CARTA_SIM_WORKER === '1') {
-    app = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
+    const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true,
       password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, ...v21 });
+    // Un worker caído deja el transporte sirviendo un espejo fosilizado para siempre: se sale con 75
+    // y systemd reinicia el servicio sobre el último guardado.
+    pasarela.events.on('workerError', (error: unknown) => {
+      console.error(`El hilo de simulación cayó (${error instanceof Error ? error.message : String(error)}); salgo con 75 para que el servicio reinicie.`);
+      process.exit(75);
+    });
+    app = pasarela;
     await app.ready;
   } else {
   store = new Store(resolve(dataPath, 'world.sqlite'));

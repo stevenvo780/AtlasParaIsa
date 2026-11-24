@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
+import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
+import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
@@ -57,6 +59,10 @@ export interface AppOptions {
    * yields one scheduling turn for bounded recorder backpressure without dropping a tick. */
   beforeStep?: () => void | boolean;
   afterStep?: (simHz: number) => void;
+  /** Salida del proceso cuando el paso ya no puede atravesar el tick guardado (código 75:
+   * systemd reinicia sobre ese mismo guardado). Por defecto `process.exit`; las pruebas la
+   * sustituyen para observar la salida sin morirse. */
+  onFatalExit?: (code: number) => void;
   /** V21: uncapped loop. `tickMs = 0` (also implied by `tickMs: 0`): one step per `setImmediate`,
    * never an idle sleep, so I/O still interleaves between steps. Steps never clone the world. */
   turbo?: boolean;
@@ -70,6 +76,23 @@ export interface AppOptions {
   /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
   observerOnly?: boolean;
 }
+/** Estado de salud operacional que sirve `GET /health` y consume el vigilante externo. */
+export interface Salud {
+  estado: 'ok' | 'degradado' | 'parado';
+  tick: number;
+  ticksPorSegundo: number;
+  segundosDesdeUltimoPaso: number;
+  /** Epoch ms del último guardado confirmado; `null` si este proceso no lo conoce. */
+  ultimoGuardado: number | null;
+  gpu: { dispositivo: number; estado: 'ok' | 'cpu' | 'sin' }[];
+  recargas: number;
+}
+/** `cpu`: la tarjeta cayó en este proceso y su trabajo va por CPU. `sin`: pedida pero no utilizable. */
+export function estadoGpu(dispositivos: readonly number[]): Salud['gpu'] {
+  const hayNvrtc = gpuNvrtcAvailable();
+  return dispositivos.map(dispositivo => ({ dispositivo,
+    estado: dispositivosGpuApagados.has(dispositivo) ? 'cpu' : hayNvrtc ? 'ok' : 'sin' }));
+}
 /** Shared HTTP/WS security and transport, without a World or a SQLite writer. */
 export interface ReadOnlyBackend {
   sessions: Pick<Store, 'sessionValid' | 'addSession' | 'revoke'>;
@@ -78,6 +101,7 @@ export interface ReadOnlyBackend {
   person(id: string): Promise<Extract<ServerMessage, { type: 'persona' }>['persona']>;
   recipe(id: string): Promise<Extract<ServerMessage, { type: 'recipe' }>['recipe']>;
   regions(): unknown;
+  salud(): Salud;
   readonly runtime: RuntimeStats;
   readonly deltas: boolean;
   readonly failed: boolean;
@@ -468,6 +492,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   if (!gateway) store.save(world);
   let lastWorldSaveAt = monotonicNow();
+  /** Salud operacional y recuperación (reloj real, no el inyectable de las cuentas de paso). */
+  let ultimoGuardadoEn: number | null = gateway ? null : Date.now();
+  let ultimoPasoEn = relojReal();
+  let recargas = 0;
+  let fallosEnTick = -1, fallosSeguidos = 0;
+  const salirFatal = options.onFatalExit ?? ((codigo: number) => process.exit(codigo));
   const turboSaveIntervalMs = Math.max(0, options.turboSaveIntervalMs ?? 30_000);
   const instanceId = gateway ? undefined : existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
@@ -529,6 +559,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: turbo ? 0 : 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0 };
+  function salud(): Salud {
+    if (gateway) return gateway.salud();
+    const segundos = Math.max(0, (relojReal() - ultimoPasoEn) / 1000);
+    const gpu = estadoGpu(paramsOf(world).motor.gpu);
+    const parado = failed || stopped || segundos > 60;
+    return { estado: parado ? 'parado' : gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
+      tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
+      ultimoGuardado: ultimoGuardadoEn, gpu, recargas };
+  }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = monotonicNow() - start;
@@ -908,6 +947,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     // PERF3: el paso corre sobre el mundo vigente sin nada con que deshacerlo. Mientras siga en
     // `true`, un fallo deja `world` a medio paso (ver el `catch`).
     let sinReserva = false;
+    /** El paso ya es el mundo vigente (y durable si tocaba guardar): un fallo posterior no lo deshace. */
+    let confirmado = false;
+    /** El fallo vino del propio `store.save`: seguir simulando sin guardar no se recupera aquí. */
+    let guardando = false;
     try {
       for (const [socket, client] of clients) if (!sessions.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
       for (const item of batch) {
@@ -919,13 +962,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // A Mensaje Divino is a host input like a gesture: its step keeps an undo and saves at once.
       const conEntradas = valid.length > 0 || whisperBatch.length > 0;
       const cloneStarted = monotonicNow();
-      // T104/PERF3. La reserva solo sirve para deshacer el paso y seguir: el único fallo del que el
-      // servidor se recupera es `SessionRevoked`, y solo puede darse en un paso con gestos (`save`
-      // recibe sus sesiones). Cualquier otro fallo pausa el mundo para siempre (`failed`).
+      // T104/PERF3. La reserva sirve para deshacer el paso y seguir: `SessionRevoked` se reintenta
+      // tal cual, un fallo de paso deshecho (o recargado, sin reserva) sigue vía `recuperarPaso`, y
+      // solo un fallo del propio guardado pausa el mundo (`failed`, ver el `catch`).
       // · `motor.clonPorPaso=true` (default y producción): con gestos se simula sobre un clon y el
       //   mundo vigente no se toca hasta que el guardado confirma; sin gestos se simula en el sitio,
-      //   como el laboratorio, y un fallo deja el mundo a medio paso: pausa y nada lo proyecta ni lo
-      //   guarda. Copiar el mundo costaba 40–245 ms por paso y casi nunca se usaba.
+      //   como el laboratorio, y un fallo deja el mundo a medio paso hasta que se recarga el guardado.
+      //   Copiar el mundo costaba 40–245 ms por paso y casi nunca se usaba.
       // · `false` (T104): punto de restauración en todo paso y simulación sobre el mundo vigente.
       // `cloneMs` mide lo que costó reservar la vuelta atrás (0 sin reserva).
       // V21: turbo and observer-only steps never copy the world (`clonPorPaso` off). A step with gestures
@@ -989,8 +1032,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
+        guardando = true;
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
           [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios);
+        guardando = false; ultimoGuardadoEn = Date.now();
         lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
@@ -999,14 +1044,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // que queda (métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
       // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
       // disco ya dejó atrás y los gestos resueltos en este paso quedarían fuera del mundo en memoria.
-      // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
-      punto = null; sinReserva = false;
-      runtime.stepMs = monotonicNow() - stepStarted;
-      runtime.p95StepMs = registrarPaso(runtime.stepMs);
-      // Solo la pausa manual toca `reproductionEnabled`, sobre el mundo ya vigente.
-      if (reproduccionManual !== null) world.reproductionEnabled = reproduccionManual;
-      if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
-      runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
+      // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí cae sobre un paso entero.
+      punto = null; sinReserva = false; confirmado = true;
+      // Confirmado y durable: se responde a gestos y mensajes antes de la telemetría, para que un
+      // fallo de esta nunca deje un gesto ya guardado sin respuesta (se reaplicaría al paso siguiente).
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
       // Durable now: confirm each Mensaje Divino as it entered the world.
       for (const { item, whisper } of susurrosAplicados) {
@@ -1015,6 +1056,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         item.resolve(whisper);
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
+      runtime.stepMs = monotonicNow() - stepStarted;
+      runtime.p95StepMs = registrarPaso(runtime.stepMs);
+      // Solo la pausa manual toca `reproductionEnabled`, sobre el mundo ya vigente.
+      if (reproduccionManual !== null) world.reproductionEnabled = reproduccionManual;
+      if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
+      runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró
       // (siempre corrió así; instrumentarlo no adelanta ni retrasa el envío ni cambia su cadencia).
       // Reloj real, no `monotonicNow` — mismo motivo que `medicion` arriba.
@@ -1048,6 +1095,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (paraleloCapturadoMs > 0) { runtime.ocupacionWorkers = Math.max(0, Math.min(1, ocupacionPonderada / paraleloCapturadoMs)); runtime.tiempoParaleloMs = paraleloCapturadoMs; runtime.tiempoBarreraMs = barreraCapturadaMs; }
         else if (hayGpu && paraleloPasoMs > 0) { runtime.tiempoParaleloMs = paraleloPasoMs; runtime.tiempoBarreraMs = 0; }
       }
+      ultimoPasoEn = relojReal(); fallosSeguidos = 0; fallosEnTick = -1;
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -1065,22 +1113,78 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
         return;
       }
-      failed = true;
-      // Un mundo a medio paso (sin reserva, o con un punto que no se pudo restaurar) no es un estado
-      // del mundo: desde aquí nada lo proyecta ni lo consulta (`view`, `persona`, `recipe`). Guardar ya
-      // no puede: `avanzar` no pasa de `failed` y el cierre no guarda.
-      aMedioPaso = !restaurado;
-      for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
-      pending.clear();
-      rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));
-      // Do not log snapshots, inputs, or personal content on failure.
-      for (const socket of clients.keys()) {
-        send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
-        const previous = clients.get(socket)?.lastView;
-        // Terminal: no habrá más difusiones, así que no espera al acuse del `state` en vuelo.
-        if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
+      const motivo = error instanceof Error ? error.message : String(error);
+      if (confirmado) {
+        // El paso ya es durable y el mundo está entero: falló la telemetría o la difusión, no el paso.
+        console.warn(`Un fallo tras confirmar el paso ${world.tick} no detiene el mundo: ${motivo}`);
+        ultimoPasoEn = relojReal(); fallosSeguidos = 0; fallosEnTick = -1;
+        return;
       }
+      if (guardando) {
+        // Simular sin poder guardar perdería mundo y confirmaría lo que no es durable: se conserva
+        // la pausa protectora. `/health` dice `parado` y el vigilante externo reinicia el servicio
+        // sobre el último guardado; esa es la recuperación de un fallo de persistencia.
+        failed = true;
+        // Un mundo a medio paso (sin reserva, o con un punto que no se pudo restaurar) no es un estado
+        // del mundo: desde aquí nada lo proyecta ni lo consulta (`view`, `persona`, `recipe`). Guardar ya
+        // no puede: `avanzar` no pasa de `failed` y el cierre no guarda.
+        aMedioPaso = !restaurado;
+        for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
+        pending.clear();
+        rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));
+        // Do not log snapshots, inputs, or personal content on failure.
+        for (const socket of clients.keys()) {
+          send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
+          const previous = clients.get(socket)?.lastView;
+          // Terminal: no habrá más difusiones, así que no espera al acuse del `state` en vuelo.
+          if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
+        }
+        return;
+      }
+      recuperarPaso(error, restaurado);
     }
+  }
+  /**
+   * Un paso de simulación que lanzó ya no pausa el mundo para siempre: el paso quedó deshecho
+   * (clon o punto de restauración) o, si iba sin reserva, el mundo en memoria se descarta y se
+   * recarga el último guardado; en ambos casos el mundo sigue. Tres fallos seguidos intentando
+   * salir del mismo tick son un estado que el paso no puede atravesar: se sale con 75 y systemd
+   * reinicia el servicio sobre ese mismo guardado (con el vigilante de respaldo).
+   */
+  function recuperarPaso(error: unknown, restaurado: boolean): void {
+    const motivo = error instanceof Error ? error.message : String(error);
+    if (!restaurado) {
+      let cargado: ReturnType<Store['load']> = null;
+      try { cargado = store.load(); } catch { cargado = null; }
+      if (!cargado) {
+        console.error(`El paso falló (${motivo}) y no hay un guardado legible desde el que recargar: salgo con 75.`);
+        failed = true; aMedioPaso = true; salirFatal(75); return;
+      }
+      world = cargado.world; recargas++; aMedioPaso = false;
+      // Las cachés por tick y la cinta describían el mundo descartado: el próximo fotograma va completo.
+      mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
+      ultimoTickGrabado = -1;
+      world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
+        text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
+        cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
+      world.events = world.events.slice(-120);
+      renovarReserva();
+      console.warn(`El paso falló (${motivo}); el mundo se recargó desde su último guardado (paso ${world.tick}, recarga ${recargas}) y sigue.`);
+    } else {
+      console.warn(`El paso ${world.tick + 1} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
+    }
+    // Ni los gestos ni los mensajes del lote llegaron a aplicarse ni a guardarse: esperan al paso
+    // siguiente como con `SessionRevoked`, salvo los de sesiones que ya terminaron.
+    for (const item of pending.values()) if (!sessions.sessionValid(item.hash)) {
+      item.reject(new HttpError(401, 'La sesión terminó antes de guardar el gesto.')); pending.delete(item.gesture.id);
+    }
+    rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
+    if (world.tick === fallosEnTick) fallosSeguidos++; else { fallosEnTick = world.tick; fallosSeguidos = 1; }
+    if (fallosSeguidos >= 3) {
+      console.error(`Tres fallos seguidos intentando salir del paso ${world.tick} (último: ${motivo}): salgo con 75 para que el servicio reinicie.`);
+      failed = true; salirFatal(75); return;
+    }
+    broadcast();
   }
   const server = createServer(async (req, res) => {
     // Hasta que la respuesta termina (o se corta): el planificador cede a ella tras un paso largo.
@@ -1094,7 +1198,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try {
       const expectedOrigin = requestOrigin(req);
       const url = new URL(req.url ?? '/', expectedOrigin);
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, (gateway?.failed ?? failed) ? 503 : 200, { status: (gateway?.failed ?? failed) ? 'paused' : 'ok', ...((gateway?.respaldo ?? respaldo) ? { respaldo: gateway?.respaldo ?? respaldo } : {}) });
+      if (req.method === 'GET' && url.pathname === '/health') {
+        // 503 solo en `parado`: más de 60 s sin completar un paso, o la pausa protectora de guardado.
+        const estado = salud();
+        return json(res, estado.estado === 'parado' ? 503 : 200,
+          { ...estado, status: estado.estado === 'parado' ? 'paused' : 'ok', ...((gateway?.respaldo ?? respaldo) ? { respaldo: gateway?.respaldo ?? respaldo } : {}) });
+      }
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         armarGraciaCarga();
@@ -1380,7 +1489,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
-    server, stepOnce, broadcast, requestGesture, requestWhisper, view,
+    server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud,
     /** V24: Mensajes Divinos waiting for their step (tests and benches), and whether the last step applied one. */
     get susurrosPendientes() { return pendingWhispers.length; },
     get susurrosEnUltimoPaso() { return susurrosEnUltimoPaso; },

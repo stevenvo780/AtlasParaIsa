@@ -37,20 +37,28 @@ function paramsParaDigesto(world: World): object {
   const params = paramsOf(world);
   const { depuracion: _depuracion, ...motor } = params.motor;
   const out: Record<string, unknown> = { ...params, motor };
-  if (params.conducta && params.conducta.politicaAutonomia === 0) {
-    const { politicaAutonomia: _pa, ...rest } = params.conducta;
-    out.conducta = rest;
-  }
-  if (params.social && (params.social.derivaCultural === 0 || params.social.vinculoEncuentro === 0)) {
+  const conducta: Record<string, unknown> = { ...params.conducta };
+  if (params.conducta && params.conducta.politicaAutonomia === 0) delete conducta.politicaAutonomia;
+  // V19: un interruptor apagado deja su constante asociada inerte; ambos se omiten (digestos V18 intactos).
+  if (params.conducta && params.conducta.aprendizajeCausal === false) { delete conducta.aprendizajeCausal; delete conducta.memoriaResultadoTicks; }
+  out.conducta = conducta;
+  if (params.social) {
     const social: Record<string, unknown> = { ...params.social };
     if (params.social.derivaCultural === 0) delete social.derivaCultural;
     if (params.social.vinculoEncuentro === 0) delete social.vinculoEncuentro;
+    if (params.social.acuerdosMateriales === false) { delete social.acuerdosMateriales; delete social.memoriaResultadosDias; }
     out.social = social;
   }
-  if (params.tecnologia && params.tecnologia.efectosHerramientas === false) {
-    const { efectosHerramientas: _eh, ...rest } = params.tecnologia;
-    out.tecnologia = rest;
+  if (params.tecnologia) {
+    const tecnologia: Record<string, unknown> = { ...params.tecnologia };
+    if (params.tecnologia.efectosHerramientas === false) delete tecnologia.efectosHerramientas;
+    if (params.tecnologia.obrasPorPropiedades === false) delete tecnologia.obrasPorPropiedades;
+    out.tecnologia = tecnologia;
   }
+  const fauna = params.fauna;
+  if (!fauna || !(fauna.contactoContinuo || fauna.reservaReproductiva || fauna.encuentroFertil)) delete out.fauna;
+  if (!params.construccion || params.construccion.modular === false) delete out.construccion;
+  if (!params.ecologia || params.ecologia.amplitudEstacional === 0) delete out.ecologia;
   return out;
 }
 

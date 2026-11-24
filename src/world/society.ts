@@ -52,7 +52,9 @@ export function updateCulturalNormsOnOutcome(world: World, person: Person, actio
   if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9 * (0.95 - person.culture.sharing));
   else if (need > 0.72) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1 * Math.max(0.1, person.culture.sharing - 0.08));
   else if (useful && ['forage','hunt'].includes(action) && (!person.communityId || person.hunger > 0.55)) person.culture.sharing = clamp(person.culture.sharing - rate * 0.45 * Math.max(0.1, person.culture.sharing - 0.1));
-  if (useful && ['farm','build'].includes(action) && person.communityId) person.culture.openness = clamp(person.culture.openness - rate * 0.3 * Math.max(0.1, person.culture.openness - 0.15));
+  const acuerdos = paramsOf(world).social.acuerdosMateriales;
+  if (acuerdos) { /* V19/S: ni construir ni explorar mueven la apertura; sólo acuerdos y cooperación cumplidos. */ }
+  else if (useful && ['farm','build'].includes(action) && person.communityId) person.culture.openness = clamp(person.culture.openness - rate * 0.3 * Math.max(0.1, person.culture.openness - 0.15));
   else if (useful && action === 'explore' && person.culture.openness < 0.85) person.culture.openness = clamp(person.culture.openness + rate * 0.25 * (0.85 - person.culture.openness));
 }
 /** Herencia cultural vertical. Con `derivaCultural <= 0`, la media exacta de siempre; con
@@ -85,7 +87,7 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
       const delta = (b.culture[key] - a.culture[key]) * 0.004 * similarity;
       a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
     }
-  } else if (a.communityId !== b.communityId && amount > 0) {
+  } else if (a.communityId !== b.communityId && amount > 0 && !paramsOf(world).social.acuerdosMateriales) {
     a.culture.openness = clamp(a.culture.openness + 0.006 * derivaCultural);
     b.culture.openness = clamp(b.culture.openness + 0.006 * derivaCultural);
   }
@@ -538,7 +540,11 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }
   bond(world, person, other, 0.12); count(world, 'cooperation');
   const derivaCultural = paramsOf(world).social.derivaCultural;
-  if (derivaCultural > 0) {
+  if (paramsOf(world).social.acuerdosMateriales) {
+    // V19/S: la cooperación SÍ entregó recursos o trabajo (pasos anteriores): evidencia observada de cumplimiento,
+    // igual para dentro y fuera de la comunidad; la etiqueta de comunidad no cuenta.
+    observeAgreementOutcome(world, person, other, 1); observeAgreementOutcome(world, other, person, 1);
+  } else if (derivaCultural > 0) {
     const opennessDelta = person.communityId !== other.communityId ? 0.015 * derivaCultural : -0.003 * derivaCultural;
     person.culture.openness = clamp(person.culture.openness + opennessDelta);
     other.culture.openness = clamp(other.culture.openness + opennessDelta);
@@ -853,6 +859,40 @@ export function updateCommunities(world: World, emit: Emit): void {
   }
   world.communities = world.communities.filter(group => group.members.length > 0);
 }
+/** V19/S: estimador acotado `o ← o + α(y − o)` de lo que `person` espera de `other` (confianza propia en la
+ * pareja y apertura cultural), con `y = 1` si lo acordado se cumplió y `y = 0` si no. `α = 1 / memoriaResultadosDias`:
+ * la memoria de resultados es finita (con 10 días, cada observación pesa un 10 %). */
+export function observeAgreementOutcome(world: World, person: Person, other: Person, y: 0 | 1): void {
+  const alpha = 1 / paramsOf(world).social.memoriaResultadosDias, trust = person.bonds[other.id] ?? 0.2;
+  person.bonds[other.id] = clamp(trust + alpha * (y - trust));
+  person.culture.openness = clamp(person.culture.openness + alpha * (y - person.culture.openness));
+}
+/** Ticks que quien cedió espera a que la fuente le dé antes de contar el acuerdo como incumplido. */
+const PLAZO_ACUERDO = 300;
+/** V19/S: resuelve el acuerdo pendiente de `person` con lo que su cuerpo y la fuente muestran. Cumplido: su
+ * hambre o sed bajó junto a la fuente. Incumplido: pasada la espera, la fuente se agotó sin que le llegara nada, o
+ * venció el plazo. Si bajó lejos de la fuente (otra comida) no hay evidencia sobre el acuerdo y se descarta. */
+export function settleAgreement(world: World, person: Person): void {
+  const agreement = person.agreement;
+  if (!agreement) return;
+  const other = world.people.find(p => p.id === agreement.partner);
+  const age = world.tick - agreement.tick;
+  const delivered = agreement.level - person[agreement.metric] >= 0.08;
+  if (delivered) {
+    delete person.agreement;
+    if (other && distance(person, agreement) <= 2) observeAgreementOutcome(world, person, other, 1);
+    return;
+  }
+  if (age < 12) return;
+  const source = tileAt(world, agreement), water = agreement.metric === 'thirst';
+  const stock = water ? waterAvailable(world, agreement) : Math.max(source?.food ?? 0, source?.fauna ?? 0);
+  if (age < PLAZO_ACUERDO && stock >= (water ? 0.012 : 0.006)) return;
+  delete person.agreement;
+  if (!other) return;
+  // La espera costó tiempo y no dio nada: evidencia en contra de quien pidió esperar y de lo acordado.
+  observeAgreementOutcome(world, person, other, 0);
+  person.socialLoad = clamp(person.socialLoad + 0.06);
+}
 export function resourceDispute(world: World, person: Person, emit: Emit): boolean {
   // Leyes candidatas `social.disputaNecesidad`, `social.disputaEscasez` y
   // `social.disputaRadio`: las tres condiciones tienen que darse A LA VEZ (necesidad
@@ -861,7 +901,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez;
   // `disputaDestino` es cuánto tienen que coincidir los dos destinos y `disputaEspera` los
   // ticks de calma que guarda cada lado tras disputar.
-  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera, memoriaDisputa, derivaCultural } = paramsOf(world).social;
+  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera, memoriaDisputa, derivaCultural, acuerdosMateriales } = paramsOf(world).social;
   if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < disputaEspera || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
@@ -881,11 +921,27 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   const legible = memoriaDisputa > 0, necesidad = (p: Person) => Math.max(p.hunger, p.thirst);
   const cedeOtro = legible && (necesidad(other) < necesidad(person) || (necesidad(other) === necesidad(person) && other.id > person.id));
   const cede = cedeOtro ? other : person, sigue = cedeOtro ? person : other, fuente = { x: person.target.x, y: person.target.y };
-  if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {
-    bond(world, person, other, 0.04); person.lastDispute = other.lastDispute = world.tick;
-    if (derivaCultural > 0 && person.communityId !== other.communityId) {
-      person.culture.openness = clamp(person.culture.openness + 0.012 * derivaCultural);
-      other.culture.openness = clamp(other.culture.openness + 0.012 * derivaCultural);
+  // V19/S: la predisposición (confianza o apertura) ya no basta; el turno tiene que ser factible con el stock que
+  // se percibe aquí y ahora. Quien cede necesita `unidad · necesidad` de lo que queda después de que el otro tome lo
+  // suyo; la fracción que el stock cubre de la demanda de ambos, ponderada por la apertura que ha aprendido quien
+  // espera, es la probabilidad que da al cumplimiento y debe cubrir su propia urgencia. Sin stock suficiente, o con
+  // una apertura que la experiencia ya rebajó, el desacuerdo cuesta fatiga y confianza aunque la apertura sea 0,95.
+  const unidad = person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06;
+  const cubierto = acuerdosMateriales ? Math.min(1, stock / (unidad * (necesidad(cede) + necesidad(sigue)))) : 1;
+  const turnoViable = !acuerdosMateriales || cubierto * cede.culture.openness >= necesidad(cede);
+  const predispuestos = trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65;
+  if (predispuestos && turnoViable) {
+    person.lastDispute = other.lastDispute = world.tick;
+    if (acuerdosMateriales) {
+      // El acuerdo no entrega nada ni premia al firmarse: queda pendiente hasta ver si quien esperó recibió.
+      const metric = person.action === 'drink' ? 'thirst' : 'hunger';
+      cede.agreement = { partner: sigue.id, x: fuente.x, y: fuente.y, tick: world.tick, metric, level: cede[metric] };
+    } else {
+      bond(world, person, other, 0.04);
+      if (derivaCultural > 0 && person.communityId !== other.communityId) {
+        person.culture.openness = clamp(person.culture.openness + 0.012 * derivaCultural);
+        other.culture.openness = clamp(other.culture.openness + 0.012 * derivaCultural);
+      }
     }
     cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + 12;
     cede.reason = legible ? 'Acordó un turno ante la escasez: su vecino lo necesita más y accede primero.' : 'Acordó un turno ante la escasez: deja acceder primero a su vecino.';
@@ -895,18 +951,23 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
       : 'Confianza o apertura aprendida permiten coordinar el acceso; el primero espera doce pasos y el recurso no aumenta.' });
     return true;
   }
-  if (person.communityId === other.communityId && trust >= 0.25) return false;
+  // V19/S: la confianza entre miembros de una comunidad ya no exime del desacuerdo cuando el turno que su
+  // predisposición pedía es materialmente inviable: el recurso no alcanza para los dos.
+  if (person.communityId === other.communityId && trust >= 0.25 && !(acuerdosMateriales && predispuestos)) return false;
   person.lastDispute = world.tick; other.lastDispute = world.tick;
   person.socialLoad = clamp(person.socialLoad + 0.12); other.socialLoad = clamp(other.socialLoad + 0.12);
   person.fatigue = clamp(person.fatigue + 0.015); other.fatigue = clamp(other.fatigue + 0.015);
   if (derivaCultural > 0) {
     person.culture.sharing = clamp(person.culture.sharing - 0.025 * derivaCultural);
     other.culture.sharing = clamp(other.culture.sharing - 0.025 * derivaCultural);
-    if (person.communityId !== other.communityId) {
+    if (!acuerdosMateriales && person.communityId !== other.communityId) {
       person.culture.openness = clamp(person.culture.openness - 0.03 * derivaCultural);
       other.culture.openness = clamp(other.culture.openness - 0.03 * derivaCultural);
     }
   }
+  // V19/S: el obstáculo físico real (dos reclamos sobre una fuente que no alcanza) es evidencia en contra para ambos,
+  // pertenezcan o no a la misma comunidad.
+  if (acuerdosMateriales) { observeAgreementOutcome(world, person, other, 0); observeAgreementOutcome(world, other, person, 0); }
   bond(world, person, other, -0.08); count(world, 'conflicts');
   for (const p of [person, other]) { const group = world.communities.find(c => c.id === p.communityId); if (group) group.disputes++; }
   // Yield one contested attempt, producing an observable cost without forced violence or theft.

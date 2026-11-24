@@ -70,15 +70,16 @@ export const CELDA_PRESENTE = 1, CELDA_AGUA = 2, CELDA_REFUGIO = 4, CELDA_OCEANO
 export const TF = { x: 0, y: 1, carnivory: 2, health: 3 } as const;
 export const NTF = 4;
 /** Columnas Int32 de la tabla. */
-export const TI = { especie: 0, rango: 1 } as const;
-export const NTI = 2;
+/** `listo` (V19/M): 1 si el animal cumple `listoParaCriar` (sin leer `action`); sólo se llena con `encuentro`. */
+export const TI = { especie: 0, rango: 1, listo: 2 } as const;
+export const NTI = 3;
 
 /** Columnas Float64 de entrada por animal debido. */
 export const DF = { x: 0, y: 1, hunger: 2, thirst: 3, energy: 4, fatigue: 5, perception: 6, carnivory: 7 } as const;
 export const NDF = 8;
 /** Columnas Int32 de entrada por animal debido. */
-export const DI = { especie: 0, rango: 1, memorias: 2, idInicio: 3, idLongitud: 4 } as const;
-export const NDI = 5;
+export const DI = { especie: 0, rango: 1, memorias: 2, idInicio: 3, idLongitud: 4, listo: 5 } as const;
+export const NDI = 6;
 /** Campos Float64 por recuerdo (`memoriaF64[(slot · capMemoria + k) · NMF + campo]`). */
 export const MF = { x: 0, y: 1, tick: 2, food: 3, water: 4 } as const;
 export const NMF = 5;
@@ -92,6 +93,10 @@ export const NSO = 9;
 /** `destinoTipo`: el propio animal, una tesela (índice en `world.tiles`), un recuerdo (posición en la
  * memoria ya actualizada por los `remember` de este `choose`) o una presa (fila de la tabla). */
 export const DESTINO_PROPIO = 0, DESTINO_TESELA = 1, DESTINO_RECUERDO = 2, DESTINO_PRESA = 3;
+/** V19/M: el destino es el animal de la fila de la tabla (pareja); la acción sigue siendo `roam`. */
+export const DESTINO_PAREJA = 4;
+/** Razón de la aproximación a pareja: literal de `RAZON_PAREJA` en `animals.ts` (la prueba lo comprueba). */
+export const RAZON_PAREJA_FAUNA = 'Está listo para criar y se acerca, pagando cada paso, a una pareja compatible que percibe.';
 
 /** Nombres de los SAB del despacho. */
 export const BUFFERS_FAUNA = [
@@ -110,6 +115,8 @@ export interface ParamsFauna {
   hashMask: number;
   seed: number;
   tick: number;
+  /** V19/M (`fauna.encuentroFertil`): ausente o `false` = la decisión de V18. */
+  encuentro?: boolean;
 }
 
 export interface VistaFauna {
@@ -404,6 +411,20 @@ export function decidirAnimal(vista: VistaFauna, slot: number): void {
       else if (df[DF.energy * cap + slot]! < 0.4 || df[DF.fatigue * cap + slot]! > 0.55) accion = ACCION_FAUNA.rest;
       else {
         // Novedad de cada adyacente (`novelty`), con la cadena exacta del `hash` real.
+        // V19/M: pareja conespecífica lista más cercana (distancia, rango canónico); `listo` ya incluye la reserva de R.
+        let pareja = -1;
+        if (params.encuentro === true && di[DI.listo * cap + slot] === 1) {
+          for (let i = 0; i < numCercanos; i++) {
+            const fila = cercanos[i]!;
+            if (ti[TI.especie * capT + fila] !== especie || ti[TI.listo * capT + fila] !== 1) continue;
+            if (pareja < 0) { pareja = fila; continue; }
+            const d = distancia(tf[TF.x * capT + fila]!, tf[TF.y * capT + fila]!) - distancia(tf[TF.x * capT + pareja]!, tf[TF.y * capT + pareja]!);
+            const ra = ti[TI.rango * capT + fila]!, rb = ti[TI.rango * capT + pareja]!;
+            if ((d || (ra < rb ? -1 : ra > rb ? 1 : 0)) < 0) pareja = fila;
+          }
+        }
+        if (pareja >= 0) { destinoTipo = DESTINO_PAREJA; destinoRef = pareja; }
+        else {
         let id = '';
         const idInicio = di[DI.idInicio * cap + slot]!, idFin = idInicio + di[DI.idLongitud * cap + slot]!;
         for (let k = idInicio; k < idFin; k++) id += String.fromCharCode(vista.id[k]!);
@@ -421,6 +442,7 @@ export function decidirAnimal(vista: VistaFauna, slot: number): void {
           if (mejor < 0 || (mejorNovedad - n || visY[v]! - visY[mejor]! || visX[v]! - visX[mejor]!) < 0) { mejor = v; mejorNovedad = n; }
         }
         if (mejor >= 0) destinoVisible(mejor);
+        }
       }
     }
   }

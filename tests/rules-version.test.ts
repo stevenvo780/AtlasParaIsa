@@ -11,10 +11,10 @@ for (const previousVersion of [6, 7, 8, 9, 10, 11]) test(`V12 is explicit and re
   // Old founder expressions are historical state, not retroactively corrected.
   world.people[2]!.traits.curiosity = 0.01;
   const before = cloneWorld(world), migrated = migrateWorld(world);
-  assert.equal(RULES_VERSION, 12);
-  assert.equal(createWorld().version, 12);
-  assert.equal(migrated.version, 12);
-  assert.deepEqual(migrated, { ...before, version: 12 });
+  assert.equal(RULES_VERSION, 13);
+  assert.equal(createWorld().version, 13);
+  assert.equal(migrated.version, 13);
+  assert.deepEqual(migrated, { ...before, version: 13 });
   assert.deepEqual(world, before);
   assert.deepEqual(paramsOf(migrated), paramsOf(world));
   assertWorld(migrated);
@@ -31,12 +31,12 @@ test('V10/V11→V12 cambia sólo version: mismo digesto canónico del estado y p
     const digest = digestoCanonico(before);
     assertWorld(before, prev);
     const migrated = migrateWorld(sample);
-    assert.deepEqual(migrated, { ...before, version: 12 });
+    assert.deepEqual(migrated, { ...before, version: 13 });
     assert.deepEqual(paramsOf(migrated), persisted);
     assert.deepEqual(paramsOf(sample), persisted);
     migrated.version = prev;
     assert.equal(digestoCanonico(migrated), digest, `normalizar sólo la etiqueta reproduce el digesto V${prev}`);
-    migrated.version = 12;
+    migrated.version = 13;
     assertWorld(migrated);
 
     // Un V10/V11 sin diario ni punto de control recibe al cargar la MISMA normalización que la versión vigente.
@@ -49,7 +49,7 @@ test('V10/V11→V12 cambia sólo version: mismo digesto canónico del estado y p
   }
 });
 
-for (const previousVersion of [6, 7, 8, 9, 10, 11]) test(`a V${previousVersion} label cannot launder corrupt physical state through the V12 reader`, () => {
+for (const previousVersion of [6, 7, 8, 9, 10, 11]) test(`a V${previousVersion} label cannot launder corrupt physical state through the V13 reader`, () => {
   const world = createWorld(); world.version = previousVersion;
   world.people[2]!.materials.wood = -1;
   const before = structuredClone(world);

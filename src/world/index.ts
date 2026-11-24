@@ -8,7 +8,7 @@ import { residentFastAccess, residentTileReader, type ResidentFastAccess, type R
 import { gpuNvrtcAvailable } from './gpu/puente.js';
 import { chunkKey, generateChunk, proceduralPlaceName, proceduralPersonName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
-import { bond, convivir, cooperate, cooperationOpportunity, inheritCulture, initialCulture, resourceDispute, updateCommunities, updateCulturalNormsOnOutcome, settlementOpportunity, type Culture } from './society.js';
+import { bond, convivir, cooperate, cooperationOpportunity, inheritCulture, initialCulture, resourceDispute, settleAgreement, updateCommunities, updateCulturalNormsOnOutcome, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
@@ -35,7 +35,7 @@ import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 import {
   assertPolicyGenome, assertPolicyPlasticity, evaluatePolicySingle,
   founderPolicy, inheritPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS,
-  policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
+  policyActionBias, updatePolicyPlasticity, updatePolicyPlasticityCausal, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
 import { cellIntKey, computeLocalPolicyObservation } from './politica-obs.js';
 import { evaluatePoliciesBatch, residentPolicyRegistry } from './gpu/politica-gpu.js';
@@ -56,7 +56,7 @@ export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExe
 
 // V12 adds opt-in local neighborhood natality (D2), uncapped organic communities (`maxComunidades=0`),
 // evolvable 12→8→12 local neural policy + lifetime Baldwin plasticity, and multi-chip CPU+Dual-GPU dispatch.
-export const RULES_VERSION = 12;
+export const RULES_VERSION = 13;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -115,6 +115,10 @@ export interface Person extends PersonView {
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
+  /** V19/S (`social.acuerdosMateriales`): turno acordado ante una fuente escasa que quien cedió espera ver cumplido.
+   * `level` es su hambre o sed al firmar; se resuelve con el cambio corporal real (`society.ts` → `settleAgreement`).
+   * Adquirido, nunca heredable: se borra al nacer. */
+  agreement?: { partner: string; x: number; y: number; tick: number; metric: 'hunger' | 'thirst'; level: number };
   /** Ley V16 (`social.vinculoEncuentro > 0`): último punto de encuentro o rastro recordado de S/I. */
   partnerMemory?: { x: number; y: number; tick: number };
   /** Ley evolutiva V12 (`conducta.politicaPeso > 0`): red de política local 12→8→12 heredable. */
@@ -618,6 +622,16 @@ function placeById(world: World, id: string): PlaceView | undefined {
   return index.byId.get(id);
 }
 
+/** V19/L (`conducta.aprendizajeCausal`): acredita la consecuencia corporal REAL observada desde la última marca a la
+ * acción que la precedió; el retorno lo mide `updatePolicyPlasticityCausal`, no una constante por acción hecha. */
+function creditCausalOutcome(world: World, person: Person, action: Action | 'rest'): void {
+  const { conducta } = paramsOf(world);
+  const { plasticity } = ensurePersonPolicy(world, person);
+  updatePolicyPlasticityCausal(plasticity, action, person.intentContext,
+    [person.hunger, person.thirst, person.fatigue, person.energy], world.tick, conducta.memoriaResultadoTicks,
+    person.genome.learningRate * (conducta.politicaAutonomia > 0 ? 0.4 : 0.25));
+}
+
 function ensurePersonPolicy(world: World, person: Person): { genome: PolicyGenome; plasticity: PolicyPlasticity } {
   if (!person.policy) person.policy = founderPolicy(world.seed, person.id);
   if (!person.policyPlasticity) person.policyPlasticity = initialPolicyPlasticity();
@@ -702,6 +716,8 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   const exact = fast?.exact;
   const params = paramsOf(world);
   const WATER_CODE = fast?.TERRAIN_WATER ?? -1, terrainScan = fast?.terrainArr;
+  // V19/L: un tramo de descanso se acredita con lo que el cuerpo recuperó DE VERDAD hasta esta nueva decisión.
+  if (own && person.action === 'rest' && params.conducta.aprendizajeCausal && params.conducta.politicaPeso > 0 && world.adaptationEnabled) creditCausalOutcome(world, person, 'rest');
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
     const x = person.x + dx, y = person.y + dy;
@@ -1281,7 +1297,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   // Ley evolutiva V12 (`conducta.politicaPeso`) + autonomía V16 (`conducta.politicaAutonomia`):
   // red local 12→8→12 heredable + plasticidad Baldwin adquirida en vida (nunca heredada). Nunca sobrepone
   // urgencias corporales severas (> 0,75) ni búsquedas de emergencia por sed o lluvia. Con default 0 no ejecuta nada.
-  const { politicaPeso: pesoBase, politicaAutonomia } = params.conducta;
+  const { politicaPeso: pesoBase, politicaAutonomia, aprendizajeCausal } = params.conducta;
   const politicaPeso = person.thirst <= 0.75 && person.hunger <= 0.75 ? pesoBase : 0;
   let heuristicWinnerAction: Action | undefined;
   if (politicaPeso > 0) {
@@ -1307,7 +1323,9 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       candidate.prePolicyScore = candidate.score;
       if (candidate.score > bestPre) { bestPre = candidate.score; heuristicWinnerAction = candidate.action; }
       if ((candidate === candidates[0] && emergencyExplore) || (politicaAutonomia > 0 && protectedBond)) continue;
-      const delta = policyActionBias(scores, candidate.action, politicaPeso);
+      let delta = policyActionBias(scores, candidate.action, politicaPeso);
+      // V19/L: la preferencia aprendida por descansar no puede dominar cuando no queda nada que recuperar.
+      if (aprendizajeCausal && candidate.action === 'rest') delta *= clamp(person.fatigue + (1 - person.energy));
       candidate.score += delta;
       candidate.policyDelta = delta;
     }
@@ -1422,9 +1440,12 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   const key = `${person.intentContext}:${action}`;
   if (world.adaptationEnabled) person.values[key] = Math.max(-0.3, Math.min(0.3, (person.values[key] ?? 0) + person.genome.learningRate * (benefit - (person.values[key] ?? 0))));
   if (world.adaptationEnabled && paramsOf(world).conducta.politicaPeso > 0) {
-    const { plasticity } = ensurePersonPolicy(world, person);
-    const step = paramsOf(world).conducta.politicaAutonomia > 0 ? 0.4 : 0.25;
-    updatePolicyPlasticity(plasticity, action, benefit, person.genome.learningRate * step);
+    if (paramsOf(world).conducta.aprendizajeCausal) creditCausalOutcome(world, person, action);
+    else {
+      const { plasticity } = ensurePersonPolicy(world, person);
+      const step = paramsOf(world).conducta.politicaAutonomia > 0 ? 0.4 : 0.25;
+      updatePolicyPlasticity(plasticity, action, benefit, person.genome.learningRate * step);
+    }
   }
   if (world.adaptationEnabled && world.cooperationEnabled) {
     // Acquired norms react to consequences, independently from inherited alleles.
@@ -1618,6 +1639,7 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
   if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot, tileIn, fast ?? null);
   if (person.action === 'eat' || person.action === 'drink' || person.action === 'hunt') resourceDispute(world, person, event => addEvent(world, event));
+  if (person.agreement !== undefined) settleAgreement(world, person);
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot, tileIn, fast?.exact ?? null);
   const moved = person.x !== tile.x || person.y !== tile.y;
   const current = moved ? tileIn(person.x, person.y)! : tile;
@@ -1667,7 +1689,7 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
     restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
     const { politicaPeso, politicaAutonomia } = params.conducta;
-    if (politicaAutonomia > 0 && politicaPeso > 0 && world.adaptationEnabled && world.tick % 30 === 0) {
+    if (!params.conducta.aprendizajeCausal && politicaAutonomia > 0 && politicaPeso > 0 && world.adaptationEnabled && world.tick % 30 === 0) {
       const gained = (beforeRest.fatigue - person.fatigue) + (person.energy - beforeRest.energy);
       const { plasticity } = ensurePersonPolicy(world, person);
       updatePolicyPlasticity(plasticity, 'rest', gained * 25, person.genome.learningRate * 0.3);
@@ -1796,7 +1818,7 @@ function encounters(world: World): void {
     s.partnerMemory = { x: s.x, y: s.y, tick: world.tick };
     i.partnerMemory = { x: i.x, y: i.y, tick: world.tick };
     bond(world, s, i, 0.08);
-    if (world.adaptationEnabled && params.conducta.politicaPeso > 0) {
+    if (world.adaptationEnabled && params.conducta.politicaPeso > 0 && !params.conducta.aprendizajeCausal) {
       for (const person of [s, i]) {
         const { plasticity } = ensurePersonPolicy(world, person);
         updatePolicyPlasticity(plasticity, 'cooperate', 0.18, person.genome.learningRate * 0.35);
@@ -1995,6 +2017,7 @@ function reproduce(world: World): void {
     };
     delete child.home;
     delete child.partnerMemory;
+    delete child.agreement;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
     delete (child as unknown as Record<string, unknown>).vocacion;
     // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.
@@ -2182,6 +2205,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     if (p.policyPlasticity !== undefined) {
       if (expectedVersion < 12) fail();
       assertPolicyPlasticity(p.policyPlasticity);
+      if (expectedVersion < 13 && Object.hasOwn(p.policyPlasticity, 'baseline')) fail();
     }
   }
   if (expectedVersion >= 3) {
@@ -2255,6 +2279,13 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 12) {
+    // V12 → V13 sólo etiqueta: los interruptores V19 ausentes de sus params cargan apagados
+    // (`readSnapshotParams` completa con `HISTORICAL_PARAMS`) y el estado V19 opcional queda ausente.
+    assertWorld(value, 12, context);
+    const world = cloneWorld(value, context); upgradeV13(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 11) {
     assertWorld(value, 11, context);
     const world = cloneWorld(value, context); upgradeV12(world);
@@ -2291,20 +2322,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -2332,7 +2363,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); upgradeV13(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -2370,3 +2401,5 @@ function upgradeV10(world: World): void { world.version = 10; }
 function upgradeV11(world: World): void { world.version = 11; }
 /** V12 habilita leyes evolutivas y natalidad local opt-in; al migrar no altera estado ni params. */
 function upgradeV12(world: World): void { world.version = 12; }
+/** V13 (V19 fase 1) añade interruptores opt-in apagados por defecto; al migrar no altera estado ni params. */
+function upgradeV13(world: World): void { world.version = 13; }

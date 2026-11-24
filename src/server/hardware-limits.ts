@@ -226,7 +226,8 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
  *   ancla narrativa de largo alcance para S e I (`vinculoEncuentro=1`);
  * - especialización adaptativa de oficios (`aptitud=0.85`) + política neuronal autónoma y plasticidad
  *   Baldwin (`politicaPeso=0.80`, `politicaAutonomia=0.65`);
- * - tecnología funcional de alto cociente señal/ruido (`mejoraLocal=0.08`, `dosisCuanto=100`, `efectosHerramientas=true`).
+ * - tecnología funcional de alto cociente señal/ruido (`mejoraLocal=0.08`, `dosisCuanto=100`, `efectosHerramientas=true`);
+ * - V19 fase 1 (`RULES_VERSION 13`): aprendizaje causal (L), acuerdos materiales (S) y fauna F/R/M.
  */
 export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
   const full = hostFullHardwareParams(base, probe);
@@ -241,8 +242,13 @@ export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: 
     },
     agua: { ...full.agua, cuencas: 0.36, memoria: 1 },
     poblacion: { ...full.poblacion, natalidadVecindad: true, radioVecindadNatalidad: 16 },
-    social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0, derivaCultural: 1, vinculoEncuentro: 1 },
-    conducta: { ...full.conducta, aptitud: 0.85, politicaPeso: 0.8, politicaAutonomia: 0.65 },
+    social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0, derivaCultural: 1, vinculoEncuentro: 1,
+      acuerdosMateriales: true, memoriaResultadosDias: 10 },
+    conducta: { ...full.conducta, aptitud: 0.85, politicaPeso: 0.8, politicaAutonomia: 0.65,
+      aprendizajeCausal: true, memoriaResultadoTicks: 2400 },
+    // V19 fase 1 (`RULES_VERSION 13`): candidatos L, S, F, R, M. B (`construccion.modular`), T
+    // (`tecnologia.obrasPorPropiedades`) y E (`ecologia.amplitudEstacional`) siguen apagados hasta la fase 2.
+    fauna: { ...full.fauna, contactoContinuo: true, reservaReproductiva: true, fraccionReservaCria: 0.15, encuentroFertil: true },
     tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true },
   }, full);
 }

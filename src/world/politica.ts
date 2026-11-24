@@ -10,7 +10,11 @@ export const POLICY_WEIGHTS = POLICY_INPUTS * POLICY_HIDDEN + POLICY_HIDDEN
   + POLICY_HIDDEN * POLICY_ACTIONS.length + POLICY_ACTIONS.length;
 
 export interface PolicyGenome { weights: number[]; }
-export interface PolicyPlasticity { bias: number[]; trace: number[]; }
+/** `baseline`, `at` y `body` sólo existen con V19/L (`conducta.aprendizajeCausal`): línea base de retorno por contexto
+ * corporal, tick de la última observación y cuerpo (hambre, sed, fatiga, energía) en ese tick. Adquirido, no heredable. */
+export interface PolicyPlasticity { bias: number[]; trace: number[]; baseline?: number[]; at?: number; body?: number[]; }
+export const POLICY_CONTEXTS = ['ready', 'hungry', 'thirsty', 'tired'] as const;
+export type PolicyContext = typeof POLICY_CONTEXTS[number];
 
 /** Fractions in [0,1], measured by the caller from the body and its local
  * neighbourhood only. Counts/stocks must first be divided by LOCAL capacity.
@@ -44,11 +48,19 @@ export function assertPolicyGenome(g: unknown): asserts g is PolicyGenome {
   vector(g.weights, POLICY_WEIGHTS, -1, 1, 'policy weights');
 }
 export function assertPolicyPlasticity(p: unknown): asserts p is PolicyPlasticity {
-  if (!record(p, ['bias', 'trace']) || !Array.isArray(p.bias) || !Array.isArray(p.trace))
+  const causal = p !== null && typeof p === 'object' && Object.hasOwn(p, 'baseline');
+  if (!record(p, causal ? ['bias', 'trace', 'baseline', 'at', 'body'] : ['bias', 'trace']) || !Array.isArray(p.bias) || !Array.isArray(p.trace))
     throw new Error('Invalid policy plasticity');
   if (p.bias === p.trace) throw new Error('Aliased policy plasticity');
   vector(p.bias, POLICY_ACTIONS.length, -0.5, 0.5, 'policy bias');
   vector(p.trace, POLICY_ACTIONS.length, 0, 1, 'policy trace');
+  if (causal) {
+    if (!Array.isArray(p.baseline) || !Array.isArray(p.body) || !Number.isSafeInteger(p.at) || (p.at as number) < 0
+      || p.baseline === p.body || p.baseline === p.bias || p.baseline === p.trace || p.body === p.bias || p.body === p.trace)
+      throw new Error('Invalid policy plasticity');
+    vector(p.baseline, POLICY_CONTEXTS.length, -1, 1, 'policy baseline');
+    vector(p.body, 4, 0, 1, 'policy body');
+  }
 }
 function gaussian(random: () => number): number {
   return Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
@@ -96,6 +108,49 @@ export function updatePolicyPlasticity(plasticity: PolicyPlasticity, action: str
     plasticity.trace[i] = i === chosen ? 1 : plasticity.trace[i] * 0.8;
     plasticity.bias[i] = clamp(plasticity.bias[i] + learningRate * reward * plasticity.trace[i], -0.5, 0.5);
   }
+}
+/** Escala del retorno corporal observado: un cambio de 0,25 en la suma de las cuatro magnitudes satura en 1. */
+const CAUSAL_RETURN_SCALE = 4;
+/** La elegibilidad dura `memoryTicks / 20` ticks (≈ 120 con el valor inicial 2400): la vieja traza de 0,8 por
+ * llamada con una observación cada ~30 ticks; el olvido del sesgo y de la línea base dura `memoryTicks`. */
+const ELIGIBILITY_FRACTION = 20;
+/** V19/L: aprendizaje causal contextual. Una llamada por consecuencia corporal observada (no por acción hecha).
+ * El retorno es el cambio REAL del cuerpo desde la observación anterior (hambre, sed y fatiga que bajan, energía que
+ * sube); no se recompensa producción prevista, inventario ni acuerdos sin cumplir. Sobre él:
+ *   ventaja = retorno − línea_base[contexto]
+ *   sesgo[i] ← sesgo[i] + η · elegibilidad[i] · (ventaja − sesgo[i])        (acotado a ±0,5)
+ *   línea_base[contexto] ← línea_base[contexto] + η · (retorno − línea_base[contexto])
+ * La elegibilidad y el sesgo/línea base decaen con los ticks transcurridos (no con el número de llamadas), de modo
+ * que una preferencia que nada confirma se olvida. La primera llamada sólo fija la marca corporal. Devuelve el
+ * retorno observado (0 en la primera llamada). */
+export function updatePolicyPlasticityCausal(plasticity: PolicyPlasticity, action: string, context: PolicyContext,
+  body: readonly [number, number, number, number], tick: number, memoryTicks: number, learningRate: number): number {
+  assertPolicyPlasticity(plasticity);
+  vector(body, 4, 0, 1, 'policy body');
+  if (!Number.isSafeInteger(tick) || tick < 0) throw new RangeError('Invalid policy tick');
+  if (!Number.isSafeInteger(memoryTicks) || memoryTicks < 1) throw new RangeError('Invalid policy memory');
+  bounded(learningRate, 0, 1, 'learning rate');
+  if (plasticity.baseline === undefined) {
+    plasticity.baseline = new Array<number>(POLICY_CONTEXTS.length).fill(0);
+    plasticity.at = tick; plasticity.body = [body[0], body[1], body[2], body[3]];
+    return 0;
+  }
+  const previous = plasticity.body!, elapsed = Math.max(0, tick - plasticity.at!);
+  const observed = clamp(CAUSAL_RETURN_SCALE * ((previous[0] - body[0]) + (previous[1] - body[1])
+    + (previous[2] - body[2]) + (body[3] - previous[3])), -1, 1);
+  plasticity.at = tick; plasticity.body = [body[0], body[1], body[2], body[3]];
+  const chosen = actionIndex(action), contextIndex = POLICY_CONTEXTS.indexOf(context);
+  if (chosen < 0 || contextIndex < 0 || learningRate === 0) return observed;
+  const forget = Math.exp(-elapsed / memoryTicks), eligibility = Math.exp(-elapsed * ELIGIBILITY_FRACTION / memoryTicks);
+  const advantage = clamp(observed - plasticity.baseline[contextIndex] * forget, -1, 1);
+  for (let i = 0; i < POLICY_CONTEXTS.length; i++) plasticity.baseline[i] *= forget;
+  for (let i = 0; i < 12; i++) {
+    plasticity.trace[i] = i === chosen ? 1 : plasticity.trace[i] * eligibility;
+    const kept = plasticity.bias[i] * forget;
+    plasticity.bias[i] = clamp(kept + learningRate * plasticity.trace[i] * (advantage - kept), -0.5, 0.5);
+  }
+  plasticity.baseline[contextIndex] = clamp(plasticity.baseline[contextIndex] + learningRate * (observed - plasticity.baseline[contextIndex]), -1, 1);
+  return observed;
 }
 export function extractLocalObservation(input: LocalObservationInput): Float64Array {
   return Float64Array.from(OBSERVATION_KEYS, key => {

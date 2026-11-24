@@ -151,7 +151,7 @@ test('T171 lente 2: la partición por regiones es estática, completa y sin robo
 });
 
 test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt-in en su valor histórico', () => {
-  assert.equal(RULES_VERSION, 12);
+  assert.equal(RULES_VERSION, 13);
   assert.equal(DEFAULT_PARAMS.poblacion.natalidadVecindad, false);
   assert.equal(DEFAULT_PARAMS.conducta.politicaPeso, 0);
   // Claves reales de la Fase B en `params.ts` (la tarea las nombra como

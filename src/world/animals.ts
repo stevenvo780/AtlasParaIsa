@@ -21,6 +21,18 @@ export const MAX_ANIMAL_MEMORY = 12;
 export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
 const MEMORY_TTL = 480;
 const MATURITY = 600;
+/** V19/R: biomasa que cada progenitor aporta a la cría (0,03 + 0,03 = los 0,06 de la biomasa natal histórica). */
+export const RESERVA_POR_PROGENITOR = 0.03;
+/** V19/R: cota de la reserva de un animal; permite cuatro aportes y es lo que `assertAnimal` valida. */
+export const RESERVA_MAXIMA = 0.12;
+/** Razón de la aproximación a pareja (V19/M); `fauna-motor.ts` la repite literal. */
+export const RAZON_PAREJA = 'Está listo para criar y se acerca, pagando cada paso, a una pareja compatible que percibe.';
+/** V19/M y V19/R: puertas corporales de la cría SIN la acción (`flee`), que `choose` no debe leer de otro animal
+ * porque otra decisión del mismo paso puede haberla escrito. Con `reserva`, además la reserva alcanza su aporte. */
+export function listoParaCriar(a: Animal, reserva: boolean): boolean {
+  return a.age >= MATURITY && a.age - a.lastBirthAge >= MATURITY && a.health > 0.75 && a.energy > 0.65
+    && a.hunger < 0.4 && a.thirst < 0.4 && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
+}
 const SPECIES: AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
 const ACTIONS: AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
 const LIFESPAN: Record<AnimalSpecies, number> = { hare: 18000, deer: 36000, boar: 30000, fish: 20000, wolf: 32000, fox: 26000 };
@@ -30,6 +42,8 @@ export interface AnimalMemory extends Point { tick: number; food: number; water:
 export interface Animal extends AnimalView {
   bornAt: number; lastBirth: number; lastBirthAge: number; lastDecision: number; lastMove: number;
   target: Point; memory: AnimalMemory[]; work: number; preyId: string | null;
+  /** V19/R (`fauna.reservaReproductiva`): biomasa de la dieta apartada para la cría, en [0, `RESERVA_MAXIMA`]. Ausente = 0. */
+  reproReserve?: number;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;
@@ -434,6 +448,8 @@ interface LocalState {
   visible: VisibleTile[]; pool: VisibleTile[]; resources: Resource[]; adjacent: VisibleTile[]; neighbors: Step[]; steps: Step[];
   /** Desplazamientos (dx, dy) de la última `localTiles` que entraron en lo visible: valen `stamp`. */
   seen: Int32Array; stamp: number;
+  /** V19: leyes de fauna del paso (`paramsOf(world).fauna`), leídas una vez por `stepAnimals`. */
+  contacto: boolean; reserva: boolean; fraccionReserva: number; encuentro: boolean;
 }
 /** La celda a (dx, dy) del animal está en lo que devolvió su última `localTiles`: lo mismo que buscar su
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
@@ -519,8 +535,16 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
     else {
-      const seed = world.seed, tick = world.tick;
-      target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
+      // V19/M: sin amenaza ni necesidad urgente, un animal listo para criar se acerca a la pareja conespecífica
+      // lista más cercana que percibe (desempate canónico). Es el movimiento pagado de siempre.
+      const mate = state.encuentro && listoParaCriar(animal, state.reserva)
+        ? primero(near, (a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b),
+          a => a.species === animal.species && listoParaCriar(a, state.reserva)) : undefined;
+      if (mate) { target = mate; reason = RAZON_PAREJA; }
+      else {
+        const seed = world.seed, tick = world.tick;
+        target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
+      }
     }
   }
   if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
@@ -586,13 +610,22 @@ function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emit?: 
   }
   if (animal.health <= 0) death(world, animal, cause || 'heridas', emit);
 }
-function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
+/** V19/R: aparta de lo realmente consumido la fracción de la reserva (sin pasar de `RESERVA_MAXIMA`) y
+ * devuelve lo apartado, que NO baja el hambre. */
+function reservar(animal: Animal, consumed: number, fraccion: number): number {
+  const actual = animal.reproReserve ?? 0, parte = Math.min(consumed * fraccion, RESERVA_MAXIMA - actual);
+  if (!(parte > 0)) return 0;
+  animal.reproReserve = Math.min(RESERVA_MAXIMA, actual + parte);
+  return parte;
+}
+function feed(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState): void {
   if (distance(animal, animal.target) > 0) return;
   if (animal.action === 'graze' && animal.genes.carnivory < 0.6) {
     const consumed = Math.min(tile.growth ?? tile.vegetation, 0.0015, animal.hunger / 4);
     tile.growth = clamp((tile.growth ?? tile.vegetation) - consumed);
     tile.vegetation = clamp(tile.vegetation - consumed * 0.5);
-    assimilateFood(animal, consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
+    const apartado = state.reserva ? reservar(animal, consumed, state.fraccionReserva) : 0;
+    assimilateFood(animal, state.reserva ? consumed - apartado : consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
     world.animalDynamics.plantConsumed += consumed;
     // Plant water is finite and belongs to this patch, never to an invisible drinking reservoir.
     if (animal.species !== 'fish') {
@@ -636,14 +669,16 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
   // Eligibility uses biological time. A global modulo would permanently exclude some rotating cohorts.
   let capacity: number | undefined;
   // Only initiators consume an action slot. Resident partners can receive costs without an extra physiological turn.
+  const reserva = state.reserva;
   const eligible = (a: Animal): boolean => a.age >= MATURITY && a.age - a.lastBirthAge >= MATURITY
-    && a.health > 0.75 && a.energy > 0.65 && a.hunger < 0.4 && a.thirst < 0.4 && a.action !== 'flee';
+    && a.health > 0.75 && a.energy > 0.65 && a.hunger < 0.4 && a.thirst < 0.4 && a.action !== 'flee'
+    && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
   for (const a of active) {
     if (capacity !== undefined && world.animals.length >= capacity) break;
     if (!eligible(a)) continue;
     const tile = state.tile(a.x, a.y)!;
     if ((state.counts.get(cell(a)) ?? 0) >= MAX_ANIMALS_PER_TILE || waterAt(a, tile) < 0.012
-      || (tile.growth ?? 0) < 0.08) continue;
+      || (!reserva && (tile.growth ?? 0) < 0.08)) continue;
     // La pareja es la primera en orden canónico (`sort(canonical)[0]`) de las elegibles de su vecindad.
     let b: Animal | undefined;
     for (const [dx, dy] of BREEDING_CELLS) for (const c of state.occupants.get(cellXY(a.x + dx!, a.y + dy!)) ?? [])
@@ -664,7 +699,9 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     }
     const water = takeWater(a, tile, 0.012); world.animalDynamics.waterConsumed += water;
     // The natal patch provides limited biomass as well as energy donated by both parents.
-    tile.growth = clamp((tile.growth ?? 0) - 0.06); world.animalDynamics.plantConsumed += 0.06;
+    // V19/R: la biomasa de la cría sale de los 0,03 de cada progenitor (conservada: 0,06 en total), no de la celda.
+    if (reserva) { for (const parent of [a, b]) parent.reproReserve = Math.max(0, (parent.reproReserve ?? 0) - RESERVA_POR_PROGENITOR); }
+    else { tile.growth = clamp((tile.growth ?? 0) - 0.06); world.animalDynamics.plantConsumed += 0.06; }
     const child: Animal = { id, species: a.species, x: a.x, y: a.y, action: 'rest', reason: 'Cría con rasgos heredados; necesita alimento, agua y descanso.',
       hunger: 0.32, thirst: 0.25, energy: 0.35, fatigue: 0.2, health: 0.8, genes: inherited,
       generation: Math.max(a.generation, b.generation) + 1, parents, age: 0, bornAt: world.tick, lastBirth: world.tick, lastBirthAge: 0,
@@ -822,7 +859,14 @@ export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]):
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map(),
-    reader: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0 };
+    reader: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
+    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
+  const { fauna: leyesFauna } = paramsOf(world);
+  // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
+  if (leyesFauna) {
+    state.contacto = leyesFauna.contactoContinuo; state.reserva = leyesFauna.reservaReproductiva;
+    state.fraccionReserva = leyesFauna.fraccionReservaCria; state.encuentro = leyesFauna.encuentroFertil;
+  }
   if (mascara && (mascara.tick !== world.tick || mascara.animales !== world.animals || mascara.poblacion !== world.animals.length || !mismosObjetos(world.animals, mascara.orden)))
     throw new Error('Máscara de fauna de otro paso.');
   const seleccion = mascara?.seleccion ?? calcularMascara(world);
@@ -858,7 +902,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   for (const animal of active) {
     if (animal.health <= 0) continue;
     const tile = state.tile(animal.x, animal.y)!;
-    feed(animal, tile, world);
+    feed(animal, tile, world, state);
     if (animal.action !== 'hunt' || !animal.preyId) continue;
     if (!byId) {
       byId = new Map();
@@ -866,14 +910,19 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     }
     const prey = byId.get(animal.preyId);
     // A resident prey is physically reachable even when its own routine is deferred; archived animals are absent from byId.
-    if (!prey || prey.health <= 0 || !edible(animal, prey) || distance(animal, prey) > 0) { animal.work = 0; continue; }
+    if (state.contacto && prey && prey.health > 0 && edible(animal, prey)) {
+      // V19/F: el alcance es el contacto o la adyacencia (≤ 1 celda, también tras cruzarse); una separación breve
+      // sólo resta un paso de preparación en vez de borrarla. El daño sigue exigiendo contacto/alcance actual.
+      if (distance(animal, prey) > 1) { if (animal.work > 0) animal.work--; continue; }
+    } else if (!prey || prey.health <= 0 || !edible(animal, prey) || distance(animal, prey) > 0) { animal.work = 0; continue; }
     animal.work++; exertBody(animal, { energy: 0.0008, fatigue: 0.001 });
     if (animal.work < 4) continue;
     animal.work = 0; prey.health = clamp(prey.health - (0.18 + animal.genes.speed * 0.08 - prey.genes.camouflage * 0.05));
     if (prey.health > 0) continue;
     death(world, prey, 'depredación', emit, animal.id); world.animalDynamics.predations++;
     state.counts.set(cell(prey), state.counts.get(cell(prey))! - 1);
-    assimilateFood(animal, FOOD_PER_ANIMAL[prey.species], { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
+    const botin = FOOD_PER_ANIMAL[prey.species];
+    assimilateFood(animal, state.reserva ? botin - reservar(animal, botin, state.fraccionReserva) : botin, { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     animal.lastDecision = world.tick - 12;
   }
   // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.
@@ -914,7 +963,8 @@ export function assertAnimal(value: unknown, tick: number): asserts value is Ani
     || !Number.isSafeInteger(a.age) || a.age < 0 || a.age > tick - a.bornAt || !Number.isSafeInteger(a.lastBirthAge) || a.lastBirthAge < 0 || a.lastBirthAge > a.age
     || !Number.isSafeInteger(a.work) || a.work < 0 || a.work > 4
     || !(a.preyId === null || typeof a.preyId === 'string' && /^animal-[a-zA-Z0-9-]{1,110}$/.test(a.preyId) && a.preyId !== a.id)
-    || !Array.isArray(a.memory) || a.memory.length > MAX_ANIMAL_MEMORY) fail();
+    || !Array.isArray(a.memory) || a.memory.length > MAX_ANIMAL_MEMORY
+    || a.reproReserve !== undefined && !(typeof a.reproReserve === 'number' && Number.isFinite(a.reproReserve) && a.reproReserve >= 0 && a.reproReserve <= RESERVA_MAXIMA)) fail();
   const seen = new Set<string>();
   for (const memory of a.memory) {
     if (!point(memory) || !time(memory.tick) || !unit(memory.food) || !unit(memory.water) || typeof memory.visited !== 'boolean' || seen.has(key(memory))) fail();

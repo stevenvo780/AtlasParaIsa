@@ -97,7 +97,14 @@ export interface WorldParams {
     /** V16: autonomía de la política neuronal frente a las heurísticas fijas fuera de emergencias corporales.
      * 0 = heurísticas intactas (V12/V15); (0, 1] atenúa los sesgos fijos no urgentes para que la red
      * 12→8→12 y su plasticidad de Baldwin conduzcan de verdad la estrategia del habitante. */
-    politicaAutonomia: number };
+    politicaAutonomia: number;
+    /** V19/L: aprendizaje causal contextual. `false` = V18 exacto (recompensa de descanso periódica, sesgo de acción
+     * independiente del estado). `true`: sin recompensa recurrente de `rest`, error de predicción acotado con línea
+     * base contextual y elegibilidad que decae por ticks transcurridos, y la contribución neuronal de `rest` escalada
+     * por la demanda corporal de recuperación. */
+    aprendizajeCausal: boolean;
+    /** V19/L: constante de tiempo (ticks, entero positivo) de la memoria local de resultados; inactiva con L apagada. */
+    memoriaResultadoTicks: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -143,7 +150,28 @@ export interface WorldParams {
     derivaCultural: number;
     /** V16: vínculo y memoria local de reencuentro de S e I + rescate del bloqueo de subsistencia con
      * energía cero ante alimento/agua adyacentes. 0 = conducta histórica; > 0 activa. */
-    vinculoEncuentro: number };
+    vinculoEncuentro: number;
+    /** V19/S: acuerdos materiales. `false` = V18 exacto (el turno por confianza/apertura se firma sin comprobar el
+     * stock y premia +0,018 de apertura al firmar). `true`: el turno se evalúa con el stock localmente factible y la
+     * urgencia; el acuerdo no da recursos ni apertura al firmarse, sólo su cumplimiento (o incumplimiento) observado
+     * actualiza confianza y apertura con `o ← o + α(y − o)`. */
+    acuerdosMateriales: boolean;
+    /** V19/S: memoria finita (días, entero positivo) de los resultados de acuerdos observados personalmente. */
+    memoriaResultadosDias: number };
+  /**
+   * V19/F+R+M: reparaciones biológicas independientes de la fauna depredadora. Todas `false` = V18 exacto.
+   * · `contactoContinuo` (F): la preparación del ataque decae poco a poco al separarse y el alcance resuelve el
+   *   contacto cruzado/adyacente (≤ 1 celda) con esfuerzo pagado.
+   * · `reservaReproductiva` (R): una fracción de la comida realmente adquirida se debita a `reproReserve` (no baja el
+   *   hambre) y financia la biomasa de la cría (0,03 de cada progenitor) en lugar de la biomasa vegetal de la celda.
+   * · `encuentroFertil` (M): un animal reproductivamente listo se acerca, con movimiento pagado, a una pareja
+   *   compatible percibida localmente.
+   */
+  fauna: { contactoContinuo: boolean; reservaReproductiva: boolean; fraccionReservaCria: number; encuentroFertil: boolean };
+  /** V19/B: obras modulares por módulos físicos y sitios compartidos (Fase 2). `false` = V18 exacto. */
+  construccion: { modular: boolean };
+  /** V19/E: estacionalidad hidrológica regional (Fase 2). `amplitudEstacional` 0 = V18 exacto. */
+  ecologia: { amplitudEstacional: number; periodoEstacionalDias: number; escalaClimaticaCeldas: number };
   /**
    * Leyes locales de estabilidad tecnológica (Fase B, `docs/PLAN-ESTABILIDAD-2026-11-18.md`,
    * `docs/preregistros/2026-11-18-estabilidad-tecnologia.md`). Constitución II: nacen en sus valores
@@ -167,6 +195,8 @@ export interface WorldParams {
     /** V16: efectos físicos cualitativos de todas las capacidades (`insulation`, `binding`, `cutting` en caza/obra,
      * `abrasion` en obra/reparación) con desgaste material real (`useTool`). `false` = histórico. */
     efectosHerramientas: boolean;
+    /** V19/T: instalaciones derivadas de las propiedades materiales de los productos (Fase 2). `false` = V18 exacto. */
+    obrasPorPropiedades: boolean;
   };
 }
 
@@ -205,10 +235,13 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0, politicaPeso: 0, politicaAutonomia: 0 },
+  conducta: { habituacion: 0, aptitud: 0, politicaPeso: 0, politicaAutonomia: 0, aprendizajeCausal: false, memoriaResultadoTicks: 2400 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0, derivaCultural: 0, vinculoEncuentro: 0 },
-  tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0, derivaCultural: 0, vinculoEncuentro: 0, acuerdosMateriales: false, memoriaResultadosDias: 10 },
+  fauna: { contactoContinuo: false, reservaReproductiva: false, fraccionReservaCria: 0.15, encuentroFertil: false },
+  construccion: { modular: false },
+  ecologia: { amplitudEstacional: 0, periodoEstacionalDias: 20, escalaClimaticaCeldas: 64 },
+  tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false, obrasPorPropiedades: false },
 };
 
 /**
@@ -402,7 +435,16 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'tecnologia.dosisCuanto': [0, 1000],
   'tecnologia.mejoraLocal': [0, 1],
   'tecnologia.enfriamiento': [1, 2400],
+  // V19 (`docs/DISENO-V19.md`): valores históricos/neutros por defecto; los candidatos abiertos los fija el anfitrión.
+  'conducta.memoriaResultadoTicks': [1, 1_000_000],
+  'social.memoriaResultadosDias': [1, 365],
+  'fauna.fraccionReservaCria': [0, 1],
+  'ecologia.amplitudEstacional': [0, 1],
+  'ecologia.periodoEstacionalDias': [1, 365],
+  'ecologia.escalaClimaticaCeldas': [1, 4096],
 };
+const INTEGER_V19_KEYS: readonly string[] = ['conducta.memoriaResultadoTicks', 'social.memoriaResultadosDias',
+  'ecologia.periodoEstacionalDias', 'ecologia.escalaClimaticaCeldas'];
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
   | { kind: 'boolean' } | { kind: 'enum'; values: readonly string[] };
@@ -412,7 +454,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'poblacion.radioVecindadNatalidad' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'tecnologia.dosisCuanto' || key === 'tecnologia.enfriamiento' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'poblacion.radioVecindadNatalidad' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'tecnologia.dosisCuanto' || key === 'tecnologia.enfriamiento' || INTEGER_V19_KEYS.includes(key) || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'poblacion.natalidadVecindad': { kind: 'boolean' },
@@ -429,6 +471,13 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
   'tecnologia.evitarNoOp': { kind: 'boolean' },
   'tecnologia.efectosHerramientas': { kind: 'boolean' },
+  'tecnologia.obrasPorPropiedades': { kind: 'boolean' },
+  'conducta.aprendizajeCausal': { kind: 'boolean' },
+  'social.acuerdosMateriales': { kind: 'boolean' },
+  'fauna.contactoContinuo': { kind: 'boolean' },
+  'fauna.reservaReproductiva': { kind: 'boolean' },
+  'fauna.encuentroFertil': { kind: 'boolean' },
+  'construccion.modular': { kind: 'boolean' },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 

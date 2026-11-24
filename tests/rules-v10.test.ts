@@ -24,7 +24,7 @@ test('un mundo V9 guardado por Store se recarga como V12 conservando todo salvo 
   const reopened = new Store(legacy.path), reference = new Store(control.path);
   try {
     const loaded = reopened.load()!.world, expected = reference.load()!.world;
-    assert.equal(RULES_VERSION, 12);
+    assert.equal(RULES_VERSION, 13);
     assert.equal(loaded.version, 12);
     assert.equal(JSON.stringify(loaded), JSON.stringify(expected));
     assert.deepEqual(paramsOf(loaded), paramsOf(expected));

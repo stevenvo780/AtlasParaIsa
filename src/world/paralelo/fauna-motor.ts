@@ -40,7 +40,8 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Tile } from '../../shared/types.js';
-import type { Animal, AnimalMemory } from '../animals.js';
+import { listoParaCriar, type Animal, type AnimalMemory } from '../animals.js';
+import { paramsOf } from '../params.js';
 import {
   residentBackingArray, residentInPlaceRevision, residentTopologyToken, sameResidentTopology,
   type ResidentTopologyToken,
@@ -59,7 +60,7 @@ import {
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import {
   ACCIONES_FAUNA, CELDA_AGUA, CELDA_CRECIMIENTO, CELDA_OCEANO, CELDA_PRESENTE, CELDA_REFUGIO,
-  DESTINO_PRESA, DESTINO_PROPIO, DESTINO_RECUERDO, DESTINO_TESELA, DF, DI,
+  DESTINO_PAREJA, DESTINO_PRESA, DESTINO_PROPIO, DESTINO_RECUERDO, DESTINO_TESELA, DF, DI, RAZON_PAREJA_FAUNA,
   MAX_MEMORIA_ANIMAL, MEMORIA_TTL, MF, NDF, NDI, NMF, NSO, NTF, NTI, RAZONES_FAUNA, SO, TF, TI,
   celdaDe, codigoEspecie, crearVistaFauna, ejecutarRegionesFauna, paginable,
   type BuffersFauna, type ParamsFauna, type VistaFauna,
@@ -455,9 +456,11 @@ export class EstadoFaunaCompartido {
       this.#asignarAnimales(crecerCapacidad(this.#capTabla, filas), crecerCapacidad(this.#capDue, due.length),
         crecerCapacidad(this.#capMemoria, memoriaMax), crecerCapacidad(this.#capId, caracteres));
     }
+    // V19: con `encuentroFertil` la decisión lee, de cada vecino, si está listo para criar (sin leer su acción).
+    const leyes = paramsOf(world).fauna, encuentro = leyes?.encuentroFertil === true, reserva = leyes?.reservaReproductiva === true;
     this.#params = {
       capTabla: this.#capTabla, capDue: this.#capDue, due: due.length, capMemoria: this.#capMemoria,
-      hashMask: d.capHash - 1, seed: world.seed, tick: world.tick,
+      hashMask: d.capHash - 1, seed: world.seed, tick: world.tick, ...(encuentro ? { encuentro: true } : {}),
     };
     vista = crearVistaFauna(this.#buffers, this.#params);
     vista.cuenta.fill(0, 0, celdasActivas); vista.ocupados.fill(0, 0, celdasActivas);
@@ -475,6 +478,7 @@ export class EstadoFaunaCompartido {
         tf[TF.x * capT + fila] = a.x; tf[TF.y * capT + fila] = a.y;
         tf[TF.carnivory * capT + fila] = a.genes.carnivory; tf[TF.health * capT + fila] = a.health;
         ti[TI.especie * capT + fila] = codigoEspecie(a.species);
+        ti[TI.listo * capT + fila] = encuentro && listoParaCriar(a, reserva) ? 1 : 0;
         fila++;
       }
     }
@@ -503,6 +507,7 @@ export class EstadoFaunaCompartido {
       df[DF.perception * cap + slot] = a.genes.perception; df[DF.carnivory * cap + slot] = a.genes.carnivory;
       di[DI.especie * cap + slot] = codigoEspecie(a.species);
       di[DI.rango * cap + slot] = rangos[filas + slot]!;
+      di[DI.listo * cap + slot] = encuentro && listoParaCriar(a, reserva) ? 1 : 0;
       di[DI.memorias * cap + slot] = a.memory.length;
       di[DI.idInicio * cap + slot] = caracter; di[DI.idLongitud * cap + slot] = a.id.length;
       for (let k = 0; k < a.id.length; k++) id[caracter++] = a.id.charCodeAt(k);
@@ -546,10 +551,10 @@ export function applyFaunaChooseOutputs(due: readonly Animal[], world: { tick: n
     if (recuerdos >= 2) recordar(animal, tiles[so[o + SO.recuerdo1Tesela]!]!, tick, so[o + SO.recuerdo1Visitado] === 1);
     const codigo = so[o + SO.accion]!, action = ACCIONES_FAUNA[codigo]!, tipo = so[o + SO.destinoTipo]!, ref = so[o + SO.destinoRef]!;
     const target: { x: number; y: number } = tipo === DESTINO_PROPIO ? animal : tipo === DESTINO_TESELA ? tiles[ref]!
-      : tipo === DESTINO_RECUERDO ? animal.memory[ref] as AnimalMemory : tipo === DESTINO_PRESA ? tabla[ref]! : animal;
+      : tipo === DESTINO_RECUERDO ? animal.memory[ref] as AnimalMemory : tipo === DESTINO_PRESA || tipo === DESTINO_PAREJA ? tabla[ref]! : animal;
     const presa = so[o + SO.presa]!, preyId = presa >= 0 ? tabla[presa]!.id : null;
     if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
-    animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = RAZONES_FAUNA[codigo]!; animal.preyId = preyId; animal.lastDecision = tick;
+    animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = tipo === DESTINO_PAREJA ? RAZON_PAREJA_FAUNA : RAZONES_FAUNA[codigo]!; animal.preyId = preyId; animal.lastDecision = tick;
   }
 }
 
@@ -665,6 +670,13 @@ export function stepChooseParallel(world: MundoFauna, due: readonly Animal[], st
   estado.empaquetar(world, due, state);
   pool.stepChoose(estado);
   return estado.salidas();
+}
+
+/** Diagnóstico (pruebas): despachos a piscinas de fauna realizados desde que se crearon; 0 = nunca se usó la ruta paralela. */
+export function despachosFaunaParalelos(): number {
+  let total = 0;
+  for (const pool of poolsFauna.values()) total += pool.diagnostics().despachos;
+  return total;
 }
 
 /** Cierra todas las piscinas persistentes de la decisión de fauna (pruebas y apagado del servidor). */

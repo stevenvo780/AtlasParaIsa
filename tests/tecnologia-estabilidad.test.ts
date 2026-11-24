@@ -464,7 +464,7 @@ test('persistencia: parseParams valida tecnologia.*, Store.save/load los conserv
   assert.equal(PARAM_DESCRIPTORS['tecnologia.evitarNoOp']!.kind, 'boolean');
 
   const parsed = parseParams(CANDIDATO);
-  assert.deepEqual(parsed.tecnologia, { dosisCuanto: 250, mejoraLocal: 0.05, enfriamiento: 300, evitarNoOp: true, efectosHerramientas: false });
+  assert.deepEqual(parsed.tecnologia, { dosisCuanto: 250, mejoraLocal: 0.05, enfriamiento: 300, evitarNoOp: true, efectosHerramientas: false, obrasPorPropiedades: false });
 
   for (const invalid of [
     'tecnologia.dosisCuanto=-1',
@@ -514,6 +514,7 @@ test('persistencia: parseParams valida tecnologia.*, Store.save/load los conserv
       enfriamiento: 45,
       evitarNoOp: false,
       efectosHerramientas: false,
+      obrasPorPropiedades: false,
     });
   } finally {
     reopenedLegacy.close();

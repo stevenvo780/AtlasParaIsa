@@ -56,13 +56,13 @@ test('réplica de 1 día produce dia-001.json y replica.json con las claves espe
 
 test('réplica registra límites de host por defecto y respeta limites.chunks explícito', (t) => {
   const limitesHost = hostParams().limites;
-  const dirHost = runReplica(t, ['--seed', '1', '--dias', '1']);
+  const dirHost = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS]);
   const paramsHost = readJson(join(dirHost, 'replica.json')).params as Json;
   const limitesRegistrados = paramsHost.limites as Json;
   for (const clave of ['teselasActivas', 'chunks', 'fauna'])
     assert.equal(limitesRegistrados[clave], limitesHost[clave as keyof typeof limitesHost], `límite host ${clave}`);
 
-  const dirOverride = runReplica(t, ['--seed', '1', '--dias', '1', '--params', 'limites.chunks=300']);
+  const dirOverride = runReplica(t, ['--seed', '1', '--dias', '1', '--params', `${FAST_PARAMS},limites.chunks=300`]);
   const limitesOverride = (readJson(join(dirOverride, 'replica.json')).params as Json).limites as Json;
   assert.equal(limitesOverride.chunks, 300, '--params explícito debe prevalecer sobre los límites del host');
 });

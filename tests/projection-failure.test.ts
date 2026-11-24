@@ -91,26 +91,36 @@ test('sin clon por paso, un fallo de guardado deja el mundo vigente intacto y la
 function mudarLejos(world: World): void {
   for (const person of world.people) { person.x += 40; person.y += 40; person.target = { x: person.x, y: person.y }; }
 }
+
+/** Impide la recuperación automática durante el paso fallido; después se puede inspeccionar lo durable. */
+function pasoSinGuardadoLegible(app: ReturnType<typeof createApp>, store: Store): void {
+  const load = store.load;
+  store.load = () => { throw new Error('synthetic checkpoint read failure'); };
+  try { assert.doesNotThrow(() => app.stepOnce()); } finally { store.load = load; }
+}
+
 async function servidorConSesion(seed: number) {
   const port = await freePort(), origin = `http://127.0.0.1:${port}`, store = new Store(':memory:');
+  const salidas: number[] = [];
   // Params por defecto: `motor.clonPorPaso=true`, el camino de producción.
-  const app = createApp({ store, origin, password: 'synthetic-failure-password', manual: true, seed });
+  const app = createApp({ store, origin, password: 'synthetic-failure-password', manual: true, seed,
+    onFatalExit: codigo => { salidas.push(codigo); } });
   app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening');
   const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
     body: JSON.stringify({ password: 'synthetic-failure-password' }) });
   const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
   const ws = () => new WebSocket(origin.replace('http:', 'ws:') + '/ws', { headers: { Origin: origin, Cookie: cookie } });
   const recibir = async (socket: WebSocket) => JSON.parse((await once(socket, 'message'))[0].toString()) as ServerMessage;
-  return { app, store, origin, cookie, ws, recibir };
+  return { app, store, origin, cookie, ws, recibir, salidas };
 }
 
-/** PERF3: con clon por paso (default y producción) el paso SIN gestos corre en el sitio, sin reserva. Si falla,
- * `app.world` queda a medio paso y el mundo se pausa como siempre; además ni `/api/world`, ni un cliente que
+/** PERF3: con clon por paso (default y producción) el paso SIN gestos corre en el sitio, sin reserva. Si
+ * el guardado o la recarga fallan, `app.world` queda a medio paso; ni `/api/world`, ni un cliente que
  * llega por WS, ni una consulta de biografía o de receta lo ven, y nada vuelve a guardarse. Lo que se sirve es
  * la última vista proyectada, marcada en pausa y con su paso. */
 test('PERF3: un paso sin gestos que falla en el sitio pausa, y nada a medio paso se sirve ni se guarda', async () => {
   for (const fallo of ['a mitad del paso', 'al guardar'] as const) {
-    const { app, store, origin, cookie, ws, recibir } = await servidorConSesion(42);
+    const { app, store, origin, cookie, ws, recibir, salidas } = await servidorConSesion(42);
     let nuevo: WebSocket | undefined;
     try {
       for (let n = 0; n < 6; n++) app.stepOnce();
@@ -124,7 +134,9 @@ test('PERF3: un paso sin gestos que falla en el sitio pausa, y nada a medio paso
         store.save = (...args) => { guardados++; return guardar(...args); };
       } else store.save = () => { guardados++; throw new Error('synthetic disk failure'); };
       const mundo = app.world;
-      assert.doesNotThrow(() => app.stepOnce());
+      if (fallo === 'a mitad del paso') pasoSinGuardadoLegible(app, store);
+      else assert.doesNotThrow(() => app.stepOnce());
+      assert.deepEqual(salidas, fallo === 'a mitad del paso' ? [75] : []);
       assert.equal(app.failed, true, fallo);
       assert.equal(app.world, mundo, 'sin gestos el paso corrió sobre el mundo vigente');
       assert.equal(app.world.tick, 7, `${fallo}: el mundo en memoria quedó a medio paso (o sin confirmar)`);
@@ -172,7 +184,7 @@ test('PERF3: un paso sin gestos que falla en el sitio pausa, y nada a medio paso
  * `VISTA_RESERVA_PASOS` pasos que nadie mira: lo servido es un estado completo, en pausa y con su paso. */
 test('PERF3: sin visores, un mundo a medio paso sirve la vista de reserva del arranque o la renovada', async () => {
   for (const pasos of [3, VISTA_RESERVA_PASOS + 5]) {
-    const { app, store, origin, cookie, ws, recibir } = await servidorConSesion(42);
+    const { app, store, origin, cookie, ws, recibir, salidas } = await servidorConSesion(42);
     let nuevo: WebSocket | undefined;
     try {
       const inicio = app.world.tick, reserva = pasos < VISTA_RESERVA_PASOS ? inicio : inicio + VISTA_RESERVA_PASOS;
@@ -180,7 +192,8 @@ test('PERF3: sin visores, un mundo a medio paso sirve la vista de reserva del ar
       assert.equal(app.failed, false);
       mudarLejos(app.world);
       store.loadChunk = () => { throw new Error('synthetic mid-step failure'); };
-      app.stepOnce();
+      pasoSinGuardadoLegible(app, store);
+      assert.deepEqual(salidas, [75]);
       assert.equal(app.failed, true); assert.equal(app.world.tick, inicio + pasos + 1, 'el mundo en memoria quedó a medio paso');
       for (const encoding of ['gzip', 'identity']) {
         const respuesta = await fetch(origin + '/api/world', { headers: { Cookie: cookie, 'Accept-Encoding': encoding } });
@@ -200,7 +213,9 @@ test('PERF3: sin visores, un mundo a medio paso sirve la vista de reserva del ar
 
 test('PERF3: una región ilegible no impide arrancar; sin ninguna vista, un mundo a medio paso responde 503 «en pausa»', async () => {
   const port = await freePort(), origin = `http://127.0.0.1:${port}`, store = new Store(':memory:');
-  const opciones = { store, origin, password: 'synthetic-failure-password', manual: true, seed: 42 };
+  const salidas: number[] = [];
+  const opciones = { store, origin, password: 'synthetic-failure-password', manual: true, seed: 42,
+    onFatalExit: (codigo: number) => { salidas.push(codigo); } };
   // Como la primera prueba: con todos en la esquina, la cámara por defecto pasa a leer regiones archivadas.
   const antes = createApp(opciones);
   for (const p of antes.world.people) { p.x = 39; p.y = 27; p.target = { x: p.x, y: p.y }; p.action = 'rest'; p.decisionAt = 1000; }
@@ -217,7 +232,8 @@ test('PERF3: una región ilegible no impide arrancar; sin ninguna vista, un mund
       body: JSON.stringify({ password: opciones.password }) });
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     mudarLejos(app.world);
-    app.stepOnce();
+    pasoSinGuardadoLegible(app, store);
+    assert.deepEqual(salidas, [75]);
     assert.equal(app.failed, true); assert.equal(app.world.tick, tick + 1);
     const respuesta = await fetch(origin + '/api/world', { headers: { Cookie: cookie } });
     assert.equal(respuesta.status, 503);

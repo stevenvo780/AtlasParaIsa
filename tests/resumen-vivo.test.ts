@@ -54,12 +54,13 @@ test('M4: consultar la natalidad y las fichas no cambia el mundo ni su trayector
   assert.equal(digestoCanonico(a), digestoCanonico(b));
 });
 
-test('M4: los prefijos de intención son los que escribe la ley (contrato con world/index.ts)', () => {
-  const source = readFileSync(new URL('../src/world/index.ts', import.meta.url), 'utf8');
-  assert.ok(source.includes('reason: `' + RAZON_CORTEJO + '${'), 'el cortejo empieza así en decide()');
-  assert.ok(source.includes('reason: `' + RAZON_REUNION + '${'), 'la reunión para criar empieza así');
-  assert.ok(source.includes('reason: `' + RAZON_PREPARA + '${'), 'la preparación de reservas empieza así');
-  assert.match(source, /function fertile\(world: World, person: Person\): boolean \{\n\s+return person\.inventory >= 0\.1 &&/, `la reserva para criar es ${RESERVA_PARA_CRIAR}`);
+test('M4: el resumen coincide con los prefijos de intención y la reserva de la ley', () => {
+  const decision = readFileSync(new URL('../src/world/decision/personas.ts', import.meta.url), 'utf8');
+  const natalidad = readFileSync(new URL('../src/world/demografia/nacer.ts', import.meta.url), 'utf8');
+  assert.ok(decision.includes('reason: `' + RAZON_CORTEJO + '${'), 'el cortejo empieza así en decide()');
+  assert.ok(decision.includes('reason: `' + RAZON_REUNION + '${'), 'la reunión para criar empieza así');
+  assert.ok(decision.includes('reason: `' + RAZON_PREPARA + '${'), 'la preparación de reservas empieza así');
+  assert.match(natalidad, /function fertile\(world: World, person: Person\): boolean \{\n\s+return person\.inventory >= 0\.1 &&/, `la reserva para criar es ${RESERVA_PARA_CRIAR}`);
 });
 
 test('M4: en un mundo sembrado real, dos vecinos fértiles con vínculo mutuo y lejos se cortejan, y la ficha dice a quién', () => {

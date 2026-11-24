@@ -9,6 +9,7 @@
  */
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { on } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +32,13 @@ function directory(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'v24-sim-hz-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
+}
+
+async function esperarEspejo(gateway: ReturnType<typeof createWorkerGateway>, objetivo: number, signal: AbortSignal): Promise<void> {
+  for await (const [tick] of on(gateway.events, 'mirror', { signal, close: ['workerError'] })) {
+    if (typeof tick === 'number' && tick >= objetivo) return;
+  }
+  assert.fail(`El worker se detuvo antes de publicar el paso ${objetivo}.`);
 }
 
 /** The simulation worker's own setup: resident Proxy tiles whenever the motor is parallel. */
@@ -221,11 +229,12 @@ test('turbo gateway: every tick on the tape in order, summaries on every frame, 
   assert.equal(gateway.salud().operacion, null);
   assert.ok(gateway.salud().ultimoGuardado);
   const start = await gateway.flushTape();
+  const publicado = esperarEspejo(gateway, start.latestTick + 11, t.signal);
   gateway.start();
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  await publicado;
   const end = await gateway.flushTape();
   const ticks = end.latestTick - start.latestTick;
-  t.diagnostic(`turbo: ${ticks} ticks in 3 s`);
+  t.diagnostic(`turbo: ${ticks} ticks on the tape`);
   assert.ok(ticks > 10, `the world advanced (${ticks} ticks)`);
   const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
   try {
@@ -274,10 +283,12 @@ test('turbo gateway: the first frame a reopened tape accepts is a full keyframe 
     try { return reader.readChunk(tick, 1).frames.find(frame => frame.tick === tick); } finally { reader.close(); }
   };
   let gateway = createWorkerGateway(options);
-  await gateway.ready;
-  gateway.start();
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  await gateway.close();
+  try {
+    await gateway.ready;
+    const publicado = esperarEspejo(gateway, 5, t.signal);
+    gateway.start();
+    await publicado;
+  } finally { await gateway.close(); }
   const first = new TapeReader({ path: tapePathForWorld(worldPath) });
   const before = first.readMeta();
   first.close();
@@ -285,12 +296,10 @@ test('turbo gateway: the first frame a reopened tape accepts is a full keyframe 
   gateway = createWorkerGateway(options);
   t.after(() => gateway.close());
   await gateway.ready;
+  const publicado = esperarEspejo(gateway, before.maxTick + 3, t.signal);
   gateway.start();
-  let after = await gateway.flushTape();
-  for (let i = 0; i < 100 && after.latestTick <= before.maxTick + 2; i++) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    after = await gateway.flushTape();
-  }
+  await publicado;
+  assert.ok((await gateway.flushTape()).latestTick >= before.maxTick + 3);
   const resumed = frameAt(before.maxTick + 1);
   assert.ok(resumed?.performance?.activeTiles);
   // El terreno residente puede cambiar al paso siguiente, incluso sin reiniciar.

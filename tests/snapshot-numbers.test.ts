@@ -56,7 +56,7 @@ test('ordinary compact bytes declare parameters and limits profile; historical b
   for (const params of [HISTORICAL_PARAMS, DEFAULT_PARAMS, parseParams('agua.cuencas=0.9,motor.gpu=[2,0]')]) {
     const world = createWorld(51926, params);
     const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
-      t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
+      t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life,t.paved]);
     const expected = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: 'tiles-tuple-v1',
       ...(params === HISTORICAL_PARAMS ? {} : { paramsEncoding: 'params-v1', params }) };
     const { aplicacion, ...numericLimits } = params.limites;

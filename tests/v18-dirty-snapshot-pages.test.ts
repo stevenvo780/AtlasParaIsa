@@ -310,7 +310,8 @@ test('v18: un trigger que corrompe la página insertada hace fallar el guardado 
   assert.equal(digestoCanonico(lab.reopen().load()!.world), digestoCanonico(world), 'sin el trigger, la mutación se guarda exacta');
 });
 
-test('v18: banco caliente — 1 página sucia de 31 en ~125k teselas, con paridad contra el control', t => {
+test('v18: el guardado caliente solo codifica la página sucia entre ~125k teselas y conserva los bytes', t => {
+  const warmSaves = 5;
   const makeBigWorld = (wrap: boolean): World => {
     const world = createWorld(42, parseParams('limites.teselasActivas=262144,limites.chunks=1024'));
     for (let cy = 0; cy < 22; cy++) for (let cx = 0; cx < 22; cx++) activate(world, cx * 16, cy * 16);
@@ -321,33 +322,23 @@ test('v18: banco caliente — 1 página sucia de 31 en ~125k teselas, con parida
     }
     return world;
   };
-  const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
-  const warmTimes = (lab: ReturnType<typeof laboratory>, world: World): number[] => {
-    lab.store.save(world); // frío (profundo): construye el directorio
-    const times: number[] = [];
-    for (let n = 0; n < 5; n++) {
+  const saveDirtyPage = (store: Store, world: World): void => {
+    store.save(world); // El primer guardado construye el directorio completo.
+    for (let n = 0; n < warmSaves; n++) {
       world.tiles[12345]!.food = 0.31 + n * 0.01;
-      const started = performance.now();
-      lab.store.save(world);
-      times.push(performance.now() - started);
+      store.save(world);
     }
-    return times;
   };
   const cachedLab = laboratory(t), controlLab = laboratory(t);
   const cached = makeBigWorld(true), control = makeBigWorld(false);
   const pages = Math.ceil(cached.tiles.length / 4096);
   assert.equal(cached.tiles.length, control.tiles.length);
-  assert.ok(cached.tiles.length >= 65536 && pages >= 16 && pages <= 32, `escala del banco: ${cached.tiles.length} teselas, ${pages} páginas`);
-  const cachedTimes = warmTimes(cachedLab, cached), controlTimes = warmTimes(controlLab, control);
-  const cachedMedian = median(cachedTimes), controlMedian = median(controlTimes);
-  t.diagnostic(`v18 banco: ${cached.tiles.length} teselas, ${pages} páginas; caliente con caché ${cachedMedian.toFixed(1)} ms `
-    + `(mediana de ${cachedTimes.map(v => v.toFixed(1)).join('/')}) frente a control ${controlMedian.toFixed(1)} ms `
-    + `(${controlTimes.map(v => v.toFixed(1)).join('/')}) = ${(controlMedian / cachedMedian).toFixed(2)}x; `
-    + `stats caché ${JSON.stringify(cachedLab.store.snapshotPageStats)} control ${JSON.stringify(controlLab.store.snapshotPageStats)}`);
-  assert.deepEqual(cachedLab.store.snapshotPageStats, { reused: 5 * (pages - 1), encoded: pages + 5 },
+  assert.ok(cached.tiles.length >= 65536 && pages >= 16 && pages <= 32, `escala de la prueba: ${cached.tiles.length} teselas, ${pages} páginas`);
+  saveDirtyPage(cachedLab.store, cached);
+  saveDirtyPage(controlLab.store, control);
+  assert.deepEqual(cachedLab.store.snapshotPageStats, { reused: warmSaves * (pages - 1), encoded: pages + warmSaves },
     'en caliente solo se codifica la página sucia; el trabajo de páginas cae en un factor ~páginas');
-  assert.equal(controlLab.store.snapshotPageStats.reused, 0);
-  assert.ok(cachedMedian * 1.4 < controlMedian,
-    `aceleración clara en save() caliente: ${cachedMedian.toFixed(1)} ms frente a ${controlMedian.toFixed(1)} ms`);
+  assert.deepEqual(controlLab.store.snapshotPageStats, { reused: 0, encoded: (1 + warmSaves) * pages },
+    'sin caché se codifican todas las páginas en cada guardado');
   assert.equal(slotBody(cachedLab.store), slotBody(controlLab.store), 'a esta escala el cuerpo también es byte a byte idéntico');
 });

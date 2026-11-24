@@ -232,6 +232,7 @@
 .stats-tabs { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-snap-type: x proximity; }
 .stats-tabs::-webkit-scrollbar { display: none; }
 .stats-tabs button { flex: 1 0 auto; white-space: nowrap; overflow-wrap: normal; padding: 0 9px; min-width: 44px; scroll-snap-align: start; }
+#stats-drawer:not(:has(#stats-tab-performance[aria-selected="true"])) > #panel-salud { display: none; }
 @media (max-width: 760px) {
   .game-brand { flex: 1 1 auto; min-width: 0; max-width: none; }
   .game-brand > span { white-space: normal; line-height: 1.1; font-size: 17px; }

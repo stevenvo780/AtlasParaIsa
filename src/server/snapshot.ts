@@ -33,6 +33,7 @@ const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos'
 /** Orden de los campos de cada tupla de tesela. `encodeSnapshotTileRows` escribe el mismo orden a mano
  * (camino caliente de cada guardado); tests/snapshot-tile-fields.test.ts comprueba que coinciden. */
 export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life','paved'] as const;
+const PAVED_TILE_RULES_VERSION = 14;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
@@ -330,9 +331,13 @@ export function parseSnapshotJSON(body: string): unknown {
   }
   return value;
 }
-export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
+export function decodeSnapshotTileRows(rows: unknown[], rulesVersion?: number): Tile[] {
+  // Los chunks archivados no llevan versión de reglas y también pueden contener tuplas históricas.
+  const allowLegacyWidth = rulesVersion === undefined || rulesVersion < PAVED_TILE_RULES_VERSION;
   return rows.map(row => {
-    if (!Array.isArray(row) || (row.length !== SNAPSHOT_TILE_FIELDS.length && row.length !== SNAPSHOT_TILE_FIELDS.length - 1)) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
+    if (!Array.isArray(row) || row.length !== SNAPSHOT_TILE_FIELDS.length
+      && !(allowLegacyWidth && row.length === SNAPSHOT_TILE_FIELDS.length - 1))
+      throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
     const tile: Record<string, unknown> = {};
     for (let i = 0; i < row.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
     return tile as unknown as Tile;
@@ -347,7 +352,7 @@ export function decodeSnapshotValue(value: unknown): unknown {
   assertSnapshotCounts(record, limits, Array.isArray(record.tiles) ? record.tiles.length : undefined);
   if ('tileEncoding' in record) {
     if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles)) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
-    record.tiles = decodeSnapshotTileRows(record.tiles);
+    record.tiles = decodeSnapshotTileRows(record.tiles, record.version as number);
   }
   finishDecodedRecord(record);
   return value;
@@ -369,7 +374,7 @@ export function encodeArchivedChunk(chunk: Chunk): string {
   // Coordinates are implicit in a chunk: tile i sits at (cx*16 + i%16, cy*16 + i/16),
   // exactly as `assertChunk` requires (same rationale as the SoA terrain of T112).
   // When every tile matches that derivation, drop the two leading slots; the decoder
-  // rebuilds them from the grid. Any other chunk keeps the full 20-field tuple.
+  // rebuilds them from the grid. Any other chunk keeps the full tuple.
   if (Number.isSafeInteger(chunk.cx) && Number.isSafeInteger(chunk.cy)) {
     const x0 = chunk.cx * 16, y0 = chunk.cy * 16;
     if (rows.every((row, i) => row[0] === x0 + i % 16 && row[1] === y0 + Math.floor(i / 16)))
@@ -395,8 +400,7 @@ export function decodeArchivedChunk(body: string): Chunk {
   if (!('tileEncoding' in record)) return value as Chunk;
   if (record.tileEncoding !== ARCHIVED_CHUNK_TILE_ENCODING || !Array.isArray(record.tiles))
     throw new SnapshotSemanticError('Invalid archived chunk tile encoding. Explicit recovery required.');
-  // Restore dropped coordinates from the chunk grid before expanding the tuples:
-  // an 18-field row is a 20-field tuple whose x,y are the grid position of its index.
+  // Las tuplas de dos campos menos toman x e y de la posición en la cuadrícula del chunk.
   if (Number.isSafeInteger(record.cx) && Number.isSafeInteger(record.cy)) {
     const x0 = (record.cx as number) * 16, y0 = (record.cy as number) * 16;
     record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && (row.length === SNAPSHOT_TILE_FIELDS.length - 2 || row.length === SNAPSHOT_TILE_FIELDS.length - 3)

@@ -10,6 +10,7 @@ import { Connection, type ConnectionStatus } from '../src/client/connection.js';
 import { PROTOCOL_VERSION, type Gesture, type ServerMessage, type TechnologyRecipe, type WorldView } from '../src/shared/types.js';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
+import { barreraWs } from './lib/net.js';
 
 class BrowserSocket {
   static readonly OPEN = 1;
@@ -325,38 +326,51 @@ async function subscriptionFixture(t: TestContext) {
     const states: WorldView[] = [];
     socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerMessage; if (message.type === 'state') states.push(message.world); });
     await once(socket, 'open');
-    await new Promise(resolve => setTimeout(resolve, 20)); // deja llegar el estado inicial de la conexión.
+    await barreraWs(socket);
     return { socket, states };
   }
   return { connect, stepOnce: () => app.stepOnce() };
 }
-const settle = (ms = 20): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 test('un cliente suscrito no recibe estados más seguido que su intervaloMs', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const f = await subscriptionFixture(t);
   const unSubscribed = await f.connect();
   const subscribed = await f.connect();
   subscribed.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 5000 }));
-  await settle();
+  await barreraWs(subscribed.socket);
   unSubscribed.states.length = 0; subscribed.states.length = 0; // solo lo que llegue DESPUÉS de suscribirse.
+  t.mock.timers.tick(1000);
   for (let tick = 0; tick < 25; tick++) f.stepOnce(); // sin gestos: broadcast solo en tick % 5 === 0 → 5 veces.
-  await settle();
+  await Promise.all([barreraWs(unSubscribed.socket), barreraWs(subscribed.socket)]);
   assert.equal(unSubscribed.states.length, 5, 'sin suscripción, la cadencia normal (cada 5 ticks) no cambia');
-  assert.equal(subscribed.states.length, 0, 'a los pocos ms de suscribirse a 5000 ms, ningún broadcast periódico debe llegar todavía');
+  assert.equal(subscribed.states.length, 0, 'una suscripción de 5000 ms no emite al cabo de 1000 ms');
+  t.mock.timers.tick(4000);
+  for (let tick = 0; tick < 5; tick++) f.stepOnce();
+  await barreraWs(subscribed.socket);
+  assert.equal(subscribed.states.length, 1, 'al completar los 5000 ms vuelve a emitir');
   unSubscribed.socket.terminate(); subscribed.socket.terminate();
 });
 
 test('intervaloMs se acota a un piso de 1000 ms (no se puede pedir más frecuencia que eso)', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const f = await subscriptionFixture(t);
   const baseline = await f.connect(); // sin suscripción: referencia de la cadencia normal.
   const casi = await f.connect();
   casi.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 1 })); // de no acotarse, se comportaría como `baseline`.
-  await settle();
+  await barreraWs(casi.socket);
   baseline.states.length = 0; casi.states.length = 0;
-  for (let tick = 0; tick < 25; tick++) f.stepOnce();
-  await settle();
+  for (let broadcast = 0; broadcast < 5; broadcast++) {
+    t.mock.timers.tick(100);
+    for (let tick = 0; tick < 5; tick++) f.stepOnce();
+  }
+  await Promise.all([barreraWs(baseline.socket), barreraWs(casi.socket)]);
   assert.equal(baseline.states.length, 5, 'control: sin suscripción, los 5 broadcasts periódicos llegan');
-  assert.ok(casi.states.length < baseline.states.length, `pedir 1 ms debe acotarse a 1000 ms, no comportarse como sin suscripción (recibió ${casi.states.length} de 5)`);
+  assert.equal(casi.states.length, 0, 'pedir 1 ms no permite emitir antes de los 1000 ms');
+  t.mock.timers.tick(500);
+  for (let tick = 0; tick < 5; tick++) f.stepOnce();
+  await barreraWs(casi.socket);
+  assert.equal(casi.states.length, 1, 'el piso es de 1000 ms');
   baseline.socket.terminate(); casi.socket.terminate();
 });
 
@@ -366,8 +380,8 @@ test('el mensaje de suscripción rechaza un intervaloMs inválido sin cerrar la 
   const errors: string[] = [];
   client.socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerMessage; if (message.type === 'error') errors.push(message.message); });
   client.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 'pronto' }));
-  await settle();
-  assert.equal(errors.length, 1);
+  await barreraWs(client.socket);
+  assert.deepEqual(errors, ['Intervalo de suscripción no válido.']);
   assert.equal(client.socket.readyState, NodeWebSocket.OPEN, 'un mensaje inválido no debe tumbar la conexión');
   client.socket.terminate();
 });

@@ -32,7 +32,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const keys = (value: Record<string, unknown>, expected: string[]): boolean =>
   Object.keys(value).length === expected.length && expected.every(key => Object.hasOwn(value, key));
 interface Page { index: number; digest: string; count: number; bytes: number; }
-interface Manifest { snapshotEncoding: typeof ENCODING; world: Record<string, unknown>; tiles: { count: number; pages: Page[] }; }
+interface Manifest { snapshotEncoding: typeof ENCODING; world: Record<string, unknown> & { version: number }; tiles: { count: number; pages: Page[] }; }
 /** `metadata` is the exact JSON of the world record without tiles, serialized once. */
 export interface PreparedSnapshot { inline?: string; metadata?: string; tiles: readonly Tile[]; }
 /** `digest` is sha256(body); `pages` are the digests write() proved inside the caller's transaction. */
@@ -371,7 +371,7 @@ export class SnapshotParts {
     const manifest = this.manifest(value, body), tiles: Tile[] = [];
     for (const page of manifest.tiles.pages) {
       // Avoid a giant spread argument or a reconstructed giant JSON string.
-      for (const tile of decodeSnapshotTileRows(this.page(page))) tiles.push(tile);
+      for (const tile of decodeSnapshotTileRows(this.page(page), manifest.world.version)) tiles.push(tile);
       bytes += page.bytes;
       this.onProgress?.();
     }
@@ -387,7 +387,8 @@ export class SnapshotParts {
     assertSnapshotPartsSchema(this.db);
     const value = parseSnapshotJSON(body);
     if (!object(value) || !Object.hasOwn(value, 'snapshotEncoding')) return;
-    for (const page of this.manifest(value, body).tiles.pages) decodeSnapshotTileRows(this.page(page));
+    const manifest = this.manifest(value, body);
+    for (const page of manifest.tiles.pages) decodeSnapshotTileRows(this.page(page), manifest.world.version);
   }
 
   /** Triggers can also damage pages now referenced only by a backup. Verify all

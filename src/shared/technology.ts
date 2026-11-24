@@ -17,6 +17,10 @@ export interface MaterialBatch {
   /** V6 free liquid, never composition.water. One environmental water unit is
    * 50 material units (50,000 mass quanta); coefficients are simulated, not calibrated. */
   contents?: ContainedWater;
+  /** V23: emergent chemical alloy/compound provenance forged into this tool/vessel/pack (real colorHex + properties). */
+  materialTint?: string;
+  chemFormulaId?: string;
+  chemPhase?: import('./chemistry.js').ThermalPhase;
 }
 export interface ContainedWater { version: 1; water: number; leakRemainder: number; lastTick: number; }
 export interface WaterLedger {
@@ -134,6 +138,10 @@ export interface TechnologyView {
      * In version 1 the optional constants default to 50000 and 1000000 respectively.
      * Protocol 9 omits them; readers also accept the previous complete representation. */
     water?: { version: 1; quanta: number; capacityQuanta: number; quantaPerUnit?: 50000; leakageNumerator: number; leakageDenominator?: 1000000 };
+    /** V23: emergent chemical compound color & provenance forged into this artifact. */
+    materialTint?: string;
+    chemFormulaId?: string;
+    chemPhase?: import('./chemistry.js').ThermalPhase;
   }[];
   dynamics: { attempts: number; failures: number; recipes: number; products: number; generations: number;
     toolUses: number; observedUtility: number; shared: number; importedMass: number; productMass: number;

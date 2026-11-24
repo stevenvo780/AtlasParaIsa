@@ -1,11 +1,28 @@
 export type AnimalSpecies = 'hare' | 'deer' | 'boar' | 'fish' | 'wolf' | 'fox';
 export type AnimalAction = 'roam' | 'graze' | 'drink' | 'rest' | 'hunt' | 'flee';
 export interface AnimalGenes { speed: number; perception: number; metabolism: number; carnivory: number; waterEfficiency: number; camouflage: number; }
+/** V23: heritable continuous evolutionary morphology & temperament traits (all in [0,1]). */
+export interface AnimalMorphology {
+  /** Lower = bolder/calmer near humans → natural domestication; higher = wild/skittish. */
+  caution: number;
+  /** Body bulk: larger = more meat/fiber & stockier sprite, slower; leaner = faster. */
+  size: number;
+  /** Fur/wool thickness: adapts to cold/mountains, yields fiber when tended, woollier sprite. */
+  coat: number;
+  /** Antlers/tusks/horns: deters predators & draws prominent defensive silhouette. */
+  defense: number;
+}
 export interface AnimalView {
   id: string; species: AnimalSpecies; x: number; y: number; action: AnimalAction; reason: string;
   hunger: number; thirst: number; energy: number; fatigue: number; health: number;
   generation: number; parents: string[]; genes: AnimalGenes; age: number;
   reproReserve?: number;
+  /** V23: heritable evolutionary morphology & temperament traits (optional for legacy snapshots). */
+  morphology?: AnimalMorphology;
+  /** V23: local habituation near non-hostile human settlements [0..1]; >= 0.45 enables emergent non-lethal tending & calm herd visuals. */
+  habituation?: number;
+  /** V23: count of non-lethal tending interactions received. */
+  tends?: number;
 }
 export interface AnimalDynamics { births: number; deaths: number; predations: number; humanHunts: number; waterConsumed: number; plantConsumed: number; }
 export type StructureComponent = 'frame' | 'roof' | 'cistern' | 'granary' | 'garden' | 'hearth';

@@ -1,7 +1,7 @@
-import type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
+import type { AnimalView, AnimalMorphology, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 import type { TechnologyRecipe, TechnologyView } from './technology.js';
 import type { OrganizationSummary } from './organization.js';
-export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
+export type { AnimalView, AnimalMorphology, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js';
 export type { ElementSymbol, ElementVector, ThermalPhase, ChemOperator, MaterialProperties, CompoundLot, ChemicalFormulaView, ChemistrySummaryView, StructureMaterialProfile, StructureSynergyView } from './chemistry.js';
 /** 7: `TechnologyView.recipes` carries summaries; the program travels only on request.
@@ -50,6 +50,9 @@ export interface PersonView {
   lifeStage?: 'juvenile' | 'adult' | 'senescent';
   /** V20: conserved chemical compound lots carried by this inhabitant. */
   compounds?: import('./chemistry.js').CompoundLot[];
+  /** V23: emergent craft colorHex (dominant compound/tool tint) and continuous vocation focus derived from real deeds & chemistry. */
+  craftTint?: string;
+  craftFocus?: string;
 }
 /** T036(h): lo que el inspector pide por habitante y no viaja en cada `state`. */
 export interface PersonDetail {

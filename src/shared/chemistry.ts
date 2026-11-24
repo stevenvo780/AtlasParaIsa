@@ -15,6 +15,10 @@ export interface MaterialProperties {
   seal: number;
   insulation: number;
   fuelPower: number;
+  /** V23: organic/mineral soil enrichment potential (ash/lime/bone/manure C+Ca+H). */
+  fertility?: number;
+  /** V23: strength-to-weight agility for packs, carry loads, shafts and transport (C+H vs heavy Fe+Si). */
+  lightness?: number;
   colorHex: string;
 }
 
@@ -175,6 +179,10 @@ export function evaluateMaterialProperties(composition: ElementVector, phase: Th
   const seal = clamp01(n.Si * 0.46 + n.Ca * 0.44 + n.S * 0.36 + n.Fe * 0.22 + phaseSeal - n.C * 0.15 - n.H * 0.22);
   const insulation = clamp01(n.C * 0.56 + n.Ca * 0.42 + n.Si * 0.28 + phaseInsul - n.Fe * 0.28 - n.H * 0.25);
   const fuelPower = clamp01(n.C * (phase === 'fired' ? 1.35 : phase === 'raw' ? 0.72 : 0.55) - n.H * 0.65 - (n.Si + n.Fe) * 0.35);
+  const fertility = clamp01(n.Ca * 0.48 + n.C * 0.42 + n.H * 0.34 + n.S * 0.14 - n.Fe * 0.35
+    - (phase === 'smelted' || phase === 'vitrified' ? 0.38 : 0) + (phase === 'ground' || phase === 'fired' ? 0.14 : 0));
+  const lightness = clamp01(n.C * 0.62 + n.H * 0.42 + n.S * 0.12 - n.Fe * 0.55 - n.Si * 0.25
+    - (phase === 'smelted' ? 0.24 : 0) + (phase === 'raw' || phase === 'washed' ? 0.14 : 0));
 
   // Color derived continuously from dominant chemistry + thermal phase (terracotta, lime, iron-slate, charcoal, vitreous teal)
   let r = 162, g = 148, b = 124;
@@ -193,6 +201,8 @@ export function evaluateMaterialProperties(composition: ElementVector, phase: Th
     seal: Math.round(seal * 1000) / 1000,
     insulation: Math.round(insulation * 1000) / 1000,
     fuelPower: Math.round(fuelPower * 1000) / 1000,
+    fertility: Math.round(fertility * 1000) / 1000,
+    lightness: Math.round(lightness * 1000) / 1000,
     colorHex,
   };
 }

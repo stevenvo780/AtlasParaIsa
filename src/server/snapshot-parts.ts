@@ -126,7 +126,8 @@ export class SnapshotParts {
   private writtenDigest: string | null = null;
   private pagesReused = 0;
   private pagesEncoded = 0;
-  constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number) {}
+  constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
+    private readonly onProgress?: () => void) {}
 
   /** Contadores acumulados de diagnóstico: páginas servidas desde el directorio confirmado frente a
    * codificadas (serializar + sha256 + cotejo SQL) por el camino completo. */
@@ -281,6 +282,7 @@ export class SnapshotParts {
         pending.push(reused);
         bytes += reused.bytes;
         this.pagesReused++;
+        this.onProgress?.();
         continue;
       }
       const rows = encodeSnapshotTileRows(tiles, offset, Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset));
@@ -293,6 +295,7 @@ export class SnapshotParts {
       bytes += size;
       this.pagesEncoded++;
       if (certified) pending.push(this.cachedPage(tiles, offset, rows.length, digest, size));
+      this.onProgress?.();
     }
     // Byte for byte `stringifyExact(manifest)`: the page descriptors hold only strings and non-negative integers.
     const manifestTiles: Manifest['tiles'] = { count: tiles.length, pages };
@@ -370,6 +373,7 @@ export class SnapshotParts {
       // Avoid a giant spread argument or a reconstructed giant JSON string.
       for (const tile of decodeSnapshotTileRows(this.page(page))) tiles.push(tile);
       bytes += page.bytes;
+      this.onProgress?.();
     }
     const world = { ...manifest.world, tiles };
     finishDecodedRecord(world);

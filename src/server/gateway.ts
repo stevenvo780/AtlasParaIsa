@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { deserialize } from 'node:v8';
-import { createReadOnlyApp, DIAGNOSTICO_VACIO, estadoGpu, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type Salud, type WhispersResponse } from './app.js';
+import { createReadOnlyApp, DIAGNOSTICO_VACIO, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type WhispersResponse } from './app.js';
 import { buildWorldDirectory, WorldMapCache } from './worldmap-service.js';
 import { TICKS_PER_DAY } from '../world/index.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapResponse } from '../shared/worldmap.js';
@@ -13,8 +13,9 @@ import { initializeEcosystem } from '../world/ecosystem.js';
 import { projectAnimal } from '../world/animals.js';
 import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, tapePathForWorld } from './tape-store.js';
-import { projectMirrorTile, type MirrorUpdate, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
+import { projectMirrorTile, type MirrorUpdate, type OperacionWorker, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
 import type { RuntimeStats, Tile, Viewport, WorldView } from '../shared/types.js';
+import type { Salud } from '../shared/salud.js';
 import type { TapeChunkEncoding } from '../shared/tape.js';
 import type { World } from '../world/index.js';
 
@@ -26,8 +27,17 @@ type TilePage = { data: Uint8Array; tiles?: Tile[] };
  * Main-thread transport. Only an authenticated, immutable projection crosses from the
  * simulation worker. Its archive connection is WAL/read-only: never load/save a World here.
  */
-/** Plazo del silencio del espejo antes de declarar `parado`: cubre un guardado o una recarga síncronos del worker. */
-const ESPEJO_PARADO_S = 600;
+type MedicionSalud = Pick<MirrorUpdate, 'salud' | 'saludMedidaEn'>;
+export function saludDelEspejo(medicion: MedicionSalud, avance: OperacionWorker, detenido: boolean, ahora: number): Salud {
+  const { operacion, medidaEn } = avance;
+  const segundos = medicion.salud.segundosDesdeUltimoPaso + Math.max(0, ahora - medicion.saludMedidaEn) / 1000;
+  const desdeOperacion = Math.max(0, ahora - medidaEn) / 1000;
+  // Tras una operación hay margen para completar el siguiente paso sin alterar la edad del tick.
+  const silencio = operacion ? desdeOperacion : Math.min(segundos, desdeOperacion);
+  const estado = detenido || silencio > PASO_PARADO_S ? 'parado'
+    : operacion || segundos > PASO_PARADO_S || medicion.salud.estado === 'degradado' ? 'degradado' : 'ok';
+  return { ...medicion.salud, segundosDesdeUltimoPaso: segundos, estado, operacion };
+}
 
 export function createWorkerGateway(options: WorkerGatewayOptions) {
   let mirror: MirrorUpdate | undefined;
@@ -38,10 +48,12 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   /** Read-only WAL view of the worker's tape: scrubbing never sends an RPC to the simulation. */
   let tapeReader: TapeReader | undefined;
   let fatal: Error | undefined;
-  /** Salud vista desde el espejo: cuándo cambió el tick por última vez y cuántas veces retrocedió
-   * (cada retroceso es una recarga del worker desde su guardado). */
   const creadoEn = Date.now();
-  let tickVisto = -1, tickCambioEn = creadoEn, recargas = 0;
+  let avance: OperacionWorker = { type: 'operacion', operacion: { tipo: 'arrancando', inicio: creadoEn, progresoEn: creadoEn }, medidaEn: performance.now() };
+  let medicion: MedicionSalud = { saludMedidaEn: avance.medidaEn, salud: {
+    estado: 'degradado', tick: 0, ticksPorSegundo: 0, segundosDesdeUltimoPaso: 0,
+    ultimoGuardado: null, gpu: [], recargas: 0, diagnostico: DIAGNOSTICO_VACIO, operacion: null,
+  } };
   let simulationPaused = false;
   let lastPublishMs = 0;
   let closing = false, started = !options.manual, isReady = false;
@@ -254,20 +266,9 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       return created;
     },
     salud(): Salud {
-      // El worker guarda y recarga de forma síncrona (una recarga de un mundo grande tardó 140-330 s) y el
-      // espejo no se mueve mientras tanto: ese silencio no se distingue desde aquí de un paso colgado.
-      // Hasta `ESPEJO_PARADO_S` es `degradado` (sigue en 200, el vigilante espera); pasado el plazo, `parado`.
-      // Sin espejo aún, los segundos cuentan desde el arranque, pero el transporte no escucha hasta que el
-      // worker está listo. El estado `cpu` de una GPU caída vive en el worker y aquí no se ve (solo la
-      // disponibilidad de NVRTC): publicarlo exige que el espejo lleve la salud del worker.
-      const segundos = Math.max(0, (Date.now() - (mirror ? tickCambioEn : creadoEn)) / 1000);
-      const gpu = estadoGpu(options.params?.motor.gpu ?? []);
-      const parado = !!fatal || simulationPaused || !!mirror?.failed || segundos > ESPEJO_PARADO_S;
-      const diagnostico = mirror?.diagnostico ?? DIAGNOSTICO_VACIO;
-      return { estado: parado ? 'parado' : segundos > PASO_PARADO_S || diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
-        tick: mirror?.view.tick ?? 0, ticksPorSegundo: mirror?.view.performance?.tickHz ?? 0,
-        segundosDesdeUltimoPaso: segundos, ultimoGuardado: null, gpu, recargas, diagnostico };
+      return saludDelEspejo(medicion, avance, !!fatal || simulationPaused || closing, performance.now());
     },
+    get ready() { return isReady && !closing; },
     get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
@@ -333,10 +334,6 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     atlas.retainActive(update.activeKeys);
     for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
     activeKeys = update.activeChunks; mirror = update;
-    if (update.view.tick !== tickVisto) {
-      if (update.view.tick < tickVisto) recargas++;
-      tickVisto = update.view.tick; tickCambioEn = Date.now();
-    }
     if (isReady && !closing) transport.broadcast();
     events.emit('mirror', update.view.tick);
   }
@@ -349,8 +346,13 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
         if (reply.error) call.reject(new HttpError(reply.error.status, reply.error.message));
         else call.resolve(reply.value);
       } else if (message.type === 'mirror') {
-        applying = applying.then(() => applyMirror(message as MirrorUpdate));
+        const update = message as MirrorUpdate;
+        // La salud no espera a que se reconstruya la proyección, que puede ocupar muchas vueltas.
+        medicion = { salud: update.salud, saludMedidaEn: update.saludMedidaEn };
+        applying = applying.then(() => applyMirror(update));
         void applying.catch(fail);
+      } else if (message.type === 'operacion') {
+        avance = message as OperacionWorker;
       } else if (message.type === 'ready') {
         applying = applying.then(() => {
           if (!closing) {

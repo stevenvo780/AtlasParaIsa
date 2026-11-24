@@ -227,19 +227,21 @@ export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
 export interface StoreOptions {
   readOnly?: boolean; snapshotInlineTileLimit?: number;
+  onProgress?: () => void;
   /** Recibos podados como mucho por guardado (default `TECHNOLOGY_PRUNE_ROWS_PER_SAVE`); las pruebas lo bajan. */
   technologyPruneRowsPerSave?: number;
 }
 function validateStoreOptions(options: StoreOptions): void {
   if (!options || typeof options !== 'object' || Array.isArray(options)
-    || Object.keys(options).some(key => !['readOnly', 'snapshotInlineTileLimit', 'technologyPruneRowsPerSave'].includes(key))
+    || Object.keys(options).some(key => !['readOnly', 'snapshotInlineTileLimit', 'technologyPruneRowsPerSave', 'onProgress'].includes(key))
+    || options.onProgress !== undefined && typeof options.onProgress !== 'function'
     || options.readOnly !== undefined && typeof options.readOnly !== 'boolean'
     || options.snapshotInlineTileLimit !== undefined && (!Number.isSafeInteger(options.snapshotInlineTileLimit)
       || options.snapshotInlineTileLimit < 0 || options.snapshotInlineTileLimit > SNAPSHOT_INLINE_TILE_LIMIT)
     || options.technologyPruneRowsPerSave !== undefined && (!Number.isSafeInteger(options.technologyPruneRowsPerSave)
       || options.technologyPruneRowsPerSave < 1 || options.technologyPruneRowsPerSave > 1_000_000))
     throw new Error('Invalid StoreOptions: readOnly must be boolean, snapshotInlineTileLimit an integer from 0 to 32768'
-      + ' and technologyPruneRowsPerSave an integer from 1 to 1000000.');
+      + ', technologyPruneRowsPerSave an integer from 1 to 1000000 and onProgress a function.');
 }
 export class Store {
   readonly db: DatabaseSync;
@@ -291,8 +293,10 @@ export class Store {
    * sesiones probada como propia en `sessionWrite`); cualquier escritura ajena, DDL o escritura propia no
    * contabilizada lo desajusta y el guardado siguiente recodifica todas las páginas. */
   private snapshotPagesStamp: ChronicleStamp | null = null;
+  private readonly onProgress: StoreOptions['onProgress'];
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
+    this.onProgress = options.onProgress;
     this.readOnly = options.readOnly ?? false;
     this.snapshotInlineTileLimit = options.snapshotInlineTileLimit ?? SNAPSHOT_INLINE_TILE_LIMIT;
     this.explicitPruneCap = options.technologyPruneRowsPerSave !== undefined;
@@ -380,7 +384,7 @@ export class Store {
       this.autoVacuumIncremental = !this.readOnly
         && Number((this.db.prepare('PRAGMA auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum) === 2;
       this.schemaVersion = schemaVersion;
-      this.snapshotParts = new SnapshotParts(this.db, schemaVersion);
+      this.snapshotParts = new SnapshotParts(this.db, schemaVersion, this.onProgress);
     } catch (error) { this.db.close(); throw error; }
   }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
@@ -540,6 +544,7 @@ export class Store {
       const results = stepWorld(world, batch.map(entry => entry.gesture), this.context);
       if (stringifyExact(results) !== stringifyExact(batch.map(entry => entry.result)))
         throw new SnapshotSemanticError('Replay gesture result mismatch. Explicit recovery required.');
+      this.onProgress?.();
     }
     if (input !== node.inputs.length || change !== node.changes.length)
       throw new SnapshotSemanticError('Replay input timeline is invalid. Explicit recovery required.');
@@ -729,6 +734,7 @@ export class Store {
     this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
+    this.onProgress?.();
     const refusals: string[] = [];
     // El momento del eslabón dañado MÁS RECIENTE cuya fila seguía ahí: es lo único que
     // mide el retroceso de un rescate, porque el cuerpo que lo superaba no se puede leer.
@@ -757,11 +763,13 @@ export class Store {
     skipped: string[], supersededAt: number | null): LoadedSnapshot {
     const declaredChronicle = decoded.chronicleJournal !== undefined;
     const world = this.migrateSnapshot(decoded);
+    this.onProgress?.();
     if (slot > 0) this.assertNothingNewerThan(world);
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
     this.assertChronicleOrigin(world, declaredChronicle);
     this.assertChronicleArchive(world);
+    this.onProgress?.();
     const declaredJournal = world.technology.journal !== undefined;
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
@@ -770,6 +778,7 @@ export class Store {
       if (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter) technologyFailure('snapshot contains uncommitted executions');
       if (this.schemaVersion >= 4) this.assertTechnologyCache(world);
       chain = this.assertTechnologyCoverage(world);
+      this.onProgress?.();
     } else if (this.schemaVersion >= 4 && (this.technologyArchive.getHistoryOrigin()
       || ['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()))) {
       technologyFailure('an unjournaled snapshot cannot describe an initialized archive');
@@ -943,6 +952,7 @@ export class Store {
       assertChronicleEvent(event, world.tick);
       if (event.id !== row!.id || event.tick !== row!.tick || event.tick < tick) chronicleFailure('archived identity or timeline disagrees');
       tick = event.tick; digest = checksum(`${digest}\n${row!.body}`);
+      if (serial % 1024 === 0) this.onProgress?.();
     }
     if (digest !== journal.committedDigest) chronicleFailure('archive digest disagrees');
     if (!allowLater && this.db.prepare("SELECT 1 FROM events WHERE id GLOB 'e[0-9]*' AND (CAST(substr(id,2) AS INTEGER)>? OR CAST(substr(id,2) AS INTEGER)<=0 OR id<>'e'||CAST(substr(id,2) AS INTEGER)) LIMIT 1").get(world.eventCounter)) chronicleFailure('archived event exceeds snapshot counter');
@@ -1134,6 +1144,7 @@ export class Store {
         const cached = recent.get(receipt.id);
         if (cached && JSON.stringify(cached) !== JSON.stringify(receipt)) technologyFailure('cached execution disagrees with archive');
       }
+      this.onProgress?.();
     }
     return { startsAfter, through, digest };
   }
@@ -1565,6 +1576,7 @@ export class Store {
     const deepValidation = deepValidationDue(this.saves, this.verifiedByLoad);
     if (deepValidation) assertWorld(world, world.version, this.context);
     else bindWorldContext(world, this.context);
+    this.onProgress?.();
     // Vale v18 de páginas limpias: solo si el sello COMPLETO (incluido `total_changes` de esta conexión)
     // sigue siendo el del último COMMIT de este Store y no toca la revisión completa. Los triggers se
     // descartan dentro de la transacción, antes de escribir; `snapshot-parts` recoteja allí los campos
@@ -1670,6 +1682,7 @@ export class Store {
         if (deep) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
       written = prepared ? this.snapshotParts.write(prepared, chronicleTriggers ? undefined : pageReuseTicket) : undefined;
+      this.onProgress?.();
       if (replay) {
         if (replay.node.kind === 'checkpoint') replay.node.body = written!.body;
         body = stringifyExact(replay.node);

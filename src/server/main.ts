@@ -79,8 +79,13 @@ function shutdown(code?: number): Promise<void> {
 }
 process.once('SIGINT', () => { void shutdown(); });
 process.once('SIGTERM', () => { void shutdown(); });
+function escuchar(instancia: NonNullable<typeof app>) {
+  instancia.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
+  instancia.server.listen(port, host, () => console.log(`Carta disponible en ${[origin, ...extraOrigins].join(', ')}; acceso privado requerido.`));
+}
+const conWorker = process.env.CARTA_SIM_WORKER === '1';
 try {
-  if (process.env.CARTA_SIM_WORKER === '1') {
+  if (conWorker) {
     const pasarela = createWorkerGateway({ worldPath: resolve(dataPath, 'world.sqlite'), manual: true, deployment: true, commit,
       password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, ...v21 });
     // Un worker caído deja el transporte sirviendo un espejo fosilizado para siempre: se sale con 75
@@ -90,6 +95,7 @@ try {
       process.exit(75);
     });
     app = pasarela;
+    escuchar(pasarela);
     await app.ready;
   } else {
   store = new Store(resolve(dataPath, 'world.sqlite'));
@@ -131,10 +137,8 @@ try {
   }
   if (abortado || !app) await shutdown(abortado ? undefined : 1);
   else {
-    const escuchando = app;
-    escuchando.start();
-    escuchando.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
-    escuchando.server.listen(port, host, () => console.log(`Carta disponible en ${[origin, ...extraOrigins].join(', ')}; acceso privado requerido.`));
+    if (!conWorker) escuchar(app);
+    app.start();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'No se pudo iniciar el mundo.');

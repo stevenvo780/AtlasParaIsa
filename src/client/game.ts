@@ -51,7 +51,8 @@ let observerOnly = false;
 interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean }
 let landscape: Landscape | null = null;
 /** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
-const tileCache = new ClientTileCache();
+// V24: 640 trozos de 16×16 (≈ 164 k teselas): alejar al zoom mínimo (≈ 480×270 teselas a 1080p) cabe sin expulsar lo visible.
+const tileCache = new ClientTileCache(640);
 let selected: Selection = { kind: 'person', id: 's' };
 let activePersonId = 's';
 let control: 'inspect' | 'direct' = 'inspect';
@@ -120,7 +121,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { soundEnabled = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; statsSignature = ''; focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -150,7 +151,7 @@ function enterWorld(flags: SessionFlags = {}): void {
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
   const modo = decidirModo(); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -177,8 +178,9 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   // V22: con trozos delta solo se ingieren las teselas que cambiaron (10–50) en vez de las ~6.000 de la vista.
   // Sin `changedTiles` (fotograma completo, base de trozo, salto) se ingiere la vista entera como siempre.
   const tiles = info.changedTiles ?? frame.tiles;
-  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles); }
-  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame); cronica.acumular(frame.events); }
+  // V24: el paisaje también recibe `changedTiles`: solo rehornea los trozos de 8×8 que tocan esas teselas.
+  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
+  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); cronica.acumular(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
 }
 
@@ -449,7 +451,11 @@ function startClientUi(): void {
       const b = landscape.getViewportBounds(), camera = landscape.camera();
       const viewport = { x: b.minX, y: b.minY, width: b.maxX - b.minX, height: b.maxY - b.minY };
       const key = JSON.stringify(viewport);
-      if (key !== previous) { previous = key; minimap?.updateViewport(viewport); }
+      if (key !== previous) {
+        previous = key; minimap?.updateViewport(viewport);
+        // V24: la ventana pedida al servidor ya no sigue a la cámara paso a paso; las coordenadas salen de la cámara.
+        el('camera-coordinates').textContent = `${Math.floor(camera.x)}, ${Math.floor(camera.y)}`;
+      }
       soundscape.update(world, { ...viewport, zoom: camera.zoom });
     } catch { /* La cámara visible manda; el minimapa y el sonido son accesorios. */ }
   };
@@ -592,7 +598,7 @@ function wireClientUi(): void {
   });
 }
 
-function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles): void {
+function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles, changedTiles?: readonly Tile[]): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
   // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
@@ -600,7 +606,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   recordarVistos(next);
   tileCache.ingest(tilesToIngest, next.tick);
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
-  const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
+  const first = world === null; world = next; landscape?.update(next, changedTiles); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
   renderTelemetryHud(next);
   cronica.acumular(next.events);
@@ -879,11 +885,26 @@ function renderPanelGobernadorEnDom(): void {
   const html = world ? renderPanelGobernador(world.performance, world.stats?.population) : '';
   contenedor.innerHTML = html; contenedor.hidden = !html;
 }
+/**
+ * V24: el panel de estadísticas solo se rehace si está abierto y algo cambió. Lo que cambia con cada paso del mundo
+ * (tick/secuencia) lo refresca a lo sumo una vez por segundo; cambiar de pestaña, de foco, de receta o de estado lo
+ * rehace al momento. Antes se reconstruía su HTML ~6 veces por segundo y competía con el dibujo del mapa.
+ */
+const STATS_TICK_MS = 1000;
+let statsRenderedAt = -Infinity, statsTrailing: ReturnType<typeof setTimeout> | null = null;
 function renderStats(): void {
-  const panel = document.getElementById('stats-content'); if (!panel) return;
-  const sig = statsTab === 'performance' ? '' : `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.tick ?? -1}|${world?.sequence ?? -1}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
-  if (sig && sig === statsSignature) return;
-  statsSignature = sig;
+  const panel = document.getElementById('stats-content'); if (!panel || el('stats-drawer').hidden) return;
+  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
+  const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}`;
+  if (sig === statsSignature) return;
+  const now = performance.now();
+  if (statsSignature.startsWith(`${structure}#`) && now - statsRenderedAt < STATS_TICK_MS) {
+    // El último paso recibido se muestra igual, al cumplirse el segundo (aunque no llegue otro paso).
+    statsTrailing ??= setTimeout(() => { statsTrailing = null; renderStats(); }, STATS_TICK_MS - (now - statsRenderedAt));
+    return;
+  }
+  if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; }
+  statsSignature = sig; statsRenderedAt = now;
   renderPanelGobernadorEnDom();
   const restore = retainViewState(panel);
   const deepStats = document.getElementById('mundo-deep-stats') ?? Object.assign(document.createElement('div'), { id: 'mundo-deep-stats' });

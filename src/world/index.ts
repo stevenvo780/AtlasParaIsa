@@ -48,6 +48,8 @@ import {
 } from './paralelo/personas-motor.js';
 import { ALIMENTO_MEDIO_MINIMO_NATALIDAD, selectLocalBirthPairs } from './natalidad-local.js';
 import { cloneWorld } from './clon.js';
+import { activeWhisperForPerson, enqueueWhisper, stepWhispers, MAX_RETAINED_WHISPERS, WHISPER_INTENTS, type WhisperFadeReason, type WhisperRecord } from './whispers.js';
+import type { DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export { closePersonasParallelPools } from './paralelo/personas-motor.js';
 export { closeFaunaParallelPools } from './paralelo/fauna-motor.js';
@@ -139,6 +141,9 @@ export interface Memory extends MemoryView {
 }
 export interface World {
   chemistry?: ChemistryState;
+  /** V24: Mensajes Divinos asíncronos. Ausente (o vacío) en todo mundo que nunca recibió uno: entonces el
+   * paso no hace NI UNA operación ni sorteo extra y los digestos históricos no cambian. */
+  whispers?: WhisperRecord[];
   version: number; seed: number; rng: number; tick: number; width: number; height: number;
   weather: 'clear' | 'rain'; tiles: Tile[]; people: Person[]; places: PlaceView[];
   memories: Memory[]; events: ChronicleEvent[]; eventCounter: number; chronicleJournal?: ChronicleJournal;
@@ -1441,6 +1446,17 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       candidate.policyDelta = delta;
     }
   }
+  // V24 Mensajes Divinos: un mensaje OÍDO es una prioridad fuerte y persistente, no un sesgo. Sólo cede ante
+  // una necesidad corporal aguda (entonces el candidato ni se ofrece y comer, beber o descansar deciden), y se
+  // cumple caminando paso a paso por tierra: nunca teletransporte. Una orden directa (fuera del modo observador)
+  // conserva su prioridad. Sin mensajes, ni una lectura más.
+  let whisperCandidate: Candidate | undefined;
+  const whisper = world.whispers?.length && !person.command ? activeWhisperForPerson(world.whispers, person.id) : undefined;
+  if (whisper && person.hunger < 0.72 && person.thirst < 0.72 && person.fatigue < 0.78 && person.energy > 0.22) {
+    whisperCandidate = { action: 'explore', target: { x: whisper.x, y: whisper.y }, score: 4,
+      reason: `Un susurro le llama a ${WHISPER_INTENT_LABEL[whisper.intent]}; va a su ritmo y atiende antes su cuerpo.` };
+    candidates.push(whisperCandidate);
+  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
@@ -1455,7 +1471,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   }
   candidates.sort((a, b) => b.score - a.score);
   const selected = candidates[0]!;
-  if (selected.action === 'explore' && !selected.directed && selected !== volverAlAgua) {
+  if (selected.action === 'explore' && !selected.directed && selected !== volverAlAgua && selected !== whisperCandidate) {
     // Urgent thirst reconsiders every tick. Replacing a still viable waypoint
     // each time can reverse the route before either endpoint is ever visited.
     // Keep the paid local search leg; visible water and bodily recovery still
@@ -2185,6 +2201,63 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
   return result(true, text);
 }
 
+/**
+ * V24 — Mensajes Divinos. Un mensaje se deja en el mundo entre pasos (nunca dentro de uno) y queda
+ * `latent`: nadie lo oye en el acto. Lo valida el anfitrión (`parseWhisperRequest`); aquí se comprueba lo
+ * que sólo el mundo sabe: que el destino sea una coordenada del mundo, que no sea agua conocida y que el
+ * destinatario siga vivo. No toca el RNG del mundo.
+ */
+export function submitWhisper(world: World, req: DivineWhisperRequest): DivineWhisper {
+  if (!validCoordinate(req.x) || !validCoordinate(req.y)) throw new Error('Coordenadas del mensaje divino fuera del mundo.');
+  const listener = req.personId ? world.people.find(p => p.id === req.personId) : undefined;
+  if (req.personId && !listener) throw new Error('Ese habitante ya no vive en el mundo.');
+  if (tileAt(world, req)?.terrain === 'water') throw new Error('El destino del mensaje divino está en el agua.');
+  world.whispers ??= [];
+  return enqueueWhisper(world.whispers, req, world.tick, Math.floor(world.tick / TICKS_PER_DAY) + 1, listener?.name);
+}
+/** Cadencia de escucha: cada 10 pasos (1 s del mundo). */
+const WHISPER_INTERVAL_TICKS = 10;
+const WHISPER_INTENT_LABEL: Record<DivineWhisperIntent, string> = {
+  travel: 'viajar hasta allí', explore: 'explorar esa región', gather: 'recolectar materiales allí',
+  build: 'construir allí', craft: 'trabajar un oficio allí', tend: 'cuidar a los animales de allí',
+};
+const WHISPER_FADE_CAUSE: Record<WhisperFadeReason, string> = {
+  gone: 'quien debía oírlo ya no vive', unreachable: 'el destino no se alcanza por tierra',
+  deadline: 'pasaron tres días desde que lo oyó', unheard: 'nadie pasó cerca para oírlo',
+};
+/** Sólo se llama con `world.whispers` no vacío (el paso de un mundo sin mensajes no llega aquí). */
+function advanceWhispers(world: World): void {
+  if (world.tick % WHISPER_INTERVAL_TICKS !== 0) return;
+  const whispers = world.whispers!;
+  let pending = false;
+  for (const w of whispers) if (w.status === 'latent' || w.status === 'heard') { pending = true; break; }
+  if (!pending) return;
+  const outcome = stepWhispers(whispers, world.people, world.tick, world.seed, (x, y) => {
+    const tile = tileAt(world, { x, y });
+    return tile ? tile.terrain === 'water' : undefined;
+  });
+  for (const { whisper, person } of outcome.heard) {
+    const listener = person as Person;
+    const note = whisper.note ? ` «${whisper.note}»` : '';
+    const event = addEvent(world, { kind: 'gesture', actors: [listener.id], x: listener.x, y: listener.y, source: 'simulation',
+      text: `${listener.name} oyó un susurro${note}: una llamada a ${WHISPER_INTENT_LABEL[whisper.intent]} (${whisper.x}, ${whisper.y}).`,
+      cause: `Mensaje divino ${whisper.id}, dejado en el paso ${whisper.createdTick} y oído ${world.tick - whisper.createdTick} pasos después. Irá en cuanto su cuerpo no tenga una necesidad aguda.` });
+    remember(listener, world, 'Un susurro le llamó a otro lugar.', event.id);
+  }
+  for (const { whisper, person } of outcome.fulfilled) {
+    const listener = person as Person;
+    const event = addEvent(world, { kind: 'gesture', actors: [listener.id], x: listener.x, y: listener.y, source: 'simulation',
+      text: `${listener.name} llegó al lugar del susurro (${whisper.x}, ${whisper.y}) por su propio camino.`,
+      cause: `Mensaje divino ${whisper.id} cumplido en el paso ${world.tick}, ${world.tick - (whisper.heardTick ?? whisper.createdTick)} pasos después de oírlo; caminó pagando sus costes corporales.` });
+    remember(listener, world, 'Siguió un susurro y llegó a otro lugar.', event.id);
+  }
+  for (const { whisper, reason } of outcome.faded) {
+    addEvent(world, { kind: 'gesture', actors: whisper.heardById ? [whisper.heardById] : [], x: whisper.x, y: whisper.y, source: 'simulation',
+      text: whisper.heardByName ? `El susurro que oyó ${whisper.heardByName} se desvaneció sin cumplirse.` : 'Un susurro se desvaneció sin que nadie lo oyera.',
+      cause: `Mensaje divino ${whisper.id}: ${WHISPER_FADE_CAUSE[reason]}.` });
+  }
+}
+
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
 /**
  * T107 (perfil por fase y fracción serial): reloj inyectado por el llamador —nunca
@@ -2260,6 +2333,8 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       }
     }
   }));
+  // V24: sin mensajes, ni una lectura más (0 ULP en todo mundo histórico).
+  if (world.whispers?.length) advanceWhispers(world);
   medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
@@ -2461,6 +2536,17 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
+  if (w.whispers !== undefined) {
+    if (!Array.isArray(w.whispers) || w.whispers.length > MAX_RETAINED_WHISPERS) fail();
+    const optionalTick = (n: unknown) => n === undefined || Number.isSafeInteger(n) && (n as number) >= 0 && (n as number) <= w.tick;
+    for (const whisper of w.whispers) if (!whisper || typeof whisper !== 'object' || typeof whisper.id !== 'string' || whisper.id.length > 100
+      || !WHISPER_INTENTS.includes(whisper.intent) || !['latent', 'heard', 'fulfilled', 'faded'].includes(whisper.status)
+      || !validCoordinate(whisper.x) || !validCoordinate(whisper.y) || !Number.isSafeInteger(whisper.createdTick) || whisper.createdTick > w.tick
+      || (whisper.personId !== null && typeof whisper.personId !== 'string') || typeof whisper.note !== 'string' || whisper.note.length > 120
+      || !optionalTick(whisper.heardTick) || !optionalTick(whisper.resolvedTick)
+      || whisper.bestDistance !== undefined && !(Number.isFinite(whisper.bestDistance) && whisper.bestDistance >= 0)
+      || whisper.stalledChecks !== undefined && !(Number.isSafeInteger(whisper.stalledChecks) && whisper.stalledChecks >= 0)) fail();
+  }
   // assertCommon has already rejected duplicate live IDs. Resolve live references
   // once rather than scanning the roster for every bond and recipe author.
   const alive = new Map(w.people.map(person => [person.id, person]));

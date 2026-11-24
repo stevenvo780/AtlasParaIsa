@@ -2,7 +2,7 @@ import { projectChemistry } from '../world/proyeccion.js';
 import { publicGeologyKey } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
-import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../world/index.js';
+import { phaseAt, submitWhisper, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../world/index.js';
 import { bindWorldContext, projectTerrain, worldContext } from '../world/spatial.js';
 import { paramsOf } from '../world/params.js';
 import { demographicTraits } from '../world/demography.js';
@@ -11,6 +11,10 @@ import { worldStatistics } from '../world/statistics.js';
 import { residentFastAccess, type ResidentFastAccess } from '../world/soa/terreno.js';
 import { projectTechnology } from '../world/technology.js';
 import { analyzeTechnologyOrganization } from '../world/technology-organization.js';
+import { projectCraft } from '../world/projection.js';
+import { encodeChunkMinimapCells } from './worldmap-service.js';
+import { parseWhisperRequest, whisperView } from '../world/whispers.js';
+import type { DivineWhisperRequest } from '../shared/worldmap.js';
 
 const clamp = (n: number, max = 1): number => Math.max(0, Math.min(max, n));
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -104,7 +108,7 @@ export function projectMirrorWorld(world: World, viewport?: Viewport, context: W
     tiles: projected.tiles.map(t => projectMirrorTile(t, fastTiles)),
     people: peopleInView.map((p): PersonView => {
       const life = demographicTraits(p.genome, cuerpo);
-      return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
+      const view: PersonView = { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || WORKING_ACTIONS.has(p.action) && distance(p,p.target)<0.5,
       workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
         : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
@@ -112,6 +116,9 @@ export function projectMirrorWorld(world: World, viewport?: Viewport, context: W
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture },
       ...(p.compounds?.length ? { compounds: p.compounds.map(c => ({ ...c, composition: { ...c.composition }, properties: { ...c.properties } })) } : {}) };
+      // V24: the live mirror and the DVR show what each inhabitant works with (no allocation when empty).
+      projectCraft(p, view);
+      return view;
     }),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
@@ -119,6 +126,7 @@ export function projectMirrorWorld(world: World, viewport?: Viewport, context: W
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: projectTechnology(world, peopleInView), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
     ...(world.chemistry ? { chemistry: projectChemistry(world) } : {}),
+    ...(world.whispers?.length ? { whispers: world.whispers.map(whisperView) } : {}),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
 }
@@ -182,6 +190,8 @@ export interface MirrorUpdate {
   failed: boolean;
   respaldo: unknown;
   publishMs: number;
+  /** V24: 4×4 minimap palette summary of every chunk page in this post (`/api/worldmap`). */
+  minimap?: { key: string; cells: string }[];
 }
 export type SimRpc = { type: 'rpc'; id: number; method: string; args: unknown[] };
 export type SimReply = { type: 'reply'; id: number; value?: unknown; error?: { status: number; message: string } };
@@ -359,12 +369,15 @@ async function runSimulation(options: SimWorkerOptions) {
     if (turbo && !forcePost && !force && now - lastPostAt < TURBO_MIRROR_MS) return;
     lastPostAt = now;
     const updates: MirrorUpdate['chunks'] = [];
+    const minimap: NonNullable<MirrorUpdate['minimap']> = [];
     const transfers: ArrayBuffer[] = [];
     for (const [key, tiles] of unpostedChunks) {
       // A chunk that changed and then left the resident set before this post is no longer a page.
       if (!chunks.has(key)) continue;
       const data = packed(tiles);
       updates.push({ key, data }); transfers.push(data.buffer as ArrayBuffer);
+      const comma = key.indexOf(',');
+      minimap.push({ key, cells: encodeChunkMinimapCells(tiles, Number(key.slice(0, comma)), Number(key.slice(comma + 1))) });
     }
     unpostedChunks.clear();
     // The tape frame is reused as the mirror's base; only this shallow copy is emptied into pages.
@@ -396,7 +409,7 @@ async function runSimulation(options: SimWorkerOptions) {
     }
     const update: MirrorUpdate = { type: 'mirror', view, seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
       activeKeys: Object.keys(world.chunks), activeChunks: world.chunks, chunks: updates, pendingChunks: [], pages,
-      deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0 };
+      deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap };
     // Terrain preparation stays OFF the HTTP thread. Chunk buffers move, rather than cloning
     // hundreds of thousands of Tile objects on every postMessage.
     const started = performance.now();
@@ -492,6 +505,18 @@ async function runSimulation(options: SimWorkerOptions) {
         case 'recipeDetail': {
           if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
           value = technologyRecipeDetail(app!.world, args[0] as string) ?? null; break;
+        }
+        case 'whisper': {
+          // V24 Mensajes Divinos: allowed in observer-only worlds (an inhabitant hears them later, never an order).
+          if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
+          let request: DivineWhisperRequest;
+          try { request = parseWhisperRequest(args[0]); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+          try { value = whisperView(submitWhisper(app!.world, request)); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+          // The live mirror shows it at once (posted before the reply on the same FIFO port).
+          publish({ forcePost: true, record: false });
+          break;
         }
         case 'flushTape':
           value = { enabled: !!tapeWorker && !tapeClosed && !tapeError, ...await tapeCommand('flush') };

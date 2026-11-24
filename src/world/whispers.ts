@@ -1,35 +1,60 @@
 /**
- * V24 — Asynchronous "Mensajes Divinos" (Divine Whispers).
- * Non-coercive, delayed, deterministic inspiration queue designed for a DVR / non-real-time living world:
- * an observer sends a whisper (destination/intent), never knowing exactly WHEN the inhabitant will hear it
- * or how they will weave it into their autonomous survival & community life.
+ * V24 — Mensajes Divinos (susurros asíncronos).
+ *
+ * Quien observa deja un mensaje («ve allí», «explora esa región»…) y no sabe CUÁNDO lo oirá la persona:
+ * el retraso es determinista (hash de semilla, paso y destinatario, nunca el RNG del mundo ni el reloj),
+ * imprevisible para el observador y acotado: un mensaje dirigido a alguien vivo se oye seguro antes de
+ * `HEAR_HORIZON_TICKS`. Una vez oído, la persona lo cumple caminando por tierra en cuanto su cuerpo no
+ * tenga una necesidad aguda (`index.ts`, `choose`). Nunca hay teletransporte ni obediencia instantánea.
+ * Se desvanece sólo si la persona muere, si el destino es inalcanzable o si pasa un plazo largo tras oírlo.
  */
 import type { DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 
 export const WHISPER_INTENTS: readonly DivineWhisperIntent[] = ['travel', 'explore', 'gather', 'build', 'craft', 'tend'] as const;
 export const MAX_ACTIVE_WHISPERS = 16;
 export const MAX_RETAINED_WHISPERS = 32;
-/** A whisper fades peacefully if unheard or unfulfilled after 3 simulated days (7200 ticks). */
+/** Nadie oye un mensaje antes de 20 pasos (2 s del mundo): nunca es una orden de mando. */
+export const HEAR_MIN_DELAY_TICKS = 20;
+/** Un mensaje dirigido a una persona viva se oye, a más tardar, en un día del mundo. */
+export const HEAR_HORIZON_TICKS = 2400;
+/** Plazo para cumplirlo una vez oído (3 días); pasado, se desvanece. */
+export const FULFIL_DEADLINE_TICKS = 7200;
+/** Un mensaje regional (sin destinatario) que nadie oye en 3 días se desvanece. */
 export const WHISPER_LIFETIME_TICKS = 7200;
+/** Llegó: a 1,5 celdas o menos del destino. */
+export const FULFIL_RADIUS = 1.5;
+/** Comprobaciones seguidas (cada 10 pasos) persiguiéndolo sin acercarse nunca más: destino inalcanzable. */
+export const STALL_CHECKS = 60;
+/** Radio en el que un mensaje regional busca a quien lo oiga. */
+export const REGIONAL_RADIUS = 28;
+
+/** Estado interno que el mundo persiste junto a cada mensaje (nunca se proyecta: ver `whisperView`). */
+export interface WhisperRecord extends DivineWhisper {
+  /** Menor distancia al destino alcanzada desde que lo oyó. */
+  bestDistance?: number;
+  /** Comprobaciones seguidas persiguiéndolo sin mejorar `bestDistance`. */
+  stalledChecks?: number;
+}
 
 export interface WhisperPersonLike {
   id: string;
   name: string;
   x: number;
   y: number;
-  hunger: number;
-  thirst?: number;
-  fatigue: number;
-  energy: number;
-  traits?: { curiosity?: number; openness?: number };
+  action?: string;
+  target?: { x: number; y: number };
+  traits?: { curiosity?: number };
   culture?: { openness?: number };
 }
 
+export type WhisperFadeReason = 'gone' | 'unreachable' | 'deadline' | 'unheard';
 export interface WhisperStepOutcome {
-  heard: Array<{ whisper: DivineWhisper; person: WhisperPersonLike }>;
-  fulfilled: Array<{ whisper: DivineWhisper; person: WhisperPersonLike }>;
+  heard: Array<{ whisper: WhisperRecord; person: WhisperPersonLike }>;
+  fulfilled: Array<{ whisper: WhisperRecord; person: WhisperPersonLike }>;
+  faded: Array<{ whisper: WhisperRecord; reason: WhisperFadeReason; person?: WhisperPersonLike }>;
 }
 
+/** Hash determinista en [0, 1): ni `Math.random`, ni el RNG del mundo, ni el reloj. */
 function deterministicUnit(seed: number, tick: number, a: string, b: string): number {
   let h = (Math.imul(seed | 0, 0x9e3779b1) ^ Math.imul(tick | 0, 0x85ebca6b)) >>> 0;
   for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a.charCodeAt(i), 0x2c1b3c6d) >>> 0;
@@ -39,6 +64,11 @@ function deterministicUnit(seed: number, tick: number, a: string, b: string): nu
   h ^= h >>> 13;
   return (h >>> 0) / 0x1_0000_0000;
 }
+
+const dist = (a: { x: number; y: number }, b: { x: number; y: number }): number => {
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+};
 
 export function parseWhisperRequest(raw: unknown): DivineWhisperRequest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Mensaje divino no válido.');
@@ -66,6 +96,8 @@ export function parseWhisperRequest(raw: unknown): DivineWhisperRequest {
   return { personId, intent: intent as DivineWhisperIntent, x, y, note };
 }
 
+const isActive = (w: DivineWhisper): boolean => w.status === 'latent' || w.status === 'heard';
+
 export function enqueueWhisper(
   whispers: DivineWhisper[],
   req: DivineWhisperRequest,
@@ -73,17 +105,17 @@ export function enqueueWhisper(
   day: number,
   personName?: string,
 ): DivineWhisper {
-  const activeCount = whispers.filter(w => w.status === 'latent' || w.status === 'heard').length;
-  if (activeCount >= MAX_ACTIVE_WHISPERS) {
-    const oldestActiveIdx = whispers.findIndex(w => w.status === 'latent' || w.status === 'heard');
-    if (oldestActiveIdx >= 0) {
-      whispers[oldestActiveIdx]!.status = 'faded';
-      whispers[oldestActiveIdx]!.resolvedTick = tick;
-    }
+  // Con el cupo lleno, el mensaje activo más antiguo cede su lugar (queda como desvanecido).
+  if (whispers.filter(isActive).length >= MAX_ACTIVE_WHISPERS) {
+    const oldest = whispers.find(isActive)!;
+    oldest.status = 'faded';
+    oldest.resolvedTick = tick;
   }
-  const id = `w-${tick}-${whispers.length + 1}`;
+  // Identificador único aunque la historia retenida ya haya descartado mensajes del mismo paso.
+  let sequence = 1;
+  for (const w of whispers) if (w.createdTick === tick) sequence++;
   const created: DivineWhisper = {
-    id,
+    id: `w-${tick}-${sequence}`,
     createdTick: tick,
     createdDay: day,
     personId: req.personId ?? null,
@@ -99,88 +131,91 @@ export function enqueueWhisper(
   return created;
 }
 
+/** Probabilidad de oírlo en esta comprobación: crece con la espera y la curiosidad; 1 al llegar al horizonte. */
+function hearingChance(person: WhisperPersonLike, age: number, targeted: boolean): number {
+  if (targeted && age >= HEAR_HORIZON_TICKS) return 1;
+  const ramp = Math.min(1, (age - HEAR_MIN_DELAY_TICKS) / (HEAR_HORIZON_TICKS - HEAR_MIN_DELAY_TICKS));
+  return 0.01 + (person.traits?.curiosity ?? 0.5) * 0.03 + (person.culture?.openness ?? 0.5) * 0.02 + ramp * 0.06;
+}
+
+function resolve(w: WhisperRecord, status: 'fulfilled' | 'faded', tick: number) {
+  w.status = status; w.resolvedTick = tick;
+  delete w.bestDistance; delete w.stalledChecks;
+}
+
 /**
- * Advance the asynchronous divine whisper queue deterministically (ZERO Math.random, ZERO wall clock).
- * Called inside the simulation step (e.g. every 10 ticks) so whispers are heard unpredictably when
- * inhabitants are calm & curious — never overriding urgent hunger, thirst, or exhaustion.
+ * Avanza la cola de mensajes (llamar cada 10 pasos, sólo con mensajes). `isWater` dice si el destino es
+ * agua (`undefined` si la celda no está cargada: se sabrá al acercarse). Sin `Math.random`, sin reloj y
+ * sin el RNG del mundo.
  */
 export function stepWhispers(
-  whispers: DivineWhisper[],
+  whispers: WhisperRecord[],
   people: readonly WhisperPersonLike[],
   tick: number,
   seed: number,
+  isWater?: (x: number, y: number) => boolean | undefined,
 ): WhisperStepOutcome {
-  const outcome: WhisperStepOutcome = { heard: [], fulfilled: [] };
-  if (!whispers.length) return outcome;
-  const byId = new Map<string, WhisperPersonLike>();
-  for (let i = 0; i < people.length; i++) byId.set(people[i]!.id, people[i]!);
+  const outcome: WhisperStepOutcome = { heard: [], fulfilled: [], faded: [] };
+  let byId: Map<string, WhisperPersonLike> | undefined;
+  const find = (id: string): WhisperPersonLike | undefined => {
+    if (!byId) { byId = new Map(); for (let i = 0; i < people.length; i++) byId.set(people[i]!.id, people[i]!); }
+    return byId.get(id);
+  };
+  const fade = (w: WhisperRecord, reason: WhisperFadeReason, person?: WhisperPersonLike) => {
+    resolve(w, 'faded', tick);
+    outcome.faded.push({ whisper: w, reason, ...(person ? { person } : {}) });
+  };
 
   for (const w of whispers) {
-    if (w.status !== 'latent' && w.status !== 'heard') continue;
-    if (tick - w.createdTick >= WHISPER_LIFETIME_TICKS) {
-      w.status = 'faded';
-      w.resolvedTick = tick;
-      continue;
-    }
+    if (!isActive(w)) continue;
     if (w.status === 'heard') {
-      const listener = w.heardById ? byId.get(w.heardById) : undefined;
-      if (!listener) {
-        w.status = 'faded';
-        w.resolvedTick = tick;
+      const listener = w.heardById ? find(w.heardById) : undefined;
+      if (!listener) { fade(w, 'gone'); continue; }
+      const away = dist(listener, w);
+      if (away <= FULFIL_RADIUS) {
+        resolve(w, 'fulfilled', tick);
+        outcome.fulfilled.push({ whisper: w, person: listener });
         continue;
       }
-      const dist = Math.hypot(listener.x - w.x, listener.y - w.y);
-      if (dist <= 3.2) {
-        w.status = 'fulfilled';
-        w.resolvedTick = tick;
-        outcome.fulfilled.push({ whisper: w, person: listener });
-      }
+      if (tick - (w.heardTick ?? w.createdTick) >= FULFIL_DEADLINE_TICKS) { fade(w, 'deadline', listener); continue; }
+      if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', listener); continue; }
+      // Sólo cuenta como atasco el tiempo que la persona lo persigue (comer, beber o descansar no cuentan).
+      const pursuing = listener.action === 'explore' && listener.target?.x === w.x && listener.target?.y === w.y;
+      if (w.bestDistance === undefined || away < w.bestDistance - 0.5) { w.bestDistance = away; w.stalledChecks = 0; }
+      else if (pursuing && (w.stalledChecks = (w.stalledChecks ?? 0) + 1) >= STALL_CHECKS) fade(w, 'unreachable', listener);
       continue;
     }
 
-    // Status === 'latent': wait at least 20 ticks so a whisper is NEVER an instant arcade command!
+    // Latente.
     const age = tick - w.createdTick;
-    if (age < 20) continue;
-
     let candidate: WhisperPersonLike | undefined;
     if (w.personId) {
-      candidate = byId.get(w.personId);
-      if (!candidate) {
-        w.status = 'faded';
-        w.resolvedTick = tick;
-        continue;
-      }
+      candidate = find(w.personId);
+      if (!candidate) { fade(w, 'gone'); continue; }
     } else {
-      // Regional whisper: closest calm inhabitant within 28 cells
-      let bestDist = 28;
+      if (age >= WHISPER_LIFETIME_TICKS) { fade(w, 'unheard'); continue; }
+      let best = REGIONAL_RADIUS;
       for (let i = 0; i < people.length; i++) {
-        const p = people[i]!;
-        const d = Math.hypot(p.x - w.x, p.y - w.y);
-        if (d < bestDist) { bestDist = d; candidate = p; }
+        const d = dist(people[i]!, w);
+        if (d < best) { best = d; candidate = people[i]; }
       }
     }
-    if (!candidate) continue;
-
-    // Only hear a whisper when survival needs are calm
-    const calm = candidate.hunger < 0.65 && (candidate.thirst ?? 0) < 0.65 && candidate.fatigue < 0.72 && candidate.energy > 0.25;
-    if (!calm) continue;
-
-    const receptivity = 0.035
-      + (candidate.traits?.curiosity ?? 0.5) * 0.055
-      + (candidate.culture?.openness ?? 0.5) * 0.045
-      + Math.min(0.08, age / 2400 * 0.08);
-    if (deterministicUnit(seed, tick, candidate.id, w.id) < receptivity) {
+    if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', candidate); continue; }
+    if (!candidate || age < HEAR_MIN_DELAY_TICKS) continue;
+    if (deterministicUnit(seed, tick, candidate.id, w.id) < hearingChance(candidate, age, !!w.personId)) {
       w.status = 'heard';
       w.heardTick = tick;
       w.heardById = candidate.id;
       w.heardByName = candidate.name;
+      w.bestDistance = dist(candidate, w);
+      w.stalledChecks = 0;
       outcome.heard.push({ whisper: w, person: candidate });
     }
   }
   return outcome;
 }
 
-/** Return the active 'heard' divine whisper currently inspiring `personId`, if any. */
+/** El mensaje oído que hoy inspira a `personId`, si lo hay (el más reciente). */
 export function activeWhisperForPerson(whispers: readonly DivineWhisper[] | undefined, personId: string): DivineWhisper | undefined {
   if (!whispers?.length) return undefined;
   for (let i = whispers.length - 1; i >= 0; i--) {
@@ -188,4 +223,10 @@ export function activeWhisperForPerson(whispers: readonly DivineWhisper[] | unde
     if (w.status === 'heard' && w.heardById === personId) return w;
   }
   return undefined;
+}
+
+/** Copia pública de un mensaje (contrato `DivineWhisper`), sin el estado interno de seguimiento. */
+export function whisperView(w: WhisperRecord): DivineWhisper {
+  const { bestDistance: _best, stalledChecks: _stalled, ...view } = w;
+  return view;
 }

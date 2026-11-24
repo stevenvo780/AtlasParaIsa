@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
@@ -26,7 +26,11 @@ import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
 import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
-import { createChunkObserver, projectMirrorTile, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import type { Chunk } from '../world/terrain.js';
+import { createChunkObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import { parseWhisperRequest, whisperView } from '../world/whispers.js';
+import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
+import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
 export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -83,6 +87,98 @@ export interface ReadOnlyBackend {
   /** V21 DVR (read-only, never an RPC to the simulation). Absent when the tape is disabled. */
   tapeMeta?(): TapeMetaResponse;
   tapeChunk?(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse;
+  /** V24: discovered-terrain minimap, global directory and Mensajes Divinos. Each read returns the SAME
+   * object while nothing changed, so the HTTP layer reuses its encoded (and gzipped) body. */
+  worldmap?(): WorldMapResponse;
+  directory?(): WorldDirectoryResponse;
+  whispers?(): WhispersResponse;
+  whisper?(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper>;
+}
+export interface WhispersResponse { tick: number; whispers: DivineWhisper[] }
+
+/**
+ * V24 — Last known 4×4 palette summary of every chunk this process has seen: resident chunks refresh
+ * as they change; a chunk that leaves the resident set keeps its last summary (it is still discovered
+ * terrain), and pending retired chunks are encoded once. `version` moves on any change, so a caller can
+ * cache the response built from `chunks()`.
+ */
+export class MinimapAtlas {
+  private readonly summaries = new Map<string, WorldMapChunkSummary>();
+  private readonly activeKeys = new Set<string>();
+  version = 0;
+  setActive(key: string, cells: string): void {
+    const previous = this.summaries.get(key);
+    this.activeKeys.add(key);
+    if (previous?.cells === cells && previous.active) return;
+    const [cx, cy] = key.split(',').map(Number) as [number, number];
+    this.summaries.set(key, { cx, cy, cells, active: true });
+    this.version++;
+  }
+  /** Chunks outside `active` keep their last summary, marked as not simulated. */
+  retainActive(active: Iterable<string>): void {
+    const next = new Set(active);
+    for (const key of this.activeKeys) {
+      if (next.has(key)) continue;
+      this.activeKeys.delete(key);
+      const summary = this.summaries.get(key);
+      if (summary) { this.summaries.set(key, { cx: summary.cx, cy: summary.cy, cells: summary.cells }); this.version++; }
+    }
+  }
+  /** A retired chunk (pending archive) whose terrain this atlas never summarized. */
+  addKnown(chunk: Pick<Chunk, 'key' | 'cx' | 'cy' | 'tiles'>): void {
+    if (this.summaries.has(chunk.key)) return;
+    this.summaries.set(chunk.key, { cx: chunk.cx, cy: chunk.cy, cells: encodeChunkMinimapCells(chunk.tiles, chunk.cx, chunk.cy) });
+    this.version++;
+  }
+  has(key: string): boolean { return this.summaries.has(key); }
+  get activeCount(): number { return this.activeKeys.size; }
+  chunks(): WorldMapChunkSummary[] { return [...this.summaries.values()]; }
+  private archiveQueue: string[] | undefined;
+  private archiveScheduled = false;
+  /** True once every chunk archived in `store` has a summary. */
+  get archiveFilled(): boolean { return !!this.archiveQueue && this.archiveQueue.length === 0; }
+  /**
+   * Chunks the world retired to its archive (before this process started, too) are discovered terrain.
+   * The archive is read once, in bounded turns (`budgetMs` each) that continue on the event loop, so
+   * neither the first request nor a large world stalls HTTP.
+   */
+  fillFromArchive(store: Pick<Store, 'db' | 'loadChunk'>, tick: number, budgetMs = 8): void {
+    if (this.archiveFilled || this.archiveScheduled) return;
+    try {
+      if (!this.archiveQueue) {
+        let keys: { key: string }[] = [];
+        try { keys = store.db.prepare('SELECT key FROM chunks GROUP BY key ORDER BY key').all() as { key: string }[]; }
+        catch { /* A V1 database has no chunk archive. */ }
+        this.archiveQueue = keys.map(row => row.key).reverse();
+      }
+      // At least one chunk per turn, then as many as fit in the budget.
+      const started = performance.now();
+      do {
+        const key = this.archiveQueue.pop();
+        if (key === undefined || this.summaries.has(key)) continue;
+        const chunk = store.loadChunk(key, tick);
+        if (chunk) this.addKnown(chunk);
+      } while (this.archiveQueue.length && performance.now() - started < budgetMs);
+    } catch { this.archiveQueue = []; return; }
+    if (this.archiveQueue.length) {
+      this.archiveScheduled = true;
+      setImmediate(() => { this.archiveScheduled = false; this.fillFromArchive(store, tick, budgetMs); });
+    }
+  }
+}
+/** Encoded JSON bodies, keyed by the response object: unchanged reads cost neither stringify nor gzip. */
+const cuerposJson = new WeakMap<object, { raw: Buffer; gzip?: Promise<Buffer> }>();
+async function jsonCacheable(req: IncomingMessage, res: ServerResponse, status: number, data: object) {
+  let cuerpo = cuerposJson.get(data);
+  if (!cuerpo) { cuerpo = { raw: Buffer.from(JSON.stringify(data)) }; cuerposJson.set(data, cuerpo); }
+  if (!aceptaGzip(req)) {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', Vary: 'Accept-Encoding' });
+    return res.end(cuerpo.raw);
+  }
+  cuerpo.gzip ??= gzipAsync(cuerpo.raw, { level: 3 });
+  const comprimido = await cuerpo.gzip;
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  return res.end(comprimido);
 }
 export type GatewayAppOptions = Omit<AppOptions, 'store' | 'params' | 'beforeStep' | 'afterStep'>;
 export function createReadOnlyApp(options: GatewayAppOptions, gateway: ReadOnlyBackend) {
@@ -390,6 +486,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const clients = new Map<WebSocket, ClienteWs>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
+  const whisperAttempts = new Map<string, { count: number; reset: number }>();
   const loginGlobal = new Map<string, { count: number; reset: number }>();
   const trustedProxies = trustedProxiesFromEnv();
   // T136: medido con `scripts/benchmark-ws-deflate.ts` (12 clientes, viewport 40x28,
@@ -572,6 +669,52 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function mundoConsultable(): World {
     if (aMedioPaso) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no se puede consultar.');
     return world;
+  }
+  /** V24 direct mode (no gateway): minimap, directory and whispers read the live `world` between steps,
+   * rebuilt at most once per simulated tick (the same object is served while the tick does not move). */
+  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache(), atlasObserver = createChunkObserver();
+  let mapaDirecto: { tick: number; version: number; value: WorldMapResponse } | undefined;
+  let directorioDirecto: { tick: number; value: WorldDirectoryResponse } | undefined;
+  let susurrosDirectos: { tick: number; count: number; value: WhispersResponse } | undefined;
+  function worldmapDirecto(): WorldMapResponse {
+    const mundo = mundoConsultable();
+    if (mapaDirecto?.tick !== mundo.tick) {
+      // Every chunk the scan reports as changed is re-encoded now: a change is reported only once.
+      const { chunks, changed } = atlasObserver.scan(mundo);
+      for (const key of changed) {
+        const comma = key.indexOf(',');
+        atlas.setActive(key, encodeChunkMinimapCells(chunks.get(key)!, Number(key.slice(0, comma)), Number(key.slice(comma + 1))));
+      }
+      atlas.retainActive(chunks.keys());
+      for (const chunk of mundo.retiredChunks) atlas.addKnown(chunk);
+    }
+    atlas.fillFromArchive(store, mundo.tick);
+    if (mapaDirecto?.tick === mundo.tick && mapaDirecto.version === atlas.version) return mapaDirecto.value;
+    const value = atlasBuilder.buildResponse({ tick: mundo.tick, day: Math.floor(mundo.tick / TICKS_PER_DAY) + 1,
+      discoveredChunks: mundo.discoveredChunks, activeChunks: Object.keys(mundo.chunks).length, chunks: atlas.chunks(),
+      // Read-only inputs: the response copies only ids, names, rounded positions and counts.
+      people: mundo.people, communities: mundo.communities, animals: mundo.animals, whispers: mundo.whispers });
+    mapaDirecto = { tick: mundo.tick, version: atlas.version, value };
+    return value;
+  }
+  function directorioDirectoFn(): WorldDirectoryResponse {
+    const mundo = mundoConsultable();
+    if (directorioDirecto?.tick !== mundo.tick) directorioDirecto = { tick: mundo.tick, value: buildWorldDirectory(projectMirrorWorld(mundo, undefined, context)) };
+    return directorioDirecto.value;
+  }
+  function susurrosDirectosFn(): WhispersResponse {
+    const mundo = mundoConsultable();
+    const count = mundo.whispers?.length ?? 0;
+    if (susurrosDirectos?.tick !== mundo.tick || susurrosDirectos.count !== count)
+      susurrosDirectos = { tick: mundo.tick, count, value: { tick: mundo.tick, whispers: (mundo.whispers ?? []).map(whisperView) } };
+    return susurrosDirectos.value;
+  }
+  function susurrarDirecto(request: DivineWhisperRequest): DivineWhisper {
+    if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa.');
+    const mundo = mundoConsultable();
+    try { return whisperView(submitWhisper(mundo, request)); }
+    catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+    finally { susurrosDirectos = undefined; mapaDirecto = undefined; }
   }
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
@@ -1032,6 +1175,31 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(chunk)), { level: 3 });
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
           return res.end(cuerpo);
+        }
+        // V24: discovered-terrain minimap and global directory (whole world, never clipped to a camera).
+        if (req.method === 'GET' && url.pathname === '/api/worldmap') {
+          if (gateway && !gateway.worldmap) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.worldmap!() : worldmapDirecto());
+        }
+        if (req.method === 'GET' && url.pathname === '/api/directory') {
+          if (gateway && !gateway.directory) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.directory!() : directorioDirectoFn());
+        }
+        if (req.method === 'GET' && url.pathname === '/api/whispers') {
+          if (gateway && !gateway.whispers) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.whispers!() : susurrosDirectosFn());
+        }
+        // V24 Mensajes Divinos: allowed in observer-only worlds — they are asynchronous inspiration that an
+        // inhabitant may hear later, when calm, never a direct order (those stay 410 in that mode).
+        if (req.method === 'POST' && url.pathname === '/api/whisper') {
+          if (gateway && !gateway.whisper) throw new HttpError(404, 'Ruta no encontrada.');
+          rate(whisperAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustedProxies), 20, 60_000);
+          const raw = await body(req);
+          let request: DivineWhisperRequest;
+          try { request = parseWhisperRequest(raw); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+          const whisper = gateway ? await gateway.whisper!(request, hash) : susurrarDirecto(request);
+          return json(res, 201, { ok: true, whisper });
         }
         if (req.method === 'POST' && (url.pathname === '/api/gesture' || (gateway && url.pathname === '/api/gestures'))) {
           const raw = await body(req);

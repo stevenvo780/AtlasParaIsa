@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
@@ -25,8 +25,13 @@ import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
 import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
+import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
 import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
-import { createChunkObserver, projectMirrorTile, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import type { Chunk } from '../world/terrain.js';
+import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import { parseWhisperRequest, whisperView } from '../world/whispers.js';
+import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
+import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
 export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
 export class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -83,6 +88,98 @@ export interface ReadOnlyBackend {
   /** V21 DVR (read-only, never an RPC to the simulation). Absent when the tape is disabled. */
   tapeMeta?(): TapeMetaResponse;
   tapeChunk?(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse;
+  /** V24: discovered-terrain minimap, global directory and Mensajes Divinos. Each read returns the SAME
+   * object while nothing changed, so the HTTP layer reuses its encoded (and gzipped) body. */
+  worldmap?(): WorldMapResponse;
+  directory?(): WorldDirectoryResponse;
+  whispers?(): WhispersResponse;
+  whisper?(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper>;
+}
+export interface WhispersResponse { tick: number; whispers: DivineWhisper[] }
+
+/**
+ * V24 — Last known 4×4 palette summary of every chunk this process has seen: resident chunks refresh
+ * as they change; a chunk that leaves the resident set keeps its last summary (it is still discovered
+ * terrain), and pending retired chunks are encoded once. `version` moves on any change, so a caller can
+ * cache the response built from `chunks()`.
+ */
+export class MinimapAtlas {
+  private readonly summaries = new Map<string, WorldMapChunkSummary>();
+  private readonly activeKeys = new Set<string>();
+  version = 0;
+  setActive(key: string, cells: string): void {
+    const previous = this.summaries.get(key);
+    this.activeKeys.add(key);
+    if (previous?.cells === cells && previous.active) return;
+    const [cx, cy] = key.split(',').map(Number) as [number, number];
+    this.summaries.set(key, { cx, cy, cells, active: true });
+    this.version++;
+  }
+  /** Chunks outside `active` keep their last summary, marked as not simulated. */
+  retainActive(active: Iterable<string>): void {
+    const next = new Set(active);
+    for (const key of this.activeKeys) {
+      if (next.has(key)) continue;
+      this.activeKeys.delete(key);
+      const summary = this.summaries.get(key);
+      if (summary) { this.summaries.set(key, { cx: summary.cx, cy: summary.cy, cells: summary.cells }); this.version++; }
+    }
+  }
+  /** A retired chunk (pending archive) whose terrain this atlas never summarized. */
+  addKnown(chunk: Pick<Chunk, 'key' | 'cx' | 'cy' | 'tiles'>): void {
+    if (this.summaries.has(chunk.key)) return;
+    this.summaries.set(chunk.key, { cx: chunk.cx, cy: chunk.cy, cells: encodeChunkMinimapCells(chunk.tiles, chunk.cx, chunk.cy) });
+    this.version++;
+  }
+  has(key: string): boolean { return this.summaries.has(key); }
+  get activeCount(): number { return this.activeKeys.size; }
+  chunks(): WorldMapChunkSummary[] { return [...this.summaries.values()]; }
+  private archiveQueue: string[] | undefined;
+  private archiveScheduled = false;
+  /** True once every chunk archived in `store` has a summary. */
+  get archiveFilled(): boolean { return !!this.archiveQueue && this.archiveQueue.length === 0; }
+  /**
+   * Chunks the world retired to its archive (before this process started, too) are discovered terrain.
+   * The archive is read once, in bounded turns (`budgetMs` each) that continue on the event loop, so
+   * neither the first request nor a large world stalls HTTP.
+   */
+  fillFromArchive(store: Pick<Store, 'db' | 'loadChunk'>, tick: number, budgetMs = 8): void {
+    if (this.archiveFilled || this.archiveScheduled) return;
+    try {
+      if (!this.archiveQueue) {
+        let keys: { key: string }[] = [];
+        try { keys = store.db.prepare('SELECT key FROM chunks GROUP BY key ORDER BY key').all() as { key: string }[]; }
+        catch { /* A V1 database has no chunk archive. */ }
+        this.archiveQueue = keys.map(row => row.key).reverse();
+      }
+      // At least one chunk per turn, then as many as fit in the budget.
+      const started = performance.now();
+      do {
+        const key = this.archiveQueue.pop();
+        if (key === undefined || this.summaries.has(key)) continue;
+        const chunk = store.loadChunk(key, tick);
+        if (chunk) this.addKnown(chunk);
+      } while (this.archiveQueue.length && performance.now() - started < budgetMs);
+    } catch { this.archiveQueue = []; return; }
+    if (this.archiveQueue.length) {
+      this.archiveScheduled = true;
+      setImmediate(() => { this.archiveScheduled = false; this.fillFromArchive(store, tick, budgetMs); });
+    }
+  }
+}
+/** Encoded JSON bodies, keyed by the response object: unchanged reads cost neither stringify nor gzip. */
+const cuerposJson = new WeakMap<object, { raw: Buffer; gzip?: Promise<Buffer> }>();
+async function jsonCacheable(req: IncomingMessage, res: ServerResponse, status: number, data: object) {
+  let cuerpo = cuerposJson.get(data);
+  if (!cuerpo) { cuerpo = { raw: Buffer.from(JSON.stringify(data)) }; cuerposJson.set(data, cuerpo); }
+  if (!aceptaGzip(req)) {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', Vary: 'Accept-Encoding' });
+    return res.end(cuerpo.raw);
+  }
+  cuerpo.gzip ??= gzipAsync(cuerpo.raw, { level: 3 });
+  const comprimido = await cuerpo.gzip;
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+  return res.end(comprimido);
 }
 export type GatewayAppOptions = Omit<AppOptions, 'store' | 'params' | 'beforeStep' | 'afterStep'>;
 export function createReadOnlyApp(options: GatewayAppOptions, gateway: ReadOnlyBackend) {
@@ -218,6 +315,9 @@ function estatico(path: string, ext: string): Estatico {
   return entry;
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
+/** V24: a Mensaje Divino waiting for its step. Like a gesture, it enters the world at the start of a step and
+ * is confirmed only once that step's save committed (with its session checked inside the transaction). */
+type PendingWhisper = { request: DivineWhisperRequest; hash: string; resolve: (w: DivineWhisper) => void; reject: (e: Error) => void; promise: Promise<DivineWhisper> };
 export function parseGesture(value: unknown): Gesture {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'Gesto no válido.');
   const g = value as Record<string, unknown>;
@@ -385,11 +485,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
    * ser del disco. Solo es `null` si ni la proyección del arranque pudo leer su región. */
   let ultimaVista: WorldView | null = null;
   const pending = new Map<string, Pending>();
+  const pendingWhispers: PendingWhisper[] = [];
+  /** True while the last step applied (and saved) a Mensaje Divino: the worker posts its mirror at once. */
+  let susurrosEnUltimoPaso = false;
   // T024 (P1): `subscribeMs` es la cadencia mínima que un cliente pidió (móvil observador) —
   // 0 = sin pedido, se manda con la cadencia normal. `lastBroadcastAt` la hace cumplir en `broadcast`.
   const clients = new Map<WebSocket, ClienteWs>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
+  const whisperAttempts = new Map<string, { count: number; reset: number }>();
   const loginGlobal = new Map<string, { count: number; reset: number }>();
   const trustedProxies = trustedProxiesFromEnv();
   // T136: medido con `scripts/benchmark-ws-deflate.ts` (12 clientes, viewport 40x28,
@@ -528,18 +632,21 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
    * and `gateway.tapeMeta/tapeChunk` read; here the app owns both ends of the same tape. */
   const tapePath = !gateway && tapeRequested ? (store.path === ':memory:' ? ':memory:' : tapePathForWorld(store.path)) : undefined;
   let tapeWriter = tapePath ? new TapeWriter({ path: tapePath, maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval }) : undefined;
-  const observadorCinta = createChunkObserver();
+  const observadorCinta = createTileObserver();
   let ultimoTickGrabado = -1;
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
   let ultimaDifusionTurbo = -Infinity;
   function grabarCinta() {
     if (!tapeWriter || failed || aMedioPaso || world.tick === ultimoTickGrabado) return;
+    // A reopened tape already holds this tick (a world restarted from its last save): the writer would drop
+    // the frame, and the first one it does accept must be a full keyframe, since it has no base to patch.
+    if (world.tick <= tapeWriter.latestTick) return;
     try {
-      const { chunks, changed, fast } = observadorCinta.scan(world);
+      const { chunks, changed } = observadorCinta.scan(world);
       const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, ultimoTickGrabado < 0);
-      const tiles: Tile[] = [];
-      for (const [key, chunk] of chunks) if (keyframe || changed.has(key)) for (const tile of chunk) tiles.push(projectMirrorTile(tile, fast));
+      let tiles = changed;
+      if (keyframe) { tiles = []; for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile); }
       tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz, !keyframe);
       ultimoTickGrabado = world.tick;
     } catch (error) {
@@ -572,6 +679,71 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function mundoConsultable(): World {
     if (aMedioPaso) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no se puede consultar.');
     return world;
+  }
+  /** V24 direct mode (no gateway): minimap, directory and whispers read the live `world` between steps,
+   * rebuilt at most once per simulated tick (the same object is served while the tick does not move). */
+  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache(), atlasObserver = createTileObserver();
+  let mapaDirecto: { tick: number; version: number; value: WorldMapResponse } | undefined;
+  let directorioDirecto: { tick: number; value: WorldDirectoryResponse } | undefined;
+  let susurrosDirectos: { tick: number; count: number; value: WhispersResponse } | undefined;
+  function worldmapDirecto(): WorldMapResponse {
+    const mundo = mundoConsultable();
+    if (mapaDirecto?.tick !== mundo.tick) {
+      // Every chunk the scan reports as changed is re-encoded now: a change is reported only once.
+      const { chunks, dirty } = atlasObserver.scan(mundo);
+      for (const key of dirty) {
+        const comma = key.indexOf(',');
+        atlas.setActive(key, encodeChunkMinimapCells(chunks.get(key)!, Number(key.slice(0, comma)), Number(key.slice(comma + 1))));
+      }
+      atlas.retainActive(chunks.keys());
+      for (const chunk of mundo.retiredChunks) atlas.addKnown(chunk);
+    }
+    atlas.fillFromArchive(store, mundo.tick);
+    if (mapaDirecto?.tick === mundo.tick && mapaDirecto.version === atlas.version) return mapaDirecto.value;
+    const value = atlasBuilder.buildResponse({ tick: mundo.tick, day: Math.floor(mundo.tick / TICKS_PER_DAY) + 1,
+      discoveredChunks: mundo.discoveredChunks, activeChunks: Object.keys(mundo.chunks).length, chunks: atlas.chunks(),
+      // Read-only inputs: the response copies only ids, names, rounded positions and counts.
+      people: mundo.people, communities: mundo.communities, animals: mundo.animals, whispers: mundo.whispers });
+    mapaDirecto = { tick: mundo.tick, version: atlas.version, value };
+    return value;
+  }
+  function directorioDirectoFn(): WorldDirectoryResponse {
+    const mundo = mundoConsultable();
+    if (directorioDirecto?.tick !== mundo.tick) directorioDirecto = { tick: mundo.tick, value: buildWorldDirectory(projectMirrorWorld(mundo, undefined, context)) };
+    return directorioDirecto.value;
+  }
+  function susurrosDirectosFn(): WhispersResponse {
+    const mundo = mundoConsultable();
+    const count = mundo.whispers?.length ?? 0;
+    if (susurrosDirectos?.tick !== mundo.tick || susurrosDirectos.count !== count)
+      susurrosDirectos = { tick: mundo.tick, count, value: { tick: mundo.tick, whispers: (mundo.whispers ?? []).map(whisperView) } };
+    return susurrosDirectos.value;
+  }
+  /**
+   * V24 Mensajes Divinos (direct app, and the simulation worker behind the gateway). The message waits for
+   * the next step: it enters the world at that step's tick, recorded as a replay change, and the 201 comes
+   * only after that step's save committed — with the session checked again inside the save transaction.
+   * A crash before the reply loses an unconfirmed message, never a confirmed one.
+   */
+  function requestWhisper(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper> {
+    if (gateway) return gateway.whisper!(request, hash);
+    if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
+    if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa.');
+    if (pendingWhispers.length >= 16) throw new HttpError(429, 'Hay varios mensajes en camino. Espera un momento.');
+    // What only the world knows (a living listener, a land destination) fails at once, not a step later.
+    try { validateWhisper(mundoConsultable(), request); }
+    catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+    let resolve!: PendingWhisper['resolve'], reject!: PendingWhisper['reject'];
+    const promise = new Promise<DivineWhisper>((yes, no) => { resolve = yes; reject = no; });
+    pendingWhispers.push({ request, hash, resolve, reject, promise });
+    return promise;
+  }
+  function rejectWhispers(error: HttpError, which: (item: PendingWhisper) => boolean = () => true) {
+    for (let i = pendingWhispers.length - 1; i >= 0; i--) {
+      const item = pendingWhispers[i]!;
+      if (!which(item)) continue;
+      pendingWhispers.splice(i, 1); item.promise.catch(() => undefined); item.reject(error);
+    }
   }
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
@@ -788,6 +960,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     options.afterStep?.(simHz);
   }
   function avanzar() {
+    susurrosEnUltimoPaso = false;
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
     runtime.cloneMs = 0; runtime.simulationMs = 0; runtime.saveMs = 0;
@@ -816,6 +989,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (sessions.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
+      rejectWhispers(new HttpError(401, 'La sesión terminó antes de dejar el mensaje.'), item => !sessions.sessionValid(item.hash));
+      const whisperBatch = pendingWhispers.slice();
+      // A Mensaje Divino is a host input like a gesture: its step keeps an undo and saves at once.
+      const conEntradas = valid.length > 0 || whisperBatch.length > 0;
       const cloneStarted = monotonicNow();
       // T104/PERF3. La reserva solo sirve para deshacer el paso y seguir: el único fallo del que el
       // servidor se recupera es `SessionRevoked`, y solo puede darse en un paso con gestos (`save`
@@ -830,11 +1007,24 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // still keeps its undo (`SessionRevoked`) with a restoration point; one without runs in place.
       const sinClon = turbo || observerOnly;
       const clonar = !sinClon && paramsOf(world).motor.clonPorPaso;
-      if (sinClon) { if (valid.length) punto = puntoDeRestauracion(world); else sinReserva = true; }
+      if (sinClon) { if (conEntradas) punto = puntoDeRestauracion(world); else sinReserva = true; }
       else if (!clonar) punto = puntoDeRestauracion(world);
-      else sinReserva = valid.length === 0;
+      else sinReserva = !conEntradas;
       const draft = clonar && !sinReserva ? cloneWorld(world, context) : world;
       runtime.cloneMs = monotonicNow() - cloneStarted;
+      // V24: queued Mensajes Divinos enter the world at this step's tick, before it is simulated. The whole
+      // `whispers` list is recorded as a replay change at that tick (`persistencia.paginasSucias`), so a
+      // replayed save rebuilds exactly this world. A message the world rejects (its listener died, the
+      // destination is water) is answered 400 and never touches the world.
+      const susurrosAplicados: { item: PendingWhisper; whisper: DivineWhisper }[] = [];
+      const cambios: SnapshotReplayChange[] = [];
+      for (const item of whisperBatch) {
+        try { susurrosAplicados.push({ item, whisper: whisperView(submitWhisper(draft, item.request)) }); }
+        catch (error) {
+          rejectWhispers(new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'), other => other === item);
+        }
+      }
+      if (susurrosAplicados.length) cambios.push(captureReplayChange(draft, ['whispers']));
       const simulationStarted = monotonicNow();
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
       // Reloj propio, **no** `monotonicNow`: perfilar por fase es observabilidad de hardware
@@ -871,11 +1061,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(draft).persistencia.cadaTicks;
       const routineSaveDue = draft.tick % cadaTicksEfectivo === 0
         && (!turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
-      if (valid.length > 0 || routineSaveDue
+      if (valid.length > 0 || susurrosAplicados.length > 0 || routineSaveDue
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
-        store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
+        store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
+          [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios);
         lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
@@ -893,6 +1084,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
+      // Durable now: confirm each Mensaje Divino as it entered the world.
+      for (const { item, whisper } of susurrosAplicados) {
+        const index = pendingWhispers.indexOf(item);
+        if (index >= 0) pendingWhispers.splice(index, 1);
+        item.resolve(whisper);
+      }
+      susurrosEnUltimoPaso = susurrosAplicados.length > 0;
       // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró
       // (siempre corrió así; instrumentarlo no adelanta ni retrasa el envío ni cambia su cadencia).
       // Reloj real, no `monotonicNow` — mismo motivo que `medicion` arriba.
@@ -900,7 +1098,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       Object.assign(fases, medicion.fases, { save: runtime.saveMs });
       // Turbo: a step every event-loop turn would project for every viewer at 100–300 Hz; viewers get
       // the live world at most every `TURBO_MIRROR_MS` (the DVR tape keeps every tick).
-      const difundir = turbo ? valid.length > 0 || relojReal() - ultimaDifusionTurbo >= TURBO_MIRROR_MS : world.tick % 5 === 0 || valid.length > 0;
+      const entradas = valid.length > 0 || susurrosEnUltimoPaso;
+      const difundir = turbo ? entradas || relojReal() - ultimaDifusionTurbo >= TURBO_MIRROR_MS : world.tick % 5 === 0 || entradas;
       if (difundir) {
         if (turbo) ultimaDifusionTurbo = relojReal();
         const broadcastStarted = performance.now();
@@ -940,6 +1139,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         for (const item of pending.values()) if (!sessions.sessionValid(item.hash)) {
           item.reject(new HttpError(401, 'La sesión terminó antes de guardar el gesto.')); pending.delete(item.gesture.id);
         }
+        // The undone step also undid its Mensajes Divinos: those with a live session wait for the retry.
+        rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
         return;
       }
       failed = true;
@@ -949,6 +1150,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       aMedioPaso = !restaurado;
       for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
       pending.clear();
+      rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));
       // Do not log snapshots, inputs, or personal content on failure.
       for (const socket of clients.keys()) {
         send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
@@ -1032,6 +1234,33 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(chunk)), { level: 3 });
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
           return res.end(cuerpo);
+        }
+        // V24: discovered-terrain minimap and global directory (whole world, never clipped to a camera).
+        if (req.method === 'GET' && url.pathname === '/api/worldmap') {
+          if (gateway && !gateway.worldmap) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.worldmap!() : worldmapDirecto());
+        }
+        if (req.method === 'GET' && url.pathname === '/api/directory') {
+          if (gateway && !gateway.directory) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.directory!() : directorioDirectoFn());
+        }
+        if (req.method === 'GET' && url.pathname === '/api/whispers') {
+          if (gateway && !gateway.whispers) throw new HttpError(404, 'Ruta no encontrada.');
+          return jsonCacheable(req, res, 200, gateway ? gateway.whispers!() : susurrosDirectosFn());
+        }
+        // V24 Mensajes Divinos: allowed in observer-only worlds — they are asynchronous inspiration that an
+        // inhabitant may hear later, when calm, never a direct order (those stay 410 in that mode).
+        if (req.method === 'POST' && url.pathname === '/api/whisper') {
+          if (gateway && !gateway.whisper) throw new HttpError(404, 'Ruta no encontrada.');
+          rate(whisperAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustedProxies), 20, 60_000);
+          const raw = await body(req);
+          let request: DivineWhisperRequest;
+          try { request = parseWhisperRequest(raw); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'); }
+          // The session may have ended while the body arrived: `requestWhisper` checks it again (and the
+          // save transaction, a third time, before anything is confirmed).
+          const whisper = await requestWhisper(request, hash);
+          return json(res, 201, { ok: true, whisper });
         }
         if (req.method === 'POST' && (url.pathname === '/api/gesture' || (gateway && url.pathname === '/api/gestures'))) {
           const raw = await body(req);
@@ -1229,7 +1458,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
-    server, stepOnce, broadcast, requestGesture, view,
+    server, stepOnce, broadcast, requestGesture, requestWhisper, view,
+    /** V24: Mensajes Divinos waiting for their step (tests and benches), and whether the last step applied one. */
+    get susurrosPendientes() { return pendingWhispers.length; },
+    get susurrosEnUltimoPaso() { return susurrosEnUltimoPaso; },
     get respaldo() { return respaldo; },
     /** Arranca el bucle de pasos cuando `createApp` se creó con `manual: true` (p. ej. tras la autoprueba GPU). */
     start() { if (!gateway && !stopped && !timer && !bucleTurbo) { next = monotonicNow() + tickMs; citar(Math.max(0, next - monotonicNow())); } },
@@ -1253,6 +1485,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       stopped = true; if (timer) clearTimeout(timer); if (inmediato) clearImmediate(inmediato); clearInterval(heartbeat); clearInterval(latido);
       for (const item of pending.values()) { item.promise.catch(() => undefined); item.reject(new HttpError(503, 'El servicio se está cerrando.')); }
       pending.clear();
+      rejectWhispers(new HttpError(503, 'El servicio se está cerrando.'));
       for (const socket of clients.keys()) socket.terminate();
       for (const socket of conexionesNuevas) socket.destroy();
       conexionesNuevas.clear();

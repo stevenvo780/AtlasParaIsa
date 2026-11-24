@@ -10,6 +10,7 @@ import { worldStatistics } from './statistics.js';
 import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
 import { projectTechnology } from './technology.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
+import { whisperView } from './whispers.js';
 
 const clamp = (n: number, max = 1): number => Math.max(0, Math.min(max, n));
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -143,6 +144,8 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: projectTechnology(world, peopleInView), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
     ...(world.chemistry ? { chemistry: projectChemistry(world) } : {}),
+    // V24: los Mensajes Divinos son públicos para quien observa (copias, nunca el estado vivo).
+    ...(world.whispers?.length ? { whispers: world.whispers.map(whisperView) } : {}),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
 }

@@ -2,7 +2,10 @@ import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { deserialize } from 'node:v8';
-import { createReadOnlyApp, HttpError, type GatewayAppOptions, type ReadOnlyBackend } from './app.js';
+import { createReadOnlyApp, HttpError, MinimapAtlas, type GatewayAppOptions, type ReadOnlyBackend, type WhispersResponse } from './app.js';
+import { buildWorldDirectory, WorldMapCache } from './worldmap-service.js';
+import { TICKS_PER_DAY } from '../world/index.js';
+import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapResponse } from '../shared/worldmap.js';
 import { Store } from './store.js';
 import { normalizeViewport } from '../world/spatial.js';
 import { CHUNK_SIZE, generateChunk, legacyStructures, type Chunk } from '../world/terrain.js';
@@ -44,6 +47,39 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   let pendingChunks = new Map<string, Chunk>();
   const scenery = new Map<string, Chunk>();
   const events = new EventEmitter();
+  /** V24: minimap summaries arrive with each mirror post (computed in the worker from the projected pages). */
+  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache();
+  let worldmapCache: { mirror: MirrorUpdate; version: number; value: WorldMapResponse } | undefined;
+  let directoryCache: { mirror: MirrorUpdate; value: WorldDirectoryResponse } | undefined;
+  let whispersCache: { mirror: MirrorUpdate; value: WhispersResponse } | undefined;
+  function loadedMirror(): MirrorUpdate {
+    if (!mirror) throw new HttpError(503, 'El mundo todavía está cargando.');
+    return mirror;
+  }
+  function worldmap(): WorldMapResponse {
+    const current = loadedMirror();
+    // Chunks archived before this process started are discovered terrain too: read once, in bounded turns.
+    if (archive) atlas.fillFromArchive(archive, current.view.tick);
+    if (worldmapCache?.mirror === current && worldmapCache.version === atlas.version) return worldmapCache.value;
+    const source = current.view;
+    const value = atlasBuilder.buildResponse({ tick: source.tick, day: source.day ?? Math.floor(source.tick / TICKS_PER_DAY) + 1,
+      discoveredChunks: source.discoveredChunks ?? 0, activeChunks: current.activeKeys.length, chunks: atlas.chunks(),
+      people: source.people, communities: source.communities, animals: source.animals, whispers: source.whispers });
+    worldmapCache = { mirror: current, version: atlas.version, value };
+    return value;
+  }
+  /** The mirror carries the FULL population (it is never clipped to a camera): the directory is global. */
+  function directory(): WorldDirectoryResponse {
+    const current = loadedMirror();
+    if (directoryCache?.mirror !== current) directoryCache = { mirror: current, value: buildWorldDirectory(current.view) };
+    return directoryCache.value;
+  }
+  function whispers(): WhispersResponse {
+    const current = loadedMirror();
+    if (whispersCache?.mirror !== current)
+      whispersCache = { mirror: current, value: { tick: current.view.tick, whispers: (current.view.whispers ?? []).map(w => ({ ...w })) } };
+    return whispersCache.value;
+  }
   let applying = Promise.resolve();
   let readyResolve!: () => void, readyReject!: (error: Error) => void;
   const ready = new Promise<void>((yes, no) => { readyResolve = yes; readyReject = no; });
@@ -199,6 +235,17 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     person: id => rpc('personDetail', id),
     recipe: id => rpc('recipeDetail', id),
     regions: () => ({ tick: mirror?.view.tick ?? 0, regionesVivas: Object.keys(activeKeys) }),
+    worldmap, directory, whispers,
+    whisper: async (request: DivineWhisperRequest, hash: string): Promise<DivineWhisper> => {
+      if (!valid(hash)) throw new HttpError(401, 'La sesión terminó.');
+      // The worker checks the session again when the step applies the message and inside its save
+      // transaction, and replies only once that save committed.
+      const created = await rpc<DivineWhisper>('whisper', request, hash);
+      // The step that applied it posted its mirror BEFORE the reply (one FIFO port): once that mirror is
+      // applied, a following GET /api/whispers or /api/worldmap already shows the new whisper.
+      await applying;
+      return created;
+    },
     get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
@@ -255,7 +302,14 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     for (const key of update.activeKeys) next[key] = true;
     for (const key of pages.keys()) if (!next[key]) pages.delete(key);
     for (const page of update.chunks) pages.set(page.key, { data: page.data });
-    pendingChunks = new Map(update.pendingChunks.map(c => [c.key, c]));
+    // Retired chunks cross once; the keys say which of the earlier ones are still pending an archive.
+    const pending = new Map<string, Chunk>();
+    for (const key of update.pendingKeys) { const chunk = pendingChunks.get(key); if (chunk) pending.set(key, chunk); }
+    for (const chunk of update.pendingChunks) pending.set(chunk.key, chunk);
+    pendingChunks = pending;
+    for (const entry of update.minimap ?? []) atlas.setActive(entry.key, entry.cells);
+    atlas.retainActive(update.activeKeys);
+    for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
     activeKeys = update.activeChunks; mirror = update;
     if (isReady && !closing) transport.broadcast();
     events.emit('mirror', update.view.tick);
@@ -309,6 +363,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     get workerThreadId() { return worker.threadId; },
     get workerExited() { return workerExited; },
     get publishMs() { return lastPublishMs; },
+    worldmap, directory, whispers,
+    whisper: (request: DivineWhisperRequest, hash: string) => backend.whisper!(request, hash),
     /** V21: the worker writes its buffered tape frames now (tests, and readers that need the newest tick). */
     flushTape(): Promise<{ enabled: boolean; frames: number; latestTick: number }> { return rpc('flushTape'); },
     close() {

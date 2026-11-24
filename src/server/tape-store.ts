@@ -59,7 +59,49 @@ function fastJson(v: unknown): string {
   return JSON.stringify(v);
 }
 const equal = (a: unknown, b: unknown): boolean => a === b || fastJson(a) === fastJson(b);
-function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
+type Equality = (a: unknown, b: unknown) => boolean;
+const isMember = (v: unknown): boolean => v !== undefined && typeof v !== 'function' && typeof v !== 'symbol';
+/**
+ * V24 writer: in-place JSON normalization of a value the writer owns (a structured clone from the
+ * simulation thread), with exactly what a JSON round trip keeps: members that JSON drops are deleted
+ * (null inside arrays), non-finite numbers become null and -0 becomes 0. Anything but a plain object
+ * or array takes the real round trip.
+ */
+function normalizeOwned(value: unknown): unknown {
+  if (typeof value === 'number') return Number.isFinite(value) ? value === 0 ? 0 : value : null;
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = isMember(value[i]) ? normalizeOwned(value[i]) : null;
+    return value;
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype) return jsonCopy(value);
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    const member = record[key];
+    if (isMember(member)) record[key] = normalizeOwned(member); else delete record[key];
+  }
+  return value;
+}
+/** Structural equality of two JSON-normalized values: the same verdict as comparing their JSON texts
+ * (key order included), without building them. */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!jsonEqual(a[i], b[i])) return false;
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (let i = 0; i < ka.length; i++) {
+    if (ka[i] !== kb[i] || !jsonEqual((a as Record<string, unknown>)[ka[i]!], (b as Record<string, unknown>)[ka[i]!])) return false;
+  }
+  return true;
+}
+/** Exact equality of two public tile projections (every field the wire carries). */
+export function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   return a.x === b.x && a.y === b.y && a.terrain === b.terrain
@@ -85,11 +127,11 @@ function tileChangedSignificantly(a: Tile, b: Tile): boolean {
     || Math.abs((a.moisture ?? 0) - (b.moisture ?? 0)) >= 0.15
     || Math.abs((a.growth ?? 0) - (b.growth ?? 0)) >= 0.12;
 }
-function diffObject(cur: Record<string, unknown>, prev: Record<string, unknown>): ObjectPatch | undefined {
+function diffObject(cur: Record<string, unknown>, prev: Record<string, unknown>, eq: Equality = equal): ObjectPatch | undefined {
   const set: Record<string, unknown> = {};
   let hasChange = false;
   for (const key in cur) {
-    if (!equal(cur[key], prev[key])) { set[key] = cur[key]; hasChange = true; }
+    if (!eq(cur[key], prev[key])) { set[key] = cur[key]; hasChange = true; }
   }
   const unset: string[] = [];
   for (const key in prev) if (!(key in cur)) { unset.push(key); hasChange = true; }
@@ -134,7 +176,7 @@ function unpack(data: Uint8Array): State {
   return { view, tiles: new Map(modifiedTiles.map(t => [coord(t), t])) };
 }
 
-function patch<T extends Identified>(current: T[], previous: T[]): Patch<T> {
+function patch<T extends Identified>(current: T[], previous: T[], eq: Equality = equal): Patch<T> {
   const old = new Map(previous.map(v => [v.id, v]));
   const ids = new Set(current.map(v => v.id));
   const upserts: (T | PartialUpsert)[] = [];
@@ -148,7 +190,7 @@ function patch<T extends Identified>(current: T[], previous: T[]): Patch<T> {
     for (const key in curRec) {
       if (key === 'id') continue;
       const val = curRec[key];
-      if (!equal(val, prevRec[key])) (diff ??= { id: v.id, _p: 1 })[key] = val;
+      if (!eq(val, prevRec[key])) (diff ??= { id: v.id, _p: 1 })[key] = val;
     }
     for (const key in prevRec) {
       if (key !== 'id' && !(key in curRec)) (unset ??= []).push(key);
@@ -162,7 +204,7 @@ function patch<T extends Identified>(current: T[], previous: T[]): Patch<T> {
   };
   const naturalOrder = previous.filter(v => ids.has(v.id)).map(v => v.id)
     .concat(current.filter(v => !old.has(v.id)).map(v => v.id));
-  if (!equal(naturalOrder, current.map(v => v.id))) result.order = current.map(v => v.id);
+  if (!eq(naturalOrder, current.map(v => v.id))) result.order = current.map(v => v.id);
   return result;
 }
 
@@ -289,13 +331,24 @@ export class TapeWriter implements ITapeWriter {
   get frameCount(): number { return this.count; }
   get latestTick(): number { return this.tick; }
 
-  record(view: WorldView, simHz: number, partialTiles = false): void {
+  /** `owned`: the caller hands over `view` (a structured clone nobody else holds), normalized in place
+   * instead of copied; top-level values identical to the previous frame's are already normalized. */
+  record(view: WorldView, simHz: number, partialTiles = false, owned = false): void {
     if (this.closed) throw new Error('TapeWriter is closed');
     if (!Number.isSafeInteger(view.tick) || view.tick < 0) throw new Error('Tape tick must be a nonnegative safe integer');
     // A tape is append-only. Repeated broadcasts of the same simulation tick add no frame.
     if (view.tick <= this.tick) return;
     const { tiles, ...raw } = view;
-    const current = jsonCopy(raw);
+    let current: typeof raw;
+    if (owned) {
+      const previous = this.previous as Record<string, unknown> | undefined, fields = raw as Record<string, unknown>;
+      for (const key of Object.keys(fields)) {
+        const value = fields[key];
+        if (!isMember(value)) delete fields[key];
+        else if (value !== previous?.[key]) fields[key] = normalizeOwned(value);
+      }
+      current = raw;
+    } else current = jsonCopy(raw);
     delete (current as unknown as Record<string, unknown>).seed;
     const { people, animals, structures, events, blueprints, communities, technology, stats, ...header } = current;
     const sparseMode = tiles.length > 4096 || (partialTiles && this.previousTiles.size > 4096);
@@ -327,7 +380,7 @@ export class TapeWriter implements ITapeWriter {
     const tileOrder = small ? [...nextTiles.keys()] : undefined;
     if (small) this.recordedTiles = new Map(nextTiles);
     const oldEvents = new Map(this.previous?.events.map(e => [e.id, e]));
-    const eventEdited = events.some(e => oldEvents.has(e.id) && !equal(e, oldEvents.get(e.id)));
+    const eventEdited = events.some(e => oldEvents.has(e.id) && !jsonEqual(e, oldEvents.get(e.id)));
     const isKeyframe = !this.previous || view.tick - this.anchor >= this.keyframeInterval || eventEdited;
     let keyframe: Buffer | undefined;
     let data: Buffer;
@@ -340,50 +393,50 @@ export class TapeWriter implements ITapeWriter {
         blueprints: oldBlueprints, communities: oldCommunities, technology: oldTech, stats: oldStats, ...oldHeader } = this.previous!;
       const delta: Delta = {
         tick: view.tick, sequence: view.sequence, day: view.day, phase: view.phase, weather: view.weather,
-        peoplePatch: patch(people, oldPeople), tilesPatch, newEvents: events.filter(e => !oldEvents.has(e.id)),
+        peoplePatch: patch(people, oldPeople, jsonEqual), tilesPatch, newEvents: events.filter(e => !oldEvents.has(e.id)),
       };
       const changes = delta as Record<string, unknown>;
       for (const [key, value] of Object.entries(header)) {
-        if (!equal(value, (oldHeader as unknown as Record<string, unknown>)[key])) changes[key] = value;
+        if (!jsonEqual(value, (oldHeader as unknown as Record<string, unknown>)[key])) changes[key] = value;
       }
       const unset = Object.keys(oldHeader).filter(key => !(key in header));
-      if (animals) delta.animalsPatch = patch(animals, oldAnimals ?? []);
+      if (animals) delta.animalsPatch = patch(animals, oldAnimals ?? [], jsonEqual);
       else if (oldAnimals) unset.push('animals');
-      if (structures) delta.structuresPatch = patch(structures, oldStructures ?? []);
+      if (structures) delta.structuresPatch = patch(structures, oldStructures ?? [], jsonEqual);
       else if (oldStructures) unset.push('structures');
       if (blueprints && oldBlueprints) {
-        const bp = patch(blueprints, oldBlueprints);
+        const bp = patch(blueprints, oldBlueprints, jsonEqual);
         if (patchNonEmpty(bp)) delta.blueprintsPatch = bp;
       } else if (blueprints) delta.blueprints = blueprints;
       else if (oldBlueprints) unset.push('blueprints');
       if (communities && oldCommunities) {
-        const cp = patch(communities, oldCommunities);
+        const cp = patch(communities, oldCommunities, jsonEqual);
         if (patchNonEmpty(cp)) delta.communitiesPatch = cp;
       } else if (communities) delta.communities = communities;
       else if (oldCommunities) unset.push('communities');
       if (technology && oldTech) {
         const tp: TechPatch = {};
         let techChanged = false;
-        const ip = patch(technology.items, oldTech.items);
+        const ip = patch(technology.items, oldTech.items, jsonEqual);
         if (patchNonEmpty(ip)) { tp.itemsPatch = ip; techChanged = true; }
-        const rp = patch(technology.recipes, oldTech.recipes);
+        const rp = patch(technology.recipes, oldTech.recipes, jsonEqual);
         if (patchNonEmpty(rp)) { tp.recipesPatch = rp; techChanged = true; }
-        if (technology.knowledge !== undefined && !equal(technology.knowledge, oldTech.knowledge)) { tp.knowledge = technology.knowledge; techChanged = true; }
+        if (technology.knowledge !== undefined && !jsonEqual(technology.knowledge, oldTech.knowledge)) { tp.knowledge = technology.knowledge; techChanged = true; }
         else if (technology.knowledge === undefined && oldTech.knowledge !== undefined) { tp.unsetKnowledge = true; techChanged = true; }
-        if (!equal(technology.dynamics, oldTech.dynamics)) { tp.dynamics = technology.dynamics; techChanged = true; }
-        if (!equal(technology.budgets, oldTech.budgets)) { tp.budgets = technology.budgets; techChanged = true; }
+        if (!jsonEqual(technology.dynamics, oldTech.dynamics)) { tp.dynamics = technology.dynamics; techChanged = true; }
+        if (!jsonEqual(technology.budgets, oldTech.budgets)) { tp.budgets = technology.budgets; techChanged = true; }
         if (techChanged) delta.techPatch = tp;
       } else if (technology) delta.technology = technology;
       else if (oldTech) unset.push('technology');
       if (stats && oldStats) {
-        const sp = diffObject(stats as unknown as Record<string, unknown>, oldStats as unknown as Record<string, unknown>);
+        const sp = diffObject(stats as unknown as Record<string, unknown>, oldStats as unknown as Record<string, unknown>, jsonEqual);
         if (sp) delta.statsPatch = sp;
       } else if (stats) delta.stats = stats;
       else if (oldStats) unset.push('stats');
       if (unset.length) delta.unset = unset;
       if (removedTiles.length) delta.removedTiles = removedTiles;
-      if (tileOrder && !equal(tileOrder, [...this.previousTiles.keys()])) delta.tileOrder = tileOrder;
-      if (!equal(events.map(e => e.id), this.previous!.events.map(e => e.id))) delta.eventOrder = events.map(e => e.id);
+      if (tileOrder && !jsonEqual(tileOrder, [...this.previousTiles.keys()])) delta.tileOrder = tileOrder;
+      if (!jsonEqual(events.map(e => e.id), this.previous!.events.map(e => e.id))) delta.eventOrder = events.map(e => e.id);
       data = encode(delta);
     }
     const point: TapeTimelinePoint = {

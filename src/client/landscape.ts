@@ -11,27 +11,37 @@
  * `.js` (resolución ESM / NodeNext).
  */
 import { sanitizeGraphicsSettings, PRESET_SETTINGS, type GraphicsSettings } from './graphics-settings.js';
-import { MAP_LAYER_CATALOG, isMapLayerId, type MapLayerId } from './layers-control.js';
+import { CAPAS_V23, MAP_LAYER_CATALOG, colorDeDueno, isMapLayerId, type MapLayerId } from './layers-control.js';
 import { valorCrudo, posicionEnRampa, type Capa as LegacyCapa } from './calor.js';
 import { geologyAt } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
-import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm, type AnimalVisualTraits } from './life-art.js';
-import { bodySeed, animalPose, daylightAt, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
-import type { ClientTileCache } from './tile-cache.js';
+import { animalActions, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm, type AnimalVisualTraits,
+  escalaDeCuerpo, escalaDeFauna, extraccionVisible, fraccionGestacion, madurezDeFauna, nombreDeFauna, paintEmbarazo, paintMarcaExtraccion,
+  paintMiedo, pelajeDeLinaje, planDeFauna } from './life-art.js';
+import { bodySeed, animalPose, daylightAt, intensidadLluvia, newEventAccents, AtmosphereSmoother, CadenceEstimator, MotionTracker, PlaybackBuffer, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
+import { firmaMat, mismaMat, PaletaSustancias, type ClientTileCache } from './tile-cache.js';
+import type { AireVisible, CuerpoVisible, LoteVisible } from '../shared/vistas-v23.js';
 import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
 import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from './crop-art.js';
-import { paintGeologyVeins, paintRoadTile } from './road-geology-art.js';
-import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure } from './structure-art.js';
-import { classifyTerrainPixel, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
+import { paintGeologyVeins, paintRoadTile, paintVetasComposicion } from './road-geology-art.js';
+import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure,
+  claveLote, figuraDeLote, humoDeFuego, paintFuego, paintLote, LOTE_SPRITE } from './structure-art.js';
+import { brilloTermico, classifyTerrainPixel, colorCuerpoNegro, colorTermico, escarcha, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd,
+  sustanciaDelPixel, umbralBayer as umbralTrama, waterDepthTone, type FieldSample, type Rgb } from './terrain-field.js';
 
 /** Only discrete phenotype buckets enter the sprite key; continuous genetic noise never does. */
 export function animalVisualTraits(v: AnimalView): AnimalVisualTraits {
   const bucket = (n: number | undefined): 0 | 1 | 2 => n === undefined || !Number.isFinite(n) ? 1 : n < .35 ? 0 : n >= .65 ? 2 : 1;
+  const base = animalVisualTraitsBase(v, bucket);
+  // V23: sin especie en las reglas, el pelaje sale del linaje fundador y la madurez de la masa sobre la adulta.
+  return v.v23 ? { ...base, maturity: madurezDeFauna(v) ?? base.maturity, pelaje: pelajeDeLinaje(v.v23.linaje) } : base;
+}
+function animalVisualTraitsBase(v: AnimalView, bucket: (n: number | undefined) => 0 | 1 | 2): AnimalVisualTraits {
   return {
     camouflage: v.genes?.camouflage > .56 ? 2 : v.genes?.camouflage < .44 ? 0 : 1,
     agile: v.genes?.speed > .56 || v.genes?.perception > .56 || (v.morphology?.caution ?? 0) >= .65 ? 1 : 0,
@@ -41,10 +51,10 @@ export function animalVisualTraits(v: AnimalView): AnimalVisualTraits {
     tame: (v.habituation ?? 0) >= .75 ? 2 : (v.habituation ?? 0) >= .45 ? 1 : 0,
   };
 }
-export function animalSpriteKey(v: AnimalView, pose: number, traits = animalVisualTraits(v)): string {
+export function animalSpriteKey(v: AnimalView, pose: number, traits = animalVisualTraits(v), plan: AnimalView['species'] = v.species): string {
   // Drink/graze and roam/flee/hunt use identical silhouettes at a given pose.
   const action = v.action === 'rest' ? 'rest' : v.action === 'drink' || v.action === 'graze' ? 'graze' : 'roam';
-  return `animal:${v.species}:${action}:${pose}:${Object.values(traits).join(':')}`;
+  return `animal:${plan}:${action}:${pose}:${Object.values(traits).join(':')}`;
 }
 const chemicalColor = (v: string | undefined): string | undefined => v && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(v) ? v : undefined;
 type ForgedItem = NonNullable<WorldView['technology']>['items'][number];
@@ -145,6 +155,12 @@ const BAKE_SYNC_CHUNKS = 24;
 const BAKE_SYNC_WINDOW = 320;
 /** V24: sprites de persona por identidad + pose (32×32 RGBA = 4 KiB). */
 const PERSON_SPRITE_LIMIT = 3072;
+/** V23: sprites de lotes (32×36 RGBA ≈ 4,5 KiB cada uno). */
+const LOTE_CACHE_LIMIT = 1024;
+/** V23: lado de una página del motor en teselas (`Fotograma.paginas`: páginas 16×16). */
+const PAGINA = 16;
+/** V23: lo que dura el destello de una página que cambió de dueño (ms). */
+const MIGRACION_DESTELLO_MS = 1500;
 const PERSON_SPRITE = { w: 32, h: 32, ox: 16, oy: 22 } as const;
 /** V24: ventana pedida al servidor (la mayor que acepta): más grande que la cámara, para no repedir con cada paneo. */
 const REQUEST_WINDOW = { w: 96, h: 64 } as const;
@@ -168,6 +184,10 @@ interface RGB {
 
 interface GroundMaterial extends FieldSample {
   soil: RGB; leaf: RGB; cover: number; moisture: number; traffic: number;
+  /** V23: colores de las sustancias de `Tile.mat` (ya con su temperatura) y sus fracciones; ausente = suelo de hoy. */
+  mat: { colores: RGB[]; fracciones: number[]; escarcha: number } | null;
+  /** Versión de la paleta con que se calculó (una sustancia aprendida después rehace el material). */
+  paleta: number;
 }
 
 /** The raster and its cache key must observe the same received-state buckets. */
@@ -198,6 +218,13 @@ function mix(a: RGB, b: RGB, t: number): RGB {
 }
 
 const WHITE = rgb(255, 255, 255);
+/** V23: color de la escarcha y del hielo sobre suelo o agua por debajo de la fusión. */
+const ESCARCHA = rgb(226, 236, 242);
+/** V23: humo y color de un lote cuya sustancia aún no tiene ficha (gris neutro de piedra). */
+const HUMO = rgb(104, 100, 96);
+const LOTE_SIN_FICHA: Rgb = [136, 128, 120];
+const deRgb = (c: Rgb): RGB => rgb(c[0], c[1], c[2]);
+const aRgb = (c: RGB): Rgb => [c.r, c.g, c.b];
 const BLACK = rgb(0, 0, 0);
 
 function lighten(c: RGB, t: number): RGB {
@@ -318,6 +345,13 @@ function mergeBySortY<T extends { sortY: number }>(first: readonly T[], second: 
 }
 
 /** Clave numérica de una celda (|coordenada| < 2^24): evita construir cadenas `x,y` en el camino caliente. */
+/** V23: uid del frente con que `FaunaVisible.persigue`/`huyeDe` nombran a alguien. Viaja en `CuerpoVisible.uid` (pedido
+ * al integrador); sin él la línea de persecución o huida no se dibuja (no se adivina a quién). */
+function uidVisible(v: { cuerpoVisto?: CuerpoVisible }): number | undefined {
+  const uid = (v.cuerpoVisto as (CuerpoVisible & { uid?: unknown }) | undefined)?.uid;
+  return typeof uid === 'number' && Number.isFinite(uid) ? uid : undefined;
+}
+
 function cellKey(x: number, y: number): number { return (x + 16777216) * 33554432 + (y + 16777216); }
 
 /** V24: misma tesela por valor (un fotograma completo de la cinta trae objetos nuevos aunque nada haya cambiado). */
@@ -325,7 +359,7 @@ function sameTile(a: Tile, b: Tile): boolean {
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   const ra = a as unknown as Record<string, unknown>, rb = b as unknown as Record<string, unknown>;
-  for (const key of ka) if (ra[key] !== rb[key]) return false;
+  for (const key of ka) if (ra[key] !== rb[key] && !(key === 'mat' && mismaMat(a.mat, b.mat))) return false;
   return true;
 }
 
@@ -445,6 +479,7 @@ const enum SpriteKind {
   Fauna = 3,
   Animal = 4,
   Structure = 5,
+  Lote = 6,
 }
 
 interface Sprite {
@@ -460,6 +495,7 @@ interface Sprite {
   animal?: RenderAnimal;
   structure?: StructureView;
   tree?: TreeForm;
+  lote?: LoteVisible;
 }
 
 export interface RenderDiagnostics {
@@ -648,6 +684,20 @@ export class Landscape {
   /** M10: regiones que el servidor simula en la ventana recibida (null = no lo dijo). */
   private vivas: Set<string> | null = null;
   private vivasKey = '';
+  /** V23: color y densidad de las sustancias vistas (los ids son estables en un mundo). */
+  private readonly paleta = new PaletaSustancias();
+  private readonly conoceSustancia = (id: number): boolean => this.paleta.conoce(id);
+  private readonly colorSustancia = (id: number): Rgb | undefined => this.paleta.color(id);
+  private mundoV23: string | undefined;
+  /** V23: aire de las páginas visibles (clave «px,py») y dueño de cada página; null = la vista no lo trae. */
+  private aire: Map<number, AireVisible> | null = null;
+  private aireKey = '';
+  private reparto: Map<number, number> | null = null;
+  private repartoKey = '';
+  private readonly coloresHilo = new Map<number, string>();
+  /** Páginas que cambiaron de dueño y cuándo (ms de `performance.now`): destello de la migración en la capa «Hilos». */
+  private readonly migraciones = new Map<number, number>();
+  private readonly loteCache = new BoundedCache<HTMLCanvasElement>(LOTE_CACHE_LIMIT, canvas => { canvas.width = canvas.height = 0; });
   private grid: (Tile | undefined)[] = [];
   private prevPeople = new Map<string, PersonView>();
   private prevAnimals = new Map<string, AnimalView>();
@@ -848,6 +898,7 @@ export class Landscape {
     }
     this.communityColors.clear();
     for (const community of world.communities ?? []) this.communityColors.set(community.id, community.color);
+    this.ingestV23(world);
     this.sceneRevision++;
     this.syncStructures(world);
 
@@ -1265,6 +1316,9 @@ export class Landscape {
       const stock = (Math.round((t.wood ?? 0) * 2) & 0xff) | ((Math.round((t.stone ?? 0) * 2) & 0xff) << 8)
         | (((t.variety ?? 0) & 0xff) << 16) | ((t.elevation !== undefined ? Math.round(t.elevation * 32) & 0xff : 0) << 24);
       h = Math.imul(h ^ stock, 16777619) >>> 0;
+      // V23: composición, brillo térmico y escarcha en pasos visibles (0 sin materia: la huella de siempre).
+      const materia = firmaMat(t.mat, t.T, t.moisture, this.conoceSustancia);
+      if (materia) h = Math.imul(h ^ materia, 16777619) >>> 0;
     }
     return h;
   }
@@ -1380,21 +1434,74 @@ export class Landscape {
   }
 
   private groundMaterial(tile: Tile): GroundMaterial {
-    const cached = this.groundMaterials.get(tile); if (cached) return cached;
+    const cached = this.groundMaterials.get(tile);
+    if (cached && (cached.paleta === this.paleta.version || !tile.mat?.length)) return cached;
     const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
     const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
     const mineral = tile.biome === 'desert' ? P.sand : tile.biome === 'mountain' ? P.stoneShade : P.soilLight;
     const humus = tile.biome === 'wetland' ? mix(P.soilDark, P.mossHigh, .55) : darken(P.soil, .38);
     const green = tile.biome === 'wetland' ? mix(P.mossHigh, P.waterShallow, .25)
       : tile.biome === 'forest' ? mix(P.mossHigh, P.sageLow, .3) : mix(P.sageLow, P.mossHigh, .32);
-    const material = {
-      soil: darken(mix(mineral, humus, fertility * .72), moisture * .2),
+    const legacySoil = darken(mix(mineral, humus, fertility * .72), moisture * .2);
+    const mat = this.materiaDeTesela(tile, legacySoil, moisture);
+    const material: GroundMaterial = {
+      soil: mat ? mat.colores[0]! : legacySoil,
       leaf: mix(green, P.sandDark, (1 - moisture) * .6),
       cover: tile.terrain === 'water' ? 0 : groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
       moisture, traffic: tile.terrain === 'water' ? 0 : traffic,
       biome: tile.biome ?? 'grassland', water: tile.terrain === 'water',
+      mat, paleta: this.paleta.version,
     };
     this.groundMaterials.set(tile, material); return material;
+  }
+
+  /**
+   * V23: el suelo por composición. Cada sustancia de `Tile.mat` con ficha conocida aporta su color (oscurecido por la
+   * humedad como el suelo de siempre y al rojo si `Tile.T` pasa del punto de Draper) y su fracción; sin ninguna conocida
+   * pero con `T`, el suelo de siempre a su temperatura. `null` = la tesela no trae materia: se pinta como hoy.
+   */
+  private materiaDeTesela(tile: Tile, legacySoil: RGB, moisture: number): GroundMaterial['mat'] {
+    if (!tile.mat?.length && tile.T === undefined) return null;
+    const colores: RGB[] = [], fracciones: number[] = [];
+    for (const [id, fraccion] of tile.mat ?? []) {
+      const color = this.paleta.color(id);
+      if (!color || !(fraccion > 0)) continue;
+      colores.push(deRgb(colorTermico(aRgb(darken(deRgb(color), moisture * .2)), tile.T)));
+      fracciones.push(fraccion);
+    }
+    if (!colores.length) { colores.push(deRgb(colorTermico(aRgb(legacySoil), tile.T))); fracciones.push(1); }
+    return { colores, fracciones, escarcha: escarcha(tile.T, moisture) };
+  }
+
+  /** V23: aprende de la vista las sustancias, el aire y el reparto. Lo ausente deja el mapa como hoy. */
+  private ingestV23(world: WorldView): void {
+    if (world.instanceId !== undefined && world.instanceId !== this.mundoV23) {
+      if (this.mundoV23 !== undefined) { this.paleta.clear(); this.reparto = null; this.repartoKey = ''; this.loteCache.clear(); }
+      this.mundoV23 = world.instanceId;
+    }
+    this.paleta.ingest(world.sustancias);
+    if (world.aire) {
+      const aire = new Map<number, AireVisible>(), partes: string[] = [];
+      for (const [clave, a] of Object.entries(world.aire)) {
+        const [px, py] = clave.split(',').map(Number);
+        if (!Number.isInteger(px) || !Number.isInteger(py)) continue;
+        aire.set(cellKey(px!, py!), a);
+        partes.push(`${clave}:${Math.round(clamp01(a.humedadRelativa) * 20)}:${Math.round(intensidadLluvia(a.lluvia) * 10)}`);
+      }
+      this.aire = aire; this.aireKey = partes.join(';');
+    } else { this.aire = null; this.aireKey = ''; }
+    // El reparto viaja solo en los fotogramas completos: entre uno y otro vale el último conocido de este mundo.
+    if (world.reparto?.paginas.length) {
+      const reparto = new Map<number, number>(), partes: string[] = [];
+      const ahora = performance.now(), previo = this.reparto;
+      for (const [px, py, dueno] of world.reparto.paginas) {
+        const key = cellKey(px, py), antes = previo?.get(key);
+        reparto.set(key, dueno); partes.push(`${px},${py}:${dueno}`);
+        if (antes !== undefined && antes !== dueno) this.migraciones.set(key, ahora);
+      }
+      for (const [key, at] of this.migraciones) if (ahora - at > MIGRACION_DESTELLO_MS) this.migraciones.delete(key);
+      this.reparto = reparto; this.repartoKey = partes.join(';');
+    }
   }
 
   private biomeEdgeFraction(tile: Tile): number {
@@ -1427,6 +1534,11 @@ export class Landscape {
         const ry = oy + Math.floor(rnd(x, y, 40 + i) * ART);
         px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(lighten(P.waterDeep, .1)));
       }
+      // V23: agua por debajo de la fusión: placas de hielo tramadas (sin degradado).
+      const helada = owner.mat?.escarcha ?? 0;
+      if (helada > 0) for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
+        if (umbralTrama(ox + bx, oy + by) < helada) px(g, ox + bx, oy + by, 1, 1, css(ESCARCHA, .85));
+      }
       return;
     }
     const stencil = prepareTerrainStencil(samples);
@@ -1445,6 +1557,7 @@ export class Landscape {
         const tone = waterDepthTone(wx, wy, x, y, stencil, pixel.waterValue);
         let color = mix(P.waterShallow, P.waterDeep, tone / 3);
         if ((bx === waveX0 && by === waveY0) || (bx === waveX1 && by === waveY1)) color = lighten(color, .1);
+        if (owner.mat && owner.mat.escarcha > 0 && umbralTrama(wx, wy) < owner.mat.escarcha) color = ESCARCHA;
         data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
         continue;
       }
@@ -1454,6 +1567,8 @@ export class Landscape {
         continue;
       }
       let soilR = 0, soilG = 0, soilB = 0, leafR = 0, leafG = 0, leafB = 0, total = 0;
+      // V23: con composición, el suelo es la sustancia que el tramado asigna a este píxel; nunca se funde con el vecino.
+      const sustancia = owner.mat ? owner.mat.colores[sustanciaDelPixel(owner.mat.fracciones, wx, wy)] : undefined;
       for (let j = 0; j < 4; j++) {
         const sample = samples[pixel.corners[j]!]!;
         if (sample.water || sample.biome !== pixel.biome) continue;
@@ -1464,6 +1579,7 @@ export class Landscape {
       }
       if (total > 0) { soilR /= total; soilG /= total; soilB /= total; leafR /= total; leafG /= total; leafB /= total; }
       else { soilR = owner.soil.r; soilG = owner.soil.g; soilB = owner.soil.b; leafR = owner.leaf.r; leafG = owner.leaf.g; leafB = owner.leaf.b; }
+      if (sustancia) { soilR = sustancia.r; soilG = sustancia.g; soilB = sustancia.b; }
       const grainSeed = rnd(wx, wy, 358);
       const pigment = pixel.grass && !pixel.wear ? 1 : pixel.grass && pixel.wear ? .35 : 0;
       const grain = (grainSeed - .5) * (pixel.wear ? 1 : 4);
@@ -1479,6 +1595,9 @@ export class Landscape {
       data[offset + 1] = soilG + (leafG - soilG) * pigment + (pixel.wear ? 6 : 0) + relief + edge;
       data[offset + 2] = soilB + (leafB - soilB) * pigment + (pixel.wear ? 3 : 0) + relief + edge;
       data[offset + 3] = 255;
+      if (owner.mat && owner.mat.escarcha > 0 && umbralTrama(wx, wy) < owner.mat.escarcha) {
+        data[offset] = ESCARCHA.r; data[offset + 1] = ESCARCHA.g; data[offset + 2] = ESCARCHA.b;
+      }
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
     g.drawImage(this.groundStamp, ox, oy);
@@ -1486,7 +1605,9 @@ export class Landscape {
 
   /** V20: vetas minerales y caminos (senda/calzada) sobre el suelo; se hornean con el trozo, cero coste por fotograma. */
   private bakeV20Ground(g: CanvasRenderingContext2D, tile: Tile): void {
-    paintGeologyVeins(g, tile, this.worldSeed);
+    // V23: con composición servida las vetas salen de ella; `paintGeologyVeins` ya no pinta la geología latente.
+    if (tile.mat?.length) paintVetasComposicion(g, tile, this.colorSustancia);
+    else paintGeologyVeins(g, tile, this.worldSeed);
     paintRoadTile(g, tile, { n: this.tileAt(tile.x, tile.y - 1), e: this.tileAt(tile.x + 1, tile.y), s: this.tileAt(tile.x, tile.y + 1), w: this.tileAt(tile.x - 1, tile.y) });
   }
 
@@ -1931,7 +2052,8 @@ export class Landscape {
       const shownTime = this.reduceMotion || this.dvrMode ? null : this.playback.bracket();
       const shownTick = this.reduceMotion || this.dvrMode ? world.tick : this.playback.shownTick(world.tick);
       const shownWeather = shownTime ? (shownTime.alpha < .5 ? shownTime.a.view : shownTime.b.view).weather : world.weather;
-      const light = this.atmosphere.step(daylightAt(shownTick), shownWeather === 'rain', now);
+      // V23: con el aire servido, la lluvia es la de las páginas que se ven, no un tiempo global.
+      const light = this.atmosphere.step(daylightAt(shownTick), this.aire ? this.lluviaVisible() : shownWeather === 'rain', now);
       this.lighting = { shadowX: light.shadowX, shadowY: light.shadowY, shadowAlpha: light.shadowAlpha * (1 - .6 * light.rain) };
       const people = this.interpolatePeople(this.motionClock);
       const animals = this.interpolateAnimals(this.motionClock);
@@ -2029,6 +2151,7 @@ export class Landscape {
       const foot = structureExtent(structure as ExtendedStructure).foot;
       dynamic.push({ kind: SpriteKind.Structure, sortY: foot, ax: (box.x0 + box.w / 2) * ART, ay: foot, seed: 0, size: 0, person: null, structure });
     }
+    this.pushLotes(world, dynamic, x0, x1, y0, y1, selectedTile);
     for (const animal of animals) {
       if (animal.x < x0 || animal.x > x1 || animal.y < y0 || animal.y > y1) continue;
       this.visibleAnimals++;
@@ -2111,6 +2234,7 @@ export class Landscape {
         this.drawStructure(g, s.structure, t);
         if (hidden) g.restore();
       }
+      else if (s.lote) this.drawLote(g, s.lote, s.ax, s.ay, t);
       else if (s.tile) this.drawFauna(g, s.tile, t);
       else if (s.person) this.drawPerson(g, s.person, t);
     }
@@ -2149,6 +2273,147 @@ export class Landscape {
     // M10: un velo tenue sobre las zonas en reposo (el servidor no las simula ahora; se ve su estado
     // guardado o una vista previa). Sin `regionesVivas` no se vela nada: no se sabe.
     if (this.vivas) this.drawRestVeil(g, x0, x1, y0, y1);
+    g.restore();
+  }
+
+  /* ------------------ V23: lotes con forma ------------------ */
+
+  /**
+   * Lotes visibles (`WorldView.lotes`) y piezas de obra (`StructureView.piezas`) como sprites ordenados por su pie. Las piezas
+   * de una obra terminada ya están en el dibujo del edificio: se ven en la obra en marcha, calientes (un horno) o al
+   * inspeccionar su casilla. Varios lotes en una celda se apilan en un montón legible.
+   */
+  private pushLotes(world: WorldView, dynamic: Sprite[], x0: number, x1: number, y0: number, y1: number, selectedTile: { x: number; y: number } | null): void {
+    const enCelda = new Map<number, number>();
+    const push = (lote: LoteVisible): void => {
+      if (lote.x < x0 || lote.x > x1 || lote.y < y0 || lote.y > y1) return;
+      const cx = Math.floor(lote.x), cy = Math.floor(lote.y), key = cellKey(cx, cy), k = enCelda.get(key) ?? 0;
+      enCelda.set(key, k + 1);
+      // Celda de 16 px: hasta tres lotes por hilera, la siguiente hilera un poco más arriba (montón).
+      const ax = cx * ART + 8 + ((k % 3) - 1) * 5, ay = cy * ART + 13 - Math.floor(k / 3) * 3;
+      dynamic.push({ kind: SpriteKind.Lote, sortY: cy * ART + 13 + (k % 3) * .01, ax, ay, seed: 0, size: 0, person: null, lote });
+    };
+    for (const lote of world.lotes ?? []) push(lote);
+    for (const structure of world.structures ?? []) {
+      if (!structure.piezas?.length) continue;
+      const enObra = structure.site !== undefined;
+      const inspeccionada = selectedTile !== null && footprintCells(structure as ExtendedStructure).some(c => c.x === selectedTile.x && c.y === selectedTile.y);
+      for (const pieza of structure.piezas) if (enObra || inspeccionada || brilloTermico(pieza.T) > 0) push(pieza);
+    }
+  }
+
+  /** Un lote desde su sprite en caché (fuego con su llama por pose, y su humo encima, que sí cambia con el reloj). */
+  private drawLote(g: CanvasRenderingContext2D, lote: LoteVisible, ax: number, ay: number, t: number): void {
+    const color = this.paleta.color(lote.principal) ?? LOTE_SIN_FICHA;
+    const figura = figuraDeLote(lote, this.paleta.densidad(lote.principal));
+    const pose = this.reduceMotion ? 0 : Math.floor(t * 8) & 3;
+    const pintar = (ctx: CanvasRenderingContext2D, x: number, y: number) => lote.rol === 'fuego'
+      ? paintFuego(ctx, lote, color, x, y, pose) : paintLote(ctx, lote, figura, color, x, y);
+    if (typeof document === 'undefined') pintar(g, ax, ay);
+    else {
+      const key = claveLote(lote, figura, color, pose);
+      let sprite = this.loteCache.get(key);
+      if (!sprite) {
+        sprite = document.createElement('canvas'); sprite.width = LOTE_SPRITE.w; sprite.height = LOTE_SPRITE.h;
+        pintar(sprite.getContext('2d')!, LOTE_SPRITE.ox, LOTE_SPRITE.oy);
+        this.loteCache.set(key, sprite);
+      }
+      g.drawImage(sprite, Math.round(ax) - LOTE_SPRITE.ox, Math.round(ay) - LOTE_SPRITE.oy); this.drawCalls++;
+    }
+    if (lote.rol === 'fuego' && this.graphicsSettings.atmosphere) {
+      for (const humo of humoDeFuego(lote, this.reduceMotion ? 0 : t)) {
+        px(g, Math.round(ax + humo.dx - humo.lado / 2), Math.round(ay + humo.dy), humo.lado, humo.lado, css(HUMO, humo.alfa));
+      }
+    }
+  }
+
+  /**
+   * Lejos solo se distingue lo que brilla: fuegos (con su llama de cerca del lejano) y lotes al rojo como un resplandor de
+   * una tesela del color de cuerpo negro de su T; en el mapa, un punto. Lo frío se ve al acercarse.
+   */
+  private drawLotesCalientes(g: CanvasRenderingContext2D, world: WorldView, x0: number, x1: number, y0: number, y1: number, tier: LodTier, t: number): void {
+    const brillan = (l: LoteVisible) => l.rol === 'fuego' || brilloTermico(l.T) > 0;
+    const pinta = (l: LoteVisible): void => {
+      if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1 || !brillan(l)) return;
+      const [r, gr, b] = colorCuerpoNegro(l.T), cx = Math.floor(l.x) * ART, cy = Math.floor(l.y) * ART;
+      g.fillStyle = `rgba(${r},${gr},${b},${(.25 + .5 * Math.max(brilloTermico(l.T), l.rol === 'fuego' ? .6 : 0)).toFixed(3)})`;
+      if (tier === 'map') g.fillRect(cx + ART / 4, cy + ART / 4, ART / 2, ART / 2);
+      else { g.fillRect(cx, cy, ART, ART); if (l.rol === 'fuego') this.drawLote(g, l, cx + 8, cy + 13, t); }
+      this.drawCalls++;
+    };
+    for (const lote of world.lotes ?? []) pinta(lote);
+    for (const structure of world.structures ?? []) for (const pieza of structure.piezas ?? []) pinta(pieza);
+  }
+
+  /* ------------------ V23: aire, lluvia y reparto por página ------------------ */
+
+  private paginaDe(x: number, y: number): number { return cellKey(Math.floor(x / PAGINA), Math.floor(y / PAGINA)); }
+
+  /** Intensidad media [0, 1] de la lluvia en las páginas visibles (las que el aire servido trae). */
+  private lluviaVisible(): number {
+    if (!this.aire?.size) return 0;
+    const b = this.getViewportBounds();
+    let suma = 0, n = 0;
+    for (let py = Math.floor(b.minY / PAGINA); py <= Math.floor(b.maxY / PAGINA); py++) for (let px = Math.floor(b.minX / PAGINA); px <= Math.floor(b.maxX / PAGINA); px++) {
+      const a = this.aire?.get(cellKey(px, py));
+      if (a) { suma += intensidadLluvia(a.lluvia); n++; }
+    }
+    return n ? suma / n : 0;
+  }
+
+  /** Lluvia [0, 1] de la página bajo un punto de pantalla; `null` sin aire servido (llueve en todo el cuadro, como hoy). */
+  private lluviaEnPantalla(sx: number, sy: number): number | null {
+    if (!this.aire) return null;
+    const w = this.screenToWorld(sx, sy), a = this.aire?.get(this.paginaDe(w.x, w.y));
+    return a ? intensidadLluvia(a.lluvia) : 0;
+  }
+
+  /** Capas V23 activas cuyo dato trae la vista, en el orden del catálogo. */
+  private capasV23Activas(): typeof CAPAS_V23[number][] {
+    return CAPAS_V23.filter(meta => this.activeLayers?.has(meta.id) && (meta.id === 'hilos' ? this.reparto !== null : this.aire !== null));
+  }
+
+  /** Color CSS del dueño de una página (capa «Hilos»), memorizado por dueño. */
+  private colorHilo(dueno: number): string {
+    let c = this.coloresHilo.get(dueno);
+    if (!c) { const [r, g, b] = colorDeDueno(dueno); c = `rgb(${r},${g},${b})`; this.coloresHilo.set(dueno, c); }
+    return c;
+  }
+
+  /** Capas V23 del nivel cercano: un rectángulo por página (no por tesela) y un borde de 1 px donde cambia el dueño. */
+  private drawCapasV23(g: CanvasRenderingContext2D, x0: number, x1: number, y0: number, y1: number, total: number): void {
+    const capas = this.capasV23Activas();
+    if (!capas.length) return;
+    const alfa = Math.min(.36, .7 / Math.sqrt(Math.max(1, total)));
+    g.save();
+    for (const meta of capas) for (let py = Math.floor(y0 / PAGINA); py <= Math.floor(y1 / PAGINA); py++) for (let pxp = Math.floor(x0 / PAGINA); pxp <= Math.floor(x1 / PAGINA); pxp++) {
+      const key = cellKey(pxp, py), left = Math.max(x0, pxp * PAGINA), top = Math.max(y0, py * PAGINA);
+      const w = Math.min(x1 + 1, (pxp + 1) * PAGINA) - left, h = Math.min(y1 + 1, (py + 1) * PAGINA) - top;
+      if (w <= 0 || h <= 0) continue;
+      if (meta.id === 'hilos') {
+        const dueno = this.reparto?.get(key);
+        if (dueno === undefined) continue;
+        g.globalAlpha = alfa; g.fillStyle = this.colorHilo(dueno); g.fillRect(left * ART, top * ART, w * ART, h * ART);
+        g.globalAlpha = .8;
+        if (this.reparto?.get(cellKey(pxp + 1, py)) !== dueno && (pxp + 1) * PAGINA <= x1 + 1) g.fillRect((pxp + 1) * PAGINA * ART - 1, top * ART, 1, h * ART);
+        if (this.reparto?.get(cellKey(pxp, py + 1)) !== dueno && (py + 1) * PAGINA <= y1 + 1) g.fillRect(left * ART, (py + 1) * PAGINA * ART - 1, w * ART, 1);
+        const migro = this.migraciones.get(key);
+        if (migro !== undefined) {
+          const vida = 1 - (performance.now() - migro) / MIGRACION_DESTELLO_MS;
+          if (vida > 0) { g.globalAlpha = .45 * vida; g.fillStyle = css(P.paper); g.fillRect(left * ART, top * ART, w * ART, h * ART); }
+        }
+      } else {
+        const a = this.aire?.get(key);
+        if (!a) continue;
+        g.globalAlpha = clamp01(a.humedadRelativa) * alfa; g.fillStyle = meta.color; g.fillRect(left * ART, top * ART, w * ART, h * ART);
+        const lluvia = intensidadLluvia(a.lluvia);
+        // Donde llueve, trazos de agua tramados en la página (fijos: la lluvia animada va en la atmósfera).
+        if (lluvia > 0) {
+          g.globalAlpha = .5; g.fillStyle = css(P.waterShallow);
+          for (let y = top; y < top + h; y++) for (let x = left; x < left + w; x++) if (rnd(x, y, 1777) < lluvia * .35) g.fillRect(x * ART + 5, y * ART + 3, 1, 4);
+        }
+      }
+    }
     g.restore();
   }
 
@@ -2322,16 +2587,26 @@ export class Landscape {
     const rate = v.action === 'flee' || v.action === 'hunt' ? 10 : 6;
     const pose = animalPose(v, animal.moving, (animal.moving ? animal.stride / ANIMAL_STEP_TILES / rate : t) + phase, this.reduceMotion, this.actionActive || animal.moving);
     const traits = animalVisualTraits(v);
-    const key = animalSpriteKey(v, pose, traits);
+    // V23: sin especie, el cuerpo dibujado sale de la masa, la carnivoría y el agua; la talla, de la masa real.
+    const plan = planDeFauna(v, this.tileAt(Math.round(animal.x), Math.round(animal.y))?.terrain === 'water');
+    const escala = escalaDeFauna(v, plan);
+    const key = animalSpriteKey(v, pose, traits, plan);
     let art = this.animalCache.get(key);
     if (!art) {
       art = document.createElement('canvas');
       art.width = art.height = 32;
-      paintAnimal(art.getContext('2d')!, v.species, v.action, pose, traits);
+      paintAnimal(art.getContext('2d')!, plan, v.action, pose, traits);
       this.cacheSprite(key, art, this.animalCache);
     }
-    g.save(); g.translate(Math.round(animal.x * ART + 8), Math.round(animal.y * ART + 12)); if (animal.left) g.scale(-1, 1);
-    g.drawImage(art, -16, -26); g.restore(); this.drawCalls++;
+    const x = Math.round(animal.x * ART + 8), y = Math.round(animal.y * ART + 12);
+    g.save(); g.translate(x, y); if (animal.left) g.scale(-1, 1);
+    if (escala === 1) g.drawImage(art, -16, -26);
+    else g.drawImage(art, Math.round(-16 * escala), Math.round(-26 * escala), Math.round(32 * escala), Math.round(32 * escala));
+    g.restore(); this.drawCalls++;
+    if (!v.v23) return;
+    const extraido = extraccionVisible(v, this.curr?.tick ?? 0);
+    if (extraido) paintMarcaExtraccion(g, x + Math.round(5 * escala), y - Math.round(14 * escala), extraido);
+    paintMiedo(g, x, y - Math.round(24 * escala), v.v23.miedo);
   }
 
   private structureRaster(structure: StructureView): HTMLCanvasElement {
@@ -2582,19 +2857,22 @@ export class Landscape {
 
   private drawActiveLayers(g: CanvasRenderingContext2D, x0: number, x1: number, y0: number, y1: number): void {
     const layers = MAP_LAYER_CATALOG.filter(meta => this.activeLayers?.has(meta.id));
-    if (!layers.length) return;
-    g.save();
-    for (const meta of layers) {
-      g.fillStyle = meta.color;
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        const tile = this.tileAt(x, y); if (!tile) continue;
-        const intensity = this.layerIntensity(meta, tile, x, y);
-        if (intensity === null) continue;
-        g.globalAlpha = clamp01(intensity) * Math.min(.36, .7 / Math.sqrt(layers.length));
-        g.fillRect(x * ART, y * ART, ART, ART);
+    const v23 = this.capasV23Activas().length;
+    if (layers.length) {
+      g.save();
+      for (const meta of layers) {
+        g.fillStyle = meta.color;
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+          const tile = this.tileAt(x, y); if (!tile) continue;
+          const intensity = this.layerIntensity(meta, tile, x, y);
+          if (intensity === null) continue;
+          g.globalAlpha = clamp01(intensity) * Math.min(.36, .7 / Math.sqrt(layers.length + v23));
+          g.fillRect(x * ART, y * ART, ART, ART);
+        }
       }
+      g.restore();
     }
-    g.restore();
+    if (v23) this.drawCapasV23(g, x0, x1, y0, y1, layers.length + v23);
   }
 
   /** Intensidad 0..1 de una capa en una tesela; `null` = sin evidencia (geología sin semilla recibida): no se pinta. */
@@ -2606,6 +2884,8 @@ export class Landscape {
       const geology = geologyAt(this.worldSeed, x, y, tile.biome, tile.feature);
       return Math.max(geology.Fe, geology.Ca, geology.S);
     }
+    if (meta.id === 'hilos') return this.reparto?.has(this.paginaDe(x, y)) ? 1 : null;
+    if (meta.id === 'aire') { const a = this.aire?.get(this.paginaDe(x, y)); return a ? a.humedadRelativa : null; }
     if (meta.legacyCapa) { const capa = meta.legacyCapa as LegacyCapa; return posicionEnRampa(valorCrudo(tile, capa), capa); }
     return 0;
   }
@@ -2640,6 +2920,7 @@ export class Landscape {
       this.visibleStructures++;
       this.drawStructure(ctx, structure, t, true);
     }
+    this.drawLotesCalientes(ctx, world, x0, x1, y0, y1, tier, t);
     this.drawLayerImage(ctx, 'legacy'); // los datos clásicos quedan visibles sobre el arbolado, como de cerca
     this.layerDirty.length = 0;
     if (this.vivas) this.drawRestVeil(ctx, x0, x1, y0, y1);
@@ -2659,8 +2940,8 @@ export class Landscape {
       for (const body of bodies) {
         const ax = body.x * ART + ART / 2, ay = body.y * ART + ART / 2;
         const person = 'role' in body.view ? body as RenderPerson : null;
-        const species = person ? null : (body.view as AnimalView).species;
-        const fill = person ? this.personDotColor(person.view) : species === 'deer' ? css(P.soil) : species === 'boar' || species === 'wolf' ? css(P.trunkLight) : css(P.soilLight);
+        const animal = person ? null : body.view as AnimalView, species = animal?.species;
+        const fill = person ? this.personDotColor(person.view) : animal?.v23 ? pelajeDeLinaje(animal.v23.linaje) : species === 'deer' ? css(P.soil) : species === 'boar' || species === 'wolf' ? css(P.trunkLight) : css(P.soilLight);
         const size = person ? unit * 1.5 : unit;
         ctx.fillStyle = '#231710'; ctx.fillRect(ax - size / 2 - unit / 4, ay - size - unit / 4, size + unit / 2, size + unit / 2);
         ctx.fillStyle = fill; ctx.fillRect(ax - size / 2, ay - size, size, size);
@@ -2834,10 +3115,11 @@ export class Landscape {
    * `drawLayerCell`). Mismos colores y alfas que el dibujo por tesela del nivel cercano.
    */
   private drawLayerImage(g: CanvasRenderingContext2D, which: 'data' | 'legacy'): void {
-    const layers = which === 'data' ? MAP_LAYER_CATALOG.filter(meta => this.activeLayers?.has(meta.id)) : [];
+    const layers = which === 'data' ? [...MAP_LAYER_CATALOG.filter(meta => this.activeLayers?.has(meta.id)), ...this.capasV23Activas()] : [];
     const legacy = which === 'legacy' ? this.layer : 'none';
     if ((which === 'data' ? !layers.length : legacy === 'none') || !this.worldW || !this.worldH) { this.layerImages[which] = null; return; }
-    const key = `${which === 'data' ? layers.map(meta => meta.id).join(',') : legacy}:${this.gridRevision}:${this.vivasKey}:${this.worldSeed}:${this.originX}:${this.originY}:${this.worldW}:${this.worldH}`;
+    const v23Key = layers.some(meta => meta.id === 'hilos') ? this.repartoKey : '', aireKey = layers.some(meta => meta.id === 'aire') ? this.aireKey : '';
+    const key = `${which === 'data' ? layers.map(meta => meta.id).join(',') : legacy}:${this.gridRevision}:${this.vivasKey}:${this.worldSeed}:${this.originX}:${this.originY}:${this.worldW}:${this.worldH}:${v23Key}:${aireKey}`;
     const colors = layers.map(meta => hexRgb(meta.color)), base = Math.min(.36, .7 / Math.sqrt(Math.max(1, layers.length)));
     const legacyColor = legacy === 'moisture' ? P.waterShallow : P.amber;
     const paint = (img: LayerImage, tile: Tile): void => {
@@ -2850,7 +3132,8 @@ export class Landscape {
       } else layers.forEach((meta, i) => {
         const intensity = this.layerIntensity(meta, tile, tile.x, tile.y);
         if (intensity === null) return;
-        const alpha = clamp01(intensity) * base, [cr, cg, cb] = colors[i]!;
+        const alpha = clamp01(intensity) * base;
+        const [cr, cg, cb] = meta.id === 'hilos' ? colorDeDueno(this.reparto!.get(this.paginaDe(tile.x, tile.y))!) : colors[i]!;
         r = cr * alpha + r * (1 - alpha); gr = cg * alpha + gr * (1 - alpha); b = cb * alpha + b * (1 - alpha); a = alpha + a * (1 - alpha);
       });
       const o = (ly * img.w + lx) * 4, d = img.data.data;
@@ -2949,7 +3232,13 @@ export class Landscape {
         + `|${view.controlMode === 'directed' ? 1 : 0}|${(view.thirst ?? 0) >= .82 ? 1 : (view.hunger ?? 0) >= .82 ? 2 : 0}|${health}`;
       const cache = this.personSprites ??= new BoundedCache<HTMLCanvasElement>(PERSON_SPRITE_LIMIT, canvas => { canvas.width = canvas.height = 0; });
       let sprite = cache.get(key);
-      if (sprite && sprite.width > 0) { this.spriteHits++; g.drawImage(sprite, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy); this.drawCalls++; }
+      // V23: el sprite de su etapa, a la talla de su masa (cuantizada: pocas tallas, píxeles enteros).
+      const escala = escalaDeCuerpo(view.cuerpoVisto, view.lifeStage);
+      const blit = (art: HTMLCanvasElement): void => {
+        if (escala === 1) g.drawImage(art, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy);
+        else g.drawImage(art, Math.round(ax - PERSON_SPRITE.ox * escala), Math.round(ay - PERSON_SPRITE.oy * escala), Math.round(PERSON_SPRITE.w * escala), Math.round(PERSON_SPRITE.h * escala));
+      };
+      if (sprite && sprite.width > 0) { this.spriteHits++; blit(sprite); this.drawCalls++; }
       else if (cache.size >= cache.capacity) {
         // Caché llena: un recorrido cíclico más largo que ella la expulsaría entera en cada fotograma (0 aciertos).
         // Lo que no cabe se pinta directo y lo ya guardado se conserva; `settlePersonSprites` la vacía si solo quedan obsoletos.
@@ -2959,9 +3248,11 @@ export class Landscape {
         this.paintPerson(sprite.getContext('2d')!, p, PERSON_SPRITE.ox, PERSON_SPRITE.oy, pose);
         cache.set(key, sprite);
         this.perf.personSpriteBuilds++; this.spriteFresh++;
-        g.drawImage(sprite, ax - PERSON_SPRITE.ox, ay - PERSON_SPRITE.oy); this.drawCalls++;
+        blit(sprite); this.drawCalls++;
       }
     }
+    const gestacion = fraccionGestacion(view.cuerpoVisto);
+    if (gestacion !== null) paintEmbarazo(g, ax, baseY, gestacion, escalaDeCuerpo(view.cuerpoVisto, view.lifeStage));
     if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
       px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
     }
@@ -3376,6 +3667,9 @@ export class Landscape {
     for (let i = 0; i < count; i++) {
       const x = (rnd(i, 0, 991) * this.cssW + time * 38) % this.cssW;
       const y = (rnd(i, 1, 993) * this.cssH + time * 210) % this.cssH;
+      // V23: con aire servido, cada gota cae solo si en su página llueve (en proporción a su lluvia sobre la media).
+      const local = this.lluviaEnPantalla(x, y);
+      if (local !== null && rnd(i, 2, 997) * intensity >= local) continue;
       g.moveTo(x, y); g.lineTo(x + 2, y + 8); this.effects.rain++;
     }
     g.stroke(); g.restore();
@@ -3508,6 +3802,7 @@ export class Landscape {
 
     if (tier !== 'map') this.drawSocialLinks(people); // en el mapa los arcos medirían unos pocos píxeles
     this.drawVinculos(people);
+    if (tier !== 'map') this.drawCuerposV23(people, animals, tier === 'near');
 
     if (this.pendingTarget) {
       const mark = this.worldToScreen(this.pendingTarget.x + .5, this.pendingTarget.y + .5);
@@ -3563,7 +3858,7 @@ export class Landscape {
         const s = this.worldToScreen(animal.x + .5, animal.y + .75);
         if (s.x >= -60 && s.x <= this.cssW + 60 && s.y >= -60 && s.y <= this.cssH + 60) {
           ctx.beginPath(); ctx.ellipse(s.x, s.y, this.cam.zoom * .42, this.cam.zoom * .2, 0, 0, Math.PI * 2); ctx.strokeStyle = '#f2dfb0'; ctx.lineWidth = 1.5; ctx.stroke();
-          this.drawChip(s.x, s.y + 15, `${speciesNames[animal.view.species]} · ${animalActions[animal.view.action]}`, P.ink, P.rule, 'meta');
+          this.drawChip(s.x, s.y + 15, `${nombreDeFauna(animal.view)} · ${animalActions[animal.view.action]}`, P.ink, P.rule, 'meta');
         }
       }
     }
@@ -3600,6 +3895,71 @@ export class Landscape {
     ctx.restore();
     const fuera = v.aristas.length - presentes.length;
     this.drawChip(a.x, a.y + 34, `${presentes.length} vínculos aquí${fuera ? ` · ${fuera} fuera` : ''}`, P.ink, P.rule, 'meta');
+  }
+
+  /**
+   * V23: persecución (línea de la cazadora a su presa, con remate en la presa), huida (trazos de carrera del lado de la
+   * amenaza) y, de cerca, la crianza (hilo cálido punteado de cada cría a sus cuidadores a la vista). O(n + k).
+   */
+  private drawCuerposV23(people: RenderPerson[], animals: RenderAnimal[], near: boolean): void {
+    const fauna = animals.some(a => a.view.v23 && (a.view.v23.persigue !== undefined || a.view.v23.huyeDe !== undefined));
+    const crias = near && people.some(p => p.view.crianza?.cuidadores.length);
+    if (!fauna && !crias) return;
+    const ctx = this.labelCtx;
+    ctx.save(); ctx.lineCap = 'square';
+    if (fauna) {
+      const porUid = new Map<number, RenderPerson | RenderAnimal>();
+      for (const a of animals) { const uid = uidVisible(a.view); if (uid !== undefined) porUid.set(uid, a); }
+      for (const p of people) { const uid = uidVisible(p.view); if (uid !== undefined) porUid.set(uid, p); }
+      for (const a of animals) {
+        const f = a.view.v23;
+        if (!f) continue;
+        const o = this.worldToScreen(a.x + .5, a.y + .6);
+        const presa = f.persigue !== undefined ? porUid.get(f.persigue) : undefined;
+        if (presa) {
+          const b = this.worldToScreen(presa.x + .5, presa.y + .6);
+          ctx.setLineDash([5, 3]);
+          ctx.beginPath(); ctx.moveTo(Math.round(o.x), Math.round(o.y)); ctx.lineTo(Math.round(b.x), Math.round(b.y));
+          ctx.globalAlpha = .55; ctx.strokeStyle = '#1f1a15'; ctx.lineWidth = 3; ctx.stroke();
+          ctx.globalAlpha = .9; ctx.strokeStyle = '#c8553d'; ctx.lineWidth = 1.5; ctx.stroke();
+          ctx.setLineDash([]); ctx.globalAlpha = 1;
+          ctx.fillStyle = '#1f1a15'; ctx.fillRect(Math.round(b.x) - 3, Math.round(b.y) - 3, 6, 6);
+          ctx.fillStyle = '#c8553d'; ctx.fillRect(Math.round(b.x) - 2, Math.round(b.y) - 2, 4, 4);
+        }
+        const amenaza = f.huyeDe !== undefined ? porUid.get(f.huyeDe) : undefined;
+        if (amenaza) {
+          const b = this.worldToScreen(amenaza.x + .5, amenaza.y + .6), dx = b.x - o.x, dy = b.y - o.y, d = Math.hypot(dx, dy);
+          if (d > 1) {
+            const ux = dx / d, uy = dy / d, paso = Math.max(4, this.cam.zoom * .25);
+            ctx.globalAlpha = .4 + .5 * clamp01(f.miedo); ctx.strokeStyle = '#f2dfb0'; ctx.lineWidth = 1.5;
+            for (let i = -1; i <= 1; i++) {
+              const sx = o.x + ux * paso - uy * i * 3, sy = o.y + uy * paso + ux * i * 3;
+              ctx.beginPath(); ctx.moveTo(Math.round(sx), Math.round(sy)); ctx.lineTo(Math.round(sx + ux * paso), Math.round(sy + uy * paso)); ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+    }
+    if (crias) {
+      const porId = new Map(people.map(p => [p.view.id, p]));
+      ctx.setLineDash([2, 3]); ctx.lineWidth = 1.5;
+      for (const p of people) {
+        const c = p.view.crianza;
+        if (!c?.cuidadores.length) continue;
+        const a = this.worldToScreen(p.x + .5, p.y + .6);
+        // Cuanto más depende la cría (menos madura), más se ve el hilo.
+        ctx.globalAlpha = .35 + .5 * (1 - clamp01(c.madurez)); ctx.strokeStyle = '#e9b07a';
+        for (const id of c.cuidadores) {
+          const q = porId.get(id);
+          if (!q) continue;
+          const b = this.worldToScreen(q.x + .5, q.y + .6);
+          ctx.beginPath(); ctx.moveTo(Math.round(a.x), Math.round(a.y)); ctx.lineTo(Math.round(b.x), Math.round(b.y)); ctx.stroke();
+        }
+      }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
 
   /** V18: pulso local en el destino ordenado, visible desde el clic aunque el servidor aplique la orden un paso (o varios segundos) después. */

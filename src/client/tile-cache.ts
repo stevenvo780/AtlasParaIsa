@@ -1,4 +1,6 @@
 import type { Tile } from '../shared/types.js';
+import type { MatTesela, SustanciaId, SustanciaVista } from '../shared/materia.js';
+import { aPaleta, brilloTermico, escarcha, rgbDeEntero, type Rgb } from './terrain-field.js';
 
 /**
  * Caché espacial LRU de teselas del cliente (V18, capa 2). Sin DOM.
@@ -128,4 +130,73 @@ export class ClientTileCache {
       this.stored -= oldest[1].count;
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* V23: composición de la tesela y paleta de sustancias               */
+/* ------------------------------------------------------------------ */
+
+/** Pasos de fracción que el ojo distingue en una tesela de 16×16 (256 píxeles: 1/16 ≈ 16 píxeles de tramado). */
+export const PASOS_FRACCION = 16;
+/** Pasos del brillo térmico entre el punto de Draper y el brillo pleno que cambian el horneado. */
+export const PASOS_BRILLO = 8;
+
+/** `Tile.mat` igual por valor (cada vista trae arreglos nuevos aunque nada haya cambiado). Ausente solo iguala a ausente. */
+export function mismaMat(a: MatTesela | undefined, b: MatTesela | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]![0] !== b[i]![0] || a[i]![1] !== b[i]![1]) return false;
+  return true;
+}
+
+/** Huella de lo que de `mat` y `T` se ve en el suelo horneado: sustancias, fracción en pasos visibles, brillo y escarcha.
+ * 0 si la tesela no trae materia: el trozo se hornea como hoy. `conoce` dice si la paleta ya tiene el color de un id. */
+export function firmaMat(mat: MatTesela | undefined, T: number | undefined, humedad: number, conoce?: (id: SustanciaId) => boolean): number {
+  if (!mat?.length && T === undefined) return 0;
+  let h = 2166136261;
+  for (const [id, fraccion] of mat ?? []) {
+    h = Math.imul(h ^ (id | 0), 16777619) >>> 0;
+    h = Math.imul(h ^ (Math.round(Math.max(0, Math.min(1, fraccion)) * PASOS_FRACCION) | (conoce && !conoce(id) ? 256 : 0)), 16777619) >>> 0;
+  }
+  const brillo = Math.round(brilloTermico(T) * PASOS_BRILLO), helada = Math.round(escarcha(T, humedad) * 4);
+  h = Math.imul(h ^ (brillo | (helada << 8) | 0x10000), 16777619) >>> 0;
+  return h || 1;
+}
+
+interface FichaColor { rgb: Rgb; densidad: number }
+
+/**
+ * Color y densidad de cada sustancia vista (de `WorldView.sustancias`, que trae solo las referenciadas por esa vista).
+ * Los ids son estables en un mundo: lo aprendido se conserva entre vistas y `version` sube solo al aprender algo nuevo,
+ * así que lo horneado con un id desconocido se rehace una sola vez cuando llega su ficha.
+ */
+export class PaletaSustancias {
+  private readonly fichas = new Map<SustanciaId, FichaColor>();
+  private ultima: readonly SustanciaVista[] | undefined;
+  version = 0;
+
+  get size(): number { return this.fichas.size; }
+
+  /** Aprende las sustancias de una vista. Devuelve `true` si alguna era nueva o cambió de color. */
+  ingest(sustancias: readonly SustanciaVista[] | undefined): boolean {
+    if (!sustancias?.length || sustancias === this.ultima) return false;
+    this.ultima = sustancias;
+    let cambio = false;
+    for (const s of sustancias) {
+      const rgb = aPaleta(rgbDeEntero(s.prop?.color ?? 0)), densidad = s.prop?.densidad ?? 0;
+      const previa = this.fichas.get(s.id);
+      if (previa && previa.rgb[0] === rgb[0] && previa.rgb[1] === rgb[1] && previa.rgb[2] === rgb[2]) continue;
+      this.fichas.set(s.id, { rgb, densidad: Number.isFinite(densidad) && densidad > 0 ? densidad : 0 });
+      cambio = true;
+    }
+    if (cambio) this.version++;
+    return cambio;
+  }
+
+  conoce(id: SustanciaId): boolean { return this.fichas.has(id); }
+  color(id: SustanciaId): Rgb | undefined { return this.fichas.get(id)?.rgb; }
+  /** kg/L en fase condensada; `undefined` si no se conoce. */
+  densidad(id: SustanciaId): number | undefined { const d = this.fichas.get(id)?.densidad; return d ? d : undefined; }
+  /** Cambio de mundo: los ids de otro mundo no valen. */
+  clear(): void { this.fichas.clear(); this.ultima = undefined; this.version++; }
 }

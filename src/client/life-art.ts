@@ -1,5 +1,7 @@
 import type { AnimalView } from '../shared/life.js';
 import type { Tile } from '../shared/types.js';
+import type { CuerpoVisible } from '../shared/vistas-v23.js';
+import { DEMOGRAPHY_TICKS_PER_DAY } from '../shared/demography.js';
 
 export interface TreeForm {
   kind: 'tree' | 'pine' | 'palm'; height: number; width: number; foliage: number; variant: number;
@@ -117,6 +119,8 @@ export interface AnimalVisualTraits {
   fierce?: 0 | 1;
   /** 0 = juvenile, 1 = adult, 2 = evolved veteran (generation >= 3) */
   maturity?: 0 | 1 | 2;
+  /** V23: pelaje del linaje fundador (`pelajeDeLinaje`); manda sobre el color del cuerpo salvo la lana. */
+  pelaje?: string;
 }
 
 /** A reusable 32px sprite with 2-pass #231710 outline and evolved genetic/maturity traits. */
@@ -181,7 +185,7 @@ export function paintAnimal(
   };
 
   const baseCoat = animalColors[species];
-  const coat = wool ? '#d8d4c6' : cam === 0
+  const coat = wool ? '#d8d4c6' : traits.pelaje ? traits.pelaje : cam === 0
     ? (species === 'deer' ? '#9e6234' : species === 'boar' ? '#4d3f34' : species === 'wolf' ? '#626b73' : species === 'fox' ? '#c26026' : species === 'hare' ? '#ab9076' : '#3a8c94')
     : cam === 2
       ? (species === 'deer' ? '#c2925a' : species === 'boar' ? '#7d6752' : species === 'wolf' ? '#969e9c' : species === 'fox' ? '#d99652' : species === 'hare' ? '#d4c0a6' : '#7ec7bf')
@@ -320,3 +324,126 @@ export function paintAnimal(
 
 // Preserve the public V18 entry point while sharing material rendering with modular halls.
 export { paintStructure, type StructureSurface } from './structure-art.js';
+
+/* ------------------------------------------------------------------ */
+/* V23: cuerpos de átomos, crianza y fauna sin especie                 */
+/* ------------------------------------------------------------------ */
+
+/** Masa (sobre la adulta) que representa el sprite juvenil tal como se pinta: un juvenil de esa masa no se reescala. */
+export const MASA_SPRITE_JUVENIL = 0.35;
+/** Escala mínima y máxima del sprite por masa: fuera de ellas el pixel-art de 32 px deja de leerse. */
+export const ESCALA_CUERPO_MIN = 0.625; // 10/16: múltiplo del paso
+export const ESCALA_CUERPO_MAX = 1.625; // 26/16
+/** Pasos de la escala (1/16: 2 px enteros en un sprite de 32), para que la caché vea pocas tallas. */
+export const PASOS_ESCALA = 16;
+/** Masa adulta (kg) hasta la que un animal se dibuja con cuerpo pequeño (liebre, zorro). */
+export const MASA_CUERPO_PEQUENO_KG = 8;
+/** Carnivoría (gen, [0, 1]) desde la que se dibuja cuerpo de cazador y desde la que se dibuja hocico de omnívoro. */
+export const CARNIVORIA_CAZADOR = 0.54;
+export const CARNIVORIA_OMNIVORO = 0.3;
+/** Masa (kg) que representa cada cuerpo dibujado tal como se pinta, para reescalarlo según la masa real. */
+export const MASA_NOMINAL_CUERPO_KG: Readonly<Record<AnimalView['species'], number>> = { hare: 3, fox: 6, wolf: 35, deer: 60, boar: 80, fish: 2 };
+/** Miedo ([0, 1]) a partir del cual se dibuja la señal de alarma sobre el animal. */
+export const MIEDO_VISIBLE = 0.5;
+/** Miedo desde el que la señal pasa del ámbar al rojo (pánico). */
+export const MIEDO_PANICO = 0.8;
+/** Ticks que dura la marca de «ordeñó» o «esquiló» (un día). */
+export const MARCA_EXTRACCION_TICKS = DEMOGRAPHY_TICKS_PER_DAY;
+
+const cuantizar = (v: number) => Math.round(v * PASOS_ESCALA) / PASOS_ESCALA;
+const acotar = (v: number) => Math.max(ESCALA_CUERPO_MIN, Math.min(ESCALA_CUERPO_MAX, v));
+
+/** Escala del sprite de una persona por su masa: la del sprite de su etapa es 1; un cuerpo flaco o grueso se ve así. */
+export function escalaDeCuerpo(cuerpo: CuerpoVisible | undefined, etapa?: 'juvenile' | 'adult' | 'senescent'): number {
+  if (!cuerpo || !(cuerpo.masaAdulta > 0) || !(cuerpo.masa > 0)) return 1;
+  const referencia = etapa === 'juvenile' ? MASA_SPRITE_JUVENIL : 1;
+  return cuantizar(acotar(Math.cbrt(cuerpo.masa / cuerpo.masaAdulta / referencia)));
+}
+
+/** Avance de la gestación en [0, 1] (masa del embrión sobre la que tendrá al nacer); `null` sin embarazo. */
+export function fraccionGestacion(cuerpo: CuerpoVisible | undefined): number | null {
+  const e = cuerpo?.embrion;
+  if (!e || !(e.m0 > 0)) return null;
+  return Math.max(0, Math.min(1, e.masa / e.m0));
+}
+
+/** Vientre de una gestación sobre el sprite de una persona con el pie en (`ax`, `ay`) y escala `escala`. */
+export function paintEmbarazo(g: CanvasRenderingContext2D, ax: number, ay: number, fraccion: number, escala = 1): void {
+  if (!(fraccion > 0)) return;
+  const w = 1 + Math.round(2 * Math.min(1, fraccion)), h = 2 + Math.round(2 * Math.min(1, fraccion));
+  const x = Math.round(ax + 3 * escala), y = Math.round(ay - 11 * escala);
+  g.fillStyle = '#231710'; g.fillRect(x, y - 1, w + 1, h + 2);
+  g.fillStyle = '#efe6d2'; g.fillRect(x, y, w, h);
+  g.fillStyle = '#c9b48f'; g.fillRect(x, y + h - 1, w, 1);
+}
+
+/** Cuerpo con que se dibuja un animal con `v23`: sale de su masa adulta, su carnivoría y de si está en el agua, nunca de
+ * una especie. Sin `v23` se dibuja como hoy (`species`). */
+export function planDeFauna(v: AnimalView, enAgua = false): AnimalView['species'] {
+  if (!v.v23) return v.species;
+  if (enAgua) return 'fish';
+  const masa = v.cuerpoVisto ? (v.cuerpoVisto.masaAdulta > 0 ? v.cuerpoVisto.masaAdulta : v.cuerpoVisto.masa) : MASA_NOMINAL_CUERPO_KG[v.species];
+  const carnivoria = v.genes?.carnivory ?? 0, pequeno = masa <= MASA_CUERPO_PEQUENO_KG;
+  if (carnivoria >= CARNIVORIA_CAZADOR) return pequeno ? 'fox' : 'wolf';
+  if (pequeno) return 'hare';
+  return carnivoria >= CARNIVORIA_OMNIVORO ? 'boar' : 'deer';
+}
+
+/** Escala del sprite de un animal por su masa sobre la del cuerpo con que se dibuja. 1 sin cuerpo de átomos. */
+export function escalaDeFauna(v: AnimalView, plan: AnimalView['species']): number {
+  const masa = v.cuerpoVisto?.masa;
+  if (!(masa !== undefined && masa > 0)) return 1;
+  return cuantizar(acotar(Math.cbrt(masa / MASA_NOMINAL_CUERPO_KG[plan])));
+}
+
+const PELAJES = ['#b78450', '#8f6a4a', '#c8b29a', '#705c49', '#a09a8e', '#c98d4e', '#5f5248', '#d2bf96'] as const;
+
+/** Pelaje de un linaje fundador: un tono de una paleta terrosa fija, el mismo para toda su descendencia. */
+export function pelajeDeLinaje(linaje: number): string {
+  let h = Math.imul((linaje | 0) ^ 0x9e3779b9, 2654435761) >>> 0;
+  h ^= h >>> 15;
+  return PELAJES[h % PELAJES.length]!;
+}
+
+/** Madurez visible del animal (para el sprite juvenil): por masa sobre masa adulta si hay cuerpo; si no, como hoy. */
+export function madurezDeFauna(v: AnimalView): 0 | 1 | 2 | undefined {
+  const c = v.cuerpoVisto;
+  if (!c || !(c.masaAdulta > 0)) return undefined;
+  return c.masa / c.masaAdulta < .5 ? 0 : (v.generation ?? 0) >= 3 ? 2 : 1;
+}
+
+/** Nombre sin especie para la etiqueta del mapa: «Animal de 34 kg». */
+export function nombreDeFauna(v: AnimalView): string {
+  const masa = v.cuerpoVisto?.masa;
+  if (!v.v23 || masa === undefined || !Number.isFinite(masa)) return speciesNames[v.species];
+  const kg = masa >= 10 ? Math.round(masa).toLocaleString('es-CO') : masa.toLocaleString('es-CO', { maximumFractionDigits: 1 });
+  return `Animal de ${kg} kg`;
+}
+
+/** Extracción no letal reciente («ordeñó» o «esquiló») que el mapa marca sobre el animal; `null` si no hay o ya pasó un día. */
+export function extraccionVisible(v: AnimalView, tick: number): 'reserva' | 'fibra' | null {
+  const e = v.v23?.extraido;
+  if (!e) return null;
+  const edad = tick - e.tick;
+  return edad >= 0 && edad < MARCA_EXTRACCION_TICKS ? e.que : null;
+}
+
+/** Marca de extracción junto al lomo (arte en píxeles): gota de leche o mechón de fibra. */
+export function paintMarcaExtraccion(g: CanvasRenderingContext2D, x: number, y: number, que: 'reserva' | 'fibra'): void {
+  const p = (dx: number, dy: number, w: number, h: number, c: string) => { g.fillStyle = c; g.fillRect(Math.round(x + dx), Math.round(y + dy), w, h); };
+  if (que === 'reserva') {
+    p(0, -1, 3, 5, '#231710'); p(1, -2, 1, 1, '#231710');
+    p(1, -1, 1, 1, '#f7f3ea'); p(1, 0, 1, 3, '#f7f3ea'); p(1, 2, 1, 1, '#d9d2c4');
+  } else {
+    p(-1, -1, 5, 4, '#231710');
+    p(0, 0, 3, 2, '#ece5d5'); p(1, -1, 1, 1, '#ece5d5'); p(2, 1, 1, 1, '#cfc6b2');
+  }
+}
+
+/** Señal de alarma sobre un animal asustado: «!» en píxeles, del ámbar al rojo según el miedo. */
+export function paintMiedo(g: CanvasRenderingContext2D, x: number, y: number, miedo: number): void {
+  if (!(miedo >= MIEDO_VISIBLE)) return;
+  const color = miedo >= MIEDO_PANICO ? '#d8432c' : '#e8a93a';
+  g.fillStyle = '#231710'; g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 7);
+  g.fillStyle = color; g.fillRect(Math.round(x), Math.round(y), 1, 3); g.fillRect(Math.round(x), Math.round(y) + 4, 1, 1);
+}

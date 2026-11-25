@@ -9,7 +9,8 @@
  */
 import { geologyAt } from '../shared/chemistry.js';
 import type { Tile } from '../shared/types.js';
-import { hash3 } from './terrain-field.js';
+import { hash3, type Rgb } from './terrain-field.js';
+import type { SustanciaId } from '../shared/materia.js';
 
 const ART = 16;
 
@@ -148,6 +149,8 @@ const VEIN = {
 
 /** Qué vetas aflora `geologyAt` en la casilla (vacío en agua, refugio o sin semilla). Pura: sirve a la ficha y a las pruebas. */
 export function veinsAt(tile: Tile, seed: number | undefined): { kind: VeinKind; amount: number }[] {
+  // V23: con composición servida, las vetas salen de ella (`vetasDeComposicion`), no de la geología latente.
+  if (tile.mat?.length) return [];
   if (seed === undefined || !Number.isFinite(seed) || tile.terrain === 'water' || tile.terrain === 'shelter') return [];
   const geo = geologyAt(seed, tile.x, tile.y, tile.biome, tile.feature), out: { kind: VeinKind; amount: number }[] = [];
   if (geo.Fe >= IRON_VEIN) out.push({ kind: 'Fe', amount: geo.Fe });
@@ -181,4 +184,44 @@ export function paintGeologyVeins(g: CanvasRenderingContext2D, tile: Tile, seed:
     painted.push(kind);
   }
   return painted;
+}
+
+/** Fracción de masa por debajo de la cual una sustancia secundaria solo aparece en el tramado del suelo y no aflora en veta. */
+export const VETA_FRACCION_MINIMA = 0.15;
+
+/** Vetas de la composición servida (`Tile.mat`): cada sustancia secundaria con fracción suficiente aflora en su color.
+ * Pura: índices en `tile.mat` y su número de trazos (más cuanto más fracción). Vacío en agua, refugio o sin materia. */
+export function vetasDeComposicion(tile: Tile): { indice: number; id: SustanciaId; trazos: number }[] {
+  if (!tile.mat?.length || tile.terrain === 'water' || tile.terrain === 'shelter') return [];
+  const out: { indice: number; id: SustanciaId; trazos: number }[] = [];
+  for (let i = 1; i < tile.mat.length; i++) {
+    const [id, fraccion] = tile.mat[i]!;
+    if (!(fraccion >= VETA_FRACCION_MINIMA)) continue;
+    out.push({ indice: i, id, trazos: 1 + Math.round((fraccion - VETA_FRACCION_MINIMA) * 12) });
+  }
+  return out;
+}
+
+const hexDe = (c: Rgb) => `#${((1 << 24) | (c[0] << 16) | (c[1] << 8) | c[2]).toString(16).slice(1)}`;
+
+/** Pinta las vetas de la composición: trazos diagonales del color de la sustancia con su sombra y un brillo. Se hornea con el
+ * trozo de suelo (cero coste por fotograma). Devuelve los ids pintados; una sustancia sin color conocido no se pinta. */
+export function paintVetasComposicion(g: CanvasRenderingContext2D, tile: Tile, colorDe: (id: SustanciaId) => Rgb | undefined): SustanciaId[] {
+  const ox = tile.x * ART, oy = tile.y * ART, pintadas: SustanciaId[] = [];
+  for (const { indice, id, trazos } of vetasDeComposicion(tile)) {
+    const color = colorDe(id);
+    if (!color) continue;
+    const sombra = hexDe([color[0] * .7 | 0, color[1] * .7 | 0, color[2] * .7 | 0]);
+    const luz = hexDe([Math.min(255, color[0] + 40), Math.min(255, color[1] + 40), Math.min(255, color[2] + 40)]);
+    const base = hexDe(color), salt = 170 + indice * 40;
+    for (let i = 0; i < trazos; i++) {
+      const bx = 1 + hash3(tile.x, tile.y, salt + i) % 13, by = 1 + hash3(tile.x, tile.y, salt + 20 + i) % 13;
+      const largo = 2 + hash3(tile.x, tile.y, salt + 30 + i) % 3, baja = (hash3(tile.x, tile.y, salt + 35 + i) & 1) === 1;
+      for (let k = 0; k < largo; k++) px(g, ox + bx + k, oy + by + (baja ? k >> 1 : -(k >> 1)), 1, 1, base);
+      px(g, ox + bx, oy + by + 1, largo, 1, hexToRgba(sombra, '.55'));
+      if (i % 2 === 0) px(g, ox + bx, oy + by - 1, 1, 1, luz);
+    }
+    pintadas.push(id);
+  }
+  return pintadas;
 }

@@ -814,7 +814,7 @@ async function curva(args: string[]): Promise<void> {
   if (!salida) throw new Error('Falta --salida');
   mkdirSync(salida, { recursive: true });
   // Las más caras primero: así la última en terminar no es una grande lanzada al final.
-  const plan = planCurva(semillas, ns, z, coherencia).sort((a, b) => b.n * (a.zona.ancho) - a.n * (b.zona.ancho) || b.n - a.n);
+  const plan = planCurva(semillas, ns, z, coherencia).sort((a, b) => b.n - a.n);
   writeFileSync(join(salida, 'curva-plan.json'), JSON.stringify({ plan, resto, carga: loadavg(), inicio: new Date().toISOString() }, null, 2));
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(paralelo, plan.length) }, async () => {

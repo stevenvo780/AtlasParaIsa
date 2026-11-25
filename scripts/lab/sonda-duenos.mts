@@ -25,7 +25,8 @@ const mundo = createWorld(semilla, params);
 const motor = crearMotor(mundo, { hilos, gpu: [], decisionGpu: 'siempre', verificar: true, semilla });
 const revisar = crearComprobador({ cadencia: false });
 const inicio = performance.now();
-let msMotor = 0, muestras = 0, guardadosInvalidos = 0;
+const propietarios = new Map<number, number>();
+let msMotor = 0, muestras = 0, guardadosInvalidos = 0, chunksCedidos = 0;
 try {
   for (let i = 1; i <= pasos; i++) {
     const antes = performance.now();
@@ -35,7 +36,18 @@ try {
     assert.ok(d?.quimica && d.materia);
     const intentos = d.balanceIntentos();
     assert.equal(intentos.enviados, intentos.recibidos + intentos.pendientes, `saldo de intentos en tick ${i}`);
-    if (i !== 1 && i % 120 !== 0 && i !== pasos) continue;
+    let cedidos = 0;
+    if (hasta === 'rebalanceo') {
+      const t = d.terreno;
+      for (let p = 0; p < t.paginas; p++) {
+        if (t.celda(t.paginaX[p] * 16, t.paginaY[p] * 16) < 0) { propietarios.delete(p); continue; }
+        const anterior = propietarios.get(p), nuevo = t.duenoChunk[p];
+        if (anterior !== undefined && anterior !== nuevo) cedidos++;
+        propietarios.set(p, nuevo);
+      }
+      chunksCedidos += cedidos;
+    }
+    if (!cedidos && i !== 1 && i % 120 !== 0 && i !== pasos) continue;
     const { world, materia } = motor.instantanea();
     assert.ok(materia);
     try { assertWorld(world); }
@@ -74,7 +86,7 @@ try {
         poblacion: world.people.filter(p => p.role === 'neighbor').length, nacimientos: world.totals.births ?? 0,
         muertes: world.demographyDynamics.deaths, fauna: world.animals.length, violaciones: 0, muestras, guardadosInvalidos,
         conservacion: true, saldos: saldos.map(s => s.map(String)), intentos,
-        migraciones, desequilibrio, hz: i * 1000 / msMotor, faseMs, esperaBarreraMs, segundos: (performance.now() - inicio) / 1000 }));
+        migraciones, chunksCedidos, desequilibrio, hz: i * 1000 / msMotor, faseMs, esperaBarreraMs, segundos: (performance.now() - inicio) / 1000 }));
     }
   }
   if (guardadosInvalidos > 0) process.exitCode = 2;

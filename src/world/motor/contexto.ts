@@ -723,7 +723,7 @@ export class Dueno implements CtxF0 {
     const m = this.mundo, organismos = this.organismos, tabla = organismos.tabla, terreno = this.terrenoPercibido;
     for (const [chunk, destino] of this.cesiones.splice(0)) {
       if (!this.#activos.has(chunk)) continue;
-      if (destino < 0) for (const ley of this.leyes) ley.alRetirar?.(this, chunk);
+      for (const ley of this.leyes) ley.alRetirar?.(this, chunk);
       const mig = this.#desprender(chunk, false);
       if (!mig) continue;
       // Un chunk se archiva sin gente: quien estuviera en él sigue con este dueño (su halo lo volverá a pedir).
@@ -745,7 +745,10 @@ export class Dueno implements CtxF0 {
     }
     const duenoDe = (o: { x: number; y: number }): Hilo => {
       const celda = terreno.celda(o.x, o.y);
-      return celda < 0 ? this.hilo : terreno.duenoChunk[celda >> 8]!;
+      if (celda < 0) return this.hilo;
+      // El organismo llega en F1, una vez que F0 ya aplicó las cesiones del rebalanceo.
+      const chunk = terreno.chunkDe(celda), siguiente = terreno.duenoSiguiente[chunk]!;
+      return siguiente >= 0 ? siguiente : terreno.duenoChunk[chunk]!;
     };
     let seVan: Person[] | undefined;
     for (const p of m.people) {

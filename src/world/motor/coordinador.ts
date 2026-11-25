@@ -168,7 +168,7 @@ class MotorDuenos implements Motor {
   // Lo que llega por la cola F0 del coordinador.
   #resultados: GestureResult[] = [];
   #partesTick: ParteTick[] = [];
-  #partesMundo: World[] = [];
+  readonly #partesMundo = new Map<Hilo, World>();
   #altas: [number, string][] = [];
   readonly #detalles = new Map<number, ((p: Person | null) => void)[]>();
   readonly #t: TelemetriaMotor;
@@ -187,7 +187,7 @@ class MotorDuenos implements Motor {
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
-    this.#resultados = []; this.#partesTick = []; this.#partesMundo = []; this.#altas = [];
+    this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#altas = [];
 
     // Memoria compartida de la época. La reserva de filas crece con el mundo que se carga: agotarla es fatal y la
     // recarga siguiente la abre mayor.
@@ -276,7 +276,10 @@ class MotorDuenos implements Motor {
       control[CTL.tick] = m.tick;
       // F0: serie y corto. Todos los dueños están detenidos en la barrera.
       buzones.fijarFase(0);
-      for (const [chunk, destino] of this.#cesiones.splice(0)) if (destino >= 0) this.#terreno.asignar(chunk, destino);
+      for (const [chunk, destino] of this.#cesiones.splice(0)) {
+        this.#terreno.asignar(chunk, destino);
+        this.#terreno.duenoSiguiente[chunk] = -1;
+      }
       this.#regiones();
       this.#rebalancear();
       const resultados = this.#gestos(gestos);
@@ -321,7 +324,7 @@ class MotorDuenos implements Motor {
     switch (clase) {
       case AVISO.resultado: this.#resultados.push(deserialize(i.bytes!) as GestureResult); break;
       case AVISO.tick: this.#partesTick.push(deserialize(i.bytes!) as ParteTick); break;
-      case AVISO.parte: this.#partesMundo.push(deserialize(i.bytes!) as World); break;
+      case AVISO.parte: this.#partesMundo.set(i.dato![1]!, deserialize(i.bytes!) as World); break;
       case AVISO.detalle: {
         const persona = i.bytes ? deserialize(i.bytes) as Person : null;
         for (const resolver of this.#detalles.get(i.dato![1]!) ?? []) resolver(persona);
@@ -452,6 +455,7 @@ class MotorDuenos implements Motor {
       const chunk = medida.chunks[i]!, de = medida.dueno[i]!, a = nuevo[i]!;
       if (a === de || a < 0 || a >= hilos) continue;
       this.#d.ordenar(de, [ORDEN.ceder, chunk, a]);
+      terreno.duenoSiguiente[chunk] = a;
       this.#cesiones.push([chunk, a]);
     }
     this.#historial.length = 0;
@@ -466,8 +470,12 @@ class MotorDuenos implements Motor {
       this.#buzones.fijarFase(0);
       this.#piscina.ejecutar(TRAMO.reunir);
       this.#recoger();
-      const partes = this.#partesMundo.splice(0);
-      if (partes.length !== this.#hilos - 1) throw new Error(`Instantánea incompleta: ${partes.length} de ${this.#hilos - 1} dueños.`);
+      const partes = Array.from({ length: this.#hilos - 1 }, (_, i) => {
+        const parte = this.#partesMundo.get(i + 1);
+        if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
+        return parte;
+      });
+      this.#partesMundo.clear();
       const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
       const pendientes = this.#d.pendientes();
       for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {

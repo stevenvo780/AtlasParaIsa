@@ -15,8 +15,8 @@ import { reducirTesela } from './reducir.js';
 
 /** Memoria de bloques decodificados por lector (cinta-sonnet §6). */
 export const CACHE_BYTES = 256 * 1024 ** 2;
-// Un bloque decodificado ocupa en el montón unas 20 veces lo que ocupa comprimido (JSON con gzip nivel 1 ≈ 6×,
-// objetos de V8 ≈ 3× el JSON). El tope se cuenta con esa estimación.
+// Montón que retiene un bloque decodificado por byte comprimido: medido 9× en L0 y 12× en L1 con el volumen sintético
+// de I5 (que comprime más que uno real). El tope se cuenta con 20, que queda por encima.
 const FACTOR_MEMORIA = 20;
 /** Bytes por respuesta: una parte que lo pasaría no entra y el resto sigue con `hayMas`. Lo que lleva hasta el primer
  * fotograma ≥ t entra siempre, o el cliente no avanzaría. */

@@ -147,7 +147,8 @@ type StoreCompleto = Store & {
 
 function cargarGuardado(store: Store, deployment: boolean | undefined): (LoadedSnapshot & Omit<Instantanea, 'world'> & { epoca: number | null }) | null {
   const completo = store as StoreCompleto;
-  const base = completo.verificarGuardado ? completo.verificarGuardado() : store.load();
+  // Con todo apagado se lee con `load()`, como antes de la V23; solo un mundo ya guardado «completo» pasa por la verificación.
+  const base = store.usaGuardadoCompleto() ? store.verificarGuardado() : store.load();
   if (!base) return null;
   const params = paramsOf(base.world);
   if (params.v23.guardadoCompleto !== paramsDelArranque(params, deployment).v23.guardadoCompleto) {

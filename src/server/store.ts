@@ -761,6 +761,9 @@ export class Store {
     } finally { void quimica?.cerrar(); }
   }
 
+  /** Si este mundo se guarda con materia y épocas (`v23.guardadoCompleto`): entonces `load()` no sirve y se usa `verificarGuardado`. */
+  usaGuardadoCompleto(): boolean { return this.readCompleteEpoch() !== null; }
+
   private readCompleteEpoch(): number | null {
     const row = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(EPOCA_COMPLETA_KEY) as { value: string } | undefined;
     if (!row) return null;

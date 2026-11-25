@@ -416,6 +416,9 @@ export interface MotorConfig {
   decisionGpu: 'siempre';                // §1.2: si hay tarjeta, la percepción va a ella aunque no compense
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)
+  /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de
+   * dueños), con el máximo que fija el proceso; el reloj nunca altera las leyes. Lo suministra srv (`motorConfig`). */
+  auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };
 }
 
 /** AJUSTES §1: con un solo dueño, sin GPU y con semilla, dos corridas dan el mismo mundo; las leyes no leen el reloj

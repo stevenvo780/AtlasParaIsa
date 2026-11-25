@@ -3,7 +3,7 @@
  * moler, extraer) y quemar la reserva para pagar un trabajo. Ninguna crea ni destruye átomos ni energía: romper solo
  * traslada materia y su calor entre lotes; quemar aplica la reacción balanceada de Q y deja el calor en el lote.
  */
-import { EPS_TENACIDAD } from '../../shared/naturaleza.js';
+import { EPS_TENACIDAD, FRACTURA } from '../../shared/naturaleza.js';
 import type { SustanciaId } from '../../shared/materia.js';
 import { DATO_GOLPEAR } from '../motor/contratos.js';
 import { balanceada } from './copiar.js';
@@ -34,9 +34,9 @@ export function romper(arena: ArenaMateria, q: ServicioQuimico, blanco: LoteRef,
 }
 
 /**
- * Desprende de `de` hacia `a` la fracción f = min(1, j/cohesión) del lote, con cohesión = Σ cuantos·D̄ de sus sustancias
- * (sale de la composición): la misma f de cada sustancia (misma química, redondeo entero insesgado con `azar`) y la
- * parte del calor de los átomos que se van, para que el fragmento salga a la misma T. Devuelve los cuantos movidos.
+ * Desprende de `de` hacia `a` la fracción f = min(1, j/cohesión) del lote, con cohesión = FRACTURA·Σ cuantos·D̄ de sus
+ * sustancias (sale de la composición): la misma f de cada sustancia (misma química, redondeo entero insesgado con `azar`)
+ * y la parte del calor de los átomos que se van, para que el fragmento salga a la misma T. Devuelve los cuantos movidos.
  */
 export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef, a: LoteRef, j: number,
   azar: () => number): number {
@@ -44,7 +44,7 @@ export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef,
   let cohesion = 0, atomos = 0;
   for (const id of ids) {
     const c = arena.cuantos(de, id), s = q.sustancia(id);
-    cohesion += c * s.prop.dMedia;
+    cohesion += FRACTURA * c * s.prop.dMedia;
     atomos += c * atomosDe(s.atomos);
   }
   if (!(cohesion > 0 && j > 0)) return 0;
@@ -65,7 +65,8 @@ export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef,
 
 /**
  * Quema por demanda (no Arrhenius): aplica en `lote` la reacción de Q de cada sustancia con `oxidante` (por id) tantas
- * veces como pide `trabajo` J, recortado a existencias, hasta pagarlo o agotar el oxidante. Solo usa reacciones
+ * veces como pide `trabajo` J, recortado a existencias, hasta pagarlo o agotar el oxidante. Cada vez lleva los
+ * coeficientes que eligió Q (2 CH₂ + 3 O₂ → 2 CO₂ + 2 H₂O, enmienda 1): una reserva quema completa, sin soltar H₂. Solo usa reacciones
  * exotérmicas y balanceadas; las que Q no tiene aún (encoladas) no queman este tick. Con oxidante 0, que Q tomaría por
  * reacción unaria, no quema: ningún lote tiene cuantos de 0. El calor liberado queda en el lote (de ahí lo toman la
  * síntesis o fluir). Devuelve los J liberados: ≥ trabajo si alcanzó (sobra menos de una vez), menos si no.

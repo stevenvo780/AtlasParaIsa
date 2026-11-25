@@ -22,7 +22,7 @@ import { percepcionDe, olvidarPercepcion } from '../decision/percepcion.js';
 import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { ArenaLotes, LOTES_POR_BLOQUE } from '../materia/arena.js';
 import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, decodificarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
-import { plegarLibros, type TotalesMateria } from '../materia/libro.js';
+import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
 import { barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type Libro, type LoteRef, type MateriaCheckpoint, type ServicioQuimico, type Sustancia } from '../materia/tipos.js';
@@ -73,20 +73,21 @@ export const AVISO = { lugar: 0, comunidad: 1, resultado: 2, tick: 3, parte: 4, 
 
 /** Celdas del control compartido del motor (Float64 sobre SAB). Las de cada dueño empiezan en `CTL.porDueno`. */
 export const CTL = { tick: 0, epoca: 1, fotoRanura: 2, fotoCompleto: 3, fotoInvalido: 4, porDueno: 8 } as const;
-export const CTL_DUENO = { msF1: 0, msEco: 1, msPercibir: 2, msActuar: 3, msAplicar: 4, msTick: 5, intentos: 6, rechazados: 7, migraciones: 8, celdas: 9 } as const;
+export const CTL_DUENO = { msF1: 0, msEco: 1, msPercibir: 2, msActuar: 3, msAplicar: 4, msTick: 5, intentos: 6, rechazados: 7, migraciones: 8, recibidos: 9, celdas: 10 } as const;
 export const celdaDueno = (hilo: Hilo, campo: number): number => CTL.porDueno + hilo * CTL_DUENO.celdas + campo;
 
-/** Un chunk que cambia de dueño (o llega a su primer dueño), con todo lo que hay en él. Las personas viajan con la fila
- * que ya tenían en la tabla; la fauna recibe fila nueva en su dueño (su identidad es el uid). Los lotes de materia no
+/** Un chunk que cambia de dueño (o llega a su primer dueño), con todo lo que hay en él. Los organismos viajan con la fila
+ * que ya tenían en la tabla. Los lotes de materia no
  * viajan: están en la arena compartida y cambian de dueño con `duenoChunk`. */
 export interface MigranteChunk {
   tipo: 'chunk'; chunk: ChunkId; key: string; meta: ChunkMeta; tiles: Tile[]; structures: StructureView[];
   animals: Animal[]; personas: { persona: Person; ref: Ref }[];
+  refsFauna?: Ref[];
   /** Reparto al abrir la época: no es una activación (lo cubre `Ley.iniciar`). */
   inicial: boolean;
 }
 /** Un organismo que cruzó a un chunk de otro dueño. */
-export interface MigranteOrganismo { tipo: 'organismo'; persona?: { persona: Person; ref: Ref }; animal?: Animal }
+export interface MigranteOrganismo { tipo: 'organismo'; persona?: { persona: Person; ref: Ref }; animal?: { animal: Animal; ref: Ref } }
 export type Migrante = MigranteChunk | MigranteOrganismo;
 
 /** Lo que cada dueño manda al coordinador al cerrar el tick. */
@@ -186,7 +187,11 @@ export class Dueno implements CtxF0 {
         this.#contar(i.tipo === TipoIntento.Migrante ? CTL_DUENO.migraciones : i.tipo === TipoIntento.Devuelto ? CTL_DUENO.rechazados : CTL_DUENO.intentos);
         this.#interno.enviar(destino, i);
       },
-      vaciar: (cola, f) => this.#interno.vaciar(cola, i => { if (!this.#aplicarMotor(i)) f(i); }),
+      vaciar: (cola, f) => this.#interno.vaciar(cola, i => {
+        if (this.#aplicarMotor(i)) return;
+        f(i);
+        this.#contar(CTL_DUENO.recibidos);
+      }),
     };
     if (piezas.enlace) this.enlazar(piezas.enlace);
     this.#nonce = (mundo.tick + 1) * NONCES_POR_TICK;
@@ -386,6 +391,22 @@ export class Dueno implements CtxF0 {
 
   /** Intentos que siguen en los buzones (solo quien tiene los buzones: el coordinador o el único dueño). */
   pendientes(): Intento[] { return this.#piezas.buzones?.pendientes() ?? []; }
+
+  /** Saldo de entregas de ley, incluido el tramo que sigue en los buzones, leído en barrera. */
+  balanceIntentos(): { enviados: number; recibidos: number; pendientes: number } {
+    const { control } = this.#piezas;
+    const cuenta = (campo: number): number => {
+      if (!control) return this.cuentas[campo - CTL_DUENO.intentos]!;
+      let n = 0;
+      for (let h = 0; h < this.hilos; h++) n += control[celdaDueno(h, campo)]!;
+      return n;
+    };
+    return {
+      enviados: cuenta(CTL_DUENO.intentos) + cuenta(CTL_DUENO.rechazados),
+      recibidos: cuenta(CTL_DUENO.recibidos),
+      pendientes: this.pendientes().filter(i => i.nonce !== 0).length,
+    };
+  }
 
   /** Migrantes de la cola M (los aparta el buzón del dueño: ningún aplicador los ve). Y, si el aplicador de m5 no está
    * encendido, las órdenes del coordinador de la cola B, que sin él nadie vaciaría (no hay más intentos en ella). */
@@ -599,8 +620,8 @@ export class Dueno implements CtxF0 {
     if (control) control[celdaDueno(this.hilo, campo)]!++;
     else this.cuentas[campo - CTL_DUENO.intentos]!++;
   }
-  /** Intentos, rechazados y migraciones enviados por este dueño (con uno solo; con varios están en el control). */
-  readonly cuentas = [0, 0, 0];
+  /** Intentos, rechazos, migraciones y entregas de este dueño (con varios están en el control). */
+  readonly cuentas = [0, 0, 0, 0];
 
   #aplicarMotor(i: Intento): boolean {
     if (i.tipo === TipoIntento.Migrante) { this.#adoptar(deserialize(i.bytes!) as Migrante); return true; }
@@ -641,9 +662,16 @@ export class Dueno implements CtxF0 {
       if (ref === REF_NULA) organismos.personas.registrar(persona); else organismos.personas.adoptar(persona, ref);
       this.#anotarAlta(persona.uid!, persona.id);
     };
+    const adoptarAnimal = (animal: Animal, ref: Ref): void => {
+      m.animals.push(animal);
+      if (ref !== REF_NULA) organismos.fauna.adoptar(animal, ref);
+    };
     if (mig.tipo === 'organismo') {
       if (mig.persona) { adoptarPersona(mig.persona); for (const ley of this.leyes) ley.alAdoptar?.(this, mig.persona.persona); }
-      if (mig.animal) { m.animals.push(mig.animal); for (const ley of this.leyes) ley.alAdoptar?.(this, mig.animal); }
+      if (mig.animal) {
+        adoptarAnimal(mig.animal.animal, mig.animal.ref);
+        for (const ley of this.leyes) ley.alAdoptar?.(this, mig.animal.animal);
+      }
       return;
     }
     const desde = m.tiles.length;
@@ -652,7 +680,7 @@ export class Dueno implements CtxF0 {
     tileIndexAppended(m.tiles, desde);
     faunaCacheAppended(m.tiles, desde);
     m.structures.push(...mig.structures);
-    m.animals.push(...mig.animals);
+    mig.animals.forEach((animal, k) => adoptarAnimal(animal, mig.refsFauna?.[k] ?? REF_NULA));
     for (const p of mig.personas) adoptarPersona(p);
     this.#activos.set(mig.chunk, mig.key); this.#chunks = undefined;
     this.terrenoPercibido.sincronizarPagina(mig.chunk, tileLookup(m.tiles), residentFastAccess(m.tiles));
@@ -689,8 +717,7 @@ export class Dueno implements CtxF0 {
 
   /**
    * F6 con varios dueños, tras escribir las filas: cumple las órdenes de ceder chunks y manda a su nuevo dueño a quien
-   * cruzó a un chunk ajeno. Una persona conserva su fila (`ceder` cambia el dueño en el frente t+1); un animal recibe
-   * fila nueva al llegar.
+   * cruzó a un chunk ajeno. `ceder` cambia el dueño de la fila en el frente t+1.
    */
   emigrar(): void {
     const m = this.mundo, organismos = this.organismos, tabla = organismos.tabla, terreno = this.terrenoPercibido;
@@ -702,6 +729,14 @@ export class Dueno implements CtxF0 {
       // Un chunk se archiva sin gente: quien estuviera en él sigue con este dueño (su halo lo volverá a pedir).
       if (destino < 0) { for (const p of mig.personas) m.people.push(p.persona); mig.personas = []; }
       for (const p of mig.personas) if (p.ref !== REF_NULA) { organismos.personas.soltar(p.persona); tabla.ceder(this.hilo, p.ref, destino); }
+      mig.refsFauna = mig.animals.map(a => {
+        const ref = organismos.fauna.soltar(a);
+        if (ref !== REF_NULA) {
+          if (destino < 0) tabla.baja(this.hilo, ref);
+          else tabla.ceder(this.hilo, ref, destino);
+        }
+        return ref;
+      });
       if (destino >= 0) this.enviarMigrante(destino, mig);
       else {
         terreno.vaciarPagina(chunk);
@@ -726,7 +761,9 @@ export class Dueno implements CtxF0 {
     for (const a of m.animals) {
       const destino = duenoDe(a);
       if (destino === this.hilo || destino < 0) continue;
-      this.enviarMigrante(destino, { tipo: 'organismo', animal: a });
+      const ref = organismos.fauna.soltar(a);
+      if (ref !== REF_NULA) tabla.ceder(this.hilo, ref, destino);
+      this.enviarMigrante(destino, { tipo: 'organismo', animal: { animal: a, ref } });
       (animales ??= []).push(a);
     }
     if (animales) { const fuera = new Set(animales); m.animals = m.animals.filter(a => !fuera.has(a)); }
@@ -750,6 +787,19 @@ export class Dueno implements CtxF0 {
   tenerChunk(chunk: ChunkId, key: string): void { this.#activos.set(chunk, key); this.#chunks = undefined; }
 
   // ── Materia: punto de control ──────────────────────────────────────────────────────────────────────────
+
+  /** Balance global de materia en barrera: un lote puede cambiar de dueño sin un asiento de fuente o sumidero. */
+  balanceMateria(): { esperado: bigint[]; hallado: bigint[] } {
+    const libros = this.#piezas.libros, vuelo = sumarEnVuelo(libros);
+    const lotes = (this.materia as ArenaLotes).saldo();
+    return {
+      esperado: this.totales.inicial.map((n, k) => libros.reduce(
+        (s, l) => s + BigInt(l.fuentes[k]!) - BigInt(l.sumideros[k]!),
+        n + this.totales.fuentes[k]! - this.totales.sumideros[k]!,
+      )),
+      hallado: lotes.map((n, k) => n + vuelo[k]!),
+    };
+  }
 
   /** La materia para `Instantanea` (en barrera, con todos los dueños detenidos). null sin `v23.materia`. */
   instantaneaMateria(pendientes: readonly Intento[]): MateriaCheckpoint | null {

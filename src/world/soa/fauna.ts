@@ -31,12 +31,28 @@ export class FaunaSoA {
 
   animal(slot: number): Animal | undefined { return this.residentes.get(slot)?.animal; }
 
+  soltar(animal: Animal): Ref {
+    const fila = this.filas.get(animal);
+    if (!fila) return REF_NULA;
+    this.filas.delete(animal);
+    this.residentes.delete(fila.slot);
+    return fila.ref;
+  }
+
+  adoptar(animal: Animal, ref: Ref): void {
+    const uid = animal.uid ??= this.uids();
+    const s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
+    const fila = { slot, ref, uid, animal };
+    this.filas.set(animal, fila);
+    this.residentes.set(slot, fila);
+  }
+
   sincronizar(animales: readonly Animal[]): void {
     if (this.residentes.size === animales.length && animales.every(animal => this.filas.has(animal))) return;
     const vigentes = new Set(animales);
     for (const [slot, fila] of this.residentes) {
       if (vigentes.has(fila.animal)) continue;
-      this.tabla.baja(0, fila.ref);
+      this.tabla.baja(this.tabla.hilo, fila.ref);
       this.filas.delete(fila.animal);
       this.residentes.delete(slot);
     }
@@ -90,12 +106,6 @@ export class FaunaSoA {
   }
 
   private alta(animal: Animal): void {
-    const uid = animal.uid ??= this.uids();
-    // `slotDe` divide un double: `| 0` deja la misma ranura como entero pequeño, y así las claves del mapa y los
-    // índices de las columnas no hacen que V8 desoptimice cada escritura del frente.
-    const ref = this.tabla.alta(0, Clase.Animal), s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
-    const fila = { slot, ref, uid, animal };
-    this.filas.set(animal, fila);
-    this.residentes.set(slot, fila);
+    this.adoptar(animal, this.tabla.alta(this.tabla.hilo, Clase.Animal));
   }
 }

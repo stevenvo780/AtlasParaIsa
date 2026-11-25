@@ -13,7 +13,7 @@ import { deserialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { cargarSustancias } from '../materia/servicio.js';
+import { crearServicioQuimico } from '../materia/servicio.js';
 import type { Libro } from '../materia/tipos.js';
 import type { World } from '../mundo/tipos.js';
 import { setParams, type WorldParams } from '../params.js';
@@ -42,8 +42,8 @@ export interface DatosDueno {
   libros: Libro[];
   lotes: ArenaCompartida | null;
   desborde: ArenaCompartida | null;
-  /** Registro químico al abrir la época (null sin `v23.materia`). */
-  sustancias: Uint8Array | null;
+  /** Identidad de sustancias compartida durante la época (null sin `v23.materia`). */
+  sustancias: MemoriaRegistro | null;
   control: SharedArrayBuffer;
   enlace: DescriptorEnlace | null;
   /** null: entropía real. Con semilla, cada dueño siembra la suya de (semilla, hilo). */
@@ -88,7 +88,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
     registro: new RegistroContenido(datos.registro), azar, control: new Float64Array(datos.control), enlace: datos.enlace,
     materia: datos.sustancias && datos.lotes && datos.desborde ? {
       lotes: PageArena.conectar(datos.lotes), desborde: PageArena.conectar(datos.desborde),
-      quimica: cargarSustancias(datos.sustancias, { modo: 'inmediato' }),
+      quimica: crearServicioQuimico({ modo: 'inmediato', registroSustancias: new RegistroContenido(datos.sustancias) }),
     } : null,
   };
   const dueno = new Dueno(mundo, piezas);

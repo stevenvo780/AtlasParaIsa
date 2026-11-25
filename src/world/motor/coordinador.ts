@@ -16,7 +16,7 @@ import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../s
 import { applyGesture } from '../actuar/gestos.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { cargarSustancias, crearServicioQuimico, serializarSustancias } from '../materia/servicio.js';
+import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
 import { addEvent } from '../mundo/crear.js';
 import { stepWorld, type FaseMedicion } from '../mundo/paso.js';
@@ -37,9 +37,9 @@ import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
   AVISO, CTL, CTL_DUENO, Dueno, ORDEN, RESERVA_DESBORDE, RESERVA_LOTES, celdaDueno, duenoDe, duenoSi,
-  type MigranteChunk, type ParteTick,
+  type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
-import { Clase, slotDe, type ChunkId, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type TelemetriaMotor } from './contratos.js';
+import { Clase, TipoIntento, slotDe, type ChunkId, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import { leyesActivas } from './leyes.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
@@ -207,7 +207,9 @@ class MotorDuenos implements Motor {
     control[CTL.tick] = m.tick; control[CTL.epoca] = this.#epoca; control[CTL.fotoRanura] = -1;
     const azar = azarDeHilo(this.#config.semilla, 0);
     const conMateria = params.v23.materia;
-    const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, { modo: 'inmediato' }) : crearServicioQuimico({ modo: 'inmediato' });
+    const registroSustancias = conMateria ? new RegistroContenido(hilos) : null;
+    const opcionesQuimica = { modo: 'inmediato', registroSustancias: registroSustancias ?? undefined } as const;
+    const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, opcionesQuimica) : crearServicioQuimico(opcionesQuimica);
     const lotes = conMateria ? new PageArena(RESERVA_LOTES) : null, desborde = conMateria ? new PageArena(RESERVA_DESBORDE) : null;
     const d = this.#d = new Dueno(m, {
       hilo: 0, hilos, buzones, buzon: buzones.dueno(0, azar), libros, contadores, registro, azar, control, enlace: this.#enlace,
@@ -241,7 +243,7 @@ class MotorDuenos implements Motor {
     const datos: DatosDueno = {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: lotes?.compartir() ?? null, desborde: desborde?.compartir() ?? null,
-      sustancias: quimica && serializarSustancias(quimica), control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
+      sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, conMateriaCargada: materia !== null,
     };
     try {
@@ -465,8 +467,23 @@ class MotorDuenos implements Motor {
       const partes = this.#partesMundo.splice(0);
       if (partes.length !== this.#hilos - 1) throw new Error(`Instantánea incompleta: ${partes.length} de ${this.#hilos - 1} dueños.`);
       const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
+      const pendientes = this.#d.pendientes();
+      for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
+        // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
+        const mig = deserialize(i.bytes!) as Migrante;
+        if (mig.tipo === 'chunk') {
+          world.chunks[mig.key] = mig.meta;
+          world.tiles.push(...mig.tiles);
+          world.structures.push(...mig.structures);
+          world.animals.push(...mig.animals);
+          for (const p of mig.personas) world.people.push(p.persona);
+        } else {
+          if (mig.persona) world.people.push(mig.persona.persona);
+          if (mig.animal) world.animals.push(mig.animal.animal);
+        }
+      }
       recordSample(world);
-      return { world, materia: this.#d.instantaneaMateria(this.#d.pendientes()) };
+      return { world, materia: this.#d.instantaneaMateria(pendientes) };
     } catch (error) { throw this.#fallo(error); }
   }
 

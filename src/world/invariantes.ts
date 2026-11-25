@@ -13,31 +13,9 @@ import type { CtxMateria } from './motor/contratos.js';
 import { conservacion } from './materia/ley-mundo.js';
 import { ley, paramsOf } from './params.js';
 
-export type Gravedad = 'dura' | 'blanda';
-export interface RegionRef { chunkX: number; chunkY: number }
-export interface Violacion {
-  id: string; gravedad: Gravedad; tick: number; detalle: string;
-  contexto?: Record<string, unknown>; region?: string;
-  esperado?: number; observado?: number; muestra?: unknown;
-}
-export interface Invariante {
-  id: string; carril: string; gravedad: Gravedad; cadaTicks: number;
-  alcance: 'global' | 'region';
-  /** Solo lectura. Sin `region` comprueba el mundo entero; con ella, solo esa región de CHUNK_SIZE². */
-  comprobar(mundo: World, region?: RegionRef): Violacion[];
-}
+import { listaInvariantes, registrar, type Gravedad, type Invariante, type RegionRef, type Violacion } from './registro-invariantes.js';
 
-const registro = new Map<string, Invariante>();
-/** Devuelve el retiro del registro para módulos descargables y pruebas aisladas. */
-export function registrar(invariante: Invariante): () => void {
-  if (!invariante.id || registro.has(invariante.id) || !Number.isSafeInteger(invariante.cadaTicks) || invariante.cadaTicks < 1) {
-    throw new Error(`Registro de invariante inválido o duplicado: ${invariante.id}`);
-  }
-  const entrada = Object.freeze({ ...invariante });
-  registro.set(entrada.id, entrada);
-  return () => { if (registro.get(entrada.id) === entrada) registro.delete(entrada.id); };
-}
-export function listaInvariantes(): readonly Invariante[] { return [...registro.values()]; }
+export { listaInvariantes, registrar, type Gravedad, type Invariante, type RegionRef, type Violacion } from './registro-invariantes.js';
 
 export function comprobarInvariante(inv: Invariante, mundo: World, region?: RegionRef): Violacion[] {
   try {
@@ -50,7 +28,7 @@ export function comprobarInvariante(inv: Invariante, mundo: World, region?: Regi
 /** Sin cadencia por defecto: las pruebas comprueban TODAS las leyes en cada barrera de fin de paso. */
 export function comprobarInvariantes(mundo: World, opciones: { region?: RegionRef; ids?: readonly string[]; cadencia?: boolean } = {}): Violacion[] {
   const resultado: Violacion[] = [];
-  for (const inv of registro.values()) {
+  for (const inv of listaInvariantes()) {
     if (opciones.ids && !opciones.ids.includes(inv.id) || opciones.cadencia && mundo.tick % inv.cadaTicks !== 0) continue;
     resultado.push(...comprobarInvariante(inv, mundo, opciones.region));
   }

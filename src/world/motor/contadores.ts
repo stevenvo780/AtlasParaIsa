@@ -1,5 +1,5 @@
 import { NE } from '../../shared/naturaleza.js';
-import { registrar, type Violacion } from '../invariantes.js';
+import { registrar, type Violacion } from '../registro-invariantes.js';
 import type { Libro } from '../materia/tipos.js';
 import type { World } from '../mundo/tipos.js';
 import { ErrorFatalMotor } from '../paralelo/barrera.js';

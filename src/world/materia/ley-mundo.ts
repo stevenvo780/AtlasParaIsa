@@ -783,6 +783,11 @@ function balance(e: Estado): BalanceMateria {
   const c = e.caja.c, L = e.libro;
   e.m.volcarCuentas(e.cuentas);
   asentar(e);
+  const cuentas: Record<string, bigint> = {};
+  NOMBRE_CUENTA.forEach((nombre, k) => { cuentas[nombre] = e.cuentas[k]!; });
+  for (let k = 0; k < NE; k++) cuentas[`neto con el exterior (mmol de ${ELEMENTOS[k]})`] = e.cuentas[CUENTA.EXTERIOR_AT + k]!;
+  const motor = c as Partial<{ hilos: number; balanceMateria(): Omit<BalanceMateria, 'cuentas'> }>;
+  if (c.hilo === 0 && (motor.hilos ?? 1) > 1 && motor.balanceMateria) return { ...motor.balanceMateria(), cuentas };
   const hallado = saldoDe(e);
   for (let k = 0; k <= NE; k++) hallado[k]! += BigInt(c.libro.enVuelo[k]!);
   // Lo plegado por el coordinador, si el contexto lo ofrece (pedido al contrato); si no, el tramo que w ha visto pasar
@@ -796,9 +801,6 @@ function balance(e: Estado): BalanceMateria {
     L.ancla ??= hallado.map((h, k) => h - L.neto[k]!);
     esperado = L.ancla.map((a, k) => a + L.neto[k]!);
   }
-  const cuentas: Record<string, bigint> = {};
-  NOMBRE_CUENTA.forEach((nombre, k) => { cuentas[nombre] = e.cuentas[k]!; });
-  for (let k = 0; k < NE; k++) cuentas[`neto con el exterior (mmol de ${ELEMENTOS[k]})`] = e.cuentas[CUENTA.EXTERIOR_AT + k]!;
   return { esperado, hallado, cuentas };
 }
 

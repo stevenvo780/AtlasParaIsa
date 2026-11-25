@@ -332,8 +332,8 @@ export { paintStructure, type StructureSurface } from './structure-art.js';
 /** Masa (sobre la adulta) que representa el sprite juvenil tal como se pinta: un juvenil de esa masa no se reescala. */
 export const MASA_SPRITE_JUVENIL = 0.35;
 /** Escala mínima y máxima del sprite por masa: fuera de ellas el pixel-art de 32 px deja de leerse. */
-export const ESCALA_CUERPO_MIN = 0.6;
-export const ESCALA_CUERPO_MAX = 1.6;
+export const ESCALA_CUERPO_MIN = 0.625; // 10/16: múltiplo del paso
+export const ESCALA_CUERPO_MAX = 1.625; // 26/16
 /** Pasos de la escala (1/16: 2 px enteros en un sprite de 32), para que la caché vea pocas tallas. */
 export const PASOS_ESCALA = 16;
 /** Masa adulta (kg) hasta la que un animal se dibuja con cuerpo pequeño (liebre, zorro). */

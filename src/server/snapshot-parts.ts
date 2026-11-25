@@ -34,7 +34,7 @@ const keys = (value: Record<string, unknown>, expected: string[]): boolean =>
 interface Page { index: number; digest: string; count: number; bytes: number; }
 interface Manifest { snapshotEncoding: typeof ENCODING; world: Record<string, unknown> & { version: number }; tiles: { count: number; pages: Page[] }; }
 /** `metadata` is the exact JSON of the world record without tiles, serialized once. */
-export interface PreparedSnapshot { inline?: string; metadata?: string; tiles: readonly Tile[]; }
+export interface PreparedSnapshot { inline?: string; metadata?: string; tiles: readonly Tile[]; nativo: boolean; }
 /** `digest` is sha256(body); `pages` are the digests write() proved inside the caller's transaction. */
 export interface WrittenSnapshot { body: string; digest: string; bytes: number; pages: readonly string[]; }
 /**
@@ -157,14 +157,15 @@ export class SnapshotParts {
   }
 
   prepare(world: World, params: WorldParams, inlineLimit: number): PreparedSnapshot {
-    if (world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [] };
+    const nativo = params.v23.guardadoCompleto;
+    if (world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [], nativo };
     // Keep a validated null placeholder: deleting/reinserting tiles changes the
     // world's enumerable property order when a paged checkpoint is reloaded.
-    const metadata = stringifyExact(snapshotRecord(world, params, null));
+    const metadata = stringifyExact(snapshotRecord(world, params, null), nativo);
     // UTF-8 ocupa como mucho 3 bytes por unidad UTF-16: por debajo de un tercio del tope el cuerpo
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
     if (metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
-    return { metadata, tiles: world.tiles };
+    return { metadata, tiles: world.tiles, nativo };
   }
 
   /** Los tres campos del vale que una conexión ajena puede mover, recotejados DENTRO de la transacción:
@@ -285,7 +286,7 @@ export class SnapshotParts {
         this.onProgress?.();
         continue;
       }
-      const rows = encodeSnapshotTileRows(tiles, offset, Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset));
+      const rows = encodeSnapshotTileRows(tiles, offset, Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset), prepared.nativo);
       const body = JSON.stringify(rows), digest = checksum(body), size = Buffer.byteLength(body);
       if (size > PAGE_BYTES) failure('page exceeds transport size');
       const existing = same.get(body, digest) as { same: number } | undefined;

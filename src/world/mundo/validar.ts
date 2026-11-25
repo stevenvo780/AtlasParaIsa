@@ -1,7 +1,7 @@
 import { RULES_VERSION, type World, COOLDOWN, MAX_EVENTS, MAX_EXPERIENCES, MAX_HABITS, type WorldContext, type Person } from './tipos.js';
 import type { Point } from './geometria.js';
 import { walkable } from './crear.js';
-import { limitsOf, paramsOf, openWorldCaps, MAX_FOUNDER_AGE_TICKS } from '../params.js';
+import { ley, limitsOf, paramsOf, openWorldCaps, MAX_FOUNDER_AGE_TICKS } from '../params.js';
 import { POPULATION_HARD_LIMIT } from '../../shared/life.js';
 import { validCoordinate, bindWorldContext, worldContext } from '../spatial.js';
 import { assertChemistryState, assertCompoundLots } from '../chemistry.js';
@@ -17,6 +17,44 @@ import { assertPolicyGenome, assertPolicyPlasticity } from '../politica.js';
 import type { WorldSample } from '../../shared/types.js';
 import { assertTechnology } from '../technology.js';
 import { resolveTechnologyRecipe } from '../technology-catalogue.js';
+import { COLUMNAS_CEREBRO, GENOMA_ANCHO } from '../motor/contratos.js';
+
+function esRegistro(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function esReferencia(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function esVectorFinito(value: unknown): value is number[] {
+  if (!Array.isArray(value)) return false;
+  for (const numero of value) if (!Number.isFinite(numero)) return false;
+  return true;
+}
+
+function assertGestacion(value: unknown, tick: number, persona: boolean): void {
+  const tiempo = (n: unknown): boolean => esReferencia(n) && n <= tick;
+  if (!esRegistro(value) || !esReferencia(value.embrion) || !esReferencia(value.otro)
+    || !tiempo(value.inicio) || (value.bajoBasalDesde !== -1 && !tiempo(value.bajoBasalDesde))
+    || !esVectorFinito(value.genoma) || value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO
+    || persona && (value.genoma.length !== GENOMA_ANCHO || value.genoma.some(n => n < 0 || n > 1))
+    || value.politica !== undefined && (!persona || !esVectorFinito(value.politica)
+      || value.politica.length !== COLUMNAS_CEREBRO.politica)) throw new Error('Gestación inválida.');
+}
+
+function assertCuerpo(value: unknown, tick: number, persona: boolean): void {
+  if (value === undefined) return;
+  if (!esRegistro(value) || !esReferencia(value.tejido) || !esReferencia(value.reserva)
+    || !esReferencia(value.digestivo) || !esReferencia(value.plantilla)) throw new Error('Cuerpo inválido.');
+  if (value.gestacion !== undefined) assertGestacion(value.gestacion, tick, persona);
+}
+
+function assertCarga(value: unknown): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw new Error('Carga de lotes inválida.');
+  for (const lote of value) if (!esReferencia(lote)) throw new Error('Carga de lotes inválida.');
+}
 
 
 /** Reject corruption on load rather than silently replacing a world. */
@@ -63,6 +101,7 @@ export function assertCommon(value: unknown, legacy = false, expectedVersion = R
 export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, context?: WorldContext): asserts value is World {
   assertCommon(value, false, expectedVersion);
   const w = value;
+  const validarCuerpos = ley(w, 'cuerpos') || ley(w, 'guardadoCompleto');
   const limits = limitsOf(w, expectedVersion);
   const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
   if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick);
@@ -94,7 +133,10 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     identities.set(id, person); return person;
   };
   if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > limits.chunks || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
-  for(const chunk of w.retiredChunks)assertDormantTerrain(chunk,w.tick,expectedVersion>=3);
+  for (const chunk of w.retiredChunks) {
+    assertDormantTerrain(chunk, w.tick, expectedVersion >= 3);
+    if (validarCuerpos) for (const animal of chunk.animals ?? []) assertCuerpo(animal.cuerpo, w.tick, false);
+  }
   const keys = new Set<string>();
   for (const tile of w.tiles) {
     if (expectedVersion >= 3) assertEcosystemTile(tile);
@@ -112,6 +154,10 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   }
   const numericMap = (v: unknown, min: number, max: number, limit: number) => v && typeof v === 'object' && !Array.isArray(v) && Object.entries(v).length <= limit && Object.entries(v).every(([k, n]) => k.length <= 50 && typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max);
   for (const p of w.people) {
+    if (validarCuerpos) {
+      assertCuerpo(p.cuerpo, w.tick, true);
+      assertCarga(p.carga);
+    }
     if (expectedVersion >= 3) {
       assertGenome(p.genome);
       if (p.genome.parents.length) {
@@ -146,7 +192,10 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < (expectedVersion>=5?2:16) || sample.population > populationCap || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
-  if(expectedVersion>=4) assertLifeState(w);
+  if (expectedVersion >= 4) {
+    assertLifeState(w);
+    if (validarCuerpos) for (const animal of w.animals) assertCuerpo(animal.cuerpo, w.tick, false);
+  }
   if(expectedVersion>=5) {
     if (expectedVersion === 5 && (Object.hasOwn(w.technology, 'water')
       || w.people.some(p => Object.hasOwn(p.technology, 'waterActionAt') || Object.hasOwn(p.technology, 'waterCarryAt') || Object.hasOwn(p.technology, 'waterPreparation') || p.technology.items.some(item => Object.hasOwn(item, 'contents')))

@@ -147,7 +147,7 @@ export function assertSnapshotCounts(record: Record<string, unknown>, limits: Re
 }
 /** Codifica `count` teselas desde `offset` sin copiar el tramo (el guardado por páginas ya no paga un
  * `slice` —otra pasada de traps sobre el array Proxy residente— por página). Sin tramo, el array entero. */
-export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset): unknown[][] {
+export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset, nativo = false): unknown[][] {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
   const rows: unknown[][] = new Array(count);
@@ -177,7 +177,7 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
         if (!Number.isFinite(value)) {
           if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
           if (i >= 6) throw new Error('Invalid optional tile value. Snapshot was not written.');
-        } else if (value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
+        } else if (!nativo && value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
       } else if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
       else if (i >= 6 && value === null) throw new Error('Invalid optional tile value. Snapshot was not written.');
     }
@@ -197,7 +197,7 @@ export function snapshotRecord(world: World, params: WorldParams, tiles: unknown
   assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, world.tiles.length);
   const current = world.version >= PARAMETER_LIMITS_RULES_VERSION;
   const serializedParams = current ? params : { ...params, limites: Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, params.limites[key]])) };
-  const body = stringifyExact(serializedParams);
+  const body = stringifyExact(serializedParams, params.v23.guardadoCompleto);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: SNAPSHOT_TILE_ENCODING };
   // Current snapshots declare the mode even with defaults; old encoders retain
   // their historical omission convention.
@@ -209,7 +209,9 @@ export function snapshotRecord(world: World, params: WorldParams, tiles: unknown
 }
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
   const encoded = snapshotRecord(world, params, undefined);
-  encoded.tiles = encodeSnapshotTileRows(world.tiles);
+  const nativo = params.v23.guardadoCompleto;
+  encoded.tiles = encodeSnapshotTileRows(world.tiles, 0, world.tiles.length, nativo);
+  if (nativo) return stringifyExact(encoded, true);
   // Tile scalars were checked above. Keep their native serializer fast instead
   // of running a JS replacer for every scalar a second time. Metadata still uses
   // the exact scalar writer. Property order and ordinary bytes remain unchanged.

@@ -160,9 +160,11 @@ export function decidirFauna(animal: Animal, world: AnimalWorld, state: Percepci
     const aqui = t.ocupantes;
     if (!aqui) continue;
     for (const other of aqui) {
-      if (other.id === id || other.health <= 0) continue;
+      // Un herbívoro solo mira a los carnívoros (amenazas); las comprobaciones son lecturas puras, en otro orden.
+      const amenaza = other.genes.carnivory >= 0.6;
+      if (!amenaza && !carnivoro || other.id === id || other.health <= 0) continue;
       const d = Math.abs(other.x - ax) + Math.abs(other.y - ay);
-      if (other.genes.carnivory >= 0.6 && coincide(plan, other, d, 0, plan.presas)) threats.push(other);
+      if (amenaza && coincide(plan, other, d, 0, plan.presas)) threats.push(other);
       if (carnivoro && coincide(plan, other, d, plan.presas, plan.pareja)
         && (!prey || d < dPrey || d === dPrey && canonical(other, prey) < 0)) { prey = other; dPrey = d; }
     }

@@ -611,9 +611,10 @@ function remember(animal: Animal, tile: Point, tick: number, visited: boolean, f
   // `find` precedía al filtro de caducidad: la primera visita a la celda, incluso caducada, conserva
   // visited. Con coordenadas enteras, misma celda (`cell`) equivale a mismas coordenadas (`===`).
   let existingVisited = false, found = false, kept = 0;
-  for (const m of memory) {
+  for (let j = 0, n = memory.length; j < n; j++) {
+    const m = memory[j]!;
     if (m.x === x && m.y === y) { if (!found) { existingVisited = m.visited; found = true; } }
-    else if (tick - m.tick <= MEMORY_TTL) memory[kept++] = m;
+    else if (tick - m.tick <= MEMORY_TTL) { if (kept !== j) memory[kept] = m; kept++; }
   }
   // El recuerdo nuevo va al final; si no cabe, sale el más antiguo de los que quedan (el `shift` de antes).
   const drop = kept >= MAX_ANIMAL_MEMORY ? 1 : 0;
@@ -642,6 +643,8 @@ interface LocalState extends PercepcionFauna {
   /** Borradores de `settlementOverlay`, reutilizados entre animales. */
   amenazas: Point[]; cerca: Point[];
   celdas: CeldasFauna; fila: Int32Array;
+  /** Plan de cada animal activo y el orden por cercanía de la decisión (`ordenEspacial`). */
+  planes: PlanFauna[]; claves: Float64Array; orden: Int32Array;
 }
 /** La celda a (dx, dy) del animal está en lo que devolvió su última `localTiles`: lo mismo que buscar su
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
@@ -668,9 +671,8 @@ class CeldasFauna {
   generacion = 0;
   private k1 = -1; private p1 = -1; private k2 = -1; private p2 = -1;
   datos = new Float64Array(0);
-  /** La celda residente de la tesela (-1 sin SoA residente) y la tesela, para las lecturas que se hacen tarde. */
+  /** La celda residente de la tesela (-1 sin SoA residente), para las lecturas que se hacen tarde. */
   private residente = new Int32Array(0);
-  private teselas: (Tile | undefined)[] = [];
   /** Los animales vivos de la celda al empezar la decisión: el arreglo de `occupants`, sellado al registrarlo. */
   selloOcupantes = new Int32Array(0);
   ocupantes: (Animal[] | undefined)[] = [];
@@ -727,12 +729,15 @@ class CeldasFauna {
     if (pez ? marcas & HUMEDAD_LEIDA : marcas & AGUA_TIERRA_LEIDA) return datos[b + (pez ? C_AGUA_PEZ : C_AGUA_TIERRA)]!;
     const reader = state.reader, fast = state.fast, at = this.residente[i]!;
     if (pez) {
-      datos[b + C_AGUA_PEZ] = reader ? reader.moisture(at)! : at < 0 ? this.teselas[i]!.moisture : fast!.moisture(at)!;
+      datos[b + C_AGUA_PEZ] = reader ? reader.moisture(at)! : at < 0 ? state.tile(datos[b + C_X]!, datos[b + C_Y]!)!.moisture : fast!.moisture(at)!;
       datos[b + C_MARCAS] = marcas | HUMEDAD_LEIDA;
       return datos[b + C_AGUA_PEZ]!;
     }
     if (reader) datos[b + C_AGUA_TIERRA] = reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
-    else if (at < 0) { const tile = this.teselas[i]!; datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0; }
+    else if (at < 0) {
+      const tile = state.tile(datos[b + C_X]!, datos[b + C_Y]!)!;
+      datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0;
+    }
     else datos[b + C_AGUA_TIERRA] = fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
     datos[b + C_MARCAS] = marcas | AGUA_TIERRA_LEIDA;
     return datos[b + C_AGUA_TIERRA]!;
@@ -743,7 +748,7 @@ class CeldasFauna {
     const b = i * ANCHO;
     let marcas = this.datos[b + C_MARCAS]!;
     if (!(marcas & POBLADO_LEIDO)) {
-      const tile = state.reader ? state.tile(x, y) : this.teselas[i];
+      const tile = state.tile(x, y);
       marcas |= POBLADO_LEIDO;
       if (tile?.terrain === 'shelter') marcas |= REFUGIO_TESELA | POBLADO;
       else if (tile && (tile.cultivation ?? 0) > 0) marcas |= POBLADO;
@@ -778,7 +783,7 @@ class CeldasFauna {
     const residente = new Int32Array(n); residente.set(this.residente); this.residente = residente;
     const ocupados = new Int32Array(n); ocupados.set(this.selloOcupantes); ocupados.fill(this.generacion - 1, viejo);
     this.selloOcupantes = ocupados;
-    for (let i = viejo; i < n; i++) { this.ocupantes.push(undefined); this.teselas.push(undefined); }
+    for (let i = viejo; i < n; i++) this.ocupantes.push(undefined);
   }
 
   /** La clase de terreno, el crecimiento, el alimento y las coordenadas de la tesela, como los leía `localTiles`. */
@@ -802,12 +807,15 @@ class CeldasFauna {
         const fast = state.fast;
         at = fast?.cellOf(tile) ?? -1;
         if (at < 0) {
-          // El poblado se lee aquí también: el terreno ya está leído y la tesela a mano.
+          // Con la tesela a mano se leen también el poblado y el agua de quien puede estar en ella (un pez en el
+          // agua, un animal de tierra fuera); la otra agua se lee tarde si alguien la pide.
           const terrain = tile.terrain;
           marcas = VISIBLE | POBLADO_LEIDO | (terrain === 'water' ? AGUA : 0)
             | (terrain === 'shelter' ? REFUGIO | REFUGIO_TESELA | POBLADO : (tile.cultivation ?? 0) > 0 ? POBLADO : 0);
           growth = tile.growth;
           if (growth === undefined) vegetation = tile.vegetation;
+          if (terrain === 'water') { datos[b + C_AGUA_PEZ] = tile.moisture; marcas |= HUMEDAD_LEIDA; }
+          else { datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0; marcas |= AGUA_TIERRA_LEIDA; }
         } else {
           const terrain = fast!.terrainCode(at);
           marcas = VISIBLE | (terrain === fast!.TERRAIN_WATER ? AGUA : 0) | (terrain === fast!.TERRAIN_SHELTER ? REFUGIO : 0);
@@ -821,11 +829,33 @@ class CeldasFauna {
     if (growth !== undefined) { marcas |= CRECIMIENTO; datos[b + C_BROTE] = growth; datos[b + C_ALIMENTO] = growth; }
     else { datos[b + C_BROTE] = 0; datos[b + C_ALIMENTO] = vegetation; }
     datos[b + C_SELLO] = this.generacion; datos[b + C_MARCAS] = marcas; datos[b + C_X] = x; datos[b + C_Y] = y;
-    this.residente[i] = at; this.teselas[i] = tile;
+    this.residente[i] = at;
   }
 }
 const celdasFauna = new CeldasFauna();
 
+/**
+ * Los índices de `animales` agrupados por chunk (16 × 16), para que la decisión y el poblado de animales vecinos lean
+ * seguidas las mismas celdas. Ninguna de las dos fases lee lo que la otra escribe en otro animal (cada una escribe solo
+ * la acción, el destino, la memoria y la habituación del suyo, y lee de los demás posición, especie, salud, genes y
+ * cuerpo), así que el orden no cambia nada. Con más de 2^21 animales la clave no cabe y se deja el orden canónico.
+ */
+function ordenEspacial(animales: readonly Animal[], state: LocalState): Iterable<number> {
+  const n = animales.length;
+  if (n > 2 ** 21) return animales.keys();
+  if (state.claves.length < n) state.claves = new Float64Array(Math.max(n, 2 * state.claves.length));
+  const claves = state.claves.subarray(0, n);
+  for (let i = 0; i < n; i++) {
+    const a = animales[i]!;
+    // Chunk en 16 + 16 bits (con vuelta: solo agrupa) por delante del índice.
+    claves[i] = ((((a.x >> 4) & 0xffff) << 16 | ((a.y >> 4) & 0xffff)) >>> 0) * 2 ** 21 + i;
+  }
+  claves.sort();
+  if (state.orden.length < n) state.orden = new Int32Array(state.claves.length);
+  const orden = state.orden.subarray(0, n);
+  for (let i = 0; i < n; i++) orden[i] = claves[i]! % 2 ** 21;
+  return orden;
+}
 function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): VisibleTile[] {
   const radius = plan.radio, result = state.visible, stamp = ++state.stamp, celdas = state.celdas, fish = animal.species === 'fish';
   result.length = 0;
@@ -1024,7 +1054,8 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     visto: (dx, dy) => seenAt(state, dx, dy),
     recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
-    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, emergente: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE) };
+    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, emergente: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE),
+    planes: [], claves: new Float64Array(0), orden: new Int32Array(0) };
   const { fauna: leyesFauna } = paramsOf(world);
   const emergent = state.emergente = paramsOf(world).quimica.emergente;
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
@@ -1058,13 +1089,17 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
   }
   world.animals = world.animals.filter(a => a.health > 0);
   const active = world.animals;
-  for (const animal of active) decidirFauna(animal, world, state, planFauna(animal, columnaEspecie));
+  // Los planes se crean en orden canónico (su id es el orden de creación); la decisión y el poblado van por cercanía.
+  const planes = state.planes, orden = ordenEspacial(active, state);
+  planes.length = active.length;
+  for (let i = 0; i < active.length; i++) planes[i] = planFauna(active[i]!, columnaEspecie);
+  for (const i of orden) decidirFauna(active[i]!, world, state, planes[i]!);
   actividadFauna.set(world, { tick: world.tick, vivos: active.length, decisiones: decididosEn(active, world.tick) });
   if (emergent) {
     const humans = settlementBuckets(world.people ?? []);
     const structures = world.structures ?? [];
     const hearths = settlementBuckets(structures.filter(s => s.condition > 0.1 && s.components.includes('hearth')));
-    for (const animal of active) settlementOverlay(animal, world.tick, state, humans, hearths);
+    for (const i of orden) settlementOverlay(active[i]!, world.tick, state, humans, hearths);
   }
   // Las huidas preceden al contacto, con desempate por id dentro de cada grupo.
   for (const animal of active) if (animal.action === 'flee') move(animal, world, state);

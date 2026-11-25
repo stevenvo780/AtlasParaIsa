@@ -94,3 +94,12 @@ Medido ese día con el panel: un día simulado cuesta 53 s con menos de 50 habit
 - **Optimizar primero.** Antes de paneles largos se perfila el tick y se arregla lo que más pese sin cambiar la conducta (identidad de digesto con un hilo).
 - **Paneles a la medida de la pregunta.** «¿Se extingue esta banda?» se responde con tope 100 y pocos días; las tasas demográficas, con poblaciones grandes y horizonte corto; el horizonte largo queda para el panel final.
 - **Poblaciones grandes y tarjetas.** Miles de vidas a la vez dan en 5 días simulados lo que una banda de 14 no da en 45: tasas por habitante con error pequeño y su dependencia de la densidad (si el crecimiento no baja al subir la densidad, no hay equilibrio; si es negativo con pocos, las bandas pequeñas se extinguen). Se arranca de mundos ya crecidos (puntos guardados del panel) o sembrados (`scripts/lab/poblacion.mts`), con la decisión repartida en hilos y tarjeta. Lo que el perfil señale como grueso y paralelizable se lleva a la tarjeta; la química de lotes del mundo material nace pensada para ella.
+
+## 13. Modo de trabajo con cuota escasa (Steven, 24-nov noche)
+Muse y Gemini están agotados; quedan Claude y GPT. Medido en los transcritos del 24-nov: los subagentes escribieron 16 M de tokens y releyeron 2.200 M de contexto; el 60 % del gasto fueron subagentes Opus y el 20 % el orquestador (Fable, 430 mil tokens de contexto medio en 676 respuestas). Más de la mitad de todo es cada agente releyendo su propio contexto en cada paso: el coste crece con pasos × contexto.
+- **Solo camino crítico** y como mucho 4 agentes a la vez en la torre: saturada, cada agente da más pasos (esperas, reintentos, pruebas de tiempos que fallan).
+- **Modelo por defecto Sonnet**; Opus con esfuerzo alto (no extra) solo en los tres núcleos de §10; Fable solo para matemática extrema. GPT-6.2 Sol por CLI para los carriles grandes de código mientras tenga saldo.
+- **Agentes cortos y de contexto pequeño:** el encargo da punteros exactos (nunca «lee entero»), las salidas de pruebas se resumen, las esperas son una sola orden que bloquea (nunca sondeos) y un trabajo largo se parte en agentes sucesivos con un fichero de relevo.
+- **Un autor y una verificación pequeña que ejecuta** (§10); sin rondas de cierre.
+- **El orquestador** procesa las entregas por tandas, con una sola orden por entrega, y pasa a una sesión nueva cuando su contexto supera los 150 mil tokens.
+- El gasto se mide con `archivo/v23-orquesta/consumo.py` (por workflow, por modelo y del hilo principal).

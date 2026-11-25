@@ -127,16 +127,9 @@ export function forageFood(world: World, person: Person, tile: Tile): boolean {
 
 // ── V23: comer, beber y recoger sobre la materia ─────────────────────────────────────────────────────────
 
-/** kg de alimento que una persona adulta traga en un tick de comer (un bocado de ≈ 10 g cada 36 s de mundo). */
-export const BOCADO_KG = 0.01;
-/** kg de agua que una persona adulta bebe en un tick de beber (≈ 50 mL por sorbo largo). */
-export const SORBO_KG = 0.05;
-/** kg de alimento que deja a cuestas una tarea completa de forrajear. */
-export const FORRAJEO_KG = 0.5;
-/** kg de madera o de piedra que pesa una unidad de `Person.materials`: la vista escalar de lo que lleva a cuestas. */
-export const KG_POR_UNIDAD_MATERIAL = 5;
-/** Exponente de escala del bocado con la masa del cuerpo (Kleiber): una cría traga menos que un adulto. */
-export const EXPONENTE_BOCADO = 0.75;
+// Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí.
+import { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG } from '../../shared/naturaleza.js';
+export { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG };
 
 /** Contadores de `world.totals` que lee el laboratorio (kg acumulados en la vida del mundo). */
 export const TOTAL_DIETA_KG = 'v23DietaKg';

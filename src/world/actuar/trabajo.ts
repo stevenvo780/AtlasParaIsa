@@ -21,7 +21,6 @@ import { Clase, REF_NULA, slotDe, type Ref } from '../motor/contratos.js';
 import { masCercano } from '../motor/vecinos.js';
 import { pagar, pedidoComida, soltar } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo } from '../materia/tipos.js';
-import { POTENCIA_TRABAJO, SEGUNDOS_TICK } from '../materia/proceso.js';
 import { cazarAnimal, extraerDeAnimal, valorDeAnimal, animalVisto } from './caza.js';
 import { celdaEsPropia, contar, escalaBocado, gastarMaderaEnSuelo, marcarCarne } from './recursos.js';
 
@@ -112,13 +111,9 @@ export function performWork(world: World, person: Person, tile: Tile): void {
 
 // ── V23: trabajar con un cuerpo de átomos ────────────────────────────────────────────────────────────────
 
-/** J de trabajo que una persona hace en un tick de tarea: su potencia sostenida (t1, `POTENCIA_TRABAJO`) por la
- * duración del tick. */
-export const TRABAJO_J_TICK = POTENCIA_TRABAJO * SEGUNDOS_TICK;
-/** Celdas a las que alcanza un golpe o una mano: quien caza o esquila tiene que estar junto al animal. */
-export const ALCANCE_MANO = 1.5;
-/** kg de carne que quien caza se lleva a cuestas del cadáver; el resto queda en la celda para quien llegue. */
-export const CARNE_A_CUESTAS_KG = 2;
+// Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí.
+import { ALCANCE_MANO, CARNE_A_CUESTAS_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
+export { ALCANCE_MANO, CARNE_A_CUESTAS_KG, TRABAJO_J_TICK };
 
 /** Última posición vista de la presa, para ir a por el cadáver cuando muere fuera de su celda. */
 const ultimaPresa = new WeakMap<Person, { x: number; y: number }>();

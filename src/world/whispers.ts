@@ -193,8 +193,9 @@ export interface OyentesSusurro {
   cerca(x: number, y: number, f: (p: WhisperPersonLike) => void): void;
 }
 
-/** Fracción de la audibilidad junto al mensaje por debajo de la cual el oído ya no la distingue del ruido (adimensional). */
-export const CAIDA_AUDIBLE = 1e-3;
+// CAIDA_AUDIBLE vive en shared/naturaleza.ts (integrador) y se reexporta aquí.
+import { CAIDA_AUDIBLE } from '../shared/naturaleza.js';
+export { CAIDA_AUDIBLE };
 /** Distancia (celdas) a la que la audibilidad cae a `CAIDA_AUDIBLE`: el radio del índice espacial de los regionales. */
 export const RADIO_AUDIBLE = ALCANCE_VOZ * Math.sqrt(1 / CAIDA_AUDIBLE - 1);
 

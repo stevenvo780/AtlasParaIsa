@@ -383,3 +383,30 @@ export const DURACION_PASO = 100;
 /** Probabilidad de partir de una receta recordada al investigar, y de cruzarla con otra (búsqueda de programas de la V22). */
 export const PROB_VARIAR_CONOCIDA = 0.72;
 export const PROB_CRUZAR = 0.35;
+
+// ── Carril act: el tick de las personas sobre materia (`world/actuar/*.ts` y `world/whispers.ts` las reexportan) ─
+
+// actuar/recursos.ts
+/** kg de alimento que una persona adulta traga en un tick de comer (un bocado de ≈ 10 g cada 36 s de mundo). */
+export const BOCADO_KG = 0.01;
+/** kg de agua que una persona adulta bebe en un tick de beber (≈ 50 mL por sorbo largo). */
+export const SORBO_KG = 0.05;
+/** kg de alimento que deja a cuestas una tarea completa de forrajear. */
+export const FORRAJEO_KG = 0.5;
+/** kg de madera o de piedra que pesa una unidad de `Person.materials`: la vista escalar de lo que lleva a cuestas. */
+export const KG_POR_UNIDAD_MATERIAL = 5;
+/** Exponente de escala del bocado con la masa del cuerpo (Kleiber): una cría traga menos que un adulto. */
+export const EXPONENTE_BOCADO = 0.75;
+
+// actuar/trabajo.ts
+/** J de trabajo que una persona hace en un tick de tarea: su potencia sostenida (t1, `POTENCIA_TRABAJO`) por la
+ * duración del tick. */
+export const TRABAJO_J_TICK = POTENCIA_TRABAJO * SEGUNDOS_TICK;
+/** Celdas a las que alcanza un golpe o una mano: quien caza o esquila tiene que estar junto al animal. */
+export const ALCANCE_MANO = 1.5;
+/** kg de carne que quien caza se lleva a cuestas del cadáver; el resto queda en la celda para quien llegue. */
+export const CARNE_A_CUESTAS_KG = 2;
+
+// whispers.ts (RADIO_AUDIBLE se queda allí: deriva de ALCANCE_VOZ)
+/** Fracción de la audibilidad junto al mensaje por debajo de la cual el oído ya no la distingue del ruido (adimensional). */
+export const CAIDA_AUDIBLE = 1e-3;

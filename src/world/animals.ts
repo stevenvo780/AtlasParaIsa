@@ -153,6 +153,12 @@ function puntosCerca(bloques: Map<number, Point[]>, x: number, y: number, radio:
     if (aqui) for (const p of aqui) if (Math.abs(p.x - x) + Math.abs(p.y - y) <= radio) fuera.push(p);
   }
 }
+/** Distancia de (x, y) a la amenaza más cercana. */
+function safetyAt(threats: readonly Point[], x: number, y: number): number {
+  let d = Infinity;
+  for (const t of threats) d = Math.min(d, Math.abs(x - t.x) + Math.abs(y - t.y));
+  return d;
+}
 function settlementOverlay(animal: Animal, tick: number, state: LocalState, humans: Map<number, Point[]>, hearths: Map<number, Point[]>): void {
   // Un pez no tiene amenazas de poblado ni habituación: nada de lo que se percibe aquí le cambia.
   if (animal.species === 'fish') return;
@@ -201,14 +207,12 @@ function settlementOverlay(animal: Animal, tick: number, state: LocalState, huma
     animal.habituation = clamp((animal.habituation ?? 0) + (nearSettlement && puedeHabituarse ? 0.012 : -0.003));
   }
   if (!threats.length) return;
-  let best = animal as Point, bestSafety = Infinity;
-  const safetyAt = (p: Point): number => { let d = Infinity; for (const t of threats) d = Math.min(d, distance(p, t)); return d; };
-  bestSafety = safetyAt(best);
+  let best = animal as Point, bestSafety = safetyAt(threats, best.x, best.y);
   for (const [dx, dy] of BREEDING_CELLS) {
-    const p = { x: animal.x + dx, y: animal.y + dy }, tile = state.tile(p.x, p.y);
+    const x = animal.x + dx, y = animal.y + dy, tile = state.tile(x, y);
     if (!tile || !habitat(animal, tile)) continue;
-    const safe = safetyAt(p);
-    if (safe > bestSafety) { best = p; bestSafety = safe; }
+    const safe = safetyAt(threats, x, y);
+    if (safe > bestSafety) { best = { x, y }; bestSafety = safe; }
   }
   animal.action = 'flee'; animal.target = { x: best.x, y: best.y }; animal.preyId = null; animal.work = 0;
   animal.reason = predator ? 'Evita el fuego y el refugio humano.' : 'Su cautela y habituación regulan la distancia a las personas.';
@@ -798,8 +802,10 @@ class CeldasFauna {
         const fast = state.fast;
         at = fast?.cellOf(tile) ?? -1;
         if (at < 0) {
+          // El poblado se lee aquí también: el terreno ya está leído y la tesela a mano.
           const terrain = tile.terrain;
-          marcas = VISIBLE | (terrain === 'water' ? AGUA : 0) | (terrain === 'shelter' ? REFUGIO : 0);
+          marcas = VISIBLE | POBLADO_LEIDO | (terrain === 'water' ? AGUA : 0)
+            | (terrain === 'shelter' ? REFUGIO | REFUGIO_TESELA | POBLADO : (tile.cultivation ?? 0) > 0 ? POBLADO : 0);
           growth = tile.growth;
           if (growth === undefined) vegetation = tile.vegetation;
         } else {

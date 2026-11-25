@@ -184,3 +184,75 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
   .game-shell .layers-dock { bottom:222px; max-height:calc(100dvh - 355px); }
   #heat-legend { left:auto; right:10px; width:190px; bottom:240px; }
 }
+
+/* V23 · V1 — indicador de salud (mundo, motor y servidor), panel «Motor», escucha y red de comunidades.
+ * Mismo papel y tinta que el resto del cuaderno; lo que se mide se pinta en píxeles (barras por escalones). */
+.game-clock .salud-indicador { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; }
+.salud-luz { display: inline-grid; grid-template-columns: 8px auto; grid-template-rows: auto auto; column-gap: 6px; align-items: center; min-height: 32px; padding: 3px 12px 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: #f3f1e4; text-align: left; line-height: 1.15; white-space: nowrap; }
+.salud-luz > i { grid-row: 1 / span 2; width: 8px; height: 8px; background: #829075; box-shadow: inset -2px -2px 0 #0000002e; }
+.game-top .salud-indicador .salud-luz > span { font-size: 9px; letter-spacing: .4px; text-transform: uppercase; color: #6a7860; white-space: nowrap; }
+.game-top .salud-indicador .salud-luz > strong { font-family: inherit; font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.salud-luz:hover { background: #e8ecd9; }
+.salud-luz[data-estado="sano"] > i { background: #8aa05a; }
+.salud-luz[data-estado="atencion"] { background: #f6e7cc; border-color: #d9b98a; }
+.salud-luz[data-estado="atencion"] > i { background: #c0782f; }
+.salud-luz[data-estado="grave"] { background: #f4d9cd; border-color: #dcaf9d; }
+.salud-luz[data-estado="grave"] > i { background: #a94c3b; animation: luz-grave 1.2s steps(2, jump-none) infinite; }
+.game-top .salud-indicador .salud-luz[data-estado="sin-dato"] > strong { font-weight: 400; color: #6a7860; }
+@keyframes luz-grave { to { background: #f2c1b2; } }
+@media (prefers-reduced-motion: reduce) { .salud-luz[data-estado="grave"] > i { animation: none; } }
+@media (max-width: 760px) {
+  .game-top .game-clock .salud-indicador { position: absolute; top: calc(100% + 66px); left: 0; z-index: 1; flex: none; max-width: calc(100vw - 20px); }
+  .game-top .game-clock .salud-indicador .salud-chip { position: static; top: auto; }
+  .salud-indicador .salud-luz { min-height: 44px; box-shadow: 0 3px 12px #18302530; }
+}
+
+.sin-dato { font-style: italic; font-weight: 400; color: #7a8270; }
+.motor-panel .motor-luz { margin: 0 0 10px; padding: 7px 9px; border-radius: 5px; font-size: 12px; background: #eef0da; color: #4f6236; }
+.motor-panel .motor-luz[data-estado="atencion"] { background: #f6e7cc; color: #6d4518; }
+.motor-panel .motor-luz[data-estado="grave"] { background: #f4d9cd; color: #843a2d; }
+.motor-panel .motor-luz[data-estado="sin-dato"] { background: #eeeee3; color: #5b6c53; }
+.motor-bloque { margin-top: 14px; }
+.motor-bloque > .detail-subtitle { margin: 0 0 6px; }
+.motor-hilos { display: flex; align-items: flex-end; gap: 2px; height: 36px; padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: #f3f1e4; overflow: hidden; }
+.motor-hilo { flex: 1 1 0; min-width: 3px; height: 32px; background: repeating-linear-gradient(to top, #dfe2d0 0 3px, transparent 3px 4px); position: relative; }
+.motor-hilo::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--o) * 4px); background: repeating-linear-gradient(to top, #486750 0 3px, transparent 3px 4px); }
+.motor-fases-barra { display: flex; height: 12px; border-radius: 2px; overflow: hidden; border: 1px solid var(--line); }
+.motor-fases-barra > span { min-width: 1px; }
+.motor-fases { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; font-size: 12px; color: #5e7051; }
+.motor-fases li { display: grid; grid-template-columns: 8px 1fr auto auto; gap: 6px; align-items: center; }
+.motor-fases i { width: 8px; height: 8px; }
+.motor-fases strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.motor-fases small { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.motor-tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.motor-tarjeta { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; padding: 8px 9px; border: 1px solid var(--line); border-left: 4px solid #8aa05a; border-radius: 4px; font-size: 12px; }
+.motor-tarjeta small { grid-column: 1 / -1; color: #5e7051; }
+.motor-tarjeta .detail-badge { justify-self: start; }
+.motor-tarjeta[data-estado="cpu"] { border-left-color: #c0782f; }
+.motor-tarjeta[data-estado="sin"] { border-left-color: #a94c3b; }
+
+.escucha-ficha { margin: 12px 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.escucha-ficha > .detail-subtitle { margin: 0 0 8px; }
+.escucha-fila { display: grid; grid-template-columns: minmax(0, 1fr) 98px 38px; gap: 8px; align-items: center; min-height: 22px; font-size: 12px; color: #5e7051; }
+.escucha-fila > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.escucha-fila > strong { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+.escucha-fila > .sin-dato { grid-column: 2 / -1; }
+.escucha-barra { position: relative; height: 10px; background: repeating-linear-gradient(to right, #dfe2d0 0 5px, transparent 5px 6px); }
+.escucha-barra::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--e) * 6px); background: repeating-linear-gradient(to right, #5f8fa3 0 5px, transparent 5px 6px); }
+.escucha-propia { font-weight: 600; }
+.escucha-propia .escucha-barra { height: 14px; }
+.escucha-padre .escucha-barra::after { background: repeating-linear-gradient(to right, #9bb6c0 0 5px, transparent 5px 6px); }
+.escucha-ficha .drawer-note { margin-top: 6px; }
+
+.grafo-comunidades { margin: 0 0 12px; }
+.grafo-comunidades svg { display: block; width: 100%; height: auto; aspect-ratio: 480 / 300; background: #f3f1e4; border: 1px solid var(--line); border-radius: 4px; touch-action: manipulation; }
+.grafo-halo { fill-opacity: .1; stroke-opacity: .55; stroke-width: 1; stroke-dasharray: 3 2; }
+.grafo-arista { fill: none; stroke-opacity: .55; stroke-linecap: square; }
+.grafo-arista.es-propia { stroke-opacity: .95; }
+.grafo-seleccion { fill: none; stroke: #294638; stroke-width: 1.5; }
+.grafo-comunidades figcaption { margin-top: 5px; min-height: 18px; font-size: 12px; color: var(--ink); }
+.histograma-tamanos ol { display: flex; align-items: flex-end; gap: 6px; list-style: none; margin: 4px 0 0; padding: 0; overflow-x: auto; }
+.histograma-tamanos li { display: grid; justify-items: center; gap: 2px; min-width: 34px; font-size: 11px; color: #5e7051; }
+.histograma-tamanos li strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.histo-barra { width: 16px; height: 36px; background: repeating-linear-gradient(to top, #dfe2d0 0 3px, transparent 3px 4.5px); position: relative; }
+.histo-barra::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--h) * 4.5px); background: repeating-linear-gradient(to top, #b07a3c 0 3px, transparent 3px 4.5px); }

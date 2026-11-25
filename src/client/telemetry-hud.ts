@@ -2,6 +2,8 @@
 import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../shared/types.js';
 import { esc, number, percentage } from './ui-catalog.js';
 import { censoDe } from './censo-view.js';
+import type { WorldDirectoryResponse } from '../shared/worldmap.js';
+import type { EstadoSalud, LuzSalud } from './panel-motor.js';
 import { ELEMENTS, geologyAt, type ChemOperator, type ChemistrySummaryView, type CompoundLot, type ElementSymbol, type ElementVector, type ThermalPhase } from '../shared/chemistry.js';
 
 export type HudNav = 'people' | 'life' | 'communities' | 'animals' | 'land' | 'technology' | 'performance';
@@ -311,4 +313,133 @@ export function habituatedFauna(animals?: readonly AnimalView[]) {
 }
 export function forgedToolsCount(items?: NonNullable<WorldView['technology']>['items']): number | undefined {
   return items?.filter(item => item.mass > 0 && !!item.chemFormulaId && !!item.chemPhase && item.chemPhase !== 'raw' && item.chemPhase !== 'ground' && item.chemPhase !== 'washed' && Object.values(item.capacities).some(v => v > .08)).length;
+}
+
+/* ------------------------------------------------------------------ */
+/* V23 — luz del mundo y grafo de comunidades                          */
+/* ------------------------------------------------------------------ */
+
+/** Umbrales de lectura (no del mundo): caer un 10 % en un día pide atención; un 40 %, o quedarse sin nadie, es grave. */
+const CAIDA_ATENCION = .1, CAIDA_GRAVE = .4, TICKS_DIA = 2400;
+
+/** Luz del mundo: la población viva y su cambio en el último día de muestras recibidas. */
+export function luzMundo(world: WorldView | null): LuzSalud {
+  const vivos = world?.stats?.population;
+  if (!world || !finite(vivos)) return { estado: 'sin-dato', valor: 'sin dato', motivo: 'Sin censo del mundo todavía.' };
+  if (vivos <= 0) return { estado: 'grave', valor: '0', motivo: 'No queda nadie con vida.' };
+  const muestras = (world.stats?.history ?? []).filter(s => finite(s.tick) && finite(s.population));
+  const ultima = muestras.at(-1), primera = ultima && muestras.find(s => s.tick >= ultima.tick - TICKS_DIA);
+  if (!ultima || !primera || primera === ultima || primera.population <= 0) return { estado: 'sano', valor: number(vivos), motivo: `${number(vivos)} vidas. Aún no hay un día de muestras para ver la tendencia.` };
+  const cambio = (ultima.population - primera.population) / primera.population, dias = (ultima.tick - primera.tick) / TICKS_DIA;
+  const flecha = cambio > .005 ? '↑' : cambio < -.005 ? '↓' : '→';
+  const lectura = `${number(vivos)} vidas; ${cambio >= 0 ? 'subió' : 'bajó'} ${number(Math.abs(cambio) * 100, 1)} % en ${number(dias, 2)} días (${number(primera.population)} → ${number(ultima.population)}).`;
+  const estado: EstadoSalud = -cambio >= CAIDA_GRAVE ? 'grave' : -cambio >= CAIDA_ATENCION ? 'atencion' : 'sano';
+  return { estado, valor: `${number(vivos)} ${flecha}`, motivo: estado === 'sano' ? lectura : `Atención: ${lectura}` };
+}
+
+export interface NodoGrafo { id: string; nombre: string; x: number; y: number; comunidad: string | null }
+export interface ComunidadGrafo { id: string; nombre: string; color: string; miembros: number }
+/** `mutua`: se conocen los dos sentidos y el peso es el menor (como la red de la ley de comunidades); si no, el sentido conocido. */
+export interface AristaGrafo { a: string; b: string; peso: number; mutua: boolean }
+export interface DatosGrafo { nodos: NodoGrafo[]; comunidades: ComunidadGrafo[]; aristas: AristaGrafo[]; seleccion: string | null; alcance: 'mundo' | 'vista'; fichas: number }
+
+const colorSeguro = (hex: string | undefined, fallback: string): string => typeof hex === 'string' && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(hex) ? hex : fallback;
+const SIN_COMUNIDAD = '#a29484', ARISTA_ENTRE = '#7c806f';
+
+/** Junta las confianzas de las fichas recibidas en aristas no dirigidas. */
+export function aristasConocidas(fichas: Iterable<{ id: string; trust: readonly { id: string; value: number }[] }>): AristaGrafo[] {
+  const pares = new Map<string, { a: string; b: string; ab?: number; ba?: number }>();
+  for (const ficha of fichas) for (const t of ficha.trust) {
+    if (t.id === ficha.id || !finite(t.value) || t.value <= 0) continue;
+    const [a, b] = ficha.id < t.id ? [ficha.id, t.id] : [t.id, ficha.id];
+    const par = pares.get(`${a}\u0000${b}`) ?? { a, b };
+    const v = Math.min(1, t.value);
+    if (ficha.id === a) par.ab = v; else par.ba = v;
+    pares.set(`${a}\u0000${b}`, par);
+  }
+  return [...pares.values()].map(p => p.ab !== undefined && p.ba !== undefined ? { a: p.a, b: p.b, peso: Math.min(p.ab, p.ba), mutua: true } : { a: p.a, b: p.b, peso: (p.ab ?? p.ba)!, mutua: false });
+}
+
+/** Personas y comunidades de todo el mundo si llegó el directorio; si no, las de la vista. */
+export function datosGrafo(world: WorldView, directory: WorldDirectoryResponse | null, fichas: Iterable<{ id: string; trust: readonly { id: string; value: number }[] }>, seleccion: string | null): DatosGrafo {
+  const fichasLista = [...fichas];
+  const nodos: NodoGrafo[] = (directory?.people ?? world.people).filter(p => finite(p.x) && finite(p.y)).map(p => ({ id: p.id, nombre: p.name, x: p.x, y: p.y, comunidad: p.communityId ?? null }));
+  const comunidades: ComunidadGrafo[] = (directory?.communities ?? world.communities ?? []).map(c => ({ id: c.id, nombre: c.name, color: colorSeguro(c.color, '#779264'), miembros: c.memberCount ?? ('members' in c ? c.members.length : 0) }));
+  return { nodos, comunidades, aristas: aristasConocidas(fichasLista), seleccion, alcance: directory ? 'mundo' : 'vista', fichas: fichasLista.length };
+}
+
+export interface GrafoDibujado { html: string; nodos: { id: string; nombre: string; x: number; y: number }[] }
+const ANCHO_GRAFO = 480, ALTO_GRAFO = 300, MARGEN_GRAFO = 14;
+const r1 = (v: number): string => (Math.round(v * 10) / 10).toString();
+
+/**
+ * Grafo de comunidades en SVG con las personas en su lugar del mundo: la dispersión de cada comunidad se lee tal cual.
+ * Los nodos de una comunidad son un solo `<path>` de píxeles y las aristas se agrupan por color, grosor y trazo, así que
+ * el número de elementos depende de las comunidades, no de las personas; el clic lo resuelve quien llama con `nodos`.
+ */
+export function grafoComunidades(d: DatosGrafo): GrafoDibujado {
+  if (!d.nodos.length) return { html: '<p class="stats-empty" data-grafo-vacio>No hay personas recibidas para dibujar la red.</p>', nodos: [] };
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of d.nodos) { minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x); minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y); }
+  const escala = Math.min((ANCHO_GRAFO - 2 * MARGEN_GRAFO) / Math.max(1, maxX - minX), (ALTO_GRAFO - 2 * MARGEN_GRAFO) / Math.max(1, maxY - minY));
+  const ox = (ANCHO_GRAFO - (maxX - minX) * escala) / 2, oy = (ALTO_GRAFO - (maxY - minY) * escala) / 2;
+  const puntos = d.nodos.map(n => ({ id: n.id, nombre: n.nombre, comunidad: n.comunidad, x: ox + (n.x - minX) * escala, y: oy + (n.y - minY) * escala }));
+  const porId = new Map(puntos.map(p => [p.id, p]));
+  const colorDe = new Map(d.comunidades.map(c => [c.id, c.color]));
+
+  // Halo de cada comunidad: centro de sus miembros recibidos y radio que abarca al 90 % de ellos.
+  const miembros = new Map<string, typeof puntos>();
+  for (const p of puntos) if (p.comunidad && colorDe.has(p.comunidad)) { const lista = miembros.get(p.comunidad) ?? []; lista.push(p); miembros.set(p.comunidad, lista); }
+  const halos = d.comunidades.flatMap(c => {
+    const lista = miembros.get(c.id); if (!lista?.length) return [];
+    const cx = lista.reduce((s, p) => s + p.x, 0) / lista.length, cy = lista.reduce((s, p) => s + p.y, 0) / lista.length;
+    const dist = lista.map(p => Math.hypot(p.x - cx, p.y - cy)).sort((a, b) => a - b);
+    const r = Math.max(6, (dist[Math.min(dist.length - 1, Math.floor(dist.length * .9))] ?? 0) + 5);
+    return [`<circle class="grafo-halo" cx="${r1(cx)}" cy="${r1(cy)}" r="${r1(r)}" fill="${c.color}" stroke="${c.color}"><title>${esc(`${c.nombre} · ${number(c.miembros)} miembros`)}</title></circle>`];
+  }).join('');
+
+  // Aristas en 4 grosores × (misma comunidad o entre comunidades) × (mutua o de un sentido).
+  const grupos = new Map<string, string[]>();
+  let conocidas = 0;
+  for (const a of d.aristas) {
+    const pa = porId.get(a.a), pb = porId.get(a.b); if (!pa || !pb) continue;
+    conocidas++;
+    const nivel = Math.min(3, Math.floor(a.peso * 4));
+    const propia = d.seleccion !== null && (a.a === d.seleccion || a.b === d.seleccion);
+    const color = pa.comunidad && pa.comunidad === pb.comunidad ? colorDe.get(pa.comunidad) ?? ARISTA_ENTRE : ARISTA_ENTRE;
+    const clave = `${color}|${nivel}|${a.mutua ? 1 : 0}|${propia ? 1 : 0}`;
+    (grupos.get(clave) ?? grupos.set(clave, []).get(clave)!).push(`M${r1(pa.x)} ${r1(pa.y)}L${r1(pb.x)} ${r1(pb.y)}`);
+  }
+  const aristas = [...grupos].sort(([a], [b]) => Number(a.endsWith('1')) - Number(b.endsWith('1'))).map(([clave, trazos]) => {
+    const [color, nivel, mutua, propia] = clave.split('|');
+    return `<path class="grafo-arista${propia === '1' ? ' es-propia' : ''}" d="${trazos.join('')}" stroke="${color}" stroke-width="${(.6 + Number(nivel) * .8).toFixed(1)}"${mutua === '1' ? '' : ' stroke-dasharray="2 2"'}/>`;
+  }).join('');
+
+  // Nodos: un cuadrado de 3×3 por persona, un solo path por color.
+  const porColor = new Map<string, string[]>();
+  for (const p of puntos) {
+    const color = p.comunidad ? colorDe.get(p.comunidad) ?? SIN_COMUNIDAD : SIN_COMUNIDAD;
+    (porColor.get(color) ?? porColor.set(color, []).get(color)!).push(`M${Math.round(p.x) - 1} ${Math.round(p.y) - 1}h3v3h-3z`);
+  }
+  const nodos = [...porColor].map(([color, trazos]) => `<path class="grafo-nodos" d="${trazos.join('')}" fill="${color}"/>`).join('');
+  const sel = d.seleccion ? porId.get(d.seleccion) : undefined;
+  const marca = sel ? `<rect class="grafo-seleccion" x="${Math.round(sel.x) - 3}" y="${Math.round(sel.y) - 3}" width="7" height="7"/>` : '';
+  const resumen = `${number(d.nodos.length)} personas ${d.alcance === 'mundo' ? 'del mundo' : 'de esta vista'} en su lugar, ${number(d.comunidades.length)} comunidades y ${number(conocidas)} vínculos conocidos`;
+  const nota = `Cada cuadrado es una persona en su lugar del mundo, del color de su comunidad (gris: sin comunidad); el halo abarca al 90 % de sus miembros. Línea continua: confianza en los dos sentidos (el peso es el menor); discontinua: solo se conoce un sentido. Más gruesa, más confianza. Los vínculos son los de las ${number(d.fichas)} fichas abiertas en esta visita: el servidor aún no envía la red completa. Toca una persona para abrir su ficha.`;
+  return {
+    html: `<figure class="grafo-comunidades" data-grafo data-nodos="${d.nodos.length}" data-aristas="${conocidas}"><svg viewBox="0 0 ${ANCHO_GRAFO} ${ALTO_GRAFO}" shape-rendering="crispEdges" role="img" aria-label="${esc(resumen)}">${halos}${aristas}${nodos}${marca}</svg><figcaption><span data-grafo-pista aria-live="polite">${esc(resumen)}.</span></figcaption><p class="stats-note">${esc(nota)}</p></figure>`,
+    nodos: puntos.map(({ id, nombre, x, y }) => ({ id, nombre, x, y })),
+  };
+}
+
+/** Histograma de tamaños en clases que se doblan (1–2, 3–4, 5–8, …) hasta la mayor comunidad: sin un tope de escala. */
+export function histogramaTamanos(comunidades: readonly ComunidadGrafo[]): string {
+  const tamanos = comunidades.map(c => c.miembros).filter(n => finite(n) && n > 0).sort((a, b) => a - b);
+  if (!tamanos.length) return '<p class="stats-empty" data-histograma-vacio>Todavía no hay comunidades para medir sus tamaños.</p>';
+  const clases: { desde: number; hasta: number; n: number }[] = [];
+  for (let hasta = 2, desde = 1; desde <= tamanos.at(-1)!; desde = hasta + 1, hasta *= 2) clases.push({ desde, hasta, n: tamanos.filter(t => t >= desde && t <= hasta).length });
+  const alto = Math.max(...clases.map(c => c.n));
+  const pct = (q: number) => tamanos[Math.min(tamanos.length - 1, Math.floor(q * tamanos.length))]!;
+  const barras = clases.map(c => `<li data-clase="${c.desde}-${c.hasta}"><span class="histo-barra" style="--h:${Math.round(c.n / alto * 8)}" title="${esc(`${number(c.n)} comunidades de ${c.desde}–${c.hasta} miembros`)}"></span><strong>${esc(number(c.n))}</strong><small>${c.desde === c.hasta ? c.desde : `${c.desde}–${c.hasta}`}</small></li>`).join('');
+  return `<div class="histograma-tamanos" data-histograma><ol role="img" aria-label="${esc(clases.map(c => `${c.desde}–${c.hasta}: ${c.n}`).join(' · '))}">${barras}</ol><p class="stats-note">Miembros por comunidad · mediana ${esc(number(pct(.5)))} · p90 ${esc(number(pct(.9)))} · mayor ${esc(number(tamanos.at(-1)))}.</p></div>`;
 }

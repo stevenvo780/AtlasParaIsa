@@ -138,9 +138,10 @@ export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], lina
   const S = sustanciasDe(c), carn = qc * PASO_CARNIVORIA, masaAdulta = Math.exp(qm * PASO_LNMASA);
   const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA_HUMANA[2], KAPPA0];
   // Tejido animal: proteína (músculo, pelo), grasa (CH₂), agua y hueso (CaHPO₄). Se sintetiza de lo mismo que hay en el
-  // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄.
+  // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄. En masa: agua 61 %, proteína 20 %, grasa 10 %, mineral 9 %
+  // (un mamífero: 60/18/15/5). Con 3:2:10:1 el mineral era el 31 % y el calcio de la hoja no alcanzaba para un embrión.
   const p = crearPlantilla(c.quimica, c.globales.registro, {
-    partes: [{ id: S.proteina, nu: 3 }, { id: S.CH2, nu: 2 }, { id: S.H2O, nu: 10 }, { id: S.CaHPO4, nu: 1 }],
+    partes: [{ id: S.proteina, nu: 10 }, { id: S.CH2, nu: 10 }, { id: S.H2O, nu: 50 }, { id: S.CaHPO4, nu: 1 }],
     entradas: [S.proteina, S.CH2, S.H2O, S.CaHPO4, S.madera, S.NH3, S.H3PO4],
     subproductos: [S.CO2, S.O2],
     kappa, captura: 0, masaAdulta, m0: M0 * masaAdulta, linaje,
@@ -387,6 +388,10 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   const coste = costeCria(c, f, plantillaDe(c, cu));
   f.fertil = coste > 0 && yo.reservaJ >= coste;
   if (coste > 0 && !f.fertil) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / coste);
+  // Gestante: el embrión se hace con lo que hay en el tubo (el hueso y la proteína no se guardan en la reserva), así que
+  // la madre sigue con hambre hasta completarlo. Sin esto descansaba saciada con el tubo vacío y el embrión no crecía.
+  const g = cu.gestacion;
+  if (g) yo.hambre = Math.max(yo.hambre, 1 - c.materia.vista(g.embrion).masa / plantillaDe(c, cu).m0);
   yo.fertil = f.fertil;
 }
 

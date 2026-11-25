@@ -20,7 +20,7 @@ const { dispositivo, script, nvrtc, fds, entorno, control } = workerData;
 const estado = new Int32Array(control);
 const avisar = () => { Atomics.add(estado, 0, 1); Atomics.notify(estado, 0); };
 const fallar = () => { Atomics.store(estado, 1, 1); avisar(); };
-const hijo = spawn('python3', [script, '--device', String(dispositivo), '--nvrtc', nvrtc, '--fd', '3'],
+const hijo = spawn('python3', ['-B', script, '--device', String(dispositivo), '--nvrtc', nvrtc, '--fd', '3'],
   { stdio: [fds[0], fds[1], 'inherit', fds[2]], env: entorno });
 Atomics.store(estado, 2, hijo.pid ?? 0);
 avisar();
@@ -331,4 +331,13 @@ function decodificar<T>(canal: CanalGpu, datos: Uint8Array): T {
 
 export function recibirRespuesta<T>(canal: CanalGpu, plazoMs: number): T {
   return decodificar<T>(canal, canal.recibir(plazoMs));
+}
+
+const canalesOcupados = new WeakSet<CanalGpu>();
+
+/** Los clientes de una tarjeta comparten el tramo de /dev/shm desde el byte 0. */
+export function reservarCanalGpu(canal: CanalGpu): (() => void) | undefined {
+  if (canalesOcupados.has(canal)) return;
+  canalesOcupados.add(canal);
+  return () => { canalesOcupados.delete(canal); };
 }

@@ -10,6 +10,8 @@ import struct
 import sys
 from time import perf_counter
 
+from materia_kernel import MateriaKernel
+
 
 def enlace(lib, nombre, *tipos):
     funcion = getattr(lib, nombre)
@@ -45,18 +47,28 @@ class Dispositivo:
         self.sync = enlace(driver, 'cuCtxSynchronize')
         self.buffers = {}
 
+        self.nvrtc = nvrtc
+        self.arquitectura = f'compute_{mayor.value}{menor.value}'
+        self.cargar_modulo = enlace(driver, 'cuModuleLoadData', C.POINTER(p), p)
+        self.buscar_funcion = enlace(driver, 'cuModuleGetFunction', C.POINTER(p), p, C.c_char_p)
+        self.materia = None
         try:
-            fuente = Path(__file__).with_name('percibir.cu').read_bytes()
-            ptx = compilar(nvrtc, fuente, f'compute_{mayor.value}{menor.value}')
-            modulo = p()
-            enlace(driver, 'cuModuleLoadData', C.POINTER(p), p)(C.byref(modulo), ptx)
-            funcion = enlace(driver, 'cuModuleGetFunction', C.POINTER(p), p, C.c_char_p)
-            self.actualizar, self.percibir = p(), p()
-            funcion(C.byref(self.actualizar), modulo, b'actualizar_percepcion')
-            funcion(C.byref(self.percibir), modulo, b'percibir')
+            self.actualizar, self.percibir = self.cargar('percibir.cu', b'actualizar_percepcion', b'percibir')
         except Exception:
             self.cerrar()
             raise
+
+    def cargar(self, nombre, *funciones):
+        fuente = Path(__file__).with_name(nombre).read_bytes()
+        ptx = compilar(self.nvrtc, fuente, self.arquitectura, nombre)
+        modulo = C.c_void_p()
+        self.cargar_modulo(C.byref(modulo), ptx)
+        resultado = []
+        for nombre_funcion in funciones:
+            funcion = C.c_void_p()
+            self.buscar_funcion(C.byref(funcion), modulo, nombre_funcion)
+            resultado.append(funcion)
+        return resultado
 
     def buffer(self, nombre, bytes_, conservar=False):
         puntero, capacidad = self.buffers.get(nombre, (None, 0))
@@ -72,21 +84,33 @@ class Dispositivo:
         self.buffers[nombre] = nuevo, tamano
         return nuevo
 
-    def kernel(self, funcion, bloques, *argumentos):
+    def kernel(self, funcion, bloques, *argumentos, hilos=256):
         if bloques:
             argv = (C.c_void_p * len(argumentos))(*(C.addressof(arg) for arg in argumentos))
-            self.lanzar(funcion, bloques, 1, 1, 256, 1, 1, 0, None, argv, None)
+            self.lanzar(funcion, bloques, 1, 1, hilos, 1, 1, 0, None, argv, None)
 
     def ejecutar(self, orden, mm):
         subida, bajada, salida = (orden[k] for k in ('subida', 'bajada', 'salida'))
         if not 0 <= subida <= salida <= salida + bajada <= len(mm):
             raise ValueError('Lote fuera del canal GPU.')
+        inicio = perf_counter()
+        kind = orden['kind']
+        if kind in ('materia', 'prepararMateria') and self.materia is None:
+            self.materia = MateriaKernel(self)
+        if kind == 'prepararMateria':
+            return {'ms': (perf_counter() - inicio) * 1000}
+        if kind not in ('materia', 'percibir'):
+            raise ValueError('Orden GPU desconocida.')
         lote = self.buffer('lote', subida)
+        direccion = C.addressof(C.c_ubyte.from_buffer(mm))
+        if kind == 'materia':
+            self.subir(lote, direccion, subida)
+            tripletas = self.materia.ejecutar(orden, lote, direccion + salida, mm)
+            return {'ms': (perf_counter() - inicio) * 1000, 'tripletas': tripletas}
         resultado = self.buffer('resultado', bajada)
         terreno = self.buffer('terreno', orden['terrenoBytes'], conservar=True)
         cerebro = self.buffer('cerebro', orden['cerebroBytes'], conservar=True)
         ocupantes = self.buffer('ocupantes', orden['organismosBytes'], conservar=True)
-        direccion = C.addressof(C.c_ubyte.from_buffer(mm))
         inicio = perf_counter()
         self.subir(lote, direccion, subida)
         self.kernel(self.actualizar, orden['parches'], lote, terreno, cerebro, ocupantes)
@@ -95,18 +119,18 @@ class Dispositivo:
             self.bajar(direccion + salida, resultado, bajada)
         else:
             self.sync()
-        return (perf_counter() - inicio) * 1000
+        return {'ms': (perf_counter() - inicio) * 1000}
 
     def cerrar(self):
         self.destruir(self.contexto)
 
 
-def compilar(nvrtc, fuente, arquitectura):
+def compilar(nvrtc, fuente, arquitectura, nombre):
     lib = C.CDLL(nvrtc, mode=C.RTLD_GLOBAL)
     p, z = C.c_void_p, C.c_size_t
     programa = p()
     enlace(lib, 'nvrtcCreateProgram', C.POINTER(p), C.c_char_p, C.c_char_p, C.c_int, p, p)(
-        C.byref(programa), fuente, b'percibir.cu', 0, None, None)
+        C.byref(programa), fuente, nombre.encode(), 0, None, None)
     destruir = enlace(lib, 'nvrtcDestroyProgram', C.POINTER(p))
     opciones = (C.c_char_p * 2)(f'--gpu-architecture={arquitectura}'.encode(), b'--std=c++11')
     try:
@@ -148,16 +172,14 @@ def main():
             if largo > 4096:
                 raise ValueError('Orden de control demasiado grande.')
             orden = json.loads(sys.stdin.buffer.read(largo))
-            if orden['kind'] != 'percibir':
-                raise ValueError('Orden GPU desconocida.')
             capacidad = os.fstat(args.fd).st_size
             if mm is None or len(mm) != capacidad:
                 if mm is not None:
                     mm.close()
                 mm = mmap.mmap(args.fd, capacidad)
-            ms = gpu.ejecutar(orden, mm)
+            datos = gpu.ejecutar(orden, mm)
             # Eco del despacho: el motor descarta la respuesta que no sea la del lote que espera.
-            emitir({'ok': True, 'ms': ms, 'tick': orden['tick'], 'despacho': orden['despacho']})
+            emitir({'ok': True, **datos, 'tick': orden['tick'], 'despacho': orden['despacho']})
     finally:
         if mm is not None:
             mm.close()

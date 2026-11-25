@@ -104,8 +104,8 @@ const SUELO_MINERAL = { SiO2: 1_000_000, CaCO3: 100_000 }, NH3_FERTIL = 60_000, 
 /** P del suelo / P de la vegetación de referencia a su capacidad (en suelos reales, de 5 a 20). */
 const SUELO_POR_VEGETACION = 5;
 
-/** Fuego: se enciende a 1.100 K (K), el laboratorio lo deja arder hasta 60 ticks y mantiene dentro dos veces el O₂
- * estequiométrico de lo que le queda por arder (pedido de la química: O₂ ≥ 1×). */
+/** Fuego: la caja del laboratorio se enciende a 1.100 K (K) y arde 60 ticks (ticks); todo fuego busca tener dentro dos
+ * veces el O₂ estequiométrico de lo que le queda por arder (pedido de la química: O₂ ≥ 1×). */
 const T_IGNICION = 1100, TICKS_FUEGO = 60, O2_FUEGO = 2;
 
 /** Clausius–Clapeyron con la regla de Trouton (ΔH_vap = 88 J/(mol·K)·T_eb), con la T de ebullición del modelo. */
@@ -166,6 +166,9 @@ export const FISICA = {
   dispersionSemillas: 0.01,
   /** Temperatura por debajo de la cual una brasa se apaga (K). Real: 500–700 K. */
   tBrasa: 600,
+  /** Tiro: fracción de su exceso de temperatura sobre la de brasa que un fuego gasta en calentar el aire que aspira en un
+   * tick (adimensional). Un fuego no aspira más aire del que puede calentar: con 1 se enfriaría hasta la brasa. */
+  tiroFuego: 0.25,
 };
 export type Fisica = typeof FISICA;
 
@@ -1484,32 +1487,45 @@ export class MundoMaterial {
   }
 
   /**
-   * Un tick de un fuego (su paso es de un tick, no el de la página). Toma aire de `aire` (O₂ con el N₂ que lo acompaña,
-   * a su temperatura) hasta tener O2_FUEGO veces lo que pide lo que le queda por oxidar, H₂ incluido; arde (`pasoLote`
-   * sin catálisis); y suelta al aire los humos (CO₂, H₂O y N₂) con su calor, que es lo que lo enfría. Devuelve si sigue
-   * ardiendo: le queda algo por oxidar y no ha bajado de la temperatura de brasa.
+   * Un tick de un fuego (su paso es de un tick, no el de la página). Aspira aire de `aire` (O₂ con el N₂ que lo acompaña,
+   * a su temperatura) hasta tener O2_FUEGO veces lo que pide lo que le queda por oxidar, H₂ incluido, pero nunca más del
+   * que su calor puede calentar sin acercarse a la temperatura de brasa (el tiro): un fuego recién prendido toma poco
+   * aire y, según arde y se calienta, más, hasta que no le queda nada por oxidar. Luego arde (`pasoLote` sin catálisis) y
+   * suelta al aire los humos (CO₂, H₂O y N₂) con su calor, que es lo que lo enfría. Devuelve si sigue ardiendo: le queda
+   * algo por oxidar y no ha bajado de la temperatura de brasa.
    */
   arder(fuego: LoteRef, aire: LoteRef): boolean {
-    const A = this.arena, S = this.S, pide = this.oxigenoQuePide(fuego);
+    const A = this.arena, S = this.S, fi = this.params.fisica, pide = this.oxigenoQuePide(fuego);
     if (!(pide > 0)) return false;
     const falta = Math.ceil(O2_FUEGO * pide) - A.cuantos(fuego, S.O2), o2Aire = A.cuantos(aire, S.O2);
     if (falta > 0 && o2Aire > 0) {
-      const n2 = Math.round(Math.min(falta, o2Aire) * A.cuantos(aire, S.N2) / o2Aire);
-      A.moverParte(aire, fuego, this.pide(S.O2, falta));
-      if (n2 > 0) A.moverParte(aire, fuego, this.pide(S.N2, n2));
+      const atomos = medir(this.ctx, fuego).atomos, T = A.calor(fuego) / (CAPACIDAD_ATOMO * atomos), tAire = this.temperaturaLote(aire);
+      const n2PorO2 = A.cuantos(aire, S.N2) / o2Aire, mezcla = T - fi.tiroFuego * (T - fi.tBrasa);
+      const atomosPorO2 = this.atomosDe(S.O2) + n2PorO2 * this.atomosDe(S.N2);
+      // Balance de calor: tras aspirar x cuantos de O₂ con su N₂ a tAire, el lote queda a `mezcla` o por encima.
+      const cabe = mezcla > tAire && T > mezcla ? Math.floor(atomos * (T - mezcla) / (mezcla - tAire) / atomosPorO2) : 0;
+      const o2 = Math.min(falta, o2Aire, cabe);
+      if (o2 > 0) {
+        A.moverParte(aire, fuego, this.pide(S.O2, o2));
+        const n2 = Math.round(o2 * n2PorO2);
+        if (n2 > 0) A.moverParte(aire, fuego, this.pide(S.N2, n2));
+      }
     }
     pasoLote(this.ctx, fuego, 1, SIN);
     for (const id of this.humos) {
       const n = A.cuantos(fuego, id);
       if (n > 0) A.moverParte(fuego, aire, this.pide(id, n));
     }
-    return this.oxigenoQuePide(fuego) > 0 && this.temperaturaLote(fuego) >= this.params.fisica.tBrasa;
+    return this.oxigenoQuePide(fuego) > 0 && this.temperaturaLote(fuego) >= fi.tBrasa;
   }
 
+  private atomosDe(id: SustanciaId): number { return this.quimica.sustancia(id).atomos.reduce((x, v) => x + v, 0); }
+
   /**
-   * Quema la fracción `fraccion` de cada órgano de la tesela i (laboratorio): lo quemado va a un lote de fuego que se
-   * enciende a 1.100 K (la ignición es calor declarado) y arde con `arder` hasta apagarse o TICKS_FUEGO ticks; después
-   * los gases que queden vuelven al aire y lo demás, con el calor, al suelo. Devuelve las unidades quemadas.
+   * Quema la fracción `fraccion` de cada órgano de la tesela i con el protocolo de la caja validada (laboratorio): lo
+   * quemado va a un lote de fuego con dos veces el O₂ estequiométrico del aire (y su N₂), arde TICKS_FUEGO ticks cerrado
+   * desde 1.100 K (la ignición es calor declarado) y luego los gases vuelven al aire y lo demás, con el calor, al suelo.
+   * Devuelve las unidades quemadas. Los fuegos del mundo (`encender`) arden abiertos, con `arder`.
    */
   quemar(i: number, fraccion: number, p = this.paginaDe(i)): number {
     const u = { ...this.unidades(i, this.u) }, vida = this.vida[i]!, suelo = this.suelo[i]!, aire = this.aire[p]!;
@@ -1519,14 +1535,15 @@ export class MundoMaterial {
       const k = Math.round(u[o] * fraccion);
       if (k > 0) { this.moverUnidades(vida, fuego, o, k); quemadas += k; }
     }
-    if (quemadas > 0) {
-      this.termostato(fuego, T_IGNICION, IGNICION);
-      for (let t = 0; t < TICKS_FUEGO && this.arder(fuego, aire); t++);
-    }
+    const pedido = Math.ceil(O2_FUEGO * this.oxigenoQuePide(fuego));
+    this.arena.mover({ de: aire, a: fuego, esp: this.S.O2, cuantos: pedido });
+    this.arena.mover({ de: aire, a: fuego, esp: this.S.N2, cuantos: Math.round(pedido * 78 / 21) });
+    this.termostato(fuego, T_IGNICION, IGNICION);
+    for (let t = 0; t < TICKS_FUEGO; t++) pasoLote(this.ctx, fuego, 1, SIN);
     const T = this.temperatura(p, 1);
     this.termostato(fuego, T);
     for (const id of [...this.especies(fuego)]) {
-      this.arena.moverParte(fuego, this.esGas(id, T) ? aire : suelo, this.pide(id, this.arena.cuantos(fuego, id)));
+      this.arena.mover({ de: fuego, a: this.esGas(id, T) ? aire : suelo, esp: id, cuantos: this.arena.cuantos(fuego, id) });
     }
     this.arena.moverCalor(fuego, suelo, this.arena.calor(fuego));
     this.arena.liberar(fuego);

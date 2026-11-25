@@ -335,7 +335,8 @@ function cadencia(): void {
   mkdirSync(salida, { recursive: true });
   for (const K of lista('k', '1,10,60,120')) {
     const q = crearServicioQuimico({ modo: 'inmediato' });
-    const m = MundoMaterial.levantar(teselas(mapa, lado), q, { semilla, luz: luzMedia(0, grupo ? 1 : K) });
+    // --reparto inicio|strang: dónde se evalúa la vida dentro de la ventana (para medir cuánto baja el sesgo de K).
+    const m = MundoMaterial.levantar(teselas(mapa, lado), q, { semilla, luz: luzMedia(0, grupo ? 1 : K), reparto: opt('reparto', 'strang') === 'inicio' ? 'inicio' : 'strang' });
     const tot = totalesVacios(), clima = tiempo(mapa), lluvia = lluvias(mapa);
     m.plegar(tot);
     const fotos: Record<string, unknown> = {};

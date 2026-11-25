@@ -9,7 +9,7 @@ import type { World } from '../../src/world/index.js';
 import type { WorldParams } from '../../src/world/params.js';
 import type { Chunk } from '../../src/world/terrain.js';
 import type { Violacion } from '../../src/world/invariantes.js';
-import { INTERRUPTORES, type Interruptor } from '../../src/shared/interruptores.js';
+import type { Interruptor } from '../../src/shared/interruptores.js';
 
 const TICKS_POR_DIA = 2400;
 type Estado = 'cumple' | 'falla' | 'desconocido';
@@ -221,7 +221,9 @@ async function resolverParams(t: Pick<Trabajo, 'raiz' | 'regimen' | 'params' | '
   }
   if (t.params) params = parseParams(JSON.parse(readFileSync(t.params, 'utf8')), params);
   if (t.hasta) {
-    const { escalon } = await importar(t.raiz, 'shared/interruptores.ts') as typeof import('../../src/shared/interruptores.js');
+    // Cada brazo trae los interruptores de su árbol: se validan contra los suyos, no contra los de este panel.
+    const { escalon, INTERRUPTORES } = await importar(t.raiz, 'shared/interruptores.ts') as typeof import('../../src/shared/interruptores.js');
+    if (!(INTERRUPTORES as readonly string[]).includes(t.hasta)) throw new Error(`--hasta: «${t.hasta}» no es un interruptor V23 de ${t.raiz}`);
     params = parseParams({ v23: escalon(t.hasta) }, params);
   }
   return parseParams({ motor: { ...params.motor, hilos: t.hilos, gpu: t.gpu } }, params);
@@ -487,7 +489,7 @@ function argumentos(args: string[]): Opciones {
       case '--guardar-en': o.guardarEn = resolve(valor); break;
       case '--desde': o.desde = resolve(valor); break;
       case '--hasta':
-        if (!(INTERRUPTORES as readonly string[]).includes(valor)) throw new Error(`--hasta: «${valor}» no es un interruptor V23`);
+        if (!/^[a-zA-Z]+$/.test(valor)) throw new Error(`--hasta: «${valor}» no es un interruptor V23`);
         o.hasta = valor as Interruptor; break;
       default: throw new Error(`Opción desconocida: ${bandera}`);
     }

@@ -354,7 +354,10 @@ export interface Pretendiente { uid: number; slot: number; x: number; y: number;
 /** El mejor que aporta, no pariente, a ≤ `radio` celdas de `p`: afinidad = cercanía en unidades del radio más el vínculo
  * que `p` le tiene. Los empates los rompe el azar del dueño. */
 export function mejorPareja(c: CtxLey, p: Person, slot: number, radio: number): Pretendiente | undefined {
-  const f = c.frente, pareja = f.pareja, progenitores = f.col('progenitores');
+  const f = c.frente;
+  // Sin la columna (la ley se acaba de encender y el motor aún no la registró) no hay con quién: nadie publicó parentesco.
+  if (!f.columnas.includes('progenitores')) return undefined;
+  const pareja = f.pareja, progenitores = f.col('progenitores');
   let mejor: Pretendiente | undefined, empates = 0;
   cercanos(c, p.x, p.y, radio, Clase.Persona, (s, d2) => {
     if (s === slot || !(pareja[s]! >= 0) || parienteDe(c, p, s, progenitores)) return;
@@ -570,10 +573,12 @@ export const leyNatalidad: Ley = {
 
   proyectar: {
     persona(c: CtxLey, persona: Person, vista: PersonView): void {
-      vista.crianza = persona.crianza ? { cuidadores: [...persona.crianza.cuidadores], madurez: persona.crianza.madurez } : undefined;
+      if (persona.crianza) vista.crianza = { cuidadores: [...persona.crianza.cuidadores], madurez: persona.crianza.madurez };
+      else if (vista.crianza !== undefined) vista.crianza = undefined;
       if (persona.role !== 'neighbor' || !vista.cuerpoVisto) return;
       const g = balanceDe(c).enCurso(persona);
-      vista.cuerpoVisto.embrion = g ? { masa: g.masa, m0: g.m0, otro: g.otro } : undefined;
+      if (g) vista.cuerpoVisto.embrion = { masa: g.masa, m0: g.m0, otro: g.otro };
+      else if (vista.cuerpoVisto.embrion !== undefined) vista.cuerpoVisto.embrion = undefined;
     },
   },
 

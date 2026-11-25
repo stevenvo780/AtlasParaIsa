@@ -21,6 +21,8 @@ import { vecinos } from '../rejilla.js';
 const ELECCION_POR_AFINIDAD = true;
 
 export function reproduce(world: World): void {
+  // Con `v23.natalidad` este paso está sustituido por `leyNatalidad`: aunque alguien lo llame, no hace nacer a nadie.
+  if (ley(world, 'natalidad')) return;
   const pop = paramsOf(world).poblacion;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
   // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`

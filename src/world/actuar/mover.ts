@@ -12,6 +12,13 @@ import { personaMovida } from '../rejilla.js';
 import { trampleTile } from '../ecosystem.js';
 import { exertBody } from '../body.js';
 import { count } from '../statistics.js';
+import { ley } from '../params.js';
+import { C_MOVER } from '../../shared/naturaleza.js';
+import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
+import { cargaKg, masaDe, pagar } from '../materia/cuerpo.js';
+import type { Cuerpo } from '../materia/tipos.js';
+import { calidadEmpedrado, desgastarEmpedrado } from '../materia/piezas.js';
+import { empedrar } from '../inventions.js';
 
 
 /** Physical relief from the material state of the single cell underfoot. */
@@ -120,6 +127,13 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
     }
     return;
   }
+  const conCuerpo = person.cuerpo && ley(world, 'cuerpos') ? ctxMateriaDe(world) : undefined;
+  if (conCuerpo && person.cuerpo) {
+    const pagado = pagarPaso(conCuerpo, world, person, person.cuerpo, tileIn(start.x, start.y));
+    if (pagado < 0) return;
+    darPaso(world, person, nextStep, tileIn, physicalRoads, conCuerpo, pagado);
+    return;
+  }
   const carryFatigue = physicalRoads ? person.fatigue : 0;
   if (!payContainedWaterCarry(world, person)) {
     const desperateCarry = paramsOf(world).social.vinculoEncuentro > 0
@@ -149,6 +163,59 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
     count(world, 'roadsPaved');
   }
   const visitedKey = key(person);
+  if (!person.visited.includes(visitedKey)) {
+    person.visited.push(visitedKey); person.visited = person.visited.slice(-192);
+    if (person.action === 'explore') outcome(world, person, 'explore', 0.05);
+  }
+  if (person.command?.order === 'move' && distance(person, person.command) < 0.5) {
+    person.command = null; person.controlMode = 'auto'; person.decisionAt = world.tick + 1;
+    person.reason = 'Llegó al destino solicitado; retoma sus decisiones.';
+  }
+}
+
+
+// ── V23: andar con un cuerpo de átomos ───────────────────────────────────────────────────────────────────
+
+/** J ya pagados de un paso que aún no se dio: quien no alcanza a pagar uno entero lo completa en los siguientes. */
+const pagoPendiente = new WeakMap<Person, number>();
+
+/** Alivio del camino con obra: el tráfico apisona y el empedrado es una pieza de piedra en la celda (t2). */
+function alivioCamino(c: CtxLeyMateria, tile: Tile | undefined): number {
+  if (!tile) return 1;
+  return 1 - Math.min(0.55, Math.max(0, tile.traffic ?? 0) * 0.45 + calidadEmpedrado(c, tile) * 0.15);
+}
+
+/** Paga un paso de una celda: C_MOVER·(masa + carga) J por celda, con el alivio del camino donde empieza. Devuelve los
+ * J pagados en este tick, o −1 si el paso aún no está pagado entero (lo pagado queda a cuenta). */
+function pagarPaso(c: CtxLeyMateria, world: World, person: Person, cuerpo: Cuerpo, desde: Tile | undefined): number {
+  const alivio = paramsOf(world).terreno.caminosFisicos ? (ley(world, 'obra') ? alivioCamino(c, desde) : roadEffortFactor(desde)) : 1;
+  const coste = C_MOVER * (masaDe(c, cuerpo) + cargaKg(c, person.carga ?? [])) * alivio;
+  const previo = pagoPendiente.get(person) ?? 0;
+  const pagado = pagar(c, cuerpo, coste - previo);
+  if (previo + pagado < coste) {
+    pagoPendiente.set(person, previo + pagado);
+    person.decisionAt = Math.min(person.decisionAt, world.tick + 1);
+    person.reason = 'Lo que lleva a cuestas pesa más de lo que su reserva puede pagar ahora: avanza muy despacio.';
+    return -1;
+  }
+  pagoPendiente.delete(person);
+  return pagado;
+}
+
+/** El paso ya pagado: posición, pisada, fatiga, empedrado con obra, lugares visitados y orden cumplida. */
+function darPaso(world: World, person: Person, nextStep: Point, tileIn: TileLookup, physicalRoads: boolean,
+  c: CtxLeyMateria, pagadoJ: number): void {
+  person.x = nextStep.x; person.y = nextStep.y;
+  personaMovida(world, person);
+  const steppedTile = tileIn(person.x, person.y)!;
+  trampleTile(steppedTile);
+  const alivio = physicalRoads ? (ley(world, 'obra') ? alivioCamino(c, steppedTile) : roadEffortFactor(steppedTile)) : 1;
+  exertBody(person, { energy: 0, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) * alivio });
+  if (physicalRoads && ley(world, 'obra')) {
+    desgastarEmpedrado(c, steppedTile, pagadoJ);
+    if ((steppedTile.traffic ?? 0) >= 0.72 && empedrar(c, person, steppedTile)) count(world, 'roadsPaved');
+  }
+  const visitedKey = `${person.x},${person.y}`;
   if (!person.visited.includes(visitedKey)) {
     person.visited.push(visitedKey); person.visited = person.visited.slice(-192);
     if (person.action === 'explore') outcome(world, person, 'explore', 0.05);

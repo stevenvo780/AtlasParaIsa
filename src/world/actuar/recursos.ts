@@ -18,6 +18,13 @@ import { compoundToolBonus, performChemistryExperiment } from '../chemistry.js';
 import { harvestMaterial } from '../ecosystem.js';
 import { filtrarCerca } from '../indice-puntos.js';
 import { marcarTesela } from '../soa/barrera-percepcion.js';
+import { ley } from '../params.js';
+import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
+import { REF_NULA } from '../motor/contratos.js';
+import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
+import { MASA_ADULTA_HUMANA, beber, beberEnCelda, comerEnCelda, ingerirSelecto, masaDe, pedidoComida, soltar } from '../materia/cuerpo.js';
+import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
+import { madurezDe } from '../cohesion.js';
 
 export const MIN_FORAGE_STOCK = 0.005;
 
@@ -25,13 +32,19 @@ export const FORAGE_AMOUNT = 0.06;
 
 
 export function eat(world: World, person: Person, current: Tile, currentCell: number, fast?: ResidentFastAccess): void {
+  if (person.cuerpo && ley(world, 'cuerpos')) { comerConCuerpo(world, person, person.cuerpo, current); return; }
   const foodBefore = fast && currentCell >= 0 ? fast.foodArr[currentCell]! : current.food;
-  const harvest = Math.min(foodBefore, 0.0035);
-  current.food = clamp(foodBefore - harvest);
+  let harvest = Math.min(foodBefore, 0.0035 * madurezEscalar(world, person));
+  if (ley(world, 'materia')) {
+    // La vista `food` la reescribe w tras el paso material de la página: restar del escalar no comería nada.
+    harvest = extraerDeCelda(world, current, 'comida', harvest);
+  } else {
+    current.food = clamp(foodBefore - harvest);
+    const vegBefore = fast && currentCell >= 0 ? fast.vegetationArr[currentCell]! : current.vegetation;
+    current.vegetation = clamp(vegBefore - harvest * 0.1);
+    marcarTesela(current);
+  }
   count(world, 'foodHarvested', harvest);
-  const vegBefore = fast && currentCell >= 0 ? fast.vegetationArr[currentCell]! : current.vegetation;
-  current.vegetation = clamp(vegBefore - harvest * 0.1);
-  marcarTesela(current);
   // Harvested biomass is divided between today's meal and a bounded portable reserve.
   const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
   person.inventory += saved;
@@ -48,6 +61,7 @@ export function eat(world: World, person: Person, current: Tile, currentCell: nu
 
 
 export function drink(world: World, person: Person, current: Tile, currentCell: number, fast: ResidentFastAccess | undefined, physiology: ReturnType<typeof demographicTraits>, params: WorldParams): void {
+  if (person.cuerpo && ley(world, 'cuerpos')) { beberConCuerpo(world, person, person.cuerpo, current); return; }
   const needed = Math.min(0.006, person.thirst / SED_POR_UNIDAD);
   const ambient = takeWater(world, person, needed);
   hydrateBody(person, ambient);
@@ -69,6 +83,7 @@ export function drink(world: World, person: Person, current: Tile, currentCell: 
 
 
 export function gatherResources(world: World, person: Person, tile: Tile): boolean {
+  if (person.cuerpo && ley(world, 'cuerpos') && ley(world, 'obra')) return recogerACuestas(world, person, person.cuerpo, tile);
   let success = false;
   const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
   for (const material of [preferred, preferred === 'wood' ? 'stone' : 'wood'] as const) {
@@ -93,13 +108,234 @@ export function gatherResources(world: World, person: Person, tile: Tile): boole
 
 
 export function forageFood(world: World, person: Person, tile: Tile): boolean {
+  if (person.cuerpo && ley(world, 'cuerpos')) return forrajearACuestas(world, person, person.cuerpo, tile);
   let success = false;
-  const foodBefore = tile.food, harvested = Math.min(foodBefore, FORAGE_AMOUNT, Math.max(0, 0.25 - person.inventory));
-  tile.food = clamp(foodBefore - harvested);
-  tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
-  marcarTesela(tile);
+  const foodBefore = tile.food;
+  let harvested = Math.min(foodBefore, FORAGE_AMOUNT * madurezEscalar(world, person), Math.max(0, 0.25 - person.inventory));
+  if (ley(world, 'materia')) harvested = extraerDeCelda(world, tile, 'comida', harvested);
+  else {
+    tile.food = clamp(foodBefore - harvested);
+    tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
+    marcarTesela(tile);
+  }
   person.inventory += harvested;
   count(world, 'foodHarvested', harvested);
   success = harvested > 0;
   return success;
+}
+
+
+// ── V23: comer, beber y recoger sobre la materia ─────────────────────────────────────────────────────────
+
+/** kg de alimento que una persona adulta traga en un tick de comer (un bocado de ≈ 10 g cada 36 s de mundo). */
+export const BOCADO_KG = 0.01;
+/** kg de agua que una persona adulta bebe en un tick de beber (≈ 50 mL por sorbo largo). */
+export const SORBO_KG = 0.05;
+/** kg de alimento que deja a cuestas una tarea completa de forrajear. */
+export const FORRAJEO_KG = 0.5;
+/** kg de madera o de piedra que pesa una unidad de `Person.materials`: la vista escalar de lo que lleva a cuestas. */
+export const KG_POR_UNIDAD_MATERIAL = 5;
+/** Exponente de escala del bocado con la masa del cuerpo (Kleiber): una cría traga menos que un adulto. */
+export const EXPONENTE_BOCADO = 0.75;
+
+/** Contadores de `world.totals` que lee el laboratorio (kg acumulados en la vida del mundo). */
+export const TOTAL_DIETA_KG = 'v23DietaKg';
+export const TOTAL_DIETA_FAUNA_KG = 'v23DietaFaunaKg';
+export const TOTAL_BEBIDA_KG = 'v23BebidaKg';
+export const TOTAL_FORRAJEO_KG = 'v23ForrajeoKg';
+export const TOTAL_RECOGIDA_KG = 'v23RecogidaKg';
+/** Σ por persona y tick de la carga a cuestas y de la masa corporal: su cociente es la carga media sobre la masa. */
+export const TOTAL_CARGA_KG_TICK = 'v23CargaKgTick';
+export const TOTAL_MASA_KG_TICK = 'v23MasaKgTick';
+
+export function contar(world: World, clave: string, cantidad: number): void {
+  if (!(cantidad > 0)) return;
+  world.totals[clave] = (world.totals[clave] ?? 0) + cantidad;
+}
+
+const celdaVacia = (): LotesCelda => ({ suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA });
+const lotesCelda = celdaVacia();
+const MG_A_KG = 1e-6;
+const lotesTmp = new Float64Array(8);
+
+/** ¿Es la celda de este dueño? Lo ajeno solo se toca por intento. */
+export const celdaEsPropia = (c: CtxLeyMateria, celda: number): boolean =>
+  celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo;
+
+/** Sin cuerpos, n pide que una cría coma y forrajee en proporción a su madurez. Con cuerpos lo da la masa del cuerpo. */
+function madurezEscalar(world: World, person: Person): number {
+  return ley(world, 'natalidad') ? Math.max(0, madurezDe(world, person)) : 1;
+}
+
+/** Cuánto traga este cuerpo frente a un adulto: (masa / masa adulta)^0,75. */
+export function escalaBocado(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const masa = masaDe(c, cuerpo);
+  return masa > 0 ? (masa / MASA_ADULTA_HUMANA) ** EXPONENTE_BOCADO : 0;
+}
+
+/** Con materia y cuerpos aún escalares: lo que sale de la tesela va al sumidero declarado de w. */
+function extraerDeCelda(world: World, tile: Tile, recurso: 'comida' | 'agua', cantidad: number): number {
+  if (!(cantidad > 0)) return 0;
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(tile.x, tile.y);
+  if (!celdaEsPropia(c, celda)) return 0;
+  return extraerEscalar(c, celda, recurso, cantidad);
+}
+
+/** Lotes de carne que esta persona lleva desde una caza o un cadáver: lo que come de ellos cuenta como dieta de fauna. */
+const carneACuestas = new WeakMap<Person, Set<LoteRef>>();
+export function marcarCarne(person: Person, lote: LoteRef): void {
+  let s = carneACuestas.get(person);
+  if (!s) carneACuestas.set(person, s = new Set());
+  s.add(lote);
+}
+
+/** Come hasta `kg` de los lotes de la carga; suelta en la celda lo que, tras comer de ello, ya no da nada. */
+export function comerDeCarga(c: CtxLeyMateria, person: Person, cuerpo: Cuerpo, kg: number, celda: number): { kg: number; fauna: number } {
+  const carga = person.carga, carne = carneACuestas.get(person);
+  let comido = 0, fauna = 0;
+  if (!carga?.length || !(kg > 0)) return { kg: 0, fauna: 0 };
+  for (let i = carga.length - 1; i >= 0 && comido < kg; i--) {
+    const lote = carga[i]!;
+    if (!c.materia.propio(lote) || !(c.materia.vista(lote).digerible > 0)) continue;
+    const k = ingerirSelecto(c, cuerpo, lote, kg - comido);
+    if (!(k > 0)) continue;
+    comido += k;
+    if (carne?.has(lote)) fauna += k;
+    const queda = c.materia.vista(lote);
+    if (queda.masa <= 0 && c.materia.calor(lote) === 0) { c.materia.liberar(lote); carga.splice(i, 1); carne?.delete(lote); }
+    else if (!(queda.digerible > 0) && celda >= 0) { soltar(c, lote, celda); carga.splice(i, 1); carne?.delete(lote); }
+  }
+  return { kg: comido, fauna };
+}
+
+/**
+ * Comer con cuerpo de átomos: el bocado pasa al digestivo desde lo que hay en la celda propia (primero un cadáver, que se
+ * pudre si nadie lo come, luego la vegetación), después de una obra con depósito y por último de lo que lleva a cuestas.
+ * Nada se resta de un escalar: las vistas las reescriben w y b.
+ */
+export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, current: Tile): number {
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(current.x, current.y);
+  const bocado = BOCADO_KG * escalaBocado(c, cuerpo);
+  let comido = 0, fauna = 0;
+  if (celdaEsPropia(c, celda)) {
+    const n = Math.min(c.materia.lotes(celda, Rol.Cadaver, lotesTmp), lotesTmp.length);
+    for (let i = 0; i < n && comido < bocado; i++) {
+      const k = ingerirSelecto(c, cuerpo, lotesTmp[i]!, bocado - comido);
+      comido += k; fauna += k;
+    }
+    if (comido < bocado) comido += comerEnCelda(c, cuerpo, celda, bocado - comido);
+  }
+  if (comido < bocado && ley(world, 'obra')) comido += takeFood(world, person, bocado - comido);
+  if (comido < bocado) { const r = comerDeCarga(c, person, cuerpo, bocado - comido, celda); comido += r.kg; fauna += r.fauna; }
+  contar(world, TOTAL_DIETA_KG, comido); contar(world, TOTAL_DIETA_FAUNA_KG, fauna);
+  if (comido > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', comido / bocado);
+  if (person.hunger < 0.12 || !(comido > 0)) person.decisionAt = world.tick + 1;
+  return comido;
+}
+
+/** Beber con cuerpo: de la charca de la celda propia (y, con obra, de una cisterna) y de lo que lleva con agua. */
+export function beberConCuerpo(world: World, person: Person, cuerpo: Cuerpo, current: Tile): number {
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(current.x, current.y);
+  const sorbo = SORBO_KG * escalaBocado(c, cuerpo);
+  let bebido = 0;
+  if (ley(world, 'obra')) bebido = takeWater(world, person, sorbo);
+  else if (celdaEsPropia(c, celda)) bebido = beberEnCelda(c, cuerpo, celda, sorbo);
+  const carga = person.carga;
+  for (let i = 0; carga && i < carga.length && bebido < sorbo; i++) {
+    const lote = carga[i]!;
+    if (c.materia.propio(lote) && c.materia.vista(lote).agua > 0) bebido += beber(c, cuerpo, lote, sorbo - bebido);
+  }
+  if (bebido > 0 && ley(world, 'materia') && paramsOf(world).agua.memoria < 1) person.waterMemory = { x: person.x, y: person.y };
+  contar(world, TOTAL_BEBIDA_KG, bebido);
+  if (bebido > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', bebido / sorbo);
+  if (person.thirst < 0.12 || !(bebido > 0)) {
+    if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; }
+    person.decisionAt = world.tick + 1;
+  }
+  return bebido;
+}
+
+/** Forrajear con cuerpo: lo digerible de la vegetación de la celda propia pasa a un lote a cuestas (`Person.carga`). */
+export function forrajearACuestas(world: World, person: Person, cuerpo: Cuerpo, tile: Tile): boolean {
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(tile.x, tile.y);
+  if (!celdaEsPropia(c, celda)) return false;
+  const vida = lotesDeCelda(c, celda, lotesCelda).vida;
+  if (vida < 0) return false;
+  const lote = c.materia.nuevo(Rol.Objeto, -1, 0);
+  const antes = c.materia.vista(lote).masa;
+  c.materia.moverParte(vida, lote, pedidoComida(c, cuerpo, FORRAJEO_KG * escalaBocado(c, cuerpo)));
+  const kg = c.materia.vista(lote).masa - antes;
+  if (!(kg > 0)) { if (c.materia.calor(lote) === 0) c.materia.liberar(lote); else soltar(c, lote, celda); return false; }
+  (person.carga ??= []).push(lote);
+  contar(world, TOTAL_FORRAJEO_KG, kg);
+  return true;
+}
+
+/** Con obra, recoger madera (del tronco de la vegetación) o piedra (de la roca latente) deja un lote a cuestas. */
+export function recogerACuestas(world: World, person: Person, cuerpo: Cuerpo, tile: Tile): boolean {
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(tile.x, tile.y);
+  if (!celdaEsPropia(c, celda)) return false;
+  vistaMateriales(c, person);
+  const S = sustanciasDe(c), carga = (person.carga ??= []);
+  const preferido = person.materials.wood < 6 ? 'wood' : 'stone';
+  for (const material of [preferido, preferido === 'wood' ? 'stone' : 'wood'] as const) {
+    const receipt = useTool(world, person, material === 'wood' ? 'cutting' : 'abrasion');
+    const kg = KG_POR_UNIDAD_MATERIAL * (1 + (receipt?.power ?? 0)) * escalaBocado(c, cuerpo);
+    let lote: LoteRef = REF_NULA;
+    if (material === 'stone') lote = rocaDe(c, celda, kg);
+    else {
+      const vida = lotesDeCelda(c, celda, lotesCelda).vida;
+      if (vida >= 0) {
+        lote = c.materia.nuevo(Rol.Objeto, -1, 0);
+        const cuantos = Math.floor(kg / (c.quimica.sustancia(S.madera).masa * MG_A_KG));
+        if (!(c.materia.mover({ de: vida, a: lote, esp: S.madera, cuantos }) > 0)) { c.materia.liberar(lote); lote = REF_NULA; }
+      }
+    }
+    if (lote === REF_NULA) continue;
+    const masa = c.materia.vista(lote).masa;
+    carga.push(lote);
+    contar(world, TOTAL_RECOGIDA_KG, masa);
+    count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', masa / KG_POR_UNIDAD_MATERIAL);
+    recordTechnologyBenefit(world, person, receipt, masa / KG_POR_UNIDAD_MATERIAL - 1);
+    vistaMateriales(c, person);
+    marcarTesela(tile);
+    return true;
+  }
+  return false;
+}
+
+/** `Person.materials` como vista de la carga: madera y piedra en unidades de `KG_POR_UNIDAD_MATERIAL`. La decisión de
+ * siempre la sigue leyendo; con obra no se escribe por otro lado. */
+export function vistaMateriales(c: CtxLeyMateria, person: Person): void {
+  const carga = person.carga;
+  if (!carga) return;
+  const S = sustanciasDe(c);
+  let madera = 0, piedra = 0;
+  for (const lote of carga) {
+    if (!c.materia.propio(lote)) continue;
+    const v = c.materia.vista(lote);
+    if (v.principal === S.madera) madera += v.masa;
+    else if (v.principal === S.SiO2 || v.principal === S.CaCO3 || v.principal === S.Fe2O3) piedra += v.masa;
+  }
+  person.materials.wood = madera / KG_POR_UNIDAD_MATERIAL;
+  person.materials.stone = piedra / KG_POR_UNIDAD_MATERIAL;
+}
+
+/** Saca de la carga `unidades` de madera hacia el Suelo de una celda propia (estacas de un cultivo): no se destruye. */
+export function gastarMaderaEnSuelo(c: CtxLeyMateria, person: Person, celda: number, unidades: number): number {
+  const carga = person.carga, S = sustanciasDe(c);
+  if (!carga || !celdaEsPropia(c, celda)) return 0;
+  const suelo = lotesDeCelda(c, celda, lotesCelda).suelo;
+  if (suelo < 0) return 0;
+  const mg = c.quimica.sustancia(S.madera).masa;
+  let resta = Math.ceil(unidades * KG_POR_UNIDAD_MATERIAL / (mg * MG_A_KG)), movido = 0;
+  for (let i = carga.length - 1; i >= 0 && resta > 0; i--) {
+    const lote = carga[i]!;
+    if (!c.materia.propio(lote) || c.materia.vista(lote).principal !== S.madera) continue;
+    const m = c.materia.mover({ de: lote, a: suelo, esp: S.madera, cuantos: resta });
+    resta -= m; movido += m;
+    if (c.materia.vista(lote).masa <= 0 && c.materia.calor(lote) === 0) { c.materia.liberar(lote); carga.splice(i, 1); }
+  }
+  vistaMateriales(c, person);
+  return movido * mg * MG_A_KG / KG_POR_UNIDAD_MATERIAL;
 }

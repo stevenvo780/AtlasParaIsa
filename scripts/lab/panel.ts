@@ -9,6 +9,7 @@ import type { World } from '../../src/world/index.js';
 import type { WorldParams } from '../../src/world/params.js';
 import type { Chunk } from '../../src/world/terrain.js';
 import type { Violacion } from '../../src/world/invariantes.js';
+import { INTERRUPTORES, type Interruptor } from '../../src/shared/interruptores.js';
 
 const TICKS_POR_DIA = 2400;
 type Estado = 'cumple' | 'falla' | 'desconocido';
@@ -40,6 +41,8 @@ export interface CensoPanel {
 export interface CorridaPanel {
   brazo: string; semilla: number; replica: number; estado: 'completo' | 'error'; error?: string;
   censos: CensoPanel[]; ramBytes: number; maxRssMiB: number;
+  /** Los interruptores V23 con que corrió el mundo (`params.v23` de su fila de inicio). */
+  interruptores?: Record<string, unknown>;
   /** Día en que la corrida se detuvo por pasar de `--tope-mortales`: viva, con lo posterior desconocido. */
   tope?: number;
   /** Día en que no quedó ningún mortal: la corrida termina ahí y el mundo vacío ya no se simula. */
@@ -180,6 +183,8 @@ interface MarcaCache { estado: 'acierto' | 'fallo' | 'sin-cache'; clave?: string
 interface Trabajo {
   raiz: string; brazo: string; semilla: number; replica: number; dias: number; salida: string;
   regimen: 'abierto' | 'defecto'; hilos: number; gpu: number[]; cadaTicks: number; params?: string; topeMortales?: number;
+  /** Enciende los interruptores V23 hasta este (`escalon()`), encima de `params`. */
+  hasta?: Interruptor;
   /** Guardar el mundo al final de este día en `guardarEn`, y/o arrancar desde un punto guardado allí. */
   guardarDia?: number; guardarEn?: string; desde?: string;
   /** Internos del panel: no salen en la fila de inicio salvo `cache`, que sale al final. */
@@ -188,6 +193,7 @@ interface Trabajo {
 interface Opciones {
   semillas: number[]; replicas: number; dias: number; paralelo: number; salida: string; brazos: string[];
   regimen: Trabajo['regimen']; hilos: number; gpu: number[]; cadaTicks: number; config?: string; params?: string; topeMortales?: number;
+  hasta?: Interruptor;
   cache?: string; guardarDia?: number; guardarEn?: string; desde?: string;
 }
 const importar = (raiz: string, ruta: string) => import(pathToFileURL(join(raiz, 'src', ruta)).href);
@@ -206,7 +212,7 @@ function filaInicio(trabajo: Trabajo, params: WorldParams, medio: MedioInicio, e
 }
 
 /** Los parámetros con que corre un trabajo: régimen, archivo `--params` y motor de un solo hilo, sobre `base` si se parte de un punto guardado. */
-async function resolverParams(t: Pick<Trabajo, 'raiz' | 'regimen' | 'params' | 'hilos' | 'gpu'>, base?: WorldParams): Promise<WorldParams> {
+async function resolverParams(t: Pick<Trabajo, 'raiz' | 'regimen' | 'params' | 'hilos' | 'gpu' | 'hasta'>, base?: WorldParams): Promise<WorldParams> {
   const { parseParams, DEFAULT_PARAMS } = await importar(t.raiz, 'world/params.ts') as typeof import('../../src/world/params.js');
   let params: WorldParams = base ?? DEFAULT_PARAMS;
   if (!base && t.regimen === 'abierto') {
@@ -214,6 +220,10 @@ async function resolverParams(t: Pick<Trabajo, 'raiz' | 'regimen' | 'params' | '
     params = hostOpenWorldParams();
   }
   if (t.params) params = parseParams(JSON.parse(readFileSync(t.params, 'utf8')), params);
+  if (t.hasta) {
+    const { escalon } = await importar(t.raiz, 'shared/interruptores.ts') as typeof import('../../src/shared/interruptores.js');
+    params = parseParams({ v23: escalon(t.hasta) }, params);
+  }
   return parseParams({ motor: { ...params.motor, hilos: t.hilos, gpu: t.gpu } }, params);
 }
 
@@ -240,7 +250,7 @@ async function contextoCache(o: Opciones, raiz: string): Promise<ContextoCache> 
   if (!git) return { usable: false, motivo: 'la raíz no es un repositorio git' };
   if (git.sucio) return { usable: false, motivo: 'la raíz tiene cambios sin commitear' };
   try {
-    const params = await resolverParams({ raiz, regimen: o.regimen, params: o.params, hilos: o.hilos, gpu: o.gpu });
+    const params = await resolverParams({ raiz, regimen: o.regimen, params: o.params, hilos: o.hilos, gpu: o.gpu, hasta: o.hasta });
     return { usable: true, arbol: git.arbol, params, paramsHash: sha(estable(params)) };
   } catch (error) { return { usable: false, motivo: `no se pudieron resolver los parámetros: ${String(error)}` }; }
 }
@@ -399,6 +409,9 @@ async function replica(trabajo: Trabajo): Promise<void> {
       filas: readFileSync(trabajo.salida, 'utf8').split('\n').filter(Boolean).slice(1) };
     mkdirSync(trabajo.guardarEn!, { recursive: true });
     writeFileSync(temporal, serialize(contenido)); renameSync(temporal, destino);
+    // El mismo mundo en el formato que lee `poblacion.mts --desde` (`atlas-punto-1`), al lado del punto del panel.
+    const paraPoblacion = `${destino.replace(/\.punto$/, '')}.atlas-punto`, temporalPoblacion = `${paraPoblacion}.${process.pid}.tmp`;
+    writeFileSync(temporalPoblacion, serialize({ formato: 'atlas-punto-1', mundo, params, archivo: [...archivo] })); renameSync(temporalPoblacion, paraPoblacion);
   };
   const medio: MedioInicio = { carga: loadavg(), ramBytes: totalmem(), invariantesDisponibles: !!comprobarInvariantes, limitaciones: ['En memoria sin servidor ni BD: el catálogo tecnológico standalone puede divergir de producción', 'RSS y tiempos por proceso; no incluyen consumo de otros trabajos', ...(!comprobarInvariantes ? ['Este brazo no integra invariantes.ts: M5 desconocida'] : [])] };
   const origenPunto = punto ? { bifurcacion: { punto: rutaPunto(trabajo.desde!, trabajo.semilla, trabajo.replica), dia: punto.dia, tick: punto.tick, origen: punto.origen } } : {};
@@ -473,6 +486,9 @@ function argumentos(args: string[]): Opciones {
       case '--guardar-dia': o.guardarDia = numero(valor, bandera); break;
       case '--guardar-en': o.guardarEn = resolve(valor); break;
       case '--desde': o.desde = resolve(valor); break;
+      case '--hasta':
+        if (!(INTERRUPTORES as readonly string[]).includes(valor)) throw new Error(`--hasta: «${valor}» no es un interruptor V23`);
+        o.hasta = valor as Interruptor; break;
       default: throw new Error(`Opción desconocida: ${bandera}`);
     }
   }
@@ -493,7 +509,8 @@ function leerCorrida(trabajo: Trabajo): CorridaPanel {
   return { brazo: trabajo.brazo, semilla: trabajo.semilla, replica: trabajo.replica, censos: filas.filter(f => f.tipo === 'censo'),
     estado: terminada ? 'completo' : 'error', tope: fin?.estado === 'tope' ? fin.dia : undefined, extinta: fin?.estado === 'extinta' ? fin.dia : undefined,
     error: fin?.error ?? falloProceso?.error ?? (!fin ? 'El proceso terminó sin fila fin' : undefined),
-    ramBytes: inicio?.ramBytes ?? totalmem(), maxRssMiB: fin?.maxRssMiB ?? Infinity };
+    ramBytes: inicio?.ramBytes ?? totalmem(), maxRssMiB: fin?.maxRssMiB ?? Infinity,
+    ...(inicio?.params?.v23 ? { interruptores: inicio.params.v23 as Record<string, unknown> } : {}) };
 }
 
 /** Valor de una métrica en el horizonte. Una corrida extinta antes de él deja `mortales` y `nacimientos` congelados en cero nuevos;
@@ -512,7 +529,7 @@ async function panel(o: Opciones): Promise<void> {
     const brazo = `${indice + 1}-${basename(raiz)}`;
     const salida = join(o.salida, `${brazo}-${semilla}-${replica}.jsonl`);
     if (existsSync(salida)) throw new Error(`La salida ya existe: ${salida}`);
-    trabajos.push({ raiz, brazo, semilla, replica, dias: o.dias, salida, regimen: o.regimen, hilos: o.hilos, gpu: o.gpu, cadaTicks: o.cadaTicks, params: o.params, topeMortales: o.topeMortales,
+    trabajos.push({ raiz, brazo, semilla, replica, dias: o.dias, salida, regimen: o.regimen, hilos: o.hilos, gpu: o.gpu, cadaTicks: o.cadaTicks, params: o.params, topeMortales: o.topeMortales, hasta: o.hasta,
       guardarDia: o.guardarDia, guardarEn: o.guardarEn, desde: o.desde });
   }
   writeFileSync(join(o.salida, 'config.json'), JSON.stringify({ ...o, umbrales, carga: loadavg(), ramBytes: totalmem() }, null, 2));
@@ -609,7 +626,7 @@ async function panel(o: Opciones): Promise<void> {
     const huellas = corridas.filter(r => `${r.brazo}/${r.semilla}` === clave && r.estado === 'completo').map(huella);
     return huellas.length > 1 && new Set(huellas).size === 1;
   });
-  const informe = { brazos, comparacion, pseudorreplicas, ...(o.cache ? { cache: resumenCache } : {}), corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas idénticas dentro de una semilla (pseudorreplicas) cuentan como una en la permutación, pero no en las proporciones M1-M6', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide la persistencia ni el catálogo tecnológico de producción'] };
+  const informe = { interruptores: { hasta: o.hasta ?? null, params: o.params ?? null }, brazos, comparacion, pseudorreplicas, ...(o.cache ? { cache: resumenCache } : {}), corridas, umbrales, limitaciones: ['M1 es informativa hasta integrar 0H', 'Un panel corto deja desconocidas las métricas cuyo horizonte no alcanza', 'Réplicas idénticas dentro de una semilla (pseudorreplicas) cuentan como una en la permutación, pero no en las proporciones M1-M6', 'Permutación: diferencia de medias estratificada; no equivale a demostrar equivalencia', 'Sin servidor ni BD: no mide la persistencia ni el catálogo tecnológico de producción'] };
   writeFileSync(join(o.salida, 'panel.json'), JSON.stringify(informe, null, 2));
   process.stdout.write(`${JSON.stringify({ salida: o.salida, brazos, comparacion, pseudorreplicas, ...(o.cache ? { cache: resumenCache } : {}) })}\n`);
   if (corridas.some(r => r.estado === 'error')) process.exitCode = 1;
@@ -617,7 +634,7 @@ async function panel(o: Opciones): Promise<void> {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--help')) {
-    process.stdout.write('tsx scripts/lab/panel.ts [--semillas 51926,19104,19101,19103] [--replicas 3] [--dias 30] [--paralelo 4] [--regimen abierto|defecto] [--hilos 1] [--gpu sin] [--cada-ticks 120] [--config umbrales.json] [--params params.json] [--tope-mortales N] [--brazo directorio (hasta dos)] [--salida directorio] [--cache directorio|sin (por defecto $CARTA_PANEL_CACHE)] [--guardar-dia N --guardar-en directorio] [--desde directorio]\n');
+    process.stdout.write('tsx scripts/lab/panel.ts [--semillas 51926,19104,19101,19103] [--replicas 3] [--dias 30] [--paralelo 4] [--regimen abierto|defecto] [--hilos 1] [--gpu sin] [--cada-ticks 120] [--config umbrales.json] [--params params.json] [--hasta interruptor] [--tope-mortales N] [--brazo directorio (hasta dos)] [--salida directorio] [--cache directorio|sin (por defecto $CARTA_PANEL_CACHE)] [--guardar-dia N --guardar-en directorio] [--desde directorio]\n');
   } else if (process.argv[2] === '--worker') {
     replica(JSON.parse(process.argv[3]!)).then(() => process.exit(0)).catch(error => { process.stderr.write(`${String(error)}\n`); process.exit(1); });
   } else {

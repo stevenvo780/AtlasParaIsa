@@ -8,7 +8,7 @@
  * emparejamientos y r = nacimientos − muertes. La curva r(densidad) dice si el mundo tiene punto de equilibrio.
  *
  *   tsx scripts/lab/poblacion.mts correr --semilla 7 --n 200 --zona 0,0,48,32 [--siembra S] [--dias 5] [--regimen abierto|defecto]
- *        [--params p.json] [--hilos 1] [--gpu sin|0,1] [--bloque 8] [--tope N] [--ticks T] [--desde punto.v8] [--guardar punto.v8] --salida corrida.json
+ *        [--params p.json] [--hasta interruptor] [--hilos 1] [--gpu sin|0,1] [--bloque 8] [--tope N] [--ticks T] [--desde punto.v8] [--guardar punto.v8] --salida corrida.json
  *   tsx scripts/lab/poblacion.mts curva --semillas 7,51926 --n 50,100,200,400 --zona 0,0,48,32 [--coherencia 200] [--replicas K] [--paralelo 6] --salida dir
  *   tsx scripts/lab/poblacion.mts resumir dir [--transitorio auto|K] [--bloque 8|16|32] [--hasta D]
  *
@@ -38,10 +38,16 @@ import { closeKin, reproductiveReadiness } from '../../src/world/family.js';
 import { crearComprobador } from '../../src/world/invariantes.js';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
 import type { DemographicDeathCause, DemographicState } from '../../src/shared/demography.js';
+import { escalon, INTERRUPTORES, type Interruptor } from '../../src/shared/interruptores.js';
 
 export const CAUSAS: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
-/** La confianza mutua que `reproduce` exige a una pareja (`natalidad-local.ts`, `CONFIANZA_MUTUA_MINIMA`). */
-const CONFIANZA_PAREJA = 0.3;
+/**
+ * La confianza mutua mínima de una pareja fértil: la regla es de la natalidad (`natalidad.ts`, que exporta lo de n), no de este
+ * instrumento. Todo el guion pasa por esta función; cuando n la exporte, solo cambia su cuerpo. Mientras tanto vale la de
+ * `natalidad-local.ts` (`CONFIANZA_MUTUA_MINIMA`, 0,3, adimensional), que no se exporta.
+ */
+export function confianzaMutuaMinima(): number { return 0.3; }
+const CONFIANZA_PAREJA = confianzaMutuaMinima();
 const DIA = TICKS_PER_DAY;
 
 // ── Estadística ──────────────────────────────────────────────────────────────────────────────────────────
@@ -290,8 +296,9 @@ export function guardarPunto(ruta: string, mundo: World, archivo: Map<string, Bu
 }
 
 export function cargarPunto(ruta: string): { mundo: World; archivo: Map<string, Buffer> } {
-  const punto = deserialize(readFileSync(ruta)) as PuntoGuardado;
-  if (punto?.formato !== 'atlas-punto-1') throw new Error(`${ruta} no es un punto guardado atlas-punto-1`);
+  // Vale el punto de este guion (`atlas-punto-1`, `archivo` como pares) y el que guarda `panel.ts --guardar-dia` (`formato: 1`, `archivo` como Map).
+  const punto = deserialize(readFileSync(ruta)) as Omit<PuntoGuardado, 'formato' | 'archivo'> & { formato: unknown; archivo: [string, Buffer][] | Map<string, Buffer> };
+  if (punto?.formato !== 'atlas-punto-1' && punto?.formato !== 1) throw new Error(`${ruta} no es un punto guardado atlas-punto-1`);
   setParams(punto.mundo, punto.params);
   return { mundo: punto.mundo, archivo: new Map(punto.archivo) };
 }
@@ -655,11 +662,14 @@ export interface OpcionesCorrida {
   hilos: number; gpu: number[]; bloque: number; tope?: number; desde?: string; guardar?: string; salida: string;
   /** Sonda corta: duración en ticks en vez de días. */
   ticks?: number;
+  /** Enciende los interruptores V23 hasta este (`escalon()`), encima de `--params` (y de los del punto con `--desde`). */
+  hasta?: Interruptor;
 }
 
-export function paramsDeCorrida(o: Pick<OpcionesCorrida, 'regimen' | 'params' | 'hilos' | 'gpu'>): WorldParams {
+export function paramsDeCorrida(o: Pick<OpcionesCorrida, 'regimen' | 'params' | 'hilos' | 'gpu'> & { hasta?: Interruptor }): WorldParams {
   let params = o.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS;
   if (o.params) params = parseParams(JSON.parse(readFileSync(o.params, 'utf8')), params);
+  if (o.hasta) params = parseParams({ v23: escalon(o.hasta) }, params);
   // Las opciones de hilos y tarjetas pasan tal cual al mundo: con un hilo y sin tarjeta, la corrida es reproducible.
   return parseParams({ motor: { ...params.motor, hilos: o.hilos, gpu: o.gpu } }, params);
 }
@@ -671,6 +681,7 @@ export function correr(o: OpcionesCorrida): unknown {
     ({ mundo, archivo } = cargarPunto(o.desde));
     if (o.hilos !== paramsOf(mundo).motor.hilos || o.gpu.join() !== paramsOf(mundo).motor.gpu.join())
       setParams(mundo, parseParams({ motor: { ...paramsOf(mundo).motor, hilos: o.hilos, gpu: o.gpu } }, paramsOf(mundo)));
+    if (o.hasta) setParams(mundo, parseParams({ v23: escalon(o.hasta) }, paramsOf(mundo)));
     caminables = celdasDeTierra(mundo, o.zona).length;
   } else {
     mundo = createWorld(o.semilla, paramsDeCorrida(o));
@@ -684,7 +695,7 @@ export function correr(o: OpcionesCorrida): unknown {
       alDia: d => appendFileSync(`${o.salida}.progreso`, `${JSON.stringify({ dia: d.dia, vivos: d.vivos, msPared: Math.round(d.msPared), carga: d.carga })}\n`) });
     assertWorld(mundo);
     if (o.guardar) { chunks.archivar(); guardarPunto(o.guardar, mundo, chunks.archivo); }
-    const informe = { tipo: 'poblacion-corrida', opciones: o, params: paramsOf(mundo), siembra, msSiembra, msTotal: performance.now() - t0,
+    const informe = { tipo: 'poblacion-corrida', opciones: o, params: paramsOf(mundo), interruptores: paramsOf(mundo).v23, siembra, msSiembra, msTotal: performance.now() - t0,
       carga: { inicio: cargaInicio, fin: loadavg() }, uptime: { inicio: uptimeInicio, fin: uptime() }, maxRssMiB: process.resourceUsage().maxRSS / 1024, registro };
     writeFileSync(o.salida, JSON.stringify(informe));
     return informe;
@@ -879,6 +890,9 @@ export function argumentosCorrida(args: string[]): OpcionesCorrida {
       case '--tope': o.tope = entero(valor, bandera, 1); break;
       case '--ticks': o.ticks = entero(valor, bandera, 1); break;
       case '--desde': o.desde = resolve(valor); break;
+      case '--hasta':
+        if (!(INTERRUPTORES as readonly string[]).includes(valor)) throw new Error(`--hasta: «${valor}» no es un interruptor V23`);
+        o.hasta = valor as Interruptor; break;
       case '--guardar': o.guardar = resolve(valor); break;
       case '--salida': o.salida = resolve(valor); break;
       default: throw new Error(`Opción desconocida: ${bandera}`);

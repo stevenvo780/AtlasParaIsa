@@ -274,9 +274,12 @@ extern "C" __global__ __launch_bounds__(HILOS) void percibir(const byte* lote, b
         if (carril < ACCIONES) {
             float suma = politica[B2 + carril];
             for (int j = 0; j < OCULTAS; ++j) suma += ocultas[j] * politica[W2 + carril * OCULTAS + j];
-            suma = softSign(suma) + sesgo[carril];
-            const float* w = en<float>(lote, plan.w) + carril * RASGOS;
-            for (int j = 0; j < RASGOS; ++j) suma += w[j] * rasgos[j];
+            // La plasticidad va dentro de la última activación, como en evaluateRow (politica.ts) y en el contrato.
+            suma = softSign(suma + sesgo[carril]);
+            if (plan.w) {
+                const float* w = en<float>(lote, plan.w) + carril * RASGOS;
+                for (int j = 0; j < RASGOS; ++j) suma += w[j] * rasgos[j];
+            }
             salidaUtilidad[carril] = suma;
         }
     }

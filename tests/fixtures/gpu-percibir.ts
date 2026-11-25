@@ -109,9 +109,10 @@ function crearFrente(terreno: Terreno, personas: number, animales: number, rando
   const cuerpo = new Float32Array(alta * CUERPO_ANCHO), rasgos = new Float32Array(alta * RASGOS_ANCHO);
   const gen = new Int32Array(alta), vivo = new Uint8Array(alta), clase = new Uint8Array(alta);
   const uid = new Float64Array(alta), decideEn = new Float64Array(alta).fill(10_000);
-  const observacion = new Float32Array(alta * COLUMNAS_CEREBRO.observacion);
-  const politica = new Float32Array(alta * COLUMNAS_CEREBRO.politica);
-  const sesgo = new Float32Array(alta * COLUMNAS_CEREBRO.sesgo);
+  // El tipo del contrato (TIPO_CEREBRO): la tarjeta los convierte a f32 al subirlos.
+  const observacion = new Float64Array(alta * COLUMNAS_CEREBRO.observacion);
+  const politica = new Float64Array(alta * COLUMNAS_CEREBRO.politica);
+  const sesgo = new Float64Array(alta * COLUMNAS_CEREBRO.sesgo);
   const dueno = new Int32Array(alta), accion = new Uint8Array(alta), objetivo = new Int32Array(alta).fill(-1);
   const genoma = new Float32Array(alta * GENOMA_ANCHO), pareja = new Float64Array(alta).fill(-1);
   const tiposDePlan = new Uint16Array(alta);
@@ -190,7 +191,7 @@ export function crearFixtureGpu(opciones: boolean | OpcionesFixture = false) {
   return {
     terreno, planes,
     get frente(): FrentePublico { return frenteActual; },
-    lote(): LotePercepcion { return { tick, slots, plan }; },
+    lote(): LotePercepcion { return { tick, despacho: tick, slots, plan }; },
     siguiente() {
       tick++;
       const comida = terreno.campo('comida') as Float32Array;

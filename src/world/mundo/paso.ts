@@ -3,9 +3,8 @@ import { applyGesture, advanceWhispers } from '../actuar/gestos.js';
 import { ecology } from './ecologia.js';
 import { phaseAt, addEvent, remember, deathContext } from './crear.js';
 import { decideConCerebro, prepararCerebros, puntuacionesPercibidas } from '../decision/politica-persona.js';
-import { percepcionDe } from '../decision/percepcion.js';
+import { percepcionDe, type Vencidos } from '../decision/percepcion.js';
 import { PLAN } from '../decision/planes.js';
-import type { LotePercepcion } from '../motor/contratos.js';
 import { bodyAndAction } from '../actuar/cuerpo.js';
 import { encounters } from '../actuar/interacciones.js';
 import { transferEstate } from '../demografia/morir.js';
@@ -147,7 +146,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
  * avance de un tick (≈ 0,0003 en reposo). Quien decide sin estar aquí (su objetivo se agotó en este tick, o el margen
  * no bastó) se percibe en el momento (`PercepcionDelPaso.filaDe`), sobre el estado de ese momento.
  */
-function lotePersonas(world: World): LotePercepcion {
+function lotePersonas(world: World): Vencidos {
   const slots: number[] = [], plan: number[] = [];
   for (let slot = 0; slot < world.people.length; slot++) {
     const p = world.people[slot]!;

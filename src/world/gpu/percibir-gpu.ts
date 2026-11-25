@@ -94,7 +94,7 @@ function preparar(lote: LotePercepcion, planes: readonly Plan[], frente: FrenteP
   let q = 0, v = 0, a = 0;
   const preparados = planes.map((p, i): PlanPreparado => {
     if (p.id !== i || (p.acciones !== 0 && p.acciones !== CEREBRO.acciones)
-      || (p.acciones ? p.w?.length !== p.acciones * RASGOS_ANCHO : p.w !== null)) {
+      || (p.w !== null && (!p.acciones || p.w.length !== p.acciones * RASGOS_ANCHO))) {
       throw new RangeError(`Plan de percepción inválido (${i})`);
     }
     q = Math.max(q, p.celdas.length); v = Math.max(v, p.organismos.length); a = Math.max(a, p.acciones);
@@ -144,9 +144,9 @@ function tamanoResultado(n: number, q: number, v: number, a: number): number {
   return alinear(n * q * 10, 8) + n * (v * 8 + a * 4);
 }
 
-function vistaResultado(n: number, q: number, v: number, a: number, buffer: ArrayBuffer): Percepcion {
+function vistaResultado({ n, q, v, a, tick, despacho }: PendienteGpu, buffer: ArrayBuffer): Percepcion {
   const nv = n * q, inicioOrganismos = alinear(nv * 10, 8);
-  return { q, v, a, celda: new Int32Array(buffer, 0, nv), valor: new Float32Array(buffer, nv * 4, nv),
+  return { q, v, a, tick, despacho, celda: new Int32Array(buffer, 0, nv), valor: new Float32Array(buffer, nv * 4, nv),
     pasos: new Int16Array(buffer, nv * 8, nv), organismo: new Float64Array(buffer, inicioOrganismos, n * v),
     utilidad: new Float32Array(buffer, inicioOrganismos + n * v * 8, n * a) };
 }
@@ -451,7 +451,7 @@ function obtenerCsr(terreno: Terreno): CsrCompartido {
 
 interface Parche { destino: number; offset: number; fuente: number; bytes: number }
 interface PendienteGpu {
-  n: number; q: number; v: number; a: number; salida: number; bajada: number;
+  n: number; q: number; v: number; a: number; tick: number; despacho: number; salida: number; bajada: number;
   confirmar: () => void;
 }
 interface FilaCerebro { gen: number; dinamica: Float32Array }
@@ -459,7 +459,8 @@ interface FilaCerebro { gen: number; dinamica: Float32Array }
 function copiarDistinta(origen: Col, desde: number, destino: Float32Array, hasta: number, ancho: number): boolean {
   let cambio = false;
   for (let i = 0; i < ancho; i++) {
-    const valor = origen[desde + i], antes = destino[hasta + i];
+    // Las columnas del cerebro son f64 y la tarjeta las lee en f32: se compara lo que se subiría.
+    const valor = Math.fround(origen[desde + i]), antes = destino[hasta + i];
     if (valor !== antes && (valor === valor || antes === antes)) { destino[hasta + i] = valor; cambio = true; }
   }
   return cambio;
@@ -499,7 +500,7 @@ export class PercibidorGpu implements Percibidor {
     const bajada = tamanoResultado(n, q, v, a);
     if (n === 0) {
       this.transferencia = { subidos: 0, bajados: 0, ms: 0 };
-      this.pendiente = { n, q, v, a, salida: 0, bajada, confirmar: () => {} };
+      this.pendiente = { n, q, v, a, tick: lote.tick, despacho: lote.despacho, salida: 0, bajada, confirmar: () => {} };
       return;
     }
     const parches: Parche[] = [], paginasNuevas = new Map<number, number>();
@@ -567,9 +568,10 @@ export class PercibidorGpu implements Percibidor {
     const subida = b.bytes, salida = alinear(subida, 8);
     if (this.canal.bytes < salida + bajada) this.canal.crecer(salida + bajada);
     this.canal.escribir(0, b.vistaActiva());
-    enviarOrden(this.canal, { kind: 'percibir', n, subida, bajada, salida, terrenoBytes, cerebroBytes, organismosBytes, parches: parches.length });
+    const { tick, despacho } = lote;
+    enviarOrden(this.canal, { kind: 'percibir', tick, despacho, n, subida, bajada, salida, terrenoBytes, cerebroBytes, organismosBytes, parches: parches.length });
     this.transferencia = { subidos: subida, bajados: bajada, ms: 0 };
-    this.pendiente = { n, q, v, a, salida, bajada, confirmar: () => {
+    this.pendiente = { n, q, v, a, tick, despacho, salida, bajada, confirmar: () => {
       this.campos = columnasTerreno;
       if (revisionCsr) this.csr = revisionCsr;
       for (const [pagina, version] of paginasNuevas) this.paginas.set(pagina, version);
@@ -605,14 +607,17 @@ export class PercibidorGpu implements Percibidor {
     const buffer = new ArrayBuffer(p.bajada);
     if (p.n !== 0) {
       try {
-        const respuesta = recibirRespuesta<{ ok: boolean; ms: number }>(this.canal, plazoMs);
+        const respuesta = recibirRespuesta<{ ok: boolean; ms: number; tick: number; despacho: number }>(this.canal, plazoMs);
         if (respuesta.ok !== true || !Number.isFinite(respuesta.ms) || respuesta.ms < 0) throw new Error('Respuesta de percepción GPU inválida');
+        // El eco del contrato: una respuesta de otro despacho no se lee como la de este.
+        if (respuesta.tick !== p.tick || respuesta.despacho !== p.despacho)
+          throw new Error(`Respuesta del despacho ${respuesta.despacho} (tick ${respuesta.tick}) en el ${p.despacho} (tick ${p.tick})`);
         if (p.bajada !== 0) this.canal.leer(p.salida, new Uint8Array(buffer));
         this.transferencia = { ...this.transferencia, ms: respuesta.ms };
       } catch (error) { throw this.marcarFallo(error); }
       p.confirmar();
     }
-    return vistaResultado(p.n, p.q, p.v, p.a, buffer);
+    return vistaResultado(p, buffer);
   }
 
   private marcarFallo(error: unknown): ErrorDispositivo {

@@ -13,7 +13,7 @@ import { RADIUS, type Person } from '../src/world/mundo/tipos.js';
 import { evaluatePolicySingle, founderPolicy } from '../src/world/politica.js';
 import { CAMPOS_CUERPO, CEREBRO, COLUMNAS_CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, slotDe, type LotePercepcion, type Percepcion, type Percibidor,
   type Plan } from '../src/world/motor/contratos.js';
-import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercepcionDelPaso, PercibidorCpu, VistaMundo, percepcionDe, type DescriptorVista,
+import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercepcionDelPaso, PercibidorCpu, VistaMundo, percepcionDe, type DescriptorVista, type Vencidos,
   type PercepcionCpu } from '../src/world/decision/percepcion.js';
 import { CONSULTA, PLAN, UMBRAL, f32Abajo, f32Arriba, planesPersonas } from '../src/world/decision/planes.js';
 import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararCerebros, puntuacionesPercibidas } from '../src/world/decision/politica-persona.js';
@@ -57,7 +57,7 @@ function multitud(world: World, n: number): Person[] {
 function percibirTodos(world: World, personas: readonly Person[] = world.people): { vista: VistaMundo; lote: LotePercepcion; salida: PercepcionCpu; planes: Plan[] } {
   const vista = VistaMundo.nueva(), tileIn = tileLookup(world.tiles);
   const slots = Int32Array.from(personas, (_, s) => s);
-  const lote: LotePercepcion = { tick: world.tick, slots, plan: Uint16Array.from(personas, () => PLAN.conCerebro) };
+  const lote: LotePercepcion = { tick: world.tick, despacho: 1, slots, plan: Uint16Array.from(personas, () => PLAN.conCerebro) };
   vista.capturar(personas, world.tick, slots, tileIn, residentFastAccess(world.tiles));
   prepararCerebros(world, vista, lote, tileIn);
   const cpu = new PercibidorCpu(vista), planes = planesPersonas(vista.terreno.campos);
@@ -165,7 +165,7 @@ test('una ConsultaOrganismo da el organismo de una búsqueda directa sobre el fr
     ],
   };
   const cpu = new PercibidorCpu(vista);
-  cpu.lanzar({ tick: world.tick, slots, plan: new Uint16Array(slots.length) }, [plan]);
+  cpu.lanzar({ tick: world.tick, despacho: 1, slots, plan: new Uint16Array(slots.length) }, [plan]);
   const salida = cpu.esperar();
   let encontrados = 0;
   for (let i = 0; i < personas.length; i++) {
@@ -261,7 +261,7 @@ test('un mundo que percibe en 32 hilos, en tandas de 2, acaba igual que el de un
   assert.equal(digestoCanonico(world), digestoCanonico(uno));
 });
 
-/** Doble de tarjeta: percibe en CPU sobre la vista, pero devuelve solo lo que pide el contrato (sin ventanas ni despacho)
+/** Doble de tarjeta: percibe en CPU sobre la vista, pero devuelve solo lo que pide el contrato (sin ventanas)
  * y, si `falla(llamada)`, lanza `ErrorDispositivo` en `esperar`, como una tarjeta que cae o vence a media fase. */
 class TarjetaDoble implements Percibidor {
   readonly dispositivo = 'gpu0' as const;
@@ -271,8 +271,8 @@ class TarjetaDoble implements Percibidor {
   lanzar(lote: LotePercepcion, planes: readonly Plan[]): void { this.#cpu.lanzar(lote, planes); }
   esperar(): Percepcion {
     if (this.falla(++this.llamadas)) { this.fallos++; throw new ErrorDispositivo(this.dispositivo, 'plazo vencido'); }
-    const { q, v, a, celda, pasos, valor, organismo, utilidad } = this.#cpu.esperar();
-    return { q, v, a, celda, pasos, valor, organismo, utilidad };
+    const { q, v, a, tick, despacho, celda, pasos, valor, organismo, utilidad } = this.#cpu.esperar();
+    return { q, v, a, tick, despacho, celda, pasos, valor, organismo, utilidad };
   }
 }
 
@@ -296,35 +296,38 @@ function copiar(p: PercepcionCpu): PercepcionCpu {
     ventana: p.ventana.slice(), ventanaCelda: p.ventanaCelda.slice() };
 }
 
-/** Tarjeta que responde con la salida del despacho anterior, como una respuesta tardía. Con `eco` devuelve el sello del
- * despacho que la produjo; sin él, solo lo que pide el contrato. */
+/** Tarjeta que responde con la salida del despacho anterior, como una respuesta tardía. Con `ecoDelLote` la sella con el
+ * despacho que espera el dueño (una tarjeta que copia bien el eco y mal las filas); sin él, con el que la produjo. */
 class TarjetaAtrasada implements Percibidor {
   readonly dispositivo = 'gpu0' as const;
   llamadas = 0;
   readonly #cpu: PercibidorCpu;
   #anterior: PercepcionCpu | undefined; #actual: PercepcionCpu | undefined;
-  constructor(vista: VistaMundo, private readonly eco: boolean) { this.#cpu = new PercibidorCpu(vista); }
-  lanzar(lote: LotePercepcion, planes: readonly Plan[]): void { this.#cpu.lanzar(lote, planes); this.#actual = copiar(this.#cpu.esperar()); }
+  #lote = { tick: -1, despacho: -1 };
+  constructor(vista: VistaMundo, private readonly ecoDelLote: boolean) { this.#cpu = new PercibidorCpu(vista); }
+  lanzar(lote: LotePercepcion, planes: readonly Plan[]): void {
+    this.#cpu.lanzar(lote, planes); this.#actual = copiar(this.#cpu.esperar()); this.#lote = { tick: lote.tick, despacho: lote.despacho };
+  }
   esperar(): Percepcion {
     this.llamadas++;
     const p = this.#anterior ?? this.#actual!;
     this.#anterior = this.#actual;
-    if (this.eco) return p;
+    if (!this.ecoDelLote) return p;
     const { q, v, a, celda, pasos, valor, organismo, utilidad } = p;
-    return { q, v, a, celda, pasos, valor, organismo, utilidad };
+    return { q, v, a, ...this.#lote, celda, pasos, valor, organismo, utilidad };
   }
 }
 
 test('una respuesta de otro despacho se rechaza y el lote se percibe en CPU', () => {
   const pasos = 600, uno = digestoCanonico(mundo(7, pasos));
   const world = createWorld(7, DEFAULT_PARAMS), percepcion = percepcionDe(world);
-  const tarjeta = new TarjetaAtrasada(percepcion.vista, true);
+  const tarjeta = new TarjetaAtrasada(percepcion.vista, false);
   percepcion.percibidor = tarjeta;
   for (let i = 0; i < pasos; i++) stepWorld(world);
   assert.equal(percepcion.respaldos, tarjeta.llamadas - 1);
   assert.equal(digestoCanonico(world), uno);
-  // Sin sello, la guardia de coherencia reconoce casi todas: las filas no casan con las posiciones de ahora.
-  const sinEco = createWorld(7, DEFAULT_PARAMS), otra = percepcionDe(sinEco), muda = new TarjetaAtrasada(otra.vista, false);
+  // Con el eco bien y las filas de otro despacho, la guardia de coherencia reconoce casi todas: no casan con las posiciones de ahora.
+  const sinEco = createWorld(7, DEFAULT_PARAMS), otra = percepcionDe(sinEco), muda = new TarjetaAtrasada(otra.vista, true);
   otra.percibidor = muda;
   for (let i = 0; i < 300; i++) stepWorld(sinEco);
   assert.ok(otra.respaldos > 0, 'la guardia rechazó respuestas atrasadas');
@@ -410,7 +413,7 @@ test('un slot que cambia de ocupante cambia de gen, y crecer el frente no la pie
 test('quien sustituye a otra persona en su slot y su sitio no recibe la percepción de la anterior', () => {
   const world = mundo(7, 300), tileIn = tileLookup(world.tiles);
   const percepcion = new PercepcionDelPaso(), personas = world.people.slice();
-  const lote: LotePercepcion = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
+  const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
   const delLote = percepcion.percibir(personas, world.tick, lote, tileIn, undefined, () => {});
   assert.equal(percepcion.filaDe(personas, world.tick, personas[0]!, 0, tileIn, undefined).salida, delLote);
   const otra: Person = { ...structuredClone(personas[0]!), id: 'sustituta' };
@@ -425,7 +428,7 @@ test('quien sustituye a otra persona en su slot y su sitio no recibe la percepci
 test('quien decide fuera del lote se percibe donde está sin escribir en el frente', () => {
   const world = mundo(7, 900), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles) ?? undefined;
   const percepcion = new PercepcionDelPaso(), persona = world.people[0]!;
-  const lote: LotePercepcion = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
+  const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
   percepcion.percibir(world.people, world.tick, lote, tileIn, fast, () => {});
   const { datos } = percepcion.vista.frente;
   const soloLectura = (c: ArrayBufferView) => new Proxy(c, { set: () => { throw new Error('escritura en el frente'); } });
@@ -448,7 +451,7 @@ test('la fila del lote solo vale mientras el disco no cambie: bajar o subir cual
   for (const params of [DEFAULT_PARAMS, RESIDENTE]) {
     const world = mundo(51926, 300, params), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
     const persona = world.people[0]!, percepcion = new PercepcionDelPaso();
-    const lote: LotePercepcion = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
+    const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
     const delLote = percepcion.percibir(world.people, world.tick, lote, tileIn, fast, () => {});
     const fila = () => percepcion.filaDe(world.people, world.tick, persona, 0, tileIn, fast).salida;
     assert.equal(fila(), delLote, 'sin cambios, la del lote');
@@ -544,7 +547,7 @@ test('quien comparte elige al más hambriento de ahora, no al que lo era cuando 
 
 test('los pesos de un ocupante nuevo se publican con su gen aunque no decida con cerebro, sin crearle la política', () => {
   const world = mundo(51926, 300, ABIERTO), tileIn = tileLookup(world.tiles), vista = VistaMundo.nueva();
-  const vacio: LotePercepcion = { tick: world.tick, slots: new Int32Array(0), plan: new Uint16Array(0) };
+  const vacio: Vencidos = { tick: world.tick, slots: new Int32Array(0), plan: new Uint16Array(0) };
   const pesos = (s: number) => Array.from((vista.frente.col('politica') as Float64Array).subarray(s * COLUMNAS_CEREBRO.politica, (s + 1) * COLUMNAS_CEREBRO.politica));
   vista.capturar(world.people, world.tick, [], tileIn, undefined);
   prepararCerebros(world, vista, vacio, tileIn);

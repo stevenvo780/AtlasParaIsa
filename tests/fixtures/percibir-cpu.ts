@@ -43,7 +43,7 @@ function percibir(frente: FrentePublico, terreno: Terreno, lote: LotePercepcion,
   const v = Math.max(0, ...planes.map(p => p.organismos.length));
   const a = Math.max(0, ...planes.map(p => p.acciones));
   const n = lote.slots.length;
-  const p: Percepcion = { q, v, a, celda: new Int32Array(n * q).fill(-1), pasos: new Int16Array(n * q).fill(-1),
+  const p: Percepcion = { q, v, a, tick: lote.tick, despacho: lote.despacho, celda: new Int32Array(n * q).fill(-1), pasos: new Int16Array(n * q).fill(-1),
     valor: new Float32Array(n * q).fill(Infinity), organismo: new Float64Array(n * v).fill(REF_NULA), utilidad: new Float32Array(n * a) };
   const campos = terreno.campos.map(nombre => terreno.campo(nombre));
   const ubicaciones = new Map<string, number[]>();
@@ -98,15 +98,17 @@ function percibir(frente: FrentePublico, terreno: Terreno, lote: LotePercepcion,
       });
     }
     plan.organismos.forEach((c, j) => { p.organismo[i * v + j] = cercano(slot, x, y, c); });
-    if (plan.w) {
+    if (plan.acciones) {
       const obs = frente.col('observacion'), pesos = frente.col('politica'), sesgo = frente.col('sesgo');
+      // La ley del contrato: softSign(capa2 + sesgo), y luego W·rasgos si el plan trae W.
       const red = evaluatePolicySingle(
         Array.from({ length: CEREBRO.entradas }, (_, j) => obs[slot * CEREBRO.entradas + j]),
         Array.from({ length: COLUMNAS_CEREBRO.politica }, (_, j) => pesos[slot * COLUMNAS_CEREBRO.politica + j]),
+        Array.from({ length: CEREBRO.acciones }, (_, j) => sesgo[slot * CEREBRO.acciones + j]),
       );
       for (let j = 0; j < a; j++) {
-        let u = red[j] + sesgo[slot * a + j];
-        for (let r = 0; r < RASGOS_ANCHO; r++) u += plan.w[j * RASGOS_ANCHO + r] * frente.rasgos[slot * RASGOS_ANCHO + r];
+        let u = red[j];
+        if (plan.w) for (let r = 0; r < RASGOS_ANCHO; r++) u += plan.w[j * RASGOS_ANCHO + r] * frente.rasgos[slot * RASGOS_ANCHO + r];
         p.utilidad[i * a + j] = u;
       }
     }

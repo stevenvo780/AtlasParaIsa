@@ -156,7 +156,8 @@ def main():
                     mm.close()
                 mm = mmap.mmap(args.fd, capacidad)
             ms = gpu.ejecutar(orden, mm)
-            emitir({'ok': True, 'ms': ms})
+            # Eco del despacho: el motor descarta la respuesta que no sea la del lote que espera.
+            emitir({'ok': True, 'ms': ms, 'tick': orden['tick'], 'despacho': orden['despacho']})
     finally:
         if mm is not None:
             mm.close()

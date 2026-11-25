@@ -7,8 +7,8 @@ import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { vecinos } from '../rejilla.js';
 import { computeLocalPolicyObservation } from '../politica-obs.js';
-import type { LotePercepcion, Percepcion } from '../motor/contratos.js';
-import type { VistaMundo } from './percepcion.js';
+import type { Percepcion } from '../motor/contratos.js';
+import type { Vencidos, VistaMundo } from './percepcion.js';
 import { PLAN } from './planes.js';
 
 
@@ -57,9 +57,9 @@ export function decideConCerebro(world: World, person: Person): boolean {
 const observacionF2 = new Float64Array(POLICY_INPUTS);
 
 /** F2: las columnas del cerebro antes de lanzar. Todo slot cuyo ocupante cambió se publica con sus pesos heredados
- * aunque no decida en este tick (contrato: los pesos se escriben al nacer y no cambian; quien los espeje por `gen`
- * los toma en cuanto la ve), y cada slot del lote con plan `conCerebro`, con su observación y su plasticidad de ahora. */
-export function prepararCerebros(world: World, vista: VistaMundo, lote: LotePercepcion, tileIn: (x: number, y: number) => Tile | undefined): void {
+ * aunque no decida en este tick (contrato: los pesos se escriben para todo slot cuya `gen` cambió; quien los espeje por
+ * `gen` los toma en cuanto la ve), y cada slot del lote con plan `conCerebro`, con su observación y su plasticidad de ahora. */
+export function prepararCerebros(world: World, vista: VistaMundo, lote: Vencidos, tileIn: (x: number, y: number) => Tile | undefined): void {
   if (paramsOf(world).conducta.politicaPeso <= 0) return;
   const { personas } = vista;
   // Sin crearle la política a nadie: la de un fundador que aún no decidió es la misma que le dará `ensurePersonPolicy`.
@@ -76,7 +76,7 @@ export function prepararCerebros(world: World, vista: VistaMundo, lote: LotePerc
 }
 
 /** Las utilidades del cerebro percibidas, por persona, como las lee `choose`: vistas de una sola copia en f64 por tick. */
-export function puntuacionesPercibidas(world: World, lote: LotePercepcion, salida: Percepcion): Map<string, Float64Array> {
+export function puntuacionesPercibidas(world: World, lote: Vencidos, salida: Percepcion): Map<string, Float64Array> {
   const puntuaciones = new Map<string, Float64Array>(), n = lote.slots.length, a = salida.a;
   if (a === 0) return puntuaciones;
   const utilidades = Float64Array.from(salida.utilidad.subarray(0, n * a));

@@ -69,7 +69,7 @@ export class PuentePercepcion implements Percibidor {
         peso += this.#tasas[i]!;
         const hasta = Math.round(actores * peso / pesoTotal);
         if (hasta <= desde) continue;
-        const tramo = { tick: lote.tick, slots: lote.slots.subarray(desde, hasta), plan: lote.plan.subarray(desde, hasta) };
+        const tramo = { tick: lote.tick, despacho: lote.despacho, slots: lote.slots.subarray(desde, hasta), plan: lote.plan.subarray(desde, hasta) };
         try {
           this.tarjetas[i]!.percibidor.lanzar(tramo, planes);
           tramos.push({ desde, lote: tramo, tarjeta: i });
@@ -131,7 +131,7 @@ export class PuentePercepcion implements Percibidor {
         break;
       }
       const { q, v, a } = percepcion;
-      reunida ??= { q, v, a, celda: new Int32Array(actores * q), pasos: new Int16Array(actores * q),
+      reunida ??= { q, v, a, tick: percepcion.tick, despacho: percepcion.despacho, celda: new Int32Array(actores * q), pasos: new Int16Array(actores * q),
         valor: new Float32Array(actores * q), organismo: new Float64Array(actores * v), utilidad: new Float32Array(actores * a) };
       reunida.celda.set(percepcion.celda, desde * q);
       reunida.pasos.set(percepcion.pasos, desde * q);

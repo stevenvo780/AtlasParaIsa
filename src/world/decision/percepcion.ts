@@ -8,7 +8,7 @@
  * entera (`PercepcionCpu.ventana`): la elección necesita los pasos hasta objetivos que no salen de ninguna consulta
  * (pareja, hogar, lugar, refugio, caza, exploración).
  */
-import { CAMPOS_CUERPO, COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, genDe, refDe, slotDe, type Col, type CtxLectura,
+import { CAMPOS_CUERPO, COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, TIPO_CEREBRO, genDe, refDe, slotDe, type Col, type CtxLectura,
   type FrentePublico, type LotePercepcion, type Percepcion, type Percibidor, type Plan, type Terreno, type TipoColumna } from '../motor/contratos.js';
 import { distance, type TileLookup } from '../mundo/geometria.js';
 import { RADIUS, type Person } from '../mundo/tipos.js';
@@ -84,11 +84,10 @@ export function calcularVentana(terreno: Terreno, x: number, y: number, transita
 
 // ── Salida ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Identidad de un despacho de F2. El contrato todavía no la lleva (pedido al integrador): viaja como campos de más en
- * el lote y en la salida, y `PercepcionDelPaso` rechaza una salida que traiga otra. */
-export interface Despacho { readonly tick: number; readonly despacho: number }
+/** Los vencidos de F2 antes de despacharlos: `PercepcionDelPaso` les da el número de despacho al lanzarlos. */
+export type Vencidos = Omit<LotePercepcion, 'despacho'>;
 
-/** La salida del contrato con su despacho y, por actor, su ventana entera: pasos y celda de cada posición. */
+/** La salida del contrato y, por actor, su ventana entera: pasos y celda de cada posición. */
 export interface PercepcionCpu extends Percepcion { tick: number; despacho: number; readonly ventana: Int16Array; readonly ventanaCelda: Int32Array }
 
 /** Reserva (o reutiliza si cabe) la salida de `n` actores; `compartida` la pone en SAB para que escriban otros hilos. */
@@ -106,10 +105,10 @@ export function reservarPercepcion(n: number, planes: readonly Plan[], previa?: 
   };
 }
 
-/** Sella `salida` con el despacho de `lote` (−1 si el lote no lo trae). */
+/** El eco del contrato: la salida lleva el `tick` y el `despacho` de su lote. */
 export function sellar(salida: PercepcionCpu, lote: LotePercepcion): void {
   salida.tick = lote.tick;
-  salida.despacho = (lote as Partial<Despacho>).despacho ?? -1;
+  salida.despacho = lote.despacho;
 }
 
 // ── Organismos cercanos ──────────────────────────────────────────────────────────────────────────────────
@@ -266,16 +265,15 @@ function conVentanas({ frente, terreno }: Lectura, lote: LotePercepcion, planes:
     const slot = lote.slots[i]!;
     calcularVentana(terreno, frente.x[slot]!, frente.y[slot]!, transitable[lote.plan[i]!]!, ventana, ventanaCelda, i * CELDAS_VENTANA);
   }
-  const eco = p as Partial<Despacho>;
-  return { q: p.q, v: p.v, a: p.a, tick: eco.tick ?? lote.tick, despacho: eco.despacho ?? -1, celda: p.celda, pasos: p.pasos, valor: p.valor,
+  return { q: p.q, v: p.v, a: p.a, tick: p.tick, despacho: p.despacho, celda: p.celda, pasos: p.pasos, valor: p.valor,
     organismo: p.organismo, utilidad: p.utilidad, ventana, ventanaCelda };
 }
 
 /**
  * ¿Puede ser `p` (de otro percibidor, ya con ventanas de CPU) la percepción de este lote sobre esta vista? Cada celda
  * devuelta tiene que caer en la ventana de su actor, con sus pasos, y cumplir los filtros de su consulta; cada organismo,
- * vivir con la generación de su `Ref` y dentro del radio. Sin despacho en el contrato, una salida de otro lote o de otro
- * tick se delata casi siempre aquí: las filas no casan con las posiciones. No comprueba que la celda sea la mejor.
+ * vivir con la generación de su `Ref` y dentro del radio. El eco de `tick` y `despacho` descarta antes las salidas de otro
+ * lote; esto atrapa las que traen el eco bien y las filas mal. No comprueba que la celda sea la mejor.
  */
 function coherente(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: PercepcionCpu): boolean {
   const { frente, terreno } = ctx, resueltos = planes.map(plan => resolver(plan, ctx)), n = lote.slots.length;
@@ -351,10 +349,11 @@ type Columna = Int32Array | Uint8Array | Uint16Array | Float32Array | Float64Arr
 const CONSTRUCTOR: Record<TipoColumna, { new (b: SharedArrayBuffer): Columna; BYTES_PER_ELEMENT: number }> = {
   i32: Int32Array, u8: Uint8Array, u16: Uint16Array, f32: Float32Array, f64: Float64Array,
 };
-/** Columnas registradas del cerebro, en FP64: la red da entonces lo mismo que `evaluatePolicySingle` hasta el redondeo
- * final a `utilidad` (el contrato pide f32: pedido al integrador). */
+/** Columnas registradas del cerebro, del tipo del contrato (f64): la red da lo mismo que `evaluatePolicySingle` hasta el
+ * redondeo final a la `utilidad` f32. */
 export const REGISTRADAS: readonly (readonly [string, TipoColumna, number])[] = [
-  ['observacion', 'f64', COLUMNAS_CEREBRO.observacion], ['politica', 'f64', COLUMNAS_CEREBRO.politica], ['sesgo', 'f64', COLUMNAS_CEREBRO.sesgo],
+  ['observacion', TIPO_CEREBRO, COLUMNAS_CEREBRO.observacion], ['politica', TIPO_CEREBRO, COLUMNAS_CEREBRO.politica],
+  ['sesgo', TIPO_CEREBRO, COLUMNAS_CEREBRO.sesgo],
 ];
 const COLUMNAS_VISTA = [...COLUMNAS_FIJAS, ...REGISTRADAS];
 
@@ -661,17 +660,17 @@ export class PercepcionDelPaso {
 
   /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro. Si la tarjeta falla o vence su plazo, o devuelve
    * algo que no es de este lote, el lote entero se percibe aquí en CPU en el mismo tick. */
-  percibir(personas: readonly Person[], tick: number, lote: LotePercepcion, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
+  percibir(personas: readonly Person[], tick: number, vencidos: Vencidos, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
     cerebro: (vista: VistaMundo) => void): PercepcionCpu {
-    this.vista.capturar(personas, tick, lote.slots, tileIn, fast);
+    this.vista.capturar(personas, tick, vencidos.slots, tileIn, fast);
     cerebro(this.vista);
-    const despacho: LotePercepcion & Despacho = { tick: lote.tick, slots: lote.slots, plan: lote.plan, despacho: ++this.#despachos };
+    const despacho: LotePercepcion = { ...vencidos, despacho: ++this.#despachos };
     let salida: PercepcionCpu;
     try {
       this.percibidor.lanzar(despacho, this.planes);
       const p = this.percibidor.esperar(PLAZO_PERCEPCION_MS);
       salida = 'ventana' in p ? p as PercepcionCpu : this.#ventanas = conVentanas(this.vista, despacho, this.planes, p, this.#ventanas);
-      if (salida.tick !== despacho.tick || (salida.despacho !== -1 && salida.despacho !== despacho.despacho))
+      if (salida.tick !== despacho.tick || salida.despacho !== despacho.despacho)
         throw new ErrorDispositivo(this.percibidor.dispositivo, `salida del despacho ${salida.despacho} (tick ${salida.tick}) en el ${despacho.despacho} (tick ${tick})`);
       if (!('ventana' in p) && !coherente(this.vista, despacho, this.planes, salida))
         throw new ErrorDispositivo(this.percibidor.dispositivo, 'salida que no casa con el lote');
@@ -687,7 +686,7 @@ export class PercepcionDelPaso {
     this.#salida = salida;
     if (this.#fila.length < personas.length) this.#fila = new Int32Array(Math.max(personas.length, 2 * this.#fila.length));
     this.#fila.fill(-1);
-    for (let i = 0; i < lote.slots.length; i++) this.#fila[lote.slots[i]!] = i;
+    for (let i = 0; i < despacho.slots.length; i++) this.#fila[despacho.slots[i]!] = i;
     this.#activa = true;
     return this.#salida;
   }

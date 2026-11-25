@@ -54,6 +54,10 @@ def main():
             if fase == 'plazo':
                 marca.write_text(fase)
                 sys.stdin.buffer.read(1)
+            if fase == 'eco':
+                # Una salida completa con el eco de otro despacho: el motor debe rechazarla.
+                marca.write_text(fase)
+                emitir({'ok': True, 'ms': 0, 'tick': orden['tick'], 'despacho': orden['despacho'] + 1})
 
 
 if __name__ == '__main__':

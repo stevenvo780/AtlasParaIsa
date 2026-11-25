@@ -118,7 +118,7 @@ test('M3 cerrar, matar el servidor o matar el motor no deja procesos de Python n
   assert.deepEqual(segmentosM3(), antes);
 });
 
-test('M3 CPU distingue ruta, visibilidad, criterio de organismos, generación, red y W·rasgos', () => {
+test('M3 CPU distingue ruta, visibilidad, criterio de organismos, generación, red (con la plasticidad dentro) y W·rasgos', () => {
   const { frente, terreno, planes } = crearFixtureGpu();
   const agua = terreno.campo('agua') as Float32Array;
   const comida = terreno.campo('comida') as Float32Array;
@@ -144,19 +144,23 @@ test('M3 CPU distingue ruta, visibilidad, criterio de organismos, generación, r
     celdas: [consulta, { ...consulta, alcanzable: false }],
     organismos: [base.organismos[0], { ...base.organismos[1], clase: Clase.Animal }],
   };
-  const lote = { tick: 100, slots: Int32Array.of(0), plan: Uint16Array.of(0) };
-  const resultado = percibir(new PercibidorCpu(frente, terreno), lote, [queridas]);
-  assert.deepEqual([...resultado.celda], [cerca, lejos]);
-  assert.deepEqual([...resultado.pasos], [4, -1]);
-  assert.deepEqual([...resultado.organismo], [refDe(1, frente.gen[1]), refDe(2, frente.gen[2])]);
+  // El segundo plan es el de las personas de M2b: cerebro sin cabeza lineal (w = null).
+  const lote = { tick: 100, despacho: 7, slots: Int32Array.of(0, 0), plan: Uint16Array.of(0, 1) };
+  const resultado = percibir(new PercibidorCpu(frente, terreno), lote, [queridas, { ...queridas, id: 1, w: null }]);
+  assert.deepEqual([resultado.tick, resultado.despacho], [100, 7], 'eco del lote');
+  assert.deepEqual([...resultado.celda.subarray(0, 2)], [cerca, lejos]);
+  assert.deepEqual([...resultado.pasos.subarray(0, 2)], [4, -1]);
+  assert.deepEqual([...resultado.organismo.subarray(0, 2)], [refDe(1, frente.gen[1]), refDe(2, frente.gen[2])]);
   const red = evaluatePolicySingle(
     Float64Array.from(Array.from({ length: CEREBRO.entradas }, (_, j) => frente.col('observacion')[j])),
     Float64Array.from(Array.from({ length: POLICY_WEIGHTS }, (_, j) => frente.col('politica')[j])),
+    Array.from({ length: CEREBRO.acciones }, (_, j) => frente.col('sesgo')[j]),
   );
   for (let a = 0; a < CEREBRO.acciones; a++) {
-    let utilidad = red[a] + frente.col('sesgo')[a];
+    let utilidad = red[a];
     for (let r = 0; r < RASGOS_ANCHO; r++) utilidad += base.w![a * RASGOS_ANCHO + r] * frente.rasgos[r];
     assert.ok(Math.abs(resultado.utilidad[a] - utilidad) <= 2e-6, `utilidad ${POLICY_ACTIONS[a]}`);
+    assert.ok(Math.abs(resultado.utilidad[CEREBRO.acciones + a] - red[a]) <= 2e-6, `utilidad sin W ${POLICY_ACTIONS[a]}`);
   }
 });
 
@@ -176,13 +180,14 @@ function rastrear(base: Percibidor, dispositivo: Dispositivo) {
 function tarjetaModelo(dispositivo: Dispositivo, modelo: { fijo: number; porActor: number; ruido: number }) {
   let pendiente = 0, k = 0;
   const ultimasTransferencias = { subidos: 1, bajados: 1, ms: 0 };
+  let eco = { tick: -1, despacho: -1 };
   const percibidor = {
     dispositivo, ultimasTransferencias,
-    lanzar(lote: LotePercepcion) { pendiente = lote.slots.length; },
+    lanzar(lote: LotePercepcion) { pendiente = lote.slots.length; eco = { tick: lote.tick, despacho: lote.despacho }; },
     esperar(): Percepcion {
       const ruido = 1 + modelo.ruido * Math.sin(++k * 2.3);
       ultimasTransferencias.ms = (modelo.fijo + modelo.porActor * pendiente) * ruido;
-      return { q: 0, v: 0, a: 0, celda: new Int32Array(), pasos: new Int16Array(), valor: new Float32Array(),
+      return { q: 0, v: 0, a: 0, ...eco, celda: new Int32Array(), pasos: new Int16Array(), valor: new Float32Array(),
         organismo: new Float64Array(), utilidad: new Float32Array() };
     },
   };
@@ -194,7 +199,7 @@ test('M3 el reparto entre tarjetas converge al punto de igual tiempo de tarjeta,
   const lenta = tarjetaModelo('gpu1', { fijo: 0.05, porActor: 0.00035, ruido: 0.2 });
   const cpu = { dispositivo: 'cpu' as const, lanzar() { throw new Error('ninguna tarjeta falló'); }, esperar(): Percepcion { throw new Error(); } };
   const puente = new PuentePercepcion(cpu, [rapida, lenta]);
-  const n = 4000, lote = { tick: 1, slots: new Int32Array(n), plan: new Uint16Array(n) };
+  const n = 4000, lote = { tick: 1, despacho: 1, slots: new Int32Array(n), plan: new Uint16Array(n) };
   const reparto = (ultimos: readonly LoteGpuMedido[]) => ultimos.find(l => l.dispositivo === 'gpu0')?.actores ?? 0;
   const serie: number[] = [];
   for (let i = 0; i < 80; i++) {
@@ -229,7 +234,8 @@ test('M3 publica un invariante para detectar una recepción dañada en el tick c
   assert.deepEqual(comprobarInvariantes(mundo, opciones), []);
 });
 
-for (const fase of ['arranque', 'antes-de-leer', 'entrada-leida', 'salida-parcial', 'antes-de-confirmar', 'plazo']) {
+// `eco`: el servidor confirma una salida completa con el despacho de otro lote.
+for (const fase of ['arranque', 'antes-de-leer', 'entrada-leida', 'salida-parcial', 'antes-de-confirmar', 'plazo', 'eco']) {
   test(`M3 ${fase}: la misma recepción conserva slots y tick aunque falle una tarjeta`, () => {
     canalDePrueba(fase, (canal, marca) => {
       if (fase !== 'arranque') canal.iniciar(PLAZO_MS);
@@ -390,7 +396,13 @@ test('M3 CUDA real: GPU y CPU coinciden por estadística en varios mundos y en l
           t.diagnostic(`gpu${canal.dispositivo}: ${iguales}/${esperado.celda.length} celdas idénticas`);
           compararDistribuciones(t, fixture, lote, esperado, gpu);
           assert.deepEqual(gpu.organismo, esperado.organismo, 'las consultas de organismo son exactas en f64');
+          assert.deepEqual([gpu.tick, gpu.despacho], [lote.tick, lote.despacho], 'eco del servidor');
         }
+        // El plan de las personas de M2b: cerebro sin cabeza lineal (w = null).
+        const sinW = fixture.planes.map(p => p.acciones ? { ...p, w: null } : p);
+        const cpuSinW = percibir(new PercibidorCpu(fixture.frente, fixture.terreno), lote, sinW);
+        const gpuSinW = percibir(new PercibidorGpu(canales[0], fixture.frente, fixture.terreno), lote, sinW);
+        compararDistribuciones(t, fixture, lote, cpuSinW, gpuSinW);
       });
     }
   } finally {
@@ -570,7 +582,7 @@ test('M3 CUDA real: 4.000 vencidos, volumen por tick y estadística frente a CPU
         assert.deepEqual(recibido.valor.subarray(0, c), esperado.valor.subarray(0, c));
         assert.deepEqual(recibido.organismo.subarray(0, v), esperado.organismo.subarray(0, v));
         assert.deepEqual(recibido.utilidad.subarray(0, a), esperado.utilidad.subarray(0, a));
-        const seleccion = { tick: actual.tick, slots: actual.slots.subarray(fallado.actores), plan: actual.plan.subarray(fallado.actores) };
+        const seleccion = { tick: actual.tick, despacho: actual.despacho, slots: actual.slots.subarray(fallado.actores), plan: actual.plan.subarray(fallado.actores) };
         const resto = percibir(tarjetas[1].percibidor, seleccion, planes);
         assert.deepEqual(recibido.celda.subarray(c), resto.celda);
         assert.deepEqual(recibido.pasos.subarray(c), resto.pasos);

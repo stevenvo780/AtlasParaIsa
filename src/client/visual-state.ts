@@ -234,8 +234,10 @@ export class AtmosphereSmoother {
   private at = 0;
   constructor(private readonly settleMs: number = ATMOSPHERE_SETTLE_MS) {}
 
-  step(daylight: ReturnType<typeof daylightAt>, raining: boolean, nowMs: number): AtmosphereState {
-    const [r, g, b] = parseRgb(daylight.color), rain = raining ? 1 : 0;
+  /** `raining`: `true`/`false` como hoy, o la intensidad local de la lluvia en [0, 1] (V23, de `WorldView.aire`). */
+  step(daylight: ReturnType<typeof daylightAt>, raining: boolean | number, nowMs: number): AtmosphereState {
+    const [r, g, b] = parseRgb(daylight.color);
+    const rain = typeof raining === 'number' ? (Number.isFinite(raining) ? Math.max(0, Math.min(1, raining)) : 0) : raining ? 1 : 0;
     const previous = this.state;
     if (!previous) {
       this.at = nowMs;
@@ -426,4 +428,13 @@ export class PlaybackBuffer<V extends PlaybackSource = PlaybackSource> {
     while (i > 0 && ring[i]!.tick > this.playTick) i--;
     this.bracketA = ring[i]!; this.bracketB = ring[i + 1]!;
   }
+}
+
+/** Lluvia (mm/h) que se pinta como aguacero pleno: la de una lluvia fuerte. La intensidad satura hacia ella sin tope duro. */
+export const LLUVIA_PLENA_MM_H = 8;
+
+/** Intensidad visible en [0, 1) de una lluvia de `mmH` mm/h (`AireVisible.lluvia`): ≈ 95 % a `LLUVIA_PLENA_MM_H`; 0 sin dato. */
+export function intensidadLluvia(mmH: number | undefined): number {
+  if (mmH === undefined || !Number.isFinite(mmH) || mmH <= 0) return 0;
+  return 1 - Math.exp(-mmH / LLUVIA_PLENA_MM_H * 3);
 }

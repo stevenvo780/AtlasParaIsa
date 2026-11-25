@@ -249,3 +249,87 @@ export function classifyTerrainPixel(
   }
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* V23: color de la materia (composición y temperatura de la tesela)   */
+/* ------------------------------------------------------------------ */
+
+/** Punto de Draper (K): un sólido empieza a verse al rojo en la penumbra. */
+export const PUNTO_DRAPER_K = 798;
+/** Temperatura (K) a la que el brillo de cuerpo negro cubre el color propio del material (metal fundido, brasas vivas). */
+export const BRILLO_PLENO_K = 1800;
+/** Fusión del hielo (K): el agua superficial por debajo se pinta escarchada. */
+export const FUSION_HIELO_K = 273.15;
+/** Grados (K) bajo la fusión a los que la escarcha cubre del todo un suelo saturado de agua. */
+export const ESCARCHA_PLENA_K = 10;
+/** Paso de cuantización de cada canal de la paleta (niveles de 0–255): mantiene el pixel-art en una paleta finita. */
+export const PASO_PALETA = 8;
+
+export type Rgb = [number, number, number];
+
+/** `0xRRGGBB` (como `Propiedades.color`) → [r, g, b]. */
+export function rgbDeEntero(color: number): Rgb {
+  const c = Number.isFinite(color) ? Math.max(0, Math.min(0xffffff, Math.floor(color))) : 0;
+  return [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+}
+
+/** Redondea cada canal al paso de la paleta: dos composiciones casi iguales comparten color exacto. */
+export function aPaleta(c: Rgb, paso = PASO_PALETA): Rgb {
+  const q = (v: number) => Math.max(0, Math.min(255, Math.round(v / paso) * paso));
+  return [q(c[0]), q(c[1]), q(c[2])];
+}
+
+/** Color aparente de un cuerpo negro a `T` K (aproximación al lugar de Planck, válida de ~800 K a 40 000 K). */
+export function colorCuerpoNegro(T: number): Rgb {
+  const t = Math.max(8, Math.min(400, (Number.isFinite(T) ? T : 0) / 100));
+  const canal = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+  const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  return [canal(r), canal(g), canal(b)];
+}
+
+/** Cuánto domina la emisión térmica sobre el color propio, en [0, 1]: 0 hasta el punto de Draper; ausente = 0. */
+export function brilloTermico(T: number | undefined): number {
+  if (T === undefined || !Number.isFinite(T) || T <= PUNTO_DRAPER_K) return 0;
+  return Math.min(1, (T - PUNTO_DRAPER_K) / (BRILLO_PLENO_K - PUNTO_DRAPER_K));
+}
+
+/** El color que se ve de un material de color `base` a temperatura `T`: su color, y al rojo por encima de Draper. */
+export function colorTermico(base: Rgb, T: number | undefined): Rgb {
+  const k = brilloTermico(T);
+  if (k <= 0) return base;
+  const e = colorCuerpoNegro(T!);
+  return aPaleta([base[0] + (e[0] - base[0]) * k, base[1] + (e[1] - base[1]) * k, base[2] + (e[2] - base[2]) * k]);
+}
+
+/** Umbral de tramado ordenado 4×4 en [0, 1) fijo en píxeles del mundo (mismo dibujo en cada horneado). */
+export function umbralBayer(wx: number, wy: number): number {
+  return (BAYER_4X4[((wy & 3) << 2) | (wx & 3)]! + .5) / 16;
+}
+
+/**
+ * Qué sustancia de la composición pinta el píxel (`wx`, `wy`): índice en `fracciones`, o -1 si no hay ninguna.
+ * Tramado sin degradados: cada sustancia ocupa una parte de los píxeles igual a su fracción entre las listadas, con un
+ * umbral ordenado desplazado por grano para que las teselas vecinas no repitan la misma trama.
+ */
+export function sustanciaDelPixel(fracciones: readonly number[], wx: number, wy: number): number {
+  let total = 0;
+  for (const f of fracciones) if (f > 0 && Number.isFinite(f)) total += f;
+  if (total <= 0) return -1;
+  const grano = (umbralBayer(wx, wy) + rnd(wx >> 2, wy >> 2, 1931) * .999) % 1;
+  let acumulado = 0;
+  for (let i = 0; i < fracciones.length; i++) {
+    const f = fracciones[i]!;
+    if (!(f > 0) || !Number.isFinite(f)) continue;
+    acumulado += f / total;
+    if (grano < acumulado) return i;
+  }
+  return fracciones.length - 1;
+}
+
+/** Escarcha: cuánto blanquear el suelo húmedo por debajo de la fusión del hielo, en [0, 1] (0 sin `T`). */
+export function escarcha(T: number | undefined, humedad: number): number {
+  if (T === undefined || !Number.isFinite(T) || T >= FUSION_HIELO_K) return 0;
+  return Math.max(0, Math.min(1, humedad)) * Math.min(1, (FUSION_HIELO_K - T) / ESCARCHA_PLENA_K);
+}

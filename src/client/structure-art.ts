@@ -8,7 +8,9 @@
  */
 import type { Tile } from '../shared/types.js';
 import type { StructureView } from '../shared/life.js';
-import { hash3 } from './terrain-field.js';
+import { brilloTermico, colorCuerpoNegro, colorTermico, hash3, type Rgb } from './terrain-field.js';
+import { formaDeCodigo } from '../shared/materia.js';
+import type { LoteVisible } from '../shared/vistas-v23.js';
 
 export interface FootprintCell { x: number; y: number }
 export interface FootprintSize { width: number; height: number }
@@ -816,4 +818,152 @@ function paintMaterialFinish(g: CanvasRenderingContext2D, s: ExtendedStructure, 
       px(g, f.x0 + 2, f.wallTop + 1, 2, 1, '#f0faf2');
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* V23: lotes con forma (objetos, montones, cadáveres, piezas, fuego)  */
+/* ------------------------------------------------------------------ */
+
+/** Píxeles de arte por metro: un adulto de ~1,7 m ocupa ~14 px del sprite de 32. */
+export const PIXELES_POR_METRO = 8;
+/** kg/L con que se estima el volumen de un lote cuya sustancia aún no tiene ficha (la del agua). */
+export const DENSIDAD_SUPUESTA_KG_L = 1;
+/** Pendiente de un montón suelto (alto sobre radio): ángulo de reposo de ~27° de la grava y el grano. */
+export const PENDIENTE_MONTON = 0.5;
+/** Fracción de `Forma.filo` a partir de la cual el filo brilla en el dibujo. */
+export const FILO_VISIBLE = 0.5;
+/** Fracción de `Forma.hueco` a partir de la cual se ve la boca (vasija, horno). */
+export const HUECO_VISIBLE = 0.3;
+/** Altura de llama (px de arte) por kg^(1/3) de combustible: la llama crece con el tamaño de la pila, no con su masa. */
+export const LLAMA_PX_POR_KG13 = 6;
+/** Temperatura del borde de la llama sobre la de su núcleo (el borde se mezcla con aire frío). */
+export const LLAMA_BORDE_SOBRE_NUCLEO = 0.7;
+/** Bocanadas de humo a la vista por cada duplicación de la masa que arde. */
+export const BOCANADAS_POR_DUPLICAR = 1;
+/** Segundos que tarda una bocanada en subir y deshacerse. */
+export const HUMO_VIDA_S = 2.4;
+/** Lienzo de un lote (px de arte) y su ancla de suelo dentro de él. */
+export const LOTE_SPRITE = { w: 32, h: 36, ox: 16, oy: 30 } as const;
+
+const MAX_LARGO = LOTE_SPRITE.w - 4, MAX_ALTO = LOTE_SPRITE.oy - 2;
+
+/** Medidas en píxeles de arte de un lote: `largo` en el suelo, `alto` sobre él, `fondo` de la cara de arriba. */
+export interface FiguraLote { largo: number; alto: number; fondo: number; filo: boolean; hueco: boolean; monton: boolean }
+
+const pxDe = (metros: number, max: number) => Math.max(1, Math.min(max, Math.round(metros * PIXELES_POR_METRO)));
+
+/** Figura de un lote a partir de su forma empaquetada; sin forma (montón, cadáver sin forma) sale de su masa y densidad. */
+export function figuraDeLote(lote: Pick<LoteVisible, 'rol' | 'forma' | 'masa'>, densidadKgL?: number): FiguraLote {
+  if (lote.forma > 0) {
+    const f = formaDeCodigo(lote.forma);
+    const tumbado = lote.rol === 'cadaver';
+    return {
+      largo: pxDe(Math.max(f.largo, f.ancho), MAX_LARGO),
+      alto: pxDe(tumbado ? Math.min(f.ancho, f.grueso) : f.grueso, MAX_ALTO),
+      fondo: Math.max(1, Math.min(8, Math.round(Math.min(f.largo, f.ancho) * PIXELES_POR_METRO / 2))),
+      filo: f.filo >= FILO_VISIBLE, hueco: f.hueco >= HUECO_VISIBLE, monton: false,
+    };
+  }
+  const densidad = densidadKgL && densidadKgL > 0 ? densidadKgL : DENSIDAD_SUPUESTA_KG_L;
+  const volumen = Math.max(0, lote.masa) / densidad / 1000; // m³
+  // Cono de pendiente p: V = π·r³·p/3 → r = ∛(3V/(π·p)).
+  const radio = Math.cbrt(3 * volumen / (Math.PI * PENDIENTE_MONTON));
+  const largo = pxDe(2 * radio, MAX_LARGO);
+  return { largo, alto: Math.max(1, Math.min(MAX_ALTO, Math.round(largo * PENDIENTE_MONTON / 2) || 1)), fondo: 1, filo: false, hueco: false, monton: true };
+}
+
+/** Altura de la llama (px de arte) de un fuego de `masa` kg. */
+export function alturaLlama(masa: number): number {
+  return Math.max(3, Math.min(MAX_ALTO, Math.round(Math.cbrt(Math.max(0, masa)) * LLAMA_PX_POR_KG13)));
+}
+
+/** Clave de caché del sprite de un lote: solo lo que cambia su dibujo. `pose` solo cuenta para el fuego. */
+export function claveLote(lote: LoteVisible, figura: FiguraLote, color: Rgb, pose: number): string {
+  const brillo = Math.round(brilloTermico(lote.T) * 8);
+  const llama = lote.rol === 'fuego' ? `${alturaLlama(lote.masa)}:${pose & 3}:${Math.round(lote.T / 100)}` : '';
+  return `lote:${lote.rol}:${figura.largo}x${figura.alto}x${figura.fondo}:${figura.filo ? 1 : 0}${figura.hueco ? 1 : 0}${figura.monton ? 1 : 0}:${color.join(',')}:${brillo}:${llama}`;
+}
+
+const hex = (c: Rgb, a?: number): string => a === undefined
+  ? `#${((1 << 24) | (Math.round(c[0]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[2])).toString(16).slice(1)}`
+  : `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a.toFixed(3)})`;
+const tono = (c: Rgb, k: number): Rgb => k >= 0
+  ? [c[0] + (255 - c[0]) * k, c[1] + (255 - c[1]) * k, c[2] + (255 - c[2]) * k]
+  : [c[0] * (1 + k), c[1] * (1 + k), c[2] * (1 + k)];
+const TINTA: Rgb = [35, 23, 16];
+
+/**
+ * Pinta un lote con su pie en (`ax`, `ay`): caja de su color con cara de arriba más clara y contorno de tinta; el filo es una
+ * línea de luz, el hueco una boca oscura (o encendida si está caliente), la pieza de obra lleva juntas y el cadáver yace.
+ * Lo caliente se tiñe con su color de cuerpo negro. El fuego se pinta con `paintFuego`.
+ */
+export function paintLote(g: CanvasRenderingContext2D, lote: LoteVisible, figura: FiguraLote, color: Rgb, ax: number, ay: number): void {
+  const propio: Rgb = lote.rol === 'cadaver' ? tono(color, -.22) : color;
+  const visto = colorTermico(propio, lote.T), brillo = brilloTermico(lote.T);
+  const { largo, alto, fondo } = figura;
+  const x0 = Math.round(ax - largo / 2), base = Math.round(ay);
+  if (brillo > 0) px(g, x0 - 2, base - alto - fondo - 2, largo + 4, alto + fondo + 3, hex(colorCuerpoNegro(lote.T), .18 + .3 * brillo));
+  if (figura.monton) {
+    // Hileras cada vez más cortas, con motas de luz deterministas: un montón suelto, no un bloque.
+    for (let r = 0; r < alto; r++) {
+      const ancho = Math.max(1, Math.round(largo * (1 - r / (alto + 1)))), x = Math.round(ax - ancho / 2), y = base - 1 - r;
+      px(g, x - 1, y, ancho + 2, 1, hex(TINTA));
+      px(g, x, y, ancho, 1, hex(r === alto - 1 ? tono(visto, .18) : visto));
+      for (let i = 0; i < ancho; i += 2) if (hash3(x + i, y, 271) % 5 === 0) px(g, x + i, y, 1, 1, hex(tono(visto, (hash3(x + i, y, 272) & 1) ? .25 : -.25)));
+    }
+    return;
+  }
+  const top = base - alto;
+  px(g, x0 - 1, top - fondo - 1, largo + 2, alto + fondo + 2, hex(TINTA));
+  px(g, x0, top - fondo, largo, fondo, hex(tono(visto, .2)));
+  px(g, x0, top, largo, alto, hex(visto));
+  if (alto >= 2) px(g, x0, base - 1, largo, 1, hex(tono(visto, -.25)));
+  if (lote.rol === 'pieza' && alto >= 4) {
+    // Juntas de la obra: hiladas cada 3 px, trabadas.
+    for (let y = top + 3, fila = 0; y < base - 1; y += 3, fila++) {
+      px(g, x0, y, largo, 1, hex(tono(visto, -.3)));
+      for (let x = x0 + (fila & 1 ? 2 : 4); x < x0 + largo; x += 5) px(g, x, y - 2, 1, 2, hex(tono(visto, -.3)));
+    }
+  }
+  if (lote.rol === 'cadaver' && largo >= 4) {
+    // Costillar claro sobre el lomo: se lee como cuerpo tendido, no como tronco.
+    for (let x = x0 + 1; x < x0 + largo - 1; x += 2) px(g, x, top, 1, 1, hex(tono(visto, .3)));
+  }
+  if (figura.filo) px(g, x0, top - fondo, largo, 1, hex(tono(visto, .55)));
+  if (figura.hueco && largo >= 3 && alto >= 3) {
+    const boca: Rgb = brillo > 0 ? colorCuerpoNegro(lote.T) : tono(visto, -.6);
+    const bw = Math.max(1, largo - 2), bh = Math.max(1, Math.min(alto - 1, Math.round(alto / 2)));
+    px(g, x0 + 1, base - 1 - bh, bw, bh, hex(boca));
+    if (brillo > 0) px(g, x0 + 1 + (bw >> 1), base - 1 - bh, 1, 1, hex(tono(boca, .6)));
+  }
+}
+
+/** Llama de un fuego: lenguas que titilan por `pose` sobre la pila de combustible, con núcleo del color de cuerpo negro de su T. */
+export function paintFuego(g: CanvasRenderingContext2D, lote: LoteVisible, combustible: Rgb, ax: number, ay: number, pose: number): void {
+  const alto = alturaLlama(lote.masa), ancho = Math.max(3, Math.min(MAX_LARGO, Math.round(alto * .8)));
+  const x0 = Math.round(ax - ancho / 2), base = Math.round(ay);
+  const nucleo = colorCuerpoNegro(lote.T), borde = colorCuerpoNegro(lote.T * LLAMA_BORDE_SOBRE_NUCLEO);
+  px(g, x0 - 1, base - 2, ancho + 2, 3, hex(TINTA));
+  px(g, x0, base - 1, ancho, 2, hex(tono(combustible, -.35)));
+  px(g, x0 - 2, base - alto - 2, ancho + 4, alto + 2, hex(nucleo, .16));
+  for (let i = 0; i < ancho; i++) {
+    const centro = 1 - Math.abs((i + .5) / ancho - .5) * 2;
+    const lengua = Math.max(1, Math.round(alto * (.35 + .65 * centro) * (.75 + (hash3(i, pose & 3, 281) % 6) / 20)));
+    px(g, x0 + i, base - 1 - lengua, 1, lengua, hex(borde));
+    const dentro = Math.round(lengua * .6);
+    if (dentro > 0) px(g, x0 + i, base - 1 - dentro, 1, dentro, hex(nucleo));
+  }
+  px(g, Math.round(ax), base - 2, 1, 1, hex(tono(nucleo, .7)));
+}
+
+/** Bocanadas de humo de un fuego en el instante `t` (s): posición relativa al pie (px de arte), lado y opacidad. Pura. */
+export function humoDeFuego(lote: Pick<LoteVisible, 'x' | 'y' | 'masa'>, t: number): { dx: number; dy: number; lado: number; alfa: number }[] {
+  const n = Math.max(1, Math.round(Math.log2(1 + Math.max(0, lote.masa)) * BOCANADAS_POR_DUPLICAR));
+  const alto = alturaLlama(lote.masa), out: { dx: number; dy: number; lado: number; alfa: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const fase = ((t / HUMO_VIDA_S) + i / n + (hash3(lote.x, lote.y, 291 + i) % 97) / 97) % 1;
+    const deriva = ((hash3(lote.x, lote.y, 301 + i) % 7) - 3) * fase;
+    out.push({ dx: Math.round(deriva), dy: -Math.round(alto + fase * (alto + 14)), lado: 2 + Math.round(fase * 3), alfa: .45 * (1 - fase) });
+  }
+  return out;
 }

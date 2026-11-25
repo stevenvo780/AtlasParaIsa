@@ -10,6 +10,48 @@ const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
 export const FOOD_PER_ANIMAL: Record<Species, number> = { hare: 0.12, deer: 0.25, boar: 0.22, fish: 0.1, wolf: 0.2, fox: 0.12 };
 
+/**
+ * Lo que el mundo material (ley `w`, `v23.materia`) pone para que las funciones de este fichero, que solo reciben la
+ * tesela, muevan átomos en vez de cambiar un escalar que ya es una vista. Cada método dice si la tesela es de su mundo
+ * (`undefined` o `false` si no lo es, y entonces vale la ley escalar). Lo liga `materia/ley-mundo.ts` en el hilo del
+ * dueño, en cada tick; sin ligar, nada cambia.
+ */
+export interface PuenteMaterial {
+  /** Saca madera o piedra, en unidades de su escalar, y pone al día el escalar. Devuelve lo sacado. */
+  extraer(tile: Tile, material: 'wood' | 'stone', cantidad: number): number | undefined;
+  /** Pisoteo: esa vegetación (unidades del escalar) cae al suelo. */
+  pisar(tile: Tile, vegetacion: number): boolean;
+  /** Labrar: aporta esa fertilidad y siembra esa vegetación. */
+  cultivar(tile: Tile, fertilidad: number, vegetacion: number): boolean;
+}
+let puente: PuenteMaterial | undefined;
+export function enlazarMateria(nuevo: PuenteMaterial | undefined): void { puente = nuevo; }
+
+/** Escalares que no son materia (la huella del paso, el firme y el cultivo) y que el paso heredado del ecosistema dejaba
+ * decaer cada 10 ticks: lo mismo, para `dt` ticks. Lo llama el mundo material, que sustituye ese paso. */
+const PASO_HEREDADO_TICKS = 10, HUELLA_POR_PASO = 0.0005, HUELLA_FIRME_POR_PASO = 0.00005, FIRME_POR_PASO = 0.0005, CULTIVO_POR_PASO = 0.00002;
+export function asentarHuella(tile: Tile, dt: number, caminosFisicos: boolean): void {
+  const pasos = dt / PASO_HEREDADO_TICKS, traffic = tile.traffic ?? 0, paved = tile.paved ?? 0;
+  if (caminosFisicos && paved > 0) {
+    tile.traffic = clamp(traffic - HUELLA_FIRME_POR_PASO * pasos);
+    if (tile.traffic < 0.05) {
+      const queda = Math.max(0, paved - FIRME_POR_PASO * pasos);
+      if (queda < 0.001) tile.paved = undefined; else tile.paved = queda;
+    }
+  } else if (traffic > 0) tile.traffic = clamp(traffic - HUELLA_POR_PASO * pasos);
+  if ((tile.cultivation ?? 0) > 0) tile.cultivation = clamp(tile.cultivation! - CULTIVO_POR_PASO * pasos);
+}
+
+/** El rasgo que se ve sigue a la madera que hay: un tocón con madera vuelve a ser árbol y un árbol sin madera, tocón. */
+export function rasgoPorMadera(tile: Tile): void {
+  const wood = tile.wood ?? 0, feature = tile.feature ?? 'none';
+  if (feature === 'stump') { if (wood >= 1) tile.feature = tile.biome === 'mountain' ? 'pine' : 'tree'; }
+  else if (wood === 0 && TREE_FEATURES.has(feature)) tile.feature = feature === 'reeds' || feature === 'cactus' ? 'none' : 'stump';
+}
+export function rasgoPorPiedra(tile: Tile): void {
+  if ((tile.stone ?? 0) === 0 && (tile.feature === 'rock' || tile.feature === 'clay')) tile.feature = 'none';
+}
+
 function hash(seed: number, x: number, y: number, salt: number): number {
   let n = seed ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77) ^ salt;
   n = Math.imul(n ^ (n >>> 16), 0x7feb352d);
@@ -206,6 +248,12 @@ function stepFauna(tiles: Tile[], tick: number): void {
 
 export function harvestMaterial(tile: Tile, material: 'wood' | 'stone', amount: number): number {
   if (!Number.isFinite(amount) || amount < 0) throw new RangeError('La extracción requiere una cantidad finita no negativa.');
+  const sacado = puente?.extraer(tile, material, amount);
+  if (sacado !== undefined) {
+    marcarTesela(tile);
+    if (sacado > 0) { if (material === 'wood') rasgoPorMadera(tile); else rasgoPorPiedra(tile); }
+    return sacado;
+  }
   const harvested = Math.min(tile[material] ?? 0, amount);
   tile[material] = Math.max(0, (tile[material] ?? 0) - harvested);
   marcarTesela(tile);
@@ -221,9 +269,11 @@ export function harvestMaterial(tile: Tile, material: 'wood' | 'stone', amount: 
 export function cultivateTile(tile: Tile): boolean {
   if (tile.terrain === 'water' || tile.terrain === 'shelter' || tile.moisture <= 0.25 || (tile.cultivation ?? 0) >= 0.95) return false;
   tile.cultivation = clamp((tile.cultivation ?? 0) + 0.18);
-  tile.fertility = clamp((tile.fertility ?? 0) + 0.06);
-  tile.growth = clamp((tile.growth ?? tile.vegetation) + 0.03);
-  tile.vegetation = clamp(tile.vegetation + 0.04);
+  if (!puente?.cultivar(tile, 0.06, 0.04)) {
+    tile.fertility = clamp((tile.fertility ?? 0) + 0.06);
+    tile.growth = clamp((tile.growth ?? tile.vegetation) + 0.03);
+    tile.vegetation = clamp(tile.vegetation + 0.04);
+  }
   marcarTesela(tile);
   if (tile.feature === 'none' || tile.feature === 'stump') tile.feature = 'flowers';
   return true;
@@ -232,8 +282,10 @@ export function cultivateTile(tile: Tile): boolean {
 export function trampleTile(tile: Tile): void {
   if (tile.terrain === 'water') return;
   tile.traffic = clamp((tile.traffic ?? 0) + 0.025);
-  tile.growth = clamp((tile.growth ?? tile.vegetation) - 0.006);
-  tile.vegetation = clamp(tile.vegetation - 0.003);
+  if (!puente?.pisar(tile, 0.003)) {
+    tile.growth = clamp((tile.growth ?? tile.vegetation) - 0.006);
+    tile.vegetation = clamp(tile.vegetation - 0.003);
+  }
   tile.life = clamp((tile.life ?? 0) - 0.01);
   marcarTesela(tile);
 }

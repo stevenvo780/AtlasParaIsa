@@ -85,7 +85,6 @@ function buffersDe(d: DescriptorVista): SharedArrayBuffer[] {
     d.terreno.arena.control, d.terreno.arena.enlaces, ...d.terreno.arena.columnas.map(c => c.memoria)];
 }
 
-/** Tiempos de la piscina acumulados desde la última lectura de `medidas`. */
 /** Tiempos de la piscina acumulados desde la última lectura de `medidas`: fases (y cuántas despertaron a la piscina),
  * filas, pared de las fases, espera del que simula en la barrera tras sus tandas, tiempo activo sumado de los hilos,
  * pared × hilos activos (para la ocupación) y vistas nuevas enviadas a los hilos. */

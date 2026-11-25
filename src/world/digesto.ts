@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { World } from './index.js';
 import { paramsOf } from './params.js';
+import { todosApagados } from '../shared/interruptores.js';
 
 type Canonical = null | boolean | number | string | Canonical[] | { [key: string]: Canonical };
 const compareText = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
@@ -55,6 +56,8 @@ function paramsParaDigesto(world: World, gobernador: GobernadorLegado = GOBERNAD
   const params = paramsOf(world);
   const { depuracion: _depuracion, ...motor } = params.motor;
   const out: Record<string, unknown> = { ...params, motor, gobernador };
+  // V23: con todos los interruptores apagados el grupo no mueve el mundo y se omite (digestos anteriores intactos).
+  if (todosApagados(params.v23)) delete out.v23;
   const conducta: Record<string, unknown> = { ...params.conducta };
   if (params.conducta && params.conducta.politicaAutonomia === 0) delete conducta.politicaAutonomia;
   // V19: un interruptor apagado deja su constante asociada inerte; ambos se omiten (digestos V18 intactos).

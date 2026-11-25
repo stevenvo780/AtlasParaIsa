@@ -14,6 +14,7 @@
 
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges, type LongevityLaw } from '../shared/demography.js';
 import { splitParamList } from '../shared/param-syntax.js';
+import { INTERRUPTORES, INTERRUPTORES_APAGADOS, exigirCoherentes, type Interruptor, type InterruptoresV23 } from '../shared/interruptores.js';
 
 export interface WorldParams {
   cuerpo: {
@@ -189,6 +190,9 @@ export interface WorldParams {
     /** V19/T: instalaciones derivadas de las propiedades materiales de los productos (Fase 2). `false` = V18 exacto. */
     obrasPorPropiedades: boolean;
   };
+  /** V23: interruptores de las leyes y piezas nuevas, declarados en `shared/interruptores.ts` (apagados por defecto).
+   * Nadie añade claves aquí: se piden al integrador. Las leyes los leen con `ley(world, 'materia')`. */
+  v23: InterruptoresV23;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -234,6 +238,7 @@ const RAW_HISTORICAL: WorldParams = {
   quimica: { emergente: false },
   ecologia: { amplitudEstacional: 0, periodoEstacionalDias: 20, escalaClimaticaCeldas: 64 },
   tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false, obrasPorPropiedades: false },
+  v23: { ...INTERRUPTORES_APAGADOS },
 };
 
 /**
@@ -429,8 +434,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'ecologia.amplitudEstacional': [0, 1],
   'ecologia.periodoEstacionalDias': [1, 365],
   'ecologia.escalaClimaticaCeldas': [1, 4096],
+  'v23.cadenciaMateria': [1, 2400],
 };
-const INTEGER_V19_KEYS: readonly string[] = ['conducta.memoriaResultadoTicks', 'social.memoriaResultadosDias',
+const INTEGER_V19_KEYS: readonly string[] = ['v23.cadenciaMateria', 'conducta.memoriaResultadoTicks', 'social.memoriaResultadosDias',
   'ecologia.periodoEstacionalDias', 'ecologia.escalaClimaticaCeldas'];
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -466,6 +472,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'construccion.poliminosYSinergia': { kind: 'boolean' },
   'terreno.caminosFisicos': { kind: 'boolean' },
   'quimica.emergente': { kind: 'boolean' },
+  ...Object.fromEntries(INTERRUPTORES.map(k => [`v23.${k}`, { kind: 'boolean' }])),
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 
@@ -623,6 +630,7 @@ export function parseParams(input?: Record<string, unknown> | string, base: Worl
   // Cruce de claves: el rango por clave no puede verlo, y el tick es demasiado tarde.
   assertLongevityLaw(params.cuerpo);
   assertFounderAges(params.genes);
+  exigirCoherentes(params.v23);
   return deepFreeze(params);
 }
 
@@ -631,6 +639,11 @@ const worldParams = new WeakMap<object, WorldParams>();
 /** Params efectivos de un mundo, o `DEFAULT_PARAMS` (misma identidad) si nunca se fijaron. */
 export function paramsOf(world: object): WorldParams {
   return worldParams.get(world) ?? DEFAULT_PARAMS;
+}
+
+/** V23: ¿está encendida en este mundo la ley o pieza `k`? (`shared/interruptores.ts`). */
+export function ley(world: object, k: Interruptor): boolean {
+  return (worldParams.get(world) ?? DEFAULT_PARAMS).v23[k];
 }
 
 /** Params fijados explícitamente en `world` (`setParams`), o `undefined` si no está en el WeakMap. */

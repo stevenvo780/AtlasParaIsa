@@ -87,3 +87,10 @@ Steven preguntó si hacen falta tantas revisiones y si no es mejor «hacer, ejec
 - Un panel solo cuando el carril cambia una ley del mundo. Para diagnosticar, corridas cortas instrumentadas (minutos), no paneles.
 - El «antes» de un mismo commit base se simula una vez y se comparte (caché del panel, carril `panel`).
 - No se lanzan más corridas que núcleos libres: en una máquina saturada cada corrida tarda varias veces más. El portátil lo comparten otros trabajos; `portatil.sh` encola por memoria.
+
+## 12. Medir más rápido: decisiones de Steven (24-nov, noche)
+Medido ese día con el panel: un día simulado cuesta 53 s con menos de 50 habitantes y unos 8 minutos con 250–300 (≈ 200 ms por tick); las dos tarjetas van al 1–10 % mientras la CPU de la torre pasa de carga 110.
+- **Solo hardware local.** Nada de cómputo en la nube.
+- **Optimizar primero.** Antes de paneles largos se perfila el tick y se arregla lo que más pese sin cambiar la conducta (identidad de digesto con un hilo).
+- **Paneles a la medida de la pregunta.** «¿Se extingue esta banda?» se responde con tope 100 y pocos días; las tasas demográficas, con poblaciones grandes y horizonte corto; el horizonte largo queda para el panel final.
+- **Poblaciones grandes y tarjetas.** Miles de vidas a la vez dan en 5 días simulados lo que una banda de 14 no da en 45: tasas por habitante con error pequeño y su dependencia de la densidad (si el crecimiento no baja al subir la densidad, no hay equilibrio; si es negativo con pocos, las bandas pequeñas se extinguen). Se arranca de mundos ya crecidos (puntos guardados del panel) o sembrados (`scripts/lab/poblacion.mts`), con la decisión repartida en hilos y tarjeta. Lo que el perfil señale como grueso y paralelizable se lleva a la tarjeta; la química de lotes del mundo material nace pensada para ella.

@@ -11,7 +11,7 @@ import type { Tile, Action } from '../../shared/types.js';
 import { type BodyState, type BodyRates, assimilateFood, exertBody, hydrateBody, restBody } from '../body.js';
 import { REF_NULA, slotDe } from '../motor/contratos.js';
 import { CELDAS_VENTANA, DISTANCIA_VENTANA, LADO_VENTANA, percepcionDe } from './percepcion.js';
-import { CONSULTA, ORGANISMO } from './planes.js';
+import { CONSULTA, ORGANISMO, UMBRAL } from './planes.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { paramsOf } from '../params.js';
@@ -171,7 +171,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     let foodKey = 0;
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, f = foodOf(tile, reachableCells[i]!);
-      if (!(f > 0.025 && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0)))) continue;
+      if (!(f > UMBRAL.comida && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0)))) continue;
       const key = disputada ? reachableDist[i]! - f * 2 + recelo(tile) : reachableDist[i]! - f * 2;
       if (!food || key < foodKey) { food = tile; foodKey = key; }
     }
@@ -313,7 +313,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       const key = disputada ? reachableDist[i]! + recelo(tile) : reachableDist[i]!;
       if (water && !(key < waterKey)) continue;
       const ambient = dwOf(tile, reachableCells[i]!);
-      if ((ambient > 0.005 || waterAvailable(world, tile) > 0.005)
+      if ((ambient > UMBRAL.agua || waterAvailable(world, tile) > UMBRAL.agua)
         && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0))) {
         water = tile; waterKey = key;
       }
@@ -487,7 +487,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       const key = nearbyDist[i]!;
       if (buildable && !(key < buildableKey)) continue;
       const cell = fast ? nearbyCells[i]! : -1;
-      if (!isShelterOf(tile, cell) && moistureOf(tile, cell) > 0.2 && vegetationOf(tile, cell) > 0.15 && !lugarCerca(tile)) {
+      if (!isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadObra && vegetationOf(tile, cell) > UMBRAL.vegetacionObra && !lugarCerca(tile)) {
         buildable = tile; buildableKey = key;
       }
     }
@@ -509,7 +509,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const damaged = repairOpportunity(world,person);
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Reparar una instalación que percibe recupera una función útil; exige material y trabajo.'});
   const farmland = person.materials.wood >= 1 ? percibida(CONSULTA.cultivo) : undefined;
-  if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
+  if (farmland) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   let reunionCandidate: Candidate | undefined;
   if (partner) {
     if (vinculoEncuentro > 0) person.partnerMemory = { x: partner.x, y: partner.y, tick: world.tick };
@@ -552,8 +552,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);
   let hungry: Person | undefined;
   const hambrePercibida = percibido(ORGANISMO.hambriento);
-  if (hambrePercibida && hambrePercibida !== person && distance(person, hambrePercibida) <= 2 && hambrePercibida.hunger > 0.27) hungry = hambrePercibida;
-  else for (const other of nearbyPeople) if (distance(person, other) <= 2 && other.hunger > 0.27 && (!hungry || other.hunger > hungry.hunger)) hungry = other;
+  const compartible = (other: Person) => distance(person, other) <= UMBRAL.radioCompartir && other.hunger > UMBRAL.hambreAjena;
+  if (hambrePercibida && hambrePercibida !== person && compartible(hambrePercibida)) hungry = hambrePercibida;
+  else for (const other of nearbyPeople) if (compartible(other) && (!hungry || other.hunger > hungry.hunger)) hungry = other;
   const learned = place ? person.habits.find(habit => habit.placeId === place.id && habit.strength >= 0.5) : undefined;
   if (place && hungry && availableToShare(world, person, hungry) && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
     action: 'share', target: hungry, score: 0.22 + person.generosity * (1 + person.culture.sharing * 0.5) + (learned ? learned.strength : 0),

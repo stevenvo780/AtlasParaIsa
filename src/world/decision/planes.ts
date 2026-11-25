@@ -5,7 +5,8 @@
  */
 import { CAMPOS_CUERPO, CEREBRO, Clase, type Consulta, type ConsultaOrganismo, type Plan } from '../motor/contratos.js';
 
-/** Umbrales de las búsquedas de `choose`, en sus unidades de siempre. */
+/** Umbrales de las búsquedas de `choose`, en sus unidades de siempre: los leen los planes y las búsquedas exactas
+ * con que el dueño rehace una consulta percibida que no le sirve, que deben coincidir. */
 export const UMBRAL = {
   comida: 0.025,        // alimento visible para comer: > 0,025
   agua: 0.005,          // agua potable: > 0,005

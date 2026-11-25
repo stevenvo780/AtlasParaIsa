@@ -34,7 +34,7 @@ import {
 import { cercanos } from './motor/vecinos.js';
 import { TICKS_PER_DAY, type World } from './mundo/tipos.js';
 import { alarmaEn, alarmaPorAtaque, podarAlarmaLocal, subirAlarma, TAU_ALARMA } from './soa/alarma.js';
-import { COLUMNA_FAUNA, escribirFilaFaunaV23, FAUNA_ANCHO } from './soa/fauna.js';
+import { COLUMNA_FAUNA, escribirFilaFaunaV23, FAUNA_ANCHO } from './soa/fauna-v23.js';
 import { faunaRegistrada } from './soa/organismos-mundo.js';
 
 // ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────

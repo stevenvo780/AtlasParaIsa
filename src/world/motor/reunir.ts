@@ -14,6 +14,8 @@
  */
 import type { Tile } from '../../shared/types.js';
 import type { World } from '../mundo/tipos.js';
+import { boundParamsOf, setParams } from '../params.js';
+import { bindWorldContext, worldContext } from '../spatial.js';
 import type { TipoId } from './contadores.js';
 
 /** Campos que cada dueño acumula sobre la copia de la cabecera. */
@@ -105,5 +107,9 @@ export function reunir(coordinador: World, cabecera: World, partes: readonly Wor
   mundo.siguienteUid = siguientes.uid;
   mundo.communityCounter = Math.max(coordinador.communityCounter, siguientes.comunidad);
   mundo.structureCounter = Math.max(coordinador.structureCounter, siguientes.estructura);
+  // Es otro objeto: lleva los parámetros y las capacidades del anfitrión del mundo del que sale.
+  const params = boundParamsOf(coordinador);
+  if (params) setParams(mundo, params);
+  bindWorldContext(mundo, worldContext(coordinador));
   return mundo;
 }

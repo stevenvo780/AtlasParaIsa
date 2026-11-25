@@ -17,6 +17,7 @@ import { cargarSustancias } from '../materia/servicio.js';
 import type { Libro } from '../materia/tipos.js';
 import type { World } from '../mundo/tipos.js';
 import { setParams, type WorldParams } from '../params.js';
+import { conRejilla } from '../rejilla.js';
 import { PageArena, type ArenaCompartida } from '../soa/arena.js';
 import { OrganismosMundo, registrarOrganismos } from '../soa/organismos-mundo.js';
 import { TablaOrganismosSoA, type TablaCompartida } from '../soa/organismos.js';
@@ -96,8 +97,13 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
   return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada);
 }
 
-/** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. */
+/** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
+ * del mundo, como el tick de un dueño (`stepWorld`), por si una ley usa una consulta espacial de las de siempre. */
 export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false): void {
+  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada));
+}
+
+function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean): void {
   const m = d.mundo, celda = (campo: number): number => celdaDueno(d.hilo, campo), inicio = performance.now();
   switch (tramo) {
     case TRAMO.cargar:

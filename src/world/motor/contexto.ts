@@ -698,7 +698,9 @@ export class Dueno implements CtxF0 {
       if (destino < 0) for (const ley of this.leyes) ley.alRetirar?.(this, chunk);
       const mig = this.#desprender(chunk, false);
       if (!mig) continue;
-      for (const p of mig.personas) if (p.ref !== REF_NULA) { organismos.personas.soltar(p.persona); if (destino >= 0) tabla.ceder(this.hilo, p.ref, destino); }
+      // Un chunk se archiva sin gente: quien estuviera en él sigue con este dueño (su halo lo volverá a pedir).
+      if (destino < 0) { for (const p of mig.personas) m.people.push(p.persona); mig.personas = []; }
+      for (const p of mig.personas) if (p.ref !== REF_NULA) { organismos.personas.soltar(p.persona); tabla.ceder(this.hilo, p.ref, destino); }
       if (destino >= 0) this.enviarMigrante(destino, mig);
       else {
         terreno.vaciarPagina(chunk);

@@ -186,7 +186,7 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   });
 });
 
-test('si el anillo se llena, el escritor espera y publica los dos rangos contiguos', t => {
+test('si el anillo se llena, el motor entrega el crédito sin esperar ni adelantar el cursor', t => {
   const s: SucesoFotograma = { tipo: 'cronica', evento };
   const link = enlace(serialize(s).length + 4, 2);
   const c = contextos().coordinador;
@@ -195,20 +195,16 @@ test('si el anillo se llena, el escritor espera y publica los dos rangos contigu
   Atomics.store(link.creditos, 0, 2);
   enlazarFuenteFotograma(link, { corte: () => ({ serie, sucesos: [s] }), confirmar() {} });
   cerrarFotograma(ctx, link, abrirFotograma(ctx, link, 1)!, true);
-  let frontera = 0;
-  const wait = t.mock.method(Atomics, 'wait', () => {
-    assert.equal(Atomics.load(link.entregados, 0), 1n);
-    assert.ok(leerFotograma(link, 0n, (f, sucesos) => {
-      frontera = f.sucesos[1];
-      assert.deepEqual(sucesos, [s]);
-    }));
-    return 'ok';
-  });
+  const frontera = Atomics.load(link.sucesosEscritos, 0);
+  const wait = t.mock.method(Atomics, 'wait', () => assert.fail('el productor esperó al consumidor'));
   c.tick++;
-  cerrarFotograma(ctx, link, abrirFotograma(ctx, link, 2)!, true);
-  assert.equal(wait.mock.callCount(), 1);
-  assert.ok(leerFotograma(link, 1n, (f, sucesos) => {
-    assert.deepEqual([f.sucesos[0], f.epoca, f.tick, f.completo], [frontera, 2, 11, true]);
+  assert.equal(cerrarFotograma(ctx, link, abrirFotograma(ctx, link, 2)!, true), false);
+  assert.equal(wait.mock.callCount(), 0);
+  assert.equal(Atomics.load(link.saturado, 0), 1);
+  assert.equal(Atomics.load(link.entregados, 0), 1n);
+  assert.equal(Atomics.load(link.sucesosEscritos, 0), frontera);
+  assert.ok(leerFotograma(link, 0n, (f, sucesos) => {
+    assert.equal(BigInt(f.sucesos[1]), frontera);
     assert.deepEqual(sucesos, [s]);
   }));
   assert.equal(Atomics.load(link.creditos, 0), 2);
@@ -219,22 +215,25 @@ test('un lote mayor que el anillo falla con diagnóstico y no confirma ni public
   const datos = contextos().coordinador, c = datos as unknown as CtxF0;
   setParams(c.mundo, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, fotograma: true } });
   Atomics.store(link.creditos, 0, 1);
-  let sucesos: SucesoFotograma[] = [{ tipo: 'cronica', evento }];
+  const sucesos: SucesoFotograma[] = [{ tipo: 'cronica', evento }];
   let confirmados = 0;
   enlazarFuenteFotograma(link, { corte: () => ({ serie, sucesos }), confirmar() { confirmados++; } });
   const f = abrirFotograma(c, link, 1)!;
-  assert.throws(() => cerrarFotograma(c, link, f, true), /no cabe en el anillo/);
+  assert.equal(cerrarFotograma(c, link, f, true), false);
   assert.equal(confirmados, 0);
   assert.equal(Atomics.load(link.entregados, 0), 0n);
   assert.equal(Atomics.load(link.sucesosEscritos, 0), 0n);
   assert.equal(Atomics.load(link.creditos, 0), 1);
 
-  sucesos = [];
   datos.tick++;
-  cerrarFotograma(c, link, abrirFotograma(c, link, 1)!, true);
-  assert.throws(() => leerFotograma(link, 0n, f => {
-    assert.equal(f.saltados, 1);
+  assert.equal(abrirFotograma(c, link, 1), null);
+  const reemplazo = enlace(8);
+  Atomics.store(reemplazo.creditos, 0, 1);
+  enlazarFuenteFotograma(reemplazo, { corte: () => ({ serie, sucesos: [] }), confirmar() {} });
+  assert.equal(cerrarFotograma(c, reemplazo, abrirFotograma(c, reemplazo, 2)!, true), true);
+  assert.throws(() => leerFotograma(reemplazo, 0n, f => {
+    assert.equal(f.completo, true);
     throw new Error('Falló el consumidor');
   }), /Falló el consumidor/);
-  assert.equal(Atomics.load(link.creditos, 0), 1);
+  assert.equal(Atomics.load(reemplazo.creditos, 0), 1);
 });

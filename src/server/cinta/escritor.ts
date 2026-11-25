@@ -117,7 +117,7 @@ export class EscritorCinta {
     return [...this.grabadas[nivel - 1]?.values() ?? []];
   }
 
-  registrar(corte: Corte): void {
+  registrar(corte: Corte, serieAutomatica = true): void {
     const completo = corte.tilesCambiadas === 'todas';
     if (this.entradaEpoca === undefined || corte.epoca !== this.entradaEpoca
       || !Number.isSafeInteger(corte.seq) || corte.seq <= this.ultimaSecuencia || !Number.isSafeInteger(corte.t)
@@ -134,6 +134,7 @@ export class EscritorCinta {
     if (completo) this.olvidarTeselas();
     for (const tesela of corte.tilesCambiadas === 'todas' ? corte.vista.tiles : corte.tilesCambiadas) {
       const clave = `${tesela.x},${tesela.y}`;
+      if (igual(this.teselas.get(clave), tesela)) continue;
       this.teselas.set(clave, tesela);
       for (const claves of this.sucias) claves.add(clave);
     }
@@ -142,7 +143,7 @@ export class EscritorCinta {
       if (hito.tipo === 'suceso' && hito.importancia > 0) for (const id of hito.suceso.actors) this.notables.add(id);
     }
     for (const entrada of corte.catalogo) this.entradas.push(entrada);
-    if (corte.t >= this.proximaSerie) this.registrarSerie(corte.epoca, { t: corte.t, ...corte.serie });
+    if (serieAutomatica && corte.t >= this.proximaSerie) this.registrarSerie(corte.epoca, { t: corte.t, ...corte.serie });
     const sinTeselas = { ...corte.vista, tiles: [] };
     for (const nivel of NIVELES) {
       if (nivel > 0 && corte.t < (this.proximos[nivel] ?? 0)) continue;

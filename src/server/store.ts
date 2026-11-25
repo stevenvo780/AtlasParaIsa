@@ -709,13 +709,17 @@ export class Store {
   }
 
   cargarInstantanea(): { instantanea: Instantanea; epoca: number } | null {
+    const carga = this.cargarGuardadoCompleto();
+    if (!carga) { this.assertNewCompleteStore(); return null; }
+    const { instantanea, epoca } = carga;
+    return { instantanea, epoca };
+  }
+
+  cargarGuardadoCompleto(): { instantanea: Instantanea; epoca: number; metadatos: Omit<LoadedSnapshot, 'world'> } | null {
     if (this.readOnly || this.db.isTransaction) throw new Error('Store.cargarInstantanea requiere una transacción propia de escritura.');
     return this.loadTransaction(rawTransaction => {
       const anterior = this.readCompleteEpoch();
-      if (anterior === null) {
-        this.assertNewCompleteStore();
-        return null;
-      }
+      if (anterior === null) return null;
       const loaded = this.loadVerified(rawTransaction, true);
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
       const materia = this.decodeCompleteMatter(this.readCompleteMatter(loaded.slot), loaded.world.tick);
@@ -723,7 +727,8 @@ export class Store {
       if (!Number.isSafeInteger(epoca)) throw new SnapshotSemanticError('La época de carga excede el rango de enteros exactos.');
       this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
       if (this.readCompleteEpoch() !== epoca) throw new SnapshotSemanticError('La época cambió antes del commit.');
-      return { instantanea: { world: loaded.world, materia }, epoca };
+      const { world, ...metadatos } = loaded;
+      return { instantanea: { world, materia }, epoca, metadatos };
     }, true);
   }
 
@@ -1639,11 +1644,15 @@ export class Store {
     this.saveSnapshot(world, inputs, requiredSessions, changes);
   }
 
-  guardar({ world, materia }: Instantanea): void {
+  guardar(i: Instantanea): void {
+    this.guardarConEntradas(i, [], []);
+  }
+
+  guardarConEntradas({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[], sesiones: string[]): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
-    this.saveSnapshot(world, [], [], [], materia === null ? null : codificarCheckpoint(materia));
+    this.saveSnapshot(world, inputs, sesiones, [], materia === null ? null : codificarCheckpoint(materia));
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],

@@ -145,7 +145,11 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     if (expectedVersion >= 3) assertEcosystemTile(tile);
     const key = `${tile.x},${tile.y}`;
     if (tile.biome !== undefined && !['grassland','forest','desert','mountain','wetland','ocean'].includes(tile.biome) || tile.elevation !== undefined && (typeof tile.elevation !== 'number' || !Number.isFinite(tile.elevation) || tile.elevation < 0 || tile.elevation > 1)) fail();
-    if (keys.has(key) || !w.chunks[chunkKey(tile.x, tile.y)] || (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || tile.wood > 12)) || (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || tile.stone > 8))) fail();
+    if (keys.has(key) || !w.chunks[chunkKey(tile.x, tile.y)]) fail();
+    if (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || tile.wood > 12))
+      throw new Error(`Estado procedural inválido. Madera fuera de rango en la tesela ${key}.`);
+    if (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || tile.stone > 8))
+      throw new Error(`Estado procedural inválido. Piedra fuera de rango en la tesela ${key}.`);
     keys.add(key);
   }
   for (const [key, chunk] of Object.entries(w.chunks)) {

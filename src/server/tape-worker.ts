@@ -110,7 +110,7 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
           if (previoBinario >= 0 && f.saltados && corte.t - previoBinario <= PASO_MAXIMO) {
             corte.hitos.push({ t: corte.t, importancia: 1, tipo: 'laguna', laguna: { t0: previoBinario, t1: corte.t } });
           }
-          escritor.registrar(corte);
+          escritor.registrar(corte, false);
           previoBinario = corte.t;
         }));
         if (!disponible) break;

@@ -130,7 +130,10 @@ export type Suceso = { tipo: 'cronica'; evento: ChronicleEvent } | { tipo: 'sust
  *   módulo su longitud) con registros [u32 len LE][len bytes de v8.serialize(Suceso)],
  *   envueltos byte a byte módulo `sucesos.byteLength` (también la cabecera u32 si cae en el borde).
  */
-export interface DescriptorEnlace { control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null }
+export interface DescriptorEnlace {
+  control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null;
+  versiones?: SharedArrayBuffer;
+}
 
 /** Int32 [créditos, pedirCompleto, cadencia, —] y BigInt64 desde el byte 16 [entregados, sucesosEscritos, sucesosLeidos]. */
 export const CONTROL_ENLACE_BYTES = 40;
@@ -141,19 +144,19 @@ export const CONTROL_ENLACE_BYTES = 40;
  * aborta ese fotograma devolviendo el crédito y sumando 1 a `saltados`. Al acabar un fotograma válido,
  * `Atomics.add(entregados, 0, 1n)` y `Atomics.notify(entregados, 0)` (`entregados` es monótono entre épocas, nunca se
  * reinicia en `cargar`). Antes de publicar el fotograma escribe sus sucesos en el anillo (`sucesosEscritos`, en bytes) y
- * espera con `Atomics.wait(sucesosLeidos, 0, ...)` si no caben. Cinta: lee en orden la ranura `leidos % ranuras` mientras
+ * descarta el corte si no caben. Cinta: lee en orden la ranura `leidos % ranuras` mientras
  * `leidos < entregados`, lee antes los bytes del anillo hasta `BigInt(Fotograma.sucesos[1])`, sube `sucesosLeidos` con
  * `Atomics.store` + `Atomics.notify(sucesosLeidos, 0)` y, al soltar la ranura, `Atomics.add(creditos, 0, 1)`. Los contadores
  * BigInt64 no desbordan en la vida del mundo. `pedirCompleto[0] = 1` lo pone la cinta y lo baja el motor; `cadencia[0]`
  * son ticks entre fotogramas y la cinta lo sube si se atrasa.
  * Si el consumidor muere o el enlace queda inutilizable, el supervisor publica
  * Atomics.store(sucesosLeidos, 0, -1n) y Atomics.notify(sucesosLeidos, 0).
- * El productor comprueba -1n antes de reservar, publicar y al comprobar espacio
- * para sucesos, también después de despertar. Un enlace abandonado no se vuelve
+ * El productor comprueba -1n antes de reservar y publicar. Un enlace abandonado no se vuelve
  * a usar; el productor omite los fotogramas hasta que Motor.enlazar reciba uno nuevo.
  */
 export interface EnlaceCinta {
   readonly ranuras: readonly SharedArrayBuffer[];
+  readonly versiones?: Float64Array;
   readonly sucesos: Uint8Array | null;
   readonly creditos: Int32Array; readonly pedirCompleto: Int32Array; readonly cadencia: Int32Array;
   /** Palabra libre del control (bytes 12–15). Si el lote de sucesos de un fotograma no cabe en el anillo, el motor no
@@ -168,6 +171,7 @@ export function enlaceCinta(d: DescriptorEnlace): EnlaceCinta {
   const i64 = (i: number) => new BigInt64Array(d.control, 16 + 8 * i, 1);
   return {
     ranuras: d.ranuras, sucesos: d.sucesos && new Uint8Array(d.sucesos),
+    versiones: d.versiones && new Float64Array(d.versiones),
     creditos: i32(0), pedirCompleto: i32(1), cadencia: i32(2), saturado: i32(3),
     entregados: i64(0), sucesosEscritos: i64(1), sucesosLeidos: i64(2),
   };

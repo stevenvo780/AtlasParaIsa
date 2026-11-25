@@ -6,6 +6,8 @@ import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../src/world/para
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { tileLookup } from '../src/world/tile-index.js';
 import { residentFastAccess } from '../src/world/soa/terreno.js';
+import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
+import { bindWorldContext, worldContext } from '../src/world/spatial.js';
 import { distance } from '../src/world/mundo/geometria.js';
 import { RADIUS } from '../src/world/mundo/tipos.js';
 import { evaluatePolicySingle } from '../src/world/politica.js';
@@ -16,12 +18,20 @@ import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararC
 import type { Tile } from '../src/shared/types.js';
 import { PercibidorHilos } from './v23-decision-hilos.js';
 
-/** El régimen abierto del panel con un hilo: SoA residente, política activa, química y obras modulares. */
+/** El régimen abierto del panel con un hilo: política activa, química y obras modulares (terreno en teselas). */
 const ABIERTO = parseParams({ motor: { ...hostOpenWorldParams().motor, hilos: 1, gpu: [] } }, hostOpenWorldParams());
+/** El mismo con el SoA residente, como lo arma `sim-worker`: dueño de topología y ecología en 2 hilos. */
+const RESIDENTE = parseParams({ motor: { ...ABIERTO.motor, hilos: 2 } }, ABIERTO);
 
 function mundo(seed: number, pasos: number, params: WorldParams = DEFAULT_PARAMS): World {
   const world = createWorld(seed, params);
+  if (params === RESIDENTE) {
+    const dueno = new ResidentTopologyOwner();
+    world.tiles = dueno.tiles(world.tiles.map(t => dueno.tile(t)));
+    bindWorldContext(world, { ...worldContext(world), tileOwnership: dueno });
+  }
   for (let i = 0; i < pasos; i++) stepWorld(world);
+  if (params === RESIDENTE) assert.ok(residentFastAccess(world.tiles)?.exact, 'el SoA es residente');
   return world;
 }
 
@@ -75,7 +85,7 @@ function referencia(world: World, x: number, y: number) {
 }
 
 test('la ventana, las consultas y los organismos percibidos son los de la búsqueda de siempre', () => {
-  for (const [seed, params] of [[7, DEFAULT_PARAMS], [42, DEFAULT_PARAMS], [51926, ABIERTO]] as const) {
+  for (const [seed, params] of [[7, DEFAULT_PARAMS], [42, DEFAULT_PARAMS], [51926, ABIERTO], [51926, RESIDENTE], [19104, RESIDENTE]] as const) {
     const world = mundo(seed, 900, params);
     const { vista, salida } = percibirTodos(world);
     assert.ok(world.people.length > 0);
@@ -177,6 +187,26 @@ test('el terreno sube la versión de cada página que reasigna, también en la v
     assert.equal(otra.versionPagina[c], terreno.versionPagina[c]);
     assert.ok(otra.duenoChunk[c]! >= 0);
   }
+});
+
+test('un slot que cambia de ocupante cambia de gen, y crecer el frente no la pierde', () => {
+  const world = mundo(42, 300), tileIn = tileLookup(world.tiles), vista = VistaMundo.nueva();
+  const gens = () => Array.from(vista.frente.gen.subarray(0, vista.frente.alta));
+  const antes = world.people.slice();
+  assert.ok(antes.length > 3);
+  vista.capturar(antes, 1, [], tileIn, undefined);
+  const g1 = gens();
+  assert.ok(g1.every(g => g > 0));
+  // Muere la persona 1: las de detrás se corren un slot; las de delante siguen en el suyo.
+  const despues = antes.filter((_, i) => i !== 1);
+  vista.capturar(despues, 2, [], tileIn, undefined);
+  const g2 = gens();
+  assert.equal(g2[0], g1[0]);
+  for (let s = 1; s < despues.length; s++) assert.ok(g2[s]! > g1[s]!, `slot ${s}`);
+  // Más personas que capacidad: el frente crece sin volver a gen 0.
+  const muchas = Array.from({ length: 4 * vista.frente.gen.length }, (_, i) => despues[i % despues.length]!);
+  vista.capturar(muchas, 3, [], tileIn, undefined);
+  assert.equal(vista.frente.gen[0], g2[0]);
 });
 
 test('quien decide fuera del lote se percibe donde está sin escribir en el frente', () => {

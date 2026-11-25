@@ -319,11 +319,14 @@ export interface DescriptorVista {
 
 /** Frente de las personas en la ola 1: una fila por persona (slot = índice en `world.people` al capturar), con solo lo
  * que lee la percepción: vida, clase, posición, hambre, sed y energía, rol protegido y, para quien decide con cerebro,
- * sus tres columnas. Las demás columnas del contrato quedan a cero hasta que M2a dé el frente de verdad. */
+ * sus tres columnas. Cuando una muerte corre los índices, el slot cambia de ocupante y su `gen` sube, así que un `Ref`
+ * nunca nombra a otra persona y quien guarde algo por slot (los pesos en la GPU) sabe que caducó. Las demás columnas
+ * del contrato quedan a cero hasta que M2a dé el frente de verdad. */
 class FrenteMundo implements FrentePublico {
   tick = 0; alta = 0;
   readonly columnas = COLUMNAS_VISTA.map(([nombre]) => nombre);
   datos: Record<string, Columna> = {};
+  #ocupante: (Person | undefined)[] = [];
   constructor(buffers?: Record<string, SharedArrayBuffer>) {
     if (buffers) for (const [nombre, tipo] of COLUMNAS_VISTA) this.datos[nombre] = new CONSTRUCTOR[tipo](buffers[nombre]!);
     else this.reservar(16);
@@ -341,21 +344,28 @@ class FrenteMundo implements FrentePublico {
   reservar(filas: number): void {
     if (this.datos.gen && this.datos.gen.length >= filas) return;
     const cap = Math.max(filas, 2 * (this.datos.gen?.length ?? 0));
-    for (const [nombre, tipo, ancho] of COLUMNAS_VISTA) this.datos[nombre] = new CONSTRUCTOR[tipo](new SharedArrayBuffer(cap * ancho * CONSTRUCTOR[tipo].BYTES_PER_ELEMENT));
+    for (const [nombre, tipo, ancho] of COLUMNAS_VISTA) {
+      const nueva = new CONSTRUCTOR[tipo](new SharedArrayBuffer(cap * ancho * CONSTRUCTOR[tipo].BYTES_PER_ELEMENT));
+      const previa = this.datos[nombre];
+      if (previa) nueva.set(previa as never);
+      this.datos[nombre] = nueva;
+    }
   }
   capturar(personas: readonly Person[], tick: number): void {
     this.reservar(personas.length);
     this.tick = tick; this.alta = personas.length;
     casillasPorFrente.delete(this);   // recapturar en el mismo tick (fuera de la fase de personas) mueve a la gente
     const vivo = this.datos.vivo!, clase = this.datos.clase!, x = this.datos.x!, y = this.datos.y!, cuerpo = this.datos.cuerpo!;
-    const protegido = this.datos[COLUMNA_PROTEGIDO]!;
+    const protegido = this.datos[COLUMNA_PROTEGIDO]!, gen = this.datos.gen!, ocupante = this.#ocupante;
     for (let s = 0; s < personas.length; s++) {
       const p = personas[s]!;
+      if (ocupante[s] !== p) { gen[s]!++; ocupante[s] = p; }
       vivo[s] = 1; clase[s] = Clase.Persona; x[s] = p.x; y[s] = p.y;
       cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.hambre] = p.hunger; cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.sed] = p.thirst;
       cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.energia] = p.energy;
       protegido[s] = p.role !== 'neighbor' ? 1 : 0;
     }
+    ocupante.length = personas.length;
   }
 }
 

@@ -5,7 +5,7 @@
  *   huella    --pasos 600 [--lado 64] [--cada 10] [--semilla 1] --salida f   una línea por paso: libro, vistas y lotes (sha1)
  *   comparar  a b                                                          primera diferencia entre dos huellas
  *   fases     [--pasos 60] [--lado 64] [--cada 10]                          ms por fase y reacciones evaluadas/aplicadas
- *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10]          µs por tesela y tick (calentamiento en un hilo)
+ *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10] [--reparto modulo|coste]   µs por tesela y tick
  *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] [--mapa 1] [--grupo vida|cinetica|intercambio] --salida dir
  *             vistas tras cada día pedido, por K (con --grupo, solo ese grupo de procesos cada K ticks y el resto cada tick)
  *   errores   dir                                                          tabla de error frente a K = 1 (y ruido de semilla)
@@ -200,31 +200,55 @@ async function fases(): Promise<void> {
 
 // ── Velocidad ──
 
+/** Dueño de cada página: p % hilos (el de `levantar`), o por coste (la página más cara al hilo menos cargado). El
+ * resultado no depende del dueño (cada página lleva su azar), solo el reparto de la carga. */
+function repartir(m: MundoMaterial, hilos: number, coste: Float64Array | null): void {
+  if (!coste) { for (let p = 0; p < m.np; p++) m.dueno[p] = p % hilos; return; }
+  const carga = new Float64Array(hilos), orden = Array.from({ length: m.np }, (_, p) => p).sort((a, b) => coste[b]! - coste[a]! || a - b);
+  for (const p of orden) {
+    let h = 0;
+    for (let k = 1; k < hilos; k++) if (carga[k]! < carga[h]!) h = k;
+    m.dueno[p] = h; carga[h]! += coste[p]!;
+  }
+}
+
 async function velocidad(): Promise<void> {
   const lado = +opt('lado', '64'), cada = +opt('cada', '10'), semilla = +opt('semilla', '1'), pasos = +opt('pasos', '50');
-  const etiqueta = opt('etiqueta', '');
+  const etiqueta = opt('etiqueta', ''), reparto = opt('reparto', 'modulo');
   for (const hilos of lista('hilos', '1,8')) {
     const q = crearServicioQuimico({ modo: 'inmediato' });
     const m = MundoMaterial.levantar(teselas(semilla, lado), q, { hilos, semilla });
     const clima = tiempo(semilla);
     let t = 0;
+    // Calentamiento en el hilo principal (que la química conozca las mezclas), midiendo lo que cuesta cada página.
     m.dueno.fill(0);
-    for (; t < 30 * cada; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); }
-    for (let p = 0; p < m.np; p++) m.dueno[p] = p % hilos;
+    const coste = new Float64Array(m.np);
+    for (; t < 30 * cada; t += cada) {
+      const f = clima(t, cada);
+      m.prepararPaso(); m.arena.barrera();
+      for (let p = 0; p < m.np; p++) { const t0 = performance.now(); m.pasarPagina(p, f); coste[p]! += performance.now() - t0; }
+    }
+    repartir(m, hilos, reparto === 'coste' ? coste : null);
     const d: DescriptorMundo = { ...m.d, sustancias: serializarSustancias(q) };
     const workers = hilos > 1 ? Array.from({ length: hilos }, (_, h) => hiloBanco({ bancoMaterial: true, d, hilo: h })) : [];
-    let ms = 0;
-    for (let k = 0; k < pasos; k++, t += cada) {
+    let ms = 0, maximo = 0, medio = 0;
+    // Los workers tienen cada uno su química: unos pasos sin medir para que aprendan sus mezclas (en el mundo viven siempre).
+    const fria = hilos > 1 ? +opt('calentar-hilos', '10') : 0;
+    for (let k = -fria; k < pasos; k++, t += cada) {
       const f = clima(t, cada);
       m.prepararPaso();
       const t0 = performance.now();
       if (hilos === 1) m.pasar(f);
-      else await Promise.all(workers.map((wk) => new Promise((ok) => { wk.once('message', ok); wk.postMessage(f); })));
+      else {
+        const r = await Promise.all(workers.map((wk) => new Promise<number>((ok) => { wk.once('message', ok); wk.postMessage(f); })));
+        maximo += Math.max(...r); medio += r.reduce((a, b) => a + b, 0) / r.length;
+      }
+      if (k < 0) { ms = maximo = medio = 0; continue; }
       ms += performance.now() - t0;
     }
     await Promise.all(workers.map((wk) => wk.terminate()));
     const us = 1000 * ms / pasos / m.n / cada;
-    console.log(`velocidad ${etiqueta} hilos=${hilos} ${(ms / pasos).toFixed(1)} ms por paso de ${cada} ticks → ${us.toFixed(3)} µs por tesela y tick (${m.n} teselas); ${carga()}`);
+    console.log(`velocidad ${etiqueta} hilos=${hilos} reparto=${reparto} ${(ms / pasos).toFixed(1)} ms por paso de ${cada} ticks → ${us.toFixed(3)} µs por tesela y tick (${m.n} teselas)${hilos > 1 ? `; hilo más lento ${(maximo / pasos).toFixed(1)} ms, medio ${(medio / pasos).toFixed(1)} ms` : ''}; ${carga()}`);
     await q.cerrar();
   }
 }
@@ -378,7 +402,7 @@ const E = (x: string) => ELEMENTOS.indexOf(x as never);
 if (!isMainThread && (workerData as { bancoMaterial?: boolean } | null)?.bancoMaterial) {
   const { d, hilo } = workerData as { d: DescriptorMundo; hilo: number };
   const m = MundoMaterial.conectar(d, hilo);
-  parentPort!.on('message', (f: Forzamiento) => { m.pasar(f); parentPort!.postMessage(0); });
+  parentPort!.on('message', (f: Forzamiento) => { const t0 = performance.now(); m.pasar(f); parentPort!.postMessage(performance.now() - t0); });
 } else if (isMainThread) {
   const orden = argv[0];
   if (orden === 'huella') huella();

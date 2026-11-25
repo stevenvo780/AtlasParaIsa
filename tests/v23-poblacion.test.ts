@@ -4,7 +4,7 @@ import { assertWorld, createWorld, TICKS_PER_DAY } from '../src/world/index.js';
 import { DEFAULT_PARAMS, paramsOf } from '../src/world/params.js';
 import { demographicTraits, initialDemography, updateDemography } from '../src/world/demography.js';
 import {
-  analizar, bondadAjuste, colaChiCuadrado, curvaSupervivencia, mulberry32, NECESIDADES_REFERENCIA, paramsDeCorrida, poblar, probabilidadesEdad, remuestreo, transitorio, coherenciaEscala,
+  analizar, bondadAjuste, entreSiembras, planCurva, colaChiCuadrado, curvaSupervivencia, mulberry32, NECESIDADES_REFERENCIA, parejasNuevas, paramsDeCorrida, tendenciaDiaria, poblar, probabilidadesEdad, remuestreo, transitorio, coherenciaEscala,
   type Grupo, type Individuo, type Registro, type Zona,
 } from '../scripts/lab/poblacion.mjs';
 
@@ -120,7 +120,7 @@ test('las tasas por habitante recuperan las verdaderas con su IC y el transitori
 });
 
 test('coherencia de escala: dos mitades con la misma tasa coinciden y con otra tasa no', () => {
-  const corrida = (registro: Registro, n: number, zona: Zona) => ({ archivo: '', opciones: { semilla: 1, n, zona } as never, registro: { ...registro, zona }, msTotal: 0, carga: { inicio: [0], fin: [0] }, maxRssMiB: 0 });
+  const corrida = (registro: Registro, n: number, zona: Zona) => ({ archivo: '', opciones: { semilla: 1, n, zona, siembra: 1 } as never, registro: { ...registro, zona }, msTotal: 0, carga: { inicio: [0], fin: [0] }, maxRssMiB: 0 });
   const izq = { ...ZONA, ancho: 24 }, der = { ...ZONA, x: 24, ancho: 24 };
   const iguales = coherenciaEscala([corrida(registroSintetico(1, 2000, 5, 0.3, 0.2, false), 2000, ZONA),
     corrida(registroSintetico(2, 1000, 5, 0.3, 0.2, false), 1000, izq), corrida(registroSintetico(3, 1000, 5, 0.3, 0.2, false), 1000, der)], 1, 8);
@@ -138,3 +138,49 @@ test('el remuestreo de un solo grupo no inventa incertidumbre', () => {
   assert.deepEqual(estimaciones.r.ic95, [0.1, 0.1]);
 });
 
+
+test('una pareja cuenta la primera vez que cruza la confianza, no cada vez que vuelve a cruzarla', () => {
+  const vistos = new Set(['a|b']);
+  assert.deepEqual(parejasNuevas(vistos, new Set(['a|b', 'a|c'])), ['a|c'], 'a|b ya estaba al empezar');
+  assert.deepEqual(parejasNuevas(vistos, new Set(['a|b'])), [], 'a|c baja del umbral');
+  assert.deepEqual(parejasNuevas(vistos, new Set(['a|b', 'a|c'])), [], 'a|c vuelve a cruzarlo y no es nueva');
+  assert.deepEqual(parejasNuevas(vistos, new Set(['a|b', 'a|c', 'c|d'])), ['c|d']);
+});
+
+test('réplicas de siembra: con el mismo mecanismo la razón entre siembras y dentro ronda 1, y con siembras que difieren de verdad la delata', () => {
+  const corrida = (registro: Registro, siembra: number) => ({ archivo: '', opciones: { semilla: 1, n: 400, zona: ZONA, siembra } as never, registro, msTotal: 0, carga: { inicio: [0], fin: [0] }, maxRssMiB: 0 });
+  const iguales = entreSiembras(Array.from({ length: 6 }, (_, k) => corrida(registroSintetico(500 + k, 400, 5, 0.3, 0.2, false), k)), 1, 8);
+  assert.equal(iguales.length, 1);
+  assert.ok(iguales[0]!.ic95[0] <= 0.1 && 0.1 <= iguales[0]!.ic95[1], `IC entre siembras ${iguales[0]!.ic95} no cubre 0,1`);
+  assert.ok(iguales[0]!.razon > 0.3 && iguales[0]!.razon < 2.2, `razón ${iguales[0]!.razon}`);
+  const { r, media, sd, ic95 } = iguales[0]!;
+  assert.ok(Math.abs(sd ** 2 - r.reduce((a, x) => a + (x - media) ** 2, 0) / (r.length - 1)) < 1e-12, 'varianza muestral con n − 1');
+  assert.ok(Math.abs((ic95[1] - ic95[0]) / 2 - 2.571 * sd / Math.sqrt(6)) < 1e-9, 't de Student con 5 grados de libertad');
+  // Siembras con natalidad distinta: cada corrida cree conocer su r con un error pequeño y entre ellas se llevan 0,2.
+  const distintas = entreSiembras(Array.from({ length: 6 }, (_, k) => corrida(registroSintetico(600 + k, 400, 5, k % 2 ? 0.5 : 0.3, 0.2, false), k)), 1, 8);
+  assert.ok(distintas[0]!.razon > 3, `razón ${distintas[0]!.razon}`);
+  assert.deepEqual(entreSiembras([corrida(registroSintetico(1, 400, 5, 0.3, 0.2, false), 1)], 1, 8), [], 'una sola siembra no da varianza entre siembras');
+});
+
+test('el plan de la curva añade réplicas con otra siembra y deja intacta la base', () => {
+  const sin = planCurva([7, 51926], [50, 100], ZONA, 100), con = planCurva([7, 51926], [50, 100], ZONA, 100, 2);
+  assert.deepEqual(con.filter(p => !p.nombre.includes('-r')), sin);
+  const replicas = con.filter(p => p.nombre.includes('-r'));
+  assert.equal(replicas.length, 2 * 2 * 2);
+  assert.equal(new Set(con.map(p => `${p.semilla}-${p.siembra}-${p.n}-${p.zona.x}-${p.zona.ancho}`)).size, con.length, 'ninguna siembra se repite en un mismo punto');
+  assert.ok(replicas.every(p => p.siembra !== p.semilla));
+});
+
+test('la tendencia diaria de r delata una ventana que aún sube y es ≈ 0 en régimen', () => {
+  // Natalidad constante frente a una que crece cada día: la primera no tiene tendencia, la segunda sí.
+  const plano = tendenciaDiaria(registroSintetico(11, 2000, 7, 0.3, 0.2, false));
+  assert.ok(Math.abs(plano) < 0.02, `tendencia ${plano}`);
+  const sube = (() => {
+    const r = registroSintetico(12, 2000, 7, 0.1, 0.2, false);
+    // Cada día, los nacimientos de los días siguientes se multiplican: se reescriben los hijos de cada individuo según su día.
+    for (const i of r.individuos) i.hijos = i.hijos.flatMap(t => { const d = Math.ceil(t / DIA); return Array.from({ length: d }, () => t); });
+    return tendenciaDiaria(r);
+  })();
+  assert.ok(sube > 0.03, `tendencia ${sube}`);
+  assert.ok(Number.isNaN(tendenciaDiaria(registroSintetico(13, 100, 4, 0.3, 0.2, false), 3)), 'con menos de tres días no hay tendencia');
+});

@@ -9,7 +9,7 @@
  *
  *   tsx scripts/lab/poblacion.mts correr --semilla 7 --n 200 --zona 0,0,48,32 [--siembra S] [--dias 5] [--regimen abierto|defecto]
  *        [--params p.json] [--hilos 1] [--gpu sin|0,1] [--bloque 8] [--tope N] [--ticks T] [--desde punto.v8] [--guardar punto.v8] --salida corrida.json
- *   tsx scripts/lab/poblacion.mts curva --semillas 7,51926 --n 50,100,200,400 --zona 0,0,48,32 [--coherencia 200] [--paralelo 6] --salida dir
+ *   tsx scripts/lab/poblacion.mts curva --semillas 7,51926 --n 50,100,200,400 --zona 0,0,48,32 [--coherencia 200] [--replicas K] [--paralelo 6] --salida dir
  *   tsx scripts/lab/poblacion.mts resumir dir [--transitorio auto|K] [--bloque 8|16|32] [--hasta D]
  *
  * Con `--desde` el punto de partida es un mundo ya crecido y guardado (`guardarPunto`), con su cultura, sus obras y sus
@@ -353,6 +353,14 @@ function parejasDeConfianza(vivos: readonly Person[]): Set<string> {
   return pares;
 }
 
+/** Pares de `actuales` que no estaban en `vistos`, que los recuerda: un vínculo que ronda el umbral entra y sale de él
+ * muestra a muestra y no debe contar cada vez, solo la primera que el par lo cruza. */
+export function parejasNuevas(vistos: Set<string>, actuales: ReadonlySet<string>): string[] {
+  const nuevas = [...actuales].filter(par => !vistos.has(par));
+  for (const par of nuevas) vistos.add(par);
+  return nuevas;
+}
+
 /** Embudo de la natalidad: en edad fértil → cuerpo listo → con pareja de confianza a ≤ radioPareja → y un lugar a ≤ radioLugar. */
 function embudo(mundo: World, vivos: readonly Person[]): Embudo {
   const { cuerpo, poblacion } = paramsOf(mundo), porId = new Map(vivos.map(p => [p.id, p]));
@@ -444,9 +452,7 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
       }
       vivos = ids; legado = mundo.retiredLegacy.length;
       if (mundo.tick % cadaMuestra === 0) {
-        // Un vínculo que ronda el umbral entra y sale de él muestra a muestra: cuenta solo la primera vez que el par lo cruza.
-        for (const par of parejasDeConfianza(ahora)) if (!pares.has(par)) {
-          pares.add(par);
+        for (const par of parejasNuevas(pares, parejasDeConfianza(ahora))) {
           const [a, b] = par.split('|') as [string, string];
           individuos.get(a)!.parejas.push(mundo.tick); individuos.get(b)!.parejas.push(mundo.tick); bloque(ids.get(a)!)[2 + CAUSAS.length]!++;
         }
@@ -583,6 +589,20 @@ export function transitorio(registro: Registro, minimo = 1, hasta?: number): { d
   return { dias: Math.max(minimo, serie.length - 2), pruebas };
 }
 
+/**
+ * Pendiente por mínimos cuadrados de la r diaria desde el día `desde` hasta el final (por día): la regla del transitorio
+ * solo comprueba que los días de la ventana sean compatibles entre sí, y con dos días no ve una subida. Si r sigue
+ * subiendo donde se mide, la tabla muestra el camino hacia el régimen y no el régimen.
+ */
+export function tendenciaDiaria(registro: Registro, desde = 3): number {
+  const ys = serieDiaria(registro).filter(s => s.dia >= desde).map(s => s.tasas.r);
+  if (ys.length < 3) return NaN;
+  const mx = (ys.length - 1) / 2, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0, sxx = 0;
+  ys.forEach((y, i) => { sxy += (i - mx) * (y - my); sxx += (i - mx) ** 2; });
+  return sxy / sxx;
+}
+
 export interface Analisis {
   transitorio: number; ventana: [number, number]; diasPersona: number; densidadInicial: number; densidadMedia: number;
   bloques: Record<Tasa, Estimacion>; personas: Record<Tasa, Estimacion>; replicasR: number[];
@@ -705,7 +725,7 @@ export function resumir(dir: string, opciones: { transitorio: 'auto' | number; b
   // Una sola ventana para todas: la curva compara densidades, no ventanas distintas.
   const comun = opciones.transitorio === 'auto' ? Math.max(...propios.map(p => p.dias)) : opciones.transitorio;
   const filas = corridas.map(c => ({ c, a: analizar(c.registro, { transitorio: comun, bloque: opciones.bloque, hasta: opciones.hasta }), serie: serieDiaria(c.registro) }));
-  const completas = filas.filter(f => f.c.opciones.zona.ancho * f.c.opciones.zona.alto === Math.max(...filas.filter(g => g.c.opciones.semilla === f.c.opciones.semilla).map(g => g.c.opciones.zona.ancho * g.c.opciones.zona.alto)));
+  const completas = filas.filter(f => f.c.opciones.siembra === f.c.opciones.semilla && f.c.opciones.zona.ancho * f.c.opciones.zona.alto === Math.max(...filas.filter(g => g.c.opciones.semilla === f.c.opciones.semilla).map(g => g.c.opciones.zona.ancho * g.c.opciones.zona.alto)));
   const ultimo = Math.min(opciones.hasta ?? Infinity, Math.max(...corridas.map(c => c.registro.dias.length)));
   const lineas = [`Ventana: días ${comun + 1}..${ultimo} (transitorio común = ${comun} d; propio de cada corrida: ${propios.map(p => p.dias).join(', ')}). Tasas por habitante y día, IC 95 % por bloques de ${opciones.bloque}×${opciones.bloque} celdas donde ocurre cada cosa; «ancho IC r» compara bloques de 8/16/32 y personas.`, '',
     '| semilla | N | zona | densidad (hab/celda de tierra) | vecinos a ≤3 / ≤8 | fuera de zona | r = b − m | nacimientos b | muertes m | hambre | sed | intemperie | vejez | parejas | con pareja | N final | ancho IC r b8/b16/b32/personas | tiempo (min) | ticks/s | carga |',
@@ -722,14 +742,17 @@ export function resumir(dir: string, opciones: { transitorio: 'auto' | number; b
     if (filasMapa.length >= 2) pendientes[semilla] = { sembrada: pendiente(puntos(a => a.densidadInicial)), vivida: pendiente(puntos(a => a.vecinos8)) };
   }
   lineas.push('', 'Pendiente de r por mapa: ' + Object.entries(pendientes).map(([s, e]) => `${s}: dr/d(densidad sembrada) ${fmtE(e.sembrada)} · dr/d(vecinos a ≤8) ${fmtE(e.vivida, 4)}`).join(' · '));
+  const replicas = entreSiembras(filas.map(f => f.c), comun, opciones.bloque, opciones.hasta);
+  for (const k of replicas) lineas.push(`Réplicas de siembra, semilla ${k.semilla} N=${k.n} (${k.zona.ancho}×${k.zona.alto}): r ${k.r.map(x => fmt(x)).join(' ')} · media ${fmt(k.media)} IC entre siembras [${fmt(k.ic95[0])}, ${fmt(k.ic95[1])}] · desviación entre siembras / error dentro de cada corrida = ${fmt(k.razon, 2)}`);
   const coherencia = coherenciaEscala(filas.map(f => f.c), comun, opciones.bloque, opciones.hasta);
   for (const k of coherencia) lineas.push(`Coherencia de escala, semilla ${k.semilla}: N=${k.n} entera r ${fmtE(k.entera.r)} · dos mitades N=${k.n / 2} r ${fmtE(k.mitades.r)} · diferencia r ${fmtE(k.diferencia.r)} → ${k.coinciden ? 'coinciden' : 'NO coinciden'} (b ${fmtE(k.diferencia.nacimientos)}, m ${fmtE(k.diferencia.muertes)}, parejas ${fmtE(k.diferencia.parejas)})`);
+  lineas.push('', 'Tendencia de r por día (mínimos cuadrados desde el día 3; si no es ≈ 0 la ventana aún no es régimen): ' + filas.map(f => `${f.c.opciones.semilla}/N${f.c.opciones.n}/${f.c.opciones.zona.ancho}: ${fmt(tendenciaDiaria(f.c.registro), 3)}`).join(' · '));
   lineas.push('', 'Serie diaria de r (sin ventana): ' + filas.map(f => `${f.c.opciones.semilla}/N${f.c.opciones.n}/${f.c.opciones.zona.ancho}: ${f.serie.map(s => fmt(s.tasas.r, 2)).join(' ')}`).join(' · '));
-  const json = { ventana: { transitorio: comun, hasta: ultimo, propios }, bloque: opciones.bloque, pendientes, coherencia,
+  const json = { ventana: { transitorio: comun, hasta: ultimo, propios }, bloque: opciones.bloque, pendientes, replicas, coherencia,
     puntos: filas.map(({ c, a, serie }) => ({ archivo: c.archivo, semilla: c.opciones.semilla, siembra: c.opciones.siembra, n: c.opciones.n, zona: c.opciones.zona,
       caminables: c.registro.caminables, msTotal: c.msTotal, carga: c.carga, maxRssMiB: c.maxRssMiB, nFinal: c.registro.dias.at(-1)?.vivos, violaciones: c.registro.violaciones,
       piramideInicial: c.registro.piramideInicial, piramideFinal: c.registro.piramideFinal,
-      serie: serie.map(s => ({ dia: s.dia, ...s.tasas, exposicion: s.grupo.exposicion })), ...a, replicasR: undefined })) };
+      serie: serie.map(s => ({ dia: s.dia, ...s.tasas, exposicion: s.grupo.exposicion })), tendenciaR: tendenciaDiaria(c.registro), ...a, replicasR: undefined })) };
   const svg = grafica(completas.map(f => ({ serie: String(f.c.opciones.semilla), x: f.a.vecinos8, r: f.a.bloques.r, n: f.c.opciones.n })));
   return { texto: lineas.join('\n'), json, svg };
 }
@@ -761,10 +784,41 @@ export function grafica(puntos: { serie: string; x: number; r: Estimacion; n: nu
 `;
 }
 
+/** Cuantil 0,975 de la t de Student (tabla para pocos grados de libertad). */
+function t975(gl: number): number {
+  const tabla = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160, 2.145, 2.131];
+  return gl < 1 ? NaN : gl <= tabla.length ? tabla[gl - 1]! : 1.96 + 2.4 / gl;
+}
+
+/**
+ * El IC por bloques de una corrida es condicional a su siembra: no recoge que otra población sembrada (edades, sitios,
+ * genes) dé otra r. Con réplicas del mismo punto (mismo mapa, N y zona, otra siembra) se estima esa varianza: IC t de la
+ * media de r entre siembras y la razón entre la desviación observada entre siembras y el error medio que anunciaba cada
+ * corrida. Una razón cercana a 1 dice que el IC por bloques estaba bien calibrado; mayor, que se quedaba corto.
+ */
+export function entreSiembras(corridas: readonly CorridaLeida[], transitorioDias: number, bloque: number, hasta?: number) {
+  const puntos = new Map<string, CorridaLeida[]>();
+  for (const c of corridas) {
+    const o = c.opciones, clave = `${o.semilla}|${o.n}|${o.zona.x},${o.zona.y},${o.zona.ancho},${o.zona.alto}`;
+    puntos.set(clave, [...(puntos.get(clave) ?? []), c]);
+  }
+  const salida: { semilla: number; n: number; zona: Zona; siembras: number[]; r: number[]; media: number; sd: number; ic95: [number, number]; eeDentro: number; razon: number }[] = [];
+  for (const cs of puntos.values()) {
+    if (cs.length < 2) continue;
+    const e = cs.map(c => remuestreo(agruparEspacio(c.registro, ...ventana(c.registro, transitorioDias, hasta), bloque), 2000, 1).estimaciones.r);
+    const r = e.map(x => x.valor), k = r.length, media = r.reduce((a, b) => a + b, 0) / k;
+    const sd = Math.sqrt(r.reduce((a, b) => a + (b - media) ** 2, 0) / (k - 1)), eeDentro = Math.sqrt(e.reduce((a, x) => a + x.ee ** 2, 0) / k);
+    const margen = t975(k - 1) * sd / Math.sqrt(k), o = cs[0]!.opciones;
+    salida.push({ semilla: o.semilla, n: o.n, zona: o.zona, siembras: cs.map(c => c.opciones.siembra), r, media, sd, ic95: [media - margen, media + margen], eeDentro, razon: sd / eeDentro });
+  }
+  return salida.sort((a, b) => a.semilla - b.semilla || a.n - b.n);
+}
+
 /** A la misma densidad, una corrida con N en la zona entera frente a dos con N/2 en sus dos mitades, sumadas. */
 export function coherenciaEscala(corridas: readonly CorridaLeida[], transitorioDias: number, bloque: number, hasta?: number) {
   const salida: { semilla: number; n: number; entera: Record<Tasa, Estimacion>; mitades: Record<Tasa, Estimacion>; diferencia: Record<Tasa, Estimacion>; coinciden: boolean }[] = [];
   for (const entera of corridas) {
+    if (entera.opciones.siembra !== entera.opciones.semilla) continue;
     const z = entera.opciones.zona;
     const mitades = corridas.filter(c => c.opciones.semilla === entera.opciones.semilla && c.opciones.n * 2 === entera.opciones.n
       && c.opciones.zona.alto === z.alto && c.opciones.zona.y === z.y && c.opciones.zona.ancho * 2 === z.ancho && (c.opciones.zona.x === z.x || c.opciones.zona.x === z.x + z.ancho / 2));
@@ -836,11 +890,15 @@ export function argumentosCorrida(args: string[]): OpcionesCorrida {
   return { ...o, semilla: o.semilla ?? 0, n: o.n ?? 0, siembra: o.siembra ?? o.semilla ?? 0 } as OpcionesCorrida;
 }
 
+export const SALTO_REPLICA = 3_000_003;
+
 /** Corridas de la curva: cada N en la zona entera y, para la coherencia, N/2 en cada mitad con siembras propias. */
-export function planCurva(semillas: number[], ns: number[], z: Zona, coherencia: number | undefined): { semilla: number; n: number; zona: Zona; siembra: number; nombre: string }[] {
+export function planCurva(semillas: number[], ns: number[], z: Zona, coherencia: number | undefined, replicas = 0): { semilla: number; n: number; zona: Zona; siembra: number; nombre: string }[] {
   const plan: { semilla: number; n: number; zona: Zona; siembra: number; nombre: string }[] = [];
   for (const semilla of semillas) {
     for (const n of ns) plan.push({ semilla, n, zona: z, siembra: semilla, nombre: `${semilla}-n${n}` });
+    // Réplicas del mismo punto con otra población sembrada en el mismo mapa: miden la varianza entre siembras.
+    for (let k = 1; k <= replicas; k++) for (const n of ns) plan.push({ semilla, n, zona: z, siembra: semilla + SALTO_REPLICA * k, nombre: `${semilla}-n${n}-r${k}` });
     if (coherencia !== undefined) {
       if (coherencia % 2 || z.ancho % 2) throw new Error('--coherencia y el ancho de la zona deben ser pares');
       const mitad = z.ancho / 2;
@@ -852,7 +910,7 @@ export function planCurva(semillas: number[], ns: number[], z: Zona, coherencia:
 }
 
 async function curva(args: string[]): Promise<void> {
-  let semillas = [7, 51926], ns = [50, 100, 200, 400], z: Zona = { x: 0, y: 0, ancho: 48, alto: 32 }, paralelo = 6, salida = '', coherencia: number | undefined;
+  let semillas = [7, 51926], ns = [50, 100, 200, 400], z: Zona = { x: 0, y: 0, ancho: 48, alto: 32 }, paralelo = 6, salida = '', coherencia: number | undefined, replicas = 0;
   const resto: string[] = [];
   for (let i = 0; i < args.length; i += 2) {
     const bandera = args[i]!, valor = args[i + 1]!;
@@ -861,13 +919,14 @@ async function curva(args: string[]): Promise<void> {
     else if (bandera === '--zona') z = zona(valor);
     else if (bandera === '--paralelo') paralelo = entero(valor, bandera, 1);
     else if (bandera === '--coherencia') coherencia = entero(valor, bandera, 2);
+    else if (bandera === '--replicas') replicas = entero(valor, bandera);
     else if (bandera === '--salida') salida = resolve(valor);
     else resto.push(bandera, valor);
   }
   if (!salida) throw new Error('Falta --salida');
   mkdirSync(salida, { recursive: true });
   // Las más caras primero: así la última en terminar no es una grande lanzada al final.
-  const plan = planCurva(semillas, ns, z, coherencia).sort((a, b) => b.n - a.n);
+  const plan = planCurva(semillas, ns, z, coherencia, replicas).sort((a, b) => b.n - a.n);
   writeFileSync(join(salida, 'curva-plan.json'), JSON.stringify({ plan, resto, carga: loadavg(), inicio: new Date().toISOString() }, null, 2));
   let cursor = 0;
   await Promise.all(Array.from({ length: Math.min(paralelo, plan.length) }, async () => {

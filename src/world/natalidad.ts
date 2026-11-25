@@ -544,6 +544,9 @@ export const leyNatalidad: Ley = {
     const mundo = c.mundo, tick = c.tick, b = balanceDe(c), radio = c.params.poblacion.radioPareja;
     const partos: Person[] = [];
     for (const [slot, p] of c.personas) {
+      // `c.personas` se pone al día con `mundo.people` en F6 (`publicarFilas`): quien murió en la demografía de este
+      // tick sigue aquí, ya sin cuerpo (su materia es un cadáver). Un muerto ni madura ni gesta ni concibe.
+      if (p.demography.deathCause !== null) continue;
       if (p.crianza) {
         const madurez = b.madurez(p);
         if (madurez >= 1) p.crianza = undefined;

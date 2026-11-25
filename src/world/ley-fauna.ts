@@ -77,7 +77,7 @@ interface Estado {
   filas: Map<Animal, Fila>;
   porSlot: Map<number, Fila>;
   plantillas: Map<string, Plantilla>;
-  /** J digeribles por unidad del campo `comida`, medidos en las celdas propias donde hay fauna (media del último F2). */
+  /** J de oxidación por unidad del campo `comida`, medidos en las celdas propias donde hay fauna (media del último F2). */
   jPorComida: number;
   /** m² ocupados por celda propia (Σ huellas de los animales de este dueño). */
   ocupacion: Map<number, number>;
@@ -338,14 +338,15 @@ function percibir(c: CtxLeyMateria, e: Estado, f: Fila): void {
   p.carronaJ = 0;
   if (propia(c, miCelda)) {
     const n = c.materia.lotes(miCelda, Rol.Cadaver, e.buf);
-    for (let i = 0; i < Math.min(n, e.buf.length); i++) p.carronaJ += c.materia.vista(e.buf[i]!).digerible;
+    for (let i = 0; i < Math.min(n, e.buf.length); i++) p.carronaJ += c.materia.vista(e.buf[i]!).energia;
   }
 }
 const agenteVacio = (): AgenteVisto => ({ ref: REF_NULA, uid: 0, persona: false, x: 0, y: 0, d: 0, masa: 0, carnivoria: 0,
   velocidad: 0, defensa: 0, pareja: false });
 const celdaVacia = (): CeldaVista => ({ celda: -1, x: 0, y: 0, d: 0, comida: 0, agua: 0, habitable: false, libre: 0 });
 
-/** J digeribles por unidad de `comida`: se mide en las celdas propias donde hay fauna, con la vista de su lote Vida. */
+/** J de oxidación por unidad de `comida`. `digerible` usa κ₀, que deja la carne en ≈ 1 J/kg antes de ponderar la dieta
+ * y hace que perseguir incluso a una presa contigua cueste más que comerla. */
 function medirPasto(c: CtxLeyMateria, e: Estado): void {
   const cols = campos(c, e);
   if (!cols.comida) return;
@@ -359,7 +360,7 @@ function medirPasto(c: CtxLeyMateria, e: Estado): void {
     if (!(q > 0)) continue;
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
     if (vida === REF_NULA || !c.materia.vivo(vida)) continue;
-    j += c.materia.vista(vida).digerible; comida += q;
+    j += c.materia.vista(vida).energia; comida += q;
   }
   if (comida > 0) e.jPorComida = j / comida;
 }
@@ -382,7 +383,7 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   yo.hambre = v.hambre; yo.sed = v.sed; yo.reservaRel = v.energia; yo.reservaJ = reservaJ(c, cu);
   yo.habituacion = fa.habituacion; yo.sobresalto = sobresaltoActual(fa, c.tick);
   const vt = c.materia.vista(cu.tejido);
-  yo.jPorKgCarne = vt.masa > 0 ? vt.digerible / vt.masa : 0;
+  yo.jPorKgCarne = vt.masa > 0 ? vt.energia / vt.masa : 0;
   // Fértil: reserva para pagar la cría. Ese coste es ≈ 2,3 veces la reserva llena (M0·Q_tejido / (η·RESERVA_OBJETIVO_J_KG),
   // la misma para toda la fauna), así que un adulto que puede criar sigue con hambre hasta reunirla, como la gestante de
   // `natalidad.ts` (`provisionCrianza`): sin esto comía solo hasta la reserva llena y ninguno llegaba nunca a fértil.

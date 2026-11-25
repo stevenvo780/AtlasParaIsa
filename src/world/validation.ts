@@ -4,7 +4,7 @@ import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import { ELEMENTS } from '../shared/chemistry.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
-import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells, polyominoCost } from './inventions.js';
+import { firmaPlanoObra, validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature, blueprintCap, materialCapacity, structureFootprintCells, polyominoCost } from './inventions.js';
 import { chunkKey } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
 /** Optional V23 traits: legacy snapshots remain valid without adding fields. */
@@ -40,7 +40,28 @@ const integer = (v: unknown,max=Number.MAX_SAFE_INTEGER): v is number => number(
 const string = (v: unknown,max=200): v is string => typeof v==='string' && v.length>0 && v.length<=max;
 const coordinate = (v: unknown): v is number => typeof v==='number'&&Number.isSafeInteger(v)&&v>=-10_000_000&&v<10_000_000;
 const fail = ():never=>{throw new Error('Estado de vida o estructuras inválido.');};
+/** Costura del integrador (t2): un plano de obra material (`planoMaterial`, inventions.ts) no tiene coste
+ * escalar (madera/piedra/trabajo = 0): su coste es la masa de las piezas. Se valida su forma y no el coste. */
+const lote = (v: unknown): v is number => typeof v==='number'&&Number.isSafeInteger(v)&&v>=-1;
+function planoObraValido(v: unknown): boolean {
+  return object(v)&&integer(v.area)&&v.area>=1&&typeof v.compacto==='boolean'&&typeof v.forma==='number'&&Number.isSafeInteger(v.forma)
+    &&Object.keys(v).every(k=>['area','compacto','forma'].includes(k));
+}
+function obraMaterialValida(v: unknown): boolean {
+  if(!object(v)||!Array.isArray(v.piezas)||!lote(v.agua)||!lote(v.comida)||typeof v.terminada!=='boolean')return false;
+  const pieza=(p: unknown): p is Record<string,unknown> => object(p)&&coordinate(p.x)&&coordinate(p.y)&&lote(p.lote)&&p.lote>=0;
+  if(!v.piezas.every(pieza))return false;
+  if(v.pendiente===null)return true;
+  const q=v.pendiente;
+  return pieza(q)&&number(q.trabajoJ,Number.MAX_VALUE)&&(q.proceso===null||object(q.proceso));
+}
 export function assertBlueprint(value: unknown,tick: number,maxGeneration=64,modular=false): asserts value is BlueprintView {
+  if(object(value)&&value.planoMaterial!==undefined){
+    if(!planoObraValido(value.planoMaterial)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,true)||!integer(value.generation)
+      ||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))
+      ||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost))fail();
+    return;
+  }
   if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,modular)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,modular?Number.MAX_SAFE_INTEGER:12)||!integer(value.cost.stone,modular?Number.MAX_SAFE_INTEGER:8)||!integer(value.cost.work,modular?Number.MAX_SAFE_INTEGER:600)||value.cost.work<1)fail();
   const b=value as unknown as BlueprintView, cost=blueprintCost(b.components,modular);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
@@ -52,6 +73,8 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
   const positions=new Map(tiles.map(t=>[`${t.x},${t.y}`,t])),ids=new Set<string>(),occupied=new Set<string>();
   for(const s of value as StructureView[]) {
     if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!validBlueprint(s.components,true)||!number(s.condition)||!number(s.water,Number.MAX_SAFE_INTEGER)||!number(s.food,Number.MAX_SAFE_INTEGER)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
+    const obra=(s as StructureView&{obraMaterial?:unknown}).obraMaterial;
+    if(obra!==undefined&&!obraMaterialValida(obra))fail();
     const capacity=blueprintAffordances(s.components);
     if(s.losses!==undefined&&(!object(s.losses)||Object.keys(s.losses).length!==2||!number(s.losses.water,Number.MAX_SAFE_INTEGER)||!number(s.losses.food,Number.MAX_SAFE_INTEGER)))fail();
     if(s.installed!==undefined){
@@ -92,7 +115,7 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
       const frames=components.filter(c=>c==='frame').length;
       if(footprint!==undefined&&(!object(footprint)||Object.keys(footprint).length!==2||![1,2].includes(footprint.width)||![1,2].includes(footprint.height)))fail();
       if(cells!==undefined){
-        if(!Array.isArray(cells)||cells.length<1||cells.length>6)fail();
+        if(!Array.isArray(cells)||cells.length<1||(obra===undefined&&cells.length>6))fail();
         const keys=new Set<string>();
         for(const c of cells){
           if(!object(c)||Object.keys(c).length!==2||!coordinate(c.x)||!coordinate(c.y)||chunkKey(c.x,c.y)!==chunkKey(s.x,s.y)||keys.has(`${c.x},${c.y}`))fail();
@@ -179,13 +202,13 @@ export function assertLifeState(world: World): void {
   const maxBlueprints=blueprintCap(world);
   if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>maxBlueprints)fail();
   const ids=new Set<string>(),signatures=new Set<string>();
-  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick,maxBlueprints,paramsOf(world).construccion.modular);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
+  for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick,maxBlueprints,paramsOf(world).construccion.modular);const signature=(blueprint as BlueprintView&{planoMaterial?:unknown}).planoMaterial!==undefined?`obra:${firmaPlanoObra(blueprint)}`:blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}
   if(!ids.has('blueprint-base'))fail();
   for(const blueprint of world.blueprints) {
     if(blueprint.parents.some(id=>id===blueprint.id||!ids.has(id))||new Set(blueprint.parents).size!==blueprint.parents.length)fail();
     if(blueprint.id==='blueprint-base'){if(blueprint.generation!==0||blueprint.parents.length||blueprint.components.join(',')!=='frame,roof'||blueprint.inventorId!==null||blueprint.tick!==0)fail();}
     else {
-      const serial=/^blueprint-([1-9]\d*)$/.exec(blueprint.id);
+      const serial=/^blueprint-(?:obra-)?([1-9]\d*)$/.exec(blueprint.id);
       if(!serial||!integer(Number(serial[1]),world.blueprintCounter))fail();
       const parents=blueprint.parents.map(id=>world.blueprints.find(b=>b.id===id)!);
       if(!parents.length||blueprint.generation!==Math.max(...parents.map(b=>b.generation))+1||parents.some(b=>b.tick>blueprint.tick)||!(world.people.some(p=>p.id===blueprint.inventorId)||(world.version>=5&&world.legacy?.some(p=>p.id===blueprint.inventorId&&p.diedAt>=blueprint.tick))))fail();

@@ -646,7 +646,7 @@ export function pendiente(puntos: { densidad: number; r: number; replicas: numbe
 const fmt = (x: number, d = 3) => Number.isFinite(x) ? x.toFixed(d) : '—';
 const fmtE = (e: Estimacion, d = 3) => `${fmt(e.valor, d)} [${fmt(e.ic95[0], d)}, ${fmt(e.ic95[1], d)}]`;
 
-export function resumir(dir: string, opciones: { transitorio: 'auto' | number; bloque: number }): { texto: string; json: unknown } {
+export function resumir(dir: string, opciones: { transitorio: 'auto' | number; bloque: number }): { texto: string; json: unknown; svg: string } {
   const corridas = leerCorridas(dir).sort((a, b) => a.opciones.semilla - b.opciones.semilla || a.opciones.zona.ancho - b.opciones.zona.ancho || a.opciones.n - b.opciones.n || a.opciones.zona.x - b.opciones.zona.x);
   const propios = corridas.map(c => ({ archivo: c.archivo, ...transitorio(c.registro) }));
   // Una sola ventana para todas: la curva compara densidades, no ventanas distintas.
@@ -676,7 +676,35 @@ export function resumir(dir: string, opciones: { transitorio: 'auto' | number; b
       caminables: c.registro.caminables, msTotal: c.msTotal, carga: c.carga, maxRssMiB: c.maxRssMiB, nFinal: c.registro.dias.at(-1)?.vivos, violaciones: c.registro.violaciones,
       piramideInicial: c.registro.piramideInicial, piramideFinal: c.registro.piramideFinal,
       serie: serie.map(s => ({ dia: s.dia, ...s.tasas, exposicion: s.grupo.exposicion })), ...a, replicasR: undefined })) };
-  return { texto: lineas.join('\n'), json };
+  const svg = grafica(completas.map(f => ({ serie: String(f.c.opciones.semilla), x: f.a.vecinos8, r: f.a.bloques.r, n: f.c.opciones.n })));
+  return { texto: lineas.join('\n'), json, svg };
+}
+
+/** La curva a la vista: r (con su IC) frente al apiñamiento vivido, una serie por mapa, y la línea de r = 0. */
+export function grafica(puntos: { serie: string; x: number; r: Estimacion; n: number }[]): string {
+  const an = 640, al = 400, m = { i: 64, d: 16, s: 24, b: 48 }, colores = ['#2a6f97', '#c4572a', '#4f772d', '#7b2cbf'];
+  const xs = puntos.map(p => p.x), ys = puntos.flatMap(p => [...p.r.ic95, 0]);
+  const x0 = 0, x1 = Math.max(...xs) * 1.1 || 1, y0 = Math.min(...ys) * 1.1, y1 = Math.max(...ys) * 1.1 || 0.01;
+  const X = (x: number) => m.i + (x - x0) / (x1 - x0) * (an - m.i - m.d), Y = (y: number) => m.s + (y1 - y) / (y1 - y0) * (al - m.s - m.b);
+  const series = [...new Set(puntos.map(p => p.serie))], partes: string[] = [];
+  partes.push(`<line x1="${m.i}" x2="${an - m.d}" y1="${Y(0)}" y2="${Y(0)}" stroke="#888" stroke-dasharray="4 4"/>`);
+  for (let k = 0; k <= 4; k++) {
+    const y = y0 + (y1 - y0) * k / 4, x = x0 + (x1 - x0) * k / 4;
+    partes.push(`<text x="${m.i - 6}" y="${Y(y) + 4}" text-anchor="end">${y.toFixed(2)}</text>`, `<text x="${X(x)}" y="${al - m.b + 16}" text-anchor="middle">${x.toFixed(1)}</text>`);
+  }
+  series.forEach((serie, k) => {
+    const c = colores[k % colores.length]!, propios = puntos.filter(p => p.serie === serie).sort((a, b) => a.x - b.x);
+    partes.push(`<polyline fill="none" stroke="${c}" stroke-width="1.5" points="${propios.map(p => `${X(p.x)},${Y(p.r.valor)}`).join(' ')}"/>`);
+    for (const p of propios) partes.push(`<line x1="${X(p.x)}" x2="${X(p.x)}" y1="${Y(p.r.ic95[0])}" y2="${Y(p.r.ic95[1])}" stroke="${c}"/>`,
+      `<circle cx="${X(p.x)}" cy="${Y(p.r.valor)}" r="4" fill="${c}"><title>semilla ${serie}, N=${p.n}: r=${p.r.valor.toFixed(3)} [${p.r.ic95.map(v => v.toFixed(3)).join(', ')}]</title></circle>`);
+    partes.push(`<text x="${an - m.d - 4}" y="${m.s + 14 + 16 * k}" text-anchor="end" fill="${c}">semilla ${serie}</text>`);
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${an}" height="${al}" font-family="sans-serif" font-size="12">
+<rect width="100%" height="100%" fill="#fff"/>${partes.join('')}
+<text x="${(an + m.i) / 2}" y="${al - 10}" text-anchor="middle">otros mortales a ≤ 8 celdas de cada persona (media en la ventana)</text>
+<text transform="translate(16 ${(al - m.b + m.s) / 2}) rotate(-90)" text-anchor="middle">r = nacimientos − muertes (por habitante y día)</text>
+</svg>
+`;
 }
 
 /** A la misma densidad, una corrida con N en la zona entera frente a dos con N/2 en sus dos mitades, sumadas. */
@@ -799,8 +827,8 @@ async function curva(args: string[]): Promise<void> {
       });
     }
   }));
-  const { texto, json } = resumir(salida, { transitorio: 'auto', bloque: 8 });
-  writeFileSync(join(salida, 'curva.json'), JSON.stringify(json, null, 2)); writeFileSync(join(salida, 'curva.md'), `${texto}\n`);
+  const { texto, json, svg } = resumir(salida, { transitorio: 'auto', bloque: 8 });
+  writeFileSync(join(salida, 'curva.json'), JSON.stringify(json, null, 2)); writeFileSync(join(salida, 'curva.md'), `${texto}\n`); writeFileSync(join(salida, 'curva.svg'), svg);
   process.stdout.write(`${texto}\n`);
 }
 
@@ -812,8 +840,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } else if (orden === 'curva') curva(args).catch(fallo);
   else if (orden === 'resumir') {
     const dir = resolve(args[0] ?? '.'), t = args.indexOf('--transitorio'), b = args.indexOf('--bloque');
-    const { texto, json } = resumir(dir, { transitorio: t >= 0 && args[t + 1] !== 'auto' ? entero(args[t + 1]!, '--transitorio') : 'auto', bloque: b >= 0 ? entero(args[b + 1]!, '--bloque', 1) : 8 });
-    writeFileSync(join(dir, 'curva.json'), JSON.stringify(json, null, 2)); writeFileSync(join(dir, 'curva.md'), `${texto}\n`);
+    const { texto, json, svg } = resumir(dir, { transitorio: t >= 0 && args[t + 1] !== 'auto' ? entero(args[t + 1]!, '--transitorio') : 'auto', bloque: b >= 0 ? entero(args[b + 1]!, '--bloque', 1) : 8 });
+    writeFileSync(join(dir, 'curva.json'), JSON.stringify(json, null, 2)); writeFileSync(join(dir, 'curva.md'), `${texto}\n`); writeFileSync(join(dir, 'curva.svg'), svg);
     process.stdout.write(`${texto}\n`);
   } else process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 17).join('\n') + '\n');
 }

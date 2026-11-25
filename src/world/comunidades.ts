@@ -384,18 +384,20 @@ function comunidadesGlobales(c: CtxF0): void {
   c.publicarComunidades(r.comunidades);
 }
 
-const asignaciones = new WeakMap<ReadonlyMap<string, CommunityView>, Map<string, string>>();
+/** Por réplica y versión: si el motor sustituye el mapa o lo cambia en sitio, la versión de `globales` lo delata. */
+const asignaciones = new WeakMap<ReadonlyMap<string, CommunityView>, { version: number; asignacion: Map<string, string> }>();
 
 /** F1: cada dueño pone a sus personas la comunidad que F0 publicó. */
 function asignarComunidad(c: CtxLey): void {
   if (!c.mundo.cooperationEnabled) return;
   const globales = c.globales.comunidades;
-  let asignacion = asignaciones.get(globales);
-  if (!asignacion) {
-    asignacion = new Map();
+  let cache = asignaciones.get(globales);
+  if (!cache || cache.version !== c.globales.version) {
+    const asignacion = new Map<string, string>();
     for (const g of globales.values()) for (const m of g.members) asignacion.set(m, g.id);
-    asignaciones.set(globales, asignacion);
+    asignaciones.set(globales, cache = { version: c.globales.version, asignacion });
   }
+  const asignacion = cache.asignacion;
   for (const p of c.mundo.people) p.communityId = asignacion.get(p.id) ?? null;
 }
 

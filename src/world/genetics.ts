@@ -1,7 +1,12 @@
 import type { GenomeView, PersonView } from '../shared/types.js';
 
 export interface Genome extends GenomeView { alleles: number[]; }
-export const GENE_COUNT = 7;
+/** Loci diploides del genoma: los cinco rasgos de carácter, el ritmo de aprendizaje, la cooperación y la escucha. */
+export const GENE_COUNT = 8;
+/** Alelos del genoma (dos por locus). */
+export const ALLELE_COUNT = GENE_COUNT * 2;
+/** Locus de la escucha: la disposición a hacer caso de un mensaje (alelos 14 y 15). */
+export const ESCUCHA_LOCUS = 7;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 /** Como `clamp`, pero el excedente fuera de [0,1] decae de forma continua hacia el borde en vez
  * de pegarse EXACTAMENTE a él (revisión T011: con el clamp duro, dos alelos que se salían de
@@ -32,7 +37,7 @@ function gaussian(random: () => number): number {
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
 
-/** Seven diploid design loci. They encode model parameters, not human biological traits. */
+/** Eight diploid design loci. They encode model parameters, not human biological traits. */
 export function founderGenome(seed: number, id: string, traits: NonNullable<PersonView['traits']>, varianza = 0): Genome {
   const random = localRandom(seed, `genome:${id}`);
   const phenotype = [traits.curiosity, traits.sociability, traits.industriousness, traits.care, traits.resilience, 0.5, 0.2 + random() * 0.65];
@@ -42,6 +47,8 @@ export function founderGenome(seed: number, id: string, traits: NonNullable<Pers
   // que cambia aquí es softClamp en vez de clamp (ver comentario de softClamp arriba).
   const sd = Math.sqrt(varianza) * 1.5;
   const displaced = (value: number) => varianza === 0 ? value : softClamp(value + gaussian(random) * sd);
+  // La escucha sale de su propia tirada: los siete loci anteriores conservan sus alelos de siempre.
+  phenotype.push(0.2 + localRandom(seed, `escucha:${id}`)() * 0.6);
   const alleles = phenotype.flatMap(value => [displaced(value), displaced(value)]);
   return { alleles, generation: 0, parents: [], mutations: 0,
     learningRate: 0.04 + ((alleles[10]! + alleles[11]!) / 2) * 0.16, cooperation: (alleles[12]! + alleles[13]!) / 2 };
@@ -49,6 +56,11 @@ export function founderGenome(seed: number, id: string, traits: NonNullable<Pers
 export function expressGenome(genome: Genome): NonNullable<PersonView['traits']> {
   const values = Array.from({ length: GENE_COUNT }, (_, index) => (genome.alleles[index * 2]! + genome.alleles[index * 2 + 1]!) / 2);
   return { curiosity: values[0]!, sociability: values[1]!, industriousness: values[2]!, care: values[3]!, resilience: values[4]! };
+}
+/** Disposición heredable a hacer caso de un mensaje, en [0, 1]: la media de los dos alelos del locus de escucha. Se deriva
+ * del genoma cada vez (no hay copia que desincronizar) y vale también para S e I, cuyos cinco rasgos están escritos a mano. */
+export function escuchaDe(genome: { readonly alleles: readonly number[] }): number {
+  return (genome.alleles[ESCUCHA_LOCUS * 2]! + genome.alleles[ESCUCHA_LOCUS * 2 + 1]!) / 2;
 }
 export function inheritGenome(seed: number, childId: string, parents: { id: string; genome: Genome }[], mutationRate = DEFAULT_MUTATION_RATE): Genome {
   if (parents.length !== 2 || parents[0]!.id === parents[1]!.id || !Number.isFinite(mutationRate) || mutationRate < 0 || mutationRate > 1) throw new Error('Herencia requiere dos progenitores distintos y una tasa válida.');
@@ -64,6 +76,8 @@ export function inheritGenome(seed: number, childId: string, parents: { id: stri
 }
 export function assertGenome(genome: unknown): asserts genome is Genome {
   const g = genome as Genome;
-  if (!g || !Array.isArray(g.alleles) || g.alleles.length !== GENE_COUNT * 2 || !g.alleles.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1) || !Number.isSafeInteger(g.generation) || g.generation < 0 || !Array.isArray(g.parents) || ![0, 2].includes(g.parents.length) || !g.parents.every(id => typeof id === 'string' && id.length < 50) || !Number.isInteger(g.mutations) || g.mutations < 0 || g.mutations > 14 || !Number.isFinite(g.learningRate) || g.learningRate < 0.04 || g.learningRate > 0.2 || !Number.isFinite(g.cooperation) || g.cooperation < 0 || g.cooperation > 1) throw new Error('Genoma de simulación inválido.');
+  // Un mundo de la V22 o anterior tiene siete genes (14 alelos). La V23 no migra: se publica en un mundo nuevo.
+  if (g && Array.isArray(g.alleles) && g.alleles.length === (GENE_COUNT - 1) * 2) throw new Error(`Genoma de ${GENE_COUNT - 1} genes (mundo anterior a la V23): esta versión usa ${GENE_COUNT} genes (falta «escucha») y no migra mundos viejos; empieza un mundo nuevo.`);
+  if (!g || !Array.isArray(g.alleles) || g.alleles.length !== ALLELE_COUNT || !g.alleles.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1) || !Number.isSafeInteger(g.generation) || g.generation < 0 || !Array.isArray(g.parents) || ![0, 2].includes(g.parents.length) || !g.parents.every(id => typeof id === 'string' && id.length < 50) || !Number.isInteger(g.mutations) || g.mutations < 0 || g.mutations > ALLELE_COUNT || !Number.isFinite(g.learningRate) || g.learningRate < 0.04 || g.learningRate > 0.2 || !Number.isFinite(g.cooperation) || g.cooperation < 0 || g.cooperation > 1) throw new Error('Genoma de simulación inválido.');
   if ((g.generation === 0) !== (g.parents.length === 0) || new Set(g.parents).size !== g.parents.length || g.parents.some(id => !id)) throw new Error('Genealogía de simulación inválida.');
 }

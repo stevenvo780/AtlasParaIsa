@@ -34,7 +34,7 @@ export const RADIO_MUESTREO_FORRAJEO_DEFAULT = 4;
 const RADIO_MUESTREO_MAXIMO = 4;
 
 /** La misma confianza mutua que ya exige `reproduce`. No es un umbral ecológico nuevo. */
-const CONFIANZA_MUTUA_MINIMA = 0.3;
+export const CONFIANZA_MUTUA_MINIMA = 0.3;
 
 export interface LocalBirthConfig {
   radioVecindad: number;

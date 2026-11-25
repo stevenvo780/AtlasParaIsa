@@ -15,13 +15,12 @@
  */
 import { performance } from 'node:perf_hooks';
 import {
-  CAPACIDAD_ATOMO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, NU, R,
+  CAPACIDAD_ATOMO, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, NU, R,
 } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS, type SustanciaId } from '../src/shared/materia.js';
 import { nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import {
-  ContextoSolver, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO,
-  esGasA, indiceTipoEnlace, productos,
+  ContextoSolver, esGasA, indiceTipoEnlace, productos,
 } from '../src/world/materia/quimica.js';
 import { crearServicioQuimico, verificarI4, type ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 
@@ -42,15 +41,15 @@ function vec(pares: readonly [number, number][]): Uint16Array {
   return out;
 }
 
-/** Tasa de Arrhenius de ARQ-materia §3.1, k(T) = ν·exp(−max(0, ea − κ)/(R·T)), en 1/tick o L/(cuanto·tick). */
+/** Tasa de Arrhenius de ARQ-materia §3.1 con la enmienda 1, k(T) = ν·exp(−max(0, ea − κ, dH)/(R·T)), en 1/tick o
+ * L/(cuanto·tick) por vez de reacción: la catálisis nunca baja la barrera de una endotérmica por debajo de su dH. */
 export function tasaArrhenius(
   T: number,
-  ea: number,
-  catalisis: -1 | 0 | 1 | 2,
+  r: Pick<Reaccion, 'ea' | 'catalisis' | 'dH'>,
   kappa: readonly [number, number, number] | number = 0,
 ): number {
-  const kEff = catalisis === -1 ? 0 : typeof kappa === 'number' ? kappa : kappa[catalisis]!;
-  return NU * Math.exp(-Math.max(0, ea - kEff) / (R * T));
+  const kEff = r.catalisis === -1 ? 0 : typeof kappa === 'number' ? kappa : kappa[r.catalisis]!;
+  return NU * Math.exp(-Math.max(0, r.ea - kEff, r.dH) / (R * T));
 }
 
 function formula(s: Readonly<Sustancia>): string {
@@ -175,9 +174,9 @@ export function ejecutarTablaCordura(): {
   // 2. Madera arde solo por encima del umbral y sostiene su llama en aire (> 1.000 K).
   const rMadO2Amb = reac(S.madera, S.O2, lvlAmb);
   const rMadO2Llama = reac(S.madera, S.O2, lvlLlama);
-  const kFrio = rMadO2Amb ? tasaArrhenius(295, rMadO2Amb.ea, rMadO2Amb.catalisis, 0) : 0;
+  const kFrio = rMadO2Amb ? tasaArrhenius(295, rMadO2Amb, 0) : 0;
   const tLlamaMadera = rMadO2Llama ? 295 + (-rMadO2Llama.dH) / (14 * CAPACIDAD_ATOMO) : 0;
-  const kLlama = rMadO2Llama ? tasaArrhenius(tLlamaMadera, rMadO2Llama.ea, rMadO2Llama.catalisis, 0) : 0;
+  const kLlama = rMadO2Llama ? tasaArrhenius(tLlamaMadera, rMadO2Llama, 0) : 0;
   const rAire = reac(S.N2, S.O2, lvlLlama);
   const okFuego = rMadO2Amb !== null && rMadO2Amb.dH < -200
     && kFrio < 1e-18 && tLlamaMadera > 1000 && kLlama > 1 && rAire === null;
@@ -191,8 +190,8 @@ export function ejecutarTablaCordura(): {
   const rPir = reac(S.madera, 0, lvlFogata);
   const tieneCarbon = rPir !== null && rPir.salidas.some(p => p.id === S.C);
   const tieneAgua = rPir !== null && rPir.salidas.some(p => p.id === S.H2O);
-  const kPirFrio = rPir ? tasaArrhenius(295, rPir.ea, rPir.catalisis, 0) : 0;
-  const kPirCaliente = rPir ? tasaArrhenius(800, rPir.ea, rPir.catalisis, 0) : 0;
+  const kPirFrio = rPir ? tasaArrhenius(295, rPir, 0) : 0;
+  const kPirCaliente = rPir ? tasaArrhenius(800, rPir, 0) : 0;
   cordura.push({
     nombre: 'Pirólisis de madera → carbón + H₂O',
     cumple: tieneCarbon && tieneAgua && kPirFrio < 1e-12 && kPirCaliente > 1e-1,
@@ -216,8 +215,8 @@ export function ejecutarTablaCordura(): {
   const sSil = serv.sustancia(S.SiO2);
   const rArcAmb = reac(S.arcilla, 0, lvlAmb);
   const rArcHorno = reac(S.arcilla, 0, lvlLlama);
-  const kArcHervor = rArcHorno ? tasaArrhenius(380, rArcHorno.ea, rArcHorno.catalisis, 0) : 0;
-  const kArcHorno = rArcHorno ? tasaArrhenius(900, rArcHorno.ea, rArcHorno.catalisis, 0) : 0;
+  const kArcHervor = rArcHorno ? tasaArrhenius(380, rArcHorno, 0) : 0;
+  const kArcHorno = rArcHorno ? tasaArrhenius(900, rArcHorno, 0) : 0;
   const okArc = rArcAmb === null && rArcHorno !== null
     && rArcHorno.salidas.some(p => p.id === S.SiO2) && rArcHorno.salidas.some(p => p.id === S.H2O)
     && sArc.prop.dureza < sSil.prop.dureza && kArcHervor < 1e-8 && kArcHorno > 0.5;
@@ -233,8 +232,8 @@ export function ejecutarTablaCordura(): {
   const rApaga = reac(S.CaO, S.H2O, lvlAmb);
   const rFraguaDir = reac(S.CaO, S.CO2, lvlAmb);
   const rFraguaMor = reac(S.CaOH2, S.CO2, lvlAmb);
-  const kFragua = rFraguaMor ? tasaArrhenius(295, rFraguaMor.ea, rFraguaMor.catalisis, 0) : 0;
-  const kCalcHorno = rCalHorno ? tasaArrhenius(1234, rCalHorno.ea, rCalHorno.catalisis, 0) : 0;
+  const kFragua = rFraguaMor ? tasaArrhenius(295, rFraguaMor, 0) : 0;
+  const kCalcHorno = rCalHorno ? tasaArrhenius(1234, rCalHorno, 0) : 0;
   const okCal = rCalFogata === null && rCalHorno !== null
     && rCalHorno.salidas.some(p => p.id === S.CaO) && rCalHorno.salidas.some(p => p.id === S.CO2)
     && rApaga !== null && rApaga.salidas.some(p => p.id === S.CaOH2)
@@ -271,10 +270,10 @@ export function ejecutarTablaCordura(): {
   const rOrgPSuelo = reac(S.orgP, 0, lvlAmb);
   const rCSuelo = reac(S.C, S.O2, lvlAmb);
   const rNH3Aire = reac(S.NH3, S.O2, lvlAmb);
-  const kNH3Suelo = rNH3Aire ? tasaArrhenius(295, rNH3Aire.ea, rNH3Aire.catalisis, KAPPA_SUELO) : 0;
-  const kCSuelo = rCSuelo ? tasaArrhenius(295, rCSuelo.ea, rCSuelo.catalisis, KAPPA_SUELO) : 0;
-  const kProtSuelo = rProtSuelo ? tasaArrhenius(295, rProtSuelo.ea, rProtSuelo.catalisis, KAPPA_SUELO) : 0;
-  const kOrgPSuelo = rOrgPSuelo ? tasaArrhenius(295, rOrgPSuelo.ea, rOrgPSuelo.catalisis, KAPPA_SUELO) : 0;
+  const kNH3Suelo = rNH3Aire ? tasaArrhenius(295, rNH3Aire, KAPPA_SUELO) : 0;
+  const kCSuelo = rCSuelo ? tasaArrhenius(295, rCSuelo, KAPPA_SUELO) : 0;
+  const kProtSuelo = rProtSuelo ? tasaArrhenius(295, rProtSuelo, KAPPA_SUELO) : 0;
+  const kOrgPSuelo = rOrgPSuelo ? tasaArrhenius(295, rOrgPSuelo, KAPPA_SUELO) : 0;
   const rSilEstable = reac(S.SiO2, S.SiO2, lvlHornoAlto);
   const rCarEstable = reac(S.C, S.C, lvlHornoAlto);
   const okCiclo = rMetO2 !== null && rMetO2.salidas.some(p => p.id === S.CO2) && rMetO2.dH < -150
@@ -291,9 +290,9 @@ export function ejecutarTablaCordura(): {
   const rGlic = reac(S.glicosido, 0, lvlCuerpo);
   const rForm = reac(S.formamida, 0, lvlCuerpo);
   const rMadDig = reac(S.madera, 0, lvlCuerpo);
-  const kMadDig = rMadDig ? tasaArrhenius(310, rMadDig.ea, rMadDig.catalisis, KAPPA0) : 0;
-  const kGlicDig = rGlic ? tasaArrhenius(310, rGlic.ea, rGlic.catalisis, KAPPA0) : 0;
-  const kFormDig = rForm ? tasaArrhenius(310, rForm.ea, rForm.catalisis, KAPPA0) : 0;
+  const kMadDig = rMadDig ? tasaArrhenius(310, rMadDig, KAPPA0) : 0;
+  const kGlicDig = rGlic ? tasaArrhenius(310, rGlic, KAPPA0) : 0;
+  const kFormDig = rForm ? tasaArrhenius(310, rForm, KAPPA0) : 0;
   const dCN = TIPOS[enlace('C', 'N')]!.d, dCO = TIPOS[enlace('C', 'O')]!.d;
   const dCC = TIPOS[enlace('C', 'C')]!.d, dCH = TIPOS[enlace('H', 'C')]!.d;
   cordura.push({

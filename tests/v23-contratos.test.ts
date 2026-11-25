@@ -10,6 +10,7 @@ import * as naturaleza from '../src/shared/naturaleza.js';
 import * as cinta from '../src/shared/cinta.js';
 import * as fotograma from '../src/shared/fotograma.js';
 import { POLICY_ACTIONS, POLICY_HIDDEN, POLICY_INPUTS, POLICY_WEIGHTS } from '../src/world/politica.js';
+import { familiaCatalitica, indiceTipoEnlace } from '../src/world/materia/quimica.js';
 
 // Si dos contratos exportan el mismo nombre, sea tipo o valor, `npm run typecheck` falla aquí (TS2308).
 export type * from '../src/world/motor/contratos.js';
@@ -163,6 +164,37 @@ test('codigoForma cabe en 30 bits y es su propia inversa sobre los códigos', ()
   assert.ok(codigoForma({ largo: 1e9, ancho: 1e9, grueso: 1e9, hueco: 1, filo: 1 }) < 2 ** 30);
 });
 
+test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable en la familia 2 y ATOMOS_POR_REACCION', () => {
+  const { nivelDeT, tFronteraNivel, tDeNivel, NIVELES_T } = tipos;
+  const anterior = (x: number) => {
+    const v = new DataView(new ArrayBuffer(8));
+    v.setFloat64(0, x); v.setBigUint64(0, v.getBigUint64(0) - 1n);
+    return v.getFloat64(0);
+  };
+  // Cada frontera T_ℓ = 200·2^(ℓ/4) es del nivel de arriba; el double justo debajo, del de abajo (sin el error del log).
+  for (let l = 1; l < NIVELES_T; l++) {
+    const t = tFronteraNivel(l);
+    assert.equal(nivelDeT(t), l, `frontera ${l} (${t} K)`);
+    assert.equal(nivelDeT(anterior(t)), l - 1, `bajo la frontera ${l}`);
+    assert.ok(tFronteraNivel(l) < tDeNivel(l) && tDeNivel(l) < tFronteraNivel(l + 1));
+  }
+  assert.equal(tFronteraNivel(4), 400);
+  assert.equal(nivelDeT(295), 2, 'suelo'); assert.equal(nivelDeT(310), 2, 'cuerpo: mismo nivel que el suelo');
+  for (const T of [0, -5, NaN, 199.9]) assert.equal(nivelDeT(T), 0, `T = ${T}`);
+  assert.equal(nivelDeT(Infinity), NIVELES_T - 1);
+  // Familias: C–O 0, C–N 1, C–C/C–H/H–H 2; O=O, O–H y lo demás no catalizable.
+  const i = (a: string, b: string, k: 1 | 2 | 3 = 1) => indiceTipoEnlace(ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never), k);
+  assert.deepEqual([i('C', 'O'), i('C', 'O', 2), i('C', 'N'), i('C', 'C'), i('C', 'H'), i('H', 'H'), i('O', 'O', 2), i('O', 'H'), i('N', 'H')].map(familiaCatalitica),
+    [0, 0, 1, 2, 2, 2, -1, -1, -1]);
+  assert.equal(materia.ATOMOS_POR_REACCION, 2 * materia.ATOMOS_POR_UNIDAD);
+  assert.equal(naturaleza.FRACTURA, 1);
+  // Las constantes de Q (enmienda 1) viven en naturaleza con su intervalo escrito, sin marcadores por rellenar.
+  const fuente = readFileSync(resolve(RAIZ, 'src/shared/naturaleza.ts'), 'utf8');
+  for (const c of ['E_RES_IONICO', 'E_HID_IONICO', 'E_CAT_IONICO', 'FUSION_MOLECULA', 'VOLUMEN_ATOMO', 'EMPAQUETADO_BASE',
+    'EMPAQUETADO_POR_R', 'TENACIDAD_RED', 'TENACIDAD_ANCHO', 'TENACIDAD_METAL']) assert.ok(c in naturaleza, c);
+  assert.doesNotMatch(fuente, /@[A-Z_]+@/, 'intervalos sin medir');
+});
+
 test('nivelDeT y tDeNivel son coherentes y cubren de 200 K a 3.200 K', () => {
   const { nivelDeT, tDeNivel, NIVELES_T } = tipos;
   for (let l = 0; l < NIVELES_T; l++) assert.equal(nivelDeT(tDeNivel(l)), l);
@@ -299,7 +331,8 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
     const [e, f] = [ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never)].sort((x, y) => x - y);
     return TIPOS.find(t => t.e === e && t.f === f && t.k === k)!.d;
   };
-  const kRate = (T: number, d: number, kappa = 0) => NU * Math.exp(-Math.max(0, GAMMA * d - kappa) / (R * T));
+  // Enmienda 1: la barrera nunca baja de dH (k = ν·exp(−max(0, ea − κ, dH)/RT)).
+  const kRate = (T: number, d: number, kappa = 0, dH = 0) => NU * Math.exp(-Math.max(0, GAMMA * d - kappa, dH) / (R * T));
 
   // 1. CO₂ gas supera al polímero sólido [4×C–O] incluso a 0 K; fosfatos (H₃PO₄/CaHPO₄) son más estables que P=O extra.
   assert.ok(2 * D('C', 'O', 2) > 4 * D('C', 'O', 1), 'CO₂ gas debe vencer al polímero sólido [4×C–O]');
@@ -336,6 +369,9 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
   assert.ok(kRate(310, D('C', 'N'), KAPPA0) > 1 && kRate(310, D('C', 'O'), KAPPA0) > 1 && kRate(310, D('C', 'C'), KAPPA0) > 1e-2);
   assert.ok(kRate(310, D('C', 'H'), KAPPA0) < 1e-4 && kRate(310, D('O', 'O', 2), KAPPA0) < 1e-9);
   assert.ok(kRate(295, D('O', 'O', 2), KAPPA_SUELO) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
+  // …y oxidar el H₂ con O₂ (H–H en la familia 2), pero ningún κ parte el agua: 2 H₂O → 2 H₂ + O₂ cuesta su dH.
+  const dH_agua = 4 * D('O', 'H') - 2 * D('H', 'H') - D('O', 'O', 2);
+  assert.ok(dH_agua > 300 && kRate(310, D('O', 'H'), 1e9, dH_agua) < 1e-50, 'ni el suelo ni el tubo parten el agua');
 
   // 6. Magnitudes en enteros seguros (un chunk nuevo entero cabe con margen en Float64 entero antes de plegar a bigint en F0).
   const cuantosChunk = 256 * Math.round(2000e6 / 60.08);

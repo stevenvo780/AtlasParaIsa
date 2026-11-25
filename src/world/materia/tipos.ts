@@ -1,3 +1,6 @@
+// ENMIENDA 1 (2026-11-24, «ciclos cerrados»; integrador Claude Opus 5.5 en sprint/v23l-materia, pedidos 1–4, 6 y 7 de
+// Q y los de L): coeficientes enteros que elige Q, H–H catalizable en la familia 2, ninguna barrera por debajo de dH,
+// energía de red y reglas de ea escritas, fronteras exactas de nivelDeT y precisiones de `aplicar`.
 /**
  * Contratos de la materia en el servidor (ARQ-materia §2 con PLAN-V23 §1.2): sustancias internadas, lotes y su
  * arena, el `Libro` único de conservación, reacciones, plantillas, cuerpos, procesos y el punto de control.
@@ -16,7 +19,9 @@ export interface Sustancia {
   enlaces: Uint16Array; // pares [tipo de TIPOS, cuenta] ordenados por tipo: es la clave
   atomos: Uint8Array;   // NE
   masa: number;         // mg por cuanto (g/mol)
-  energia: number;      // J por cuanto: −Σd·b, entero
+  /** J por cuanto, entero: −Σd·b − E_red(b). E_red ≥ 0 solo en unidades con enlace iónico (`quimica.energiaRed`:
+   * E_RES_IONICO por puente resonante M–X–Y=X y E_HID_IONICO por hidróxido M–X–H, homogénea de grado 1). */
+  energia: number;
   prop: Propiedades;
 }
 
@@ -26,9 +31,26 @@ export const T_NIVEL_MIN = 200;
 export const T_NIVEL_MAX = 3200;
 const RAZON_NIVEL = Math.log(T_NIVEL_MAX / T_NIVEL_MIN) / NIVELES_T;
 
-/** Nivel ℓ ∈ [0, NIVELES_T) de una temperatura en K. Lo usan Q (memo) y P (`pasoLote`). */
-export const nivelDeT = (T: number): number =>
-  Math.min(NIVELES_T - 1, Math.max(0, Math.floor(Math.log(T / T_NIVEL_MIN) / RAZON_NIVEL)));
+/** Frontera inferior del nivel ℓ en K, T_ℓ = T_NIVEL_MIN·(T_NIVEL_MAX/T_NIVEL_MIN)^(ℓ/NIVELES_T) = 200·2^(ℓ/4), tal como la
+ * da la coma flotante (ℓ = 4: 400 K; ℓ = 10: 1.131,37 K). Es la referencia exacta de `nivelDeT`. */
+export const tFronteraNivel = (nivel: number): number => T_NIVEL_MIN * (T_NIVEL_MAX / T_NIVEL_MIN) ** (nivel / NIVELES_T);
+const FRONTERAS = Float64Array.from({ length: NIVELES_T + 1 }, (_, l) => tFronteraNivel(l));
+
+/**
+ * Nivel ℓ ∈ [0, NIVELES_T) de una temperatura en K: el ℓ con T_ℓ ≤ T < T_ℓ₊₁ (`tFronteraNivel`), así que cada frontera
+ * exacta pertenece al nivel de arriba (1.131,37 K es el 10, no el 9); por debajo de 200 K (y con T = 0 o NaN), 0; desde
+ * T_15, 15. 295 K (suelo) y 310 K (cuerpo) caen los dos en el nivel 2, [282,8; 336,4) K: tienen los mismos productos y
+ * solo cambia la tasa, que usa la T del lote. Lo usan Q (memo), P (`pasoLote`) y L (`quemar`).
+ */
+export const nivelDeT = (T: number): number => {
+  let n = Math.floor(Math.log(T / T_NIVEL_MIN) / RAZON_NIVEL);
+  if (!(n >= 0)) return 0;
+  if (n >= NIVELES_T - 1) return T >= FRONTERAS[NIVELES_T - 1]! ? NIVELES_T - 1 : NIVELES_T - 2;
+  // El logaritmo puede quedar a un ulp de la frontera: se corrige contra la tabla.
+  if (T < FRONTERAS[n]!) n--;
+  else if (T >= FRONTERAS[n + 1]!) n++;
+  return Math.max(0, n);
+};
 /** Temperatura representativa (centro geométrico) del nivel ℓ: la T con que Q calcula los productos. */
 export const tDeNivel = (nivel: number): number => T_NIVEL_MIN * Math.exp((nivel + 0.5) * RAZON_NIVEL);
 
@@ -41,18 +63,29 @@ export interface Ecuacion {
 }
 
 /**
- * Reparto de menor energía libre de a + b al nivel de temperatura `nivelT`, como `Ecuacion`: entradas a y b con nu 1
- * (a + a: a con nu 2; b = 0: a sola) y salidas los productos. Lo calcula Q; lo aplica P con Arrhenius:
- * x = ν·exp(−max(0, ea − κ[catalisis])/(R·T))·… (ARQ-materia §3.1). `quemar` (L) no es cinético: el cuerpo paga su trabajo
- * aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
+ * Reparto de menor energía libre de a + b al nivel de temperatura `nivelT`, como `Ecuacion`: entradas a y b con los
+ * coeficientes enteros p, q ≥ 1 que elige Q (los de mayor −ΔG por átomo sin reactivo sobrante, con p·|a| + q·|b| ≤
+ * `ATOMOS_POR_REACCION` = 16 átomos; a igualdad, los de menos átomos y luego el menor p; a + a: a con nu p ≥ 2; b = 0: a
+ * sola con nu 1) y salidas los productos del mínimo global de G = E − T·S_GAS·#gas sobre esos átomos. ΔG es frente a los
+ * reactivos tal cual; para ser reacción, el mínimo debe ganar en más de EPSILON_G a todo reparto de p·a + q·b en dos
+ * grupos que reaccionen por separado (sin espectadores ni uniones de reacciones menores). Así 2 H₂ + O₂ → 2 H₂O.
+ * Lo calcula Q; lo aplica P con Arrhenius, x = ν·exp(−max(0, ea − κ[catalisis], dH)/(R·T))·… (ARQ-materia §3.1 con la
+ * enmienda 1: ningún catalizador baja la barrera por debajo de dH), con veces por tick k·n_a·n_b/V (a + b), k·n_a²/V
+ * (a + a) y k·n_a (sola) sean cuales sean los nu, y cada vez gasta nu de cada entrada. `quemar` (L) no es cinético: el
+ * cuerpo paga su trabajo aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
  */
 export interface Reaccion extends Ecuacion {
   a: SustanciaId; b: SustanciaId; nivelT: number;
-  ea: number;                  // J por cuanto de reacción: barrera, GAMMA·D del enlace más fuerte que disminuye
+  /** J por cuanto de reacción (una vez): barrera. GAMMA·D del enlace más fuerte que disminuye; de un enlace múltiple que
+   * solo baja de orden, su parte π, D_k − D_k′, menos E_CAT_IONICO si hay un sólido iónico entre las entradas y no se
+   * pierde ningún σ. Si el vector de enlaces se conserva: 0 en una asociación (un solo producto) y GAMMA·D del enlace más
+   * débil de las entradas si alguna se parte. Nunca menor que dH. */
+  ea: number;
   /** Familia del enlace catalizable más débil que disminuye, índice de `Plantilla.kappa` (0 = C–O, 1 = C–N,
-   * 2 = C–C/C–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
+   * 2 = C–C/C–H/H–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
    * catalizable. Sustituye al «más fuerte» de ARQ-materia §3.1, con el que C–C y C–H tapaban a C–O (azúcares, celulosa)
-   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H), que fija tests/v23-contratos.test.ts. */
+   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H), que fija tests/v23-contratos.test.ts. H–H solo decide
+   * cuando no baja ningún otro catalizable: el suelo oxida así el H₂ con O₂ en frío (enmienda 1). */
   catalisis: -1 | 0 | 1 | 2;
 }
 
@@ -149,7 +182,10 @@ export interface ArenaMateria {
   moverParte(de: LoteRef, a: LoteRef, p: Pedido): number;
   moverCalor(de: LoteRef, a: LoteRef, j: number): number;
   /** Aplica `e` hasta `veces` veces, recortado a existencias y a calor ≥ 0; devuelve las que aplicó. Reacciones (P),
-   * síntesis de plantillas (L) y `quemar`. */
+   * síntesis de plantillas (L) y `quemar`. `veces` es un entero seguro ≥ 0: Infinity, NaN, negativos o fracciones son
+   * fatales (I3). Los términos con el mismo id se agrupan por lado; el recorte usa las existencias de cada entrada entre
+   * su nu total y las entradas se restan antes de sumar las salidas, así que un id que está en los dos lados se compensa
+   * sin picos intermedios: solo es fatal (I3) un resultado final que pase de 2⁵³ − 1. */
   aplicar(l: LoteRef, e: Ecuacion, veces: number): number;
   /** Saca de `l` lo pedido (recortado a existencias) como garantía para un `Intento`: pares [SustanciaId, cuantos] y
    * [0, j] con su parte del calor. Lo suma a `libro.enVuelo`. Puede volver vacío. */
@@ -173,7 +209,7 @@ export interface Plantilla {
    * produce entera (sus salidas son estas partes más los subproductos, como O₂ y H₂O). */
   partes: readonly { id: SustanciaId; nu: number }[];
   sintesis: Ecuacion;
-  kappa: readonly [number, number, number]; // J por cuanto de rebaja de barrera: C–O, C–N, C–C/C–H
+  kappa: readonly [number, number, number]; // J por cuanto de rebaja de barrera: C–O, C–N, C–C/C–H/H–H
   captura: number;    // fracción de la luz que fija (plantas)
   masaAdulta: number; // kg
   m0: number;         // kg al nacer

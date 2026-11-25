@@ -4,41 +4,19 @@
  * Sin catálogo de materiales ni lista de reacciones: toda sustancia es un vector canónico de enlaces
  * saturados de ≤ 8 átomos (`ATOMOS_POR_UNIDAD`), y toda reacción sale de minimizar
  *   G(P, T) = Σ_s [ E(s) − T·S_GAS·1_{esGas(s, T)} ]
- * sobre todas las particiones válidas de los átomos de los reactivos (≤ 16 átomos).
+ * sobre todas las particiones válidas de los átomos de p·a + q·b (≤ `ATOMOS_POR_REACCION` = 16 átomos), con los
+ * coeficientes enteros p, q que elige `productos` (enmienda 1). Las constantes elegidas a mano están en naturaleza.ts.
  */
 import {
-  ANCHO_RIGIDEZ, DCHI_IONICO, EBULLICION_MASA, EBULLICION_POLAR, EPSILON_G, FUSION_RED,
-  GAMMA, NE, R_RIGIDEZ, S_GAS, TABLA,
+  ANCHO_RIGIDEZ, DCHI_IONICO, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO, EBULLICION_MASA, EBULLICION_POLAR,
+  EMPAQUETADO_BASE, EMPAQUETADO_POR_R, EPSILON_G, FUSION_MOLECULA, FUSION_RED, GAMMA, NE, R_RIGIDEZ, S_GAS, TABLA,
+  TENACIDAD_ANCHO, TENACIDAD_METAL, TENACIDAD_RED, VOLUMEN_ATOMO,
 } from '../../shared/naturaleza.js';
 import {
-  ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS,
+  ATOMOS_POR_REACCION, ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS,
   type Propiedades, type SustanciaId,
 } from '../../shared/materia.js';
 import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type Sustancia } from './tipos.js';
-
-// ── Constantes elegidas por Q, por mover a `src/shared/naturaleza.ts` en la integración ──────────────────
-// Los intervalos son los que mantienen verde la tabla de cordura con las demás constantes fijas (auditoría de Q).
-
-/** J por cuanto y por puente M–X–Y=X: red de un oxoanión resonante (CaCO₃, CaHPO₄). Sin ella dH(CaCO₃ → CaO + CO₂) =
- * 2·D(C–O) − D(C=O) = −63 y no hay caliza; con 135 vale +207 y calcina en el nivel 10 a 1,7/tick. Intervalo: 110..137
- * (por encima, ea ≥ dH deja la calcinación en horno por debajo de 1/tick). */
-export const E_RES_IONICO = 135;
-/** J por cuanto y por puente M–X–H: red de un hidróxido iónico (CaO + H₂O → Ca(OH)₂, dH = −100). Intervalo: 1..75. */
-export const E_HID_IONICO = 50;
-/** J por cuanto: rebaja de la barrera al abrir un enlace π sobre un sólido iónico sin perder ningún σ (CaO + CO₂,
- * fraguado del mortero a 295 K). Es una regla calibrada para la cal, no un principio general. Intervalo: ≥ 67. */
-export const E_CAT_IONICO = 75;
-/** T_f/T_eb de una molécula (regla de Beaman–Walden), adimensional: agua líquida en [271, 371] K. */
-export const FUSION_MOLECULA = 0.73;
-/** mL/mol (µL por cuanto) de cada átomo en fase condensada, en el orden de `ELEMENTOS`: fija la densidad. */
-export const VOLUMEN_ATOMO: readonly number[] = [5.0, 7.0, 7.5, 7.5, 15.0, 12.0, 18.0, 8.5];
-/** Fracción de volumen ocupada por una red: EMPAQUETADO_BASE + EMPAQUETADO_POR_R·min(4, r); las moléculas, 1. */
-export const EMPAQUETADO_BASE = 0.65;
-export const EMPAQUETADO_POR_R = 0.15;
-/** Tenacidad de una red = TENACIDAD_RED·exp(−((r − R_RIGIDEZ)/TENACIDAD_ANCHO)²) + TENACIDAD_METAL·fracción metálica. */
-export const TENACIDAD_RED = 0.6;
-export const TENACIDAD_ANCHO = 0.8;
-export const TENACIDAD_METAL = 0.4;
 
 // ── Tablas derivadas de TABLA y TIPOS (sin números mágicos duplicados) ──────────────────────────────────
 
@@ -545,12 +523,13 @@ export function esGasA(s: Pick<Sustancia, 'clase' | 'prop'>, T: number): boolean
 
 // ── Cinética (ea, familia catalítica y Arrhenius) ───────────────────────────────────────────────────────
 
-/** Familia catalítica de un tipo de enlace: 0 = C–O, 1 = C–N, 2 = C–C/C–H, −1 = no catalizable. */
+/** Familia catalítica de un tipo de enlace: 0 = C–O, 1 = C–N, 2 = C–C/C–H/H–H, −1 = no catalizable. H–H entra en la
+ * familia 2 con la enmienda 1: el suelo oxida el H₂ con O₂ en frío (bacterias del hidrógeno) y cierra el ciclo del H. */
 export function familiaCatalitica(tipo: number): -1 | 0 | 1 | 2 {
   const e = T_E[tipo]!, f = T_F[tipo]!;
   if (e === 1 && f === 3) return 0; // C–O, C=O
   if (e === 1 && f === 2) return 1; // C–N, C=N, C≡N
-  if ((e === 1 && f === 1) || (e === 0 && f === 1)) return 2; // C–C..C≡C, H–C
+  if ((e === 1 && f === 1) || (e === 0 && f === 1) || (e === 0 && f === 0)) return 2; // C–C..C≡C, H–C, H–H
   return -1;
 }
 
@@ -733,6 +712,10 @@ function cotaSuperiorEnergiaRed(atomos: Uint8Array): number {
  */
 export class ContextoSolver {
   readonly cacheEstequiometria = new Map<number, EspecieOpt | null>();
+  /** Negativos con cota: ninguna especie de esa estequiometría mejora (cg, cgas, cmol, ccnt) (`mejoraDescomposicion`).
+   * Con los coeficientes de la enmienda 1 cada pareja resuelve hasta ~40 particiones que comparten sub-estequiometrías,
+   * y sin esto cada una repetía la búsqueda (C + N₂: 0,5 s en frío). */
+  readonly cotaNula = new Map<number, readonly [number, number, number, number]>();
   readonly pi = new Float64Array(NE);
   readonly piTry = new Float64Array(NE);
   readonly availIdx = new Int32Array(NT);
@@ -872,6 +855,16 @@ function resolverEstequiometria(
     return mejoraDescomposicion(g, esGas, esMol, cg, cgas, cmol, ccnt) ? { spec: memo, g, esGas } : null;
   }
 
+  // Ya se probó que nada mejora la misma cota o una más laxa. Margen 2·10⁻⁶: lo que mejora cg (g ≤ cg + 10⁻⁹) queda
+  // por debajo de cota − 10⁻⁶, que la poda de la raíz y la de la búsqueda no habrían descartado.
+  const nula = ctx.cotaNula.get(clave);
+  if (nula && (cg < nula[0] - 2e-6 || (cg === nula[0] && cgas === nula[1] && cmol === nula[2] && ccnt === nula[3]))) return null;
+  const negativo = (): null => {
+    const previa = ctx.cotaNula.get(clave);
+    if (cg !== Infinity && (!previa || cg > previa[0])) ctx.cotaNula.set(clave, [cg, cgas, cmol, ccnt]);
+    return null;
+  };
+
   const T = T_NIVEL[nivelT]!;
   const Ts = TS_NIVEL[nivelT]!;
   const puedeSerMol = atomos[6]! === 0 && atomos[7]! === 0;
@@ -933,7 +926,7 @@ function resolverEstequiometria(
     return null;
   }
   const minERaiz = -(Math.floor(dualRaiz + 1e-9) + maxEred);
-  if (minERaiz - creditoGas > umbralRaiz) return null;
+  if (minERaiz - creditoGas > umbralRaiz) return negativo();
 
   const tramoEtapa: number[][] = [];
   const activosEtapa: number[][] = [];
@@ -984,6 +977,13 @@ function resolverEstequiometria(
     }
 
     if (s === np) {
+      // Sin enlaces iónicos la energía no depende de la clase (E_red = 0): solo el crédito de gas, que exige molécula. Si
+      // ni con él mejora, la hoja no cuenta y se ahorra `realizable`, que es lo caro (con la enmienda 1 cada pareja
+      // explora muchas más sub-estequiometrías ricas en C: el 80 % del tiempo en frío era esa búsqueda).
+      if (curIon === 0) {
+        const gOpt = -curBondE - (puedeSerGas && baseTeb + curPolar < T ? Ts : 0);
+        if (gOpt > (hallado ? mejorG : cg) + 1e-9) return;
+      }
       let pares = 0;
       for (let i = 0; i < m; i++) if (counts[i]! > 0) pares++;
       const bruto = new Uint16Array(pares * 2);
@@ -1057,7 +1057,7 @@ function resolverEstequiometria(
     return { spec: mejorSpec, g: mejorG, esGas: mejorEsGas };
   }
   if (cg === Infinity) ctx.cacheEstequiometria.set(clave, null);
-  return null;
+  return negativo();
 }
 
 interface ParticionOptima {
@@ -1181,6 +1181,9 @@ function minimizarParticion(objetivo: Uint8Array, nivelT: number, ctx: ContextoS
 }
 
 export interface ResultadoProductos {
+  /** Coeficientes enteros de las entradas que eligió Q: [1, 0] para a sola, [p, 0] para a + a (p ≥ 2) y [p, q] para
+   * a + b (p, q ≥ 1), siempre con p·|a| + q·|b| ≤ ATOMOS_POR_REACCION. */
+  nu: readonly [number, number];
   productos: readonly { enlaces: Uint16Array; nu: number }[];
   dH: number;
   ea: number;
@@ -1192,12 +1195,100 @@ const CONTEXTO_DEFECTO = new ContextoSolver();
 /** G(E₁, gases₁) − G(E₂, gases₂) con Ts = T·S_GAS: resta de enteros más un solo producto. */
 const difG = (e1: number, gas1: number, e2: number, gas2: number, Ts: number): number => (e1 - e2) - Ts * (gas1 - gas2);
 
+const sumaAtomos = (atomos: Uint8Array): number => {
+  let n = 0;
+  for (let e = 0; e < NE; e++) n += atomos[e]!;
+  return n;
+};
+
 /**
- * Calcula los productos de menor energía libre de `a` (si `b === null`) o `a + b` al nivel de temperatura `nivelT`.
- *
- * Teorema anti-espectadores (para b !== null): exigir G*(n_A + n_B, T) < G*(n_A, T) + G*(n_B, T) − ε garantiza
- * por reducción al absurdo que ningún reactivo sobrevive intacto como mero espectador ni la reacción es la unión
- * independiente de dos descomposiciones unarias ya cubiertas por (a, 0) y (b, 0).
+ * Mínimos G*(p·a + q·b) de una pareja para todos los múltiplos que caben en ATOMOS_POR_REACCION, calculados una vez y
+ * compartidos por los candidatos (p, q) y por sus referencias. Las sub-estequiometrías de ≤ 8 átomos van a `ctx`.
+ */
+class MultiplosPareja {
+  private readonly tabla = new Map<number, ParticionOptima | null>();
+  constructor(
+    private readonly a: Readonly<Sustancia>, private readonly b: Readonly<Sustancia> | null,
+    private readonly nivelT: number, private readonly ctx: ContextoSolver,
+  ) {}
+  optimo(p: number, q: number): ParticionOptima | null {
+    const k = p * 32 + q;
+    let r = this.tabla.get(k);
+    if (r === undefined) {
+      const objetivo = new Uint8Array(NE);
+      for (let e = 0; e < NE; e++) objetivo[e] = p * this.a.atomos[e]! + (this.b ? q * this.b.atomos[e]! : 0);
+      r = minimizarParticion(objetivo, this.nivelT, this.ctx);
+      this.tabla.set(k, r);
+    }
+    return r;
+  }
+}
+
+/**
+ * Productos de p·a + q·b (q = 0: p copias de a) si la reacción es irreducible: su mínimo de G gana en más de ε a todo
+ * reparto en dos grupos de reactivos que reaccionen por separado, G*(p₁, q₁) + G*(p − p₁, q − q₁), incluido el de
+ * cada reactivo solo (p·a y q·b; con p = 1, la unaria). Así ningún reactivo sobra como espectador y la reacción no es la
+ * unión de dos más pequeñas que ya cubren otros canales. Devuelve también ΔG frente a los reactivos tal cual.
+ */
+function candidato(
+  a: Readonly<Sustancia>, b: Readonly<Sustancia> | null, p: number, q: number, nivelT: number, m: MultiplosPareja,
+): { res: ResultadoProductos; dE: number; dGas: number; atomos: number } | null {
+  const T = T_NIVEL[nivelT]!, Ts = TS_NIVEL[nivelT]!;
+  const opt = m.optimo(p, q);
+  if (!opt) return null;
+  const gasA = esGasA(a, T) ? 1 : 0, gasB = b && esGasA(b, T) ? 1 : 0;
+  const eReac = p * a.energia + (b ? q * b.energia : 0), gasReac = p * gasA + q * gasB;
+  // La decisión se toma con energías y cuentas de gases enteras: G = E − T·s·#gas, así que con los mismos gases la
+  // comparación con ε es exacta y no la decide el redondeo de sumas de T·s.
+  let eRef = eReac, gasRef = gasReac;
+  for (let p1 = 0; p1 <= p; p1++) for (let q1 = 0; q1 <= q; q1++) {
+    const p2 = p - p1, q2 = q - q1;
+    if ((p1 === 0 && q1 === 0) || (p2 === 0 && q2 === 0)) continue;
+    if (p1 * 32 + q1 > p2 * 32 + q2) continue; // cada reparto una vez
+    const x = m.optimo(p1, q1), y = m.optimo(p2, q2);
+    if (x && y && difG(x.energia + y.energia, x.gases + y.gases, eRef, gasRef, Ts) < 0) {
+      eRef = x.energia + y.energia; gasRef = x.gases + y.gases;
+    }
+  }
+  if (!(difG(opt.energia, opt.gases, eRef, gasRef, Ts) < -EPSILON_G)) return null;
+
+  // Agrupar productos idénticos en orden canónico por enlaces; ninguno puede ser un reactivo (sobraría).
+  const mapa = new Map<string, { enlaces: Uint16Array; nu: number }>();
+  for (const sp of opt.especies) {
+    const k = claveEnlaces(sp.enlaces);
+    const actual = mapa.get(k);
+    if (actual) actual.nu++;
+    else mapa.set(k, { enlaces: sp.enlaces, nu: 1 });
+  }
+  const salidas = [...mapa.values()].sort((x, y) => compararEnlaces(x.enlaces, y.enlaces));
+  if (salidas.some(s => compararEnlaces(s.enlaces, a.enlaces) === 0 || (b && compararEnlaces(s.enlaces, b.enlaces) === 0))) {
+    return null; // no ocurre con la irreducibilidad (un reactivo intacto es el reparto (1, 0) + el resto); se comprueba igual
+  }
+  const entradas: EntradaSalidaEnlaces[] = b === null || q === 0
+    ? [{ enlaces: a.enlaces, nu: p }]
+    : [{ enlaces: a.enlaces, nu: p }, { enlaces: b.enlaces, nu: q }];
+  const dH = opt.energia - eReac;
+  const { ea, catalisis } = calcularCinetica(entradas, salidas, dH);
+  const atomos = p * sumaAtomos(a.atomos) + (b ? q * sumaAtomos(b.atomos) : 0);
+  return { res: { nu: [p, q], productos: salidas, dH, ea, catalisis }, dE: dH, dGas: opt.gases - gasReac, atomos };
+}
+
+/** ¿Baja más G por átomo `x` que `y`? Producto cruzado: entero exacto si los gases no deciden, un solo redondeo si deciden. */
+function masPorAtomo(
+  x: { dE: number; dGas: number; atomos: number }, y: { dE: number; dGas: number; atomos: number }, Ts: number,
+): number {
+  const e = x.dE * y.atomos - y.dE * x.atomos, g = x.dGas * y.atomos - y.dGas * x.atomos;
+  return g === 0 ? -e : -(e - Ts * g); // > 0: x baja más G por átomo
+}
+
+/**
+ * Calcula los productos de menor energía libre de `a` (si `b === null`), de `a + a` o de `a + b` al nivel de
+ * temperatura `nivelT`, con los coeficientes enteros que elige Q (contrato de `Reaccion`, enmienda 1):
+ * - a sola: nu 1; es reacción si su mínimo G* baja más de ε de G(a).
+ * - a + a: p ≥ 2 copias; a + b: p, q ≥ 1; siempre p·|a| + q·|b| ≤ ATOMOS_POR_REACCION.
+ * - De los (p, q) irreducibles (`candidato`), el de mayor −ΔG por átomo, ΔG = G*(p·a + q·b) − p·G(a) − q·G(b); a
+ *   igualdad, el de menos átomos y después el de menor p. Así 2 H₂ + O₂ → 2 H₂O y CH₄ + 2 O₂ → CO₂ + 2 H₂O, y no el
+ *   H₂O₂ que da 1:1 o la oxidación a medias que suelta H₂.
  */
 export function productos(
   a: Readonly<Sustancia>,
@@ -1208,47 +1299,34 @@ export function productos(
   if (!Number.isInteger(nivelT) || nivelT < 0 || nivelT >= NIVELES_T) {
     throw new RangeError(`nivelT fuera de rango [0, ${NIVELES_T}): ${nivelT}`);
   }
-  const T = T_NIVEL[nivelT]!;
   const Ts = TS_NIVEL[nivelT]!;
-
-  const objetivo = new Uint8Array(NE);
-  for (let e = 0; e < NE; e++) objetivo[e] = a.atomos[e]! + (b ? b.atomos[e]! : 0);
-
-  const opt = minimizarParticion(objetivo, nivelT, ctx);
-  if (!opt) return null;
-
-  // La decisión se toma con energías y cuentas de gases enteras: G = E − T·s·#gas, así que con los mismos gases la
-  // comparación con ε es exacta y no la decide el redondeo de sumas de T·s.
-  const mismaSustancia = b !== null && compararEnlaces(a.enlaces, b.enlaces) === 0;
-  let eRef = a.energia + (b ? b.energia : 0);
-  let gasRef = (esGasA(a, T) ? 1 : 0) + (b && esGasA(b, T) ? 1 : 0);
-  if (b !== null) {
-    const optA = minimizarParticion(a.atomos, nivelT, ctx);
-    const optB = mismaSustancia ? optA : minimizarParticion(b.atomos, nivelT, ctx);
-    if (optA && optB && difG(optA.energia + optB.energia, optA.gases + optB.gases, eRef, gasRef, Ts) < 0) {
-      eRef = optA.energia + optB.energia;
-      gasRef = optA.gases + optB.gases;
-    }
+  const misma = b !== null && compararEnlaces(a.enlaces, b.enlaces) === 0;
+  const sola = b === null ? null : misma ? null : b;
+  const m = new MultiplosPareja(a, sola, nivelT, ctx);
+  if (b === null) return candidato(a, null, 1, 0, nivelT, m)?.res ?? null;
+  const nA = sumaAtomos(a.atomos), nB = sumaAtomos(b.atomos);
+  let mejor: ReturnType<typeof candidato> = null;
+  const probar = (p: number, q: number) => {
+    const c = candidato(a, sola, p, q, nivelT, m);
+    if (!c) return;
+    if (!mejor) { mejor = c; return; }
+    const d = masPorAtomo(c, mejor, Ts);
+    if (d > 0 || (d === 0 && c.atomos < mejor.atomos)) mejor = c; // a igualdad de átomos gana el primero: menor p
+  };
+  if (misma) for (let p = 2; p * nA <= ATOMOS_POR_REACCION; p++) probar(p, 0);
+  else for (let p = 1; p * nA + nB <= ATOMOS_POR_REACCION; p++) {
+    for (let q = 1; p * nA + q * nB <= ATOMOS_POR_REACCION; q++) probar(p, q);
   }
-  if (!(difG(opt.energia, opt.gases, eRef, gasRef, Ts) < -EPSILON_G)) return null;
+  return (mejor as ReturnType<typeof candidato>)?.res ?? null;
+}
 
-  // Agrupar productos idénticos en orden canónico por enlaces.
-  const mapa = new Map<string, { enlaces: Uint16Array; nu: number }>();
-  for (const sp of opt.especies) {
-    const k = claveEnlaces(sp.enlaces);
-    const actual = mapa.get(k);
-    if (actual) actual.nu++;
-    else mapa.set(k, { enlaces: sp.enlaces, nu: 1 });
-  }
-  const salidas = [...mapa.values()].sort((x, y) => compararEnlaces(x.enlaces, y.enlaces));
-
-  const entradas: EntradaSalidaEnlaces[] = b === null
-    ? [{ enlaces: a.enlaces, nu: 1 }]
-    : mismaSustancia
-      ? [{ enlaces: a.enlaces, nu: 2 }]
-      : [{ enlaces: a.enlaces, nu: 1 }, { enlaces: b.enlaces, nu: 1 }];
-
-  const dH = opt.energia - (a.energia + (b ? b.energia : 0));
-  const { ea, catalisis } = calcularCinetica(entradas, salidas, dH);
-  return { productos: salidas, dH, ea, catalisis };
+/** Los productos de p·a + q·b con coeficientes fijos (q = 0 con b = a o b = null: p copias de a), o null si esa
+ * multiplicidad no es una reacción irreducible. Solo para pruebas y para el laboratorio: `productos` elige (p, q). */
+export function productosCon(
+  a: Readonly<Sustancia>, b: Readonly<Sustancia> | null, p: number, q: number, nivelT: number,
+  ctx: ContextoSolver = CONTEXTO_DEFECTO,
+): ResultadoProductos | null {
+  const misma = b !== null && compararEnlaces(a.enlaces, b.enlaces) === 0;
+  const sola = b === null || misma ? null : b;
+  return candidato(a, sola, p, sola ? q : 0, nivelT, new MultiplosPareja(a, sola, nivelT, ctx))?.res ?? null;
 }

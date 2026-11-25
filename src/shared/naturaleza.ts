@@ -1,3 +1,5 @@
+// ENMIENDA 1 (2026-11-24, «ciclos cerrados»; integrador Claude Opus 5.5 en sprint/v23l-materia, pedidos 3, 6 y 7 de Q
+// y los de L): ninguna barrera por debajo de dH; las constantes que eligió Q viven aquí con su intervalo; FRACTURA.
 /**
  * Constantes de la naturaleza de V23: el ÚNICO fichero con números de física, química y biología elegidos a
  * mano. No son topes: dicen cómo se comporta la materia. Las puertas demográficas solo calibran aquí
@@ -47,9 +49,10 @@ export const TABLA: readonly ConstantesElemento[] = [
 
 // ── Enlaces ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** J por cuanto por unidad de Δχ²: término iónico de Pauling por orden k, D = (D_e + D_f)/2 + k·PAULING·Δχ² + (k − 1)·√(π_e·π_f). */
-// Decisión de Q (ola 1): con energías aditivas, CaCO₃ → CaO + CO₂ tiene dH = 2·D(C–O) − D(C=O) (hoy −63, no hay caliza);
-// que aguante a 295 K pide dH > 295·S_GAS y que el CO₂ gane a [C–O]ₙ pide dH < ½·295·S_GAS: término de red o sin «cal que fragua».
+/** J por cuanto por unidad de Δχ²: término iónico de Pauling por orden k, D = (D_e + D_f)/2 + k·PAULING·Δχ² + (k − 1)·√(π_e·π_f).
+ * Con energías solo aditivas no había caliza: CaCO₃ → CaO + CO₂ tenía dH = 2·D(C–O) − D(C=O) = −63. Resuelto en la
+ * enmienda 1 sin tocar PAULING: las unidades iónicas suman la energía de red E_red (`E_RES_IONICO`, `E_HID_IONICO`,
+ * `Sustancia.energia`), con la que la caliza aguanta a 295 K, calcina en horno y la cal fragua. */
 export const PAULING = 96.5;
 /** Orden máximo de un enlace (triple). */
 export const ORDEN_MAX = 3;
@@ -65,8 +68,8 @@ export const CAPACIDAD_ATOMO = 0.025;
 /** ν: factor de frecuencia de Arrhenius, en L/(cuanto·tick) entre dos sustancias y en 1/tick para una sola. */
 export const NU = 1e9;
 /** γ: la barrera de una reacción es γ·D del enlace más fuerte que disminuye, contados todos (también O=O y O–H),
- * adimensional. La paga la cinética de P, no `quemar`. Con O₂ manda O=O (494, ea = 173): sin κ el combustible aguanta en
- * frío (k(295 K) ~ 10⁻²²/tick) y arde en un fuego (k(1.100 K) ~ 6/tick). */
+ * adimensional (reglas completas en `Reaccion.ea`). La paga la cinética de P, no `quemar`. Con O₂ manda O=O (494,
+ * ea = 173): sin κ el combustible aguanta en frío (k(295 K) ~ 10⁻²²/tick) y arde en un fuego (k(1.100 K) ~ 6/tick). */
 export const GAMMA = 0.35;
 /** s: J/(cuanto·K) de entropía por cuanto de molécula gaseosa en los productos (CO₂/H₂O/O₂/N₂ reales ≈ 0,19–0,21); G = −Σd·b − T·s·#gas. */
 export const S_GAS = 0.18;
@@ -74,11 +77,14 @@ export const S_GAS = 0.18;
 export const EPSILON_G = 1;
 /** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de su familia de enlace (`Reaccion.catalisis`).
  * A 310 K, una ruta cuya barrera ponga C–N va a ~400/tick y una de C–O a ~2/tick; si la pone C–H, O–H u O=O (carbonizar o
- * dismutar CH₂O, oxidar) queda en ~2·10⁻⁵/tick o menos: B y Q la calibran contra las rutas que dé `productos()`. */
+ * dismutar CH₂O, oxidar) queda en ~2·10⁻⁵/tick o menos: B y Q la calibran contra las rutas que dé `productos()`.
+ * Se queda en 60 con la enmienda 1: con 80 el digestivo haría H₂ y carbón de la grasa (CH₂ → H₂ + C a 5·10⁻²/tick). */
 export const KAPPA0 = 60;
 /** κ del suelo (descomposición microbiana a ~295 K), igual en las tres familias, en los lotes Suelo y Cadaver: la oxidación
- * con O₂ va a ~10⁻³/tick (cientos de ticks con [O₂] ≈ 5 mmol/L; con KAPPA0 quedaría en ~10⁻¹¹ y el suelo no devolvería nada).
- * También acelera las rutas sin O₂ (carbonizar CH₂O, ~400/tick) y, con κ ≥ ea, la tasa satura en ν. */
+ * con O₂ va a ~10⁻³ L/(cuanto·tick) (cientos de ticks con [O₂] ≈ 5 mmol/L; con KAPPA0 quedaría en ~10⁻¹¹ y el suelo no
+ * devolvería nada), también la del H₂ (2 H₂ + O₂ → 2 H₂O, familia C–C/C–H/H–H: bacterias del hidrógeno). Acelera las
+ * rutas sin O₂ (carbonizar, ~400/tick), pero nunca por debajo de dH (enmienda 1): madera + H₂O → 2 H₂ + CO₂ (dH +102)
+ * queda en ~10⁻⁹. Con κ ≥ ea y dH ≤ 0, la tasa satura en ν. */
 export const KAPPA_SUELO = 105;
 
 // ── Propiedades por estructura ───────────────────────────────────────────────────────────────────────────
@@ -96,10 +102,49 @@ export const EBULLICION_POLAR = 100;
 /** Fracción de volumen desde la que la fase rígida endurece el lote entero (percolación). */
 export const PERCOLACION = 0.3;
 
+// ── Química por estructura: constantes que eligió Q (enmienda 1) ─────────────────────────────────────────────
+// Cada intervalo se midió (2026-11-24, 100 corridas) moviendo solo esa constante con las demás fijas: dentro, las 7 filas
+// verdes de la tabla de cordura de `scripts/lab-materia.mts` siguen verdes (la 7, hierro, y la 8, C estable, están rojas
+// con cualquier valor: no dependen de estas constantes), I4 sin violaciones y las dos cajas cerradas de
+// tests/lib/caja-cerrada.ts (40 recambios, sin y con fuego) cumplen (balance exacto, agua ≥ 97 %, H₂ < 0,5 % del H y
+// estable). «Probado» marca un extremo de la rejilla, no una frontera: ninguna fila la encontró.
+/** J por cuanto y por puente M–X–Y=X: energía de red de un oxoanión resonante (CaCO₃, CaHPO₄), parte de E_red. Sin ella
+ * CaCO₃ → CaO + CO₂ tiene dH = −63 y no hay caliza; con 135, +207, y calcina en el nivel 10. Intervalo: [110, 137]
+ * (fuera falla la fila de la cal; con ≤ 108 la caja además pierde el 4 % del agua). */
+export const E_RES_IONICO = 135;
+/** J por cuanto y por puente M–X–H: energía de red de un hidróxido iónico (CaO + H₂O → Ca(OH)₂, dH = −100). Intervalo:
+ * [1, 75] (con 0 o ≥ 80 la cal falla; con ≥ 80 la caja pierde el 4 % del agua). */
+export const E_HID_IONICO = 50;
+/** J por cuanto: rebaja de la barrera al abrir un enlace π sobre un sólido iónico sin perder ningún σ (CaO + CO₂, fraguado
+ * del mortero a 295 K). Es una calibración de la cal, no un principio general. Intervalo: ≥ 67
+ * (con 66 el mortero no fragua a 295 K), probado hasta 200. */
+export const E_CAT_IONICO = 75;
+/** Adimensional: T_f/T_eb de una molécula (regla de Beaman–Walden), agua líquida en [271, 371] K. Intervalo:
+ * [0,45 probado, 0,79]: el agua se hiela a 295 K desde 295/371 = 0,795. */
+export const FUSION_MOLECULA = 0.73;
+/** µL por cuanto (mL/mol) de cada átomo en fase condensada, en el orden de `ELEMENTOS`: fija la densidad y, con ella, el
+ * volumen y las concentraciones de lo condensado en P. Intervalo: todos ×[0,25; 4], probado entero (ninguna fila ni la
+ * caja lo acotan: el volumen de la caja lo pone el gas). */
+export const VOLUMEN_ATOMO: readonly number[] = [5.0, 7.0, 7.5, 7.5, 15.0, 12.0, 18.0, 8.5];
+/** Adimensional: fracción de volumen que ocupa una red, EMPAQUETADO_BASE + EMPAQUETADO_POR_R·min(4, r) (las moléculas, 1).
+ * Intervalos: [0,35; 0,95] y [0; 0,4], probados enteros (solo cambian densidades). */
+export const EMPAQUETADO_BASE = 0.65;
+export const EMPAQUETADO_POR_R = 0.15;
+/** Adimensional: tenacidad de una red = TENACIDAD_RED·exp(−((r − R_RIGIDEZ)/TENACIDAD_ANCHO)²) + TENACIDAD_METAL·fracción
+ * de enlaces metálicos. Intervalos: [0; 1], [0,2; 2,4] y [0; 1], probados enteros: la química no las acota (solo entran
+ * en `romper`); las calibran W, F y T1 con sus paneles, como FRACTURA. */
+export const TENACIDAD_RED = 0.6;
+export const TENACIDAD_ANCHO = 0.8;
+export const TENACIDAD_METAL = 0.4;
+
 // ── Leyes de uso ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** Tenacidad que se suma a la del blanco al romper (evita dividir por 0): se desprende P·min(1, r²)/(tenacidad + EPS_TENACIDAD). */
 export const EPS_TENACIDAD = 0.01;
+/** Adimensional: J que cuesta desprender un cuanto = FRACTURA·D̄ de sus enlaces (cohesión de `romper`). Con 1 se paga
+ * romper cada enlace del fragmento, unas 100–1.000 veces más de lo real (una fractura solo corta los de su superficie): la
+ * calibran W, F y T1 con sus paneles (talar, cavar, tallar); ninguna fila de cordura de la materia la acota. */
+export const FRACTURA = 1;
 /** g: fracción máxima de su masa que una plantilla sintetiza por tick al crecer; en gestación (embrión desde 0) es
  * fracción de `Plantilla.m0`, lo que fija T_min = 1/G_SINTESIS = 1.200 ticks (0,5 días). */
 export const G_SINTESIS = 1 / 1200;

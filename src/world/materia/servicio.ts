@@ -11,7 +11,7 @@
 import { existsSync } from 'node:fs';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { EPSILON_G, NE, S_GAS, TABLA } from '../../shared/naturaleza.js';
-import { ClaseSustancia, TIPOS, type SustanciaId } from '../../shared/materia.js';
+import { ATOMOS_POR_REACCION, ClaseSustancia, TIPOS, type SustanciaId } from '../../shared/materia.js';
 import type { World } from '../index.js';
 import { registrar, type Violacion } from '../invariantes.js';
 import {
@@ -278,12 +278,12 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
     if (res !== null) {
       // Regla de visibilidad (ARQ-materia §3.1): internar TODOS los productos ANTES de publicar la fila del memo.
       const salidas = Object.freeze(res.productos.map(p => Object.freeze({ id: this.internar(p.enlaces), nu: p.nu })));
+      // Los coeficientes los elige Q (contrato de `Reaccion`, enmienda 1): [1, 0] sola, [p, 0] a + a, [p, q] a + b.
+      const [p, q] = res.nu;
       const entradas = Object.freeze(
-        b === 0
-          ? [Object.freeze({ id: a, nu: 1 })]
-          : a === b
-            ? [Object.freeze({ id: a, nu: 2 })]
-            : [Object.freeze({ id: a, nu: 1 }), Object.freeze({ id: b, nu: 1 })],
+        b === 0 || a === b
+          ? [Object.freeze({ id: a, nu: p })]
+          : [Object.freeze({ id: a, nu: p }), Object.freeze({ id: b, nu: q })],
       );
       reac = Object.freeze({
         a, b, nivelT,
@@ -553,6 +553,20 @@ function revisarFila(servicio: ServicioQuimicoAuditable, fila: FilaMemoQuimico, 
     return true;
   };
   if (!sumar(r.salidas, 1, 'Salida') || !sumar(r.entradas, -1, 'Entrada')) return;
+  // Entradas: a sola con nu 1, a + a con nu ≥ 2, a + b con nu ≥ 1 cada una, en ≤ ATOMOS_POR_REACCION átomos; ningún
+  // reactivo sale intacto (sobraría).
+  const ids = r.entradas.map(x => x.id), nus = r.entradas.map(x => x.nu);
+  const formaOk = r.b === 0 ? ids.length === 1 && ids[0] === r.a && nus[0] === 1
+    : r.a === r.b ? ids.length === 1 && ids[0] === r.a && nus[0]! >= 2
+      : ids.length === 2 && ids[0] === r.a && ids[1] === r.b;
+  let atomosVez = 0;
+  for (const { id, nu } of r.entradas) atomosVez += nu * servicio.sustancia(id).atomos.reduce((t, n) => t + n, 0);
+  if (!formaOk || atomosVez > ATOMOS_POR_REACCION) {
+    fallo('Entradas de reacción fuera del contrato (coeficientes o átomos por vez).', { a: r.a, b: r.b, nivelT: r.nivelT, entradas: r.entradas, atomosVez });
+  }
+  if (r.salidas.some(x => x.id === r.a || x.id === r.b)) {
+    fallo('Un reactivo sale intacto de su reacción.', { a: r.a, b: r.b, nivelT: r.nivelT });
+  }
 
   for (let e = 0; e < NE; e++) {
     if (atomosNetos[e] !== 0) fallo('La fila de memo no conserva átomos.', { a: r.a, b: r.b, nivelT: r.nivelT, elemento: e }, 0, atomosNetos[e]);

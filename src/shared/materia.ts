@@ -7,6 +7,8 @@ import { NE, ORDEN_MAX, PAULING, TABLA } from './naturaleza.js';
 
 /** Átomos por unidad de fórmula: resolución de la representación, no tope de materia (lo grande son muchos cuantos). */
 export const ATOMOS_POR_UNIDAD = 8;
+/** Átomos de una vez de reacción, p·|a| + q·|b| (enmienda 1): resolución del solver de Q, no tope de materia. */
+export const ATOMOS_POR_REACCION = 2 * ATOMOS_POR_UNIDAD;
 
 /** u32 > 0 que asigna la química (Q): solo crece y nunca se reutiliza. 0 = ninguna. */
 export type SustanciaId = number;

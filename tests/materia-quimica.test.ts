@@ -9,7 +9,7 @@ import { NIVELES_T, nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '..
 import {
   ContextoSolver, atomosDeEnlaces, calcularCinetica, construirSustancia, energiaRed,
   esGasA, grafoElementosConexo, indiceTipoEnlace, normalizarEnlaces,
-  productos, realizable,
+  productos, productosCon, realizable,
 } from '../src/world/materia/quimica.js';
 import {
   asociarServicioQuimico, cargarSustancias, crearServicioQuimico,
@@ -200,7 +200,8 @@ test('energiaRed() es homogénea de grado 1, nula en covalentes y resiste exploi
 });
 
 test('el solver exacto MRV+LP-dual coincide al 100 % con el oráculo de fuerza bruta (sin mínimos locales)', () => {
-  // Comparar mínimo global G exacto sobre 20 sistemas variados de ≤ 6 átomos y 4 niveles de T.
+  // Comparar mínimo global G exacto sobre 20 sistemas variados de ≤ 6 átomos y 5 niveles de T, con la multiplicidad
+  // fija de antes de la enmienda 1 (1·a + 1·b, 2·a, 1·a): `productosCon` resuelve una sola (p, q), sin elegirla.
   const casos: [string, Uint16Array, Uint16Array | null][] = [
     ['H2 + O2', B([[E('H', 'H'), 1]]), B([[E('O', 'O', 2), 1]])],
     ['C + O2', B([[E('C', 'C'), 2]]), B([[E('O', 'O', 2), 1]])],
@@ -238,7 +239,9 @@ test('el solver exacto MRV+LP-dual coincide al 100 % con el oráculo de fuerza b
       const bruto = minimoFuerzaBruta(objetivo, lvl);
       assert.ok(bruto !== null, `Fuerza bruta nula para ${nombre}`);
 
-      const res = productos(sA, sB, lvl, ctx);
+      const misma = sB !== null && sB.enlaces.length === sA.enlaces.length && sB.enlaces.every((x, i) => x === sA.enlaces[i]);
+      const res = sB === null ? productosCon(sA, null, 1, 0, lvl, ctx)
+        : misma ? productosCon(sA, sA, 2, 0, lvl, ctx) : productosCon(sA, sB, 1, 1, lvl, ctx);
       const gA = sA.energia - (esGasA(sA, T) ? T * S_GAS : 0);
       const gB = sB ? sB.energia - (esGasA(sB, T) ? T * S_GAS : 0) : 0;
       const brutoA = minimoFuerzaBruta(sA.atomos, lvl)!;
@@ -263,10 +266,12 @@ test('el solver exacto MRV+LP-dual coincide al 100 % con el oráculo de fuerza b
 test('reacciones de control y tabla de cordura completa (E0 / I6) pasan sin violaciones I4', async () => {
   const { cordura, violacionesI4, servicio } = ejecutarTablaCordura();
   try {
-    for (const c of cordura) {
-      assert.equal(c.cumple, true, `Falló cordura «${c.nombre}»: ${c.detalle}`);
-    }
     assert.deepEqual(violacionesI4, [], 'I4 debe tener 0 violaciones en la tabla de cordura');
+    assert.equal(cordura.length, 9);
+    // Todas las filas a la vez: un fallo no tapa a los siguientes. Ninguna se relaja (enmienda 1: las filas del hierro y
+    // del carbono a 1.500 K no se cumplen con coeficientes; la aritmética está en el informe de integración).
+    const fallos = cordura.filter(c => !c.cumple).map(c => `«${c.nombre}»: ${c.detalle}`);
+    assert.deepEqual(fallos, [], `Fallan ${fallos.length} filas de cordura:\n${fallos.join('\n')}`);
   } finally {
     await servicio.cerrar();
   }
@@ -313,8 +318,10 @@ test('servicio químico en worker propio: encola fallos, publica en barrera, es 
     assert.equal(sWorker.pendientes(), 0);
 
     // Tras la barrera: filas visibles, productos ya internados, simetría exacta y espectador descartado.
+    // Enmienda 1: CH₄ + 2 O₂ → CO₂ + 2 H₂O, combustión completa en una vez (antes, 1:1 daba dH −172 y H₂).
     const rMet = sWorker.reaccion(A.ch4, A.o2, lvlLlama);
-    assert.ok(rMet && rMet.dH === -172);
+    assert.ok(rMet && rMet.dH === -554, `CH₄ + O₂ con dH=${rMet?.dH}`);
+    assert.deepEqual(new Map(rMet.entradas.map(x => [x.id, x.nu])), new Map([[A.ch4, 1], [A.o2, 2]]));
     assert.equal(sWorker.reaccion(A.o2, A.ch4, lvlLlama), rMet, 'simetría exacta (b,a) === (a,b)');
     for (const sal of rMet.salidas) assert.ok(sWorker.sustancia(sal.id).id === sal.id);
 
@@ -435,9 +442,9 @@ test('cinética de digestión (310 K, KAPPA0) y suelo (295 K, KAPPA_SUELO) coher
   const rComb = productos(madera, o2, nivelDeT(310))!;
   assert.equal(rMad.catalisis, 0, 'madera (CH2O) cae en familia herbívora C–O (0)');
   assert.equal(rProt.catalisis, 1, 'proteína (CH2N) cae en familia carnívora C–N (1)');
-  assert.ok(tasaArrhenius(310, rMad.ea, rMad.catalisis, KAPPA0) < 1e-4, 'con KAPPA0=60, CH2O no carboniza rápido en estómago');
-  assert.ok(tasaArrhenius(295, rComb.ea, rComb.catalisis, KAPPA_SUELO) > 1e-4, 'con KAPPA_SUELO=105, el suelo mineraliza con O2');
-  assert.ok(tasaArrhenius(295, rProt.ea, rProt.catalisis, KAPPA_SUELO) > 1, 'el suelo libera NH3 de proteínas');
+  assert.ok(tasaArrhenius(310, rMad, KAPPA0) < 1e-4, 'con KAPPA0=60, CH2O no carboniza rápido en estómago');
+  assert.ok(tasaArrhenius(295, rComb, KAPPA_SUELO) > 1e-4, 'con KAPPA_SUELO=105, el suelo mineraliza con O2');
+  assert.ok(tasaArrhenius(295, rProt, KAPPA_SUELO) > 1, 'el suelo libera NH3 de proteínas');
 });
 
 test('banco de rendimiento de productos() cumple p99 < 50 ms hasta 16 átomos en frío y en caliente', () => {
@@ -459,10 +466,10 @@ test('cinética: ninguna barrera es menor que dH ni nula al partir una especie; 
     const rGrasa = r(S.CH2, S.CH2, nivelDeT(259));
     assert.ok(rGrasa && rGrasa.dH === 0);
     assert.ok(Math.abs(rGrasa.ea - GAMMA * dCC) < 1e-9, `2 CH₂ → CH₄ + C con ea=${rGrasa.ea}`);
-    assert.ok(tasaArrhenius(259, rGrasa.ea, rGrasa.catalisis, 0) < 1e-12, 'la grasa no se desproporciona en frío');
+    assert.ok(tasaArrhenius(259, rGrasa, 0) < 1e-12, 'la grasa no se desproporciona en frío');
     // Arcilla + cal: sin cocer, no hay cerámica a 295 K.
     const rArcCal = r(S.arcilla, S.CaO, nivelDeT(295));
-    assert.ok(rArcCal && tasaArrhenius(295, rArcCal.ea, rArcCal.catalisis, 0) < 1e-12, `arcilla + CaO con ea=${rArcCal?.ea}`);
+    assert.ok(rArcCal && tasaArrhenius(295, rArcCal, 0) < 1e-12, `arcilla + CaO con ea=${rArcCal?.ea}`);
     // 2 H₃PO₄ → 3 H₂O + P₂O₅ se parte: tiene barrera.
     const rFosf = r(S.H3PO4, S.H3PO4, nivelDeT(436));
     assert.ok(rFosf && rFosf.ea > 100, `2 H₃PO₄ con ea=${rFosf?.ea}`);
@@ -491,6 +498,58 @@ test('cinética: ninguna barrera es menor que dH ni nula al partir una especie; 
   const { ea } = calcularCinetica([{ enlaces: n2, nu: 1 }, { enlaces: h2, nu: 2 }], [{ enlaces: nn, nu: 1 }], 0);
   const d = (k: 1 | 2 | 3) => TIPOS[E('N', 'N', k)]!.d;
   assert.equal(ea, GAMMA * Math.max(d(3) - d(1), TIPOS[E('H', 'H')]!.d));
+});
+
+test('enmienda 1: Q elige p, q enteros por −ΔG por átomo; ninguna otra multiplicidad gana y la combustión es completa', () => {
+  const ctx = new ContextoSolver();
+  const gDe = (enlaces: Uint16Array, T: number) => {
+    const s = construirSustancia(99, enlaces);
+    return s.energia - (esGasA(s, T) ? T * S_GAS : 0);
+  };
+  const atomos = (s: Sustancia) => s.atomos.reduce((x, y) => x + y, 0);
+  const h2 = construirSustancia(1, B([[E('H', 'H'), 1]])), o2 = construirSustancia(2, B([[E('O', 'O', 2), 1]]));
+  const ch4 = construirSustancia(3, B([[E('H', 'C'), 4]])), ch2 = construirSustancia(4, B([[E('C', 'C'), 1], [E('H', 'C'), 2]]));
+  const acetico = construirSustancia(5, B([[E('C', 'C'), 1], [E('C', 'O', 2), 1], [E('C', 'O'), 1], [E('H', 'C'), 3], [E('H', 'O'), 1]]));
+  const agua = B([[E('H', 'O'), 2]]), co2 = B([[E('C', 'O', 2), 2]]);
+  const casos: [string, Sustancia, Sustancia, number, [number, number]][] = [
+    ['2 H₂ + O₂ @L0', h2, o2, 0, [2, 1]], ['2 H₂ + O₂ @L2', h2, o2, 2, [2, 1]], ['2 H₂ + O₂ @L9', h2, o2, 9, [2, 1]],
+    ['CH₄ + 2 O₂ @L9', ch4, o2, 9, [1, 2]], ['2 CH₂ + 3 O₂ @L9', ch2, o2, 9, [2, 3]], ['acético + 2 O₂ @L9', acetico, o2, 9, [1, 2]],
+  ];
+  for (const [nombre, a, b, l, nu] of casos) {
+    const T = tDeNivel(l);
+    const r = productos(a, b, l, ctx);
+    assert.ok(r, `${nombre}: sin reacción`);
+    assert.deepEqual(r.nu, nu, `${nombre}: coeficientes ${r.nu}`);
+    for (const x of r.productos) {
+      const e = [...x.enlaces].join();
+      assert.ok(e === [...agua].join() || e === [...co2].join(), `${nombre}: producto ${e} no es H₂O ni CO₂ (sin H₂)`);
+    }
+    const puntos = (res: NonNullable<typeof r>, p: number, q: number) => {
+      let g = -(p * gDe(a.enlaces, T) + q * gDe(b.enlaces, T));
+      for (const x of res.productos) g += x.nu * gDe(x.enlaces, T);
+      return -g / (p * atomos(a) + q * atomos(b));
+    };
+    const elegido = puntos(r, nu[0], nu[1]);
+    for (let p = 1; p * atomos(a) < 16; p++) for (let q = 1; p * atomos(a) + q * atomos(b) <= 16; q++) {
+      const otro = productosCon(a, b, p, q, l, ctx);
+      if (otro) assert.ok(puntos(otro, p, q) <= elegido + 1e-9, `${nombre}: (${p}, ${q}) gana a ${nu} por átomo`);
+    }
+  }
+  // 2 H₂ + O₂ (6 átomos): el mínimo de Q coincide con el oráculo sin poda.
+  const objetivo = new Uint8Array(NE);
+  objetivo[ELEMENTOS.indexOf('H' as never)] = 4;
+  objetivo[ELEMENTOS.indexOf('O' as never)] = 2;
+  for (const l of [0, 2, 9]) {
+    const r = productos(h2, o2, l, ctx)!;
+    const g = r.productos.reduce((s, x) => s + x.nu * gDe(x.enlaces, tDeNivel(l)), 0);
+    assert.ok(Math.abs(g - minimoFuerzaBruta(objetivo, l)!.g) < 1e-6, `2 H₂ + O₂ @L${l}: G=${g}`);
+  }
+  // H–H es de la familia C–C/C–H (2): el suelo oxida el H₂ a ~10⁻³ L/(cuanto·tick); sin κ, en frío, no.
+  const rH2 = productos(h2, o2, nivelDeT(295), ctx)!;
+  assert.equal(rH2.catalisis, 2);
+  const kSuelo = tasaArrhenius(295, rH2, KAPPA_SUELO);
+  assert.ok(kSuelo > 1e-4 && kSuelo < 1e-2, `2 H₂ + O₂ en suelo a ${kSuelo}`);
+  assert.ok(tasaArrhenius(295, rH2, 0) < 1e-18);
 });
 
 test('productos(): con ΔG = −ε exacto decide la aritmética entera, no el redondeo', () => {

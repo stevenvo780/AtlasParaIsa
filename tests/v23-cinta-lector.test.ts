@@ -818,10 +818,10 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
 
         // La validación JSON queda fuera del tiempo de respuesta del servidor.
         const r = JSON.parse(json) as ChunkResp;
-        const paso = CINTA.pasos[n.nivel], clave = Math.floor(tick / (32 * paso)) * 32 * paso;
+        const paso = CINTA.pasos[n.nivel], anterior = Math.floor(tick / paso) * paso;
         const teselas = n.nivel > 2 ? 0 : conCamara ? camara.w * camara.h : (resumen.lado * CHUNK_SIZE) ** 2;
-        if (!r.baseFrame || r.nivel !== n.nivel || r.t0 !== clave || r.baseFrame.tick !== clave
-          || r.t1 !== Math.ceil(tick / paso) * paso || r.baseFrame.tiles.length !== teselas) {
+        if (!r.baseFrame || r.nivel !== n.nivel || r.t0 !== anterior || r.baseFrame.tick !== anterior
+          || r.t1 !== anterior || r.deltas.length || r.baseFrame.tiles.length !== teselas) {
           assert.fail(JSON.stringify({ tick, conCamara, nivel: r.nivel, t0: r.t0, t1: r.t1, teselas: r.baseFrame?.tiles.length }));
         }
       }

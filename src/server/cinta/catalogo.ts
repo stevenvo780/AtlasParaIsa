@@ -221,7 +221,7 @@ export class CatalogoCinta {
     const anterior = this.ultimaEpoca();
     const id = anterior ? Math.max(a.epoca, anterior.id + 1) : a.epoca;
     this.transaccion(() => {
-      const ultimoVisual = anterior ? Number(this.db.prepare(`SELECT max(t1) AS t FROM bloques b WHERE epoca=? AND nivel=0
+      const ultimoVisual = anterior ? Number(this.db.prepare(`SELECT max(t1) AS t FROM bloques b WHERE epoca=?
         AND NOT EXISTS (SELECT 1 FROM cuarentena c WHERE c.segmento=b.segmento AND c.offset=b.offset)`)
         .get(anterior.id)!.t ?? anterior.tMundo) : 0;
       this.db.prepare('INSERT INTO epocas VALUES (?,?,?,?,?,NULL)').run(id, a.instanciaId, a.tMundo, a.motivo, a.tMundo);

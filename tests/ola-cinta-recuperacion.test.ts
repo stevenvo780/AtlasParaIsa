@@ -89,3 +89,16 @@ test('verificar aísla un CRC malo en un segmento sellado y conserva sus bloques
   assert.equal(leer({ t: 8, n: 1, nivel: 0 }).baseFrame?.tick, 0);
   assert.equal(leer({ t: 12, n: 1, nivel: 0 }).baseFrame?.tick, 12);
 });
+
+test('una cinta restaurada sin L0 declara la laguna desde el último fotograma que sí conserva', t => {
+  const ruta = directorio(t);
+  const catalogo = new CatalogoCinta(ruta);
+  t.after(() => catalogo.db.close());
+  const a = { instanciaId: 'prueba', epoca: 0, tMundo: 0, motivo: 'reinicio' } as const;
+  const epoca = catalogo.abrir(a);
+  catalogo.escribirBloque(epoca, codificarBloque(1, vista(32), []), undefined);
+  catalogo.abrir({ ...a, tMundo: 64, motivo: 'restauracion' });
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  assert.deepEqual(lector.meta().lagunas, [{ t0: 32, t1: 64 }]);
+});

@@ -3,9 +3,27 @@ import { distance } from '../mundo/geometria.js';
 import { addEvent } from '../mundo/crear.js';
 import { cancelTechnologyProject, settleTechnologyEstate } from '../technology.js';
 import { vecinos } from '../rejilla.js';
+import { ley } from '../params.js';
+import { ctxMateriaDe } from '../motor/acceso.js';
+import { morir, soltar } from '../materia/cuerpo.js';
 
+
+/** V23 (`v23.cuerpos`): la muerte deja el cuerpo como un lote Cadaver en la celda donde cayó (lo descompone la κ del
+ * suelo) y lo que la persona llevaba a cuestas queda en el suelo como objetos, con su forma. Nada sale del mundo. */
+export function dejarCadaver(world: World, person: Person): void {
+  const cuerpo = person.cuerpo;
+  if (!cuerpo) return;
+  const c = ctxMateriaDe(world), celda = c.terreno.celda(person.x, person.y);
+  if (person.carga) {
+    for (const lote of person.carga) soltar(c, lote, celda);
+    person.carga.length = 0;
+  }
+  morir(c, cuerpo, celda);
+  person.cuerpo = undefined;
+}
 
 export function transferEstate(world: World, person: Person): void {
+  if (ley(world, 'cuerpos')) dejarCadaver(world, person);
   cancelTechnologyProject(world,person);
   const recipients=vecinos(world,person,3,other=>other!==person&&other.demography.deathCause===null&&distance(person,other)<=2,'transferEstate').sort((a,b)=>distance(person,a)-distance(person,b)||a.id.localeCompare(b.id));
   let transferred=0;

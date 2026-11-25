@@ -6,7 +6,9 @@ import type { StructureView } from '../../shared/life.js';
 import { tileLookup } from '../tile-index.js';
 import { filtrarCerca } from '../indice-puntos.js';
 import { BROKEN_CONDITION, foodAvailable, waterAvailable, facilityRestQuality, REST_FATIGUE_RATE, REST_ENERGY_RATE } from '../inventions.js';
-import { paramsOf } from '../params.js';
+import { ley, paramsOf } from '../params.js';
+import { ctxSi, type CtxLeyMateria } from '../motor/acceso.js';
+import { tasasBasales } from '../materia/cuerpo.js';
 import { updateDemography, demographicTraits } from '../demography.js';
 import { type BodyState, hydrateBody, exertBody, type BodyRates, restBody } from '../body.js';
 import { SED_POR_UNIDAD, HAMBRE_POR_PASO, SED_POR_PASO } from '../ecologia-constantes.js';
@@ -157,7 +159,22 @@ export function drinkingBody(world: World, person: Person, point: Point, out?: B
 // componentwise maximum in a separate object; the public API still returns an owned value.
 export const needRatesScratch: BodyRates = { hunger: 0, thirst: 0, energy: 0.00007, stressEnergy: 0.00015, fatigue: 0 };
 
+/** Con `v23.cuerpos` el hambre y la sed de una persona son vistas de su cuerpo de átomos y nadie las suma: estas tasas
+ * solo sirven a las previsiones (descanso, crianza), y son las del cuerpo en reposo, `tasasBasales` (mantenimiento sobre
+ * el objetivo de la reserva; evaporación y tránsito sobre el objetivo de agua). El desierto y la demanda heredable ya
+ * no entran aquí: el calor se cobra en agua sudada y el frío en reserva quemada, en el propio cuerpo. La energía no
+ * deriva (vuelve respirando) y la fatiga sigue siendo la escalar. */
+function needRatesDelCuerpo(world: World, exposed: boolean, out: BodyRates): BodyRates {
+  const c = ctxSi(world) as Partial<CtxLeyMateria> | undefined;
+  out.hunger = 0; out.thirst = 0;
+  if (c?.materia && c.quimica) tasasBasales(c as CtxLeyMateria, out);
+  out.energy = 0; out.stressEnergy = 0;
+  out.fatigue = 0.00009 + (world.weather === 'rain' && exposed ? 0.0001 : 0);
+  return out;
+}
+
 export function needRates(world: World, desert: boolean, exposed: boolean, physiology: ReturnType<typeof demographicTraits>, out: BodyRates = needRatesScratch): BodyRates {
+  if (ley(world, 'cuerpos')) return needRatesDelCuerpo(world, exposed, out);
   out.hunger = HAMBRE_POR_PASO * physiology.foodDemand;
   out.thirst = (SED_POR_PASO + (desert ? 0.0002 : 0)) * physiology.waterDemand;
   out.energy = 0.00007; out.stressEnergy = 0.00015;

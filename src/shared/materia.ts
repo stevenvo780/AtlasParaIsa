@@ -7,6 +7,8 @@ import { NE, ORDEN_MAX, PAULING, TABLA } from './naturaleza.js';
 
 /** Átomos por unidad de fórmula: resolución de la representación, no tope de materia (lo grande son muchos cuantos). */
 export const ATOMOS_POR_UNIDAD = 8;
+/** Átomos de una vez de reacción, p·|a| + q·|b| (enmienda 1): resolución del solver de Q, no tope de materia. */
+export const ATOMOS_POR_REACCION = 2 * ATOMOS_POR_UNIDAD;
 
 /** u32 > 0 que asigna la química (Q): solo crece y nunca se reutiliza. 0 = ninguna. */
 export type SustanciaId = number;
@@ -30,8 +32,11 @@ export const TIPOS: readonly TipoEnlace[] = (() => {
     const kMax = a.pi * b.pi > 0 ? Math.min(a.valencia, b.valencia, ORDEN_MAX) : 1;
     for (let k = 1; k <= kMax; k++) {
       // Cada par de electrones de un enlace múltiple se polariza por Δχ: sin `k`, C=O queda por debajo de 2·C–O
-      // (el CO₂ polimerizaría en frío y la madera/carbón se apagarían en aire a 655/535 K).
-      const d = (a.dPropia + b.dPropia) / 2 + k * PAULING * (a.chi - b.chi) ** 2 + (k - 1) * Math.sqrt(a.pi * b.pi);
+      // (el CO₂ polimerizaría en frío y la madera/carbón se apagarían en aire a 655/535 K). Un enlace con otro elemento
+      // hace la media de las energías de dos centros (`dDosCentros`, enmienda 3): la cohesión de un metal es energía de
+      // banda y solo cuenta entre átomos iguales. En los no metales dDosCentros = dPropia y nada cambia.
+      const da = e === f ? a.dPropia : a.dDosCentros, db = e === f ? b.dPropia : b.dDosCentros;
+      const d = (da + db) / 2 + k * PAULING * (a.chi - b.chi) ** 2 + (k - 1) * Math.sqrt(a.pi * b.pi);
       tipos.push({ e, f, k: k as TipoEnlace['k'], d: Math.round(d) });
     }
   }

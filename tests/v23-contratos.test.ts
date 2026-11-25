@@ -10,6 +10,9 @@ import * as naturaleza from '../src/shared/naturaleza.js';
 import * as cinta from '../src/shared/cinta.js';
 import * as fotograma from '../src/shared/fotograma.js';
 import { POLICY_ACTIONS, POLICY_HIDDEN, POLICY_INPUTS, POLICY_WEIGHTS } from '../src/world/politica.js';
+import { familiaCatalitica, indiceTipoEnlace } from '../src/world/materia/quimica.js';
+import { crearServicioQuimico } from '../src/world/materia/servicio.js';
+import { registrarSustanciasBase } from '../scripts/lab-materia.mjs';
 
 // Si dos contratos exportan el mismo nombre, sea tipo o valor, `npm run typecheck` falla aquí (TS2308).
 export type * from '../src/world/motor/contratos.js';
@@ -167,6 +170,46 @@ test('codigoForma cabe en 30 bits y es su propia inversa sobre los códigos', ()
   assert.ok(codigoForma({ largo: 1e9, ancho: 1e9, grueso: 1e9, hueco: 1, filo: 1 }) < 2 ** 30);
 });
 
+test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable (familia 3 desde la enmienda 2) y ATOMOS_POR_REACCION', () => {
+  const { nivelDeT, tFronteraNivel, tDeNivel, NIVELES_T } = tipos;
+  const anterior = (x: number) => {
+    const v = new DataView(new ArrayBuffer(8));
+    v.setFloat64(0, x); v.setBigUint64(0, v.getBigUint64(0) - 1n);
+    return v.getFloat64(0);
+  };
+  // Cada frontera T_ℓ = 200·2^(ℓ/4) es del nivel de arriba; el double justo debajo, del de abajo (sin el error del log).
+  for (let l = 1; l < NIVELES_T; l++) {
+    const t = tFronteraNivel(l);
+    assert.equal(nivelDeT(t), l, `frontera ${l} (${t} K)`);
+    assert.equal(nivelDeT(anterior(t)), l - 1, `bajo la frontera ${l}`);
+    assert.ok(tFronteraNivel(l) < tDeNivel(l) && tDeNivel(l) < tFronteraNivel(l + 1));
+  }
+  assert.equal(tFronteraNivel(4), 400);
+  assert.equal(nivelDeT(295), 2, 'suelo'); assert.equal(nivelDeT(310), 2, 'cuerpo: mismo nivel que el suelo');
+  for (const T of [0, -5, NaN, 199.9]) assert.equal(nivelDeT(T), 0, `T = ${T}`);
+  assert.equal(nivelDeT(Infinity), NIVELES_T - 1);
+  // Familias (enmienda 2): C–O 0, C–N 1, C–C/C–H 2, H–H 3; O=O, O–H y lo demás no catalizable. `Kappa` tiene una por familia.
+  const i = (a: string, b: string, k: 1 | 2 | 3 = 1) => indiceTipoEnlace(ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never), k);
+  assert.deepEqual([i('C', 'O'), i('C', 'O', 2), i('C', 'N'), i('C', 'C'), i('C', 'H'), i('H', 'H'), i('O', 'O', 2), i('O', 'H'), i('N', 'H')].map(familiaCatalitica),
+    [0, 0, 1, 2, 2, 3, -1, -1, -1]);
+  assert.equal(tipos.FAMILIAS_CATALITICAS, 4);
+  // La barrera efectiva: κ rebaja solo exotérmicas; una endotérmica o sin familia paga ea (≥ dH).
+  const r = (ea: number, dH: number, catalisis: -1 | 0 | 1 | 2 | 3, paresCatalisis: 0 | 1 | 2 | 3 = catalisis === -1 ? 0 : 1) =>
+    ({ ea, dH, catalisis, paresCatalisis });
+  assert.equal(tipos.barreraEfectiva(r(100, -5, 3), [0, 0, 0, 30]), 70);
+  // Enmienda 3: la rebaja es κ por par del enlace que decide la familia.
+  assert.equal(tipos.barreraEfectiva(r(100, -5, 0, 2), [30, 0, 0, 0]), 40);
+  assert.equal(tipos.barreraEfectiva(r(100, 5, 3), [0, 0, 0, 1e3]), 100);
+  assert.equal(tipos.barreraEfectiva(r(100, -5, -1), [1e3, 1e3, 1e3, 1e3]), 100);
+  assert.equal(materia.ATOMOS_POR_REACCION, 2 * materia.ATOMOS_POR_UNIDAD);
+  assert.equal(naturaleza.FRACTURA, 1);
+  // Las constantes de Q (enmienda 1) viven en naturaleza con su intervalo escrito, sin marcadores por rellenar.
+  const fuente = readFileSync(resolve(RAIZ, 'src/shared/naturaleza.ts'), 'utf8');
+  for (const c of ['E_RES_IONICO', 'E_HID_IONICO', 'E_CAT_IONICO', 'FUSION_MOLECULA', 'VOLUMEN_ATOMO', 'EMPAQUETADO_BASE',
+    'EMPAQUETADO_POR_R', 'TENACIDAD_RED', 'TENACIDAD_ANCHO', 'TENACIDAD_METAL']) assert.ok(c in naturaleza, c);
+  assert.doesNotMatch(fuente, /@[A-Z_]+@/, 'intervalos sin medir');
+});
+
 test('nivelDeT y tDeNivel son coherentes y cubren de 200 K a 3.200 K', () => {
   const { nivelDeT, tDeNivel, NIVELES_T } = tipos;
   for (let l = 0; l < NIVELES_T; l++) assert.equal(nivelDeT(tDeNivel(l)), l);
@@ -301,14 +344,15 @@ test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción m
   assert.equal(typeof chequearTipos, 'function');
 });
 
-test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', () => {
+test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', async () => {
   const { TIPOS } = materia;
-  const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
+  const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
   const D = (a: string, b: string, k = 1): number => {
     const [e, f] = [ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never)].sort((x, y) => x - y);
     return TIPOS.find(t => t.e === e && t.f === f && t.k === k)!.d;
   };
-  const kRate = (T: number, d: number, kappa = 0) => NU * Math.exp(-Math.max(0, GAMMA * d - kappa) / (R * T));
+  // Enmiendas 1 y 2 (`barreraEfectiva`): κ rebaja la barrera de una exotérmica hasta 0; una endotérmica paga ea ≥ dH.
+  const kRate = (T: number, d: number, kappa = 0, dH = 0) => NU * Math.exp(-(dH > 0 ? Math.max(GAMMA * d, dH) : Math.max(0, GAMMA * d - kappa)) / (R * T));
 
   // 1. CO₂ gas supera al polímero sólido [4×C–O] incluso a 0 K; fosfatos (H₃PO₄/CaHPO₄) son más estables que P=O extra.
   assert.ok(2 * D('C', 'O', 2) > 4 * D('C', 'O', 1), 'CO₂ gas debe vencer al polímero sólido [4×C–O]');
@@ -335,16 +379,34 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
   const dG_etano = (2 * D('C', 'H') + D('C', 'C') - D('C', 'C', 2) - D('H', 'H')) - 295 * S_GAS;
   assert.ok(dG_etano > 20, 'el etano debe ser estable a 295 K');
 
-  // 4. Hierro (Fe₂O₃ + C → Fe₂O + CO₂): NO funde en fogata (800 K), SÍ funde en horno (1.400 K).
-  const dH_fe = (4 * D('Fe', 'O') - 2 * D('Fe', 'Fe')) + (2 * D('C', 'C') - 2 * D('C', 'O', 2));
-  assert.ok(dH_fe - 800 * S_GAS > 0, 'Fe₂O₃ no debe reducirse en fogata (800 K)');
-  assert.ok(dH_fe - 1400 * S_GAS < 0, 'Fe₂O₃ debe reducirse en horno (1.400 K)');
-
-  // 5. Digestión (310 K, KAPPA0) rompe C–N/C–O/C–C sin carbonizar C–H ni oxidar O=O; suelo (295 K, KAPPA_SUELO) cierra el ciclo.
-  assert.ok(D('C', 'N') < D('C', 'O') && D('C', 'O') < D('C', 'C') && D('C', 'C') < D('C', 'H'), 'orden catalítico C–N < C–O < C–C < C–H');
-  assert.ok(kRate(310, D('C', 'N'), KAPPA0) > 1 && kRate(310, D('C', 'O'), KAPPA0) > 1 && kRate(310, D('C', 'C'), KAPPA0) > 1e-2);
-  assert.ok(kRate(310, D('C', 'H'), KAPPA0) < 1e-4 && kRate(310, D('O', 'O', 2), KAPPA0) < 1e-9);
-  assert.ok(kRate(295, D('O', 'O', 2), KAPPA_SUELO) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
+  // 4 y 5, con las reacciones reales de Q (revisión de la enmienda 3, hallazgo 9: antes se rehacían aquí con γ·D del enlace
+  // que se suponía decisivo y con un Fe₂O₃ + C → Fe₂O + CO₂ 1:1 que Q ya no elige).
+  const q = crearServicioQuimico({ modo: 'inmediato' });
+  try {
+    const S = registrarSustanciasBase(q), { nivelDeT, barreraEfectiva } = tipos;
+    const k = (a: number, b: number, T: number, kappa: readonly [number, number, number, number]) => {
+      const r = q.reaccion(a, b, nivelDeT(T));
+      return r ? NU * Math.exp(-barreraEfectiva(r, kappa) / (R * T)) : 0;
+    };
+    const K0 = [KAPPA0, KAPPA0, KAPPA0, KAPPA0] as const, KS = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH] as const;
+    // 4. Hierro: Fe₂O₃ + C no se reduce en fogata (800 K) ni en llama abierta (1.095 K); en horno (1.250 K) da CO₂ y metal.
+    assert.equal(q.reaccion(S.Fe2O3, S.C, nivelDeT(800)), null, 'Fe₂O₃ no se reduce en fogata');
+    assert.equal(q.reaccion(S.Fe2O3, S.C, nivelDeT(1095)), null, 'ni en llama abierta');
+    const horno = q.reaccion(S.Fe2O3, S.C, nivelDeT(1250));
+    assert.ok(horno && horno.salidas.some((t) => t.id === S.CO2) && horno.salidas.some((t) => t.id === S.Fe2), 'en horno, CO₂ y hierro');
+    // 5. Digestión (310 K, KAPPA0): las rutas sin O₂ de la proteína, la madera y el glicósido (→ NH₃ + C, → H₂O + C) tienen
+    // su barrera en γ·D(C–H) = 141,05 (rompen un C–H), así que con κ₀ = 60 van a ~2·10⁻⁵/tick: el tubo apenas digiere por
+    // química (pedido a B: κ del tubo ≳ 88 o plantillas cuya ruta la decida C–N o C–O). No oxida con O₂ ni carboniza la grasa.
+    for (const id of [S.proteina, S.madera, S.glicosido]) {
+      const v = k(id, 0, 310, K0);
+      assert.ok(v > 1e-6 && v < 1e-4, `digestión de ${id} a 310 K: k = ${v.toExponential(2)}`);
+    }
+    assert.ok(k(S.madera, S.O2, 310, K0) < 1e-9 && k(S.CH2, 0, 310, K0) < 1e-12, 'el tubo no quema ni carboniza');
+    // Suelo (295 K, KAPPA_SUELO): mineraliza con O₂ y oxida el H₂ sin barrera; nada parte el agua.
+    assert.ok(k(S.madera, S.O2, 295, KS) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
+    assert.ok(KAPPA_SUELO_HH >= GAMMA * D('O', 'O', 2) && k(S.H2, S.O2, 295, KS) === NU, 'el suelo oxida el H₂ al paso');
+    assert.equal(q.reaccion(S.H2O, 0, nivelDeT(310)), null, 'ni el suelo ni el tubo parten el agua');
+  } finally { await q.cerrar(); }
 
   // 6. Magnitudes en enteros seguros (un chunk nuevo entero cabe con margen en Float64 entero antes de plegar a bigint en F0).
   const cuantosChunk = 256 * Math.round(2000e6 / 60.08);

@@ -2,7 +2,6 @@ import type { World, Person } from '../mundo/tipos.js';
 import { type TileLookup, distance, type Point } from '../mundo/geometria.js';
 import { outcome } from '../decision/personas.js';
 import { addEvent } from '../mundo/crear.js';
-import { type PrecomputedMoves, SI, MOVE_EN_DESTINO, MOVE_BLOQUEADO, MOVE_AVANZA } from '../paralelo/personas-motor.js';
 import { type ResidentTileReader, residentTileReader } from '../soa/terreno.js';
 import { paramsOf } from '../params.js';
 import type { Tile } from '../../shared/types.js';
@@ -22,7 +21,7 @@ export function roadEffortFactor(tile: { traffic?: number; paved?: number } | un
 
 
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
-export function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number, tileInArg?: TileLookup, readerArg?: ResidentTileReader | null): void {
+export function move(world: World, person: Person, tileInArg?: TileLookup, readerArg?: ResidentTileReader | null): void {
   if (distance(person, person.target) < 0.5) return;
   const key = (p: Point) => `${p.x},${p.y}`;
   const start = { x: person.x, y: person.y };
@@ -43,15 +42,6 @@ export function move(world: World, person: Person, precomputed?: PrecomputedMove
       roadStep = { x, y }; roadDistance = d; roadScore = score;
     }
   };
-  if (precomputed !== undefined && slot !== undefined && slot < precomputed.count
-    && precomputed.targetX[slot] === person.target.x && precomputed.targetY[slot] === person.target.y) {
-    const status = precomputed.si[SI.moveStatus * precomputed.cap + slot]!;
-    if (status === MOVE_EN_DESTINO) return;
-    if (status === MOVE_BLOQUEADO) blocked = true;
-    else if (status === MOVE_AVANZA) {
-      nextStep = { x: precomputed.si[SI.nextX * precomputed.cap + slot]!, y: precomputed.si[SI.nextY * precomputed.cap + slot]! };
-    }
-  }
   const allowCoastalDetour = paramsOf(world).social.vinculoEncuentro > 0
     && person.action === 'approach' && !person.command && distance(start, person.target) > 12;
   const tileIn = tileInArg ?? tileLookup(world.tiles);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import {
-  closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld, type Person, type World,
+  closePolicyGpuBatchers, createWorld, stepWorld, type Person, type World,
 } from '../src/world/index.js';
 import { activate, tileAt } from '../src/world/spatial.js';
 import { tileLookup } from '../src/world/tile-index.js';
@@ -15,7 +15,6 @@ import type { Tile } from '../src/shared/types.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

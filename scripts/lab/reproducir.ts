@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../../src/server/store.js';
-import { createWorld, stepWorld, closePersonasParallelPools, closeFaunaParallelPools, closePolicyGpuBatchers, type World } from '../../src/world/index.js';
+import { createWorld, stepWorld, closeFaunaParallelPools, closePolicyGpuBatchers, type World } from '../../src/world/index.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { crearComprobador } from '../../src/world/invariantes.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
@@ -87,7 +87,7 @@ export async function ejecutarIntento(opciones: OpcionesIntento): Promise<Result
     return { ocurre: true, tick: mundo?.tick ?? 0, invariantes: [], error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
   } finally {
     try {
-      await Promise.all([closeEcosystemWorkers(), closePersonasParallelPools(), closeFaunaParallelPools(), closePolicyGpuBatchers()]);
+      await Promise.all([closeEcosystemWorkers(), closeFaunaParallelPools(), closePolicyGpuBatchers()]);
     } finally {
       store?.close();
       rmSync(temporal, { recursive: true, force: true });

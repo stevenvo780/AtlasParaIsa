@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import type { MaterialBatch, TechnologyKnowledge } from '../src/shared/technology.js';
 import type { Tile } from '../src/shared/types.js';
 import { stringifyExact, exactJsonNumber } from '../src/shared/exact-json.js';
-import { closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
+import { closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
@@ -24,7 +24,6 @@ import { tileLookup } from '../src/world/tile-index.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

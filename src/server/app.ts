@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closeFaunaParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
@@ -441,7 +441,6 @@ export async function cerrarPiscinasDeComputo(): Promise<void> {
   const paso = async (fn: () => unknown) => { try { await fn(); } catch (error) { errores.push(error); } };
   await paso(() => closePolicyGpuBatchers());
   await paso(() => closeFaunaParallelPools());
-  await paso(() => closePersonasParallelPools());
   await paso(() => closeEcosystemWorkers());
   if (errores.length === 1) throw errores[0];
   if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');
@@ -1045,14 +1044,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // se encadena cualquier `onBarrier` previo del contexto y solo se acumulan ms.
       let paraleloCapturadoMs = 0, barreraCapturadaMs = 0, ocupacionPonderada = 0;
       const ejecucionPrevia = context.ecologyExecution;
-      const personasPrevia = context.personasExecution;
       const contextoPaso: typeof context = {
         ...context,
         tileOwnership: worldContext(draft).tileOwnership ?? context.tileOwnership,
         ecologyExecution: { ...ejecucionPrevia,
           onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
-        personasExecution: { ...personasPrevia,
-          onStep: d => { personasPrevia?.onStep?.(d); if (d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
       };
       const results = stepWorld(draft, valid.map(item => item.gesture), contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;

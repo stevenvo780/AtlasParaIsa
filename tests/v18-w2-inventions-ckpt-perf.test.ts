@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import type { StructureComponent, StructureView } from '../src/shared/life.js';
 import type { MaterialBatch, ResourceMass, TechnologyCheckpoint, TechnologyProgram, TechnologyState } from '../src/shared/technology.js';
 import { POPULATION_HARD_LIMIT } from '../src/shared/life.js';
-import { closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
+import { closePolicyGpuBatchers, createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { cloneWorld } from '../src/world/clon.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -35,7 +35,6 @@ import { technologyStock } from '../src/world/technology-execution.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

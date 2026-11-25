@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  assertWorld, cloneWorld, closePersonasParallelPools, closePolicyGpuBatchers, createWorld,
+  assertWorld, cloneWorld, closePolicyGpuBatchers, createWorld,
   migrateWorld, RULES_VERSION, stepWorld, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
@@ -22,7 +22,6 @@ import { Store } from '../src/server/store.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 
@@ -85,24 +84,15 @@ test('V12: hostOpenWorldParams activa todos los chips y todas las leyes de evolu
 test('V12: paridad bit a bit en evolución abierta entre serie, particionarPersonas (1/4/28 hilos, adversarial/inverso)', () => {
   const run = (motor: string) => {
     const world = createWorld(51926, parseParams(`${V12_OPEN_LAWS},${motor}`));
-    const pasosParalelos: number[] = [];
-    for (let t = 0; t < 180; t++) {
-      stepWorld(world, [], {
-        personasExecution: { onStep: diag => { pasosParalelos.push(diag.hilos); } },
-      });
-    }
+    for (let t = 0; t < 180; t++) stepWorld(world);
     assertWorld(world);
-    return { world, pasosParalelos };
+    return { world };
   };
 
   const serie = run('motor.hilos=1,motor.particionarPersonas=false,motor.soaTerreno=false');
   const part1 = run('motor.hilos=1,motor.particionarPersonas=true,motor.soaTerreno=true');
   const part4Adv = run('motor.hilos=4,motor.particionarPersonas=true,motor.soaTerreno=true,motor.orden=adversarial');
   const part28Inv = run('motor.hilos=28,motor.particionarPersonas=true,motor.soaTerreno=true,motor.orden=inverso');
-
-  assert.equal(serie.pasosParalelos.length, 0);
-  assert.ok(part28Inv.pasosParalelos.length >= 30, 'debe despachar la fase personas en cada paso de movimiento');
-  assert.ok(part28Inv.pasosParalelos.every(h => h === 28), 'debe correr en los 28 hilos configurados');
 
   const dSerie = digestoSinMotor(serie.world);
   assert.equal(digestoSinMotor(part1.world), dSerie, 'hilos=1 particionarPersonas=true debe ser bit a bit idéntico');

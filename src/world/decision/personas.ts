@@ -1,4 +1,4 @@
-import { ROUTE_CELLS, needRatesScratch, perceivedRoutes, type Candidate, ventajaComparativa, copyBody, bodilyShelter, bodilyDamage, immediateMeal, avoidedDamageScore, needRates, tileIsDesert, tileIsExposed, personById, canRecoverWaterHandling, soaCell, placeById, drinkingBody, RASGO_DEL_OFICIO, foodStock } from './sentidos.js';
+import { ROUTE_CELLS, needRatesScratch, type Candidate, ventajaComparativa, copyBody, bodilyShelter, bodilyDamage, immediateMeal, avoidedDamageScore, needRates, tileIsDesert, tileIsExposed, personById, canRecoverWaterHandling, soaCell, placeById, drinkingBody, RASGO_DEL_OFICIO, foodStock } from './sentidos.js';
 import { type Person, type World, RADIUS, TICKS_PER_DAY } from '../mundo/tipos.js';
 import { type Point, type TileLookup, distance, clamp } from '../mundo/geometria.js';
 import { creditCausalOutcome, ensurePersonPolicy, localPolicyObservation } from './politica-persona.js';
@@ -9,7 +9,8 @@ import { phaseAt, addEvent, remember } from '../mundo/crear.js';
 import { WHISPER_INTENT_LABEL } from '../actuar/gestos.js';
 import type { Tile, Action } from '../../shared/types.js';
 import { type BodyState, type BodyRates, assimilateFood, exertBody, hydrateBody, restBody } from '../body.js';
-import { PrecomputedRouteReader, type PrecomputedMoves } from '../paralelo/personas-motor.js';
+import { CELDAS_VENTANA, DISTANCIA_VENTANA, LADO_VENTANA, percepcionDe } from './percepcion.js';
+import { CONSULTA, UMBRAL } from './planes.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { paramsOf } from '../params.js';
@@ -48,12 +49,6 @@ const choosePaid: BodyState = { hunger: 0, thirst: 0, fatigue: 0, energy: 0 };
 
 const chooseWorst: BodyRates = { ...needRatesScratch };
 
-const chooseRouteReader = new PrecomputedRouteReader();
-
-function routeSteps(reader: PrecomputedRouteReader, serial: ((point: Point) => number | undefined) | undefined, point: Point): number | undefined {
-  return serial ? serial(point) : reader.at(point);
-}
-
 function planAffordable(person: Person, payload: number, steps: number, work: number): boolean {
   return person.energy >= steps * (.0008 + payload * .0008) + work * .0003
     && person.fatigue + steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4) < 1;
@@ -61,7 +56,16 @@ function planAffordable(person: Person, payload: number, steps: number, work: nu
 
 let chooseDepth = 0;
 
-export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
+/**
+ * Decide la siguiente acción y objetivo de `person` (F3 de ARQ-motor). Lo regular de su ventana r = 7 (pasos BFS, la
+ * mejor celda de cada consulta y las utilidades del cerebro) llega ya percibido en F2 (`percepcion.ts`) sobre el estado
+ * al empezar la fase de personas; aquí quedan los candidatos fríos, que leen el estado privado, y la elección.
+ * Lo percibido se acepta solo si sigue valiendo ahora: si alguien cambió su disco antes en este tick, la fila se percibe
+ * de nuevo sobre el estado vivo (`filaDe`), y una celda ganadora que no cumple la ley exacta o las condiciones propias
+ * de la persona (esfuerzo asumible, fuente disputada, cisternas, lugares cercanos) se busca otra vez como siempre.
+ * La pareja y quien tiene hambre salen de la lista viva de cercanos, como siempre.
+ */
+export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   const depth = ++chooseDepth;
   try {
   const own = depth === 1;
@@ -70,51 +74,46 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const nearbyCells = own ? chooseNearbyCells : [];
   const tileIn = tileInArg ?? tileLookup(world.tiles);
   const fast = fastArg === undefined ? residentFastAccess(world.tiles) : fastArg ?? undefined;
-  const exact = fast?.exact;
   const params = paramsOf(world);
-  const WATER_CODE = fast?.TERRAIN_WATER ?? -1, terrainScan = fast?.terrainArr;
   // V19/L: un tramo de descanso se acredita con lo que el cuerpo recuperó DE VERDAD hasta esta nueva decisión.
   if (own && person.action === 'rest' && params.conducta.aprendizajeCausal && params.conducta.politicaPeso > 0 && world.adaptationEnabled) creditCausalOutcome(world, person, 'rest');
-  for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
-    if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
-    const x = person.x + dx, y = person.y + dy;
-    if (exact) {
-      const cell = exact.cellAt(x, y);
-      if (cell >= 0 && terrainScan![cell] !== WATER_CODE) { nearbyTiles.push(tileIn(x, y)!); nearbyCells.push(cell); }
-    } else if (fast) {
-      const tile = tileIn(x, y);
-      if (!tile) continue;
-      const cell = fast.cellOf(tile);
-      if (cell >= 0 ? terrainScan![cell] !== WATER_CODE : tile.terrain !== 'water') { nearbyTiles.push(tile); nearbyCells.push(cell); }
-    } else {
-      const tile = tileIn(x, y); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
-    }
-  }
-  const routeReader = own ? chooseRouteReader : new PrecomputedRouteReader();
-  const serialSteps = routeReader.prepare(person, precomputed, slot) ? undefined : perceivedRoutes(person, nearbyTiles);
+  const { salida, fila, terreno } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, fast, own);
+  const ventana = salida.ventana, ventanaCelda = salida.ventanaCelda, base = fila * CELDAS_VENTANA;
+  const celdaPercibida = (consulta: number): number => salida.celda[fila * salida.q + consulta]!;
+  const percibida = (consulta: number): Tile | undefined => {
+    const c = celdaPercibida(consulta);
+    return c >= 0 ? terreno.teselas[c] : undefined;
+  };
+  /** Celda del SoA residente de lo percibido en `consulta` (−1 sin SoA): para leer en vivo el campo que la ley mira. */
+  const soaPercibida = (consulta: number): number => fast ? terreno.soa[celdaPercibida(consulta)]! : -1;
+  const pasosPercibidos = (consulta: number): number => salida.pasos[fila * salida.q + consulta]!;
+  /** Pasos BFS hasta `point` dentro de la ventana (undefined fuera de ella, en agua o sin ruta), como `perceivedRoutes`. */
+  const stepsTo = (point: Point): number | undefined => {
+    const dx = point.x - person.x, dy = point.y - person.y;
+    if (!(dx >= -RADIUS && dx <= RADIUS && dy >= -RADIUS && dy <= RADIUS) || (dx | 0) !== dx || (dy | 0) !== dy) return undefined;
+    const st = ventana[base + (dy + RADIUS) * LADO_VENTANA + dx + RADIUS]!;
+    return st >= 0 ? st : undefined;
+  };
   const reachableTiles = own ? chooseReachable : [];
   const reachableCells = own ? chooseReachableCells : [];
-  // Pasos y distancias de cada tesela percibida, calculados una sola vez: ni la persona ni las
-  // teselas se mueven durante `choose`, así que cada bucle posterior lee el mismo doble que
-  // `stepsTo`/`distance` devolvería (`nearbySteps` usa -1 para «sin ruta», como `undefined`).
-  const nearbySteps = own ? chooseNearbySteps : new Int16Array(nearbyTiles.length), nearbyDist = own ? chooseNearbyDist : new Float64Array(nearbyTiles.length);
-  const reachableSteps = own ? chooseReachableSteps : new Int16Array(nearbyTiles.length), reachableDist = own ? chooseReachableDist : new Float64Array(nearbyTiles.length);
-  for (let i = 0; i < nearbyTiles.length; i++) {
-    const t = nearbyTiles[i]!, st = routeSteps(routeReader, serialSteps, t), d = distance(person, t);
-    nearbySteps[i] = st ?? -1; nearbyDist[i] = d;
-    if (st !== undefined) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(fast ? nearbyCells[i]! : -1); reachableSteps[ri] = st; reachableDist[ri] = d; }
+  // Las teselas de tierra del disco, en el orden de filas de la ventana, con sus pasos (-1: sin ruta) y distancias.
+  const nearbySteps = own ? chooseNearbySteps : new Int16Array(ROUTE_CELLS), nearbyDist = own ? chooseNearbyDist : new Float64Array(ROUTE_CELLS);
+  const reachableSteps = own ? chooseReachableSteps : new Int16Array(ROUTE_CELLS), reachableDist = own ? chooseReachableDist : new Float64Array(ROUTE_CELLS);
+  for (let k = 0; k < CELDAS_VENTANA; k++) {
+    const c = ventanaCelda[base + k]!;
+    if (c < 0) continue;
+    const t = terreno.teselas[c]!, st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? terreno.soa[c]! : -1;
+    const i = nearbyTiles.length;
+    nearbyTiles.push(t); nearbyCells.push(cell); nearbySteps[i] = st; nearbyDist[i] = d;
+    if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }
   }
   const payload = containedWaterQuanta(person) / 1000;
-  const foodArr = fast?.foodArr, woodArr = fast?.woodArr, dwArr = fast?.drinkingWaterArr;
+  const foodArr = fast?.foodArr, dwArr = fast?.drinkingWaterArr;
   const moistureArr = fast?.moistureArr, vegArr = fast?.vegetationArr, terrainArr = fast?.terrainArr, biomeArr = fast?.biomeArr;
   const SHELTER_CODE = fast?.TERRAIN_SHELTER ?? -1;
   const foodOf = (tile: Tile, cell: number): number => {
     if (cell >= 0 && foodArr) { const v = foodArr[cell]!; return v === v ? v : 0; }
     return tile.food;
-  };
-  const woodOf = (tile: Tile, cell: number): number => {
-    if (cell >= 0 && woodArr) { const v = woodArr[cell]!; return v === v ? v : 0; }
-    return tile.wood ?? 0;
   };
   const dwOf = (tile: Tile, cell: number): number => {
     if (cell >= 0 && dwArr) { const v = dwArr[cell]!; return v === v ? v : 0; }
@@ -163,12 +162,19 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar. Con
   // `recelo` el comparador sigue siendo diferencia de una clave finita por celda (preorden total), así que la
   // fusión CONFL + perf elige exactamente la misma celda que el `filter().sort()[0]` de la rama CONFL.
-  let food: Tile | undefined, foodKey = 0, foodIndex = -1;
-  for (let i = 0; i < reachableTiles.length; i++) {
-    const tile = reachableTiles[i]!, f = foodOf(tile, reachableCells[i]!);
-    if (!(f > 0.025 && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0)))) continue;
-    const key = disputada ? reachableDist[i]! - f * 2 + recelo(tile) : reachableDist[i]! - f * 2;
-    if (!food || key < foodKey) { food = tile; foodKey = key; foodIndex = i; }
+  // Lo percibido es la mejor celda de un filtro f32 algo más ancho que la ley (planes.ts): si cumple la ley y las
+  // condiciones propias, es también la mejor de las que las cumplen; si no, se busca como siempre.
+  let food = percibida(CONSULTA.comida);
+  if (food && (disputada || !(foodOf(food, soaPercibida(CONSULTA.comida)) > UMBRAL.comida)
+    || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.comida), 0)))) {
+    food = undefined;
+    let foodKey = 0;
+    for (let i = 0; i < reachableTiles.length; i++) {
+      const tile = reachableTiles[i]!, f = foodOf(tile, reachableCells[i]!);
+      if (!(f > UMBRAL.comida && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0)))) continue;
+      const key = disputada ? reachableDist[i]! - f * 2 + recelo(tile) : reachableDist[i]! - f * 2;
+      if (!food || key < foodKey) { food = tile; foodKey = key; }
+    }
   }
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = copyBody(person, own ? chooseBody : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 });
@@ -296,15 +302,22 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       candidates.push(cortejoCandidate);
     }
   }
-  let water: Tile | undefined, waterKey = 0;
-  for (let i = 0; i < reachableTiles.length; i++) {
-    const tile = reachableTiles[i]!;
-    const key = disputada ? reachableDist[i]! + recelo(tile) : reachableDist[i]!;
-    if (water && !(key < waterKey)) continue;
-    const ambient = dwOf(tile, reachableCells[i]!);
-    if ((ambient > 0.005 || waterAvailable(world, tile) > 0.005)
-      && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0))) {
-      water = tile; waterKey = key;
+  // La consulta percibida solo ve el agua del suelo: con una cisterna cerca, o si su celda no sirve, se busca como siempre.
+  let water = percibida(CONSULTA.agua);
+  const cisterna = algunoCerca(world.structures, person, RADIUS + 2, structure => structure.components.includes('cistern'));
+  if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)
+    || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.agua), 0))))) {
+    water = undefined;
+    let waterKey = 0;
+    for (let i = 0; i < reachableTiles.length; i++) {
+      const tile = reachableTiles[i]!;
+      const key = disputada ? reachableDist[i]! + recelo(tile) : reachableDist[i]!;
+      if (water && !(key < waterKey)) continue;
+      const ambient = dwOf(tile, reachableCells[i]!);
+      if ((ambient > UMBRAL.agua || waterAvailable(world, tile) > UMBRAL.agua)
+        && (desperateSubsistence || planAffordable(person, payload, reachableSteps[i]!, 0))) {
+        water = tile; waterKey = key;
+      }
     }
   }
   const carriedWater = containedWaterQuanta(person) > 0;
@@ -406,7 +419,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const prey = huntPlan?.tile;
   if (herdPlan && (person.hunger > 0.15 || !(person.compounds?.length))) candidates.push({ action: 'forage', target: herdPlan,
     score: Math.max(0, person.hunger - 0.1) * 2 + 0.35, reason: 'Percibe un animal habituado; recoge alimento y fibra sin matarlo, pagando tiempo y biomasa.' });
-  if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && foodOf(food, reachableCells[foodIndex]!) > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
+  if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
   const seekingFood = !food && !prey && meal === 0 && person.hunger > .6;
   if (seekingFood) {
     // Like thirst, deprivation still motivates a paid search when perception is
@@ -455,30 +468,31 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // is the shortfall was banked by the nearest warehouse and sent its carrier straight back out.
   const tripWood = modularWorks && person.materials.wood < Math.min(12, cost.wood), tripStone = modularWorks && person.materials.stone < Math.min(8, cost.stone);
   const tripPrefersWood = tripWood && (!tripStone || preferWood);
-  let resource: Tile | undefined, resourceKey = 0, tripResource: Tile | undefined, tripKey = 0;
-  if (needWood || needStone) {
-    for (let i = 0; i < nearbyTiles.length; i++) {
-      const tile = nearbyTiles[i]!, w = woodOf(tile, fast ? nearbyCells[i]! : -1), s = tile.stone ?? 0;
-      if (!((w >= 1 && needWood) || (s >= 1 && needStone))) continue;
-      const key = nearbyDist[i]! + ((preferWood ? w >= 1 : s >= 1) ? 0 : 20);
-      if (!resource || key < resourceKey) { resource = tile; resourceKey = key; }
-      if (!((w >= 1 && tripWood) || (s >= 1 && tripStone))) continue;
-      const trip = nearbyDist[i]! + ((tripPrefersWood ? w >= 1 : s >= 1) ? 0 : 20);
-      if (!tripResource || trip < tripKey) { tripResource = tile; tripKey = trip; }
-    }
-  }
+  // La celda más cercana con el material que falta, y si hay de los dos, la del preferido: el «+20» de la clave de
+  // siempre supera cualquier distancia del disco (≤ 7√2), así que nunca empata entre clases.
+  const madera = percibida(CONSULTA.madera), piedra = percibida(CONSULTA.piedra), ambas = percibida(CONSULTA.maderaYPiedra);
+  const materialCercano = (quiereMadera: boolean, quierePiedra: boolean, prefiereMadera: boolean): Tile | undefined =>
+    quiereMadera && quierePiedra ? (prefiereMadera ? madera ?? piedra : piedra ?? madera)
+      : quiereMadera ? (prefiereMadera ? madera : ambas ?? madera)
+      : quierePiedra ? (prefiereMadera ? ambas ?? piedra : piedra) : undefined;
+  const resource = materialCercano(needWood, needStone, preferWood);
+  const tripResource = materialCercano(tripWood, tripStone, tripPrefersWood);
   const workBias = person.traits.industriousness;
-  let buildable: Tile | undefined, buildableKey = 0;
-  for (let i = 0; i < nearbyTiles.length; i++) {
-    const tile = nearbyTiles[i]!;
-    const key = nearbyDist[i]!;
-    if (buildable && !(key < buildableKey)) continue;
-    const cell = fast ? nearbyCells[i]! : -1;
-    if (!isShelterOf(tile, cell) && moistureOf(tile, cell) > 0.2 && vegetationOf(tile, cell) > 0.15
-      && !algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5)) {
-      buildable = tile; buildableKey = key;
+  /** La tierra más cercana del disco que cumple `sirve` (la primera en orden de filas si empatan), como las búsquedas de siempre. */
+  const masCercana = (sirve: (tile: Tile, cell: number) => boolean): Tile | undefined => {
+    let mejor: Tile | undefined, clave = 0;
+    for (let i = 0; i < nearbyTiles.length; i++) {
+      if (mejor && !(nearbyDist[i]! < clave)) continue;
+      if (sirve(nearbyTiles[i]!, fast ? nearbyCells[i]! : -1)) { mejor = nearbyTiles[i]; clave = nearbyDist[i]!; }
     }
-  }
+    return mejor;
+  };
+  const lugarCerca = (tile: Tile) => algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5);
+  // La tierra que se percibe es siempre suelo, pradera o techo: sin techo es suelo o pradera.
+  const obraValida = (tile: Tile, cell: number) => !isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadObra && vegetationOf(tile, cell) > UMBRAL.vegetacionObra;
+  let buildable = percibida(CONSULTA.obra);
+  if (buildable && (lugarCerca(buildable) || !obraValida(buildable, soaPercibida(CONSULTA.obra))))
+    buildable = masCercana((tile, cell) => obraValida(tile, cell) && !lugarCerca(tile));
   const gatherAt = modularWorks ? tripResource : resource;
   if (gatherAt && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: gatherAt, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
   // V20 modular: an active site or extension supplies its own target, so free ground is not required to
@@ -495,16 +509,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (technology) candidates.push({ action: technology.kind, target: person, score: technology.score, reason: technology.reason });
   const damaged = repairOpportunity(world,person);
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Reparar una instalación que percibe recupera una función útil; exige material y trabajo.'});
-  let farmland: Tile | undefined, farmlandKey = 0;
-  if (person.materials.wood >= 1) {
-    for (let i = 0; i < nearbyTiles.length; i++) {
-      const tile = nearbyTiles[i]!, cell = fast ? nearbyCells[i]! : -1;
-      if (isShelterOf(tile, cell) || !(moistureOf(tile, cell) > 0.25) || !(vegetationOf(tile, cell) < 0.8)) continue;
-      const key = nearbyDist[i]!;
-      if (!farmland || key < farmlandKey) { farmland = tile; farmlandKey = key; }
-    }
-  }
-  if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && foodOf(food, reachableCells[foodIndex]!) < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
+  const cultivoValido = (tile: Tile, cell: number) => !isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadCultivo && vegetationOf(tile, cell) < UMBRAL.vegetacionCultivo;
+  let farmland = person.materials.wood >= 1 ? percibida(CONSULTA.cultivo) : undefined;
+  if (farmland && !cultivoValido(farmland, soaPercibida(CONSULTA.cultivo))) farmland = masCercana(cultivoValido);
+  if (farmland) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   let reunionCandidate: Candidate | undefined;
   if (partner) {
     if (vinculoEncuentro > 0) person.partnerMemory = { x: partner.x, y: partner.y, tick: world.tick };
@@ -545,8 +553,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
   }
   const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);
+  // Con el hambre de ahora, como siempre: `share` vuelve a buscar receptor con ella al ejecutarse.
   let hungry: Person | undefined;
-  for (const other of nearbyPeople) if (distance(person, other) <= 2 && other.hunger > 0.27 && (!hungry || other.hunger > hungry.hunger)) hungry = other;
+  for (const other of nearbyPeople) if (distance(person, other) <= UMBRAL.radioCompartir && other.hunger > UMBRAL.hambreAjena && (!hungry || other.hunger > hungry.hunger)) hungry = other;
   const learned = place ? person.habits.find(habit => habit.placeId === place.id && habit.strength >= 0.5) : undefined;
   if (place && hungry && availableToShare(world, person, hungry) && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
     action: 'share', target: hungry, score: 0.22 + person.generosity * (1 + person.culture.sharing * 0.5) + (learned ? learned.strength : 0),
@@ -578,24 +587,24 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const exposed = world.weather === 'rain' && world.shelterBenefitEnabled;
   const outdoorDamage = exposed ? bodilyDamage(world, person, body, 0) : damage;
   let coverGather: Candidate | undefined, gatherWork = 0, gatherSteps = 0;
-  if (exposed && !shelter && construction && buildable && routeSteps(routeReader, serialSteps, buildable) !== undefined && cost.wood <= 12 && cost.stone <= 8) {
+  if (exposed && !shelter && construction && buildable && stepsTo(buildable) !== undefined && cost.wood <= 12 && cost.stone <= 8) {
     const missing = { wood: Math.max(0, Math.ceil(cost.wood - person.materials.wood)), stone: Math.max(0, Math.ceil(cost.stone - person.materials.stone)) };
     // The existing gather action chooses its preferred material first. Only
     // motivate a first collection that actually pays part of the missing bill.
     const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
     const useful = nearbyTiles.filter(t => {
-      if (routeSteps(routeReader, serialSteps, t) === undefined) return false;
+      if (stepsTo(t) === undefined) return false;
       const first = (t[preferred] ?? 0) >= 1 && person.materials[preferred] < (preferred === 'wood' ? 12 : 8)
         ? preferred : preferred === 'wood' ? 'stone' : 'wood';
       return missing[first] > 0 && (t[first] ?? 0) >= 1;
-    }).sort((a, b) => routeSteps(routeReader, serialSteps, a)! - routeSteps(routeReader, serialSteps, b)!)[0];
+    }).sort((a, b) => stepsTo(a)! - stepsTo(b)!)[0];
     let supplied = true;
-    gatherSteps = routeSteps(routeReader, serialSteps, buildable)!;
+    gatherSteps = stepsTo(buildable)!;
     for (const material of ['wood', 'stone'] as const) {
       let need = missing[material];
-      for (const tile of nearbyTiles.filter(t => routeSteps(routeReader, serialSteps, t) !== undefined).sort((a, b) => routeSteps(routeReader, serialSteps, a)! - routeSteps(routeReader, serialSteps, b)!)) {
+      for (const tile of nearbyTiles.filter(t => stepsTo(t) !== undefined).sort((a, b) => stepsTo(a)! - stepsTo(b)!)) {
         const units = Math.min(need, Math.floor(tile[material] ?? 0));
-        need -= units; gatherSteps += units * routeSteps(routeReader, serialSteps, tile)! * 2;
+        need -= units; gatherSteps += units * stepsTo(tile)! * 2;
       }
       supplied &&= need === 0;
     }
@@ -609,7 +618,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   let protectionPlan = false;
   for (const candidate of candidates) {
     if (candidate.action === 'explore') continue; // Its destination is selected later; no fictional roof there.
-    const steps = routeSteps(routeReader, serialSteps, candidate.target);
+    const steps = stepsTo(candidate.target);
     const bypassEffort = desperateSubsistence && (candidate.action === 'eat' || candidate.action === 'drink');
     if (steps === undefined || (!bypassEffort && !planAffordable(person, payload, steps, 0))) continue;
     let cover = exposed && !(candidate.target.x === person.x && candidate.target.y === person.y)
@@ -758,7 +767,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     // each time can reverse the route before either endpoint is ever visited.
     // Keep the paid local search leg; visible water and bodily recovery still
     // compete on every choice, and blocked/reached targets must be replaced.
-    const remaining = routeSteps(routeReader, serialSteps, person.target);
+    const remaining = stepsTo(person.target);
     const urgentSearch = seekingWater || (vinculoEncuentro > 0 && seekingFood);
     const continuingSearch = urgentSearch && person.action === 'explore' && remaining !== undefined
       && remaining > 0 && (desperateSubsistence || planAffordable(person, payload, remaining, 0));

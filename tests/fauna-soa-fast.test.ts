@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import type { Tile } from '../src/shared/types.js';
 import { materializeAnimals, stepAnimals, type AnimalWorld } from '../src/world/animals.js';
-import { bindWorldContext, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
+import { bindWorldContext, closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
@@ -13,7 +13,6 @@ import { SOA_COORDINATE_LIMIT } from '../src/world/soa/region.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

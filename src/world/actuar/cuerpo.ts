@@ -9,7 +9,6 @@ import { move } from './mover.js';
 import { ensurePersonPolicy } from '../decision/politica-persona.js';
 import { share } from './interacciones.js';
 import { performWork } from './trabajo.js';
-import type { PrecomputedMoves } from '../paralelo/personas-motor.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { maintainContainedWater, advanceWaterPreparation, containedWaterQuanta, canHandleContainedWater } from '../technology-water.js';
 import { paramsOf } from '../params.js';
@@ -25,7 +24,7 @@ import { updatePolicyPlasticity } from '../politica.js';
 import { researchTechnology, craftTechnology, technologyOpportunity } from '../technology.js';
 
 
-export function bodyAndAction(world: World, person: Person, precomputedMoves?: PrecomputedMoves, slot?: number, policyScores?: Map<string, Float64Array>, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
+export function bodyAndAction(world: World, person: Person, slot?: number, policyScores?: Map<string, Float64Array>, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   maintainContainedWater(world, person);
   const params = paramsOf(world);
   if (params.quimica.emergente && person.action === 'hunt' && person.huntingPreyId) {
@@ -62,10 +61,10 @@ export function bodyAndAction(world: World, person: Person, precomputedMoves?: P
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot, tileIn, fast ?? null);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, slot, tileIn, fast ?? null);
   if (person.action === 'eat' || person.action === 'drink' || person.action === 'hunt') resourceDispute(world, person, event => addEvent(world, event));
   if (person.agreement !== undefined) settleAgreement(world, person);
-  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot, tileIn, fast?.exact ?? null);
+  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, tileIn, fast?.exact ?? null);
   const moved = person.x !== tile.x || person.y !== tile.y;
   const current = moved ? tileIn(person.x, person.y)! : tile;
   const currentCell = moved ? soaCell(fast, person.x, person.y, current) : tileCell;

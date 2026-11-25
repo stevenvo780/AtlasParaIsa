@@ -289,6 +289,7 @@ export interface Plantilla {
 export interface Gestacion {
   embrion: LoteRef;
   otro: number;           // uid de la pareja (frente público)
+  otroId?: string;        // progenitor humano, incluso después de morir o recargar
   genoma: number[];       // alelos, generación y mutaciones (personas) o genes continuos (fauna), sorteados al concebir
   politica?: number[];    // pesos heredados de CEREBRO (`COLUMNAS_CEREBRO.politica`), sorteados al concebir; ausente en fauna
   inicio: number;         // tick

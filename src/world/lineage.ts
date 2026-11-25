@@ -110,7 +110,11 @@ export function assertLegacyRecord(value: unknown, atTick: number): asserts valu
 /** Only dead references need a legacy row; living parent/inventor identities are in the snapshot. */
 export function referencedLegacy(world: World): Set<string> {
   const required = new Set<string>();
-  for (const person of world.people) for (const parent of person.genome.parents) required.add(parent);
+  for (const person of world.people) {
+    for (const parent of person.genome.parents) required.add(parent);
+    const progenitor = (person.cuerpo?.gestacion ?? person.gestacion)?.otroId;
+    if (progenitor !== undefined) required.add(progenitor);
+  }
   for (const blueprint of world.blueprints) if (blueprint.inventorId !== null) required.add(blueprint.inventorId);
   for (const recipe of world.technology.recipes) required.add(recipe.inventorId);
   for (const person of world.people) required.delete(person.id);

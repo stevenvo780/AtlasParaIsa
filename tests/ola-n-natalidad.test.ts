@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertWorld, createWorld, TICKS_PER_DAY, type Person } from '../src/world/index.js';
-import { parseParams } from '../src/world/params.js';
+import { assertWorld, createWorld, stepWorld, TICKS_PER_DAY, type Person } from '../src/world/index.js';
+import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { DIAS_ABORTO, ETA, M0 } from '../src/shared/naturaleza.js';
 import { HAMBRE_POR_UNIDAD } from '../src/world/ecologia-constantes.js';
 import {
-  MASA_ADULTA_UA, T_GESTACION_MIN, balanceEscalar, candidatoCuidar, causaNoAporta, causaNoCria, claveDeId, estadoCria,
+  MASA_ADULTA_UA, T_GESTACION_MIN, balanceDeMundo, balanceEscalar, candidatoCuidar, causaNoAporta, causaNoCria, claveDeId, estadoCria,
   fertil, idDeCria, porQueNoCria, provisionCrianza, type EstadoCria,
 } from '../src/world/natalidad.js';
 import { crearCria } from '../src/world/demografia/nacer.js';
 import { familyOpportunity, availableToShare } from '../src/world/family.js';
+import { advancePopulation, referencedLegacy } from '../src/world/lineage.js';
 
 // Pruebas de funciones puras de la ley: no avanzan el mundo ni miden nada.
 
@@ -84,13 +85,66 @@ test('n: sin sobrante no se gesta y se anota desde cuándo; el parto entrega lo 
 
 test('n: una gestación en curso conserva alelos, generación y mutaciones en el guardado', () => {
   const world = mundoConLey(), madre = mortal(world), b = balanceEscalar(world);
-  b.concebir(madre, { otro: 9, genoma: [...madre.genome.alleles, 2, 3], inicio: 0 });
+  b.concebir(madre, { otro: 9, otroId: 'neighbor-8', genoma: [...madre.genome.alleles, 2, 3], inicio: 0 });
   const guardado: unknown = JSON.parse(JSON.stringify(world));
   assertWorld(guardado);
   const cargada = mortal(guardado);
   assert.deepEqual(b.enCurso(cargada), b.enCurso(madre));
+  delete cargada.gestacion!.otroId;
+  assertWorld(guardado);
   cargada.gestacion!.genoma[madre.genome.alleles.length] = 0.5;
   assert.throws(() => assertWorld(guardado), /Gestación inválida/);
+});
+
+test('n: el parto tras la recarga conserva al progenitor fallecido en el genoma, sin vínculo ni cuidado', () => {
+  const world = mundoConLey(), [madre, otro] = world.people.filter(p => p.role === 'neighbor') as [Person, Person];
+  world.reproductionEnabled = false;
+  world.tick = T_GESTACION_MIN * TICKS_PER_DAY;
+  for (const p of world.people) p.demography.age = world.tick - p.bornAt - 1;
+  otro.demography.health = 0;
+  otro.demography.deathCause = 'starvation';
+  advancePopulation(world, { emit() {}, beforeDeath() {} });
+  const b = balanceEscalar(world);
+  b.concebir(madre, { otro: 800, otroId: otro.id, genoma: [...madre.genome.alleles, 1, 0], inicio: 0 });
+  madre.gestacion!.masa = madre.gestacion!.m0;
+  assert.ok(referencedLegacy(world).has(otro.id));
+  const guardado = JSON.parse(JSON.stringify(world)) as typeof world;
+  setParams(guardado, paramsOf(world));
+  stepWorld(guardado);
+  const cria = guardado.people.find(p => p.id.startsWith('nacido-'))!;
+  assert.deepEqual(cria.genome.parents, [madre.id, otro.id]);
+  assert.deepEqual(cria.crianza?.cuidadores, [madre.id]);
+  assert.deepEqual(cria.bonds, { [madre.id]: 1 });
+  assertWorld(guardado);
+  const antiguo = JSON.parse(JSON.stringify(world)) as typeof world;
+  setParams(antiguo, paramsOf(world));
+  delete mortal(antiguo).gestacion!.otroId;
+  stepWorld(antiguo);
+  assert.equal(antiguo.birthCounter, 0);
+  assert.equal(mortal(antiguo).gestacion, undefined);
+  assert.ok(antiguo.events.some(e => e.cause.includes('no conservó la identidad')));
+});
+
+test('n: el balance de átomos conserva el id durable en el cuerpo', () => {
+  const world = createWorld(7, parseParams({ v23: { natalidad: true, materia: true, cuerpos: true } }));
+  const [madre, otro] = world.people.filter(p => p.role === 'neighbor') as [Person, Person];
+  stepWorld(world);
+  const b = balanceDeMundo(world)!;
+  b.concebir(madre, { otro: otro.uid!, otroId: otro.id, genoma: [...madre.genome.alleles, 1, 0], inicio: world.tick });
+  assert.equal(b.enCurso(madre)?.otroId, otro.id);
+  assert.equal(structuredClone(madre.cuerpo)?.gestacion?.otroId, otro.id);
+});
+
+test('s: el frente de F5 no vuelve a vincular al vecino que acaba de morir', () => {
+  const world = createWorld(7, parseParams({ v23: { comunidades: true } }));
+  const [vivo, otro] = world.people.filter(p => p.role === 'neighbor') as [Person, Person];
+  otro.x = vivo.x; otro.y = vivo.y;
+  vivo.bonds[otro.id] = 0.7;
+  otro.demography.health = 0;
+  otro.demography.deathCause = 'starvation';
+  stepWorld(world);
+  assert.ok(!world.people.some(p => p.id === otro.id));
+  assert.ok(!Object.hasOwn(vivo.bonds, otro.id));
 });
 
 test('n: el hambre paga cuando no lleva nada, sin pasar del día de basal', () => {

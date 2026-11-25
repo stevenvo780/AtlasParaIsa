@@ -317,12 +317,13 @@ function posicion(c: CtxLey, p: Person): { x: number; y: number; enFrente: boole
  * gestación (`ladoDeRecienNacido`). Quien lo gestó es, de sus dos progenitores vivos, el más cercano a él. Espera a
  * que su fila esté en el frente: sin `Ref` propia sus intentos no tendrían emisor.
  */
-function sembrarRecienNacido(c: CtxLey, p: Person, x: number, y: number): void {
+function sembrarRecienNacido(c: CtxLey, p: Person, x: number, y: number, vivo: (id: string) => boolean): void {
   const padres = p.genome.parents;
   if (padres.length !== 2 || c.tick - p.bornAt >= TICKS_PER_DAY || p.uid === undefined) return;
   if (padres.some(id => p.bonds[id] !== undefined && p.bonds[id]! >= THETA_VINCULO)) return;
   let gestanteId: string | undefined, uidGestante = 0, mejor = Infinity;
   for (const id of padres) {
+    if (!vivo(id)) continue;
     const uid = c.uidDe(id), r = uid > 0 ? c.ref(uid) : REF_NULA;
     if (r === REF_NULA) continue;
     const s = slotDe(r), d2 = (c.frente.x[s]! - x) ** 2 + (c.frente.y[s]! - y) ** 2;
@@ -334,7 +335,7 @@ function sembrarRecienNacido(c: CtxLey, p: Person, x: number, y: number): void {
   // El otro lado: quien lo gestó estuvo con él siempre; sus allegados, lo que estuvieron con ella.
   afectar(c.mundo, p, gestante, uidGestante, { copia: gestanteId });
   if (gestante) for (const id in gestante.bonds) {
-    if (id === p.id || gestante.bonds[id]! < THETA_VINCULO) continue;
+    if (id === p.id || gestante.bonds[id]! < THETA_VINCULO || !vivo(id)) continue;
     const uid = c.uidDe(id);
     if (uid > 0) afectar(c.mundo, p, propia(c, uid), uid, { copia: gestanteId });
   }
@@ -343,20 +344,30 @@ function sembrarRecienNacido(c: CtxLey, p: Person, x: number, y: number): void {
 /** F5: cada dueño pone al día el lado de sus personas y manda a F0 sus aristas ≥ θ. */
 function convivirPorLado(c: CtxLey): void {
   const fr = c.frente, registros: RegistroPersona[] = [], cerca = new Set<string>();
+  // El frente aún muestra los muertos de este tick y aún no muestra a quienes acaban de nacer.
+  const vivosPropios = new Set(c.mundo.people.map(p => p.id));
+  const vivo = (id: string): boolean => {
+    if (vivosPropios.has(id)) return true;
+    const ref = c.ref(c.uidDe(id));
+    return ref !== REF_NULA && c.personas.get(slotDe(ref))?.demography.deathCause == null;
+  };
   for (const p of c.mundo.people) {
     const { x, y, enFrente } = posicion(c, p);
-    if (enFrente) sembrarRecienNacido(c, p, x, y);
+    if (enFrente) sembrarRecienNacido(c, p, x, y, vivo);
     cerca.clear();
     cercanos(c, x, y, RADIO_CONVIVENCIA_CELDAS, Clase.Persona, slot => {
       const uid = fr.uid[slot]!;
       if (uid === p.uid) return;
       const id = c.idDe(uid);
-      if (id !== undefined && id !== p.id) cerca.add(id);
+      if (id !== undefined && id !== p.id && c.personas.get(slot)?.demography.deathCause == null) cerca.add(id);
     });
     actualizarLado(p.bonds, cerca);
     if (p.uid === undefined) continue;
     const fuertes: number[] = [];
-    for (const id in p.bonds) if (p.bonds[id]! >= THETA_VINCULO) { const uid = c.uidDe(id); if (uid > 0) fuertes.push(uid); }
+    for (const id in p.bonds) {
+      if (!vivo(id)) { delete p.bonds[id]; continue; }
+      if (p.bonds[id]! >= THETA_VINCULO) { const uid = c.uidDe(id); if (uid > 0) fuertes.push(uid); }
+    }
     registros.push({ uid: p.uid, id: p.id, nombre: p.name, mortal: p.role === 'neighbor', x, y,
       cultura: [p.culture.sharing, p.culture.stewardship, p.culture.openness], fuertes });
   }

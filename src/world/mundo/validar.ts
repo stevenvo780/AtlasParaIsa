@@ -47,6 +47,7 @@ function genomaGestado(genoma: number[]): boolean {
 function assertGestacion(value: unknown, tick: number, persona: boolean, escalar = false): void {
   const tiempo = (n: unknown): boolean => esReferencia(n) && n <= tick;
   if (!esRegistro(value) || (!escalar && !esReferencia(value.embrion)) || !esReferencia(value.otro)
+    || value.otroId !== undefined && (!persona || typeof value.otroId !== 'string' || !/^[^\s\u0000-\u001f\u007f]{1,49}$/.test(value.otroId))
     || !tiempo(value.inicio) || (value.bajoBasalDesde !== -1 && !tiempo(value.bajoBasalDesde))
     || !esVectorFinito(value.genoma)
     || (persona ? !genomaGestado(value.genoma) : value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO)
@@ -191,7 +192,12 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       assertGenome(p.genome);
       if (p.genome.parents.length) {
         const parents = p.genome.parents.map(id => identity(id));
-        if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || ('diedAt' in parent && parent.diedAt < p.bornAt) || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
+        // En V23 la gestante va primero. El otro progenitor pudo morir entre la concepción y el parto.
+        const gestado = ley(w, 'natalidad') && /^nacido-[1-9]\d*$/.test(p.id);
+        if (parents.some((parent, i) => !parent || parent.id === p.id || parent.bornAt >= p.bornAt
+          || ('diedAt' in parent && parent.diedAt < p.bornAt && (!gestado || i === 0))
+          || parent.genome.generation >= p.genome.generation)
+          || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
       }
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -MAX_FOUNDER_AGE_TICKS || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }

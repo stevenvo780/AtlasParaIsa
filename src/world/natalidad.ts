@@ -131,6 +131,7 @@ export const idDeCria = (uid: number): string => `nacido-${uid}`;
 /** Gestación en curso, vista igual en los dos balances. `masa` y `m0` van en kg (átomos) o en ua (escalar). */
 export interface EnCurso {
   otro: number;            // uid de quien dio el genoma
+  otroId?: string;         // identidad durable de quien dio el genoma
   genoma: number[];        // alelos de la cría y, tras ellos, [generación, mutaciones]
   politica?: number[];
   inicio: number;          // tick
@@ -156,7 +157,7 @@ export interface Balance {
   /** Masa sobre masa adulta (átomos) o edad sobre edad de madurez (escalar), sin recortar. */
   madurez(p: Person): number;
   enCurso(p: Person): EnCurso | undefined;
-  concebir(p: Person, g: { otro: number; genoma: number[]; politica?: number[]; inicio: number }): void;
+  concebir(p: Person, g: Pick<EnCurso, 'otro' | 'otroId' | 'genoma' | 'politica' | 'inicio'>): void;
   /** Transfiere reserva → embrión durante `dt` ticks y devuelve la masa del embrión. */
   gestar(p: Person, dt: number, tick: number): number;
   /** Transfiere embrión → gestante y cierra la gestación. */
@@ -246,10 +247,14 @@ export function balanceAtomos(c: CtxLeyMateria): Balance {
     enCurso(p) {
       const cuerpo = p.cuerpo, g = cuerpo?.gestacion;
       if (!cuerpo || !g) return undefined;
-      return { otro: g.otro, genoma: g.genoma, politica: g.politica, inicio: g.inicio, bajoBasalDesde: g.bajoBasalDesde,
+      return { otro: g.otro, otroId: g.otroId, genoma: g.genoma, politica: g.politica, inicio: g.inicio, bajoBasalDesde: g.bajoBasalDesde,
         masa: c.materia.vista(g.embrion).masa, m0: plantillaDe(c, cuerpo).m0, grano: granoDe(cuerpo) };
     },
-    concebir(p, g) { concebir(c, cuerpoDe(p), g); },
+    concebir(p, g) {
+      const cuerpo = cuerpoDe(p);
+      concebir(c, cuerpo, g);
+      if (g.otroId !== undefined) cuerpo.gestacion!.otroId = g.otroId;
+    },
     // Las unidades hechas pueden ser menos que las pedidas (`copiar`): vale la masa que `gestar` devuelve.
     gestar: (p, dt) => gestar(c, cuerpoDe(p), dt),
     abortar(p) { abortar(c, cuerpoDe(p)); },
@@ -457,38 +462,38 @@ function concebirCon(c: CtxLey, b: Balance, madre: Person, q: Pretendiente): voi
   const politica = c.params.conducta.politicaPeso > 0
     ? inheritPolicy(mundo.seed, sorteo, madre.policy ?? founderPolicy(mundo.seed, madre.id), politicaDelFrente(c, q.slot, idOtro), tasa).weights
     : undefined;
-  b.concebir(madre, { otro: q.uid, genoma: [...cria.alleles, cria.generation, cria.mutations], politica, inicio: c.tick });
+  b.concebir(madre, { otro: q.uid, otroId: idOtro, genoma: [...cria.alleles, cria.generation, cria.mutations], politica, inicio: c.tick });
 }
 
 /** Rehace el genoma de la cría de lo guardado al concebir. */
-function genomaDeCria(madre: Person, g: EnCurso, idOtro: string | undefined): Genome {
+function genomaDeCria(madre: Person, g: EnCurso, idOtro: string): Genome {
   const alleles = g.genoma.slice(0, GENOMA_ANCHO);
   return {
     alleles, generation: g.genoma[GENOMA_ANCHO] ?? madre.genome.generation + 1,
-    parents: idOtro !== undefined ? [madre.id, idOtro] : [madre.id], mutations: g.genoma[GENOMA_ANCHO + 1] ?? 0,
+    parents: [madre.id, idOtro], mutations: g.genoma[GENOMA_ANCHO + 1] ?? 0,
     learningRate: 0.04 + ((alleles[10]! + alleles[11]!) / 2) * 0.16, cooperation: (alleles[12]! + alleles[13]!) / 2,
   };
 }
 
-/** ¿Sigue vivo el cuidador `id`? Sin intentos el mundo es un solo heap (los muertos ya salieron de `mundo.people` o
- * llevan causa); con intentos, lo vivo es su fila en el frente (como en `parto`). */
+/** En F5 el frente aún contiene a los muertos de este tick. La demografía ya marcó a los de este dueño. */
 function cuidadorVive(c: CtxLey, id: string): boolean {
   if (!ley(c.mundo, 'intentos')) return c.mundo.people.some(o => o.id === id && o.demography.deathCause === null);
-  const uid = c.uidDe(id);
-  return uid > 0 && c.ref(uid) !== REF_NULA;
+  const ref = c.ref(c.uidDe(id));
+  return ref !== REF_NULA && c.personas.get(slotDe(ref))?.demography.deathCause == null;
 }
 
 function parto(c: CtxLey, b: Balance, madre: Person): void {
   const mundo = c.mundo, g = b.enCurso(madre);
   if (!g) return;
-  const idOtro = c.idDe(g.otro), dote = b.parir(madre), uid = c.id('uid');
-  // Quien dio el genoma puede haber muerto durante la gestación: el directorio recuerda su id un día (para el
-  // parentesco del genoma), pero un muerto no cría ni tiene vínculos. Sin intentos el mundo es un solo heap y las
-  // muertes de este tick ya salieron de `mundo.people` (F5 va tras la demografía); con intentos, lo vivo es su fila
-  // en el frente.
+  const idOtro = g.otroId ?? c.idDe(g.otro);
+  // Un guardado antiguo puede haber perdido ya el id del donante. Se devuelve lo gestado sin inventar parentesco.
+  if (idOtro === undefined) {
+    aborto(c, b, madre, 'El guardado no conservó la identidad de quien dio el genoma; lo gestado volvió a su cuerpo.');
+    return;
+  }
+  const dote = b.parir(madre), uid = c.id('uid');
   const intentos = ley(mundo, 'intentos'), refOtro = c.ref(g.otro);
-  const otro = idOtro === undefined || intentos ? undefined : mundo.people.find(o => o.id === idOtro);
-  const otroVivo = idOtro !== undefined && (intentos ? refOtro !== REF_NULA : otro !== undefined);
+  const otroVivo = cuidadorVive(c, idOtro);
   const cuidadores = otroVivo ? [madre.id, idOtro] : [madre.id];
   const cria = crearCria(mundo, madre, {
     uid, id: idDeCria(uid), genome: genomaDeCria(madre, g, idOtro), policy: g.politica ? { weights: g.politica } : undefined,
@@ -514,14 +519,14 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
       const dueno = c.frente.dueno[slotDe(refOtro)]!;
       if (dueno >= 0) c.buzon.enviar(dueno, { tipo: TipoIntento.Vincular, de: ref, a: refOtro, celda: -1, lote: REF_NULA,
         nonce: c.id('nonce'), materia: null, dato: Float64Array.of(APEGO_NACER), bytes: null });
-    } else otro!.bonds[cria.id] = APEGO_NACER;
+    } else mundo.people.find(o => o.id === idOtro)!.bonds[cria.id] = APEGO_NACER;
   }
   if (!ley(mundo, 'comunidades')) {
     const grupo = mundo.communities.find(k => k.id === madre.communityId);
     if (grupo) grupo.members = [...grupo.members, cria.id];
   }
   count(mundo, 'births');
-  const nombreOtro = idOtro !== undefined ? mundo.people.find(o => o.id === idOtro)?.name : undefined;
+  const nombreOtro = mundo.people.find(o => o.id === idOtro)?.name;
   const evento = c.suceso({
     kind: 'birth', actors: cuidadores.concat(cria.id), x: cria.x, y: cria.y, source: 'simulation',
     text: `${cria.name} nació de ${madre.name}${nombreOtro ? ` y ${nombreOtro}` : ''}.`,
@@ -530,11 +535,12 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
   remember(cria, mundo, 'Quien lo gestó lo sostuvo hasta su llegada.', evento);
 }
 
-function aborto(c: CtxLey, b: Balance, madre: Person): void {
+function aborto(c: CtxLey, b: Balance, madre: Person,
+  causa = `Su reserva no cubrió un día de gasto basal durante ${DIAS_ABORTO} día(s) seguidos; lo gestado volvió a su cuerpo.`): void {
   b.abortar(madre);
   c.suceso({ kind: 'care', actors: [madre.id], x: madre.x, y: madre.y, source: 'simulation',
     text: `${madre.name} perdió la gestación.`,
-    cause: `Su reserva no cubrió un día de gasto basal durante ${DIAS_ABORTO} día(s) seguidos; lo gestado volvió a su cuerpo.` });
+    cause: causa });
 }
 
 export const leyNatalidad: Ley = {

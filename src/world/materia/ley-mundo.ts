@@ -772,7 +772,9 @@ function inventariar(e: Estado): Inventario {
  * lotes que un organismo lleva a cuestas. */
 function saldoDe(e: Estado, inventario?: Inventario): bigint[] {
   const c = e.caja.c, arena = c.materia as Partial<{ saldo(): bigint[] }>;
-  if (typeof arena.saldo === 'function' && !c.params.v23.duenos) return arena.saldo();
+  // `v23.duenos` con un solo hilo sigue siendo un dueño: su arena es entera suya.
+  const unDueno = !c.params.v23.duenos || (c as Partial<{ hilos: number }>).hilos === 1;
+  if (typeof arena.saldo === 'function' && unDueno) return arena.saldo();
   const inv = inventario ?? inventariar(e), out = Array<bigint>(NE + 1).fill(0n);
   for (let comp = 0; comp < EN_VUELO; comp++) {
     for (let k = 0; k < NE; k++) out[k]! += inv.atomos[comp]![k]!;

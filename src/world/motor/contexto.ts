@@ -335,7 +335,8 @@ export class Dueno implements CtxF0 {
   abrirEpoca(cp?: MateriaCheckpoint | null): void {
     if (!this.prepararEpoca()) return;
     if (cp) this.reponer(this.cargarMateria(cp));
-    this.reservarMateria(0);
+    // `Ley.iniciar` de w materializa cada chunk ya activo que no traiga sus lotes: la reserva de F0 los cubre todos.
+    this.reservarMateria(cp ? 0 : this.chunks.length);
     this.publicarFilas();
     this.organismos.tabla.publicar(this.mundo.tick);
     this.iniciarLeyes();

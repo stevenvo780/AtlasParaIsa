@@ -227,7 +227,8 @@ class MotorDuenos implements Motor {
     }
     buzones.fijarFase(0);
     if (materia) d.reponer(d.cargarMateria(materia));
-    d.reservarMateria(0);
+    // Cada dueño materializa en su `Ley.iniciar` los chunks que no traen lotes: la arena compartida solo crece aquí.
+    d.reservarMateria(materia ? 0 : claves.length);
     const cabecera = serialize(cabeceraDe(m));
     this.#cabecera = deserialize(cabecera) as World;
     for (let i = 0; i < claves.length; i++) if (duenos[i] !== 0) {

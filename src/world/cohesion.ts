@@ -111,7 +111,7 @@ export function dondeEsta(world: World, id: string): Punto | undefined {
 function personaMasCercana(world: World, person: Person, radio: number): Punto | undefined {
   const c = ctxSi(world);
   if (c) {
-    const ref = masCercano(c, person.x, person.y, radio, Clase.Persona, slotPropio(c, person), () => true, c.azar);
+    const ref = masCercano(c, person.x, person.y, radio, Clase.Persona, slotPropio(c, person), () => true, () => c.azar());
     if (ref === REF_NULA) return undefined;
     const s = slotDe(ref);
     return { x: c.frente.x[s]!, y: c.frente.y[s]! };

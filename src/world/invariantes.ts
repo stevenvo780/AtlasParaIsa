@@ -344,7 +344,8 @@ v23('motor-conservacion', 'I-C', 'dura', 'global', m => {
     const contexto = { posicion: i, energia: i === energia, esperado: String(e), hallado: String(o), diferencia: String(o - e),
       cuentas: Object.fromEntries(Object.entries(cuentas).map(([k, v]) => [k, String(v)])) };
     if (e !== o) h.fallo('La materia no se conserva: Σ lotes + en vuelo distinto de inicial + fuentes − sumideros.', contexto, comoNumero(e), comoNumero(o));
-    else if (o < 0n) h.fallo('Stock negativo.', contexto, 0, comoNumero(o));
+    // La energía se cuenta como entalpía de formación (negativa para casi todo compuesto): solo los átomos no pueden ser negativos.
+    else if (o < 0n && i !== energia) h.fallo('Stock negativo.', contexto, 0, comoNumero(o));
   }
   return h.resultado;
 });

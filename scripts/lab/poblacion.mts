@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deserialize, serialize } from 'node:v8';
 import {
-  assertWorld, bindWorldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
+  assertWorld, bindWorldContext, closePolicyGpuBatchers,
   createWorld, stepWorld, TICKS_PER_DAY, type Person, type World,
 } from '../../src/world/index.js';
 import { initializePerson, seededTraits } from '../../src/world/mundo/crear.js';
@@ -689,7 +689,7 @@ export function correr(o: OpcionesCorrida): unknown {
     writeFileSync(o.salida, JSON.stringify(informe));
     return informe;
   } finally {
-    closePersonasParallelPools(); closeFaunaParallelPools(); closePolicyGpuBatchers();
+    closePolicyGpuBatchers();
   }
 }
 

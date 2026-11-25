@@ -7,6 +7,25 @@ import { MAX_ANIMALS_PER_TILE } from '../world/animals.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
 import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
+import type { MotorConfig } from '../world/motor/contratos.js';
+
+/** Configuración del coordinador V23, independiente de los parámetros guardados. */
+export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env): MotorConfig {
+  const hilos = env.CARTA_MOTOR_HILOS?.trim() || '1';
+  if (hilos !== 'auto' && (!/^\d+$/.test(hilos) || !Number.isSafeInteger(Number(hilos)) || Number(hilos) < 1)) {
+    throw new Error('CARTA_MOTOR_HILOS debe ser un entero positivo o auto.');
+  }
+  const dispositivos = env.CARTA_MOTOR_GPU?.trim();
+  const gpu = dispositivos ? dispositivos.split(',').map(token => {
+    const indice = Number(token);
+    if (!/^\d+$/.test(token.trim()) || !Number.isSafeInteger(indice)) {
+      throw new Error('CARTA_MOTOR_GPU debe contener índices CUDA separados por comas.');
+    }
+    return indice;
+  }) : [];
+  return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
+    decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
+}
 
 /**
  * T100, fase 4b: los topes de admisión de un mundo NUEVO se resuelven aquí, en el host, y

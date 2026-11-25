@@ -205,7 +205,6 @@ import { CINTA, type Apertura, type Corte, type Hito } from '../shared/cinta.js'
 import type { ChronicleEvent } from '../shared/types.js';
 import { chronicleSerial } from '../world/chronicle-journal.js';
 import { registrar } from '../world/invariantes.js';
-import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
 import type { AppOptions } from './app.js';
 import type { OperacionSalud, Salud } from '../shared/salud.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
@@ -229,9 +228,6 @@ export interface SimWorkerOptions {
   tapeTopeBytes?: number;
   /** Tiempo sin que la cinta devuelva un crédito tras el cual se la da por perdida (por defecto, 5 min). */
   tapeSinCreditoMs?: number;
-  // Se retiran del gateway al integrar C1b.
-  tapeMaxFrames?: number;
-  tapeKeyframeInterval?: number;
   /** V21: inhabitants act autonomously; direct NPC orders are rejected. */
   observerOnly?: boolean;
 }
@@ -390,10 +386,6 @@ export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId
   return view;
 }
 
-/** Ticks at which a tape frame carries every resident tile instead of only the changed chunks. */
-export function tapeKeyframeDue(tick: number, interval: number | undefined, first: boolean): boolean {
-  return first || tick % Math.max(1, interval ?? TAPE_KEYFRAME_INTERVAL) === 0;
-}
 
 /** Minimum spacing between live mirror posts while the turbo loop runs uncapped. */
 export const TURBO_MIRROR_MS = 250;

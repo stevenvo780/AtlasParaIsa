@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
 import {
-  bindWorldContext, closeFaunaParallelPools, closePolicyGpuBatchers,
+  bindWorldContext, closePolicyGpuBatchers,
   createWorld, stepWorld, tileAt, worldContext, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers, initializeEcosystem } from '../src/world/ecosystem.js';
@@ -119,7 +119,6 @@ test('V18 spikes: paridad bit a bit (0 ULP) entre mundo residente y referencia p
   assert.equal(faunaCacheBuilds(), faunaScans0, '0 barridos completos de syncFauna durante altas y retiros');
 
   await closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });
 

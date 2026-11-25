@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bindWorldContext, closeFaunaParallelPools, closePolicyGpuBatchers,
+  bindWorldContext, closePolicyGpuBatchers,
   createWorld, stepWorld, worldContext,
 } from '../../src/world/index.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
@@ -56,7 +56,6 @@ test('V17 perf: paridad exacta 1T vs 4T residente con chunks dinámicos (activat
   const d4 = run(4, true);
   assert.equal(d4, d1, '1T no residente y 4T residente deben producir exactamente el mismo digestoCanonico');
   await closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });
 
@@ -83,6 +82,5 @@ test('V17 perf: paridad exacta 1T CPU vs 4T + GPU residente en 60 pasos', async 
   };
   assert.equal(run(4, [0]), run(1, []));
   await closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });

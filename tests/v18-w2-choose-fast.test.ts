@@ -13,7 +13,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import {
-  bindWorldContext, closeFaunaParallelPools, closePolicyGpuBatchers,
+  bindWorldContext, closePolicyGpuBatchers,
   createWorld, stepWorld, worldContext,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
@@ -28,7 +28,6 @@ import { founderGenome } from '../src/world/genetics.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });
 

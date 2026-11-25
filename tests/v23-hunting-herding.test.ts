@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { AnimalMorphology, AnimalSpecies } from '../src/shared/life.js';
 import type { Tile } from '../src/shared/types.js';
 import { evaluateMaterialProperties, vectorMass, type CompoundLot } from '../src/shared/chemistry.js';
-import { createWorld, stepWorld, cloneWorld, projectWorld, assertWorld, huntWorkDuration, closeFaunaParallelPools, type World } from '../src/world/index.js';
+import { createWorld, stepWorld, cloneWorld, projectWorld, assertWorld, huntWorkDuration, type World } from '../src/world/index.js';
 import { materializeAnimals, stepAnimals, syncFauna, harvestAt, assertAnimal, animalBiomass, projectAnimal, type Animal, type AnimalWorld } from '../src/world/animals.js';
 import { assertAnimalTraits } from '../src/world/validation.js';
 import { assertChemistryState, assertCompoundLots } from '../src/world/chemistry.js';
@@ -18,7 +18,7 @@ import { rawMaterial } from '../src/world/technology.js';
 const OPEN = 'quimica.emergente=true,fauna.contactoContinuo=true,fauna.reservaReproductiva=true,fauna.encuentroFertil=true,poblacion.natalidadVecindad=true,social.maxComunidades=0,construccion.modular=true,construccion.poliminosYSinergia=true,terreno.caminosFisicos=true';
 const morph = (changes: Partial<AnimalMorphology> = {}): AnimalMorphology => ({ caution: 0.3, size: 0.5, coat: 0.5, defense: 0.3, ...changes });
 
-after(async () => { await closeFaunaParallelPools(); await closeEcosystemWorkers(); });
+after(async () => { await closeEcosystemWorkers(); });
 
 function scene(species: AnimalSpecies[] = ['deer'], emerging = true, half = 7): AnimalWorld {
   const tiles: Tile[] = [];

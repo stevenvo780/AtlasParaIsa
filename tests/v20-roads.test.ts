@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
 import { publicGeologyKey, type ChemicalFormulaView, type CompoundLot } from '../src/shared/chemistry.js';
 import {
-  cloneWorld, closeFaunaParallelPools, closePolicyGpuBatchers,
+  cloneWorld, closePolicyGpuBatchers,
   createWorld, projectWorld, roadEffortFactor, stepWorld, tileAt, type World,
 } from '../src/world/index.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
@@ -20,7 +20,6 @@ import { proyectoInvestigacion } from './lib/escenas.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });
 

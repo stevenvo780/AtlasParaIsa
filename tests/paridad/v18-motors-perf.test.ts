@@ -1,7 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { stringifyExact } from '../../src/shared/exact-json.js';
-import { bindWorldContext, closeFaunaParallelPools, closePolicyGpuBatchers, createWorld, projectWorld, stepWorld, worldContext, type World } from '../../src/world/index.js';
+import { bindWorldContext, closePolicyGpuBatchers, createWorld, projectWorld, stepWorld, worldContext, type World } from '../../src/world/index.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { DEFAULT_PARAMS, parseParams, setParams } from '../../src/world/params.js';
@@ -9,7 +9,6 @@ import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
 
 after(async () => {
   await closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
   await closeEcosystemWorkers();
 });
 

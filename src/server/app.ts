@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closeFaunaParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
@@ -431,7 +431,7 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
 }
 
 /**
- * Suelta las cuatro piscinas de proceso (GPU de políticas, fauna, personas, ecología).
+ * Suelta las piscinas de proceso (GPU de políticas y ecología).
  * Son globales: un `createApp` que avanzó con `motor.hilos > 1` o con GPU las deja vivas
  * aunque el llamador solo cierre el HTTP. Cada cierre es idempotente. Un rechazo no se traga
  * en silencio ni impide intentar las demás.
@@ -440,7 +440,6 @@ export async function cerrarPiscinasDeComputo(): Promise<void> {
   const errores: unknown[] = [];
   const paso = async (fn: () => unknown) => { try { await fn(); } catch (error) { errores.push(error); } };
   await paso(() => closePolicyGpuBatchers());
-  await paso(() => closeFaunaParallelPools());
   await paso(() => closeEcosystemWorkers());
   if (errores.length === 1) throw errores[0];
   if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');

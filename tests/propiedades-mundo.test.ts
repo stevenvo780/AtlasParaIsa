@@ -3,14 +3,14 @@ import { after, test } from 'node:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
-import { createWorld, stepWorld, closeFaunaParallelPools, closePolicyGpuBatchers } from '../src/world/index.js';
+import { createWorld, stepWorld, closePolicyGpuBatchers } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { parseParams } from '../src/world/params.js';
 import { comprobarInvariantes, crearComprobador } from '../src/world/invariantes.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { propiedad } from './lib/propiedades.js';
 
-after(async () => { await Promise.all([closeFaunaParallelPools(), closePolicyGpuBatchers(), closeEcosystemWorkers()]); });
+after(async () => { await Promise.all([closePolicyGpuBatchers(), closeEcosystemWorkers()]); });
 
 propiedad('mundos pequeños aleatorios preservan las invariantes en cada paso, T=1 sin GPU',
   { casos: 4, semilla: 230024, repeticiones: 3 },

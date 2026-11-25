@@ -56,9 +56,11 @@ export interface WorldParams {
    * (o donde bebió) cuando la sed prevista AL LLEGAR —sed actual − agua que lleva + sed del camino— supera este
    * umbral, en vez de explorar al azar; el recuerdo se olvida al verlo seco. 1 = nunca (hoy: ni recuerda ni vuelve). */
   agua: { cuencas: number; memoria: number };
-  /** T102: configuración reservada; todavía no selecciona otro backend. T148: `depuracion` activa la guardia
-   * de solo lectura de la fase de decisión (`src/world/paralelo/guardia.ts`). Es diagnóstico: no cambia la
-   * dinámica y no entra en el digesto canónico. */
+  /** T102: configuración reservada; todavía no selecciona otro backend. T148: `depuracion` activa las
+   * comprobaciones de la tabla de organismos (`soa/organismos.ts`: qué hilo escribió cada fila y el sello del frente
+   * publicado). Es diagnóstico: no cambia la dinámica y no entra en el digesto canónico. `particionarPersonas` no tiene
+   * efecto desde V23 (el motor de personas por particiones se retiró): se conserva porque está en el digesto canónico
+   * de los mundos guardados y de los digestos dorados, con su valor (true en los mundos abiertos). */
   motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial'; depuracion: boolean };
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */

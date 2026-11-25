@@ -188,7 +188,8 @@ export type Fisica = typeof FISICA;
 /** Unidades base de cada órgano. La hoja es la planta de la caja validada; el fruto es semilla (lípido, proteína y
  * fósforo orgánico, sin madera); el tronco es madera. Su composición distinta es lo que permite leerlos por separado. */
 const PARTES = {
-  hoja: [['madera', 20], ['CH2', 2], ['proteina', 2], ['orgP', 1]],
+  // CaHPO₄: el calcio y el fósforo mineral de la hoja (pp2-fauna), del CaCO₃ y el fosfato del suelo; de él hace hueso la fauna.
+  hoja: [['madera', 20], ['CH2', 2], ['proteina', 2], ['orgP', 1], ['CaHPO4', 1]],
   fruto: [['CH2', 4], ['proteina', 1], ['orgP', 1]],
   tronco: [['madera', 1]],
 } as const satisfies Record<string, readonly (readonly [keyof BaseMundo, number])[]>;
@@ -445,8 +446,8 @@ export function plantillasMundo(q: ServicioQuimico, S: BaseMundo, registro: Regi
   };
   const variantes = (o: Organo): Variante[] => {
     const out: Variante[] = [];
-    for (const f of fosfatos) for (const n of nitrogenos) {
-      const v = crear(o, [...new Set([S.CO2, S.H2O, n, f])]);
+    for (const f of fosfatos) for (const n of nitrogenos) for (const ca of [[], [S.CaCO3]]) {
+      const v = crear(o, [...new Set([S.CO2, S.H2O, n, f, ...ca])]);
       if (v && !out.some((x) => x.p.id === v.p.id)) out.push(v);
     }
     return out;

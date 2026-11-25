@@ -163,8 +163,12 @@ test('un cadáver que yace en una tesela vuelve a su suelo: su masa baja, el sue
   const cadaver = A.nuevo(Rol.Cadaver, m.celda[i]!, 0);
   A.moverParte(m.vida[i]!, cadaver, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
   const masa0 = A.vista(cadaver).masa, proteina0 = A.cuantos(cadaver, m.S.proteina), orgP0 = A.cuantos(cadaver, m.S.orgP);
-  const atomosSuelo = (k: number) => { let n = 0; for (const id of [...m.especies(m.suelo[i]!)]) n += A.cuantos(m.suelo[i]!, id) * q.sustancia(id).atomos[k]!; return n; };
-  const p0 = atomosSuelo(P);
+  const atomosEn = (lote: number, k: number): number => {
+    let n = 0;
+    for (const id of m.especies(lote)) n += A.cuantos(lote, id) * q.sustancia(id).atomos[k]!;
+    return n;
+  };
+  const suelo = m.suelo[i]!, p0 = atomosEn(suelo, P), pCadaver0 = atomosEn(cadaver, P);
   assert.ok(masa0 > 0 && proteina0 > 1000 && orgP0 > 1000);
   m.plegar(tot);
   assert.ok(exacto());
@@ -173,7 +177,7 @@ test('un cadáver que yace en una tesela vuelve a su suelo: su masa baja, el sue
   const queda = A.vista(cadaver).masa / masa0, esperado = Math.exp(-1 / m.params.fisica.incorporacionCadaver);
   assert.ok(Math.abs(queda - esperado) < 0.02, `queda ${queda.toFixed(4)} de la masa (se espera ${esperado.toFixed(4)})`);
   // El P no es gas ni se lo lleva nadie de noche: el que perdió el cadáver está en el suelo, átomo por átomo.
-  assert.equal(atomosSuelo(P) - p0, orgP0 - A.cuantos(cadaver, m.S.orgP));
+  assert.equal(atomosEn(suelo, P) - p0, pCadaver0 - atomosEn(cadaver, P));
   // Con el tiempo no queda nada y el lote se libera.
   m.params.fisica.incorporacionCadaver = 0.01;
   for (let k = 0; k < 40 && A.vivo(cadaver); k++) { m.prepararPaso(); m.pasar({ dt: 60, luz: 0, lluvia: false }); m.plegar(tot); }

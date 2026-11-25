@@ -704,9 +704,9 @@ export function soltar(c: CtxLeyMateria, lote: LoteRef, celda: number): LoteRef 
 /** Golpe recibido (`DATO_GOLPEAR`): desprende tejido con la ley de romper hacia un lote nuevo (carne) que devuelve, y
  * baja la salud en lo desprendido. REF_NULA si el golpe no arrancó nada. La carne nace ligada al organismo (celda −1):
  * quien aplica el golpe la deja en el suelo con `soltar` o se la da a quien golpeó. */
-export function herir(c: CtxLeyMateria, cuerpo: Cuerpo, golpe: Float64Array): LoteRef {
+export function herir(c: CtxLeyMateria, cuerpo: Cuerpo, golpe: Float64Array, fraccionEnlaces?: number): LoteRef {
   const a = c.materia, carne = a.nuevo(Rol.Objeto, -1, 0);
-  const { cuantos } = romper(a, c.quimica, cuerpo.tejido, carne, golpe, pasoDe(c).azar);
+  const { cuantos } = romper(a, c.quimica, cuerpo.tejido, carne, golpe, pasoDe(c).azar, fraccionEnlaces);
   if (cuantos > 0) return carne;
   a.liberar(carne);
   return REF_NULA;

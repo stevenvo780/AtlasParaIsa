@@ -6,9 +6,14 @@ import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, distanciaGenetica, elegirFaunaV23, habituar, huella, miedoDe,
   rendimientoPresa, velocidadDe, vidaMaxima, type AgenteVisto, type CeldaVista, type PercepcionFaunaV23, type YoFauna,
 } from '../src/world/decision/fauna.js';
-import { FUNDADORES, genomaFundador } from '../src/world/ley-fauna.js';
+import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
+import { createWorld, stepWorld } from '../src/world/index.js';
+import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
+import { concebir, gestar, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
+import { Parte } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
-import type { CtxLey } from '../src/world/motor/acceso.js';
+import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
+import { DATO_GOLPEAR } from '../src/world/motor/contratos.js';
 
 const azarFijo = (): (() => number) => { let s = 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 
@@ -110,6 +115,68 @@ test('la alarma sube en la celda, cae con la distancia y decae sola', () => {
   assert.ok(Math.abs(alarmaEn(c1, centro) - Math.exp(-1)) < 1e-12);
   subirAlarma(c1, centro, 0.5);
   assert.ok(Math.abs(alarmaEn(c1, centro) - (Math.exp(-1) + 0.5)) < 1e-12);
+});
+
+test('F5 aplica un golpe local con intentos apagados y la muerte conserva la materia', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [presa, otra] = mundo.animals;
+  assert.ok(presa?.cuerpo && otra?.cuerpo && presa.uid && mundo.people[0]?.uid);
+  const golpe = new Float64Array(5);
+  golpe[DATO_GOLPEAR.trabajo] = 1e10;
+  golpe[DATO_GOLPEAR.dureza] = 1;
+  golpearAnimal(c, c.ref(mundo.people[0].uid), c.ref(presa.uid), golpe);
+  leyFauna.F5!(c);
+  assert.equal(mundo.animals.includes(presa), false);
+  assert.equal(mundo.animalDynamics.humanHunts, 1);
+
+  const masa = Math.round(masaDe(c, otra.cuerpo) * 10) / 10;
+  matarAnimal(c, otra, 'senescencia');
+  assert.ok(mundo.events.some(e => e.kind === 'animal' && e.actors.includes(otra.id) && e.text.includes(`${masa} kg`)));
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('un embrión completo nace con su masa y cabe en la huella', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo, plantilla = plantillaDe(c, cuerpo);
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  const embrion = cuerpo.gestacion!.embrion;
+  const unidadKg = plantilla.partes.reduce((suma, t) => suma + c.quimica.sustancia(t.id).masa * t.nu, 0) / 1e6;
+  const unidades = Math.ceil(plantilla.m0 / unidadKg);
+  for (const { id, nu } of plantilla.partes) {
+    const cuantos = unidades * nu;
+    assert.equal(c.materia.moverParte(cuerpo.tejido, embrion, { parte: Parte.Exacta, esp: id, cuantos, kappa: null }), cuantos);
+  }
+  stepWorld(mundo);
+
+  const cria = mundo.animals.find(a => a.parents[0] === madre.id);
+  assert.ok(cria?.cuerpo);
+  assert.ok(masaDe(c, cria.cuerpo) > unidades * unidadKg);
+  assert.ok(c.materia.vista(cria.cuerpo.reserva).masa > 0);
+  assert.equal(mundo.animalDynamics.births, 1);
+  assert.deepEqual(leyFauna.comprobar!(c), []);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('el embrión sigue creciendo aunque consuma el último precursor disponible', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo;
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  for (const { id, nu } of plantillaDe(c, cuerpo).partes) {
+    assert.equal(c.materia.moverParte(cuerpo.tejido, cuerpo.digestivo, { parte: Parte.Exacta, esp: id, cuantos: nu, kappa: null }), nu);
+  }
+  const masa = gestar(c, cuerpo, 1);
+  assert.ok(masa > 0);
+  assert.equal(cuerpo.gestacion!.bajoBasalDesde, -1);
+  assert.equal(gestar(c, cuerpo, 1), masa);
+  assert.equal(cuerpo.gestacion!.bajoBasalDesde, c.tick);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
 test('I10: la ley de la fauna no lee especie ni linaje fundador', () => {

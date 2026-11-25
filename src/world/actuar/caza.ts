@@ -4,6 +4,7 @@ import { workEffort, performWork } from './trabajo.js';
 import { outcome } from '../decision/personas.js';
 import { type ElementVector, evaluateMaterialProperties, type CompoundLot, vectorMass } from '../../shared/chemistry.js';
 import { type Animal, isHerdAnimal, animalesVivosEnCelda } from '../animals.js';
+import { golpearAnimal } from '../ley-fauna.js';
 import { defaultChemistryState, formulaSignature, MAX_PERSON_COMPOUNDS, applyChemOperator } from '../chemistry.js';
 import { exertBody, assimilateFood } from '../body.js';
 import { HAMBRE_POR_UNIDAD } from '../ecologia-constantes.js';
@@ -188,10 +189,7 @@ export function cazarAnimal(c: CtxLeyMateria, person: Person, presa: Ref, trabaj
   const pagado = pagar(c, person.cuerpo, trabajoJ);
   if (!(pagado > 0)) return 0;
   const { golpe, util } = golpeDePersona(c, person, pagado);
-  const intento = { tipo: TipoIntento.Golpear, de: c.ref(person.uid ?? 0), a: presa, celda: -1, lote: REF_NULA,
-    nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null };
-  if (c.params.v23.intentos) c.buzon.enviar(duenoDe(c, presa), intento);
-  else leyFauna.aplicar?.Golpear?.(c, intento);
+  golpearAnimal(c, c.ref(person.uid ?? 0), presa, golpe);
   const celda = c.terreno.celda(person.x, person.y);
   if (util !== REF_NULA && celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo) {
     const desgaste = reparto(golpe, c.materia.vista(person.cuerpo.tejido)).util;

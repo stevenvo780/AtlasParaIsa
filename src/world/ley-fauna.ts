@@ -15,7 +15,7 @@ import type { AnimalView } from '../shared/life.js';
 import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, KAPPA_HUMANA, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
 import { ACTIONS, SPECIES, syncFauna, type Animal, type EstadoFauna } from './animals.js';
 import {
-  AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, elegirFaunaV23, huella, radioVista, velocidadDe,
+  AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, HUELLA_FORMA, decisionVacia, elegirFaunaV23, huella, radioVista, velocidadDe,
   vidaMaxima, type AgenteVisto, type CeldaVista, type DecisionFaunaV23, type PercepcionFaunaV23, type YoFauna,
 } from './decision/fauna.js';
 import type { Violacion } from './invariantes.js';
@@ -60,6 +60,9 @@ const sat01 = (n: number): number => n < 0 ? 0 : n > 1 ? 1 : n;
 const T_AGUA = 1, T_SUELO = 2, T_PRADERA = 3;
 const habitableEn = (codigo: number, acuatico: boolean): boolean => acuatico ? codigo === T_AGUA : codigo === T_SUELO || codigo === T_PRADERA;
 const ID_ANIMAL = /^animal-[a-zA-Z0-9-]{1,110}$/;
+/** Fracción de enlaces del fragmento que se cortan al desgarrar tejido. Pagar todos costaba ≈20 MJ/kg de tejido
+ * efectivo (1,7 g por mordisco de lobo); se calibra la superficie de la rotura en ≈20 kJ/kg. */
+const FRACTURA_TEJIDO = 1e-3;
 
 // ── Estado del dueño ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -69,19 +72,22 @@ interface Fila {
   /** Celda al empezar F4 y celda propuesta para el movimiento (−1 = se queda). */
   celda: number; destino: number; dx: number; dy: number;
   fertil: boolean;
+  /** m² con que este animal cuenta ahora en `Estado.ocupacion` de su celda (la de su masa en F2, o la de después de comer). */
+  huellaContada: number;
 }
 interface Campos { terreno: Col | null; comida: Col | null; agua: Col | null }
 interface Estado {
   filas: Map<Animal, Fila>;
   porSlot: Map<number, Fila>;
   plantillas: Map<string, Plantilla>;
-  /** J digeribles por unidad del campo `comida`, medidos en las celdas propias donde hay fauna (media del último F2). */
+  /** J de oxidación por unidad del campo `comida`, medidos en las celdas propias donde hay fauna (media del último F2). */
   jPorComida: number;
   /** m² ocupados por celda propia (Σ huellas de los animales de este dueño). */
   ocupacion: Map<number, number>;
   /** Agua bebible desde una celda de tierra por tener una vecina de agua, por tick. */
   aguaVecina: Map<number, number>;
   partos: Fila[];
+  mordiscos: Intento[];
   orden: Fila[];
   lotes: LotesCelda;
   buf: Float64Array;
@@ -92,7 +98,7 @@ function estado(c: CtxLey): Estado {
   let e = estados.get(c.mundo);
   if (!e) estados.set(c.mundo, e = {
     filas: new Map(), porSlot: new Map(), plantillas: new Map(), jPorComida: 0, ocupacion: new Map(), aguaVecina: new Map(),
-    partos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
+    partos: [], mordiscos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
     buf: new Float64Array(16), campos: null,
   });
   return e;
@@ -136,9 +142,10 @@ export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], lina
   const S = sustanciasDe(c), carn = qc * PASO_CARNIVORIA, masaAdulta = Math.exp(qm * PASO_LNMASA);
   const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA_HUMANA[2], KAPPA0];
   // Tejido animal: proteína (músculo, pelo), grasa (CH₂), agua y hueso (CaHPO₄). Se sintetiza de lo mismo que hay en el
-  // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄.
+  // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄. En masa: agua 61 %, proteína 20 %, grasa 10 %, mineral 9 %
+  // (un mamífero: 60/18/15/5). Con 3:2:10:1 el mineral era el 31 % y el calcio de la hoja no alcanzaba para un embrión.
   const p = crearPlantilla(c.quimica, c.globales.registro, {
-    partes: [{ id: S.proteina, nu: 3 }, { id: S.CH2, nu: 2 }, { id: S.H2O, nu: 10 }, { id: S.CaHPO4, nu: 1 }],
+    partes: [{ id: S.proteina, nu: 10 }, { id: S.CH2, nu: 10 }, { id: S.H2O, nu: 50 }, { id: S.CaHPO4, nu: 1 }],
     entradas: [S.proteina, S.CH2, S.H2O, S.CaHPO4, S.madera, S.NH3, S.H3PO4],
     subproductos: [S.CO2, S.O2],
     kappa, captura: 0, masaAdulta, m0: M0 * masaAdulta, linaje,
@@ -231,7 +238,7 @@ function cruzar(c: CtxLey, madre: readonly number[], genoma: Col, base: number):
 
 function nuevaFila(e: Estado, animal: Animal, ref: Ref): Fila {
   const f: Fila = { animal, ref, vista: vistaVacia(), percepcion: percepcionVacia(), yo: yoVacio(), decision: decisionVacia(),
-    celda: -1, destino: -1, dx: 0, dy: 0, fertil: false };
+    celda: -1, destino: -1, dx: 0, dy: 0, fertil: false, huellaContada: 0 };
   e.filas.set(animal, f);
   e.porSlot.set(slotDe(ref), f);
   return f;
@@ -334,14 +341,15 @@ function percibir(c: CtxLeyMateria, e: Estado, f: Fila): void {
   p.carronaJ = 0;
   if (propia(c, miCelda)) {
     const n = c.materia.lotes(miCelda, Rol.Cadaver, e.buf);
-    for (let i = 0; i < Math.min(n, e.buf.length); i++) p.carronaJ += c.materia.vista(e.buf[i]!).digerible;
+    for (let i = 0; i < Math.min(n, e.buf.length); i++) p.carronaJ += c.materia.vista(e.buf[i]!).energia;
   }
 }
 const agenteVacio = (): AgenteVisto => ({ ref: REF_NULA, uid: 0, persona: false, x: 0, y: 0, d: 0, masa: 0, carnivoria: 0,
   velocidad: 0, defensa: 0, pareja: false });
 const celdaVacia = (): CeldaVista => ({ celda: -1, x: 0, y: 0, d: 0, comida: 0, agua: 0, habitable: false, libre: 0 });
 
-/** J digeribles por unidad de `comida`: se mide en las celdas propias donde hay fauna, con la vista de su lote Vida. */
+/** J de oxidación por unidad de `comida`. `digerible` usa κ₀, que deja la carne en ≈ 1 J/kg antes de ponderar la dieta
+ * y hace que perseguir incluso a una presa contigua cueste más que comerla. */
 function medirPasto(c: CtxLeyMateria, e: Estado): void {
   const cols = campos(c, e);
   if (!cols.comida) return;
@@ -355,7 +363,7 @@ function medirPasto(c: CtxLeyMateria, e: Estado): void {
     if (!(q > 0)) continue;
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
     if (vida === REF_NULA || !c.materia.vivo(vida)) continue;
-    j += c.materia.vista(vida).digerible; comida += q;
+    j += c.materia.vista(vida).energia; comida += q;
   }
   if (comida > 0) e.jPorComida = j / comida;
 }
@@ -378,21 +386,33 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   yo.hambre = v.hambre; yo.sed = v.sed; yo.reservaRel = v.energia; yo.reservaJ = reservaJ(c, cu);
   yo.habituacion = fa.habituacion; yo.sobresalto = sobresaltoActual(fa, c.tick);
   const vt = c.materia.vista(cu.tejido);
-  yo.jPorKgCarne = vt.masa > 0 ? vt.digerible / vt.masa : 0;
+  yo.jPorKgCarne = vt.masa > 0 ? vt.energia / vt.masa : 0;
   // Fértil: reserva para pagar la cría. Ese coste es ≈ 2,3 veces la reserva llena (M0·Q_tejido / (η·RESERVA_OBJETIVO_J_KG),
   // la misma para toda la fauna), así que un adulto que puede criar sigue con hambre hasta reunirla, como la gestante de
   // `natalidad.ts` (`provisionCrianza`): sin esto comía solo hasta la reserva llena y ninguno llegaba nunca a fértil.
   const coste = costeCria(c, f, plantillaDe(c, cu));
   f.fertil = coste > 0 && yo.reservaJ >= coste;
   if (coste > 0 && !f.fertil) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / coste);
+  // Gestante: el embrión se hace con lo que hay en el tubo (el hueso y la proteína no se guardan en la reserva), así que
+  // la madre sigue con hambre hasta completarlo. Sin esto descansaba saciada con el tubo vacío y el embrión no crecía.
+  const g = cu.gestacion;
+  if (g) yo.hambre = Math.max(yo.hambre, 1 - c.materia.vista(g.embrion).masa / plantillaDe(c, cu).m0);
   yo.fertil = f.fertil;
 }
 
 // ── F4: actuar ────────────────────────────────────────────────────────────────────────────────────────────
 
 function enviar(c: CtxLey, a: Ref, i: Omit<Intento, 'a'>): void {
-  const slot = slotDe(a), dueno = c.frente.dueno[slot] ?? -1;
+  const dueno = c.frente.dueno[slotDe(a)] ?? -1;
   c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { ...i, a });
+}
+
+export function golpearAnimal(c: CtxLeyMateria, de: Ref, presa: Ref, golpe: Float64Array): void {
+  const i: Intento = { tipo: TipoIntento.Golpear, de, a: presa, celda: -1, lote: REF_NULA,
+    nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null };
+  const dueno = c.frente.dueno[slotDe(presa)]!;
+  if (c.params.v23.intentos) c.buzon.enviar(dueno, i);
+  else if (dueno === c.hilo) estado(c).mordiscos.push(i);
 }
 
 /** Un mordisco de un tick de contacto: trabajo pagado con la reserva, filo y esbeltez de dientes y garras según la
@@ -404,32 +424,34 @@ function morder(c: CtxLeyMateria, f: Fila, presa: Ref): void {
   const vt = c.materia.vista(cu.tejido), golpe = new Float64Array(5);
   golpe[DATO_GOLPEAR.trabajo] = trabajo; golpe[DATO_GOLPEAR.filo] = carn; golpe[DATO_GOLPEAR.tenacidad] = vt.tenacidad;
   golpe[DATO_GOLPEAR.esbeltez] = carn; golpe[DATO_GOLPEAR.dureza] = Math.max(vt.dureza, carn);
-  enviar(c, presa, { tipo: TipoIntento.Golpear, de: f.ref, celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null });
+  golpearAnimal(c, f.ref, presa, golpe);
 }
 
-/** Come de los lotes `rol` de su celda propia lo que quepa en el tubo y deje pasar la boca en un tick. */
-function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol): void {
+/** Come de los lotes `rol` de su celda propia lo que quepa en el tubo, deje pasar la boca en un tick y no pase de `tope`
+ * kg (el área libre de la celda). Devuelve los kg comidos. */
+function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol, tope: number): number {
   const cu = f.animal.cuerpo!, masa = f.vista.masa;
-  let libre = CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa;
+  let libre = Math.min(tope, CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa);
   let boca = TASA_INGESTA * masa ** 0.75;
-  if (!(libre > 0)) return;
+  if (!(libre > 0)) return 0;
   if (rol === Rol.Vida) {
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
-    if (vida !== REF_NULA) ingerirSelecto(c, cu, vida, Math.min(libre, boca));
-    return;
+    return vida !== REF_NULA ? ingerirSelecto(c, cu, vida, Math.min(libre, boca)) : 0;
   }
   const n = Math.min(c.materia.lotes(celda, rol, e.buf), e.buf.length);
+  let comido = 0;
   for (let i = 0; i < n && libre > 0 && boca > 0; i++) {
     const kg = ingerirSelecto(c, cu, e.buf[i]!, Math.min(libre, boca));
-    libre -= kg; boca -= kg;
+    libre -= kg; boca -= kg; comido += kg;
   }
+  return comido;
 }
 
 /** Come de una celda ajena: `Tomar` de su lote `rol` lo digerible para su κ; llega al tubo con el `Concedido`. */
-function comerAjeno(c: CtxLeyMateria, f: Fila, celda: number, rol: Rol): void {
+function comerAjeno(c: CtxLeyMateria, f: Fila, celda: number, rol: Rol, tope: number): number {
   const cu = f.animal.cuerpo!, masa = f.vista.masa;
-  const kg = Math.min(CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa, TASA_INGESTA * masa ** 0.75);
-  if (!(kg > 0)) return;
+  const kg = Math.min(tope, CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa, TASA_INGESTA * masa ** 0.75);
+  if (!(kg > 0)) return 0;
   const pd = pedidoComida(c, cu, kg), dato = new Float64Array(DATO_TOMAR.kappa + 4);
   dato[DATO_TOMAR.rol] = rol; dato[DATO_TOMAR.parte] = pd.parte; dato[DATO_TOMAR.esp] = pd.esp;
   dato[DATO_TOMAR.cuantos] = pd.cuantos; dato[DATO_TOMAR.loteDestino] = cu.digestivo;
@@ -438,12 +460,13 @@ function comerAjeno(c: CtxLeyMateria, f: Fila, celda: number, rol: Rol): void {
   const dueno = c.terreno.duenoChunk[c.terreno.chunkDe(celda)] ?? -1;
   c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { tipo: TipoIntento.Tomar, de: f.ref, a: REF_NULA, celda, lote: REF_NULA,
     nonce: c.id('nonce'), materia: null, dato, bytes: null });
+  return kg;
 }
 
 /** Bebe del agua de su celda o, en tierra, de la de una vecina propia (orilla). */
-function beberAqui(c: CtxLeyMateria, e: Estado, f: Fila, celda: number): void {
+function beberAqui(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, tope: number): void {
   const cu = f.animal.cuerpo!, masa = f.vista.masa;
-  const kg = Math.min(TASA_BEBER * masa ** 0.75, f.vista.sed * masa * AGUA_CORPORAL);
+  const kg = Math.min(tope, TASA_BEBER * masa ** 0.75, f.vista.sed * masa * AGUA_CORPORAL);
   if (!(kg > 0)) return;
   const aqui = lotesDeCelda(c, celda, e.lotes).agua;
   let bebido = aqui !== REF_NULA ? beber(c, cu, aqui, kg) : 0;
@@ -476,7 +499,7 @@ function proponer(c: CtxLeyMateria, e: Estado, f: Fila, pasos: number): void {
 function moverse(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const a = f.animal, fa = a.fauna!;
   if (f.destino < 0) return;
-  const h = huella(f.vista.masa), ocupado = e.ocupacion.get(f.destino) ?? 0;
+  const h = f.huellaContada, ocupado = e.ocupacion.get(f.destino) ?? 0;
   if (ocupado + h > AREA_CELDA) return;
   const dist = Math.abs(f.dx - a.x) + Math.abs(f.dy - a.y), coste = C_MOVER * (f.vista.masa + f.vista.carga) * dist;
   if (f.yo.reservaJ < coste) { fa.avance = 0; return; }
@@ -497,7 +520,9 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
   if (cu.gestacion) {
     const masa = gestar(c, cu, 1), g = cu.gestacion;
     if (g && masa >= plantillaDe(c, cu).m0) e.partos.push(f);
-    else if (g && g.bajoBasalDesde >= 0 && c.tick - g.bajoBasalDesde >= DIAS_ABORTO * TICKS_PER_DAY) abortar(c, cu);
+    // El aborto devuelve el embrión al digestivo de la madre: espera a que su masa quepa en la celda.
+    else if (g && g.bajoBasalDesde >= 0 && c.tick - g.bajoBasalDesde >= DIAS_ABORTO * TICKS_PER_DAY
+      && c.materia.vista(g.embrion).masa <= margenKg(c, e, f, f.celda)) { abortar(c, cu); contarHuella(e, f, f.celda, masaDe(c, cu)); }
   }
   fa.miedo = d.miedo; fa.habituacion = d.habituacion; fa.huyeDe = d.huyeDe; fa.persigue = d.presaUid; fa.pareja = d.pareja;
   // Contacto con la presa (posiciones del frente): muerde y no se mueve este tick.
@@ -522,18 +547,37 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
   if (pasos > 0) proponer(c, e, f, pasos);
 }
 
-/** Tras moverse: come o bebe en la celda donde quedó, si es lo que decidió. */
+/** kg que el cuerpo puede ganar (comer, beber, recibir el embrión de un aborto) sin que la huella de su celda pase del
+ * área: lo que queda libre más lo que ya cuenta él, menos un gramo por el redondeo a cuantos. */
+function margenKg(c: CtxLeyMateria, e: Estado, f: Fila, celda: number): number {
+  const libre = AREA_CELDA - (e.ocupacion.get(celda) ?? 0) + f.huellaContada;
+  return libre > 0 ? Math.max(0, (libre / HUELLA_FORMA) ** 1.5 - masaDe(c, f.animal.cuerpo!) - 1e-3) : 0;
+}
+/** Pone en `Estado.ocupacion` la huella de la masa `masa` del animal en su celda en lugar de la que contaba. */
+function contarHuella(e: Estado, f: Fila, celda: number, masa: number): void {
+  const h = huella(masa);
+  e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) - f.huellaContada + h);
+  f.huellaContada = h;
+}
+
+/** Tras moverse: come o bebe en la celda donde quedó, si es lo que decidió, sin pasar del área libre de la celda; la
+ * huella que gana queda contada para quien coma después en la misma celda. */
 function alimentarse(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const a = f.animal, d = f.decision, celda = c.terreno.celda(a.x, a.y);
   if (celda < 0) return;
-  const mia = propia(c, celda);
-  if (d.accion === 'drink') { if (mia) beberAqui(c, e, f, celda); return; }
-  if (d.accion !== 'graze' && d.accion !== 'hunt') return;
-  const carn = sat01(a.fauna!.genoma[GEN.carnivoria] ?? 0);
-  if (!mia) { comerAjeno(c, f, celda, carn >= 0.5 ? Rol.Cadaver : Rol.Vida); return; }
-  // Carne primero si la hay y la digiere mejor que la hierba; si no, la vegetación de la celda.
-  if (carn > 0 && c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0) comer(c, e, f, celda, Rol.Cadaver);
-  if (d.accion === 'graze' && carn < 1) comer(c, e, f, celda, Rol.Vida);
+  const mia = propia(c, celda), tope = margenKg(c, e, f, celda);
+  if (!(tope > 0)) return;
+  if (d.accion === 'drink') { if (mia) beberAqui(c, e, f, celda, tope); }
+  else if (d.accion === 'graze' || d.accion === 'hunt') {
+    const carn = sat01(a.fauna!.genoma[GEN.carnivoria] ?? 0);
+    // De una celda ajena la comida llega luego (`Concedido`): su huella se cuenta ya, como si hubiera llegado.
+    if (!mia) { contarHuella(e, f, celda, masaDe(c, a.cuerpo!) + comerAjeno(c, f, celda, carn >= 0.5 ? Rol.Cadaver : Rol.Vida, tope)); return; }
+    // Carne primero si la hay y la digiere mejor que la hierba; si no, la vegetación de la celda.
+    let queda = tope;
+    if (carn > 0 && c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0) queda -= comer(c, e, f, celda, Rol.Cadaver, queda);
+    if (d.accion === 'graze' && carn < 1 && queda > 0) comer(c, e, f, celda, Rol.Vida, queda);
+  } else return;
+  contarHuella(e, f, celda, masaDe(c, a.cuerpo!));
 }
 
 /** Copia a los campos de hoy lo que el cliente y las leyes heredadas aún leen del animal. */
@@ -584,18 +628,39 @@ function causaDeMuerte(c: CtxLeyMateria, f: Fila): string {
   return c.tick - a.bornAt > vidaMaxima(plantillaDe(c, cu).masaAdulta) ? 'senescencia' : '';
 }
 
+const AQUI_Y_VECINAS: readonly (readonly [number, number])[] = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]];
+
+/** Parto: la cría nace en la celda de la madre o en una vecina donde quepa su huella; si no cabe en ninguna, el parto
+ * espera (el embrión ya no crece y `gestar` lo vuelve a dar por listo en el tick siguiente). */
 function nacer(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const madre = f.animal, cu = madre.cuerpo!, g = cu.gestacion;
   if (!g) return;
+  const acuaticoCria = (g.genoma[GEN.acuatico] ?? 0) > 0.5;
+  const masaEmbrion = c.materia.vista(g.embrion).masa;
+  // El parto transfiere también parte de la reserva. La fracción sin redondear acota la masa por arriba.
+  const fraccion = masaEmbrion / (masaEmbrion + c.materia.vista(cu.tejido).masa);
+  const hCria = huella(masaEmbrion + fraccion * c.materia.vista(cu.reserva).masa);
+  const cols = campos(c, e);
+  let donde = -1, x = madre.x, y = madre.y;
+  for (const [dx, dy] of AQUI_Y_VECINAS) {
+    const celda = c.terreno.celda(madre.x + dx, madre.y + dy);
+    if (!propia(c, celda) || !habitableEn(cols.terreno?.[celda] ?? 0, acuaticoCria)) continue;
+    if ((e.ocupacion.get(celda) ?? 0) + hCria > AREA_CELDA) continue;
+    donde = celda; x = madre.x + dx; y = madre.y + dy;
+    break;
+  }
+  if (donde < 0) return;
   const genoma = g.genoma.slice(), otro = g.otro, linaje = plantillaDe(c, cu).linaje;
   const cria = parir(c, cu);
+  contarHuella(e, f, c.terreno.celda(madre.x, madre.y), masaDe(c, cu));
+  e.ocupacion.set(donde, (e.ocupacion.get(donde) ?? 0) + huella(masaDe(c, cria)));
   // El embrión se sintetizó con la plantilla de la madre (el mismo tejido para toda la fauna); su masa adulta y su κ
   // son las de su propio genoma.
   cria.plantilla = plantillaFauna(c, genoma, linaje).id;
   const uid = c.id('uid');
   const padre = c.idDe(otro);
   const parents = [madre.id, padre !== undefined && padre !== madre.id && ID_ANIMAL.test(padre) ? padre : `animal-u${otro}`];
-  const hijo = animalNuevo(c, { uid, x: madre.x, y: madre.y, genoma, cuerpo: cria, linaje, generation: madre.generation + 1, parents });
+  const hijo = animalNuevo(c, { uid, x, y, genoma, cuerpo: cria, linaje, generation: madre.generation + 1, parents });
   madre.lastBirth = c.tick; madre.lastBirthAge = Math.max(0, c.tick - madre.bornAt);
   c.mundo.animals.push(hijo);
   c.mundo.animalDynamics.births++;
@@ -624,13 +689,13 @@ function aplicarGolpear(cl: CtxLey, i: Intento): Aplicado {
   const golpe = Float64Array.from(i.dato);
   golpe[DATO_GOLPEAR.trabajo] = golpe[DATO_GOLPEAR.trabajo]! / (1 + sat01(fa.genoma[GEN.defensa] ?? 0));
   const masa = masaDe(c, cu), celda = c.terreno.celda(a.x, a.y);
-  const carne = herir(c, cu, golpe);
+  const carne = herir(c, cu, golpe, FRACTURA_TEJIDO);
   let arrancado = 0;
   if (carne !== REF_NULA && c.materia.vivo(carne)) {
     arrancado = c.materia.vista(carne).masa;
     // La carne arrancada cae a su celda como un trozo de cadáver.
     if (celda >= 0) {
-      const trozo = c.materia.nuevo(Rol.Cadaver, celda, 0);
+      const trozo = c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0 ? e.buf[0]! : c.materia.nuevo(Rol.Cadaver, celda, 0);
       c.materia.moverParte(carne, trozo, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
       c.materia.liberar(carne);
     }
@@ -737,7 +802,8 @@ export const leyFauna: Ley = {
     for (const f of e.filas.values()) {
       vistaCuerpo(c, f.animal.cuerpo!, f.vista);
       const celda = c.terreno.celda(f.animal.x, f.animal.y);
-      if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + huella(f.vista.masa));
+      f.huellaContada = celda >= 0 ? huella(f.vista.masa) : 0;
+      if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + f.huellaContada);
     }
     // Quien aún no tiene fila (un chunk que vuelve del archivo: el alta llega en F4) ya ocupa su celda: si no contara,
     // otro podría entrar en ella este tick y la huella pasaría del área.
@@ -766,6 +832,9 @@ export const leyFauna: Ley = {
   },
   F5(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c);
+    // Antes de encender intentos, F5 resuelve los mordiscos locales que no pasan por la cola A.
+    for (const i of e.mordiscos) aplicarGolpear(c, i);
+    e.mordiscos.length = 0;
     for (const f of [...e.filas.values()]) {
       const causa = causaDeMuerte(c, f);
       if (!causa) continue;

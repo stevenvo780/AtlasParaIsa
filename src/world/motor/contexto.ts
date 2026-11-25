@@ -39,7 +39,7 @@ import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  Clase, REF_NULA, TipoIntento, genDe, refDe, slotDe,
+  Clase, REF_NULA, TipoIntento, genDe, slotDe,
   type Buzon, type ChunkId, type FrenteEscritura, type FrentePublico, type Globales, type Hilo, type Intento, type Ref, type Slot,
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
@@ -566,24 +566,12 @@ export class Dueno implements CtxF0 {
   publicarFilas(): void {
     const m = this.mundo, organismos = this.organismos, terreno = this.terrenoPercibido;
     const faunaHeredada = !this.params.v23.fauna;
-    organismos.fauna.sincronizar(faunaHeredada ? m.animals : []);
-    if (!faunaHeredada) this.#retirarFilasFaunaAusente();
+    organismos.fauna.sincronizar(m.animals);
     organismos.escribir(m.tick, faunaHeredada ? { celda: (x, y) => terreno.celda(x, y), chunkDe: c => c >> 8 } : undefined, m.people);
     const w = this.escritura, chunk = w.i32('chunk');
     for (const [slot, p] of organismos.personas.mapa) {
       const celda = terreno.celda(p.x, p.y);
       chunk[slot] = celda < 0 ? -1 : celda >> 8;
-    }
-  }
-
-  #retirarFilasFaunaAusente(): void {
-    const presentes = new Set(this.mundo.animals.map(a => a.uid));
-    const frente = this.frente, vivo = this.escritura.u8('vivo'), gen = this.escritura.i32('gen');
-    for (let s = 0; s < frente.alta; s++) {
-      if (frente.vivo[s] && frente.clase[s] === Clase.Animal && frente.dueno[s] === this.hilo
-        && vivo[s] && gen[s] === frente.gen[s] && !presentes.has(frente.uid[s])) {
-        this.organismos.tabla.baja(this.hilo, refDe(s, frente.gen[s]!));
-      }
     }
   }
 

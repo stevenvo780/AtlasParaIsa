@@ -322,7 +322,7 @@ export const decisionVacia = (): DecisionFaunaV23 => ({
   accion: 'rest', tx: 0, ty: 0, razon: '', presa: -1, presaUid: 0, pareja: 0, huyeDe: 0, miedo: 0, habituacion: 0,
 });
 
-/** J esperados de cazar a `p`: energía digerible de su masa para el κ propio − coste de perseguirla − riesgo
+/** J esperados de cazar a `p`: energía química de su masa ponderada por la carnivoría − coste de perseguirla − riesgo
  * (leyes-opus §3e, ley 3). La persecución cuesta C_MOVER·masa·d, más cuanto más rápida sea la presa. */
 export function rendimientoPresa(yo: YoFauna, p: AgenteVisto): number {
   const carn = sat01(yo.genoma[GEN.carnivoria] ?? 0);

@@ -6,7 +6,8 @@
  *   comparar  a b                                                          primera diferencia entre dos huellas
  *   fases     [--pasos 60] [--lado 64] [--cada 10]                          ms por fase y reacciones evaluadas/aplicadas
  *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10]          µs por tesela y tick (calentamiento en un hilo)
- *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] --salida dir   vistas tras cada día pedido, por K
+ *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] [--mapa 1] [--grupo vida|cinetica|intercambio] --salida dir
+ *             vistas tras cada día pedido, por K (con --grupo, solo ese grupo de procesos cada K ticks y el resto cada tick)
  *   errores   dir                                                          tabla de error frente a K = 1 (y ruido de semilla)
  *   arder     [--k 1,10,60,120]                                           un lote de fuego 120 ticks con pasos de K ticks
  */
@@ -232,19 +233,79 @@ async function velocidad(): Promise<void> {
 
 const CAMPOS = ['drinkingWater', 'moisture', 'vegetation', 'food', 'wood'] as const;
 
+type Grupo = 'vida' | 'cinetica' | 'intercambio';
+
+/** Lluvia del bloque de 600 ticks de t: el mismo sorteo que `tiempo`, por bloque, para pedirlo con cualquier ventana. */
+function lluvias(semilla: number): (t: number) => boolean {
+  const clima = tiempo(semilla), bloques: boolean[] = [];
+  return (t) => {
+    const b = Math.floor(t / 600);
+    while (bloques.length <= b) bloques.push(clima(600 * bloques.length, 600).lluvia);
+    return bloques[b]!;
+  };
+}
+
+/**
+ * `pasarPagina` con un grupo de procesos cada K ticks (dt = K, con la luz media de su ventana) y los demás cada tick:
+ * vida (crecer y caer), cinética (pasoLote de suelo, agua y aire, y el termostato que se lleva su calor) o intercambio
+ * (suelo–aire, charca–suelo, vapor y posar). Así se ve qué procesos aguantan qué K.
+ */
+function paginaMixta(m: MundoMaterial, p: number, t: number, K: number, grupo: Grupo, lluvia: (t: number) => boolean): void {
+  const x = m as unknown as Privado, c = m.ctx, a = m.aire[p]!, i0 = m.inicio[p]!, i1 = m.inicio[p + 1]!;
+  const ventana = (g: Grupo): Forzamiento | null => {
+    const k = g === grupo ? K : 1;
+    return t % k === 0 ? { dt: k, luz: luzMedia(t, k), lluvia: lluvia(t) } : null;
+  };
+  x.semilla = x.estadoAzar[p]!;
+  const fv = ventana('vida'), fc = ventana('cinetica'), fi = ventana('intercambio');
+  if (fv) for (let i = i0; i < i1; i++) { x.crecer(i, a, fv); x.caer(i, fv.dt); }
+  if (fc) {
+    for (let i = i0; i < i1; i++) {
+      pasoLote(c, m.suelo[i]!, fc.dt, SUELO);
+      if (m.agua[i]! >= 0) pasoLote(c, m.agua[i]!, fc.dt, SIN);
+    }
+    pasoLote(c, a, fc.dt, SIN);
+  }
+  if (fi) {
+    const T = m.temperatura(p, fi.luz), Taire = fi.lluvia ? T - DT_LLUVIA : T, capAire = 100 * (i1 - i0);
+    for (let i = i0; i < i1; i++) {
+      x.intercambiar(m.suelo[i]!, a, 1, 10, capAire, fi.dt, T);
+      if (m.agua[i]! >= 0) fluir(c, m.agua[i]!, m.suelo[i]!, m.S.H2O, m.params.gCharca, m.params.escalas.agua, m.params.escalas.humedad, 0, fi.dt);
+    }
+    x.vapor(p, fi.dt, Taire);
+    x.posar(p, Taire);
+  }
+  if (fc) {
+    const T = m.temperatura(p, fc.luz), Taire = fc.lluvia ? T - DT_LLUVIA : T;
+    for (let i = i0; i < i1; i++) {
+      m.termostato(m.suelo[i]!, T); m.termostato(m.vida[i]!, T);
+      if (m.agua[i]! >= 0) m.termostato(m.agua[i]!, T);
+    }
+    m.termostato(a, Taire);
+  }
+  x.estadoAzar[p] = x.semilla;
+}
+
 function cadencia(): void {
   const lado = +opt('lado', '32'), semilla = +opt('semilla', '1'), dias = lista('dias', '1,5'), salida = opt('salida', '/tmp/atlas-v23-wperf/cadencia');
+  // El mapa y el tiempo son los de --mapa; --semilla solo cambia el azar de la materia (para medir el ruido).
+  const grupo = opt('grupo', '') as Grupo | '', mapa = +opt('mapa', '1');
   mkdirSync(salida, { recursive: true });
   for (const K of lista('k', '1,10,60,120')) {
     const q = crearServicioQuimico({ modo: 'inmediato' });
-    const m = MundoMaterial.levantar(teselas(semilla, lado), q, { semilla, luz: luzMedia(0, K) });
-    const tot = totalesVacios(), clima = tiempo(semilla);
+    const m = MundoMaterial.levantar(teselas(mapa, lado), q, { semilla, luz: luzMedia(0, grupo ? 1 : K) });
+    const tot = totalesVacios(), clima = tiempo(mapa), lluvia = lluvias(mapa);
     m.plegar(tot);
     const fotos: Record<string, unknown> = {};
     const t0 = performance.now();
     let t = 0;
     for (const dia of dias) {
-      for (; t < dia * TICKS_PER_DAY; t += K) { m.prepararPaso(); m.pasar(clima(t, K)); m.plegar(tot); }
+      if (grupo) for (; t < dia * TICKS_PER_DAY; t++) {
+        m.prepararPaso(); m.arena.barrera();
+        for (let p = 0; p < m.np; p++) paginaMixta(m, p, t, K, grupo, lluvia);
+        m.plegar(tot);
+      }
+      else for (; t < dia * TICKS_PER_DAY; t += K) { m.prepararPaso(); m.pasar(clima(t, K)); m.plegar(tot); }
       const v = vistas(m), inv = m.inventario(), S = m.S;
       const aire = (id: number) => { let s = 0; for (let p = 0; p < m.np; p++) s += m.arena.cuantos(m.aire[p]!, id); return s; };
       fotos[dia] = {
@@ -253,8 +314,8 @@ function cadencia(): void {
         exacto: m.saldo().every((x, k) => x === tot.esperado[k]),
       };
     }
-    writeFileSync(`${salida}/s${semilla}-k${K}.json`, JSON.stringify({ K, semilla, lado, n: m.n, segundos: (performance.now() - t0) / 1000, fotos }));
-    console.log(`cadencia K=${K} semilla ${semilla}: ${((performance.now() - t0) / 1000).toFixed(0)} s; ${carga()}`);
+    writeFileSync(`${salida}/s${semilla}-k${K}${grupo ? `-${grupo}` : ''}.json`, JSON.stringify({ K, semilla, lado, grupo, n: m.n, segundos: (performance.now() - t0) / 1000, fotos }));
+    console.log(`cadencia K=${K}${grupo ? ` (solo ${grupo})` : ''} semilla ${semilla}: ${((performance.now() - t0) / 1000).toFixed(0)} s; ${carga()}`);
   }
 }
 
@@ -262,10 +323,11 @@ interface Foto { vistas: number[]; cuentas: string[]; inventario: Record<string,
 
 function errores(): void {
   const dir = argv[1]!;
-  const corr = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as { K: number; semilla: number; fotos: Record<string, Foto> });
-  const ref = corr.find((c) => c.K === 1 && c.semilla === 1);
+  const corr = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as { K: number; semilla: number; grupo: string; segundos: number; fotos: Record<string, Foto> });
+  const ref = corr.find((c) => c.K === 1 && c.semilla === 1 && !c.grupo);
   if (!ref) throw new Error('Falta la corrida K = 1 de la semilla 1.');
-  const filas = corr.filter((c) => c !== ref && (c.semilla === 1 || c.K === 1)).sort((a, b) => a.K - b.K || a.semilla - b.semilla);
+  const filas = corr.filter((c) => c !== ref && (c.semilla === 1 || c.K === 1))
+    .sort((a, b) => (a.grupo || '').localeCompare(b.grupo || '') || a.K - b.K || a.semilla - b.semilla);
   const media = (v: number[], k: number) => { let s = 0, n = 0; for (let i = k; i < v.length; i += 6) { s += v[i]!; n++; } return s / n; };
   const rms = (a: number[], b: number[], k: number) => { let s = 0, n = 0; for (let i = k; i < a.length; i += 6) { s += (a[i]! - b[i]!) ** 2; n++; } return Math.sqrt(s / n); };
   for (const dia of Object.keys(ref.fotos)) {
@@ -278,7 +340,7 @@ function errores(): void {
     for (const c of filas) {
       const x = c.fotos[dia]!;
       const d = (a: number, b: number) => (b === 0 ? (a === 0 ? '0' : '∞') : (100 * (a - b) / b).toFixed(2));
-      console.log(`| K=${c.K} s${c.semilla} | ${k.map((j) => `${d(media(x.vistas, j), media(r.vistas, j))} / ${rms(x.vistas, r.vistas, j).toFixed(4)}`).join(' | ')} | ${d(+x.cuentas[CUENTA.SOL]!, +r.cuentas[CUENTA.SOL]!)} | ${d(+x.cuentas[CUENTA.CAIDA]!, +r.cuentas[CUENTA.CAIDA]!)} | ${d(x.inventario.vaporAire!, r.inventario.vaporAire!)} | ${d(x.inventario.CO2aire!, r.inventario.CO2aire!)} | ${x.exacto} |`);
+      console.log(`| K=${c.K}${c.grupo ? ` solo ${c.grupo}` : ''} s${c.semilla} (${c.segundos.toFixed(0)} s) | ${k.map((j) => `${d(media(x.vistas, j), media(r.vistas, j))} / ${rms(x.vistas, r.vistas, j).toFixed(4)}`).join(' | ')} | ${d(+x.cuentas[CUENTA.SOL]!, +r.cuentas[CUENTA.SOL]!)} | ${d(+x.cuentas[CUENTA.CAIDA]!, +r.cuentas[CUENTA.CAIDA]!)} | ${d(x.inventario.vaporAire!, r.inventario.vaporAire!)} | ${d(x.inventario.CO2aire!, r.inventario.CO2aire!)} | ${x.exacto} |`);
     }
   }
 }

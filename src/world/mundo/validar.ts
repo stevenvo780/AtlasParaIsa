@@ -225,10 +225,20 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       || w.technology.checkpoint?.inventories.some(inv => inv.items.some(item => Object.hasOwn(item, 'contents'))))) fail();
     if (expectedVersion >= 6 && !w.technology.water) fail();
     assertPopulation(w); assertTechnology(w);
+    const nacidos = new Set<string>();
     for(const person of [...w.people,...w.legacy,...w.retiredLegacy]) {
+      if (person.genome.generation === 0) continue;
+      nacidos.add(person.id);
+      const nacido = ley(w, 'natalidad') ? /^nacido-([1-9]\d*)$/.exec(person.id) : null;
+      if (nacido) {
+        const uid = Number(nacido[1]);
+        if (!Number.isSafeInteger(uid) || ('demography' in person && person.uid !== uid)) fail();
+        continue;
+      }
       const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
-      if(person.genome.generation>0&&(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter)) fail();
+      if(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter) fail();
     }
+    if (nacidos.size > w.birthCounter) fail();
     const ownRecipes = [...w.technology.recipes, ...(w.technology.catalogue?.pending ?? [])];
     const recipeIds = new Set(ownRecipes.map(recipe => recipe.id));
     for (const person of w.people) {

@@ -9,9 +9,9 @@
  * M9: de dónde viene cada procedimiento que recuerda (lo inventó, de quién lo aprendió y cuándo).
  */
 import type { PersonDetail } from '../shared/types.js';
-import { personDetail, type World } from '../world/index.js';
+import { personDetail, type Person, type World } from '../world/index.js';
 import { demographicTraits } from '../world/demography.js';
-import { paramsOf } from '../world/params.js';
+import { ley, paramsOf } from '../world/params.js';
 import { aQuienBusca, fertilidad } from './resumen-vivo.js';
 
 type Pariente = NonNullable<PersonDetail['familia']>['progenitores'][number];
@@ -20,8 +20,7 @@ export const MAX_HIJOS_NOMBRADOS = 24;
 
 /** Progenitores e hijos sobre `world.people` y el registro de difuntos que el mundo conserva
  * (`legacy` + `retiredLegacy`); un difunto archivado fuera del mundo servido no se inventa. */
-export function familia(world: World, id: string): NonNullable<PersonDetail['familia']> | undefined {
-  const person = world.people.find(p => p.id === id);
+export function familia(world: World, id: string, person = world.people.find(p => p.id === id)): NonNullable<PersonDetail['familia']> | undefined {
   if (!person) return undefined;
   const muertos = new Map<string, { id: string; name: string; generation: number; parents: string[] }>();
   for (const record of [...world.legacy, ...world.retiredLegacy]) if (!muertos.has(record.id)) muertos.set(record.id, record);
@@ -44,8 +43,7 @@ export const MAX_PROCEDIMIENTOS = 32;
 /** M9: origen de cada procedimiento que recuerda: `invento` si la definición residente lo nombra como
  * inventor, `aprendido` con maestro y paso si `learnedFrom` lo registra, y `sin-registro` si el mundo no
  * conserva de dónde vino (nunca se supone que lo descubrió solo). */
-export function tecnica(world: World, id: string): Pick<PersonDetail, 'procedimientos' | 'inventadas'> | undefined {
-  const person = world.people.find(p => p.id === id);
+export function tecnica(world: World, id: string, person = world.people.find(p => p.id === id)): Pick<PersonDetail, 'procedimientos' | 'inventadas'> | undefined {
   if (!person) return undefined;
   const recetas = new Map(world.technology.recipes.map(recipe => [recipe.id, recipe]));
   const nombreDe = (pid: string): string | null => world.people.find(p => p.id === pid)?.name
@@ -66,16 +64,23 @@ export function tecnica(world: World, id: string): Pick<PersonDetail, 'procedimi
   return { procedimientos, inventadas: world.technology.recipes.filter(recipe => recipe.inventorId === id).length };
 }
 
-export function enriquecerPersona(world: World, id: string): PersonDetail | undefined {
-  const detail = personDetail(world, id);
+export function enriquecerPersona(world: World, id: string, delDueno?: Person): PersonDetail | undefined {
+  const person = delDueno ?? world.people.find(p => p.id === id);
+  if (!person) return undefined;
+  const detail = delDueno ? {
+    id: person.id,
+    experiences: person.experiences.map(({ tick, text, causeId }) => ({ tick, text, causeId })),
+    trust: Object.entries(person.bonds).map(([id, value]) => ({ id, value: Math.round(value * 1000) / 1000 })),
+    recipeIds: [...person.technology.knownRecipes],
+  } : personDetail(world, id);
   if (!detail) return undefined;
-  const person = world.people.find(p => p.id === id)!;
-  const busca = aQuienBusca(world, person);
+  const natalidad = ley(world, 'natalidad');
+  const busca = natalidad ? undefined : aQuienBusca(world, person);
   const traits = demographicTraits(person.genome, paramsOf(world).cuerpo);
   // M4: fertilidad y a quién busca, con las funciones de la ley y en solo lectura.
   // M8: familia y edades clave (en pasos de edad corporal; el cliente las dice en días).
-  return { ...detail, name: person.name, x: person.x, y: person.y, vivo: true, fertil: fertilidad(world, person), ...(busca ? { busca } : {}),
-    familia: familia(world, id), edades: { edad: person.demography.age, madurez: traits.maturityAge, vejez: traits.senescenceStart, maxima: traits.maximumAge },
+  return { ...detail, name: person.name, x: person.x, y: person.y, vivo: true, ...(!natalidad ? { fertil: fertilidad(world, person) } : {}), ...(busca ? { busca } : {}),
+    familia: familia(world, id, person), edades: { edad: person.demography.age, madurez: traits.maturityAge, vejez: traits.senescenceStart, maxima: traits.maximumAge },
     // M9: origen de los procedimientos que recuerda.
-    ...tecnica(world, id) };
+    ...tecnica(world, id, person) };
 }

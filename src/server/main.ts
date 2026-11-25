@@ -5,10 +5,8 @@ import { cerrarPiscinasDeComputo, createApp } from './app.js';
 import { createWorkerGateway } from './gateway.js';
 import { Store } from './store.js';
 import { acquireLock } from './lock.js';
-import { paramsOf, setParams } from '../world/params.js';
-import { deploymentParams } from './deployment-params.js';
-import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
-import { gpuParitySession } from '../world/gpu/autoprueba.js';
+import { ley, paramsOf, setParams } from '../world/params.js';
+import { deploymentParams, paramsNuevosDeDespliegue } from './deployment-params.js';
 import { bindWorldContext, worldContext } from '../world/index.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { resumenDespacho } from './resumen-vivo.js';
@@ -55,7 +53,6 @@ let store: Store | undefined;
 let app: ReturnType<typeof createApp> | ReturnType<typeof createWorkerGateway> | undefined;
 let released = false;
 let closing: Promise<void> | undefined;
-/** `shutdown` puede entrar por señal mientras el `await` de la autoprueba sigue en curso. */
 let abortado = false;
 function release(): void {
   if (released) return; released = true;
@@ -97,42 +94,20 @@ try {
     escuchar(pasarela);
     await app.ready;
   } else {
-  store = new Store(resolve(dataPath, 'world.sqlite'));
-  if (!abortado) {
-    // Los params llegan ANTES de que `createApp` genere un mundo nuevo (R6: `agua.cuencas`
-    // decide el terreno en la generación, así que fijarlos después no servía de nada).
-    // `CARTA_OPEN_WORLD=1` activa evolución abierta V12 + todos los chips (CPU+GPU);
-    // `CARTA_FULL_HARDWARE=1` activa solo el despacho multi-chip sobre las leyes base.
-    // Orden de un mundo NUEVO: host (límites + motor + leyes abiertas) → `deploymentParams`
-    // (`PRODUCTION_PARAMS` y, encima, cada clave de `CARTA_PARAMS`). Un mundo CARGADO no
-    // vuelve a resolver el host: solo cede en las claves que `CARTA_PARAMS` nombra.
-    const baseHostParams = () => process.env.CARTA_OPEN_WORLD === '1'
-      ? hostOpenWorldParams()
-      : process.env.CARTA_FULL_HARDWARE === '1'
-        ? hostFullHardwareParams()
-        : hostParams();
-    // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
-    // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
-    // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
-    app = createApp({ store, manual: true, commit, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure, params: () => deploymentParams(baseHostParams()), ...v21 });
-    // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
-    // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
-    // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
-    setParams(app.world, deploymentParams(paramsOf(app.world)));
-    const motor = paramsOf(app.world).motor;
-    if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
-      const tileOwnership = new ResidentTopologyOwner();
-      app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
-      bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+    store = new Store(resolve(dataPath, 'world.sqlite'));
+    app = createApp({ store, manual: true, deployment: true, commit, password: process.env.CARTA_PASSWORD,
+      credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure,
+      params: paramsNuevosDeDespliegue, ...v21 });
+    if (!app.usaMotor) {
+      if (!ley(app.world, 'guardadoCompleto')) setParams(app.world, deploymentParams(paramsOf(app.world)));
+      const motor = paramsOf(app.world).motor;
+      if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
+        const tileOwnership = new ResidentTopologyOwner();
+        app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
+        bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+      }
+      console.info(JSON.stringify({ v15: resumenDespacho(app.world) }));
     }
-    const vivo = app;
-    for (const device of motor.gpu) {
-      if (abortado) break;
-      const parity = await gpuParitySession.initialize(device, { budgetMs: 5000, log: diagnostic => console.warn(JSON.stringify(diagnostic)) });
-      console.info(JSON.stringify({ gpuAutoprueba: parity, v15: resumenDespacho(vivo.world) }));
-    }
-    if (!abortado && motor.gpu.length === 0) console.info(JSON.stringify({ gpuAutoprueba: null, v15: resumenDespacho(vivo.world) }));
-  }
   }
   if (abortado || !app) await shutdown(abortado ? undefined : 1);
   else {

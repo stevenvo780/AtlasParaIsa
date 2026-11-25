@@ -2,31 +2,26 @@
  * V24 engine frequency: the publish path of the simulation worker records less without losing anything.
  * - The tile observer reports exactly the tiles whose public projection changed (ground truth: a fresh
  *   projection of every resident tile on every scan), serially and with the parallel SoA kernel.
- * - The tape writer normalizes an owned structured clone in place instead of a JSON round trip and
- *   compares structurally: same rows, byte for byte, as the copying writer.
- * - Turbo frames between live mirror posts carry the slow summaries: the tape holds a frame at least every
+ * - The tape holds a frame at least every
  *   `PASO_MAXIMO` ticks (its cadence widens under load), in order, and each reconstructed frame has its summaries.
  */
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { on } from 'node:events';
+import { isDeepStrictEqual } from 'node:util';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { gunzipSync } from 'node:zlib';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { paramsOf, parseParams } from '../src/world/params.js';
 import { bindWorldContext, worldContext } from '../src/world/spatial.js';
 import { ResidentTopologyOwner, residentBackingArray } from '../src/world/soa/topologia.js';
 import { residentFastAccess } from '../src/world/soa/terreno.js';
-import { createTileObserver, projectMirrorTile, projectTapeFrame } from '../src/server/sim-worker.js';
-import { TapeWriter, tileEqual } from '../src/server/tape-store.js';
+import { createTileObserver, projectMirrorTile } from '../src/server/sim-worker.js';
 import { cintaDeMundo, PASO_MAXIMO } from '../src/server/cinta/escritor.js';
 import { LectorCinta } from '../src/server/cinta/lector.js';
 import { CINTA, type ChunkResp } from '../src/shared/cinta.js';
 import { applyClientTapeDelta } from '../src/shared/tape-delta.js';
-import { CARRIED_VIEW_FIELDS, withCarriedFields } from '../src/server/tape-worker.js';
 import { cerrarPiscinasDeComputo } from '../src/server/app.js';
 import { createWorkerGateway, saludDelEspejo } from '../src/server/gateway.js';
 import type { OperacionSalud, Salud } from '../src/shared/salud.js';
@@ -87,7 +82,7 @@ for (const hilos of [1, 4]) {
       if (step === 30) { const tile = world.tiles[5]!; tile.stone = (tile.stone ?? 0) + 0.5; }
       const current = truth();
       const observation = observer.scan(world);
-      const expected = [...current].filter(([id, tile]) => !tileEqual(previous.get(id), tile)).map(([id]) => id).sort();
+      const expected = [...current].filter(([id, tile]) => !isDeepStrictEqual(previous.get(id), tile)).map(([id]) => id).sort();
       assert.deepEqual(observation.changed.map(key).sort(), expected, `step ${step}: changed tiles`);
       // The cache is the projection: every chunk page equals a fresh projection, field for field.
       let cached = 0;
@@ -130,69 +125,6 @@ test('tile observer: a different resident set regroups and keeps what did not ch
   assert.equal(shrunk.changed.length, 0);
   assert.equal([...shrunk.chunks.values()].reduce((n, tiles) => n + tiles.length, 0), world.tiles.length);
   assert.ok(![...shrunk.chunks.values()].some(tiles => tiles.some(tile => key(tile) === key(last))));
-});
-
-/** Rows of a tape, decompressed, without wall-clock columns. */
-function rows(path: string) {
-  const db = new DatabaseSync(path, { readOnly: true });
-  try {
-    const text = (data: Uint8Array) => gunzipSync(data).toString();
-    return {
-      frames: (db.prepare('SELECT tick,keyframe_tick,day,phase,weather,pop,births,deaths,structures,formulas,paved,sim_hz,data FROM tape_frames ORDER BY tick').all() as Record<string, unknown>[])
-        .map(row => ({ ...row, data: text(row.data as Uint8Array) })),
-      keyframes: (db.prepare('SELECT tick,day,pop,data FROM tape_keyframes ORDER BY tick').all() as Record<string, unknown>[])
-        .map(row => ({ ...row, data: text(row.data as Uint8Array) })),
-    };
-  } finally { db.close(); }
-}
-
-test('owned tape frames: in-place normalization and structural equality write the same rows as the JSON copy', t => {
-  const dir = directory(t);
-  const world = createWorld(42, parseParams('motor.hilos=1'));
-  const copying = new TapeWriter({ path: join(dir, 'copy.tape.sqlite'), keyframeInterval: 20, maxFrames: 50 });
-  const owning = new TapeWriter({ path: join(dir, 'own.tape.sqlite'), keyframeInterval: 20, maxFrames: 50 });
-  const observer = createTileObserver();
-  let previousView: WorldView | undefined;
-  for (let i = 0; i < 90; i++) {
-    stepWorld(world);
-    const { chunks, changed } = observer.scan(world);
-    const keyframe = i % 20 === 0;
-    const tiles = keyframe ? [...chunks.values()].flat() : changed;
-    const view = projectTapeFrame(world, { stepMs: i } as never, 'instance', tiles);
-    // What JSON drops or rewrites must be dropped or rewritten in place too.
-    const person = view.people[0]! as unknown as Record<string, unknown>;
-    person.probe = i % 4 === 0 ? undefined : i % 4 === 1 ? -0 : i % 4 === 2 ? Number.NaN : [undefined, -0, Infinity, { nested: undefined, kept: 1 }];
-    if (i % 5 === 0) (view as unknown as Record<string, unknown>).extra = { at: new Date(0), list: [1, undefined] };
-    // The tape thread receives a structured clone; a carried frame keeps the previous summaries by identity.
-    let owned = structuredClone(view);
-    if (previousView && !keyframe && i % 3) {
-      for (const field of CARRIED_VIEW_FIELDS) {
-        delete (owned as unknown as Record<string, unknown>)[field];
-        // The copying writer sees the same carried values, as its own copy.
-        (view as unknown as Record<string, unknown>)[field] = structuredClone((previousView as unknown as Record<string, unknown>)[field]);
-      }
-      owned = withCarriedFields(owned, previousView);
-      for (const field of CARRIED_VIEW_FIELDS) assert.equal((owned as unknown as Record<string, unknown>)[field], (previousView as unknown as Record<string, unknown>)[field]);
-    }
-    copying.record(view, 5, !keyframe);
-    owning.record(owned, 5, !keyframe, true);
-    previousView = owned;
-  }
-  copying.close(); owning.close();
-  const a = rows(join(dir, 'copy.tape.sqlite')), b = rows(join(dir, 'own.tape.sqlite'));
-  assert.equal(a.frames.length, 50);
-  assert.deepEqual(b.frames, a.frames);
-  assert.deepEqual(b.keyframes, a.keyframes);
-});
-
-test('carried fields: completed in the previous key order, new fields appended, dropped fields gone', () => {
-  const previous = { version: 1, tick: 1, people: [], places: ['p'], stats: { population: 3 }, whispers: [1], chemistry: { c: 1 } } as unknown as WorldView;
-  const current = { version: 1, tick: 2, people: [{ id: 'x' }], weather: 'rain' } as unknown as WorldView;
-  const merged = withCarriedFields(current, previous) as unknown as Record<string, unknown>;
-  // `places` is projected on every frame (never carried): a frame without it does not inherit it.
-  assert.deepEqual(Object.keys(merged), ['version', 'tick', 'people', 'stats', 'chemistry', 'weather']);
-  assert.equal(merged.stats, (previous as unknown as Record<string, unknown>).stats);
-  assert.equal(merged.tick, 2);
 });
 
 test('la salud del worker vence por falta de progreso, aunque una operación siga declarada', () => {
@@ -277,14 +209,6 @@ test('turbo gateway: tape frames in order without gaps, summaries on every frame
   assert.ok(gateway.salud().tick >= mirrorTick);
   assert.ok(gateway.salud().ticksPorSegundo > 0);
   assert.equal(gateway.salud().diagnostico.duras24h, 0);
-});
-
-test('carried frames still project per tick what must agree with that tick\'s people', () => {
-  const world = createWorld(51926, parseParams('motor.hilos=1'));
-  for (let i = 0; i < 3; i++) stepWorld(world);
-  const frame = projectTapeFrame(world, {} as WorldView['performance'] & object, 'instance', [], true) as unknown as Record<string, unknown>;
-  for (const field of CARRIED_VIEW_FIELDS) assert.equal(Object.hasOwn(frame, field), false, `${field} is carried`);
-  for (const field of ['communities', 'demography', 'places', 'memories']) assert.ok(frame[field] !== undefined, `${field} on every frame`);
 });
 
 test('turbo gateway: the first frame of a reopened tape\'s epoch is a full keyframe (terrain not lost after a restart)', { timeout: 180_000 }, async t => {

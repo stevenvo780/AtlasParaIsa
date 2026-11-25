@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { deserialize } from 'node:v8';
-import { createReadOnlyApp, DIAGNOSTICO_VACIO, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type WhispersResponse } from './app.js';
+import { createReadOnlyApp, DIAGNOSTICO_VACIO, HttpError, MinimapAtlas, PASO_PARADO_S, type GatewayAppOptions, type ReadOnlyBackend, type SaludServidor, type WhispersResponse } from './app.js';
 import { buildWorldDirectory, WorldMapCache } from './worldmap-service.js';
 import { TICKS_PER_DAY } from '../world/index.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapResponse } from '../shared/worldmap.js';
@@ -17,7 +17,6 @@ import { LectoresCinta } from './cinta/lector-worker.js';
 import { CINTA } from '../shared/cinta.js';
 import { projectMirrorTile, type MirrorUpdate, type OperacionWorker, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
 import type { RuntimeStats, Tile, Viewport, WorldView } from '../shared/types.js';
-import type { Salud } from '../shared/salud.js';
 import type { World } from '../world/index.js';
 
 export interface WorkerGatewayOptions extends GatewayAppOptions, SimWorkerOptions {}
@@ -29,7 +28,7 @@ type TilePage = { data: Uint8Array; tiles?: Tile[] };
  * simulation worker. Its archive connection is WAL/read-only: never load/save a World here.
  */
 type MedicionSalud = Pick<MirrorUpdate, 'salud' | 'saludMedidaEn'>;
-export function saludDelEspejo(medicion: MedicionSalud, avance: OperacionWorker, detenido: boolean, ahora: number): Salud {
+export function saludDelEspejo(medicion: MedicionSalud, avance: OperacionWorker, detenido: boolean, ahora: number): SaludServidor {
   const { operacion, medidaEn } = avance;
   const segundos = medicion.salud.segundosDesdeUltimoPaso + Math.max(0, ahora - medicion.saludMedidaEn) / 1000;
   const desdeOperacion = Math.max(0, ahora - medidaEn) / 1000;
@@ -38,7 +37,8 @@ export function saludDelEspejo(medicion: MedicionSalud, avance: OperacionWorker,
   const silencio = operacion ? desdeOperacion : Math.min(segundos, desdeOperacion);
   const estado = detenido || silencio > PASO_PARADO_S ? 'parado'
     : operacion && operacion.tipo !== 'guardando' || segundos > PASO_PARADO_S || medicion.salud.estado === 'degradado' ? 'degradado' : 'ok';
-  return { ...medicion.salud, segundosDesdeUltimoPaso: segundos, estado, operacion };
+  const guardado = medidaEn >= medicion.saludMedidaEn ? avance.guardado : undefined;
+  return { ...medicion.salud, ...guardado, segundosDesdeUltimoPaso: segundos, estado, operacion };
 }
 
 export function createWorkerGateway(options: WorkerGatewayOptions) {
@@ -46,10 +46,9 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   let archive: Store | undefined;
   /** V21: same rule as the worker (`tickMs: 0` is turbo; the tape follows turbo unless set). */
   const turbo = !!options.turbo || options.tickMs === 0;
-  const tapeEnabled = options.tape ?? turbo;
   /** Lectores de la cinta que graba `carta-tape`: el DVR nunca manda una RPC a la simulación. */
-  const lectores = tapeEnabled ? new LectoresCinta({ directorio: cintaDeMundo(options.worldPath), mundo: options.worldPath,
-    topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly: !!options.observerOnly, turbo }) : undefined;
+  const directorio = cintaDeMundo(options.worldPath);
+  let lectores: LectoresCinta | undefined;
   /** El motivo con el que la simulación dio la cinta por perdida. */
   let errorCinta: string | undefined;
   let fatal: Error | undefined;
@@ -227,6 +226,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     person: id => rpc('personDetail', id),
     recipe: id => rpc('recipeDetail', id),
     regions: () => ({ tick: mirror?.view.tick ?? 0, regionesVivas: Object.keys(activeKeys) }),
+    motor: () => !simulationPaused && !fatal ? mirror?.motor : undefined,
     worldmap, directory, whispers,
     whisper: async (request: DivineWhisperRequest, hash: string): Promise<DivineWhisper> => {
       if (!valid(hash)) throw new HttpError(401, 'La sesión terminó.');
@@ -238,18 +238,21 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       await applying;
       return created;
     },
-    salud(): Salud {
+    salud(): SaludServidor {
       return saludDelEspejo(medicion, avance, !!fatal || simulationPaused || closing, performance.now());
     },
     get ready() { return isReady && !closing; },
     get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
+    get turbo() { return mirror?.turbo ?? turbo; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
     get respaldo() { return mirror?.respaldo; },
     // Hasta el primer espejo no se sabe de qué instancia es el mundo: la cinta de otra no se sirve ni un momento.
-    ...(lectores ? { cinta: { leer: (peticion, gzip, senal) => mirror ? lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
-      instancia: mirror.view.instanceId, fondo: { seed: mirror.seed, cuencas: mirror.cuencas } }, senal)
-      : Promise.reject(new HttpError(503, 'El mundo todavía está cargando.')) } } : {}),
+    get cinta(): ReadOnlyBackend['cinta'] {
+      if (!mirror?.grabaCinta || !lectores) return undefined;
+      return { directorio, estado: () => errorCinta ? 'error' : 'ok', leer: (peticion, gzip, senal) => lectores!.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
+        instancia: mirror?.view.instanceId, fondo: mirror && { seed: mirror.seed, cuencas: mirror.cuencas } }, senal) };
+    },
   };
   // Validate credentials/origins before spawning, so configuration errors cannot orphan a worker.
   const transport = createReadOnlyApp(options, backend);
@@ -267,7 +270,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
       options: { worldPath: options.worldPath, commit: options.commit, seed: options.seed, params: options.params, tickMs: options.tickMs,
         deployment: options.deployment, testStepDelayMs: options.testStepDelayMs,
-        turbo, tape: tapeEnabled, tapeTopeBytes: options.tapeTopeBytes,
+        turbo, tape: options.tape, tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
         turboSaveIntervalMs: options.turboSaveIntervalMs,
         observerOnly: options.observerOnly } satisfies SimWorkerOptions } });
   let workerExited = false;
@@ -304,6 +307,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     atlas.retainActive(update.activeKeys);
     for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
     activeKeys = update.activeChunks; mirror = update;
+    if (update.grabaCinta) lectores ??= new LectoresCinta({ directorio, mundo: options.worldPath,
+      topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly: !!options.observerOnly, turbo: update.turbo ?? turbo });
     if (isReady && !closing) transport.broadcast();
     events.emit('mirror', update.view.tick);
   }
@@ -340,9 +345,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       } else if (message.type === 'paused') {
         simulationPaused = true;
         if (mirror) transport.broadcast();
+      } else if (message.type === 'cinta') {
+        errorCinta = typeof message.error === 'string' ? message.error : undefined;
+        if (options.deployment && errorCinta) console.warn(JSON.stringify({ cinta: 'detenida', motivo: errorCinta }));
       } else if (message.type === 'log') {
-        const aviso = message.value as { cinta?: string; motivo?: string } | undefined;
-        if (aviso?.cinta === 'detenida') errorCinta = aviso.motivo ?? 'La cinta se detuvo.';
         if (options.deployment) {
           const log = message.level === 'warn' ? console.warn : console.info;
           log(JSON.stringify(message.value));

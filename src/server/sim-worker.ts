@@ -16,6 +16,8 @@ import { projectCraft } from '../world/projection.js';
 import { encodeChunkMinimapCells } from './worldmap-service.js';
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import type { DivineWhisperRequest } from '../shared/worldmap.js';
+import { ctxSi } from '../world/motor/acceso.js';
+import { leyesActivas } from '../world/motor/leyes.js';
 
 const clamp = (n: number, max = 1): number => Math.max(0, Math.min(max, n));
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -112,15 +114,16 @@ interface MirrorProjection {
   /** DVR telemetry resolution (V21): fast-drifting bodies to 2 decimals, animal age to 20-tick buckets,
    * applied in the projection pass itself. */
   quantize?: boolean;
-  /** Leave out `CARRIED_VIEW_FIELDS` (not even computed). */
-  carry?: boolean;
+  v23?: boolean;
 }
 export function projectMirrorWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
   return projectMirror(world, context, {});
 }
 function projectMirror(world: World, context: WorldContext, options: MirrorProjection): WorldView {
   bindWorldContext(world, context);
-  const quantize = !!options.quantize, carry = !!options.carry;
+  const quantize = !!options.quantize;
+  const ctx = options.v23 ? ctxSi(world) : undefined;
+  const ganchos = ctx ? leyesActivas(paramsOf(world).v23).flatMap(ley => ley.proyectar ? [ley.proyectar] : []) : [];
   const animals = new Array<ReturnType<typeof projectAnimal>>(world.animals.length);
   for (let i = 0; i < animals.length; i++) {
     const a = projectAnimal(world.animals[i]!, world.tick);
@@ -129,11 +132,12 @@ function projectMirror(world: World, context: WorldContext, options: MirrorProje
       if (a.reproReserve !== undefined) a.reproReserve = q2(a.reproReserve);
       if (a.age !== undefined) a.age = Math.floor(a.age / 20) * 20;
     }
+    if (ctx) for (const gancho of ganchos) gancho.animal?.(ctx, world.animals[i]!, a);
     animals[i] = a;
   }
   const projected = { tiles: [], places: world.places, animals, structures: world.structures }, v = { x: 0, y: 0, width: 40, height: 28 };
   let organization=organizationViews.get(world);
-  if(!carry&&(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter||organization.checkpoint!==world.technology.checkpoint)) {
+  if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter||organization.checkpoint!==world.technology.checkpoint) {
     organization={tick:world.tick,executionCounter:world.technology.executionCounter,checkpoint:world.technology.checkpoint,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
     organizationViews.set(world,organization);
   }
@@ -167,47 +171,63 @@ function projectMirror(world: World, context: WorldContext, options: MirrorProje
       ...(p.compounds?.length ? { compounds: p.compounds.map(c => ({ ...c, composition: { ...c.composition }, properties: { ...c.properties } })) } : {}) };
       // V24: the live mirror and the DVR show what each inhabitant works with (no allocation when empty).
       projectCraft(p, view);
+      if (ctx) for (const gancho of ganchos) gancho.persona?.(ctx, p, view);
       return view;
     }),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
-    animals: projected.animals, structures: projected.structures, blueprints: carry ? undefined : world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
-    stats: carry ? undefined : worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
-    technology: carry ? undefined : projectTechnology(world, peopleInView), organization: carry ? undefined : (({ resources: _resources, ...summary }) => structuredClone(summary))(organization!.value),
-    ...(world.chemistry && !carry ? { chemistry: projectChemistry(world) } : {}),
+    animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
+    stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    technology: projectTechnology(world, peopleInView), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization!.value),
+    ...(world.chemistry ? { chemistry: projectChemistry(world) } : {}),
     ...(world.whispers?.length ? { whispers: world.whispers.map(whisperView) } : {}),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
-  if (carry) for (const field of CARRIED_VIEW_FIELDS) delete (view as unknown as Record<string, unknown>)[field];
+  if (ctx) for (const gancho of ganchos) gancho.mundo?.(ctx, view);
   return view;
+}
+
+export function vistaParaEmision(world: World, context: WorldContext = worldContext(world)): WorldView {
+  return projectMirror(world, context, { v23: true });
+}
+
+export function teselasParaEmision(world: World): Map<string, Tile[]> {
+  const chunks = new Map<string, Tile[]>();
+  const fast = residentFastAccess(world.tiles);
+  const ctx = ctxSi(world);
+  const ganchos = ctx ? leyesActivas(paramsOf(world).v23).flatMap(ley => ley.proyectar?.tesela ? [ley.proyectar.tesela] : []) : [];
+  for (const tesela of world.tiles) {
+    const vista = projectMirrorTile(tesela, fast);
+    if (ctx) for (const decorar of ganchos) decorar(ctx, tesela, vista);
+    const key = `${Math.floor(vista.x / 16)},${Math.floor(vista.y / 16)}`;
+    const chunk = chunks.get(key);
+    if (chunk) chunk.push(vista);
+    else chunks.set(key, [vista]);
+  }
+  return chunks;
 }
 
 
 import { isMainThread, parentPort, workerData, Worker } from 'node:worker_threads';
 import { existsSync } from 'node:fs';
+import { totalmem } from 'node:os';
 import { serialize } from 'node:v8';
 import { createApp, HttpError } from './app.js';
 import { Store } from './store.js';
-import { setParams } from '../world/params.js';
+import { ley, setParams } from '../world/params.js';
 import { ResidentTopologyOwner, residentBackingArray, residentTileRevision, residentTopologyToken, sameResidentTopology } from '../world/soa/topologia.js';
 import { residentSnapshotGate } from '../world/soa/terreno.js';
-import { gpuParitySession } from '../world/gpu/autoprueba.js';
-import { deploymentParams } from './deployment-params.js';
-import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
+import { deploymentParams, paramsNuevosDeDespliegue } from './deployment-params.js';
 import { resumenDespacho } from './resumen-vivo.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
-import { tileEqual } from './tape-store.js';
-import { CARRIED_VIEW_FIELDS, crearEnlaceCortes, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
-import { cintaDeMundo } from './cinta/escritor.js';
-import { enlaceCinta } from '../shared/fotograma.js';
-import { CINTA, type Apertura, type Corte, type Hito } from '../shared/cinta.js';
-import type { ChronicleEvent } from '../shared/types.js';
-import { chronicleSerial } from '../world/chronicle-journal.js';
+import { crearEnlaceCortes, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
+import { enlaceCinta, regionesRanura } from '../shared/fotograma.js';
+import type { Apertura, Hito } from '../shared/cinta.js';
 import { registrar } from '../world/invariantes.js';
-import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
-import type { AppOptions } from './app.js';
-import type { OperacionSalud, Salud } from '../shared/salud.js';
+import type { AppOptions, SaludServidor } from './app.js';
+import type { OperacionSalud } from '../shared/salud.js';
+import type { TelemetriaMotor } from '../world/motor/contratos.js';
 import type { Gesture, RuntimeStats } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
 
@@ -229,9 +249,6 @@ export interface SimWorkerOptions {
   tapeTopeBytes?: number;
   /** Tiempo sin que la cinta devuelva un crédito tras el cual se la da por perdida (por defecto, 5 min). */
   tapeSinCreditoMs?: number;
-  // Se retiran del gateway al integrar C1b.
-  tapeMaxFrames?: number;
-  tapeKeyframeInterval?: number;
   /** V21: inhabitants act autonomously; direct NPC orders are rejected. */
   observerOnly?: boolean;
 }
@@ -241,7 +258,10 @@ export type MirrorPageField = 'people' | 'places' | 'animals' | 'structures' | '
 export interface MirrorUpdate {
   type: 'mirror';
   view: WorldView;
-  salud: Salud;
+  salud: SaludServidor;
+  motor?: TelemetriaMotor;
+  turbo?: boolean;
+  grabaCinta?: boolean;
   saludMedidaEn: number;
   seed: number;
   cuencas: number;
@@ -263,10 +283,24 @@ export interface MirrorUpdate {
 export type SimRpc = { type: 'rpc'; id: number; method: string; args: unknown[] };
 export type SimReply = { type: 'reply'; id: number; value?: unknown; error?: { status: number; message: string } };
 /** La caducidad usa el reloj monotónico común del proceso, las fechas visibles usan tiempo civil. */
-export type OperacionWorker = { type: 'operacion'; operacion: OperacionSalud | null; medidaEn: number };
+export type OperacionWorker = { type: 'operacion'; operacion: OperacionSalud | null; medidaEn: number;
+  guardado?: Pick<SaludServidor, 'epoca' | 'ultimoTickGuardado' | 'ultimoGuardado'> };
 function packed(value: unknown): Uint8Array<ArrayBuffer> {
   // Own transferable storage, never a pooled Buffer (which would clone the entire slab).
   return Uint8Array.from(serialize(value));
+}
+
+function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.x === b.x && a.y === b.y && a.terrain === b.terrain
+    && a.moisture === b.moisture && a.vegetation === b.vegetation && a.food === b.food
+    && a.biome === b.biome && a.elevation === b.elevation
+    && a.wood === b.wood && a.stone === b.stone && a.feature === b.feature
+    && a.variety === b.variety && a.growth === b.growth && a.fertility === b.fertility
+    && a.cultivation === b.cultivation && a.traffic === b.traffic && a.paved === b.paved
+    && a.drinkingWater === b.drinkingWater && a.species === b.species
+    && a.fauna === b.fauna && a.life === b.life;
 }
 
 export interface TileObservation {
@@ -379,10 +413,10 @@ export function createTileObserver() {
  * same-thread app's TapeWriter copies its input synchronously inside record().
  * Fast-drifting continuous body telemetry is quantized to 2 decimals (animal age to 20-tick buckets)
  * so resting inhabitants and hundreds of grazing fauna don't rewrite unchanged entities on every delta
- * tick. `carry` leaves out `CARRIED_VIEW_FIELDS` for the tape writer to carry over.
+ * tick.
  */
-export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[], carry = false): WorldView {
-  const view = projectMirror(world, worldContext(world), { quantize: true, carry });
+export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
+  const view = projectMirror(world, worldContext(world), { quantize: true });
   if (instanceId !== undefined) view.instanceId = instanceId;
   view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.
@@ -390,23 +424,24 @@ export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId
   return view;
 }
 
-/** Ticks at which a tape frame carries every resident tile instead of only the changed chunks. */
-export function tapeKeyframeDue(tick: number, interval: number | undefined, first: boolean): boolean {
-  return first || tick % Math.max(1, interval ?? TAPE_KEYFRAME_INTERVAL) === 0;
-}
 
 /** Minimum spacing between live mirror posts while the turbo loop runs uncapped. */
 export const TURBO_MIRROR_MS = 250;
 
-function demografiaCinta(world: World) {
+export function demografiaDeCinta(world: World) {
   return { poblacion: world.people.length, nacimientos: world.birthCounter, muertes: world.demographyDynamics.deaths };
 }
-const basesDemografia = new WeakMap<World, ReturnType<typeof demografiaCinta>>();
+
+const basesDemografia = new WeakMap<World, ReturnType<typeof demografiaDeCinta>>();
+export function fijarBaseDemograficaCinta(world: World, base: ReturnType<typeof demografiaDeCinta>): void {
+  basesDemografia.set(world, base);
+}
+
 registrar({ id: 'cinta.serie-demografia', carril: 'C1a', gravedad: 'dura', alcance: 'global', cadaTicks: 200,
   comprobar(world) {
     const base = basesDemografia.get(world);
     if (!base) return [];
-    const { poblacion, nacimientos, muertes } = demografiaCinta(world);
+    const { poblacion, nacimientos, muertes } = demografiaDeCinta(world);
     const esperado = base.poblacion + nacimientos - base.nacimientos - (muertes - base.muertes);
     if (poblacion === esperado && nacimientos >= base.nacimientos && muertes >= base.muertes) return [];
     return [{ id: 'cinta.serie-demografia', gravedad: 'dura', tick: world.tick, esperado, observado: poblacion,
@@ -414,18 +449,179 @@ registrar({ id: 'cinta.serie-demografia', carril: 'C1a', gravedad: 'dura', alcan
   },
 });
 
-function hitoCinta(suceso: ChronicleEvent): Hito {
-  const importancia = Number(['birth', 'death', 'community', 'settlement', 'discovery', 'invention'].includes(suceso.kind));
-  return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
+const REINTENTO_CINTA_MS = 1000;
+const ANILLO_SUCESOS_BYTES = 256 * 1024 * 1024;
+const CINTA_SIN_CREDITO_MS = 300_000;
+
+type EstadoGrabacion = Pick<TapeWorkerReply, 'frames' | 'latestTick'>;
+type HiloCinta = { worker: Worker; enlace: ReturnType<typeof enlaceCinta>; salida: Promise<void> };
+type MensajeGrabador = TapeWorkerReply & { error?: string }
+  | { type: 'estado'; estado: 'ok' }
+  | { type: 'estado'; estado: 'error'; motivo: string };
+
+export function descriptorCinta(binario: boolean) {
+  const base = crearEnlaceCortes();
+  if (!binario) return base;
+  const control = enlaceCinta(base);
+  const cabecera = regionesRanura(0, 0).total;
+  const maxByteLength = Math.max(cabecera, totalmem());
+  const ranuras = Array.from({ length: Atomics.load(control.creditos, 0) },
+    () => new SharedArrayBuffer(cabecera, { maxByteLength }));
+  return { control: base.control, ranuras, sucesos: new SharedArrayBuffer(ANILLO_SUCESOS_BYTES) };
+}
+
+export class GrabadorCinta {
+  private hilo?: HiloCinta;
+  private esperaSalida?: Promise<void>;
+  private reintentoEn = -Infinity;
+  private sinCreditoDesde?: number;
+  private siguiente = 0;
+  private cerrando = false;
+  private enError = false;
+  private reintento?: ReturnType<typeof setTimeout>;
+  private readonly llamadas = new Map<number, { resolve(value: EstadoGrabacion): void; reject(error: Error): void }>();
+
+  constructor(private readonly directorio: string, private readonly topeBytes: number | undefined,
+    private readonly binario: boolean, private readonly avisar: (error: string | null) => void,
+    private readonly reabrir: () => void) {}
+
+  get estado() { return this.enError ? 'error' as const : 'ok' as const; }
+  get activo() { return this.hilo?.enlace; }
+
+  iniciar() {
+    if (this.cerrando || this.hilo || this.esperaSalida || performance.now() < this.reintentoEn) return;
+    try {
+      const descriptor = descriptorCinta(this.binario);
+      let moduleURL = new URL('./tape-worker.js', import.meta.url);
+      const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
+      if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
+      const worker = new Worker(`
+        const { workerData } = require('node:worker_threads');
+        (async () => {
+          if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
+          await import(workerData.moduleURL);
+        })().catch(error => { setImmediate(() => { throw error; }); });
+      `, { eval: true, execArgv: [], name: 'carta-tape', workerData: {
+        role: 'carta-tape', moduleURL: moduleURL.href,
+        loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
+        descriptor, options: { directorio: this.directorio, topeBytes: this.topeBytes },
+      } });
+      const enlace = enlaceCinta(descriptor);
+      const salida = new Promise<void>(resolve => worker.once('exit', code => {
+        if (this.hilo?.worker === worker) {
+          if (!this.cerrando || code !== 0 || this.llamadas.size) this.fallar(new Error(`El hilo de la cinta terminó (código ${code}).`));
+          else this.hilo = undefined;
+        }
+        resolve();
+      }));
+      this.hilo = { worker, enlace, salida };
+      worker.on('error', error => { if (this.hilo?.worker === worker) this.fallar(error); });
+      worker.on('message', (mensaje: MensajeGrabador) => {
+        if (this.hilo?.worker !== worker) return;
+        if (mensaje.type === 'estado') {
+          if (mensaje.estado === 'error') this.fallar(new Error(mensaje.motivo));
+          else this.confirmarApertura();
+          return;
+        }
+        const llamada = this.llamadas.get(mensaje.id);
+        this.llamadas.delete(mensaje.id);
+        if (mensaje.error !== undefined) llamada?.reject(new Error(mensaje.error));
+        else llamada?.resolve({ frames: mensaje.frames, latestTick: mensaje.latestTick });
+      });
+      return { descriptor, recuperada: this.enError };
+    } catch (error) { this.fallar(error); }
+  }
+
+  abrir(apertura: Apertura, hitosPrevios: readonly Hito[]): void {
+    this.enviar({ type: 'abrir', apertura, hitosPrevios });
+    if (!this.enError) return;
+    const hilo = this.hilo;
+    void this.orden('flush').then(() => {
+      if (this.hilo === hilo) this.confirmarApertura();
+    }, error => { if (this.hilo === hilo && hilo) this.fallar(error); });
+  }
+
+  private confirmarApertura(): void {
+    if (!this.enError) return;
+    this.enError = false;
+    this.avisar(null);
+  }
+
+  enviar(mensaje: TapeWorkerRequest): void {
+    if (!this.hilo) throw new Error('La cinta está detenida.');
+    this.hilo.worker.postMessage(mensaje);
+  }
+
+  comprobarCredito(plazo = CINTA_SIN_CREDITO_MS): void {
+    if (!this.hilo) return;
+    if (Atomics.load(this.hilo.enlace.creditos, 0) > 0) { this.sinCreditoDesde = undefined; return; }
+    const ahora = performance.now();
+    if (ahora - (this.sinCreditoDesde ??= ahora) >= plazo) this.fallar(new Error('La cinta dejó de devolver créditos.'));
+  }
+
+  fallar(causa: unknown): void {
+    const error = causa instanceof Error ? causa : new Error(String(causa));
+    const hilo = this.hilo;
+    this.hilo = undefined;
+    this.sinCreditoDesde = undefined;
+    this.reintentoEn = performance.now() + REINTENTO_CINTA_MS;
+    if (hilo) {
+      Atomics.store(hilo.enlace.creditos, 0, 0);
+      this.esperaSalida = hilo.salida;
+      void hilo.worker.terminate().catch(() => undefined);
+      void hilo.salida.then(() => {
+        Atomics.store(hilo.enlace.creditos, 0, 0);
+        this.esperaSalida = undefined;
+        this.programarReintento();
+      });
+    } else this.programarReintento();
+    for (const llamada of this.llamadas.values()) llamada.reject(error);
+    this.llamadas.clear();
+    const avisar = !this.enError;
+    this.enError = true;
+    if (avisar) this.avisar(error.message);
+  }
+
+  private programarReintento(): void {
+    if (this.cerrando) return;
+    clearTimeout(this.reintento);
+    this.reintento = setTimeout(this.reabrir, Math.ceil(Math.max(1, this.reintentoEn - performance.now())));
+    this.reintento.unref();
+  }
+
+  private orden(tipo: 'flush' | 'close'): Promise<EstadoGrabacion> {
+    const id = ++this.siguiente;
+    return new Promise((resolve, reject) => {
+      this.enviar({ type: tipo, id });
+      this.llamadas.set(id, { resolve, reject });
+    });
+  }
+
+  async flush(): Promise<EstadoGrabacion & { enabled: boolean }> {
+    if (!this.hilo) return { enabled: false, frames: 0, latestTick: -1 };
+    return { enabled: true, ...await this.orden('flush') };
+  }
+
+  async cerrar(): Promise<void> {
+    this.cerrando = true;
+    clearTimeout(this.reintento);
+    const hilo = this.hilo;
+    if (hilo) {
+      try { await this.orden('close'); }
+      catch (error) { if (this.hilo === hilo) this.fallar(error); }
+    }
+    await (hilo?.salida ?? this.esperaSalida);
+  }
 }
 
 async function runSimulation(options: SimWorkerOptions) {
   const port = parentPort!;
   let operacion: OperacionSalud | null = null;
   let ultimoAvance = 0;
+  let app: ReturnType<typeof createApp> | undefined;
   function publicarAvance(medidaEn: number) {
     ultimoAvance = medidaEn;
-    port.postMessage({ type: 'operacion', operacion, medidaEn } satisfies OperacionWorker);
+    port.postMessage({ type: 'operacion', operacion, medidaEn, guardado: app?.guardado } satisfies OperacionWorker);
   }
   function publicarOperacion(tipo: OperacionSalud['tipo'] | null) {
     const ahora = Date.now();
@@ -440,190 +636,49 @@ async function runSimulation(options: SimWorkerOptions) {
   }
   publicarOperacion('arrancando');
   const store = new Store(options.worldPath, { onProgress: informarAvance });
-  let app: ReturnType<typeof createApp> | undefined;
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();
   const realSessionValid = store.sessionValid.bind(store);
   store.sessionValid = hash => (!sessionFlags.has(hash) || Atomics.load(sessionFlags.get(hash)!, 0) === 1) && realSessionValid(hash);
   const initialSessions = (store.db.prepare('SELECT hash,expires FROM sessions WHERE expires>?').all(Date.now()) as { hash: string; expires: number }[])
     .map(row => { const validity = new SharedArrayBuffer(4); const flag = new Int32Array(validity); flag[0] = 1; sessionFlags.set(row.hash, flag); return { ...row, validity }; });
-  let observer = createTileObserver();
+  let observer: ReturnType<typeof createTileObserver> | undefined;
   const turbo = !!options.turbo || options.tickMs === 0;
-  const tapeEnabled = options.tape ?? turbo;
-  let tapeWorker: Worker | undefined;
-  let tapeClosed = false;
-  let tapeError: Error | undefined;
-  const descriptor = crearEnlaceCortes();
-  const enlace = enlaceCinta(descriptor);
-  let tapeRequestId = 0;
-  type TapeResult = { frames: number; latestTick: number };
-  const tapeCalls = new Map<number, { resolve(value: TapeResult): void; reject(error: Error): void }>();
-  let tapeExited: Promise<void> | undefined;
-  let epoca = -1, seq = 0, ultimoCorte = -Infinity, ultimoPuntoSerie = -1;
   let recargaPendiente = false;
-  // Sin crédito los hitos se acumulan aquí: una cinta que no vuelve no puede llevarse la memoria del motor.
-  const sinCreditoMaxMs = options.tapeSinCreditoMs ?? 300_000;
-  let sinCreditoDesde: number | undefined;
-  let serialCronica = 0;
-  let baseDemografia: ReturnType<typeof demografiaCinta>;
-  const hitosPendientes: Hito[] = [];
-  const teselasPendientes = new Map<string, Tile>();
-  const eventoGuardado = store.db.prepare('SELECT body FROM events WHERE id=?');
-  let lastSimHz = 0;
-  /** Chunks changed since the last mirror post (turbo accumulates across throttled ticks). */
-  const unpostedChunks = new Set<string>();
-  /** Retired chunks already posted to the gateway (they never change until a save archives them). */
-  const postedRetired = new WeakSet<Chunk>();
+  let postedRetired = new WeakSet<Chunk>();
   let lastPostAt = -Infinity;
   let previousPaused = false;
-  function failTape(error: Error) {
-    if (tapeError) return;
-    tapeError = error;
-    hitosPendientes.length = 0;
-    teselasPendientes.clear();
-    for (const call of tapeCalls.values()) call.reject(error);
-    tapeCalls.clear();
-    port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error.message } });
-  }
-  function tapeCommand(type: 'flush' | 'close'): Promise<TapeResult> {
-    if (tapeError) return Promise.reject(tapeError);
-    if (!tapeWorker) return Promise.resolve({ frames: 0, latestTick: -1 });
-    const id = ++tapeRequestId;
-    return new Promise((resolve, reject) => {
-      tapeCalls.set(id, { resolve, reject });
-      try { tapeWorker!.postMessage({ type, id } satisfies TapeWorkerRequest); }
-      catch (error) { tapeCalls.delete(id); reject(error); }
-    });
-  }
-  async function closeTape() {
-    if (!tapeWorker || tapeClosed) return;
-    tapeClosed = true;
-    try { if (!tapeError) { await tapeCommand('close'); await tapeExited; } }
-    catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
-    finally { if (tapeError) await tapeWorker.terminate(); }
-  }
   let instanceId: string | undefined;
-  function abrirCinta(world: World, motivo: Apertura['motivo']) {
-    tapeWorker!.postMessage({ type: 'abrir', apertura: { instanciaId: instanceId!, epoca: ++epoca,
-      tMundo: world.tick, motivo }, hitosPrevios: hitosPendientes } satisfies TapeWorkerRequest);
-    Atomics.store(enlace.pedirCompleto, 0, 1);
-    ultimoCorte = -Infinity;
-    ultimoPuntoSerie = -1;
-    serialCronica = world.eventCounter;
-    baseDemografia = demografiaCinta(world);
-    teselasPendientes.clear();
-    hitosPendientes.length = 0;
-    for (const suceso of world.events) if (suceso.tick === world.tick && (epoca === 0 || chronicleSerial(suceso.id) === null)) {
-      hitosPendientes.push(hitoCinta(suceso));
-    }
-  }
-
-  function serieCinta(world: World): Corte['serie'] {
-    const demografia = demografiaCinta(world);
-    return { poblacion: demografia.poblacion, nacimientos: demografia.nacimientos - baseDemografia.nacimientos,
-      muertes: demografia.muertes - baseDemografia.muertes, fauna: world.animals.length,
-      estructuras: world.structures.length, sustancias: world.chemistry?.formulas.length ?? 0, hz: lastSimHz };
-  }
-
-  function recogerCronica(world: World) {
-    const diario = world.chronicleJournal;
-    while (serialCronica < world.eventCounter) {
-      const serial = ++serialCronica;
-      // En un paso que guardó, Store ya pasó los nuevos sucesos del diario al archivo.
-      const suceso = diario?.pending[serial - diario.committedThrough - 1];
-      const body = suceso ? undefined : eventoGuardado.get(`e${serial}`)?.body;
-      if (!suceso && typeof body !== 'string') throw new Error(`Falta el suceso ${serial} de la crónica.`);
-      hitosPendientes.push(hitoCinta(suceso ?? JSON.parse(body as string) as ChronicleEvent));
-    }
-  }
-
-  function publish({ forcePost = false, forzarCorte = false }: { forcePost?: boolean; forzarCorte?: boolean } = {}) {
+  function publish(forcePost = false) {
     const live = app!;
-    // A failed in-place step must NEVER leak its partially mutated world into the mirror (nor the tape).
     if (live.failed) {
       if (!previousPaused) { previousPaused = true; port.postMessage({ type: 'paused' }); }
       return;
     }
-    const world = live.world;
-    // The world's identity never changes under its single writer: read once, not per (turbo) tick.
-    instanceId ??= readWorldInstance(store.db)!;
     const now = performance.now();
+    if (!forcePost && !recargaPendiente && live.turbo && now - lastPostAt < TURBO_MIRROR_MS) return;
+    const world = live.mundoParaEmision(true);
+    instanceId ??= readWorldInstance(store.db)!;
     if (recargaPendiente) {
-      observer = createTileObserver();
-      unpostedChunks.clear();
-      lastSimHz = 0;
+      observer = undefined;
+      postedRetired = new WeakSet();
+      recargaPendiente = false;
     }
-    if (tapeWorker && !tapeClosed && !tapeError) {
-      if (Atomics.load(enlace.creditos, 0) > 0) sinCreditoDesde = undefined;
-      else if (now - (sinCreditoDesde ??= now) >= sinCreditoMaxMs) {
-        failTape(new Error(`La cinta no devolvió ningún corte en ${Math.round(sinCreditoMaxMs / 1000)} s.`));
-        void tapeWorker.terminate();
-      }
-    }
-    if (tapeWorker && !tapeClosed && !tapeError) {
-      try {
-        if (epoca < 0 || recargaPendiente) abrirCinta(world, epoca < 0 && live.respaldo ? 'restauracion' : 'reinicio');
-        basesDemografia.set(world, baseDemografia);
-        recogerCronica(world);
-        if (ultimoPuntoSerie < 0 || world.tick > ultimoPuntoSerie && world.tick % CINTA.seriePaso === 0) {
-          // La serie conserva sus ticks aunque no quede crédito para una vista.
-          tapeWorker.postMessage({ type: 'serie', epoca, punto: { t: world.tick, ...serieCinta(world) } } satisfies TapeWorkerRequest);
-          ultimoPuntoSerie = world.tick;
-        }
-      } catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
-    }
-    let postDue = !turbo || forcePost || recargaPendiente || now - lastPostAt >= TURBO_MIRROR_MS;
-    recargaPendiente = false;
-    const activa = !!tapeWorker && !tapeClosed && !tapeError;
-    const completa = Atomics.load(enlace.pedirCompleto, 0) === 1;
-    const recording = activa && Atomics.load(enlace.creditos, 0) > 0 && world.tick > ultimoCorte
-      && (completa || forzarCorte || world.tick - ultimoCorte >= Atomics.load(enlace.cadencia, 0));
-    let observation: TileObservation | undefined;
-    if (postDue || recording) {
-      observation = observer.scan(world);
-      for (const key of observation.dirty) unpostedChunks.add(key);
-      if (activa && !completa) for (const tile of observation.changed) teselasPendientes.set(`${tile.x},${tile.y}`, tile);
-      if (observation.force) postDue = true;
-    }
-    let frame: WorldView | undefined;
-    if (recording) {
-      try {
-        const tiles: Tile[] = [];
-        if (completa) for (const chunk of observation!.chunks.values()) for (const tile of chunk) tiles.push(tile);
-        frame = projectTapeFrame(world, live.runtime, instanceId, tiles);
-        const corte: Corte = { seq: ++seq, epoca, t: world.tick, vista: frame,
-          tilesCambiadas: completa ? 'todas' : [...teselasPendientes.values()], hitos: hitosPendientes, catalogo: [], hz: lastSimHz,
-          serie: serieCinta(world) };
-        Atomics.sub(enlace.creditos, 0, 1);
-        Atomics.add(enlace.entregados, 0, 1n);
-        tapeWorker!.postMessage({ type: 'corte', corte } satisfies TapeWorkerRequest);
-        Atomics.store(enlace.pedirCompleto, 0, 0);
-        ultimoCorte = world.tick;
-        teselasPendientes.clear();
-        hitosPendientes.length = 0;
-      } catch (error) {
-        // A DVR is an observer: it never pauses the world. It stops recording and says so once.
-        failTape(error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-    if (!postDue) return;
     lastPostAt = now;
     const updates: MirrorUpdate['chunks'] = [];
     const minimap: NonNullable<MirrorUpdate['minimap']> = [];
     const transfers: ArrayBuffer[] = [];
-    const chunks = observation!.chunks;
-    for (const key of unpostedChunks) {
-      // A chunk that changed and then left the resident set before this post is no longer a page.
-      const tiles = chunks.get(key);
-      if (!tiles) continue;
+    const binario = ley(world, 'fotograma');
+    const observacion = binario ? undefined : (observer ??= createTileObserver()).scan(world);
+    const chunks = observacion?.chunks ?? teselasParaEmision(world);
+    for (const key of observacion?.dirty ?? chunks.keys()) {
+      const tiles = chunks.get(key)!;
       const data = packed(tiles);
       updates.push({ key, data }); transfers.push(data.buffer as ArrayBuffer);
       const comma = key.indexOf(',');
       minimap.push({ key, cells: encodeChunkMinimapCells(tiles, Number(key.slice(0, comma)), Number(key.slice(comma + 1))) });
     }
-    unpostedChunks.clear();
-    // The tape frame is reused as the mirror's base; only this shallow copy is emptied into pages.
-    const base = frame ?? projectMirrorWorld(world, undefined, worldContext(world));
+    const base = binario ? vistaParaEmision(world, store.context) : projectMirrorWorld(world, undefined, worldContext(world));
     const view: WorldView = { ...base, tiles: [], instanceId, performance: live.runtime,
       ...(base.technology ? { technology: { ...base.technology } } : {}) };
     const pages: MirrorUpdate['pages'] = [];
@@ -653,7 +708,7 @@ async function runSimulation(options: SimWorkerOptions) {
       // Resident tile proxies must never be passed to structuredClone/v8.serialize.
       packPages('pendingChunks', [{ ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) }], 1);
     }
-    const update: MirrorUpdate = { type: 'mirror', view, salud: live.salud(), saludMedidaEn: performance.now(), seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
+    const update: MirrorUpdate = { type: 'mirror', view, motor: live.telemetriaMotor, turbo: live.turbo, grabaCinta: live.grabaCinta, salud: live.salud(), saludMedidaEn: performance.now(), seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
       activeKeys: Object.keys(world.chunks), activeChunks: world.chunks, chunks: updates, pendingChunks: [], pendingKeys: world.retiredChunks.map(chunk => chunk.key), pages,
       deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap };
     // Terrain preparation stays OFF the HTTP thread. Chunk buffers move, rather than cloning
@@ -663,70 +718,39 @@ async function runSimulation(options: SimWorkerOptions) {
     port.postMessage({ type: 'published', ms: performance.now() - started });
   }
   try {
-    const base = () => process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams()
-      : process.env.CARTA_FULL_HARDWARE === '1' ? hostFullHardwareParams() : hostParams();
     app = createApp({ store, commit: options.commit, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
-      // publish sends to the dedicated writer thread; the inner app must not open another writer.
-      tape: false,
+      deployment: options.deployment, tape: options.tape, tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
+      onEstadoCinta: error => port.postMessage({ type: 'cinta', error }),
       turboSaveIntervalMs: options.turboSaveIntervalMs,
       onOperacion: tipo => {
         if (tipo === 'recargando') recargaPendiente = true;
         publicarOperacion(tipo);
       },
-      params: options.deployment ? () => deploymentParams(base()) : options.params,
+      params: options.deployment ? paramsNuevosDeDespliegue : options.params,
       beforeStep: options.testStepDelayMs ? () => {
           port.postMessage({ type: 'step-blocked', tick: app!.world.tick });
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.testStepDelayMs);
       } : undefined,
       // A step that applied a Mensaje Divino posts the mirror at once (and still records its frame).
-      afterStep: simHz => { lastSimHz = simHz; publish({ forcePost: app!.susurrosEnUltimoPaso }); } });
-    if (options.deployment) setParams(app.world, deploymentParams(paramsOf(app.world)));
-    const motor = paramsOf(app.world).motor;
-    if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
-      const tileOwnership = new ResidentTopologyOwner();
-      app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
-      bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+      afterStep: () => publish(app!.susurrosEnUltimoPaso) });
+    if (!app.usaMotor) {
+      if (options.deployment && !ley(app.world, 'guardadoCompleto')) setParams(app.world, deploymentParams(paramsOf(app.world)));
+      const motor = paramsOf(app.world).motor;
+      if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
+        const tileOwnership = new ResidentTopologyOwner();
+        app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
+        bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+      }
+      port.postMessage({ type: 'log', level: 'info', value: { v15: resumenDespacho(app.world) } });
     }
     informarAvance();
-    for (const device of motor.gpu) {
-      const parity = await gpuParitySession.initialize(device, { budgetMs: 5000, log: diagnostic => port.postMessage({ type: 'log', level: 'warn', value: diagnostic }) });
-      port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: parity, v15: resumenDespacho(app.world) } });
-      informarAvance();
-    }
-    if (motor.gpu.length === 0) port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: null, v15: resumenDespacho(app.world) } });
-    if (tapeEnabled) try {
-      let moduleURL = new URL('./tape-worker.js', import.meta.url);
-      const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
-      if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
-      tapeWorker = new Worker(`
-        const { workerData } = require('node:worker_threads');
-        (async () => {
-          if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
-          await import(workerData.moduleURL);
-        })().catch(error => { setImmediate(() => { throw error; }); });
-      `, { eval: true, execArgv: [], name: 'carta-tape', workerData: {
-        role: 'carta-tape', moduleURL: moduleURL.href,
-        loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
-        descriptor, options: { directorio: cintaDeMundo(options.worldPath), topeBytes: options.tapeTopeBytes },
-      } });
-      tapeWorker.on('message', (message: TapeWorkerReply) => {
-        tapeCalls.get(message.id)?.resolve({ frames: message.frames, latestTick: message.latestTick });
-        tapeCalls.delete(message.id);
-      });
-      tapeWorker.on('error', failTape);
-      tapeExited = new Promise(resolve => tapeWorker!.once('exit', code => {
-        if (!tapeClosed || code !== 0 || tapeCalls.size) failTape(new Error(`Tape worker exited (code ${code}).`));
-        resolve();
-      }));
-    } catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
-    informarAvance();
-    publish({ forcePost: true });
+    publish(true);
     port.on('message', (message: SimRpc) => { void handle(message); });
     publicarOperacion(null);
     port.postMessage({ type: 'ready', sessions: initialSessions });
   } catch (error) {
-    try { await app?.close(); } finally { try { await closeTape(); } finally { store.close(); } }
+    try { await app?.close(); } finally { store.close(); }
     throw error;
   }
   async function handle(message: SimRpc) {
@@ -746,11 +770,11 @@ async function runSimulation(options: SimWorkerOptions) {
         case 'gesture': value = await app!.requestGesture(args[0] as Gesture, args[1] as string); break;
         case 'personDetail': {
           if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
-          value = enriquecerPersona(app!.world, args[0] as string) ?? null; break;
+          value = await app!.detallePersona(args[0] as string); break;
         }
         case 'recipeDetail': {
           if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
-          value = technologyRecipeDetail(app!.world, args[0] as string) ?? null; break;
+          value = technologyRecipeDetail(app!.mundoParaEmision(), args[0] as string) ?? null; break;
         }
         case 'whisper': {
           // V24 Mensajes Divinos: allowed in observer-only worlds (an inhabitant hears them later, never an order).
@@ -764,17 +788,11 @@ async function runSimulation(options: SimWorkerOptions) {
           break;
         }
         case 'flushTape':
-          value = { enabled: !!tapeWorker && !tapeClosed && !tapeError, ...await tapeCommand('flush') };
+          value = await app!.flushTape();
           break;
         case 'shutdown':
           closing = true;
-          try {
-            await app!.close();
-            if (!app!.failed && (turbo || tapeWorker)) {
-              if (tapeWorker && !tapeError) await tapeCommand('flush').catch(() => undefined);
-              publish({ forcePost: true, forzarCorte: true });
-            }
-          } finally { try { await closeTape(); } finally { store.close(); } }
+          try { await app!.close(); } finally { store.close(); }
           break;
         default: throw new HttpError(400, 'RPC desconocido.');
       }
@@ -787,6 +805,5 @@ async function runSimulation(options: SimWorkerOptions) {
     }
   }
 }
-import { enriquecerPersona } from './persona-extra.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 if (!isMainThread && workerData?.role === 'carta-sim') await runSimulation(workerData.options);

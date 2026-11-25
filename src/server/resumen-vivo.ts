@@ -12,7 +12,7 @@ import type { PersonDetail, RuntimeStats } from '../shared/types.js';
 import type { Person, World } from '../world/index.js';
 import { reproductiveReadiness } from '../world/family.js';
 import { demographicTraits } from '../world/demography.js';
-import { paramsOf } from '../world/params.js';
+import { ley, paramsOf } from '../world/params.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export const CADA_PASOS = 50;
@@ -51,7 +51,7 @@ export function comidaCompartida(world: World): number {
 
 /** Lo que el servidor añade a `RuntimeStats` cada `CADA_PASOS` pasos. `conducta` es O(1): un parámetro. */
 export function resumenVivo(world: World): Pick<RuntimeStats, 'natalidad' | 'comidaCompartida' | 'conducta'> {
-  return { natalidad: resumenNatalidad(world), comidaCompartida: comidaCompartida(world),
+  return { natalidad: ley(world, 'natalidad') ? undefined : resumenNatalidad(world), comidaCompartida: comidaCompartida(world),
     conducta: { habituacion: paramsOf(world).conducta.habituacion } };
 }
 

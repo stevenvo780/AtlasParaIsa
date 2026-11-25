@@ -828,8 +828,9 @@ function paintMaterialFinish(g: CanvasRenderingContext2D, s: ExtendedStructure, 
 export const PIXELES_POR_METRO = 8;
 /** kg/L con que se estima el volumen de un lote cuya sustancia aún no tiene ficha (la del agua). */
 export const DENSIDAD_SUPUESTA_KG_L = 1;
-/** Pendiente de un montón suelto (alto sobre radio): ángulo de reposo de ~27° de la grava y el grano. */
-export const PENDIENTE_MONTON = 0.5;
+// PENDIENTE_MONTON vive en shared/naturaleza.ts (integrador) y se reexporta aquí.
+import { PENDIENTE_MONTON } from '../shared/naturaleza.js';
+export { PENDIENTE_MONTON };
 /** Fracción de `Forma.filo` a partir de la cual el filo brilla en el dibujo. */
 export const FILO_VISIBLE = 0.5;
 /** Fracción de `Forma.hueco` a partir de la cual se ve la boca (vasija, horno). */

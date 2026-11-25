@@ -18,6 +18,8 @@ export interface CuerpoVisible {
   principal: SustanciaId;  // sustancia de más masa del tejido (color del sprite)
   /** Gestación en curso (n): masa del embrión, la que tendrá al nacer y uid de la pareja que aportó su genoma. */
   embrion?: { masa: number; m0: number; otro: number };
+  /** uid del frente (el mismo con que FaunaVisible.persigue/huyeDe nombran a alguien). */
+  uid?: number;
 }
 
 /** Cría que aún depende de sus cuidadores y quiénes son (n). */
@@ -62,9 +64,14 @@ export interface MateriaMundoVisible {
 }
 
 /** Ciclo del agua y aire de la página que contiene una celda (w): para la capa de humedad y la lluvia. */
-export interface AireVisible { humedadRelativa: number; lluvia: number; T: number }
+export interface AireVisible {
+  humedadRelativa: number; // [0, 1]
+  lluvia: number; // mm/h
+  T: number;
+}
 
-/** Qué dueño tiene cada página visible y cuánto le cuesta (capa «Hilos»; m4a y m7). */
+/** Qué dueño tiene cada página visible y cuánto le cuesta (capa «Hilos»; m4a y m7). `px, py` en páginas de 16×16
+ * teselas (`Math.floor(x / 16)`); las claves de `WorldView.aire` son «px,py» en esas mismas páginas. */
 export interface RepartoVisible { paginas: [px: number, py: number, dueno: number][]; msPorHilo: number[] }
 
 /** Sustancias referenciadas por lo que viaja en esta vista (fichas de sustancia). */

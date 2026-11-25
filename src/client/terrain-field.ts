@@ -254,12 +254,11 @@ export function classifyTerrainPixel(
 /* V23: color de la materia (composición y temperatura de la tesela)   */
 /* ------------------------------------------------------------------ */
 
-/** Punto de Draper (K): un sólido empieza a verse al rojo en la penumbra. */
-export const PUNTO_DRAPER_K = 798;
+// PUNTO_DRAPER_K y FUSION_HIELO_K viven en shared/naturaleza.ts (integrador) y se reexportan aquí.
+import { PUNTO_DRAPER_K, FUSION_HIELO_K } from '../shared/naturaleza.js';
+export { PUNTO_DRAPER_K, FUSION_HIELO_K };
 /** Temperatura (K) a la que el brillo de cuerpo negro cubre el color propio del material (metal fundido, brasas vivas). */
 export const BRILLO_PLENO_K = 1800;
-/** Fusión del hielo (K): el agua superficial por debajo se pinta escarchada. */
-export const FUSION_HIELO_K = 273.15;
 /** Grados (K) bajo la fusión a los que la escarcha cubre del todo un suelo saturado de agua. */
 export const ESCARCHA_PLENA_K = 10;
 /** Paso de cuantización de cada canal de la paleta (niveles de 0–255): mantiene el pixel-art en una paleta finita. */

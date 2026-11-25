@@ -115,7 +115,8 @@ export interface WorldView {
   /** V20: emergent algebraic chemistry summary (discovered formulas, active lots, highest temperature tier). */
   chemistry?: import('./chemistry.js').ChemistrySummaryView;
   /** V23: materia del mundo (panel «Materia»), lotes con forma visibles en la cámara, sustancias que esta vista
-   * referencia, aire de las páginas visibles (clave «px,py») y reparto de dueños. Cada uno ausente sin su ley. */
+   * referencia, aire de las páginas visibles (clave «px,py», páginas de 16×16 teselas: `Math.floor(x / 16)`) y reparto
+   * de dueños (mismas páginas). Cada uno ausente sin su ley. */
   materia?: import('./vistas-v23.js').MateriaMundoVisible; lotes?: import('./vistas-v23.js').LoteVisible[];
   sustancias?: import('./vistas-v23.js').SustanciasVisibles; aire?: Record<string, import('./vistas-v23.js').AireVisible>;
   reparto?: import('./vistas-v23.js').RepartoVisible;

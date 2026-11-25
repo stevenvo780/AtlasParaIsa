@@ -1,6 +1,6 @@
 import { makeFloatingPanel, type FloatingPanel } from './panel-manager.js';
 import { GRAPHICS_STORAGE_KEY, loadGraphicsSettings, saveGraphicsSettings, sanitizeGraphicsSettings, applyPreset, renderGraphicsSettingsHtml, minZoomLabel, GRAPHICS_PRESETS, type GraphicsPreset, type GraphicsSettings } from './graphics-settings.js';
-import { MAP_LAYER_CATALOG, isMapLayerId, toggleLayer, clearLayers, activeLayersSummary, renderLayersPopoverHtml, type MapLayerId } from './layers-control.js';
+import { isMapLayerId, toggleLayer, clearLayers, activeLayersSummary, renderLayersPopoverHtml, capasV23Disponibles, capasDelMapa, type MapLayerId } from './layers-control.js';
 import { mountMinimap, type MinimapController } from './minimap.js';
 import { SpatialSoundscape } from './soundscape.js';
 import { fetchJson, modoDeAjustes, validDirectory, validMap, validWhisperResult, validWhispers } from './ui-guards.js';
@@ -44,6 +44,8 @@ import './notebook.css';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 let world: WorldView | null = null;
+/** Integrador (pedido de vmapa): firma de las capas V23 disponibles; al cambiar se rehace el menú de capas. */
+let capasV23Firma = '';
 let connection: Connection | null = null;
 /** V21: reproductor DVR de la cinta (`/api/tape/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
 let dvr: DvrPlayer | null = null;
@@ -137,7 +139,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { soundEnabled = false; soundBusy = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; capasV23Firma = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -652,11 +654,12 @@ function renderWhispers(): void {
 function renderLayers(): void {
   landscape?.setActiveLayers(activeLayers);
   const options = el('layers-options'), focused = (document.activeElement as HTMLElement | null)?.dataset?.layer;
-  options.innerHTML = renderLayersPopoverHtml(activeLayers);
+  const disponibles = capasV23Disponibles(world);
+  options.innerHTML = renderLayersPopoverHtml(activeLayers, disponibles);
   if (focused) options.querySelector<HTMLElement>(`[data-layer="${focused}"]`)?.focus({ preventScroll: true });
   const summary = el('layers-summary'); summary.hidden = !activeLayers.size; summary.textContent = activeLayersSummary(activeLayers);
   const legend = el('heat-legend'); legend.hidden = !activeLayers.size;
-  legend.innerHTML = MAP_LAYER_CATALOG.filter(layer => activeLayers.has(layer.id)).map(layer => `<p class="layer-legend-row"><i class="layer-swatch" style="background:${layer.color}"></i><span><strong>${esc(layer.label)}</strong> · ${esc(layer.description)}</span><button type="button" data-remove-layer="${layer.id}" aria-label="Quitar ${esc(layer.label)}">×</button></p>`).join('') + (activeLayers.size ? '<button type="button" data-action="clear-layers">Limpiar</button>' : '');
+  legend.innerHTML = capasDelMapa(disponibles).filter(layer => activeLayers.has(layer.id)).map(layer => `<p class="layer-legend-row"><i class="layer-swatch" style="background:${layer.color}"></i><span><strong>${esc(layer.label)}</strong> · ${esc(layer.description)}</span><button type="button" data-remove-layer="${layer.id}" aria-label="Quitar ${esc(layer.label)}">×</button></p>`).join('') + (activeLayers.size ? '<button type="button" data-action="clear-layers">Limpiar</button>' : '');
 }
 function toggleLayers(): void {
   const panel = el('layers-popover'); panel.hidden = !panel.hidden;
@@ -733,6 +736,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   const first = world === null; world = next; landscape?.update(next, changedTiles); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
   renderTelemetryHud(next); renderSaludIndicador();
+  const firmaCapas = [...capasV23Disponibles(next)].join(); if (firmaCapas !== capasV23Firma) { capasV23Firma = firmaCapas; renderLayers(); }
   cronica.acumular(next.events);
   if (first) {
     try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }

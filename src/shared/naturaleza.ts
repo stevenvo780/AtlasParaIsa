@@ -429,3 +429,12 @@ export const PESO_EMA = 0.25;
 /** Cota del retraso relativo de un hilo (asignado / pared): ni un hilo con medida absurda se queda sin chunks ni uno
  * ganador acapara todo el reparto (sin unidad; el peso va en [COTA_RETRASO, 1 / COTA_RETRASO]). */
 export const COTA_RETRASO = 0.25;
+
+// ── Carril vmapa: constantes físicas del mapa (`client/terrain-field.ts` y `client/structure-art.ts` las reexportan) ──
+
+/** Punto de Draper (K): un sólido empieza a verse al rojo en la penumbra. */
+export const PUNTO_DRAPER_K = 798;
+/** Fusión del hielo (K): el agua superficial por debajo se pinta escarchada. */
+export const FUSION_HIELO_K = 273.15;
+/** Pendiente de un montón suelto (alto sobre radio): ángulo de reposo de ~27° de la grava y el grano. */
+export const PENDIENTE_MONTON = 0.5;

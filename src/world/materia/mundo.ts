@@ -100,6 +100,11 @@ const T_IGNICION = 1100, TICKS_FUEGO = 60, O2_FUEGO = 2;
 
 /** Clausius–Clapeyron con la regla de Trouton (ΔH_vap = 88 J/(mol·K)·T_eb), con la T de ebullición del modelo. */
 const TROUTON = 88 / 8.314;
+/** Fracción del aire de una tesela que intercambia vapor con su superficie en el día (la capa baja que se renueva en
+ * `tauVapor`; el resto de la columna es la reserva de gases del aire, no de agua). Con la columna entera el aire saturado
+ * guarda 1,7 veces el agua de una charca por tesela y, sin lluvia con origen, el agua de las charcas acaba toda en el aire
+ * en un día (medido: 0 % de retención en 3.000 ticks; 45–60 % con 0,03–0,1). */
+const CAPA_VAPOR = 0.1;
 
 /** Unidades base de cada órgano. La hoja es la planta de la caja validada; el fruto es semilla (lípido, proteína y
  * fósforo orgánico, sin madera); el tronco es madera. Su composición distinta es lo que permite leerlos por separado. */
@@ -493,11 +498,11 @@ export class MundoMaterial {
 
   temperatura(p: number, luz: number): number { return T_NOCHE + (T_DIA - T_NOCHE) * luz + this.dT[p]!; }
 
-  /** Cuantos de vapor que satura un aire con `gases` cuantos de otros gases a T (ley de Raoult–Dalton). */
+  /** Cuantos de vapor que satura la capa de intercambio de un aire con `gases` cuantos de otros gases a T (Raoult–Dalton). */
   vaporSaturado(gases: number, T: number): number {
     const tEb = this.quimica.sustancia(this.S.H2O).prop.tEbullicion;
     const x = Math.min(0.99, Math.exp(-TROUTON * (tEb / T - 1)));
-    return gases * x / (1 - x);
+    return CAPA_VAPOR * gases * x / (1 - x);
   }
 
   private esGas(id: SustanciaId, T: number): boolean {

@@ -131,6 +131,8 @@ function puntoAB(A: ReturnType<typeof args>) {
     return CAMPOS.map((k) => `${k} ${f3(se[k]!)}/${f3(sm[k]!)}`).join(' ');
   };
   comparar.push(`t=0: ${media()}`);
+  const charcas = tiles.filter((t) => (t.drinkingWater ?? 0) > 0.15).map((t) => ({ clave: t.x * 65536 + t.y, agua0: t.drinkingWater! }));
+  const idxClave = new Map<number, number>(); for (let i = 0; i < m.n; i++) idxClave.set(m.x[i]! * 65536 + m.y[i]!, i);
   while (w.tick < A.ticks) {
     const f: Forzamiento = { dt: A.cada, luz: luzMedia(w.tick, A.cada), lluvia: w.weather === 'rain' };
     const t0 = performance.now();
@@ -147,9 +149,16 @@ function puntoAB(A: ReturnType<typeof args>) {
   console.log(`  Δ energía ${energia} J = sol ${c[CUENTA.SOL]} + radiación entrante ${c[CUENTA.RAD_ENTRA]} − saliente ${c[CUENTA.RAD_SALE]} + ignición ${c[CUENTA.IGNICION]} = ${declarada} J → ${energia === declarada ? 'cuadra' : 'NO cuadra'}`);
   console.log(`  pasos con Σ lotes ≠ libro: ${fallos} de ${pasos} → ${fallos === 0 && energia === declarada && s1.slice(0, NE).every((x, k) => x === s0[k]) ? 'PASA' : 'FALLA'}`);
   console.log(`  ${(ms / pasos).toFixed(0)} ms por paso (${(1000 * ms / pasos / m.n / A.cada).toFixed(2)} µs por tesela y tick, 1 hilo, con el libro bigint aparte), ${carga()}`);
-  console.log('  medias escalar/sombra (la sombra no come ni bebe; el escalar tiene topes y lluvia sin origen):');
+  console.log('  medias escalar/sombra (nadie come ni bebe en ninguno de los dos; el escalar tiene topes y lluvia sin origen):');
   for (const x of comparar) console.log(`    ${x}`);
-  return { peor, bOk, fallos, pasos, dAtomos, energia, declarada, comparar, msPaso: ms / pasos };
+  // Nadie bebe: una charca que se queda sin agua es evaporación sin retorno suficiente (calibración del aire), no consumo.
+  // La charca se iguala con su suelo (gCharca), así que se espera que quede en torno al llenado del suelo, no al 100 %.
+  const media0 = charcas.reduce((a, c) => a + c.agua0, 0) / Math.max(1, charcas.length);
+  const mediaE = charcas.reduce((a, c) => a + (porTesela.get(c.clave)!.drinkingWater ?? 0), 0) / Math.max(1, charcas.length);
+  const mediaS = charcas.reduce((a, c) => a + m.vista(idxClave.get(c.clave)!, v).drinkingWater, 0) / Math.max(1, charcas.length);
+  const retencion = { escalar: mediaE / media0, sombra: mediaS / media0 };
+  console.log(`  retención de las ${charcas.length} charcas (agua potable inicial > 0,15) a los ${A.ticks} ticks, sin que nadie beba: escalar ${pc(retencion.escalar)}, sombra ${pc(retencion.sombra)} → ${retencion.sombra >= 0.25 ? 'PASA' : 'FALLA (la sombra seca las charcas: el aire guarda más vapor que toda el agua del suelo)'}`);
+  return { peor, bOk, fallos, pasos, dAtomos, energia, declarada, comparar, retencion, msPaso: ms / pasos };
 }
 
 // ── H₂: el suelo discreto, dos lotes (aire 10.000 / poro 10, como materia.cierre2) ──

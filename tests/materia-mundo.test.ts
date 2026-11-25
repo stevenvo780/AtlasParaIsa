@@ -4,11 +4,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NE } from '../src/shared/naturaleza.js';
+import { ELEMENTOS, NE } from '../src/shared/naturaleza.js';
 import type { Tile } from '../src/shared/types.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
-import { MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
+import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, unidadesVida, vistaVacia, type Organos } from '../src/world/materia/vistas.js';
 
 const pagina = (semilla: number): Tile[] => createWorld(semilla).tiles.filter((t) => t.x >= 0 && t.y >= 0 && t.x < 16 && t.y < 16);
@@ -45,12 +45,12 @@ test('las vistas reproducen los escalares de la tesela al levantar (dentro de me
   await q.cerrar();
 });
 
-test('el libro cuadra exacto en cada paso y los átomos no cambian', async () => {
+test('el libro cuadra exacto en cada paso y los átomos solo cambian por el agua declarada con el exterior', async () => {
   const { q, m, tot, exacto } = levantar();
   const s0 = m.saldo();
   for (let k = 0; k < 12; k++) { correr(m, tot, 1); assert.ok(exacto(), `paso ${k}`); }
-  const s1 = m.saldo();
-  for (let e = 0; e < NE; e++) assert.equal(s1[e], s0[e]);
+  const s1 = m.saldo(), c = tot.cuentas, neto = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
+  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, ELEMENTOS[e] === 'H' ? 2n * neto : ELEMENTOS[e] === 'O' ? neto : 0n, ELEMENTOS[e]);
   assert.notEqual(s1[NE], s0[NE], 'el sol y la radiación mueven energía');
   await q.cerrar();
 });

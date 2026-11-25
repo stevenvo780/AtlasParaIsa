@@ -2,10 +2,12 @@
  * Laboratorio del mundo material en sombra (carril W, etapa 1). Corre un mundo normal de L × L (sin gente ni fauna:
  * solo sus leyes de ecología y de agua) y su sombra material a la vez, y mide los puntos de aceptación:
  *   a) conservación exacta (bigint) con las fuentes y sumideros declarados;   b) vistas en el instante inicial;
- *   c) equivalencia de flujos (rebrote de alimento y recarga de agua);       d) ciclos en 40 recambios, sin gente;
- *   e) fenómenos (rebrote tras el fuego, agua que se evapora y vuelve, suelo frío); f) coste por tesela y tick.
+ *   c) equivalencia de flujos (rebrote de alimento y recarga de agua);       c2) charcas con el tiempo de hoy (en a);
+ *   d) ciclos y régimen de la biomasa en 40 recambios, sin gente;
+ *   e) fenómenos (rebrote tras el fuego, agua que se evapora y vuelve, suelo frío sobre una masa marcada); f) coste.
  * Uso: npx tsx scripts/lab-mundo-material.mts [--puntos a,b,c,e,f] [--lado 64] [--ticks 5000] [--cada 10]
- *      [--recambios 40] [--cada-d 240] [--hilos 1,8] [--semilla 1] [--salida dir]
+ *      [--recambios 40] [--cada-d 240] [--hilos 1,8] [--semilla 1] [--salida dir] [--fisica clave=valor,…]
+ * `--fisica` cambia parámetros físicos de FISICA (mundo.ts) para barrerlos, p. ej. --fisica alturaCapaLimite=500.
  */
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
@@ -24,7 +26,7 @@ import { pasoLote } from '../src/world/materia/paso.js';
 import { Rol } from '../src/world/materia/tipos.js';
 import { KAPPA_SUELO, KAPPA_SUELO_HH } from '../src/shared/naturaleza.js';
 import { LUZ_CREPSCULO } from '../src/world/ecologia-constantes.js';
-import { MundoMaterial, intercambioBruto, totalesVacios, CUENTA, type DescriptorMundo, type Forzamiento } from '../src/world/materia/mundo.js';
+import { MundoMaterial, intercambioBruto, totalesVacios, CUENTA, type DescriptorMundo, type Fisica, type Forzamiento } from '../src/world/materia/mundo.js';
 import { serializarSustancias, type ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 import { unidadesVacias, vistaVacia, type VistaTesela } from '../src/world/materia/vistas.js';
 
@@ -34,8 +36,20 @@ function args() {
     puntos: new Set(v('puntos', 'a,b,c,e,f').split(',')), lado: +v('lado', '64'), ticks: +v('ticks', '5000'), cada: +v('cada', '10'),
     recambios: +v('recambios', '40'), cadaD: +v('cada-d', '240'), hilos: v('hilos', '1,8').split(',').map(Number),
     semilla: +v('semilla', '1'), salida: v('salida', '/tmp/atlas-v23-w/lab'),
+    fisica: Object.fromEntries(v('fisica', '').split(',').filter(Boolean).map((x) => { const [k, n] = x.split('='); return [k!, +n!]; })) as Partial<Fisica>,
   };
 }
+
+const veredicto = (ok: boolean) => ok ? 'PASA' : 'FALLA';
+const entre = (x: number, a: number, b: number) => x >= a && x <= b;
+
+/** Agua con el exterior: entra y sale de la atmósfera libre y se va por el desagüe (cuantos). */
+function exteriorAgua(c: bigint[]): string {
+  return `atmósfera libre +${c[CUENTA.CIELO_ENTRA]} −${c[CUENTA.CIELO_SALE]}, desagüe −${c[CUENTA.DESAGUE]} cuantos de H₂O (saldo ${c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!})`;
+}
+
+/** Un paso material con un hilo. */
+function paso(m: MundoMaterial, f: Forzamiento, tot: ReturnType<typeof totalesVacios>): void { m.prepararPaso(); m.pasar(f); m.plegar(tot); }
 
 const carga = () => `carga ${loadavg().map((x) => x.toFixed(1)).join(' ')} (${hostname()}, ${cpus().length} hilos)`;
 const f3 = (x: number) => x.toFixed(3), pc = (x: number) => `${(100 * x).toFixed(2)} %`;
@@ -99,7 +113,7 @@ async function principal(): Promise<void> {
 function puntoAB(A: ReturnType<typeof args>) {
   const { w, tiles } = mundoNormal(A.semilla, A.lado);
   const q = crearServicioQuimico({ modo: 'inmediato' });
-  const m = MundoMaterial.levantar(tiles, q, { semilla: A.semilla, luz: luzMedia(0, A.cada) });
+  const m = MundoMaterial.levantar(tiles, q, { fisica: A.fisica, semilla: A.semilla, luz: luzMedia(0, A.cada) });
   const tot = totalesVacios(); m.plegar(tot);
   const e = m.params.escalas;
   console.log(`\nEscalas (cuantos o unidades por unidad de escalar): ${JSON.stringify(e)}`);
@@ -136,7 +150,7 @@ function puntoAB(A: ReturnType<typeof args>) {
   while (w.tick < A.ticks) {
     const f: Forzamiento = { dt: A.cada, luz: luzMedia(w.tick, A.cada), lluvia: w.weather === 'rain' };
     const t0 = performance.now();
-    m.prepararPaso(); m.pasar(f); m.plegar(tot);
+    paso(m, f, tot);
     ms += performance.now() - t0; pasos++;
     if (!exacto(m, tot)) fallos++;
     for (let k = 0; k < A.cada; k++) tickEscalar(w);
@@ -144,21 +158,25 @@ function puntoAB(A: ReturnType<typeof args>) {
   }
   const s1 = m.saldo();
   const dAtomos = ELEMENTOS.map((x, k) => `${x} ${s1[k]! - s0[k]!}`).join(', ');
-  const c = tot.cuentas, energia = s1[NE]! - s0[NE]!, declarada = c[CUENTA.SOL]! + c[CUENTA.RAD_ENTRA]! - c[CUENTA.RAD_SALE]! + c[CUENTA.IGNICION]!;
-  console.log(`  Δ átomos (debe ser 0): ${dAtomos}`);
-  console.log(`  Δ energía ${energia} J = sol ${c[CUENTA.SOL]} + radiación entrante ${c[CUENTA.RAD_ENTRA]} − saliente ${c[CUENTA.RAD_SALE]} + ignición ${c[CUENTA.IGNICION]} = ${declarada} J → ${energia === declarada ? 'cuadra' : 'NO cuadra'}`);
-  console.log(`  pasos con Σ lotes ≠ libro: ${fallos} de ${pasos} → ${fallos === 0 && energia === declarada && s1.slice(0, NE).every((x, k) => x === s0[k]) ? 'PASA' : 'FALLA'}`);
+  const c = tot.cuentas, energia = s1[NE]! - s0[NE]!;
+  const declarada = c[CUENTA.SOL]! + c[CUENTA.RAD_ENTRA]! - c[CUENTA.RAD_SALE]! + c[CUENTA.IGNICION]! + c[CUENTA.EXTERIOR_J]!;
+  // Los átomos cambian solo por el agua declarada con el exterior: H 2 y O 1 por cuanto de H₂O.
+  const aguaNeta = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
+  const esperadoAt = ELEMENTOS.map((x) => x === 'H' ? 2n * aguaNeta : x === 'O' ? aguaNeta : 0n);
+  const atomosOk = s1.slice(0, NE).every((x, k) => x - s0[k]! === esperadoAt[k]);
+  console.log(`  Δ átomos: ${dAtomos}; agua con el exterior: ${exteriorAgua(c)} → Δ átomos − agua declarada = ${ELEMENTOS.map((x, k) => `${x} ${s1[k]! - s0[k]! - esperadoAt[k]!}`).join(', ')} (debe ser 0)`);
+  console.log(`  Δ energía ${energia} J = sol ${c[CUENTA.SOL]} + radiación entrante ${c[CUENTA.RAD_ENTRA]} − saliente ${c[CUENTA.RAD_SALE]} + ignición ${c[CUENTA.IGNICION]} + exterior ${c[CUENTA.EXTERIOR_J]} = ${declarada} J → ${energia === declarada ? 'cuadra' : 'NO cuadra'}`);
+  console.log(`  pasos con Σ lotes ≠ libro: ${fallos} de ${pasos} → ${veredicto(fallos === 0 && energia === declarada && atomosOk)}`);
   console.log(`  ${(ms / pasos).toFixed(0)} ms por paso (${(1000 * ms / pasos / m.n / A.cada).toFixed(2)} µs por tesela y tick, 1 hilo, con el libro bigint aparte), ${carga()}`);
   console.log('  medias escalar/sombra (nadie come ni bebe en ninguno de los dos; el escalar tiene topes y lluvia sin origen):');
   for (const x of comparar) console.log(`    ${x}`);
-  // Nadie bebe: una charca que se queda sin agua es evaporación sin retorno suficiente (calibración del aire), no consumo.
-  // La charca se iguala con su suelo (gCharca), así que se espera que quede en torno al llenado del suelo, no al 100 %.
+  // c2) Nadie bebe en ninguno de los dos: el agua de las charcas a los A.ticks es la que deja el tiempo de hoy.
   const media0 = charcas.reduce((a, c) => a + c.agua0, 0) / Math.max(1, charcas.length);
   const mediaE = charcas.reduce((a, c) => a + (porTesela.get(c.clave)!.drinkingWater ?? 0), 0) / Math.max(1, charcas.length);
   const mediaS = charcas.reduce((a, c) => a + m.vista(idxClave.get(c.clave)!, v).drinkingWater, 0) / Math.max(1, charcas.length);
-  const retencion = { escalar: mediaE / media0, sombra: mediaS / media0 };
-  console.log(`  retención de las ${charcas.length} charcas (agua potable inicial > 0,15) a los ${A.ticks} ticks, sin que nadie beba: escalar ${pc(retencion.escalar)}, sombra ${pc(retencion.sombra)} → ${retencion.sombra >= 0.25 ? 'PASA' : 'FALLA (la sombra seca las charcas: el aire guarda más vapor que toda el agua del suelo)'}`);
-  return { peor, bOk, fallos, pasos, dAtomos, energia, declarada, comparar, retencion, msPaso: ms / pasos };
+  const retencion = { escalar: mediaE / media0, sombra: mediaS / media0 }, c2 = mediaS / mediaE;
+  console.log(`\n(c2) Agua de las ${charcas.length} charcas (agua potable inicial > 0,15, media ${f3(media0)}) a los ${A.ticks} ticks con el tiempo de hoy, sin que nadie beba: escalar ${f3(mediaE)} (${pc(retencion.escalar)}), sombra ${f3(mediaS)} (${pc(retencion.sombra)}); sombra/escalar ${f3(c2)} (0,75–1,25) → ${veredicto(entre(c2, 0.75, 1.25))}`);
+  return { peor, bOk, fallos, pasos, dAtomos, energia, declarada, atomosOk, comparar, retencion, c2, msPaso: ms / pasos, exterior: exteriorAgua(c) };
 }
 
 // ── H₂: el suelo discreto, dos lotes (aire 10.000 / poro 10, como materia.cierre2) ──
@@ -199,7 +217,9 @@ function puntoC(A: ReturnType<typeof args>) {
   const { pradera, charca } = seleccion(tiles);
   // Escalar: alimento a K/2 y un trago grande (0,1) en la mitad de cada grupo; la otra mitad es el control.
   const K = 0.7, DIA = 2400, delta = 0.1;
-  for (let k = 0; k < 2 * DIA; k++) tickEscalar(w); // el escalar se asienta (humedad y agua con su tiempo)
+  // Los dos se asientan 10 días antes de tratar, para que el control esté en su equilibrio y no en el transitorio de su
+  // estado inicial (el escalar arranca con alimento 0,21 y lo sube a 0,75).
+  for (let k = 0; k < 10 * DIA; k++) tickEscalar(w);
   const tratar = <T,>(xs: T[]) => xs.filter((_, k) => k % 2 === 0), control = <T,>(xs: T[]) => xs.filter((_, k) => k % 2 === 1);
   const antesE = { comida: tratar(pradera).map((t) => { t.food = K / 2; return t.food; }), agua: tratar(charca).map((t) => { t.drinkingWater = Math.max(0, t.drinkingWater! - delta); return t.drinkingWater!; }) };
   const ctlE0 = { comida: control(pradera).map((t) => t.food), agua: control(charca).map((t) => t.drinkingWater!) };
@@ -215,12 +235,12 @@ function puntoC(A: ReturnType<typeof args>) {
   void w2;
   const sel = new Set(sub.map((t) => t.x * 65536 + t.y));
   const q = crearServicioQuimico({ modo: 'inmediato' });
-  const m = MundoMaterial.levantar(t2.filter((t) => sel.has(t.x * 65536 + t.y)), q, { semilla: A.semilla });
+  const m = MundoMaterial.levantar(t2.filter((t) => sel.has(t.x * 65536 + t.y)), q, { fisica: A.fisica, semilla: A.semilla });
   const idx = new Map<number, number>(); for (let i = 0; i < m.n; i++) idx.set(m.x[i]! * 65536 + m.y[i]!, i);
   const iP = pradera.map((t) => idx.get(t.x * 65536 + t.y)!), iC = charca.map((t) => idx.get(t.x * 65536 + t.y)!);
   const clima = tiempo(A.semilla), cada = 60, tot = totalesVacios();
   let t = 0;
-  const correr = (ticks: number) => { for (const fin = t + ticks; t < fin; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); m.plegar(tot); } };
+  const correr = (ticks: number) => { for (const fin = t + ticks; t < fin; t += cada) paso(m, clima(t, cada), tot); };
   const v = vistaVacia(), u = unidadesVacias();
   const leer = (is: number[], k: keyof VistaTesela) => is.map((i) => m.vista(i, v)[k]);
   const serie: string[] = [];
@@ -237,25 +257,25 @@ function puntoC(A: ReturnType<typeof args>) {
   console.log(`\n(c) Equivalencia de flujos (${pradera.length} praderas y ${charca.length} charcas, mitad tratadas y mitad control, ${dias} días; sombra asentada 10 días, paso cada ${cada} ticks):`);
   for (const x of serie) console.log(`    sombra ${x}`);
   console.log('  | flujo | escalar | sombra | sombra/escalar |');
-  console.log(`  | rebrote de alimento a media capacidad (u/día) | ${rebroteE.toFixed(4)} | ${rebroteM.toFixed(4)} | ${(rebroteM / rebroteE).toFixed(2)} |`);
+  const okR = entre(rebroteM / rebroteE, 0.8, 1.2), okA = entre(recargaM / recargaE, 0.8, 1.2);
+  console.log(`  | rebrote de alimento a media capacidad (u/día) | ${rebroteE.toFixed(4)} | ${rebroteM.toFixed(4)} | ${(rebroteM / rebroteE).toFixed(2)} | ${veredicto(okR)}`);
   console.log(`  | rebrote relativo a su capacidad (1/día) | ${relE.toFixed(4)} | ${relM.toFixed(4)} | ${(relM / relE).toFixed(2)} |`);
-  console.log(`  | recarga tras un trago de ${delta} (u/día) | ${recargaE.toFixed(4)} | ${recargaM.toFixed(4)} | ${(recargaM / recargaE).toFixed(2)} |`);
+  console.log(`  | recarga tras un trago de ${delta} (u/día) | ${recargaE.toFixed(4)} | ${recargaM.toFixed(4)} | ${(recargaM / recargaE).toFixed(2)} | ${veredicto(okA)}`);
+  console.log(`  (c) rebrote y recarga entre 0,8 y 1,2 de los de hoy → ${veredicto(okR && okA)}`);
   console.log(`  equilibrio del alimento en la sombra: ${f3(equilibrio)} (capacidad escalar de la pradera ${K}); libro exacto: ${exacto(m, tot)}`);
-  return { rebroteE, rebroteM, relE, relM, recargaE, recargaM, equilibrio, serie };
+  return { rebroteE, rebroteM, relE, relM, recargaE, recargaM, equilibrio, serie, ok: okR && okA };
 }
 
 // ── e) Fenómenos ──
 
 function puntoE(A: ReturnType<typeof args>) {
   const { tiles } = mundoNormal(A.semilla, A.lado);
-  // Dos páginas: la (0,0) normal y la (1,0) a −20 K (suelo frío).
   const dos = tiles.filter((t) => t.y < 16 && t.x < 32);
   const q = crearServicioQuimico({ modo: 'inmediato' });
-  const m = MundoMaterial.levantar(dos, q, { semilla: A.semilla });
-  m.dT[1] = -20;
-  const S = m.S, A_ = m.arena, clima = tiempo(A.semilla + 1), cada = 20, tot = totalesVacios(), DIA = 2400;
+  const m = MundoMaterial.levantar(dos, q, { fisica: A.fisica, semilla: A.semilla });
+  const S = m.S, A_ = m.arena, clima = tiempo(A.semilla + 1), cada = 60, tot = totalesVacios(), DIA = 2400, DIAS = 40;
   let t = 0;
-  const correr = (ticks: number) => { for (const fin = t + ticks; t < fin; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); m.plegar(tot); } };
+  const correr = (ticks: number) => { for (const fin = t + ticks; t < fin; t += cada) paso(m, clima(t, cada), tot); };
   correr(2 * DIA);
   // Fuego: 6 teselas con hoja en la página templada, al 90 %.
   const v = vistaVacia(), u = unidadesVacias();
@@ -266,37 +286,71 @@ function puntoE(A: ReturnType<typeof args>) {
   m.prepararPaso();
   let unidades = 0; for (const i of quemadas) unidades += m.quemar(i, 0.9);
   const despues = veg();
-  // Suelo frío: la misma hojarasca (5.000 unidades de hoja de fuera del mundo, como fuente declarada) en un suelo de
-  // cada página; se mide el C orgánico que queda.
-  const orgC = (l: number) => [S.madera, S.CH2, S.proteina, S.orgP].reduce((s, id) => s + A_.cuantos(l, id), 0);
-  const sT = m.suelo[m.inicio[0]! + 5]!, sF = m.suelo[m.inicio[1]! + 5]!;
-  const hojarasca = Float64Array.of(S.madera, 100_000, S.CH2, 10_000, S.proteina, 10_000, S.orgP, 5000, 0, 0);
-  const at = 100_000 * 4 + 10_000 * 3 + 10_000 * 5 + 5000 * 6;
-  for (const [l, T] of [[sT, m.temperatura(0, 0.6)], [sF, m.temperatura(1, 0.6)]] as const) { hojarasca[9] = Math.round(T * 0.025 * at); m.arena.fuente(l, hojarasca, m.libro); }
-  m.plegar(tot);
-  const c0 = [orgC(sT), orgC(sF)];
   const agua = { aire: [] as number[], superficie: [] as number[] };
   const H2O = S.H2O, sup = () => { let s = 0; for (let i = 0; i < m.n; i++) { s += A_.cuantos(m.suelo[i]!, H2O); if (m.agua[i]! >= 0) s += A_.cuantos(m.agua[i]!, H2O); } return s; };
   const serie: string[] = [];
-  // Vida media del C orgánico añadido (ticks hasta la mitad), con la resolución del paso.
-  const media: [number, number] = [-1, -1];
-  for (let dia = 1; dia <= 12; dia++) {
+  for (let dia = 1; dia <= DIAS; dia++) {
     for (let k = 0; k < DIA / cada; k++) {
       correr(cada);
-      if (media[0] < 0 && orgC(sT) <= c0[0]! / 2) media[0] = t - 2 * DIA;
-      if (media[1] < 0 && orgC(sF) <= c0[1]! / 2) media[1] = t - 2 * DIA;
       if (dia === 1) { agua.aire.push(A_.cuantos(m.aire[0]!, H2O) + A_.cuantos(m.aire[1]!, H2O)); agua.superficie.push(sup()); }
     }
-    if (dia % 4 === 0 || dia === 1) serie.push(`día ${dia}: vegetación quemada ${f3(veg())}; C orgánico templado ${(orgC(sT) / c0[0]!).toFixed(3)}, frío ${(orgC(sF) / c0[1]!).toFixed(3)} del añadido`);
+    if (dia % 10 === 0 || dia === 1) serie.push(`día ${dia}: vegetación quemada ${f3(veg())}`);
   }
-  serie.push(`vida media del C orgánico añadido: templado ${media[0]} ticks, frío ${media[1]} ticks`);
   const rango = (xs: number[]) => `${Math.min(...xs)}–${Math.max(...xs)}`;
-  console.log(`\n(e) Fenómenos (2 páginas de 16×16; la segunda a ${m.temperatura(1, 0.6).toFixed(0)} K frente a ${m.temperatura(0, 0.6).toFixed(0)} K):`);
-  console.log(`  fuego: ${quemadas.length} teselas al 90 % (${unidades} unidades): vegetación ${f3(antes)} → ${f3(despues)}`);
+  const rebrota = veg() > 2 * despues;
+  console.log(`\n(e) Fenómenos (2 páginas de 16×16):`);
+  console.log(`  fuego: ${quemadas.length} teselas al 90 % (${unidades} unidades): vegetación ${f3(antes)} → ${f3(despues)} → ${f3(veg())} a los ${DIAS} días (debe al menos doblarse) → ${veredicto(despues < 0.2 * antes && rebrota)}`);
   for (const x of serie) console.log(`    ${x}`);
   console.log(`  agua en un día: vapor del aire ${rango(agua.aire)} cuantos, agua de suelos y charcas ${rango(agua.superficie)} (sube de noche: rocío; baja de día: evaporación)`);
   console.log(`  libro exacto: ${exacto(m, tot)}`);
-  return { antes, despues, final: veg(), c0, media, cT: orgC(sT), cF: orgC(sF), agua: { aire: rango(agua.aire), superficie: rango(agua.superficie) }, serie };
+  const frio = descomposicionMarcada(q, m, [m.temperatura(0, 0.6), m.temperatura(0, 0.6) - 20]);
+  for (const x of frio.lineas) console.log(`  ${x}`);
+  return { antes, despues, final: veg(), agua: { aire: rango(agua.aire), superficie: rango(agua.superficie) }, serie, frio: frio.r, ok: despues < 0.2 * antes && rebrota && frio.ok };
+}
+
+/**
+ * Suelo frío sobre una masa marcada: un suelo mineral sin C orgánico (el de una tesela de referencia, con su aire de poro
+ * y un aire grande que le repone el O₂, como intercambia en el mundo) recibe una hojarasca conocida; todo el C orgánico
+ * que queda es de esa masa, sin la hojarasca natural de la planta. Se mide tick a tick la vida media a cada temperatura.
+ */
+function descomposicionMarcada(q: ServicioQuimicoImpl, m: MundoMaterial, Ts: number[]) {
+  const S = m.S, A = m.arena, c = m.ctx, cajas = m.params.suelo, k: [number, number, number, number] = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH];
+  // C orgánico: todo el C del lote salvo el del CO₂ y el del carbonato (incluye lo que la descomposición deja a medias).
+  const iC = ELEMENTOS.indexOf('C');
+  const orgC = (l: number) => { let s = 0; for (const id of m.especies(l)) if (id !== S.CO2 && id !== S.CaCO3) s += A.cuantos(l, id) * q.sustancia(id).atomos[iC]!; return s; };
+  const at = (id: number) => q.sustancia(id).atomos.reduce((s, v) => s + v, 0);
+  const llenar = (l: number, cont: [number, number][], T: number) => {
+    const pares = cont.flat(); pares.push(0, Math.round(T * 0.025 * cont.reduce((s, [id, n]) => s + n * at(id), 0)));
+    A.fuente(l, Float64Array.from(pares), m.libro);
+  };
+  const r: { T: number; medio: number; dia1: number; dia4: number }[] = [];
+  for (const T of Ts) {
+    const suelo = A.nuevo(Rol.Objeto, -1, 0), aire = A.nuevo(Rol.Objeto, -1, 0);
+    llenar(suelo, [[S.SiO2, Math.round(1_000_000 * cajas)], [S.CaCO3, Math.round(100_000 * cajas)], [S.NH3, Math.round(30_000 * cajas)],
+      [S.H3PO4, Math.round(10_000 * cajas)], [S.H2O, Math.round(0.85 * m.params.escalas.humedad)], [S.N2, 78_000], [S.O2, 21_000], [S.CO2, 2000],
+      [S.madera, 100_000], [S.CH2, 10_000], [S.proteina, 10_000], [S.orgP, 5000]], T);
+    llenar(aire, [[S.N2, 7_800_000 * 4], [S.O2, 2_100_000 * 4], [S.CO2, 200_000 * 4]], T);
+    const c0 = orgC(suelo);
+    let t = 0, medio = -1, dia1 = 0, dia4 = 0, antes = c0;
+    while (t < 4 * 2400) {
+      const dt = t < 2400 ? 1 : 10;
+      pasoLote(c, suelo, dt, k);
+      for (const id of [S.O2, S.CO2, S.N2, S.H2, S.NH3]) intercambioBruto(c, suelo, aire, id, 1, 10, 400, dt);
+      m.termostato(suelo, T); m.termostato(aire, T);
+      t += dt;
+      const ahora = orgC(suelo);
+      if (medio < 0 && ahora <= c0 / 2) medio = t - dt + dt * (antes - c0 / 2) / Math.max(1, antes - ahora);
+      if (t === 2400) dia1 = ahora / c0;
+      antes = ahora;
+    }
+    dia4 = orgC(suelo) / c0;
+    r.push({ T, medio, dia1, dia4 });
+  }
+  const [cal, fri] = r as [typeof r[0], typeof r[0]];
+  const lento = fri.medio < 0 || fri.medio > 1.2 * cal.medio;
+  const lineas = r.map((x) => `masa marcada a ${x.T.toFixed(0)} K: vida media del C orgánico ${x.medio < 0 ? '> 4 días' : `${x.medio.toFixed(1)} ticks`}, queda ${pc(x.dia1)} al día y ${pc(x.dia4)} a los 4 días`);
+  lineas.push(`suelo frío más lento (vida media ≥ 1,2× la templada): ${fri.medio < 0 ? '> 4 días' : (fri.medio / cal.medio).toFixed(2) + '×'} → ${veredicto(lento)}`);
+  return { r, ok: lento, lineas };
 }
 
 // ── d) Ciclos ──
@@ -304,7 +358,7 @@ function puntoE(A: ReturnType<typeof args>) {
 function puntoD(A: ReturnType<typeof args>) {
   const { tiles } = mundoNormal(A.semilla, A.lado);
   const q = crearServicioQuimico({ modo: 'inmediato' });
-  const m = MundoMaterial.levantar(tiles, q, { semilla: A.semilla });
+  const m = MundoMaterial.levantar(tiles, q, { fisica: A.fisica, semilla: A.semilla });
   const clima = tiempo(A.semilla), cada = A.cadaD, tot = totalesVacios(), S = m.S;
   const iH = 0, iN = ELEMENTOS.indexOf('N'), iP = ELEMENTOS.indexOf('P');
   const atomos = (id: number) => q.sustancia(id).atomos;
@@ -324,20 +378,21 @@ function puntoD(A: ReturnType<typeof args>) {
   };
   const m0 = medir();
   const H2O0 = m0.agua, desconocidas0 = new Set(m0.inv.keys());
-  let caido = 0n, recambios = 0, t = 0, pasos = 0, fallos = 0, ms = 0, aguaMin = 1, h2Max = 0, nMin = Infinity, pMin = 1;
-  const serie: string[] = [];
+  let caido = 0n, recambios = 0, t = 0, pasos = 0, fallos = 0, ms = 0, aguaMin = Infinity, h2Max = 0, nMin = Infinity, pMin = 1;
+  const serie: string[] = [], biomasas: number[] = [];
   // Recambio: el tejido que cayó al suelo (en cuantos) iguala a la biomasa que hay.
   const bioDe = () => { let b = 0; for (let i = 0; i < m.n; i++) for (const id of [S.madera, S.CH2, S.proteina, S.orgP]) b += m.arena.cuantos(m.vida[i]!, id); return b; };
   const tope = A.recambios * 40 * 2400;
   while (recambios < A.recambios && t < tope) {
     const t0 = performance.now();
     const c0 = tot.cuentas[CUENTA.CAIDA]!;
-    m.prepararPaso(); m.pasar(clima(t, cada)); m.plegar(tot);
+    paso(m, clima(t, cada), tot);
     ms += performance.now() - t0; pasos++; t += cada;
     caido += tot.cuentas[CUENTA.CAIDA]! - c0;
     const ahora = BigInt(bioDe());
     if (caido >= ahora) { caido -= ahora; recambios++;
       const x = medir(); if (!exacto(m, tot)) fallos++;
+      biomasas.push(x.bio / m0.bio);
       aguaMin = Math.min(aguaMin, x.agua / H2O0); h2Max = Math.max(h2Max, x.h2); nMin = Math.min(nMin, x.nFijado / m0.nFijado); pMin = Math.min(pMin, x.pAcc);
       if (recambios % 5 === 0 || recambios <= 2) console.log(`    recambio ${recambios} (día ${(t / 2400).toFixed(0)}, ${(ms / pasos).toFixed(0)} ms/paso)`);
       if (recambios % 5 === 0 || recambios <= 2) serie.push(`recambio ${recambios} (día ${(t / 2400).toFixed(0)}): agua ${pc(x.agua / H2O0)}, H₂ ${(100 * x.h2).toFixed(4)} % del H, N fijado ×${(x.nFijado / m0.nFijado).toFixed(3)}, P accesible ${pc(x.pAcc)}, CO₂ ×${(x.co2 / m0.co2).toFixed(3)}, biomasa ×${(x.bio / m0.bio).toFixed(3)}`);
@@ -346,12 +401,17 @@ function puntoD(A: ReturnType<typeof args>) {
   const fin = medir();
   const nuevas = [...fin.inv].filter(([id]) => !desconocidas0.has(id)).sort((a, b) => b[1] - a[1]).slice(0, 8)
     .map(([id, c]) => `${ELEMENTOS.map((x, k) => (atomos(id)[k] ? x + (atomos(id)[k]! > 1 ? atomos(id)[k] : '') : '')).join('')}#${id} ${c}`);
-  const ok = aguaMin >= 0.95 && h2Max <= 0.005 && nMin > 0.5 && pMin > 0.5 && fallos === 0;
+  const ultimas = biomasas.slice(-20), mediaB = ultimas.reduce((a, x) => a + x, 0) / Math.max(1, ultimas.length);
+  const desvB = Math.max(...ultimas.map((x) => Math.abs(x / mediaB - 1)));
+  const okB = ultimas.length === 20 && desvB <= 0.2;
+  const ok = aguaMin >= 0.95 && h2Max <= 0.005 && nMin > 0.5 && pMin > 0.5 && fallos === 0 && okB;
   console.log(`\n(d) Ciclos sin gente, ${m.n} teselas, paso cada ${cada} ticks: ${recambios} recambios en ${(t / 2400).toFixed(0)} días (${pasos} pasos, ${(ms / pasos).toFixed(0)} ms/paso, ${carga()})`);
   for (const x of serie) console.log(`    ${x}`);
-  console.log(`  mínimos: agua ${pc(aguaMin)} (≥ 95 %), H₂ máx ${(100 * h2Max).toFixed(4)} % del H (≤ 0,5 %), N fijado ×${nMin.toFixed(3)}, P accesible ${pc(pMin)}; libro: ${fallos} fallos → ${ok ? 'PASA' : 'FALLA'}`);
+  console.log(`  biomasa de los últimos ${ultimas.length} recambios: media ×${mediaB.toFixed(3)} de la inicial, desviación máxima ${pc(desvB)} (≤ 20 %) → ${veredicto(okB)}`);
+  console.log(`  agua con el exterior: ${exteriorAgua(tot.cuentas)}`);
+  console.log(`  mínimos: agua ${pc(aguaMin)} (≥ 95 %), H₂ máx ${(100 * h2Max).toFixed(4)} % del H (≤ 0,5 %), N fijado ×${nMin.toFixed(3)}, P accesible ${pc(pMin)}; libro: ${fallos} fallos → ${veredicto(ok)}`);
   console.log(`  sustancias nuevas (más abundantes): ${nuevas.join(', ')}`);
-  return { recambios, dias: t / 2400, aguaMin, h2Max, nMin, pMin, fallos, serie, nuevas, msPaso: ms / pasos };
+  return { recambios, dias: t / 2400, aguaMin, h2Max, nMin, pMin, fallos, serie, nuevas, biomasas, mediaB, desvB, ok, msPaso: ms / pasos };
 }
 
 // ── f) Coste ──
@@ -361,12 +421,12 @@ async function puntoF(A: ReturnType<typeof args>) {
   for (const hilos of A.hilos) {
     const { tiles } = mundoNormal(A.semilla, A.lado);
     const q = crearServicioQuimico({ modo: 'inmediato' });
-    const m = MundoMaterial.levantar(tiles, q, { hilos, semilla: A.semilla });
+    const m = MundoMaterial.levantar(tiles, q, { fisica: A.fisica, hilos, semilla: A.semilla });
     const clima = tiempo(A.semilla), cada = A.cada;
     let t = 0;
     // Calentamiento en el hilo principal: que la química conozca las mezclas antes de repartir (cada hilo tiene la suya).
     m.dueno.fill(0);
-    for (; t < 30 * cada; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); }
+    for (; t < 30 * cada; t += cada) { m.prepararPaso(); m.pasarLocal(clima(t, cada)); m.recibir(); }
     for (let p = 0; p < m.np; p++) m.dueno[p] = p % hilos;
     const d: DescriptorMundo = { ...m.d, sustancias: serializarSustancias(q) };
     const base = q.totalSustancias();
@@ -379,7 +439,9 @@ async function puntoF(A: ReturnType<typeof args>) {
       const t0 = performance.now();
       if (hilos === 1) m.pasar(f);
       else {
-        const r = await Promise.all(workers.map((wk) => new Promise<{ sustancias: number }>((ok) => { wk.once('message', ok); wk.postMessage(f); })));
+        const fase = (msg: Forzamiento | 'recibir') => Promise.all(workers.map((wk) => new Promise<{ sustancias: number }>((ok) => { wk.once('message', ok); wk.postMessage(msg); })));
+        const r = await fase(f);
+        await fase('recibir');
         divergen = Math.max(divergen, ...r.map((x) => x.sustancias - base));
       }
       ms += performance.now() - t0;
@@ -398,9 +460,9 @@ async function puntoF(A: ReturnType<typeof args>) {
 if (!isMainThread && (workerData as { mundoMaterial?: boolean } | null)?.mundoMaterial) {
   const { d, hilo } = workerData as { d: DescriptorMundo; hilo: number };
   const m = MundoMaterial.conectar(d, hilo);
-  parentPort!.on('message', (f: Forzamiento) => {
+  parentPort!.on('message', (f: Forzamiento | 'recibir') => {
     const t0 = performance.now();
-    m.pasar(f);
+    if (f === 'recibir') m.recibir(); else m.pasarLocal(f);
     parentPort!.postMessage({ ms: performance.now() - t0, sustancias: (m.quimica as ServicioQuimicoImpl).totalSustancias() });
   });
 } else if (isMainThread) await principal();

@@ -5,12 +5,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NE } from '../src/shared/naturaleza.js';
+import { ELEMENTOS, NE } from '../src/shared/naturaleza.js';
 import type { Tile } from '../src/shared/types.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { activate } from '../src/world/spatial.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
-import { MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
+import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, vistaVacia } from '../src/world/materia/vistas.js';
 
 const CLIMA: Forzamiento[] = [{ dt: 20, luz: 1, lluvia: false }, { dt: 20, luz: 0.4, lluvia: true }, { dt: 20, luz: 0, lluvia: false }];
@@ -31,7 +31,7 @@ function levantar(semilla: number, lado: number, hilos = 1) {
   return {
     q, m, tot, mundos: [m, ...otros],
     cuadra: () => m.saldo().every((x, k) => x === tot.esperado[k]),
-    paso(f: Forzamiento) { m.prepararPaso(); for (const x of this.mundos) x.pasar(f); m.plegar(tot); },
+    paso(f: Forzamiento) { m.prepararPaso(); for (const x of this.mundos) x.pasarLocal(f); for (const x of this.mundos) x.recibir(); m.plegar(tot); },
   };
 }
 
@@ -44,9 +44,11 @@ const sumaVistas = (m: MundoMaterial): number[] => {
 test('el libro cuadra en cada paso con el día, la noche y la lluvia alternándose (la radiación entra y sale)', async () => {
   const x = levantar(3, 16), s0 = x.m.saldo();
   for (let k = 0; k < 36; k++) { x.paso(CLIMA[k % 3]!); assert.ok(x.cuadra(), `paso ${k} (luz ${CLIMA[k % 3]!.luz})`); }
-  const s1 = x.m.saldo();
-  for (let e = 0; e < NE; e++) assert.equal(s1[e], s0[e], `átomos del elemento ${e}`);
-  assert.ok(x.tot.cuentas.every((c) => c >= 0n));
+  const s1 = x.m.saldo(), c = x.tot.cuentas, neto = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
+  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, ELEMENTOS[e] === 'H' ? 2n * neto : ELEMENTOS[e] === 'O' ? neto : 0n, `átomos de ${ELEMENTOS[e]}`);
+  assert.ok(c.every((x, k) => k === CUENTA.EXTERIOR_J || x >= 0n));
+  const declarada = c[CUENTA.SOL]! + c[CUENTA.RAD_ENTRA]! - c[CUENTA.RAD_SALE]! + c[CUENTA.IGNICION]! + c[CUENTA.EXTERIOR_J]!;
+  assert.equal(s1[NE]! - s0[NE]!, declarada, 'la energía cuadra con lo declarado');
   await x.q.cerrar();
 });
 

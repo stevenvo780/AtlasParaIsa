@@ -24,19 +24,26 @@ export class OrganismosMundo {
   readonly fauna: FaunaSoA;
   readonly personas: PersonasSoA;
 
-  constructor(depuracion: boolean, uids: Uids) {
-    this.tabla = new TablaOrganismosSoA(depuracion);
+  /** Con varios dueños, cada uno arma la suya sobre la tabla compartida que recibe (`tabla.hilo` es el suyo). */
+  constructor(depuracion: boolean, uids: Uids, tabla = new TablaOrganismosSoA(depuracion)) {
+    this.tabla = tabla;
     this.fauna = new FaunaSoA(this.tabla, uids);
-    this.personas = new PersonasSoA(this.tabla, uids);
+    this.personas = new PersonasSoA(this.tabla, uids, tabla.hilo);
   }
 
-  /** Publica el frente del tick. Las filas de la clase que no se reescribe solo se sellan (modo verificación). */
-  publicar(tick: number, fauna?: EscrituraFauna, personas?: readonly PersonaFrente[]): FrentePublico {
-    const w = this.tabla.escritura(0);
+  /** Las filas de este dueño en el frente que se va a publicar. Las de la clase que no se reescribe solo se sellan (modo
+   * verificación). */
+  escribir(tick: number, fauna?: EscrituraFauna, personas?: readonly PersonaFrente[]): void {
+    const w = this.tabla.escritura(this.tabla.hilo);
     if (fauna) this.fauna.escribir(w, tick, fauna.celda, fauna.chunkDe, fauna.fertil);
     else if (this.tabla.verificar) this.fauna.sellar(w);
     if (personas) { this.personas.sincronizar(personas); this.personas.escribir(w); }
     else if (this.tabla.verificar) this.personas.sellar(w);
+  }
+
+  /** Publica el frente del tick (un solo dueño, o el coordinador cuando todos escribieron). */
+  publicar(tick: number, fauna?: EscrituraFauna, personas?: readonly PersonaFrente[]): FrentePublico {
+    this.escribir(tick, fauna, personas);
     return this.tabla.publicar(tick);
   }
 }
@@ -57,6 +64,13 @@ export function organismosDe(mundo: MundoOrganismos): OrganismosMundo {
   }
   return registro;
 }
+
+/** El motor de dueños liga a la parte del mundo de cada dueño su tabla (la compartida, con su hilo). */
+export function registrarOrganismos(mundo: object, registro: OrganismosMundo): void { registros.set(mundo, registro); }
+
+/** Olvida la tabla del mundo: la siguiente se arma de cero (época nueva o columnas nuevas de una ley). Los uid no se
+ * pierden: viven en cada persona y cada animal. */
+export function olvidarOrganismos(mundo: object): void { registros.delete(mundo); }
 
 export const faunaDe = (mundo: MundoOrganismos): FaunaSoA => organismosDe(mundo).fauna;
 export const faunaRegistrada = (mundo: object): FaunaSoA | undefined => registros.get(mundo)?.fauna;

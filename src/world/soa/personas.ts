@@ -27,7 +27,8 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
   private readonly residentes = new Map<number, P>();
   pesosGen = new Int32Array(0);
 
-  constructor(readonly tabla: TablaOrganismosSoA, private readonly uids: Uids) {
+  /** `hilo`: el dueño que escribe estas filas (0 con un solo dueño). */
+  constructor(readonly tabla: TablaOrganismosSoA, private readonly uids: Uids, private readonly hilo = 0) {
     for (const [nombre, ancho] of COLUMNAS_CEREBRO_FRENTE) tabla.columna(nombre, TIPO_CEREBRO, ancho, true);
   }
 
@@ -35,6 +36,56 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
   ref(persona: P): Ref { return this.filas.get(persona)?.ref ?? REF_NULA; }
   persona(slot: number): P | undefined { return this.residentes.get(slot); }
   get ranuras(): IterableIterator<number> { return this.residentes.keys(); }
+  /** Las personas de este dueño por ranura (`CtxDueno.personas`). */
+  get mapa(): ReadonlyMap<number, P> { return this.residentes; }
+
+  /** Alta de una persona en el momento (una cría, en F4–F5): su fila existe desde ya y `sincronizar` no la repite. */
+  registrar(persona: P): Ref {
+    const previa = this.filas.get(persona);
+    if (previa) return previa.ref;
+    const uid = persona.uid ??= this.uids();
+    const ref = this.tabla.alta(this.hilo, Clase.Persona), slot = slotDe(ref);
+    this.filas.set(persona, { ref, uid });
+    this.residentes.set(slot, persona);
+    if (slot >= this.pesosGen.length) {
+      const pesos = new Int32Array(Math.max(16, 2 * slot));
+      pesos.set(this.pesosGen);
+      this.pesosGen = pesos;
+    }
+    return ref;
+  }
+
+  /** Baja en el momento de la persona de `ref` (murió): devuelve si era de aquí. */
+  retirar(ref: Ref): boolean {
+    const slot = slotDe(ref), persona = this.residentes.get(slot);
+    if (!persona || this.filas.get(persona)!.ref !== ref) return false;
+    this.tabla.baja(this.hilo, ref);
+    this.filas.delete(persona);
+    this.residentes.delete(slot);
+    return true;
+  }
+
+  /** Migración: la persona deja este dueño sin dejar de vivir (su fila sigue; `TablaOrganismosSoA.ceder` cambia el dueño). */
+  soltar(persona: P): Ref {
+    const fila = this.filas.get(persona);
+    if (!fila) return REF_NULA;
+    this.filas.delete(persona);
+    this.residentes.delete(slotDe(fila.ref));
+    return fila.ref;
+  }
+
+  /** Migración: la persona llega con la fila que ya tenía. Los pesos del cerebro se reescriben (otra copia de la tabla). */
+  adoptar(persona: P, ref: Ref): void {
+    const slot = slotDe(ref);
+    this.filas.set(persona, { ref, uid: persona.uid ??= this.uids() });
+    this.residentes.set(slot, persona);
+    if (slot >= this.pesosGen.length) {
+      const pesos = new Int32Array(Math.max(16, 2 * slot));
+      pesos.set(this.pesosGen);
+      this.pesosGen = pesos;
+    }
+    this.pesosGen[slot] = 0;
+  }
 
   /** Altas y bajas para que la tabla lleve exactamente a `personas`. Devuelve si hubo alguna. */
   sincronizar(personas: readonly P[]): boolean {
@@ -42,22 +93,11 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
     const vigentes = new Set(personas);
     for (const [slot, persona] of this.residentes) {
       if (vigentes.has(persona)) continue;
-      this.tabla.baja(0, this.filas.get(persona)!.ref);
+      this.tabla.baja(this.hilo, this.filas.get(persona)!.ref);
       this.filas.delete(persona);
       this.residentes.delete(slot);
     }
-    for (const persona of personas) {
-      if (this.filas.has(persona)) continue;
-      const uid = persona.uid ??= this.uids();
-      const ref = this.tabla.alta(0, Clase.Persona), slot = slotDe(ref);
-      this.filas.set(persona, { ref, uid });
-      this.residentes.set(slot, persona);
-      if (slot >= this.pesosGen.length) {
-        const pesos = new Int32Array(Math.max(16, 2 * slot));
-        pesos.set(this.pesosGen);
-        this.pesosGen = pesos;
-      }
-    }
+    for (const persona of personas) this.registrar(persona);
     return true;
   }
 

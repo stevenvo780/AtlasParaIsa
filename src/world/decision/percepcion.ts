@@ -467,11 +467,12 @@ export class PercepcionDelPaso {
   #instantanea: Float64Array[] = [];
   readonly #suelta: PercepcionCpu;
 
-  constructor(mundo: MundoOrganismos) {
+  /** `terreno`: el del dueño cuando el motor reparte el mundo (la copia de la arena compartida con su hilo). */
+  constructor(mundo: MundoOrganismos, terreno?: TerrenoPercepcion) {
     const { motor } = paramsOf(mundo as never);
     this.#motor = () => paramsOf(mundo as never).motor;
     this.#depuracion = motor.depuracion;
-    this.vista = VistaMundo.de(organismosDe(mundo), new TerrenoPercepcion(motor.depuracion));
+    this.vista = VistaMundo.de(organismosDe(mundo), terreno ?? new TerrenoPercepcion(motor.depuracion));
     this.planes = planesPersonas(this.vista.terreno.campos);
     this.#cpu = new PercibidorCpu(this.vista);
     this.#suelta = reservarPercepcion(1, this.planes);
@@ -530,6 +531,38 @@ export class PercepcionDelPaso {
     this.#tick = tick;
     return salida;
   }
+  #despachosAjenos = 0;
+  #salidaAjena: PercepcionCpu | undefined;
+  /**
+   * Entrada pública del despacho para quien no es una persona (la fauna vencida de f): percibe `lote` (ranuras de la
+   * tabla común, con sus propios `planes`) por el mismo percibidor que las personas, con la misma caída a CPU en el tick.
+   * `discos` son las posiciones cuyos discos r = 7 hay que poner al día antes de lanzar. No abre la barrera de escritura
+   * ni toca la fila de nadie: la salida vale hasta el siguiente despacho ajeno.
+   */
+  percibirLote(lote: Vencidos, planes: readonly Plan[], discos: Iterable<{ readonly x: number; readonly y: number }>,
+    tileIn: TileLookup, fast: ResidentFastAccess | undefined): PercepcionCpu {
+    const { vista } = this;
+    for (const d of discos) vista.terreno.capturarDisco(d.x, d.y, tileIn, fast);
+    const despacho: LotePercepcion = { tick: lote.tick, despacho: 2 ** 31 + ++this.#despachosAjenos, slots: lote.slots, plan: lote.plan };
+    const percibidor = this.percibidor;
+    try {
+      if ('fuentes' in percibidor) percibidor.fuentes(vista);
+      percibidor.lanzar(despacho, planes);
+      const p = percibidor.esperar(PLAZO_PERCEPCION_MS);
+      const salida = 'ventana' in p ? p as PercepcionCpu : this.#salidaAjena = conVentanas(vista, despacho, planes, p, this.#salidaAjena);
+      if (salida.tick !== despacho.tick || salida.despacho !== despacho.despacho)
+        throw new ErrorDispositivo(percibidor.dispositivo, `salida del despacho ${salida.despacho} en el ${despacho.despacho}`);
+      if ((!('ventana' in p) || percibidor.dispositivo !== 'cpu') && !coherente(vista, despacho, planes, salida))
+        throw new ErrorDispositivo(percibidor.dispositivo, 'salida que no casa con el lote');
+      return salida;
+    } catch (error) {
+      if (!(error instanceof ErrorDispositivo) || percibidor === this.#cpu) throw error;
+      this.#respaldos++;
+      this.#cpu.lanzar(despacho, planes);
+      return this.#cpu.esperar();
+    }
+  }
+
   /** Fin de la fase de personas: lo percibido deja de valer y la barrera de escritura se cierra. */
   cerrar(): void {
     if (!this.#activa) return;
@@ -600,3 +633,8 @@ export function percepcionDe(mundo: MundoOrganismos): PercepcionDelPaso {
   if (!p) { p = new PercepcionDelPaso(mundo); porMundo.set(mundo, p); }
   return p;
 }
+/** El motor de dueños liga a la parte del mundo de cada dueño su percepción (sobre la tabla y el terreno compartidos). */
+export function registrarPercepcion(mundo: object, p: PercepcionDelPaso): void { porMundo.set(mundo, p); }
+/** Olvida la percepción del mundo (época nueva: la tabla de organismos se rearma y la vista con ella). */
+export function olvidarPercepcion(mundo: object): void { porMundo.get(mundo)?.cerrar(); porMundo.delete(mundo); }
+

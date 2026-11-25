@@ -296,11 +296,13 @@ function runDays(days: number, params?: WorldParams, seed = 51926): { world: Ret
  * Reglas 10, etapa 1 (2026-09-22): la trayectoria declarada es la del mundo de antes, así que el
  * control y sus contrastes R3 corren sobre `HISTORICAL_PARAMS` explícitos (los defaults nuevos
  * adoptan el paquete de natalidad y moverían el control sin que la longevidad cambiara). */
-const CONTROL_51926 = ['32969bf8a6c5fd01', '93a4fb6e74d7fec3', '3e1459914a7a5078'];
+// V23: re-grabada en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// la trayectoria V8 (32969bf8…, 93a4fb6e…, 3e145991…) pasó sin cambios hasta 98e750c (sprint/v23l-motor).
+const CONTROL_51926 = ['f7ef80ca8d21ef03', '9ade6c5afcccdedc', 'bcbd9b69f6e06c1a'];
 
-test('3 días con params históricos conservan la trayectoria demográfica declarada V8 el 2026-09-22', context => {
+test('3 días con params históricos conservan la trayectoria demográfica de referencia', context => {
   const { world, digests } = runDays(3, HISTORICAL_PARAMS);
-  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria V8 declarada el 2026-09-22');
+  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria demográfica de referencia');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
     nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
 });

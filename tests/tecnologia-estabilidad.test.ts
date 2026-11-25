@@ -67,18 +67,20 @@ function runProgram(host: TechnologyHost, actor: TechnologyActor, program: Techn
 // ── (1) Q5: paridad bit a bit de digestoCanonico con defaults históricos ────────────────────────
 // Referencias medidas directamente sobre main @bd2d30d ANTES de declarar `tecnologia.*` ni
 // editar `src/world/technology.ts` (Store temporal guardado antes del tick 1, 1.200 ticks):
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
 const REFERENCIAS_MAIN_1200: Readonly<Record<7 | 42 | 51926, { historicos: string; defaults: string }>> = {
   7: {
-    historicos: '4feb3b29ebc9fab55bc9295950aa05ad7e290fee1fceffcceb7ec92eb41a3f53',
-    defaults: 'f89b23e11855b3ee03018561f6fcaba3c9cf11bc4ea34e70c401c2f6c2461d43',
+    historicos: '99e0994a87c7abc1ca79d2b3ab1888b37375dd5ef7c81a1a9873e5cfc12c9813',
+    defaults: '26f7832debe4a46e642f9525c0e0c5add17b6e7c83fa4fa174d0684e0121fe59',
   },
   42: {
-    historicos: 'bfaed1a9c5b3fb6f168a65083edea7693436c8a82b15fafe56b2bfd8854ae78c',
-    defaults: '29be2bda308e008eb21cb3836590ee16aa438e5755c63f013f8baaf7492af140',
+    historicos: '947f9b01a3b7a2c8cf4da15306ec3436a41bb2aa05f73ce164b73f61b97e166c',
+    defaults: '7c48601220fcab9423ee14840bf95ac4145a79d5a7f55f242d44bd4f64ae93a9',
   },
   51926: {
-    historicos: '5b033b791db62f519a43404278b59e4417e462913721615239347457ab0e8bd5',
-    defaults: '2397b68a3683ea811d1e38e5ffaf89146bf188f9218192b226b2c4632843346b',
+    historicos: '5bf3ab366216298291d1b9d90bab835e0f1138c29921758a51b4d064b4bcde4f',
+    defaults: '9ec3c6a2d75c9bb9664422b75da1589c48ff9bf1cfecf965909dfafa6e8360b2',
   },
 };
 

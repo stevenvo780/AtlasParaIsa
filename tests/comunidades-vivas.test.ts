@@ -97,8 +97,10 @@ function digestoSinLaClave(world: World): string {
 //     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --sin social.radioConvivencia \
 //     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$LAB" --sin social.radioConvivencia
 // (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-const DIGESTO_PREVIO_DEFAULTS = '481e7358b62d0bead6b96848574eb7dbc8992c8226893fea42c6cfd606096a03';
-const DIGESTO_PREVIO_LAB = '48e7eacfeb9b2d06f0167ca36f198fcbe0858a980b878f019a978fc93b291751';
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
+const DIGESTO_PREVIO_DEFAULTS = '7b114b180ccafa294ec249da03b090d2fa395e7645d0ec695283db9a310b2d7c';
+const DIGESTO_PREVIO_LAB = '478e13dbf62093408ee9c1f9ae000ae5b42bcd629687921e98f85f40cf28dccc';
 
 test('(i) con radioConvivencia=0 el mundo es el de antes bit a bit, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.social.radioConvivencia, 0, 'reglas 10 no adopta las comunidades vivas');

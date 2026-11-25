@@ -72,17 +72,20 @@ function digestoSinLaClave(world: World): string {
 
 // Medidos con la réplica de arriba ANTES de la ley: el carril en `sprint/noche-r3confl-20260922` @e1adaaf y los
 // defaults en `main` @ff52c30 (reglas 11 se monta sobre ese main; el carril da el mismo digesto en ambos).
-const PREVIO_42_DEFAULTS_1200 = 'd4c91223e9105cfb29abfae2f31571a68e46eb1ec70b45e57f5f3c11d582984c';
-const PREVIO_51926_CARRIL_D_2400 = 'ea56cf5a7901ec169e228bdae9838c8e6b646dd485d2849974b1f8c602cb3e72';
+// V23: re-grabado el de los defaults en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
+const PREVIO_42_DEFAULTS_1200 = '7dfcb7acb0b8570cb63be1ededdc2d883343679125ee2e322a17b048e97b8b9b';
+// Sin topes, la semilla 51926 del carril (ea56cf5a… hasta 98e750c) ya no tiene disputas en 2400 pasos; 61001 tiene 7.
+const PREVIO_61001_CARRIL_D_2400 = 'dab38b6f77139f653023854d8877e352122fb37ad796f51d2f5b25ddaed2e81d';
 
 test('(i) con memoriaDisputa=0 el mundo es bit a bit el de antes, también cuando hay disputas', { timeout: 2_800_000 }, t => {
   assert.equal(HISTORICAL_PARAMS.social.memoriaDisputa, 0);
   assert.deepEqual(PARAM_RANGES['social.memoriaDisputa'], [0, 32]);
   const defecto = replica(t, 42, 1200);
   assert.equal(digestoSinLaClave(defecto), PREVIO_42_DEFAULTS_1200, 'seed 42, defaults, 1200 pasos');
-  const carril = replica(t, 51926, 2400, CARRIL_D);
+  const carril = replica(t, 61001, 2400, CARRIL_D);
   assert.ok((carril.totals.conflicts ?? 0) > 0, 'el control ejerce el camino de la disputa de hoy');
-  assert.equal(digestoSinLaClave(carril), PREVIO_51926_CARRIL_D_2400, 'seed 51926, carril con disputas, 2400 pasos');
+  assert.equal(digestoSinLaClave(carril), PREVIO_61001_CARRIL_D_2400, 'seed 61001, carril con disputas, 2400 pasos');
   for (const world of [defecto, carril]) assert.ok(world.people.every(p => p.conflictMemory === undefined), 'sin la ley nadie recuerda disputas');
 });
 

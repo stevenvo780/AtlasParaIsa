@@ -19,7 +19,9 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
 // si cambia a dónde caminan y beben los habitantes. Se actualiza solo en el commit que cambie a
 // propósito una ley del agua o del movimiento, citando su evidencia (el historial está en git log y
 // en docs/REVISION-*). Los controles del generador y del agua aislada de abajo no dependen de él.
-const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = 'ad4b5dd88eba765a3df24ccb96296ddfcc740312f4f4842f51c2ba25a4c5270b';
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
+const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '643fb9ba79cb297370177b7a3a4b31bde468641e90cef26a60963470bc41d3ca';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
   const world = createWorld(4821, parseParams('agua.cuencas=1', HISTORICAL_PARAMS));

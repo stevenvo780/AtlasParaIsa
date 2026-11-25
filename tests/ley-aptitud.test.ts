@@ -84,9 +84,11 @@ function digestoSinAptitud(world: World): string {
 //     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin conducta.aptitud \
 //     && npx tsx scripts/lab/digesto-control.ts --seed 7 --pasos 1200 --params "$CARRIL" --sin conducta.aptitud
 // (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-const PADRE_DEFECTO_1200 = '599f30e4dba17c1f46615d870496311a43dfd8ae8d6f5ae2558a2d17a58ae541';
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
+const PADRE_DEFECTO_1200 = 'ba42beb134796012f456adb7a65e05264a9fc9eea81f3769ef12768497760018';
 const CARRIL = 'persistencia.cadaTicks=300,poblacion.cortejo=1,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
-const PADRE_CARRIL_SEMILLA7_1200 = '51595624213966fae231495c8a62b3c05d5eee894a0db65d28950a7e164de87d';
+const PADRE_CARRIL_SEMILLA7_1200 = '9752a031c420e1254766d478a87837f343664a2935bc1a33d18a760e7d6529ae';
 
 test('(i) con aptitud=0 el mundo es bit a bit el de antes, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.conducta.aptitud, 0, 'reglas 10 no adopta la aptitud');

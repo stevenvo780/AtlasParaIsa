@@ -424,11 +424,12 @@ function normalizedDigest(world: World): string {
 }
 
 test('worlds without whispers are bit-identical to the code without whispers (open world digest)', () => {
-  // Captured on 849a895 (sprint/v24-base), before the whisper law was wired into the step.
+  // Captured on 849a895 (sprint/v24-base), before the whisper law was wired into the step, and re-recorded in V23 when
+  // M2a removed the fauna caps (1aae52f): the earlier value passed unchanged up to 98e750c (sprint/v23l-motor).
   const world = createWorld(51926, parseParams(`${OPEN},motor.hilos=1`));
   for (let i = 0; i < 240; i++) stepWorld(world);
   assert.equal(world.whispers, undefined);
-  assert.equal(normalizedDigest(world), '2e8a623166638a4f9857600cbcb2398900ad4f3ca572fbdcb45d09e32239bc23');
+  assert.equal(normalizedDigest(world), 'bb44867ce223acfa74d999d572b8333a925ebb52d1160fba00c8a22b7e2466ce');
 });
 
 test('whisper law: latent → heard (bounded, deterministic delay) → fulfilled by land; acute need defers it', () => {

@@ -334,3 +334,17 @@ test('activating another region above 8192 animals preserves and advances every 
   assert.equal(world.animals.length,ages.size);assert.ok(world.animals.every(a=>a.age===ages.get(a.id)!+1));
   assert.deepEqual(decisionesFauna(world),{tick:world.tick,vivos:ages.size,decisiones:ages.size});assertWorld(world);
 });
+
+test('a world with more than six animals on one tile saves, reloads and keeps them', t => {
+  const { store } = fixture(t);
+  const world = createWorld(42); world.reproductionEnabled = false;
+  const tile = world.tiles.find(x => x.terrain === 'meadow')!;
+  for (const animal of world.animals) if (animal.species !== 'fish') { animal.x = tile.x; animal.y = tile.y; animal.target = { x: tile.x, y: tile.y }; animal.memory = []; }
+  syncFauna(world.tiles, world.animals);
+  assert.ok(tile.fauna! > 6, `fauna en la tesela: ${tile.fauna}`);
+  assertWorld(world);
+  store.save(world);
+  const loaded = store.load()!.world;
+  assert.equal(loaded.tiles.find(x => x.x === tile.x && x.y === tile.y)!.fauna, tile.fauna);
+  assert.equal(loaded.animals.filter(a => a.x === tile.x && a.y === tile.y).length, tile.fauna);
+});

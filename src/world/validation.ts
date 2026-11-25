@@ -30,7 +30,7 @@ export function assertEcosystemTile(tile: Tile, required = true): void {
     const value = tile[key];
     if ((required || value !== undefined) && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) fail();
   }
-  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0 || tile.fauna! > 6)) fail();
+  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0)) fail();
   if (tile.species !== undefined && !['hare','deer','boar','fish','wolf','fox'].includes(tile.species)) fail();
   if ((tile.fauna ?? 0) > 0 && tile.species === undefined) fail();
 }

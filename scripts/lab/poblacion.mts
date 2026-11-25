@@ -28,7 +28,7 @@ import {
 import { initializePerson, seededTraits } from '../../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams, type WorldParams } from '../../src/world/params.js';
 import { demographicTraits, initialDemography, updateDemography } from '../../src/world/demography.js';
-import { expressGenome, founderGenome, localRandom, type Genome } from '../../src/world/genetics.js';
+import { ALLELE_COUNT, expressGenome, founderGenome, localRandom, type Genome } from '../../src/world/genetics.js';
 import { founderPolicy, initialPolicyPlasticity } from '../../src/world/politica.js';
 import { activate, tileAt } from '../../src/world/spatial.js';
 import { CHUNK_SIZE, proceduralPersonName, type Chunk } from '../../src/world/terrain.js';
@@ -197,7 +197,7 @@ function estadoAEdad(genoma: Genome, cuerpo: WorldParams['cuerpo'], curva: Curva
 
 /** La mayor esperanza que permite la ley: resiliencia 1 y actividad 0 (la ley es afín en ambas, `longevityAges`). */
 function esperanzaMaxima(cuerpo: WorldParams['cuerpo']): number {
-  const alelos = new Array<number>(14).fill(0.5);
+  const alelos = new Array<number>(ALLELE_COUNT).fill(0.5);
   alelos[8] = alelos[9] = 1; alelos[4] = alelos[5] = 0;
   return curvaSupervivencia({ alleles: alelos }, cuerpo).esperanza;
 }
@@ -693,9 +693,12 @@ export function correr(o: OpcionesCorrida): unknown {
   try {
     const registro = medir(mundo, { dias: o.dias, ticks: o.ticks, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar,
       alDia: d => appendFileSync(`${o.salida}.progreso`, `${JSON.stringify({ dia: d.dia, vivos: d.vivos, msPared: Math.round(d.msPared), carga: d.carga })}\n`) });
-    assertWorld(mundo);
+    // Con la V23 los hijos se llaman `nacido-<uid>` (natalidad.ts `idDeCria`) y `assertWorld` (validar.ts, exige `descendant-N`) rechaza el
+    // mundo en cuanto nace uno. Aquí el rechazo se anota en el informe (`aserto`) en vez de perder la corrida.
+    let aserto: string | null = null;
+    try { assertWorld(mundo); } catch (error) { aserto = String(error); }
     if (o.guardar) { chunks.archivar(); guardarPunto(o.guardar, mundo, chunks.archivo); }
-    const informe = { tipo: 'poblacion-corrida', opciones: o, params: paramsOf(mundo), interruptores: paramsOf(mundo).v23, siembra, msSiembra, msTotal: performance.now() - t0,
+    const informe = { tipo: 'poblacion-corrida', aserto, opciones: o, params: paramsOf(mundo), interruptores: paramsOf(mundo).v23, siembra, msSiembra, msTotal: performance.now() - t0,
       carga: { inicio: cargaInicio, fin: loadavg() }, uptime: { inicio: uptimeInicio, fin: uptime() }, maxRssMiB: process.resourceUsage().maxRSS / 1024, registro };
     writeFileSync(o.salida, JSON.stringify(informe));
     return informe;

@@ -16,6 +16,21 @@ export interface Holguras {
 }
 const libreEnDisco = (directorio: string): number => { const d = statfsSync(directorio); return d.bavail * d.bsize; };
 
+/** Se ejecuta en la transacción del borrado, con los bloques del segmento ya eliminados. */
+function declararLaguna(catalogo: CatalogoCinta, s: SegmentoCinta): void {
+  const { db } = catalogo;
+  const anterior = db.prepare(`SELECT t1 FROM bloques WHERE epoca=? AND nivel=? AND t0<? ORDER BY t0 DESC LIMIT 1`)
+    .get(s.epoca, s.nivel, s.t0);
+  const posterior = db.prepare(`SELECT t0 FROM bloques WHERE epoca=? AND nivel=? AND t0>? ORDER BY t0 LIMIT 1`)
+    .get(s.epoca, s.nivel, s.t1);
+  // El hueco interior ocupa el intervalo abierto entre los fotogramas retenidos. Al mover un extremo de la
+  // pista, deja de haber un hueco interior del lado podado. En ambos casos se quitan las marcas absorbidas.
+  db.prepare('DELETE FROM lagunas_poda WHERE epoca=? AND nivel=? AND t0>=? AND t0<?')
+    .run(s.epoca, s.nivel, anterior?.t1 ?? Number.MIN_SAFE_INTEGER, posterior?.t0 ?? Number.MAX_SAFE_INTEGER);
+  if (anterior && posterior) db.prepare('INSERT INTO lagunas_poda VALUES (?,?,?,?)')
+    .run(s.epoca, s.nivel, anterior.t1, posterior.t0);
+}
+
 /** Deja sitio antes de hacer el append. El segmento más nuevo por nivel sigue referenciado incluso durante la escritura. */
 export function podar(catalogo: CatalogoCinta, tope: number, nivel?: Nivel, entrada = 0,
   { margen = 0, reservaDisco = RESERVA_DISCO, libre = libreEnDisco }: Holguras = {}): void {
@@ -35,7 +50,7 @@ export function podar(catalogo: CatalogoCinta, tope: number, nivel?: Nivel, entr
   const eliminados = new Set<number>();
   const borrar = (s: SegmentoCinta) => {
     const protegido = () => s.nivel === 0 && !!pinActual.get(activosDesde, s.epoca, s.t0 - PIN_DIAS * TICKS_PER_DAY, s.t1);
-    if (!catalogo.borrarSegmento(s, protegido)) return false;
+    if (!catalogo.borrarSegmento(s, protegido, () => declararLaguna(catalogo, s))) return false;
     eliminados.add(s.id);
     total -= s.bytes;
     return true;

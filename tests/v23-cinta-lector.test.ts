@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { request, type IncomingHttpHeaders, type Server } from 'node:http';
-import { loadavg } from 'node:os';
+import { loadavg, uptime } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
-import { crc32, gunzipSync, gzipSync } from 'node:zlib';
+import { gunzipSync } from 'node:zlib';
 import { createWorkerGateway } from '../src/server/gateway.js';
 import { createApp, createReadOnlyApp, DIAGNOSTICO_VACIO, type ReadOnlyBackend } from '../src/server/app.js';
-import { CatalogoCinta, INDICE_CINTA, MAX_SEGMENTO, NIVELES } from '../src/server/cinta/catalogo.js';
-import { clientDelta, decodificarBloque } from '../src/server/cinta/formato.js';
+import { CatalogoCinta, INDICE_CINTA, MAX_SEGMENTO, NIVELES, rutaSegmento } from '../src/server/cinta/catalogo.js';
+import { clientDelta, codificarBloque, decodificarBloque, leerIndiceBloque, prepararBloque, sectoresVisibles } from '../src/server/cinta/formato.js';
 import { reducir, reducirTesela } from '../src/server/cinta/reducir.js';
 import { EscritorCinta } from '../src/server/cinta/escritor.js';
 import { LectorCinta, type Fondo } from '../src/server/cinta/lector.js';
@@ -18,7 +18,7 @@ import { LectoresCinta, MAX_ESPERA } from '../src/server/cinta/lector-worker.js'
 import { projectMirrorTile, projectMirrorWorld } from '../src/server/sim-worker.js';
 import { Store } from '../src/server/store.js';
 import { CINTA, type ChunkResp, type CintaMeta, type Corte, type Nivel } from '../src/shared/cinta.js';
-import { applyClientTapeDelta, type TapeChunkResponse, type TapeMetaResponse } from '../src/shared/tape.js';
+import { applyClientTapeDelta, type TapeChunkResponse, type TapeClientDelta, type TapeMetaResponse } from '../src/shared/tape.js';
 import type { Salud } from '../src/shared/salud.js';
 import type { Tile, Viewport, WorldView } from '../src/shared/types.js';
 import { initializeEcosystem } from '../src/world/ecosystem.js';
@@ -30,7 +30,7 @@ const params = parseParams('motor.hilos=1,persistencia.cadaTicks=200');
 const plantilla = JSON.parse(JSON.stringify(projectMirrorWorld(createWorld(42, params)))) as WorldView;
 const clon = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-function directorio(t: TestContext, raiz = '/tmp/atlas-v23-c1b') {
+function directorio(t: TestContext, raiz = '/tmp/atlas-v23-c1c') {
   mkdirSync(raiz, { recursive: true });
   const temporal = mkdtempSync(join(raiz, 'lector-'));
   t.after(() => rmSync(temporal, { recursive: true, force: true }));
@@ -165,6 +165,107 @@ test('I1 lector: los tramos reconstruyen cada fotograma de L0, cruzando bloques,
   assert.equal(completos.toTick, completos.frames.at(-1)!.tick); assert.equal(completos.hasMore, true);
 });
 
+function grabarBloque(t: TestContext, bloque: Buffer): { ruta: string; segmento: string } {
+  const ruta = join(directorio(t), 'cinta');
+  const catalogo = new CatalogoCinta(ruta);
+  try {
+    const epoca = catalogo.abrir({ instanciaId: 'sectores', epoca: 0, tMundo: 0, motivo: 'reinicio' });
+    catalogo.escribirBloque(epoca, bloque, undefined);
+    const s = catalogo.segmentos()[0]!;
+    return { ruta, segmento: rutaSegmento(ruta, s.nivel, s.id) };
+  } finally { catalogo.db.close(); }
+}
+
+test('la cámara conserva orden y contenido al cruzar sectores con entradas, salidas y bajas', t => {
+  const limites = [0, 64, 128];
+  const base = { ...clon(plantilla), tick: 0, sequence: 0 } as WorldView & { seed?: number };
+  delete base.seed;
+  base.people = limites.flatMap(x => [
+    { ...base.people[0]!, id: `este-${x}`, x: x + 1, y: 0 },
+    { ...base.people[0]!, id: `oeste-${x}`, x: x - 1, y: 0 },
+    { ...base.people[0]!, id: `viajero-${x}`, x: x + 6, y: 0 },
+  ]);
+  base.animals = limites.flatMap(x => [
+    { ...base.animals![0]!, id: `lejos-${x}`, x: x - 6, y: 0 },
+    { ...base.animals![0]!, id: `visible-${x}`, x, y: 0 },
+  ]);
+  const tesela = (x: number, y: number, food: number): Tile => ({ x, y, terrain: 'meadow', food, moisture: 0.5, vegetation: 0.5 });
+  const fondo: Fondo = (x, y) => tesela(x, y, 0.1);
+  base.tiles = limites.flatMap(x => [
+    tesela(x + 1, 0, 0.8), tesela(x - 1, -1, 0.9), tesela(x + 5, 0, 0.7),
+  ]);
+  const siguiente = { ...clon(base), tick: 4, sequence: 4 };
+  siguiente.people = siguiente.people.reverse().map(p => ({ ...p,
+    x: p.id.startsWith('viajero-') ? p.x - 7 : p.id.startsWith('este-') ? p.x + 5 : p.x }));
+  siguiente.animals = siguiente.animals!.map(a => ({ ...a, x: a.x + 6 }));
+  siguiente.tiles = siguiente.tiles.filter(tile => tile.y >= 0).map(tile => ({ ...tile, food: 0.6 }));
+
+  const { ruta } = grabarBloque(t, codificarBloque(0, base, [clientDelta(base, siguiente)]));
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  const leer = (camara?: Viewport) => {
+    const req = camara ? { x: camara.x, y: camara.y, w: camara.width, h: camara.height } : {};
+    const r = JSON.parse(lector.chunk({ t: 0, n: 2, ...req }, fondo)) as ChunkResp;
+    return reproducir(r.baseFrame, r.deltas);
+  };
+  const completos = leer();
+  assert.deepEqual(completos, [base, siguiente], 'sin cámara se preserva el orden original entre sectores');
+  for (const x of limites) {
+    const camara = { x: x - 2, y: -1, width: 4, height: 2 };
+    const cortados = leer(camara);
+    assert.equal(cortados[1]!.tiles.find(tile => tile.x === x - 1 && tile.y === -1)?.food, 0.1, 'una baja vuelve al fondo');
+    assert.deepEqual(cortados, completos.map(vista => recortar(vista, camara, fondo)), `cámara alrededor de x=${x}`);
+  }
+});
+
+test('un salto con cámara omite un sector lejano, la franja de teselas y las deltas posteriores', t => {
+  const camara = { x: 0, y: 0, w: 2, h: 2 };
+  const cerca: Tile = { x: camara.x, y: camara.y, terrain: 'meadow', food: 0, moisture: 0.5, vegetation: 0.5 };
+  const persona = { ...plantilla.people[0]!, x: -1, y: 0 };
+  const base = { ...clon(plantilla), tick: 0, sequence: 0, people: [persona], animals: [], places: [], structures: [],
+    tiles: [cerca, { ...cerca, x: -1 }, { ...cerca, x: 512, y: 512 }] };
+  const bloque = codificarBloque(0, base, [clientDelta(base, { ...base, tick: 4, sequence: 4 })]);
+  const indice = leerIndiceBloque((offset, bytes) => bloque.subarray(offset, offset + bytes), bloque.length);
+  const sectores = sectoresVisibles(indice, { x: camara.x, y: camara.y, width: camara.w, height: camara.h });
+  const fuera = indice.marcos[0]!.partes.filter(p => !sectores.has(p.sector));
+  const delta = indice.marcos[1]!.partes.find(p => p.sector === 0);
+  assert.equal(fuera.length, 2, 'quedan fuera tanto la tesela remota como la de x=-1');
+  assert.ok(delta, 'hay una delta global');
+
+  const { ruta, segmento } = grabarBloque(t, bloque);
+  const fd = openSync(segmento, 'r+');
+  try {
+    for (const { offset } of [...fuera, delta]) writeSync(fd, Buffer.from([bloque[offset]! ^ 1]), 0, 1, offset);
+  } finally { closeSync(fd); }
+
+  const lector = new LectorCinta(ruta, 0);
+  t.after(() => lector.close());
+  const r = JSON.parse(lector.chunk({ t: 0, n: 1, ...camara })) as ChunkResp;
+  assert.deepEqual(r.baseFrame?.tiles, [cerca]);
+  assert.deepEqual(r.baseFrame?.people, [persona], 'el margen de una tesela sí incluye a la persona');
+  assert.equal(r.t1, 0);
+  assert.throws(() => lector.chunk({ t: 0, n: 1 }), /CRC32/, 'la clave completa requiere la parte lejana');
+  assert.throws(() => lector.chunk({ t: 4, n: 1, ...camara }), /CRC32/, 'al avanzar debe verificarse la delta');
+});
+
+test('un índice de bloque cacheado no permite leer un segmento con magia alterada', t => {
+  const base = { ...clon(plantilla), tick: 0, sequence: 0 };
+  const bloque = codificarBloque(0, base, []);
+  const { ruta, segmento } = grabarBloque(t, bloque);
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  const leer = () => JSON.parse(lector.chunk({ t: 0, n: 1 })) as ChunkResp;
+  assert.equal(leer().baseFrame?.tick, 0);
+
+  const fd = openSync(segmento, 'r+');
+  try {
+    writeSync(fd, Buffer.from('MALA'), 0, 4, 0);
+    assert.throws(leer, /Cabecera CNT2 inválido/);
+    writeSync(fd, bloque, 0, 4, 0);
+    assert.equal(leer().baseFrame?.tick, 0, 'vuelve a leer el índice válido');
+  } finally { closeSync(fd); }
+});
+
 test('I7 lector: la época del catálogo, lo huérfano y las lagunas nunca se sirven como historia continua', t => {
   const dir = directorio(t), cinta = join(dir, 'cinta');
   const escritor = new EscritorCinta({ directorio: cinta });
@@ -260,7 +361,11 @@ const ticksDe = (r: ChunkResp) => reproducir(r.baseFrame, r.deltas).map(f => f.t
 test('un hueco de la poda corta el tramo, otro nivel lo cubre y el alias salta al otro lado', t => {
   const ruta = cinta(t, [[{}, cada(0, 2000)]]);
   // Como una poda que conserva un segmento fijado: faltan los bloques de L0 entre 508 y 1024.
-  borrarBloques(ruta, 'nivel=0 AND t0>=512 AND t0<1024');
+  const db = new DatabaseSync(join(ruta, INDICE_CINTA));
+  try {
+    db.prepare('DELETE FROM bloques WHERE nivel=0 AND t0>=512 AND t0<1024').run();
+    db.prepare('INSERT INTO lagunas_poda(epoca,nivel,t0,t1) VALUES (0,0,508,1024)').run();
+  } finally { db.close(); }
   const lector = new LectorCinta(ruta);
   t.after(() => lector.close());
   assert.deepEqual([lector.meta().niveles[0]!.t0, lector.meta().niveles[0]!.t1], [0, 2000]);
@@ -463,10 +568,16 @@ test('un tramo largo no retrasa /health ni un meta que llega a la vez', { timeou
   const vacio: number[] = [];
   for (let i = 0; i < 20; i++) vacio.push((await http.pedir('/health')).ms);
   let enCurso = true;
+  const estados: number[] = [];
   const largo = (async () => {
     const tramos: number[] = [];
-    while (tramos.length < 6) tramos.push((await http.pedir('/api/cinta/chunk?t=0&n=120&nivel=0', undefined, { 'Accept-Encoding': 'gzip' })).ms);
-    enCurso = false;
+    try {
+      while (tramos.length < 6) {
+        const r = await http.pedir('/api/cinta/chunk?t=0&n=120&nivel=0', undefined, { 'Accept-Encoding': 'gzip' });
+        tramos.push(r.ms);
+        estados.push(r.status);
+      }
+    } finally { enCurso = false; }
     return tramos;
   })();
   const salud: number[] = [], metas: number[] = [];
@@ -479,6 +590,7 @@ test('un tramo largo no retrasa /health ni un meta que llega a la vez', { timeou
     metas.push(meta.ms);
   }
   const tramos = await largo;
+  assert.deepEqual(estados, Array(6).fill(200), 'los seis tramos se sirvieron correctamente');
   const p95 = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length * 0.95)]!;
   t.diagnostic(JSON.stringify({ tramoMs: tramos.map(Math.round), saludVacioP95: p95(vacio).toFixed(1), saludP95: p95(salud).toFixed(1),
     saludMax: Math.max(...salud).toFixed(1), salud: salud.length, metaMax: Math.max(...metas).toFixed(1) }));
@@ -583,13 +695,10 @@ test('pasarela: la cinta perdida en el hilo de la simulación se muestra con est
   assert.equal((await http.pedir('/api/tape/meta')).status, 200, 'lo grabado sigue a la vista');
 });
 
-// Cabecera CNT1 (formato.ts): magia, nivel, fotogramas, t0, t1, crc y longitud de la clave; cada delta lleva tick y longitud.
-const CABECERA = 33, CRC = 25, LONGITUD_KF = 29;
-
 /**
  * Cinta sintética de unos `bytes` con bloques de tamaño real: 700 habitantes, 3.000 animales y 16.384 teselas por clave,
  * 31 deltas con 210 habitantes que se mueven y 200 teselas que cambian, reducidos por nivel como los graba el
- * escritor. El tick va en su propio miembro gzip, así un bloque nuevo cuesta un CRC y no una compresión.
+ * escritor. Se reutilizan las partes comprimidas al grabar el mismo bloque en otro tick.
  */
 function volumenSintetico(directorio: string, bytes: number, [personas, animales, lado] = [700, 3000, 8]) {
   const vista = clon(plantilla);
@@ -599,41 +708,25 @@ function volumenSintetico(directorio: string, bytes: number, [personas, animales
     x: (i * 7) % 128, y: (i * 13) % 128 }));
   vista.tiles = teselas(lado);
   const notables = new Set(vista.people.slice(0, 60).map(p => p.id));
-  const gz = (texto: string) => gzipSync(texto, { level: 1 });
   const restos = NIVELES.map(nivel => {
-    let previa = reducir(nivel, { ...vista, tick: 0, sequence: 0 }, notables);
-    const { tick: _, ...resto } = previa;
-    const base = JSON.stringify({ tick: 0, ...resto });
-    const deltas: Buffer[] = [];
+    const base = reducir(nivel, { ...vista, tick: 0, sequence: 0 }, notables);
+    let previa = base;
+    const deltas: TapeClientDelta[] = [];
     for (let i = 1; i < 32; i++) {
       const siguiente = clon(vista);
-      Object.assign(siguiente, { tick: 0, sequence: 0 });
+      Object.assign(siguiente, { tick: i * CINTA.pasos[nivel], sequence: 0 });
       siguiente.people.forEach((p, k) => { if (k % 10 < 3) p.x += i; });
       siguiente.animals!.forEach((a, k) => { if (k % 2) a.y += i; });
       const actual = reducir(nivel, siguiente, notables);
       const delta = clientDelta({ ...previa, tiles: [] }, { ...actual, tiles: [] });
       if (nivel <= 2) delta.tilesPatch = vista.tiles.slice(i * 200, i * 200 + 200).map(t => reducirTesela(nivel, { ...t, food: i / 40 })!);
-      const json = JSON.stringify(delta);
-      assert.ok(json.startsWith('{"tick":0,'));
-      deltas.push(gz(json.slice('{"tick":0,'.length)));
+      deltas.push(delta);
       previa = actual;
     }
-    return { base: gz(base.slice('{"tick":0,'.length)), crudo: base.length, deltas };
+    return { bloque: prepararBloque(nivel, base, deltas), crudo: JSON.stringify(base).length };
   });
   function bloque(nivel: Nivel, t0: number): Buffer {
-    const paso = CINTA.pasos[nivel], { base, deltas } = restos[nivel]!;
-    const clave = Buffer.concat([gz(`{"tick":${t0},`), base]);
-    const partes = [Buffer.alloc(CABECERA), clave];
-    deltas.forEach((resto, i) => {
-      const cuerpo = Buffer.concat([gz(`{"tick":${t0 + (i + 1) * paso},`), resto]), cabecera = Buffer.alloc(12);
-      cabecera.writeDoubleLE(t0 + (i + 1) * paso, 0); cabecera.writeUInt32LE(cuerpo.length, 8);
-      partes.push(cabecera, cuerpo);
-    });
-    const datos = Buffer.concat(partes);
-    datos.write('CNT1', 0, 'ascii'); datos.writeUInt8(nivel, 4); datos.writeUInt32LE(32, 5);
-    datos.writeDoubleLE(t0, 9); datos.writeDoubleLE(t0 + 31 * paso, 17); datos.writeUInt32LE(clave.length, LONGITUD_KF);
-    datos.writeUInt32LE(crc32(datos.subarray(LONGITUD_KF), crc32(datos.subarray(0, CRC))), CRC);
-    return datos;
+    return restos[nivel]!.bloque(t0);
   }
   const tamanos = NIVELES.map(n => bloque(n, 0).length);
   assert.equal(decodificarBloque(bloque(0, 0)).baseFrame.people.length, personas);
@@ -641,7 +734,7 @@ function volumenSintetico(directorio: string, bytes: number, [personas, animales
   const porTick = NIVELES.reduce<number>((s, n) => s + tamanos[n]! / (32 * CINTA.pasos[n]), 0);
   const fin = Math.ceil(bytes / porTick);
   const catalogo = new CatalogoCinta(directorio);
-  let escritos = 0, bloques = 0;
+  let escritos = 0, bloques = 0, bytesFisicos = 0;
   try {
     const epoca = catalogo.abrir({ instanciaId: 'salto', epoca: 0, tMundo: 0, motivo: 'reinicio' });
     const siguiente = NIVELES.map(() => 0);
@@ -654,49 +747,64 @@ function volumenSintetico(directorio: string, bytes: number, [personas, animales
       siguiente[nivel]! += 32 * CINTA.pasos[nivel];
       escritos += datos.length; bloques++;
     }
+    for (const s of catalogo.segmentos()) bytesFisicos += statSync(rutaSegmento(directorio, s.nivel, s.id)).blocks * 512;
   } finally { catalogo.db.close(); }
-  return { escritos, bloques, fin, bloquePorNivel: tamanos, claveCruda: restos.map(r => r.crudo) };
+  return { escritos, bytesFisicos, bloques, fin, bloquePorNivel: tamanos, claveCruda: restos.map(r => r.crudo), lado };
 }
+
 test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en cada nivel', {
   skip: process.env.ATLAS_V23_CINTA_SALTO !== '1', timeout: 3_600_000,
 }, async t => {
-  const dir = directorio(t);
+  const dir = directorio(t, '/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/tmp-v23-c1c');
   const inicio = performance.now();
+  const carga = () => ({ uptimeSegundos: Math.floor(uptime()), carga: loadavg() });
+  t.diagnostic(JSON.stringify({ etapa: 'inicio', ...carga() }));
   // `ATLAS_V23_CINTA_SALTO_MUNDO=personas,animales,lado` cambia el mundo sintético (lado en chunks, ≥ 6 para la cámara de
   // 96×64); el de I5 es el de omisión.
   const objetivo = Number(process.env.ATLAS_V23_CINTA_SALTO_BYTES ?? 5e9), mundo = process.env.ATLAS_V23_CINTA_SALTO_MUNDO?.split(',').map(Number);
   const resumen = volumenSintetico(join(dir, 'cinta'), objetivo, mundo as [number, number, number] | undefined);
-  t.diagnostic(`escritura: ${((performance.now() - inicio) / 1000).toFixed(0)} s`);
-  t.diagnostic(JSON.stringify(resumen));
-  assert.ok(resumen.escritos >= objetivo * 0.99, `cinta de ${resumen.escritos} bytes`);
-  const lector = new LectorCinta(join(dir, 'cinta'), 1);
+  t.diagnostic(JSON.stringify({ ...resumen, escrituraSegundos: Math.round((performance.now() - inicio) / 1000) }));
+  assert.ok(resumen.escritos >= objetivo && resumen.bytesFisicos >= objetivo, `cinta de ${resumen.escritos} bytes, ${resumen.bytesFisicos} físicos`);
+  if (!mundo) assert.ok(resumen.claveCruda[0]! >= 5_200_000, 'se conserva la clave grande de L0');
+  // Índice en RAM con la caché de decodificación deshabilitada. El SO mantiene su gestión normal de páginas.
+  const lector = new LectorCinta(join(dir, 'cinta'), 0);
   t.after(() => lector.close());
   const meta = lector.meta();
   assert.deepEqual(meta.niveles.map(n => n.nivel), [0, 1, 2, 3, 4]);
   const camara = { x: 0, y: 0, w: 96, h: 64 };
   const azar = (() => { let s = 12345; return () => (s = Math.imul(s, 1664525) + 1013904223 >>> 0) / 2 ** 32; })();
-  // La CPU del hilo separa el coste del lector de la espera: las pruebas corren en SCHED_IDLE con la torre cargada.
-  const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
-  const p95 = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(0.95 * (v.length - 1))]!;
+  const percentiles = (v: number[]) => {
+    const orden = [...v].sort((a, b) => a - b);
+    return { p50: orden[Math.ceil(0.5 * orden.length) - 1]!, p95: orden[Math.ceil(0.95 * orden.length) - 1]! };
+  };
   const lentos: string[] = [];
   for (const n of meta.niveles) {
-    const pared: number[] = [], cpus: number[] = [], sinCamara: number[] = [];
-    for (let i = 0; i < 1000; i++) {
-      const tick = n.t0 + Math.floor(azar() * (n.t1 - n.t0 + 1));
-      let inicio = performance.now();
-      const c = cpu();
-      const r = JSON.parse(lector.chunk({ t: tick, n: 1, nivel: n.nivel, ...camara })) as ChunkResp;
-      pared.push(performance.now() - inicio); cpus.push(cpu() - c);
-      // Los bloques del volumen empiezan en múltiplos de 32 pasos: la clave ≤ t y el primer fotograma ≥ t son exactos.
-      const paso = CINTA.pasos[n.nivel], clave = Math.floor(tick / (32 * paso)) * 32 * paso;
-      assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 === clave && r.baseFrame.tick === clave && r.t1 === Math.ceil(tick / paso) * paso
-        && r.baseFrame.tiles.length === (n.nivel <= 2 ? 96 * 64 : 0), JSON.stringify({ tick, nivel: r.nivel, t0: r.t0, t1: r.t1, teselas: r.baseFrame?.tiles.length }));
-      if (i % 10 === 0) { inicio = performance.now(); lector.chunk({ t: tick, n: 1, nivel: n.nivel }); sinCamara.push(performance.now() - inicio); }
+    const ticks = Array.from({ length: 1000 }, () => n.t0 + Math.floor(azar() * (n.t1 - n.t0 + 1)));
+    for (const conCamara of [true, false]) {
+      const pared: number[] = [], cpus: number[] = [];
+      for (const tick of ticks) {
+        const inicio = performance.now();
+        const cpuInicio = process.threadCpuUsage();
+        const json = lector.chunk({ t: tick, n: 1, nivel: n.nivel, ...(conCamara ? camara : {}) });
+        const cpu = process.threadCpuUsage(cpuInicio);
+        pared.push(performance.now() - inicio);
+        cpus.push((cpu.user + cpu.system) / 1000);
+
+        // La validación JSON queda fuera del tiempo de respuesta del servidor.
+        const r = JSON.parse(json) as ChunkResp;
+        const paso = CINTA.pasos[n.nivel], clave = Math.floor(tick / (32 * paso)) * 32 * paso;
+        const teselas = n.nivel > 2 ? 0 : conCamara ? camara.w * camara.h : (resumen.lado * CHUNK_SIZE) ** 2;
+        if (!r.baseFrame || r.nivel !== n.nivel || r.t0 !== clave || r.baseFrame.tick !== clave
+          || r.t1 !== Math.ceil(tick / paso) * paso || r.baseFrame.tiles.length !== teselas) {
+          assert.fail(JSON.stringify({ tick, conCamara, nivel: r.nivel, t0: r.t0, t1: r.t1, teselas: r.baseFrame?.tiles.length }));
+        }
+      }
+      const tiempoPared = percentiles(pared);
+      t.diagnostic(JSON.stringify({ nivel: n.nivel, conCamara, muestras: ticks.length, bytes: n.bytes, fotogramas: n.fotogramas,
+        paredMs: tiempoPared, cpuHiloMs: percentiles(cpus), ...carga() }));
+      if (tiempoPared.p95 >= 100) lentos.push(`nivel ${n.nivel}, cámara ${conCamara}: p95 ${tiempoPared.p95.toFixed(1)} ms`);
     }
-    const orden = [...pared].sort((a, b) => a - b);
-    t.diagnostic(JSON.stringify({ nivel: n.nivel, bytes: n.bytes, fotogramas: n.fotogramas, p50: orden[499]!.toFixed(1), p95: p95(pared).toFixed(1),
-      max: orden.at(-1)!.toFixed(1), cpuP95: p95(cpus).toFixed(1), sinCamaraP95: p95(sinCamara).toFixed(1), carga: loadavg()[0]!.toFixed(0) }));
-    if (p95(pared) >= 100) lentos.push(`nivel ${n.nivel}: p95 ${p95(pared).toFixed(1)} ms`);
   }
+  t.diagnostic(JSON.stringify({ etapa: 'fin', ...carga() }));
   assert.deepEqual(lentos, []);
 });

@@ -1,23 +1,18 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { isDeepStrictEqual as igual } from 'node:util';
 import { CINTA, type Bifurcacion, type ChunkReq, type ChunkResp, type CintaMeta, type Laguna, type Nivel, type SeriePunto } from '../../shared/cinta.js';
 import { applyClientTapeDelta, type TapeClientDelta, type TapeEntityPatch } from '../../shared/tape-delta.js';
 import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse, TapeTimelinePoint } from '../../shared/tape.js';
 import type { Tile, Viewport, WorldView } from '../../shared/types.js';
 import { phaseAt } from '../../world/mundo/crear.js';
 import { TICKS_PER_DAY } from '../../world/mundo/tipos.js';
-import { INDICE_CINTA, NIVELES, rutaSegmento } from './catalogo.js';
-import { PASO_MAXIMO } from './escritor.js';
-import { clientDelta, decodificarBloque, type BloqueDecodificado } from './formato.js';
+import { INDICE_CINTA, NIVELES, rutaSegmento, VERSION_CATALOGO } from './catalogo.js';
+import { cabeceraCoincide, clientDelta, leerIndiceBloque, leerMarcoJson, sectoresVisibles, type IndiceBloque, type LeerBytes, type LeerTesela } from './formato.js';
 import { reducirTesela } from './reducir.js';
 
-/** Memoria de bloques decodificados por lector (cinta-sonnet §6). */
+/** Memoria de índices por lector (cinta-sonnet §6). */
 export const CACHE_BYTES = 256 * 1024 ** 2;
-// Montón que retiene un bloque decodificado por byte comprimido: medido 9× en L0 y 12× en L1 con el volumen sintético
-// de I5 (que comprime más que uno real). El tope se cuenta con 20, que queda por encima.
-const FACTOR_MEMORIA = 20;
 /** Bytes por respuesta: una parte que lo pasaría no entra y el resto sigue con `hayMas`. Lo que lleva hasta el primer
  * fotograma ≥ t entra siempre, o el cliente no avanzaría. */
 export const TOPE_RESPUESTA = 8 * 1024 ** 2;
@@ -33,13 +28,12 @@ interface Epoca { id: number; instanciaId: string; tMundo: number; t1: number; f
 interface Intervalo { i0: number; i1: number; t0: number; t1: number }
 interface Pista { bloques: Bloque[]; intervalos: Intervalo[] }
 interface Sitio { e: Epoca; nivel: Nivel; iv: Intervalo }
-interface Fotograma { vista: WorldView; teselas: Map<string, Tile>; delta?: TapeClientDelta }
+interface Fotograma { vista: WorldView; teselas: Map<string, string>; delta?: TapeClientDelta; cambiadas?: Map<string, string> }
 /** `contados`: fotogramas ≥ `desde`; `ultimo` es -1 si el tramo salió vacío. */
 interface Tramo { base?: string; partes: string[]; t0: number; t1: number; ultimo: number; contados: number }
 interface OpcionesTramo { clave: boolean; n: number; hasta: number; camara?: Viewport; fondo?: Fondo; completos?: boolean }
 
 const PISTA_VACIA: Pista = { bloques: [], intervalos: [] };
-const coord = (t: { x: number; y: number }): string => `${t.x},${t.y}`;
 /** Un error que se arregla releyendo el catálogo: el bloque ya no es el que el índice describe. */
 const cambiada = (mensaje: string): Error => Object.assign(new Error(mensaje), { code: 'ESTALE' });
 
@@ -51,21 +45,47 @@ function parcheRecortado<T extends { id: string }>(antes: readonly T[], ahora: r
   const previos = new Set<string>(), actuales = new Set<string>();
   for (const v of antes) previos.add(v.id);
   for (const v of ahora) actuales.add(v.id);
-  const cambios = new Map<string, TapeEntityPatch<T>['upserts'][number]>();
-  for (const u of grabado?.upserts ?? []) cambios.set(u.id, u);
   const upserts: TapeEntityPatch<T>['upserts'] = [], removed: string[] = [], natural: string[] = [];
+  for (const u of grabado?.upserts ?? []) if (previos.has(u.id) && actuales.has(u.id)) upserts.push(u);
   for (const v of antes) if (actuales.has(v.id)) natural.push(v.id); else removed.push(v.id);
-  for (const v of ahora) {
-    if (!previos.has(v.id)) { upserts.push(v); natural.push(v.id); continue; }
-    const u = cambios.get(v.id);
-    if (u) upserts.push(u);
-  }
+  for (const v of ahora) if (!previos.has(v.id)) { upserts.push(v); natural.push(v.id); }
   const r: TapeEntityPatch<T> = { upserts, removed };
   if (natural.some((id, i) => id !== ahora[i]!.id)) r.order = ahora.map(v => v.id);
   return r;
 }
 
 const RECORTE_RAPIDO = ['people', 'animals'] as const;
+
+/** Durante un tramo se serializa cada vista antes de avanzar el mapa de entidades. */
+class Entidades<T extends { id: string }> {
+  private valores = new Map<string, T>();
+
+  constructor(valores: readonly T[] = []) {
+    for (const v of valores) this.valores.set(v.id, v);
+  }
+
+  aplicar(p: TapeEntityPatch<T>): T[] {
+    for (const id of p.removed) this.valores.delete(id);
+    for (const u of p.upserts) {
+      if ('_p' in u && u._p === 1) {
+        const v = (this.valores.get(u.id) ?? { id: u.id }) as Record<string, unknown>;
+        for (const k in u) if (k !== '_p' && k !== '_u') v[k] = u[k];
+        for (const k of u._u as string[] ?? []) delete v[k];
+        this.valores.set(u.id, v as T);
+      } else this.valores.set(u.id, u as T);
+    }
+    if (p.order) {
+      const orden = new Map<string, T>();
+      for (const id of p.order) {
+        const v = this.valores.get(id);
+        if (v) orden.set(id, v);
+      }
+      this.valores = orden;
+    }
+    return [...this.valores.values()];
+  }
+}
+
 /** `clientDelta` entre dos cabeceras recortadas; personas y animales salen del delta grabado si lo hay. */
 function deltaRecortado(previa: WorldView, actual: WorldView, grabado?: TapeClientDelta): TapeClientDelta {
   if (!grabado) return clientDelta(previa, actual);
@@ -79,21 +99,15 @@ function deltaRecortado(previa: WorldView, actual: WorldView, grabado?: TapeClie
   return delta;
 }
 
-/** Recorte a la cámara de una vista de la cinta; sin `teselas` solo proyecta la cabecera (para las deltas). */
-function proyectar(vista: WorldView, teselas: Map<string, Tile> | undefined, camara: Viewport | undefined,
-  fondo?: (x: number, y: number) => Tile | undefined): WorldView {
+/** Recorta la cabecera. Las teselas conservan su JSON hasta formar la respuesta. */
+function proyectar(vista: WorldView, camara?: Viewport): WorldView {
   const r: WorldView = { ...vista };
   delete (r as unknown as Record<string, unknown>).seed;
-  if (!camara) { r.tiles = teselas ? [...teselas.values()] : []; return r; }
+  if (!camara) return r;
   const { x, y, width, height } = camara;
   const visible = (p: { x: number; y: number }, margen = 0): boolean => p.x >= x - margen && p.y >= y - margen
     && p.x < x + width + margen && p.y < y + height + margen;
   r.originX = x; r.originY = y; r.width = width; r.height = height;
-  r.tiles = [];
-  if (teselas) for (let j = y; j < y + height; j++) for (let i = x; i < x + width; i++) {
-    const t = teselas.get(`${i},${j}`) ?? fondo?.(i, j);
-    if (t) r.tiles.push(t);
-  }
   r.people = r.people.filter(p => visible(p, 1));
   const ids = new Set(r.people.map(p => p.id));
   if (r.animals) r.animals = r.animals.filter(a => visible(a));
@@ -131,7 +145,7 @@ function ultimoHasta<T>(lista: readonly T[], t: number, valor: (v: T) => number)
 
 /**
  * Lector de la cinta (cinta-sonnet §3, «Lectura y salto»): índice de bloques en RAM que se pone al día con lo que
- * confirma el escritor, búsqueda binaria por tick y caché LRU de bloques decodificados. Es síncrono: corre en los
+ * confirma el escritor, búsqueda binaria por tick y caché LRU de índices CNT2. Es síncrono: corre en los
  * hilos de `lector-worker.ts`, nunca en el del HTTP. Con `instancia`, una cinta de otro mundo se lee como vacía.
  */
 export class LectorCinta {
@@ -144,8 +158,9 @@ export class LectorCinta {
   /** Por época, una pista por nivel. */
   private indice = new Map<number, Pista[]>();
   private lagunas: (Laguna & { epoca: number })[] = [];
+  private lagunasPoda: (Laguna & { epoca: number; nivel: Nivel })[] = [];
   private bifurcaciones: Bifurcacion[] = [];
-  private readonly cache = new Map<string, { bloque: BloqueDecodificado; coste: number }>();
+  private readonly cache = new Map<string, { indice: IndiceBloque; coste: number }>();
   private cacheUsado = 0;
   /** Último fotograma antes de `fin` de un bloque que lo cruza, que solo se sabe decodificándolo. */
   private readonly bordes = new Map<string, number>();
@@ -156,6 +171,7 @@ export class LectorCinta {
     try { this.db?.close(); } finally {
       this.db = undefined; this.ino = -1; this.version = -1; this.ultimoRowid = 0;
       this.epocas = []; this.segmentos.clear(); this.indice.clear(); this.lagunas = []; this.bifurcaciones = [];
+      this.lagunasPoda = [];
       this.cache.clear(); this.cacheUsado = 0; this.bordes.clear();
     }
   }
@@ -173,7 +189,7 @@ export class LectorCinta {
         db.exec('PRAGMA busy_timeout=5000');
         const version = Number(db.prepare('PRAGMA user_version').get()!.user_version);
         if (version === 0) { db.close(); return false; }
-        if (version !== 3) throw new Error(`Versión de catálogo de cinta incompatible: ${version}.`);
+        if (version !== VERSION_CATALOGO) throw new Error(`Versión de catálogo de cinta incompatible: ${version}.`);
       } catch (error) { db.close(); throw error; }
       this.db = db; this.ino = ino;
     }
@@ -211,24 +227,22 @@ export class LectorCinta {
       this.ultimoRowid = r;
     }
     this.lagunas = db.prepare('SELECT epoca,t0,t1 FROM lagunas ORDER BY t0').all().map(l => ({ ...l })) as unknown as (Laguna & { epoca: number })[];
+    this.lagunasPoda = db.prepare('SELECT epoca,nivel,t0,t1 FROM lagunas_poda ORDER BY t1').all() as unknown as typeof this.lagunasPoda;
     this.bifurcaciones = db.prepare('SELECT epoca,desde,hasta,motivo FROM bifurcaciones ORDER BY epoca').all()
       .map(b => ({ ...b })) as unknown as Bifurcacion[];
     for (const [epoca, pistas] of this.indice) pistas.forEach((p, nivel) => { p.intervalos = this.intervalos(epoca, nivel as Nivel, p.bloques); });
   }
 
-  /**
-   * Corta la pista donde falta historia: en una laguna declarada o donde dos bloques seguidos quedan más lejos de lo
-   * que el escritor deja entre dos fotogramas del nivel (la poda puede quitar segmentos del medio y conservar uno
-   * fijado). El escritor declara laguna en cuanto dos cortes distan más de `PASO_MAXIMO`, así que entre dos
-   * fotogramas seguidos del nivel k hay a lo sumo su paso más `PASO_MAXIMO` (L0 graba todos los cortes).
-   */
+  /** Cada laguna de poda corta solo la pista que perdió los segmentos. */
   private intervalos(epoca: number, nivel: Nivel, bloques: readonly Bloque[]): Intervalo[] {
-    const salto = (nivel ? CINTA.pasos[nivel] : 0) + PASO_MAXIMO;
-    const lagunas = this.lagunas.filter(l => l.epoca === epoca);
+    const lagunas = this.lagunas.filter(l => l.epoca === epoca)
+      .concat(this.lagunasPoda.filter(l => l.epoca === epoca && l.nivel === nivel)).sort((a, b) => a.t1 - b.t1);
+    let cursor = 0;
     const r: Intervalo[] = [];
     bloques.forEach((b, i) => {
       const a = bloques[i - 1], ultimo = r.at(-1);
-      if (a && ultimo && b.t0 - a.t1 <= salto && !lagunas.some(l => l.t1 > a.t1 && l.t1 <= b.t0)) { ultimo.i1 = i; ultimo.t1 = b.t1; }
+      while (a && cursor < lagunas.length && lagunas[cursor]!.t1 <= a.t1) cursor++;
+      if (a && ultimo && (lagunas[cursor]?.t1 ?? Infinity) > b.t0) { ultimo.i1 = i; ultimo.t1 = b.t1; }
       else r.push({ i0: i, i1: i, t0: b.t0, t1: b.t1 });
     });
     return r;
@@ -244,36 +258,60 @@ export class LectorCinta {
     }
   }
 
-  private leerBloque(b: Bloque): BloqueDecodificado {
+  private indiceBloque(b: Bloque, leer: LeerBytes): IndiceBloque {
     const k = `${b.segmento}:${b.offset}`;
     const guardado = this.cache.get(k);
-    if (guardado) { this.cache.delete(k); this.cache.set(k, guardado); return guardado.bloque; }
-    const datos = Buffer.allocUnsafe(b.bytes);
-    const fd = openSync(rutaSegmento(this.directorio, b.nivel, b.segmento), 'r');
-    try {
-      for (let cursor = 0; cursor < datos.length;) {
-        const n = readSync(fd, datos, cursor, datos.length - cursor, b.offset + cursor);
-        if (!n) throw cambiada(`Bloque de cinta incompleto: ${b.segmento}/${b.offset}.`);
-        cursor += n;
-      }
-    } finally { closeSync(fd); }
-    let bloque: BloqueDecodificado;
-    try { bloque = decodificarBloque(datos); } catch (error) {
-      throw cambiada(`Bloque de cinta ilegible: ${b.segmento}/${b.offset} (${error instanceof Error ? error.message : error}).`);
-    }
+    const indice = guardado?.indice ?? leerIndiceBloque(leer, b.bytes);
     // Con la cinta apartada por otra instancia, el mismo nombre de segmento puede ser ya de la cinta nueva.
-    if (bloque.crc !== b.crc || bloque.nivel !== b.nivel || bloque.t0 !== b.t0 || bloque.t1 !== b.t1 || bloque.fotogramas !== b.fotogramas) {
+    if (indice.crc !== b.crc || indice.nivel !== b.nivel || indice.t0 !== b.t0 || indice.t1 !== b.t1 || indice.fotogramas !== b.fotogramas) {
       throw cambiada(`El bloque ${b.segmento}/${b.offset} no es el del catálogo.`);
     }
-    const coste = b.bytes * FACTOR_MEMORIA;
-    if (coste > this.cacheBytes) return bloque;
-    this.cache.set(k, { bloque, coste });
+    if (guardado) {
+      if (!cabeceraCoincide(leer, indice)) {
+        this.cache.delete(k); this.cacheUsado -= guardado.coste;
+        throw cambiada(`La cabecera del bloque ${k} cambió desde la última lectura.`);
+      }
+      this.cache.delete(k);
+      this.cache.set(k, guardado);
+      return indice;
+    }
+    // El índice retiene solo los descriptores de extensión fija, sin JSON ni cargas comprimidas.
+    const coste = indice.bytesIndice * 12;
+    if (coste > this.cacheBytes) return indice;
+    this.cache.set(k, { indice, coste });
     this.cacheUsado += coste;
     for (const [viejo, { coste: c }] of this.cache) {
       if (this.cacheUsado <= this.cacheBytes) break;
       this.cache.delete(viejo); this.cacheUsado -= c;
     }
-    return bloque;
+    return indice;
+  }
+
+  private *abrirBloque(b: Bloque): Generator<{
+    indice: IndiceBloque; json: (i: number, sectores?: ReadonlySet<number>, tesela?: LeerTesela) => string;
+  }> {
+    const fd = openSync(rutaSegmento(this.directorio, b.nivel, b.segmento), 'r');
+    const leer: LeerBytes = (offset, bytes) => {
+      const datos = Buffer.allocUnsafe(bytes);
+      for (let cursor = 0; cursor < bytes;) {
+        const n = readSync(fd, datos, cursor, bytes - cursor, b.offset + offset + cursor);
+        if (!n) throw cambiada(`Bloque de cinta incompleto: ${b.segmento}/${b.offset}.`);
+        cursor += n;
+      }
+      return datos;
+    };
+    const protegido = <T>(f: () => T): T => {
+      try { return f(); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ESTALE') throw error;
+        throw cambiada(`Bloque de cinta ilegible: ${b.segmento}/${b.offset} (${error instanceof Error ? error.message : error}).`);
+      }
+    };
+    try {
+      const indice = protegido(() => this.indiceBloque(b, leer));
+      yield { indice, json: (i, sectores, tesela) => protegido(() => leerMarcoJson(indice, i, leer, sectores, tesela)) };
+    } finally { closeSync(fd); }
   }
 
   private pista(epoca: number, nivel: Nivel): Pista { return this.indice.get(epoca)?.[nivel] ?? PISTA_VACIA; }
@@ -300,9 +338,10 @@ export class LectorCinta {
     const k = `${b.segmento}:${b.offset}:${e.fin}`;
     let t = this.bordes.get(k);
     if (t === undefined) {
-      const d = this.leerBloque(b);
-      t = d.t0;
-      for (const delta of d.deltas) if (delta.tick < e.fin) t = delta.tick;
+      for (const { indice } of this.abrirBloque(b)) {
+        t = indice.marcos[ultimoHasta(indice.marcos, e.fin - 1, m => m.tick)]!.tick;
+      }
+      if (t === undefined) throw cambiada('Índice sin fotogramas.');
       this.bordes.set(k, t);
     }
     return t;
@@ -359,24 +398,67 @@ export class LectorCinta {
   }
 
   /** Fotogramas completos de un nivel de los bloques [i, j], sin llegar a `hasta`. Las teselas van aparte. */
-  private *recorrer(e: Epoca, nivel: Nivel, i: number, j: number, hasta: number): Generator<Fotograma> {
+  private *recorrer(e: Epoca, nivel: Nivel, i: number, j: number, hasta: number, camara?: Viewport): Generator<Fotograma> {
     const { bloques } = this.pista(e.id, nivel);
     for (let k = i; k <= j; k++) {
       const b = bloques[k]!;
       if (b.t0 >= hasta) return;
-      const d = this.leerBloque(b);
-      let vista: WorldView = { ...d.baseFrame, tiles: [] };
-      const teselas = new Map(d.baseFrame.tiles.map(t => [coord(t), t]));
-      yield { vista, teselas };
-      for (const delta of d.deltas) {
-        if (delta.tick >= hasta) return;
-        const { tilesPatch, removedTiles, ...cabecera } = delta;
-        vista = applyClientTapeDelta(vista, cabecera).frame;
-        for (const k of removedTiles ?? []) teselas.delete(k);
-        for (const t of tilesPatch ?? []) teselas.set(coord(t), t);
-        yield { vista, teselas, delta };
+      for (const { indice, json } of this.abrirBloque(b)) {
+        const visibles = camara && sectoresVisibles(indice, camara);
+        const teselas = new Map<string, string>();
+        const copiar = (mapa: Map<string, string>): LeerTesela =>
+          (x, y, json) => {
+            if (camara) {
+              const i = Number(x), j = Number(y);
+              if (i < camara.x || i >= camara.x + camara.width || j < camara.y || j >= camara.y + camara.height) return;
+            }
+            mapa.set(`${x},${y}`, json);
+          };
+        let vista = JSON.parse(json(0, visibles, copiar(teselas))) as WorldView;
+        const personas = new Entidades(vista.people);
+        let animales = vista.animals && new Entidades(vista.animals);
+        yield { vista, teselas };
+        for (let m = 1; m < indice.marcos.length; m++) {
+          if (indice.marcos[m]!.tick >= hasta) return;
+          const cambiadas = new Map<string, string>();
+          const delta = JSON.parse(json(m, visibles, copiar(cambiadas))) as TapeClientDelta;
+          const { removedTiles, peoplePatch, animalsPatch, ...cabecera } = delta;
+          vista = applyClientTapeDelta(vista, cabecera).frame;
+          if (peoplePatch) vista.people = personas.aplicar(peoplePatch);
+          if (!vista.animals) animales = undefined;
+          if (animalsPatch) vista.animals = (animales ??= new Entidades()).aplicar(animalsPatch);
+          for (const k of removedTiles ?? []) teselas.delete(k);
+          for (const [k, t] of cambiadas) teselas.set(k, t);
+          yield { vista, teselas, delta, cambiadas };
+        }
       }
     }
+  }
+
+  /** El salto dentro de un bloque puede enviar su JSON directamente, sin reconstruir el mundo entero. */
+  private tramoCrudo(b: Bloque, desde: number, o: OpcionesTramo): Tramo | undefined {
+    if (b.t1 < desde) return undefined;
+    for (const { indice, json } of this.abrirBloque(b)) {
+      const primero = ultimoHasta(indice.marcos, desde - 1, m => m.tick) + 1;
+      const limite = Math.max(primero + 1, o.n);
+      if (limite > indice.fotogramas || indice.marcos[primero]!.tick >= o.hasta) return undefined;
+      const r: Tramo = { partes: [], t0: b.t0, t1: b.t0, ultimo: b.t0, contados: 0 };
+      let bytes = 0;
+      for (let i = 0; i < limite; i++) {
+        const tick = indice.marcos[i]!.tick;
+        if (tick >= o.hasta) break;
+        const parte = json(i);
+        const medida = Buffer.byteLength(parte);
+        if (r.contados && bytes + medida > TOPE_RESPUESTA) break;
+        if (!i) r.base = parte;
+        else r.partes.push(parte);
+        if (tick >= desde) r.contados++;
+        bytes += medida;
+        r.ultimo = r.t1 = tick;
+      }
+      return r;
+    }
+    return undefined;
   }
 
   /**
@@ -386,47 +468,66 @@ export class LectorCinta {
    * primer fotograma ≥ `desde` entra siempre: un bloque tiene 32 fotogramas y `n` llega a 120.
    */
   private tramo(e: Epoca, nivel: Nivel, i: number, j: number, desde: number, o: OpcionesTramo): Tramo {
+    if (o.clave && !o.camara && !o.completos) {
+      const crudo = this.tramoCrudo(this.pista(e.id, nivel).bloques[i]!, desde, o);
+      if (crudo) return crudo;
+    }
     const r: Tramo = { partes: [], t0: desde, t1: desde, ultimo: -1, contados: 0 };
     let bytes = 0, enviados = 0;
-    let previa: WorldView | undefined, teselasPrevias: Map<string, Tile> | undefined;
-    const visibles = new Map<string, Tile>();
-    const dentro = (t: { x: number; y: number }): boolean => !o.camara || t.x >= o.camara.x && t.y >= o.camara.y
-      && t.x < o.camara.x + o.camara.width && t.y < o.camara.y + o.camara.height;
-    for (const f of this.recorrer(e, nivel, i, j, o.hasta)) {
+    let previa: WorldView | undefined, teselasPrevias: Map<string, string> | undefined;
+    const visibles = new Map<string, string>();
+    for (const f of this.recorrer(e, nivel, i, j, o.hasta, o.camara)) {
       const tick = f.vista.tick;
       if (!previa && !o.clave && tick < desde) continue;
-      if (r.contados && enviados >= o.n) break;
       // Lo huérfano se pinta sobre el archivo que comparte con lo visible: el de su bifurcación.
-      const fondo = o.fondo && ((x: number, y: number) => o.fondo!(x, y, Math.min(tick, e.fin)));
-      const cabecera = proyectar(f.vista, undefined, o.camara);
+      const fondo = (x: number, y: number): string | undefined => {
+        const t = o.fondo?.(x, y, Math.min(tick, e.fin));
+        return t && JSON.stringify(t);
+      };
+      const cabecera = proyectar(f.vista, o.camara);
       let parte: string;
-      if (o.completos) parte = JSON.stringify(proyectar(f.vista, f.teselas, o.camara, fondo));
-      else if (!previa) {
-        const base = proyectar(f.vista, f.teselas, o.camara, fondo);
-        for (const t of base.tiles) visibles.set(coord(t), t);
-        parte = JSON.stringify(base);
-      } else if (!o.camara && f.delta) parte = JSON.stringify(f.delta);
-      else {
+      if (o.completos || !previa) {
+        const { tiles: _, ...base } = cabecera, cam = o.camara;
+        const filas: string[] = [];
+        if (cam) {
+          for (let y = cam.y; y < cam.y + cam.height; y++) for (let x = cam.x; x < cam.x + cam.width; x++) {
+            const k = `${x},${y}`, t = f.teselas.get(k) ?? fondo(x, y);
+            if (t) { filas.push(t); visibles.set(k, t); }
+          }
+        } else for (const t of f.teselas.values()) filas.push(t);
+        parte = conCampos(base, `"tiles":[${filas.join(',')}]`);
+      } else if (!o.camara && f.delta) {
+        parte = f.cambiadas!.size ? conCampos(f.delta, `"tilesPatch":[${[...f.cambiadas!.values()].join(',')}]`) : JSON.stringify(f.delta);
+      } else if (!o.camara) {
+        const teselas = (m: Map<string, string>): Tile[] => [...m.values()].map(t => JSON.parse(t) as Tile);
+        parte = JSON.stringify(clientDelta({ ...previa, tiles: teselas(teselasPrevias!) },
+          { ...cabecera, tiles: teselas(f.teselas) }));
+      } else {
         const delta = deltaRecortado(previa, cabecera, f.delta);
-        const cambiadas: Tile[] = [], quitadas: string[] = [];
+        const cambiadas: string[] = [], quitadas: string[] = [];
+        const cambiar = (k: string, t: string) => { cambiadas.push(t); visibles.set(k, t); };
         if (f.delta) {
-          for (const t of f.delta.tilesPatch ?? []) if (dentro(t)) cambiadas.push(t);
-        } else if (o.camara) {
+          if (f.delta.removedTiles?.length) {
+            for (const k of f.delta.removedTiles) {
+              if (f.cambiadas!.has(k) || !visibles.has(k)) continue;
+              const coma = k.indexOf(','), x = Number(k.slice(0, coma)), y = Number(k.slice(coma + 1));
+              const t = fondo(x, y);
+              if (t) cambiar(k, t);
+              else quitadas.push(k);
+            }
+          }
+          for (const [k, t] of f.cambiadas!) cambiar(k, t);
+        } else {
           // Cruce de bloque: la clave nueva no trae parche, se compara lo que se ve.
           for (let y = o.camara.y; y < o.camara.y + o.camara.height; y++) for (let x = o.camara.x; x < o.camara.x + o.camara.width; x++) {
-            const k = `${x},${y}`, t = f.teselas.get(k) ?? fondo?.(x, y);
-            if (t && !igual(t, visibles.get(k))) cambiadas.push(t);
+            const k = `${x},${y}`, t = f.teselas.get(k) ?? fondo(x, y);
+            if (t && t !== visibles.get(k)) cambiar(k, t);
             else if (!t && visibles.has(k)) quitadas.push(k);
           }
-        } else {
-          for (const [k, t] of f.teselas) if (!igual(t, teselasPrevias!.get(k))) cambiadas.push(t);
-          for (const k of teselasPrevias!.keys()) if (!f.teselas.has(k)) quitadas.push(k);
         }
-        for (const t of cambiadas) visibles.set(coord(t), t);
         for (const k of quitadas) visibles.delete(k);
-        if (cambiadas.length) delta.tilesPatch = cambiadas;
         if (quitadas.length) delta.removedTiles = quitadas;
-        parte = JSON.stringify(delta);
+        parte = cambiadas.length ? conCampos(delta, `"tilesPatch":[${cambiadas.join(',')}]`) : JSON.stringify(delta);
       }
       const medida = Buffer.byteLength(parte);
       if (r.contados && bytes + medida > TOPE_RESPUESTA) break;
@@ -437,6 +538,7 @@ export class LectorCinta {
       bytes += medida; enviados++;
       // Dentro de un bloque el mapa de teselas es el mismo objeto; al cruzar queda el del bloque anterior.
       previa = cabecera; teselasPrevias = f.teselas; r.t1 = tick;
+      if (r.contados && enviados >= o.n) break;
     }
     r.ultimo = previa ? r.t1 : -1;
     return r;

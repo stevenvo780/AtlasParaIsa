@@ -9,6 +9,7 @@ import { verificarBloque } from './formato.js';
 
 export const NIVELES = [0, 1, 2, 3, 4] as const;
 export const INDICE_CINTA = 'cinta.idx.sqlite';
+export const VERSION_CATALOGO = 4;
 export const MAX_SEGMENTO = 64 * 1024 ** 2;
 
 export type PuntoEscritura = 'mitad de bloque' | 'bloque sincronizado' | 'catálogo podado';
@@ -84,7 +85,7 @@ export class CatalogoCinta {
     this.db = new DatabaseSync(join(directorio, INDICE_CINTA));
     try {
       const version = this.db.prepare('PRAGMA user_version').get()!.user_version;
-      if (version !== 0 && version !== 3) throw new Error(`Versión de catálogo de cinta incompatible: ${version}.`);
+      if (version !== 0 && version !== VERSION_CATALOGO) throw new Error(`Versión de catálogo de cinta incompatible: ${version}.`);
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
       if (version === 0 && NIVELES.some(n => readdirSync(join(directorio, `n${n}`)).some(esSegmento))) {
         throw new Error('Falta el catálogo de una cinta con segmentos existentes.');
@@ -114,6 +115,11 @@ export class CatalogoCinta {
           epoca INTEGER NOT NULL REFERENCES epocas(id), t0 INTEGER NOT NULL, t1 INTEGER NOT NULL,
           PRIMARY KEY (epoca,t0)
         ) STRICT;
+        CREATE TABLE IF NOT EXISTS lagunas_poda (
+          epoca INTEGER NOT NULL REFERENCES epocas(id), nivel INTEGER NOT NULL CHECK (nivel BETWEEN 0 AND 4),
+          t0 INTEGER NOT NULL, t1 INTEGER NOT NULL CHECK (t1 > t0),
+          PRIMARY KEY (epoca,nivel,t0)
+        ) STRICT;
         CREATE TABLE IF NOT EXISTS serie (
           epoca INTEGER NOT NULL REFERENCES epocas(id), t INTEGER NOT NULL, poblacion INTEGER NOT NULL,
           nacimientos INTEGER NOT NULL, muertes INTEGER NOT NULL, fauna INTEGER NOT NULL, estructuras INTEGER NOT NULL,
@@ -132,7 +138,7 @@ export class CatalogoCinta {
           perfil TEXT NOT NULL, en INTEGER NOT NULL, nombre TEXT, epoca INTEGER NOT NULL REFERENCES epocas(id),
           t INTEGER NOT NULL, nivel INTEGER NOT NULL, velocidad REAL NOT NULL, PRIMARY KEY (perfil,en)
         ) STRICT;
-        PRAGMA user_version=3;
+        PRAGMA user_version=${VERSION_CATALOGO};
         COMMIT;
       `);
       this.recuperar();
@@ -264,11 +270,12 @@ export class CatalogoCinta {
     } finally { closeSync(fd); }
   }
 
-  borrarSegmento(s: SegmentoCinta, protegido?: () => boolean): boolean {
+  borrarSegmento(s: SegmentoCinta, protegido?: () => boolean, trasBorrar?: () => void): boolean {
     let borrado = false;
     this.transaccion(() => {
       if (protegido?.()) return;
       borrado = Number(this.db.prepare('DELETE FROM segmentos WHERE id=?').run(s.id).changes) > 0;
+      if (borrado) trasBorrar?.();
     });
     if (!borrado) return false;
     this.punto?.('catálogo podado');

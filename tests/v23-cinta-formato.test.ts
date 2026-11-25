@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { clientDelta, codificarBloque, decodificarBloque, verificarBloque } from '../src/server/cinta/formato.js';
+import { crc32 } from 'node:zlib';
+import { clientDelta, codificarBloque, decodificarBloque, leerIndiceBloque, verificarBloque } from '../src/server/cinta/formato.js';
 import { projectTapeFrame } from '../src/server/sim-worker.js';
 import { applyClientTapeDelta, indexTiles } from '../src/shared/tape-delta.js';
 import type { RuntimeStats, Tile, WorldView } from '../src/shared/types.js';
@@ -18,7 +19,7 @@ const runtime: RuntimeStats = {
 const alCable = (v: WorldView): WorldView => JSON.parse(JSON.stringify(v));
 const tesela = (x: number): Tile => ({ x, y: 0, terrain: 'meadow', moisture: 0.4, vegetation: 0.7, food: 0.3 });
 
-test('I1: un bloque CNT1 reconstruye los cortes cuantizados con el aplicador compartido', () => {
+test('I1: un bloque CNT2 reconstruye los cortes cuantizados con el aplicador compartido', () => {
   const mundo = createWorld(74033, parseParams('motor.hilos=1'));
   const base = projectTapeFrame(mundo, runtime, 'cinta-prueba', [tesela(0), tesela(1), tesela(2), tesela(3)]);
   const siguiente: WorldView = {
@@ -52,7 +53,7 @@ test('I1: un bloque CNT1 reconstruye los cortes cuantizados con el aplicador com
   }
 });
 
-test('I6: CNT1 detecta cabeceras y datos alterados, truncamientos y ticks repetidos', () => {
+test('I6: CNT2 detecta cabeceras y datos alterados, truncamientos y ticks repetidos', () => {
   const base: WorldView = {
     version: 10, tick: 2 ** 33, sequence: 9, day: 1, phase: 'day', weather: 'clear',
     width: 1, height: 1, tiles: [], people: [], places: [], events: [], memories: [],
@@ -70,6 +71,23 @@ test('I6: CNT1 detecta cabeceras y datos alterados, truncamientos y ticks repeti
     assert.throws(() => verificarBloque(corrupto), /CRC32/);
   }
   for (const largo of [0, 10, bytes.length - 1]) {
-    assert.throws(() => verificarBloque(bytes.subarray(0, largo)), /CNT1/);
+    assert.throws(() => verificarBloque(bytes.subarray(0, largo)), /CNT2/);
   }
+});
+
+test('CNT2 acota la salida de Zstd aun con CRC válidos e índice incoherente', () => {
+  const base: WorldView = {
+    version: 10, tick: 0, sequence: 0, day: 1, phase: 'day', weather: 'clear',
+    width: 1, height: 1, tiles: [], people: [], places: [], events: [], memories: [],
+    pauseReason: 'Prueba de compresión '.repeat(100_000),
+  };
+  const datos = codificarBloque(0, base, []);
+  const indice = leerIndiceBloque((o, n) => datos.subarray(o, o + n), datos.length);
+  const parte = indice.marcos[0]!.partes[0]!;
+  assert.ok(parte.bytes < 4096 && parte.crudos > 1_000_000);
+  // Índice con CRC correcto y tamaño declarado menor que el del contenido.
+  datos.writeUInt32LE(4096, 33 + 4 + 16 + 8);
+  datos.writeUInt32LE(crc32(datos.subarray(29, indice.bytesIndice), crc32(datos.subarray(0, 25))), 25);
+  assert.equal(verificarBloque(datos).fotogramas, 1);
+  assert.throws(() => decodificarBloque(datos), { code: 'ERR_BUFFER_TOO_LARGE' });
 });

@@ -168,31 +168,33 @@ test('I4: una ráfaga a dos veces la capacidad del consumidor sube y luego devue
   }
 });
 
-test('I1/I3: cada nivel reconstruye reducir(k, L0) mientras las teselas cambian, aparecen y cruzan bloques', t => {
+test('I1/I3: el escritor conserva el orden de las teselas entre sectores y reconstruye reducir(k, L0) al cruzar bloques', t => {
   const path = directorio(t);
   const teselas = new Map<string, Tile>();
   const tesela = (x: number, y: number, food: number): Tile => ({ x, y, terrain: 'meadow', moisture: 0.5, vegetation: 0.3, food });
   for (let i = 0; i < 20; i++) teselas.set(`${i},0`, tesela(i, 0, 0.1));
-  const persona = (t: number): PersonView => ({ id: 'p', name: 'p', role: 'neighbor', x: t / 100, y: 0, color: '#fff',
+  const dispersas = [[140, 0], [-500, -1], [150, 0], [0, 145], [-499, -1]] as const;
+  for (const [x, y] of dispersas) teselas.set(`${x},${y}`, tesela(x, y, 0.1));
+  const persona = (t: number): PersonView => ({ id: 'p', name: 'p', role: 'neighbor', x: t % 40 < 20 ? -145 : 145, y: 0, color: '#fff',
     action: 'rest', reason: 'r', energy: 1, hunger: t / 2000, fatigue: 0, need: 'n', recentMemory: null });
-  const estados = new Map<number, Tile[]>();
+  const estados = new Map<number, Pick<WorldView, 'tiles' | 'people'>>();
   const escritor = new EscritorCinta({ directorio: path });
   try {
     escritor.abrir({ instanciaId: 'mundo', epoca: 0, tMundo: 0, motivo: 'reinicio' });
     for (let tick = 0, seq = 1; tick <= 1300; tick += 4, seq++) {
       const cambiadas: Tile[] = [];
       if (tick > 0) {
-        // Un cambio pequeño (dentro de la banda de L1), uno grande y, a veces, una tesela nueva.
+        // Un cambio pequeño dentro de la banda de L1, uno grande y altas en dos sectores.
         const k = tick / 4;
         cambiadas.push({ ...teselas.get(`${k % 20},0`)!, food: 0.1 + (k % 3) * 0.01 });
         cambiadas.push({ ...teselas.get(`${(k * 7) % 20},0`)!, food: (k % 10) / 10 });
-        if (k % 9 === 0) cambiadas.push(tesela(100 + k, 1, 0.2));
+        if (k % 9 === 0) cambiadas.push(tesela(100 + k, 1, 0.2), tesela(-100 - k, -1, 0.4));
         for (const c of cambiadas) teselas.set(`${c.x},${c.y}`, c);
       }
       const c = corte(seq, 0, tick, tick === 0);
       c.vista.tiles = [...teselas.values()];
-      estados.set(tick, c.vista.tiles);
       c.vista.people = [persona(tick)];
+      estados.set(tick, { tiles: c.vista.tiles, people: c.vista.people });
       if (tick > 0) c.tilesCambiadas = cambiadas;
       escritor.registrar(c);
     }
@@ -211,9 +213,9 @@ test('I1/I3: cada nivel reconstruye reducir(k, L0) mientras las teselas cambian,
       }
     }
     const l0 = fotogramas.get(0)!;
-    assert.deepEqual([...l0].map(([tick, frame]) => [tick, frame.tiles]), [...estados]);
+    assert.deepEqual([...l0].map(([tick, { tiles, people }]) => [tick, { tiles, people }]), [...estados]);
     assert.ok(db.prepare('SELECT count(*) AS n FROM bloques WHERE nivel=0').get()!.n as number > 1, 'L0 cruza varios bloques');
-    assert.equal(l0.get(1300)!.tiles.length, 20 + Math.floor(325 / 9));
+    assert.equal(l0.get(1300)!.tiles.length, 20 + dispersas.length + 2 * Math.floor(325 / 9));
     for (const nivel of [1, 2, 3, 4] as const) {
       const esperados = [...l0.keys()].filter(tick => tick % CINTA.pasos[nivel] < 4);
       assert.deepEqual([...fotogramas.get(nivel)!.keys()], esperados, `ticks de L${nivel}`);

@@ -207,7 +207,7 @@ if (process.argv[2] === '--hijo') {
       const alterado = Buffer.from(previo.datos);
       alterado[alterado.length - 1] ^= 0x80;
       writeFileSync(archivo, alterado);
-      assert.throws(() => new CatalogoCinta(dir), /CRC32 CNT1 inválido/);
+      assert.throws(() => new CatalogoCinta(dir), /CRC32 CNT2 inválido/);
       assert.deepEqual(readFileSync(archivo), alterado);
     });
     await t.test('solo se relee el segmento que admite anexos; de los sellados basta su tamaño', sub => {
@@ -223,7 +223,7 @@ if (process.argv[2] === '--hijo') {
       const ultimo = Buffer.from(confirmados.get(abierto)!.datos);
       ultimo[ultimo.length - 1] ^= 0x80;
       writeFileSync(abierto, ultimo);
-      assert.throws(() => new CatalogoCinta(dir), /CRC32 CNT1 inválido/);
+      assert.throws(() => new CatalogoCinta(dir), /CRC32 CNT2 inválido/);
     });
     await t.test('truncado', sub => {
       const dir = temporal(sub), confirmados = sembrar(dir);

@@ -715,8 +715,10 @@ function asentar(e: Estado): void {
 
 interface Inventario { atomos: bigint[][]; energia: bigint[]; masa: Map<SustanciaId, number> }
 
-/** Recorre los lotes que este dueño tiene: los del mundo material por sus tablas, los de los cuerpos por sus organismos
- * y los que yacen en sus celdas (objetos, cadáveres y piezas) por la arena. Suma en dobles por tramos cortos (una página,
+/** Reparto por compartimento para el panel «Materia» (no es la conservación: esa usa `saldoPropio`). Recorre los lotes
+ * que este dueño tiene: los del mundo material por sus tablas, los de los cuerpos y la carga por los organismos que hay
+ * en el mundo y los que yacen en sus celdas (objetos, cadáveres y piezas) por la arena. No ve los cuerpos de los
+ * organismos archivados con su chunk ni los lotes sueltos sin celda (fuego en curso, carne en reparto). Suma en dobles por tramos cortos (una página,
  * cien cuerpos) y pliega cada tramo en bigint: el total del mundo puede pasar de 2⁵³. */
 function inventariar(e: Estado): Inventario {
   const c = e.caja.c, m = e.m, A = c.materia, q = c.quimica, nC = COMPARTIMENTOS.length;
@@ -737,14 +739,16 @@ function inventariar(e: Estado): Inventario {
       if (en[comp] !== 0) { energia[comp]! += BigInt(en[comp]!); en[comp] = 0; }
     }
   };
-  const buf = new Float64Array(32);
+  let buf = new Float64Array(32);
   for (let p = 0; p < m.np; p++) {
     if (!m.tiene(p) || !A.propio(m.aire[p]!)) continue;
     for (let i = m.inicio[p]!; i < m.fin[p]!; i++) {
       sumar(m.suelo[i]!, Rol.Suelo); sumar(m.vida[i]!, Rol.Vida);
       if (m.agua[i]! >= 0) sumar(m.agua[i]!, Rol.Agua);
       for (const rol of ROLES_EN_CELDA) {
-        const n = Math.min(buf.length, A.lotes(m.celda[i]!, rol, buf));
+        // Una celda puede tener más objetos que el búfer (lascas, montones): se agranda y se vuelve a pedir.
+        let n = A.lotes(m.celda[i]!, rol, buf);
+        if (n > buf.length) n = A.lotes(m.celda[i]!, rol, buf = new Float64Array(2 * n));
         for (let k = 0; k < n; k++) sumar(buf[k]!, rol);
       }
     }
@@ -752,7 +756,9 @@ function inventariar(e: Estado): Inventario {
     plegar();
   }
   let cuerpos = 0;
-  const cuerpo = (o: { cuerpo?: import('./tipos.js').Cuerpo }): void => {
+  const cuerpo = (o: { cuerpo?: import('./tipos.js').Cuerpo; carga?: number[] }): void => {
+    // Lo que lleva a cuestas (objetos de t1, agua acarreada) cuenta como objeto, con o sin cuerpo.
+    if (o.carga) for (const l of o.carga) if (A.propio(l)) sumar(l, Rol.Objeto);
     const k = o.cuerpo;
     if (!k || !A.propio(k.tejido)) return;
     sumar(k.tejido, Rol.Tejido);
@@ -767,27 +773,17 @@ function inventariar(e: Estado): Inventario {
   return { atomos, energia, masa };
 }
 
-/** Σ de los lotes de este dueño por posición del libro. Con un solo dueño, si la arena lo sabe dar entero (`saldo`, pedido
- * al contrato; el de `ArenaLotes` suma los lotes de todos los hilos), es el suyo; si no, el del inventario, que no ve los
- * lotes que un organismo lleva a cuestas. */
-function saldoDe(e: Estado, inventario?: Inventario): bigint[] {
-  const c = e.caja.c, arena = c.materia as Partial<{ saldo(): bigint[] }>;
-  // `v23.duenos` con un solo hilo sigue siendo un dueño: su arena es entera suya.
-  const unDueno = !c.params.v23.duenos || (c as Partial<{ hilos: number }>).hilos === 1;
-  if (typeof arena.saldo === 'function' && unDueno) return arena.saldo();
-  const inv = inventario ?? inventariar(e), out = Array<bigint>(NE + 1).fill(0n);
-  for (let comp = 0; comp < EN_VUELO; comp++) {
-    for (let k = 0; k < NE; k++) out[k]! += inv.atomos[comp]![k]!;
-    out[NE]! += inv.energia[comp]!;
-  }
-  return out;
-}
+/** Σ de los lotes de este dueño por posición del libro: la arena recorre todos los suyos (`saldoPropio`), con uno o con
+ * varios dueños. No sale del inventario del panel, que recorre teselas y organismos vivos en el mundo y no ve los cuerpos
+ * de los animales que duermen archivados con su chunk (sus lotes siguen en la arena): eran los ≈ 5,6·10⁸ mmol de H que
+ * faltaban en el tick 97 de la semilla 7. */
+function saldoDe(e: Estado): bigint[] { return e.caja.c.materia.saldoPropio(); }
 
-function balance(e: Estado, inventario?: Inventario): BalanceMateria {
+function balance(e: Estado): BalanceMateria {
   const c = e.caja.c, L = e.libro;
   e.m.volcarCuentas(e.cuentas);
   asentar(e);
-  const hallado = saldoDe(e, inventario);
+  const hallado = saldoDe(e);
   for (let k = 0; k <= NE; k++) hallado[k]! += BigInt(c.libro.enVuelo[k]!);
   // Lo plegado por el coordinador, si el contexto lo ofrece (pedido al contrato); si no, el tramo que w ha visto pasar
   // por el libro del hilo desde que ancló la cuenta.
@@ -826,7 +822,7 @@ function comprobar(c: CtxLey): Violacion[] {
 function panel(e: Estado): MateriaMundoVisible {
   const c = e.caja.c;
   if (e.panel && c.tick - e.panelTick < PANEL_TICKS) return e.panel;
-  const inv = inventariar(e), b = balance(e, inv);
+  const inv = inventariar(e), b = balance(e);
   for (let k = 0; k < NE; k++) {
     inv.atomos[EN_VUELO]![k] = BigInt(c.libro.enVuelo[k]!);
     inv.atomos[EXTERIOR]![k] = -e.cuentas[CUENTA.EXTERIOR_AT + k]!;

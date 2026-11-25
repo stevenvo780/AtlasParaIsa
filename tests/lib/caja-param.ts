@@ -167,6 +167,7 @@ export async function cajaParam(op: OpcionesCaja = {}): Promise<ResultadoCajaPar
       },
       garantizar: (l, p, lb) => real.garantizar(l, p, lb), abonar: (l, g, lb) => real.abonar(l, g, lb),
       fuente: (l, p, lb) => real.fuente(l, p, lb), sumidero: (l, p, lb) => real.sumidero(l, p, lb),
+      saldoPropio: () => real.saldoPropio(),
     };
     const esH2O2 = (a: number, b: number) => (a === S.H2 && b === S.O2) || (a === S.O2 && b === S.H2);
     const contrafactual = cfg.rebajaHH > 0 || cfg.soloExo || cfg.nivelMin > 0;

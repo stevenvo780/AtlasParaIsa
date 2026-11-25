@@ -687,9 +687,14 @@ export class ArenaLotes implements ArenaMateria {
     return { lotes: Array.from(this.muestras()), libres: Array.from(this.libres()) };
   }
 
-  saldo(): bigint[] {
+  /** Σ de todos los lotes vivos, de todos los hilos (laboratorio y pruebas). */
+  saldo(): bigint[] { return this.sumar(false); }
+
+  saldoPropio(): bigint[] { return this.sumar(true); }
+
+  private sumar(soloPropios: boolean): bigint[] {
     const saldo = Array<bigint>(NE + 1).fill(0n);
-    for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) {
+    for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s) && (!soloPropios || this.duenoDe(s) === this.op.hilo)) {
       const parcial = balancePares(this.contenido(s, this.la), this.sustancia);
       for (let i = 0; i < saldo.length; i++) saldo[i] += parcial[i];
     }

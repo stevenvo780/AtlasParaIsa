@@ -344,7 +344,11 @@ v23('motor-conservacion', 'I-C', 'dura', 'global', m => {
     const contexto = { posicion: i, energia: i === energia, esperado: String(e), hallado: String(o), diferencia: String(o - e),
       cuentas: Object.fromEntries(Object.entries(cuentas).map(([k, v]) => [k, String(v)])) };
     if (e !== o) h.fallo('La materia no se conserva: Σ lotes + en vuelo distinto de inicial + fuentes − sumideros.', contexto, comoNumero(e), comoNumero(o));
-    // La energía se cuenta como entalpía de formación (negativa para casi todo compuesto): solo los átomos no pueden ser negativos.
+    // La energía es química más calor. La química es la de enlace con referencia en los átomos libres
+    // (`Sustancia.energia` = −Σd·b − E_red ≤ 0, estrictamente negativa en todo compuesto), así que el total es negativo por
+    // construcción (semilla 7, tick 97: química −1,119·10¹⁴ J, calor +2,03·10¹² J). Lo que no puede bajar de 0 es el calor
+    // de cada lote, y eso lo garantiza la arena al escribirlo (`natural` en mover/moverCalor, recorte por calor en aplicar).
+    // Solo los átomos tienen aquí cota de stock.
     else if (o < 0n && i !== energia) h.fallo('Stock negativo.', contexto, 0, comoNumero(o));
   }
   return h.resultado;

@@ -182,3 +182,21 @@ test('m4a: al cambiar de sitio la gente, se activan sus chunks, se archivan los 
     assert.ok(motor.telemetria().migraciones > 0);
   } finally { await motor.cerrar(); }
 });
+
+test('m4a: con v23.materia el dueño arma la arena de lotes y la química, con uno y con varios dueños', async () => {
+  const v23 = { ...DEFAULT_PARAMS.v23, materia: true };
+  const mundo = createWorld(17, { ...DEFAULT_PARAMS, v23 });
+  const unico = crearMotor(mundo, unSoloDueno(17));
+  unico.paso([]); unico.paso([]);
+  const d = duenoSi(mundo)!;
+  assert.ok(d.materia && d.quimica, 'el contexto lleva materia y química');
+  assert.equal(d.materia.vivo(-1), false);
+  // Volcar la arena es un pedido al integrador (ArenaLotes.guardar): hasta entonces la instantánea lo dice claro.
+  assert.throws(() => unico.instantanea(), /ArenaLotes\.guardar/);
+  const repartido = createWorld(17, { ...DEFAULT_PARAMS, v23: { ...v23, duenos: true } });
+  const motor = crearMotor(repartido, { ...unSoloDueno(17), hilos: 2 });
+  try {
+    assert.equal(motor.paso([]).tick, 1);
+    assert.equal(motor.paso([]).tick, 2);
+  } finally { await motor.cerrar(); }
+});

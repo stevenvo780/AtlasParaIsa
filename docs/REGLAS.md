@@ -740,7 +740,7 @@ ninguna de 642 decisiones de la fauna con H ≥ 5; con reglas 10 cambian algunas
   42 y 51926, 16–33 habitantes, 10 000–18 000 teselas activas) cada región lee de sus vecinas el 26–50 % de las
   teselas activas con halo 14 (15–27 % con halo 8), y con regiones de 512 igual o más, porque el mundo nace
   en el origen, que es esquina de cuatro regiones de cualquier tamaño. Pasar a 512 cambia la geometría de las
-  regiones, no las reglas (`tests/determinismo-hardware.test.ts` verifica ambas geometrías 256 y 512 bit a bit).
+  regiones, no las reglas. Desde la V23 el mundo público es irrepetible; solo un mundo de un hilo, sin tarjeta y con semilla da el mismo resultado en dos corridas (es el modo de las pruebas).
 - **Cobertura viva (2026-11-19).** El inventario de `src/world/halo.ts` incorpora las primitivas de
   E.0 (`vecinos`/`primerVecino` de `rejilla.ts`, `techoDelArchivo`/`esMiembro` de `indices.ts`),
   el despacho paralelo/GPU del `TileStore` (T112/T115/T120/T122), la máscara global de fauna (T116)
@@ -749,9 +749,7 @@ ninguna de 642 decisiones de la fauna con H ≥ 5; con reglas 10 cambian algunas
 ### Motor: orden determinista de reducciones y barreras (2026-11-19)
 
 El principio rector de ejecución (Constitución I) exige que el reparto entre hilos, geometrías de
-partición o dispositivos GPU decida **quién** calcula, jamás **qué** resultado se produce: con
-distinto hardware el `digestoCanonico` normalizado (sin selectores de motor) debe ser bit a bit
-idéntico al de CPU en 1 hilo. Ninguna fórmula del mundo puede leer `availableParallelism()`, `os.cpus()`,
+partición o dispositivos GPU decida **quién** calcula, jamás **qué** resultado se produce: Desde la V23 el mundo público es irrepetible; solo un mundo de un hilo, sin tarjeta y con semilla da el mismo resultado en dos corridas (es el modo de las pruebas). Ninguna fórmula del mundo puede leer `availableParallelism()`, `os.cpus()`,
 el número de hilos, el tamaño de partición ni el throughput medido de una GPU.
 
 1. **Colas estáticas ordenadas por `regionId` (`src/world/paralelo/particion.ts`).** Las regiones

@@ -2,7 +2,7 @@
  * Equivalencia estadística de `choose` (M2b) entre dos árboles del motor, en el régimen abierto.
  *
  *   tsx tests/v23-decision-equivalencia.ts preparar --raiz <árbol> --destino <copia>
- *   tsx tests/v23-decision-equivalencia.ts correr --raiz <copia> --semilla N --orden K --dias D [--hilos 32] [--residente] --salida f.json
+ *   tsx tests/v23-decision-equivalencia.ts correr --raiz <copia> --semilla N --orden K --dias D [--hilos 32 [--tanda 2]] [--residente] --salida f.json
  *   tsx tests/v23-decision-equivalencia.ts analizar <brazoA> <brazoB>        (cada brazo: carpeta con <semilla>-<orden>.json)
  *
  * `preparar` copia `src/` del árbol e inyecta en `choose`, justo después de fijar `decisionAt`, una llamada a
@@ -13,7 +13,8 @@
  * Réplicas: `--orden K` (K ≥ 1) permuta `world.people` al crear el mundo con una permutación fija de (semilla, K); la 0
  * es el orden de siempre. Los dos motores corren los mismos órdenes, así que cada par (semilla, orden) es una
  * comparación emparejada, el orden mide la dispersión entre corridas independientes del mismo motor y su interacción
- * con el motor se estima aparte. Con `--hilos` la percepción va al doble de hilos de `v23-decision-hilos.ts`.
+ * con el motor se estima aparte. Con `--hilos` la percepción va al doble de hilos de `v23-decision-hilos.ts`, en tandas
+ * de `--tanda` slots (64 por defecto; con pocas personas, una tanda pequeña es lo que reparte el lote entre hilos).
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -23,7 +24,7 @@ export interface Corrida {
   raiz: string; semilla: number; orden: number; dias: number; hilos: number; residente: boolean; digesto: string;
   personasPorDia: number[]; hambrePorDia: number[]; nacimientos: number; muertes: number;
   acciones: Record<string, number>; accionesPorDia: Record<string, number>[]; anidadas: number;
-  distObjetivo: number[]; recorrido: number[]; ms: number;
+  distObjetivo: number[]; recorrido: number[]; ms: number; hilosConFilas?: number; despachosRepartidos?: number;
 }
 
 const ANCLA = 'person.decisionAt = world.tick + (selected === restCandidate && recoverWater ? 1 : 30);';
@@ -74,9 +75,13 @@ async function correr(opcion: (nombre: string) => string | undefined, banderas: 
   if (hilos > 1) {
     const { percepcionDe } = await imp('src/world/decision/percepcion.ts');
     const { PercibidorHilos } = await import(pathToFileURL(resolve(import.meta.dirname, 'v23-decision-hilos.ts')).href);
-    const percepcion = percepcionDe(world), doble = new PercibidorHilos(percepcion.vista, hilos);
+    const percepcion = percepcionDe(world), doble = new PercibidorHilos(percepcion.vista, hilos, Number(opcion('tanda') ?? 64));
     percepcion.percibidor = doble;
-    cerrar = () => doble.cerrar();
+    cerrar = async () => {
+      await doble.cerrar();
+      if (percepcion.respaldos > 0) throw new Error(`${percepcion.respaldos} despachos recalculados en CPU`);
+      r.hilosConFilas = doble.filasPorHilo.filter((f: number) => f > 0).length; r.despachosRepartidos = doble.despachosRepartidos;
+    };
   }
   const r: Corrida = { raiz, semilla, orden, dias, hilos, residente, digesto: '', personasPorDia: [], hambrePorDia: [], nacimientos: 0, muertes: 0,
     acciones: {}, accionesPorDia: [], anidadas: 0, distObjetivo: [], recorrido: [], ms: 0 };
@@ -113,7 +118,8 @@ async function correr(opcion: (nombre: string) => string | undefined, banderas: 
   r.nacimientos = (world.birthCounter as number) - nacidos0;
   r.digesto = digestoCanonico(world);
   writeFileSync(opcion('salida')!, JSON.stringify(r));
-  console.log(JSON.stringify({ semilla, orden, hilos, residente, personas: r.personasPorDia, decisiones: r.distObjetivo.length, ms: Math.round(r.ms), digesto: r.digesto }));
+  console.log(JSON.stringify({ semilla, orden, hilos, residente, personas: r.personasPorDia, decisiones: r.distObjetivo.length, ms: Math.round(r.ms),
+    hilosConFilas: r.hilosConFilas, despachosRepartidos: r.despachosRepartidos, digesto: r.digesto }));
 }
 
 // ── Estadística ──────────────────────────────────────────────────────────────────────────────────────────
@@ -267,7 +273,8 @@ export function signos(d: readonly number[]): { media: number; p: number } {
  * - `porSemilla`: la media de cada semilla como unidad (conservadora: absorbe cualquier interacción semilla × motor).
  * - `ic`: intervalo t bilateral de nivel 1 − 2α (TOST) con unidad semilla; `equivalente` si cabe en ±margen.
  * - `necesarias`: semillas (con los mismos órdenes por semilla) para que ese intervalo quepa en ±margen con potencia 0,8
- *   si la diferencia real fuera 0, con la varianza observada entre semillas.
+ *   si la diferencia real fuera 0, con la varianza observada entre semillas; `necesariasCaos`, las mismas si los dos
+ *   motores divergieran como dos réplicas independientes (varianza 2·σ²orden/K por semilla con K órdenes).
  * - `sigmaOrden`: dispersión entre corridas independientes del mismo motor (desviación entre órdenes de una semilla,
  *   juntada); `sigmaInteraccion`: la de la diferencia entre motores de un orden a otro (orden × motor).
  */
@@ -288,9 +295,11 @@ export function emparejar(pares: readonly { semilla: number; a: number; b: numbe
   }
   const z = (p: number) => tCuantil(p, 1e6), sigmaSemilla = Math.sqrt(varianza(porSemilla));
   const necesarias = Math.ceil(((z(1 - alfa) + z(0.8)) * sigmaSemilla / margen) ** 2);
+  const sigmaOrden = gOrden ? Math.sqrt(sOrden / gOrden) : NaN, K = pares.length / S;
+  const necesariasCaos = Math.ceil(((z(1 - alfa) + z(0.8)) * sigmaOrden * Math.sqrt(2 / K) / margen) ** 2);
   return {
-    mediaD, porPar: signos(d), porSemilla: signos(porSemilla), ic, equivalente: ic[0] > -margen && ic[1] < margen, necesarias,
-    sigmaSemilla, sigmaOrden: gOrden ? Math.sqrt(sOrden / gOrden) : NaN, sigmaInteraccion: gInter ? Math.sqrt(sInter / gInter) : NaN,
+    mediaD, porPar: signos(d), porSemilla: signos(porSemilla), ic, equivalente: ic[0] > -margen && ic[1] < margen, necesarias, necesariasCaos,
+    sigmaSemilla, sigmaOrden, sigmaInteraccion: gInter ? Math.sqrt(sInter / gInter) : NaN,
   };
 }
 
@@ -320,12 +329,12 @@ function analizar(carpetas: string[]): void {
   // Simultáneo sobre las 8 acciones (Bonferroni) a α = 0,05: cada TOST con α/8.
   const alfa = 0.05 / principales.length;
   console.log(`## Emparejado por (semilla, orden): diferencia B − A, TOST a ±1 pp con α = 0,05/${principales.length} por acción (IC ${(100 * (1 - 2 * alfa)).toFixed(2)} %, unidad semilla)\n`);
-  console.log('| medida | media B−A | p signos por par | p signos por semilla | IC unidad semilla | ¿equivalente? | σ entre semillas | σ entre órdenes (mismo motor) | σ orden × motor | semillas necesarias |');
-  console.log('|---|---|---|---|---|---|---|---|---|---|');
+  console.log('| medida | media B−A | p signos por par | p signos por semilla | IC unidad semilla | ¿equivalente? | σ entre semillas | σ entre órdenes (mismo motor) | σ orden × motor | semillas necesarias | ídem si divergieran como dos órdenes |');
+  console.log('|---|---|---|---|---|---|---|---|---|---|---|');
   const fila = (nombre: string, f: (r: Corrida) => number, escala: number, margen: number, dec: number) => {
     const pares = claves.map(k => ({ semilla: A.get(k)!.semilla, a: f(A.get(k)!) * escala, b: f(B.get(k)!) * escala }));
     const e = emparejar(pares, alfa, margen);
-    console.log(`| ${nombre} | ${e.mediaD.toFixed(dec)} | ${e.porPar.p.toFixed(4)} | ${e.porSemilla.p.toFixed(3)} | [${e.ic[0].toFixed(dec)}, ${e.ic[1].toFixed(dec)}] | ${Number.isFinite(margen) ? (e.equivalente ? 'sí' : 'no') : '—'} | ${e.sigmaSemilla.toFixed(dec)} | ${e.sigmaOrden.toFixed(dec)} | ${e.sigmaInteraccion.toFixed(dec)} | ${Number.isFinite(margen) ? e.necesarias : '—'} |`);
+    console.log(`| ${nombre} | ${e.mediaD.toFixed(dec)} | ${e.porPar.p.toFixed(4)} | ${e.porSemilla.p.toFixed(3)} | [${e.ic[0].toFixed(dec)}, ${e.ic[1].toFixed(dec)}] | ${Number.isFinite(margen) ? (e.equivalente ? 'sí' : 'no') : '—'} | ${e.sigmaSemilla.toFixed(dec)} | ${e.sigmaOrden.toFixed(dec)} | ${e.sigmaInteraccion.toFixed(dec)} | ${Number.isFinite(margen) ? e.necesarias : '—'} | ${Number.isFinite(margen) ? e.necesariasCaos : '—'} |`);
   };
   for (const a of principales) fila(`% ${a}`, r => parte(r, a), 100, 1, 2);
   fila('dist. objetivo media', r => media(r.distObjetivo), 1, Infinity, 3);

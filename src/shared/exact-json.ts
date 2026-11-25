@@ -118,7 +118,7 @@ function legacyNeedsExactReplacer(value: unknown): boolean {
   }
   return false;
 }
-export function stringifyExact(value: unknown): string {
-  if (!needsExactReplacer(value) || !legacyNeedsExactReplacer(value)) return JSON.stringify(value);
+export function stringifyExact(value: unknown, nativo = false): string {
+  if (nativo || !needsExactReplacer(value) || !legacyNeedsExactReplacer(value)) return JSON.stringify(value);
   return JSON.stringify(value, exactReplacer);
 }

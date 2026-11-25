@@ -19,7 +19,7 @@ try {
     // Backing up an older running service must not migrate its schema underneath it.
     const store = new Store(db, { readOnly: true });
     try {
-      if (!store.load()) throw new Error('Copia sin mundo.');
+      if (!store.verificarGuardado()) throw new Error('Copia sin mundo.');
       const destination = resolve(argument);
       store.backup(destination); chmodSync(destination, 0o600);
       // VACUUM copies a coherent SQLite version, possibly newer than the preload.
@@ -29,7 +29,7 @@ try {
       const copied = new Store(destination, { readOnly: true });
       try {
         copied.db.exec('BEGIN');
-        const loaded = copied.load();
+        const loaded = copied.verificarGuardado();
         if (!loaded) throw new Error('Copia sin mundo.');
         // Stream keys, including older retained chunk versions, without keeping
         // a second world in memory. Older schemas may lack either archive table.
@@ -79,9 +79,9 @@ try {
     try {
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
       const original = new Store(source, { readOnly: true });
-      try { if (!original.load()) throw new Error('Copia sin mundo.'); original.backup(target); } finally { original.close(); }
+      try { if (!original.verificarGuardado()) throw new Error('Copia sin mundo.'); original.backup(target); } finally { original.close(); }
       chmodSync(target, 0o600);
-      const restored = new Store(target); try { restored.revoke(); restored.load(); } finally { restored.close(); }
+      const restored = new Store(target); try { restored.revoke(); restored.verificarGuardado(); } finally { restored.close(); }
     } finally { unlock(); }
     console.log('Mundo restaurado y sesiones revocadas. Configura acceso en este directorio antes de arrancar.');
   } else throw new Error('Operación no válida.');

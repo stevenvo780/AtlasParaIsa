@@ -1,12 +1,12 @@
 import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
-import { DEFAULT_PARAMS, paramsOf } from './params.js';
+import { DEFAULT_PARAMS, ley, paramsOf } from './params.js';
 import { algunoCerca } from './indice-puntos.js';
 import { vecinos } from './rejilla.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
-const SHARE_AMOUNT = 0.025;
+export const SHARE_AMOUNT = 0.025;
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /** Direct parent/child or siblings sharing either parent. Founders with empty `parents` are never kin this way. */
@@ -98,6 +98,9 @@ export function earlierForagerExhausts(
  * This intent neither supplies food nor guarantees a birth; the host owns actions and costs.
  * Both partners retain their communities; mutual local trust can cross their labels. */
 export function familyOpportunity(world: World, person: Person): FamilyOpportunity | null {
+  // Con `v23.natalidad` no hay pareja pactada ni reserva familiar: el motivo de criar lo dan `candidatoCortejo` y
+  // `provisionCrianza` (natalidad.ts), sin exigir vínculo mutuo, comunidad ni lugar.
+  if (ley(world, 'natalidad')) return null;
   if (!world.reproductionEnabled || !person.communityId || !reproductiveReadiness(world, person)) return null;
   const partner = vecinos(world, person, 8, other => other !== person && other.id !== person.id && !!other.communityId
     && distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3
@@ -112,6 +115,8 @@ export function familyOpportunity(world: World, person: Person): FamilyOpportuni
 export function availableToShare(world: World, person: Person, recipient: Person): boolean {
   if (person.inventory < SHARE_AMOUNT) return false;
   if (recipient.hunger >= 0.8) return true;
+  // `v23.natalidad`: una cría a su cargo come de lo que su cuidador lleva, sin más condición.
+  if (recipient.crianza !== undefined && recipient.crianza.cuidadores.includes(person.id)) return true;
   const family = familyOpportunity(world, person);
   return family === null || person.inventory >= family.reserveTarget + SHARE_AMOUNT;
 }

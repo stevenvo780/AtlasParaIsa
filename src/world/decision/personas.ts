@@ -13,7 +13,9 @@ import { CELDAS_VENTANA, DISTANCIA_VENTANA, LADO_VENTANA, percepcionDe } from '.
 import { CONSULTA, UMBRAL } from './planes.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
-import { paramsOf } from '../params.js';
+import { ley, paramsOf } from '../params.js';
+import { anclaExploracion, candidatosCohesion, umbralMemoriaAgua, type Ancla } from '../cohesion.js';
+import { candidatoCortejo, candidatoCuidar, deseoCria, provisionCrianza } from '../natalidad.js';
 import { containedWaterQuanta, canHandleContainedWater } from '../technology-water.js';
 import { vecinos } from '../rejilla.js';
 import { settlementOpportunity, cooperationOpportunity, updateCulturalNormsOnOutcome } from '../society.js';
@@ -188,17 +190,22 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       reason: 'Puede comer una reserva local ahora; aliviar el daño corporal no requiere esperar una caza.' });
   }
   const family = familyOpportunity(world, person);
+  // `v23.natalidad`: no hay pareja pactada (`family` es null). El motivo de aprovisionarse es que el cuerpo aún no paga
+  // una cría (`provision`); el de acercarse, el cortejo de más abajo. `v23.cohesion` añade sus candidatos tras el agua.
+  const leyNat = ley(world, 'natalidad'), leyCoh = ley(world, 'cohesion');
+  const provision = leyNat ? provisionCrianza(world, person) : null;
+  const metaCrianza = family ?? (provision && !provision.comer ? provision : null);
   const familyPlace = family ? filtrarCerca(world.places, person, RADIUS + 1, place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
     .sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0] : undefined;
   // A small local harvest may improve a viable family reserve below the meal-search
   // filter. Preview finite observed biomass; no future regeneration is promised.
   let familyFood: Tile | undefined;
   familyForecast: {
-    if (!family || person.inventory >= family.reserveTarget) break familyForecast;
+    if (!metaCrianza || person.inventory >= metaCrianza.reserveTarget) break familyForecast;
     const sources: number[] = [];
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!;
-      if (foodOf(tile, reachableCells[i]!) >= MIN_FORAGE_STOCK && distance(tile, family.partner) <= RADIUS) sources.push(i);
+      if (foodOf(tile, reachableCells[i]!) >= MIN_FORAGE_STOCK && (!family || distance(tile, family.partner) <= RADIUS)) sources.push(i);
     }
     if (!sources.length) break familyForecast;
     const foragers = observedForagersByCell(nearbyPeople);
@@ -251,7 +258,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       exertBody(paid, plannedEffort(steps, work));
       const eligibility = updateDemography({ state: { ...person.demography, age: person.demography.age + delay },
         traits: physiology, ...paid }, { exposure: 0, shelter: 0, protected: false }, 0);
-      if (!eligibility.offspringEligible) continue;
+      // La aptitud corporal prevista es condición de la ley heredada; con `v23.natalidad` basta con que el plan se pague.
+      if (family && !eligibility.offspringEligible) continue;
       // Consumption equivalent discriminates effort from potential usefulness.
       // The real action stores biomass; this private preview grants no energy.
       // Use an empty readiness probe so a currently rested body does not mask
@@ -266,12 +274,19 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     }
     familyFood = best?.tile;
   }
-  const familyForage: Candidate | undefined = family && person.inventory < family.reserveTarget && familyFood ? {
+  const pactoForage: Candidate | undefined = family && person.inventory < family.reserveTarget && familyFood ? {
     action: 'forage', target: familyFood,
     score: 0.85 + person.traits.care * 0.2 + (family.reserveTarget - person.inventory) / family.reserveTarget * 0.4 - distance(person, familyFood) * 0.02,
     reason: `Prepara alimento para una posible crianza con ${family.partner.name}; debe recogerlo del entorno y conservar una reserva.`,
   } : undefined;
+  const familyForage: Candidate | undefined = pactoForage ?? (!family && provision && !provision.comer && familyFood ? {
+    action: 'forage', target: familyFood, score: deseoCria(person) * provision.apremio - distance(person, familyFood) * 0.02,
+    reason: 'Su cuerpo aún no puede pagar una cría; recoge alimento del entorno para reunir la reserva que le falta.',
+  } : undefined);
   if (familyForage) candidates.push(familyForage);
+  // Con cuerpos de átomos la reserva es del cuerpo y se repone comiendo: el mismo motivo, sobre el alimento que ve.
+  if (provision?.comer && food) candidates.push({ action: 'eat', target: food, score: deseoCria(person) * provision.apremio - distance(person, food) * 0.02,
+    reason: 'Su cuerpo aún no puede pagar una cría; come para reunir la reserva que le falta.' });
   if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
@@ -285,7 +300,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // crea recursos ni garantiza un nacimiento; hambre, sed y descanso siguen ganando cuando urgen.
   let cortejoCandidate: Candidate | undefined;
   const leyPoblacion = params.poblacion;
-  if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
+  if (leyNat) {
+    cortejoCandidate = candidatoCortejo(world, person);
+    if (cortejoCandidate) candidates.push(cortejoCandidate);
+  } else if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
     let cortejado: Person | undefined, vinculo = 0;
     for (const [id, strength] of Object.entries(person.bonds)) {
       if (strength < 0.3) continue;
@@ -335,7 +353,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // seca; y sin agua a la vista, cuando la sed prevista AL LLEGAR allí —la de ahora, menos la que cubre el
   // agua que lleva, más la del camino a 6 pasos por celda— supera el umbral, emprende la vuelta. No revela
   // agua lejana (el recuerdo puede estar agotado), no hidrata ni ahorra el camino, que se paga igual.
-  const umbralMemoria = params.agua.memoria;
+  const umbralMemoria = leyCoh ? umbralMemoriaAgua(params.agua.memoria) : params.agua.memoria;
   let aguaRecordada: Point | undefined, sedAlLlegar = 0;
   if (umbralMemoria < 1) {
     if (water) person.waterMemory = { x: water.x, y: water.y };
@@ -369,6 +387,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (aguaRecordada && !volverAlAgua) volverAlAgua = { action: 'explore', target: aguaRecordada, score: Math.max(0, sedAlLlegar - 0.18) * 3.1,
     reason: 'Calcula que, si se aleja más, llegaría con demasiada sed al último lugar donde vio agua; vuelve antes de que la sed apriete.' };
   if (volverAlAgua) candidates.push(volverAlAgua);
+  // `v23.cohesion`: volver con quien lo cuida, al hogar o hacia la gente que percibe, cada uno con su coste de camino.
+  if (leyCoh) for (const candidato of candidatosCohesion(world, person, { genteCerca: nearbyPeople.length })) candidates.push(candidato);
   if (localWater && damage > 0) candidates.push({ action: 'drink', target: person,
     score: Math.max(0, person.thirst - .18) * 3.1, reason: 'Puede beber una reserva local ahora para aliviar la privación corporal.' });
   let huntPlan: { tile: Tile; victim: Animal; work: number } | undefined;
@@ -562,6 +582,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     action: 'share', target: hungry, score: 0.22 + person.generosity * (1 + person.culture.sharing * 0.5) + (learned ? learned.strength : 0),
     reason: learned ? `Repite en ${place.name} el cuidado que observó de otra persona.` : 'Puede compartir parte de lo que recogió con alguien que tiene hambre.',
   });
+  if (leyNat) {
+    const cuidar = candidatoCuidar(world, person, nearbyPeople);
+    if (cuidar) candidates.push(cuidar);
+  }
   // Learning also makes a locally known meeting place attractive; it cannot reveal distant places.
   for (const habit of person.habits) {
     const knownPlace = placeById(world, habit.placeId);
@@ -795,7 +819,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
         person.heading += 1.3;
       }
     }
-    selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles, reachableCells, fast);
+    selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles, reachableCells, fast, leyCoh ? anclaExploracion(world, person) : undefined);
   }
   // A viable work site retains accumulated work while the same action is selected.
   // A protective forecast in rain cannot be redirected to a different old site
@@ -834,7 +858,8 @@ function actionLabel(action: Action): string {
 }
 
 
-function explorationTarget(world: World, person: Person, tiles: Tile[], cells?: readonly number[], fast?: ResidentFastAccess): Point {
+/** `ancla` (`v23.cohesion`): punto hacia el que se inclina el tramo; cada celda que acerca a él vale `ancla.peso`. */
+function explorationTarget(world: World, person: Person, tiles: Tile[], cells?: readonly number[], fast?: ResidentFastAccess, ancla?: Ancla): Point {
   const headingX = Math.cos(person.heading), headingY = Math.sin(person.heading);
   const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];
   const desperate = paramsOf(world).social.vinculoEncuentro > 0 && (person.thirst > 0.85 || person.hunger > 0.85);
@@ -843,6 +868,7 @@ function explorationTarget(world: World, person: Person, tiles: Tile[], cells?: 
   const compWeight = person.sociability * (1 - person.curiosity) * 0.18;
   const headingWeight = desperate ? 0.65 : 0.2;
   const visited = person.visited, novelty = world.noveltyEnabled;
+  const anclaDist = ancla ? distance(person, ancla) : 0;
   let best: Tile | undefined, bestScore = 0, visitedSet: Set<string> | undefined;
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i]!;
@@ -854,7 +880,8 @@ function explorationTarget(world: World, person: Person, tiles: Tile[], cells?: 
     const s = ((t.x - person.x) * headingX + (t.y - person.y) * headingY) * headingWeight
       + (novelty && !(visitedSet ??= new Set(visited)).has(`${t.x},${t.y}`) ? 2 : 0)
       + traffic * 0.1
-      + (comp0 ? (compDist - distance(t, comp0)) * compWeight : 0);
+      + (comp0 ? (compDist - distance(t, comp0)) * compWeight : 0)
+      + (ancla ? (anclaDist - distance(t, ancla)) * ancla.peso : 0);
     if (!best || s > bestScore || (s === bestScore && (t.x < best.x || (t.x === best.x && t.y < best.y)))) {
       best = t; bestScore = s;
     }

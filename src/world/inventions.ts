@@ -1,5 +1,7 @@
+import { serialize } from 'node:v8';
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
 import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
+import { codigoForma, formaDeCodigo } from '../shared/materia.js';
 import { blendMaterialProfile, compoundCarryUnits, enrichSoilFromLots, KILN_FUEL_POWER, unfiredCompoundShare } from './chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
@@ -7,21 +9,38 @@ import { localRandom } from './genetics.js';
 import { tileAt } from './spatial.js';
 import { tileLookup } from './tile-index.js';
 import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
-import { chunkKey } from './terrain.js';
+import { CHUNK_SIZE, chunkKey } from './terrain.js';
 import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
-import { openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS, paramsOf } from './params.js';
+import { ley, openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS, paramsOf } from './params.js';
 import { vecinos } from './rejilla.js';
 import { constructionWorkFactor, consumeConstructionTools, installTechnologyItem, recordTechnologyBenefit, toolEffectsEnabled, useTool } from './technology.js';
 import { marcarTesela } from './soa/barrera-percepcion.js';
+import { ctxMateriaDe, refDeOrganismo, type CtxLeyMateria } from './motor/acceso.js';
+import { slotDe } from './motor/contratos.js';
+import { beber, cargaKg, ingerir, pagar, pedidoComida } from './materia/cuerpo.js';
+import { aportarEscalar, extraerEscalar, lotesDeCelda, rocaDe } from './materia/ley-mundo.js';
+import {
+  AREA_OBRA_M2, COBERTURA_COBIJO, DENSIDAD_AGUA_KG_M3, DENSIDAD_GRANO_KG_M3, FLUJO_CAPTACION_KG_M2_TICK, KG_POR_CUANTO_AGUA, MASA_PORTANTE_KG_M2,
+  areaPortante, calidadEmpedrado, celdaObra, colocarPieza, depositarEnObra, esPiedraDeObra, estadoObra, loteDepositoObra, lotesEnObra,
+  prestacionesDePiezas, prestacionesObra, registrarEmpedrado, stockObra, trasladarLoteObra, type DepositoObra, type EstadoObra,
+} from './materia/piezas.js';
+import { avanzarProceso, iniciarProceso } from './materia/proceso.js';
+import { Rol, type LoteRef, type Paso } from './materia/tipos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
 export const MAX_BLUEPRINTS = 64;
 export const MAX_STRUCTURES = 512;
-export const structureCap = (world: World): number => openWorldCaps(world) ? paramsOf(world).limites.teselasActivas : MAX_STRUCTURES;
-export const blueprintCap = (world: World): number => paramsOf(world).construccion.modular ? Number.MAX_SAFE_INTEGER : openWorldCaps(world) ? OPEN_WORLD_MAX_BLUEPRINTS : MAX_BLUEPRINTS;
+export const structureCap = (world: World): number => ley(world, 'obra') ? Infinity
+  : openWorldCaps(world) ? paramsOf(world).limites.teselasActivas : MAX_STRUCTURES;
+export const blueprintCap = (world: World): number => ley(world, 'obra') ? Infinity
+  : paramsOf(world).construccion.modular ? Number.MAX_SAFE_INTEGER : openWorldCaps(world) ? OPEN_WORLD_MAX_BLUEPRINTS : MAX_BLUEPRINTS;
+export const COLOCACION_J_POR_KG = 20;
+export const SALTO_TERMICO_COBIJO_K = 20;
+const FORMA_OBRA_INICIAL = codigoForma({ largo: 1, ancho: 1, grueso: 0.12, hueco: 0.25, filo: 0 });
+export interface PlanoObra { area: number; compacto: boolean; forma: number }
 export const RESEARCH_WORK = 60;
 export const REPAIR_WORK = 30;
 export const RESEARCH_COOLDOWN = 1200;
@@ -135,13 +154,17 @@ export function fittingPolyomino(world: World, anchor: Point, components: readon
   const wanted = n.frame >= 6 && n.roof + n.hearth >= n.cistern + n.garden ? 6 : target;
   if (!isFootprintFree(world, cells, existing?.id) || cells.length > wanted) return false;
   const compact = n.roof + n.hearth >= n.cistern + n.garden;
+  return growPolyomino(cells, wanted, compact, p => Math.abs(p.x - anchor.x) <= 2 && Math.abs(p.y - anchor.y) <= 2
+    && chunkKey(p.x, p.y) === chunkKey(anchor.x, anchor.y) && tileAt(world, p)?.terrain !== 'shelter'
+    && isFootprintFree(world, [p], existing?.id), anchor);
+}
+
+function growPolyomino(cells: Point[], wanted: number, compact: boolean, libre: (p: Point) => boolean, anchor: Point): Point[] | false {
   while (cells.length < wanted) {
     const keys = new Set(cells.map(cellKey)), frontier = new Map<string, Point>();
     for (const c of cells) for (const [dx, dy] of ORTHOGONAL) {
       const p = { x: c.x + dx, y: c.y + dy };
-      if (keys.has(cellKey(p)) || Math.abs(p.x - anchor.x) > 2 || Math.abs(p.y - anchor.y) > 2
-        || chunkKey(p.x, p.y) !== chunkKey(anchor.x, anchor.y) || tileAt(world, p)?.terrain === 'shelter'
-        || !isFootprintFree(world, [p], existing?.id)) continue;
+      if (keys.has(cellKey(p)) || !libre(p)) continue;
       frontier.set(cellKey(p), p);
     }
     const edges = (p: Point) => ORTHOGONAL.filter(([dx, dy]) => keys.has(`${p.x + dx},${p.y + dy}`)).length;
@@ -151,6 +174,49 @@ export function fittingPolyomino(world: World, anchor: Point, components: readon
     cells.push(candidate);
   }
   return cells;
+}
+
+const PLANO_INICIAL: Readonly<PlanoObra> = { area: 1, compacto: true, forma: FORMA_OBRA_INICIAL };
+const planoObra = (b: BlueprintView): Readonly<PlanoObra> => (b as BlueprintView & { planoMaterial?: PlanoObra }).planoMaterial ?? PLANO_INICIAL;
+const PREFIJO_PLANO_OBRA = 'blueprint-obra-';
+export const firmaPlanoObra = (b: BlueprintView): string => {
+  const { area, compacto, forma } = planoObra(b);
+  return `${area}/${Number(compacto)}/${forma}`;
+};
+
+function formaDePlano(c: CtxLeyMateria, id: string): Readonly<PlanoObra> {
+  const local = c.mundo.blueprints.find(b => b.id === id);
+  if (local) return planoObra(local);
+  if (!id.startsWith(PREFIJO_PLANO_OBRA)) return PLANO_INICIAL;
+  const clave = Number(id.slice(PREFIJO_PLANO_OBRA.length));
+  if (!Number.isSafeInteger(clave) || clave < 0) return PLANO_INICIAL;
+  const bytes = c.globales.registro.leer(clave);
+  if (!bytes) return PLANO_INICIAL;
+  const [marca, area, compacto, forma] = JSON.parse(new TextDecoder().decode(bytes)) as [string, number, boolean, number];
+  if (marca !== 'obra-v23') throw new Error(`El registro ${clave} no contiene un plano de obra.`);
+  return { area, compacto, forma };
+}
+
+function planoSeleccionado(c: CtxLeyMateria, persona: Person) {
+  const mundo = c.mundo;
+  const base = selectedBlueprint(mundo, persona);
+  const id = persona.blueprintId?.startsWith(PREFIJO_PLANO_OBRA) ? persona.blueprintId : base.id;
+  const plano = formaDePlano(c, id);
+  return { id, name: id === base.id ? base.name : `Obra de ${plano.area} celdas`, components: base.components, plano };
+}
+
+function fittingMaterial(world: World, anchor: Point, plano: Readonly<PlanoObra>, existing?: StructureView): Point[] | false {
+  const key = chunkKey(anchor.x, anchor.y);
+  const ocupadas = new Set(filtrarCerca(world.structures, anchor, CHUNK_SIZE, s => s !== existing
+    && chunkKey(s.x, s.y) === key).flatMap(s => structureFootprintCells(s).map(cellKey)));
+  const cells = existing ? completedStructureCells(existing).slice() : [anchor];
+  const libre = (p: Point) => {
+    if (chunkKey(p.x, p.y) !== key || ocupadas.has(cellKey(p))) return false;
+    const tile = tileAt(world, p);
+    return !!tile && tile.terrain !== 'water' && tile.terrain !== 'shelter';
+  };
+  if (cells.length > plano.area || cells.some(p => !libre(p))) return false;
+  return growPolyomino(cells, plano.area, plano.compacto, libre, anchor);
 }
 
 export function isFootprintFree(world: World, cells: readonly Point[], ignoreStructureId?: string): boolean {
@@ -211,6 +277,7 @@ function warehousesNear(world: World, person: Point): StructureView[] {
 
 export function storedMaterialsNear(world: World, person: Point): { wood: number; stone: number } {
   const result = { wood: 0, stone: 0 };
+  if (ley(world, 'obra')) return result;
   if (paramsOf(world).construccion.modular) for (const s of warehousesNear(world, person)) { result.wood += s.storedWood ?? 0; result.stone += s.storedStone ?? 0; }
   return result;
 }
@@ -218,6 +285,7 @@ export function storedMaterialsNear(world: World, person: Point): { wood: number
 /** Sole matching debit for material delivered directly into a local paid process. */
 export function withdrawMaterials(world: World, person: Point, requested: { wood: number; stone: number }): { wood: number; stone: number } {
   const taken = { wood: 0, stone: 0 };
+  if (ley(world, 'obra')) return taken;
   for (const s of warehousesNear(world, person)) {
     const wood = Math.max(0, Math.min(s.storedWood ?? 0, Math.floor(requested.wood - taken.wood)));
     const stone = Math.max(0, Math.min(s.storedStone ?? 0, Math.floor(requested.stone - taken.stone)));
@@ -231,6 +299,7 @@ export function withdrawMaterials(world: World, person: Point, requested: { wood
 
 /** Deposit surplus only; moving stock is not evidence of utility. */
 export function depositMaterials(world: World, person: Person, structure: StructureView): boolean {
+  if (ley(world, 'obra')) return false;
   if (!paramsOf(world).construccion.modular || person.action === 'build' || !world.people.includes(person) || !world.structures.includes(structure)
     || !hasCompletedBuilding(structure) || structure.condition <= BROKEN_CONDITION || tileAt(world, structure)?.terrain !== 'shelter'
     || structureDistance(person, structure) > 1.5) return false;
@@ -426,6 +495,7 @@ function expansionCandidate(world: World, person: Person, blueprint = selectedBl
 }
 
 export function constructionCost(world: World, person: Person): BlueprintView['cost'] {
+  if (ley(world, 'obra')) return { wood: 0, stone: 0, work: 1 };
   const modular = paramsOf(world).construccion.modular;
   const components = selectedBlueprint(world, person).components;
   const cells = modular && paramsOf(world).construccion.poliminosYSinergia ? fittingPolyomino(world, person, components) : false;
@@ -442,6 +512,7 @@ export function constructionCost(world: World, person: Person): BlueprintView['c
 }
 
 export function activeSiteAt(world: World, point: Point): StructureView | undefined {
+  if (ley(world, 'obra')) return obraCercana(world, point, 0.5).find(s => !!celdaPendiente(ctxMateriaDe(world), s));
   if (!paramsOf(world).construccion.modular) return;
   return filtrarCerca(world.structures, point, 1.5, s => !!s.site && distance(point, s) <= 0.5)
     .sort((a, b) => distance(point, a) - distance(point, b) || a.id.localeCompare(b.id))[0];
@@ -451,6 +522,7 @@ export function activeSiteAt(world: World, point: Point): StructureView | undefi
  * stays strictly inside HALO_CELDAS (7 + 3.5 = 10.5 <= 14) by checking only a site the partner
  * stands on and warehouses directly beside them. */
 export function partnerConstructionCost(world: World, person: Person): BlueprintView['cost'] {
+  if (ley(world, 'obra')) return constructionCost(world, person);
   const modular = paramsOf(world).construccion.modular;
   const cost = blueprintCost(selectedBlueprint(world, person).components, modular);
   if (!modular) return cost;
@@ -462,6 +534,10 @@ export function partnerConstructionCost(world: World, person: Person): Blueprint
 }
 
 export function constructionSite(world: World, person: Point): StructureView | undefined {
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world);
+    return obraCercana(world, person, CONSTRUCTION_RADIUS).find(s => !!celdaPendiente(c, s));
+  }
   if (!paramsOf(world).construccion.modular) return;
   // V20 keeps the V19 reach for active sites: anchor 7 + warehouse anchor 7 from the site <= HALO 14.
   // Shrinking it to 3 left half-paid sites invisible a few steps away, so neighbours started new ones.
@@ -614,6 +690,7 @@ function constructionBudget(world: World, person: Person): { wood: number; stone
  * and pays the same material/work costs. No distant archive, historical uses or
  * invented number of occupants contributes to this local marginal comparison. */
 export function constructionOpportunity(world: World, person: Person, placed = true): ConstructionOpportunity | undefined {
+  if (ley(world, 'obra')) return oportunidadObraMaterial(ctxMateriaDe(world), person, placed);
   const site = constructionSite(world, person);
   if (site) return { target: { x: site.x, y: site.y }, score: 0.6 + person.traits.industriousness * 0.2,
     reason: 'Una obra local aún necesita entregas de materiales y trabajo pagado.',
@@ -713,11 +790,15 @@ const normalizedCost = (cost: BlueprintView['cost']) => cost.wood + cost.stone *
 const genotypeDistance = (a: readonly StructureComponent[], b: readonly StructureComponent[]) => {
   const ac = counts(a), bc = counts(b); return COMPONENTS.reduce((sum, component) => sum + Math.abs(ac[component] - bc[component]), 0);
 };
-export interface InventionCandidate { components: StructureComponent[]; parents: string[]; value: number; efficiency: number; novelty: number; }
+export interface InventionCandidate {
+  components: StructureComponent[]; parents: string[]; value: number; efficiency: number; novelty: number;
+  planoMaterial?: PlanoObra;
+}
 
 /** Exactly twelve bounded proposals, including meaningful multi-component edits; invalid children
  * are rejected rather than silently repaired into a different claimed genotype. */
 export function inventionCandidates(world: World, person: Person): InventionCandidate[] {
+  if (ley(world, 'obra')) return candidatosObra(ctxMateriaDe(world), person);
   return candidatesFromKnown(world, person, inventionContext(world, person), knownBlueprints(world, person));
 }
 
@@ -806,7 +887,91 @@ function expertise(person: Person): number {
   return clamp(((person.activity.build ?? 0) + (person.activity.farm ?? 0) + (person.activity.gather ?? 0)) / 20
     + (person.skills.build ?? 0) + (person.skills.farm ?? 0) + (person.skills.gather ?? 0));
 }
+
+function candidatosObra(c: CtxLeyMateria, persona: Person): InventionCandidate[] {
+  const mundo = c.mundo;
+  const obras = obraCercana(mundo, persona, CONSTRUCTION_RADIUS);
+  const referencias = [
+    ...(persona.carga ?? []),
+    ...obras.flatMap(s => estadoObra(s)!.piezas.map(p => p.lote)),
+  ];
+  const muestra = referencias.filter(l => c.materia.propio(l)).map(l => c.materia.vista(l))
+    .find(v => areaPortante(v) >= AREA_OBRA_M2 * COBERTURA_COBIJO);
+  if (!muestra) return [];
+  const ids = new Set(['blueprint-base', persona.blueprintId, ...obras.map(s => s.blueprintId)]);
+  const conocidos = mundo.blueprints.filter(b => ids.has(b.id) || b.inventorId === persona.id);
+  const sitio = obras.find(s => structureDistance(persona, s) <= 0.5);
+  const firmas = new Set(mundo.blueprints.map(firmaPlanoObra));
+  const valorar = (plano: Readonly<PlanoObra>) => {
+    const forma = formaDeCodigo(plano.forma);
+    const huecoAnterior = formaDeCodigo(muestra.forma).hueco;
+    const sellado = huecoAnterior < 1 ? clamp(muestra.sellado / (1 - huecoAnterior) * (1 - forma.hueco)) : 0;
+    const s = prestacionesDePiezas([{ ...muestra, forma: plano.forma, sellado }], 1);
+    const valor = calidadCobijo(s) * persona.fatigue + clamp(s.volumen * DENSIDAD_AGUA_KG_M3) * persona.thirst
+      + clamp(s.volumen * DENSIDAD_GRANO_KG_M3) * persona.hunger;
+    return valor * plano.area;
+  };
+  const candidatos: InventionCandidate[] = [];
+  for (const padre of conocidos) {
+    const plano = planoObra(padre);
+    const f = formaDeCodigo(plano.forma);
+    const variaciones: PlanoObra[] = [
+      { ...plano, area: plano.area + 1, compacto: !plano.compacto },
+      { ...plano, forma: codigoForma({ ...f, hueco: (1 + f.hueco) / 2 }) },
+      { ...plano, forma: codigoForma({ ...f, grueso: f.grueso * 2, hueco: f.hueco / 2 }) },
+      { ...plano, forma: muestra.forma },
+    ];
+    const valorPadre = valorar(plano);
+    for (const variacion of variaciones) {
+      const firma = `${variacion.area}/${Number(variacion.compacto)}/${variacion.forma}`;
+      if (firmas.has(firma) || !fittingMaterial(mundo, sitio ?? persona, variacion, sitio)) continue;
+      const value = valorar(variacion);
+      if (value <= valorPadre) continue;
+      firmas.add(firma);
+      const masa = muestra.masa * variacion.area;
+      candidatos.push({ components: [...padre.components], parents: [padre.id], planoMaterial: variacion,
+        value, efficiency: value / (masa * COLOCACION_J_POR_KG), novelty: 1 - valorPadre / value });
+    }
+  }
+  return paretoCandidates(candidatos).sort((a, b) => b.efficiency - a.efficiency || b.value - a.value || b.novelty - a.novelty);
+}
+
+function inventarObra(c: CtxLeyMateria, persona: Person, emit: Emit): boolean {
+  const mundo = c.mundo, cuerpo = persona.cuerpo;
+  if (!mundo.noveltyEnabled || !cuerpo || !puedeTrabajarEn(c, persona, celdaObra(c, persona))) return false;
+  const [candidato] = candidatosObra(c, persona);
+  if (!candidato?.planoMaterial) return false;
+  const cargaPrototipo = AREA_OBRA_M2 * MASA_PORTANTE_KG_M2;
+  const coste = Math.ceil(cargaPrototipo * COLOCACION_J_POR_KG);
+  const pago = pagar(c, cuerpo, coste);
+  if (pago < coste) return false;
+  const { planoMaterial } = candidato;
+  const serial = c.globales.registro.insertar(new TextEncoder().encode(JSON.stringify(
+    ['obra-v23', planoMaterial.area, planoMaterial.compacto, planoMaterial.forma],
+  )));
+  const padre = mundo.blueprints.find(b => b.id === candidato.parents[0])!;
+  const plano: BlueprintView & { planoMaterial: PlanoObra } = {
+    id: `${PREFIJO_PLANO_OBRA}${serial}`, name: `Obra de ${planoMaterial.area} celdas`, generation: padre.generation + 1,
+    parents: candidato.parents, inventorId: persona.id, tick: mundo.tick, components: candidato.components,
+    uses: 0, usefulness: 0, cost: { wood: 0, stone: 0, work: 0 }, planoMaterial,
+  };
+  mundo.blueprintCounter = Math.max(mundo.blueprintCounter, serial);
+  mundo.blueprints.push(plano);
+  mundo.inventionDynamics.attempts++;
+  mundo.inventionDynamics.accepted++;
+  persona.lastInvention = mundo.tick; persona.blueprintId = plano.id;
+  emit({ kind: 'invention', actors: [persona.id], x: persona.x, y: persona.y, source: 'simulation',
+    text: `${persona.name} ensayó otra planta de obra.`, cause: `Ensayo de una variación sobre ${padre.name} con ${pago} J de trabajo.` });
+  return true;
+}
 export function inventionOpportunity(world: World, person: Person): { score: number; target: Point; reason: string } | undefined {
+  if (ley(world, 'obra')) {
+    if (!world.noveltyEnabled || !person.cuerpo) return;
+    const [plan] = candidatosObra(ctxMateriaDe(world), person);
+    if (plan) return { score: plan.value * person.curiosity, target: { x: person.x, y: person.y },
+      reason: 'Una pieza real sugiere otra forma, volumen o reparto de la planta.' };
+    return;
+  }
   if (!world.noveltyEnabled || world.blueprints.length >= blueprintCap(world) || person.materials.wood < 1 || expertise(person) < 0.2
     || world.tick - (person.lastInvention ?? -RESEARCH_COOLDOWN) < RESEARCH_COOLDOWN
     || person.energy < 0.45 || Math.max(person.hunger, person.thirst, person.fatigue) > 0.72) return;
@@ -818,6 +983,7 @@ export function inventionOpportunity(world: World, person: Person): { score: num
 
 /** The single debit boundary for research. A completed unsuccessful trial still consumes effort. */
 export function invent(world: World, person: Person, emit: Emit): boolean {
+  if (ley(world, 'obra')) return inventarObra(ctxMateriaDe(world), person, emit);
   if (!world.noveltyEnabled || person.work < RESEARCH_WORK || person.materials.wood < 1 || expertise(person) < 0.2
     || world.tick - (person.lastInvention ?? -RESEARCH_COOLDOWN) < RESEARCH_COOLDOWN) return false;
   const identity = blueprintIdentity(world); if (!identity) return false;
@@ -853,7 +1019,159 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
  * V16 (`tecnologia.efectosHerramientas`): lashings, carpentry and masonry tools shorten the work the
  * blueprint needs (`constructionWorkFactor`) without changing its materials. The work saved is measured,
  * not assumed: only work the builder really did not spend wears the tools and counts as their benefit. */
+function obraCercana(world: World, p: Point, radio: number): StructureView[] {
+  return filtrarCerca(world.structures, p, CHUNK_SIZE + radio,
+    s => !!estadoObra(s) && structureDistance(p, s) <= radio)
+    .sort((a, b) => structureDistance(p, a) - structureDistance(p, b) || a.id.localeCompare(b.id));
+}
+
+function puedeTrabajarEn(c: CtxLeyMateria, quien: Person, celda: number): boolean {
+  const ref = refDeOrganismo(c, quien);
+  if (ref < 0 || celda < 0) return false;
+  const slot = slotDe(ref);
+  return c.personas.get(slot) === quien && c.frente.chunk[slot] === c.terreno.chunkDe(celda);
+}
+
+function celdaPendiente(c: CtxLeyMateria, s: StructureView): Point | undefined {
+  const obra = estadoObra(s);
+  if (!obra) return;
+  if (obra.pendiente) return obra.pendiente;
+  const areas = new Map<string, number>();
+  for (const pieza of obra.piezas) if (c.materia.propio(pieza.lote)) {
+    const key = cellKey(pieza);
+    areas.set(key, (areas.get(key) ?? 0) + areaPortante(c.materia.vista(pieza.lote)));
+  }
+  return (s.cells ?? [s]).find(p => (areas.get(cellKey(p)) ?? 0) < AREA_OBRA_M2 * COBERTURA_COBIJO);
+}
+
+function oportunidadObraMaterial(c: CtxLeyMateria, persona: Person, placed: boolean): ConstructionOpportunity | undefined {
+  const mundo = c.mundo;
+  if (!persona.cuerpo) return;
+  const { plano } = planoSeleccionado(c, persona);
+  for (const s of obraCercana(mundo, persona, CONSTRUCTION_RADIUS)) {
+    const p = celdaPendiente(c, s);
+    if (p) return { target: { x: p.x, y: p.y }, score: 0.6 + persona.traits.industriousness * 0.2, delivery: 'site',
+      workLeft: true, reason: 'La obra local necesita piezas y trabajo para asentarlas.' };
+    if (plano.area > (s.cells?.length ?? 1) && fittingMaterial(mundo, s, plano, s)) {
+      return { target: { x: s.x, y: s.y }, score: 0.6 + persona.traits.industriousness * 0.2, delivery: 'expansion',
+        workLeft: true, reason: 'La planta del plano admite una ampliación con más piezas.' };
+    }
+  }
+  if (!placed) return;
+  const tile = tileAt(mundo, persona);
+  if (!tile || !fittingMaterial(mundo, tile, plano) || (!(tile.stone && tile.stone > 0) && !persona.carga?.some(l => c.materia.propio(l)))) return;
+  const carencia = Math.max(persona.fatigue, persona.thirst, persona.hunger);
+  return { target: { x: tile.x, y: tile.y }, score: carencia * persona.traits.industriousness,
+    reason: 'Puede ensayar el plano con la materia que tiene a mano.' };
+}
+
+/** Arranca un corte, unión o cocción de T1 sobre un lote libre ya depositado en la obra. */
+export function prepararPiezaObra(c: CtxLeyMateria, s: StructureView, p: Point, lote: LoteRef, pasos: readonly Paso[]): boolean {
+  const obra = estadoObra(s);
+  const celda = celdaObra(c, p);
+  if (!obra || !c.mundo.structures.includes(s) || obra.pendiente || obra.agua === lote || obra.comida === lote || celda < 0
+    || !c.materia.propio(lote) || !(s.cells ?? [s]).some(q => q.x === p.x && q.y === p.y)
+    || !lotesEnObra(c, celda, Rol.Objeto).includes(lote)) return false;
+  const vista = c.materia.vista(lote);
+  if (vista.masa <= 0 || (!vista.forma && !pasos.length)) return false;
+  const proceso = pasos.length ? iniciarProceso(c, lote, pasos, p.x, p.y) : null;
+  obra.pendiente = { x: p.x, y: p.y, lote, proceso, trabajoJ: 0 };
+  return true;
+}
+
+function contribuirObraMaterial(c: CtxLeyMateria, persona: Person, s: StructureView, emit: Emit): boolean {
+  const mundo = c.mundo, obra = estadoObra(s), cuerpo = persona.cuerpo;
+  const p = celdaPendiente(c, s);
+  if (!obra || !cuerpo || !p || distance(persona, p) > 0.5) return false;
+  const celda = celdaObra(c, p);
+  if (!puedeTrabajarEn(c, persona, celda)) return false;
+  if (!obra.pendiente) {
+    const plano = formaDePlano(c, s.blueprintId);
+    const forma = formaDeCodigo(plano.forma);
+    const carga = persona.carga?.find(l => {
+      if (!c.materia.propio(l)) return false;
+      const v = c.materia.vista(l);
+      return v.masa > 0 && (v.fase === 0 || v.fase === 3) && (v.dureza > 0 || v.tenacidad > 0);
+    });
+    const vistaCarga = carga === undefined ? undefined : c.materia.vista(carga);
+    const lote = carga === undefined
+      ? rocaDe(c, celda, MASA_PORTANTE_KG_M2 * forma.largo * forma.ancho)
+      : trasladarLoteObra(c, carga, Rol.Objeto, celda, vistaCarga!.forma);
+    if (carga !== undefined) persona.carga!.splice(persona.carga!.indexOf(carga), 1);
+    const pasos: Paso[] = vistaCarga && areaPortante(vistaCarga) > 0 ? [] : [{ op: 'romper', forma }];
+    if (lote < 0 || !prepararPiezaObra(c, s, p, lote, pasos)) return false;
+  }
+  const pendiente = obra.pendiente!;
+  if (pendiente.proceso) {
+    if (!c.materia.propio(pendiente.lote)) {
+      obra.pendiente = null;
+      return false;
+    }
+    const avance = avanzarProceso(c, pendiente.proceso, cuerpo);
+    pendiente.lote = pendiente.proceso.lote;
+    if (avance !== 'hecho') return avance !== 'espera';
+    pendiente.proceso = null;
+  }
+  if (!c.materia.propio(pendiente.lote) || areaPortante(c.materia.vista(pendiente.lote)) <= 0) {
+    obra.pendiente = null;
+    return false;
+  }
+  const coste = Math.ceil(cargaKg(c, [pendiente.lote]) * COLOCACION_J_POR_KG);
+  const falta = Math.max(0, coste - pendiente.trabajoJ);
+  const pago = falta > 0 ? pagar(c, cuerpo, falta) : 0;
+  pendiente.trabajoJ += Math.min(falta, pago);
+  if (pendiente.trabajoJ < coste) return pago > 0;
+  colocarPieza(c, s.id, pendiente.lote, celda);
+  obra.pendiente = null;
+  const servicio = prestacionesObra(c, s);
+  s.condition = servicio.cobertura >= COBERTURA_COBIJO ? servicio.cobertura : 0;
+  if (!obra.terminada && !celdaPendiente(c, s)) {
+    obra.terminada = true;
+    s.builtAt = mundo.tick;
+    mundo.settlementCount++;
+    const lugar = { id: `settlement-${s.x}-${s.y}`, name: s.name, x: s.x, y: s.y,
+      description: 'Obra levantada con piezas colocadas.', gatherings: 0 };
+    c.pedirGlobal('lugar', serialize(lugar));
+    emit({ kind: 'settlement', actors: [persona.id], x: s.x, y: s.y, source: 'simulation',
+      text: `${persona.name} terminó ${s.name.toLocaleLowerCase('es')}.`,
+      cause: `La obra sostiene ${servicio.masa.toFixed(3)} kg de piezas colocadas con trabajo pagado.` });
+  }
+  return true;
+}
+
+function construirObraMaterial(c: CtxLeyMateria, persona: Person, tile: Tile, emit: Emit): StructureView | null {
+  const mundo = c.mundo, celda = celdaObra(c, tile);
+  if (!persona.cuerpo || tileAt(mundo, tile) !== tile || distance(persona, tile) > 0.5 || !puedeTrabajarEn(c, persona, celda)) return null;
+  const blueprint = planoSeleccionado(c, persona), { plano } = blueprint;
+  const existente = obraCercana(mundo, tile, 0.5)[0];
+  if (existente) {
+    const obra = estadoObra(existente)!;
+    if (obra.terminada && !celdaPendiente(c, existente) && plano.area > (existente.cells?.length ?? 1)) {
+      const cells = fittingMaterial(mundo, existente, plano, existente);
+      if (!cells) return null;
+      existente.cells = cells;
+      existente.blueprintId = blueprint.id;
+      existente.name = blueprint.name;
+      existente.components = [...blueprint.components];
+      return existente;
+    }
+    return contribuirObraMaterial(c, persona, existente, emit) ? existente : null;
+  }
+  const cells = fittingMaterial(mundo, tile, plano);
+  if (!cells || (!(tile.stone && tile.stone > 0) && !persona.carga?.some(l => c.materia.propio(l)))) return null;
+  const serial = c.id('estructura');
+  const s: StructureView & { obraMaterial: EstadoObra } = {
+    id: `structure-${serial}`, x: tile.x, y: tile.y, cells, blueprintId: blueprint.id, name: blueprint.name,
+    components: [...blueprint.components], condition: 0, water: 0, food: 0, uses: 0, builtAt: mundo.tick, builderId: persona.id,
+    obraMaterial: { piezas: [], pendiente: null, agua: -1, comida: -1, terminada: false },
+  };
+  mundo.structureCounter = Math.max(mundo.structureCounter, serial);
+  mundo.structures.push(s);
+  return contribuirObraMaterial(c, persona, s, emit) ? s : null;
+}
+
 export function completeConstruction(world: World, person: Person, tile: Tile, emit: Emit): StructureView | null {
+  if (ley(world, 'obra')) return construirObraMaterial(ctxMateriaDe(world), person, tile, emit);
   if (paramsOf(world).construccion.modular) return modularConstruction(world, person, tile, emit);
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components);
   const tools = toolEffectsEnabled(world), requiredWork = tools ? cost.work * constructionWorkFactor(world, person) : cost.work;
@@ -917,6 +1235,7 @@ function modularConstruction(world: World, person: Person, tile: Tile, emit: Emi
 
 /** Only present actors can debit their own carried load and already paid work. */
 export function contributeConstruction(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
+  if (ley(world, 'obra')) return contribuirObraMaterial(ctxMateriaDe(world), person, structure, emit);
   const site = structure.site;
   if (!paramsOf(world).construccion.modular || !site || !world.structures.includes(structure) || !world.people.includes(person)
     || distance(person, structure) > 1.5 || !isFootprintFree(world, structureFootprintCells(structure), structure.id)) return false;
@@ -956,6 +1275,12 @@ export function contributeConstruction(world: World, person: Person, structure: 
 
 /** Added volume and protection come only from the condition of real installed products. */
 export function structureAffordances(world: World, structure: StructureView) {
+  if (ley(world, 'obra')) {
+    const s = prestacionesObra(ctxMateriaDe(world), structure);
+    return { waterCapacity: s.volumen * DENSIDAD_AGUA_KG_M3, foodCapacity: s.volumen * DENSIDAD_GRANO_KG_M3,
+      catchment: FLUJO_CAPTACION_KG_M2_TICK * s.cobijo * (structure.cells?.length ?? 1) * AREA_OBRA_M2,
+      irrigation: 0, restQuality: calidadCobijo(s), hearths: s.calor > 0 ? 1 : 0, durability: Math.max(s.dureza, s.tenacidad) };
+  }
   const a = blueprintAffordances(structure.components);
   if (!paramsOf(world).tecnologia.obrasPorPropiedades || !structure.installed?.length) return a;
   const containment = structure.installed.reduce((n, i) => n + i.containment * i.condition * i.mass / 1000, 0);
@@ -981,6 +1306,10 @@ function synergyNeighbours(world: World, structure: StructureView): StructureVie
 }
 
 export function computeStructureSynergy(world: World, structure: StructureView): StructureSynergyView {
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world), servicio = prestacionesObra(c, structure);
+    return { sharedEdges: 0, heated: servicio.calor > 0, irrigated: false, workshopBonus: 0 };
+  }
   const result: StructureSynergyView = { sharedEdges: 0, heated: false, irrigated: false, workshopBonus: 0, kilnTier: 0 };
   if (!hasCompletedBuilding(structure) || structure.condition <= BROKEN_CONDITION) return result;
   const cells = completedStructureCells(structure), neighbours = synergyNeighbours(world, structure), n = counts(structure.components);
@@ -1052,11 +1381,18 @@ const functionalNear = (world: World, point: Point, radius = 1.5) => paramsOf(wo
 const waterNearScratch = new WeakMap<World, StructureView[]>();
 // `foodCapacity = granary·0.7` es positiva exactamente cuando hay algún granero (y `waterCapacity` con alguna cisterna): basta mirar
 // el componente, sin construir el recuento ni el objeto de capacidades por estructura.
-export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0); }
+export function foodAvailable(world: World, person: Point): number {
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world);
+    return obraCercana(world, person, 1.5).reduce((suma, s) => suma + stockObra(c, s, 'comida'), 0);
+  }
+  return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0);
+}
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */
 export function takeFood(world: World, person: Point, requested: number): number {
   if (!Number.isFinite(requested) || requested <= 0) return 0;
   const member = person as Person;
+  if (ley(world, 'obra')) return member.action === 'eat' ? consumirDepositoObra(ctxMateriaDe(world), member, 'comida', requested) : 0;
   let taken = 0;
   for (const structure of functionalNear(world, person).sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))) {
     if (!structure.components.includes('granary')) continue;
@@ -1071,6 +1407,14 @@ export function takeFood(world: World, person: Point, requested: number): number
 /** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */
 export function waterAvailable(world: World, point: Point): number {
   let total = tileAt(world, point)?.drinkingWater ?? 0;
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world);
+    const celda = celdaObra(c, point);
+    if (celda < 0) return 0;
+    const { agua } = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
+    total = agua >= 0 ? c.materia.vista(agua).agua * KG_POR_CUANTO_AGUA : 0;
+    return obraCercana(world, point, 0.5).reduce((suma, s) => suma + stockObra(c, s, 'agua'), total);
+  }
   if (paramsOf(world).construccion.modular) return total + functionalNear(world, point, 0.5)
     .reduce((sum, s) => sum + (s.components.includes('cistern') ? s.water : 0), 0);
   // Reuse a per-world result buffer so the indexed query keeps its narrow scan without allocating
@@ -1092,10 +1436,23 @@ export function takeWater(world: World, person: Person, requested: number): numb
   if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person, world.tick) || person.action !== 'drink'
     || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
   const tile = tileAt(world, person); if (!tile) return 0;
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world), celda = celdaObra(c, tile);
+    if (!person.cuerpo || !puedeTrabajarEn(c, person, celda)) return 0;
+    const { agua } = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
+    const kg = agua < 0 ? 0 : beber(c, person.cuerpo, agua, requested);
+    return kg + consumirDepositoObra(c, person, 'agua', requested - kg);
+  }
   const needed = Math.min(requested, person.thirst / SED_POR_UNIDAD), ambient = Math.min(tile.drinkingWater ?? 0, needed);
-  tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
-  marcarTesela(tile);
-  let taken = ambient;
+  let taken: number;
+  if (ley(world, 'materia')) {
+    const c = ctxMateriaDe(world), celda = celdaObra(c, tile);
+    taken = ambient > 0 && puedeTrabajarEn(c, person, celda) ? extraerEscalar(c, celda, 'agua', ambient) : 0;
+  } else {
+    tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
+    marcarTesela(tile);
+    taken = ambient;
+  }
   for (const structure of functionalNear(world, person, 0.5)) {
     if (!structure.components.includes('cistern')) continue;
     const amount = Math.min(structure.water, needed - taken);
@@ -1104,6 +1461,77 @@ export function takeWater(world: World, person: Person, requested: number): numb
     if (taken >= needed) break;
   }
   return taken;
+}
+
+/** Material que entra en el digestivo. El cuerpo da alivio al asimilarlo. */
+export function consumirDepositoObra(c: CtxLeyMateria, quien: Person, tipo: DepositoObra, kg: number): number {
+  const cuerpo = quien.cuerpo;
+  if (!Number.isFinite(kg) || kg <= 0 || !cuerpo) return 0;
+  let tomado = 0;
+  for (const s of obraCercana(c.mundo, quien, tipo === 'agua' ? 0.5 : 1.5)) {
+    if (!puedeTrabajarEn(c, quien, celdaObra(c, s)) || prestacionesObra(c, s).volumen <= 0) continue;
+    const lote = loteDepositoObra(c, s, tipo);
+    if (lote < 0) continue;
+    const resta = kg - tomado;
+    const cantidad = tipo === 'agua' ? beber(c, cuerpo, lote, resta) : ingerir(c, cuerpo, lote, pedidoComida(c, cuerpo, resta));
+    tomado += cantidad;
+    if (tipo === 'comida') c.mundo.inventionDynamics.foodTaken += cantidad;
+    observeUse(c.mundo, s, cantidad);
+    if (tomado >= kg) break;
+  }
+  return tomado;
+}
+
+export function guardarEnObra(c: CtxLeyMateria, quien: Person, tipo: DepositoObra, lote: LoteRef, kg: number): number {
+  const carga = quien.carga;
+  if (!carga?.includes(lote) || !c.materia.propio(lote) || !Number.isFinite(kg) || kg <= 0) return 0;
+  let guardado = 0;
+  for (const s of obraCercana(c.mundo, quien, 1.5)) {
+    if (!puedeTrabajarEn(c, quien, celdaObra(c, s))) continue;
+    guardado += depositarEnObra(c, s, tipo, lote, kg - guardado);
+    if (guardado >= kg || c.materia.vista(lote).masa <= 0) break;
+  }
+  if (guardado > 0 && c.materia.vista(lote).masa <= 0 && c.materia.calor(lote) === 0) {
+    c.materia.liberar(lote);
+    carga.splice(carga.indexOf(lote), 1);
+  }
+  if (tipo === 'comida') c.mundo.inventionDynamics.foodStored += guardado;
+  return guardado;
+}
+
+/** Asienta una piedra labrada de la carga en la celda por la que pasa la persona. */
+export function empedrar(c: CtxLeyMateria, quien: Person, tile: Tile): boolean {
+  const celda = celdaObra(c, tile), cuerpo = quien.cuerpo, carga = quien.carga;
+  if (!cuerpo || !carga || !puedeTrabajarEn(c, quien, celda) || distance(quien, tile) > 0.5
+    || tile.terrain === 'water' || tile.terrain === 'shelter' || obraCercana(c.mundo, tile, 0.5).length
+    || calidadEmpedrado(c, tile) >= 1) return false;
+  const i = carga.findIndex(lote => c.materia.propio(lote) && esPiedraDeObra(c, c.materia.vista(lote)));
+  if (i < 0) return false;
+  const lote = carga[i]!;
+  const coste = Math.ceil(cargaKg(c, [lote]) * COLOCACION_J_POR_KG);
+  if (pagar(c, cuerpo, coste) < coste) return false;
+  trasladarLoteObra(c, lote, Rol.Pieza, celda, c.materia.vista(lote).forma);
+  carga.splice(i, 1);
+  registrarEmpedrado(c, celda);
+  c.propio.marcar(c.terreno.chunkDe(celda), true);
+  return true;
+}
+
+function calidadCobijo(s: ReturnType<typeof prestacionesObra>): number {
+  return clamp(s.cobijo * (1 + s.aislamiento) + s.calor / SALTO_TERMICO_COBIJO_K);
+}
+
+function cobijoCercano(c: CtxLeyMateria, p: Point): { estructura: StructureView | undefined; calidad: number } {
+  let estructura: StructureView | undefined, calidad = 0;
+  for (const s of obraCercana(c.mundo, p, 0.5)) {
+    const valor = calidadCobijo(prestacionesObra(c, s));
+    if (valor > calidad) { estructura = s; calidad = valor; }
+  }
+  return { estructura, calidad };
+}
+
+export function cobijoEnObra(c: CtxLeyMateria, p: Point): boolean {
+  return cobijoCercano(c, p).calidad > 0;
 }
 
 function restFacility(world: World, person: Person): StructureView | undefined {
@@ -1115,6 +1543,9 @@ function hearthFuel(world: World, person: Person, structure: StructureView): num
 export function facilityRestQuality(world: World, person: Person): number {
   const outdoor = world.weather === 'rain' ? 0.2 : 0.55;
   if (!world.shelterBenefitEnabled) return outdoor;
+  if (ley(world, 'obra')) {
+    return outdoor + (1 - outdoor) * cobijoCercano(ctxMateriaDe(world), person).calidad;
+  }
   const structure = restFacility(world, person); if (!structure) return outdoor;
   const a = blueprintAffordances(structure.components), fuel = hearthFuel(world, person, structure);
   return Math.max(outdoor, clamp((a.restQuality + (fuel > 0 && person.materials.wood >= fuel ? thermalBonus(world, structure) : 0)) * structure.condition));
@@ -1125,7 +1556,11 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
   if (!world.shelterBenefitEnabled || !before || !Number.isFinite(before.fatigue) || !Number.isFinite(before.energy)
     || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !esMiembro(world.people, person, world.tick)
     || person.action !== 'rest' || distance(person, person.target) > 0.5) return;
-  const structure = restFacility(world, person); if (!structure) return;
+  const material = ley(world, 'obra');
+  const structure = material
+    ? cobijoCercano(ctxMateriaDe(world), person).estructura
+    : restFacility(world, person);
+  if (!structure) return;
   const outdoor = world.weather === 'rain' ? 0.2 : 0.55, quality = facilityRestQuality(world, person);
   const energyRate = REST_ENERGY_RATE * clamp((1 - Math.max(person.hunger, person.thirst)) / 0.5);
   const actualFatigue = Math.max(0, Math.min(before.fatigue - person.fatigue, before.fatigue, REST_FATIGUE_RATE * quality));
@@ -1135,12 +1570,18 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
   const benefit = extra(outdoor);
   // Rounding at saturation must not fabricate an incremental benefit.
   if (quality <= outdoor || benefit <= 1e-12) return;
-  const fuel = hearthFuel(world, person, structure), unheated = Math.max(outdoor, blueprintAffordances(structure.components).restQuality * structure.condition);
-  if (fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12) person.materials.wood -= fuel;
+  if (!material) {
+    const fuel = hearthFuel(world, person, structure), unheated = Math.max(outdoor, blueprintAffordances(structure.components).restQuality * structure.condition);
+    if (fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12) person.materials.wood -= fuel;
+  }
   observeUse(world, structure, benefit / (REST_FATIGUE_RATE + REST_ENERGY_RATE));
 }
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
+  if (ley(world, 'obra')) {
+    const c = ctxMateriaDe(world);
+    return obraCercana(world, person, CONSTRUCTION_RADIUS).find(s => estadoObra(s)!.terminada && !!celdaPendiente(c, s));
+  }
   if (person.materials.wood + (paramsOf(world).construccion.modular ? storedMaterialsNear(world, person).wood : 0) < 1) return;
   const options = usefulRepairs(world, person);
   if (!options.length) return;
@@ -1151,6 +1592,14 @@ export function repairOpportunity(world: World, person: Person): StructureView |
  * and work restore more condition, +0.25·power per tool up to 1. Each tool pays real wear and is credited
  * exactly the condition it added. Perception (`usefulRepairs`) still plans the bare +0.4 step. */
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
+  if (ley(world, 'obra')) {
+    const obra = estadoObra(structure);
+    if (!obra?.terminada) return false;
+    const piezas = obra.piezas.length;
+    const reparada = contribuirObraMaterial(ctxMateriaDe(world), person, structure, emit);
+    if (obra.piezas.length > piezas) world.inventionDynamics.repairs++;
+    return reparada;
+  }
   const modular = paramsOf(world).construccion.modular, load = modular ? maintenanceLoad(structure) : 1;
   if (!world.structures.includes(structure) || structure.site || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5
     || person.materials.wood + (modular ? storedMaterialsNear(world, person).wood : 0) < load || person.work < REPAIR_WORK * load) return false;
@@ -1184,7 +1633,9 @@ function maintenanceLoad(structure: StructureView): number {
 
 /** Bounded active structures only. Inflow, transfers and irrigation all have explicit debits. */
 export function stepStructures(world: World, _emit: Emit): void {
+  if (ley(world, 'obra')) return;
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
+  const materia = ley(world, 'materia') ? ctxMateriaDe(world) : undefined;
   const polyomino = paramsOf(world).construccion.poliminosYSinergia;
   if (polyomino) for (const structure of world.structures) {
     if (!hasCompletedBuilding(structure)) continue;
@@ -1228,8 +1679,10 @@ export function stepStructures(world: World, _emit: Emit): void {
     }
     if (structure.condition <= BROKEN_CONDITION) continue;
     if (modular) for (const person of vecinos(world, structure, 3.5, p => structureDistance(p, structure) <= 1.5)) depositMaterials(world, person, structure);
+    const celdaEstructura = materia ? celdaObra(materia, tile) : -1;
     if (world.weather === 'rain' && a.waterCapacity > 0) {
-      const collected = Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition);
+      const potential = Math.max(0, Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition));
+      const collected = materia ? celdaEstructura >= 0 && potential > 0 ? extraerEscalar(materia, celdaEstructura, 'agua', potential) : 0 : potential;
       structure.water += Math.max(0, collected); world.inventionDynamics.waterCollected += Math.max(0, collected);
     }
     // Production remains stock. Only an actual consumer may turn supply into observed utility.
@@ -1250,10 +1703,17 @@ export function stepStructures(world: World, _emit: Emit): void {
       let budget = Math.min(structure.water, a.irrigation * structure.condition);
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);
-        garden.moisture += amount; marcarTesela(garden); structure.water -= amount; budget -= amount;
+        const celda = materia ? celdaObra(materia, garden) : -1;
+        if (materia) {
+          const mismoChunk = celda >= 0 && celdaEstructura >= 0 && materia.terreno.chunkDe(celda) === materia.terreno.chunkDe(celdaEstructura);
+          const regado = mismoChunk && amount > 0 ? aportarEscalar(materia, celda, 'agua', amount) : 0;
+          structure.water -= regado; budget -= regado;
+        } else {
+          garden.moisture += amount; marcarTesela(garden); structure.water -= amount; budget -= amount;
+        }
       }
       // V23 (`quimica.emergente`): ash, lime and ground organics banked here manure the irrigated garden ground.
-      if (chemistryEra(world) && structure.storedCompounds?.length) {
+      if (!materia && chemistryEra(world) && structure.storedCompounds?.length) {
         for (const garden of gardens) garden.fertility = enrichSoilFromLots(structure.storedCompounds, garden.fertility ?? 0);
         if (structure.storedCompounds.length === 0) delete structure.storedCompounds;
       }

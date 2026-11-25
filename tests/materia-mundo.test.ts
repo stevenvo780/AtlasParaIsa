@@ -45,7 +45,7 @@ test('las vistas reproducen los escalares de la tesela al levantar (dentro de me
   await q.cerrar();
 });
 
-test('el libro cuadra exacto en cada paso y los átomos solo cambian por el agua declarada con el exterior', async () => {
+test('el libro cuadra exacto en cada paso y ningún átomo entra ni sale: el agua circula entre lotes (cielo, mar, suelos y charcas)', async () => {
   const { q, m, tot, exacto } = levantar();
   const s0 = m.saldo();
   for (let k = 0; k < 12; k++) { correr(m, tot, 1); assert.ok(exacto(), `paso ${k}`); }

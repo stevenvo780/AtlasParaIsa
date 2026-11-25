@@ -16,7 +16,7 @@
  * comunidades; sin él, una población sembrada, que no tiene nada de eso.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { loadavg, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -314,7 +314,12 @@ export interface Registro {
   piramideInicial: Piramide; piramideFinal: Piramide; violaciones: { duras: number; blandas: number; comprobaciones: number };
   tope?: number;
 }
-export interface OpcionesMedida { dias: number; zona: Zona; caminables: number; cadaMuestra?: number; cadaInvariantes?: number; tope?: number; archivar?: () => void }
+export interface OpcionesMedida {
+  dias: number; zona: Zona; caminables: number; cadaMuestra?: number; cadaInvariantes?: number; tope?: number;
+  /** Duración total en ticks si no es un número entero de días (sondas cortas); el último «día» queda parcial. */
+  ticks?: number;
+  archivar?: () => void; alDia?: (dia: DiaMedido) => void;
+}
 
 const mortales = (mundo: World) => mundo.people.filter(p => p.role === 'neighbor');
 const clase = (v: number) => Math.min(9, Math.max(0, Math.floor(v * 10)));
@@ -384,11 +389,12 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
   const piramideInicial = piramide(mundo);
   revisar();
   let tope: number | undefined;
-  for (let dia = 1; dia <= o.dias; dia++) {
+  const fin = inicio + (o.ticks ?? o.dias * DIA);
+  for (let dia = 1; mundo.tick < fin; dia++) {
     const desde = performance.now(), hambre = new Array<number>(10).fill(0), sed = new Array<number>(10).fill(0);
     const suma: Embudo = { adultosFertiles: 0, listos: 0, conPareja: 0, conParejaYLugar: 0 };
     let muestras = 0, fueraDeZona = 0;
-    for (let t = 0; t < DIA; t++) {
+    for (let t = 0; t < DIA && mundo.tick < fin; t++) {
       stepWorld(mundo);
       const ahora = mortales(mundo), ids = new Set<string>();
       for (const p of ahora) {
@@ -412,7 +418,8 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
     }
     o.archivar?.();
     const ms = performance.now() - desde;
-    dias.push({ dia, tick: mundo.tick, vivos: vivos.size, fueraDeZona, muestras, embudo: suma, hambre, sed, msPared: ms, ticksPorSegundo: DIA * 1000 / ms, carga: loadavg() });
+    dias.push({ dia, tick: mundo.tick, vivos: vivos.size, fueraDeZona, muestras, embudo: suma, hambre, sed, msPared: ms, ticksPorSegundo: (mundo.tick - (dias.at(-1)?.tick ?? inicio)) * 1000 / ms, carga: loadavg() });
+    o.alDia?.(dias.at(-1)!);
     if (o.tope !== undefined && vivos.size >= o.tope) { tope = dia; break; }
   }
   return { inicio, fin: mundo.tick, zona: o.zona, caminables: o.caminables, individuos: [...individuos.values()], dias,
@@ -484,9 +491,9 @@ export const clavePersona = (i: Individuo) => i.id;
 
 /** Nacimientos, muertes y exposición de cada día, para ver el transitorio. */
 export function serieDiaria(registro: Registro): { dia: number; grupo: Grupo; tasas: Record<Tasa, number> }[] {
-  return registro.dias.map(d => {
-    const grupo = grupoVacio();
-    for (const i of registro.individuos) sumar(grupo, contribucion(i, d.tick - DIA, d.tick));
+  return registro.dias.map((d, k) => {
+    const grupo = grupoVacio(), desde = k ? registro.dias[k - 1]!.tick : registro.inicio;
+    for (const i of registro.individuos) sumar(grupo, contribucion(i, desde, d.tick));
     return { dia: d.dia, grupo, tasas: razones(grupo) };
   });
 }
@@ -503,7 +510,7 @@ export function transitorio(registro: Registro, minimo = 1): { dias: number; pru
   const muertes = (g: Grupo) => CAUSAS.reduce((s, c) => s + g.muertes[c], 0);
   for (let d0 = minimo; d0 <= serie.length - 2; d0++) {
     const resto = serie.slice(d0), exp = resto.map(s => s.grupo.exposicion);
-    const p = { nacimientos: homogeneidadPoisson(resto.map(s => s.grupo.nacimientos * 2), exp).p,
+    const p = { nacimientos: homogeneidadPoisson(resto.map(s => s.grupo.nacimientos), exp).p,
       muertes: homogeneidadPoisson(resto.map(s => muertes(s.grupo)), exp).p, parejas: homogeneidadPoisson(resto.map(s => s.grupo.parejas), exp).p };
     pruebas.push({ desde: d0, p });
     if (p.nacimientos >= 0.05 && p.muertes >= 0.05 && p.parejas >= 0.05) return { dias: d0, pruebas };
@@ -574,7 +581,8 @@ export function correr(o: OpcionesCorrida): unknown {
   assertWorld(mundo);
   const msSiembra = performance.now() - t0, chunks = archivoDeChunks(mundo, archivo);
   try {
-    const registro = medir(mundo, { dias: o.dias, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar });
+    const registro = medir(mundo, { dias: o.dias, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar,
+      alDia: d => appendFileSync(`${o.salida}.progreso`, `${JSON.stringify({ dia: d.dia, vivos: d.vivos, msPared: Math.round(d.msPared), carga: d.carga })}\n`) });
     assertWorld(mundo);
     if (o.guardar) { chunks.archivar(); guardarPunto(o.guardar, mundo, chunks.archivo); }
     const informe = { tipo: 'poblacion-corrida', opciones: o, params: paramsOf(mundo), siembra, msSiembra, msTotal: performance.now() - t0,

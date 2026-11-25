@@ -54,9 +54,10 @@ function referenceSyncFaunaScratch(tiles: Tile[], animals: Animal[]): void {
   }
 }
 
+// V23 (i1): el motor deja `species = undefined` en lugar de borrar la clave (teselas de forma fija en V8): "sin especie" es valor undefined, no clave ausente.
 const tileSnapshot = (tiles: readonly Tile[]): string =>
   residentBackingArray(tiles)
-    .map(t => `${t.x},${t.y}|${Object.is(t.fauna, -0) ? '-0' : String(t.fauna)}|${Object.hasOwn(t, 'species') ? String(t.species) : '<absent>'}`)
+    .map(t => `${t.x},${t.y}|${Object.is(t.fauna, -0) ? '-0' : String(t.fauna)}|${t.species !== undefined ? String(t.species) : '<absent>'}`)
     .join('\n');
 
 test('V18 spikes: paridad bit a bit (0 ULP) entre mundo residente y referencia plana con altas, retiros, reanimaciones y pasos múltiples', async () => {
@@ -283,7 +284,7 @@ test('V18 spikes: fail-closed ante teselas parciales/no-bloque, mutaciones exter
   syncFauna(wB.tiles, wB.animals);
   assert.equal(faunaCacheBuilds(), scansB + 1, 'blockIds distintos impiden heredar caché de otro mundo');
   assert.equal(wB.tiles[idxB]!.fauna, 0);
-  assert.equal(Object.hasOwn(wB.tiles[idxB]!, 'species'), false);
+  assert.equal(wB.tiles[idxB]!.species, undefined);
 });
 
 test('V18 spikes: tile-index sobre Proxy residente coincide 100 % con arreglo plano en todos los helpers', () => {

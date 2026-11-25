@@ -31,7 +31,9 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   // Reglas 10, etapa 1 (2026-09-22): el mundo que se envía hoy nace con los defaults nuevos (paquete
   // de natalidad): re-medido con 41 habitantes (29 con `HISTORICAL_PARAMS`); cotas y razón sin cambios.
   // Reglas 11 cambia el acceso a fuentes escasas; el mundo vigente se re-mide con 39 habitantes.
-  assert.equal(world.people.length, 39, 'the measurement is stated for 39 inhabitants');
+  // V23 (2026-11-25): el octavo gen (escucha) cambia la secuencia de azar de los fundadores y de los nacimientos: el mundo
+  // de la semilla de esta prueba tiene 40 habitantes a t=8000 con todo apagado. Re-medido; cotas y razón sin cambios.
+  assert.equal(world.people.length, 40, 'the measurement is stated for 40 inhabitants');
   assert.ok(world.technology.recipes.length >= 200, `resident definitions: ${world.technology.recipes.length}`);
   const view = projectWorld(world), technology = view.technology!;
   assert.equal(technology.recipes.length, world.technology.recipes.length);

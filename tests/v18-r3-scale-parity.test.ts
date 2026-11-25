@@ -10,9 +10,10 @@ import { constructionOpportunity, inventionContext, waterAvailable } from '../sr
 import { worldStatistics } from '../src/world/statistics.js';
 import { stepAnimals } from '../src/world/animals.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
+import { sinUndefined } from './lib/comparar.js';
 import { notifyResidentSubset, residentFaunaCapacity, residentTileReader, TileStore } from '../src/world/soa/terreno.js';
 
-const snapshot = (tiles: readonly Tile[]) => tiles.map(tile => ({ ...tile }));
+const snapshot = (tiles: readonly Tile[]) => tiles.map(tile => sinUndefined({ ...tile }));
 
 test('V18-r3: retiro certificado conserva lecturas SoA, capacidad y paridad plana; altas y próximo paso ecológico', () => {
   const world = createWorld(51926);

@@ -53,8 +53,8 @@ test('roads OFF equals the control world and never adds paving/chemistry state o
   for (let i = 0; i < 60; i++) stepWorld(control);
   control.version = 12;
   assert.equal(digestoCanonico(legacy), digestoCanonico(control));
-  assert.ok(world.tiles.every(t => !Object.hasOwn(t, 'paved')));
-  assert.ok(world.people.every(p => !Object.hasOwn(p, 'compounds')));
+  assert.ok(world.tiles.every(t => t.paved === undefined));
+  assert.ok(world.people.every(p => p.compounds === undefined));
   assert.ok(!Object.hasOwn(world, 'chemistry'));
   assert.ok(!Object.hasOwn(world.totals, 'roadsPaved'));
   const stats = worldStatistics(world);
@@ -145,7 +145,7 @@ for (const parallel of [false, true]) test(`paved traffic decays 10× slower acr
   assert.ok(Math.abs((0.8 - tiles[0]!.traffic!) / (0.8 - tiles[1]!.traffic!) - 10) < 1e-10);
   assert.equal(tiles[1]!.paved, 1);
   assert.equal(tiles[2]!.paved, 0.5 - 0.0005);
-  assert.ok(!Object.hasOwn(tiles[3]!, 'paved'));
+  assert.ok(tiles[3]!.paved === undefined);
   if (parallel) assert.equal(residentFastAccess(tiles)!.trafficArr[residentFastAccess(tiles)!.cellOf(tiles[1]!)]!, tiles[1]!.traffic);
   const off = [ecoTile(0, { paved: 1 })];
   stepEcosystem(off, 10, 'clear', 'day', false, { hilos: 1, caminosFisicos: false });

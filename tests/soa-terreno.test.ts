@@ -8,6 +8,7 @@ import { cloneWorld, createWorld, stepWorld } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { TileStore } from '../src/world/soa/terreno.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 /**
  * T112: `TileStore` SoA con máscara de presencia y doble buffer, y la topología del kernel de ecología
@@ -37,7 +38,7 @@ test('empaquetar y desempaquetar un mundo real da el mismo digestoCanonico, tamb
   store.pack(world.tiles);
   const unpacked = cloneWorld(world); unpacked.tiles = store.unpack();
   assert.equal(digestoCanonico(unpacked), digestoCanonico(world));
-  assert.deepStrictEqual(unpacked.tiles, world.tiles);
+  igualesSinUndefined(unpacked.tiles, world.tiles);
   // Autoridad de la SoA y volcado sobre objetos rancios: vuelve exactamente el mundo empaquetado.
   const stale = cloneWorld(world);
   for (const tile of stale.tiles) { tile.moisture = 0; delete tile.life; tile.species = 'wolf'; }

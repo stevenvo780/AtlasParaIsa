@@ -374,7 +374,8 @@ function faunaTiles(random: () => number): Tile[] {
   }
   return tiles;
 }
-const snapshot = (tiles: Tile[]): string => tiles.map(t => `${Object.keys(t).join(',')}|${[t.x, t.y, t.fauna, t.species].map(v => Object.is(v, -0) ? '-0' : String(v)).join('|')}`).join('\n');
+// Las claves con valor undefined cuentan como ausentes y su orden no importa: el digesto canónico omite las primeras y ordena las segundas.
+const snapshot = (tiles: Tile[]): string => tiles.map(t => `${Object.entries(t).filter(([, v]) => v !== undefined).map(([k]) => k).sort().join(',')}|${[t.x, t.y, t.fauna, t.species].map(v => Object.is(v, -0) ? '-0' : String(v)).join('|')}`).join('\n');
 
 test('V18 syncFauna: 300 rondas aleatorias con −0, claves propias ausentes y mutaciones externas coinciden con el código anterior', () => {
   const random = lcg(2026);
@@ -400,14 +401,14 @@ test('V18 syncFauna: lo que cambia en una tesela se refleja en la llamada siguie
   const animals = [{ x: 1, y: 0, species: 'wolf' }, { x: 1, y: 0, species: 'hare' }, { x: 2, y: 0, species: 'deer' }] as Animal[];
   syncFauna(tiles, animals);
   assert.deepEqual(tiles.map(t => [t.fauna, t.species]), [[undefined, undefined], [2, 'hare'], [1, 'deer']]);
-  assert.equal(Object.hasOwn(tiles[0]!, 'species'), false);
+  assert.equal(tiles[0]!.species, undefined);
   // Alguien pisa la tesela a mano: la siguiente sincronización la corrige.
   tiles[1]!.fauna = 7; tiles[1]!.species = 'fox'; tiles[2]!.fauna = 0; tiles[2]!.species = 'boar';
   syncFauna(tiles, animals);
   assert.deepEqual(tiles.map(t => [t.fauna, t.species]), [[undefined, undefined], [2, 'hare'], [1, 'deer']]);
-  // Una tesela que tenía fauna y la pierde conserva fauna = 0 y pierde la clave propia `species`.
+  // Una tesela que tenía fauna y la pierde conserva fauna = 0 y su `species` queda en undefined.
   animals.splice(2, 1); syncFauna(tiles, animals);
-  assert.ok(Object.is(tiles[2]!.fauna, 0)); assert.equal(Object.hasOwn(tiles[2]!, 'species'), false, 'la especie sobrante se borra (clave propia ausente)');
+  assert.ok(Object.is(tiles[2]!.fauna, 0)); assert.equal(tiles[2]!.species, undefined, 'la especie sobrante queda sin valor (desde V23 la clave no se borra)');
   animals.push({ x: 2, y: 0, species: 'deer' } as Animal); syncFauna(tiles, animals);
   // Muere un animal y se mueve otro.
   animals.pop(); animals[0]!.x = 0;

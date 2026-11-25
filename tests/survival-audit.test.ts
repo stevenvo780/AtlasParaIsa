@@ -11,6 +11,7 @@ import { Store } from '../src/server/store.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { familyOpportunity, reproductiveReadiness } from '../src/world/family.js';
 import { directorioTemporal, filaInstantanea } from './lib/store.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 const source = fileURLToPath(new URL('../', import.meta.url));
 
@@ -103,7 +104,7 @@ test('a physical burst larger than the event ring survives journal+clone+save wh
     assert.throws(() => auditStep(world.eventCounter, draft.eventCounter, draft.events, draft.tick), /EVENT_GAP/);
     store.save(draft);
     assert.equal(Number(store.db.prepare('SELECT COUNT(*) n FROM events').get()!.n), draft.eventCounter);
-    assert.deepEqual(store.load()!.world, draft);
+    igualesSinUndefined(store.load()!.world, draft);
   } finally { store.close(); }
 });
 

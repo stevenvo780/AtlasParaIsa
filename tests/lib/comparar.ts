@@ -9,6 +9,8 @@
  *   de camino difiere del gemelo solo en el último dígito.
  */
 
+import assert from 'node:assert/strict';
+
 export function sinUndefined<T>(valor: T): T {
   if (Array.isArray(valor)) return valor.map(sinUndefined) as unknown as T;
   if (valor instanceof Map) return new Map([...valor].map(([k, v]) => [k, sinUndefined(v)])) as unknown as T;
@@ -39,4 +41,9 @@ export function primeraDiferencia(a: unknown, b: unknown, tolerancia = 1e-9, rut
     return null;
   }
   return Object.is(a, b) ? null : `${ruta}: ${String(a)} ≠ ${String(b)}`;
+}
+
+/** `assert.deepEqual` entre un mundo vivo y otro leído o reconstruido: las claves `undefined` cuentan como ausentes. */
+export function igualesSinUndefined(real: unknown, esperado: unknown, mensaje?: string): void {
+  assert.deepStrictEqual(sinUndefined(real), sinUndefined(esperado), mensaje);
 }

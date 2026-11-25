@@ -8,6 +8,7 @@ import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { DatabaseSync } from 'node:sqlite';
 import { recordChronicleEvent, assertChronicleJournal, MAX_PENDING_CHRONICLE_EVENTS, EMPTY_CHRONICLE_DIGEST } from '../src/world/chronicle-journal.js';
 import { type ConLimpieza, filaInstantanea, laboratorio, sha256 } from './lib/store.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 function emit(world: World): void {
   const event = recordChronicleEvent(world, { kind: 'ecology', actors: [], text: 'Synthetic observation.', cause: 'Test fixture.', source: 'simulation' });
@@ -41,7 +42,7 @@ test('one valid physical tick archives its full burst, beyond the visible120 eve
   assert.equal(world.events.length, 120);
   store.save(world);
   assert.equal(Number(store.db.prepare('SELECT COUNT(*) AS n FROM events').get()!.n), world.eventCounter);
-  assert.deepEqual(store.load()!.world, world);
+  igualesSinUndefined(store.load()!.world, world);
 });
 
 test('a failed commit preserves every queue and database row; clone and retry acknowledge only once', t => {
@@ -66,7 +67,7 @@ test('a failed commit preserves every queue and database row; clone and retry ac
   store.save(draft); const digest = draft.chronicleJournal!.committedDigest;
   assert.equal(draft.chronicleJournal!.pending.length, 0);
   assert.equal(draft.chronicleJournal!.committedThrough, draft.eventCounter);
-  assert.deepEqual(store.load()!.world, draft);
+  igualesSinUndefined(store.load()!.world, draft);
   store.save(draft); assert.equal(draft.chronicleJournal!.committedDigest, digest);
   assert.equal(Number(store.db.prepare('SELECT COUNT(*) n FROM events').get()!.n), draft.eventCounter);
 });
@@ -203,7 +204,7 @@ test('previous preserves all155 same-tick receipts, while cutting the later comm
   const destination = join(directory, 'previous.sqlite'); store.previous(destination);
   const recovered = new Store(destination, { readOnly: true });
   try {
-    assert.deepEqual(recovered.load()!.world, before);
+    igualesSinUndefined(recovered.load()!.world, before);
     assert.equal(Number(recovered.db.prepare('SELECT COUNT(*) n FROM events').get()!.n), before.eventCounter);
   } finally { recovered.close(); }
 });

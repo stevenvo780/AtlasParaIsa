@@ -9,6 +9,7 @@ import { initialDemography } from '../src/world/demography.js';
 import { technologyWorkCost, projectTechnology, settleTechnologyEstate } from '../src/world/technology.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
 import { filaInstantanea, sha256 } from './lib/store.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 function fixture(t: TestContext) {
   const directory=mkdtempSync(join(tmpdir(),'atlas-lifecycle-'));
@@ -66,7 +67,7 @@ test('death is durable, reference authors survive, and restart cannot resurrect 
   store.save(world);setDying(world);stepWorld(world);assertWorld(world);
   assert.ok(!world.people.some(p=>p.id===id));assert.equal(world.demographyDynamics.deaths,1);
   assert.equal(world.retiredLegacy.length,1);store.save(world);assert.equal(world.retiredLegacy.length,0);
-  const restored=store.load()!.world;assert.deepEqual(restored,world);assert.equal(store.loadLegacy(id,world.tick-1),null);
+  const restored=store.load()!.world;igualesSinUndefined(restored,world);assert.equal(store.loadLegacy(id,world.tick-1),null);
   assert.equal(store.loadLegacy(id,world.tick)!.id,id);
   assert.equal(restored.technology.recipes.find(r=>r.id===recipeId)!.inventorId,id);
   assert.equal(projectTechnology(restored).dynamics.massError,0);
@@ -80,7 +81,7 @@ test('revoked transaction preserves pending identities and commits neither death
   assert.throws(()=>store.save(world,[],['revoked-session']),SessionRevoked);
   assert.equal(world.retiredLegacy.length,1);assert.equal(store.loadLegacy(world.retiredLegacy[0]!.id),null);
   assert.deepEqual(store.load()!.world,before);
-  store.save(world);assert.equal(world.retiredLegacy.length,0);assert.deepEqual(store.load()!.world,world);
+  store.save(world);assert.equal(world.retiredLegacy.length,0);igualesSinUndefined(store.load()!.world,world);
 });
 
 test('previous checkpoint prunes future deaths only in its new recovery copy',t=>{
@@ -121,7 +122,7 @@ test('a counter cannot move behind a living descendant, and a refused collision 
 
 test('a deceased parent remains a valid identity, but cannot predate its own child birth',t=>{
   const {store}=fixture(t),world=createWorld(51926),child=makeChild(world);
-  const parent=setDying(world);stepWorld(world);assertWorld(world);store.save(world);assert.deepEqual(store.load()!.world,world);
+  const parent=setDying(world);stepWorld(world);assertWorld(world);store.save(world);igualesSinUndefined(store.load()!.world,world);
   const record=world.legacy.find(p=>p.id===parent.id)!;record.diedAt=child.bornAt-1;
   assert.throws(()=>assertWorld(world));
   const body=JSON.stringify(record),digest=sha256(body);

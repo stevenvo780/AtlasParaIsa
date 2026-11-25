@@ -8,6 +8,7 @@ import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { residentTileReader, TileStore, type SharedTerrain } from '../src/world/soa/terreno.js';
 import { SOA_COORDINATE_LIMIT } from '../src/world/soa/region.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 after(async () => {
   closePolicyGpuBatchers();
@@ -153,7 +154,7 @@ test('rombo máximo, empates, -0, peces/depredadores y memoria caducada conserva
       plain.tick++; resident.tick++; stepAnimals(plain); stepAnimals(resident);
       assert.deepEqual(resident.animals, plain.animals, `paso ${tick}`);
       assert.deepEqual(resident.animalDynamics, plain.animalDynamics);
-      assert.deepEqual(resident.tiles.map(t => ({ ...t })), plain.tiles);
+      igualesSinUndefined(resident.tiles.map(t => ({ ...t })), plain.tiles);
     }
   } finally { store.releaseParallelObjects(); }
 });
@@ -184,7 +185,7 @@ test('microbenchmark stepAnimals: 20480 teselas / 4096 animales, plano vs getter
     for (const candidate of [fallback, fast]) {
       assert.deepEqual(candidate.animals, plain.animals);
       assert.deepEqual(candidate.animalDynamics, plain.animalDynamics);
-      assert.deepEqual(candidate.tiles.map(t => ({ ...t })), plain.tiles);
+      igualesSinUndefined(candidate.tiles.map(t => ({ ...t })), plain.tiles);
     }
     const median = (xs: number[]): number => { xs.sort((a, b) => a - b); return (xs[31]! + xs[32]!) / 2; };
     console.log(JSON.stringify({ benchmark: 'stepAnimals', tiles: fast.tiles.length, animals: fast.animals.length,

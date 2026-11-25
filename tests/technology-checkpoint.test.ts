@@ -14,6 +14,7 @@ import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology,
 import type { MaterialBatch, TechnologyState } from '../src/shared/technology.js';
 import { filaInstantanea } from './lib/store.js';
 import { proyectoInvestigacion } from './lib/escenas.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }],
   steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
@@ -170,7 +171,7 @@ test('old V5 loads capture current physical stock without certifying or changing
   delete world.technology.checkpoint; store.save(world); const before = structuredClone(world);
   const loaded = store.load()!.world, cp = loaded.technology.checkpoint!;
   assert.equal(cp.reason, 'migration'); assert.equal(cp.tick, world.tick); assert.equal(cp.executionCounter, world.technology.executionCounter);
-  assert.deepEqual(withoutCheckpoint(loaded), before); assert.equal(world.technology.checkpoint, undefined);
+  igualesSinUndefined(withoutCheckpoint(loaded), before); assert.equal(world.technology.checkpoint, undefined);
   assert.equal(report(loaded).window.complete, false); assert.equal(report(loaded).evidence.executed, 0);
   const raw = filaInstantanea(store);
   assert.equal((decodeSnapshot(raw.body) as World).technology.checkpoint, undefined, 'read does not rewrite the source snapshot');
@@ -229,13 +230,13 @@ test('SQLite rollback, snapshot roundtrip, reload, and previous recovery preserv
   stepWorld(draft); assert.equal(draft.technology.checkpoint!.reason, 'roster-change');
   const decoded = decodeSnapshot(encodeSnapshot(draft));
   assert.deepEqual(takeSnapshotParams(decoded), paramsOf(draft), 'the codec preserves the complete declared parameter mode');
-  assert.deepEqual(decoded, { ...draft, retiredChunks: [], retiredLegacy: [] });
+  igualesSinUndefined(decoded, { ...draft, retiredChunks: [], retiredLegacy: [] });
   store.db.exec("CREATE TEMP TRIGGER reject_snapshot BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT, 'checkpoint rollback probe'); END");
   assert.throws(() => store.save(draft), /checkpoint rollback probe/);
   assert.deepEqual(store.load()!.world, committed); assert.deepEqual(world, committed);
   assert.equal(draft.retiredLegacy.length, 1); assert.equal(store.loadLegacy(dying.id), null);
   store.db.exec('DROP TRIGGER reject_snapshot'); store.save(draft);
-  assert.deepEqual(store.load()!.world, draft); assert.ok(store.loadLegacy(dying.id));
+  igualesSinUndefined(store.load()!.world, draft); assert.ok(store.loadLegacy(dying.id));
   const path = join(directory, 'previous.sqlite'); store.previous(path); const previous = new Store(path);
   try { assert.deepEqual(previous.load()!.world.technology.checkpoint, committed.technology.checkpoint); assert.equal(previous.loadLegacy(dying.id), null); }
   finally { previous.close(); }

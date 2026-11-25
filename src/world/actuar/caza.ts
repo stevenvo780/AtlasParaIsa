@@ -74,9 +74,9 @@ export function organicLot(world: World, person: Person, mass: number, recipe: E
 }
 
 export function tendNearbyAnimal(world: World, person: Person): boolean {
-  if (person.action !== 'forage' && person.action !== 'cooperate' && person.action !== 'share') { delete person.tending; return false; }
+  if (person.action !== 'forage' && person.action !== 'cooperate' && person.action !== 'share') { person.tending = undefined; return false; }
   const animal = tendingAnimal(world, person);
-  if (!animal) { delete person.tending; return false; }
+  if (!animal) { person.tending = undefined; return false; }
   if (person.tending?.id !== animal.id) person.tending = { id: animal.id, work: 0 };
   exertBody(person, workEffort(person));
   person.tending.work++;
@@ -95,7 +95,7 @@ export function tendNearbyAnimal(world: World, person: Person): boolean {
   assimilateFood(person, food - stored, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 });
   organicLot(world, person, fiber, TEND_ORGANIC); count(world, 'foodHarvested', food);
   outcome(world, person, person.action, 0.14, true);
-  delete person.tending; person.work = 0; person.decisionAt = world.tick + 1;
+  person.tending = undefined; person.work = 0; person.decisionAt = world.tick + 1;
   return true;
 }
 
@@ -103,7 +103,7 @@ export function tendNearbyAnimal(world: World, person: Person): boolean {
 export function trackHuntingPrey(world: World, person: Person): void {
   const prey = trackedPrey(world.animals, person);
   if (prey) person.target = { x: prey.x, y: prey.y };
-  else { delete person.huntingPreyId; person.work = 0; person.decisionAt = world.tick; }
+  else { person.huntingPreyId = undefined; person.work = 0; person.decisionAt = world.tick; }
 }
 
 

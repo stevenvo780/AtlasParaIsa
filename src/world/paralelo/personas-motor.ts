@@ -164,10 +164,15 @@ export class EstadoPersonasCompartido {
    * tabla hash y limpia las banderas de celda. */
   #paginar(tiles: readonly { x: number; y: number }[], personas: number, validar: boolean, escena?: EscenaPersonas) {
     const paginaDe = new Map<number, number>(), pagX: number[] = [], pagY: number[] = [];
+    // Las teselas llegan en bloques de una misma página: si la clave es la de la tesela anterior ya
+    // está en el mapa y `has` daría true (mismo orden de primera aparición, sin la búsqueda).
+    let ultima = NaN;
     for (let i = 0; i < tiles.length; i++) {
       const tile = tiles[i]!;
       if (validar && (!Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y))) throw new TypeError('Tesela con coordenadas no enteras.');
       const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
+      if (clave === ultima) continue;
+      ultima = clave;
       if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
     }
     const paginas = pagX.length, capHash = siguientePotencia(Math.max(2, paginas * 2));
@@ -432,9 +437,13 @@ export class EstadoPersonasCompartido {
         const paginado = this.#paginar(tiles, personas.length, false);
         paginas = paginado.paginas; vista = paginado.vista;
         const lector = token ? residentTileReader(tiles) : undefined;
+        // Misma página que la tesela anterior ⇒ mismo slot (el mapa no cambia en este recorrido).
+        let ultimaClave = NaN, ultimoSlot = 0;
         for (let i = 0; i < rawTiles.length; i++) {
           const tile = rawTiles[i]!, x = tile.x, y = tile.y;
-          const slot = paginado.paginaDe.get(clavePagina(x >> 4, y >> 4))!;
+          const clave = clavePagina(x >> 4, y >> 4);
+          if (clave !== ultimaClave) { ultimaClave = clave; ultimoSlot = paginado.paginaDe.get(clave)!; }
+          const slot = ultimoSlot;
           const celda = slot * CELDAS_POR_PAGINA + ((y & 15) << 4) + (x & 15);
           const residente = lector ? lector.cellAt(x, y) : -1;
           const caminable = residente >= 0 ? lector!.terrainCode(residente) !== lector!.TERRAIN_WATER : tile.terrain !== 'water';

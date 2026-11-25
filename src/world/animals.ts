@@ -311,6 +311,11 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
     if (count) {
       if (tile.species !== count.species) tile.species = count.species;
+    } else if (inPlaceRev === undefined) {
+      // Sin propiedad residente (un hilo): `delete` pasaba la tesela a modo diccionario en V8 y cada
+      // lectura posterior de cualquier campo era una búsqueda en tabla hash. `undefined` se lee igual
+      // (`tile.species` sigue siendo `undefined`) y el digesto canónico omite las claves `undefined`.
+      if (tile.species !== undefined) tile.species = undefined;
     } else if (Object.hasOwn(tile, 'species')) {
       delete tile.species;
     }

@@ -157,7 +157,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // Con energía agotada o fatiga saturada y privación severa, descansar ya no recupera energía (`restBody`), pero
   // `move()` sigue desplazándose saturando energía en 0: impedir buscar/elegir alimento o agua bloqueaba en bucle.
   const desperateSubsistence = vinculoEncuentro > 0 && (person.hunger > 0.85 || person.thirst > 0.85) && (person.energy < 0.01 || person.fatigue > 0.98);
-  if (memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick >= TICKS_PER_DAY) delete person.conflictMemory;
+  if (memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick >= TICKS_PER_DAY) person.conflictMemory = undefined;
   const disputada = memoriaDisputa > 0 ? person.conflictMemory : undefined;
   const recelo = (tile: Point) => disputada && distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
   // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar. Con
@@ -326,7 +326,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (umbralMemoria < 1) {
     if (water) person.waterMemory = { x: water.x, y: water.y };
     const recuerdo = person.waterMemory;
-    if (recuerdo && distance(person, recuerdo) <= RADIUS && waterAvailable(world, recuerdo) <= 0.005) delete person.waterMemory;
+    if (recuerdo && distance(person, recuerdo) <= RADIUS && waterAvailable(world, recuerdo) <= 0.005) person.waterMemory = undefined;
     else if (recuerdo && !water && !localWater && distance(person, recuerdo) >= 0.5) {
       const here = tileIn(person.x, person.y)!;
       const hereCell = soaCell(fast, person.x, person.y, here);
@@ -797,7 +797,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     && !(params.quimica.emergente && selected.action === 'hunt' && huntPlan && person.huntingPreyId === huntPlan.victim.id)) person.work = 0;
   if (params.quimica.emergente) {
     if (selected.action === 'hunt' && huntPlan) person.huntingPreyId = huntPlan.victim.id;
-    else delete person.huntingPreyId;
+    else person.huntingPreyId = undefined;
   }
   person.action = selected.action;
   if (selected.action !== 'drink') delete person.technology.waterPreparation;

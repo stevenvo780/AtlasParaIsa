@@ -47,15 +47,17 @@ export function reproduce(world: World): void {
       blueprintId: null, lastInvention: world.tick,
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
-    delete child.home;
-    delete child.partnerMemory;
-    delete child.agreement;
-    delete child.compounds;
+    // `undefined` en vez de `delete`: el campo se lee igual (ausente) y el objeto conserva su forma
+    // compartida en V8; con `delete` cada cría nacía en modo diccionario y cada lectura era una búsqueda.
+    child.home = undefined;
+    child.partnerMemory = undefined;
+    child.agreement = undefined;
+    child.compounds = undefined;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
-    delete (child as unknown as Record<string, unknown>).vocacion;
+    if ((child as unknown as Record<string, unknown>).vocacion !== undefined) (child as unknown as Record<string, unknown>).vocacion = undefined;
     // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.
-    delete child.policy;
-    delete child.policyPlasticity;
+    child.policy = undefined;
+    child.policyPlasticity = undefined;
     if (paramsOf(world).conducta.politicaPeso > 0) {
       const parentPolicyA = a.policy ?? founderPolicy(world.seed, a.id);
       const parentPolicyB = b.policy ?? founderPolicy(world.seed, b.id);

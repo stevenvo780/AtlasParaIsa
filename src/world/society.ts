@@ -454,7 +454,7 @@ export function settlementOpportunity(world: World, person: Person): { target: {
   };
   if (person.home && distance(person,person.home)<=7) {
     person.home.quality = viable(person.home); person.home.observedAt = world.tick;
-    if (person.home.quality < 0.12) delete person.home;
+    if (person.home.quality < 0.12) person.home = undefined;
   }
   const nearby = filtrarCerca(world.places, person, 7, p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))
     .sort((a,b)=>b.quality-a.quality || distance(person,a.place)-distance(person,b.place));
@@ -913,7 +913,7 @@ export function settleAgreement(world: World, person: Person): void {
   const age = world.tick - agreement.tick;
   const delivered = agreement.level - person[agreement.metric] >= 0.08;
   if (delivered) {
-    delete person.agreement;
+    person.agreement = undefined;
     if (other && distance(person, agreement) <= 2) observeAgreementOutcome(world, person, other, 1);
     return;
   }
@@ -921,7 +921,7 @@ export function settleAgreement(world: World, person: Person): void {
   const source = tileAt(world, agreement), water = agreement.metric === 'thirst';
   const stock = water ? waterAvailable(world, agreement) : Math.max(source?.food ?? 0, source?.fauna ?? 0);
   if (age < PLAZO_ACUERDO && stock >= (water ? 0.012 : 0.006)) return;
-  delete person.agreement;
+  person.agreement = undefined;
   if (!other) return;
   // La espera costó tiempo y no dio nada: evidencia en contra de quien pidió esperar y de lo acordado.
   observeAgreementOutcome(world, person, other, 0);

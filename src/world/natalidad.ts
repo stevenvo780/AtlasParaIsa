@@ -39,7 +39,7 @@ import { SHARE_AMOUNT } from './family.js';
 import { HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD } from './ecologia-constantes.js';
 import { DEFAULT_MUTATION_RATE, inheritGenome, type Genome } from './genetics.js';
 import type { Violacion } from './invariantes.js';
-import { abortar, basalJ, concebir, gestar, masaLote, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
+import { abortar, basalJ, concebir, costeGestacionJ, gestar, masaLote, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
 import type { Cuerpo, VistaCuerpo } from './materia/tipos.js';
 import { ctxMateriaDe, ctxSi, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
 import { COLUMNAS_CEREBRO, Clase, GENOMA_ANCHO, REF_NULA, TipoIntento, slotDe } from './motor/contratos.js';
@@ -237,11 +237,7 @@ export function balanceAtomos(c: CtxLeyMateria): Balance {
     unidad: 'J',
     reserva: p => reservaJ(c, cuerpoDe(p)),
     basal: (p, dt) => basalJ(c, cuerpoDe(p), dt),
-    // m0 · Q_tejido / η: la energía que queda en los enlaces de la cría es η de la que la gestante quema o cede.
-    coste(p) {
-      const cuerpo = cuerpoDe(p), tejido = c.materia.vista(cuerpo.tejido);
-      return tejido.masa > 0 ? plantillaDe(c, cuerpo).m0 * (tejido.energia / tejido.masa) / ETA : Infinity;
-    },
+    coste: p => costeGestacionJ(c, cuerpoDe(p)),
     salud: p => vistaCuerpo(c, cuerpoDe(p), vista).salud,
     madurez(p) {
       const cuerpo = cuerpoDe(p);

@@ -333,6 +333,18 @@ export function basalJ(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
   return Math.max(mantenimiento, FRACCION_EVAPORATIVA * mantenimiento + frio);
 }
 
+/** Máximo de J que una gestación completa puede retirar de la reserva. Las entradas que solo están en el tubo se
+ * transfieren como materia ya formada: su energía de oxidación no se cobra otra vez. */
+export function costeGestacionJ(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const p = plantillaDe(c, cuerpo), d = datosDe(c, p);
+  let jPorUnidad = Math.max(0, p.sintesis.dH) / ETA;
+  for (const parte of p.sintesis.entradas) {
+    const sustancia = c.quimica.sustancia(parte.id);
+    if (limpio(sustancia)) jPorUnidad += parte.nu * sustancia.prop.qOxidacion;
+  }
+  return p.m0 / (d.masaMg * MG) * jPorUnidad;
+}
+
 /** Paga `julios` de trabajo quemando reserva con O₂ (`quemar`, nunca proteína ni NH₃). Devuelve los J pagados
  * (menos si la reserva no alcanza): quien llama hace solo la parte del trabajo que se pagó. El calor queda en el cuerpo
  * y el termostato lo saca en su siguiente paso. Lo que limita un esfuerzo grande es el O₂ de la reserva (la energía). */

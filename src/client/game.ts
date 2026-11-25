@@ -13,9 +13,8 @@ import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
 import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
-import { DvrPlayer, type DvrFrameInfo, type DvrState } from './dvr-player.js';
+import { DvrPlayer, PerfilCinta, crearRedCinta, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
-import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
 import { firmaMotor, luzMotor, pedirTelemetria, renderPanelMotor, vistaMotor, type LuzSalud, type TelemetriaRecibida } from './panel-motor.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
@@ -192,13 +191,6 @@ function enterWorld(flags: SessionFlags = {}): void {
 /* ------------------------------------------------------------------ */
 /* V21 — cinta DVR: el mundo se reproduce desde `/api/tape/*` a 60 fps  */
 /* ------------------------------------------------------------------ */
-async function tapeJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: signal ?? AbortSignal.timeout(10_000) });
-  if (response.status === 401 || response.status === 403) { loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'); throw new Error('Sesión terminada.'); }
-  if (!response.ok) throw new Error('La cinta del mundo no está disponible todavía.');
-  return await response.json() as T;
-}
-
 /** Con la cinta, el HUD pesado se rehace a ≈ 6 Hz (y en cada salto); el paisaje recibe todos los fotogramas. */
 function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   const now = performance.now();
@@ -218,9 +210,10 @@ function startTape(): void {
     togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
     seek: tick => void dvr?.seek(tick), jumpLive: () => void dvr?.jumpToLiveEdge(),
   });
+  const red = crearRedCinta({ alSesionTerminada: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });
   const player = new DvrPlayer({
-    fetchMeta: () => tapeJson<TapeMetaResponse>('/api/tape/meta'),
-    fetchChunk: request => tapeJson<TapeChunkResponse>(`/api/tape/chunk?${new URLSearchParams({ fromTick: String(request.fromTick), count: String(request.count), encoding: 'delta', ...(request.viewport ? Object.fromEntries(Object.entries(request.viewport).map(([key, value]) => [key, String(value)])) : {}) })}`, request.signal),
+    fetchMeta: red.fetchMeta, fetchChunk: red.fetchChunk, marcadores: new PerfilCinta({ red: red.marcadores }),
+    onAviso: texto => message(texto), onMarca: marca => message(marca.texto),
     onFrame: receiveTapeFrame,
     onStateChange: state => { dvrEstado = state; dvrBar?.update(state); },
   });
@@ -231,7 +224,6 @@ function startTape(): void {
       dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); return;
     }
     landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
-    if (player.observerOnly && !observerOnly) { observerOnly = true; applyObserverOnly(document, true); }
     container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
     const loop = (now: number): void => { player.advance(now); dvrRaf = requestAnimationFrame(loop); };
     dvrRaf = requestAnimationFrame(loop);
@@ -1092,6 +1084,7 @@ function renderStatsContent(): void {
 }
 document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
 window.addEventListener('pagehide', saveVisit);
+window.addEventListener('pagehide', () => dvr?.guardarAlSalir());
 document.addEventListener('visibilitychange', () => {
   soundscape.setHidden(document.hidden);
   if (document.hidden) saveVisit();

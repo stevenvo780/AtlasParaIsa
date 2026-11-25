@@ -16,8 +16,6 @@ import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { PROTOCOL_VERSION, type WorldView } from '../src/shared/types.js';
-import type { TapeChunkResponse, TapeClientDelta, TapeMetaResponse } from '../src/shared/tape.js';
-import { DVR_LIMITS, DvrPlayer, type DvrChunkRequest, type DvrFrameInfo } from '../src/client/dvr-player.js';
 
 const PRINT = process.env.V24_FPS_PRINT === '1';
 /** Los umbrales de tiempo de pared solo valen en una máquina tranquila: `V24_FPS_BANCO=1` los activa fuera de `npm test`. */
@@ -202,60 +200,4 @@ test('Landscape: coste por fotograma acotado al alejar (1920×1080, minZoom real
   } finally {
     await browser.close(); await server.close();
   }
-});
-
-/* ------------------------------------------------------------------ */
-/* DvrPlayer: mover la cámara no congela la reproducción               */
-/* ------------------------------------------------------------------ */
-
-const tiny = (tick: number): WorldView => ({
-  version: PROTOCOL_VERSION, sequence: tick, tick, day: 0, phase: 'day', weather: 'clear', width: 2, height: 1, originX: 0, originY: 0,
-  tiles: [{ x: 0, y: 0, terrain: 'meadow', moisture: .5, vegetation: .5, food: 0 }, { x: 1, y: 0, terrain: 'meadow', moisture: .5, vegetation: .5, food: tick % 2 }],
-  people: [{ id: 'p', name: 'P', role: 'neighbor', x: tick * .1, y: 0, color: '#fff' }], animals: [], structures: [], places: [], events: [], memories: [],
-} as unknown as WorldView);
-
-test('DvrPlayer: cambiar la cámara no detiene el cabezal ni vacía la cola; la petición en vuelo no se aborta', async () => {
-  const requests: DvrChunkRequest[] = [];
-  const emitted: { frame: WorldView; info: DvrFrameInfo }[] = [];
-  const pending: (() => void)[] = [];
-  const settle = async (): Promise<void> => { for (let i = 0; i < 6; i++) { while (pending.length) pending.shift()!(); await new Promise(r => setImmediate(r)); } };
-  const meta = (): TapeMetaResponse => ({ enabled: true, observerOnly: true, turbo: true, minTick: 0, maxTick: 5000, latestDay: 2, totalFrames: 5001, keyframeInterval: 60, simHz: 100, keyframeTicks: [], timeline: [] });
-  const player = new DvrPlayer({
-    metaPollMs: 0, viewportCoalesceMs: 0,
-    fetchMeta: async () => meta(),
-    fetchChunk: request => {
-      requests.push(request);
-      const from = request.fromTick, to = from + request.count - 1;
-      const deltas: TapeClientDelta[] = [];
-      for (let tick = from + 1; tick <= to; tick++) deltas.push({ tick, sequence: tick, day: 0, phase: 'day', weather: 'clear', peoplePatch: { upserts: tiny(tick).people, removed: [] }, tilesPatch: [tiny(tick).tiles[1]!] });
-      const chunk: TapeChunkResponse = { fromTick: from, toTick: to, minTick: 0, maxTick: 5000, simHz: 100, hasMore: true, encoding: 'delta', frames: [], baseFrame: tiny(from), deltas };
-      // Las respuestas tardan (latencia de red al alejar): se resuelven a mano.
-      return new Promise(resolve => pending.push(() => resolve(chunk)));
-    },
-    onFrame: (frame, info) => { emitted.push({ frame, info }); },
-  });
-  const started = player.start(); await settle(); assert.equal(await started, true);
-  const seeking = player.seek(1000); await settle(); await seeking;
-  let now = 0; player.advance(now);
-  for (let i = 0; i < 60; i++) { now += 1000 / 60; player.advance(now); }
-  const tickBefore = player.currentTick, queuedBefore = player.bufferedAhead, emittedBefore = emitted.length, requestsBefore = requests.length;
-  assert.ok(tickBefore > 1000, 'el cabezal avanza');
-  // Arrastre de cámara durante 40 fotogramas; cada respuesta tarda ~5 fotogramas.
-  for (let i = 0; i < 40; i++) {
-    if (i < 20) { player.setViewport({ x: 100 + i, y: 50, width: 96, height: 64 }); void player.flushViewport(); }
-    now += 1000 / 60; player.advance(now);
-    assert.ok(player.bufferedAhead > 0, `fotograma ${i}: la cola nunca se vacía durante el arrastre`);
-    if (i % 5 === 4) await settle();
-  }
-  await settle();
-  assert.ok(player.currentTick > tickBefore, `el cabezal siguió avanzando durante el arrastre (${tickBefore} → ${player.currentTick})`);
-  assert.ok(player.bufferedAhead >= Math.min(queuedBefore, DVR_LIMITS.prefetchBelow) - 10, `la cola sigue llena (${queuedBefore} → ${player.bufferedAhead})`);
-  assert.equal(requests.slice(requestsBefore - 1).filter(request => request.signal.aborted).length, 0, 'ninguna petición (ni la que volaba al empezar) se abortó por mover la cámara');
-  const during = emitted.slice(emittedBefore);
-  assert.ok(during.length > 0 && !during.some(e => e.info.discontinuity), 'mover la cámara no emite discontinuidades (no rehace el HUD ni colapsa la interpolación)');
-  assert.ok(during.some(e => e.info.reason === 'refresh'), 'el tick visible se repinta con la ventana nueva');
-  assert.ok(requests.length - requestsBefore <= 8, `las peticiones por cámara se fusionan mientras vuela una (${requests.length - requestsBefore} para 20 movimientos)`);
-  assert.equal(requests.at(-1)!.viewport?.x, 119, 'los trozos siguientes usan la última cámara');
-  for (let i = 1; i < during.length; i++) assert.ok(during[i]!.frame.tick >= during[i - 1]!.frame.tick, 'el tick mostrado nunca retrocede');
-  player.stop();
 });

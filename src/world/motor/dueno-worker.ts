@@ -15,6 +15,7 @@ import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decisi
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { transferEstate } from '../demografia/morir.js';
 import { advancePopulation } from '../lineage.js';
+import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { crearServicioQuimico } from '../materia/servicio.js';
 import type { Libro } from '../materia/tipos.js';
 import { deathContext } from '../mundo/crear.js';
@@ -32,7 +33,7 @@ import type { Hilo } from './contratos.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
-export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5 } as const;
+export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6 } as const;
 
 /** Lo que cada worker recibe al nacer (por `workerData`: los SAB se comparten, lo demás se copia). */
 export interface DatosDueno {
@@ -172,6 +173,9 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     case TRAMO.reunir:
       // Instantánea: cada dueño manda su parte del mundo; el coordinador la arma tras la barrera.
       if (d.hilo !== 0) d.avisarCoordinador([AVISO.parte, d.hilo], m);
+      break;
+    case TRAMO.cerrar:
+      cerrarMateriaGpu(m);
       break;
     default: throw new Error(`Tramo de dueño desconocido: ${tramo}.`);
   }

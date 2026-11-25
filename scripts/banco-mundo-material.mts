@@ -2,8 +2,8 @@
  * Banco del paso material (carril W1c): huella para la identidad de los arreglos, perfil por fases, velocidad con hilos,
  * error de la cadencia y proyección. Corre la sombra material sola (sin el mundo escalar al lado), como el punto (f) del
  * laboratorio, con el mismo tiempo (luz media de la ventana y lluvia por bloques de 600 ticks).
- *   huella    --pasos 600 [--lado 64] [--cada 10] [--semilla 1] --salida f   una línea por paso: libro, vistas y lotes (sha1)
- *   comparar  a b                                                          primera diferencia entre dos huellas
+ *   huella    --pasos 600 [--lado 64] [--cada 10] [--semilla 1] [--gpu 0] --salida f
+ *   comparar  a b [--estadistica]                                           primera diferencia o medias y dispersión
  *   fases     [--pasos 60] [--lado 64] [--cada 10]                          ms por fase y reacciones evaluadas/aplicadas
  *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10] [--reparto modulo|coste]   µs por tesela y tick
  *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] [--mapa 1] [--grupo vida|cinetica|intercambio] --salida dir
@@ -22,6 +22,9 @@ import { createWorld, phaseAt } from '../src/world/mundo/crear.js';
 import { activate } from '../src/world/spatial.js';
 import { LUZ_CREPSCULO } from '../src/world/ecologia-constantes.js';
 import { TICKS_PER_DAY } from '../src/world/mundo/tipos.js';
+import { CanalCompartido } from '../src/world/gpu/canal.js';
+import { crearPasoMateriaGpu, prepararMateriaGpu } from '../src/world/gpu/materia-gpu.js';
+import { quimicaSuelosEnTarjeta } from '../src/world/materia/ley-mundo.js';
 import { crearServicioQuimico, serializarSustancias } from '../src/world/materia/servicio.js';
 import { MundoMaterial, totalesVacios, CUENTA, DT_LLUVIA, type DescriptorMundo, type Forzamiento } from '../src/world/materia/mundo.js';
 import { cuentaIntegrador, pasoLote } from '../src/world/materia/paso.js';
@@ -84,26 +87,74 @@ function lotes(m: MundoMaterial): string {
 
 function huella(): void {
   const pasos = +opt('pasos', '600'), lado = +opt('lado', '64'), cada = +opt('cada', '10'), semilla = +opt('semilla', '1');
+  const gpu = opt('gpu', ''), estadistica = argv.includes('--estadistica');
   const m = MundoMaterial.levantar(teselas(semilla, lado), crearServicioQuimico({ modo: 'inmediato' }), { semilla });
   const tot = totalesVacios(), clima = tiempo(semilla), filas: string[] = [];
   m.plegar(tot);
-  let ms = 0;
-  for (let k = 0, t = 0; k < pasos; k++, t += cada) {
-    const t0 = performance.now();
-    m.prepararPaso(); m.pasar(clima(t, cada));
-    ms += performance.now() - t0;
-    const libro = sha(m.libro.fuentes, m.libro.sumideros, m.libro.enVuelo, m.cuentas);
-    m.plegar(tot);
-    filas.push(`${k} libro ${libro} vistas ${sha(vistas(m))} lotes ${lotes(m)}`);
+  let ms = 0, tripletas = 0;
+  const canal = gpu === '' ? null : new CanalCompartido(Number(gpu));
+  const gpuPaso = canal && crearPasoMateriaGpu(canal);
+  const paginas = Array.from({ length: m.np }, (_, p) => p);
+  try {
+    if (canal) prepararMateriaGpu(canal, 30_000);
+    for (let k = 0, t = 0; k < pasos; k++, t += cada) {
+      const t0 = performance.now();
+      m.prepararPaso();
+      const f = clima(t, cada);
+      if (gpuPaso) {
+        m.arenaLab.barrera();
+        for (const p of paginas) m.pasarAntes(p, f);
+        tripletas += quimicaSuelosEnTarjeta(m, gpuPaso, paginas, f.dt, t);
+        for (const p of paginas) m.pasarDespues(p, f);
+        m.recibir();
+      } else m.pasar(f);
+      ms += performance.now() - t0;
+      const libro = sha(m.libro.fuentes, m.libro.sumideros, m.libro.enVuelo, m.cuentas);
+      m.plegar(tot);
+      filas.push(`${k} libro ${libro} vistas ${sha(vistas(m))} lotes ${lotes(m)}`);
+    }
+  } finally {
+    gpuPaso?.cerrar();
+    canal?.cerrar();
   }
   const s = m.saldo(), exacto = s.every((x, k) => x === tot.esperado[k]);
   filas.push(`fin saldo ${s.join(',')} exacto ${exacto}`);
+  if (estadistica) {
+    const v = vistas(m);
+    const campos = ['agua', 'humedad', 'vegetacion', 'comida', 'madera', 'piedra'];
+    const resumen = Object.fromEntries(campos.map((campo, j) => {
+      let suma = 0, cuadrados = 0;
+      for (let i = j; i < v.length; i += campos.length) {
+        suma += v[i]!;
+        cuadrados += v[i]! ** 2;
+      }
+      const media = suma / m.n;
+      return [campo, { media, desviacion: Math.sqrt(Math.max(0, cuadrados / m.n - media ** 2)) }];
+    }));
+    filas.push(`estadistica ${JSON.stringify({ exacto, tripletas, msPorPaso: ms / pasos, campos: resumen })}`);
+  }
   writeFileSync(opt('salida', '/tmp/atlas-v23-wperf/huella.txt'), filas.join('\n') + '\n');
   console.log(`huella de ${pasos} pasos (${m.n} teselas): ${(ms / pasos).toFixed(1)} ms por paso, libro exacto ${exacto}; ${carga()}`);
+  if (!exacto) process.exitCode = 2;
 }
 
 function comparar(): void {
   const [a, b] = [argv[1]!, argv[2]!].map((f) => readFileSync(f, 'utf8').trim().split('\n'));
+  if (argv.includes('--estadistica')) {
+    const leer = (filas: string[]): { exacto: boolean; tripletas: number; msPorPaso: number; campos: Record<string, { media: number; desviacion: number }> } => {
+      const fila = filas.find(l => l.startsWith('estadistica '));
+      if (!fila) throw new Error('La huella requiere --estadistica.');
+      return JSON.parse(fila.slice('estadistica '.length));
+    };
+    const cpu = leer(a!), tarjeta = leer(b!);
+    for (const [campo, x] of Object.entries(cpu.campos)) {
+      const y = tarjeta.campos[campo]!;
+      console.log(`${campo}: media ${x.media.toFixed(7)} / ${y.media.toFixed(7)}, Δ ${(y.media - x.media).toExponential(3)}; σ ${x.desviacion.toFixed(7)} / ${y.desviacion.toFixed(7)}`);
+    }
+    console.log(`ms/paso ${cpu.msPorPaso.toFixed(2)} / ${tarjeta.msPorPaso.toFixed(2)}; libro exacto ${cpu.exacto} / ${tarjeta.exacto}; tripletas GPU ${tarjeta.tripletas}`);
+    if (!cpu.exacto || !tarjeta.exacto || tarjeta.tripletas === 0) process.exitCode = 2;
+    return;
+  }
   const n = Math.max(a!.length, b!.length);
   for (let i = 0; i < n; i++) if (a![i] !== b![i]) {
     console.log(`DIFIEREN en la línea ${i + 1} de ${n}:\n  ${a![i]}\n  ${b![i]}`);

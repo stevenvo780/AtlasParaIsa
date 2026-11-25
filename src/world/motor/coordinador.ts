@@ -17,6 +17,7 @@ import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
+import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
 import { addEvent } from '../mundo/crear.js';
@@ -113,6 +114,7 @@ class MotorUnico implements Motor {
   }
 
   cargar(i: Instantanea, epoca: number): void {
+    cerrarMateriaGpu(this.#mundo);
     this.#mundo = i.world;
     this.#epoca = epoca;
     const activo = leyesActivas(paramsOf(i.world).v23).length > 0 || this.#enlace !== null;
@@ -137,7 +139,10 @@ class MotorUnico implements Motor {
 
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
 
-  cerrar(): Promise<void> { return Promise.resolve(); }
+  cerrar(): Promise<void> {
+    cerrarMateriaGpu(this.#mundo);
+    return Promise.resolve();
+  }
 }
 
 // ── Varios dueños ────────────────────────────────────────────────────────────────────────────────────────
@@ -182,8 +187,7 @@ class MotorDuenos implements Motor {
 
   #arrancar(materia: MateriaCheckpoint | null): void {
     const m = this.#mundo, hilos = this.#hilos, params = paramsOf(m), verificar = this.#config.verificar || params.motor.depuracion;
-    void this.#piscina?.cerrar().catch(() => {});
-    this.#piscina = null;
+    void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
@@ -562,10 +566,18 @@ class MotorDuenos implements Motor {
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
 
   async cerrar(): Promise<void> {
-    const piscina = this.#piscina;
-    this.#piscina = null;
     for (const resolvedores of this.#detalles.values()) for (const resolver of resolvedores) resolver(null);
     this.#detalles.clear();
-    await piscina?.cerrar();
+    await this.#cerrarPiscina();
+  }
+
+  async #cerrarPiscina(): Promise<void> {
+    const piscina = this.#piscina;
+    if (!piscina) return;
+    this.#piscina = null;
+    try {
+      if (this.#fatal || !paramsOf(this.#d.mundo).v23.materiaGpu) cerrarMateriaGpu(this.#d.mundo);
+      else piscina.ejecutar(TRAMO.cerrar);
+    } finally { await piscina.cerrar(); }
   }
 }

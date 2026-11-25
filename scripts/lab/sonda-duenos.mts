@@ -1,5 +1,5 @@
 /** Enciende el motor real de dueños y mide los invariantes en barrera.
- * Uso: node --import tsx scripts/lab/sonda-duenos.mts <semilla> <hilos> <ticks> [duenos|rebalanceo]
+ * Uso: node --import tsx scripts/lab/sonda-duenos.mts <semilla> <hilos> <ticks> [duenos|rebalanceo|materiaGpu [tarjeta]]
  */
 import assert from 'node:assert/strict';
 import { createWorld, TICKS_PER_DAY } from '../../src/world/index.js';
@@ -7,6 +7,7 @@ import { NE } from '../../src/shared/naturaleza.js';
 import { comprobarLeyes, crearComprobador } from '../../src/world/invariantes.js';
 import { decodificarPaginas, saldoEnVuelo } from '../../src/world/materia/checkpoint.js';
 import { balancePares, comprobarConservacion } from '../../src/world/materia/libro.js';
+import { diagnosticoMateriaGpu } from '../../src/world/materia/ley-mundo.js';
 import { enlazarCtx } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
 import { crearMotor } from '../../src/world/motor/coordinador.js';
@@ -16,13 +17,15 @@ import { paramsDeEncender } from './encender.mjs';
 
 const [semilla, hilos, pasos] = process.argv.slice(2, 5).map(Number);
 const hasta = process.argv[5] ?? 'duenos';
-assert.ok(hasta === 'duenos' || hasta === 'rebalanceo');
+assert.ok(hasta === 'duenos' || hasta === 'rebalanceo' || hasta === 'materiaGpu');
 assert.ok(Number.isSafeInteger(semilla) && semilla >= 0 && Number.isSafeInteger(hilos) && hilos > 0 && Number.isSafeInteger(pasos) && pasos > 0);
+const gpu = process.argv[6] === undefined ? [] : [Number(process.argv[6])];
+assert.ok(!gpu.length || hasta === 'materiaGpu' && hilos === 1 && Number.isSafeInteger(gpu[0]) && gpu[0] >= 0);
 
 const base = paramsDeEncender({ regimen: 'abierto', hasta });
-const params = parseParams({ motor: { ...base.motor, hilos, gpu: [] } }, base);
+const params = parseParams({ motor: { ...base.motor, hilos, gpu } }, base);
 const mundo = createWorld(semilla, params);
-const motor = crearMotor(mundo, { hilos, gpu: [], decisionGpu: 'siempre', verificar: true, semilla });
+const motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: true, semilla });
 const revisar = crearComprobador({ cadencia: false });
 const inicio = performance.now();
 const propietarios = new Map<number, number>();
@@ -86,8 +89,13 @@ try {
         poblacion: world.people.filter(p => p.role === 'neighbor').length, nacimientos: world.totals.births ?? 0,
         muertes: world.demographyDynamics.deaths, fauna: world.animals.length, violaciones: 0, muestras, guardadosInvalidos,
         conservacion: true, saldos: saldos.map(s => s.map(String)), intentos,
-        migraciones, chunksCedidos, desequilibrio, hz: i * 1000 / msMotor, faseMs, esperaBarreraMs, segundos: (performance.now() - inicio) / 1000 }));
+        migraciones, chunksCedidos, desequilibrio, hz: i * 1000 / msMotor, faseMs, esperaBarreraMs,
+        tarjeta: gpu[0], gpuMateria: gpu.length ? diagnosticoMateriaGpu(mundo) : undefined, segundos: (performance.now() - inicio) / 1000 }));
     }
+  }
+  if (gpu.length) {
+    const diagnostico = diagnosticoMateriaGpu(mundo);
+    assert.ok(diagnostico && !diagnostico.fallo && diagnostico.tripletas > 0, JSON.stringify(diagnostico));
   }
   if (guardadosInvalidos > 0) process.exitCode = 2;
 } catch (error) {

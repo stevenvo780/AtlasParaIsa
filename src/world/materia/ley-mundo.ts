@@ -24,10 +24,10 @@ import { asentarHuella, enlazarMateria, rasgoPorMadera, rasgoPorPiedra, type Pue
 import { marcarTesela } from '../soa/barrera-percepcion.js';
 import { tileLookup } from '../tile-index.js';
 import { CanalCompartido } from '../gpu/canal.js';
-import { crearPasoMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
+import { aplicarVecesGpu, crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
 import type { TotalesMateria } from './libro.js';
 import { CUENTA, MundoMaterial, NOMBRE_CUENTA, N_CUENTAS, luzDe, luzMedia, type BaseMundo, type Forzamiento } from './mundo.js';
-import { Rol, nivelDeLote, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
+import { Rol, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
 import { vistaAireVacia, vistaVacia, type VistaAire, type VistaTesela } from './vistas.js';
 
 export const leyMundo: Ley = {
@@ -45,6 +45,7 @@ export const leyMundo: Ley = {
 const AMPLITUD_TERMICA_K = 10;
 /** Plazo de la tarjeta para devolver la química de los suelos de un tick (ms); vencido, ese paso se da en CPU. */
 const PLAZO_GPU_MS = 50;
+const ARRANQUE_GPU_MS = 30_000;
 /** Ticks que w espera antes de volver a abrir la tarjeta tras un fallo. */
 const REINTENTO_GPU_TICKS = 600;
 /** Ticks entre dos inventarios para el panel «Materia» (recorre todos los lotes del dueño). */
@@ -86,7 +87,7 @@ interface Estado {
   fuegos: Map<number, LoteRef[]>;
   cuentas: bigint[];
   libro: { ancla: bigint[] | null; neto: bigint[]; vistoF: Float64Array; vistoS: Float64Array };
-  gpu: { paso: PasoMateriaGpu | null; canal: CanalCompartido | null; reintento: number; fallo: string };
+  gpu: { paso: PasoMateriaGpu | null; canal: CanalCompartido | null; reintento: number; fallo: string; tandas: number; tripletas: number };
   panel: MateriaMundoVisible | null;
   panelTick: number;
   desde: Map<SustanciaId, number>;
@@ -142,7 +143,7 @@ function crear(c0: CtxLeyMateria): Estado {
     caja, m, teselas: [], ultimo: new Int32Array(0), sal: new Uint32Array(0), pendientes: new Set(), asientoPagina: 0,
     fuegos: new Map(), cuentas: Array<bigint>(N_CUENTAS).fill(0n),
     libro: { ancla: null, neto: Array<bigint>(NE + 1).fill(0n), vistoF: new Float64Array(NE + 1), vistoS: new Float64Array(NE + 1) },
-    gpu: { paso: null, canal: null, reintento: 0, fallo: '' },
+    gpu: { paso: null, canal: null, reintento: 0, fallo: '', tandas: 0, tripletas: 0 },
     panel: null, panelTick: 0, desde: new Map(), aire: new Map(), aireVista: null, mat: [], matTick: [],
     tocan: [], forzamientos: [], luces: new Map(), lucesTick: -1,
     puente: undefined as never, v: vistaVacia(), va: vistaAireVacia(),
@@ -335,7 +336,21 @@ function eco(c: CtxLey): void {
  * nadie lo pone y `motor.gpu` nombra una tarjeta, w abre el suyo sobre la primera. */
 export function enlazarPasoGpu(c: CtxLeyMateria, paso: PasoMateriaGpu | null): void {
   const g = estado(c).gpu;
+  if (g.paso === paso) return;
+  cerrarMateriaGpu(c.mundo);
   g.paso = paso; g.canal = null; g.fallo = '';
+}
+
+export function diagnosticoMateriaGpu(mundo: CtxLey['mundo']): { tandas: number; tripletas: number; fallo: string } | null {
+  const g = estados.get(mundo)?.gpu;
+  return g ? { tandas: g.tandas, tripletas: g.tripletas, fallo: g.fallo } : null;
+}
+
+export function cerrarMateriaGpu(mundo: CtxLey['mundo']): void {
+  const g = estados.get(mundo)?.gpu;
+  if (!g) return;
+  try { g.paso?.cerrar(); }
+  finally { g.canal?.cerrar(); g.paso = null; g.canal = null; }
 }
 
 function pasoGpu(e: Estado): PasoMateriaGpu | null {
@@ -344,6 +359,7 @@ function pasoGpu(e: Estado): PasoMateriaGpu | null {
   if (c.tick < g.reintento || c.params.motor.gpu.length === 0) return null;
   try {
     g.canal = new CanalCompartido(c.params.motor.gpu[0]!);
+    prepararMateriaGpu(g.canal, ARRANQUE_GPU_MS);
     g.paso = crearPasoMateriaGpu(g.canal);
   } catch (error) { soltarGpu(e, error); }
   return g.paso;
@@ -351,9 +367,8 @@ function pasoGpu(e: Estado): PasoMateriaGpu | null {
 
 function soltarGpu(e: Estado, error: unknown): void {
   const g = e.gpu;
-  try { g.paso?.cerrar(); } catch { /* la tarjeta ya no responde */ }
-  try { g.canal?.cerrar(); } catch { /* ídem */ }
-  g.paso = null; g.canal = null; g.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error);
+  try { cerrarMateriaGpu(e.caja.c.mundo); } catch { /* la tarjeta ya no responde */ }
+  g.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error);
 }
 
 /**
@@ -374,7 +389,8 @@ function quimicaSuelos(e: Estado, tocan: readonly number[]): void {
         grupo.push(p);
       }
       for (const [dt, grupo] of porDt) {
-        suelosEnTarjeta(e, paso, grupo, dt);
+        e.gpu.tripletas += quimicaSuelosEnTarjeta(m, paso, grupo, dt, c.tick);
+        e.gpu.tandas++;
         for (const p of grupo) hechas.add(p);
       }
     } catch (error) {
@@ -385,28 +401,19 @@ function quimicaSuelos(e: Estado, tocan: readonly number[]): void {
   for (const p of tocan) if (!hechas.has(p)) m.quimicaSuelos(p, e.forzamientos[p]!.dt);
 }
 
-function suelosEnTarjeta(e: Estado, paso: PasoMateriaGpu, paginas: readonly number[], dt: number): void {
-  const c = e.caja.c, m = e.m;
+export function quimicaSuelosEnTarjeta(m: MundoMaterial, paso: PasoMateriaGpu, paginas: readonly number[], dt: number, tick: number): number {
   let n = 0;
   for (const p of paginas) n += m.fin[p]! - m.inicio[p]!;
-  const lotes = new Float64Array(n), kappas = new Float64Array(4 * n), T = new Float64Array(n);
+  const lotes = new Float64Array(n), kappas = new Float64Array(4 * n);
   let k = 0;
   for (const p of paginas) for (let i = m.inicio[p]!; i < m.fin[p]!; i++, k++) {
-    lotes[k] = m.suelo[i]!; T[k] = m.temperaturaLote(m.suelo[i]!);
+    lotes[k] = m.suelo[i]!;
     kappas.set(CATALISIS_SUELO, 4 * k);
   }
-  paso.lanzar(m.ctx, lotes, kappas, dt, c.tick);
-  const r = paso.esperar(PLAZO_GPU_MS), total = r.tripletas.length / 3;
-  // `desde[i]` es la primera tripleta (a, b, veces) del lote i; las suyas acaban donde empiezan las del siguiente.
-  for (let i = 0; i < n; i++) {
-    const fin = i + 1 < r.desde.length ? r.desde[i + 1]! : total;
-    for (let t = r.desde[i]!; t < fin; t++) {
-      const veces = r.tripletas[3 * t + 2]!;
-      if (!(veces > 0)) continue;
-      const reaccion = c.quimica.reaccion(r.tripletas[3 * t]!, r.tripletas[3 * t + 1]!, nivelDeLote(T[i]!, CATALISIS_SUELO));
-      if (reaccion) c.materia.aplicar(lotes[i]!, reaccion, veces);
-    }
-  }
+  paso.lanzar(m.ctx, lotes, kappas, dt, tick);
+  const propuesta = paso.esperar(PLAZO_GPU_MS);
+  aplicarVecesGpu(m.ctx, lotes, kappas, propuesta);
+  return propuesta.tripletas.length / 3;
 }
 
 // ── Vistas ───────────────────────────────────────────────────────────────────────────────────────────────

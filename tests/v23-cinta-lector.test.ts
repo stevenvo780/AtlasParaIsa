@@ -301,6 +301,16 @@ test('bifurcación sin fotogramas nuevos: maxTick es el último fotograma visibl
   assert.equal(ticksDe(viejo).at(-1), 200, 'lo huérfano sigue a la vista pidiendo su época');
 });
 
+test('una restauración más atrás que la época anterior: se ve la época más nueva que empezó antes de t', t => {
+  const lector = new LectorCinta(cinta(t, [[{}, cada(0, 400)], [{ tMundo: 300 }, cada(300, 500)], [{ tMundo: 100 }, cada(100, 400)]]));
+  t.after(() => lector.close());
+  for (const [tick, epoca] of [[50, 0], [200, 2], [350, 2], [450, 2]] as const) {
+    const r = JSON.parse(lector.chunk({ t: tick, n: 1 })) as ChunkResp;
+    assert.equal(r.epoca, epoca, `t=${tick}`);
+  }
+  assert.deepEqual(lector.meta().bifurcaciones.map(b => [b.epoca, b.desde, b.hasta]), [[0, 300, 400], [1, 100, 500]]);
+});
+
 test('épocas con números enormes no mezclan sus niveles', t => {
   const epoca = 2e15;
   const lector = new LectorCinta(cinta(t, [[{ epoca }, cada(0, 400)]]));

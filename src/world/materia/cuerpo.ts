@@ -584,9 +584,26 @@ export function provecho(c: CtxLeyMateria, p: Plantilla, id: SustanciaId): numbe
   return k > 0 ? k / (k + 1 / TRANSITO_TICKS) : 0;
 }
 
+/** Energía comestible y masa de la ración prevista, usando la misma selección que la boca. */
+export function energiaAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, lote: LoteRef, kg: number): number {
+  const a = c.materia, p = plantillaDe(c, cuerpo), n = leer(a, lote);
+  let energia = 0, masa = 0;
+  for (let i = 0; i < n; i++) {
+    const id = IDS[i]!, sustancia = c.quimica.sustancia(id);
+    const cuantos = a.cuantos(lote, id) * provecho(c, p, id);
+    masa += cuantos * sustancia.masa * MG;
+    energia += cuantos * sustancia.prop.qOxidacion;
+  }
+  return masa > 0 ? energia * Math.min(1, kg / masa) : 0;
+}
+
 /** Come hasta `kg` de un lote propio eligiendo: de cada sustancia toma en proporción a lo que su cuerpo aprovecha de ella
  * (`provecho`), así que quien no digiere la madera no se llena el tubo de madera. Devuelve los kg ingeridos. */
 export function ingerirSelecto(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, kg: number): number {
+  return trasladarAlimento(c, cuerpo, de, cuerpo.digestivo, kg);
+}
+
+export function trasladarAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, destino: LoteRef, kg: number): number {
   if (!(kg > 0)) return 0;
   const a = c.materia, q = c.quimica, p = plantillaDe(c, cuerpo), azar = pasoDe(c).azar;
   const ids = especiesDe(a, de), partes = new Float64Array(ids.length);
@@ -596,12 +613,12 @@ export function ingerirSelecto(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, kg
     ofrecido += partes[i]! * q.sustancia(ids[i]!).masa * MG;
   }
   if (!(ofrecido > 0)) return 0;
-  const escala = Math.min(1, kg / ofrecido), antes = masaLote(c, cuerpo.digestivo);
+  const escala = Math.min(1, kg / ofrecido), antes = masaLote(c, destino);
   for (let i = 0; i < ids.length; i++) {
     const n = entero(partes[i]! * escala, azar);
-    if (n > 0) a.moverParte(de, cuerpo.digestivo, exacta(ids[i]!, n));
+    if (n > 0) a.moverParte(de, destino, exacta(ids[i]!, n));
   }
-  return masaLote(c, cuerpo.digestivo) - antes;
+  return masaLote(c, destino) - antes;
 }
 
 /** Bebe hasta `kg` de agua de un lote propio del dueño (charca de su celda, vasija que lleva). Devuelve los kg bebidos. */
@@ -845,21 +862,30 @@ function alAdoptar(c: CtxLey, organismo: Person | Animal): void {
   contextos.set(organismo.cuerpo, m);
 }
 
-/** F4: cada persona propia metaboliza y crece un tick, y sus escalares pasan a ser las vistas de su cuerpo. La salud
- * guardada nunca supera la del tejido (`acotarSalud`); la fatiga sigue siendo escalar. */
+/** F4: cada persona propia metaboliza y crece un tick. La fatiga sigue siendo escalar. */
 function F4(c: CtxLey): void {
   const m = conMateria(c);
   for (const persona of c.mundo.people) {
     if (!conCuerpo(m, persona)) continue;
     const celda = c.terreno.celda(persona.x, persona.y);
     if (celda < 0) continue;
+    // En F1 ya se abonaron las extracciones del tick anterior: los lotes vacíos son rechazos o cargas consumidas.
+    const carga = persona.carga;
+    for (let i = (carga?.length ?? 0) - 1; i >= 0; i--) {
+      const lote = carga![i]!;
+      if (!m.materia.propio(lote) || leer(m.materia, lote) !== 0 || m.materia.calor(lote) !== 0) continue;
+      m.materia.liberar(lote);
+      carga!.splice(i, 1);
+    }
     metabolizar(m, persona.cuerpo, celda, 1);
     crecer(m, persona.cuerpo, 1);
     vistaCuerpo(m, persona.cuerpo, VISTA);
     // Un cuerpo sin una sola unidad de tejido completa no sostiene nada: lo que falta, falta entero.
-    if (!(VISTA.salud > 0)) { VISTA.hambre = 1; VISTA.sed = 1; VISTA.energia = 0; }
+    if (!(VISTA.salud > 0)) {
+      VISTA.hambre = 1; VISTA.sed = 1; VISTA.energia = 0;
+      acotarSalud(persona.demography, 0);
+    }
     necesidadesDeVista(persona, VISTA);
-    acotarSalud(persona.demography, VISTA.salud);
   }
 }
 
@@ -884,8 +910,14 @@ function aplicarGolpe(c: CtxLey, i: Intento): Aplicado {
   if (i.a === REF_NULA || !i.dato) return 'paso';
   const persona = c.personas.get(slotDe(i.a)), m = conMateria(c);
   if (!persona || persona.uid === undefined || c.ref(persona.uid) !== i.a || !conCuerpo(m, persona)) return 'paso';
-  const carne = herir(m, persona.cuerpo, i.dato);
-  if (carne !== REF_NULA) soltar(m, carne, c.terreno.celda(persona.x, persona.y));
+  const cuerpo = persona.cuerpo, plantilla = plantillaDe(m, cuerpo);
+  const antes = unidades(m.materia, cuerpo.tejido, plantilla);
+  const carne = herir(m, cuerpo, i.dato);
+  if (carne !== REF_NULA) {
+    // Una herida se mide sobre el tejido previo al golpe. Una cría pequeña puede tener todo su tejido sano.
+    if (antes > 0) acotarSalud(persona.demography, persona.demography.health * unidades(m.materia, cuerpo.tejido, plantilla) / antes);
+    soltar(m, carne, c.terreno.celda(persona.x, persona.y));
+  }
   return 'hecho';
 }
 

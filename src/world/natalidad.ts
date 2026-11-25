@@ -39,14 +39,15 @@ import { SHARE_AMOUNT } from './family.js';
 import { HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD } from './ecologia-constantes.js';
 import { DEFAULT_MUTATION_RATE, inheritGenome, type Genome } from './genetics.js';
 import type { Violacion } from './invariantes.js';
-import { abortar, basalJ, concebir, gestar, masaDe, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
+import { abortar, basalJ, concebir, gestar, masaLote, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
 import type { Cuerpo, VistaCuerpo } from './materia/tipos.js';
-import { ctxSi, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
+import { ctxMateriaDe, ctxSi, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
 import { COLUMNAS_CEREBRO, Clase, GENOMA_ANCHO, REF_NULA, TipoIntento, slotDe } from './motor/contratos.js';
 import { cercanos } from './motor/vecinos.js';
 import { remember } from './mundo/crear.js';
 import { clamp } from './mundo/geometria.js';
 import { TICKS_PER_DAY, type Person, type World } from './mundo/tipos.js';
+import { necesidadesDeVista } from './needs.js';
 import { ley, paramsOf } from './params.js';
 import { founderPolicy, inheritPolicy, type PolicyGenome } from './politica.js';
 import { vecinos } from './rejilla.js';
@@ -244,7 +245,7 @@ export function balanceAtomos(c: CtxLeyMateria): Balance {
     salud: p => vistaCuerpo(c, cuerpoDe(p), vista).salud,
     madurez(p) {
       const cuerpo = cuerpoDe(p);
-      return masaDe(c, cuerpo) / plantillaDe(c, cuerpo).masaAdulta;
+      return masaLote(c, cuerpo.tejido) / plantillaDe(c, cuerpo).masaAdulta;
     },
     enCurso(p) {
       const cuerpo = p.cuerpo, g = cuerpo?.gestacion;
@@ -419,7 +420,7 @@ export function provisionCrianza(world: World, p: Person): Provision | null {
 
 /** Cuidar: quien tiene a la vista una cría a su cargo con más hambre que él y lleva una ración, se la da. */
 export function candidatoCuidar(world: World, p: Person, cerca: readonly Person[]): Candidate | undefined {
-  if (p.inventory < SHARE_AMOUNT) return undefined;
+  if (p.cuerpo && ley(world, 'cuerpos') ? p.hunger >= 0.5 : p.inventory < SHARE_AMOUNT) return undefined;
   let cria: Person | undefined;
   for (const otro of cerca) {
     if (!otro.crianza || otro.hunger <= p.hunger || !otro.crianza.cuidadores.includes(p.id)) continue;
@@ -497,6 +498,12 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
     uid, id: idDeCria(uid), genome: genomaDeCria(madre, g, idOtro), policy: g.politica ? { weights: g.politica } : undefined,
     cuidadores, madurez: M0, apego: APEGO_NACER, inventario: dote.inventario, cuerpo: dote.cuerpo, carga: dote.carga,
   });
+  if (dote.cuerpo && madre.cuerpo) {
+    const materia = ctxMateriaDe(mundo);
+    const vista: VistaCuerpo = { hambre: 0, sed: 0, energia: 0, salud: 0, masa: 0, carga: 0, T: 0 };
+    necesidadesDeVista(cria, vistaCuerpo(materia, dote.cuerpo, vista));
+    necesidadesDeVista(madre, vistaCuerpo(materia, madre.cuerpo, vista));
+  }
   // La copia de la gestante trae su `communityId`. Con `v23.comunidades` la pertenencia no se hereda: la da la red de
   // vínculos (F0 de la ley s la calcula y su F1 la asigna); hasta entonces la cría no figura en ninguna lista de miembros.
   if (ley(mundo, 'comunidades')) cria.communityId = null;

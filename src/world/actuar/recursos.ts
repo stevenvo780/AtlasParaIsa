@@ -6,7 +6,7 @@ import { addEvent } from '../mundo/crear.js';
 import type { Tile } from '../../shared/types.js';
 import type { ResidentFastAccess } from '../soa/terreno.js';
 import { count } from '../statistics.js';
-import { takeFood, takeWater, BROKEN_CONDITION } from '../inventions.js';
+import { guardarEnObra, takeFood, takeWater, BROKEN_CONDITION } from '../inventions.js';
 import { assimilateFood, hydrateBody } from '../body.js';
 import { HAMBRE_POR_UNIDAD, SED_POR_UNIDAD, SED_POR_PASO } from '../ecologia-constantes.js';
 import { demographicTraits } from '../demography.js';
@@ -22,7 +22,7 @@ import { ley } from '../params.js';
 import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { REF_NULA } from '../motor/contratos.js';
 import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
-import { MASA_ADULTA_HUMANA, beber, beberEnCelda, comerEnCelda, ingerirSelecto, masaDe, pedidoComida, soltar } from '../materia/cuerpo.js';
+import { MASA_ADULTA_HUMANA, beber, beberEnCelda, comerEnCelda, energiaAlimento, ingerirSelecto, masaDe, soltar, trasladarAlimento } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
 import { madurezDe } from '../cohesion.js';
 
@@ -149,11 +149,27 @@ export function contar(world: World, clave: string, cantidad: number): void {
 const celdaVacia = (): LotesCelda => ({ suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA });
 const lotesCelda = celdaVacia();
 const MG_A_KG = 1e-6;
-const lotesTmp = new Float64Array(8);
+let lotesTmp = new Float64Array(8);
 
 /** ¿Es la celda de este dueño? Lo ajeno solo se toca por intento. */
 export const celdaEsPropia = (c: CtxLeyMateria, celda: number): boolean =>
   celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo;
+
+function cadaveresDe(c: CtxLeyMateria, celda: number): Float64Array {
+  const n = c.materia.lotes(celda, Rol.Cadaver, lotesTmp);
+  if (n > lotesTmp.length) c.materia.lotes(celda, Rol.Cadaver, lotesTmp = new Float64Array(n));
+  return lotesTmp.subarray(0, n);
+}
+
+/** J de alimento que la persona puede comer en esta celda, consultados en la arena del dueño. */
+export function comidaEnCelda(c: CtxLeyMateria, cuerpo: Cuerpo, punto: { x: number; y: number }, kg: number): number {
+  const celda = c.terreno.celda(punto.x, punto.y);
+  if (!celdaEsPropia(c, celda)) return 0;
+  const vida = lotesDeCelda(c, celda, lotesCelda).vida;
+  let energia = vida >= 0 ? energiaAlimento(c, cuerpo, vida, kg) : 0;
+  for (const lote of cadaveresDe(c, celda)) energia += energiaAlimento(c, cuerpo, lote, kg);
+  return energia;
+}
 
 /** Sin cuerpos, n pide que una cría coma y forrajee en proporción a su madurez. Con cuerpos lo da la masa del cuerpo. */
 function madurezEscalar(world: World, person: Person): number {
@@ -189,14 +205,14 @@ export function comerDeCarga(c: CtxLeyMateria, person: Person, cuerpo: Cuerpo, k
   if (!carga?.length || !(kg > 0)) return { kg: 0, fauna: 0 };
   for (let i = carga.length - 1; i >= 0 && comido < kg; i--) {
     const lote = carga[i]!;
-    if (!c.materia.propio(lote) || !(c.materia.vista(lote).digerible > 0)) continue;
+    if (!c.materia.propio(lote) || !(energiaAlimento(c, cuerpo, lote, kg - comido) > 0)) continue;
     const k = ingerirSelecto(c, cuerpo, lote, kg - comido);
     if (!(k > 0)) continue;
     comido += k;
     if (carne?.has(lote)) fauna += k;
     const queda = c.materia.vista(lote);
     if (queda.masa <= 0 && c.materia.calor(lote) === 0) { c.materia.liberar(lote); carga.splice(i, 1); carne?.delete(lote); }
-    else if (!(queda.digerible > 0) && celda >= 0) { soltar(c, lote, celda); carga.splice(i, 1); carne?.delete(lote); }
+    else if (!(energiaAlimento(c, cuerpo, lote, Infinity) > 0) && celda >= 0) { soltar(c, lote, celda); carga.splice(i, 1); carne?.delete(lote); }
   }
   return { kg: comido, fauna };
 }
@@ -211,9 +227,9 @@ export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
   const bocado = BOCADO_KG * escalaBocado(c, cuerpo);
   let comido = 0, fauna = 0;
   if (celdaEsPropia(c, celda)) {
-    const n = Math.min(c.materia.lotes(celda, Rol.Cadaver, lotesTmp), lotesTmp.length);
-    for (let i = 0; i < n && comido < bocado; i++) {
-      const k = ingerirSelecto(c, cuerpo, lotesTmp[i]!, bocado - comido);
+    for (const lote of cadaveresDe(c, celda)) {
+      if (comido >= bocado) break;
+      const k = ingerirSelecto(c, cuerpo, lote, bocado - comido);
       comido += k; fauna += k;
     }
     if (comido < bocado) comido += comerEnCelda(c, cuerpo, celda, bocado - comido);
@@ -222,7 +238,7 @@ export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
   if (comido < bocado) { const r = comerDeCarga(c, person, cuerpo, bocado - comido, celda); comido += r.kg; fauna += r.fauna; }
   contar(world, TOTAL_DIETA_KG, comido); contar(world, TOTAL_DIETA_FAUNA_KG, fauna);
   if (comido > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', comido / bocado);
-  if (person.hunger < 0.12 || !(comido > 0)) person.decisionAt = world.tick + 1;
+  if (person.hunger < 0.12 || (!(comido > 0) && distance(person, person.target) < 0.5)) person.decisionAt = world.tick + 1;
   return comido;
 }
 
@@ -255,11 +271,10 @@ export function forrajearACuestas(world: World, person: Person, cuerpo: Cuerpo, 
   const vida = lotesDeCelda(c, celda, lotesCelda).vida;
   if (vida < 0) return false;
   const lote = c.materia.nuevo(Rol.Objeto, -1, 0);
-  const antes = c.materia.vista(lote).masa;
-  c.materia.moverParte(vida, lote, pedidoComida(c, cuerpo, FORRAJEO_KG * escalaBocado(c, cuerpo)));
-  const kg = c.materia.vista(lote).masa - antes;
+  const kg = trasladarAlimento(c, cuerpo, vida, lote, FORRAJEO_KG * escalaBocado(c, cuerpo));
   if (!(kg > 0)) { if (c.materia.calor(lote) === 0) c.materia.liberar(lote); else soltar(c, lote, celda); return false; }
   (person.carga ??= []).push(lote);
+  if (ley(world, 'obra') && person.hunger < 0.5) guardarEnObra(c, person, 'comida', lote, kg);
   contar(world, TOTAL_FORRAJEO_KG, kg);
   return true;
 }

@@ -1,10 +1,226 @@
 import type { Biome, Feature, Species, Terrain, Tile } from '../../shared/types.js';
-import { PageArena } from './arena.js';
+import type { registrar, Violacion } from '../invariantes.js';
+import type { ChunkId, Col, Hilo, Terreno, TerrenoDueno } from '../motor/contratos.js';
+import type { World } from '../mundo/tipos.js';
+import { PageArena, type ArenaCompartida } from './arena.js';
 import { Presence } from './presencia.js';
-import { PAGE_CELLS, RegionTable, admissibleCoordinate } from './region.js';
+import { PAGE_CELLS, PAGE_SIDE, RegionTable, admissibleCoordinate, pageOffset } from './region.js';
 import type { StaticRegion } from '../paralelo/particion.js';
 import { maintainResidentTile, observeResidentArray, observeResidentTile, residentBackingArray, residentTopologyOwner,
   residentInPlaceRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyOwner, type ResidentTopologyToken } from './topologia.js';
+
+// La celda se guarda en i32 y -1 indica ausencia.
+const MAX_PAGINAS = 0x80000000 / PAGE_CELLS;
+const TIPOS_TERRENO = { f64: Float64Array, f32: Float32Array, i32: Int32Array, u8: Uint8Array };
+type TipoTerreno = keyof typeof TIPOS_TERRENO;
+type CampoTerreno = ReturnType<TerrenoDueno['escribible']>;
+interface CampoRegistrado { nombre: string; tipo: TipoTerreno; relleno: number }
+const VERSIONES_PAGINA = ['versionPagina', 'versionVisible'];
+
+export interface TerrenoCompartido {
+  arena: ArenaCompartida;
+  topologia: Int32Array<SharedArrayBuffer>;
+  campos: CampoRegistrado[];
+  verificar: boolean;
+}
+
+/** Terreno de páginas completas. El coordinador cambia topología y dueños en F0. */
+export class ArenaTerreno implements Terreno {
+  readonly paginasMateria: PageArena;
+  readonly paginaX: Int32Array;
+  readonly paginaY: Int32Array;
+  readonly versionPagina: Uint32Array;
+  readonly versionVisible: Uint32Array;
+  readonly duenoChunk: Int16Array;
+  private readonly primeroMateria: Uint32Array;
+  private readonly topologia: Int32Array<SharedArrayBuffer>;
+  private readonly definiciones: CampoRegistrado[] = [];
+  private readonly nombres: string[] = [];
+  private readonly columnas = new Map<string, CampoTerreno>();
+  private readonly coordinador: boolean;
+  private readonly indice = new Map<number, Map<number, ChunkId>>();
+  private versionIndice: number | undefined;
+
+  constructor(private readonly verificar = false, compartido?: TerrenoCompartido) {
+    this.coordinador = !compartido;
+    this.paginasMateria = compartido ? PageArena.conectar(compartido.arena) : new PageArena(MAX_PAGINAS);
+    this.topologia = compartido?.topologia ?? new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    this.paginaX = this.paginasMateria.field('paginaX', Int32Array, 1);
+    this.paginaY = this.paginasMateria.field('paginaY', Int32Array, 1);
+    this.versionPagina = this.paginasMateria.field('versionPagina', Uint32Array, 1);
+    this.versionVisible = this.paginasMateria.field('versionVisible', Uint32Array, 1);
+    this.duenoChunk = this.paginasMateria.field('duenoChunk', Int16Array, 1, -1);
+    this.primeroMateria = this.paginasMateria.field('materia.primero', Uint32Array, PAGE_CELLS);
+    for (const campo of compartido?.campos ?? []) this.vincularCampo(campo);
+  }
+
+  static conectar(descriptor: TerrenoCompartido): ArenaTerreno {
+    return new ArenaTerreno(descriptor.verificar, descriptor);
+  }
+
+  get paginas(): number { return this.paginasMateria.slots; }
+  get campos(): readonly string[] { return this.nombres; }
+
+  registrarCampo(nombre: string, tipo: TipoTerreno, relleno = 0): void {
+    this.exigirCoordinador();
+    this.vincularCampo({ nombre, tipo, relleno });
+  }
+
+  private vincularCampo(campo: CampoRegistrado): void {
+    const { nombre, tipo, relleno } = campo;
+    if (this.columnas.has(nombre)) throw new Error(`Campo de terreno duplicado: ${nombre}.`);
+    const columna = this.paginasMateria.field<CampoTerreno>(nombre, TIPOS_TERRENO[tipo], PAGE_CELLS, relleno);
+    this.definiciones.push(campo);
+    this.nombres.push(nombre);
+    this.columnas.set(nombre, columna);
+  }
+
+  compartir(): TerrenoCompartido {
+    return { arena: this.paginasMateria.compartir(), topologia: this.topologia,
+      campos: this.definiciones.slice(), verificar: this.verificar };
+  }
+
+  /** Alta en F0. Reusar una ranura no puede reusar sus versiones: la GPU o la cinta todavía pueden
+   * tener la página anterior de esa ranura. */
+  alta(px: number, py: number, hilo: Hilo): ChunkId {
+    this.exigirCoordinador();
+    this.validarHilo(hilo);
+    if ((px | 0) !== px || (py | 0) !== py) throw new RangeError('Coordenadas de página fuera de Int32.');
+    this.actualizarIndice();
+    if (this.indice.get(py)?.has(px)) throw new Error(`Página duplicada: ${px}, ${py}.`);
+    this.paginasMateria.prepararF0(1);
+    const chunk = this.paginasMateria.reserve();
+    this.paginasMateria.limpiar(chunk, VERSIONES_PAGINA);
+    this.paginaX[chunk] = px;
+    this.paginaY[chunk] = py;
+    Atomics.store(this.duenoChunk, chunk, hilo);
+    this.marcar(chunk, true, hilo);
+    this.indexar(px, py, chunk);
+    this.versionIndice = (Atomics.add(this.topologia, 0, 1) + 1) | 0;
+    return chunk;
+  }
+
+  baja(chunk: ChunkId): void {
+    this.exigirCoordinador();
+    const hilo = this.duenoChunk[chunk]!;
+    this.comprobarDueno(chunk, hilo);
+    for (let i = chunk * PAGE_CELLS; i < (chunk + 1) * PAGE_CELLS; i++) {
+      if (this.primeroMateria[i] !== 0) throw new Error(`La página ${chunk} aún contiene materia.`);
+    }
+    this.actualizarIndice();
+    this.marcar(chunk, true, hilo);
+    Atomics.store(this.duenoChunk, chunk, -1);
+    const py = this.paginaY[chunk]!, fila = this.indice.get(py)!;
+    fila.delete(this.paginaX[chunk]!);
+    if (fila.size === 0) this.indice.delete(py);
+    this.paginasMateria.release(chunk);
+    this.versionIndice = (Atomics.add(this.topologia, 0, 1) + 1) | 0;
+  }
+
+  asignar(chunk: ChunkId, hilo: Hilo): void {
+    this.exigirCoordinador();
+    this.validarHilo(hilo);
+    this.comprobarDueno(chunk, this.duenoChunk[chunk]!);
+    Atomics.store(this.duenoChunk, chunk, hilo);
+  }
+
+  celda(x: number, y: number): number {
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return -1;
+    this.actualizarIndice();
+    const px = Math.floor(x / PAGE_SIDE), py = Math.floor(y / PAGE_SIDE);
+    const chunk = this.indice.get(py)?.get(px);
+    if (chunk === undefined || Atomics.load(this.duenoChunk, chunk) < 0
+      || this.paginaX[chunk] !== px || this.paginaY[chunk] !== py) return -1;
+    return chunk * PAGE_CELLS + pageOffset(x, y);
+  }
+
+  chunkDe(celda: number): ChunkId { return celda >> 8; }
+
+  campo(nombre: string): Col { return this.columna(nombre); }
+
+  private columna(nombre: string): CampoTerreno {
+    const columna = this.columnas.get(nombre);
+    if (!columna) throw new Error(`Campo de terreno desconocido: ${nombre}.`);
+    return columna;
+  }
+
+  lectura(): Terreno { return this; }
+
+  escritura(hilo: Hilo): TerrenoDueno {
+    this.validarHilo(hilo);
+    const arena = this;
+    return {
+      get paginas() { return arena.paginas; },
+      paginaX: this.paginaX, paginaY: this.paginaY,
+      versionPagina: this.versionPagina, versionVisible: this.versionVisible, duenoChunk: this.duenoChunk,
+      campos: this.campos, celda: (x, y) => this.celda(x, y), chunkDe: c => this.chunkDe(c), campo: nombre => this.campo(nombre),
+      escribible: (nombre, c) => {
+        this.comprobarDueno(c, hilo);
+        return this.columna(nombre).subarray(c * PAGE_CELLS, (c + 1) * PAGE_CELLS);
+      },
+      marcar: (c, visible) => this.marcar(c, visible, hilo),
+    };
+  }
+
+  private actualizarIndice(): void {
+    const version = Atomics.load(this.topologia, 0);
+    if (version === this.versionIndice) return;
+    this.indice.clear();
+    const paginas = this.paginas;
+    for (let chunk = 0; chunk < paginas; chunk++) {
+      if (Atomics.load(this.duenoChunk, chunk) >= 0) this.indexar(this.paginaX[chunk]!, this.paginaY[chunk]!, chunk);
+    }
+    this.versionIndice = version;
+  }
+
+  private indexar(px: number, py: number, chunk: ChunkId): void {
+    const fila = this.indice.get(py);
+    if (fila) fila.set(px, chunk);
+    else this.indice.set(py, new Map([[px, chunk]]));
+  }
+
+  private marcar(chunk: ChunkId, visible: boolean, hilo: Hilo): void {
+    this.comprobarDueno(chunk, hilo);
+    Atomics.add(this.versionPagina, chunk, 1);
+    if (visible) Atomics.add(this.versionVisible, chunk, 1);
+  }
+
+  private comprobarDueno(chunk: ChunkId, hilo: Hilo): void {
+    if (!Number.isInteger(chunk) || chunk < 0 || chunk >= this.paginas) throw new RangeError(`Página no residente: ${chunk}.`);
+    const dueno = Atomics.load(this.duenoChunk, chunk);
+    if (dueno < 0) throw new RangeError(`Página no residente: ${chunk}.`);
+    if (this.verificar && dueno !== hilo) throw new Error(`Escritura en página ajena: ${chunk}, dueño ${dueno}, hilo ${hilo}.`);
+  }
+
+  private validarHilo(hilo: Hilo): void {
+    if (!Number.isInteger(hilo) || hilo < 0 || hilo > 0x7fff) throw new RangeError(`Hilo fuera de Int16: ${hilo}.`);
+  }
+
+  private exigirCoordinador(): void {
+    if (!this.coordinador) throw new Error('Solo el coordinador puede cambiar el terreno en F0.');
+  }
+}
+
+export function registrarTerreno(alta: typeof registrar, leer: (mundo: World) => Terreno | null): () => void {
+  const id = 'motor.terreno';
+  return alta({
+    id, carril: 'M1', gravedad: 'dura', cadaTicks: 60, alcance: 'global',
+    comprobar(mundo) {
+      const terreno = leer(mundo);
+      const violaciones: Violacion[] = [];
+      if (!terreno) return violaciones;
+      for (let chunk = 0; chunk < terreno.paginas && violaciones.length < 64; chunk++) {
+        const hilo = terreno.duenoChunk[chunk];
+        if (hilo === -1) continue;
+        const px = terreno.paginaX[chunk]!, py = terreno.paginaY[chunk]!;
+        if (hilo >= 0 && terreno.celda(px * PAGE_SIDE, py * PAGE_SIDE) === chunk * PAGE_CELLS) continue;
+        violaciones.push({ id, gravedad: 'dura', tick: mundo.tick, detalle: 'Página con dueño o índice incoherente.',
+          contexto: { chunk, hilo, px, py } });
+      }
+      return violaciones;
+    },
+  });
+}
 
 /**
  * `TileStore` (T112): el terreno en estructura de arrays, detrás de `motor.soaTerreno`. Un buffer por
@@ -278,7 +494,7 @@ export interface SharedTerrain {
 }
 
 export class TileStore {
-  private readonly arena = new PageArena();
+  private readonly arena = new PageArena(MAX_PAGINAS);
   private readonly regions = new RegionTable();
   private readonly presence = new Presence(this.arena);
   private generation = -1;
@@ -1132,6 +1348,7 @@ export class TileStore {
       if (px !== lastX || py !== lastY) {
         let slot = this.regions.slot(px, py);
         if (slot < 0) {
+          this.arena.prepararF0(1);
           slot = this.arena.reserve(); reserved++;
           this.refresh(); life = this.lives[this.parity]!; stamps = presence.stamps;
           this.regions.assign(px, py, slot);
@@ -1168,6 +1385,7 @@ export class TileStore {
         const tile = tiles[i]!, x = tile.x, y = tile.y, px = x >> 4, py = y >> 4;
         let slot = this.regions.slot(px, py);
         if (slot < 0) {
+          this.arena.prepararF0(1);
           slot = this.arena.reserve(); reserved++;
           this.refresh(); stamps = presence.stamps;
           this.regions.assign(px, py, slot);

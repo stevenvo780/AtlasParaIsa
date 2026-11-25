@@ -108,12 +108,13 @@ test('la partición rechaza todo solape no vacío, incluidos rangos anidados e i
   ]) assert.throws(() => partitionRegions(regions, 2), /Rangos solapados/);
 });
 
+// V23 ya no reordena por id (no hay paridad entre hilos que defender): cada cola es un tramo del orden de entrada.
 test('rangos adyacentes y regiones vacías pueden compartir un límite sin compartir escritura', () => {
   assert.deepEqual(partitionRegions([
     { id: 3, begin: 1, end: 2 }, { id: 2, begin: 1, end: 1 }, { id: 1, begin: 0, end: 1 },
     { id: 4, begin: 0, end: 0 },
   ], 2), [
-    [{ id: 1, begin: 0, end: 1 }, { id: 2, begin: 1, end: 1 }],
-    [{ id: 3, begin: 1, end: 2 }, { id: 4, begin: 0, end: 0 }],
+    [{ id: 3, begin: 1, end: 2 }, { id: 2, begin: 1, end: 1 }],
+    [{ id: 1, begin: 0, end: 1 }, { id: 4, begin: 0, end: 0 }],
   ]);
 });

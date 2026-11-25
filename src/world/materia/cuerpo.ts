@@ -23,7 +23,12 @@
  */
 import { DEMOGRAPHY_TICKS_PER_DAY } from '../../shared/demography.js';
 import type { SustanciaId } from '../../shared/materia.js';
-import { CAPACIDAD_ATOMO, ELEMENTOS, ETA, G_SINTESIS, KAPPA0, M0, NE, NU, R } from '../../shared/naturaleza.js';
+import {
+  ABSORCION_AGUA, AGUA_OBJETIVO_KG_KG, BASAL_J_KG_TICK, CAPACIDAD_ATOMO, CAPACIDAD_GAS_KG, CONDUCTANCIA_PIEL_MAX,
+  CONDUCTANCIA_PIEL_MIN, ELEMENTOS, ETA, FRACCION_EVAPORATIVA, FRACCION_O2_REFERENCIA, G_SINTESIS, KAPPA0, KAPPA_HUMANA,
+  LINAJE_HUMANO, M0, MASA_ADULTA_HUMANA, NE, NU, R, REPARTO_AGUA_TUBO, RESERVA_OBJETIVO_J_KG, TRANSITO_TICKS, TROUTON_J,
+  T_CUERPO, UNIDAD_HUMANA, VENTILACION,
+} from '../../shared/naturaleza.js';
 import type { PersonView } from '../../shared/types.js';
 import type { Animal } from '../animals.js';
 import { instalarCuerpoMaterial, type BodyState } from '../body.js';
@@ -33,7 +38,7 @@ import type { Person } from '../mundo/tipos.js';
 import type { Aplicado, CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { CAMPOS_CUERPO, CUERPO_ANCHO, REF_NULA, TipoIntento, slotDe, type Intento, type Registro } from '../motor/contratos.js';
 import { necesidadesDeVista } from '../needs.js';
-import { copiar, crearPlantilla } from './copiar.js';
+import { copiar, crearPlantilla, leerPlantilla } from './copiar.js';
 import { fluir } from './fluir.js';
 import { conservacion, lotesDeCelda, sustanciasDe, temperaturaDe, type LotesCelda } from './ley-mundo.js';
 import { pasoLote, type CtxPaso } from './paso.js';
@@ -45,45 +50,13 @@ import {
   type Sustancia, type VistaCuerpo,
 } from './tipos.js';
 
-// ── Constantes físicas del cuerpo (el integrador las reunirá en shared/naturaleza.ts) ────────────────────
+// ── Constantes físicas del cuerpo: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ───────────
 
-/** K: temperatura que el termostato del cuerpo defiende. */
-export const T_CUERPO = 310;
-/** J por kg de tejido y tick: gasto de mantenimiento. 45 son 6,5 MJ al día en 60 kg (W ancla la ingesta en 8,4 MJ al día). */
-export const BASAL_J_KG_TICK = 45;
-/** J por kg de tejido: energía de la reserva llena (hambre 0). Dos días de mantenimiento: con media reserva queda un día
- * de basal, el umbral de `DIAS_ABORTO`. */
-export const RESERVA_OBJETIVO_J_KG = 216_000;
-/** kg de agua libre por kg de tejido con sed 0 (2,4 kg en 60 kg: lo que una persona bebe en un día, el ancla de W). */
-export const AGUA_OBJETIVO_KG_KG = 0.04;
-/** Cuantos de un gas que la reserva guarda por kg de tejido y unidad de fracción molar en el aire (solubilidad). */
-export const CAPACIDAD_GAS_KG = 14;
-/** Fracción molar de O₂ del aire de referencia: con ella la reserva llena de O₂ da energía 1. */
-export const FRACCION_O2_REFERENCIA = 0.21;
-/** 1/tick: ventilación pulmonar, la fracción e-ésima del desequilibrio de gases que se cierra en un tick (36 s). */
-export const VENTILACION = 1;
-/** J/(K·tick·kg^⅔): conductancia de la piel por unidad de superficie (masa^⅔), cerrada y abierta. El termostato elige
- * entre las dos; por debajo de la mínima el cuerpo tirita (quema reserva) y por encima de la máxima suda. */
-export const CONDUCTANCIA_PIEL_MIN = 6;
-export const CONDUCTANCIA_PIEL_MAX = 40;
-/** Fracción del gasto de mantenimiento que sale evaporando agua por la respiración y la piel (en reposo, ~0,25). */
-export const FRACCION_EVAPORATIVA = 0.25;
-/** J/(cuanto·K): regla de Trouton, ΔH_vap = TROUTON_J·T_eb (la misma que usa W para el vapor). */
-export const TROUTON_J = 0.088;
-/** Ticks: tiempo medio de tránsito del tubo digestivo (6 h de un día de 2.400 ticks). */
-export const TRANSITO_TICKS = 600;
-/** Capacidad osmótica del tubo sobre la de la reserva: en equilibrio el tubo retiene esa parte del agua libre. */
-export const REPARTO_AGUA_TUBO = 0.05;
-/** 1/tick: conductancia osmótica de la pared del tubo por unidad de su capacidad (lo bebido pasa en ~14 ticks). */
-export const ABSORCION_AGUA = 0.05;
-/** kg: masa adulta de la plantilla humana fundadora. */
-export const MASA_ADULTA_HUMANA = 60;
-/** J por cuanto: κ de la plantilla humana por familia (C–O, C–N, C–C/C–H, H–H). El porqué, en la cabecera. */
-export const KAPPA_HUMANA: Kappa = [KAPPA0, 72, 110, KAPPA0];
-/** Unidad del tejido humano en cuantos: 61 % de agua, 17 % de proteína, 14 % de grasa y 8 % de fósforo orgánico en masa. */
-export const UNIDAD_HUMANA = { H2O: 40, proteina: 7, CH2: 12, orgP: 1 } as const;
-/** Linaje de la plantilla humana (solo lo leen la proyección y el cliente). */
-export const LINAJE_HUMANO = 0;
+export {
+  ABSORCION_AGUA, AGUA_OBJETIVO_KG_KG, BASAL_J_KG_TICK, CAPACIDAD_GAS_KG, CONDUCTANCIA_PIEL_MAX, CONDUCTANCIA_PIEL_MIN,
+  FRACCION_EVAPORATIVA, FRACCION_O2_REFERENCIA, KAPPA_HUMANA, LINAJE_HUMANO, MASA_ADULTA_HUMANA, REPARTO_AGUA_TUBO,
+  RESERVA_OBJETIVO_J_KG, TRANSITO_TICKS, TROUTON_J, T_CUERPO, UNIDAD_HUMANA, VENTILACION,
+};
 
 // ── Acceso al entorno ────────────────────────────────────────────────────────────────────────────────────
 
@@ -180,23 +153,6 @@ function memoDe(reg: Registro): Map<number, Plantilla> {
   return m;
 }
 
-/** Inversa de los bytes canónicos de `crearPlantilla` (copiar.ts, `canonico`): tres listas [n, (id, nu)…] de partes,
- * entradas y salidas y después dH, los 4 κ, captura, masa adulta, m0 y linaje, todo en float64. */
-function descifrar(id: number, bytes: Uint8Array): Plantilla {
-  const v = new Float64Array(Uint8Array.from(bytes).buffer);
-  let i = 0;
-  const lista = (): { id: SustanciaId; nu: number }[] => {
-    const n = v[i++]!, ts: { id: SustanciaId; nu: number }[] = [];
-    for (let k = 0; k < n; k++) { const esp = v[i++]!, nu = v[i++]!; ts.push({ id: esp, nu }); }
-    return ts;
-  };
-  const partes = lista(), entradas = lista(), salidas = lista(), dH = v[i++]!;
-  const k0 = v[i++]!, k1 = v[i++]!, k2 = v[i++]!, k3 = v[i++]!;
-  const captura = v[i++]!, masaAdulta = v[i++]!, m0 = v[i++]!, linaje = v[i++]!;
-  if (i !== v.length || !(masaAdulta > 0)) throw new Error(`b: la entrada ${id} del Registro no es una plantilla.`);
-  return { id, partes, sintesis: { entradas, salidas, dH }, kappa: [k0, k1, k2, k3], captura, masaAdulta, m0, linaje };
-}
-
 /** Plantilla por su id del `Registro`. Lanza si no existe. */
 export function plantillaPorId(c: CtxLeyMateria, id: number): Plantilla {
   const reg = c.globales.registro, memo = memoDe(reg);
@@ -204,7 +160,7 @@ export function plantillaPorId(c: CtxLeyMateria, id: number): Plantilla {
   if (!p) {
     const bytes = reg.leer(id);
     if (!bytes) throw new Error(`b: la plantilla ${id} no está en el Registro.`);
-    memo.set(id, p = descifrar(id, bytes));
+    memo.set(id, p = leerPlantilla(id, bytes));
   }
   return p;
 }

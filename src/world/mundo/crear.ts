@@ -128,7 +128,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       role: n === 0 ? 'S' : n === 1 ? 'I' : 'neighbor', x, y, color: colors[n % colors.length]!,
       action: 'explore', reason: 'Observa las posibilidades cercanas.', energy: 0.78 + random(world) * 0.18,
       hunger: n === 3 || n === 5 ? 0.72 : 0.2 + random(world) * 0.28, fatigue: n === 0 ? 0.52 : 0.1 + random(world) * 0.2,
-      need: 'Recorrer', recentMemory: null, inventory: 0.14, gestacion: undefined,
+      need: 'Recorrer', recentMemory: null, inventory: 0.14, gestacion: undefined, cuerpo: undefined, carga: undefined,
       curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care,
       closeness: n < 2 ? 0.55 : 0.2, socialLoad: 0, target: { x, y }, decisionAt: 0,
       lastMeeting: -300, lastShared: -60, experiences: [], habits: [],

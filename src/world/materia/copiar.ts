@@ -243,6 +243,24 @@ function canonico(partes: readonly Termino[], e: Ecuacion, r: Omit<Plantilla, 'i
   return new Uint8Array(Float64Array.from(v).buffer);
 }
 
+/** Inversa de `canonico`: la plantilla `id` a partir de sus bytes del `Registro` (tres listas [n, (id, nu)…] de partes,
+ * entradas y salidas y después dH, los 4 κ, captura, masa adulta, m0 y linaje, todo en float64). Lanza si los bytes no
+ * son de una plantilla. */
+export function leerPlantilla(id: number, bytes: Uint8Array): Plantilla {
+  const v = new Float64Array(Uint8Array.from(bytes).buffer);
+  let i = 0;
+  const lista = (): Termino[] => {
+    const n = v[i++]!, ts: Termino[] = [];
+    for (let k = 0; k < n; k++) { const esp = v[i++]!, nu = v[i++]!; ts.push({ id: esp, nu }); }
+    return ts;
+  };
+  const partes = lista(), entradas = lista(), salidas = lista(), dH = v[i++]!;
+  const k0 = v[i++]!, k1 = v[i++]!, k2 = v[i++]!, k3 = v[i++]!;
+  const captura = v[i++]!, masaAdulta = v[i++]!, m0 = v[i++]!, linaje = v[i++]!;
+  if (i !== v.length || !(masaAdulta > 0)) throw new Error(`La entrada ${id} del Registro no es una plantilla.`);
+  return { id, partes, sintesis: { entradas, salidas, dH }, kappa: [k0, k1, k2, k3], captura, masaAdulta, m0, linaje };
+}
+
 /**
  * Coeficientes ≥ 0 por columna (0 fuera de la reacción) de la reacción con la columna 0 > 0 de menos columnas: el primer
  * soporte S ∋ 0, por tamaño y luego en orden lexicográfico, cuyo núcleo es de dimensión 1 y > 0 en todo S. Si existe

@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { request, type IncomingHttpHeaders, type Server } from 'node:http';
 import { loadavg } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
 import { crc32, gunzipSync, gzipSync } from 'node:zlib';
@@ -14,7 +14,7 @@ import { clientDelta, decodificarBloque } from '../src/server/cinta/formato.js';
 import { reducir, reducirTesela } from '../src/server/cinta/reducir.js';
 import { EscritorCinta } from '../src/server/cinta/escritor.js';
 import { LectorCinta, type Fondo } from '../src/server/cinta/lector.js';
-import { LectoresCinta } from '../src/server/cinta/lector-worker.js';
+import { LectoresCinta, MAX_ESPERA } from '../src/server/cinta/lector-worker.js';
 import { projectMirrorTile, projectMirrorWorld } from '../src/server/sim-worker.js';
 import { Store } from '../src/server/store.js';
 import { CINTA, type ChunkResp, type CintaMeta, type Corte, type Nivel } from '../src/shared/cinta.js';
@@ -88,7 +88,7 @@ function recortar(vista: WorldView, camara: Viewport, fondo: Fondo): WorldView {
   const mapa = new Map(vista.tiles.map(t => [`${t.x},${t.y}`, t]));
   const tiles: Tile[] = [];
   for (let y = camara.y; y < camara.y + camara.height; y++) for (let x = camara.x; x < camara.x + camara.width; x++) {
-    const t = mapa.get(`${x},${y}`) ?? fondo(x, y);
+    const t = mapa.get(`${x},${y}`) ?? fondo(x, y, vista.tick);
     if (t) tiles.push(t);
   }
   const people = vista.people.filter(p => dentro(p, 1)), ids = new Set(people.map(p => p.id));
@@ -127,17 +127,18 @@ test('I1 lector: los tramos reconstruyen cada fotograma de L0, cruzando bloques,
   assert.equal(meta.niveles[0]!.fotogramas, ticks.length);
   assert.ok(meta.serie.length > 0 && meta.serie.every((p, i) => i === 0 || p.t > meta.serie[i - 1]!.t));
 
-  // Sin cámara: la base es el fotograma clave ≤ t y las deltas siguen hasta n fotogramas ≥ t.
+  // Sin cámara: la base es el fotograma clave ≤ t y las deltas siguen hasta n fotogramas en total.
   const tramo = JSON.parse(lector.chunk({ t: 130, n: 100 })) as ChunkResp;
   assert.equal(tramo.nivel, 0); assert.equal(tramo.paso, 4); assert.equal(tramo.epoca, 0);
   assert.equal(tramo.t0, 128, 'el fotograma clave del bloque que contiene t');
   const frames = reproducir(tramo.baseFrame, tramo.deltas);
-  assert.equal(frames.filter(f => f.tick >= 130).length, 100);
+  assert.equal(frames.length, 100, 'n cuenta la base y las deltas');
   assert.equal(tramo.t1, frames.at(-1)!.tick); assert.equal(tramo.hayMas, true);
   for (const f of frames) igualFotograma(f, esperado.get(f.tick)!, `tick ${f.tick}`);
+  // Entre dos bloques, la base sigue siendo la clave ≤ t, y lo que lleva hasta el primer fotograma ≥ t entra aunque pase de n.
   const entre = JSON.parse(lector.chunk({ t: 126, n: 2 })) as ChunkResp;
-  assert.equal(entre.t0, 0, 'entre dos bloques, la base sigue siendo la clave ≤ t');
-  assert.deepEqual(reproducir(entre.baseFrame, entre.deltas).filter(f => f.tick >= 126).map(f => f.tick), [128, 132]);
+  assert.equal(entre.t0, 0);
+  assert.deepEqual(reproducir(entre.baseFrame, entre.deltas).map(f => f.tick), Array.from({ length: 33 }, (_, i) => i * 4));
 
   // Con cámara: recorte exacto, fondo donde la cinta no grabó y deltas que cruzan bloques.
   const camara = { x: 20, y: 8, w: 24, h: 30 }, vista = { x: 20, y: 8, width: 24, height: 30 };
@@ -196,10 +197,15 @@ test('I7 lector: la época del catálogo, lo huérfano y las lagunas nunca se si
   assert.equal(hastaLaguna.t1, 600, 'un tramo no salta la laguna'); assert.equal(hastaLaguna.hayMas, true);
   const trasLaguna = leer({ t: 601, n: 10 });
   assert.equal(trasLaguna.t0, 700);
+  // Con `epoca` se sirve la historia entera de esa época, también lo huérfano: es continua y la respuesta dice de quién es.
   const huerfano = leer({ t: 250, n: 120, epoca: 0 });
-  assert.equal(huerfano.epoca, 0); assert.ok(huerfano.ticks[0]! >= 250 && huerfano.ticks.at(-1) === 400, 'solo lo huérfano');
-  const visible = leer({ t: 100, n: 120, epoca: 0 });
-  assert.ok(visible.ticks.at(-1)! < 200, 'lo visible pedido por época no sigue con lo huérfano');
+  assert.equal(huerfano.epoca, 0); assert.equal(huerfano.t0, 128, 'la clave ≤ t de la época pedida');
+  assert.deepEqual(huerfano.ticks, Array.from({ length: 69 }, (_, i) => 128 + i * 4)); assert.equal(huerfano.hayMas, false);
+  for (const t of [197, 199]) {
+    const cruce = leer({ t, n: 120, epoca: 0 });
+    assert.equal(cruce.epoca, 0, `t=${t}`); assert.deepEqual(cruce.ticks, Array.from({ length: 69 }, (_, i) => 128 + i * 4), `t=${t}`);
+  }
+  assert.equal(leer({ t: 100, n: 120, epoca: 9 }).deltas.length, 0, 'una época que no existe no sirve nada');
 
   const alias = JSON.parse(lector.chunkAntiguo(150, 240, undefined, 'full')) as TapeChunkResponse;
   assert.ok(alias.toTick < 200 && alias.hasMore);
@@ -228,6 +234,148 @@ test('nivel auto: el más fino con cobertura y el corte donde empieza uno más f
   assert.equal((JSON.parse(lector.chunk({ t: 1500, n: 4 })) as ChunkResp).nivel, 0);
   const pedido = JSON.parse(lector.chunk({ t: 100, n: 3, nivel: 3 })) as ChunkResp;
   assert.equal(pedido.nivel, 3); assert.equal(pedido.cambioDeNivelEn, undefined);
+});
+
+/** Graba épocas seguidas: cada una es [apertura, ticks]. */
+function cinta(t: TestContext, epocas: [Partial<Parameters<EscritorCinta['abrir']>[0]>, number[]][], lado = 1): string {
+  const ruta = join(directorio(t), 'cinta');
+  const escritor = new EscritorCinta({ directorio: ruta });
+  const estado = { seq: 0, mundo: new Map(teselas(lado).map(x => [`${x.x},${x.y}`, x])) };
+  try {
+    for (const [a, ticks] of epocas) {
+      const apertura = { instanciaId: 'lector', epoca: 0, tMundo: ticks[0] ?? 0, motivo: 'reinicio' as const, ...a };
+      escritor.abrir(apertura);
+      if (ticks.length) grabar(escritor, apertura.epoca, ticks, estado);
+    }
+  } finally { escritor.close(); }
+  return ruta;
+}
+const cada = (desde: number, hasta: number, paso = 4) => Array.from({ length: (hasta - desde) / paso + 1 }, (_, i) => desde + i * paso);
+const borrarBloques = (ruta: string, donde: string) => {
+  const db = new DatabaseSync(join(ruta, INDICE_CINTA));
+  try { db.prepare(`DELETE FROM bloques WHERE ${donde}`).run(); } finally { db.close(); }
+};
+const ticksDe = (r: ChunkResp) => reproducir(r.baseFrame, r.deltas).map(f => f.tick);
+
+test('un hueco de la poda corta el tramo, otro nivel lo cubre y el alias salta al otro lado', t => {
+  const ruta = cinta(t, [[{}, cada(0, 2000)]]);
+  // Como una poda que conserva un segmento fijado: faltan los bloques de L0 entre 508 y 1024.
+  borrarBloques(ruta, 'nivel=0 AND t0>=512 AND t0<1024');
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  assert.deepEqual([lector.meta().niveles[0]!.t0, lector.meta().niveles[0]!.t1], [0, 2000]);
+  const antes = JSON.parse(lector.chunk({ t: 400, n: 120 })) as ChunkResp;
+  assert.equal(antes.nivel, 0); assert.equal(antes.t1, 508, 'el tramo no cruza el hueco');
+  assert.equal(antes.cambioDeNivelEn, 509); assert.equal(antes.hayMas, true);
+  assert.deepEqual(ticksDe(antes), cada(384, 508));
+  const hueco = JSON.parse(lector.chunk({ t: 700, n: 120 })) as ChunkResp;
+  assert.equal(hueco.nivel, 1, 'L1 cubre el hueco de L0'); assert.equal(hueco.cambioDeNivelEn, 1024);
+  assert.ok(ticksDe(hueco).every(x => x < 1024) && hueco.t0 <= 700);
+  const alias = JSON.parse(lector.chunkAntiguo(400, 240)) as TapeChunkResponse;
+  assert.deepEqual([alias.fromTick, alias.toTick, alias.hasMore], [400, 508, true]);
+  const otroLado = JSON.parse(lector.chunkAntiguo(509, 240)) as TapeChunkResponse;
+  assert.equal(otroLado.fromTick, 1024);
+});
+
+test('auto: un tick con cobertura en su época no salta a una época futura', t => {
+  const ruta = cinta(t, [[{}, cada(0, 400)], [{ tMundo: 600 }, cada(600, 800)]]);
+  borrarBloques(ruta, 'nivel=0 AND epoca=0');
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  const r = JSON.parse(lector.chunk({ t: 50, n: 10 })) as ChunkResp;
+  assert.deepEqual([r.nivel, r.epoca], [1, 0]); assert.ok(r.t0 <= 50);
+});
+
+test('bifurcación sin fotogramas nuevos: maxTick es el último fotograma visible y no hay tramo vacío con hayMas', t => {
+  const ruta = cinta(t, [[{}, cada(0, 200)], [{ tMundo: 198 }, []]]);
+  const lector = new LectorCinta(ruta);
+  t.after(() => lector.close());
+  assert.equal(lector.meta().niveles[0]!.t1, 196);
+  const meta = JSON.parse(lector.metaAntigua({ observerOnly: false, turbo: true })) as TapeMetaResponse;
+  assert.equal(meta.maxTick, 196, 'el reproductor no pide lo que no puede recibir');
+  const alias = JSON.parse(lector.chunkAntiguo(197, 60)) as TapeChunkResponse;
+  assert.deepEqual([alias.frames.length, alias.hasMore], [0, false]);
+  const nuevo = JSON.parse(lector.chunk({ t: 197, n: 10 })) as ChunkResp;
+  assert.deepEqual([nuevo.deltas.length, nuevo.hayMas, nuevo.baseFrame], [0, false, undefined]);
+  const viejo = JSON.parse(lector.chunk({ t: 197, n: 120, epoca: 0 })) as ChunkResp;
+  assert.equal(ticksDe(viejo).at(-1), 200, 'lo huérfano sigue a la vista pidiendo su época');
+});
+
+test('épocas con números enormes no mezclan sus niveles', t => {
+  const epoca = 2e15;
+  const lector = new LectorCinta(cinta(t, [[{ epoca }, cada(0, 400)]]));
+  t.after(() => lector.close());
+  for (const nivel of [0, 1] as const) {
+    const r = JSON.parse(lector.chunk({ t: 0, n: 120, nivel })) as ChunkResp;
+    assert.equal(r.epoca, epoca);
+    const ticks = ticksDe(r);
+    assert.ok(ticks.length > 2 && ticks.every((x, i) => !i || x - ticks[i - 1]! === CINTA.pasos[nivel]), `nivel ${nivel}: ${ticks}`);
+  }
+});
+
+test('una clave mayor que el tope de bytes no deja la paginación sin avanzar', { timeout: 300_000 }, t => {
+  const lector = new LectorCinta(cinta(t, [[{}, cada(0, 40)]], 17));
+  t.after(() => lector.close());
+  let desde = 1;
+  for (const esperado of [4, 8, 12]) {
+    const r = JSON.parse(lector.chunk({ t: desde, n: 120 })) as ChunkResp;
+    assert.equal(r.t0, 0); assert.equal(r.t1, esperado, 'un fotograma ≥ t más que la vez anterior'); assert.equal(r.hayMas, true);
+    desde = r.t1 + 1;
+  }
+  const completos = JSON.parse(lector.chunkAntiguo(0, 240)) as TapeChunkResponse;
+  assert.deepEqual([completos.frames.length, completos.toTick, completos.hasMore], [1, 0, true]);
+});
+
+test('otra instancia del mundo se lee como vacía y un bloque que no es el del catálogo no se sirve', t => {
+  const ruta = cinta(t, [[{}, cada(0, 200)]]);
+  const lector = new LectorCinta(ruta, 1);
+  t.after(() => lector.close());
+  assert.equal(lector.meta({}, 'ok', 1e9, 'otra').niveles.length, 0);
+  assert.equal((JSON.parse(lector.chunk({ t: 0, n: 10 }, undefined, 'otra')) as ChunkResp).baseFrame, undefined);
+  assert.equal((JSON.parse(lector.chunkAntiguo(0, 10, undefined, 'full', undefined, 'otra')) as TapeChunkResponse).frames.length, 0);
+  assert.ok((JSON.parse(lector.chunk({ t: 0, n: 10 }, undefined, 'lector')) as ChunkResp).baseFrame);
+  assert.equal((lector as unknown as { cache: Map<string, unknown> }).cache.size, 0, 'un bloque que no cabe en la caché no se guarda');
+  // Un catálogo que describe otro bloque que el que hay en el segmento (como el de una cinta apartada en mitad de la lectura).
+  const db = new DatabaseSync(join(ruta, INDICE_CINTA));
+  try { db.prepare('UPDATE bloques SET crc=crc+1 WHERE nivel=0 AND t0=128').run(); } finally { db.close(); }
+  const otro = new LectorCinta(ruta);
+  t.after(() => otro.close());
+  assert.throws(() => otro.chunk({ t: 130, n: 10 }), /no es el del catálogo/);
+  assert.ok(JSON.parse(otro.chunk({ t: 0, n: 10 })).baseFrame, 'lo demás se sigue leyendo');
+});
+
+test('el fondo se pinta en el tick del fotograma y lo huérfano sobre el archivo de su bifurcación', t => {
+  const lector = new LectorCinta(cinta(t, [[{}, cada(0, 400)], [{ tMundo: 200 }, cada(200, 300)]]));
+  t.after(() => lector.close());
+  const vistos = new Set<number>();
+  const fondo: Fondo = (x, y, tick) => { vistos.add(tick); return { x, y, terrain: 'meadow', food: 0, moisture: 0.5, vegetation: 0.5 }; };
+  const camara = { x: 0, y: 0, w: 40, h: 40 };
+  lector.chunk({ t: 0, n: 120, ...camara }, fondo);
+  assert.deepEqual([...vistos].sort((a, b) => a - b), [0, 128], 'la clave de cada bloque, en su tick');
+  vistos.clear();
+  lector.chunk({ t: 130, n: 120, epoca: 0, ...camara }, fondo);
+  assert.deepEqual([...vistos].sort((a, b) => a - b), [128, 200], 'lo posterior a la bifurcación, sobre el archivo de 200');
+});
+
+test('los hilos lectores: metadatos sin esperar a los tramos, espera acotada y cancelable', { timeout: 300_000 }, async t => {
+  const ruta = cinta(t, [[{}, cada(0, 636)]], 10);
+  const lectores = new LectoresCinta({ directorio: ruta, topeBytes: 1e9, observerOnly: false, turbo: true, hilos: 1 });
+  t.after(() => lectores.close());
+  const ctx = { gzip: false, estado: 'ok' as const };
+  await Promise.all([lectores.leer({ tipo: 'meta' }, ctx), lectores.leer({ tipo: 'chunk', req: { t: 0, n: 1 } }, ctx)]);
+  const fin: string[] = [];
+  const largo = lectores.leer({ tipo: 'chunk', req: { t: 0, n: 120 } }, ctx).then(() => fin.push('tramo'));
+  const cancelar = new AbortController();
+  const esperando = Array.from({ length: MAX_ESPERA }, (_, i) =>
+    lectores.leer({ tipo: 'chunk', req: { t: i * 4, n: 120 } }, ctx, cancelar.signal).then(() => 'servida', e => (e as Error).name));
+  await assert.rejects(lectores.leer({ tipo: 'chunk', req: { t: 0, n: 1 } }, ctx), /demasiadas peticiones/);
+  const meta = JSON.parse((await lectores.leer({ tipo: 'meta' }, ctx)).cuerpo.toString()) as CintaMeta;
+  fin.push('meta');
+  assert.equal(meta.niveles[0]!.t1, 636);
+  cancelar.abort();
+  assert.deepEqual(new Set(await Promise.all(esperando)), new Set(['AbortError']), 'lo que esperaba hilo se retira');
+  await largo;
+  assert.deepEqual(fin, ['meta', 'tramo'], 'los metadatos no esperan detrás de un tramo');
 });
 
 test('los hilos lectores sirven JSON o gzip, el estado de error y el fondo del mundo', { timeout: 120_000 }, async t => {
@@ -314,7 +462,11 @@ test('un tramo largo no retrasa /health ni un meta que llega a la vez', { timeou
   const salud: number[] = [], metas: number[] = [];
   while (enCurso) {
     salud.push((await http.pedir('/health')).ms);
-    if (salud.length % 10 === 0) metas.push((await http.pedir('/api/cinta/meta')).ms);
+    if (salud.length % 10) continue;
+    const meta = await http.pedir('/api/cinta/meta');
+    assert.equal(meta.status, 200, meta.texto);
+    assert.equal((JSON.parse(meta.texto) as CintaMeta).niveles[0]!.t1, 636);
+    metas.push(meta.ms);
   }
   const tramos = await largo;
   const p95 = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length * 0.95)]!;
@@ -323,6 +475,7 @@ test('un tramo largo no retrasa /health ni un meta que llega a la vez', { timeou
   assert.ok(salud.length >= 20, 'hubo /health mientras se servía el tramo');
   assert.ok(Math.min(...tramos) > 4 * p95(salud), 'el tramo es mucho más largo que /health');
   assert.ok(p95(salud) < 50, `/health p95 ${p95(salud)} ms durante el tramo`);
+  assert.ok(metas.length >= 2 && Math.max(...metas) < Math.min(...tramos), 'un meta nunca espera detrás de un tramo');
 });
 
 test('createApp directo: rutas de la cinta, alias, validación y sesión', { timeout: 120_000 }, async t => {
@@ -367,7 +520,7 @@ test('createApp directo: recargar tras un fallo de paso abre una época con su b
   t.after(async () => { try { await app.close(); } finally { store.close(); } });
   for (let n = 0; n < 60; n++) app.stepOnce();
   const guardado = store.load()!.world.tick, grabado = app.world.tick;
-  assert.ok(guardado < grabado - 4, `el guardado (${guardado}) va por detrás de la cinta (${grabado})`);
+  assert.ok(guardado < grabado - 4, `el guardado (${guardado}) va por detrás del mundo (${grabado})`);
   // Como en recuperacion.test.ts: los habitantes pisan terreno no residente y su carga falla a mitad de paso.
   for (const p of (app.world as World).people) { p.x += 40; p.y += 40; p.target = { x: p.x, y: p.y }; }
   const leer = store.loadChunk.bind(store);
@@ -386,11 +539,13 @@ test('createApp directo: recargar tras un fallo de paso abre una época con su b
   assert.equal(meta.epoca, 1);
   assert.equal(meta.bifurcaciones.length, 1);
   assert.equal(meta.bifurcaciones[0]!.desde, guardado);
-  assert.ok(meta.bifurcaciones[0]!.hasta >= grabado - CINTA.pasos[0]);
+  // Sin crédito la cinta se salta cortes (el mundo no la espera): lo grabado de la época 0 llega hasta `hasta` ≤ `grabado`.
+  assert.ok(meta.bifurcaciones[0]!.hasta > guardado && meta.bifurcaciones[0]!.hasta <= grabado);
   const nuevo = JSON.parse(lector.chunk({ t: guardado, n: 5 })) as ChunkResp;
   assert.equal(nuevo.epoca, 1); assert.equal(nuevo.t0, guardado, 'los ticks repetidos se graban en la época nueva');
-  const viejo = JSON.parse(lector.chunk({ t: guardado + 1, n: 5, epoca: 0 })) as ChunkResp;
-  assert.equal(viejo.epoca, 0); assert.ok(reproducir(viejo.baseFrame, viejo.deltas).every(f => f.tick > guardado), 'lo descartado sigue accesible');
+  const viejo = JSON.parse(lector.chunk({ t: guardado + 1, n: 120, epoca: 0 })) as ChunkResp;
+  const descartado = reproducir(viejo.baseFrame, viejo.deltas).filter(f => f.tick > guardado);
+  assert.equal(viejo.epoca, 0); assert.ok(descartado.length > 0, 'lo descartado sigue accesible');
   const hitos = new DatabaseSync(join(dir, 'cinta', INDICE_CINTA), { readOnly: true });
   try { assert.ok(hitos.prepare("SELECT 1 FROM hitos WHERE epoca=1 AND tipo='bifurcacion'").get()); } finally { hitos.close(); }
 });
@@ -418,7 +573,6 @@ test('pasarela: la cinta perdida en el hilo de la simulación se muestra con est
   assert.equal((await http.pedir('/api/tape/meta')).status, 200, 'lo grabado sigue a la vista');
 });
 
-const ARCHIVO = resolve(import.meta.dirname, '../../../archivo/tmp-v23-c1b');
 // Cabecera CNT1 (formato.ts): magia, nivel, fotogramas, t0, t1, crc y longitud de la clave; cada delta lleva tick y longitud.
 const CABECERA = 33, CRC = 25, LONGITUD_KF = 29;
 
@@ -427,13 +581,13 @@ const CABECERA = 33, CRC = 25, LONGITUD_KF = 29;
  * 31 deltas con 210 habitantes que se mueven y 200 teselas que cambian, reducidos por nivel como los graba el
  * escritor. El tick va en su propio miembro gzip, así un bloque nuevo cuesta un CRC y no una compresión.
  */
-function volumenSintetico(directorio: string, bytes: number) {
+function volumenSintetico(directorio: string, bytes: number, [personas, animales, lado] = [700, 3000, 8]) {
   const vista = clon(plantilla);
-  vista.people = Array.from({ length: 700 }, (_, i) => ({ ...plantilla.people[i % plantilla.people.length]!, id: `p${i}`,
+  vista.people = Array.from({ length: personas }, (_, i) => ({ ...plantilla.people[i % plantilla.people.length]!, id: `p${i}`,
     x: i % 128, y: Math.floor(i / 128) * 3 }));
-  vista.animals = Array.from({ length: 3000 }, (_, i) => ({ ...plantilla.animals![i % plantilla.animals!.length]!, id: `a${i}`,
+  vista.animals = Array.from({ length: animales }, (_, i) => ({ ...plantilla.animals![i % plantilla.animals!.length]!, id: `a${i}`,
     x: (i * 7) % 128, y: (i * 13) % 128 }));
-  vista.tiles = teselas(8);
+  vista.tiles = teselas(lado);
   const notables = new Set(vista.people.slice(0, 60).map(p => p.id));
   const gz = (texto: string) => gzipSync(texto, { level: 1 });
   const restos = NIVELES.map(nivel => {
@@ -472,7 +626,7 @@ function volumenSintetico(directorio: string, bytes: number) {
     return datos;
   }
   const tamanos = NIVELES.map(n => bloque(n, 0).length);
-  assert.equal(decodificarBloque(bloque(0, 0)).baseFrame.people.length, 700);
+  assert.equal(decodificarBloque(bloque(0, 0)).baseFrame.people.length, personas);
   // Todos los niveles cubren el mismo tiempo de mundo, como en una cinta grabada de corrido.
   const porTick = NIVELES.reduce<number>((s, n) => s + tamanos[n]! / (32 * CINTA.pasos[n]), 0);
   const fin = Math.ceil(bytes / porTick);
@@ -496,16 +650,18 @@ function volumenSintetico(directorio: string, bytes: number) {
 test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en cada nivel', {
   skip: process.env.ATLAS_V23_CINTA_SALTO !== '1', timeout: 3_600_000,
 }, async t => {
-  mkdirSync(ARCHIVO, { recursive: true });
-  const dir = mkdtempSync(join(ARCHIVO, 'salto-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dir = directorio(t);
   const inicio = performance.now();
-  const resumen = volumenSintetico(join(dir, 'cinta'), Number(process.env.ATLAS_V23_CINTA_SALTO_BYTES ?? 5e9));
+  // `ATLAS_V23_CINTA_SALTO_MUNDO=personas,animales,lado` cambia el mundo sintético (lado en chunks); el de I5 es el de omisión.
+  const objetivo = Number(process.env.ATLAS_V23_CINTA_SALTO_BYTES ?? 5e9), mundo = process.env.ATLAS_V23_CINTA_SALTO_MUNDO?.split(',').map(Number);
+  const resumen = volumenSintetico(join(dir, 'cinta'), objetivo, mundo as [number, number, number] | undefined);
   t.diagnostic(`escritura: ${((performance.now() - inicio) / 1000).toFixed(0)} s`);
   t.diagnostic(JSON.stringify(resumen));
+  assert.ok(resumen.escritos >= objetivo * 0.99, `cinta de ${resumen.escritos} bytes`);
   const lector = new LectorCinta(join(dir, 'cinta'), 1);
   t.after(() => lector.close());
   const meta = lector.meta();
+  assert.deepEqual(meta.niveles.map(n => n.nivel), [0, 1, 2, 3, 4]);
   const camara = { x: 0, y: 0, w: 96, h: 64 };
   const azar = (() => { let s = 12345; return () => (s = Math.imul(s, 1664525) + 1013904223 >>> 0) / 2 ** 32; })();
   // La CPU del hilo separa el coste del lector de la espera: las pruebas corren en SCHED_IDLE con la torre cargada.
@@ -520,7 +676,10 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
       const c = cpu();
       const r = JSON.parse(lector.chunk({ t: tick, n: 1, nivel: n.nivel, ...camara })) as ChunkResp;
       pared.push(performance.now() - inicio); cpus.push(cpu() - c);
-      assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 <= tick, JSON.stringify({ tick, ...r, baseFrame: !!r.baseFrame }));
+      // Los bloques del volumen empiezan en múltiplos de 32 pasos: la clave ≤ t y el primer fotograma ≥ t son exactos.
+      const paso = CINTA.pasos[n.nivel], clave = Math.floor(tick / (32 * paso)) * 32 * paso;
+      assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 === clave && r.baseFrame.tick === clave && r.t1 === Math.ceil(tick / paso) * paso
+        && r.baseFrame.tiles.length === (n.nivel <= 2 ? 96 * 64 : 0), JSON.stringify({ tick, ...r, baseFrame: !!r.baseFrame }));
       if (i % 10 === 0) { inicio = performance.now(); lector.chunk({ t: tick, n: 1, nivel: n.nivel }); sinCamara.push(performance.now() - inicio); }
     }
     const orden = [...pared].sort((a, b) => a - b);

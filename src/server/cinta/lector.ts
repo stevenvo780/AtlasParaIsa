@@ -9,6 +9,7 @@ import type { Tile, Viewport, WorldView } from '../../shared/types.js';
 import { phaseAt } from '../../world/mundo/crear.js';
 import { TICKS_PER_DAY } from '../../world/mundo/tipos.js';
 import { INDICE_CINTA, NIVELES, rutaSegmento } from './catalogo.js';
+import { PASO_MAXIMO } from './escritor.js';
 import { clientDelta, decodificarBloque, type BloqueDecodificado } from './formato.js';
 import { reducirTesela } from './reducir.js';
 
@@ -17,22 +18,30 @@ export const CACHE_BYTES = 256 * 1024 ** 2;
 // Un bloque decodificado ocupa en el montón unas 20 veces lo que ocupa comprimido (JSON con gzip nivel 1 ≈ 6×,
 // objetos de V8 ≈ 3× el JSON). El tope se cuenta con esa estimación.
 const FACTOR_MEMORIA = 20;
-/** JSON por respuesta: al pasarlo se corta el tramo y se marca `hayMas`. Siempre va la base. */
+/** Bytes por respuesta: una parte que lo pasaría no entra y el resto sigue con `hayMas`. Lo que lleva hasta el primer
+ * fotograma ≥ t entra siempre, o el cliente no avanzaría. */
 export const TOPE_RESPUESTA = 8 * 1024 ** 2;
 const PUNTOS_SERIE = 400;
 
-/** Pinta lo que la cinta no grabó dentro de la cámara (terreno archivado o sin generar). */
-export type Fondo = (x: number, y: number) => Tile | undefined;
+/** Pinta en el tick `t` lo que la cinta no grabó dentro de la cámara (terreno archivado o sin generar). */
+export type Fondo = (x: number, y: number, t: number) => Tile | undefined;
 
-interface Bloque { segmento: number; epoca: number; nivel: Nivel; t0: number; t1: number; offset: number; bytes: number; fotogramas: number }
+interface Bloque { segmento: number; epoca: number; nivel: Nivel; t0: number; t1: number; offset: number; bytes: number; fotogramas: number; crc: number }
 /** `fin`: el tick desde el que manda una época posterior (exclusivo). Lo que la época grabó desde ahí es huérfano. */
-interface Epoca { id: number; tMundo: number; t1: number; fin: number }
+interface Epoca { id: number; instanciaId: string; tMundo: number; t1: number; fin: number }
+/** Bloques seguidos de un nivel en una época, sin laguna ni hueco de la poda entre ellos: posiciones [i0, i1]. */
+interface Intervalo { i0: number; i1: number; t0: number; t1: number }
+interface Pista { bloques: Bloque[]; intervalos: Intervalo[] }
+interface Sitio { e: Epoca; nivel: Nivel; iv: Intervalo }
 interface Fotograma { vista: WorldView; teselas: Map<string, Tile>; delta?: TapeClientDelta }
 /** `contados`: fotogramas ≥ `desde`; `ultimo` es -1 si el tramo salió vacío. */
 interface Tramo { base?: string; partes: string[]; t0: number; t1: number; ultimo: number; contados: number }
 interface OpcionesTramo { clave: boolean; n: number; hasta: number; camara?: Viewport; fondo?: Fondo; completos?: boolean }
 
+const PISTA_VACIA: Pista = { bloques: [], intervalos: [] };
 const coord = (t: { x: number; y: number }): string => `${t.x},${t.y}`;
+/** Un error que se arregla releyendo el catálogo: el bloque ya no es el que el índice describe. */
+const cambiada = (mensaje: string): Error => Object.assign(new Error(mensaje), { code: 'ESTALE' });
 
 /**
  * Parche de una lista recortada a partir del grabado para el mundo entero: quien sigue a la vista lleva el mismo cambio,
@@ -69,10 +78,10 @@ function deltaRecortado(previa: WorldView, actual: WorldView, grabado?: TapeClie
   }
   return delta;
 }
-const clave = (epoca: number, nivel: Nivel): number => epoca * 5 + nivel;
 
 /** Recorte a la cámara de una vista de la cinta; sin `teselas` solo proyecta la cabecera (para las deltas). */
-function proyectar(vista: WorldView, teselas: Map<string, Tile> | undefined, camara: Viewport | undefined, fondo?: Fondo): WorldView {
+function proyectar(vista: WorldView, teselas: Map<string, Tile> | undefined, camara: Viewport | undefined,
+  fondo?: (x: number, y: number) => Tile | undefined): WorldView {
   const r: WorldView = { ...vista };
   delete (r as unknown as Record<string, unknown>).seed;
   if (!camara) { r.tiles = teselas ? [...teselas.values()] : []; return r; }
@@ -110,10 +119,20 @@ function conCampos(sobre: object, extra: string): string {
   return json.length > 2 ? `${json.slice(0, -1)},${extra}}` : `{${extra}}`;
 }
 
+/** Última posición de `lista` cuyo valor es ≤ `t`, o -1. */
+function ultimoHasta<T>(lista: readonly T[], t: number, valor: (v: T) => number): number {
+  let lo = 0, hi = lista.length - 1, r = -1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    if (valor(lista[m]!) <= t) { r = m; lo = m + 1; } else hi = m - 1;
+  }
+  return r;
+}
+
 /**
  * Lector de la cinta (cinta-sonnet §3, «Lectura y salto»): índice de bloques en RAM que se pone al día con lo que
  * confirma el escritor, búsqueda binaria por tick y caché LRU de bloques decodificados. Es síncrono: corre en los
- * hilos de `lector-worker.ts`, nunca en el del HTTP.
+ * hilos de `lector-worker.ts`, nunca en el del HTTP. Con `instancia`, una cinta de otro mundo se lee como vacía.
  */
 export class LectorCinta {
   private db?: DatabaseSync;
@@ -122,11 +141,14 @@ export class LectorCinta {
   private ultimoRowid = 0;
   private epocas: Epoca[] = [];
   private segmentos = new Map<number, { nivel: Nivel; bytes: number }>();
-  private indice = new Map<number, Bloque[]>();
+  /** Por época, una pista por nivel. */
+  private indice = new Map<number, Pista[]>();
   private lagunas: (Laguna & { epoca: number })[] = [];
   private bifurcaciones: Bifurcacion[] = [];
   private readonly cache = new Map<string, { bloque: BloqueDecodificado; coste: number }>();
   private cacheUsado = 0;
+  /** Último fotograma antes de `fin` de un bloque que lo cruza, que solo se sabe decodificándolo. */
+  private readonly bordes = new Map<string, number>();
 
   constructor(readonly directorio: string, private readonly cacheBytes = CACHE_BYTES) {}
 
@@ -134,12 +156,12 @@ export class LectorCinta {
     try { this.db?.close(); } finally {
       this.db = undefined; this.ino = -1; this.version = -1; this.ultimoRowid = 0;
       this.epocas = []; this.segmentos.clear(); this.indice.clear(); this.lagunas = []; this.bifurcaciones = [];
-      this.cache.clear(); this.cacheUsado = 0;
+      this.cache.clear(); this.cacheUsado = 0; this.bordes.clear();
     }
   }
 
-  /** Pone el índice al día. Falso mientras la cinta no tiene catálogo. */
-  private refrescar(): boolean {
+  /** Pone el índice al día. Falso mientras la cinta no tiene catálogo o es de otra instancia del mundo. */
+  private refrescar(instancia?: string): boolean {
     const ruta = join(this.directorio, INDICE_CINTA);
     const ino = statSync(ruta, { throwIfNoEntry: false })?.ino;
     // Otra instancia del mundo aparta la cinta entera y empieza una nueva en el mismo sitio.
@@ -162,41 +184,61 @@ export class LectorCinta {
       if (version !== this.version) { this.cargar(db); this.version = version; }
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); this.version = -1; throw error; }
-    return true;
+    return instancia === undefined || this.epocas[0]?.instanciaId === instancia;
   }
 
   private cargar(db: DatabaseSync): void {
-    const epocas = db.prepare('SELECT id,tMundo,t1 FROM epocas ORDER BY id').all() as unknown as Epoca[];
+    const epocas = db.prepare('SELECT id,instanciaId,tMundo,t1 FROM epocas ORDER BY id').all() as unknown as Epoca[];
     let fin = Infinity;
     for (let i = epocas.length - 1; i >= 0; i--) { epocas[i]!.fin = fin; fin = Math.min(fin, epocas[i]!.tMundo); }
     this.epocas = epocas;
     const vivos = new Map((db.prepare('SELECT id,nivel,bytes FROM segmentos').all() as { id: number; nivel: Nivel; bytes: number }[])
       .map(s => [s.id, { nivel: s.nivel, bytes: s.bytes }]));
+    // La fila más nueva es del último segmento de su nivel, que la poda nunca borra: si baja, el catálogo es otro.
     const maximo = Number(db.prepare('SELECT coalesce(max(rowid),0) AS r FROM bloques').get()!.r);
     if (maximo < this.ultimoRowid) { this.indice.clear(); this.ultimoRowid = 0; }
     else if ([...this.segmentos.keys()].some(id => !vivos.has(id))) {
-      for (const [k, lista] of this.indice) this.indice.set(k, lista.filter(b => vivos.has(b.segmento)));
+      for (const pistas of this.indice.values()) for (const p of pistas) p.bloques = p.bloques.filter(b => vivos.has(b.segmento));
     }
     this.segmentos = vivos;
     // El escritor añade los bloques de cada época y nivel en orden de tick, así que el rowid conserva ese orden.
-    const nuevos = db.prepare(`SELECT rowid AS r,segmento,epoca,nivel,t0,t1,offset,bytes,fotogramas FROM bloques
+    const nuevos = db.prepare(`SELECT rowid AS r,segmento,epoca,nivel,t0,t1,offset,bytes,fotogramas,crc FROM bloques
       WHERE rowid>? ORDER BY rowid`).all(this.ultimoRowid) as unknown as (Bloque & { r: number })[];
     for (const { r, ...b } of nuevos) {
-      const k = clave(b.epoca, b.nivel);
-      let lista = this.indice.get(k);
-      if (!lista) this.indice.set(k, lista = []);
-      lista.push(b);
+      let pistas = this.indice.get(b.epoca);
+      if (!pistas) this.indice.set(b.epoca, pistas = NIVELES.map(() => ({ bloques: [], intervalos: [] })));
+      pistas[b.nivel]!.bloques.push(b);
       this.ultimoRowid = r;
     }
     this.lagunas = db.prepare('SELECT epoca,t0,t1 FROM lagunas ORDER BY t0').all().map(l => ({ ...l })) as unknown as (Laguna & { epoca: number })[];
     this.bifurcaciones = db.prepare('SELECT epoca,desde,hasta,motivo FROM bifurcaciones ORDER BY epoca').all()
       .map(b => ({ ...b })) as unknown as Bifurcacion[];
+    for (const [epoca, pistas] of this.indice) pistas.forEach((p, nivel) => { p.intervalos = this.intervalos(epoca, nivel as Nivel, p.bloques); });
   }
 
-  /** Un segmento podado entre la carga del índice y la lectura: se recarga el índice y se intenta una vez más. */
+  /**
+   * Corta la pista donde falta historia: en una laguna declarada o donde dos bloques seguidos quedan más lejos de lo
+   * que el escritor deja entre dos fotogramas del nivel (la poda puede quitar segmentos del medio y conservar uno
+   * fijado). El escritor declara laguna en cuanto dos cortes distan más de `PASO_MAXIMO`, así que entre dos
+   * fotogramas seguidos del nivel k hay a lo sumo su paso más `PASO_MAXIMO` (L0 graba todos los cortes).
+   */
+  private intervalos(epoca: number, nivel: Nivel, bloques: readonly Bloque[]): Intervalo[] {
+    const salto = (nivel ? CINTA.pasos[nivel] : 0) + PASO_MAXIMO;
+    const lagunas = this.lagunas.filter(l => l.epoca === epoca);
+    const r: Intervalo[] = [];
+    bloques.forEach((b, i) => {
+      const a = bloques[i - 1], ultimo = r.at(-1);
+      if (a && ultimo && b.t0 - a.t1 <= salto && !lagunas.some(l => l.t1 > a.t1 && l.t1 <= b.t0)) { ultimo.i1 = i; ultimo.t1 = b.t1; }
+      else r.push({ i0: i, i1: i, t0: b.t0, t1: b.t1 });
+    });
+    return r;
+  }
+
+  /** Un segmento podado o apartado entre la carga del índice y la lectura: se recarga el índice y se intenta otra vez. */
   private reintentar<T>(leer: () => T): T {
     try { return leer(); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ESTALE') throw error;
       this.version = -1;
       return leer();
     }
@@ -211,69 +253,117 @@ export class LectorCinta {
     try {
       for (let cursor = 0; cursor < datos.length;) {
         const n = readSync(fd, datos, cursor, datos.length - cursor, b.offset + cursor);
-        if (!n) throw new Error(`Bloque de cinta incompleto: ${b.segmento}/${b.offset}.`);
+        if (!n) throw cambiada(`Bloque de cinta incompleto: ${b.segmento}/${b.offset}.`);
         cursor += n;
       }
     } finally { closeSync(fd); }
-    const bloque = decodificarBloque(datos);
+    let bloque: BloqueDecodificado;
+    try { bloque = decodificarBloque(datos); } catch (error) {
+      throw cambiada(`Bloque de cinta ilegible: ${b.segmento}/${b.offset} (${error instanceof Error ? error.message : error}).`);
+    }
+    // Con la cinta apartada por otra instancia, el mismo nombre de segmento puede ser ya de la cinta nueva.
+    if (bloque.crc !== b.crc || bloque.nivel !== b.nivel || bloque.t0 !== b.t0 || bloque.t1 !== b.t1 || bloque.fotogramas !== b.fotogramas) {
+      throw cambiada(`El bloque ${b.segmento}/${b.offset} no es el del catálogo.`);
+    }
     const coste = b.bytes * FACTOR_MEMORIA;
+    if (coste > this.cacheBytes) return bloque;
     this.cache.set(k, { bloque, coste });
     this.cacheUsado += coste;
     for (const [viejo, { coste: c }] of this.cache) {
-      if (this.cacheUsado <= this.cacheBytes || this.cache.size === 1) break;
+      if (this.cacheUsado <= this.cacheBytes) break;
       this.cache.delete(viejo); this.cacheUsado -= c;
     }
     return bloque;
   }
 
-  private lista(epoca: number, nivel: Nivel): Bloque[] { return this.indice.get(clave(epoca, nivel)) ?? []; }
+  private pista(epoca: number, nivel: Nivel): Pista { return this.indice.get(epoca)?.[nivel] ?? PISTA_VACIA; }
 
-  /** La época que se ve en `t`: la última que empezó en o antes de `t`. */
+  /**
+   * La época que se ve en `t`: la más nueva que empezó en o antes de `t` (la primera si `t` es anterior). Una restauración
+   * puede volver más atrás que la época anterior, así que `tMundo` no crece con la época: no vale una búsqueda binaria.
+   */
   private epocaEn(t: number): number {
     let i = this.epocas.length - 1;
     while (i > 0 && this.epocas[i]!.tMundo > t) i--;
     return Math.max(0, i);
   }
 
-  /** El bloque desde el que leer `t`: el último que empieza en o antes de `t`, o el primero si `t` es anterior. */
-  private bloqueEn(lista: Bloque[], t: number): number {
-    let lo = 0, hi = lista.length - 1, r = 0;
-    while (lo <= hi) {
-      const m = (lo + hi) >> 1;
-      if (lista[m]!.t0 <= t) { r = m; lo = m + 1; } else hi = m - 1;
+  /** Último fotograma de un intervalo; sin `todo`, el último anterior a `fin` (−1 si no tiene ninguno visible). */
+  private ultimo(e: Epoca, nivel: Nivel, iv: Intervalo, todo: boolean): number {
+    if (todo || iv.t1 < e.fin) return iv.t1;
+    if (iv.t0 >= e.fin) return -1;
+    const { bloques } = this.pista(e.id, nivel);
+    let j = iv.i1;
+    while (bloques[j]!.t0 >= e.fin) j--;
+    const b = bloques[j]!;
+    if (b.t1 < e.fin) return b.t1;
+    const k = `${b.segmento}:${b.offset}:${e.fin}`;
+    let t = this.bordes.get(k);
+    if (t === undefined) {
+      const d = this.leerBloque(b);
+      t = d.t0;
+      for (const delta of d.deltas) if (delta.tick < e.fin) t = delta.tick;
+      this.bordes.set(k, t);
     }
-    return r;
+    return t;
   }
 
-  /** Lo visible de un nivel en una época: [t0, t1] de sus fotogramas antes de `fin`. */
-  private cobertura(e: Epoca, nivel: Nivel): { t0: number; t1: number } | undefined {
-    const lista = this.lista(e.id, nivel);
-    let j = lista.length - 1;
-    while (j >= 0 && lista[j]!.t0 >= e.fin) j--;
-    const primero = lista[0], ultimo = lista[j];
-    if (!primero || !ultimo) return undefined;
-    return { t0: primero.t0, t1: Math.min(ultimo.t1, e.fin - 1) };
+  /** El intervalo de un nivel que contiene `t` (sin `todo`, solo su parte visible). */
+  private intervaloEn(e: Epoca, nivel: Nivel, t: number, todo: boolean): Intervalo | undefined {
+    const { intervalos } = this.pista(e.id, nivel);
+    const iv = intervalos[ultimoHasta(intervalos, t, x => x.t0)];
+    return iv && t <= this.ultimo(e, nivel, iv, todo) ? iv : undefined;
   }
 
-  private coberturaTotal(nivel: Nivel): { t0: number; t1: number } | undefined {
-    let t0 = Infinity, t1 = -Infinity;
+  /** El primer intervalo de un nivel que empieza después de `t` (sin `todo`, que se vea). */
+  private siguiente(e: Epoca, nivel: Nivel, t: number, todo: boolean): Intervalo | undefined {
+    const { intervalos } = this.pista(e.id, nivel);
+    const iv = intervalos[ultimoHasta(intervalos, t, x => x.t0) + 1];
+    return iv && (todo || iv.t0 < e.fin) ? iv : undefined;
+  }
+
+  /**
+   * Dónde leer `t`: el nivel más fino con un intervalo que contiene `t` en la época que se ve en `t` (o en la pedida);
+   * si ninguno, lo primero que haya después, del nivel más fino si empatan.
+   */
+  private ubicar(t: number, niveles: readonly Nivel[], pedida?: Epoca): Sitio | undefined {
+    const todo = !!pedida, epocas = pedida ? [pedida] : this.epocas.slice(this.epocaEn(t));
+    const e = epocas[0];
+    if (!e) return undefined;
+    for (const nivel of niveles) {
+      const iv = this.intervaloEn(e, nivel, t, todo);
+      if (iv) return { e, nivel, iv };
+    }
+    let mejor: Sitio | undefined;
+    for (const nivel of niveles) for (const x of epocas) {
+      const iv = this.siguiente(x, nivel, t, todo);
+      if (!iv) continue;
+      if (!mejor || iv.t0 < mejor.iv.t0) mejor = { e: x, nivel, iv };
+      break;
+    }
+    return mejor;
+  }
+
+  /** Lo visible de un nivel en todas las épocas: del primer al último fotograma que se ve. */
+  private cobertura(nivel: Nivel): { t0: number; t1: number; fotogramas: number } | undefined {
+    let t0 = Infinity, t1 = -1, fotogramas = 0;
     for (const e of this.epocas) {
-      const c = this.cobertura(e, nivel);
-      if (c) { t0 = Math.min(t0, c.t0); t1 = Math.max(t1, c.t1); }
+      const { bloques, intervalos } = this.pista(e.id, nivel);
+      for (const b of bloques) if (b.t0 < e.fin) fotogramas += b.fotogramas;
+      for (const iv of intervalos) {
+        const ultimo = this.ultimo(e, nivel, iv, false);
+        if (ultimo >= 0) { t0 = Math.min(t0, iv.t0); t1 = Math.max(t1, ultimo); }
+      }
     }
-    return t1 < 0 ? undefined : { t0, t1 };
+    return t1 < 0 ? undefined : { t0, t1, fotogramas };
   }
 
-  private lagunaEntre(epoca: number, antes: Bloque, despues: Bloque): boolean {
-    return this.lagunas.some(l => l.epoca === epoca && l.t1 > antes.t1 && l.t1 <= despues.t0);
-  }
-
-  /** Fotogramas completos de un nivel desde el bloque `i`, sin cruzar `hasta` ni una laguna. Las teselas van aparte. */
-  private *recorrer(e: Epoca, nivel: Nivel, i: number, hasta: number): Generator<Fotograma> {
-    const lista = this.lista(e.id, nivel);
-    for (let j = i; j < lista.length; j++) {
-      const b = lista[j]!;
-      if (b.t0 >= hasta || j > i && this.lagunaEntre(e.id, lista[j - 1]!, b)) return;
+  /** Fotogramas completos de un nivel de los bloques [i, j], sin llegar a `hasta`. Las teselas van aparte. */
+  private *recorrer(e: Epoca, nivel: Nivel, i: number, j: number, hasta: number): Generator<Fotograma> {
+    const { bloques } = this.pista(e.id, nivel);
+    for (let k = i; k <= j; k++) {
+      const b = bloques[k]!;
+      if (b.t0 >= hasta) return;
       const d = this.leerBloque(b);
       let vista: WorldView = { ...d.baseFrame, tiles: [] };
       const teselas = new Map(d.baseFrame.tiles.map(t => [coord(t), t]));
@@ -290,28 +380,31 @@ export class LectorCinta {
   }
 
   /**
-   * Serializa un tramo: una base y deltas que aplica `applyClientTapeDelta`, recortados a la cámara. Con `clave` la base
-   * es el fotograma clave del bloque (el primer pintado sale sin aplicar deltas); si no, el primer fotograma ≥ `desde`.
+   * Serializa un tramo de los bloques [i, j]: una base y deltas que aplica `applyClientTapeDelta`, recortados a la
+   * cámara. Con `clave` la base es el fotograma clave del bloque `i` (el primer pintado sale sin aplicar deltas); si
+   * no, el primer fotograma ≥ `desde`. `n` y el tope de bytes cuentan todo lo que se envía, pero lo que lleva hasta el
+   * primer fotograma ≥ `desde` entra siempre: un bloque tiene 32 fotogramas y `n` llega a 120.
    */
-  private tramo(e: Epoca, nivel: Nivel, i: number, desde: number, o: OpcionesTramo): Tramo {
+  private tramo(e: Epoca, nivel: Nivel, i: number, j: number, desde: number, o: OpcionesTramo): Tramo {
     const r: Tramo = { partes: [], t0: desde, t1: desde, ultimo: -1, contados: 0 };
-    let bytes = 0;
+    let bytes = 0, enviados = 0;
     let previa: WorldView | undefined, teselasPrevias: Map<string, Tile> | undefined;
     const visibles = new Map<string, Tile>();
     const dentro = (t: { x: number; y: number }): boolean => !o.camara || t.x >= o.camara.x && t.y >= o.camara.y
       && t.x < o.camara.x + o.camara.width && t.y < o.camara.y + o.camara.height;
-    for (const f of this.recorrer(e, nivel, i, o.hasta)) {
+    for (const f of this.recorrer(e, nivel, i, j, o.hasta)) {
       const tick = f.vista.tick;
       if (!previa && !o.clave && tick < desde) continue;
-      if (r.contados >= o.n || bytes >= TOPE_RESPUESTA) break;
-      if (tick >= desde) r.contados++;
+      if (r.contados && enviados >= o.n) break;
+      // Lo huérfano se pinta sobre el archivo que comparte con lo visible: el de su bifurcación.
+      const fondo = o.fondo && ((x: number, y: number) => o.fondo!(x, y, Math.min(tick, e.fin)));
       const cabecera = proyectar(f.vista, undefined, o.camara);
       let parte: string;
-      if (o.completos) parte = JSON.stringify(proyectar(f.vista, f.teselas, o.camara, o.fondo));
+      if (o.completos) parte = JSON.stringify(proyectar(f.vista, f.teselas, o.camara, fondo));
       else if (!previa) {
-        const base = proyectar(f.vista, f.teselas, o.camara, o.fondo);
+        const base = proyectar(f.vista, f.teselas, o.camara, fondo);
         for (const t of base.tiles) visibles.set(coord(t), t);
-        parte = r.base = JSON.stringify(base);
+        parte = JSON.stringify(base);
       } else if (!o.camara && f.delta) parte = JSON.stringify(f.delta);
       else {
         const delta = deltaRecortado(previa, cabecera, f.delta);
@@ -321,7 +414,7 @@ export class LectorCinta {
         } else if (o.camara) {
           // Cruce de bloque: la clave nueva no trae parche, se compara lo que se ve.
           for (let y = o.camara.y; y < o.camara.y + o.camara.height; y++) for (let x = o.camara.x; x < o.camara.x + o.camara.width; x++) {
-            const k = `${x},${y}`, t = f.teselas.get(k) ?? o.fondo?.(x, y);
+            const k = `${x},${y}`, t = f.teselas.get(k) ?? fondo?.(x, y);
             if (t && !igual(t, visibles.get(k))) cambiadas.push(t);
             else if (!t && visibles.has(k)) quitadas.push(k);
           }
@@ -335,9 +428,13 @@ export class LectorCinta {
         if (quitadas.length) delta.removedTiles = quitadas;
         parte = JSON.stringify(delta);
       }
-      if (o.completos || previa) r.partes.push(parte);
+      const medida = Buffer.byteLength(parte);
+      if (r.contados && bytes + medida > TOPE_RESPUESTA) break;
+      if (!o.completos && !previa) r.base = parte;
+      else r.partes.push(parte);
       if (!previa) r.t0 = tick;
-      bytes += parte.length;
+      if (tick >= desde) r.contados++;
+      bytes += medida; enviados++;
       // Dentro de un bloque el mapa de teselas es el mismo objeto; al cruzar queda el del bloque anterior.
       previa = cabecera; teselasPrevias = f.teselas; r.t1 = tick;
     }
@@ -345,46 +442,27 @@ export class LectorCinta {
     return r;
   }
 
-  /**
-   * El bloque desde el que leer `t`. Con `clave` es el del fotograma clave más cercano ≤ `t`, salvo que entre ese bloque
-   * y `t` haya una laguna; sin ella, el primero con fotogramas en o después de `t`.
-   */
-  private bloqueDesde(epoca: number, lista: Bloque[], t: number, clave: boolean): number {
-    const i = this.bloqueEn(lista, t), b = lista[i], siguiente = lista[i + 1];
-    if (!b || b.t1 >= t) return i;
-    return !clave || siguiente && this.lagunaEntre(epoca, b, siguiente) ? i + 1 : i;
-  }
-
-  /** Primera época, desde la que se ve `t`, con un bloque del nivel desde el que leerlo. */
-  private ubicar(nivel: Nivel, t: number, clave: boolean): { e: Epoca; i: number; desde: number } | undefined {
-    for (let k = this.epocaEn(t); k < this.epocas.length; k++) {
-      const e = this.epocas[k]!, desde = Math.max(t, e.tMundo), lista = this.lista(e.id, nivel);
-      if (desde >= e.fin) continue;
-      const i = this.bloqueDesde(e.id, lista, desde, clave);
-      if (i < lista.length && lista[i]!.t0 < e.fin) return { e, i, desde };
-    }
-    return undefined;
-  }
-
-  meta(rango: { t0?: number; t1?: number } = {}, estado: CintaMeta['estado'] = 'ok', topeBytes: number = CINTA.topeBytes): CintaMeta {
+  meta(rango: { t0?: number; t1?: number } = {}, estado: CintaMeta['estado'] = 'ok', topeBytes: number = CINTA.topeBytes,
+    instancia?: string): CintaMeta {
     const vacia: CintaMeta = { version: 3, estado, epoca: 0, t0: 0, t1: 0, hz: 0, bytes: 0, topeBytes, niveles: [], bifurcaciones: [], lagunas: [], serie: [] };
-    if (!this.reintentar(() => this.refrescar())) return vacia;
-    let bytes = 0;
-    for (const sufijo of ['', '-wal', '-shm']) bytes += statSync(join(this.directorio, INDICE_CINTA + sufijo), { throwIfNoEntry: false })?.size ?? 0;
-    const niveles: CintaMeta['niveles'] = [];
-    for (const nivel of NIVELES) {
-      const c = this.coberturaTotal(nivel);
-      let enDisco = 0, fotogramas = 0;
-      for (const s of this.segmentos.values()) if (s.nivel === nivel) enDisco += s.bytes;
-      for (const e of this.epocas) for (const b of this.lista(e.id, nivel)) fotogramas += b.fotogramas;
-      bytes += enDisco;
-      if (c) niveles.push({ nivel, paso: CINTA.pasos[nivel], t0: c.t0, t1: c.t1, bytes: enDisco, fotogramas });
-    }
-    const ultima = this.epocas.at(-1);
-    const t0 = Math.min(...niveles.map(n => n.t0), ultima?.t1 ?? 0), t1 = ultima?.t1 ?? 0;
-    const serie = this.serie(rango.t0 ?? t0, rango.t1 ?? t1, PUNTOS_SERIE);
-    return { ...vacia, epoca: ultima?.id ?? 0, t0, t1, hz: this.ultimoHz(), bytes, niveles,
-      bifurcaciones: this.bifurcaciones, lagunas: this.lagunas.map(({ t0, t1 }) => ({ t0, t1 })), serie };
+    return this.reintentar(() => {
+      if (!this.refrescar(instancia)) return vacia;
+      let bytes = 0;
+      for (const sufijo of ['', '-wal', '-shm']) bytes += statSync(join(this.directorio, INDICE_CINTA + sufijo), { throwIfNoEntry: false })?.size ?? 0;
+      const niveles: CintaMeta['niveles'] = [];
+      for (const nivel of NIVELES) {
+        const c = this.cobertura(nivel);
+        let enDisco = 0;
+        for (const s of this.segmentos.values()) if (s.nivel === nivel) enDisco += s.bytes;
+        bytes += enDisco;
+        if (c) niveles.push({ nivel, paso: CINTA.pasos[nivel], t0: c.t0, t1: c.t1, bytes: enDisco, fotogramas: c.fotogramas });
+      }
+      const ultima = this.epocas.at(-1);
+      const t0 = Math.min(...niveles.map(n => n.t0), ultima?.t1 ?? 0), t1 = ultima?.t1 ?? 0;
+      const serie = this.serie(rango.t0 ?? t0, rango.t1 ?? t1, PUNTOS_SERIE);
+      return { ...vacia, epoca: ultima?.id ?? 0, t0, t1, hz: this.ultimoHz(), bytes, niveles,
+        bifurcaciones: this.bifurcaciones, lagunas: this.lagunas.map(({ t0, t1 }) => ({ t0, t1 })), serie };
+    });
   }
 
   private ultimoHz(): number {
@@ -406,70 +484,61 @@ export class LectorCinta {
     return Array.from({ length: puntos }, (_, i) => serie[Math.min(serie.length - 1, Math.round((i + 1) * salto) - 1)]!);
   }
 
-  chunk(req: ChunkReq, fondo?: Fondo): string {
+  /**
+   * `GET /api/cinta/chunk`. Sin `epoca` sirve lo visible y nunca cruza una época, una laguna ni un hueco; con ella, la
+   * historia entera de esa época (también lo huérfano), que sigue siendo continua. El tramo termina donde empieza un
+   * nivel más fino o donde el servido se acaba y otro sigue (`cambioDeNivelEn`).
+   */
+  chunk(req: ChunkReq, fondo?: Fondo, instancia?: string): string {
     return this.reintentar(() => {
-      const t = req.t, n = Math.min(CINTA.maxFotogramas, Math.max(1, req.n));
-      const vacio = (nivel: Nivel, epoca: number): string => JSON.stringify({ nivel, paso: CINTA.pasos[nivel], epoca, t0: t, t1: t,
-        hayMas: false, deltas: [] } satisfies ChunkResp);
-      if (!this.refrescar() || !this.epocas.length) return vacio(0, 0);
-      let sitio: { e: Epoca; i: number; desde: number } | undefined, nivel: Nivel = 0, cambio: number | undefined;
-      let limite = Infinity, clave = true;
-      if (req.epoca !== undefined) {
-        // Una época pedida explícitamente sirve también lo huérfano, pero nunca seguido de lo visible ni al revés.
-        const e = this.epocas.find(x => x.id === req.epoca);
-        if (!e) return vacio(0, req.epoca);
-        nivel = req.nivel === undefined || req.nivel === 'auto' ? NIVELES.find(k => this.lista(e.id, k).some(b => b.t1 >= t)) ?? 0 : req.nivel;
-        const lista = this.lista(e.id, nivel);
-        if (t < e.fin) limite = e.fin;
-        else clave = false;
-        const i = this.bloqueDesde(e.id, lista, t, clave);
-        if (i < lista.length) sitio = { e, i, desde: t };
-      } else {
-        const niveles = req.nivel === undefined || req.nivel === 'auto' ? NIVELES : [req.nivel];
-        // El más fino que cubre t o, si ninguno lo cubre, el más fino con fotogramas después.
+      const n = Math.min(CINTA.maxFotogramas, Math.max(1, req.n));
+      const auto = req.nivel === undefined || req.nivel === 'auto', niveles = auto ? NIVELES : [req.nivel as Nivel];
+      const vacio = (t: number, epoca: number): string => JSON.stringify({ nivel: niveles[0]!, paso: CINTA.pasos[niveles[0]!], epoca,
+        t0: t, t1: t, hayMas: false, deltas: [] } satisfies ChunkResp);
+      if (!this.refrescar(instancia) || !this.epocas.length) return vacio(req.t, req.epoca ?? 0);
+      const pedida = req.epoca === undefined ? undefined : this.epocas.find(x => x.id === req.epoca);
+      if (req.epoca !== undefined && !pedida) return vacio(req.t, req.epoca);
+      const todo = !!pedida, camara = req.w === undefined ? undefined : { x: req.x!, y: req.y!, width: req.w, height: req.h! };
+      // Entre t y el corte puede no haber fotogramas (un nivel más fino empieza antes del siguiente, o lo que queda
+      // del bloque es huérfano): se sirve desde el corte.
+      for (let t = req.t; ;) {
+        const sitio = this.ubicar(t, niveles, pedida);
+        if (!sitio) return vacio(t, req.epoca ?? this.epocas.at(-1)!.id);
+        const { e, nivel, iv } = sitio, desde = Math.max(t, iv.t0), fin = todo ? Infinity : e.fin;
+        let cambio = Infinity;
         for (const k of niveles) {
-          const s = this.ubicar(k, t, true);
-          if (!s) continue;
-          const cubre = this.cobertura(s.e, k)!.t0 <= s.desde;
-          if (cubre || !sitio) { sitio = s; nivel = k; }
-          if (cubre) break;
+          const otro = k < nivel ? this.siguiente(e, k, desde, todo) : undefined;
+          if (otro && otro.t0 < fin) cambio = Math.min(cambio, otro.t0);
         }
-        if (sitio) {
-          limite = sitio.e.fin;
-          // Si un nivel más fino empieza más adelante en la misma época, el tramo termina ahí.
-          for (const k of niveles) {
-            const c = k < nivel ? this.cobertura(sitio.e, k) : undefined;
-            if (c && c.t0 > sitio.desde) cambio = Math.min(cambio ?? Infinity, c.t0);
-          }
+        // Un hueco de la poda en este nivel que otro cubre (una laguna no la cubre ninguno).
+        const ultimo = this.ultimo(e, nivel, iv, todo);
+        if (ultimo + 1 < cambio && niveles.some(k => k !== nivel && this.intervaloEn(e, k, ultimo + 1, todo))) cambio = ultimo + 1;
+        const hasta = Math.min(fin, cambio), { bloques } = this.pista(e.id, nivel);
+        const i = Math.max(iv.i0, ultimoHasta(bloques, desde, b => b.t0));
+        const tramo = this.tramo(e, nivel, i, iv.i1, desde, { clave: true, n, hasta, camara, fondo: fondoDe(nivel, fondo) });
+        if (!tramo.contados) {
+          if (hasta === Infinity || hasta <= t) return vacio(t, e.id);
+          t = hasta;
+          continue;
         }
+        const final = todo ? this.pista(e.id, nivel).bloques.at(-1)!.t1 : this.cobertura(nivel)!.t1;
+        const resp: Omit<ChunkResp, 'baseFrame' | 'deltas'> = { nivel, paso: CINTA.pasos[nivel], epoca: e.id, t0: tramo.t0, t1: tramo.t1,
+          hayMas: tramo.ultimo < final, ...(cambio < Infinity ? { cambioDeNivelEn: cambio } : {}) };
+        return conCampos(resp, `${tramo.base ? `"baseFrame":${tramo.base},` : ''}"deltas":[${tramo.partes.join(',')}]`);
       }
-      if (!sitio) return vacio(req.nivel === undefined || req.nivel === 'auto' ? nivel : req.nivel, req.epoca ?? this.epocas.at(-1)!.id);
-      const { e, i, desde } = sitio;
-      const camara = req.w === undefined ? undefined : { x: req.x!, y: req.y!, width: req.w, height: req.h! };
-      const hasta = Math.min(limite, cambio ?? Infinity);
-      const tramo = this.tramo(e, nivel, i, desde, { clave, n, hasta, camara, fondo: fondoDe(nivel, fondo) });
-      // Entre `t` y el corte no había fotogramas (el bloque sigue con lo huérfano o con un nivel más fino): se sirve desde el corte.
-      if (!tramo.contados && hasta < Infinity && hasta > t) return this.chunk({ ...req, t: hasta }, fondo);
-      const final = req.epoca === undefined ? this.coberturaTotal(nivel)?.t1 ?? -1 : this.lista(e.id, nivel).at(-1)?.t1 ?? -1;
-      const resp: Omit<ChunkResp, 'baseFrame' | 'deltas'> = { nivel, paso: CINTA.pasos[nivel], epoca: e.id, t0: tramo.t0, t1: tramo.t1,
-        hayMas: tramo.ultimo >= 0 && tramo.ultimo < final,
-        ...(cambio !== undefined && tramo.ultimo >= 0 && tramo.ultimo < cambio ? { cambioDeNivelEn: cambio } : {}) };
-      return conCampos(resp, `${tramo.base ? `"baseFrame":${tramo.base},` : ''}"deltas":[${tramo.partes.join(',')}]`);
     });
   }
 
   /** `GET /api/tape/meta` con la forma del reproductor actual, servido desde L0 (alias hasta la ola 2). */
-  metaAntigua(flags: { observerOnly: boolean; turbo: boolean }, puntos = 240): string {
+  metaAntigua(flags: { observerOnly: boolean; turbo: boolean }, instancia?: string, puntos = 240): string {
     return this.reintentar(() => {
       const r: TapeMetaResponse = { enabled: true, observerOnly: flags.observerOnly, turbo: flags.turbo, minTick: 0, maxTick: 0,
         latestDay: 1, totalFrames: 0, keyframeInterval: CINTA.pasos[0], simHz: 0, keyframeTicks: [], timeline: [] };
-      if (!this.refrescar()) return JSON.stringify(r);
-      const c = this.coberturaTotal(0);
+      if (!this.refrescar(instancia)) return JSON.stringify(r);
+      const c = this.cobertura(0);
       if (c) {
-        let total = 0;
-        for (const e of this.epocas) for (const b of this.lista(e.id, 0)) if (b.t0 < e.fin) total += b.fotogramas;
-        const ultimo = this.lista(this.epocas.at(-1)!.id, 0).at(-1);
-        Object.assign(r, { minTick: c.t0, maxTick: c.t1, latestDay: Math.floor(c.t1 / TICKS_PER_DAY) + 1, totalFrames: total,
+        const ultimo = this.pista(this.epocas.at(-1)!.id, 0).bloques.at(-1);
+        Object.assign(r, { minTick: c.t0, maxTick: c.t1, latestDay: Math.floor(c.t1 / TICKS_PER_DAY) + 1, totalFrames: c.fotogramas,
           ...(ultimo ? { keyframeInterval: Math.max(CINTA.pasos[0], ultimo.t1 - ultimo.t0) } : {}) });
       }
       const serie = this.serie(r.minTick, Math.max(r.maxTick, this.epocas.at(-1)?.t1 ?? 0), Math.max(2, puntos));
@@ -482,21 +551,26 @@ export class LectorCinta {
     });
   }
 
-  /** `GET /api/tape/chunk`: L0 desde el primer fotograma ≥ `fromTick`, sin cruzar una época ni una laguna. */
-  chunkAntiguo(fromTick: number, count: number, camara?: Viewport, encoding: TapeChunkEncoding = 'full', fondo?: Fondo): string {
+  /** `GET /api/tape/chunk`: L0 visible desde el primer fotograma ≥ `fromTick`, sin cruzar una época, una laguna ni un hueco. */
+  chunkAntiguo(fromTick: number, count: number, camara?: Viewport, encoding: TapeChunkEncoding = 'full', fondo?: Fondo,
+    instancia?: string): string {
     return this.reintentar(() => {
-      const c = this.refrescar() ? this.coberturaTotal(0) : undefined;
-      const sitio = c && this.ubicar(0, fromTick, false);
-      const tramo = sitio && this.tramo(sitio.e, 0, sitio.i, sitio.desde, { clave: false, n: count, hasta: sitio.e.fin, camara,
-        fondo, completos: encoding !== 'delta' });
-      // El resto del bloque es huérfano: lo siguiente visible empieza donde la época deja de verse.
-      if (tramo && !tramo.contados && sitio.e.fin < Infinity) return this.chunkAntiguo(sitio.e.fin, count, camara, encoding, fondo);
-      const sobre: Omit<TapeChunkResponse, 'frames' | 'baseFrame' | 'deltas'> = { fromTick: tramo?.t0 ?? fromTick,
-        toTick: tramo?.t1 ?? fromTick, minTick: c?.t0 ?? 0, maxTick: c?.t1 ?? 0, simHz: c ? this.ultimoHz() : 0,
-        hasMore: !!tramo && tramo.ultimo >= 0 && tramo.ultimo < c!.t1, ...(encoding === 'delta' ? { encoding } : {}) };
-      const partes = tramo?.partes.join(',') ?? '';
+      const c = this.refrescar(instancia) ? this.cobertura(0) : undefined;
+      // El intervalo de `ubicar` tiene un fotograma visible ≥ `fromTick` (o empieza después): el tramo nunca sale vacío.
+      const sitio = c && this.ubicar(fromTick, [0]);
+      let lleno: Tramo | undefined;
+      if (sitio) {
+        const { e, iv } = sitio, desde = Math.max(fromTick, iv.t0), { bloques } = this.pista(e.id, 0);
+        let i = Math.max(iv.i0, ultimoHasta(bloques, desde, b => b.t0));
+        if (bloques[i]!.t1 < desde) i++;
+        lleno = this.tramo(e, 0, i, iv.i1, desde, { clave: false, n: count, hasta: e.fin, camara, fondo, completos: encoding !== 'delta' });
+      }
+      const sobre: Omit<TapeChunkResponse, 'frames' | 'baseFrame' | 'deltas'> = { fromTick: lleno?.t0 ?? fromTick,
+        toTick: lleno?.t1 ?? fromTick, minTick: c?.t0 ?? 0, maxTick: c?.t1 ?? 0, simHz: c ? this.ultimoHz() : 0,
+        hasMore: !!lleno && lleno.ultimo < c!.t1, ...(encoding === 'delta' ? { encoding } : {}) };
+      const partes = lleno?.partes.join(',') ?? '';
       if (encoding !== 'delta') return conCampos(sobre, `"frames":[${partes}]`);
-      return conCampos(sobre, `"frames":[],${tramo?.base ? `"baseFrame":${tramo.base},` : ''}"deltas":[${partes}]`);
+      return conCampos(sobre, `"frames":[],${lleno?.base ? `"baseFrame":${lleno.base},` : ''}"deltas":[${partes}]`);
     });
   }
 
@@ -507,5 +581,5 @@ export class LectorCinta {
 function fondoDe(nivel: Nivel, fondo?: Fondo): Fondo | undefined {
   if (!fondo || nivel > 2) return undefined;
   if (nivel === 0) return fondo;
-  return (x, y) => { const t = fondo(x, y); return t && reducirTesela(nivel, t); };
+  return (x, y, t) => { const tesela = fondo(x, y, t); return tesela && reducirTesela(nivel, tesela); };
 }

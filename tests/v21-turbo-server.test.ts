@@ -262,7 +262,7 @@ test('turbo worker: graceful shutdown flushes the tape and joins the worker', { 
   } finally { reader.close(); }
 });
 
-test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, simHz and no leaked immediates', { timeout: 20_000 }, async t => {
+test('createApp turbo + tape: DVR content from the tape thread, viewport clipping, gzip, simHz and no leaked immediates', { timeout: 20_000 }, async t => {
   const resources = () => process.getActiveResourcesInfo().filter(kind => kind === 'Immediate').length;
   const baseline = resources();
   const f = await appFixture(t, { turbo: true });
@@ -281,8 +281,9 @@ test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, 
   const meta = (await f.http('/api/tape/meta')).json() as TapeMetaResponse;
   assert.equal(meta.enabled, true); assert.equal(meta.turbo, true);
   assert.equal(meta.minTick, tick0, 'the tape starts at the initial frame');
-  // El escritor vacía cada segundo: lo grabado en el último segundo puede no verse todavía.
-  assert.ok(meta.maxTick > tick0 && meta.totalFrames === (meta.maxTick - tick0) / CINTA.pasos[0] + 1,
+  // El hilo de la cinta vacía cada segundo (lo del último puede no verse) y ensancha la cadencia si se atrasa.
+  assert.ok(meta.maxTick > tick0 && meta.totalFrames <= (meta.maxTick - tick0) / CINTA.pasos[0] + 1
+    && meta.totalFrames >= (meta.maxTick - tick0) / PASO_MAXIMO + 1,
     JSON.stringify({ ticks, ...meta, timeline: meta.timeline.length }));
   assert.ok(meta.timeline.length > 0 && meta.timeline.length <= 240);
   const available = Math.min(30, meta.totalFrames);
@@ -291,9 +292,12 @@ test('createApp turbo + tape: same-thread DVR content, viewport clipping, gzip, 
   assert.equal(res.status, 200, res.text); assert.equal(res.headers['content-encoding'], 'gzip');
   const chunk = res.json() as TapeChunkResponse;
   assert.equal(chunk.frames.length, available);
-  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, tick0 + (available - 1) * CINTA.pasos[0]);
+  assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, chunk.frames.at(-1)!.tick);
   assert.equal(chunk.hasMore, meta.totalFrames > available);
-  for (let i = 1; i < chunk.frames.length; i++) assert.equal(chunk.frames[i]!.tick, chunk.frames[i - 1]!.tick + CINTA.pasos[0], 'history at the tape cadence');
+  for (let i = 1; i < chunk.frames.length; i++) {
+    const paso = chunk.frames[i]!.tick - chunk.frames[i - 1]!.tick;
+    assert.ok(paso >= CINTA.pasos[0] && paso <= PASO_MAXIMO, `history at the tape cadence (${paso})`);
+  }
   const first = chunk.frames[0]!;
   assert.equal(first.originX, 10); assert.equal(first.width, 24);
   assert.ok(first.tiles.length > 0 && first.tiles.every(tile => tile.x >= 10 && tile.x < 34 && tile.y >= 6 && tile.y < 22));

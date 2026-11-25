@@ -186,7 +186,8 @@ test('HTTP full/delta validation of the /api/tape alias in createApp', { timeout
   t.after(async () => { try { await app.close(); } finally { store.close(); } });
   const appHttp = http(app.server);
   assert.equal((await appHttp('/api/login', { password: 'v22-test-password' })).status, 200);
-  // La grabación del worker se comprueba en v23-cinta-recarga con el catálogo CNT1.
+  // La grabación del worker se comprueba en v23-cinta-recarga con el catálogo CNT1. El hilo de la cinta vacía cada segundo.
+  for (let i = 0; i < 300 && !(await appHttp('/api/tape/meta')).value.totalFrames; i++) await new Promise(r => setTimeout(r, 100));
   const res = await appHttp('/api/tape/chunk?fromTick=0&count=10&encoding=delta');
   assert.equal(res.status, 200); assert.equal(res.value.encoding, 'delta');
   assert.ok(res.value.baseFrame); assert.ok(Array.isArray(res.value.deltas)); assert.deepEqual(res.value.frames, []);

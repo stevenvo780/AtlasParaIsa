@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -28,9 +28,12 @@ import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
-import { cintaDeMundo, EscritorCinta } from './cinta/escritor.js';
+import { Worker } from 'node:worker_threads';
+import { cintaDeMundo } from './cinta/escritor.js';
 import { LectoresCinta, type PeticionCinta, type RespuestaCinta } from './cinta/lector-worker.js';
-import { CINTA, type ChunkReq, type Hito, type Nivel } from '../shared/cinta.js';
+import { CINTA, type ChunkReq, type Corte, type Hito, type Nivel } from '../shared/cinta.js';
+import { enlaceCinta } from '../shared/fotograma.js';
+import { crearEnlaceCortes, type TapeWorkerRequest } from './tape-worker.js';
 import { chronicleSerial } from '../world/chronicle-journal.js';
 import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
 import type { Chunk } from '../world/terrain.js';
@@ -75,8 +78,7 @@ export interface AppOptions {
   turbo?: boolean;
   /** Minimum wall-clock spacing of routine turbo saves; gestures and close always persist. */
   turboSaveIntervalMs?: number;
-  /** Graba la cinta y sirve `/api/cinta/*` y su alias `/api/tape/*` (por defecto, con `turbo`). En `createApp`
-   * el escritor corre en este hilo; tras la pasarela lo lleva el hilo `carta-tape`. */
+  /** Graba la cinta en el hilo `carta-tape` y sirve `/api/cinta/*` y su alias `/api/tape/*` (por defecto, con `turbo`). */
   tape?: boolean;
   /** Bytes que puede ocupar la cinta (por defecto `CINTA.topeBytes`). */
   tapeTopeBytes?: number;
@@ -123,7 +125,7 @@ export interface ReadOnlyBackend {
 }
 export interface WhispersResponse { tick: number; whispers: DivineWhisper[] }
 /** La respuesta ya serializada (y comprimida si se pide) en un hilo lector: el HTTP solo la escribe. */
-export interface ServicioCinta { leer(peticion: PeticionCinta, gzip: boolean): Promise<RespuestaCinta> }
+export interface ServicioCinta { leer(peticion: PeticionCinta, gzip: boolean, senal?: AbortSignal): Promise<RespuestaCinta> }
 
 /**
  * V24 — Last known 4×4 palette summary of every chunk this process has seen: resident chunks refresh
@@ -657,16 +659,45 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
   }
   if (!gateway) renovarReserva();
-  /** Cinta de un mundo simulado en este hilo (`createApp`): el escritor graba aquí, síncrono, con la misma cadencia y
-   * las mismas épocas que `carta-tape` tras la pasarela; los lectores van en sus hilos. */
+  /** Cinta de un mundo simulado en este hilo (`createApp`): la graba el hilo `carta-tape`, como tras la pasarela, con
+   * la misma cadencia, créditos y épocas; los lectores van en los suyos. Ni abrir un catálogo roto ni comprimir o
+   * sincronizar un bloque ocurre en este hilo, y un fallo de la cinta nunca impide arrancar ni pausa el mundo. */
   const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:' ? cintaDeMundo(store.path) : undefined;
-  let escritor = directorioCinta ? new EscritorCinta({ directorio: directorioCinta, topeBytes: options.tapeTopeBytes }) : undefined;
+  const descriptorCortes = crearEnlaceCortes(), enlaceCortes = enlaceCinta(descriptorCortes);
+  let hiloCinta: Worker | undefined, salidaCinta: Promise<void> | undefined, cerrandoCinta = false;
   let errorCinta: string | undefined;
   let observadorCinta = createTileObserver();
-  let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, ultimoVaciado = relojReal(), serialCronica = 0;
+  let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, serialCronica = 0;
   let recargaCinta = false, baseNacimientos = 0, baseMuertes = 0;
   const hitosCinta: Hito[] = [];
   const eventoGuardado = directorioCinta ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
+  function perderCinta(error: unknown) {
+    if (errorCinta) return;
+    // La cinta observa: deja de grabar, lo dice una vez y `/api/cinta/meta` lo muestra.
+    errorCinta = error instanceof Error ? error.message : String(error);
+    console.warn(`La cinta dejó de grabar: ${errorCinta}.`);
+    hitosCinta.length = 0;
+    void hiloCinta?.terminate();
+  }
+  if (directorioCinta) {
+    let moduleURL = new URL('./tape-worker.js', import.meta.url);
+    const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
+    if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
+    const hilo = hiloCinta = new Worker(`
+      const { workerData } = require('node:worker_threads');
+      (async () => {
+        if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
+        await import(workerData.moduleURL);
+      })().catch(error => { setImmediate(() => { throw error; }); });
+    `, { eval: true, execArgv: [], name: 'carta-tape', workerData: { role: 'carta-tape', moduleURL: moduleURL.href,
+      loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined, descriptor: descriptorCortes,
+      options: { directorio: directorioCinta, topeBytes: options.tapeTopeBytes } } });
+    hilo.on('error', perderCinta);
+    salidaCinta = new Promise(resolve => hilo.once('exit', code => {
+      if (!cerrandoCinta || code !== 0) perderCinta(new Error(`El hilo de la cinta terminó (código ${code}).`));
+      resolve();
+    }));
+  }
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
   let ultimaDifusionTurbo = -Infinity;
@@ -674,11 +705,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const importancia = Number(['birth', 'death', 'community', 'settlement', 'discovery', 'invention'].includes(suceso.kind));
     return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
   }
-  function abrirCinta(cinta: EscritorCinta) {
+  function abrirCinta(hilo: Worker) {
     epocaCinta++;
     // Lo que quedó sin cortar pertenece a la época que se cierra; tras recargar, el mundo nuevo vuelve a contar.
-    cinta.abrir({ instanciaId: instanceId!, epoca: epocaCinta, tMundo: world.tick, motivo: epocaCinta === 0 && respaldo ? 'restauracion' : 'reinicio' },
-      epocaCinta > 0 ? hitosCinta : []);
+    hilo.postMessage({ type: 'abrir', apertura: { instanciaId: instanceId!, epoca: epocaCinta, tMundo: world.tick,
+      motivo: epocaCinta === 0 && respaldo ? 'restauracion' : 'reinicio' }, hitosPrevios: epocaCinta > 0 ? hitosCinta : [] } satisfies TapeWorkerRequest);
     hitosCinta.length = 0;
     recargaCinta = false; ultimoCorte = -Infinity; observadorCinta = createTileObserver();
     serialCronica = world.eventCounter; baseNacimientos = world.birthCounter; baseMuertes = world.demographyDynamics.deaths;
@@ -697,39 +728,43 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       hitosCinta.push(hitoCinta(suceso ?? JSON.parse(cuerpo as string) as ChronicleEvent));
     }
   }
+  /** Sin crédito no se corta (la cinta se atrasa, el mundo no espera), salvo el primero de cada época y el del cierre. */
   function grabarCinta(forzar = false) {
-    if (!escritor || failed || aMedioPaso) return;
+    if (!hiloCinta || errorCinta || failed || aMedioPaso) return;
     try {
-      if (epocaCinta < 0 || recargaCinta) abrirCinta(escritor);
+      if (epocaCinta < 0 || recargaCinta) abrirCinta(hiloCinta);
       recogerCronica();
       const completo = ultimoCorte < 0;
-      if (world.tick > ultimoCorte && (forzar || world.tick - ultimoCorte >= CINTA.pasos[0])) {
+      if (world.tick > ultimoCorte && (forzar || completo || Atomics.load(enlaceCortes.creditos, 0) > 0
+        && world.tick - ultimoCorte >= Atomics.load(enlaceCortes.cadencia, 0))) {
         const { chunks, changed } = observadorCinta.scan(world);
         const tiles: Tile[] = [];
         if (completo) for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile);
-        escritor.registrar({ seq: ++seqCinta, epoca: epocaCinta, t: world.tick, vista: projectTapeFrame(world, runtime, instanceId, tiles),
+        const corte: Corte = { seq: ++seqCinta, epoca: epocaCinta, t: world.tick, vista: projectTapeFrame(world, runtime, instanceId, tiles),
           tilesCambiadas: completo ? 'todas' : changed, hitos: hitosCinta.splice(0), catalogo: [], hz: simHz,
           serie: { poblacion: world.people.length, nacimientos: world.birthCounter - baseNacimientos,
             muertes: world.demographyDynamics.deaths - baseMuertes, fauna: world.animals.length, estructuras: world.structures.length,
-            sustancias: world.chemistry?.formulas.length ?? 0, hz: simHz } });
+            sustancias: world.chemistry?.formulas.length ?? 0, hz: simHz } };
+        Atomics.sub(enlaceCortes.creditos, 0, 1);
+        Atomics.add(enlaceCortes.entregados, 0, 1n);
+        hiloCinta.postMessage({ type: 'corte', corte } satisfies TapeWorkerRequest);
         ultimoCorte = world.tick;
       }
-      // Lo que el escritor aún no vació no lo ven los lectores: como `carta-tape`, se vacía cada segundo.
-      if (forzar || relojReal() - ultimoVaciado >= 1000) { escritor.flush(); ultimoVaciado = relojReal(); }
-    } catch (error) {
-      // La cinta observa: nunca pausa el mundo. Deja de grabar, lo dice una vez y `/api/cinta/meta` lo muestra.
-      errorCinta = error instanceof Error ? error.message : String(error);
-      console.warn(`La cinta dejó de grabar: ${errorCinta}.`);
-      try { escritor.close(false); } catch { /* ya está perdida */ }
-      escritor = undefined;
-    }
+    } catch (error) { perderCinta(error); }
   }
-  grabarCinta(true);
+  /** Graba el último tick y espera a que el hilo vacíe lo que retiene y salga. */
+  async function cerrarCinta() {
+    grabarCinta(true);
+    cerrandoCinta = true;
+    if (!errorCinta) hiloCinta?.postMessage({ type: 'close', id: 0 } satisfies TapeWorkerRequest);
+    await salidaCinta;
+  }
+  grabarCinta();
   const lectores = directorioCinta ? new LectoresCinta({ directorio: directorioCinta, mundo: store.path,
     topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly, turbo }) : undefined;
   const cinta: ServicioCinta | undefined = gateway ? gateway.cinta : lectores && {
-    leer: (peticion, gzip) => lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
-      fondo: { seed: world.seed, cuencas: paramsOf(world).agua.cuencas } }),
+    leer: (peticion, gzip, senal) => lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok', instancia: instanceId,
+      fondo: { seed: world.seed, cuencas: paramsOf(world).agua.cuencas } }, senal),
   };
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
@@ -1367,8 +1402,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (req.method === 'GET' && RUTAS_CINTA.has(url.pathname)) {
           if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
           const peticion = consultaCinta(url);
+          // Un cliente que se va (arrastrar el cabezal cancela el salto anterior) retira lo que aún espera hilo.
+          const cancelada = new AbortController();
+          res.once('close', () => cancelada.abort());
           let r: RespuestaCinta;
-          try { r = await cinta.leer(peticion, aceptaGzip(req)); }
+          try { r = await cinta.leer(peticion, aceptaGzip(req), cancelada.signal); }
           catch { throw new HttpError(503, 'La cinta no se pudo leer ahora.'); }
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...(r.gzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}) });
           return res.end(r.cuerpo);
@@ -1642,8 +1680,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => store.save(world));
           } finally {
             try {
-              // El cierre graba el último tick y vacía lo que el escritor aún retiene.
-              try { grabarCinta(true); escritor?.close(); escritor = undefined; } finally { await lectores?.close(); }
+              try { await cerrarCinta(); } finally { await lectores?.close(); }
             } finally {
               try { await muestreador?.vaciar(); }
               catch (error) { console.warn(`La bitácora de invariantes no se pudo escribir: ${error instanceof Error ? error.message : String(error)}`); }

@@ -246,8 +246,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     get deltas() { return mirror?.deltas ?? false; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
     get respaldo() { return mirror?.respaldo; },
-    ...(lectores ? { cinta: { leer: (peticion, gzip) => lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
-      ...(mirror ? { fondo: { seed: mirror.seed, cuencas: mirror.cuencas } } : {}) }) } } : {}),
+    // Hasta el primer espejo no se sabe de qué instancia es el mundo: la cinta de otra no se sirve ni un momento.
+    ...(lectores ? { cinta: { leer: (peticion, gzip, senal) => mirror ? lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
+      instancia: mirror.view.instanceId, fondo: { seed: mirror.seed, cuencas: mirror.cuencas } }, senal)
+      : Promise.reject(new HttpError(503, 'El mundo todavía está cargando.')) } } : {}),
   };
   // Validate credentials/origins before spawning, so configuration errors cannot orphan a worker.
   const transport = createReadOnlyApp(options, backend);

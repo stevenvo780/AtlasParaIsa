@@ -212,7 +212,7 @@ async function velocidad(): Promise<void> {
     for (; t < 30 * cada; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); }
     for (let p = 0; p < m.np; p++) m.dueno[p] = p % hilos;
     const d: DescriptorMundo = { ...m.d, sustancias: serializarSustancias(q) };
-    const workers = hilos > 1 ? Array.from({ length: hilos }, (_, h) => new Worker(new URL(import.meta.url), { workerData: { bancoMaterial: true, d, hilo: h } })) : [];
+    const workers = hilos > 1 ? Array.from({ length: hilos }, (_, h) => hiloBanco({ bancoMaterial: true, d, hilo: h })) : [];
     let ms = 0;
     for (let k = 0; k < pasos; k++, t += cada) {
       const f = clima(t, cada);
@@ -227,6 +227,13 @@ async function velocidad(): Promise<void> {
     console.log(`velocidad ${etiqueta} hilos=${hilos} ${(ms / pasos).toFixed(1)} ms por paso de ${cada} ticks → ${us.toFixed(3)} µs por tesela y tick (${m.n} teselas); ${carga()}`);
     await q.cerrar();
   }
+}
+
+/** Un worker que abre este mismo fichero con tsx registrado dentro (como la piscina): heredar el cargador del proceso
+ * no funciona en todos los equipos (en server2, con Node 22.22, el worker no resolvía los .ts). */
+function hiloBanco(datos: unknown): Worker {
+  const cargador = JSON.stringify(import.meta.resolve('tsx/esm/api')), yo = JSON.stringify(import.meta.url);
+  return new Worker(`import(${cargador}).then((m) => m.register()).then(() => import(${yo}))`, { eval: true, execArgv: [], workerData: datos });
 }
 
 // ── Cadencia ──

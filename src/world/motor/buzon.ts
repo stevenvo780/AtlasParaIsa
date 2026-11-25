@@ -107,6 +107,18 @@ function vaciar(cola: ColaCompartida, f: (i: Intento) => void, azar?: () => numb
   return n;
 }
 
+/** Copia de los intentos publicados y aún sin leer de una cola, sin consumirlos (con los dueños detenidos). */
+function pendientesDe(cola: ColaCompartida, salida: Intento[]): void {
+  const datos = new Float64Array(cola.datos), fin = Number(Atomics.load(cola.cursores, 0));
+  let inicio = Number(Atomics.load(cola.cursores, 1));
+  while (inicio < fin && inicio < cola.listos.length && Atomics.load(cola.listos, inicio) === 1) {
+    entregar(datos, inicio, i => salida.push({ ...i, materia: i.materia && new Float64Array(i.materia),
+      dato: i.dato && new Float64Array(i.dato), bytes: i.bytes && new Uint8Array(i.bytes) }));
+    inicio += CABECERA + Math.max(0, datos[inicio + 6]!) + Math.max(0, datos[inicio + 7]!)
+      + Math.ceil(Math.max(0, datos[inicio + 8]!) / PALABRA);
+  }
+}
+
 function abrirBuzon(hilo: Hilo, azar: () => number, fase: () => FaseMotor,
   poner: (destino: Hilo, cola: Cola, i: Intento) => void,
   sacar: (cola: Cola, f: (i: Intento) => void, azar?: () => number) => number): Buzon {
@@ -157,6 +169,19 @@ export class Buzones {
       duenos: Array.from({ length: hilos }, () => ({ M: crearCola(max), A: crearCola(max), B: crearCola(max) })),
     };
   }
+
+  /** Los intentos que siguen en las colas (para `MateriaCheckpoint.enVuelo` y para reponerlos al cargar): en barrera,
+   * con todos los dueños detenidos. No los consume. */
+  pendientes(): Intento[] {
+    const salida: Intento[] = [];
+    if (this.memoria) {
+      pendientesDe(this.memoria.f0, salida);
+      for (const d of this.memoria.duenos) { pendientesDe(d.M, salida); pendientesDe(d.A, salida); pendientesDe(d.B, salida); }
+    } else for (const cola of Object.values(this.local)) salida.push(...cola);
+    return salida;
+  }
+
+  get faseActual(): FaseMotor { return this.memoria ? Atomics.load(this.memoria.fase, 0) as FaseMotor : this.fase; }
 
   fijarFase(fase: FaseMotor): void {
     if (this.memoria) Atomics.store(this.memoria.fase, 0, fase);

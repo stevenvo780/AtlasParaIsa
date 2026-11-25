@@ -9,10 +9,14 @@ export type TipoId = Parameters<CtxDueno['id']>[0];
 const TIPOS = { uid: 0, suceso: 1, comunidad: 2, estructura: 3, nonce: 4 } as const;
 const CLAVES = Object.keys(TIPOS) as TipoId[];
 const LIMITE = 2 ** 53;
+/** Celda aparte, fuera de `CtxDueno.id`: el número del próximo suceso de la crónica (`e<n>`). La crónica exige ids
+ * contiguos, así que solo lo toma `CtxDueno.suceso`, que crea siempre el suceso que numera. */
+const CRONICA = CLAVES.length;
+const CELDAS = CLAVES.length + 1;
 
 export class Contadores {
   readonly memoria: BigUint64Array | null;
-  private readonly locales = new Float64Array(CLAVES.length);
+  private readonly locales = new Float64Array(CELDAS);
 
   constructor(hilosOMemoria: number | BigUint64Array, primeros: Partial<Record<TipoId, number>> = {}) {
     if (hilosOMemoria instanceof BigUint64Array) {
@@ -20,7 +24,7 @@ export class Contadores {
       return;
     }
     if (!Number.isSafeInteger(hilosOMemoria) || hilosOMemoria < 1) throw new RangeError('Cantidad de hilos inválida.');
-    this.memoria = hilosOMemoria === 1 ? null : new BigUint64Array(new SharedArrayBuffer(CLAVES.length * 8));
+    this.memoria = hilosOMemoria === 1 ? null : new BigUint64Array(new SharedArrayBuffer(CELDAS * 8));
     for (const tipo of CLAVES) {
       const minimo = tipo === 'uid' ? 1 : 0;
       const n = primeros[tipo] ?? minimo;
@@ -30,8 +34,21 @@ export class Contadores {
     }
   }
 
-  id(tipo: TipoId): number {
-    const i = TIPOS[tipo];
+  id(tipo: TipoId): number { return this.tomar(TIPOS[tipo], tipo); }
+
+  /** Número del siguiente suceso de la crónica. */
+  cronica(): number { return this.tomar(CRONICA, 'crónica'); }
+  /** Fija el próximo número de crónica (al abrir una época, con los dueños detenidos). */
+  fijarCronica(n: number): void {
+    if (!Number.isSafeInteger(n) || n < 0) throw new RangeError('Contador de crónica inválido.');
+    if (this.memoria && this.memoria.length > CRONICA) Atomics.store(this.memoria, CRONICA, BigInt(n));
+    else this.locales[CRONICA] = n;
+  }
+  get siguienteCronica(): number {
+    return this.memoria && this.memoria.length > CRONICA ? Number(Atomics.load(this.memoria, CRONICA)) : this.locales[CRONICA]!;
+  }
+
+  private tomar(i: number, tipo: string): number {
     if (this.memoria) {
       let siguiente = Atomics.load(this.memoria, i);
       while (siguiente < BigInt(LIMITE)) {

@@ -79,6 +79,8 @@ export type Selection =
 export type LandscapeSelection = Selection;
 
 export type SelectHandler = (selection: LandscapeSelection) => void;
+/** Un vínculo de confianza de la persona seleccionada: con quién, cuánto (0–1) y el color de la comunidad de ese otro. */
+export interface VinculoMapa { id: string; peso: number; color: string }
 
 /* ------------------------------------------------------------------ */
 /* Constantes de arte                                                  */
@@ -669,6 +671,7 @@ export class Landscape {
   private selection: LandscapeSelection | null = null;
   private pickMode: 'ground' | 'inspect' = 'ground';
   private pendingTarget: { x: number; y: number } | null = null;
+  private vinculos: { origen: string; aristas: readonly VinculoMapa[] } | null = null;
 
   private dpr = 1;
   private cssW = 0;
@@ -967,6 +970,8 @@ export class Landscape {
   follow(id: string | null, kind: 'person' | 'animal' = 'person'): void { this.followedId = id; this.followedKind = kind; }
 
   setPendingTarget(position: { x: number; y: number } | null): void { this.pendingTarget = position; }
+  /** Aristas de confianza de `origen` que se dibujan mientras siga seleccionado; sin aristas no se dibuja nada. */
+  setVinculos(origen: string | null, aristas: readonly VinculoMapa[] = []): void { this.vinculos = origen && aristas.length ? { origen, aristas } : null; }
 
   camera(): { x: number; y: number; zoom: number } { return { ...this.cam }; }
 
@@ -3502,6 +3507,7 @@ export class Landscape {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     if (tier !== 'map') this.drawSocialLinks(people); // en el mapa los arcos medirían unos pocos píxeles
+    this.drawVinculos(people);
 
     if (this.pendingTarget) {
       const mark = this.worldToScreen(this.pendingTarget.x + .5, this.pendingTarget.y + .5);
@@ -3563,6 +3569,37 @@ export class Landscape {
     }
     this.drawLoading();
     ctx.restore();
+  }
+
+  /** Red de confianza de la persona seleccionada: grosor y opacidad según el peso, color de la comunidad del otro y un
+   * píxel en su extremo. Una pasada por `people` (O(n + k)); los vínculos con quien está fuera de cuadro se cuentan. */
+  private drawVinculos(people: RenderPerson[]): void {
+    const v = this.vinculos, sel = this.selection;
+    if (!v || sel?.kind !== 'person' || sel.id !== v.origen) return;
+    const pesos = new Map(v.aristas.map(a => [a.id, a]));
+    let origen: RenderPerson | undefined;
+    const presentes: [RenderPerson, VinculoMapa][] = [];
+    for (const p of people) {
+      if (p.view.id === v.origen) origen = p;
+      else { const arista = pesos.get(p.view.id); if (arista) presentes.push([p, arista]); }
+    }
+    if (!origen) return;
+    const ctx = this.labelCtx, a = this.worldToScreen(origen.x + .5, origen.y + .6);
+    ctx.save();
+    ctx.lineCap = 'square';
+    for (const [otro, arista] of presentes) {
+      const b = this.worldToScreen(otro.x + .5, otro.y + .6), peso = clamp01(arista.peso);
+      const ancho = 1 + 3 * peso;
+      ctx.beginPath(); ctx.moveTo(Math.round(a.x), Math.round(a.y)); ctx.lineTo(Math.round(b.x), Math.round(b.y));
+      // Contorno de tinta debajo, como el de los sprites: la línea se lee sobre hierba, agua o roca.
+      ctx.globalAlpha = .45 + .4 * peso; ctx.strokeStyle = '#1f1a15'; ctx.lineWidth = ancho + 2; ctx.stroke();
+      ctx.globalAlpha = .55 + .45 * peso; ctx.strokeStyle = arista.color; ctx.lineWidth = ancho; ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#1f1a15'; ctx.fillRect(Math.round(b.x) - 3, Math.round(b.y) - 3, 6, 6);
+      ctx.fillStyle = arista.color; ctx.fillRect(Math.round(b.x) - 2, Math.round(b.y) - 2, 4, 4);
+    }
+    ctx.restore();
+    const fuera = v.aristas.length - presentes.length;
+    this.drawChip(a.x, a.y + 34, `${presentes.length} vínculos aquí${fuera ? ` · ${fuera} fuera` : ''}`, P.ink, P.rule, 'meta');
   }
 
   /** V18: pulso local en el destino ordenado, visible desde el clic aunque el servidor aplique la orden un paso (o varios segundos) después. */

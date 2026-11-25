@@ -8,15 +8,16 @@ import { renderMundoDeepStats } from './mundo-dashboard.js';
 import type { WorldMapResponse, WorldDirectoryResponse, DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
-import { Landscape, type Selection } from './landscape.js';
+import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
 import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
-import { DvrPlayer, type DvrFrameInfo } from './dvr-player.js';
+import { DvrPlayer, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
 import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
-import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, type HudNav } from './telemetry-hud.js';
+import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
+import { firmaMotor, luzMotor, pedirTelemetria, renderPanelMotor, vistaMotor, type LuzSalud, type TelemetriaRecibida } from './panel-motor.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
 import { personLink, recentEvidence } from './world-evidence.js';
 import { retainViewState } from './view-state.js';
@@ -106,7 +107,13 @@ let directory: WorldDirectoryResponse | null = null;
 /** Antes de la primera respuesta del directorio no es lo mismo que tras un fallo. */
 let directoryState: 'loading' | 'ready' | 'failed' = 'loading';
 let recentWhispers: DivineWhisper[] = [];
-let directoryBusy = false, mapBusy = false, whispersBusy = false, saludBusy = false;
+let directoryBusy = false, mapBusy = false, whispersBusy = false, saludBusy = false, motorBusy = false;
+/** Salud y motor: la última lectura de /health, la telemetría del motor (null hasta la primera; `motorRuta` = 'no' si
+ * este servidor no sirve la ruta) y los fotogramas saltados de la lectura anterior, para la luz del motor. */
+let ultimaSalud: SaludVisible | null = null, motorTelemetria: TelemetriaRecibida | null = null, motorRuta: 'pendiente' | 'si' | 'no' = 'pendiente';
+let saltadosAntes: number | null = null, motorFirma = '', motorVersion = 0, dvrEstado: DvrState | null = null;
+/** Grafo de comunidades ya dibujado y su firma: solo se rehace cuando cambian las personas, los vínculos o la selección. */
+let grafo: { firma: string; dibujo: GrafoDibujado } | null = null;
 let pickingWhisper = false;
 let whisperTile = { x: 0, y: 0 };
 /** El lugar del susurro sigue a la cámara hasta que se elige una casilla a propósito. */
@@ -170,7 +177,7 @@ function enterWorld(flags: SessionFlags = {}): void {
   // El perfil de Ajustes decide el modo de dibujo (Ligero = observador); ya no hay otro conmutador que lo deje atrapado.
   graphicsSettings = startupSettings();
   const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (statsTab === 'communities') renderStats(); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
@@ -215,7 +222,7 @@ function startTape(): void {
     fetchMeta: () => tapeJson<TapeMetaResponse>('/api/tape/meta'),
     fetchChunk: request => tapeJson<TapeChunkResponse>(`/api/tape/chunk?${new URLSearchParams({ fromTick: String(request.fromTick), count: String(request.count), encoding: 'delta', ...(request.viewport ? Object.fromEntries(Object.entries(request.viewport).map(([key, value]) => [key, String(value)])) : {}) })}`, request.signal),
     onFrame: receiveTapeFrame,
-    onStateChange: state => { dvrBar?.update(state); },
+    onStateChange: state => { dvrEstado = state; dvrBar?.update(state); },
   });
   dvr = player;
   void player.start().then(active => {
@@ -391,6 +398,27 @@ function wire(): void {
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
   el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (pickingWhisper) { setPickingWhisper(false); return; } if (!el('layers-popover').hidden) { toggleLayers(); el('layers-toggle').focus(); return; } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('salud-chip').addEventListener('click', () => { selectStatsTab('performance'); drawer('stats', true); });
+  el('salud-motor').addEventListener('click', () => { selectStatsTab('performance'); drawer('stats', true); void refreshMotor(); });
+  el('salud-mundo').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
+  el('stats-content').addEventListener('click', event => {
+    const nodo = nodoDelGrafo(event); if (!nodo) return;
+    // Fuera de la cámara: el directorio sabe dónde está, así que se va allí mientras llega su ficha.
+    const lejos = world?.people.some(p => p.id === nodo.id) ? undefined : directory?.people.find(p => p.id === nodo.id);
+    choosePerson(nodo.id);
+    if (lejos) landscape?.focus(lejos.x, lejos.y);
+  });
+  let pistaRaf = 0;
+  el('stats-content').addEventListener('pointermove', event => {
+    if (pistaRaf || !(event.target as Element).closest?.('[data-grafo]')) return;
+    pistaRaf = requestAnimationFrame(() => {
+      pistaRaf = 0;
+      const pista = el('stats-content').querySelector<HTMLElement>('[data-grafo-pista]'); if (!pista) return;
+      pista.dataset.resumen ??= pista.textContent ?? '';
+      const nodo = nodoDelGrafo(event), texto = nodo ? `${nodo.nombre} · toca para abrir su ficha` : pista.dataset.resumen;
+      if (pista.textContent !== texto) pista.textContent = texto;
+      el('stats-content').querySelector<SVGSVGElement>('[data-grafo] svg')!.style.cursor = nodo ? 'pointer' : '';
+    });
+  });
   el('game').addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const focus = event.target as HTMLElement | null;
@@ -471,14 +499,18 @@ function startClientUi(): void {
   uiSession = new AbortController();
   void refreshMap();
   void refreshSalud();
+  void refreshMotor();
   uiTimers.push(setInterval(() => {
     if (document.hidden) return;
     void refreshMap();
     void refreshSalud();
+    if (!motorAbierto()) void refreshMotor();
   }, 3000));
+  // Con el panel «Motor» abierto la telemetría se lee cada segundo; cerrado, basta con la luz del indicador.
+  uiTimers.push(setInterval(() => { if (!document.hidden && motorAbierto()) void refreshMotor(); }, 1000));
   uiTimers.push(setInterval(() => {
     if (document.hidden) return;
-    if (!el('population-drawer').hidden || !el('whisper-drawer').hidden) void refreshDirectory();
+    if (!el('population-drawer').hidden || !el('whisper-drawer').hidden || (!el('stats-drawer').hidden && statsTab === 'communities')) void refreshDirectory();
     if (!el('whisper-drawer').hidden) void refreshWhispers();
   }, 2500));
   let previous = '';
@@ -510,7 +542,8 @@ function stopClientUi(): void {
   panelQuery = null; panelSync = null;
   for (const page of Object.keys(panels) as NotebookPage[]) { panels[page]?.destroy(); delete panels[page]; }
   directory = null; directoryState = 'loading'; recentWhispers = []; pickingWhisper = false; whisperTile = { x: 0, y: 0 }; whisperPicked = false;
-  directoryBusy = mapBusy = whispersBusy = saludBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
+  directoryBusy = mapBusy = whispersBusy = saludBusy = motorBusy = false; mapFailures = 0; mapRetryAt = 0; notebook = null;
+  ultimaSalud = null; motorTelemetria = null; motorRuta = 'pendiente'; saltadosAntes = null; motorFirma = ''; dvrEstado = null; grafo = null;
 }
 const uiJson = <T>(url: string, session: AbortController, valid: (data: unknown) => data is T): Promise<T> => fetchJson(url, session.signal, valid);
 async function refreshMap(): Promise<void> {
@@ -533,6 +566,40 @@ async function refreshSalud(): Promise<void> {
   const etiqueta = etiquetaSalud(salud);
   if (chip.textContent !== etiqueta) chip.textContent = etiqueta;
   el('panel-salud').innerHTML = renderPanelSalud(salud);
+  ultimaSalud = salud; renderSaludIndicador();
+}
+const motorAbierto = (): boolean => !el('stats-drawer').hidden && statsTab === 'performance';
+async function refreshMotor(): Promise<void> {
+  const session = uiSession;
+  if (!session || motorBusy || motorRuta === 'no' || document.hidden) return;
+  motorBusy = true;
+  try {
+    const leida = await pedirTelemetria(session.signal);
+    if (session !== uiSession) return;
+    if (leida === 'sin-ruta') { motorRuta = 'no'; motorTelemetria = null; }
+    else { motorRuta = 'si'; saltadosAntes = motorTelemetria?.fotogramasSaltados ?? null; motorTelemetria = leida; }
+  } catch { if (session === uiSession) motorTelemetria = null; } // sin una lectura válida no se muestra una vieja como actual
+  finally { if (session === uiSession) motorBusy = false; }
+  if (session === uiSession) renderSaludIndicador();
+}
+function vistaMotorActual() {
+  const retraso = dvrEstado?.enabled ? Math.max(0, dvrEstado.maxTick - dvrEstado.playTick) : null;
+  return vistaMotor(motorTelemetria, ultimaSalud, world?.performance, retraso);
+}
+function pintarLuz(id: string, luz: LuzSalud): void {
+  const boton = el(id), valor = boton.querySelector<HTMLElement>('[data-luz-valor]')!;
+  if (boton.dataset.estado !== luz.estado) boton.dataset.estado = luz.estado;
+  if (valor.textContent !== luz.valor) valor.textContent = luz.valor;
+  if (boton.title !== luz.motivo) { boton.title = luz.motivo; boton.setAttribute('aria-label', `${boton.dataset.luz}: ${luz.valor}. ${luz.motivo}`); }
+}
+/** Indicador de salud siempre visible: luces del mundo y del motor. Solo toca el DOM si cambió lo que dicen; con el
+ * panel «Motor» abierto, una lectura nueva que cambie lo que se ve lo rehace. */
+function renderSaludIndicador(): void {
+  if (!document.getElementById('salud-mundo')) return;
+  const motor = vistaMotorActual(), luz = luzMotor(motor, saltadosAntes);
+  pintarLuz('salud-mundo', luzMundo(world)); pintarLuz('salud-motor', luz);
+  const firma = firmaMotor(motor, luz);
+  if (firma !== motorFirma) { motorFirma = firma; motorVersion++; if (motorAbierto()) renderStats(); }
 }
 async function refreshDirectory(): Promise<void> {
   const session = uiSession; if (!session || directoryBusy || document.hidden) return; directoryBusy = true;
@@ -657,7 +724,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next, changedTiles); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
-  renderTelemetryHud(next);
+  renderTelemetryHud(next); renderSaludIndicador();
   cronica.acumular(next.events);
   if (first) {
     try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
@@ -752,8 +819,15 @@ function toggleTasks(open: boolean): void {
   el('task-label').textContent = open ? 'Cerrar tareas' : 'Dar una tarea';
   el('task-toggle').classList.toggle('is-open', open);
 }
+/** Aristas de confianza para el mapa, con el color de la comunidad de cada otra persona (gris si no tiene). */
+function vinculosEnMapa(trust: PersonDetail['trust']): VinculoMapa[] {
+  const colores = new Map((world?.communities ?? []).map(c => [c.id, /^#[\da-f]{3,8}$/i.test(c.color) ? c.color : '#779264']));
+  const comunidadDe = new Map((world?.people ?? []).map(q => [q.id, q.communityId ?? null]));
+  return trust.filter(t => Number.isFinite(t.value) && t.value > 0).map(t => { const c = comunidadDe.get(t.id); return { id: t.id, peso: Math.min(1, t.value), color: (c && colores.get(c)) || '#a29484' }; });
+}
 function renderInspector(): void {
   if (!world) return;
+  if (selected.kind !== 'person') landscape?.setVinculos(null);
   el('direct-toggle').hidden = selected.kind !== 'person';
   el('inspector-tabs').hidden = selected.kind === 'tile';
   el('inspector-tab-kit').hidden = selected.kind !== 'person';
@@ -786,7 +860,7 @@ function renderInspector(): void {
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
       // S e I se llaman así en el mundo (createWorld); su botón ya lo dice aunque aún no se les haya visto.
-      const name = legacy?.name ?? nombreConocido(id, world) ?? (id === idDeRol('S', world) ? 'S' : id === idDeRol('I', world) ? 'I' : undefined);
+      const name = legacy?.name ?? nombreConocido(id, world) ?? directory?.people.find(entry => entry.id === id)?.name ?? (id === idDeRol('S', world) ? 'S' : id === idDeRol('I', world) ? 'I' : undefined);
       el('inspector-title').textContent = name ?? 'Fuera de esta vista';
       // M3: la posición exacta llega con la ficha a demanda; si no, la última en que se la vio.
       const detail = cachedAbsent?.detail, known = visto(id);
@@ -802,6 +876,7 @@ function renderInspector(): void {
     const cached = personaDetails.get(p.id);
     if (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick) connection?.requestPersona(p.id);
     const persona = cached?.detail ?? undefined;
+    landscape?.setVinculos(p.id, persona ? vinculosEnMapa(persona.trust) : []);
     const ownCommunity = p.communityId ? world.communities?.find(c => c.id === p.communityId) ?? null : null;
     const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
@@ -915,7 +990,9 @@ let statsRenderedAt = -Infinity, statsTrailing: ReturnType<typeof setTimeout> | 
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel || el('stats-drawer').hidden) return;
   const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
-  const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}`;
+  // Lo que cambia sin un paso nuevo (telemetría del motor, fichas y selección del grafo) entra en la parte que se refresca a 1 Hz.
+  const vivo = statsTab === 'performance' ? motorVersion : statsTab === 'communities' ? `${personaDetails.size}|${activePersonId}|${selected.kind}` : '';
+  const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}|${vivo}`;
   if (sig === statsSignature) return;
   const now = performance.now();
   if (statsSignature.startsWith(`${structure}#`) && now - statsRenderedAt < STATS_TICK_MS) {
@@ -933,6 +1010,28 @@ function renderStats(): void {
   el('stats-content').append(deepStats);
   restore();
 }
+/** Fichas recibidas con su confianza: las aristas que este navegador conoce. */
+function fichasConConfianza(): { id: string; trust: PersonDetail['trust'] }[] {
+  return [...personaDetails.values()].flatMap(({ detail }) => detail ? [{ id: detail.id, trust: detail.trust }] : []);
+}
+/** Mundo › Comunidades › «Red»: grafo de quién confía en quién y con qué fuerza, e histograma de tamaños. */
+function redComunidades(current: WorldView): string {
+  const seleccion = selected.kind === 'person' ? selected.id : null;
+  const datos = datosGrafo(current, directory, fichasConConfianza(), seleccion);
+  const firma = JSON.stringify([datos.alcance, directory?.tick ?? current.tick, datos.nodos.length, datos.comunidades, datos.aristas, seleccion]);
+  if (grafo?.firma !== firma) grafo = { firma, dibujo: grafoComunidades(datos) };
+  return `<section class="stats-section" data-red-comunidades><div class="stats-section-heading"><h3>Red de confianza</h3><span>${esc(datos.alcance === 'mundo' ? 'Todo el mundo' : 'Esta vista')}</span></div>${grafo.dibujo.html}<h4 class="detail-subtitle">Tamaño de las comunidades</h4>${histogramaTamanos(datos.comunidades)}</section>`;
+}
+/** Persona del grafo más cercana al puntero (en unidades del SVG), a menos de 8. */
+function nodoDelGrafo(event: MouseEvent): { id: string; nombre: string } | null {
+  const svgGrafo = (event.target as Element).closest?.('[data-grafo] svg') as SVGSVGElement | null;
+  const matriz = svgGrafo?.getScreenCTM();
+  if (!svgGrafo || !matriz || !grafo) return null;
+  const punto = new DOMPoint(event.clientX, event.clientY).matrixTransform(matriz.inverse());
+  let mejor: { id: string; nombre: string } | null = null, distancia = 64;
+  for (const n of grafo.dibujo.nodos) { const d = (n.x - punto.x) ** 2 + (n.y - punto.y) ** 2; if (d < distancia) { distancia = d; mejor = n; } }
+  return mejor;
+}
 function renderStatsContent(): void {
   const panel = document.getElementById('stats-content'); if (!panel || !world) return;
   const stats = world.stats, runtime = world.performance;
@@ -949,7 +1048,8 @@ function renderStatsContent(): void {
   if (statsTab === 'performance') {
     const graphics = (landscape as (Landscape & { getDiagnostics?: () => GraphicsDiagnostics }) | null)?.getDiagnostics?.();
     const gpuLabels: Record<string, string> = { hardware: 'WebGL · adaptador físico reconocido', software: 'Respaldo Canvas2D · adaptador de software', unverified: 'WebGL activo · hardware sin verificar', 'context-lost': 'Contexto perdido · respaldo Canvas2D', active: 'GPU activa', ready: 'GPU preparada', available: 'GPU disponible', pending: 'Consultando GPU', initializing: 'Inicializando GPU', unavailable: 'GPU no disponible', unsupported: 'GPU no compatible', disabled: 'GPU desactivada', failed: 'GPU no disponible', lost: 'Dispositivo perdido', 'device-lost': 'Dispositivo perdido', fallback: 'Respaldo gráfico activo' };
-    panel.innerHTML = `${stamp}${serverPerformance(runtime)}`+`<section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
+    const motor = vistaMotorActual();
+    panel.innerHTML = `${stamp}${renderPanelMotor(motor, luzMotor(motor, saltadosAntes))}${serverPerformance(runtime)}`+`<section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
     return;
   }
   if (statsTab === 'communities') {
@@ -962,7 +1062,7 @@ function renderStatsContent(): void {
     const notaVentana = ventana.restantes > 0
       ? `<p class="stats-note stats-scope-note" data-communities-window>Se muestran las ${number(mostradas.length)} comunidades más pobladas de ${number(comunidades.length)} vivas; el resumen cultural incluye a todas.</p>`
       : '';
-    panel.innerHTML = `${stamp}${renderCommunityTelemetry(world.communities)}<p class="stats-note">Las comunidades se forman en el mundo simulado, de la más poblada a la menos. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${sueltos !== null ? `<p class="stats-note stats-scope-note" data-without-community>${number(sueltos)} ${sueltos === 1 ? 'vida no pertenece' : 'vidas no pertenecen'} a ninguna comunidad (pertenecer es opcional).</p>` : ''}${resumenCultural(world)}${notaVentana}${mostradas.length ? mostradas.map(community => {
+    panel.innerHTML = `${stamp}${renderCommunityTelemetry(world.communities)}${redComunidades(world)}<p class="stats-note">Las comunidades se forman en el mundo simulado, de la más poblada a la menos. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${sueltos !== null ? `<p class="stats-note stats-scope-note" data-without-community>${number(sueltos)} ${sueltos === 1 ? 'vida no pertenece' : 'vidas no pertenecen'} a ninguna comunidad (pertenecer es opcional).</p>` : ''}${resumenCultural(world)}${notaVentana}${mostradas.length ? mostradas.map(community => {
       const color = /^#[\da-f]{3,8}$/i.test(community.color) ? community.color : '#779264';
       // T134 (FR-026): `members` ya no viaja completo — solo quien está en la cámara. `memberCount`
       // trae el total real; si faltan miembros por estar fuera de vista, se dice explícitamente

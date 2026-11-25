@@ -220,6 +220,35 @@ export function vinculoSIFicha(p: PersonView, world: WorldView, eventos: readonl
   return `<p class="drawer-note" data-vinculo-si>S e I están ahora a ${esc(number(v.distanciaCasillas, 1))} casillas en esta vista.${esc(cerca)} ${esc(encuentro)}</p>`;
 }
 
+/** Rasgos con la escucha de la ley E (`traits.escucha` ∈ [0,1], locus 8 del genoma); ausente en mundos sin esa ley. */
+type ConEscucha = { traits?: PersonView['traits'] & { escucha?: number } };
+export function escuchaDe(p: ConEscucha | undefined): number | null {
+  const e = p?.traits?.escucha;
+  return typeof e === 'number' && Number.isFinite(e) ? Math.max(0, Math.min(1, e)) : null;
+}
+/** 16 píxeles por barra: la escucha se lee como la cultura y las necesidades, de un vistazo. */
+const barraEscucha = (etiqueta: string, e: number | null, clase = ''): string =>
+  `<div class="escucha-fila${clase}"><span>${esc(etiqueta)}</span>${e === null ? '<em class="sin-dato">sin dato</em>' : `<span class="escucha-barra" style="--e:${Math.round(e * 16)}" role="meter" aria-label="${esc(etiqueta)}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${e.toFixed(2)}"></span><strong>${esc(number(e, 2))}</strong>`}</div>`;
+
+/** Ficha › Ahora › «Escucha»: su disposición heredable a atender susurros junto a la de sus progenitores, lo que
+ * la ley le da ahora (oír ∝ escucha² · calma, con calma = (1 − hambre)(1 − sed)(1 − cansancio)) y la media de su
+ * generación entre las vidas de esta vista. */
+export function escuchaFicha(p: PersonView, world: Pick<WorldView, 'people' | 'demography'>): string {
+  const propia = escuchaDe(p as ConEscucha);
+  if (propia === null) return '<section class="escucha-ficha" data-escucha="sin-dato"><h4 class="detail-subtitle">Escucha</h4><p class="drawer-note">Sin dato: este mundo no hereda todavía la escucha, la disposición a atender un susurro.</p></section>';
+  const padres = (p.genome?.parents ?? []).map((id, i) => {
+    const padre = world.people.find(q => q.id === id);
+    const nombre = padre?.name ?? nombreConocido(id, world) ?? `Progenitor ${i + 1}`;
+    return padre ? barraEscucha(nombre, escuchaDe(padre as ConEscucha), ' escucha-padre') : `<div class="escucha-fila escucha-padre"><span>${esc(nombre)}</span><em class="sin-dato">fuera de esta vista</em></div>`;
+  }).join('') || '<p class="drawer-note">Población inicial: su escucha no viene de progenitores registrados.</p>';
+  const calma = [p.hunger, p.thirst, p.fatigue].every(v => typeof v === 'number' && Number.isFinite(v)) ? (1 - p.hunger) * (1 - p.thirst!) * (1 - p.fatigue) : null;
+  const ahora = calma === null ? '' : `<p class="drawer-note" data-escucha-ahora>Con su calma de ahora (${esc(percentage(calma))}), la ley le da una probabilidad de oír un susurro audible proporcional a escucha² · calma = <strong>${esc(number(propia * propia * calma, 3))}</strong>.</p>`;
+  const generacion = p.genome?.generation;
+  const pares = generacion === undefined ? [] : world.people.filter(q => q.genome?.generation === generacion).map(q => escuchaDe(q as ConEscucha)).filter((e): e is number => e !== null);
+  const media = pares.length ? `<p class="drawer-note" data-escucha-generacion>Media de la generación G${esc(generacion!)} en esta vista: <strong>${esc(number(pares.reduce((a, b) => a + b, 0) / pares.length, 2))}</strong> (${esc(number(pares.length))} ${pares.length === 1 ? 'vida' : 'vidas'}).</p>` : '';
+  return `<section class="escucha-ficha" data-escucha="${propia.toFixed(2)}"><h4 class="detail-subtitle">Escucha</h4>${barraEscucha('Su escucha', propia, ' escucha-propia')}${padres}${ahora}${media}<p class="drawer-note">Disposición heredada a atender un susurro y quedarse con él. Se hereda de sus progenitores con mutación; obedecer no la cambia en vida.</p></section>`;
+}
+
 /** T036(h): `p.experiences`, `p.trust` y el repertorio (`recipeIds`) ya no viajan en el `state`:
  * llegan con `{type:'persona'}`. `undefined` significa «todavía no ha llegado» y se dibuja como
  * «cargando…»; una lista vacía sí significa «no hay nada», y se dice con esas palabras. */
@@ -228,7 +257,7 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
     // M6: el resto de las prácticas que registra `outcome()` (world/index.ts), en claro.
     research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse a otros', accompany: 'Compañía', retreat: 'Buscar espacio' };
   const skills = Object.entries(p.skills ?? {}).sort((a, b) => b[1] - a[1]);
-  const traitNames: Record<string, string> = { curiosity: 'Curiosidad', sociability: 'Sociabilidad', industriousness: 'Constancia', care: 'Cuidado', resilience: 'Resiliencia' };
+  const traitNames: Record<string, string> = { curiosity: 'Curiosidad', sociability: 'Sociabilidad', industriousness: 'Constancia', care: 'Cuidado', resilience: 'Resiliencia', escucha: 'Escucha' };
   const genome = p.genome;
   // M3: un progenitor fuera de la cámara se nombra y se puede ir a él; uno difunto abre su despedida.
   const parentMarkup = genome?.parents.length ? genome.parents.map(id => { const parent = world!.people.find(item => item.id === id); if (parent) return `<button class="lineage-person" data-parent="${esc(id)}">${esc(parent.name)} ${icon.arrow}</button>`; const dead = world.demography?.recent.find(entry => entry.id === id); const name = dead?.name ?? nombreConocido(id, world); return `<button class="lineage-person is-absent" data-parent="${esc(id)}">${esc(name ?? 'Progenitor')} · ${dead ? 'murió' : 'fuera de esta vista · Ir'} ${icon.arrow}</button>`; }).join('') : '<span class="lineage-absent">Población inicial · sin progenitores registrados</span>';
@@ -255,5 +284,5 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
   const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
-  return { now: decisionFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
+  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
 }

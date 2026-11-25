@@ -318,8 +318,22 @@ function instantaneos(m: number, n: number, V: number, dt: number): boolean {
     else if (j === i) Lt[i]! += pI[k]! * kt * xs[i]! / V;
     else { Lt[i]! += pI[k]! * kt * xs[j]! / V; Lt[j]! += pJ[k]! * kt * xs[i]! / V; }
   }
+  for (let s = 0; s < n; s++) rap[s] = Lt[s]! * dt >= INSTANTANEO ? 1 : 0;
+  // El reactivo en exceso (más veces posibles) de un canal entre dos candidatos no se agota por él, solo pierde lo que
+  // el otro le pide: ese riesgo no cuenta para ser instantáneo (el CaCO₃ frente al orgP).
+  Lf.fill(0, 0, n);
+  for (let k = 0; k < m; k++) {
+    const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+    if (j < i) Lf[i]! += kt;
+    else if (j === i) Lf[i]! += pI[k]! * kt * xs[i]! / V;
+    else {
+      const ai = xs[i]! / pI[k]!, aj = xs[j]! / pJ[k]!, ambos = rap[i] && rap[j];
+      if (!ambos || ai <= aj) Lf[i]! += pI[k]! * kt * xs[j]! / V;
+      if (!ambos || aj <= ai) Lf[j]! += pJ[k]! * kt * xs[i]! / V;
+    }
+  }
   let alguno = false;
-  for (let s = 0; s < n; s++) { rap[s] = Lt[s]! * dt >= INSTANTANEO ? 1 : 0; if (rap[s]) alguno = true; }
+  for (let s = 0; s < n; s++) { if (rap[s] && Lf[s]! * dt < INSTANTANEO) rap[s] = 0; if (rap[s]) alguno = true; }
   // Cada vuelta quita al menos un instantáneo que no cumple, así que acaba en ≤ n vueltas.
   while (alguno) {
     for (let s = 0; s < n; s++) med[s] = xs[s]!;
@@ -355,7 +369,7 @@ function instantaneos(m: number, n: number, V: number, dt: number): boolean {
         const e = Lf[s]! > 0 ? Math.max(0, B[s]!) * l / Lf[s]! / p : 0;
         ex[k] = e; D[r]! += (r === i ? pI[k]! : pJ[k]!) * e;
       }
-      for (let s = 0; s < n; s++) if (!rap[s]) med[s] = xs[s]! - D[s]! / 2;
+      for (let s = 0; s < n; s++) if (!rap[s]) med[s] = Math.max(0, xs[s]! - D[s]! / 2);
     }
     let quita = false;
     for (let s = 0; s < n; s++) if (rap[s] && Lt[s]! - Lf[s]! > VARIABLE * Lt[s]!) { rap[s] = 0; quita = true; }

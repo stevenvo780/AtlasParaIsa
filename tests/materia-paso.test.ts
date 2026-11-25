@@ -11,7 +11,7 @@ import { loadavg } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { EPSILON_G, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NU, R } from '../src/shared/naturaleza.js';
 import type { SustanciaId } from '../src/shared/materia.js';
-import { binomial, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
+import { binomial, cuentaIntegrador, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
 import { fluir, fluirCalor } from '../src/world/materia/fluir.js';
 import { pasarLotes } from '../src/world/materia/paso-worker.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
@@ -524,6 +524,47 @@ test('competencia: canales reales que comparten reactivo conservan su diferencia
   }
   await m.cerrar();
   assert.ok(co2 <= 3, `CO₂ en 10 réplicas: ${co2}`);
+});
+
+test('instantáneos: madera, proteína y orgP de un suelo catalizado se agotan sin subpasos, repartidos como en la EDO fina', async () => {
+  // Con κ del suelo la madera, la proteína y el orgP se descomponen con k = 414 por tick, y el orgP además reacciona con
+  // el CaCO₃ (k = 414 por cuanto de CaCO₃ y litro), con el agua y con la madera; todos arden en el O₂ que comparten con
+  // el C. Con dt = 1, Λ·dt va de 414 a ~10⁴: la fase instantánea los resuelve antes de los subpasos (antes, ~45 por
+  // paso). El CaCO₃, en exceso, no es instantáneo aunque su riesgo al empezar lo sea. Medias de 10 réplicas frente a RK4,
+  // comparando lo que cambia cada sustancia; sin el O₂, el C, el CO₂ y el H₂, porque los pases encadenados queman el C y
+  // el H₂ que nacen (C + O₂, k ~ 10⁻³; H₂ + O₂ sin barrera) y la EDO no abre los canales de los productos (el integrador
+  // anterior se desviaba igual: CO₂ 10.244 frente a 9.906).
+  const casos: { nombre: string; contenido: Contenido }[] = [
+    { nombre: 'suelo del banco', contenido: { O2: 2e5, N2: 8e5, H2O: 1.2e5, madera: 6e4, proteina: 2e4, orgP: 1e4, CaCO3: 1e6, C: 2e4 } },
+    // El CaCO₃ justo por encima del orgP: el canal compite con la descomposición y se lleva más de la mitad del CaCO₃,
+    // así que el reparto depende de su punto medio (corrector).
+    { nombre: 'CaCO₃ escaso', contenido: { O2: 1e5, N2: 4e5, H2O: 5e4, madera: 2e4, orgP: 1e4, CaCO3: 1.6e4, SiO2: 1e6 } },
+  ];
+  for (const e of casos) {
+    const m = materiaReal({ capacidad: 32 });
+    const antes = { ...cuentaIntegrador };
+    const medias = new Map<SustanciaId, number>(), n0 = new Map(Object.entries(e.contenido).map(([k, q]) => [m.S[k as keyof Base], q!]));
+    let esperado = new Map<SustanciaId, number>();
+    for (let r = 0; r < 10; r++) {
+      const l = m.lote(e.contenido, 295);
+      if (r === 0) { const { canales, V } = canalesDe(m, l, SUELO); esperado = edo(canales, V, n0); }
+      pasoLote(m.ctx(40 + r), l, 1, SUELO);
+      for (const id of esperado.keys()) medias.set(id, (medias.get(id) ?? 0) + m.arena.cuantos(l, id) / 10);
+    }
+    await m.cerrar();
+    const compartidas = cuentaIntegrador.compartidas - antes.compartidas, sub = cuentaIntegrador.subpasos - antes.subpasos;
+    assert.ok(cuentaIntegrador.instantaneas - antes.instantaneas >= 10, `${e.nombre}: la fase instantánea no actuó`);
+    assert.ok(sub <= 3 * compartidas, `${e.nombre}: ${sub} subpasos en ${compartidas} integraciones`);
+    let cambia = 0;
+    for (const [id, x] of esperado) {
+      if (id === m.S.O2 || id === m.S.C || id === m.S.CO2 || id === m.S.H2) continue;
+      const x0 = n0.get(id) ?? 0, v = medias.get(id) ?? 0;
+      if (Math.abs(x - x0) > 100) cambia++;
+      // 2 % de lo que cambia, más 3σ del sorteo de la media de 10 réplicas (σ ≈ √(cambio/10)).
+      assert.ok(Math.abs(v - x) <= 0.02 * Math.abs(x - x0) + 3 * Math.sqrt(Math.abs(x - x0) / 10) + 3, `${e.nombre}: sustancia ${id} cambia ${(v - x0).toFixed(1)} frente a ${(x - x0).toFixed(1)} en la EDO`);
+    }
+    assert.ok(cambia >= 5, `${e.nombre}: solo ${cambia} sustancias cambian`);
+  }
 });
 
 test('calor y existencias: el recorte no depende del orden de las ranuras y reparte en proporción', async () => {

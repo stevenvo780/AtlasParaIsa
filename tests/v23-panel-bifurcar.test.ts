@@ -6,7 +6,7 @@ import test from 'node:test';
 import { biologia, correrPanel, crearRaiz, leerFilas, temporal } from './v23-panel-ayuda.js';
 
 const base = temporal();
-test.after(() => rmSync(base, { recursive: true, force: true }));
+test.after(() => { if (!process.env.CARTA_PANEL_CONSERVAR) rmSync(base, { recursive: true, force: true }); });
 
 
 /** Una corrida que guarda su punto en `dia` y sigue hasta `dias`, y otra que arranca de ese punto y llega al mismo horizonte. */

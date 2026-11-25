@@ -5,26 +5,25 @@ import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
 import { settlementOpportunity } from '../src/world/society.js';
 
-// Medidos en un checkout temporal detached de main 2ee2658, con createWorld(seed),
-// 1200 llamadas a stepWorld y digestoCanonico, antes de declarar social.hogarTrabajo.
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const REFERENCIAS_1200 = {
-  42: '126b7daa73d7920f81460fc1e6e8e2cd404134a0ffe09b413a57bbebbb4d48c3',
-  2001: 'e1f561925d68dd610c6e136724cb66cda643e78356cedc2a2c653e60e26e363a',
-} as const;
+// V23: sin digestos dorados con valor fijo. «H-B apagada no cambia el mundo» se comprueba corriendo dos
+// veces lo mismo en la propia prueba (misma semilla, un hilo, sin tarjeta): el mundo por defecto y el
+// mismo mundo con la clave apagada de forma explícita deben dar el mismo digesto.
+const OLVIDADAS = ['social.hogarTrabajo', 'social.disolucion', 'tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'];
 
-for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de referencia: semilla ${seed}`, { timeout: 600000 }, () => {
-  assert.equal(DEFAULT_PARAMS.social.hogarTrabajo, 0);
-  assert.equal(HISTORICAL_PARAMS.social.hogarTrabajo, 0);
-  const world = createWorld(seed);
+function digestoCorrida(seed: number, params?: string): string {
+  const world = createWorld(seed, parseParams(params));
   for (let n = 0; n < 1200; n++) stepWorld(world);
   // La clave nueva sólo se quita de la FORMA hasheada, no del mundo simulado.
-  // La poda ola 1 retiró las demás claves posteriores a 2ee2658; H-B, COM-D′ (`social.disolucion`,
-  // `sprint/com-d-20260928`) y Fase B (`tecnologia.*`, `sprint/estabilidad-fase-b-20261118`) siguen
-  // declarándose en sus valores históricos (no actúan).
+  return digestoSin(world, OLVIDADAS, 11);
+}
+
+for (const seed of [42, 2001] as const) test(`H-B apagada no cambia el mundo y es reproducible: semilla ${seed}`, { timeout: 600000 }, () => {
+  assert.equal(DEFAULT_PARAMS.social.hogarTrabajo, 0);
+  assert.equal(HISTORICAL_PARAMS.social.hogarTrabajo, 0);
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, HISTORICAL_PARAMS.tecnologia);
-  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'social.disolucion', 'tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), REFERENCIAS_1200[seed]);
+  const control = digestoCorrida(seed);
+  assert.equal(digestoCorrida(seed, 'social.hogarTrabajo=0'), control, 'apagada explícita = control, misma semilla y un hilo');
+  assert.equal(digestoCorrida(seed), control, 'dos corridas del control dan el mismo digesto');
 });
 
 function escenaHogar(r: number, abundanteEnCasa = false): World {

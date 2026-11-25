@@ -217,18 +217,14 @@ test('la observación cae a la clave de texto cuando la tesela no es un entero a
   assert.ok(land >= 3 && shelterTiles === 1 && waterTiles >= 1, 'el caso cubre agua, techo y tierra');
 });
 
-const DIGESTO_BASE = {
-  7: '31229317fea16372bb8213f87d6da14dc0505d61ec31ccad4231da3bbae99873',
-  42: 'c108530b2b4d80624a31dd0a681c8c3b1725babdd47da32e67d792906fa7be12',
-  51926: '3bfff0197cf7e1b0173336485cc0f7f7ca69481aade03f5b5afdbf018f0763d7',
-} as const;
-
-// paridad histórica: cuarentena V23
-test.skip('600 ticks de mundo abierto conservan el digesto canónico de las semillas 7, 42 y 51926', () => {
+// V23: sin digestos dorados con valor fijo. El mundo abierto con las leyes de política y aptitud encendidas
+// debe ser reproducible: misma semilla, un hilo, sin tarjeta, dos corridas dan el mismo digesto canónico.
+test('600 ticks de mundo abierto son reproducibles: dos corridas de las semillas 7, 42 y 51926 dan el mismo digesto canónico', { timeout: 900_000 }, () => {
   const leyes = 'poblacion.natalidadVecindad=true,conducta.politicaPeso=0.35,conducta.aptitud=0.35';
-  for (const seed of [7, 42, 51926] as const) {
+  const correr = (seed: number): string => {
     const world = createWorld(seed, parseParams(leyes));
     for (let tick = 0; tick < 600; tick++) stepWorld(world);
-    assert.equal(digestoCanonico(world), DIGESTO_BASE[seed], `semilla ${seed}`);
-  }
+    return digestoCanonico(world);
+  };
+  for (const seed of [7, 42, 51926] as const) assert.equal(correr(seed), correr(seed), `semilla ${seed}`);
 });

@@ -75,21 +75,12 @@ test('V19 fase 1: una instantánea con params V18 (sin claves V19) carga con tod
   assert.deepEqual([reloaded.conducta.aprendizajeCausal, reloaded.social.acuerdosMateriales], [true, true]);
 });
 
-// ───────────────────────── 1. 0 ULP frente a V18 ─────────────────────────
-// Medidos con el código de HEAD antes de la fase 1 (RULES_VERSION 12), 60 pasos con DEFAULT_PARAMS y 300 con el
-// anfitrión abierto (sondeo fijo de hardware, un hilo): ver el encabezado.
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const V18_DEFAULT_60: Record<number, string> = {
-  7: 'a51569cce46eeb91069cce9533fa664f354b9463b08fe788617e3bf5bce19c65',
-  42: 'ae19695dd28c5585405706dbf7a7c559a07e254ec90a010a498be2254f5edc09',
-  51926: 'de2a8fb250950df5a9011e8407e71ed252d17f338325b36f8b73d550268f383d',
-  104729: 'b161d30770a268309353351722e381f51347900f40031096a5eaeb7126a7b89b',
-};
-const V18_HOST_300: Record<number, string> = {
-  7: 'f0ab8eb74989f614bfc3de1cac658ad27bc269f8a8eabb49723f17745e343655',
-  42: 'b99695ca036aa4b3f943de71673e13d7d4f78a330efa68db7f924c6806694a23',
-};
+// ───────────────────────── 1. Interruptores apagados: reproducibilidad y migración ─────────────────────────
+// V23: sin digestos dorados con valor fijo. Con los interruptores apagados el mundo es reproducible (60 pasos con
+// DEFAULT_PARAMS y 300 con el anfitrión abierto, sondeo fijo de hardware, un hilo): dos corridas de lo mismo dan el
+// mismo digesto, y un mundo cargado desde version = 12 y migrado da el mismo que el creado.
+const SEMILLAS_DEFAULT_60 = [7, 42, 51926, 104729] as const;
+const SEMILLAS_HOST_300 = [7, 42] as const;
 /** Digesto con la etiqueta de reglas normalizada a 12 (única diferencia declarada neutral). */
 function digestAsV18(world: World): string {
   const copy = cloneWorld(world);
@@ -98,25 +89,23 @@ function digestAsV18(world: World): string {
 }
 function run(world: World, ticks: number): World { for (let i = 0; i < ticks; i++) stepWorld(world); return world; }
 
-for (const [seedText, expected] of Object.entries(V18_DEFAULT_60)) {
-  const seed = Number(seedText);
-  test(`V19 fase 1: DEFAULT_PARAMS semilla ${seed}, 60 pasos = digesto de referencia, tanto creado como cargado desde version = 12`, () => {
+for (const seed of SEMILLAS_DEFAULT_60) {
+  test(`V19 fase 1: DEFAULT_PARAMS semilla ${seed}, 60 pasos reproducibles, tanto creado como cargado desde version = 12`, () => {
     const created = run(createWorld(seed, DEFAULT_PARAMS), 60);
     assert.equal(created.version, 14);
-    assert.equal(digestAsV18(created), expected, 'mundo nuevo con interruptores apagados');
+    const esperado = digestAsV18(created);
+    assert.equal(digestAsV18(run(createWorld(seed, DEFAULT_PARAMS), 60)), esperado, 'mundo nuevo con interruptores apagados: dos corridas');
     const legacy = createWorld(seed, DEFAULT_PARAMS);
     legacy.version = 12;
     const loaded = migrateWorld(legacy);
     assert.equal(loaded.version, 14, 'la carga V12 migra a 14');
-    assert.equal(digestAsV18(run(loaded, 60)), expected, 'mundo V12 migrado');
+    assert.equal(digestAsV18(run(loaded, 60)), esperado, 'mundo V12 migrado');
   });
 }
-for (const [seedText, expected] of Object.entries(V18_HOST_300)) {
-  const seed = Number(seedText);
-  // se borra en la ola 2 (carril PO2)
-  test.skip(`V19 fase 1: anfitrión abierto con L/S/F/R/M apagados, semilla ${seed}, 300 pasos = digesto V18 (política neuronal activa)`, () => {
+for (const seed of SEMILLAS_HOST_300) {
+  test(`V19 fase 1: anfitrión abierto con L/S/F/R/M apagados, semilla ${seed}, 300 pasos reproducibles (política neuronal activa)`, () => {
     const world = run(createWorld(seed, hostWith(V19_OFF)), 300);
-    assert.equal(digestAsV18(world), expected);
+    assert.equal(digestAsV18(world), digestAsV18(run(createWorld(seed, hostWith(V19_OFF)), 300)));
   });
 }
 

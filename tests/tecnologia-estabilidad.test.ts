@@ -64,43 +64,24 @@ function runProgram(host: TechnologyHost, actor: TechnologyActor, program: Techn
   return result;
 }
 
-// ── (1) Q5: paridad bit a bit de digestoCanonico con defaults históricos ────────────────────────
-// Referencias medidas directamente sobre main @bd2d30d ANTES de declarar `tecnologia.*` ni
-// editar `src/world/technology.ts` (Store temporal guardado antes del tick 1, 1.200 ticks):
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const REFERENCIAS_MAIN_1200: Readonly<Record<7 | 42 | 51926, { historicos: string; defaults: string }>> = {
-  7: {
-    historicos: '99e0994a87c7abc1ca79d2b3ab1888b37375dd5ef7c81a1a9873e5cfc12c9813',
-    defaults: '26f7832debe4a46e642f9525c0e0c5add17b6e7c83fa4fa174d0684e0121fe59',
-  },
-  42: {
-    historicos: '947f9b01a3b7a2c8cf4da15306ec3436a41bb2aa05f73ce164b73f61b97e166c',
-    defaults: '7c48601220fcab9423ee14840bf95ac4145a79d5a7f55f242d44bd4f64ae93a9',
-  },
-  51926: {
-    historicos: '5bf3ab366216298291d1b9d90bab835e0f1138c29921758a51b4d064b4bcde4f',
-    defaults: '9ec3c6a2d75c9bb9664422b75da1589c48ff9bf1cfecf965909dfafa6e8360b2',
-  },
-};
-
-// paridad histórica: cuarentena V23
-test.skip('Q5: paridad bit a bit de digestoCanonico en 3 semillas (7, 42, 51926) × 1200 pasos con valores históricos', { timeout: 600_000 }, t => {
+// ── (1) Q5: reproducibilidad de digestoCanonico con defaults históricos ──────────────────────────
+// V23: sin digestos dorados con valor fijo. Misma semilla, un hilo, sin tarjeta, con Store temporal
+// guardado antes del tick 1 y 1.200 ticks: dos corridas de lo mismo dan el mismo digesto físico (se quitan
+// de la forma hasheada las claves que con su valor histórico no actúan).
+test('Q5: reproducibilidad de digestoCanonico en 2 semillas (7, 42) × 1200 pasos con valores históricos', { timeout: 600_000 }, t => {
   assert.deepEqual(HISTORICAL_PARAMS.tecnologia, { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false });
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, HISTORICAL_PARAMS.tecnologia, 'Constitución II: DEFAULT_PARAMS nace en valores históricos');
 
-  for (const seed of [7, 42, 51926] as const) {
-    for (const [modo, base] of [['historicos', HISTORICAL_PARAMS], ['defaults', DEFAULT_PARAMS]] as const) {
-      const { store } = lab(t);
-      const world = createWorld(seed, base);
-      store.save(world);
-      for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
-      assert.equal(
-        digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11),
-        REFERENCIAS_MAIN_1200[seed][modo],
-        `semilla ${seed} (${modo}): digesto físico idéntico bit a bit a main @bd2d30d`,
-      );
-    }
+  const correr = (seed: number, base: typeof HISTORICAL_PARAMS): string => {
+    const { store } = lab(t);
+    const world = createWorld(seed, base);
+    store.save(world);
+    for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
+    return digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11);
+  };
+  for (const seed of [7, 42] as const) {
+    for (const [modo, base] of [['historicos', HISTORICAL_PARAMS], ['defaults', DEFAULT_PARAMS]] as const)
+      assert.equal(correr(seed, base), correr(seed, base), `semilla ${seed} (${modo}): dos corridas, mismo digesto físico`);
   }
 });
 

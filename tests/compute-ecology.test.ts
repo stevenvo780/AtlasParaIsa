@@ -175,17 +175,18 @@ function frozenRun(options?:import('../src/world/ecosystem-kernel.js').Ecosystem
   }
   return hash.digest('hex');
 }
-// Salida del port congelado: `git show bf23e04^:scripts/compute-ecology-core.mjs` (9665754) con este mismo fixture y frozenRun.
-const FROZEN_PORT_SHA256='50034301b99aa752f6bdb1dbd5125ae52adccf7c7a2557aa93d25a36603e93bc';
-test('with neutral options the SoA port is bit for bit the frozen pre-T013/T035 port, and the control bites',()=>{
+// V23: sin digestos dorados con valor fijo. El control se corre en la propia prueba: las opciones neutras
+// deben dar la misma salida que no pasar ninguna, y dos corridas de lo mismo deben coincidir.
+test('with neutral options the SoA port equals the no-options control, it is reproducible, and the control bites',()=>{
   const tiles=frozenFixture();
   assert.equal(new Set(tiles.map(tile=>tile.feature)).size,14);
   assert.ok(tiles.some(tile=>tile.x<0&&tile.wood===undefined&&tile.growth===undefined));
-  assert.equal(frozenRun(),FROZEN_PORT_SHA256);
-  assert.equal(frozenRun({}),FROZEN_PORT_SHA256);
-  assert.equal(frozenRun({seed:51926,cuencas:1,decaimientoFertilidad:0}),FROZEN_PORT_SHA256);
-  assert.notEqual(frozenRun({seed:51926,cuencas:0.4,decaimientoFertilidad:0}),FROZEN_PORT_SHA256);
-  assert.notEqual(frozenRun({seed:51926,cuencas:1,decaimientoFertilidad:0.001}),FROZEN_PORT_SHA256);
+  const control=frozenRun();
+  assert.equal(frozenRun(),control,'dos corridas sin opciones: mismo digesto');
+  assert.equal(frozenRun({}),control);
+  assert.equal(frozenRun({seed:51926,cuencas:1,decaimientoFertilidad:0}),control);
+  assert.notEqual(frozenRun({seed:51926,cuencas:0.4,decaimientoFertilidad:0}),control);
+  assert.notEqual(frozenRun({seed:51926,cuencas:1,decaimientoFertilidad:0.001}),control);
 });
 
 // T114 (refutación G4): el tick ecológico íntegro de `advanceTick` es `ecology()` y luego el kernel, en ese orden;

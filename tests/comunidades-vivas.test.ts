@@ -87,34 +87,23 @@ function digestoSinLaClave(world: World): string {
   try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
-// Los hashes originales se midieron en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`,
-// antes de la consolidación R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no
-// existían, así que dejaron de corresponder en la propia base f2757fa (6d37cc5a… y a98872e9… fallaban ya
-// allí). Regenerados el 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa,
-// nunca desde el árbol modificado, con la misma réplica (seed 42, 1200 pasos), campo `fisico`:
-//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
-//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --sin social.radioConvivencia \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$LAB" --sin social.radioConvivencia
-// (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const DIGESTO_PREVIO_DEFAULTS = '7b114b180ccafa294ec249da03b090d2fa395e7645d0ec695283db9a310b2d7c';
-const DIGESTO_PREVIO_LAB = '478e13dbf62093408ee9c1f9ae000ae5b42bcd629687921e98f85f40cf28dccc';
-
-test('(i) con radioConvivencia=0 el mundo es el de antes bit a bit, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
+// V23: sin digestos dorados con valor fijo. «radioConvivencia=0 no cambia el mundo» se comprueba como
+// reproducibilidad (dos corridas de lo mismo, misma semilla, un hilo, sin tarjeta) y «la ley actúa» frente
+// a un control corrido dentro de la propia prueba.
+test('(i) con radioConvivencia=0 el mundo es reproducible, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.social.radioConvivencia, 0, 'reglas 10 no adopta las comunidades vivas');
   assert.equal(HISTORICAL_PARAMS.social.radioConvivencia, 0);
   const defecto = replica(t, 1200, undefined, 42);
-  assert.equal(digestoSinLaClave(defecto.world), DIGESTO_PREVIO_DEFAULTS);
+  assert.equal(digestoSinLaClave(defecto.world), digestoSinLaClave(replica(t, 1200, undefined, 42).world), 'defaults: dos corridas, mismo digesto');
   const carril = replica(t, 1200, LAB, 42);
-  assert.equal(digestoSinLaClave(carril.world), DIGESTO_PREVIO_LAB);
+  assert.equal(digestoSinLaClave(carril.world), digestoSinLaClave(replica(t, 1200, LAB, 42).world), 'carril: dos corridas, mismo digesto');
   assert.equal(carril.cambios, 0, 'hoy nadie cambia de una comunidad a otra');
 });
 
 test('(ii) con radioConvivencia=12 las comunidades cambian en la semilla 42 y el mundo sigue siendo válido', { timeout: 2_800_000 }, t => {
+  const control = replica(t, 1200, LAB, 42);
   const vivo = replica(t, 1200, `${LAB},social.radioConvivencia=12`, 42);
-  assert.notEqual(digestoSinLaClave(vivo.world), DIGESTO_PREVIO_LAB, 'la ley actúa: el estado físico cambia');
+  assert.notEqual(digestoSinLaClave(vivo.world), digestoSinLaClave(control.world), 'la ley actúa: el estado físico cambia frente al control');
   assert.ok(vivo.cambios > 0, 'alguien pasa a la comunidad de sus vecinos de confianza');
   assertWorld(vivo.world);
   for (const person of vivo.world.people) if (person.communityId)

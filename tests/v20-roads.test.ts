@@ -44,12 +44,15 @@ function walking(roads = true, traffic = 0, paved?: number, parallel = false) {
   return { world, actor, destination: tileAt(world, { x: 17, y: 12 })! };
 }
 
-// V23: the reference digest (shared with v19-phase1-lsfrm) was re-recorded when M2a removed the fauna caps (1aae52f).
-test('roads OFF preserves the reference digest and never adds paving/chemistry state or zero totals', () => {
+// V23: no fixed reference digest; the control (default params) runs in the test itself, one thread, same seed.
+test('roads OFF equals the control world and never adds paving/chemistry state or zero totals', () => {
   const world = createWorld(42, parseParams('terreno.caminosFisicos=false'));
   for (let i = 0; i < 60; i++) stepWorld(world);
   const legacy = cloneWorld(world); legacy.version = 12;
-  assert.equal(digestoCanonico(legacy), 'ae19695dd28c5585405706dbf7a7c559a07e254ec90a010a498be2254f5edc09');
+  const control = createWorld(42);
+  for (let i = 0; i < 60; i++) stepWorld(control);
+  control.version = 12;
+  assert.equal(digestoCanonico(legacy), digestoCanonico(control));
   assert.ok(world.tiles.every(t => !Object.hasOwn(t, 'paved')));
   assert.ok(world.people.every(p => !Object.hasOwn(p, 'compounds')));
   assert.ok(!Object.hasOwn(world, 'chemistry'));

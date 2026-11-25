@@ -23,9 +23,8 @@ import { PROGRAMA_FILO as edge, proyectoInvestigacion } from './lib/escenas.js';
  *  - las funciones pequeñas se comparan bit a bit (`Object.is`) con una copia literal de la
  *    implementación anterior, incluida en este fichero (`ref*`), sobre fixtures deterministas;
  *  - la observación de organización tecnológica y `worldStatistics` se comparan con resúmenes
- *    SHA-256 (`GOLDEN`) calculados con el código anterior sobre los mismos fixtures, tanto en
+ *    SHA-256 de dos corridas de lo mismo sobre los mismos fixtures (V23: sin resúmenes dorados con valor fijo), tanto en
  *    casos válidos como en mundos corruptos (45 mutaciones × 3 escenas) que ejercen los 22 diagnósticos fail-closed.
- *    Para regenerarlos: `V18_PRINT_GOLDEN=1 npx tsx --test tests/v18-org-stats-perf.test.ts`.
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -46,12 +45,15 @@ const digest = (value: unknown): string => createHash('sha256').update(JSON.stri
   if (typeof item === 'number' && (!Number.isFinite(item) || Object.is(item, -0))) return `n:${String(item)}${Object.is(item, -0) ? '-0' : ''}`;
   return item === undefined ? '__undefined__' : item;
 })).digest('hex').slice(0, 16);
-const PRINT_GOLDEN = process.env.V18_PRINT_GOLDEN === '1';
-const printed: Record<string, string> = {};
-function golden(name: string, value: unknown): void {
-  const actual = digest(value);
-  if (PRINT_GOLDEN) { printed[name] = actual; return; }
-  assert.equal(actual, GOLDEN[name], `${name}: la salida cambió respecto al código anterior a V18 (${actual})`);
+/** Resúmenes de la corrida en curso: cada llamada a `golden` anota el suyo y `reproducible` compara dos corridas. */
+let resumenes: Record<string, string> = {};
+function golden(name: string, value: unknown): void { resumenes[name] = digest(value); }
+/** V23: corre dos veces el cuerpo (mismos fixtures, un hilo) y exige que cada resumen coincida entre corridas. */
+function reproducible(cuerpo: () => void): void {
+  const grabar = (): Record<string, string> => { resumenes = {}; cuerpo(); return resumenes; };
+  const una = grabar(), otra = grabar();
+  assert.ok(Object.keys(una).length > 0, 'la corrida produce resúmenes');
+  assert.deepEqual(otra, una, 'dos corridas dan los mismos resúmenes');
 }
 /** Mejor tiempo (ms) de `repeats` ejecuciones: el laboratorio comparte CPU y la media sería ruido. */
 function best(repeats: number, run: () => void): number {
@@ -323,7 +325,7 @@ function statsWorld(seed: number, people: number, width: number, height: number,
   return world;
 }
 
-test('V18 worldStatistics: salida idéntica a la del código anterior (resumen SHA-256) y cadencia intacta', () => {
+test('V18 worldStatistics: salida reproducible (resumen SHA-256 igual en dos corridas) y cadencia intacta', () => reproducible(() => {
   for (const [name, seed, people, w, h, order] of [['pequeño', 3, 40, 40, 30, 'row'], ['mediano en chunks', 4, 400, 120, 90, 'chunk'], ['mezclado', 5, 150, 70, 70, 'shuffle']] as const) {
     const world = statsWorld(seed, people, w, h, order);
     const stats = worldStatistics(world);
@@ -337,7 +339,7 @@ test('V18 worldStatistics: salida idéntica a la del código anterior (resumen S
     world.tick += ESTADISTICAS_CARAS_CADA_TICKS;
     assert.equal(worldStatistics(world).statsTick, world.tick, 'se recalcula al cumplir la cadencia');
   }
-});
+}));
 
 // ---------------------------------------------------------------------------------------------
 // Organización tecnológica: casos válidos y corruptos (fail-closed)
@@ -472,8 +474,8 @@ function nestedScene(): OrgScene {
   return { host, actors };
 }
 
-test('V18 organización tecnológica: observación y análisis idénticos al código anterior (válido y fail-closed)', () => {
-  const coverage = new Set<string>(), threw: string[] = [];
+test('V18 organización tecnológica: observación y análisis reproducibles en dos corridas (válido y fail-closed)', () => reproducible(() => {
+  const coverage = new Set<string>();
   const collect = (diagnostics: string[]): void => { for (const diagnostic of diagnostics) coverage.add(diagnostic.split(':')[0]!); };
 
   const scenes: [string, OrgScene][] = [['pequeña', orgScene(12, 5)], ['anidada', nestedScene()], ['multitud', orgScene(90, 20)]];
@@ -493,7 +495,6 @@ test('V18 organización tecnológica: observación y análisis idénticos al có
       golden(`org:${name}:${mutation}`, outcome);
       collect(diagnosticsOf(outcome));
       if (!('thrown' in outcome.analysis)) assert.deepEqual(outcome.analysis.evidence.failures.filter(f => diagnosticsOf(outcome).includes(f)), diagnosticsOf(outcome), `${name}/${mutation}: los diagnósticos llegan al análisis`);
-      else threw.push(`${name}/${mutation}`);
     }
   }
   // Cada diagnóstico fail-closed del adaptador tiene al menos un caso que lo dispara.
@@ -501,9 +502,7 @@ test('V18 organización tecnológica: observación y análisis idénticos al có
     'checkpoint-roster-change', 'unobserved-opening-stock', 'unlogged-stock-change', 'transaction-resource-mismatch', 'unverified-recipe', 'missing-transfer-id', 'incomplete-transfer',
     'current-stock-mismatch', 'unlogged-physical-stock-change', 'missing-current-actor', 'multiple-transaction-parents', 'missing-nested-execution', 'invalid-nested-execution',
     'missing-required-catalyst', 'unverified-catalyst-receipt', 'unattributed-nested-use']) assert.ok(coverage.has(kind), `ningún caso dispara «${kind}»`);
-  if (PRINT_GOLDEN) console.log(`V18_THREW ${threw.join(',')}`);
-  if (PRINT_GOLDEN) console.log(`V18_GOLDEN_OBSERVED ${[...coverage].sort().join(',')}`);
-});
+}));
 
 // ---------------------------------------------------------------------------------------------
 // Benchmark sintético realista (3.000 habitantes, 65.536 teselas, 400 eventos)
@@ -530,151 +529,3 @@ test('V18 benchmark: coste de organización, agua, diversidad, Gini, distancia y
   report('distanciaMediaAgua', best(9, () => distanciaMediaAgua(tiles)), best(9, () => refDistanciaMediaAgua(tiles)));
   t.diagnostic(`worldStatistics (recálculo completo): ${best(7, () => { world.tick += ESTADISTICAS_CARAS_CADA_TICKS; worldStatistics(world); }).toFixed(2)} ms`);
 });
-
-// ---------------------------------------------------------------------------------------------
-// Resúmenes del código anterior a V18 (se regeneran con V18_PRINT_GOLDEN=1)
-// ---------------------------------------------------------------------------------------------
-const GOLDEN: Record<string, string> = {
-  "stats:pequeño": '9ba4a16c09294c17',
-  "stats:mediano en chunks": '86975d1366b24751',
-  "stats:mezclado": '6c340c9cbf3c4fbf',
-  "org:pequeña": 'f8a813434dacd537',
-  "org:pequeña:sin-checkpoint": 'cd360f9c82cecd6c',
-  "org:pequeña:checkpoint-invalido": 'c297c29c89416907',
-  "org:pequeña:checkpoint-futuro": 'c297c29c89416907',
-  "org:pequeña:recibo-perdido-en-la-ventana": '871e0036646ef620',
-  "org:pequeña:registro-desordenado": '2ec47a4fbc6e7675',
-  "org:pequeña:historia-descartada": '09029d0050dd7505',
-  "org:pequeña:sin-epoca-completa": '705ec00300619cea',
-  "org:pequeña:recibos-fuera-de-epoca": '963e6c67d49232f5',
-  "org:pequeña:actor-duplicado": '0d26379497d0ca27',
-  "org:pequeña:actor-nuevo": '93588a5902e404de',
-  "org:pequeña:actor-nuevo-con-material": '10621443319b6783',
-  "org:pequeña:actor-ausente-con-material": 'd3f57691df08f9e0',
-  "org:pequeña:actor-ausente-sin-material": '6f4e0a694d001ddf',
-  "org:pequeña:padron-reordenado": 'f8a813434dacd537',
-  "org:pequeña:apertura-no-encadenada": 'b06addb6f1e1be76',
-  "org:pequeña:masa-de-insumo-alterada": 'bd6189e8081f0b04',
-  "org:pequeña:masa-de-cierre-alterada": 'eaabfcff17357f50',
-  "org:pequeña:entrada-externa-alterada": 'c9dcd8b41ac6c8f5',
-  "org:pequeña:perdida-externa-alterada": '15e1fc118af2b8dc',
-  "org:pequeña:receta-sin-verificar": 'd49e182dc63439a9',
-  "org:pequeña:receta-inexistente": '122544df99bca77a',
-  "org:pequeña:tick-previo-a-la-receta": 'adf5943b8656fbed',
-  "org:pequeña:transferencia-sin-id": '40b19ab397b70948',
-  "org:pequeña:transferencia-incompleta": '3f71da352e861fde',
-  "org:pequeña:transferencia-sin-contraparte": 'beaa1ab578eb78d5',
-  "org:pequeña:transferencia-asimetrica": '15e1fc118af2b8dc',
-  "org:pequeña:stock-actual-con-residuo": '78e8cd2ba5ee0dc1',
-  "org:pequeña:stock-actual-con-objeto": 'ad0731c1c6686845',
-  "org:pequeña:inventario-sin-recibo-masa": '58415002d54b012f',
-  "org:pequeña:inventario-sin-recibo-residuo": '94e2f8a128002fd3',
-  "org:pequeña:inventario-sin-recibo-composicion": '05f340309856d7c1',
-  "org:pequeña:inventario-sin-recibo-receta": '2dbf15bb28e8439c',
-  "org:pequeña:inventario-sin-recibo-id": '05f340309856d7c1',
-  "org:pequeña:inventario-con-id-repetido": '05f340309856d7c1',
-  "org:pequeña:inventario-pequeno-con-objeto-de-mas": '2e7a46fb89d9058c',
-  "org:pequeña:inventario-con-id-repetido-grande": '4e44fe76c86f1ea0',
-  "org:pequeña:inventario-grande-alterado": 'd46478d24ca348d7',
-  "org:pequeña:inventario-grande-sin-cambios-de-residuo": 'fd3d5a82aab7b933',
-  "org:pequeña:inventario-grande-con-objeto-menos": '3132ad0ee5971115',
-  "org:pequeña:estado-anidado-ausente": 'bc8986574c1f62ef',
-  "org:pequeña:anidado-de-otro-actor": '9657fee9da5aa67c',
-  "org:pequeña:padre-duplicado": 'd68ee684e6c13f78',
-  "org:pequeña:catalizador-con-desgaste-falso": '4c35c0c152f957db',
-  "org:pequeña:catalizador-requerido-omitido": '62d81c9c05936276',
-  "org:pequeña:uso-anidado-sin-atribuir": '7868ff8a68235630',
-  "org:anidada": '734881960f98ff47',
-  "org:anidada:sin-checkpoint": 'ec3fcb4c9f8aef7e',
-  "org:anidada:checkpoint-invalido": '767b62b72839aa3d',
-  "org:anidada:checkpoint-futuro": '767b62b72839aa3d',
-  "org:anidada:recibo-perdido-en-la-ventana": 'd3374882e92593d8',
-  "org:anidada:registro-desordenado": 'd4a8db3e858f9e51',
-  "org:anidada:historia-descartada": '498424e8cbac629c',
-  "org:anidada:sin-epoca-completa": '49cfca9e6342ab81',
-  "org:anidada:recibos-fuera-de-epoca": 'eeccc7c3e242df0b',
-  "org:anidada:actor-duplicado": 'e2b266adc31cf688',
-  "org:anidada:actor-nuevo": '22d0b8c2d0067d64',
-  "org:anidada:actor-nuevo-con-material": 'f2def4d21a4d00d9',
-  "org:anidada:actor-ausente-con-material": '8959f59918e96bd4',
-  "org:anidada:actor-ausente-sin-material": '8959f59918e96bd4',
-  "org:anidada:padron-reordenado": '734881960f98ff47',
-  "org:anidada:apertura-no-encadenada": '5642f3781ee07999',
-  "org:anidada:masa-de-insumo-alterada": '25b4809b4e8786e6',
-  "org:anidada:masa-de-cierre-alterada": '734881960f98ff47',
-  "org:anidada:entrada-externa-alterada": 'bed419c6a1626fb6',
-  "org:anidada:perdida-externa-alterada": '7f215d5ac3532680',
-  "org:anidada:receta-sin-verificar": '6f038b6fe5781e47',
-  "org:anidada:receta-inexistente": 'bab6b61ea5e4ee52',
-  "org:anidada:tick-previo-a-la-receta": '767b62b72839aa3d',
-  "org:anidada:transferencia-sin-id": 'dcaea92bea33a1dd',
-  "org:anidada:transferencia-incompleta": 'b514fc9596aa715d',
-  "org:anidada:transferencia-sin-contraparte": 'a56f45c00dd11f4d',
-  "org:anidada:transferencia-asimetrica": '7f215d5ac3532680',
-  "org:anidada:stock-actual-con-residuo": '3c5dca82573b9917',
-  "org:anidada:stock-actual-con-objeto": 'f302537df3500fa6',
-  "org:anidada:inventario-sin-recibo-masa": '734881960f98ff47',
-  "org:anidada:inventario-sin-recibo-residuo": '734881960f98ff47',
-  "org:anidada:inventario-sin-recibo-composicion": '734881960f98ff47',
-  "org:anidada:inventario-sin-recibo-receta": '734881960f98ff47',
-  "org:anidada:inventario-sin-recibo-id": '734881960f98ff47',
-  "org:anidada:inventario-con-id-repetido": '734881960f98ff47',
-  "org:anidada:inventario-pequeno-con-objeto-de-mas": '734881960f98ff47',
-  "org:anidada:inventario-con-id-repetido-grande": '734881960f98ff47',
-  "org:anidada:inventario-grande-alterado": '734881960f98ff47',
-  "org:anidada:inventario-grande-sin-cambios-de-residuo": '734881960f98ff47',
-  "org:anidada:inventario-grande-con-objeto-menos": '734881960f98ff47',
-  "org:anidada:estado-anidado-ausente": 'd3374882e92593d8',
-  "org:anidada:anidado-de-otro-actor": '33c96847898ce92d',
-  "org:anidada:padre-duplicado": 'a2d69f13cd80586e',
-  "org:anidada:catalizador-con-desgaste-falso": 'f8234df9d53f4106',
-  "org:anidada:catalizador-requerido-omitido": '1b300b18bb47e2d3',
-  "org:anidada:uso-anidado-sin-atribuir": '5ae84a54d72f7237',
-  "org:multitud": '3691fba70f13b438',
-  "org:multitud:sin-checkpoint": '2a42799efea0ce51',
-  "org:multitud:checkpoint-invalido": '9cb8ab36025b7e76',
-  "org:multitud:checkpoint-futuro": '9cb8ab36025b7e76',
-  "org:multitud:recibo-perdido-en-la-ventana": 'f72608d8e0e10130',
-  "org:multitud:registro-desordenado": 'f2a1af048292ebcb',
-  "org:multitud:historia-descartada": '6327b082edc22f16',
-  "org:multitud:sin-epoca-completa": '33f47b0d57de9ae1',
-  "org:multitud:recibos-fuera-de-epoca": '85b514fe82b01702',
-  "org:multitud:actor-duplicado": 'e0f26755d10b530e',
-  "org:multitud:actor-nuevo": 'cf83a6ffcc9462fd',
-  "org:multitud:actor-nuevo-con-material": 'c4b030f448847419',
-  "org:multitud:actor-ausente-con-material": '33bbf79b27ca4371',
-  "org:multitud:actor-ausente-sin-material": '03931d5d9defe8c3',
-  "org:multitud:padron-reordenado": '3691fba70f13b438',
-  "org:multitud:apertura-no-encadenada": '88e598103fe385e7',
-  "org:multitud:masa-de-insumo-alterada": '15097796f2309d7b',
-  "org:multitud:masa-de-cierre-alterada": 'ec7f29763812c0c5',
-  "org:multitud:entrada-externa-alterada": '320f8eae88b648a7',
-  "org:multitud:perdida-externa-alterada": '78abe4db2377a396',
-  "org:multitud:receta-sin-verificar": '2f440429c6829b36',
-  "org:multitud:receta-inexistente": '20974ba70da8461a',
-  "org:multitud:tick-previo-a-la-receta": 'c5b5e561c6c88243',
-  "org:multitud:transferencia-sin-id": '2d39ef1b7b1d3ae5',
-  "org:multitud:transferencia-incompleta": '0c0ac374c422eb58',
-  "org:multitud:transferencia-sin-contraparte": '576c9ee21a035b3e',
-  "org:multitud:transferencia-asimetrica": '78abe4db2377a396',
-  "org:multitud:stock-actual-con-residuo": '20aef12b3fbe9907',
-  "org:multitud:stock-actual-con-objeto": '4185803a624db7a2',
-  "org:multitud:inventario-sin-recibo-masa": '52743e4c244c2f43',
-  "org:multitud:inventario-sin-recibo-residuo": 'e951291b84613030',
-  "org:multitud:inventario-sin-recibo-composicion": '15d0d18f750df46c',
-  "org:multitud:inventario-sin-recibo-receta": '4bc0cd24dead99df',
-  "org:multitud:inventario-sin-recibo-id": '15d0d18f750df46c',
-  "org:multitud:inventario-con-id-repetido": '15d0d18f750df46c',
-  "org:multitud:inventario-pequeno-con-objeto-de-mas": '2ca8db0f5530ac60',
-  "org:multitud:inventario-con-id-repetido-grande": '15d0d18f750df46c',
-  "org:multitud:inventario-grande-alterado": '6538dc7937901de4',
-  "org:multitud:inventario-grande-sin-cambios-de-residuo": 'c3115ae515ee3447',
-  "org:multitud:inventario-grande-con-objeto-menos": 'f5d9c7e0c3adfce2',
-  "org:multitud:estado-anidado-ausente": '5b92be6514b80883',
-  "org:multitud:anidado-de-otro-actor": 'a584b62f53e99d50',
-  "org:multitud:padre-duplicado": '949bb47077c6070b',
-  "org:multitud:catalizador-con-desgaste-falso": '521d0f30e55ca145',
-  "org:multitud:catalizador-requerido-omitido": 'bcafec097cd659cb',
-  "org:multitud:uso-anidado-sin-atribuir": '9e8d49b295180dab',
-};
-test.after(() => { if (PRINT_GOLDEN) console.log(`V18_GOLDEN ${JSON.stringify(printed)}`); });

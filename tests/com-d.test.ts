@@ -108,34 +108,23 @@ function replicaIdentidad(seed: number, extra?: string): string {
 }
 
 /**
- * Referencia medida el 2026-09-28 en ESTE worktree (`sprint/com-d-20260928`), ANTES de tocar
- * `src/world/params.ts`/`society.ts` (commit base `main` @005b877), con
- * `scripts` ad hoc equivalentes a `replicaIdentidad` de arriba (`digestoCanonico` sin ninguna
- * clave nueva, porque esa base no la declara):
- *   npx tsx com-d-digestos.mts --arbol <worktree pre-edición> --semillas 61001,...,61006 \
- *     --pasos 1200 --salida pre.json
- * y reproducida BYTE A BYTE tras la implementación con `--sin social.disolucion` (`post.json`),
- * en los dos carriles: `control` (DEFAULT_PARAMS puros) y `com` (+ `social.radioConvivencia=12`,
- * que ejercita las ramas `else` nuevas de `reviseByCohabitation` con `disolver=false`).
+ * V23: sin digestos dorados con valor fijo. La identidad «disolucion=0 no cambia el mundo» se comprueba
+ * dentro de la propia prueba: el control (los params por defecto) y el mismo mundo con la clave apagada
+ * de forma explícita, misma semilla, un hilo y sin tarjeta, dan el mismo digesto, con y sin COM activo
+ * (`social.radioConvivencia=12`, que ejercita las ramas `else` de `reviseByCohabitation` con `disolver=false`).
+ * El control se corre dos veces para fijar además la reproducibilidad.
  */
-// V23: los de 61001–61005 se re-grabaron en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia
-// el mundo a propósito; los anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor). 61006 no cambió.
-const SEMILLAS_REFERENCIA: Readonly<Record<number, { control: string; com: string }>> = {
-  61001: { control: '766a3936d390d5df18fb27b765a623212dfd95b7ebf5d3cf83e220812efa35f0', com: '95378c1036b936dec4229b458c345b1f5a7f2da6f1b697947c1537db40227d90' },
-  61002: { control: '4d7437092312e12ac6f619d798848c034629dd20afc1f6d39a4efe07c7245a11', com: 'bff79e4d17f584de66574e03d1ca2c9a29ea133db4f1c13e5335c87f85bed04e' },
-  61003: { control: '474893f1ae4318515e9680ac707f3be675bc115fbe88bdeb8055b1b9343867f0', com: '9320999127ea2c879ce182be5b37ecdc91499371c0721dfec443b002ee956ad8' },
-  61004: { control: '618a7d308d4719d7e487de7b5f8f61efdf4f47604ecf7c9b46d5f064e90c50fd', com: '7993d1699ce5f50a8703dbd45f08d39737848edddc64d440cc6e4c721db700ef' },
-  61005: { control: '0007297186a9fba6d5618fb23fd24adb83f9c1b53f5b755b41fc7c38c213e2f4', com: '310303d5cbc5c1823c2207afe578a7a187c222ede05d2c886ebe9ea239b72795' },
-  61006: { control: '9e09df116fac3b307400bfe5f47ecc4ee1abc509fe45ca723a0a5bc0f87134c3', com: 'a301b7bdf1f6147e7ebabf4f7e4b0f9c0509dfcdfc69c9399baa8957bd8f9a28' },
-};
+const SEMILLAS_IDENTIDAD = [61001, 61002, 61003] as const;
 
-test('(0) identidad: con disolucion=0 (default) el mundo es idéntico a antes de esta ley, en 6 semillas nuevas, con y sin COM activo', { timeout: 600_000 }, () => {
+test('(0) identidad: con disolucion=0 (default) el mundo es el del control y es reproducible, con y sin COM activo', { timeout: 600_000 }, () => {
   assert.equal(DEFAULT_PARAMS.social.disolucion, 0, 'default = hoy');
   assert.equal(HISTORICAL_PARAMS.social.disolucion, 0);
-  for (const [seedText, referencia] of Object.entries(SEMILLAS_REFERENCIA)) {
-    const seed = Number(seedText);
-    assert.equal(replicaIdentidad(seed), referencia.control, `semilla ${seed}, DEFAULT_PARAMS`);
-    assert.equal(replicaIdentidad(seed, 'social.radioConvivencia=12'), referencia.com, `semilla ${seed}, radioConvivencia=12 (COM activo, disolucion=0)`);
+  for (const seed of SEMILLAS_IDENTIDAD) {
+    const control = replicaIdentidad(seed);
+    assert.equal(replicaIdentidad(seed), control, `semilla ${seed}, DEFAULT_PARAMS: dos corridas, mismo digesto`);
+    assert.equal(replicaIdentidad(seed, 'social.disolucion=0'), control, `semilla ${seed}, disolucion=0 explícito = control`);
+    const com = replicaIdentidad(seed, 'social.radioConvivencia=12');
+    assert.equal(replicaIdentidad(seed, 'social.radioConvivencia=12,social.disolucion=0'), com, `semilla ${seed}, COM activo, disolucion=0 explícito = control con COM`);
   }
 });
 

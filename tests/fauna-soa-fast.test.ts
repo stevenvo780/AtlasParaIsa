@@ -3,10 +3,8 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import type { Tile } from '../src/shared/types.js';
 import { materializeAnimals, stepAnimals, type AnimalWorld } from '../src/world/animals.js';
-import { bindWorldContext, closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
+import { closePolicyGpuBatchers } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { residentTileReader, TileStore, type SharedTerrain } from '../src/world/soa/terreno.js';
 import { SOA_COORDINATE_LIMIT } from '../src/world/soa/region.js';
@@ -117,34 +115,6 @@ test('lector se renueva después de crecer la arena, cambiar frente y reutilizar
     assert.equal(reader.cellAt(removed.x, removed.y), -1);
     assert.equal(reader.growth(reader.cellAt(-1024, -1024)), 0.6);
   } finally { store.releaseParallelObjects(); }
-});
-
-// Digestos de ea9b879, ANTES de cambiar fauna, con los mismos defaults y 1200 pasos.
-// Además de comparar las dos representaciones, esto detecta una deriva compartida por ambos caminos.
-const ORIGINAL_DIGESTS: Record<number, string> = {
-  7: '30c6e92e39cc733716fea72611407eee647b0e85361c3075b4105a9680b6a579',
-  42: 'a1c32baa8d8ed263d51d88087a3196227c01b75bc55c75e359edd9ae9d548757',
-  51926: '0e2cceeedec617f2bf9cb0ce71c6bb1968838064b7dde6f870c66c4f00688ab8',
-};
-// se borra en la ola 2 (carril PO2)
-for (const seed of [7, 42, 51926]) test.skip(`1200 pasos: digestoCanonico exacto en CADA paso plano/residente, semilla ${seed}`, () => {
-  const plain = createWorld(seed), resident = createWorld(seed, parseParams('motor.soaTerreno=true,motor.hilos=4'));
-  const owner = new ResidentTopologyOwner();
-  resident.tiles = owner.tiles(resident.tiles.map(t => owner.tile(t)));
-  bindWorldContext(resident, { tileOwnership: owner });
-  const referenceParams = paramsOf(plain), executionParams = paramsOf(resident);
-  let readerHits = 0;
-  for (let tick = 1; tick <= 1200; tick++) {
-    stepWorld(plain); stepWorld(resident);
-    if (residentTileReader(resident.tiles)) readerHits++;
-    // El digesto incluye motor: normalizar exclusivamente la selección de ejecución durante el hash.
-    // Ningún paso corre con parámetros normalizados; todos los campos, -0 y órdenes se comparan.
-    setParams(resident, referenceParams);
-    try { assert.equal(digestoCanonico(resident), digestoCanonico(plain), `digesto semilla=${seed} paso=${tick}`); }
-    finally { setParams(resident, executionParams); }
-  }
-  assert.ok(readerHits > 0, 'el test ejercita el lector, no sólo el fallback');
-  assert.equal(digestoCanonico(plain), ORIGINAL_DIGESTS[seed]);
 });
 
 function faunaWorld(tiles: Tile[]): AnimalWorld {

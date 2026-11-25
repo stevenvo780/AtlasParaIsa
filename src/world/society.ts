@@ -1,7 +1,7 @@
 import type { ChronicleEvent, CommunityView, PersonView } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
-import { effectiveLimits, paramsOf } from './params.js';
+import { effectiveLimits, ley, paramsOf } from './params.js';
 import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
@@ -14,6 +14,9 @@ import { primerVecino, vecinos } from './rejilla.js';
 import { tileLookup } from './tile-index.js';
 import { residentFastAccess } from './soa/terreno.js';
 import { defaultChemistryState, exchangeComplementaryCompounds } from './chemistry.js';
+import { VINCULO_MINIMO } from '../shared/naturaleza.js';
+import { ctxSi } from './motor/acceso.js';
+import { REF_NULA, slotDe, TipoIntento } from './motor/contratos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -71,6 +74,7 @@ export function inheritCulture(seed: number, childId: string, parentA: Culture, 
   };
 }
 export function bond(world: World, a: Person, b: Person, amount: number): void {
+  if (ley(world, 'intentos')) { vincularPorLado(world, a, b, amount, {}); return; }
   a.bonds[b.id] = clamp((a.bonds[b.id] ?? 0.2) + amount); b.bonds[a.id] = clamp((b.bonds[a.id] ?? 0.2) + amount);
   if (!world.cooperationEnabled || amount <= 0) return;
   const derivaCultural = paramsOf(world).social.derivaCultural;
@@ -92,6 +96,151 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
     a.culture.openness = clamp(a.culture.openness + 0.006 * derivaCultural);
     b.culture.openness = clamp(b.culture.openness + 0.006 * derivaCultural);
   }
+}
+/**
+ * Lo que un acto social le hace al OTRO (V23, `v23.intentos`). Con la ley viaja en un intento Vincular a su dueño, que
+ * lo aplica en `leyComunidades.aplicar.Vincular` (`aplicarEfectoSocial`); cada lado solo lo escribe su dueño. Sin
+ * contexto de motor (un mundo de prueba) se aplica aquí mismo.
+ */
+export interface EfectoSocial {
+  /** Cuánto sube (o baja) el lado del receptor hacia el emisor; ausente vale 0,2, como en `bond`. */
+  vinculo?: number;
+  /** El lado del receptor hacia el emisor sube al menos a su lado hacia `copia` (1 si `copia` es el propio receptor):
+   * el tiempo que pasó con el embrión del emisor fue su tiempo con quien lo gestaba. */
+  copia?: string;
+  /** Resultado observado de lo acordado con el emisor (`observeAgreementOutcome`). */
+  resultado?: 0 | 1;
+  /** Cambios de cultura del receptor: compartir, custodia, apertura. */
+  cultura?: readonly [number, number, number];
+  fatiga?: number; tension?: number;
+  /** Disputó en este tick: marca `lastDispute`. */
+  disputa?: boolean;
+  /** Cede: se retira y vuelve a decidir dentro de estos ticks. */
+  retirada?: number;
+  /** Fuente disputada o acordada. */
+  fuente?: { x: number; y: number };
+  /** Recordar la fuente cedida (`conflictMemory`, ley `social.memoriaDisputa`). */
+  memoria?: boolean;
+  /** Acuerdo pendiente con el emisor sobre la fuente, medido con esta necesidad. */
+  acuerdo?: 'hunger' | 'thirst';
+  razon?: string;
+  experiencia?: { texto: string; causa: string };
+}
+/** Posiciones en `Intento.dato` de un Vincular (NaN = ausente). La 0 es la del contrato; las demás las añade esta ley. */
+export const DATO_VINCULAR = { vinculo: 0, resultado: 1, cultura: 2, fatiga: 5, tension: 6, disputa: 7, retirada: 8, fuenteX: 9, fuenteY: 10,
+  memoria: 11, acuerdo: 12, ancho: 13 } as const;
+const textos = new TextEncoder(), lector = new TextDecoder();
+
+export function efectoADato(e: EfectoSocial): { dato: Float64Array; bytes: Uint8Array | null } {
+  const D = DATO_VINCULAR, dato = new Float64Array(D.ancho).fill(NaN);
+  if (e.vinculo !== undefined) dato[D.vinculo] = e.vinculo;
+  if (e.resultado !== undefined) dato[D.resultado] = e.resultado;
+  if (e.cultura) for (let k = 0; k < 3; k++) dato[D.cultura + k] = e.cultura[k]!;
+  if (e.fatiga !== undefined) dato[D.fatiga] = e.fatiga;
+  if (e.tension !== undefined) dato[D.tension] = e.tension;
+  if (e.disputa) dato[D.disputa] = 1;
+  if (e.retirada !== undefined) dato[D.retirada] = e.retirada;
+  if (e.fuente) { dato[D.fuenteX] = e.fuente.x; dato[D.fuenteY] = e.fuente.y; }
+  if (e.memoria) dato[D.memoria] = 1;
+  if (e.acuerdo) dato[D.acuerdo] = e.acuerdo === 'thirst' ? 2 : 1;
+  const texto = e.copia !== undefined || e.razon !== undefined || e.experiencia !== undefined
+    ? JSON.stringify({ k: e.copia, r: e.razon, x: e.experiencia?.texto, c: e.experiencia?.causa }) : undefined;
+  return { dato, bytes: texto === undefined ? null : textos.encode(texto) };
+}
+
+export function datoAEfecto(dato: Float64Array | null, bytes: Uint8Array | null): EfectoSocial {
+  const D = DATO_VINCULAR, e: EfectoSocial = {};
+  const v = (k: number) => dato && k < dato.length && !Number.isNaN(dato[k]!) ? dato[k]! : undefined;
+  e.vinculo = v(D.vinculo);
+  const resultado = v(D.resultado);
+  if (resultado === 0 || resultado === 1) e.resultado = resultado;
+  if (v(D.cultura) !== undefined) e.cultura = [v(D.cultura) ?? 0, v(D.cultura + 1) ?? 0, v(D.cultura + 2) ?? 0];
+  e.fatiga = v(D.fatiga); e.tension = v(D.tension); e.disputa = v(D.disputa) === 1; e.retirada = v(D.retirada);
+  const fx = v(D.fuenteX), fy = v(D.fuenteY);
+  if (fx !== undefined && fy !== undefined) e.fuente = { x: fx, y: fy };
+  e.memoria = v(D.memoria) === 1;
+  const acuerdo = v(D.acuerdo);
+  if (acuerdo === 1 || acuerdo === 2) e.acuerdo = acuerdo === 2 ? 'thirst' : 'hunger';
+  if (bytes && bytes.length) {
+    const t = JSON.parse(lector.decode(bytes)) as { k?: string; r?: string; x?: string; c?: string };
+    if (typeof t.k === 'string') e.copia = t.k;
+    if (typeof t.r === 'string') e.razon = t.r;
+    if (typeof t.x === 'string') e.experiencia = { texto: t.x, causa: typeof t.c === 'string' ? t.c : '' };
+  }
+  return e;
+}
+
+/** Aplica al receptor (propio) lo que le hizo el emisor. Solo escribe al receptor. */
+export function aplicarEfectoSocial(world: World, receptor: Person, emisorId: string, e: EfectoSocial, tick: number): void {
+  if (e.cultura) {
+    receptor.culture.sharing = clamp(receptor.culture.sharing + e.cultura[0]);
+    receptor.culture.stewardship = clamp(receptor.culture.stewardship + e.cultura[1]);
+    receptor.culture.openness = clamp(receptor.culture.openness + e.cultura[2]);
+  }
+  if (e.vinculo !== undefined) receptor.bonds[emisorId] = clamp((receptor.bonds[emisorId] ?? 0.2) + e.vinculo);
+  if (e.copia !== undefined) {
+    const v = e.copia === receptor.id ? 1 : receptor.bonds[e.copia] ?? 0;
+    if (v >= VINCULO_MINIMO && v > (receptor.bonds[emisorId] ?? 0)) receptor.bonds[emisorId] = v;
+  }
+  if (e.resultado !== undefined) observarAcuerdo(world, receptor, emisorId, e.resultado);
+  if (e.fatiga !== undefined) receptor.fatigue = clamp(receptor.fatigue + e.fatiga);
+  if (e.tension !== undefined) receptor.socialLoad = clamp(receptor.socialLoad + e.tension);
+  if (e.disputa) receptor.lastDispute = tick;
+  if (e.acuerdo && e.fuente) receptor.agreement = { partner: emisorId, x: e.fuente.x, y: e.fuente.y, tick, metric: e.acuerdo, level: receptor[e.acuerdo] };
+  if (e.retirada !== undefined) {
+    receptor.action = 'retreat'; receptor.target = { x: receptor.x, y: receptor.y }; receptor.decisionAt = tick + e.retirada;
+    if (e.razon !== undefined) receptor.reason = e.razon;
+  }
+  if (e.memoria && e.fuente) receptor.conflictMemory = { x: e.fuente.x, y: e.fuente.y, tick };
+  if (e.experiencia) {
+    receptor.experiences.push({ tick, text: e.experiencia.texto, causeId: e.experiencia.causa, placeId: '' });
+    receptor.experiences = receptor.experiences.slice(-8); receptor.recentMemory = e.experiencia.texto;
+  }
+}
+
+/** Manda a `receptor` (por uid) lo que le hace `emisor`. Con `v23.intentos` y motor, un Vincular a su dueño; si no,
+ * se aplica directo sobre `receptor` (sin motor solo hay un dueño y todos son propios). */
+export function afectar(world: World, emisor: Person, receptor: Person | undefined, receptorUid: number | undefined, e: EfectoSocial): void {
+  const c = ley(world, 'intentos') ? ctxSi(world) : undefined;
+  if (!c) { if (receptor) aplicarEfectoSocial(world, receptor, emisor.id, e, world.tick); return; }
+  const a = receptorUid === undefined ? REF_NULA : c.ref(receptorUid), de = emisor.uid === undefined ? REF_NULA : c.ref(emisor.uid);
+  if (a === REF_NULA || de === REF_NULA) return;
+  const { dato, bytes } = efectoADato(e), destino = c.frente.dueno[slotDe(a)]!;
+  c.buzon.enviar(destino >= 0 ? destino : c.hilo, { tipo: TipoIntento.Vincular, de, a, celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato, bytes });
+}
+
+/** Distancia a otra persona: con `v23.intentos` y motor, a donde la muestra el frente (Infinity si ya no vive). */
+function distanciaAlOtro(world: World, person: Person, other: Person): number {
+  const c = ley(world, 'intentos') ? ctxSi(world) : undefined;
+  if (!c || other.uid === undefined) return distance(person, other);
+  const r = c.ref(other.uid);
+  if (r === REF_NULA) return Infinity;
+  const s = slotDe(r);
+  return Math.hypot(person.x - c.frente.x[s]!, person.y - c.frente.y[s]!);
+}
+
+/** `bond` por lados: `a` escribe el suyo y la cultura propia; el lado de `b` y su cultura van en el efecto. */
+function vincularPorLado(world: World, a: Person, b: Person, amount: number, extra: EfectoSocial): void {
+  a.bonds[b.id] = clamp((a.bonds[b.id] ?? 0.2) + amount);
+  const cultura: [number, number, number] = [0, 0, 0];
+  if (extra.cultura) for (let k = 0; k < 3; k++) cultura[k] = extra.cultura[k]!;
+  if (world.cooperationEnabled && amount > 0) {
+    const derivaCultural = paramsOf(world).social.derivaCultural;
+    const acercar = (tasa: number) => {
+      const similarity = 1 - culturalDistance(a.culture, b.culture);
+      CULTURE_KEYS.forEach((key, k) => {
+        const delta = (b.culture[key] - a.culture[key]) * tasa * similarity;
+        a.culture[key] = clamp(a.culture[key] + delta); cultura[k]! -= delta;
+      });
+    };
+    if (!(derivaCultural > 0)) acercar(0.015);
+    else if (a.communityId !== null && a.communityId === b.communityId) acercar(0.004);
+    else if (a.communityId !== b.communityId && !paramsOf(world).social.acuerdosMateriales) {
+      a.culture.openness = clamp(a.culture.openness + 0.006 * derivaCultural); cultura[2] += 0.006 * derivaCultural;
+    }
+  }
+  const { cultura: _previa, ...resto } = extra;
+  afectar(world, a, b, b.uid, cultura.some(d => d !== 0) ? { ...resto, vinculo: amount, cultura } : { ...resto, vinculo: amount });
 }
 /**
  * Convivencia (hipótesis cohorte, 2026-09-22; `social.vinculoConvivencia`, default 0 = hoy). Diagnóstico
@@ -517,7 +666,7 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
 }
 export function cooperate(world: World, person: Person, emit: Emit): boolean {
   const opportunity = cooperationOpportunity(world, person);
-  if (!opportunity || distance(person, opportunity.person) > 1.5) return false;
+  if (!opportunity || distanciaAlOtro(world, person, opportunity.person) > 1.5) return false;
   const other = opportunity.person; let detail = '', helperPaid = false;
   if (opportunity.kind === 'site') {
     const structure = world.structures.find(s => s.id === opportunity.siteId), site = structure?.site;
@@ -572,6 +721,7 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   }
   person.lastSocial = world.tick;
   if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }
+  if (ley(world, 'intentos')) return cooperarPorLado(world, person, other, opportunity.kind, detail, emit);
   bond(world, person, other, 0.12); count(world, 'cooperation');
   const derivaCultural = paramsOf(world).social.derivaCultural;
   if (paramsOf(world).social.acuerdosMateriales) {
@@ -589,6 +739,25 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   return true;
 }
 
+/** Cierre social de `cooperate` con `v23.intentos`: lo mismo que la ley de hoy, pero al otro solo le llega un Vincular
+ * (vínculo, cultura, resultado del acuerdo y la experiencia vivida). */
+function cooperarPorLado(world: World, person: Person, other: Person, kind: Opportunity['kind'], detail: string, emit: Emit): boolean {
+  count(world, 'cooperation');
+  const extra: EfectoSocial = {}, derivaCultural = paramsOf(world).social.derivaCultural;
+  if (paramsOf(world).social.acuerdosMateriales) {
+    observeAgreementOutcome(world, person, other, 1); extra.resultado = 1;
+  } else if (derivaCultural > 0) {
+    const opennessDelta = person.communityId !== other.communityId ? 0.015 * derivaCultural : -0.003 * derivaCultural;
+    person.culture.openness = clamp(person.culture.openness + opennessDelta);
+    extra.cultura = [0, 0, opennessDelta];
+  }
+  const group = world.communities.find(c => c.id === person.communityId); if (group) group.cooperation++;
+  const event = emit({ kind: 'cooperation', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} cooperó con ${other.name}. ${detail}`, cause: `Estrategia ${kind}; recursos o trabajo transferidos realmente; confianza reforzada y prácticas locales aproximadas.` });
+  person.experiences.push({ tick: world.tick, text: detail, causeId: event.id, placeId: '' }); person.experiences = person.experiences.slice(-8); person.recentMemory = detail;
+  extra.experiencia = { texto: detail, causa: event.id };
+  vincularPorLado(world, person, other, 0.12, extra);
+  return true;
+}
 const COMMUNITY_SYLLABLES = ['Sauce','Brisa','Lumbre','Junco','Piedra','Semilla','Rocío','Sendero'];
 const COMMUNITY_COLORS = ['#dfba67','#76b8be','#c498b8','#a3bb6c'];
 const COMMUNITY_FORMAS = ['Círculo','Casa','Senda','Rama','Lumbre','Aldea','Valle','Orilla','Refugio','Nido'];
@@ -607,6 +776,12 @@ function communityName(world: World, id: string): string {
   const m = ((Number.isFinite(numero) ? numero : world.communityCounter) * 37) % 1920;
   return `${COMMUNITY_FORMAS[m % 10]} de ${COMMUNITY_RAICES[Math.floor(m / 10) % 16]} ${COMMUNITY_EPITETOS[Math.floor(m / 160)]}`;
 }
+/** Nombre de la comunidad número `numero` (V23): una de las 1 920 combinaciones, como con deriva cultural. */
+export function nombreDeComunidad(numero: number): string {
+  const m = (numero * 37) % 1920;
+  return `${COMMUNITY_FORMAS[m % 10]} de ${COMMUNITY_RAICES[Math.floor(m / 10) % 16]} ${COMMUNITY_EPITETOS[Math.floor(m / 160)]}`;
+}
+export const colorDeComunidad = (numero: number): string => COMMUNITY_COLORS[numero % COMMUNITY_COLORS.length]!;
 /** Vecino de confianza: el mismo predicado con el que `updateCommunities` une y funda (≤ 6 celdas,
  * confianza propia ≥ 0,25, prácticas a menos de 0,3). */
 const trustedNeighbor = (person: Person, other: Person): boolean => other !== person && distance(person, other) <= 6
@@ -897,8 +1072,12 @@ export function updateCommunities(world: World, emit: Emit): void {
  * pareja y apertura cultural), con `y = 1` si lo acordado se cumplió y `y = 0` si no. `α = 1 / memoriaResultadosDias`:
  * la memoria de resultados es finita (con 10 días, cada observación pesa un 10 %). */
 export function observeAgreementOutcome(world: World, person: Person, other: Person, y: 0 | 1): void {
-  const alpha = 1 / paramsOf(world).social.memoriaResultadosDias, trust = person.bonds[other.id] ?? 0.2;
-  person.bonds[other.id] = clamp(trust + alpha * (y - trust));
+  observarAcuerdo(world, person, other.id, y);
+}
+/** Solo escribe a `person`: su confianza en `otherId` y su apertura. */
+function observarAcuerdo(world: World, person: Person, otherId: string, y: 0 | 1): void {
+  const alpha = 1 / paramsOf(world).social.memoriaResultadosDias, trust = person.bonds[otherId] ?? 0.2;
+  person.bonds[otherId] = clamp(trust + alpha * (y - trust));
   person.culture.openness = clamp(person.culture.openness + alpha * (y - person.culture.openness));
 }
 /** Ticks que quien cedió espera a que la fuente le dé antes de contar el acuerdo como incumplido. */
@@ -906,15 +1085,22 @@ const PLAZO_ACUERDO = 300;
 /** V19/S: resuelve el acuerdo pendiente de `person` con lo que su cuerpo y la fuente muestran. Cumplido: su
  * hambre o sed bajó junto a la fuente. Incumplido: pasada la espera, la fuente se agotó sin que le llegara nada, o
  * venció el plazo. Si bajó lejos de la fuente (otra comida) no hay evidencia sobre el acuerdo y se descarta. */
+/** Id de `id` si vive: con `v23.intentos` y motor lo dice el frente; si no, `world.people`. */
+function companeroVivo(world: World, id: string): string | undefined {
+  const c = ley(world, 'intentos') ? ctxSi(world) : undefined;
+  if (!c) return world.people.some(p => p.id === id) ? id : undefined;
+  const uid = c.uidDe(id);
+  return uid > 0 && c.ref(uid) !== REF_NULA ? id : undefined;
+}
 export function settleAgreement(world: World, person: Person): void {
   const agreement = person.agreement;
   if (!agreement) return;
-  const other = world.people.find(p => p.id === agreement.partner);
+  const other = companeroVivo(world, agreement.partner);
   const age = world.tick - agreement.tick;
   const delivered = agreement.level - person[agreement.metric] >= 0.08;
   if (delivered) {
     person.agreement = undefined;
-    if (other && distance(person, agreement) <= 2) observeAgreementOutcome(world, person, other, 1);
+    if (other !== undefined && distance(person, agreement) <= 2) observarAcuerdo(world, person, other, 1);
     return;
   }
   if (age < 12) return;
@@ -922,9 +1108,9 @@ export function settleAgreement(world: World, person: Person): void {
   const stock = water ? waterAvailable(world, agreement) : Math.max(source?.food ?? 0, source?.fauna ?? 0);
   if (age < PLAZO_ACUERDO && stock >= (water ? 0.012 : 0.006)) return;
   person.agreement = undefined;
-  if (!other) return;
+  if (other === undefined) return;
   // La espera costó tiempo y no dio nada: evidencia en contra de quien pidió esperar y de lo acordado.
-  observeAgreementOutcome(world, person, other, 0);
+  observarAcuerdo(world, person, other, 0);
   person.socialLoad = clamp(person.socialLoad + 0.06);
 }
 export function resourceDispute(world: World, person: Person, emit: Emit): boolean {
@@ -942,6 +1128,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > disputaEscasez * (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
   const other = primerVecino(world, person, disputaRadio + 1, p => p !== person && !!p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= disputaEspera, 'resourceDispute');
   if (!other) return false;
+  if (ley(world, 'intentos') && distanciaAlOtro(world, person, other) > disputaRadio) return false;
   const trust = person.bonds[other.id] ?? 0.2;
   // Conflicto legible (hipótesis CONFL, `social.memoriaDisputa`, default 0 = hoy). Diagnóstico
   // (`scripts/lab/diagnostico-disputas.ts`, base del carril de la noche): hoy cede quien llega antes a esta
@@ -964,6 +1151,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   const cubierto = acuerdosMateriales ? Math.min(1, stock / (unidad * (necesidad(cede) + necesidad(sigue)))) : 1;
   const turnoViable = !acuerdosMateriales || cubierto * cede.culture.openness >= necesidad(cede);
   const predispuestos = trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65;
+  if (ley(world, 'intentos')) return disputarPorLado(world, person, other, emit, { cedeOtro, fuente, legible, predispuestos, turnoViable, trust });
   if (predispuestos && turnoViable) {
     person.lastDispute = other.lastDispute = world.tick;
     if (acuerdosMateriales) {
@@ -1014,5 +1202,65 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   }
   person.reason = 'Una fuente escasa quedó disputada; cede el intento y busca otra posibilidad.';
   emit({ kind: 'conflict', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} y ${other.name} disputaron una fuente escasa.`, cause: 'Necesidades urgentes, mismo destino, confianza baja y prácticas de apertura reducida. Fatiga y tensión aumentan; uno cede el intento. La diferencia de grupo por sí sola no dispara conflicto.' });
+  return true;
+}
+
+/** `resourceDispute` con `v23.intentos`: las mismas reglas, pero `person` solo escribe lo suyo y lo que le toca a
+ * `other` (marca de disputa, tensión, fatiga, cultura, vínculo, acuerdo pendiente, retirada) le llega en un Vincular. */
+function disputarPorLado(world: World, person: Person, other: Person, emit: Emit,
+  k: { cedeOtro: boolean; fuente: { x: number; y: number }; legible: boolean; predispuestos: boolean; turnoViable: boolean; trust: number }): boolean {
+  const { derivaCultural, acuerdosMateriales } = paramsOf(world).social;
+  const { cedeOtro, fuente, legible } = k, tick = world.tick;
+  const cede = cedeOtro ? other : person, sigue = cedeOtro ? person : other;
+  const otro: EfectoSocial = { disputa: true };
+  const retirarse = (ticks: number, razon: string) => {
+    if (cedeOtro) { otro.retirada = ticks; otro.razon = razon; return; }
+    person.action = 'retreat'; person.target = { x: person.x, y: person.y }; person.decisionAt = tick + ticks; person.reason = razon;
+  };
+  if (k.predispuestos && k.turnoViable) {
+    person.lastDispute = tick;
+    let vinculo = 0;
+    if (acuerdosMateriales) {
+      const metric = person.action === 'drink' ? 'thirst' : 'hunger';
+      if (cedeOtro) { otro.acuerdo = metric; otro.fuente = fuente; }
+      else person.agreement = { partner: other.id, x: fuente.x, y: fuente.y, tick, metric, level: person[metric] };
+    } else {
+      vinculo = 0.04;
+      if (derivaCultural > 0 && person.communityId !== other.communityId) {
+        person.culture.openness = clamp(person.culture.openness + 0.012 * derivaCultural);
+        otro.cultura = [0, 0, 0.012 * derivaCultural];
+      }
+    }
+    retirarse(12, legible ? 'Acordó un turno ante la escasez: su vecino lo necesita más y accede primero.' : 'Acordó un turno ante la escasez: deja acceder primero a su vecino.');
+    count(world, 'cooperation');
+    emit({ kind: 'cooperation', actors: [cede.id, sigue.id], x: cede.x, y: cede.y, source: 'simulation', text: `${cede.name} y ${sigue.name} acordaron turnarse ante una fuente escasa.`, cause: legible
+      ? 'Confianza o apertura aprendida permiten coordinar el acceso; espera doce pasos quien menos lo necesita y el recurso no aumenta.'
+      : 'Confianza o apertura aprendida permiten coordinar el acceso; el primero espera doce pasos y el recurso no aumenta.' });
+    if (vinculo) vincularPorLado(world, person, other, vinculo, otro); else afectar(world, person, other, other.uid, otro);
+    return true;
+  }
+  if (person.communityId === other.communityId && k.trust >= 0.25 && !(acuerdosMateriales && k.predispuestos)) return false;
+  person.lastDispute = tick;
+  person.socialLoad = clamp(person.socialLoad + 0.12); otro.tension = 0.12;
+  person.fatigue = clamp(person.fatigue + 0.015); otro.fatiga = 0.015;
+  if (derivaCultural > 0) {
+    const apertura = !acuerdosMateriales && person.communityId !== other.communityId ? -0.03 * derivaCultural : 0;
+    person.culture.sharing = clamp(person.culture.sharing - 0.025 * derivaCultural);
+    person.culture.openness = clamp(person.culture.openness + apertura);
+    otro.cultura = [-0.025 * derivaCultural, 0, apertura];
+  }
+  if (acuerdosMateriales) { observarAcuerdo(world, person, other.id, 0); otro.resultado = 0; }
+  count(world, 'conflicts');
+  for (const p of [person, other]) { const group = world.communities.find(c => c.id === p.communityId); if (group) group.disputes++; }
+  if (legible) {
+    const razon = 'Cedió una fuente escasa a quien la necesitaba más; la recordará y buscará otra antes de volver.';
+    retirarse(1, razon);
+    if (cedeOtro) { otro.memoria = true; otro.fuente = fuente; } else person.conflictMemory = { x: fuente.x, y: fuente.y, tick };
+    emit({ kind: 'conflict', actors: [cede.id, sigue.id], x: cede.x, y: cede.y, source: 'simulation', text: `${cede.name} y ${sigue.name} disputaron una fuente escasa; cedió ${cede.name}.`, cause: 'Necesidades urgentes, mismo destino, confianza baja y prácticas de apertura reducida. Fatiga y tensión aumentan en los dos; cede quien menos lo necesita, que recordará esa fuente un día y preferirá otra. La diferencia de grupo por sí sola no dispara conflicto.' });
+  } else {
+    retirarse(30, 'Una fuente escasa quedó disputada; cede el intento y busca otra posibilidad.');
+    emit({ kind: 'conflict', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} y ${other.name} disputaron una fuente escasa.`, cause: 'Necesidades urgentes, mismo destino, confianza baja y prácticas de apertura reducida. Fatiga y tensión aumentan; uno cede el intento. La diferencia de grupo por sí sola no dispara conflicto.' });
+  }
+  vincularPorLado(world, person, other, -0.08, otro);
   return true;
 }

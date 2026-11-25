@@ -47,10 +47,13 @@ export function demographicSummary(received: WorldView): string {
   const neighbors = censo?.neighbors;
   const stages = censo?.lifeStage;
   const known = stages ? stages.juvenile + stages.adult + stages.senescent : 0;
+  // V23: con cuerpos de átomos la fertilidad se paga con reserva y no hay cupo; sin ellos no se afirma nada de eso.
+  const conCuerpos = received.people.some(p => p.cuerpoVisto !== undefined);
   const replacement = !censo ? 'Sin censo recibido: no se puede evaluar el recambio.'
     : !censo.neighbors ? 'No hay vecinos para evaluar el recambio.'
     : stages!.unknown ? 'Faltan etapas de vida: no se puede evaluar el recambio por edad.'
     : stages!.juvenile + stages!.adult < 2 ? 'No hay recambio posible entre los vecinos actuales.'
+    : conCuerpos ? 'La edad no garantiza una crianza: también hace falta reserva de energía para pagar la gestación, confianza y cercanía. Este mundo no pone cupo ni ventana a los nacimientos.'
     : 'La edad no garantiza una crianza: también hacen falta salud, recursos, confianza y cercanía.';
   const stageValue = (value: number | undefined): string => censo && (known || !censo.neighbors) ? number(value) : '—';
   const stagesMarkup = `<div data-neighbor-life-stages><div class="stats-section-heading"><h3>Etapas de los vecinos</h3><span>${censo ? `${number(known)}/${number(censo.neighbors)} con dato · todo el mundo` : 'censo no recibido'}</span></div><div class="stats-facts"><span data-life-stage="juvenile">En crecimiento<strong>${stageValue(stages?.juvenile)}</strong></span><span data-life-stage="adult">Edad de crianza<strong>${stageValue(stages?.adult)}</strong></span><span data-life-stage="senescent">Vejez<strong>${stageValue(stages?.senescent)}</strong></span>${stages?.unknown ? `<span data-life-stage="unknown">Etapa sin dato<strong>${number(stages.unknown)}</strong></span>` : ''}</div><p class="stats-note" data-replacement-status>${replacement}</p></div>`;

@@ -4,7 +4,7 @@
  * una escalera causal. En la ficha, `fertil` y `busca` llegan con la ficha a demanda. Nada se supone:
  * si un dato no llegó, se dice.
  */
-import type { PersonDetail, WorldView } from '../shared/types.js';
+import type { PersonDetail, PersonView, WorldView } from '../shared/types.js';
 import { esc, number } from './ui-catalog.js';
 import { sparkline } from './charts.js';
 import { censoDe } from './censo-view.js';
@@ -63,8 +63,9 @@ export function seccionNacimientos(view: WorldView): string {
     + ' Tras criar, cada progenitor descansa un tiempo antes de poder volver a hacerlo.'
     + `${ley.radioCortejo > 0 ? ` Quien es fértil puede ir a buscar a su pareja hasta ${number(ley.radioCortejo)} casillas.` : ''}`
     + `${cupoDeNacimientos(ley)} Hambre, sed y descanso urgentes siguen pasando primero.`
+    + (esMundoV23(view) ? ` ${leyPagadaTexto(ley, view)}` : '')
     : 'La ley de natalidad de este mundo no llegó con este estado.';
-  return `<section class="stats-section" data-natality><div class="stats-section-heading"><h3>Nacimientos</h3><span>${natalidad ? `medido en el paso ${esc(number(natalidad.tick))}` : 'sin resumen'}</span></div><ol class="natality-ladder">${pasos.join('')}</ol>${sparkline(serie, `Nacimientos por intervalo · ${number(enVentana)} en la ventana`, 'nacimientos')}<details class="person-detail" data-detail="natality-law"><summary>La ley en claro</summary><p>${leyTexto}</p></details></section>`;
+  return `<section class="stats-section" data-natality><div class="stats-section-heading"><h3>Nacimientos</h3><span>${natalidad ? `medido en el paso ${esc(number(natalidad.tick))}` : 'sin resumen'}</span></div><ol class="natality-ladder">${pasos.join('')}</ol>${sparkline(serie, `Nacimientos por intervalo · ${number(enVentana)} en la ventana`, 'nacimientos')}<details class="person-detail" data-detail="natality-law"><summary>La ley en claro</summary><p>${leyTexto}</p></details></section>${seccionReservaV23(view)}`;
 }
 
 /** Nota bajo «Qué están haciendo»: de los que se acercan, cuántos lo hacen por una crianza. */
@@ -92,4 +93,59 @@ export function fertilidadFicha(detail: Pick<PersonDetail, 'fertil' | 'busca'> |
     : f.bloqueo === 'pausa-manual' ? 'No: los nacimientos están en pausa por orden manual.' : 'Sin dato.';
   const busca = detail.busca ? `<p class="drawer-note" data-seeking>${detail.busca.motivo === 'cortejo' ? 'Busca a su pareja' : detail.busca.motivo === 'reunion' ? 'Va a reunirse para criar con' : 'Prepara reservas para criar con'}: ${personLink(view, detail.busca.id)}</p>` : '';
   return `<div class="skill-row" data-person-fertility="${f.ahora ? 'si' : esc(f.bloqueo ?? '')}"><span>Puede criar ahora</span><strong>${f.ahora ? 'Sí' : 'No'}</strong></div><p class="drawer-note">${esc(texto)}</p>${busca}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* V23 — natalidad pagada con reserva, sin cupo ni ventana              */
+/* ------------------------------------------------------------------ */
+
+/** El mundo mostrado trae cuerpos de átomos o el libro de la materia: solo entonces se afirma la natalidad pagada. */
+export function esMundoV23(view: Pick<WorldView, 'people' | 'materia'>): boolean {
+  return view.materia !== undefined || view.people.some(p => p.cuerpoVisto !== undefined);
+}
+
+export interface CuerposDeCriar {
+  /** Personas de la vista con cuerpo de átomos (el resto no cuenta: sin dato no es cero). */
+  conCuerpo: number;
+  gestando: number;
+  crias: number;
+  /** Reserva media de los adultos con cuerpo, en [0, 1]; null si no hay ninguno. */
+  reservaAdultos: number | null;
+  /** Adultos con reserva por debajo de la mitad de lo que su cuerpo pide. */
+  adultosConPocaReserva: number;
+  adultos: number;
+}
+
+/** Lo que dicen los cuerpos de esta vista sobre quién puede pagar una gestación. */
+export function cuerposDeCriar(people: readonly Pick<PersonView, 'cuerpoVisto' | 'crianza' | 'lifeStage'>[]): CuerposDeCriar {
+  let conCuerpo = 0, gestando = 0, crias = 0, adultos = 0, pocaReserva = 0, suma = 0;
+  for (const p of people) {
+    const c = p.cuerpoVisto;
+    if (!c) continue;
+    conCuerpo++;
+    if (c.embrion) gestando++;
+    if (p.crianza) crias++;
+    if (p.lifeStage === 'adult' && Number.isFinite(c.reserva)) { adultos++; suma += c.reserva; if (c.reserva < .5) pocaReserva++; }
+  }
+  return { conCuerpo, gestando, crias, reservaAdultos: adultos ? suma / adultos : null, adultosConPocaReserva: pocaReserva, adultos };
+}
+
+/** La ley de natalidad de un mundo V23, en claro: sin cupo ni ventana ni tope; la reserva decide. Sin esos datos de la ley
+ * del servidor no se afirma nada de cupos: solo se dice que este mundo no los informa. */
+export function leyPagadaTexto(ley: Ley | undefined, view: Pick<WorldView, 'people' | 'materia'>): string {
+  if (!esMundoV23(view)) return '';
+  const sinCupo = !ley || (ley.cupo === undefined && ley.ventana === undefined);
+  const sinTope = !ley || ley.maxima === undefined;
+  const partes = [sinCupo ? 'Este mundo no tiene cupo de nacimientos ni ventana entre comprobaciones' : '', sinTope ? 'ni un tope de vidas' : ''].filter(Boolean);
+  const cabeza = partes.length ? `${partes.join(' ')}. ` : '';
+  return `${cabeza}La fertilidad sale de la reserva: quien tiene energía almacenada para pagar la gestación puede concebir, la gestación gasta esa reserva y, si falta durante un día seguido, se aborta y la masa vuelve a quien gestaba. Con menos gente sobra alimento, las reservas suben y la fertilidad vuelve; con más, compiten y baja.`;
+}
+
+/** Mundo › Vida › Nacimientos: cuántos cuerpos de esta vista gestan, cuántas crías dependen de cuidadores y qué reserva tienen los adultos. */
+export function seccionReservaV23(view: WorldView): string {
+  if (!esMundoV23(view)) return '';
+  const c = cuerposDeCriar(view.people);
+  if (!c.conCuerpo) return '<section class="stats-section" data-natality-reserva="sin-dato"><div class="stats-section-heading"><h3>Reserva y gestación</h3><span>sin dato</span></div><p class="stats-note">Esta vista no trae cuerpos de átomos: no se puede decir quién puede pagar una gestación.</p></section>';
+  const reserva = c.reservaAdultos === null ? '<em class="sin-dato">sin dato</em>' : `${number(c.reservaAdultos * 100)} %`;
+  return `<section class="stats-section" data-natality-reserva="ok"><div class="stats-section-heading"><h3>Reserva y gestación</h3><span>${esc(number(c.conCuerpo))} cuerpos en esta vista</span></div><div class="stats-facts"><span data-reserva-adultos>Reserva media de los adultos<strong>${reserva}</strong></span><span data-reserva-pocos>Adultos con menos de la mitad<strong>${esc(number(c.adultosConPocaReserva))} de ${esc(number(c.adultos))}</strong></span><span data-gestando>Gestando ahora<strong>${esc(number(c.gestando))}</strong></span><span data-crias>Crías con cuidadores<strong>${esc(number(c.crias))}</strong></span></div><p class="stats-note">Solo cuenta a las personas de la cámara con dato de cuerpo; el resto del mundo no se supone.</p></section>`;
 }

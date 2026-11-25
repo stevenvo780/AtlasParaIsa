@@ -469,6 +469,12 @@ test('la fila del lote solo vale mientras su disco no cambie: toda escritura con
     const lejana = disco(world, persona).filter(t => t.terrain !== 'water' && distance(t, persona) <= RADIUS).at(-1)!;
     const fuera = world.tiles.find(t => Math.abs(t.x - persona.x) > 40 && Math.abs(t.y - persona.y) > 40);
     if (fuera) { marcarTesela(fuera); assert.equal(fila(), delLote, 'una escritura lejos no la toca'); }
+    // En una página del disco pero fuera de él: la página sube de versión y la fila sigue valiendo.
+    const pagina = (t: { x: number; y: number }) => `${t.x >> 4},${t.y >> 4}`, paginas = new Set(disco(world, persona).map(pagina));
+    const vecina = world.tiles.find(t => paginas.has(pagina(t)) && distance(t, persona) > RADIUS + 0.5);
+    assert.ok(vecina, 'hay una tesela de una página del disco fuera de él');
+    marcarTesela(vecina);
+    assert.equal(fila(), delLote, 'una escritura en su página, fuera del disco, no la toca');
     marcarTesela(lejana);
     assert.notEqual(fila(), delLote, 'una escritura en su disco la percibe de nuevo');
     percepcion.cerrar();

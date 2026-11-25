@@ -18,8 +18,9 @@ const distinto = (a: number, b: number): boolean => a !== b || (a === 0 && 1 / a
  * viven lo que vive el mundo y que leen los hilos de la piscina y las tarjetas sobre los mismos SAB. Una página entra la
  * primera vez que el disco r = 7 de alguien la toca y no sale. `versionPagina` sube solo cuando lo que la página lleva
  * cambia: al sincronizarla con el mundo, si alguna celda difiere, y en la fase de personas cada vez que una ley escribe
- * una tesela suya (`barrera-percepcion.ts`), así que la tarjeta solo vuelve a subir las páginas que cambiaron y el dueño
- * sabe con cuatro comparaciones si el disco de alguien sigue como en F2.
+ * una tesela suya (`barrera-percepcion.ts`), así que la tarjeta solo vuelve a subir las páginas que cambiaron. El dueño
+ * sabe si el disco de alguien sigue como en F2 con las versiones de sus ≤ 4 páginas y, en las que cambiaron, con las
+ * celdas que se escribieron desde la captura.
  *
  * Una celda sin tesela lleva `terreno` = 0 y `celda` la da por ausente. Las teselas y las celdas del SoA residente de
  * cada celda (`teselas`, `soa`) solo existen en el hilo dueño.
@@ -41,6 +42,10 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   #epocaCaptura = 0;
   #capturando = false;
   #vigilado = false;
+  /** Por página: celdas que cambiaron desde la captura de F2 (época de la lista, lista y mapa de bits de 256 celdas). */
+  #tocadaEn = new Uint32Array(0);
+  #tocadas: number[][] = [];
+  #bitsTocadas = new Uint32Array(0);
   readonly #enCaptura: number[] = [];
   readonly #lectura = new Float64Array(CAMPOS_PERCEPCION.length);
 
@@ -109,14 +114,22 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   /** Páginas de la última captura de F2. */
   get paginasCapturadas(): readonly number[] { return this.#enCaptura; }
 
-  /** ¿Siguen las páginas del disco de (cx, cy) como en la captura de F2? Exacto mientras toda escritura pase por la
+  /** ¿Sigue el disco r = 7 de (cx, cy) como en la captura de F2? Sí si sus páginas conservan la versión de la captura
+   * o, en las que no, ninguna celda escrita desde entonces cae en el disco. Exacto mientras toda escritura pase por la
    * barrera: entonces lo percibido en F2 es lo mismo que se percibiría ahora. */
   vigenteDesdeCaptura(cx: number, cy: number): boolean {
     if ((cx | 0) !== cx || (cy | 0) !== cy) return false;
     const px0 = (cx - RADIUS) >> 4, px1 = (cx + RADIUS) >> 4, py0 = (cy - RADIUS) >> 4, py1 = (cy + RADIUS) >> 4;
     for (let py = py0; py <= py1; py++) for (let px = px0; px <= px1; px++) {
       const chunk = this.#paginaDe(px, py);
-      if (chunk < 0 || this.#capturadaEn[chunk] !== this.#epocaCaptura || this.versionPagina[chunk] !== this.#versionCaptura[chunk]) return false;
+      if (chunk < 0 || this.#capturadaEn[chunk] !== this.#epocaCaptura) return false;
+      if (this.versionPagina[chunk] === this.#versionCaptura[chunk]) continue;
+      if (this.#tocadaEn[chunk] !== this.#epocaCaptura) return false;
+      const x0 = px << 4, y0 = py << 4;
+      for (const o of this.#tocadas[chunk]!) {
+        const dx = x0 + (o & 15) - cx, dy = y0 + (o >> 4) - cy;
+        if (dx * dx + dy * dy <= RADIUS * RADIUS) return false;
+      }
     }
     return true;
   }
@@ -125,7 +138,24 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   tocar(x: number, y: number): void {
     if ((x | 0) !== x || (y | 0) !== y) return;
     const chunk = this.#paginaDe(x >> 4, y >> 4);
-    if (chunk >= 0) this.#escritura().marcar(chunk, true);
+    if (chunk < 0) return;
+    this.#escritura().marcar(chunk, true);
+    this.#anotar(chunk, ((y & 15) << 4) | (x & 15));
+  }
+
+  /** Tras la captura y con la barrera abierta, la celda `o` de la página cambió (o pudo cambiar). */
+  #anotar(chunk: ChunkId, o: number): void {
+    if (!this.#vigilado || this.#capturando) return;
+    const bits = chunk << 3;
+    if (this.#tocadaEn[chunk] !== this.#epoca) {
+      this.#tocadaEn[chunk] = this.#epoca;
+      this.#tocadas[chunk]!.length = 0;
+      this.#bitsTocadas.fill(0, bits, bits + 8);
+    }
+    const palabra = bits + (o >> 5), bit = 1 << (o & 31);
+    if (this.#bitsTocadas[palabra]! & bit) return;
+    this.#bitsTocadas[palabra]! |= bit;
+    this.#tocadas[chunk]!.push(o);
   }
 
   /**
@@ -155,6 +185,11 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       const crecer = (previo: Uint32Array): Uint32Array<ArrayBuffer> => { const nuevo = new Uint32Array(cap); nuevo.set(previo); return nuevo; };
       this.#sincronizadaEn = crecer(this.#sincronizadaEn); this.#versionSincronizada = crecer(this.#versionSincronizada);
       this.#capturadaEn = crecer(this.#capturadaEn); this.#versionCaptura = crecer(this.#versionCaptura);
+      this.#tocadaEn = crecer(this.#tocadaEn);
+      const bits = new Uint32Array(cap * 8);
+      bits.set(this.#bitsTocadas);
+      this.#bitsTocadas = bits;
+      while (this.#tocadas.length < cap) this.#tocadas.push([]);
       const soa = new Int32Array(cap * CELDAS_PAGINA).fill(-1);
       soa.set(this.soa);
       this.soa = soa;
@@ -166,7 +201,8 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
     return chunk;
   }
 
-  /** Copia en la página lo que el mundo lleva ahora en sus 256 celdas y sube su versión si algo cambió. */
+  /** Copia en la página lo que el mundo lleva ahora en sus 256 celdas y sube su versión si algo cambió. Una celda que
+   * cambió tras la captura se anota como escrita aunque la barrera no la viera. */
   #sincronizar(chunk: ChunkId, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
     const x0 = this.paginaX[chunk]! << 4, y0 = this.paginaY[chunk]! << 4, base = chunk << 8, leido = this.#lectura;
     const valores = this.valores, n = valores.length;
@@ -176,7 +212,7 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       this.#leer(x0 + (o & 15), y0 + (o >> 4), tileIn, fast, leido, c);
       for (let k = 0; k < n; k++) {
         const v = leido[k]!;
-        if (distinto(valores[k]![c]!, v)) { valores[k]![c] = v; cambio = true; }
+        if (distinto(valores[k]![c]!, v)) { valores[k]![c] = v; cambio = true; this.#anotar(chunk, o); }
       }
     }
     this.cuentas.sincronizadas++;

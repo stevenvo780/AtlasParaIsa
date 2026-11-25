@@ -164,6 +164,19 @@ export const FISICA = {
   /** Fracción del índice foliar medio de la página que llega a cada tesela como plántulas (lluvia de semillas,
    * adimensional): sin ella una tesela pelada no rebrota nunca. Real: 0,1–1 % de la cobertura vecina por estación. */
   dispersionSemillas: 0.01,
+  /** Solubilidad de Henry del NH₃ en el agua del suelo, adimensional (concentración disuelta / concentración en el gas
+   * del poro) a 298 K. Real: H^cp = 0,59 mol/(m³·Pa) → H^cc = H^cp·R·T ≈ 1.460 (Sander 2015); es un mínimo, porque no
+   * cuenta el amonio (NH₄⁺) ni el que retiene la arcilla. Sin ella el N mineral se repartía con el aire por volúmenes
+   * (CAP_SUELO / (CAP_SUELO + CAP_AIRE_TESELA) = 1/11) y el suelo se quedaba con el 9 %: fertilidad 0,78 → 0,076 en 120
+   * ticks (semilla 7). Los demás gases del mundo (N₂ 0,015; O₂ 0,03; H₂ 0,02; CO₂ 0,8) quedan por debajo de 1. */
+  solubilidadNH3: 1460,
+  /** Volumen de agua de un suelo a capacidad de campo (humedad 1) sobre el de su poro con aire (adimensional). Real: a
+   * capacidad de campo el agua ocupa más o menos la mitad de la porosidad, así que ≈ 1. */
+  aguaPorPoro: 1,
+  /** Tiempo en que un cadáver que yace en una tesela se incorpora a su suelo (días, constante de la exponencial): lo
+   * entierran y lo deshacen los carroñeros pequeños y el agua, y la catálisis del suelo lo mineraliza. Real: el tejido
+   * blando de un animal en clima templado desaparece en 1–4 semanas. */
+  incorporacionCadaver: 10,
   /** Temperatura por debajo de la cual una brasa se apaga (K). Real: 500–700 K. */
   tBrasa: 600,
   /** Tiro: fracción de su exceso de temperatura sobre la de brasa que un fuego gasta en calentar el aire que aspira en un
@@ -615,6 +628,7 @@ export class MundoMaterial {
   private readonly u: Unidades = unidadesVacias();
   private readonly pedido: Pedido = { parte: Parte.Exacta, esp: 0, cuantos: 0, kappa: null };
   private readonly buscado = new Float64Array(1);
+  private cadaveres = new Float64Array(8);
   private readonly pideSuelo: Tasas = { hoja: 0, fruto: 0, tronco: 0 };
   private readonly pideFijado: Tasas = { hoja: 0, fruto: 0, tronco: 0 };
   /** Masa molar media de la columna de aire (kg/mol), para su altura de escala. */
@@ -854,7 +868,7 @@ export class MundoMaterial {
       const tejido = new Map<SustanciaId, number>();
       for (const o of ORGANOS) for (const [k, nu] of PARTES[o]) tejido.set(S[k], (tejido.get(S[k]) ?? 0) + u[o] * nu);
       this.llenar(this.vida[i]!, [...tejido], T);
-      this.latente[i] = Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
     }
     // Aire de la página: la columna de cada tesela, con el vapor a la humedad relativa media de sus suelos. Si un vecino
     // ya le mandó vapor antes de materializarse, el lote existe y se aprovecha.
@@ -878,8 +892,8 @@ export class MundoMaterial {
 
   /**
    * Da de alta la página p con los lotes que ya tiene en la arena (un chunk que durmió, o un mundo cargado): los busca
-   * por celda y rol, sin crear nada. La roca latente y los manantiales se leen de `tiles`. Devuelve false, sin tocar
-   * nada, si la arena no tiene el suelo de su primera tesela (la página nunca se materializó).
+   * por celda y rol, sin crear nada. La roca latente y los manantiales se leen de `tiles`; los guardados cuya roca cabía
+   * en la vista solo traen `stone`. Devuelve false si la arena no tiene el suelo de su primera tesela.
    */
   adoptar(p: number, tiles: readonly Tile[]): boolean {
     if (!tiles.length || !this.buscar(p * 256 + local(tiles[0]!), Rol.Suelo)) return false;
@@ -889,7 +903,7 @@ export class MundoMaterial {
       this.suelo[i] = this.exigir(c, Rol.Suelo); this.vida[i] = this.exigir(c, Rol.Vida);
       this.agua[i] = this.buscar(c, Rol.Agua) ? this.buscado[0]! : -1;
       this.manantial[i] = this.agua[i]! >= 0 && t.feature === 'spring' ? 1 : 0;
-      this.latente[i] = Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
     }
     this.aire[p] = this.exigir(p * 256, Rol.Aire);
     this.mar[p] = this.exigir(p * 256 + CELDA_MAR, ROL_DEPOSITO); this.cielo[p] = this.exigir(p * 256 + CELDA_CIELO, ROL_DEPOSITO);
@@ -1095,6 +1109,7 @@ export class MundoMaterial {
     this.manar(p, dt);
     this.enviar(p, dt);
     this.posar(p, Taire);
+    this.descomponer(p, dt);
     if (partido) this.vivir(p, luzFin, dt / 2, false);
     for (let i = i0; i < i1; i++) {
       this.termostato(this.suelo[i]!, T); this.termostato(this.vida[i]!, T);
@@ -1174,15 +1189,18 @@ export class MundoMaterial {
     for (const [s, nu] of PARTES[o]) this.arena.moverParte(de, a, this.pide(this.S[s], k * nu));
   }
 
-  /** Intercambio de gases suelo–aire (`intercambioBruto` por cada gas presente en cualquiera de los dos). */
+  /** Intercambio de gases suelo–aire (`intercambioBruto` por cada gas presente en cualquiera de los dos). El NH₃ se
+   * disuelve en el agua del suelo (Henry): al volumen del poro se le suma el del agua por su solubilidad, así que un suelo
+   * húmedo retiene casi todo su N mineral y uno seco lo pierde al aire (volatilización). */
   private intercambiar(l: LoteRef, aire: LoteRef, g: number, capL: number, capA: number, dt: number, T: number): void {
-    const vistos = this.vistos;
+    const vistos = this.vistos, fi = this.params.fisica;
     vistos.clear();
     for (const lote of [l, aire]) for (const id of this.especies(lote)) {
       if (vistos.has(id) || id === this.S.H2O || !this.esGas(id, T)) continue;
       vistos.add(id);
     }
-    for (const id of vistos) intercambioBruto(this.ctx, l, aire, id, g, capL, capA, dt);
+    const disuelve = 1 + fi.solubilidadNH3 * fi.aguaPorPoro * this.arena.cuantos(l, this.S.H2O) / this.params.escalas.humedad;
+    for (const id of vistos) intercambioBruto(this.ctx, l, aire, id, g, id === this.S.NH3 ? capL * disuelve : capL, capA, dt);
   }
 
   /**
@@ -1214,9 +1232,8 @@ export class MundoMaterial {
    * El cielo y el mar de la página. El arrastre mezcla la capa límite con el cielo (flujos brutos en los dos sentidos:
    * las concentraciones se igualan): el vapor, que en el aire de la página solo ocupa la capa límite, y los gases de la
    * columna (N₂, O₂ y CO₂), de los que la capa límite es la fracción h/H; así el CO₂ que la vegetación fija vuelve del
-   * aire del planeta, que es finito. Los gases que el aire libre no tiene (NH₃, H₂) no se mezclan: la librería no
-   * disuelve el NH₃ en el agua del suelo, así que en el aire está el que en un suelo real estaría disuelto, y llevárselo
-   * sería sacar nitrógeno de los suelos. Después el mar evapora hacia el cielo lo que le falta para saturarse a la
+   * aire del planeta, que es finito. Los gases que el aire libre no tiene (NH₃, H₂) no se mezclan: el NH₃ que un suelo
+   * seco suelta se queda en el aire de la página y vuelve a sus suelos cuando se mojan (`intercambiar`). Después el mar evapora hacia el cielo lo que le falta para saturarse a la
    * temperatura de la altura (Dalton, en los dos sentidos: un cielo sobresaturado condensa sobre el mar).
    */
   private mezclarCielo(p: number, dt: number, Taire: number): void {
@@ -1340,6 +1357,36 @@ export class MundoMaterial {
     const a = this.aire[p]!, suelo = this.suelo[this.inicio[p]!]!;
     for (const id of [...this.especies(a)]) if (id !== this.S.H2O && !this.esGas(id, T)) {
       this.arena.moverParte(a, suelo, this.pide(id, this.arena.cuantos(a, id)));
+    }
+  }
+
+  /**
+   * Los cadáveres vuelven al suelo: de cada lote Cadaver propio que yace en una tesela de la página, cada cuanto pasa al
+   * Suelo de esa tesela con la probabilidad 1 − e^(−dt/τ) (τ = `incorporacionCadaver`), con su parte del calor; allí lo
+   * mineraliza la catálisis del suelo, como a la hojarasca. Nada sale del mundo: es un traslado entre lotes. El lote que
+   * se queda vacío se libera.
+   */
+  private descomponer(p: number, dt: number): void {
+    const A = this.arena, pasa = -Math.expm1(-dt / (this.params.fisica.incorporacionCadaver * TICKS_PER_DAY));
+    for (let i = this.inicio[p]!, i1 = this.fin[p]!; i < i1; i++) {
+      let n = A.lotes(this.celda[i]!, Rol.Cadaver, this.cadaveres);
+      if (n === 0) continue;
+      if (n > this.cadaveres.length) n = A.lotes(this.celda[i]!, Rol.Cadaver, this.cadaveres = new Float64Array(2 * n));
+      const suelo = this.suelo[i]!;
+      for (let k = 0; k < n; k++) {
+        const l = this.cadaveres[k]!;
+        if (!A.propio(l)) continue;
+        let queda = 0;
+        for (const id of [...this.especies(l)]) {
+          const hay = A.cuantos(l, id), va = binomial(hay, pasa, this.ctx.azar);
+          if (va > 0) A.moverParte(l, suelo, this.pide(id, va));
+          queda += hay - va;
+        }
+        if (queda > 0) continue;
+        const calor = A.calor(l);
+        if (calor !== 0) A.moverCalor(l, suelo, calor);
+        A.liberar(l);
+      }
     }
   }
 

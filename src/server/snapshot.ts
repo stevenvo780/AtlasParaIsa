@@ -32,8 +32,10 @@ const LEGACY_PARAMS_BODY = stringifyExact({ ...HISTORICAL_PARAMS, limites: LEGAC
 const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS);
 /** Orden de los campos de cada tupla de tesela. `encodeSnapshotTileRows` escribe el mismo orden a mano
  * (camino caliente de cada guardado); tests/snapshot-tile-fields.test.ts comprueba que coinciden. */
-export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life','paved'] as const;
+export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life','paved','rocaLatente'] as const;
+const ANCHO_TESELA = SNAPSHOT_TILE_FIELDS.length - 1;
 const PAVED_TILE_RULES_VERSION = 14;
+const rocaValida = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
@@ -171,6 +173,11 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
         fast!.FEATURE_NAMES[fast!.featureArr[cell]! - 1],t.variety,optionalNumber(fast!.growthArr[cell]!),
         optionalNumber(fast!.fertilityArr[cell]!),optionalNumber(fast!.cultivationArr[cell]!),optionalNumber(fast!.trafficArr[cell]!),
         optionalNumber(fast!.drinkingWaterArr[cell]!),t.species,t.fauna,optionalNumber(fast!.lifeArr[cell]!),t.paved];
+    const roca = t.rocaLatente;
+    if (roca !== undefined) {
+      if (!rocaValida(roca)) throw new Error('Reserva de roca latente inválida. No se guardó la instantánea.');
+      row.push(roca);
+    }
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
       if (typeof value === 'number') {
@@ -337,8 +344,9 @@ export function decodeSnapshotTileRows(rows: unknown[], rulesVersion?: number): 
   // Los chunks archivados no llevan versión de reglas y también pueden contener tuplas históricas.
   const allowLegacyWidth = rulesVersion === undefined || rulesVersion < PAVED_TILE_RULES_VERSION;
   return rows.map(row => {
-    if (!Array.isArray(row) || row.length !== SNAPSHOT_TILE_FIELDS.length
-      && !(allowLegacyWidth && row.length === SNAPSHOT_TILE_FIELDS.length - 1))
+    if (!Array.isArray(row) || row.length !== ANCHO_TESELA
+      && !(row.length === SNAPSHOT_TILE_FIELDS.length && rocaValida(row[ANCHO_TESELA]))
+      && !(allowLegacyWidth && row.length === ANCHO_TESELA - 1))
       throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
     const tile: Record<string, unknown> = {};
     for (let i = 0; i < row.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
@@ -376,11 +384,12 @@ export function encodeArchivedChunk(chunk: Chunk): string {
   // Coordinates are implicit in a chunk: tile i sits at (cx*16 + i%16, cy*16 + i/16),
   // exactly as `assertChunk` requires (same rationale as the SoA terrain of T112).
   // When every tile matches that derivation, drop the two leading slots; the decoder
-  // rebuilds them from the grid. Any other chunk keeps the full tuple.
+  // rebuilds them from the grid. La fila con roca latente mantiene x e y para
+  // que su ancho no coincida con el de una tupla histórica completa.
   if (Number.isSafeInteger(chunk.cx) && Number.isSafeInteger(chunk.cy)) {
     const x0 = chunk.cx * 16, y0 = chunk.cy * 16;
     if (rows.every((row, i) => row[0] === x0 + i % 16 && row[1] === y0 + Math.floor(i / 16)))
-      rows = rows.map(row => row.slice(2));
+      rows = rows.map(row => row.length === ANCHO_TESELA ? row.slice(2) : row);
   }
   const encoded: Record<string, unknown> = { ...(chunk as unknown as Record<string, unknown>),
     tiles: rows, tileEncoding: ARCHIVED_CHUNK_TILE_ENCODING };
@@ -405,7 +414,7 @@ export function decodeArchivedChunk(body: string): Chunk {
   // Las tuplas de dos campos menos toman x e y de la posición en la cuadrícula del chunk.
   if (Number.isSafeInteger(record.cx) && Number.isSafeInteger(record.cy)) {
     const x0 = (record.cx as number) * 16, y0 = (record.cy as number) * 16;
-    record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && (row.length === SNAPSHOT_TILE_FIELDS.length - 2 || row.length === SNAPSHOT_TILE_FIELDS.length - 3)
+    record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && (row.length === ANCHO_TESELA - 2 || row.length === ANCHO_TESELA - 3)
       ? [x0 + i % 16, y0 + Math.floor(i / 16), ...row] : row);
   }
   record.tiles = decodeSnapshotTileRows(record.tiles as unknown[]);

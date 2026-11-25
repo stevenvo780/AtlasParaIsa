@@ -420,14 +420,20 @@ export function quimicaSuelosEnTarjeta(m: MundoMaterial, paso: PasoMateriaGpu, p
 
 /** Los escalares de siempre van de 0 a 1 (madera y piedra, en sus unidades): la vista satura ahí, la materia no. */
 const unidad = (x: number): number => x > 1 ? 1 : x > 0 ? x : 0;
+/** Fondo de escala de las vistas de madera (kg) y de piedra (kg) de una tesela: el intervalo que admite el guardado
+ * (mundo/validar.ts) y el que pinta el cliente. Un tronco que crece por encima sigue en su lote; la vista no lo enseña. */
+const VISTA_MADERA_MAX = 12, VISTA_PIEDRA_MAX = 8;
+const hasta = (x: number, max: number): number => x > max ? max : x > 0 ? x : 0;
 
 /** Vuelca en la tesela las vistas de sus lotes. Un campo opcional que la tesela no tiene y vale 0 no se le añade. */
 function escribirTesela(e: Estado, i: number, t: Tile): void {
   const v = e.m.vista(i, e.v);
   t.food = unidad(v.food); t.moisture = unidad(v.moisture); t.vegetation = unidad(v.vegetation);
   if (t.drinkingWater !== undefined || v.drinkingWater > 0) t.drinkingWater = unidad(v.drinkingWater);
-  if (t.wood !== undefined || v.wood > 0) t.wood = v.wood;
-  if (t.stone !== undefined || v.stone > 0) t.stone = v.stone;
+  if (t.wood !== undefined || v.wood > 0) t.wood = hasta(v.wood, VISTA_MADERA_MAX);
+  if (t.stone !== undefined || v.stone > 0) t.stone = hasta(v.stone, VISTA_PIEDRA_MAX);
+  if (v.stone > VISTA_PIEDRA_MAX || t.rocaLatente !== undefined)
+    t.rocaLatente = v.stone > VISTA_PIEDRA_MAX ? e.m.latente[i] : undefined;
   if (t.growth !== undefined || v.vegetation > 0) t.growth = unidad(v.vegetation);
   const fertilidad = unidad(e.m.fertilidad(i));
   if (t.fertility !== undefined || fertilidad > 0) t.fertility = fertilidad;
@@ -653,6 +659,12 @@ export function matDeCelda(c: CtxLeyMateria, celda: number): MatTesela {
 /** Recursos de la vista heredada que una ley aún escalar saca de una tesela o le aporta. */
 export type RecursoEscalar = 'comida' | 'agua' | 'madera' | 'piedra';
 
+/** Los depósitos escalares descuentan lo transferido: ni el redondeo del producto puede exceder su presupuesto. */
+function cuantosAguaHasta(cantidad: number, escala: number): number {
+  const cuantos = Math.floor(cantidad * escala);
+  return cuantos / escala > cantidad ? cuantos - 1 : cuantos;
+}
+
 function refrescar(e: Estado, i: number): void {
   const t = e.teselas[i];
   if (t) escribirTesela(e, i, t);
@@ -665,7 +677,7 @@ function sacar(e: Estado, i: number, recurso: RecursoEscalar, cantidad: number):
   switch (recurso) {
     case 'comida': hecho = m.extraer(i, 'fruto', Math.round(cantidad * es.alimento)) / es.alimento; break;
     // El agua potable es la de la charca: donde no hay vaso, el escalar es 0 y no se saca nada.
-    case 'agua': hecho = m.agua[i]! >= 0 ? m.beber(i, Math.round(cantidad * es.agua)) / es.agua : 0; break;
+    case 'agua': hecho = m.agua[i]! >= 0 ? m.beber(i, cuantosAguaHasta(cantidad, es.agua)) / es.agua : 0; break;
     case 'madera': hecho = m.extraer(i, 'tronco', Math.round(cantidad * es.madera)) / es.madera; break;
     case 'piedra': hecho = m.moverLatente(i, Math.round(cantidad * es.piedra)) / es.piedra; break;
   }
@@ -692,7 +704,7 @@ export function aportarEscalar(c: CtxLeyMateria, celda: number, recurso: Recurso
   let hecho = 0;
   switch (recurso) {
     case 'comida': hecho = m.aportar(i, 'fruto', Math.round(cantidad * es.alimento)) / es.alimento; break;
-    case 'agua': hecho = m.regar(i, Math.round(cantidad * es.agua)) / es.agua; break;
+    case 'agua': hecho = m.regar(i, cuantosAguaHasta(cantidad, es.agua)) / es.agua; break;
     case 'madera': hecho = m.aportar(i, 'tronco', Math.round(cantidad * es.madera)) / es.madera; break;
     case 'piedra': hecho = -m.moverLatente(i, -Math.round(cantidad * es.piedra)) / es.piedra; break;
   }

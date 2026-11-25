@@ -4,12 +4,19 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Store } from '../src/server/store.js';
 import { ELEMENTOS, NE } from '../src/shared/naturaleza.js';
 import type { Tile } from '../src/shared/types.js';
 import { createWorld } from '../src/world/mundo/crear.js';
+import { ctxSi, type CtxLeyMateria } from '../src/world/motor/acceso.js';
+import { unSoloDueno } from '../src/world/motor/contratos.js';
+import { crearMotor } from '../src/world/motor/coordinador.js';
+import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { aportarEscalar, conservacion, extraerEscalar } from '../src/world/materia/ley-mundo.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
 import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, unidadesVida, vistaVacia, type Organos } from '../src/world/materia/vistas.js';
+import { Parte, Rol } from '../src/world/materia/tipos.js';
 
 const pagina = (semilla: number): Tile[] => createWorld(semilla).tiles.filter((t) => t.x >= 0 && t.y >= 0 && t.x < 16 && t.y < 16);
 const CLIMA: Forzamiento[] = [{ dt: 10, luz: 1, lluvia: false }, { dt: 10, luz: 0.4, lluvia: true }, { dt: 10, luz: 0, lluvia: false }];
@@ -43,6 +50,54 @@ test('las vistas reproducen los escalares de la tesela al levantar (dentro de me
   }
   assert.ok(exacto());
   await q.cerrar();
+});
+
+test('el guardado completo admite madera y piedra por encima de la escala de sus vistas', async (t) => {
+  const mundo = createWorld(7, {
+    ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true, guardadoCompleto: true },
+  });
+  const motor = crearMotor(mundo, unSoloDueno(7));
+  const store = new Store(':memory:');
+  t.after(async () => { store.close(); await motor.cerrar(); });
+  motor.paso([]);
+  const c = ctxSi(mundo) as CtxLeyMateria;
+  const tesela = mundo.tiles.find(tile => tile.terrain !== 'water')!;
+  const celda = c.terreno.celda(tesela.x, tesela.y);
+  assert.equal(aportarEscalar(c, celda, 'madera', 20), 20);
+  assert.equal(aportarEscalar(c, celda, 'piedra', 20), 20);
+  assert.equal(tesela.wood, 12);
+  assert.equal(tesela.stone, 8);
+
+  store.guardar(motor.instantanea());
+  const guardado = store.cargarInstantanea()!;
+  assert.ok(guardado.instantanea.materia);
+  const vista = guardado.instantanea.world.tiles.find(tile => tile.x === tesela.x && tile.y === tesela.y)!;
+  assert.equal(vista.wood, 12);
+  assert.equal(vista.stone, 8);
+
+  motor.cargar(guardado.instantanea, guardado.epoca);
+  const restaurado = ctxSi(guardado.instantanea.world) as CtxLeyMateria;
+  const celdaRestaurada = restaurado.terreno.celda(tesela.x, tesela.y);
+  assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'madera', 20), 20);
+  assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'piedra', 20), 20);
+});
+
+test('los traslados de agua al mundo escalar se ajustan al presupuesto en cuantos enteros', async (t) => {
+  const mundo = createWorld(7, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true } });
+  const motor = crearMotor(mundo, unSoloDueno(7));
+  t.after(() => motor.cerrar());
+  motor.paso([]);
+  const c = ctxSi(mundo) as CtxLeyMateria;
+  const charca = mundo.tiles.find(tile => (tile.drinkingWater ?? 0) > 0.01)!;
+  const celda = c.terreno.celda(charca.x, charca.y);
+  const pedido = 0.00001;
+  const extraido = extraerEscalar(c, celda, 'agua', pedido);
+  const aportado = aportarEscalar(c, celda, 'agua', pedido);
+  assert.ok(extraido > 0 && extraido <= pedido);
+  assert.equal(aportado, extraido);
+  assert.equal(aportarEscalar(c, celda, 'agua', 0.0000018), 0);
+  const { esperado, hallado } = conservacion(c);
+  assert.deepEqual(hallado, esperado);
 });
 
 test('el libro cuadra exacto en cada paso y ningún átomo entra ni sale: el agua circula entre lotes (cielo, mar, suelos y charcas)', async () => {
@@ -95,6 +150,34 @@ test('una tesela quemada pierde su vida, conserva la materia y rebrota', async (
   assert.ok(quemada < 0.11 * antes + 1e-9);
   for (let k = 0; k < 60; k++) { m.prepararPaso(); m.pasar({ dt: 10, luz: 1, lluvia: false }); m.plegar(tot); }
   assert.ok(m.vista(i, v).vegetation > quemada, 'rebrota');
+  assert.ok(exacto());
+  await q.cerrar();
+});
+
+test('un cadáver que yace en una tesela vuelve a su suelo: su masa baja, el suelo gana sus átomos y el libro cuadra', async () => {
+  const { q, m, tot, exacto } = levantar();
+  const u = unidadesVacias(), A = m.arena, P = ELEMENTOS.indexOf('P');
+  let i = 0;
+  while (m.unidades(i, u).hoja < 1500) i++;
+  // El cadáver de la prueba es tejido que ya estaba en el mundo (la vegetación de la tesela): nada entra por una fuente.
+  const cadaver = A.nuevo(Rol.Cadaver, m.celda[i]!, 0);
+  A.moverParte(m.vida[i]!, cadaver, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
+  const masa0 = A.vista(cadaver).masa, proteina0 = A.cuantos(cadaver, m.S.proteina), orgP0 = A.cuantos(cadaver, m.S.orgP);
+  const atomosSuelo = (k: number) => { let n = 0; for (const id of [...m.especies(m.suelo[i]!)]) n += A.cuantos(m.suelo[i]!, id) * q.sustancia(id).atomos[k]!; return n; };
+  const p0 = atomosSuelo(P);
+  assert.ok(masa0 > 0 && proteina0 > 1000 && orgP0 > 1000);
+  m.plegar(tot);
+  assert.ok(exacto());
+  // Un día de pasos de 60 ticks: con τ = 10 días se va 1 − e^(−0,1) = 9,5 %.
+  for (let k = 0; k < 40; k++) { m.prepararPaso(); m.pasar({ dt: 60, luz: 0, lluvia: false }); m.plegar(tot); assert.ok(exacto(), `paso ${k}`); }
+  const queda = A.vista(cadaver).masa / masa0, esperado = Math.exp(-1 / m.params.fisica.incorporacionCadaver);
+  assert.ok(Math.abs(queda - esperado) < 0.02, `queda ${queda.toFixed(4)} de la masa (se espera ${esperado.toFixed(4)})`);
+  // El P no es gas ni se lo lleva nadie de noche: el que perdió el cadáver está en el suelo, átomo por átomo.
+  assert.equal(atomosSuelo(P) - p0, orgP0 - A.cuantos(cadaver, m.S.orgP));
+  // Con el tiempo no queda nada y el lote se libera.
+  m.params.fisica.incorporacionCadaver = 0.01;
+  for (let k = 0; k < 40 && A.vivo(cadaver); k++) { m.prepararPaso(); m.pasar({ dt: 60, luz: 0, lluvia: false }); m.plegar(tot); }
+  assert.ok(!A.vivo(cadaver), 'el lote vacío se libera');
   assert.ok(exacto());
   await q.cerrar();
 });

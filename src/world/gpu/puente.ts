@@ -150,24 +150,33 @@ export class PuentePercepcion implements Percibidor {
   }
 }
 
+const ARRANQUE_GPU_MS = 30_000;
+
 /** El coordinador actualiza las fuentes de su percibidor CPU junto con las de las tarjetas. */
 export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor) {
   if (new Set(dispositivos).size !== dispositivos.length || dispositivos.some(d => !Number.isSafeInteger(d) || d < 0))
     throw new RangeError('Se requieren índices GPU no negativos y sin repetir.');
   const tarjetas: { percibidor: PercibidorGpu; activa: boolean; cerrar: () => void }[] = [];
-  if (process.env.COMPUTE_NVRTC) for (const dispositivo of dispositivos) {
-    try {
-      const canal = new CanalCompartido(dispositivo);
+  const abrir = (dispositivo: number) => {
+    try { return new CanalCompartido(dispositivo); }
+    catch (error) { if (error instanceof ErrorDispositivo) return undefined; throw error; }
+  };
+  // Los servidores arrancan en paralelo y el arranque (contexto CUDA y NVRTC) no gasta el plazo de 2 s del primer B2.
+  const canales: (CanalCompartido | undefined)[] = [];
+  try {
+    if (process.env.COMPUTE_NVRTC) for (const dispositivo of dispositivos) canales.push(abrir(dispositivo));
+    for (const canal of canales) {
+      if (!canal) continue;
+      try { canal.iniciar(ARRANQUE_GPU_MS); }
+      catch (error) { if (error instanceof ErrorDispositivo) continue; throw error; }
       tarjetas.push({
         percibidor: new PercibidorGpu(canal, frente, terreno), activa: true,
         cerrar() { this.activa = false; canal.cerrar(); },
       });
-    } catch (error) {
-      if (!(error instanceof ErrorDispositivo)) {
-        tarjetas.forEach(t => t.cerrar());
-        throw error;
-      }
     }
+  } catch (error) {
+    for (const canal of canales) canal?.cerrar();
+    throw error;
   }
   const puente = new PuentePercepcion(cpu, tarjetas);
   return {

@@ -138,10 +138,6 @@ function ventanasEn(x: number, y: number, terreno: Terreno, paginas: Int32Array)
 
 const claveCelda = (x: number, y: number) => `${x},${y}`;
 
-function leerComponente(c: Componente, slot: number): number {
-  return c.columna[slot * c.ancho + c.componente];
-}
-
 const alinear = (bytes: number, multiplo: number): number => Math.ceil(bytes / multiplo) * multiplo;
 
 function tamanoResultado(n: number, q: number, v: number, a: number): number {
@@ -155,28 +151,35 @@ function vistaResultado(n: number, q: number, v: number, a: number, buffer: Arra
     utilidad: new Float32Array(buffer, inicioOrganismos + n * v * 8, n * a) };
 }
 
-/** Carga binaria de una sola transferencia. Todos los offsets internos son bytes absolutos y little endian. */
+// El formato es little endian y se escribe con vistas tipadas, que usan el orden de la máquina.
+if (new Uint8Array(Uint16Array.of(1).buffer)[0] !== 1) throw new Error('La percepción GPU requiere una CPU little endian');
+
+/** Carga binaria de una sola transferencia. Todos los offsets internos son bytes absolutos; u32 y f32 van
+ * alineados a 4 y f64 a 8. */
 class Empaquetador {
   private datos = new Uint8Array(65536);
-  private vista = new DataView(this.datos.buffer);
+  enteros = new Uint32Array(this.datos.buffer);
+  flotantes = new Float32Array(this.datos.buffer);
+  dobles = new Float64Array(this.datos.buffer);
   bytes = 0;
 
   reservar(bytes: number, alineacion = 4): number {
     const inicio = alinear(this.bytes, alineacion), fin = inicio + bytes;
     if (fin > 0xffffffff) throw new RangeError('El lote excede el formato de percepción');
     if (fin > this.datos.length) {
-      const siguiente = new Uint8Array(Math.max(fin, this.datos.length * 2));
+      const siguiente = new Uint8Array(alinear(Math.max(fin, this.datos.length * 2), 8));
       siguiente.set(this.datos.subarray(0, this.bytes));
       this.datos = siguiente;
-      this.vista = new DataView(siguiente.buffer);
+      this.enteros = new Uint32Array(siguiente.buffer);
+      this.flotantes = new Float32Array(siguiente.buffer);
+      this.dobles = new Float64Array(siguiente.buffer);
     }
     this.bytes = fin;
     return inicio;
   }
 
-  u32(i: number, valor: number): void { this.vista.setUint32(i, valor, true); }
-  f32(i: number, valor: number): void { this.vista.setFloat32(i, valor, true); }
-  f64(i: number, valor: number): void { this.vista.setFloat64(i, valor, true); }
+  u32(i: number, valor: number): void { this.enteros[i >>> 2] = valor; }
+  f32(i: number, valor: number): void { this.flotantes[i >>> 2] = valor; }
   palabras(i: number, valores: readonly number[]): void { for (const valor of valores) { this.u32(i, valor); i += 4; } }
   copiar(datos: Uint8Array): number {
     const inicio = this.reservar(datos.byteLength, 8);
@@ -239,9 +242,22 @@ interface CsrGpu { indices: number; n: number; rejilla: number; mascara: number;
 const potenciaDeDos = (n: number) => 2 ** Math.ceil(Math.log2(Math.max(1, n)));
 const bytesDe = (vista: Uint32Array): Uint8Array => new Uint8Array(vista.buffer, vista.byteOffset, vista.byteLength);
 
+/** Copia en la fila de cada organismo vivo la componente de columna que piden las consultas, y marca la fila si cambió. */
+function compararColumna(c: Componente, dobles: Float64Array, primero: number, doblesFila: number,
+  enteros: Uint32Array, palabras: number, filas: number, cambiadas: Uint8Array): void {
+  const { columna, ancho, componente } = c;
+  for (let slot = 0, j = primero, i = 4; slot < filas; slot++, j += doblesFila, i += palabras) {
+    if (enteros[i] === 0) continue;
+    const valor = columna[slot * ancho + componente], antes = dobles[j];
+    // NaN se compara consigo mismo para no reenviar la fila en cada tick.
+    if (valor !== antes && (valor === valor || antes === antes)) { dobles[j] = valor; cambiadas[slot] = 1; }
+  }
+}
+
 /** Los organismos conservan su fila por slot. Mover uno modifica su fila y dos spans de la rejilla CSR. */
 class EspejoOrganismos {
   private filas = new Uint8Array();
+  private cambiadas = new Uint8Array();
   private alcance = 0;
   private anchoFila = 0;
   private claveColumnas = '';
@@ -268,50 +284,55 @@ class EspejoOrganismos {
     }
     this.claveColumnas = claveColumnas;
     this.anchoFila = anchoFila;
-    const { vivo, x, y, gen, clase } = frente;
+    const { vivo, x, y, gen, clase, alta } = frente;
     const { buffer } = this.filas;
     const enteros = new Uint32Array(buffer), flotantes = new Float32Array(buffer), dobles = new Float64Array(buffer);
     const sucias = new Set<CeldaResidente>();
     const filasNuevas = cambioColumnas || antesFilas !== this.filas.byteLength;
-    const filasPrevias = this.alcance, filasARevisar = Math.max(frente.alta, filasPrevias);
-    for (let slot = 0; slot < filasARevisar; slot++) {
-      const inicio = slot * anchoFila, i = inicio / 4, d = inicio / 8 + BYTES_FIJO_ORG / 8;
-      const tipo = slot < frente.alta && vivo[slot] === 1 ? clase[slot] : 0;
+    const filasPrevias = this.alcance, filasARevisar = Math.max(alta, filasPrevias);
+    const palabras = anchoFila >> 2;
+    if (this.cambiadas.length < filasARevisar) this.cambiadas = new Uint8Array(potenciaDeDos(filasARevisar));
+    else this.cambiadas.fill(0, 0, filasARevisar);
+    const cambiadas = this.cambiadas;
+    for (let slot = 0, i = 0; slot < filasARevisar; slot++, i += palabras) {
+      const tipo = slot < alta && vivo[slot] === 1 ? clase[slot] : 0;
       const tipoAntes = enteros[i + 4];
-      if (!tipo && !tipoAntes) continue;
-      const nx = tipo ? x[slot] : 0, ny = tipo ? y[slot] : 0;
+      if (tipo === 0 && tipoAntes === 0) continue;
+      const nx = tipo ? x[slot] : 0, ny = tipo ? y[slot] : 0, generacion = tipo ? gen[slot] : 0;
       const ax = flotantes[i + 2], ay = flotantes[i + 3];
-      if (nx !== ax || ny !== ay || Boolean(tipo) !== Boolean(tipoAntes)) {
-        const rx = Math.floor(nx), ry = Math.floor(ny), bx = Math.floor(ax), by = Math.floor(ay);
-        if (rx !== bx || ry !== by || Boolean(tipo) !== Boolean(tipoAntes)) {
-          if (tipoAntes) {
-            const anterior = this.celdas.get(claveCelda(bx, by))!;
-            anterior.slots.delete(slot); sucias.add(anterior);
+      if (tipo === tipoAntes && nx === ax && ny === ay && enteros[i + 1] === generacion) continue;
+      const rx = Math.floor(nx), ry = Math.floor(ny), bx = Math.floor(ax), by = Math.floor(ay);
+      if (rx !== bx || ry !== by || (tipo === 0) !== (tipoAntes === 0)) {
+        if (tipoAntes) {
+          const anterior = this.celdas.get(claveCelda(bx, by))!;
+          anterior.slots.delete(slot); sucias.add(anterior);
+        }
+        if (tipo) {
+          const clave = claveCelda(rx, ry);
+          let celda = this.celdas.get(clave);
+          if (!celda) {
+            celda = { x: rx, y: ry, slots: new Set(), cubeta: -1, inicio: 0, capacidad: 0 };
+            this.celdas.set(clave, celda);
           }
-          if (tipo) {
-            const clave = claveCelda(rx, ry);
-            let celda = this.celdas.get(clave);
-            if (!celda) {
-              celda = { x: rx, y: ry, slots: new Set(), cubeta: -1, inicio: 0, capacidad: 0 };
-              this.celdas.set(clave, celda);
-            }
-            celda.slots.add(slot); sucias.add(celda);
-          }
+          celda.slots.add(slot); sucias.add(celda);
         }
       }
-      const generacion = tipo ? gen[slot] : 0;
-      let modificado = tipoAntes !== tipo || nx !== ax || ny !== ay || enteros[i + 1] !== generacion;
-      if (modificado) {
-        enteros[i] = slot; enteros[i + 1] = generacion;
-        flotantes[i + 2] = nx; flotantes[i + 3] = ny; enteros[i + 4] = tipo;
-      }
-      if (tipo) for (let k = 0; k < columnas.length; k++) {
-        const valor = leerComponente(columnas[k], slot);
-        if (!Object.is(valor, dobles[d + k])) { dobles[d + k] = valor; modificado = true; }
-      }
-      if (modificado && !filasNuevas && slot < filasPrevias) parche(inicio, this.filas.subarray(inicio, inicio + anchoFila));
+      enteros[i] = slot; enteros[i + 1] = generacion;
+      flotantes[i + 2] = nx; flotantes[i + 3] = ny; enteros[i + 4] = tipo;
+      cambiadas[slot] = 1;
     }
-    this.alcance = frente.alta;
+    for (let k = 0; k < columnas.length; k++) {
+      compararColumna(columnas[k], dobles, (BYTES_FIJO_ORG >> 3) + k, anchoFila >> 3, enteros, palabras, filasARevisar, cambiadas);
+    }
+    // Las filas contiguas que cambiaron viajan en un solo parche.
+    if (!filasNuevas) for (let slot = 0; slot < filasPrevias; slot++) {
+      if (!cambiadas[slot]) continue;
+      let fin = slot + 1;
+      while (fin < filasPrevias && cambiadas[fin]) fin++;
+      parche(slot * anchoFila, this.filas.subarray(slot * anchoFila, fin * anchoFila));
+      slot = fin;
+    }
+    this.alcance = alta;
     const nuevasDesde = filasNuevas ? 0 : filasPrevias * anchoFila;
     if (filasMinimas > nuevasDesde) parche(nuevasDesde, this.filas.subarray(nuevasDesde, filasMinimas));
 
@@ -438,8 +459,8 @@ interface FilaCerebro { gen: number; dinamica: Float32Array }
 function copiarDistinta(origen: Col, desde: number, destino: Float32Array, hasta: number, ancho: number): boolean {
   let cambio = false;
   for (let i = 0; i < ancho; i++) {
-    const valor = origen[desde + i];
-    if (!Object.is(valor, destino[hasta + i])) { destino[hasta + i] = valor; cambio = true; }
+    const valor = origen[desde + i], antes = destino[hasta + i];
+    if (valor !== antes && (valor === valor || antes === antes)) { destino[hasta + i] = valor; cambio = true; }
   }
   return cambio;
 }
@@ -518,9 +539,10 @@ export class PercibidorGpu implements Percibidor {
         terrenoBytes = Math.max(terrenoBytes, (pagina + 1) * bytesPagina);
         const version = terreno.versionPagina[pagina];
         if (this.paginas.get(pagina) === version || paginasNuevas.has(pagina)) continue;
-        const fuente = b.reservar(bytesPagina, 8);
-        for (let k = 0; k < campos.length; k++) {
-          for (let c = 0; c < 256; c++) b.f64(fuente + (k * 256 + c) * 8, campos[k][pagina * 256 + c]);
+        const fuente = b.reservar(bytesPagina, 8), dobles = b.dobles;
+        for (let k = 0, d = fuente >>> 3; k < campos.length; k++, d += 256) {
+          const campo = campos[k];
+          for (let c = 0, desde = pagina * 256; c < 256; c++) dobles[d + c] = campo[desde + c];
         }
         paginasNuevas.set(pagina, version);
         parches.push({ destino: 0, offset: pagina * bytesPagina, fuente, bytes: bytesPagina });
@@ -566,12 +588,13 @@ export class PercibidorGpu implements Percibidor {
     if (!modificada) return;
     const inicio = nueva ? 0 : PESOS_RED * 4;
     const bytes = BYTES_CEREBRO - inicio, fuente = this.binario.reservar(bytes, 8);
-    let pos = fuente;
+    const flotantes = this.binario.flotantes;
+    let pos = fuente >>> 2;
     if (nueva) {
-      for (let k = 0; k < PESOS_RED; k++, pos += 4) this.binario.f32(pos, cerebro.politica[slot * PESOS_RED + k]);
+      for (let k = 0, desde = slot * PESOS_RED; k < PESOS_RED; k++) flotantes[pos++] = cerebro.politica[desde + k];
       this.cerebros.set(slot, { gen, dinamica });
     }
-    for (const valor of dinamica) { this.binario.f32(pos, valor); pos += 4; }
+    flotantes.set(dinamica, pos);
     parches.push({ destino: 1, offset: slot * BYTES_CEREBRO + inicio, fuente, bytes });
   }
 

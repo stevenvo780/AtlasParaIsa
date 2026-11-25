@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { CanalCompartido, enviarOrden, recibirRespuesta } from '../src/world/gpu/canal.js';
 import { observarPercepcionGpu } from '../src/world/gpu/invariantes.js';
 import { PercibidorGpu } from '../src/world/gpu/percibir-gpu.js';
-import { PuentePercepcion } from '../src/world/gpu/puente.js';
+import { crearPuentePercepcion, PuentePercepcion, type LoteGpuMedido } from '../src/world/gpu/puente.js';
 import { comprobarInvariantes } from '../src/world/invariantes.js';
 import type { World } from '../src/world/mundo/tipos.js';
 import {
@@ -15,7 +16,7 @@ import {
   type Dispositivo, type LotePercepcion, type Percibidor, type Percepcion, type Plan,
 } from '../src/world/motor/contratos.js';
 import { evaluatePolicySingle, POLICY_ACTIONS, POLICY_WEIGHTS } from '../src/world/politica.js';
-import { crearFixtureGpu } from './fixtures/gpu-percibir.js';
+import { crearFixtureGpu, type OpcionesFixture } from './fixtures/gpu-percibir.js';
 import { PercibidorCpu } from './fixtures/percibir-cpu.js';
 
 const SERVIDOR_PRUEBA = fileURLToPath(new URL('./fixtures/fallo-gpu-percibir.py', import.meta.url));
@@ -38,6 +39,20 @@ function canalDePrueba(fase: string, ejecutar: (canal: CanalCompartido, marca: s
     canal?.cerrar();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+const segmentosM3 = () => readdirSync('/dev/shm').filter(nombre => nombre.startsWith('atlas-m3-'));
+
+/** Un zombi ya no es un proceso vivo: su padre murió o aún no lo recogió. */
+function vivo(pid: number): boolean {
+  try { return readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.[0] !== 'Z'; }
+  catch { return false; }
+}
+
+async function esperarMuerte(pid: number, plazoMs = 10_000): Promise<void> {
+  const fin = performance.now() + plazoMs;
+  while (vivo(pid) && performance.now() < fin) await new Promise(r => setTimeout(r, 20));
+  assert.equal(vivo(pid), false, `el servidor ${pid} sigue vivo`);
 }
 
 function percibir(p: Percibidor, lote: LotePercepcion, planes: readonly Plan[], plazo = PLAZO_MS): Percepcion {
@@ -66,6 +81,41 @@ test('M3 canal SHM por descriptor: subvista, FIFO y crecimiento entre órdenes',
     canal.cerrar();
     assert.throws(() => canal.enviar(new Uint8Array()), ErrorDispositivo);
   });
+});
+
+test('M3 cerrar, matar el servidor o matar el motor no deja procesos de Python ni segmentos en /dev/shm', async () => {
+  const antes = segmentosM3();
+  const entorno = { CARTA_GPU_PRUEBA_FASE: 'canal', CARTA_GPU_PRUEBA_MARCA: '/dev/null' };
+  const abierto = new CanalCompartido(0, { script: SERVIDOR_PRUEBA, entorno });
+  abierto.iniciar(PLAZO_MS);
+  assert.deepEqual(segmentosM3(), antes, 'los nombres del canal se borran al abrirlo');
+  const pid = abierto.pid!;
+  abierto.cerrar();
+  await esperarMuerte(pid);
+
+  // Cerrar antes de que el worker arranque al servidor también lo mata en cuanto existe.
+  const prematuro = new CanalCompartido(0, { script: SERVIDOR_PRUEBA, entorno });
+  prematuro.cerrar();
+  const fin = performance.now() + 10_000;
+  while (!prematuro.pid && performance.now() < fin) await new Promise(r => setTimeout(r, 20));
+  if (prematuro.pid) await esperarMuerte(prematuro.pid);
+
+  const caido = new CanalCompartido(0, { script: SERVIDOR_PRUEBA, entorno });
+  caido.iniciar(PLAZO_MS);
+  process.kill(caido.pid!, 'SIGKILL');
+  await esperarMuerte(caido.pid!);
+  assert.throws(() => enviarOrden(caido, { desde: 0 }), ErrorDispositivo);
+  assert.throws(() => caido.recibir(PLAZO_MS), ErrorDispositivo);
+  caido.cerrar();
+
+  // Un motor que muere sin cerrar: el servidor ve EOF en sus órdenes y termina solo.
+  const motor = spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./fixtures/canal-huerfano.ts', import.meta.url))],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 60_000 });
+  assert.equal(motor.signal, 'SIGKILL');
+  const huerfano = Number(motor.stdout.trim());
+  assert.ok(Number.isSafeInteger(huerfano) && huerfano > 0, `pid del servidor huérfano: ${motor.stdout}`);
+  await esperarMuerte(huerfano);
+  assert.deepEqual(segmentosM3(), antes);
 });
 
 test('M3 CPU distingue ruta, visibilidad, criterio de organismos, generación, red y W·rasgos', () => {
@@ -121,6 +171,49 @@ function rastrear(base: Percibidor, dispositivo: Dispositivo) {
     },
   };
 }
+
+/** Tarjeta simulada: tarda `fijo + porActor·n` ms de trabajo de tarjeta, con un ruido determinista de ±ruido. */
+function tarjetaModelo(dispositivo: Dispositivo, modelo: { fijo: number; porActor: number; ruido: number }) {
+  let pendiente = 0, k = 0;
+  const ultimasTransferencias = { subidos: 1, bajados: 1, ms: 0 };
+  const percibidor = {
+    dispositivo, ultimasTransferencias,
+    lanzar(lote: LotePercepcion) { pendiente = lote.slots.length; },
+    esperar(): Percepcion {
+      const ruido = 1 + modelo.ruido * Math.sin(++k * 2.3);
+      ultimasTransferencias.ms = (modelo.fijo + modelo.porActor * pendiente) * ruido;
+      return { q: 0, v: 0, a: 0, celda: new Int32Array(), pasos: new Int16Array(), valor: new Float32Array(),
+        organismo: new Float64Array(), utilidad: new Float32Array() };
+    },
+  };
+  return { percibidor, cerrar() {}, modelo };
+}
+
+test('M3 el reparto entre tarjetas converge al punto de igual tiempo de tarjeta, sin oscilar, y sigue un cambio de velocidad', () => {
+  const rapida = tarjetaModelo('gpu0', { fijo: 0.05, porActor: 0.0001, ruido: 0.2 });
+  const lenta = tarjetaModelo('gpu1', { fijo: 0.05, porActor: 0.00035, ruido: 0.2 });
+  const cpu = { dispositivo: 'cpu' as const, lanzar() { throw new Error('ninguna tarjeta falló'); }, esperar(): Percepcion { throw new Error(); } };
+  const puente = new PuentePercepcion(cpu, [rapida, lenta]);
+  const n = 4000, lote = { tick: 1, slots: new Int32Array(n), plan: new Uint16Array(n) };
+  const reparto = (ultimos: readonly LoteGpuMedido[]) => ultimos.find(l => l.dispositivo === 'gpu0')?.actores ?? 0;
+  const serie: number[] = [];
+  for (let i = 0; i < 80; i++) {
+    if (i === 40) lenta.modelo.porActor *= 4;
+    percibir(puente, lote, []);
+    serie.push(reparto(puente.ultimosLotes));
+  }
+  // Con igual tiempo de tarjeta, fijo + k₀·n₀ = fijo + k₁·(n − n₀).
+  const equilibrio = (k0: number, k1: number) => n * k1 / (k0 + k1);
+  const banda = (desde: number, hasta: number) => serie.slice(desde, hasta);
+  for (const [desde, hasta, k1] of [[25, 40, 0.00035], [65, 80, 0.0014]] as const) {
+    const tramo = banda(desde, hasta), objetivo = equilibrio(0.0001, k1);
+    for (const n0 of tramo) assert.ok(Math.abs(n0 - objetivo) <= 0.08 * n, `${n0} lejos del equilibrio ${objetivo}`);
+    // Sin oscilación creciente: la amplitud del final no supera la del principio del tramo.
+    const amplitud = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+    assert.ok(amplitud(tramo.slice(-7)) <= amplitud(tramo.slice(0, 8)) + 0.02 * n, `oscila: ${tramo.join(',')}`);
+  }
+  assert.ok(serie[79]! > serie[39]!, 'la tarjeta lenta pierde trabajo cuando se vuelve más lenta');
+});
 
 test('M3 publica un invariante para detectar una recepción dañada en el tick correspondiente', () => {
   const fixture = crearFixtureGpu();
@@ -186,6 +279,7 @@ function resumirResultados(fixture: Fixture, lote: LotePercepcion, p: Percepcion
   let celdas = 0, organismos = 0;
   for (let i = 0; i < lote.slots.length; i++) {
     const slot = lote.slots[i], plan = planes[lote.plan[i]], ox = frente.x[slot], oy = frente.y[slot];
+    const cx = Math.floor(ox), cy = Math.floor(oy);
     for (let j = 0; j < p.q; j++) {
       const k = i * p.q + j, celda = p.celda[k], pasos = p.pasos[k];
       let distancia = -1;
@@ -199,8 +293,9 @@ function resumirResultados(fixture: Fixture, lote: LotePercepcion, p: Percepcion
         const y = terreno.paginaY[pagina] * 16 + ((celda & 255) >> 4);
         distancia = Math.hypot(x - ox, y - oy);
         assert.equal(terreno.celda(x, y), celda);
-        assert.ok(distancia <= 7 && Number.isFinite(p.valor[k]));
-        if (plan.celdas[j].alcanzable) assert.ok(pasos >= Math.abs(x - ox) + Math.abs(y - oy));
+        // La ventana BFS se centra en la celda del actor, no en su posición fraccionaria.
+        assert.ok(Math.hypot(x - cx, y - cy) <= 7 && Number.isFinite(p.valor[k]));
+        if (plan.celdas[j].alcanzable) assert.ok(pasos >= Math.abs(x - cx) + Math.abs(y - cy));
         celdas++;
       }
       if (j < plan.celdas.length) {
@@ -262,7 +357,101 @@ function compararDistribuciones(t: TestContext, fixture: Fixture, lote: LotePerc
     errorMaximo = Math.max(errorMaximo, Math.abs(cpu.utilidad[i] - gpu.utilidad[i]));
   t.diagnostic(`Máximo error absoluto de utilidad FP32: ${errorMaximo}`);
   assert.ok(errorMaximo <= 2e-5);
+  // El desempate entre celdas no es contractual, pero el mínimo sí: misma presencia y mismo valor salvo FP32.
+  for (let i = 0; i < cpu.valor.length; i++) {
+    assert.equal(gpu.celda[i] === -1, cpu.celda[i] === -1, `presencia de la consulta ${i}`);
+    if (cpu.celda[i] !== -1) assert.ok(Math.abs(gpu.valor[i] - cpu.valor[i]) <= 1e-5 * (1 + Math.abs(cpu.valor[i])), `mínimo de la consulta ${i}`);
+  }
 }
+
+const ESCENARIOS: readonly [string, OpcionesFixture][] = [
+  ['semilla 11', { grande: true, semilla: 11 }],
+  ['semilla 29', { grande: true, semilla: 29 }],
+  ['empates en el mínimo', { grande: true, semilla: 5, empates: true }],
+  ['borde de página, fracción y páginas ausentes', { grande: true, semilla: 7, borde: true }],
+  ['mitad de la fauna en el agua', { grande: true, semilla: 13, peces: true }],
+];
+
+test('M3 CUDA real: GPU y CPU coinciden por estadística en varios mundos y en las dos tarjetas', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC y dos tarjetas CUDA',
+}, async t => {
+  const canales = [0, 1].map(dispositivo => new CanalCompartido(dispositivo));
+  try {
+    for (const canal of canales) canal.iniciar(20_000);
+    for (const [nombre, opciones] of ESCENARIOS) {
+      await t.test(nombre, t => {
+        const fixture = crearFixtureGpu(opciones);
+        const lote = fixture.lote();
+        const esperado = percibir(new PercibidorCpu(fixture.frente, fixture.terreno), lote, fixture.planes);
+        for (const canal of canales) {
+          const gpu = percibir(new PercibidorGpu(canal, fixture.frente, fixture.terreno), lote, fixture.planes);
+          let iguales = 0;
+          for (let i = 0; i < esperado.celda.length; i++) if (esperado.celda[i] === gpu.celda[i]) iguales++;
+          t.diagnostic(`gpu${canal.dispositivo}: ${iguales}/${esperado.celda.length} celdas idénticas`);
+          compararDistribuciones(t, fixture, lote, esperado, gpu);
+          assert.deepEqual(gpu.organismo, esperado.organismo, 'las consultas de organismo son exactas en f64');
+        }
+      });
+    }
+  } finally {
+    for (const canal of canales) canal.cerrar();
+  }
+});
+
+test('M3 CUDA real: los espejos incrementales de las dos tarjetas siguen al frente tick a tick', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC y dos tarjetas CUDA',
+}, t => {
+  const fixture = crearFixtureGpu({ grande: true, semilla: 41, borde: true });
+  const { terreno, planes } = fixture;
+  const canales = [0, 1].map(dispositivo => new CanalCompartido(dispositivo));
+  const cpu = new PercibidorCpu(fixture.frente, terreno);
+  try {
+    const tarjetas = canales.map(canal => {
+      canal.iniciar(20_000);
+      return { percibidor: new PercibidorGpu(canal, fixture.frente, terreno), cerrar: () => canal.cerrar() };
+    });
+    const puente = new PuentePercepcion(cpu, tarjetas);
+    try {
+      for (let tick = 0; tick < 6; tick++) {
+        // Tras el primer lote completo, cada tick sube solo las páginas, filas y cerebros cambiados.
+        const frente = tick ? fixture.siguiente() : fixture.frente;
+        for (const { percibidor } of tarjetas) percibidor.fuentes(frente, terreno);
+        cpu.fuentes(frente, terreno);
+        const lote = fixture.lote();
+        const gpu = percibir(puente, lote, planes);
+        assert.deepEqual(puente.ultimosLotes.map(l => l.dispositivo).sort(), ['gpu0', 'gpu1']);
+        const esperado = percibir(cpu, lote, planes);
+        assert.deepEqual(gpu.organismo, esperado.organismo, `organismos del tick ${frente.tick}`);
+        compararDistribuciones(t, fixture, lote, esperado, gpu);
+      }
+    } finally {
+      puente.cerrar();
+    }
+  } finally {
+    for (const canal of canales) canal.cerrar();
+  }
+});
+
+test('M3 CUDA real: crearPuentePercepcion arranca las dos tarjetas fuera del plazo del tick y las cierra', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC y dos tarjetas CUDA',
+}, () => {
+  const fixture = crearFixtureGpu();
+  const cpu = new PercibidorCpu(fixture.frente, fixture.terreno);
+  const { puente, fuentes } = crearPuentePercepcion([0, 1], fixture.frente, fixture.terreno, cpu);
+  try {
+    const lote = fixture.lote();
+    // Un plazo corto basta porque el arranque ya ocurrió al crear el puente.
+    const resultado = percibir(puente, lote, fixture.planes, 500);
+    assert.deepEqual(puente.ultimosLotes.map(l => l.dispositivo).sort(), ['gpu0', 'gpu1']);
+    assert.deepEqual(resultado.organismo, percibir(cpu, lote, fixture.planes).organismo);
+    fuentes(fixture.siguiente(), fixture.terreno);
+    cpu.fuentes(fixture.frente, fixture.terreno);
+    percibir(puente, fixture.lote(), fixture.planes, 500);
+    assert.deepEqual(puente.ultimosLotes.map(l => l.dispositivo).sort(), ['gpu0', 'gpu1']);
+  } finally {
+    puente.cerrar();
+  }
+});
 
 function percentiles(serie: number[]) {
   const ordenada = [...serie].sort((a, b) => a - b);

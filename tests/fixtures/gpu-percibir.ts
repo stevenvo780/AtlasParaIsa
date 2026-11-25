@@ -54,7 +54,12 @@ function crearPlanes(): Plan[] {
   return [personas, terrestres, acuaticos];
 }
 
-function crearTerreno(ancho: number, alto: number, random: () => number): Terreno {
+/** Variantes del mundo de prueba. `empates`: campos en cuartos, para que muchas celdas empaten en el mínimo.
+ * `borde`: los actores caen en las filas y columnas de borde de su página, con fracción, también junto a páginas
+ * no residentes. `peces`: la mitad de la fauna es acuática. */
+export interface OpcionesFixture { grande?: boolean; semilla?: number; empates?: boolean; borde?: boolean; peces?: boolean }
+
+function crearTerreno(ancho: number, alto: number, random: () => number, empates: boolean): Terreno {
   const paginas = ancho * alto, px0 = -Math.floor(ancho / 2), py0 = -Math.floor(alto / 2);
   const paginaX = new Int32Array(paginas), paginaY = new Int32Array(paginas);
   const versionPagina = new Uint32Array(paginas), versionVisible = new Uint32Array(paginas);
@@ -78,6 +83,7 @@ function crearTerreno(ancho: number, alto: number, random: () => number): Terren
       for (let campo = 1; campo < CAMPOS.length; campo++) datos[campo][i] = random();
       datos[REFUGIO][i] *= agua ? 0.05 : 0.62;
       datos[CULTIVO][i] *= agua ? 0.05 : 0.60;
+      if (empates) for (let campo = 1; campo < CAMPOS.length; campo++) datos[campo][i] = Math.round(datos[campo][i] * 4) / 4;
     }
   }
   return {
@@ -97,7 +103,7 @@ function crearTerreno(ancho: number, alto: number, random: () => number): Terren
   };
 }
 
-function crearFrente(terreno: Terreno, personas: number, animales: number, random: () => number) {
+function crearFrente(terreno: Terreno, personas: number, animales: number, random: () => number, borde: boolean, peces: boolean) {
   const alta = personas + animales;
   const x = new Float32Array(alta), y = new Float32Array(alta), chunk = new Int32Array(alta).fill(-1);
   const cuerpo = new Float32Array(alta * CUERPO_ANCHO), rasgos = new Float32Array(alta * RASGOS_ANCHO);
@@ -113,14 +119,17 @@ function crearFrente(terreno: Terreno, personas: number, animales: number, rando
   const agua = terreno.campo('agua');
   for (let i = 0; i < alta; i++) {
     if (i % 251 === 250) continue; // una fila reservada que acaba de quedar vacía
-    const persona = i < personas, acuatica = !persona && i % 6 === 0;
+    const persona = i < personas, acuatica = !persona && (peces ? i % 2 === 0 : i % 6 === 0);
     let c: number;
     do {
       c = Math.floor(random() * agua.length);
+      // En borde, la celda va a la primera o la última fila o columna de su página.
+      if (borde) c = (c & ~255) | (random() < 0.5 ? (c & 0xf0) | (random() < 0.5 ? 0 : 15) : (c & 15) | (random() < 0.5 ? 0 : 0xf0));
     } while (terreno.duenoChunk[c >> 8] < 0 || (agua[c] >= 0.5) !== acuatica);
     const p = c >> 8;
-    x[i] = terreno.paginaX[p] * 16 + (c & 15);
-    y[i] = terreno.paginaY[p] * 16 + ((c & 255) >> 4);
+    const fx = borde ? Math.fround(random() * 0.999) : 0, fy = borde ? Math.fround(random() * 0.999) : 0;
+    x[i] = terreno.paginaX[p] * 16 + (c & 15) + fx;
+    y[i] = terreno.paginaY[p] * 16 + ((c & 255) >> 4) + fy;
     chunk[i] = p;
     gen[i] = 1 + (i % 11 === 0 ? 2 ** 20 : 0);
     vivo[i] = 1;
@@ -159,12 +168,14 @@ function barajar(slots: number[], random: () => number): void {
   }
 }
 
-export function crearFixtureGpu(grande = false) {
-  const random = localRandom(3781, 'm3-percibir');
-  const terreno = crearTerreno(grande ? 24 : 4, grande ? 18 : 4, random);
+export function crearFixtureGpu(opciones: boolean | OpcionesFixture = false) {
+  const { grande = false, semilla = 3781, empates = false, borde = false, peces = false } =
+    typeof opciones === 'boolean' ? { grande: opciones } : opciones;
+  const random = localRandom(semilla, 'm3-percibir');
+  const terreno = crearTerreno(grande ? 24 : 4, grande ? 18 : 4, random, empates);
   const {
     frente, grupos, tiposDePlan, observacion, sesgo, decideEn, cuerpo, x, y, chunk,
-  } = crearFrente(terreno, grande ? 3000 : 32, grande ? 30000 : 76, random);
+  } = crearFrente(terreno, grande ? 3000 : 32, grande ? 30000 : 76, random, borde, peces);
   const planes = crearPlanes();
   barajar(grupos.personas, random);
   barajar(grupos.animales, random);
@@ -201,7 +212,7 @@ export function crearFixtureGpu(grande = false) {
         const direccion = (tick + i) & 3;
         const nx = x[slot] + (direccion === 0 ? 1 : direccion === 2 ? -1 : 0);
         const ny = y[slot] + (direccion === 1 ? 1 : direccion === 3 ? -1 : 0);
-        const c = terreno.celda(nx, ny);
+        const c = terreno.celda(Math.floor(nx), Math.floor(ny));
         if (c < 0 || (agua[c] >= 0.5) !== (tiposDePlan[slot] === 2)) continue;
         x[slot] = nx;
         y[slot] = ny;

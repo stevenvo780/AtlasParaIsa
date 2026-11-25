@@ -32,6 +32,8 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   /** Páginas comparadas con el mundo y cuántas de ellas habían cambiado, desde que se creó. */
   readonly cuentas = { sincronizadas: 0, cambiadas: 0 };
   #dueno: TerrenoDueno | undefined;
+  /** Dueño que escribe las páginas desde esta copia: 0 en el coordinador y con un solo dueño. */
+  #hilo = COORDINADOR;
   #px = NaN; #py = NaN; #chunk = -1;
   #epoca = 0;
   /** Por página: época y versión de su última sincronización, y versión y época de la captura de F2. */
@@ -58,6 +60,18 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   static override conectar(descriptor: TerrenoCompartido): TerrenoPercepcion {
     return new TerrenoPercepcion(descriptor.verificar, descriptor);
   }
+
+  /** La copia de un dueño (motor de dueños): solo pone al día y marca las páginas cuyo `duenoChunk` es `hilo`. */
+  static conectarDueno(descriptor: TerrenoCompartido, hilo: number): TerrenoPercepcion {
+    const terreno = new TerrenoPercepcion(descriptor.verificar, descriptor);
+    terreno.#hilo = hilo;
+    terreno.#deDuenos = true;
+    return terreno;
+  }
+  /** Con dueños por chunk, cada copia (también la del coordinador) respeta `duenoChunk`. */
+  usarDuenos(): void { this.#deDuenos = true; }
+  #deDuenos = false;
+  #ajena(chunk: ChunkId): boolean { return this.#deDuenos && this.duenoChunk[chunk] !== this.#hilo; }
 
   override celda(x: number, y: number): number {
     if ((x | 0) !== x || (y | 0) !== y) return -1;
@@ -97,7 +111,10 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
     const px0 = (cx - RADIUS) >> 4, px1 = (cx + RADIUS) >> 4, py0 = (cy - RADIUS) >> 4, py1 = (cy + RADIUS) >> 4;
     for (let py = py0; py <= py1; py++) for (let px = px0; px <= px1; px++) {
       let chunk = this.#paginaDe(px, py);
-      if (chunk < 0) chunk = this.#alta(px, py);
+      // Con dueños, la arena crece solo en F0 (coordinador) y una página ajena se lee como la dejó su dueño.
+      if (chunk < 0) { if (this.#deDuenos) continue; chunk = this.#alta(px, py); }
+      this.#reservar(chunk);
+      if (this.#ajena(chunk)) { if (this.#capturando && this.#capturadaEn[chunk] !== this.#epoca) { this.#capturadaEn[chunk] = this.#epoca; this.#enCaptura.push(chunk); } continue; }
       // Con la barrera abierta y la versión de su última sincronización, nadie la tocó desde entonces: sigue al día.
       if (!this.#vigilado || this.#sincronizadaEn[chunk] !== this.#epoca || this.versionPagina[chunk] !== this.#versionSincronizada[chunk]) this.#sincronizar(chunk, tileIn, fast);
       if (this.#capturando && this.#capturadaEn[chunk] !== this.#epoca) { this.#capturadaEn[chunk] = this.#epoca; this.#enCaptura.push(chunk); }
@@ -138,7 +155,8 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   tocar(x: number, y: number): void {
     if ((x | 0) !== x || (y | 0) !== y) return;
     const chunk = this.#paginaDe(x >> 4, y >> 4);
-    if (chunk < 0) return;
+    if (chunk < 0 || this.#ajena(chunk)) return;
+    this.#reservar(chunk);
     this.#escritura().marcar(chunk, true);
     this.#anotar(chunk, ((y & 15) << 4) | (x & 15));
   }
@@ -176,10 +194,41 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
     return true;
   }
 
-  #escritura(): TerrenoDueno { return this.#dueno ??= this.escritura(COORDINADOR); }
+  #escritura(): TerrenoDueno { return this.#dueno ??= this.escritura(this.#hilo); }
+
+  /** F0, solo el coordinador: la página de (px, py), dándola de alta para `hilo` si no estaba. Las páginas no salen de
+   * la arena aunque su chunk se retire: quedan con `terreno` = 0 (celdas ausentes) y vuelven a llenarse si se reactiva. */
+  asegurarPagina(px: number, py: number, hilo = COORDINADOR): ChunkId {
+    let chunk = this.#paginaDe(px, py);
+    if (chunk < 0) { chunk = this.alta(px, py, hilo); this.#reservar(chunk); }
+    return chunk;
+  }
+  /** La página de (px, py) si es residente, o −1. */
+  paginaDe(px: number, py: number): ChunkId { return this.#paginaDe(px, py); }
+
+  /** Pone al día una página propia con las teselas de este dueño (al activarla, al adoptarla y al publicar en F6). */
+  sincronizarPagina(chunk: ChunkId, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
+    this.#reservar(chunk);
+    this.#sincronizar(chunk, tileIn, fast);
+  }
+  /** Las 256 celdas de una página propia pasan a ausentes (su chunk se retira o se cede). */
+  vaciarPagina(chunk: ChunkId): void {
+    this.#reservar(chunk);
+    const base = chunk << 8;
+    for (const valores of this.valores) valores.fill(0, base, base + CELDAS_PAGINA);
+    this.teselas.fill(undefined, base, base + CELDAS_PAGINA);
+    this.soa.fill(-1, base, base + CELDAS_PAGINA);
+    this.#escritura().marcar(chunk, true);
+  }
 
   #alta(px: number, py: number): ChunkId {
     const chunk = this.alta(px, py, COORDINADOR);
+    this.#reservar(chunk);
+    return chunk;
+  }
+
+  /** Estado local de la página `chunk` en este hilo (una copia conectada no da altas: crece al ver la página). */
+  #reservar(chunk: ChunkId): void {
     if (chunk >= this.#sincronizadaEn.length) {
       const cap = Math.max(64, 2 * (chunk + 1));
       const crecer = (previo: Uint32Array): Uint32Array<ArrayBuffer> => { const nuevo = new Uint32Array(cap); nuevo.set(previo); return nuevo; };
@@ -198,7 +247,6 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       for (let i = 0; i < this.teselas.length; i++) teselas[i] = this.teselas[i];
       this.teselas = teselas;
     }
-    return chunk;
   }
 
   /** Copia en la página lo que el mundo lleva ahora en sus 256 celdas y sube su versión si algo cambió. Una celda que

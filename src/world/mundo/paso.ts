@@ -27,6 +27,8 @@ import { convivir, updateCommunities } from '../society.js';
 import { advancePopulation } from '../lineage.js';
 import { maintainTechnologyMemory } from '../technology.js';
 import { recordSample } from '../statistics.js';
+import { conductorDe, type Dueno } from '../motor/contexto.js';
+import { sustituido } from '../motor/leyes.js';
 
 
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
@@ -88,22 +90,107 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
  * F6 publicar: memoria técnica, checkpoint y muestra.
  */
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
+  // V23: con alguna ley encendida (o una cinta enlazada) el tick lo conduce el dueño único, con ganchos.
+  const dueno = conductorDe(world);
+  if (dueno) return tickConLeyes(dueno, world, inputs, context, medicion);
   // F0
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
+  pasoEcologia(world, context, medicion);
+  pasoKernel(world, context, medicion);
+  medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
+  pasoPersonas(world, medicion);
+  // V24: sin mensajes, ni una lectura más (0 ULP en todo mundo histórico).
+  if (world.whispers?.length) advanceWhispers(world);
+  medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
+  medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
+  medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
+  medirFase(medicion, 'reproduccion', () => reproduce(world));
+  // F6
+  medirFase(medicion, 'checkpoint', () => {
+    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
+    advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
+  });
+  medirFase(medicion, 'muestreo', () => recordSample(world));
+  return results;
+}
+
+/**
+ * El mismo tick con leyes de la V23 encendidas y un solo dueño (`motor/contexto.ts`): cada paso heredado que una ley
+ * encendida sustituye (`sustituido`) no se llama, y los ganchos de las leyes corren en su fase, en el orden de `LEYES`.
+ * Con varios dueños este mismo orden lo sigue cada worker sobre su parte (`motor/dueno-worker.ts`), sin pasos heredados.
+ */
+function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
+  d.abrirEpoca();
+  const v = paramsOf(world).v23, queda = (paso: Parameters<typeof sustituido>[1]): boolean => !sustituido(v, paso);
+  // F0: regiones (con alActivar y alRetirar), gestos, caducidades y lo global.
+  d.fase(0);
+  medirFase(medicion, 'maintainRegions', () => d.regiones(context));
+  const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
+  world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
+  world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
+  d.F0();
+  // F1: migrantes y respuestas del tick anterior.
+  d.fase(1);
+  d.aplicar('M'); d.aplicar('B');
+  d.gancho('F1');
+  // eco: el entorno, antes de que nadie perciba.
+  if (queda('ecologia')) pasoEcologia(world, context, medicion);
+  if (queda('kernel')) pasoKernel(world, context, medicion);
+  d.gancho('eco');
+  medirFase(medicion, 'fauna', () => {
+    if (queda('fauna')) stepAnimals(world, event => addEvent(world, event));
+    if (queda('estructuras')) stepStructures(world, event => addEvent(world, event));
+  });
+  // F2–F4: preparar, elegir y actuar.
+  d.fase(2); d.gancho('F2');
+  d.fase(3); d.gancho('F3');
+  d.fase(4); d.gancho('F4');
+  if (queda('personas')) pasoPersonas(world, medicion);
+  if (queda('susurros') && world.whispers?.length) advanceWhispers(world);
+  // F5: lo que cruza organismos.
+  d.fase(5);
+  d.aplicar('A');
+  medirFase(medicion, 'encuentros', () => { if (queda('encuentros')) encounters(world); if (queda('convivir')) convivir(world); });
+  if (queda('demografia')) medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
+  if (queda('comunidades')) medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
+  if (queda('reproduccion')) medirFase(medicion, 'reproduccion', () => reproduce(world));
+  d.gancho('F5');
+  // F6: publicar.
+  d.fase(6);
+  medirFase(medicion, 'checkpoint', () => {
+    if (queda('memoriaTecnica') && catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
+    advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
+  });
+  d.publicarFilas();
+  d.gancho('F6');
+  d.escribirFoto();
+  d.publicarFrente();
+  d.cerrarFoto();
+  medirFase(medicion, 'muestreo', () => recordSample(world));
+  return results;
+}
+
+function pasoEcologia(world: World, context: WorldContext, medicion: FaseMedicion | undefined): void {
   medirFase(medicion, 'ecologia', () => ecology(world, context.ecologyExecution));
   if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0 && paramsOf(world).motor.hilos === 1 && (paramsOf(world).motor.gpu.length === 0 || !gpuNvrtcAvailable())) context.ecologyExecution?.onBarrier?.({
     tick: world.tick, phase: 'ecologia', regionSide: context.ecologyExecution.regionSide ?? 256,
     orden: paramsOf(world).motor.orden, workers: 1, dirtyPages: undefined, diagnostics: null, topologyCertificate: undefined,
   });
+}
+
+function pasoKernel(world: World, context: WorldContext, medicion: FaseMedicion | undefined): void {
   // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos,
       gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, caminosFisicos: paramsOf(world).terreno.caminosFisicos, ...context.ecologyExecution }));
-  medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
+}
+
+/** El paso heredado de las personas: percibir (F2), `bodyAndAction` de cada una (F3–F4) y descubrimientos. */
+function pasoPersonas(world: World, medicion: FaseMedicion | undefined): void {
   medirFase(medicion, 'personas', () => withRecipeSession(world, () => {
     const tileIn = tileLookup(world.tiles);
     const fast = residentFastAccess(world.tiles) ?? null;
@@ -125,19 +212,6 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       }
     }
   }));
-  // V24: sin mensajes, ni una lectura más (0 ULP en todo mundo histórico).
-  if (world.whispers?.length) advanceWhispers(world);
-  medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
-  medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
-  medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
-  medirFase(medicion, 'reproduccion', () => reproduce(world));
-  // F6
-  medirFase(medicion, 'checkpoint', () => {
-    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
-    advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
-  });
-  medirFase(medicion, 'muestreo', () => recordSample(world));
-  return results;
 }
 
 /**

@@ -118,6 +118,45 @@ function release(state: Regions, keys: readonly string[], zeroed: string[]): voi
 }
 const REACH = [-8, 0, 8] as const;
 
+/** V23: quien conduce el tick con leyes encendidas se entera de cada chunk que entra (ya con sus teselas en el mundo) y
+ * de cada uno que va a salir (todavía con ellas), para llamar a `Ley.alActivar` y `Ley.alRetirar`. Sin observador (todo
+ * apagado) no hay ni una operación más. */
+export interface ObservadorRegiones { activado(key: string, cx: number, cy: number): void; retirar(key: string, cx: number, cy: number): void }
+const observadores = new WeakMap<World, ObservadorRegiones>();
+export function observarRegiones(world: World, observador: ObservadorRegiones | undefined): void {
+  if (observador) observadores.set(world, observador); else observadores.delete(world);
+}
+
+/** Claves de los chunks que una persona en (x, y) mantiene activos (el suyo y su halo), para quien lleva las regiones
+ * desde el frente público (el coordinador de dueños). */
+export function clavesDeHalo(x: number, y: number, out: string[] = []): string[] {
+  out.length = 0;
+  for (const dx of REACH) for (const dy of REACH) {
+    const hx = x + dx, hy = y + dy;
+    if (validCoordinate(hx) && validCoordinate(hy)) out.push(chunkKey(hx, hy));
+  }
+  return out;
+}
+
+/** El contenido de un chunk que se activa, sin meterlo en el mundo: del archivo pendiente, de la LRU, del anfitrión o
+ * generado, con su ecología iniciada y su fauna y estructuras materializadas. Lo usa el coordinador de dueños, que lo
+ * envía a su dueño; `activate` hace lo mismo y además lo inserta. */
+export function tomarChunk(world: World, key: string, cx: number, cy: number, context: WorldContext = worldContext(world)): Chunk {
+  const pending = pendingIndex(world.retiredChunks, key);
+  const cuencas = paramsOf(world).agua.cuencas;
+  const lru = chunkLruFor(world);
+  let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : lru.get(key);
+  lru.delete(key);
+  if (!archived && context.loadChunk) archived = context.loadChunk(key, world.tick) ?? undefined;
+  const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
+  const tiles = chunk.tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
+  return { ...chunk, tiles, animals: chunk.animals ?? materializeAnimals(world.seed, tiles, world.tick),
+    structures: chunk.structures ?? legacyStructures(chunk.tiles, world.tick) };
+}
+
+/** Archiva un chunk que su dueño devolvió al retirarlo (motor de dueños): queda pendiente de guardado como los demás. */
+export function archivarChunk(world: World, chunk: Chunk): void { retire(world.retiredChunks, chunk); }
+
 export function activate(world: World, x: number, y: number, context: WorldContext = worldContext(world)): void {
   if (!validCoordinate(x) || !validCoordinate(y)) return;
   activateChunk(world, chunkKey(x, y), x, y, context);
@@ -158,6 +197,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
+  observadores.get(world)?.activado(key, cx, cy);
 }
 /** Mueve chunks activos (en el orden dado) a `retiredChunks` con sus teselas, lugares,
  * animales y estructuras, y los recuerda en la LRU del mundo. No borra información. */
@@ -166,6 +206,8 @@ function retireActiveChunks(world: World, keys: readonly string[], context: Worl
   const retired = new Set<string>();
   const detached = new Map<string, Chunk>();
   const done: string[] = [];
+  const observador = observadores.get(world);
+  if (observador) for (const key of keys) { const meta = world.chunks[key]; if (meta) observador.retirar(key, meta.cx, meta.cy); }
   for (const key of keys) {
     const meta = world.chunks[key]!;
     if (!meta) continue;

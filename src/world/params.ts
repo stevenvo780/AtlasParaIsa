@@ -40,6 +40,9 @@ export interface WorldParams {
    * 10 adopta `exigeComunidad=false` y `comprobacionContinua=true` para mundos nuevos. Ninguna levanta el techo de nacimientos:
    * el calendario máximo sigue siendo `nacimientosPorComprobacion` por ventana de
    * `intervaloComprobacionTicks` pasos.
+   * V23 (`v23.natalidad`, `world/natalidad.ts`): con la ley encendida, `radioPareja` es el alcance de la concepción y
+   * `radioCortejo` el del cortejo; `cortejo`, `exigeComunidad`, `radioLugar`, `nacimientosPorComprobacion`,
+   * `intervaloComprobacionTicks`, `natalidadVecindad` y `maxima` no actúan.
    */
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
     exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean;

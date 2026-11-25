@@ -66,7 +66,7 @@ export const INTERRUPTORES: readonly Interruptor[] = (Object.keys(INTERRUPTORES_
 /** Qué debe estar encendido para poder encender cada uno. El orden de `ORDEN_ENCENDIDO` las respeta. */
 export const REQUIERE: Readonly<Record<Interruptor, readonly Interruptor[]>> = Object.freeze({
   cohesion: [], natalidad: [], comunidades: [],
-  materia: [], cuerpos: ['materia'], fauna: ['cuerpos'], tecnica: ['cuerpos'], obra: ['tecnica'],
+  materia: [], cuerpos: ['materia', 'natalidad'], fauna: ['cuerpos'], tecnica: ['cuerpos'], obra: ['tecnica'],
   intentos: ['cohesion', 'natalidad', 'comunidades', 'fauna', 'obra'],
   duenos: ['intentos'], rebalanceo: ['duenos'], materiaGpu: ['materia'],
   fotograma: [], guardadoCompleto: [],

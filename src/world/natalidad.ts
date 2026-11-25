@@ -164,9 +164,13 @@ export interface Balance {
   parir(p: Person): Dote;
 }
 
-/** Gestaciones del mundo escalar. Viven junto a la persona sin cambiarle la forma; no se guardan con el mundo (ver el
- * pedido al integrador en el informe: `Person.gestacion`). Con `v23.cuerpos` la gestación va en `Cuerpo.gestacion`. */
-const gestacionesEscalares = new WeakMap<Person, EnCurso>();
+/** Gestaciones del mundo escalar: van en `Person.gestacion` y se guardan con el mundo (integrador, pedido 1 del carril n).
+ * Con `v23.cuerpos` la gestación va en `Cuerpo.gestacion`. */
+const gestacionesEscalares = {
+  get: (p: Person): EnCurso | undefined => p.gestacion,
+  set(p: Person, g: EnCurso): void { p.gestacion = g; },
+  delete(p: Person): void { p.gestacion = undefined; },
+};
 
 type Rasgos = ReturnType<typeof demographicTraits>;
 const rasgosPorGenoma = new WeakMap<Genome, { ley: object; rasgos: Rasgos }>();

@@ -12,7 +12,7 @@
  * F5 muertes y partos; F6 publica sus filas. A los demás se les escribe por intento (`Golpear`, `Tomar`).
  */
 import type { AnimalView } from '../shared/life.js';
-import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
+import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, KAPPA_HUMANA, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
 import { ACTIONS, SPECIES, syncFauna, type Animal, type EstadoFauna } from './animals.js';
 import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, elegirFaunaV23, huella, radioVista, velocidadDe,
@@ -124,7 +124,10 @@ export function genomaFundador(k: number): number[] {
 
 /** Plantilla de un genoma: tejido de la misma química para toda la fauna, masa adulta del gen `lnMasa` y κ del gen de
  * carnivoría. La κ reparte un mismo presupuesto catalítico entre C–O (celulosa, la hierba) y C–N (proteína, la carne):
- * κ_CO = 2κ₀(1 − carnivoría), κ_CN = 2κ₀·carnivoría; C–C/C–H y H–H quedan en κ₀. */
+ * κ_CO = 2κ₀(1 − carnivoría), κ_CN = 2κ₀·carnivoría. C–C/C–H es la del tubo humano (`KAPPA_HUMANA`) y H–H queda en κ₀.
+ * Abrir C–O o C–N no basta para comer: en el tubo la celulosa y la proteína se carbonizan antes de oxidarse (barrera
+ * γ·D(C–H) − κ frente a γ·D(O=O) − κ, `materia/cuerpo.ts`), y lo que la reserva recibe es carbono y grasa, que solo se
+ * absorben con C–C/C–H abierta. Con κ₀ ahí (9·10⁻¹¹ por tick) un herbívoro convertía su pasto en carbón y lo excretaba. */
 export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], linaje: number): Plantilla {
   const e = estado(c);
   const qm = Math.round((genoma[GEN.lnMasa] ?? 0) / PASO_LNMASA), qc = Math.round(sat01(genoma[GEN.carnivoria] ?? 0) / PASO_CARNIVORIA);
@@ -132,7 +135,7 @@ export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], lina
   const hecha = e.plantillas.get(clave);
   if (hecha) return hecha;
   const S = sustanciasDe(c), carn = qc * PASO_CARNIVORIA, masaAdulta = Math.exp(qm * PASO_LNMASA);
-  const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA0, KAPPA0];
+  const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA_HUMANA[2], KAPPA0];
   // Tejido animal: proteína (músculo, pelo), grasa (CH₂), agua y hueso (CaHPO₄). Se sintetiza de lo mismo que hay en el
   // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄.
   const p = crearPlantilla(c.quimica, c.globales.registro, {

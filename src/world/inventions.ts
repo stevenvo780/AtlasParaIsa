@@ -2,6 +2,7 @@ import { serialize } from 'node:v8';
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
 import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
 import { codigoForma, formaDeCodigo } from '../shared/materia.js';
+import { KG_POR_UNIDAD_MATERIAL } from '../shared/naturaleza.js';
 import { blendMaterialProfile, compoundCarryUnits, enrichSoilFromLots, KILN_FUEL_POWER, unfiredCompoundShare } from './chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
@@ -495,7 +496,14 @@ function expansionCandidate(world: World, person: Person, blueprint = selectedBl
 }
 
 export function constructionCost(world: World, person: Person): BlueprintView['cost'] {
-  if (ley(world, 'obra')) return { wood: 0, stone: 0, work: 1 };
+  if (ley(world, 'obra')) {
+    // Con obra, lo que falta es la materia de una pieza: nada si ya lleva un lote duro; si no, la roca que pide la forma
+    // del plano, en las unidades de `materials`. Sin esto la decisión veía coste cero y nadie recogía nunca piedra.
+    const c = ctxMateriaDe(world);
+    if (cargaDePieza(c, person) !== undefined) return { wood: 0, stone: 0, work: 1 };
+    const forma = formaDeCodigo(planoSeleccionado(c, person).plano.forma);
+    return { wood: 0, stone: Math.ceil(MASA_PORTANTE_KG_M2 * forma.largo * forma.ancho / KG_POR_UNIDAD_MATERIAL), work: 1 };
+  }
   const modular = paramsOf(world).construccion.modular;
   const components = selectedBlueprint(world, person).components;
   const cells = modular && paramsOf(world).construccion.poliminosYSinergia ? fittingPolyomino(world, person, components) : false;
@@ -1032,6 +1040,20 @@ function puedeTrabajarEn(c: CtxLeyMateria, quien: Person, celda: number): boolea
   return c.personas.get(slot) === quien && c.frente.chunk[slot] === c.terreno.chunkDe(celda);
 }
 
+/** El lote a cuestas que sirve de pieza: propio, con masa, sólido o polvo, y duro o tenaz. */
+function cargaDePieza(c: CtxLeyMateria, persona: Person): LoteRef | undefined {
+  return persona.carga?.find(l => {
+    if (!c.materia.propio(l)) return false;
+    const v = c.materia.vista(l);
+    return v.masa > 0 && (v.fase === 0 || v.fase === 3) && (v.dureza > 0 || v.tenacidad > 0);
+  });
+}
+
+/** Si quien está en `p` tiene de dónde sacar una pieza: un lote duro a cuestas o roca latente en esa celda. */
+function fuenteDePieza(c: CtxLeyMateria, persona: Person, p: Point): boolean {
+  return cargaDePieza(c, persona) !== undefined || (tileAt(c.mundo, p)?.stone ?? 0) > 0;
+}
+
 function celdaPendiente(c: CtxLeyMateria, s: StructureView): Point | undefined {
   const obra = estadoObra(s);
   if (!obra) return;
@@ -1050,8 +1072,12 @@ function oportunidadObraMaterial(c: CtxLeyMateria, persona: Person, placed: bool
   const { plano } = planoSeleccionado(c, persona);
   for (const s of obraCercana(mundo, persona, CONSTRUCTION_RADIUS)) {
     const p = celdaPendiente(c, s);
-    if (p) return { target: { x: p.x, y: p.y }, score: 0.6 + persona.traits.industriousness * 0.2, delivery: 'site',
-      workLeft: true, reason: 'La obra local necesita piezas y trabajo para asentarlas.' };
+    if (p) {
+      // Sin pieza a medio asentar, solo se ofrece a quien tiene de dónde sacar una: sin ella cada tick allí fallaba.
+      if (estadoObra(s)!.pendiente || fuenteDePieza(c, persona, p)) return { target: { x: p.x, y: p.y },
+        score: 0.6 + persona.traits.industriousness * 0.2, delivery: 'site', workLeft: true, reason: 'La obra local necesita piezas y trabajo para asentarlas.' };
+      continue;
+    }
     if (plano.area > (s.cells?.length ?? 1) && fittingMaterial(mundo, s, plano, s)) {
       return { target: { x: s.x, y: s.y }, score: 0.6 + persona.traits.industriousness * 0.2, delivery: 'expansion',
         workLeft: true, reason: 'La planta del plano admite una ampliación con más piezas.' };
@@ -1059,7 +1085,7 @@ function oportunidadObraMaterial(c: CtxLeyMateria, persona: Person, placed: bool
   }
   if (!placed) return;
   const tile = tileAt(mundo, persona);
-  if (!tile || !fittingMaterial(mundo, tile, plano) || (!(tile.stone && tile.stone > 0) && !persona.carga?.some(l => c.materia.propio(l)))) return;
+  if (!tile || !fittingMaterial(mundo, tile, plano) || !fuenteDePieza(c, persona, tile)) return;
   const carencia = Math.max(persona.fatigue, persona.thirst, persona.hunger);
   return { target: { x: tile.x, y: tile.y }, score: carencia * persona.traits.industriousness,
     reason: 'Puede ensayar el plano con la materia que tiene a mano.' };
@@ -1088,11 +1114,7 @@ function contribuirObraMaterial(c: CtxLeyMateria, persona: Person, s: StructureV
   if (!obra.pendiente) {
     const plano = formaDePlano(c, s.blueprintId);
     const forma = formaDeCodigo(plano.forma);
-    const carga = persona.carga?.find(l => {
-      if (!c.materia.propio(l)) return false;
-      const v = c.materia.vista(l);
-      return v.masa > 0 && (v.fase === 0 || v.fase === 3) && (v.dureza > 0 || v.tenacidad > 0);
-    });
+    const carga = cargaDePieza(c, persona);
     const vistaCarga = carga === undefined ? undefined : c.materia.vista(carga);
     const lote = carga === undefined
       ? rocaDe(c, celda, MASA_PORTANTE_KG_M2 * forma.largo * forma.ancho)
@@ -1158,7 +1180,7 @@ function construirObraMaterial(c: CtxLeyMateria, persona: Person, tile: Tile, em
     return contribuirObraMaterial(c, persona, existente, emit) ? existente : null;
   }
   const cells = fittingMaterial(mundo, tile, plano);
-  if (!cells || (!(tile.stone && tile.stone > 0) && !persona.carga?.some(l => c.materia.propio(l)))) return null;
+  if (!cells || !fuenteDePieza(c, persona, tile)) return null;
   const serial = c.id('estructura');
   const s: StructureView & { obraMaterial: EstadoObra } = {
     id: `structure-${serial}`, x: tile.x, y: tile.y, cells, blueprintId: blueprint.id, name: blueprint.name,

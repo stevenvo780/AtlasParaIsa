@@ -10,8 +10,10 @@
  *     con KAPPA0, descomposición del suelo a 295 K con KAPPA_SUELO, margen llama en aire (1.095 K) vs horno (1.131 K).
  *  4. Invariante I4 sobre el registro y el memo completos.
  *  5. Banco de rendimiento de `productos()` hasta 16 átomos en frío y con memoria caliente (puerta: p99 < 50 ms).
+ *  6. Caja cerrada (enmienda 1): 40 recambios de biomasa con piezas reales (arena, química, pasoLote, fluir, copiar,
+ *     desprender, quemar; tests/lib/caja-cerrada.ts), sin y con fuego: agua, H₂, balance exacto y destino de N y P.
  *
- * Uso: npx tsx scripts/lab-materia.mts [--json] [--solo-banco]
+ * Uso: npx tsx scripts/lab-materia.mts [--json] [--solo-banco] [--sin-caja]
  */
 import { performance } from 'node:perf_hooks';
 import {
@@ -391,15 +393,45 @@ export function ejecutarBancoRendimiento(): ResumenBanco {
 
 // Ejecución CLI cuando se invoca directamente.
 const esCli = process.argv[1]?.endsWith('lab-materia.mts') || process.argv[1]?.endsWith('lab-materia.js');
-if (esCli) {
+// Sin await de nivel superior: la caja (tests/lib) importa este módulo y esperaría a que acabe de evaluarse.
+if (esCli) void cli().catch((e: unknown) => { console.error(e); process.exit(1); });
+
+async function cli(): Promise<void> {
   const comoJson = process.argv.includes('--json');
   const soloBanco = process.argv.includes('--solo-banco');
   const { cordura, violacionesI4, servicio } = soloBanco
     ? { cordura: [], violacionesI4: [], servicio: crearServicioQuimico({ modo: 'inmediato' }) }
     : ejecutarTablaCordura();
   const banco = ejecutarBancoRendimiento();
+  // La caja usa la memoria de prueba de M1 (tests/lib): se importa solo aquí, al ejecutar el laboratorio.
+  const cajas = soloBanco || process.argv.includes('--sin-caja') ? [] : await (async () => {
+    const { cajaCerrada } = await import('../tests/lib/caja-cerrada.js');
+    return [['sin fuego', cajaCerrada({ recambios: 40 })], ['fuego cada 4 recambios (30 %)', cajaCerrada({ recambios: 40, cadaFuego: 4 })]] as const;
+  })();
+  const resumenCaja = cajas.map(([nombre, r]) => {
+    const f = r.fotos, fin = f[f.length - 1]!, h2 = (a: number, b: number) => {
+      const xs = f.filter(x => x.recambio >= a && x.recambio <= b).map(x => x.h2);
+      return xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length);
+    };
+    const exacto = f.every(x => x.exacto), aguaMin = Math.min(...f.map(x => x.agua)) / f[0]!.agua;
+    const estable = h2(31, 40) <= 1.15 * h2(21, 30);
+    let nQuemado = 0, nN2 = 0;
+    const pDestino: Record<string, number> = {};
+    for (const g of r.fuegos) {
+      const suma = (x: Record<string, number>) => Object.values(x).reduce((s, v) => s + v, 0);
+      const nAire = suma(g.nDespues) - suma(g.nAntes);
+      nQuemado += suma(g.nAntes) - (g.nAntes.N2 ?? 0);
+      nN2 += (g.nDespues.N2 ?? 0) - nAire - (g.nAntes.N2 ?? 0);
+      for (const [k, v] of Object.entries(g.pDespues)) pDestino[k] = (pDestino[k] ?? 0) + v;
+    }
+    return { nombre, recambios: fin.recambio, ticks: r.ticks, ms: Math.round(r.ms), exacto, aguaMin, h2Final: fin.h2,
+      h2PorcientoH: 100 * fin.hH2 / fin.hTotal, h2Estable: estable, fuegos: r.fuegos.length, nQuemado, nN2, pDestino,
+      nFinal: fin.n, pFinal: fin.p, biomasa: [f.find(x => x.recambio === 0)!.biomasa, fin.biomasa], flujosH2: Object.fromEntries(Object.entries(r.flujos).map(([k, v]) => [k, v.H2])),
+      ok: exacto && aguaMin >= 0.97 && estable && fin.hH2 < 0.005 * fin.hTotal };
+  });
 
-  const todoOk = cordura.every(c => c.cumple) && violacionesI4.length === 0 && banco.cumpleP99Frio && banco.cumpleP99Caliente;
+  const todoOk = cordura.every(c => c.cumple) && violacionesI4.length === 0 && banco.cumpleP99Frio && banco.cumpleP99Caliente
+    && resumenCaja.every(c => c.ok);
 
   if (comoJson) {
     console.log(JSON.stringify({
@@ -410,6 +442,7 @@ if (esCli) {
       sustanciasInternadas: servicio.totalSustancias(),
       filasMemo: servicio.totalMemo(),
       banco,
+      cajaCerrada: resumenCaja,
     }, null, 2));
   } else {
     console.log(`=== LABORATORIO DE MATERIA V23 (E_RES=${E_RES_IONICO}, E_HID=${E_HID_IONICO}, E_CAT=${E_CAT_IONICO}) ===`);
@@ -429,6 +462,13 @@ if (esCli) {
     console.log(`  FRÍO     : p50=${banco.frioMs.p50.toFixed(2)} ms | p95=${banco.frioMs.p95.toFixed(2)} ms | p99=${banco.frioMs.p99.toFixed(2)} ms | max=${banco.frioMs.max.toFixed(2)} ms [${banco.cumpleP99Frio ? 'OK < 50ms' : 'FAIL'}]`);
     console.log(`  CALIENTE : p50=${(banco.calienteMs.p50 * 1000).toFixed(1)} µs | p95=${(banco.calienteMs.p95 * 1000).toFixed(1)} µs | p99=${(banco.calienteMs.p99 * 1000).toFixed(1)} µs | max=${(banco.calienteMs.max * 1000).toFixed(1)} µs [${banco.cumpleP99Caliente ? 'OK' : 'FAIL'}]`);
     console.log(`  Nivel 10 (horno) = ${tDeNivel(10).toFixed(1)} K; Nivel 9 (llama aire) = ${tDeNivel(9).toFixed(1)} K`);
+    if (resumenCaja.length) console.log('\n=== CAJA CERRADA (40 recambios; aire, agua, suelo KAPPA_SUELO, planta, tubo KAPPA0, quemar) ===');
+    for (const c of resumenCaja) {
+      console.log(`  [${c.ok ? 'OK  ' : 'FAIL'}] ${c.nombre}: ${c.recambios} recambios en ${c.ticks} ticks (${c.ms} ms); balance ${c.exacto ? 'exacto' : 'DESCUADRE'}; agua mín ${(100 * c.aguaMin).toFixed(1)} %; H₂ ${c.h2Final} (${c.h2PorcientoH.toFixed(3)} % del H, ${c.h2Estable ? 'estable' : 'CRECE'}); biomasa ${c.biomasa.join(' → ')}`);
+      console.log(`         H₂ neto por proceso: ${JSON.stringify(c.flujosH2)}`);
+      if (c.fuegos) console.log(`         ${c.fuegos} fuegos: N fijado quemado ${c.nQuemado}, a N₂ ${c.nN2}; P quemado → ${JSON.stringify(c.pDestino)}`);
+      console.log(`         N final ${JSON.stringify(c.nFinal)}; P final ${JSON.stringify(c.pFinal)}`);
+    }
   }
   await servicio.cerrar();
   if (!todoOk) process.exit(1);

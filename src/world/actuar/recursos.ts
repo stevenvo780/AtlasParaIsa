@@ -127,19 +127,21 @@ export function forageFood(world: World, person: Person, tile: Tile): boolean {
 
 // ── V23: comer, beber y recoger sobre la materia ─────────────────────────────────────────────────────────
 
+import type { TotalV23 } from '../totales-v23.js';
+
 // Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí.
 import { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG } from '../../shared/naturaleza.js';
 export { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG };
 
 /** Contadores de `world.totals` que lee el laboratorio (kg acumulados en la vida del mundo). */
-export const TOTAL_DIETA_KG = 'v23DietaKg';
-export const TOTAL_DIETA_FAUNA_KG = 'v23DietaFaunaKg';
-export const TOTAL_BEBIDA_KG = 'v23BebidaKg';
-export const TOTAL_FORRAJEO_KG = 'v23ForrajeoKg';
-export const TOTAL_RECOGIDA_KG = 'v23RecogidaKg';
+export const TOTAL_DIETA_KG: TotalV23 = 'v23DietaKg';
+export const TOTAL_DIETA_FAUNA_KG: TotalV23 = 'v23DietaFaunaKg';
+export const TOTAL_BEBIDA_KG: TotalV23 = 'v23BebidaKg';
+export const TOTAL_FORRAJEO_KG: TotalV23 = 'v23ForrajeoKg';
+export const TOTAL_RECOGIDA_KG: TotalV23 = 'v23RecogidaKg';
 /** Σ por persona y tick de la carga a cuestas y de la masa corporal: su cociente es la carga media sobre la masa. */
-export const TOTAL_CARGA_KG_TICK = 'v23CargaKgTick';
-export const TOTAL_MASA_KG_TICK = 'v23MasaKgTick';
+export const TOTAL_CARGA_KG_TICK: TotalV23 = 'v23CargaKgTick';
+export const TOTAL_MASA_KG_TICK: TotalV23 = 'v23MasaKgTick';
 
 export function contar(world: World, clave: string, cantidad: number): void {
   if (!(cantidad > 0)) return;

@@ -34,7 +34,9 @@ export interface PersonView {
   energy: number; hunger: number; fatigue: number; need: string;
   recentMemory: string | null; thirst?: number;
   specialty?: string; controlMode?: 'auto' | 'directed';
-  traits?: { curiosity: number; sociability: number; industriousness: number; care: number; resilience: number };
+  traits?: { curiosity: number; sociability: number; industriousness: number; care: number; resilience: number};
+  /** Disposición heredable a hacer caso de un mensaje (locus 8 del genoma), en [0, 1]. */
+  escucha?: number;
   skills?: Record<string, number>; materials?: { wood: number; stone: number };
   genome?: GenomeView; age?: number;
   /** T036(h): fuera del `state`; llegan con `{type:'persona'}`. Ausente = «todavía no pedido», nunca «no tiene». */

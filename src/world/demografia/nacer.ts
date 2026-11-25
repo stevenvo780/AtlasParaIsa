@@ -83,7 +83,7 @@ export function reproduce(world: World): void {
     const group = world.communities.find(c => c.id === a.communityId);
     if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
     count(world, 'births');
-    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
+    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina ocho pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
   };
   if (pop.natalidadVecindad) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { founderGenome, assertGenome, inheritGenome, DEFAULT_MUTATION_RATE, GENE_COUNT, expressGenome, localRandom } from '../src/world/genetics.js';
+import { founderGenome, assertGenome, inheritGenome, DEFAULT_MUTATION_RATE, GENE_COUNT, ALLELE_COUNT, expressGenome, localRandom } from '../src/world/genetics.js';
 
 function mockTraits() {
   return { curiosity: 0.5, sociability: 0.5, industriousness: 0.5, care: 0.5, resilience: 0.5 };
@@ -17,7 +17,9 @@ test('control bit a bit: varianza 0 produce exactamente el mismo genoma que la v
   const phenotype1 = [traits.curiosity, traits.sociability, traits.industriousness, traits.care, traits.resilience, 0.5, 0.2 + random1() * 0.65];
   const expectedAlleles1 = phenotype1.flatMap(v => [v, v]);
   
-  assert.deepEqual(g1.alleles, expectedAlleles1);
+  // Los siete loci anteriores a la escucha conservan sus alelos de siempre; el octavo es la escucha (v23-escucha.test.ts).
+  assert.equal(g1.alleles.length, ALLELE_COUNT);
+  assert.deepEqual(g1.alleles.slice(0, expectedAlleles1.length), expectedAlleles1);
   assert.equal(g1.learningRate, 0.12);
   assert.equal(g1.cooperation, phenotype1[6]);
   
@@ -27,7 +29,7 @@ test('control bit a bit: varianza 0 produce exactamente el mismo genoma que la v
   const phenotype2 = [traits.curiosity, traits.sociability, traits.industriousness, traits.care, traits.resilience, 0.5, 0.2 + random2() * 0.65];
   const expectedAlleles2 = phenotype2.flatMap(v => [v, v]);
   
-  assert.deepEqual(g2.alleles, expectedAlleles2);
+  assert.deepEqual(g2.alleles.slice(0, expectedAlleles2.length), expectedAlleles2);
   assert.equal(g2.learningRate, 0.12);
   assert.equal(g2.cooperation, phenotype2[6]);
 });

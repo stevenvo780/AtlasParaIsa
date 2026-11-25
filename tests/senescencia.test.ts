@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import type { DemographicActor, DemographicTraits, DemographicTransition, LongevityLaw, SenescenceLaw } from '../src/shared/demography.js';
 import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography,
   PROTECTED_HEALTH_FLOOR, PROTECTED_VITALITY_FLOOR, SENESCENCE_WEAR_PER_DAY, updateDemography } from '../src/world/demography.js';
-import { localRandom } from '../src/world/genetics.js';
+import { ALLELE_COUNT, localRandom } from '../src/world/genetics.js';
 import { assertLongevityLaw, DEFAULT_PARAMS, PARAM_RANGES, parseParams, setParams } from '../src/world/params.js';
 
-const traits = demographicTraits({ alleles: Array<number>(14).fill(0.5) });
+const traits = demographicTraits({ alleles: Array<number>(ALLELE_COUNT).fill(0.5) });
 /** Ley de referencia de T001 (0,02 · 6 · 0,6). Las métricas miden la LEY, no los defaults del sprint:
  * si T016–T018 recalibra `cuerpo.*`, estas cifras siguen midiendo lo mismo. */
 const LEGACY_LAW: SenescenceLaw = { ...DEFAULT_PARAMS.cuerpo, riesgoSenescenciaDiario: 0.02, riesgoSenescenciaPendiente: 6, cuidadoReduceRiesgo: 0.6 };
@@ -98,7 +98,7 @@ test('the age of death disperses far beyond the age decree (cv)', context => {
   const deathAges: number[] = [], decree: number[] = [];
   for (let seed = 0; seed < 2000; seed++) {
     const random = localRandom(seed, 'cohorte-heterogenea');
-    const drawn = demographicTraits({ alleles: Array.from({ length: 14 }, () => random()) });
+    const drawn = demographicTraits({ alleles: Array.from({ length: ALLELE_COUNT }, () => random()) });
     const health = 0.2 + random() * 0.8, vitality = 0.2 + random() * 0.8;
     const age = deathAge(seed, health, vitality, 240, LEGACY_LAW, 6, drawn);
     decree.push(drawn.maximumAge);
@@ -252,7 +252,7 @@ test('optional deterministic hazard inputs reject invalid values', () => {
 function genomes(count: number, salt: string): { alleles: number[] }[] {
   return Array.from({ length: count }, (_, seed) => {
     const random = localRandom(seed, salt);
-    return { alleles: Array.from({ length: 14 }, () => random()) };
+    return { alleles: Array.from({ length: ALLELE_COUNT }, () => random()) };
   });
 }
 
@@ -264,8 +264,8 @@ function longevityCohort(law: LongevityLaw, sample: readonly { alleles: number[]
 }
 
 test('R3: con los defaults la ley de longevidad reproduce los literales de T010 bit a bit', () => {
-  for (const genome of [{ alleles: Array<number>(14).fill(0.5) }, { alleles: Array<number>(14).fill(0) },
-    { alleles: Array<number>(14).fill(1) }, ...genomes(64, 'ley-longevidad')]) {
+  for (const genome of [{ alleles: Array<number>(ALLELE_COUNT).fill(0.5) }, { alleles: Array<number>(ALLELE_COUNT).fill(0) },
+    { alleles: Array<number>(ALLELE_COUNT).fill(1) }, ...genomes(64, 'ley-longevidad')]) {
     const implicit = demographicTraits(genome), explicit = demographicTraits(genome, DEFAULT_PARAMS.cuerpo);
     assert.deepEqual(implicit, explicit, 'omitir la ley debe ser exactamente pasarle los defaults');
     const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2, activity = (genome.alleles[4]! + genome.alleles[5]!) / 2;
@@ -334,7 +334,7 @@ test('R3: senescenciaInicioFraccion=0.5 adelanta el inicio de la vejez y la muer
 });
 
 test('R3: longevidadPorResiliencia y longevidadPorActividad son las pendientes de la ley', () => {
-  const genome = { alleles: Array<number>(14).fill(0.5) }, resilience = 0.5, activity = 0.5;
+  const genome = { alleles: Array<number>(ALLELE_COUNT).fill(0.5) }, resilience = 0.5, activity = 0.5;
   assert.equal(demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, longevidadPorResiliencia: 0 }).maximumAge,
     Math.round((11 - activity) * DAY));
   assert.equal(demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, longevidadPorActividad: 0 }).maximumAge,
@@ -400,7 +400,7 @@ test('R3: una ley de longevidad imposible se oye romper al fijar los params, no 
     /Ley de longevidad inválida/);
   // (d) La guarda de `demographicTraits` sigue viva, pero degradada a aserción de estado imposible:
   // nadie debería poder llegar hasta aquí con una ley así, y si llega se oye.
-  const genome = { alleles: Array<number>(14).fill(0.5) };
+  const genome = { alleles: Array<number>(ALLELE_COUNT).fill(0.5) };
   assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, senescenciaInicioFraccion: 0 }), /Ley de longevidad degenerada/);
   assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, longevidadBaseDias: 1, longevidadPorResiliencia: 0, longevidadPorActividad: 20 }),
     /Ley de longevidad degenerada/);

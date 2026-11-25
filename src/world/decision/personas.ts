@@ -29,6 +29,7 @@ import { technologyOpportunity } from '../technology.js';
 import { FOOD_PER_ANIMAL } from '../ecosystem.js';
 import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '../politica.js';
 import { activeWhisperForPerson } from '../whispers.js';
+import { escuchaDe } from '../genetics.js';
 
 
 const chooseNearby: Tile[] = [], chooseNearbyCells: number[] = [], chooseReachable: Tile[] = [], chooseReachableCells: number[] = [];
@@ -737,14 +738,15 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       candidate.policyDelta = delta;
     }
   }
-  // V24 Mensajes Divinos: un mensaje OÍDO es una prioridad fuerte y persistente, no un sesgo. Sólo cede ante
-  // una necesidad corporal aguda (entonces el candidato ni se ofrece y comer, beber o descansar deciden), y se
-  // cumple caminando paso a paso por tierra: nunca teletransporte. Una orden directa (fuera del modo observador)
-  // conserva su prioridad. Sin mensajes, ni una lectura más.
+  // V23 Mensajes Divinos: un mensaje OÍDO es un candidato más, con puntuación `escucha · (1 − presión de necesidad)`:
+  // quien lo escucha mucho y está tranquilo lo prefiere a casi todo; quien tiene hambre, sed o cansancio acuciantes
+  // (o poca energía) lo deja pasar sin umbral que lo decida. Se cumple caminando paso a paso por tierra: nunca
+  // teletransporte. Una orden directa (fuera del modo observador) conserva su prioridad. Sin mensajes, ni una lectura más.
   let whisperCandidate: Candidate | undefined;
   const whisper = world.whispers?.length && !person.command ? activeWhisperForPerson(world.whispers, person.id) : undefined;
-  if (whisper && person.hunger < 0.72 && person.thirst < 0.72 && person.fatigue < 0.78 && person.energy > 0.22) {
-    whisperCandidate = { action: 'explore', target: { x: whisper.x, y: whisper.y }, score: 4,
+  if (whisper) {
+    const presion = Math.max(person.hunger, person.thirst, person.fatigue, 1 - person.energy);
+    whisperCandidate = { action: 'explore', target: { x: whisper.x, y: whisper.y }, score: 4 * escuchaDe(person.genome) * (1 - presion),
       reason: `Un susurro le llama a ${WHISPER_INTENT_LABEL[whisper.intent]}; va a su ritmo y atiende antes su cuerpo.` };
     candidates.push(whisperCandidate);
   }

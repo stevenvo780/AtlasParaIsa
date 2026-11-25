@@ -177,7 +177,7 @@ Con `--servidor si`, cada `dia-NNN.json` añade estos campos.
   - `comunidades`: `world.communities.length` (el censo detallado es `censoComunidades`, abajo).
   - `rasgosPorGeneracion`: media, por generación **viva**, de `resilience`/`curiosity`/
     `sociability`/`care` (`person.traits`) y `learningRate` (`person.genome`).
-  - `varianzaGenetica`: varianza media de los 14 alelos (`GENE_COUNT*2`, `src/world/genetics.ts`)
+  - `varianzaGenetica`: varianza media de los 16 alelos (`ALLELE_COUNT`, `src/world/genetics.ts`)
     entre los vivos.
 
 `replica.json.servidor` describe el modo usado. `scripts/lab/barrido.ts` reenvía `--servidor si|no`

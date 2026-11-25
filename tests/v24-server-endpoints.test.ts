@@ -20,7 +20,7 @@ import { cloneWorld, createWorld, projectWorld, stepWorld, submitWhisper, type P
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
-import { HEAR_HORIZON_TICKS, HEAR_MIN_DELAY_TICKS } from '../src/world/whispers.js';
+import { WHISPER_LIFETIME_TICKS } from '../src/world/whispers.js';
 import type { Tile, WorldView } from '../src/shared/types.js';
 import type { DivineWhisper, WorldDirectoryResponse, WorldMapResponse } from '../src/shared/worldmap.js';
 import type { StructureView } from '../src/shared/life.js';
@@ -184,6 +184,7 @@ test('direct app: worldmap, global directory and Mensajes Divinos (observer-only
 
   // Mensajes Divinos: CSRF, validation, body limit, and 201 even in observer-only mode (orders stay 410).
   const s = world.people.find(p => p.role === 'S')!;
+  s.genome.alleles[14] = s.genome.alleles[15] = 1; // escucha máxima: el ritmo con que oye es lo único que no se fija aquí
   const target = landNear(world, s);
   assert.equal((await http('/api/whisper', { personId: s.id, intent: 'travel', ...target }, { Origin: 'https://evil.test' })).status, 403);
   const invalid = await http('/api/whisper', { intent: 'bogus', x: 1, y: 1 });
@@ -210,7 +211,7 @@ test('direct app: worldmap, global directory and Mensajes Divinos (observer-only
 
   // Real stepped world: never heard at once; heard later; walked to; chronicle entries.
   let heardAt: number | undefined, fulfilledAt: number | undefined;
-  for (let i = 0; i < HEAR_HORIZON_TICKS + 1200 && fulfilledAt === undefined; i++) {
+  for (let i = 0; i < WHISPER_LIFETIME_TICKS + 1200 && fulfilledAt === undefined; i++) {
     app.stepOnce();
     const live = app.world.whispers!.find(w => w.id === whisper.id)!;
     if (live.status === 'heard' && heardAt === undefined) heardAt = app.world.tick;
@@ -218,8 +219,8 @@ test('direct app: worldmap, global directory and Mensajes Divinos (observer-only
     if (live.status === 'faded') break;
   }
   t.diagnostic(`whisper created at tick ${whisper.createdTick}, heard at ${heardAt}, fulfilled at ${fulfilledAt}`);
-  assert.ok(heardAt !== undefined && heardAt - whisper.createdTick >= HEAR_MIN_DELAY_TICKS, 'asynchronous: never heard at once');
-  assert.ok(heardAt! - whisper.createdTick <= HEAR_HORIZON_TICKS, 'heard within the bounded horizon');
+  assert.ok(heardAt !== undefined && heardAt > whisper.createdTick, 'asynchronous: never heard at once');
+  assert.ok(heardAt! - whisper.createdTick < WHISPER_LIFETIME_TICKS, 'heard before it fades');
   assert.ok(fulfilledAt !== undefined && fulfilledAt > heardAt!, 'the inhabitant walked there by land');
   const texts = app.world.events.map(e => e.text);
   assert.ok(texts.some(text => text.includes('oyó un susurro') && text.includes(s.name)), 'chronicle: heard');
@@ -356,7 +357,7 @@ test('sim-worker gateway: worldmap, global directory and whispers via RPC, allow
   }
   t.diagnostic(`gateway whisper: ${JSON.stringify(status)}`);
   assert.ok(status && (status.status === 'heard' || status.status === 'fulfilled'), 'heard asynchronously by the simulation worker');
-  assert.ok(status!.heardTick! - status!.createdTick >= HEAR_MIN_DELAY_TICKS);
+  assert.ok(status!.heardTick! > status!.createdTick);
   const view = (await http('/api/world?x=0&y=0&width=40&height=28')).json() as WorldView;
   assert.ok(view.events.some(e => e.text.includes('oyó un susurro')), 'chronicle event reaches the live mirror');
   const later = (await http('/api/directory')).json() as WorldDirectoryResponse;
@@ -436,11 +437,12 @@ test('whisper law: latent → heard (bounded, deterministic delay) → fulfilled
   const world = createWorld(51926, parseParams('motor.hilos=1'));
   for (let i = 0; i < 60; i++) stepWorld(world);
   const person = world.people.find(p => p.role === 'I')!;
+  person.genome.alleles[14] = person.genome.alleles[15] = 1; // escucha máxima: no olvida el mensaje por el camino
   const rngBefore = world.rng;
   const whisper = submitWhisper(world, { personId: person.id, intent: 'travel', ...landNear(world, person), note: 'Ven' });
   assert.equal(world.rng, rngBefore, 'submitting draws nothing');
   let last = { x: person.x, y: person.y }, deferred = false;
-  for (let i = 0; i < HEAR_HORIZON_TICKS + 1200 && whisper.status !== 'fulfilled' && whisper.status !== 'faded'; i++) {
+  for (let i = 0; i < WHISPER_LIFETIME_TICKS + 1200 && whisper.status !== 'fulfilled' && whisper.status !== 'faded'; i++) {
     const heardBefore = whisper.status === 'heard';
     stepWorld(world);
     const now = world.people.find(p => p.id === person.id) as Person | undefined;
@@ -448,7 +450,7 @@ test('whisper law: latent → heard (bounded, deterministic delay) → fulfilled
     assert.ok(Math.abs(now.x - last.x) + Math.abs(now.y - last.y) <= 1, 'one land step at a time, never a teleport');
     last = { x: now.x, y: now.y };
     if (!heardBefore && whisper.status === 'heard') {
-      assert.ok(world.tick - whisper.createdTick >= HEAR_MIN_DELAY_TICKS);
+      assert.ok(world.tick > whisper.createdTick);
       // Acute hunger: the next decision is about the body, not the whisper.
       const hunger = now.hunger;
       now.hunger = 0.95; now.decisionAt = world.tick;

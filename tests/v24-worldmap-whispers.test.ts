@@ -1,15 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activeWhisperForPerson, enqueueWhisper, FULFIL_DEADLINE_TICKS, HEAR_HORIZON_TICKS, HEAR_MIN_DELAY_TICKS, MAX_ACTIVE_WHISPERS, parseWhisperRequest, STALL_CHECKS, stepWhispers, WHISPER_LIFETIME_TICKS } from '../src/world/whispers.js';
+import { activeWhisperForPerson, enqueueWhisper, FULFIL_DEADLINE_TICKS, MAX_ACTIVE_WHISPERS, parseWhisperRequest, STALL_CHECKS, stepWhispers, WHISPER_LIFETIME_TICKS } from '../src/world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from '../src/server/worldmap-service.js';
 import type { Tile } from '../src/shared/types.js';
 import type { DivineWhisper } from '../src/shared/worldmap.js';
+
+/** Una persona que oye bien (escucha 1 por defecto: no olvida) y con el cuerpo en calma. */
+function oyente(id: string, x: number, y: number, escucha = 1, extra: { action?: string; target?: { x: number; y: number } } = {}) {
+  return { id, name: id === 'p1' ? 'Brisa' : id.toUpperCase(), x, y, hunger: 0.2, thirst: 0.2, fatigue: 0.2, genome: { alleles: [...Array<number>(14).fill(0.5), escucha, escucha] }, ...extra };
+}
 
 function tile(x: number, y: number, overrides: Partial<Tile> = {}): Tile {
   return { x, y, terrain: 'meadow', biome: 'grassland', moisture: 0.5, vegetation: 0.5, food: 0.4, ...overrides };
 }
 
-test('Divine Whispers: heard after a deterministic, unpredictable but bounded delay; then fulfilled on arrival', () => {
+test('Divine Whispers: heard after a deterministic, unpredictable delay; then fulfilled on arrival', () => {
   const req = parseWhisperRequest({ personId: 'p1', intent: 'travel', x: 30, y: 12, note: 'Mira hacia el valle' });
   assert.equal(req.personId, 'p1');
   assert.throws(() => parseWhisperRequest({ intent: 'bogus', x: 0, y: 0 }));
@@ -17,14 +22,14 @@ test('Divine Whispers: heard after a deterministic, unpredictable but bounded de
   const whispers: DivineWhisper[] = [];
   const w = enqueueWhisper(whispers, req, 100, 1, 'Brisa');
   assert.equal(w.status, 'latent');
-  const brisa = [{ id: 'p1', name: 'Brisa', x: 0, y: 0, action: 'rest', target: { x: 0, y: 0 }, traits: { curiosity: 0.8 } }];
-  // Never heard before HEAR_MIN_DELAY_TICKS: a whisper is not an order.
-  for (let t = 100; t < 100 + HEAR_MIN_DELAY_TICKS; t += 10) assert.equal(stepWhispers(whispers, brisa, t, 51926).heard.length, 0);
+  const brisa = [oyente('p1', 0, 0, 1, { action: 'rest', target: { x: 0, y: 0 } })];
+  // Never heard at the very step it is left: a whisper is not an order.
+  assert.equal(stepWhispers(whispers, brisa, 100, 51926).heard.length, 0);
   let heardTick: number | undefined;
-  for (let t = 100 + HEAR_MIN_DELAY_TICKS; t <= 100 + HEAR_HORIZON_TICKS; t += 10) {
+  for (let t = 110; t < 100 + WHISPER_LIFETIME_TICKS; t += 10) {
     if (stepWhispers(whispers, brisa, t, 51926).heard.length) { heardTick = t; break; }
   }
-  assert.ok(heardTick !== undefined, 'heard within the horizon');
+  assert.ok(heardTick !== undefined, 'heard before it fades');
   assert.equal(w.status, 'heard');
   assert.equal(activeWhisperForPerson(whispers, 'p1')?.id, w.id);
 
@@ -36,24 +41,24 @@ test('Divine Whispers: heard after a deterministic, unpredictable but bounded de
   assert.equal(activeWhisperForPerson(whispers, 'p1'), undefined);
 });
 
-test('Divine Whispers: every targeted whisper to a living person is heard by the horizon, at spread-out ticks', () => {
-  const people = Array.from({ length: MAX_ACTIVE_WHISPERS }, (_, i) => ({ id: `p${i}`, name: `P${i}`, x: i, y: 0, traits: { curiosity: (i % 10) / 10 } }));
+test('Divine Whispers: attentive people hear a targeted whisper before it fades, at spread-out ticks', () => {
+  const people = Array.from({ length: MAX_ACTIVE_WHISPERS }, (_, i) => oyente(`p${i}`, i, 0, 0.6 + (i % 5) / 10));
   const whispers: DivineWhisper[] = [];
   for (const p of people) enqueueWhisper(whispers, { personId: p.id, intent: 'explore', x: p.x + 9, y: 3 }, 0, 1, p.name);
   const heardAt = new Map<string, number>();
-  for (let t = 0; t <= HEAR_HORIZON_TICKS; t += 10) {
+  for (let t = 0; t < WHISPER_LIFETIME_TICKS; t += 10) {
     const live = whispers.filter(w => w.status === 'latent');
     if (!live.length) break;
     for (const { whisper } of stepWhispers(live, people, t, 7).heard) heardAt.set(whisper.id, t);
   }
-  assert.equal(heardAt.size, people.length, 'cumulative probability reaches 1 within the horizon');
+  assert.equal(heardAt.size, people.length, 'with escucha ≥ 0,6 the cumulative probability is ≈ 1 within the lifetime');
   const ticks = [...heardAt.values()];
-  assert.ok(Math.min(...ticks) >= HEAR_MIN_DELAY_TICKS && Math.max(...ticks) <= HEAR_HORIZON_TICKS);
+  assert.ok(Math.min(...ticks) > 0 && Math.max(...ticks) < WHISPER_LIFETIME_TICKS);
   assert.ok(new Set(ticks).size >= 8, `the observer cannot predict WHEN (${new Set(ticks).size} distinct ticks)`);
 });
 
 test('Divine Whispers: fade only on death, unreachable destination or a long deadline after hearing', () => {
-  const at = (x: number, y: number, extra: { action?: string; target?: { x: number; y: number } } = {}) => ({ id: 'p1', name: 'Brisa', x, y, ...extra });
+  const at = (x: number, y: number, extra: { action?: string; target?: { x: number; y: number } } = {}) => oyente('p1', x, y, 1, extra);
   // Death before hearing.
   let whispers: DivineWhisper[] = [];
   let w = enqueueWhisper(whispers, { personId: 'p1', intent: 'travel', x: 20, y: 0 }, 0, 1, 'Brisa');

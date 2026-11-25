@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
 import { cooperate, cooperationOpportunity, culturalDistance, resourceDispute, updateCommunities, settlementOpportunity } from '../src/world/society.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
-import { expressGenome, inheritGenome } from '../src/world/genetics.js';
+import { ALLELE_COUNT, expressGenome, GENE_COUNT, inheritGenome } from '../src/world/genetics.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { recordSample, worldStatistics } from '../src/world/statistics.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
@@ -143,8 +143,8 @@ test('diploid inheritance is deterministic, recombines both parents and mutation
   const {w,a,b}=scene(); const rng=w.rng;
   const child=inheritGenome(w.seed,'child',[a,b],0), again=inheritGenome(w.seed,'child',[a,b],0);
   assert.deepEqual(child,again);assert.equal(child.generation,1);assert.deepEqual(child.parents,[a.id,b.id]);assert.equal(child.mutations,0);assert.equal(w.rng,rng);
-  for(let locus=0;locus<7;locus++) {assert.ok(a.genome.alleles.slice(locus*2,locus*2+2).includes(child.alleles[locus*2]!));assert.ok(b.genome.alleles.slice(locus*2,locus*2+2).includes(child.alleles[locus*2+1]!));}
-  const mutated=inheritGenome(w.seed,'child',[a,b],1);assert.equal(mutated.mutations,14);assert.notDeepEqual(mutated.alleles,child.alleles);assert.ok(mutated.alleles.every(n=>n>=0&&n<=1));assert.ok(expressGenome(mutated).care>=0);
+  for(let locus=0;locus<GENE_COUNT;locus++) {assert.ok(a.genome.alleles.slice(locus*2,locus*2+2).includes(child.alleles[locus*2]!));assert.ok(b.genome.alleles.slice(locus*2,locus*2+2).includes(child.alleles[locus*2+1]!));}
+  const mutated=inheritGenome(w.seed,'child',[a,b],1);assert.equal(mutated.mutations,ALLELE_COUNT);assert.notDeepEqual(mutated.alleles,child.alleles);assert.ok(mutated.alleles.every(n=>n>=0&&n<=1));assert.ok(expressGenome(mutated).care>=0);
 });
 
 test('resource-dependent birth spends parental reserves, inherits parameters and starts a new learning history', () => {

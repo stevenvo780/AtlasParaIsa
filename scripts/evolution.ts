@@ -15,7 +15,7 @@ import { analyzeTechnologyOrganization } from '../src/world/technology-organizat
 // gestures, parents, food, replacement inhabitants, destinations, or research designs.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SAVE_EVERY = 120, SAMPLE_EVERY = 1200;
-const LOCI = ['curiosity', 'sociability', 'industriousness', 'care', 'resilience', 'learning', 'cooperation'] as const;
+const LOCI = ['curiosity', 'sociability', 'industriousness', 'care', 'resilience', 'learning', 'cooperation', 'escucha'] as const;
 
 function options() {
   const values = new Map<string, string>();

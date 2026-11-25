@@ -21,7 +21,7 @@ import type { ChronicleEvent } from '../src/shared/types.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { demographicTraits, exposureDamage, initialDemography, updateDemography } from '../src/world/demography.js';
-import { assertGenome, founderGenome, localRandom } from '../src/world/genetics.js';
+import { ALLELE_COUNT, assertGenome, founderGenome, localRandom } from '../src/world/genetics.js';
 import { BROKEN_CONDITION } from '../src/world/inventions.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation, referencedLegacy, retainLegacy, RECENT_LEGACY_COUNT } from '../src/world/lineage.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, type WorldParams } from '../src/world/params.js';
@@ -46,7 +46,7 @@ const oFail = (): never => { throw new Error('Registro de identidad o población
 
 function originalDemographicTraits(genome: { alleles: readonly number[] }, longevity: Readonly<LongevityLaw> = DEFAULT_PARAMS.cuerpo): DemographicTraits {
   const nonNegative = (value: number) => Number.isFinite(value) && value >= 0;
-  if (!Array.isArray(genome.alleles) || genome.alleles.length !== 14 || !genome.alleles.every(oUnit)) throw new RangeError('Alelos demográficos inválidos.');
+  if (!Array.isArray(genome.alleles) || genome.alleles.length !== ALLELE_COUNT || !genome.alleles.every(oUnit)) throw new RangeError('Alelos demográficos inválidos.');
   if (!(nonNegative(longevity.longevidadBaseDias) && nonNegative(longevity.longevidadPorResiliencia) && nonNegative(longevity.longevidadPorActividad)
     && nonNegative(longevity.senescenciaInicioFraccion))) throw new RangeError('Ley de longevidad inválida.');
   const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2;
@@ -476,13 +476,13 @@ const RECORD_MUTATIONS: Mutation[] = [
   ['communityId vacía', r => { r.communityId = ''; }], ['communityId válida', r => { r.communityId = 'c-1'; }], ['communityId undefined', r => { r.communityId = undefined; }],
   ['genome null', r => { r.genome = null; }], ['genome array', r => { r.genome = []; }], ['genome clave extra', r => { r.genome.extra = 1; }],
   ['genome sin mutations', r => { delete r.genome.mutations; }],
-  ['alelos 13', r => { r.genome.alleles.pop(); }], ['alelos 15', r => { r.genome.alleles.push(0.5); }], ['alelos no array', r => { r.genome.alleles = { length: 14 }; }],
+  ['alelos 13', r => { r.genome.alleles.pop(); }], ['alelos 15', r => { r.genome.alleles.push(0.5); }], ['alelos no array', r => { r.genome.alleles = { length: ALLELE_COUNT }; }],
   ['alelo 8 NaN', r => { r.genome.alleles[8] = Number.NaN; }], ['alelo 0 > 1', r => { r.genome.alleles[0] = 1.0000001; }], ['alelo 12 < 0', r => { r.genome.alleles[12] = -1e-300; }],
   ['alelo 3 -0', r => { r.genome.alleles[3] = -0; }], ['alelo 3 "0.5"', r => { r.genome.alleles[3] = '0.5'; }], ['alelo 11 Infinity', r => { r.genome.alleles[11] = Number.POSITIVE_INFINITY; }],
   ['alelo 8 cambia (rasgos discordantes)', r => { r.genome.alleles[8] = r.genome.alleles[8] === 0.25 ? 0.5 : 0.25; }],
   ['alelo 12 cambia (rasgo no demográfico)', r => { r.genome.alleles[12] = r.genome.alleles[12] === 0.25 ? 0.5 : 0.25; }],
   ['alelo 12 hueco', r => { delete r.genome.alleles[12]; }], ['alelo 8 hueco', r => { delete r.genome.alleles[8]; }],
-  ['mutations 15', r => { r.genome.mutations = 15; }], ['learningRate 0.03', r => { r.genome.learningRate = 0.03; }], ['cooperation 1.1', r => { r.genome.cooperation = 1.1; }],
+  ['mutations 17', r => { r.genome.mutations = ALLELE_COUNT + 1; }], ['learningRate 0.03', r => { r.genome.learningRate = 0.03; }], ['cooperation 1.1', r => { r.genome.cooperation = 1.1; }],
   ['genome.generation 1', r => { r.genome.generation = 1; }],
   ['traits null', r => { r.traits = null; }], ['traits clave extra', r => { r.traits.extra = 1; }], ['traits sin maximumAge', r => { delete r.traits.maximumAge; }],
   ['foodDemand + 1 ULP', r => { r.traits.foodDemand += Number.EPSILON; }], ['waterDemand distinto', r => { r.traits.waterDemand += 0.01; }],
@@ -520,7 +520,7 @@ test('V18 fail-closed: demographicTraits y updateDemography dan el valor o el Ra
     ['alelo -0', () => ({ alleles: Object.assign([...genome().alleles], { 8: -0, 9: -0 }) })],
     ['alelo 1+ε', () => ({ alleles: Object.assign([...genome().alleles], { 13: 1 + Number.EPSILON }) })],
     ['alelo string', () => ({ alleles: Object.assign([...genome().alleles], { 4: '0.5' }) })],
-    ['alelos no array', () => ({ alleles: { length: 14 } })], ['alelos null', () => ({ alleles: null })],
+    ['alelos no array', () => ({ alleles: { length: ALLELE_COUNT } })], ['alelos null', () => ({ alleles: null })],
     ['alelos array-like tipado', () => ({ alleles: Float64Array.from([...genome().alleles]) })],
   ];
   const laws: [string, LongevityLaw][] = [

@@ -3,7 +3,7 @@ import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.j
 import type { StructureView } from '../shared/life.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
-import { assertGenome, GENE_COUNT, type Genome } from './genetics.js';
+import { ALLELE_COUNT, assertGenome, type Genome } from './genetics.js';
 import { demographicTraits, exposureDamage, updateDemography } from './demography.js';
 import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
@@ -21,7 +21,6 @@ const RECORD_KEYS = ['id', 'name', 'role', 'generation', 'parents', 'bornAt', 'd
 const GENOME_KEYS = ['generation', 'parents', 'learningRate', 'cooperation', 'mutations', 'alleles'] as const;
 const STATE_KEYS = ['age', 'health', 'vitality', 'deathCause'] as const;
 const DYNAMICS_KEYS = ['deaths', 'causes', 'foodLost', 'woodLost', 'stoneLost'] as const;
-const ALLELE_COUNT = GENE_COUNT * 2;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -71,7 +70,7 @@ function plainGenome(genome: Genome): boolean {
   if (!Array.isArray(alleles) || alleles.length !== ALLELE_COUNT || !Array.isArray(parents)) return false;
   for (let i = 0; i < ALLELE_COUNT; i++) { const allele = alleles[i]; if (!(typeof allele === 'number' && allele >= 0 && allele <= 1)) return false; }
   const generation = genome.generation, mutations = genome.mutations, learningRate = genome.learningRate, cooperation = genome.cooperation;
-  if (!Number.isSafeInteger(generation) || generation < 0 || !Number.isInteger(mutations) || mutations < 0 || mutations > 14
+  if (!Number.isSafeInteger(generation) || generation < 0 || !Number.isInteger(mutations) || mutations < 0 || mutations > ALLELE_COUNT
     || !Number.isFinite(learningRate) || learningRate < 0.04 || learningRate > 0.2 || !Number.isFinite(cooperation) || cooperation < 0 || cooperation > 1) return false;
   if (parents.length === 0) return generation === 0;
   if (parents.length !== 2 || generation === 0) return false;

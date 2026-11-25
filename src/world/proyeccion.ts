@@ -5,6 +5,7 @@ import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } fr
 import { bindWorldContext, projectTerrain, worldContext } from './spatial.js';
 import { paramsOf } from './params.js';
 import { demographicTraits } from './demography.js';
+import { escuchaDe } from './genetics.js';
 import { constructionCost } from './inventions.js';
 import { worldStatistics } from './statistics.js';
 import { residentFastAccess, type ResidentFastAccess } from './soa/terreno.js';
@@ -129,7 +130,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     tiles: projected.tiles.map(t => projectTile(t, fastTiles)),
     people: peopleInView.map((p): PersonView => {
       const life = demographicTraits(p.genome, cuerpo);
-      return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
+      return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, escucha: escuchaDe(p.genome), skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || WORKING_ACTIONS.has(p.action) && distance(p,p.target)<0.5,
       workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
         : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),

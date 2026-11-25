@@ -185,7 +185,7 @@ function metricasServidor(world: World, p95PasoFinal: number, cloneMsMuestras: r
   const rasgosPorGeneracion: Record<string, Rasgos> = {};
   for (const [generacion, { cuenta, suma }] of [...sumas.entries()].sort((a, b) => a[0] - b[0]))
     rasgosPorGeneracion[String(generacion)] = { resilience: suma.resilience / cuenta, learningRate: suma.learningRate / cuenta, curiosity: suma.curiosity / cuenta, sociability: suma.sociability / cuenta, care: suma.care / cuenta };
-  // Varianza media de los 14 alelos (GENE_COUNT*2) entre los vivos; 0 con 0 o 1 habitante (sin
+  // Varianza media de los 16 alelos (ALLELE_COUNT) entre los vivos; 0 con 0 o 1 habitante (sin
   // pareja no hay dispersión que medir, no es indefinido).
   let varianzaGenetica = 0;
   if (vivos.length > 0) {

@@ -1,6 +1,6 @@
 import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits, DemographicTransition, LongevityLaw, SenescenceLaw } from '../shared/demography.js';
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges } from '../shared/demography.js';
-import { localRandom } from './genetics.js';
+import { ALLELE_COUNT, localRandom } from './genetics.js';
 import { DEFAULT_PARAMS } from './params.js';
 
 /** Reexportado desde `shared/demography.ts`, donde vive junto a la geometría de la ley de
@@ -35,7 +35,7 @@ export function initialDemography(age = 0): DemographicState {
  * los rasgos (demanda de comida y agua, madurez, descanso reproductivo) no dependen de esta ley:
  * sólo del genoma, y por eso `assertLegacyRecord` puede seguir recalculándolos sin mundo. */
 export function demographicTraits(genome: { alleles: readonly number[] }, longevity: Readonly<LongevityLaw> = DEFAULT_PARAMS.cuerpo): DemographicTraits {
-  if (!Array.isArray(genome.alleles) || genome.alleles.length !== 14 || !unitAlleles(genome.alleles)) throw new RangeError('Alelos demográficos inválidos.');
+  if (!Array.isArray(genome.alleles) || genome.alleles.length !== ALLELE_COUNT || !unitAlleles(genome.alleles)) throw new RangeError('Alelos demográficos inválidos.');
   if (!(nonNegative(longevity.longevidadBaseDias) && nonNegative(longevity.longevidadPorResiliencia) && nonNegative(longevity.longevidadPorActividad)
     && nonNegative(longevity.senescenciaInicioFraccion))) throw new RangeError('Ley de longevidad inválida.');
   const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2;

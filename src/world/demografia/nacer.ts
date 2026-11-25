@@ -1,13 +1,14 @@
 import type { World, Person } from '../mundo/tipos.js';
 import { clamp, distance } from '../mundo/geometria.js';
 import { addEvent, remember } from '../mundo/crear.js';
-import { paramsOf } from '../params.js';
-import { inheritGenome, DEFAULT_MUTATION_RATE, expressGenome } from '../genetics.js';
+import { ley, paramsOf } from '../params.js';
+import { inheritGenome, DEFAULT_MUTATION_RATE, expressGenome, type Genome } from '../genetics.js';
 import { proceduralPersonName, proceduralPlaceName } from '../terrain.js';
 import { inheritCulture } from '../society.js';
 import { initialTechnologyKnowledge } from '../technology.js';
 import { initialDemography } from '../demography.js';
-import { founderPolicy, inheritPolicy, initialPolicyPlasticity } from '../politica.js';
+import { founderPolicy, inheritPolicy, initialPolicyPlasticity, type PolicyGenome } from '../politica.js';
+import type { Cuerpo } from '../materia/tipos.js';
 import { count } from '../statistics.js';
 import { selectLocalBirthPairs, ALIMENTO_MEDIO_MINIMO_NATALIDAD } from '../natalidad-local.js';
 import { closeKin, pairAffinity, pairTie, chooseReproductivePartner, reproductiveReadiness } from '../family.js';
@@ -20,6 +21,8 @@ import { vecinos } from '../rejilla.js';
 const ELECCION_POR_AFINIDAD = true;
 
 export function reproduce(world: World): void {
+  // Con `v23.natalidad` este paso está sustituido por `leyNatalidad`: aunque alguien lo llame, no hace nacer a nadie.
+  if (ley(world, 'natalidad')) return;
   const pop = paramsOf(world).poblacion;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
   // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
@@ -31,6 +34,8 @@ export function reproduce(world: World): void {
   // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
   const materializeBirth = (a: Person, b: Person, place: (typeof world.places)[number]): void => {
+    // El nacimiento heredado copia a la madre y no sabe hacer un cuerpo de átomos: con cuerpos, nace por `leyNatalidad`.
+    if (ley(world, 'cuerpos')) throw new Error('v23.cuerpos exige v23.natalidad: el nacimiento heredado no crea cuerpos de átomos.');
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
     const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
@@ -60,6 +65,9 @@ export function reproduce(world: World): void {
     // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.
     child.policy = undefined;
     child.policyPlasticity = undefined;
+    // Estado de la natalidad V23 de una madre que nació con esa ley encendida: no se copia a una cría heredada.
+    if (child.crianza !== undefined) child.crianza = undefined;
+    if (child.cuerpoVisto !== undefined) child.cuerpoVisto = undefined;
     if (paramsOf(world).conducta.politicaPeso > 0) {
       const parentPolicyA = a.policy ?? founderPolicy(world.seed, a.id);
       const parentPolicyB = b.policy ?? founderPolicy(world.seed, b.id);
@@ -139,6 +147,51 @@ export function reproduce(world: World): void {
 }
 
 
-function fertile(world: World, person: Person): boolean {
+/** Fertilidad de la ley heredada (con `v23.natalidad` manda `fertil` de natalidad.ts). */
+export function fertile(world: World, person: Person): boolean {
   return person.inventory >= 0.1 && reproductiveReadiness(world, person);
+}
+
+/** Lo que la natalidad V23 decide de una cría antes de crearla. */
+export interface DatosCria {
+  uid: number; id: string; genome: Genome; policy: PolicyGenome | undefined;
+  /** Ids de quienes la cuidan (la gestante primero) y vínculo con que nace hacia cada uno. */
+  cuidadores: string[]; apego: number;
+  /** Masa sobre masa adulta al nacer. */
+  madurez: number;
+  /** Lo gestado: alimento que trae (mundo escalar) o su cuerpo de átomos y su carga (`v23.cuerpos`). */
+  inventario: number; cuerpo?: Cuerpo; carga?: number[];
+}
+
+/**
+ * La persona que nace con `v23.natalidad` (la da de alta `leyNatalidad`, que es quien paga y registra el parto). Parte
+ * de una copia de la gestante, como el nacimiento heredado, pero todo lo que trae sale de lo gestado: no recibe nada
+ * que su madre no haya pagado. Nace con hogar (donde nace), con el agua que su madre recuerda, vinculada a sus
+ * cuidadores y, con cuerpos de átomos, con `cuerpo` y `carga` ya puestos. Lo aprendido en vida no se hereda.
+ */
+export function crearCria(world: World, madre: Person, d: DatosCria): Person {
+  const params = paramsOf(world), tick = world.tick, traits = expressGenome(d.genome);
+  const name = params.social.derivaCultural > 0
+    ? proceduralPersonName(world.seed, d.uid, d.genome.generation)
+    : `${proceduralPlaceName(world.seed, d.uid, d.genome.generation).split(' ')[0]} ${d.uid}`.slice(0, 70);
+  const bonds: Record<string, number> = {};
+  for (const cuidador of d.cuidadores) bonds[cuidador] = d.apego;
+  const conPolitica = params.conducta.politicaPeso > 0 && d.policy !== undefined;
+  const cria: Person = { ...structuredClone(madre), id: d.id, name, role: 'neighbor', uid: d.uid,
+    genome: d.genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: tick, lastBirth: tick, thirst: 0.15,
+    hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: d.inventario, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds,
+    culture: inheritCulture(world.seed, d.id, madre.culture, madre.culture, params.social.derivaCultural),
+    command: null, controlMode: 'auto', target: { x: madre.x, y: madre.y }, action: 'rest', reason: 'Acaba de nacer y depende de quien lo cuida.', work: 0, decisionAt: tick + 30, lastOutcome: tick, lastPracticeMemory: tick, recentMemory: null,
+    lastSocial: tick, lastDispute: tick, lastMeeting: tick, lastShared: tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: d.uid * 2.399963229728653,
+    blueprintId: null, lastInvention: tick,
+    technology: initialTechnologyKnowledge(), demography: initialDemography(),
+    home: { x: madre.x, y: madre.y, quality: madre.home ? madre.home.quality : 1 - Math.max(madre.hunger, madre.thirst, madre.fatigue), observedAt: tick },
+    waterMemory: madre.waterMemory ? { x: madre.waterMemory.x, y: madre.waterMemory.y } : undefined,
+    crianza: { cuidadores: [...d.cuidadores], madurez: d.madurez }, cuerpoVisto: undefined,
+    partnerMemory: undefined, agreement: undefined, compounds: undefined, conflictMemory: undefined, huntingPreyId: undefined, tending: undefined,
+    policy: conPolitica ? d.policy : undefined, policyPlasticity: conPolitica ? initialPolicyPlasticity() : undefined,
+    ...(d.cuerpo ? { cuerpo: d.cuerpo, carga: d.carga ?? [] } : undefined),
+  };
+  if ((cria as unknown as Record<string, unknown>).vocacion !== undefined) (cria as unknown as Record<string, unknown>).vocacion = undefined;
+  return cria;
 }

@@ -12,9 +12,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 import { createBrowserTestServer as createServer } from './lib/vite.js';
-import { applyClientTapeDelta, indexTiles, type TapeChunkResponse, type TapeClientDelta, type TapeMetaResponse } from '../src/shared/tape.js';
+import { applyClientTapeDelta, indexTiles, type TapeClientDelta } from '../src/shared/tape-delta.js';
 import { PROTOCOL_VERSION, type Tile, type WorldView } from '../src/shared/types.js';
-import { DVR_LIMITS, DvrPlayer, type DvrChunkRequest, type DvrFrameInfo } from '../src/client/dvr-player.js';
 
 /* ------------------------------------------------------------------ */
 /* Cinta sintética: fotogramas completos y sus deltas                  */
@@ -49,41 +48,6 @@ function deltaOf(tick: number): TapeClientDelta {
   };
 }
 
-interface TapeOptions { min?: number; max?: number; delta: boolean }
-
-function harness(options: TapeOptions) {
-  const tape = { min: options.min ?? 0, max: options.max ?? 1000 };
-  const requests: DvrChunkRequest[] = [];
-  const emitted: { frame: WorldView; info: DvrFrameInfo }[] = [];
-  const meta = (): TapeMetaResponse => ({ enabled: true, observerOnly: false, turbo: true, minTick: tape.min, maxTick: tape.max, latestDay: 10, totalFrames: tape.max - tape.min + 1, keyframeInterval: 60, simHz: 100, keyframeTicks: [], timeline: [] });
-  const player = new DvrPlayer({
-    metaPollMs: 0, viewportCoalesceMs: 10,
-    fetchMeta: async () => meta(),
-    fetchChunk: async request => {
-      requests.push(request);
-      const from = Math.max(request.fromTick, tape.min), to = Math.min(tape.max, from + request.count - 1);
-      const base = { fromTick: from, toTick: to, minTick: tape.min, maxTick: tape.max, simHz: 100, hasMore: to < tape.max };
-      if (options.delta) {
-        const deltas: TapeClientDelta[] = [];
-        for (let tick = from + 1; tick <= to; tick++) deltas.push(deltaOf(tick));
-        return { ...base, encoding: 'delta', frames: [], baseFrame: fullFrame(from), deltas } satisfies TapeChunkResponse;
-      }
-      const frames: WorldView[] = [];
-      for (let tick = from; tick <= to; tick++) frames.push(fullFrame(tick));
-      return { ...base, frames } satisfies TapeChunkResponse;
-    },
-    onFrame: (frame, info) => { emitted.push({ frame, info }); },
-  });
-  return { player, requests, emitted, tape };
-}
-
-/** Avanza el reloj a 60 fps durante `ms` y devuelve el reloj final. */
-function run(player: DvrPlayer, from: number, ms: number): number {
-  let now = from;
-  for (const end = from + ms; now < end; now += 1000 / 60) player.advance(now);
-  return now;
-}
-
 test('contrato: el trozo delta reconstruye exactamente los fotogramas completos (referencia independiente)', () => {
   let frame = fullFrame(10);
   const index = indexTiles(frame.tiles);
@@ -95,123 +59,10 @@ test('contrato: el trozo delta reconstruye exactamente los fotogramas completos 
   }
 });
 
-test('DvrPlayer delta: llegar el trozo NO expande los deltas; se expanden al cruzarlos con advance()', async () => {
-  const h = harness({ delta: true, max: 1000 });
-  assert.equal(await h.player.start(), true);
-  await h.player.seek(100); // el borde vivo solo tiene ~30 fotogramas por delante: se prueba un trozo entero de 90
-  assert.equal(h.requests.at(-1)!.count, DVR_LIMITS.chunkCount);
-  assert.equal(h.emitted.length, 2, 'solo el fotograma base de cada salto se entrega al llegar el trozo');
-  assert.equal(h.player.decodedDeltas, 0, 'cero deltas expandidos tras recibir 90 fotogramas');
-  assert.equal(h.player.bufferedAhead, DVR_LIMITS.chunkCount - 1, 'los 89 deltas esperan sin expandir en la cola');
-  const first = h.emitted[1]!;
-  assert.equal(first.info.discontinuity, true);
-  assert.equal(first.info.changedTiles, undefined, 'la base es un fotograma completo: se ingiere frame.tiles');
-
-  h.player.advance(0);
-  let now = run(h.player, 16, 500); // ≈ 500 ms a 1× → unos pocos ticks
-  const crossed = h.emitted.length - 2;
-  assert.ok(crossed > 0 && crossed < 30);
-  assert.equal(h.player.decodedDeltas, crossed, 'se expande exactamente un delta por fotograma cruzado');
-  assert.ok(h.player.bufferedAhead > DVR_LIMITS.chunkCount - 1 - 40, 'el resto sigue sin expandir');
-  now = run(h.player, now, 100);
-  assert.equal(h.player.decodedDeltas, h.emitted.length - 2);
-});
-
-test('DvrPlayer delta: paridad exacta con trozos full (1×, 25×, prefetch entre trozos, step, seek, cámara, borde vivo)', async () => {
-  const a = harness({ delta: true }), b = harness({ delta: false });
-  await Promise.all([a.player.start(), b.player.start()]);
-  const same = (label: string): void => {
-    assert.equal(a.emitted.length, b.emitted.length, `${label}: mismos fotogramas emitidos`);
-    for (let i = 0; i < a.emitted.length; i++) {
-      assert.deepEqual(a.emitted[i]!.frame, b.emitted[i]!.frame, `${label} #${i}`);
-      assert.equal(a.emitted[i]!.info.skipped, b.emitted[i]!.info.skipped, `${label} #${i} skipped`);
-      assert.equal(a.emitted[i]!.info.discontinuity, b.emitted[i]!.info.discontinuity);
-      assert.equal(a.emitted[i]!.info.reason, b.emitted[i]!.info.reason);
-    }
-    for (const key of ['bufferedAhead', 'maxLoadedTick', 'currentTick', 'playTick', 'aheadOfPlayhead', 'atLiveEdge'] as const) assert.equal(a.player[key], b.player[key], `${label}: ${key}`);
-  };
-  const both = async (fn: (p: DvrPlayer) => unknown): Promise<void> => { await Promise.all([fn(a.player), fn(b.player)]); await flush(); await flush(); };
-  await both(p => p.seek(100)); same('seek inicial');
-
-  let now = 0;
-  await both(p => p.advance(now));
-  for (let i = 0; i < 200; i++) { now += 1000 / 60; await both(p => p.advance(now)); } // cruza el límite del primer trozo (prefetch)
-  same('1×');
-  assert.ok(a.requests.length >= 2 && b.requests.length === a.requests.length, 'el prefetch pidió el trozo siguiente en ambos');
-  await both(p => p.setSpeed(25));
-  for (let i = 0; i < 90; i++) { now += 1000 / 60; await both(p => p.advance(now)); }
-  same('25×');
-  assert.ok(a.emitted.some(e => e.info.skipped > 0), 'a 25× se cruzan varios fotogramas por rAF');
-  await both(p => p.setSpeed(1));
-  await both(p => p.step(-1)); same('step(-1)');
-  await both(p => p.step(1)); same('step(+1)');
-  await both(p => p.step(1)); same('step(+1) ×2');
-  await both(p => p.seek(500)); same('seek');
-  await both(p => p.setPlaying(true));
-  for (let i = 0; i < 30; i++) { now += 1000 / 60; await both(p => p.advance(now)); }
-  same('tras seek');
-  await both(p => { p.setViewport({ x: 4, y: 4, width: 20, height: 20 }); return p.flushViewport(); });
-  same('setViewport');
-  assert.deepEqual(a.requests.at(-1)!.viewport, b.requests.at(-1)!.viewport);
-  await both(p => p.jumpToLiveEdge()); same('jumpToLiveEdge');
-  assert.equal(a.player.currentTick, a.tape.max - DVR_LIMITS.liveMargin);
-});
-
-test('DvrPlayer delta: info.changedTiles trae solo las teselas modificadas y se acumula al saltar fotogramas', async () => {
-  const h = harness({ delta: true });
-  await h.player.start(); await h.player.seek(100);
-  h.player.advance(0);
-  run(h.player, 16, 700);
-  const played = h.emitted.slice(2);
-  assert.ok(played.length > 3);
-  for (const { frame, info } of played) {
-    assert.ok(info.changedTiles, 'los fotogramas de delta llevan changedTiles');
-    assert.ok(info.changedTiles!.length <= 2 && info.changedTiles!.length < frame.tiles.length / 100, `solo ${info.changedTiles!.length} de ${frame.tiles.length} teselas`);
-    for (const tile of info.changedTiles!) assert.ok(frame.tiles.includes(tile), 'cada tesela cambiada es la del fotograma entregado');
-  }
-  // Un tick que no cambia la estructura conserva la misma referencia de `tiles`/`structures` (barato para el cliente).
-  assert.ok(played.some((e, i) => i > 0 && e.frame.structures === played[i - 1]!.frame.structures));
-
-  // A 25× el cabezal cruza varios ticks por rAF: las teselas de los intermedios no se pierden.
-  h.player.setSpeed(25);
-  const before = h.emitted.length;
-  run(h.player, 2000, 200);
-  const fast = h.emitted.slice(before).filter(e => e.info.skipped > 0);
-  assert.ok(fast.length > 0);
-  for (const { info } of fast) assert.ok(info.changedTiles!.length >= 1 && info.changedTiles!.length <= 2 * (info.skipped + 1));
-  const ingestedFromDeltas = new Set<string>();
-  const cache = new Map<string, Tile>(h.emitted[1]!.frame.tiles.map(t => [`${t.x},${t.y}`, t]));
-  for (const { frame, info } of h.emitted.slice(2)) {
-    for (const t of info.changedTiles ?? frame.tiles) { cache.set(`${t.x},${t.y}`, t); ingestedFromDeltas.add(`${t.x},${t.y}`); }
-    for (const t of frame.tiles) assert.deepEqual(cache.get(`${t.x},${t.y}`), t, 'ingerir solo changedTiles deja la caché idéntica a la vista completa');
-  }
-});
-
-test('DvrPlayer delta: una base de trozo (prefetch) vuelve a ser fotograma completo y un delta corrupto no rompe el reproductor', async () => {
-  const h = harness({ delta: true });
-  await h.player.start(); await h.player.seek(100);
-  h.player.advance(0);
-  let clock = 16; // 6 ticks/s a 1×: 90 ticks = 15 s; se cede el turno cada segundo para que lleguen los trozos pedidos
-  for (let second = 0; second < 20; second++) { clock = run(h.player, clock, 1000); await flush(); await flush(); }
-  const bases = h.emitted.filter(e => e.info.changedTiles === undefined && !e.info.discontinuity);
-  assert.ok(h.requests.length >= 2, 'se pidió el segundo trozo');
-  assert.ok(bases.length >= 1, 'la base del segundo trozo llega sin changedTiles (se ingiere completa)');
-  for (const base of bases) assert.deepEqual(base.frame, fullFrame(base.frame.tick));
-
-  const broken = new DvrPlayer({
-    metaPollMs: 0, fetchMeta: async () => ({ enabled: true, observerOnly: false, turbo: true, minTick: 0, maxTick: 100, latestDay: 1, totalFrames: 101, keyframeInterval: 60, simHz: 100, keyframeTicks: [], timeline: [] }),
-    fetchChunk: async request => ({ fromTick: request.fromTick, toTick: request.fromTick + 2, minTick: 0, maxTick: 100, simHz: 100, hasMore: true, encoding: 'delta', frames: [],
-      baseFrame: fullFrame(request.fromTick), deltas: [deltaOf(request.fromTick + 1), { ...deltaOf(request.fromTick + 2), peoplePatch: { upserts: null, removed: [] } as never }] }),
-    onFrame: () => {},
-  });
-  await broken.start(); broken.advance(0);
-  assert.doesNotThrow(() => run(broken, 16, 400));
-  assert.ok(broken.error, 'el fallo de decodificación queda en `error`, sin excepciones sueltas');
-});
-
-test('game.ts pide trozos delta, ingiere solo changedTiles y activa/desactiva setDvrMode', () => {
+test('game.ts usa la red de la cinta (/api/cinta/*), ingiere solo changedTiles y activa/desactiva setDvrMode', () => {
   const game = readFileSync(new URL('../src/client/game.ts', import.meta.url), 'utf8');
-  assert.match(game, /encoding: 'delta'/, 'la petición /api/tape/chunk lleva encoding=delta');
+  assert.match(game, /crearRedCinta\(/, 'las peticiones salen de la red de la cinta');
+  assert.doesNotMatch(game, /\/api\/tape\//);
   assert.match(game, /info\.changedTiles \?\? frame\.tiles/);
   assert.match(game, /landscape\?\.setDvrMode\(true\)/);
   assert.ok((game.match(/landscape\?\.setDvrMode\(false\)/g) ?? []).length >= 2, 'se apaga al parar la cinta y al volver al WebSocket');

@@ -214,7 +214,7 @@ Los controles causales de cuerpos, ecología, aprendizaje, genética, cooperaci�
 
 | Propiedad | Evidencia de ingeniería necesaria |
 |---|---|
-| Determinismo y cámara | Mismas fuentes, estado y entradas producen el mismo mundo; consultar terreno no cambia azar, historia ni regiones activas. |
+| Determinismo y cámara | Desde la V23 el mundo público es irrepetible; solo un mundo de un hilo, sin tarjeta y con semilla da el mismo resultado en dos corridas (es el modo de las pruebas). Consultar terreno no cambia azar, historia ni regiones activas. |
 | Transacción | Snapshot, archivos, hechos y confirmaciones corresponden al mismo paso. Fallar el commit conserva colas pendientes y no confirma gestos. |
 | Identidad y recuperación | IDs monotónicos sin reutilización; parentescos y autores resolubles, sin registros posteriores al corte consultado ni resurrección. |
 | Archivo y memoria | Terreno y legados reaparecen tras reinicio; cachés acotadas conservan referencias necesarias y el crecimiento persistente se mide por separado. |

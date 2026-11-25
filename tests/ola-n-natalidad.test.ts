@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, TICKS_PER_DAY, type Person } from '../src/world/index.js';
+import { assertWorld, createWorld, TICKS_PER_DAY, type Person } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { DIAS_ABORTO, ETA, M0 } from '../src/shared/naturaleza.js';
 import { HAMBRE_POR_UNIDAD } from '../src/world/ecologia-constantes.js';
@@ -80,6 +80,17 @@ test('n: sin sobrante no se gesta y se anota desde cuándo; el parto entrega lo 
   assert.equal(b.enCurso(madre)!.bajoBasalDesde, -1);
   assert.equal(b.parir(madre).inventario, masa);
   assert.equal(b.enCurso(madre), undefined);
+});
+
+test('n: una gestación en curso conserva alelos, generación y mutaciones en el guardado', () => {
+  const world = mundoConLey(), madre = mortal(world), b = balanceEscalar(world);
+  b.concebir(madre, { otro: 9, genoma: [...madre.genome.alleles, 2, 3], inicio: 0 });
+  const guardado: unknown = JSON.parse(JSON.stringify(world));
+  assertWorld(guardado);
+  const cargada = mortal(guardado);
+  assert.deepEqual(b.enCurso(cargada), b.enCurso(madre));
+  cargada.gestacion!.genoma[madre.genome.alleles.length] = 0.5;
+  assert.throws(() => assertWorld(guardado), /Gestación inválida/);
 });
 
 test('n: el hambre paga cuando no lleva nada, sin pasar del día de basal', () => {

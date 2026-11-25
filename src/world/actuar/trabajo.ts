@@ -22,7 +22,7 @@ import { masCercano } from '../motor/vecinos.js';
 import { pagar, soltar, trasladarAlimento } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo } from '../materia/tipos.js';
 import { cazarAnimal, extraerDeAnimal, valorDeAnimal, animalVisto } from './caza.js';
-import { celdaEsPropia, contar, escalaBocado, gastarMaderaEnSuelo, marcarCarne } from './recursos.js';
+import { TOTAL_CAZA_KG, celdaEsPropia, contar, escalaBocado, gastarMaderaEnSuelo, marcarCarne } from './recursos.js';
 
 export function workEffort(person: Person, work = 1) {
   return { energy: work * 0.0003, fatigue: work * 0.00025 * (1.2 - person.traits.resilience * 0.4) };
@@ -197,7 +197,7 @@ function cazarPorTick(c: CtxLeyMateria, person: Person, cuerpo: Cuerpo): void {
   person.huntingPreyId = undefined;
   ultimaPresa.delete(person);
   const success = llevado > 0;
-  if (success) { count(world, 'hunts'); contar(world, 'v23CazaKg', llevado); }
+  if (success) { count(world, 'hunts'); contar(world, TOTAL_CAZA_KG, llevado); }
   outcome(world, person, 'hunt', success ? 0.14 : -0.2, success);
   if (!success) person.reason = 'La presa se perdió de vista sin dejar un cadáver al alcance.';
   if (person.command?.order === 'hunt') { person.command = null; person.controlMode = 'auto'; }

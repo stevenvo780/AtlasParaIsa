@@ -28,7 +28,7 @@ async function prepararMateria(world: World): Promise<MateriaCheckpoint> {
     const persona = world.people[0]!;
     persona.cuerpo = { tejido, reserva, digestivo, plantilla: 0, gestacion: {
       embrion, otro: 1, inicio: world.tick, bajoBasalDesde: -1,
-      genoma: Array<number>(GENOMA_ANCHO).fill(0.5), politica: Array<number>(COLUMNAS_CEREBRO.politica).fill(0),
+      genoma: [...Array<number>(GENOMA_ANCHO).fill(0.5), 2, 3], politica: Array<number>(COLUMNAS_CEREBRO.politica).fill(0),
     } };
     persona.carga = [carga];
     const epoca = 5;

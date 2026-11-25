@@ -170,7 +170,7 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
       const position=`${cell.x},${cell.y}`,tile=positions.get(position);
       const finished=!s.site||(expansion&&completedCells.some(c=>c.x===cell.x&&c.y===cell.y));
       if(!coordinate(cell.x)||!coordinate(cell.y)||!tile||occupied.has(position)
-        ||(finished?tile.terrain!=='shelter':['water','shelter'].includes(tile.terrain)))fail();
+        ||(obra===undefined&&finished?tile.terrain!=='shelter':['water','shelter'].includes(tile.terrain)))fail();
       occupied.add(position);
     }
     ids.add(s.id);

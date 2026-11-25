@@ -18,6 +18,7 @@ import type { WorldSample } from '../../shared/types.js';
 import { assertTechnology } from '../technology.js';
 import { resolveTechnologyRecipe } from '../technology-catalogue.js';
 import { COLUMNAS_CEREBRO, GENOMA_ANCHO } from '../motor/contratos.js';
+import { TOTALES_MATERIA } from '../actuar/recursos.js';
 
 function esRegistro(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -33,14 +34,27 @@ function esVectorFinito(value: unknown): value is number[] {
   return true;
 }
 
-function assertGestacion(value: unknown, tick: number, persona: boolean): void {
+function genomaGestado(genoma: number[]): boolean {
+  if (genoma.length !== GENOMA_ANCHO && genoma.length !== GENOMA_ANCHO + 2) return false;
+  if (genoma.slice(0, GENOMA_ANCHO).some(n => n < 0 || n > 1)) return false;
+  if (genoma.length === GENOMA_ANCHO) return true;
+  const generacion = genoma[GENOMA_ANCHO], mutaciones = genoma[GENOMA_ANCHO + 1];
+  return esReferencia(generacion) && generacion > 0 && esReferencia(mutaciones) && mutaciones <= GENOMA_ANCHO;
+}
+
+function assertGestacion(value: unknown, tick: number, persona: boolean, escalar = false): void {
   const tiempo = (n: unknown): boolean => esReferencia(n) && n <= tick;
-  if (!esRegistro(value) || !esReferencia(value.embrion) || !esReferencia(value.otro)
+  if (!esRegistro(value) || (!escalar && !esReferencia(value.embrion)) || !esReferencia(value.otro)
     || !tiempo(value.inicio) || (value.bajoBasalDesde !== -1 && !tiempo(value.bajoBasalDesde))
-    || !esVectorFinito(value.genoma) || value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO
-    || persona && (value.genoma.length !== GENOMA_ANCHO || value.genoma.some(n => n < 0 || n > 1))
+    || !esVectorFinito(value.genoma)
+    || (persona ? !genomaGestado(value.genoma) : value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO)
     || value.politica !== undefined && (!persona || !esVectorFinito(value.politica)
       || value.politica.length !== COLUMNAS_CEREBRO.politica)) throw new Error('Gestación inválida.');
+  if (escalar) {
+    const { masa, m0, grano } = value;
+    if (typeof masa !== 'number' || !(masa >= 0) || typeof m0 !== 'number' || !Number.isFinite(m0) || m0 <= 0
+      || masa > m0 || typeof grano !== 'number' || !(grano > 0 && grano <= m0)) throw new Error('Gestación escalar inválida.');
+  }
 }
 
 function assertCuerpo(value: unknown, tick: number, persona: boolean): void {
@@ -154,6 +168,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   }
   const numericMap = (v: unknown, min: number, max: number, limit: number) => v && typeof v === 'object' && !Array.isArray(v) && Object.entries(v).length <= limit && Object.entries(v).every(([k, n]) => k.length <= 50 && typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max);
   for (const p of w.people) {
+    if (p.gestacion !== undefined) assertGestacion(p.gestacion, w.tick, true, true);
     if (validarCuerpos) {
       assertCuerpo(p.cuerpo, w.tick, true);
       assertCarga(p.carga);
@@ -183,7 +198,13 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
   }
   if (expectedVersion >= 3) {
-    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, expectedVersion >= 14 ? 13 : 12)) fail();
+    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !esRegistro(w.totals)) fail();
+    const escalares = ley(w, 'cuerpos') ? Object.fromEntries(Object.entries(w.totals).filter(([contador, cantidad]) => {
+      if (!TOTALES_MATERIA.has(contador)) return true;
+      if (!Number.isFinite(cantidad) || cantidad < 0) fail();
+      return false;
+    })) : w.totals;
+    if (!numericMap(escalares, 0, 1e12, expectedVersion >= 14 ? 13 : 12)) fail();
     const communityIds = new Set<string>();
     for (const c of w.communities) {
       if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();

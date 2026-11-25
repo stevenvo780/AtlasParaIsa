@@ -137,9 +137,12 @@ export const TOTAL_DIETA_FAUNA_KG = 'v23DietaFaunaKg';
 export const TOTAL_BEBIDA_KG = 'v23BebidaKg';
 export const TOTAL_FORRAJEO_KG = 'v23ForrajeoKg';
 export const TOTAL_RECOGIDA_KG = 'v23RecogidaKg';
+export const TOTAL_CAZA_KG = 'v23CazaKg';
 /** Σ por persona y tick de la carga a cuestas y de la masa corporal: su cociente es la carga media sobre la masa. */
 export const TOTAL_CARGA_KG_TICK = 'v23CargaKgTick';
 export const TOTAL_MASA_KG_TICK = 'v23MasaKgTick';
+export const TOTALES_MATERIA = new Set<string>([TOTAL_DIETA_KG, TOTAL_DIETA_FAUNA_KG, TOTAL_BEBIDA_KG, TOTAL_FORRAJEO_KG,
+  TOTAL_RECOGIDA_KG, TOTAL_CAZA_KG, TOTAL_CARGA_KG_TICK, TOTAL_MASA_KG_TICK]);
 
 export function contar(world: World, clave: string, cantidad: number): void {
   if (!(cantidad > 0)) return;

@@ -39,7 +39,6 @@ export const structureCap = (world: World): number => ley(world, 'obra') ? Infin
 export const blueprintCap = (world: World): number => ley(world, 'obra') ? Infinity
   : paramsOf(world).construccion.modular ? Number.MAX_SAFE_INTEGER : openWorldCaps(world) ? OPEN_WORLD_MAX_BLUEPRINTS : MAX_BLUEPRINTS;
 export const COLOCACION_J_POR_KG = 20;
-const ENSAYO_OBRA_J = Math.ceil(AREA_OBRA_M2 * MASA_PORTANTE_KG_M2 * COLOCACION_J_POR_KG);
 export const SALTO_TERMICO_COBIJO_K = 20;
 const FORMA_OBRA_INICIAL = codigoForma({ largo: 1, ancho: 1, grueso: 0.12, hueco: 0.25, filo: 0 });
 export interface PlanoObra { area: number; compacto: boolean; forma: number }
@@ -945,13 +944,17 @@ function candidatosObra(c: CtxLeyMateria, persona: Person): InventionCandidate[]
   return paretoCandidates(candidatos).sort((a, b) => b.efficiency - a.efficiency || b.value - a.value || b.novelty - a.novelty);
 }
 
+function costeEnsayoObraJ(): number {
+  return Math.ceil(AREA_OBRA_M2 * MASA_PORTANTE_KG_M2 * COLOCACION_J_POR_KG);
+}
+
 function inventarObra(c: CtxLeyMateria, persona: Person, emit: Emit): boolean {
   const mundo = c.mundo, cuerpo = persona.cuerpo;
   if (!mundo.noveltyEnabled || !cuerpo || !puedeTrabajarEn(c, persona, celdaObra(c, persona))) return false;
   const [candidato] = candidatosObra(c, persona);
   if (!candidato?.planoMaterial) return false;
-  const pago = pagar(c, cuerpo, ENSAYO_OBRA_J);
-  if (pago < ENSAYO_OBRA_J) return false;
+  const coste = costeEnsayoObraJ(), pago = pagar(c, cuerpo, coste);
+  if (pago < coste) return false;
   const { planoMaterial } = candidato;
   const serial = c.globales.registro.insertar(new TextEncoder().encode(JSON.stringify(
     ['obra-v23', planoMaterial.area, planoMaterial.compacto, planoMaterial.forma],
@@ -975,7 +978,7 @@ export function inventionOpportunity(world: World, person: Person): { score: num
   if (ley(world, 'obra')) {
     if (!world.noveltyEnabled || !person.cuerpo) return;
     const c = ctxMateriaDe(world), ticks = Math.max(0, RESEARCH_WORK - (person.action === 'invent' ? person.work : 0));
-    if (reservaJ(c, person.cuerpo) < ENSAYO_OBRA_J + ticks * TRABAJO_J_TICK + basalJ(c, person.cuerpo, ticks)) return;
+    if (reservaJ(c, person.cuerpo) < costeEnsayoObraJ() + ticks * TRABAJO_J_TICK + basalJ(c, person.cuerpo, ticks)) return;
     const [plan] = candidatosObra(c, person);
     if (plan) return { score: plan.value * plan.novelty * person.curiosity, target: { x: person.x, y: person.y },
       reason: 'Una pieza real sugiere otra forma, volumen o reparto de la planta.' };

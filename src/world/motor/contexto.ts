@@ -20,7 +20,7 @@ import { applyGesture } from '../actuar/gestos.js';
 import { faunaCacheAppended, faunaCacheFiltered, type Animal } from '../animals.js';
 import { percepcionDe, olvidarPercepcion } from '../decision/percepcion.js';
 import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { ArenaLotes, LOTES_POR_BLOQUE } from '../materia/arena.js';
+import { ArenaLotes, LOTES_POR_BLOQUE, ranurasDesborde } from '../materia/arena.js';
 import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, decodificarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
 import { plegarLibros, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
@@ -776,6 +776,7 @@ export class Dueno implements CtxF0 {
     // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
     const lotes = guardados.map(l => ({ ...l, celda: celdaLocal(terreno, l.celda), dueno: 0 }));
     this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
+    this.#desborde!.prepararF0(ranurasDesborde(lotes));
     (this.materia as ArenaLotes).cargar(lotes, libres);
     this.registro.cargar(cp.registro);
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };

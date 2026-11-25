@@ -224,6 +224,7 @@ import { projectAnimal } from '../world/animals.js';
 import { crearEnlaceCortes, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
 import { enlaceCinta, regionesRanura } from '../shared/fotograma.js';
 import type { Apertura, Hito } from '../shared/cinta.js';
+import { registrar } from '../world/invariantes.js';
 import type { AppOptions, SaludServidor } from './app.js';
 import type { OperacionSalud } from '../shared/salud.js';
 import type { TelemetriaMotor } from '../world/motor/contratos.js';
@@ -427,6 +428,27 @@ export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId
 /** Minimum spacing between live mirror posts while the turbo loop runs uncapped. */
 export const TURBO_MIRROR_MS = 250;
 
+export function demografiaDeCinta(world: World) {
+  return { poblacion: world.people.length, nacimientos: world.birthCounter, muertes: world.demographyDynamics.deaths };
+}
+
+const basesDemografia = new WeakMap<World, ReturnType<typeof demografiaDeCinta>>();
+export function fijarBaseDemograficaCinta(world: World, base: ReturnType<typeof demografiaDeCinta>): void {
+  basesDemografia.set(world, base);
+}
+
+registrar({ id: 'cinta.serie-demografia', carril: 'C1a', gravedad: 'dura', alcance: 'global', cadaTicks: 200,
+  comprobar(world) {
+    const base = basesDemografia.get(world);
+    if (!base) return [];
+    const { poblacion, nacimientos, muertes } = demografiaDeCinta(world);
+    const esperado = base.poblacion + nacimientos - base.nacimientos - (muertes - base.muertes);
+    if (poblacion === esperado && nacimientos >= base.nacimientos && muertes >= base.muertes) return [];
+    return [{ id: 'cinta.serie-demografia', gravedad: 'dura', tick: world.tick, esperado, observado: poblacion,
+      detalle: 'La serie no conserva el balance demográfico de su época.' }];
+  },
+});
+
 const REINTENTO_CINTA_MS = 1000;
 const ANILLO_SUCESOS_BYTES = 256 * 1024 * 1024;
 const CINTA_SIN_CREDITO_MS = 300_000;
@@ -456,10 +478,12 @@ export class GrabadorCinta {
   private siguiente = 0;
   private cerrando = false;
   private enError = false;
+  private reintento?: ReturnType<typeof setTimeout>;
   private readonly llamadas = new Map<number, { resolve(value: EstadoGrabacion): void; reject(error: Error): void }>();
 
   constructor(private readonly directorio: string, private readonly topeBytes: number | undefined,
-    private readonly binario: boolean, private readonly avisar: (error: string | null) => void) {}
+    private readonly binario: boolean, private readonly avisar: (error: string | null) => void,
+    private readonly reabrir: () => void) {}
 
   get estado() { return this.enError ? 'error' as const : 'ok' as const; }
   get activo() { return this.hilo?.enlace; }
@@ -548,13 +572,21 @@ export class GrabadorCinta {
       void hilo.salida.then(() => {
         Atomics.store(hilo.enlace.creditos, 0, 0);
         this.esperaSalida = undefined;
+        this.programarReintento();
       });
-    }
+    } else this.programarReintento();
     for (const llamada of this.llamadas.values()) llamada.reject(error);
     this.llamadas.clear();
     const avisar = !this.enError;
     this.enError = true;
     if (avisar) this.avisar(error.message);
+  }
+
+  private programarReintento(): void {
+    if (this.cerrando) return;
+    clearTimeout(this.reintento);
+    this.reintento = setTimeout(this.reabrir, Math.ceil(Math.max(1, this.reintentoEn - performance.now())));
+    this.reintento.unref();
   }
 
   private orden(tipo: 'flush' | 'close'): Promise<EstadoGrabacion> {
@@ -572,6 +604,7 @@ export class GrabadorCinta {
 
   async cerrar(): Promise<void> {
     this.cerrando = true;
+    clearTimeout(this.reintento);
     const hilo = this.hilo;
     if (hilo) {
       try { await this.orden('close'); }

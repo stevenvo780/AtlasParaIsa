@@ -43,7 +43,8 @@ import { CINTA, type ChunkReq, type CintaMeta, type Corte, type Hito, type Nivel
 import { chronicleSerial } from '../world/chronicle-journal.js';
 import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
 import type { Chunk } from '../world/terrain.js';
-import { GrabadorCinta, createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, teselasParaEmision, TURBO_MIRROR_MS, vistaParaEmision } from './sim-worker.js';
+import { GrabadorCinta, createTileObserver, demografiaDeCinta, fijarBaseDemograficaCinta, projectMirrorTile,
+  projectMirrorWorld, projectTapeFrame, teselasParaEmision, TURBO_MIRROR_MS, vistaParaEmision } from './sim-worker.js';
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
@@ -729,7 +730,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   let muestreoFallido = false;
   /** El diagnóstico observa el paso ya confirmado: un fallo suyo no puede saltarse la difusión ni la telemetría. */
   function muestrear(mundo = world): void {
-    try { muestreador?.paso(mundo, runtime.stepMs); }
+    try {
+      if (options.onEstadoCinta && grabador?.activo && baseDemografia) fijarBaseDemograficaCinta(mundo, baseDemografia);
+      muestreador?.paso(mundo, runtime.stepMs);
+    }
     catch (error) {
       if (muestreoFallido) return;
       muestreoFallido = true;
@@ -773,10 +777,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const grabador = directorioCinta ? new GrabadorCinta(directorioCinta, options.tapeTopeBytes, binario, error => {
     if (options.onEstadoCinta) options.onEstadoCinta(error);
     else if (error) console.warn(`La cinta dejó de grabar: ${error}.`);
+  }, () => {
+    if (stopped) return;
+    try { prepararCinta(); grabarCinta(); }
+    catch (error) { recuperarPaso(error, false, tickMotor); }
   }) : undefined;
   let observadorCinta: ReturnType<typeof createTileObserver> | undefined;
   let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, serialCronica = 0;
-  let ultimoPuntoSerie = -1, baseNacimientos = 0, baseMuertes = 0;
+  let ultimoPuntoSerie = -1;
+  let baseDemografia: ReturnType<typeof demografiaDeCinta> | undefined;
   const hitosCinta: Hito[] = [];
   const eventoGuardado = directorioCinta && !binario ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
@@ -819,7 +828,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const muestra = mundoParaEmision(true);
     hitosCinta.length = 0;
     ultimoCorte = -Infinity; ultimoPuntoSerie = -1; observadorCinta = createTileObserver();
-    serialCronica = muestra.eventCounter; baseNacimientos = muestra.birthCounter; baseMuertes = muestra.demographyDynamics.deaths;
+    serialCronica = muestra.eventCounter;
+    baseDemografia = demografiaDeCinta(muestra);
     Atomics.store(grabador.activo.pedirCompleto, 0, 1);
     for (const suceso of muestra.events) if (suceso.tick === muestra.tick && (epocaCinta === 0 || chronicleSerial(suceso.id) === null)) {
       hitosCinta.push(hitoCinta(suceso));
@@ -838,7 +848,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   function grabarCinta(forzar = false): void {
     const enlace = grabador?.activo;
-    if (binario || !grabador || !enlace || failed || aMedioPaso || !observadorCinta) return;
+    if (binario || !grabador || !enlace || failed || aMedioPaso || !observadorCinta || !baseDemografia) return;
     const tick = motor ? tickMotor : world.tick;
     const completo = ultimoCorte < 0;
     const punto = ultimoPuntoSerie < 0 || tick > ultimoPuntoSerie && tick % CINTA.seriePaso === 0;
@@ -848,8 +858,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try {
       const muestra = mundoParaEmision(true);
       recogerCronica(muestra);
-      const serie = { poblacion: muestra.people.length, nacimientos: muestra.birthCounter - baseNacimientos,
-        muertes: muestra.demographyDynamics.deaths - baseMuertes, fauna: muestra.animals.length, estructuras: muestra.structures.length,
+      const actual = demografiaDeCinta(muestra);
+      const serie = { poblacion: actual.poblacion, nacimientos: actual.nacimientos - baseDemografia.nacimientos,
+        muertes: actual.muertes - baseDemografia.muertes, fauna: muestra.animals.length, estructuras: muestra.structures.length,
         sustancias: muestra.chemistry?.formulas.length ?? 0, hz: simHz };
       if (punto) {
         grabador.enviar({ type: 'serie', epoca, punto: { t: tick, ...serie } });

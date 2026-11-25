@@ -183,7 +183,36 @@ function analizar(carpetas: string[]): void {
     const misma = semillas.map(s => dvt(base.get(s)!.acciones, otro.get(s)!.acciones));
     console.log(`DVT media misma semilla A↔B: ${(misma.reduce((x, y) => x + y, 0) / misma.length).toFixed(4)}; entre semillas dentro de A: ${entre(base).toFixed(4)}; dentro de B: ${entre(otro).toFixed(4)}\n`);
   }
+  // Las decisiones de una corrida no son independientes (un mundo caótico es UNA muestra por semilla): la prueba
+  // honesta es por semilla, emparejada, con el signo de la diferencia permutado (2^semillas casos, exacta).
+  const signos = (d: number[]) => {
+    const media = Math.abs(d.reduce((x, y) => x + y, 0)) / d.length;
+    let extremos = 0;
+    for (let m = 0; m < 1 << d.length; m++) {
+      const v = Math.abs(d.reduce((x, y, i) => x + (m >> i & 1 ? -y : y), 0)) / d.length;
+      if (v >= media - 1e-15) extremos++;
+    }
+    return { media: d.reduce((x, y) => x + y, 0) / d.length, p: extremos / (1 << d.length) };
+  };
+  const media = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
+  const parte = (r: Corrida, k: string) => (r.acciones[k] ?? 0) / Object.values(r.acciones).reduce((x, y) => x + y, 0);
   const A = juntar(base);
+  const principales = Object.entries(A.acciones).sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k]) => k);
+  for (let k = 1; k < brazos.length; k++) {
+    const otro = brazos[k]!;
+    console.log(`## Por semilla, emparejado (${carpetas[0]} → ${carpetas[k]}): diferencia media y p exacto de signos\n`);
+    console.log('| medida | ' + semillas.join(' | ') + ' | media | p |');
+    console.log('|---|' + semillas.map(() => '---|').join('') + '---|---|');
+    const fila = (nombre: string, f: (r: Corrida) => number, escala = 1, dec = 2) => {
+      const d = semillas.map(s => (f(otro.get(s)!) - f(base.get(s)!)) * escala), t = signos(d);
+      console.log(`| ${nombre} | ${d.map(x => x.toFixed(dec)).join(' | ')} | ${t.media.toFixed(dec)} | ${t.p.toFixed(3)} |`);
+    };
+    for (const a of principales) fila(`% ${a}`, r => parte(r, a), 100);
+    fila('dist. objetivo media', r => media(r.distObjetivo), 1, 3);
+    fila('recorrido por persona y día', r => media(r.recorrido), 1, 2);
+    fila('personas el último día', r => r.personasPorDia.at(-1)!, 1, 1);
+    console.log('');
+  }
   const total = Object.values(A.acciones).reduce((s, x) => s + x, 0);
   console.log('Acciones (A, juntas): ' + Object.entries(A.acciones).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${(100 * v / total).toFixed(1)} %`).join(', '));
 }

@@ -662,7 +662,8 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
 }, async t => {
   const dir = directorio(t);
   const inicio = performance.now();
-  // `ATLAS_V23_CINTA_SALTO_MUNDO=personas,animales,lado` cambia el mundo sintético (lado en chunks); el de I5 es el de omisión.
+  // `ATLAS_V23_CINTA_SALTO_MUNDO=personas,animales,lado` cambia el mundo sintético (lado en chunks, ≥ 6 para la cámara de
+  // 96×64); el de I5 es el de omisión.
   const objetivo = Number(process.env.ATLAS_V23_CINTA_SALTO_BYTES ?? 5e9), mundo = process.env.ATLAS_V23_CINTA_SALTO_MUNDO?.split(',').map(Number);
   const resumen = volumenSintetico(join(dir, 'cinta'), objetivo, mundo as [number, number, number] | undefined);
   t.diagnostic(`escritura: ${((performance.now() - inicio) / 1000).toFixed(0)} s`);
@@ -689,7 +690,7 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
       // Los bloques del volumen empiezan en múltiplos de 32 pasos: la clave ≤ t y el primer fotograma ≥ t son exactos.
       const paso = CINTA.pasos[n.nivel], clave = Math.floor(tick / (32 * paso)) * 32 * paso;
       assert.ok(r.baseFrame && r.nivel === n.nivel && r.t0 === clave && r.baseFrame.tick === clave && r.t1 === Math.ceil(tick / paso) * paso
-        && r.baseFrame.tiles.length === (n.nivel <= 2 ? 96 * 64 : 0), JSON.stringify({ tick, ...r, baseFrame: !!r.baseFrame }));
+        && r.baseFrame.tiles.length === (n.nivel <= 2 ? 96 * 64 : 0), JSON.stringify({ tick, nivel: r.nivel, t0: r.t0, t1: r.t1, teselas: r.baseFrame?.tiles.length }));
       if (i % 10 === 0) { inicio = performance.now(); lector.chunk({ t: tick, n: 1, nivel: n.nivel }); sinCamara.push(performance.now() - inicio); }
     }
     const orden = [...pared].sort((a, b) => a - b);

@@ -23,7 +23,7 @@ import { LUZ_CREPSCULO } from '../src/world/ecologia-constantes.js';
 import { TICKS_PER_DAY } from '../src/world/mundo/tipos.js';
 import { crearServicioQuimico, serializarSustancias } from '../src/world/materia/servicio.js';
 import { MundoMaterial, totalesVacios, CUENTA, DT_LLUVIA, type DescriptorMundo, type Forzamiento } from '../src/world/materia/mundo.js';
-import { pasoLote } from '../src/world/materia/paso.js';
+import { cuentaIntegrador, pasoLote } from '../src/world/materia/paso.js';
 import { fluir } from '../src/world/materia/fluir.js';
 import { CAPACIDAD_ATOMO, ELEMENTOS, KAPPA_SUELO, KAPPA_SUELO_HH } from '../src/shared/naturaleza.js';
 import { Rol, type LoteRef } from '../src/world/materia/tipos.js';
@@ -170,6 +170,7 @@ async function fases(): Promise<void> {
   const tot = totalesVacios(), clima = tiempo(semilla);
   const t = new Float64Array(FASES.length), lotesCuenta = new Float64Array(3);
   let ms = 0, especies = 0, muestras = 0;
+  const c0 = { ...cuentaIntegrador };
   for (let k = 0, tk = 0; k < pasos; k++, tk += cada) {
     const f = clima(tk, cada);
     const t0 = performance.now();
@@ -195,6 +196,9 @@ async function fases(): Promise<void> {
     const n = lotesCuenta[k]!;
     console.log(`| ${nombre} | ${(n / pasos).toFixed(0)} | ${(consultas[k]! / n).toFixed(1)} | ${(reacciones[k]! / n).toFixed(1)} | ${(aplicadas[k]! / n).toFixed(2)} | ${(veces[k]! / Math.max(1, aplicadas[k]!)).toFixed(1)} |`);
   });
+  const integ = cuentaIntegrador.integraciones - c0.integraciones, comp = cuentaIntegrador.compartidas - c0.compartidas;
+  const sub = cuentaIntegrador.subpasos - c0.subpasos;
+  console.log(`integrador: ${integ} integraciones, ${(100 * comp / integ).toFixed(1)} % con reactivo compartido, ${(sub / Math.max(1, comp)).toFixed(1)} subpasos en esas, ${((integ - comp + sub) / integ).toFixed(2)} pasos de integración por integración`);
   console.log(`fuera de la cinética (crecer, fuego…): ${consultas[3]} consultas, ${aplicadas[3]} aplicaciones; sustancias por suelo ${(especies / muestras).toFixed(1)}; total de sustancias ${q.totalSustancias()}`);
 }
 

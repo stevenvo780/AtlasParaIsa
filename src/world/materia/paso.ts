@@ -279,6 +279,10 @@ function consumir(m: number, n: number, desde: Float64Array, destino: Float64Arr
   }
 }
 
+/** Contadores del integrador en este hilo (los lee el banco): integraciones, cuántas con algún reactivo compartido y
+ * subpasos que dieron esas. */
+export const cuentaIntegrador = { integraciones: 0, compartidas: 0, subpasos: 0 };
+
 /** Medias de veces de cada canal en dt, en `xi`: un paso si ningún reactivo se comparte; si no, subpasos (cabecera). */
 function integrar(m: number, n: number, V: number, dt: number): void {
   const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, kT = kTick, xs = x, ritmo = consumo, us = usos, acum = xi;
@@ -286,13 +290,16 @@ function integrar(m: number, n: number, V: number, dt: number): void {
   acum.fill(0, 0, m);
   let compite = false;
   for (let s = 0; s < n; s++) if (us[s]! > 1) compite = true;
+  cuentaIntegrador.integraciones++;
   if (!compite) {
     extensiones(m, n, V, dt, xs, xs);
     for (let k = 0; k < m; k++) acum[k] = ext[k]!;
     return;
   }
+  cuentaIntegrador.compartidas++;
   let resta = dt;
   for (let pasos = 1; resta > 0; pasos++) {
+    cuentaIntegrador.subpasos++;
     ritmo.fill(0, 0, n);
     for (let k = 0; k < m; k++) {
       const i = cI[k]!, j = cJ[k]!;

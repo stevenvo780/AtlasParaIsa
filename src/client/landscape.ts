@@ -159,6 +159,8 @@ const PERSON_SPRITE_LIMIT = 3072;
 const LOTE_CACHE_LIMIT = 1024;
 /** V23: lado de una página del motor en teselas (`Fotograma.paginas`: páginas 16×16). */
 const PAGINA = 16;
+/** V23: lo que dura el destello de una página que cambió de dueño (ms). */
+const MIGRACION_DESTELLO_MS = 1500;
 const PERSON_SPRITE = { w: 32, h: 32, ox: 16, oy: 22 } as const;
 /** V24: ventana pedida al servidor (la mayor que acepta): más grande que la cámara, para no repedir con cada paneo. */
 const REQUEST_WINDOW = { w: 96, h: 64 } as const;
@@ -693,6 +695,8 @@ export class Landscape {
   private reparto: Map<number, number> | null = null;
   private repartoKey = '';
   private readonly coloresHilo = new Map<number, string>();
+  /** Páginas que cambiaron de dueño y cuándo (ms de `performance.now`): destello de la migración en la capa «Hilos». */
+  private readonly migraciones = new Map<number, number>();
   private readonly loteCache = new BoundedCache<HTMLCanvasElement>(LOTE_CACHE_LIMIT, canvas => { canvas.width = canvas.height = 0; });
   private grid: (Tile | undefined)[] = [];
   private prevPeople = new Map<string, PersonView>();
@@ -1489,7 +1493,13 @@ export class Landscape {
     // El reparto viaja solo en los fotogramas completos: entre uno y otro vale el último conocido de este mundo.
     if (world.reparto?.paginas.length) {
       const reparto = new Map<number, number>(), partes: string[] = [];
-      for (const [px, py, dueno] of world.reparto.paginas) { reparto.set(cellKey(px, py), dueno); partes.push(`${px},${py}:${dueno}`); }
+      const ahora = performance.now(), previo = this.reparto;
+      for (const [px, py, dueno] of world.reparto.paginas) {
+        const key = cellKey(px, py), antes = previo?.get(key);
+        reparto.set(key, dueno); partes.push(`${px},${py}:${dueno}`);
+        if (antes !== undefined && antes !== dueno) this.migraciones.set(key, ahora);
+      }
+      for (const [key, at] of this.migraciones) if (ahora - at > MIGRACION_DESTELLO_MS) this.migraciones.delete(key);
       this.reparto = reparto; this.repartoKey = partes.join(';');
     }
   }
@@ -2387,6 +2397,11 @@ export class Landscape {
         g.globalAlpha = .8;
         if (this.reparto?.get(cellKey(pxp + 1, py)) !== dueno && (pxp + 1) * PAGINA <= x1 + 1) g.fillRect((pxp + 1) * PAGINA * ART - 1, top * ART, 1, h * ART);
         if (this.reparto?.get(cellKey(pxp, py + 1)) !== dueno && (py + 1) * PAGINA <= y1 + 1) g.fillRect(left * ART, (py + 1) * PAGINA * ART - 1, w * ART, 1);
+        const migro = this.migraciones.get(key);
+        if (migro !== undefined) {
+          const vida = 1 - (performance.now() - migro) / MIGRACION_DESTELLO_MS;
+          if (vida > 0) { g.globalAlpha = .45 * vida; g.fillStyle = css(P.paper); g.fillRect(left * ART, top * ART, w * ART, h * ART); }
+        }
       } else {
         const a = this.aire?.get(key);
         if (!a) continue;

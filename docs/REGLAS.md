@@ -756,7 +756,8 @@ el número de hilos, el tamaño de partición ni el throughput medido de una GPU
    disjuntas se ordenan por `compareRegionIds` (orden total determinista) y se reparten en bloques
    contiguos entre los `motor.hilos` trabajadores, sin *work stealing*. `motor.orden` (`natural`,
    `inverso`, `adversarial`) sólo cambia el orden físico de ejecución e introduce retardos reales en
-   el backend adversarial (`tests/determinismo-hardware.test.ts`), nunca la pertenencia ni la reducción.
+   el backend adversarial, nunca la pertenencia ni la reducción. La reproducibilidad que queda se prueba
+   en `tests/v23-reproducible.test.ts` (misma semilla, un hilo, sin GPU: dos corridas → mismo digesto).
 2. **Doble buffer, máscara de presencia y barrera única (`src/world/soa/terreno.ts`, `src/world/ecosystem-kernel.ts`).**
    Cada 10 ticks el ecosistema corre dos pasadas separadas —primero `ecology` local y, tras barrera,
    `EcosystemKernel.step`—, nunca fusionadas. Cada celda lee del buffer *front* (con máscara de

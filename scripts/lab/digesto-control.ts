@@ -12,6 +12,9 @@
  * Así el mismo script mide lo mismo en una exportación limpia de un commit viejo (`git archive`) y en
  * el árbol actual. Imprime JSON con `completo` (`digestoCanonico`), `fisico` (el digesto con las claves
  * de `--sin` quitadas de los params, la forma de params de antes de declararlas) y `nacimientos`.
+ *
+ * V23: no hay digesto guardado con el que comparar. La réplica se corre DOS veces (misma semilla, un hilo,
+ * sin tarjeta) y el script compara las dos: imprime `reproducible` y sale con código 1 si difieren.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,27 +34,36 @@ const sin = (arg('--sin') ?? '').split(',').filter(Boolean);
 if (!Number.isInteger(seed) || seed < 0 || !Number.isInteger(pasos) || pasos < 0) throw new Error('Uso: --seed N --pasos P [--params ...] [--sin a.b,c.d]');
 const base = (parametros as { HISTORICAL_PARAMS?: parametros.WorldParams }).HISTORICAL_PARAMS ?? parametros.DEFAULT_PARAMS;
 
-const directory = mkdtempSync(join(tmpdir(), 'atlas-digesto-control-'));
-const store = new Store(join(directory, 'world.sqlite'));
-try {
-  const world = createWorld(seed, parametros.parseParams(params, base));
-  store.save(world);
-  for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
-  const vigentes = parametros.paramsOf(world);
-  const forma = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
-  for (const clave of sin) {
-    if (!clave.includes('.')) {
-      if (!Object.hasOwn(forma, clave)) throw new Error(`--sin: la sección ${clave} no existe en este árbol`);
-      delete forma[clave];
-      continue;
+interface Medida { completo: string; fisico: string; nacimientos: number; poblacion: number }
+
+function replica(): Medida {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-digesto-control-'));
+  const store = new Store(join(directory, 'world.sqlite'));
+  try {
+    const world = createWorld(seed, parametros.parseParams(params, base));
+    store.save(world);
+    for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
+    const vigentes = parametros.paramsOf(world);
+    const forma = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
+    for (const clave of sin) {
+      if (!clave.includes('.')) {
+        if (!Object.hasOwn(forma, clave)) throw new Error(`--sin: la sección ${clave} no existe en este árbol`);
+        delete forma[clave];
+        continue;
+      }
+      const [seccion, hoja] = clave.split('.') as [string, string];
+      if (!forma[seccion] || !Object.hasOwn(forma[seccion]!, hoja)) throw new Error(`--sin: la clave ${clave} no existe en este árbol`);
+      delete forma[seccion]![hoja];
     }
-    const [seccion, hoja] = clave.split('.') as [string, string];
-    if (!forma[seccion] || !Object.hasOwn(forma[seccion]!, hoja)) throw new Error(`--sin: la clave ${clave} no existe en este árbol`);
-    delete forma[seccion]![hoja];
-  }
-  parametros.setParams(world, forma as unknown as parametros.WorldParams);
-  const fisico = digestoCanonico(world);
-  parametros.setParams(world, vigentes);
-  console.log(JSON.stringify({ seed, pasos, params: params ?? null, sin, base: base === parametros.DEFAULT_PARAMS ? 'DEFAULT_PARAMS' : 'HISTORICAL_PARAMS',
-    completo: digestoCanonico(world), fisico, nacimientos: world.birthCounter, poblacion: world.people.length }));
-} finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+    parametros.setParams(world, forma as unknown as parametros.WorldParams);
+    const fisico = digestoCanonico(world);
+    parametros.setParams(world, vigentes);
+    return { completo: digestoCanonico(world), fisico, nacimientos: world.birthCounter, poblacion: world.people.length };
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+}
+
+const primera = replica(), segunda = replica();
+const reproducible = primera.completo === segunda.completo && primera.fisico === segunda.fisico;
+console.log(JSON.stringify({ seed, pasos, params: params ?? null, sin, base: base === parametros.DEFAULT_PARAMS ? 'DEFAULT_PARAMS' : 'HISTORICAL_PARAMS',
+  reproducible, ...primera, segunda: reproducible ? undefined : segunda }));
+if (!reproducible) process.exitCode = 1;

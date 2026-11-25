@@ -1,9 +1,8 @@
 // V19 fase 1 — factores L (aprendizaje causal), S (acuerdos materiales) y F+R+M (fauna depredadora).
 // Diseño: `docs/DISENO-V19.md`. Cada prueba es rápida (< 15 s en total) y no usa el laboratorio.
 //
-//  1. Con los interruptores V19 apagados el mundo es el de V18 bit a bit: los digestos de referencia se midieron
-//     con el código de `4c97666` (HEAD de `sprint/v19-emergencia` antes de la fase 1) y sólo difieren en la
-//     etiqueta de reglas, que se normaliza a 12 (la carga `version = 12` migra a 13 sin tocar el estado).
+//  1. Con los interruptores V19 apagados el mundo es reproducible (V23: sin digestos dorados): dos corridas de un hilo
+//     dan el mismo digesto, normalizando la etiqueta de reglas a 12 (la carga `version = 12` migra sin tocar el estado).
 //  2. L: una persona descansada con un fuerte sesgo de descanso no acampa; una cansada sí descansa y se recupera.
 //  3. S: un acuerdo materialmente imposible no se firma aunque la apertura sea 0,95; los cumplidos y los
 //     incumplidos mueven la confianza y la apertura en sentidos opuestos.

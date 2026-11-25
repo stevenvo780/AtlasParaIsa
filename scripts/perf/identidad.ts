@@ -12,10 +12,11 @@
  *   s7       semilla 7, leyes de la etapa 1 (LEYES_CANDIDATAS), cortes 1200…4800
  *   s42      semilla 42, leyes de la etapa 1, cortes 1200…4800
  *
+ * V23: no se compara con un valor guardado ni con un árbol base. Cada caso corre DOS veces (misma semilla,
+ * un hilo, sin tarjeta) y el script compara las dos: imprime `identico` y sale con código 1 si difieren.
+ *
  * El mundo de población alta (~230 habitantes, semilla 3, día 12,25) se controla con
- * `scripts/perf/fases.ts --db <mundo> --pasos 600` (su `digestoFinal`). Para comparar contra la base,
- * este script y fases.ts se copian a un `git archive` del commit base (nunca contra el propio árbol) y
- * se corren allí con el mismo caso; los digestos deben ser idénticos.
+ * `scripts/perf/fases.ts --db <mundo> --pasos 600` (su `digestoFinal`).
  */
 import { writeFileSync } from 'node:fs';
 import { digestosControl, LEYES_CANDIDATAS } from '../lab/rendimiento.js';
@@ -33,8 +34,11 @@ const salidaIndex = process.argv.indexOf('--salida'), salida = salidaIndex === -
 const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
 const inicio = cpuMs();
 const digestos = digestosControl(definicion.seed, definicion.params, definicion.cortes);
-const resultado = { caso, seed: definicion.seed, params: definicion.params ?? 'historicos', digestos,
-  cpuS: Math.round(cpuMs() - inicio) / 1000 };
+const segunda = digestosControl(definicion.seed, definicion.params, definicion.cortes);
+const identico = JSON.stringify(digestos) === JSON.stringify(segunda);
+const resultado = { caso, seed: definicion.seed, params: definicion.params ?? 'historicos', identico, digestos,
+  ...(identico ? {} : { segunda }), cpuS: Math.round(cpuMs() - inicio) / 1000 };
 const texto = JSON.stringify(resultado, null, 2);
 if (salida) writeFileSync(salida, texto + '\n');
 console.log(texto);
+if (!identico) process.exitCode = 1;

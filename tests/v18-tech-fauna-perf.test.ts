@@ -1,8 +1,8 @@
 // V18 — paridad exacta de las optimizaciones de tecnología, memoria de recetas, fauna y JSON exacto.
 //
 // Cada optimización conserva el resultado bit a bit. Las pruebas la fijan por tres vías:
-//  1. digestos canónicos de mundos completos (3 semillas × 200 pasos × 2 conjuntos de leyes) tomados del
-//     commit base af88d13, ANTES de optimizar (con el probe de hardware fijo de abajo: no dependen de la torre);
+//  1. reproducibilidad de mundos completos (3 semillas × 200 pasos × 2 conjuntos de leyes): dos corridas de un hilo
+//     dan el mismo digesto (V23: sin digestos dorados; probe de hardware fijo de abajo: no dependen de la torre);
 //  2. versiones de referencia (copias literales del código anterior) comparadas con Object.is / byte a byte
 //     sobre entradas aleatorias y extremas;
 //  3. «sin caché rancia»: cualquier cambio en sitio (mass, composition, properties, tile.fauna) se ve al instante.

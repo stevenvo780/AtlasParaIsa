@@ -827,7 +827,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     }
     const muestra = mundoParaEmision(true);
     hitosCinta.length = 0;
-    ultimoCorte = -Infinity; ultimoPuntoSerie = -1; observadorCinta = createTileObserver();
+    ultimoCorte = -Infinity; ultimoPuntoSerie = -1; observadorCinta = createTileObserver({ v23: true });
     serialCronica = muestra.eventCounter;
     baseDemografia = demografiaDeCinta(muestra);
     Atomics.store(grabador.activo.pedirCompleto, 0, 1);
@@ -1597,8 +1597,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
         if (req.method === 'GET' && url.pathname === '/api/motor') {
           const telemetria = gateway ? gateway.motor?.() : !failed && motor ? motor.telemetria() : undefined;
-          if (!telemetria) throw new HttpError(404, 'No hay telemetría del motor disponible.');
-          return json(res, 200, telemetriaEnJson(telemetria));
+          if (telemetria) return json(res, 200, telemetriaEnJson(telemetria));
+          // Con motor pero caído o a medio recargar: no hay lectura ahora, sí más tarde.
+          if (!gateway && motor) throw new HttpError(503, 'La telemetría del motor no está disponible ahora.');
+          // Sin motor (paso heredado): la ruta existe y no hay nada que medir. 204 y no 404, que el navegador anota
+          // como un error de carga en la consola; el panel Motor usa entonces el paso y /health.
+          res.writeHead(204); res.end(); return;
         }
         if (url.pathname === '/api/cinta/marcador' && (req.method === 'GET' || req.method === 'PUT')) {
           const directorio = servicioCinta()?.directorio;

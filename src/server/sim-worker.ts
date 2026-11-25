@@ -290,10 +290,18 @@ function packed(value: unknown): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(serialize(value));
 }
 
+/** V23: la composición visible de una tesela (`mat`, de la ley w) comparada por valor; la ley rehace el arreglo en cada paso material. */
+function matEqual(a: Tile['mat'], b: Tile['mat']): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]![0] !== b[i]![0] || a[i]![1] !== b[i]![1]) return false;
+  return true;
+}
+
 function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.x === b.x && a.y === b.y && a.terrain === b.terrain
+  return a.x === b.x && a.y === b.y && a.terrain === b.terrain && a.T === b.T && matEqual(a.mat, b.mat)
     && a.moisture === b.moisture && a.vegetation === b.vegetation && a.food === b.food
     && a.biome === b.biome && a.elevation === b.elevation
     && a.wood === b.wood && a.stone === b.stone && a.feature === b.feature
@@ -322,7 +330,9 @@ export interface TileObservation {
  * and it is reported only when that projection differs from the cached one (`tileEqual`, the tape's own
  * equality). The 16×16 grouping is rebuilt only when the resident set changes (another tile object or
  * coordinates at some slot). A scan with nothing written is one allocation-free pass over the slots. */
-export function createTileObserver() {
+/** `v23`: las teselas proyectadas llevan además lo que añaden las leyes V23 encendidas (`mat`, `T`), como en
+ * `teselasParaEmision`. La cinta lo necesita: sin ello, el cliente que mira la cinta no ve la materia. */
+export function createTileObserver(opciones: { v23?: boolean } = {}) {
   let lastWorld: World | undefined;
   let lastGate: ReturnType<typeof residentSnapshotGate>;
   let lastGateSerial = 0;
@@ -375,6 +385,8 @@ export function createTileObserver() {
         if (tile !== slotTiles[i] || tile.x !== slotX[i] || tile.y !== slotY[i]) same = false;
       }
       const previous = same ? undefined : regroup(raw);
+      const ctx = opciones.v23 ? ctxSi(world) : undefined;
+      const decorar = ctx ? leyesActivas(paramsOf(world).v23).flatMap(ley => ley.proyectar?.tesela ? [ley.proyectar.tesela] : []) : [];
       let any = false;
       for (let i = 0; i < raw.length; i++) {
         const tile = raw[i]!;
@@ -389,6 +401,7 @@ export function createTileObserver() {
         // Stamped only: the object-held fields cannot have moved; compare the shared-array ones first.
         if (cell >= 0 && !force && soaFieldsEqual(cached!, fast!, cell)) continue;
         const projected = cell >= 0 ? refreshSoaTile(cached!, fast!, cell) : projectMirrorTile(tile, fast);
+        if (ctx) for (const gancho of decorar) gancho(ctx, tile, projected);
         const before = cached ?? previous?.get(`${projected.x},${projected.y}`);
         if (!force && before && tileEqual(before, projected)) { if (!cached) chunkTiles[slotChunk[i]!]![slotIndex[i]!] = before; continue; }
         chunkTiles[slotChunk[i]!]![slotIndex[i]!] = projected;
@@ -416,7 +429,7 @@ export function createTileObserver() {
  * tick.
  */
 export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
-  const view = projectMirror(world, worldContext(world), { quantize: true });
+  const view = projectMirror(world, worldContext(world), { quantize: true, v23: true });
   if (instanceId !== undefined) view.instanceId = instanceId;
   view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.

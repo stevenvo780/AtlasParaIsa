@@ -234,7 +234,9 @@ function golpe(u: VistaLote, trabajo: number): Float64Array {
 export const leyTecnica: Ley = {
   id: 't1', interruptor: 'tecnica', sustituye: ['memoriaTecnica'],
   iniciar: c => iniciarTecnica(c as CtxLeyMateria),
-  F4: c => avanzarTecnicaDelMundo(c as CtxLeyMateria),
+  // F5 y no F4: el gancho F4 corre antes de que las personas actúen (`pasoPersonas`), y el avance pasivo marcaba el
+  // tick como trabajado y les quitaba su propio avance (prender el fuego, dejar un paso imposible).
+  F5: c => avanzarTecnicaDelMundo(c as CtxLeyMateria),
   F6: c => mantenerTecnica(c as CtxLeyMateria),
   aplicar: { Ensenar: (c, i) => aplicarEnsenar(c as CtxLeyMateria, i) },
   proyectar: { mundo: (c, vista) => proyectarLotes(c as CtxLeyMateria, vista) },

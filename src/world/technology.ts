@@ -1183,8 +1183,9 @@ export function mantenerTecnica(c: CtxLeyMateria): void {
   }
 }
 
-/** F4: los pasos que solo esperan al mundo (calentar junto a un fuego, mojar) siguen aunque nadie trabaje en ellos;
- * quien está investigando o fabricando ya avanzó el suyo por `researchTechnology`/`craftTechnology`. */
+/** F5: los pasos que solo esperan al mundo (calentar junto a un fuego, mojar) siguen aunque nadie trabaje en ellos;
+ * quien está investigando o fabricando ya avanzó el suyo este tick por `researchTechnology`/`craftTechnology`, que
+ * corren antes (en F3–F4). */
 export function avanzarTecnicaDelMundo(c: CtxLeyMateria): void {
   for (const p of c.mundo.people) {
     const t = p.technology.tecnica, pe = t?.proceso;
@@ -1345,7 +1346,12 @@ function trabajarTecnica(c: CtxLeyMateria, p: PersonaTecnica, tipo: 'research' |
   if (!t.proceso && !empezarProceso(c, p, t, tipo, recetaId)) { interrumpir(p, t, c.tick, c); return false; }
   t.avanzadoEn = c.tick;
   const pr = t.proceso!.proceso as ProcesoMaterial;
-  return avanzarProcesoCon(c, pr, p.cuerpo, mejorUtil(c, p), p.carga ?? []) === 'hecho' && terminarTecnica(c, p, t);
+  const avance = avanzarProcesoCon(c, pr, p.cuerpo, mejorUtil(c, p), p.carga ?? []);
+  // Espera aun con quien trabaja delante: aquí no hay lo que el paso pide (insumo, fuego que prender, agua) o no le
+  // quedan fuerzas. Lo deja (el lote se queda donde está); si no, seguir ese proceso volvía a ser su oportunidad
+  // técnica cada tick y se quedaba esperando sin fin.
+  if (avance === 'espera') { interrumpir(p, t, c.tick, c); return false; }
+  return avance === 'hecho' && terminarTecnica(c, p, t);
 }
 
 /** Si quien lo hizo está en la celda y cabe en su carga (masa y volumen), el lote pasa a ir a cuestas; si no, se queda

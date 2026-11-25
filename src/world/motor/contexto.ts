@@ -113,6 +113,21 @@ type GanchoFase = 'F1' | 'eco' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6';
 const intento = (tipo: TipoIntento, dato: number[], bytes: Uint8Array | null): Intento =>
   ({ tipo, de: REF_NULA, a: REF_NULA, celda: -1, lote: REF_NULA, nonce: 0, materia: null, dato: Float64Array.from(dato), bytes });
 
+/** Una celda en el punto de control: la posición de su página, no su ranura en la arena (que cambia de una carga a
+ * otra). |px|, |py| < 2²⁰ (MAX_COORDINATE / 16), así que cabe exacta en un double y conserva `celda % 256`. */
+const SESGO_PAGINA = 2 ** 20, ANCHO_PAGINA = 2 ** 21;
+export function celdaMundo(terreno: Pick<Terreno, 'paginaX' | 'paginaY'>, celda: number): number {
+  if (celda < 0) return -1;
+  const chunk = celda >> 8;
+  return ((terreno.paginaX[chunk]! + SESGO_PAGINA) * ANCHO_PAGINA + terreno.paginaY[chunk]! + SESGO_PAGINA) * 256 + (celda & 255);
+}
+/** La celda de la arena de ahora para una del punto de control; da de alta la página si no está (solo el coordinador). */
+export function celdaLocal(terreno: TerrenoPercepcion, guardada: number): number {
+  if (guardada < 0) return -1;
+  const pagina = Math.floor(guardada / 256), px = Math.floor(pagina / ANCHO_PAGINA) - SESGO_PAGINA, py = pagina % ANCHO_PAGINA - SESGO_PAGINA;
+  return terreno.asegurarPagina(px, py, 0) * 256 + guardada % 256;
+}
+
 // ── El dueño ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export class Dueno implements CtxF0 {
@@ -313,24 +328,30 @@ export class Dueno implements CtxF0 {
   enlazar(cinta: DescriptorEnlace | null): void { this.#enlace = cinta && enlaceCinta(cinta); }
 
   /**
-   * Antes del primer tick de una época (mundo creado o cargado, o una ley recién encendida): columnas de las leyes en
-   * la tabla, materia si toca, páginas de los chunks que ya están, primer frente y `Ley.iniciar`. Con varios dueños la
-   * tabla y el terreno llegan armados y el frente inicial lo publica el coordinador cuando todos escribieron.
+   * Antes del primer tick de una época con un solo dueño (mundo creado o cargado, o una ley recién encendida): columnas
+   * de las leyes en la tabla, páginas de los chunks que ya están, materia (repuesta de `cp` si se carga), primer frente
+   * y `Ley.iniciar`. Con varios dueños el coordinador hace estos pasos por separado (`motor/coordinador.ts`).
    */
-  abrirEpoca(): void {
+  abrirEpoca(cp?: MateriaCheckpoint | null): void {
+    if (!this.prepararEpoca()) return;
+    if (cp) this.reponer(this.cargarMateria(cp));
+    this.reservarMateria(0);
+    this.publicarFilas();
+    this.organismos.tabla.publicar(this.mundo.tick);
+    this.iniciarLeyes();
+  }
+
+  /** Leyes encendidas, sus columnas y la materia. Devuelve false si la época ya estaba abierta con las mismas leyes. */
+  prepararEpoca(): boolean {
     const leyes = leyesActivas(this.params.v23), firma = leyes.map(l => l.id).join() || '-', m = this.mundo;
-    if (firma === this.#firma) return;
+    if (firma === this.#firma) return false;
     this.leyes = leyes;
     this.#firma = firma;
-    const columnas = leyes.flatMap(l => l.columnas ?? []);
     if (this.hilos === 1) {
-      const declaradas = this.frente.columnas;
+      const columnas = leyes.flatMap(l => l.columnas ?? []), declaradas = this.frente.columnas;
       if (columnas.some(([nombre]) => !declaradas.includes(nombre))) { olvidarPercepcion(m); olvidarOrganismos(m); this.#escritura = this.#indice = undefined; }
       for (const [nombre, tipo, ancho] of columnas) this.organismos.tabla.columna(nombre, tipo, ancho);
       observarRegiones(m, leyes.length ? { activado: (key, cx, cy) => this.#activado(key, cx, cy), retirar: (_k, cx, cy) => this.#retirar(cx, cy) } : undefined);
-    }
-    if (this.params.v23.materia && !this.materia) this.#armarMateria();
-    if (this.hilos === 1) {
       const terreno = this.terrenoPercibido, tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
       for (const [key, meta] of Object.entries(m.chunks)) {
         const chunk = terreno.asegurarPagina(meta.cx, meta.cy, 0);
@@ -338,14 +359,35 @@ export class Dueno implements CtxF0 {
         this.#activos.set(chunk, key);
       }
       this.#chunks = undefined;
-      this.reservarMateria(0);
-      this.publicarFilas();
-      this.organismos.tabla.publicar(m.tick);
     }
+    if (this.params.v23.materia && !this.materia) this.#armarMateria();
+    return true;
+  }
+
+  /** `Ley.iniciar` de cada ley encendida, con el directorio y la réplica de globales al día. */
+  iniciarLeyes(): void {
     this.#directorioPropio();
     this.#refrescarGlobales();
-    for (const ley of leyes) ley.iniciar?.(this);
+    for (const ley of this.leyes) ley.iniciar?.(this);
   }
+
+  /** `Ley.alAdoptar` de todo organismo propio: tras cargar con varios dueños, cada uno adopta los lotes de los suyos. */
+  adoptarPropios(): void {
+    for (const ley of this.leyes) if (ley.alAdoptar) {
+      for (const p of this.mundo.people) ley.alAdoptar(this, p);
+      for (const a of this.mundo.animals) ley.alAdoptar(this, a);
+    }
+  }
+
+  /** Vuelve a poner en vuelo los intentos con garantía de un punto de control: el aplicador de este dueño los resuelve
+   * en su F1 (o los reenvía a quien toque). Los `Ref` de antes de cargar ya no viven: la garantía acaba en su celda. */
+  reponer(intentos: readonly Intento[]): void { for (const i of intentos) this.#interno.enviar(this.hilo, i); }
+
+  /** Intentos que siguen en los buzones (solo quien tiene los buzones: el coordinador o el único dueño). */
+  pendientes(): Intento[] { return this.#piezas.buzones?.pendientes() ?? []; }
+
+  /** Migrantes de la cola M (los aparta el buzón del dueño: ningún aplicador los ve). */
+  adoptarMigrantes(): void { this.buzon.vaciar('M', () => {}); }
 
   #armarMateria(): void {
     const dadas = this.#piezas.materia;
@@ -518,14 +560,28 @@ export class Dueno implements CtxF0 {
     if (control) control[CTL.fotoInvalido] = 1;
   }
 
-  /** Tras la última barrera (coordinador): publica o aborta el fotograma. Devuelve si se perdió. */
+  /** Tras la última barrera (coordinador): publica o aborta el fotograma, y lo visible del tick deja de estar pendiente
+   * (m6 lo lee de `visiblesTick` dentro de `cerrarFotograma`). Devuelve si el fotograma se perdió. */
   cerrarFoto(): boolean {
-    if (!this.#foto || !this.#enlace) return false;
-    const control = this.#piezas.control;
-    const valido = this.#fotoValida && (!control || control[CTL.fotoInvalido] === 0);
-    cerrarFotograma(this, this.#enlace, this.#foto, valido);
-    this.#foto = null;
-    return !valido;
+    let perdido = false;
+    if (this.#foto && this.#enlace) {
+      const control = this.#piezas.control;
+      const valido = this.#fotoValida && (!control || control[CTL.fotoInvalido] === 0);
+      cerrarFotograma(this, this.#enlace, this.#foto, valido);
+      this.#foto = null;
+      perdido = !valido;
+      if (perdido) this.fotogramasPerdidos++;
+    }
+    this.visiblesTick.length = 0;
+    return perdido;
+  }
+  /** Fotogramas abiertos que no llegaron a publicarse porque algún dueño no cupo en la ranura. */
+  fotogramasPerdidos = 0;
+
+  /** El suceso entero (no solo su id), para `addEvent` cuando el mundo es la parte de un dueño entre varios. */
+  registrarSuceso(e: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
+    const id = this.suceso(e);
+    return this.#piezas.contadores ? this.sucesosTick[this.sucesosTick.length - 1]! : this.mundo.events.find(s => s.id === id)!;
   }
 
   /** Cierra el tick de este dueño con un solo dueño: frente publicado y sucesos visibles entregados. */
@@ -595,6 +651,7 @@ export class Dueno implements CtxF0 {
     for (const p of mig.personas) adoptarPersona(p);
     this.#activos.set(mig.chunk, mig.key); this.#chunks = undefined;
     this.terrenoPercibido.sincronizarPagina(mig.chunk, tileLookup(m.tiles), residentFastAccess(m.tiles));
+    // El reparto al abrir la época no es una activación: lo cubren `Ley.iniciar` y, tras una carga, `adoptarPropios`.
     if (mig.inicial) return;
     for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk);
     for (const ley of this.leyes) if (ley.alAdoptar) {
@@ -611,7 +668,8 @@ export class Dueno implements CtxF0 {
     const px = terreno.paginaX[chunk]!, py = terreno.paginaY[chunk]!;
     const dentro = (o: { x: number; y: number }): boolean => (o.x >> 4) === px && (o.y >> 4) === py;
     const previas = m.tiles, tiles: Tile[] = [], quedan: Tile[] = [];
-    for (const t of previas) (dentro(t) ? tiles : quedan).push(t);
+    // Copia plana: una tesela observada por el anfitrión es un proxy y no cruza la serialización.
+    for (const t of previas) if (dentro(t)) tiles.push({ ...t }); else quedan.push(t);
     m.tiles = quedan;
     faunaCacheFiltered(previas, quedan);
     const structures = m.structures.filter(dentro), animals = m.animals.filter(dentro);
@@ -692,11 +750,13 @@ export class Dueno implements CtxF0 {
     const arena = this.materia as ArenaLotes & { guardar?(): { lotes: Iterable<LoteGuardado>; libres: Iterable<LoteRef> } };
     if (!arena.guardar) throw new Error('La arena de lotes no sabe volcarse: falta ArenaLotes.guardar() (pedido de m4a al integrador).');
     this.totales = plegarLibros(this.#piezas.libros, this.totales);
-    const { lotes, libres } = arena.guardar();
+    const terreno = this.terrenoPercibido, { lotes: propios, libres } = arena.guardar();
+    const lotes = Array.from(propios, l => ({ ...l, celda: celdaMundo(terreno, l.celda) }));
+    const enVuelo = pendientes.filter(i => i.materia !== null).map(i => ({ ...i, celda: celdaMundo(terreno, i.celda) }));
     return {
       epoca: this.epoca, tick: this.mundo.tick,
       sustancias: serializarSustancias(this.quimica as ServicioQuimicoImpl), registro: this.registro.guardar(),
-      paginas: codificarPaginas(this.epoca, lotes, libres), enVuelo: codificarEnVuelo(pendientes.filter(i => i.materia !== null)),
+      paginas: codificarPaginas(this.epoca, lotes, libres), enVuelo: codificarEnVuelo(enVuelo),
       inicial: this.totales.inicial, fuentes: this.totales.fuentes, sumideros: this.totales.sumideros,
     };
   }
@@ -705,14 +765,16 @@ export class Dueno implements CtxF0 {
    * estaban en vuelo (quien llama los repone en un buzón). */
   cargarMateria(cp: MateriaCheckpoint): Intento[] {
     if (!this.materia || !this.quimica) throw new Error('Cargar materia exige v23.materia.');
-    const { lotes, libres } = decodificarPaginas(cp.epoca, cp.paginas);
+    const terreno = this.terrenoPercibido, { lotes: guardados, libres } = decodificarPaginas(cp.epoca, cp.paginas);
+    // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
+    const lotes = guardados.map(l => ({ ...l, celda: celdaLocal(terreno, l.celda), dueno: 0 }));
     this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
     (this.materia as ArenaLotes).cargar(lotes, libres);
     this.registro.cargar(cp.registro);
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };
     const q = this.quimica, saldo = saldoEnVuelo(cp.enVuelo, id => q.sustancia(id));
     this.#piezas.libros[0]!.enVuelo.set(saldo.map(Number));
-    return decodificarEnVuelo(cp.enVuelo);
+    return decodificarEnVuelo(cp.enVuelo).map(i => ({ ...i, celda: celdaLocal(terreno, i.celda) }));
   }
 }
 

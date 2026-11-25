@@ -11,7 +11,7 @@ import { bond } from '../society.js';
 import { chunkKey } from '../terrain.js';
 import { ley, paramsOf } from '../params.js';
 import { updatePolicyPlasticity } from '../politica.js';
-import { pedidoComida } from '../materia/cuerpo.js';
+import { ingerirSelecto, pedidoComida } from '../materia/cuerpo.js';
 import { Rol } from '../materia/tipos.js';
 import { ctxMateriaDe, refDeOrganismo, type Aplicado, type CtxLey, type CtxLeyMateria, type Ley } from '../motor/acceso.js';
 import {
@@ -35,6 +35,10 @@ export const leyInteracciones: Ley = {
 export function share(world: World, donor: Person): void {
   if (ley(world, 'intentos')) {
     compartirPorIntento(ctxMateriaDe(world), donor);
+    return;
+  }
+  if (ley(world, 'cuerpos')) {
+    compartirEnElMismoDueno(ctxMateriaDe(world), donor);
     return;
   }
   if (donor.inventory < 0.025 || donor.hunger >= 0.5 || world.tick - donor.lastShared < 30) return;
@@ -76,6 +80,33 @@ export function share(world: World, donor: Person): void {
       remember(observer, world, `Aprendió a compartir de ${donor.name}.`, learned.id, place.id);
     }
   }
+}
+
+function compartirEnElMismoDueno(c: CtxLeyMateria, donante: Person): void {
+  if (!donante.cuerpo || donante.hunger >= 0.5 || c.tick - donante.lastShared < 30) return;
+  const mundo = c.mundo;
+  const lugar = primeroCerca(mundo.places, donante, 4, p => distance(donante, p) <= 3);
+  const cerca = vecinos(mundo, donante, 2, p => p !== donante && !!p.cuerpo && distance(donante, p) <= 2, 'share:materia');
+  const cria = cerca.find(p => distance(p, donante.target) === 0 && p.crianza?.cuidadores.includes(donante.id) && p.hunger > donante.hunger);
+  const receptor = cria ?? (lugar ? cerca.sort((a, b) => b.hunger - a.hunger).find(p => p.hunger > 0.27) : undefined);
+  if (!receptor?.cuerpo) return;
+  let kg = 0;
+  for (const lote of donante.carga ?? []) {
+    if (c.materia.propio(lote)) kg = ingerirSelecto(c, receptor.cuerpo, lote, PORCION_COMPARTIDA_KG);
+    if (kg > 0) break;
+  }
+  if (!(kg > 0)) kg = ingerirSelecto(c, receptor.cuerpo, donante.cuerpo.reserva, PORCION_COMPARTIDA_KG);
+  if (!(kg > 0)) return;
+  donante.lastShared = c.tick;
+  bond(mundo, donante, receptor, 0.1);
+  outcome(mundo, donante, 'share', 0.16);
+  const evento = addEvent(mundo, {
+    kind: 'care', actors: [donante.id, receptor.id], x: donante.x, y: donante.y, source: 'simulation',
+    text: `${donante.name} compartió alimento con ${receptor.name}.`,
+    cause: 'La porción salió de su carga o reserva y pasó al digestivo de quien la recibió.',
+  });
+  remember(donante, mundo, 'Compartió alimento.', evento.id, lugar?.id);
+  remember(receptor, mundo, 'Recibió alimento.', evento.id, lugar?.id);
 }
 
 

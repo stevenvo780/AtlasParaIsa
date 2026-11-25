@@ -83,13 +83,14 @@ export function elegirPersona(world: World, person: Person, paso: PasoPersona, p
     }
   }
   let targetFood = 0;
-  if (person.action === 'eat' || person.action === 'forage') {
+  const cuerpo = params.v23.cuerpos && person.cuerpo;
+  if ((!cuerpo && person.action === 'eat') || person.action === 'forage') {
     const targetTile = tileIn(person.target.x, person.target.y);
     targetFood = foodStock(targetTile, soaCell(fast, person.target.x, person.target.y, targetTile), fast);
   }
-  const emptyFood = person.action === 'eat' && targetFood < 0.005 && person.inventory < 0.01 && !(person.carga?.length) && foodAvailable(world,person)<0.001;
+  const emptyFood = !cuerpo && person.action === 'eat' && targetFood < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
   const emptyHarvest = person.action === 'forage' && targetFood < MIN_FORAGE_STOCK;
-  const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
+  const emptyWater = !cuerpo && person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;

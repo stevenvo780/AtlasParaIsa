@@ -289,9 +289,14 @@ export function vistaCuerpo(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaCuerpo):
   const tejido = masaLote(c, cuerpo.tejido);
   // Los objetivos crecen con el tejido; sin tejido no hay objetivo y todo lo que falta, falta entero.
   const hay = tejido > 0;
-  out.hambre = hay ? 1 - clamp01(reservaJ(c, cuerpo) / (RESERVA_OBJETIVO_J_KG * tejido)) : 1;
+  const j = reservaJ(c, cuerpo);
+  out.hambre = hay ? 1 - clamp01(j / (RESERVA_OBJETIVO_J_KG * tejido)) : 1;
   out.sed = hay ? 1 - clamp01(a.cuantos(cuerpo.reserva, S.H2O) * c.quimica.sustancia(S.H2O).masa * MG / (AGUA_OBJETIVO_KG_KG * tejido)) : 1;
-  out.energia = hay ? clamp01(a.cuantos(cuerpo.reserva, S.O2) / (CAPACIDAD_GAS_KG * FRACCION_O2_REFERENCIA * tejido)) : 0;
+  // Lo que puede gastar de golpe lo limita el reactivo más escaso de `quemar`: el O₂ de la reserva o el combustible.
+  // Sin combustible no hay trabajo que pagar aunque el pulmón esté lleno.
+  const o2J = a.cuantos(cuerpo.reserva, S.O2) * d.jPorO2;
+  const lleno = CAPACIDAD_GAS_KG * FRACCION_O2_REFERENCIA * tejido;
+  out.energia = !hay ? 0 : d.jPorO2 > 0 ? clamp01(Math.min(o2J, j) / (lleno * d.jPorO2)) : clamp01(a.cuantos(cuerpo.reserva, S.O2) / lleno);
   out.salud = clamp01(unidades(a, cuerpo.tejido, p) * d.masaMg * MG / p.masaAdulta);
   out.masa = tejido + masaLote(c, cuerpo.reserva) + masaLote(c, cuerpo.digestivo);
   out.carga = 0;
@@ -326,6 +331,18 @@ export function basalJ(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
   if (aire === undefined) return mantenimiento;
   const frio = CONDUCTANCIA_PIEL_MIN * masa ** (2 / 3) * (T_CUERPO - aire) * dt;
   return Math.max(mantenimiento, FRACCION_EVAPORATIVA * mantenimiento + frio);
+}
+
+/** Máximo de J que una gestación completa puede retirar de la reserva. Las entradas que solo están en el tubo se
+ * transfieren como materia ya formada: su energía de oxidación no se cobra otra vez. */
+export function costeGestacionJ(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const p = plantillaDe(c, cuerpo), d = datosDe(c, p);
+  let jPorUnidad = Math.max(0, p.sintesis.dH) / ETA;
+  for (const parte of p.sintesis.entradas) {
+    const sustancia = c.quimica.sustancia(parte.id);
+    if (limpio(sustancia)) jPorUnidad += parte.nu * sustancia.prop.qOxidacion;
+  }
+  return p.m0 / (d.masaMg * MG) * jPorUnidad;
 }
 
 /** Paga `julios` de trabajo quemando reserva con O₂ (`quemar`, nunca proteína ni NH₃). Devuelve los J pagados
@@ -579,9 +596,26 @@ export function provecho(c: CtxLeyMateria, p: Plantilla, id: SustanciaId): numbe
   return k > 0 ? k / (k + 1 / TRANSITO_TICKS) : 0;
 }
 
+/** Energía comestible y masa de la ración prevista, usando la misma selección que la boca. */
+export function energiaAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, lote: LoteRef, kg: number): number {
+  const a = c.materia, p = plantillaDe(c, cuerpo), n = leer(a, lote);
+  let energia = 0, masa = 0;
+  for (let i = 0; i < n; i++) {
+    const id = IDS[i]!, sustancia = c.quimica.sustancia(id);
+    const cuantos = a.cuantos(lote, id) * provecho(c, p, id);
+    masa += cuantos * sustancia.masa * MG;
+    energia += cuantos * sustancia.prop.qOxidacion;
+  }
+  return masa > 0 ? energia * Math.min(1, kg / masa) : 0;
+}
+
 /** Come hasta `kg` de un lote propio eligiendo: de cada sustancia toma en proporción a lo que su cuerpo aprovecha de ella
  * (`provecho`), así que quien no digiere la madera no se llena el tubo de madera. Devuelve los kg ingeridos. */
 export function ingerirSelecto(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, kg: number): number {
+  return trasladarAlimento(c, cuerpo, de, cuerpo.digestivo, kg);
+}
+
+export function trasladarAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, destino: LoteRef, kg: number): number {
   if (!(kg > 0)) return 0;
   const a = c.materia, q = c.quimica, p = plantillaDe(c, cuerpo), azar = pasoDe(c).azar;
   const ids = especiesDe(a, de), partes = new Float64Array(ids.length);
@@ -591,12 +625,12 @@ export function ingerirSelecto(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, kg
     ofrecido += partes[i]! * q.sustancia(ids[i]!).masa * MG;
   }
   if (!(ofrecido > 0)) return 0;
-  const escala = Math.min(1, kg / ofrecido), antes = masaLote(c, cuerpo.digestivo);
+  const escala = Math.min(1, kg / ofrecido), antes = masaLote(c, destino);
   for (let i = 0; i < ids.length; i++) {
     const n = entero(partes[i]! * escala, azar);
-    if (n > 0) a.moverParte(de, cuerpo.digestivo, exacta(ids[i]!, n));
+    if (n > 0) a.moverParte(de, destino, exacta(ids[i]!, n));
   }
-  return masaLote(c, cuerpo.digestivo) - antes;
+  return masaLote(c, destino) - antes;
 }
 
 /** Bebe hasta `kg` de agua de un lote propio del dueño (charca de su celda, vasija que lleva). Devuelve los kg bebidos. */
@@ -741,8 +775,11 @@ export function gestar(c: CtxLeyMateria, madre: Cuerpo, dt: number): number {
   if (!g) return 0;
   const p = plantillaDe(c, madre), d = datosDe(c, p);
   const alNacer = p.m0 / (d.masaMg * MG), falta = alNacer - masaLote(c, g.embrion) / (d.masaMg * MG);
-  if (falta > 0 && dt > 0) sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt));
-  const paga = reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
+  // Una gestación se sostiene si la reserva cubre un día de basal Y el embrión crece (o ya está hecho): un embrión al
+  // que la madre no puede dar alguna de sus partes (N, P) no crece y, como el que no se paga, se pierde a los DIAS_ABORTO.
+  const hechas = falta > 0 && dt > 0 ? sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
+  const crece = !(falta > 0) || hechas > 0 || !(dt > 0);
+  const paga = crece && reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
   g.bajoBasalDesde = paga ? -1 : g.bajoBasalDesde < 0 ? c.tick : g.bajoBasalDesde;
   return masaLote(c, g.embrion);
 }
@@ -758,8 +795,10 @@ export function abortar(c: CtxLeyMateria, madre: Cuerpo): void {
   madre.gestacion = undefined;
 }
 
-/** Parto: el embrión pasa a ser el tejido de un cuerpo nuevo (con reserva y digestivo vacíos), que devuelve; borra
- * `gestacion` de la madre. No crea ni destruye nada. */
+/** Parto: el embrión pasa a ser el tejido de un cuerpo nuevo, que devuelve; borra `gestacion` de la madre. La reserva de
+ * la madre (combustible, agua libre y gases: lo que la placenta comparte) se reparte entre las dos en proporción a su
+ * tejido, así que la cría nace con el hambre y la sed de su madre en ese momento. El digestivo nace vacío. No crea ni
+ * destruye nada: todo son traslados de la madre a la cría. */
 export function parir(c: CtxLeyMateria, madre: Cuerpo): Cuerpo {
   const g = madre.gestacion, a = c.materia;
   if (!g) throw new Error('b: parir exige una gestación abierta.');
@@ -770,6 +809,14 @@ export function parir(c: CtxLeyMateria, madre: Cuerpo): Cuerpo {
   a.moverParte(g.embrion, cria.tejido, TODO);
   a.liberar(g.embrion);
   madre.gestacion = undefined;
+  const m = masaLote(c, cria.tejido), f = m / (m + masaLote(c, madre.tejido));
+  if (f > 0) {
+    for (const id of especiesDe(a, madre.reserva)) {
+      const n = Math.floor(a.cuantos(madre.reserva, id) * f);
+      if (n > 0) a.moverParte(madre.reserva, cria.reserva, exacta(id, n));
+    }
+    repartirCalor(c, [cria.tejido, cria.reserva]);
+  }
   contextos.set(cria, c);
   return cria;
 }
@@ -827,21 +874,30 @@ function alAdoptar(c: CtxLey, organismo: Person | Animal): void {
   contextos.set(organismo.cuerpo, m);
 }
 
-/** F4: cada persona propia metaboliza y crece un tick, y sus escalares pasan a ser las vistas de su cuerpo. La salud
- * guardada nunca supera la del tejido (`acotarSalud`); la fatiga sigue siendo escalar. */
+/** F4: cada persona propia metaboliza y crece un tick. La fatiga sigue siendo escalar. */
 function F4(c: CtxLey): void {
   const m = conMateria(c);
   for (const persona of c.mundo.people) {
     if (!conCuerpo(m, persona)) continue;
     const celda = c.terreno.celda(persona.x, persona.y);
     if (celda < 0) continue;
+    // En F1 ya se abonaron las extracciones del tick anterior: los lotes vacíos son rechazos o cargas consumidas.
+    const carga = persona.carga;
+    for (let i = (carga?.length ?? 0) - 1; i >= 0; i--) {
+      const lote = carga![i]!;
+      if (!m.materia.propio(lote) || leer(m.materia, lote) !== 0 || m.materia.calor(lote) !== 0) continue;
+      m.materia.liberar(lote);
+      carga!.splice(i, 1);
+    }
     metabolizar(m, persona.cuerpo, celda, 1);
     crecer(m, persona.cuerpo, 1);
     vistaCuerpo(m, persona.cuerpo, VISTA);
     // Un cuerpo sin una sola unidad de tejido completa no sostiene nada: lo que falta, falta entero.
-    if (!(VISTA.salud > 0)) { VISTA.hambre = 1; VISTA.sed = 1; VISTA.energia = 0; }
+    if (!(VISTA.salud > 0)) {
+      VISTA.hambre = 1; VISTA.sed = 1; VISTA.energia = 0;
+      acotarSalud(persona.demography, 0);
+    }
     necesidadesDeVista(persona, VISTA);
-    acotarSalud(persona.demography, VISTA.salud);
   }
 }
 
@@ -866,8 +922,14 @@ function aplicarGolpe(c: CtxLey, i: Intento): Aplicado {
   if (i.a === REF_NULA || !i.dato) return 'paso';
   const persona = c.personas.get(slotDe(i.a)), m = conMateria(c);
   if (!persona || persona.uid === undefined || c.ref(persona.uid) !== i.a || !conCuerpo(m, persona)) return 'paso';
-  const carne = herir(m, persona.cuerpo, i.dato);
-  if (carne !== REF_NULA) soltar(m, carne, c.terreno.celda(persona.x, persona.y));
+  const cuerpo = persona.cuerpo, plantilla = plantillaDe(m, cuerpo);
+  const antes = unidades(m.materia, cuerpo.tejido, plantilla);
+  const carne = herir(m, cuerpo, i.dato);
+  if (carne !== REF_NULA) {
+    // Una herida se mide sobre el tejido previo al golpe. Una cría pequeña puede tener todo su tejido sano.
+    if (antes > 0) acotarSalud(persona.demography, persona.demography.health * unidades(m.materia, cuerpo.tejido, plantilla) / antes);
+    soltar(m, carne, c.terreno.celda(persona.x, persona.y));
+  }
   return 'hecho';
 }
 

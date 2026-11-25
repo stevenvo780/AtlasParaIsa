@@ -141,6 +141,7 @@ export function pursuePrey(world: World, person: Person, tileIn: TileLookup): vo
 
 // ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
 import { TASA_EXTRACCION } from '../../shared/naturaleza.js';
+import { leyFauna } from '../ley-fauna.js';
 export { TASA_EXTRACCION };
 
 /** El contexto de materia del dueño de `world`, si el motor ya lo enlazó. */
@@ -187,8 +188,10 @@ export function cazarAnimal(c: CtxLeyMateria, person: Person, presa: Ref, trabaj
   const pagado = pagar(c, person.cuerpo, trabajoJ);
   if (!(pagado > 0)) return 0;
   const { golpe, util } = golpeDePersona(c, person, pagado);
-  c.buzon.enviar(duenoDe(c, presa), { tipo: TipoIntento.Golpear, de: c.ref(person.uid ?? 0), a: presa, celda: -1, lote: REF_NULA,
-    nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null });
+  const intento = { tipo: TipoIntento.Golpear, de: c.ref(person.uid ?? 0), a: presa, celda: -1, lote: REF_NULA,
+    nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null };
+  if (c.params.v23.intentos) c.buzon.enviar(duenoDe(c, presa), intento);
+  else leyFauna.aplicar?.Golpear?.(c, intento);
   const celda = c.terreno.celda(person.x, person.y);
   if (util !== REF_NULA && celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo) {
     const desgaste = reparto(golpe, c.materia.vista(person.cuerpo.tejido)).util;
@@ -209,15 +212,21 @@ export function extraerDeAnimal(c: CtxLeyMateria, person: Person, animal: Ref, p
   const kg = TASA_EXTRACCION * masaDe(c, person.cuerpo) ** 0.75;
   if (!(kg > 0) || pagar(c, person.cuerpo, C_MOVER * kg) <= 0) return REF_NULA;
   let destino: LoteRef = person.cuerpo.digestivo;
-  if (parte === 'fibra') {
-    destino = c.materia.nuevo(Rol.Objeto, -1, 0);
-    person.carga?.push(destino);
-  }
+  if (parte === 'fibra') destino = c.materia.nuevo(Rol.Objeto, -1, 0);
   const dato = new Float64Array(DATO_TOMAR.kappa + 4);
   dato[DATO_TOMAR.rol] = parte === 'reserva' ? Rol.Reserva : Rol.Tejido;
   dato[DATO_TOMAR.esp] = 0; dato[DATO_TOMAR.cuantos] = kg * 1000; dato[DATO_TOMAR.loteDestino] = destino;
-  c.buzon.enviar(duenoDe(c, animal), { tipo: TipoIntento.Tomar, de: c.ref(person.uid ?? 0), a: animal, celda: -1, lote: REF_NULA,
-    nonce: c.id('nonce'), materia: null, dato, bytes: null });
+  const intento = { tipo: TipoIntento.Tomar, de: c.ref(person.uid ?? 0), a: animal, celda: -1, lote: REF_NULA,
+    nonce: c.id('nonce'), materia: null, dato, bytes: null };
+  if (c.params.v23.intentos) c.buzon.enviar(duenoDe(c, animal), intento);
+  else {
+    leyFauna.aplicar?.Tomar?.(c, intento);
+    if (parte === 'fibra' && c.materia.especies(destino, new Uint32Array(1)) === 0) {
+      c.materia.liberar(destino);
+      return REF_NULA;
+    }
+  }
+  if (parte === 'fibra') (person.carga ??= []).push(destino);
   return destino;
 }
 

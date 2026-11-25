@@ -36,14 +36,27 @@ function esVectorFinito(value: unknown): value is number[] {
   return true;
 }
 
-function assertGestacion(value: unknown, tick: number, persona: boolean): void {
+function genomaGestado(genoma: number[]): boolean {
+  if (genoma.length !== GENOMA_ANCHO && genoma.length !== GENOMA_ANCHO + 2) return false;
+  if (genoma.slice(0, GENOMA_ANCHO).some(n => n < 0 || n > 1)) return false;
+  if (genoma.length === GENOMA_ANCHO) return true;
+  const generacion = genoma[GENOMA_ANCHO], mutaciones = genoma[GENOMA_ANCHO + 1];
+  return esReferencia(generacion) && generacion > 0 && esReferencia(mutaciones) && mutaciones <= GENOMA_ANCHO;
+}
+
+function assertGestacion(value: unknown, tick: number, persona: boolean, escalar = false): void {
   const tiempo = (n: unknown): boolean => esReferencia(n) && n <= tick;
-  if (!esRegistro(value) || !esReferencia(value.embrion) || !esReferencia(value.otro)
+  if (!esRegistro(value) || (!escalar && !esReferencia(value.embrion)) || !esReferencia(value.otro)
     || !tiempo(value.inicio) || (value.bajoBasalDesde !== -1 && !tiempo(value.bajoBasalDesde))
-    || !esVectorFinito(value.genoma) || value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO
-    || persona && (value.genoma.length !== GENOMA_ANCHO || value.genoma.some(n => n < 0 || n > 1))
+    || !esVectorFinito(value.genoma)
+    || (persona ? !genomaGestado(value.genoma) : value.genoma.length === 0 || value.genoma.length > GENOMA_ANCHO)
     || value.politica !== undefined && (!persona || !esVectorFinito(value.politica)
       || value.politica.length !== COLUMNAS_CEREBRO.politica)) throw new Error('Gestación inválida.');
+  if (escalar) {
+    const { masa, m0, grano } = value;
+    if (typeof masa !== 'number' || !(masa >= 0) || typeof m0 !== 'number' || !Number.isFinite(m0) || m0 <= 0
+      || masa > m0 || typeof grano !== 'number' || !(grano > 0 && grano <= m0)) throw new Error('Gestación escalar inválida.');
+  }
 }
 
 function assertCuerpo(value: unknown, tick: number, persona: boolean): void {
@@ -169,6 +182,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       && v23.every(([, n]) => typeof n === 'number' && Number.isFinite(n) && n >= 0);
   };
   for (const p of w.people) {
+    if (p.gestacion !== undefined) assertGestacion(p.gestacion, w.tick, true, true);
     if (validarCuerpos) {
       assertCuerpo(p.cuerpo, w.tick, true);
       assertCarga(p.carga);
@@ -219,10 +233,20 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       || w.technology.checkpoint?.inventories.some(inv => inv.items.some(item => Object.hasOwn(item, 'contents'))))) fail();
     if (expectedVersion >= 6 && !w.technology.water) fail();
     assertPopulation(w); assertTechnology(w);
+    const nacidos = new Set<string>();
     for(const person of [...w.people,...w.legacy,...w.retiredLegacy]) {
+      if (person.genome.generation === 0) continue;
+      nacidos.add(person.id);
+      const nacido = ley(w, 'natalidad') ? /^nacido-([1-9]\d*)$/.exec(person.id) : null;
+      if (nacido) {
+        const uid = Number(nacido[1]);
+        if (!Number.isSafeInteger(uid) || ('demography' in person && person.uid !== uid)) fail();
+        continue;
+      }
       const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
-      if(person.genome.generation>0&&(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter)) fail();
+      if(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter) fail();
     }
+    if (nacidos.size > w.birthCounter) fail();
     const ownRecipes = [...w.technology.recipes, ...(w.technology.catalogue?.pending ?? [])];
     const recipeIds = new Set(ownRecipes.map(recipe => recipe.id));
     for (const person of w.people) {

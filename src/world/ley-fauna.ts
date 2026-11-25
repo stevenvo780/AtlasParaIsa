@@ -660,8 +660,10 @@ function aplicarTomar(cl: CtxLey, i: Intento): Aplicado {
   fa.sobresaltoDesde = c.tick;
   const por = c.frente.uid[slotDe(i.de)] ?? 0;
   if (sacado > 0) { fa.extraido = { que: parte, tick: c.tick, por }; a.tends = (a.tends ?? 0) + 1; a.lastTended = c.tick; }
-  enviar(c, i.de, { tipo: TipoIntento.Concedido, de: f.ref, celda: -1, lote: i.dato[DATO_TOMAR.loteDestino] ?? REF_NULA,
+  const destino = i.dato[DATO_TOMAR.loteDestino] ?? REF_NULA;
+  if (c.params.v23.intentos) enviar(c, i.de, { tipo: TipoIntento.Concedido, de: f.ref, celda: -1, lote: destino,
     nonce: i.nonce, materia: garantia, dato: datoMateria(Rol.Objeto), bytes: null });
+  else if (garantia.length) c.materia.abonar(destino, garantia, c.libro);
   return 'hecho';
 }
 

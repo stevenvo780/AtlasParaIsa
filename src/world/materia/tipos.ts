@@ -289,7 +289,7 @@ export interface Plantilla {
 export interface Gestacion {
   embrion: LoteRef;
   otro: number;           // uid de la pareja (frente público)
-  genoma: number[];       // alelos (personas, GENOMA_ANCHO) o genes continuos (fauna) de la cría, sorteados al concebir
+  genoma: number[];       // alelos, generación y mutaciones (personas) o genes continuos (fauna), sorteados al concebir
   politica?: number[];    // pesos heredados de CEREBRO (`COLUMNAS_CEREBRO.politica`), sorteados al concebir; ausente en fauna
   inicio: number;         // tick
   bajoBasalDesde: number; // tick desde el que la reserva no paga el basal; −1 si la paga

@@ -4,6 +4,6 @@
  * validador no puede importar las leyes sin cerrar ciclos.
  */
 export const TOTALES_V23 = [
-  'v23DietaKg', 'v23DietaFaunaKg', 'v23BebidaKg', 'v23ForrajeoKg', 'v23RecogidaKg', 'v23CargaKgTick', 'v23MasaKgTick',
+  'v23DietaKg', 'v23DietaFaunaKg', 'v23CazaKg', 'v23BebidaKg', 'v23ForrajeoKg', 'v23RecogidaKg', 'v23CargaKgTick', 'v23MasaKgTick',
 ] as const;
 export type TotalV23 = (typeof TOTALES_V23)[number];

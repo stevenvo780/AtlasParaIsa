@@ -19,10 +19,10 @@ import { RADIUS } from '../mundo/tipos.js';
 import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { Clase, REF_NULA, slotDe, type Ref } from '../motor/contratos.js';
 import { masCercano } from '../motor/vecinos.js';
-import { pagar, pedidoComida, soltar } from '../materia/cuerpo.js';
+import { pagar, soltar, trasladarAlimento } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo } from '../materia/tipos.js';
 import { cazarAnimal, extraerDeAnimal, valorDeAnimal, animalVisto } from './caza.js';
-import { celdaEsPropia, contar, escalaBocado, gastarMaderaEnSuelo, marcarCarne } from './recursos.js';
+import { TOTAL_CAZA_KG, celdaEsPropia, contar, escalaBocado, gastarMaderaEnSuelo, marcarCarne } from './recursos.js';
 
 export function workEffort(person: Person, work = 1) {
   return { energy: work * 0.0003, fatigue: work * 0.00025 * (1.2 - person.traits.resilience * 0.4) };
@@ -188,8 +188,7 @@ function cazarPorTick(c: CtxLeyMateria, person: Person, cuerpo: Cuerpo): void {
     const quiere = CARNE_A_CUESTAS_KG * escalaBocado(c, cuerpo);
     for (let i = 0; i < n && llevado < quiere; i++) {
       const lote = c.materia.nuevo(Rol.Objeto, -1, 0);
-      c.materia.moverParte(cadaveres[i]!, lote, pedidoComida(c, cuerpo, quiere - llevado));
-      const kg = c.materia.vista(lote).masa;
+      const kg = trasladarAlimento(c, cuerpo, cadaveres[i]!, lote, quiere - llevado);
       if (kg > 0) { (person.carga ??= []).push(lote); marcarCarne(person, lote); llevado += kg; }
       else if (c.materia.calor(lote) === 0) c.materia.liberar(lote);
       else soltar(c, lote, celda);
@@ -198,7 +197,7 @@ function cazarPorTick(c: CtxLeyMateria, person: Person, cuerpo: Cuerpo): void {
   person.huntingPreyId = undefined;
   ultimaPresa.delete(person);
   const success = llevado > 0;
-  if (success) { count(world, 'hunts'); contar(world, 'v23CazaKg', llevado); }
+  if (success) { count(world, 'hunts'); contar(world, TOTAL_CAZA_KG, llevado); }
   outcome(world, person, 'hunt', success ? 0.14 : -0.2, success);
   if (!success) person.reason = 'La presa se perdió de vista sin dejar un cadáver al alcance.';
   if (person.command?.order === 'hunt') { person.command = null; person.controlMode = 'auto'; }

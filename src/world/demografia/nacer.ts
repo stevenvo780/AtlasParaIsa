@@ -68,6 +68,9 @@ export function reproduce(world: World): void {
     // Estado de la natalidad V23 de una madre que nació con esa ley encendida: no se copia a una cría heredada.
     if (child.crianza !== undefined) child.crianza = undefined;
     if (child.cuerpoVisto !== undefined) child.cuerpoVisto = undefined;
+    if (child.cuerpo !== undefined) child.cuerpo = undefined;
+    if (child.carga !== undefined) child.carga = undefined;
+    child.gestacion = undefined;
     if (paramsOf(world).conducta.politicaPeso > 0) {
       const parentPolicyA = a.policy ?? founderPolicy(world.seed, a.id);
       const parentPolicyB = b.policy ?? founderPolicy(world.seed, b.id);
@@ -187,10 +190,10 @@ export function crearCria(world: World, madre: Person, d: DatosCria): Person {
     technology: initialTechnologyKnowledge(), demography: initialDemography(),
     home: { x: madre.x, y: madre.y, quality: madre.home ? madre.home.quality : 1 - Math.max(madre.hunger, madre.thirst, madre.fatigue), observedAt: tick },
     waterMemory: madre.waterMemory ? { x: madre.waterMemory.x, y: madre.waterMemory.y } : undefined,
-    crianza: { cuidadores: [...d.cuidadores], madurez: d.madurez }, cuerpoVisto: undefined,
+    crianza: { cuidadores: [...d.cuidadores], madurez: d.madurez }, cuerpoVisto: undefined, gestacion: undefined,
     partnerMemory: undefined, agreement: undefined, compounds: undefined, conflictMemory: undefined, huntingPreyId: undefined, tending: undefined,
     policy: conPolitica ? d.policy : undefined, policyPlasticity: conPolitica ? initialPolicyPlasticity() : undefined,
-    ...(d.cuerpo ? { cuerpo: d.cuerpo, carga: d.carga ?? [] } : undefined),
+    cuerpo: d.cuerpo, carga: d.cuerpo ? d.carga ?? [] : undefined,
   };
   if ((cria as unknown as Record<string, unknown>).vocacion !== undefined) (cria as unknown as Record<string, unknown>).vocacion = undefined;
   return cria;

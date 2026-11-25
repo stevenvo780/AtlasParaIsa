@@ -2,7 +2,7 @@ import { serialize } from 'node:v8';
 import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
 import type { StructureMaterialProfile, StructureSynergyView } from '../shared/chemistry.js';
 import { codigoForma, formaDeCodigo } from '../shared/materia.js';
-import { KG_POR_UNIDAD_MATERIAL } from '../shared/naturaleza.js';
+import { KG_POR_UNIDAD_MATERIAL, TRABAJO_J_TICK } from '../shared/naturaleza.js';
 import { blendMaterialProfile, compoundCarryUnits, enrichSoilFromLots, KILN_FUEL_POWER, unfiredCompoundShare } from './chemistry.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
@@ -20,7 +20,7 @@ import { constructionWorkFactor, consumeConstructionTools, installTechnologyItem
 import { marcarTesela } from './soa/barrera-percepcion.js';
 import { ctxMateriaDe, refDeOrganismo, type CtxLeyMateria } from './motor/acceso.js';
 import { slotDe } from './motor/contratos.js';
-import { beber, cargaKg, ingerir, pagar, pedidoComida } from './materia/cuerpo.js';
+import { basalJ, beber, cargaKg, energiaAlimento, ingerirSelecto, pagar, reservaJ } from './materia/cuerpo.js';
 import { aportarEscalar, extraerEscalar, lotesDeCelda, rocaDe } from './materia/ley-mundo.js';
 import {
   AREA_OBRA_M2, COBERTURA_COBIJO, DENSIDAD_AGUA_KG_M3, DENSIDAD_GRANO_KG_M3, FLUJO_CAPTACION_KG_M2_TICK, KG_POR_CUANTO_AGUA, MASA_PORTANTE_KG_M2,
@@ -944,14 +944,16 @@ function candidatosObra(c: CtxLeyMateria, persona: Person): InventionCandidate[]
   return paretoCandidates(candidatos).sort((a, b) => b.efficiency - a.efficiency || b.value - a.value || b.novelty - a.novelty);
 }
 
+function costeEnsayoObraJ(): number {
+  return Math.ceil(AREA_OBRA_M2 * MASA_PORTANTE_KG_M2 * COLOCACION_J_POR_KG);
+}
+
 function inventarObra(c: CtxLeyMateria, persona: Person, emit: Emit): boolean {
   const mundo = c.mundo, cuerpo = persona.cuerpo;
   if (!mundo.noveltyEnabled || !cuerpo || !puedeTrabajarEn(c, persona, celdaObra(c, persona))) return false;
   const [candidato] = candidatosObra(c, persona);
   if (!candidato?.planoMaterial) return false;
-  const cargaPrototipo = AREA_OBRA_M2 * MASA_PORTANTE_KG_M2;
-  const coste = Math.ceil(cargaPrototipo * COLOCACION_J_POR_KG);
-  const pago = pagar(c, cuerpo, coste);
+  const coste = costeEnsayoObraJ(), pago = pagar(c, cuerpo, coste);
   if (pago < coste) return false;
   const { planoMaterial } = candidato;
   const serial = c.globales.registro.insertar(new TextEncoder().encode(JSON.stringify(
@@ -975,8 +977,10 @@ function inventarObra(c: CtxLeyMateria, persona: Person, emit: Emit): boolean {
 export function inventionOpportunity(world: World, person: Person): { score: number; target: Point; reason: string } | undefined {
   if (ley(world, 'obra')) {
     if (!world.noveltyEnabled || !person.cuerpo) return;
-    const [plan] = candidatosObra(ctxMateriaDe(world), person);
-    if (plan) return { score: plan.value * person.curiosity, target: { x: person.x, y: person.y },
+    const c = ctxMateriaDe(world), ticks = Math.max(0, RESEARCH_WORK - (person.action === 'invent' ? person.work : 0));
+    if (reservaJ(c, person.cuerpo) < costeEnsayoObraJ() + ticks * TRABAJO_J_TICK + basalJ(c, person.cuerpo, ticks)) return;
+    const [plan] = candidatosObra(c, person);
+    if (plan) return { score: plan.value * plan.novelty * person.curiosity, target: { x: person.x, y: person.y },
       reason: 'Una pieza real sugiere otra forma, volumen o reparto de la planta.' };
     return;
   }
@@ -1410,6 +1414,15 @@ export function foodAvailable(world: World, person: Point): number {
   }
   return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0);
 }
+
+export function comidaEnObra(c: CtxLeyMateria, cuerpo: NonNullable<Person['cuerpo']>, punto: Point, kg: number): number {
+  let energia = 0;
+  for (const s of obraCercana(c.mundo, punto, 1.5)) {
+    const lote = loteDepositoObra(c, s, 'comida');
+    if (lote >= 0 && prestacionesObra(c, s).volumen > 0) energia += energiaAlimento(c, cuerpo, lote, kg);
+  }
+  return energia;
+}
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */
 export function takeFood(world: World, person: Point, requested: number): number {
   if (!Number.isFinite(requested) || requested <= 0) return 0;
@@ -1495,7 +1508,7 @@ export function consumirDepositoObra(c: CtxLeyMateria, quien: Person, tipo: Depo
     const lote = loteDepositoObra(c, s, tipo);
     if (lote < 0) continue;
     const resta = kg - tomado;
-    const cantidad = tipo === 'agua' ? beber(c, cuerpo, lote, resta) : ingerir(c, cuerpo, lote, pedidoComida(c, cuerpo, resta));
+    const cantidad = tipo === 'agua' ? beber(c, cuerpo, lote, resta) : ingerirSelecto(c, cuerpo, lote, resta);
     tomado += cantidad;
     if (tipo === 'comida') c.mundo.inventionDynamics.foodTaken += cantidad;
     observeUse(c.mundo, s, cantidad);

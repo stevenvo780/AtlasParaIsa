@@ -106,6 +106,14 @@ function leerPares(pares: Float64Array, m: Lista): Lista {
   return m;
 }
 
+/** Ranuras fuera de línea que requiere una arena vacía al volver a cargar estos lotes. */
+export function ranurasDesborde(lotes: readonly LoteGuardado[]): number {
+  const pares = new Lista();
+  let desborde = 0;
+  for (const lote of lotes) desborde += Math.max(0, leerPares(lote.pares, pares).especies() - RANURAS);
+  return desborde;
+}
+
 /** Entradas y salidas de una ecuación agrupadas por sustancia (id, ν, id, ν…), ya comprobado su balance. */
 interface Grupos { entradas: Float64Array; salidas: Float64Array }
 

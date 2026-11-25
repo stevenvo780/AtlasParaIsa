@@ -39,14 +39,15 @@ import { SHARE_AMOUNT } from './family.js';
 import { HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD } from './ecologia-constantes.js';
 import { DEFAULT_MUTATION_RATE, inheritGenome, type Genome } from './genetics.js';
 import type { Violacion } from './invariantes.js';
-import { abortar, basalJ, concebir, gestar, masaDe, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
+import { abortar, basalJ, concebir, costeGestacionJ, gestar, masaLote, parir, plantillaDe, reservaJ, vistaCuerpo } from './materia/cuerpo.js';
 import type { Cuerpo, VistaCuerpo } from './materia/tipos.js';
-import { ctxSi, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
+import { ctxMateriaDe, ctxSi, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
 import { COLUMNAS_CEREBRO, Clase, GENOMA_ANCHO, REF_NULA, TipoIntento, slotDe } from './motor/contratos.js';
 import { cercanos } from './motor/vecinos.js';
 import { remember } from './mundo/crear.js';
 import { clamp } from './mundo/geometria.js';
 import { TICKS_PER_DAY, type Person, type World } from './mundo/tipos.js';
+import { necesidadesDeVista } from './needs.js';
 import { ley, paramsOf } from './params.js';
 import { founderPolicy, inheritPolicy, type PolicyGenome } from './politica.js';
 import { vecinos } from './rejilla.js';
@@ -164,14 +165,6 @@ export interface Balance {
   parir(p: Person): Dote;
 }
 
-/** Gestaciones del mundo escalar: van en `Person.gestacion` y se guardan con el mundo (integrador, pedido 1 del carril n).
- * Con `v23.cuerpos` la gestación va en `Cuerpo.gestacion`. */
-const gestacionesEscalares = {
-  get: (p: Person): EnCurso | undefined => p.gestacion,
-  set(p: Person, g: EnCurso): void { p.gestacion = g; },
-  delete(p: Person): void { p.gestacion = undefined; },
-};
-
 type Rasgos = ReturnType<typeof demographicTraits>;
 const rasgosPorGenoma = new WeakMap<Genome, { ley: object; rasgos: Rasgos }>();
 /** Rasgos demográficos de un genoma (edades, enfriamiento, demanda), calculados una vez por genoma y ley de longevidad. */
@@ -202,10 +195,10 @@ export function balanceEscalar(world: World): Balance {
     coste: () => m0 / ETA,
     salud: p => p.demography.health,
     madurez: p => p.demography.age / rasgosDe(world, p).maturityAge,
-    enCurso: p => gestacionesEscalares.get(p),
-    concebir(p, g) { gestacionesEscalares.set(p, { ...g, bajoBasalDesde: -1, masa: 0, m0, grano: m0 * 1e-9 }); },
+    enCurso: p => p.gestacion,
+    concebir(p, g) { p.gestacion = { ...g, bajoBasalDesde: -1, masa: 0, m0, grano: m0 * 1e-9 }; },
     gestar(p, dt, tick) {
-      const g = gestacionesEscalares.get(p);
+      const g = p.gestacion;
       if (!g) return 0;
       const sobra = reserva(p) - basal(p, TICKS_PER_DAY);
       if (!(sobra > 0)) { if (g.bajoBasalDesde < 0) g.bajoBasalDesde = tick; return g.masa; }
@@ -215,14 +208,14 @@ export function balanceEscalar(world: World): Balance {
       return g.masa;
     },
     abortar(p) {
-      const g = gestacionesEscalares.get(p);
+      const g = p.gestacion;
       if (!g) return;
       p.inventory += g.masa;
-      gestacionesEscalares.delete(p);
+      p.gestacion = undefined;
     },
     parir(p) {
-      const g = gestacionesEscalares.get(p);
-      gestacionesEscalares.delete(p);
+      const g = p.gestacion;
+      p.gestacion = undefined;
       return { inventario: g ? g.masa : 0 };
     },
   };
@@ -244,15 +237,11 @@ export function balanceAtomos(c: CtxLeyMateria): Balance {
     unidad: 'J',
     reserva: p => reservaJ(c, cuerpoDe(p)),
     basal: (p, dt) => basalJ(c, cuerpoDe(p), dt),
-    // m0 · Q_tejido / η: la energía que queda en los enlaces de la cría es η de la que la gestante quema o cede.
-    coste(p) {
-      const cuerpo = cuerpoDe(p), tejido = c.materia.vista(cuerpo.tejido);
-      return tejido.masa > 0 ? plantillaDe(c, cuerpo).m0 * (tejido.energia / tejido.masa) / ETA : Infinity;
-    },
+    coste: p => costeGestacionJ(c, cuerpoDe(p)),
     salud: p => vistaCuerpo(c, cuerpoDe(p), vista).salud,
     madurez(p) {
       const cuerpo = cuerpoDe(p);
-      return masaDe(c, cuerpo) / plantillaDe(c, cuerpo).masaAdulta;
+      return masaLote(c, cuerpo.tejido) / plantillaDe(c, cuerpo).masaAdulta;
     },
     enCurso(p) {
       const cuerpo = p.cuerpo, g = cuerpo?.gestacion;
@@ -427,7 +416,7 @@ export function provisionCrianza(world: World, p: Person): Provision | null {
 
 /** Cuidar: quien tiene a la vista una cría a su cargo con más hambre que él y lleva una ración, se la da. */
 export function candidatoCuidar(world: World, p: Person, cerca: readonly Person[]): Candidate | undefined {
-  if (p.inventory < SHARE_AMOUNT) return undefined;
+  if (p.cuerpo && ley(world, 'cuerpos') ? p.hunger >= 0.5 : p.inventory < SHARE_AMOUNT) return undefined;
   let cria: Person | undefined;
   for (const otro of cerca) {
     if (!otro.crianza || otro.hunger <= p.hunger || !otro.crianza.cuidadores.includes(p.id)) continue;
@@ -481,6 +470,14 @@ function genomaDeCria(madre: Person, g: EnCurso, idOtro: string | undefined): Ge
   };
 }
 
+/** ¿Sigue vivo el cuidador `id`? Sin intentos el mundo es un solo heap (los muertos ya salieron de `mundo.people` o
+ * llevan causa); con intentos, lo vivo es su fila en el frente (como en `parto`). */
+function cuidadorVive(c: CtxLey, id: string): boolean {
+  if (!ley(c.mundo, 'intentos')) return c.mundo.people.some(o => o.id === id && o.demography.deathCause === null);
+  const uid = c.uidDe(id);
+  return uid > 0 && c.ref(uid) !== REF_NULA;
+}
+
 function parto(c: CtxLey, b: Balance, madre: Person): void {
   const mundo = c.mundo, g = b.enCurso(madre);
   if (!g) return;
@@ -497,6 +494,12 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
     uid, id: idDeCria(uid), genome: genomaDeCria(madre, g, idOtro), policy: g.politica ? { weights: g.politica } : undefined,
     cuidadores, madurez: M0, apego: APEGO_NACER, inventario: dote.inventario, cuerpo: dote.cuerpo, carga: dote.carga,
   });
+  if (dote.cuerpo && madre.cuerpo) {
+    const materia = ctxMateriaDe(mundo);
+    const vista: VistaCuerpo = { hambre: 0, sed: 0, energia: 0, salud: 0, masa: 0, carga: 0, T: 0 };
+    necesidadesDeVista(cria, vistaCuerpo(materia, dote.cuerpo, vista));
+    necesidadesDeVista(madre, vistaCuerpo(materia, madre.cuerpo, vista));
+  }
   // La copia de la gestante trae su `communityId`. Con `v23.comunidades` la pertenencia no se hereda: la da la red de
   // vínculos (F0 de la ley s la calcula y su F1 la asigna); hasta entonces la cría no figura en ninguna lista de miembros.
   if (ley(mundo, 'comunidades')) cria.communityId = null;
@@ -550,7 +553,12 @@ export const leyNatalidad: Ley = {
       if (p.crianza) {
         const madurez = b.madurez(p);
         if (madurez >= 1) p.crianza = undefined;
-        else p.crianza.madurez = Math.max(0, madurez);
+        else {
+          p.crianza.madurez = Math.max(0, madurez);
+          // Un cuidador muerto deja de cuidar: la lista la leen la decisión y el reparto de comida.
+          const vivos = p.crianza.cuidadores.filter(id => cuidadorVive(c, id));
+          if (vivos.length !== p.crianza.cuidadores.length) p.crianza.cuidadores = vivos;
+        }
       }
       if (p.role !== 'neighbor') continue;
       const g = b.enCurso(p);

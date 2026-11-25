@@ -2,7 +2,7 @@ import { ROUTE_CELLS, needRatesScratch, type Candidate, ventajaComparativa, copy
 import { type Person, type World, RADIUS, TICKS_PER_DAY } from '../mundo/tipos.js';
 import { type Point, type TileLookup, distance, clamp } from '../mundo/geometria.js';
 import { creditCausalOutcome, ensurePersonPolicy, localPolicyObservation } from './politica-persona.js';
-import { MIN_FORAGE_STOCK, FORAGE_AMOUNT } from '../actuar/recursos.js';
+import { BOCADO_KG, MIN_FORAGE_STOCK, FORAGE_AMOUNT, SORBO_KG, celdaEsPropia, comidaEnCelda, escalaBocado } from '../actuar/recursos.js';
 import { forageDuration } from '../actuar/trabajo.js';
 import { canTend, huntable, huntWorkDuration } from '../actuar/caza.js';
 import { phaseAt, addEvent, remember } from '../mundo/crear.js';
@@ -19,7 +19,7 @@ import { candidatoCortejo, candidatoCuidar, deseoCria, provisionCrianza } from '
 import { containedWaterQuanta, canHandleContainedWater } from '../technology-water.js';
 import { vecinos } from '../rejilla.js';
 import { settlementOpportunity, cooperationOpportunity, updateCulturalNormsOnOutcome } from '../society.js';
-import { foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
+import { comidaEnObra, foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
 import { HAMBRE_POR_UNIDAD } from '../ecologia-constantes.js';
 import { familyOpportunity, observedForagersByCell, earlierForagerExhausts, reproductiveReadiness, closeKin, availableToShare } from '../family.js';
 import { filtrarCerca, algunoCerca, primeroCerca } from '../indice-puntos.js';
@@ -32,6 +32,11 @@ import { FOOD_PER_ANIMAL } from '../ecosystem.js';
 import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '../politica.js';
 import { activeWhisperForPerson } from '../whispers.js';
 import { escuchaDe } from '../genetics.js';
+import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
+import { basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
+import { ctxMateriaDe } from '../motor/acceso.js';
+import { lotesDeCelda } from '../materia/ley-mundo.js';
+import { KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
 
 
 const chooseNearby: Tile[] = [], chooseNearbyCells: number[] = [], chooseReachable: Tile[] = [], chooseReachableCells: number[] = [];
@@ -114,6 +119,32 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }
   }
   const payload = containedWaterQuanta(person) / 1000;
+  const cuerpo = ley(world, 'cuerpos') ? person.cuerpo : undefined;
+  const materia = cuerpo ? ctxMateriaDe(world) : undefined;
+  const obra = ley(world, 'obra');
+  const tramo = 30;
+  const carga = person.carga ?? [];
+  const escala = cuerpo && materia ? escalaBocado(materia, cuerpo) : 0;
+  const basal = cuerpo && materia ? basalJ(materia, cuerpo, 1) : 0;
+  const reserva = cuerpo && materia ? reservaJ(materia, cuerpo) : 0;
+  const masa = cuerpo && materia ? masaLote(materia, cuerpo.tejido) : 0;
+  const pasoJ = cuerpo && materia ? C_MOVER * (masaDe(materia, cuerpo) + cargaKg(materia, carga)) : 0;
+  const puedePagar = (pasos: number, trabajo = 0) => cuerpo
+    ? reserva >= pasos * (pasoJ + 6 * basal) + trabajo * (TRABAJO_J_TICK + basal)
+    : planAffordable(person, payload, pasos, trabajo);
+  const aguaLibre = (p: Point): number => {
+    if (!materia || obra) return waterAvailable(world, p);
+    const celda = materia.terreno.celda(p.x, p.y);
+    if (!celdaEsPropia(materia, celda)) return 0;
+    const lote = lotesDeCelda(materia, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 }).agua;
+    return lote >= 0 ? materia.materia.vista(lote).agua * KG_POR_CUANTO_AGUA : 0;
+  };
+  let comidaCargada = 0, aguaCargada = 0;
+  if (cuerpo && materia) for (const lote of carga) {
+    if (!materia.materia.propio(lote)) continue;
+    comidaCargada += energiaAlimento(materia, cuerpo, lote, tramo * BOCADO_KG * escala);
+    aguaCargada += materia.materia.vista(lote).agua * KG_POR_CUANTO_AGUA;
+  }
   const foodArr = fast?.foodArr, dwArr = fast?.drinkingWaterArr;
   const moistureArr = fast?.moistureArr, vegArr = fast?.vegetationArr, terrainArr = fast?.terrainArr, biomeArr = fast?.biomeArr;
   const SHELTER_CODE = fast?.TERRAIN_SHELTER ?? -1;
@@ -170,8 +201,21 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // fusión CONFL + perf elige exactamente la misma celda que el `filter().sort()[0]` de la rama CONFL.
   // Lo percibido es la mejor celda de un filtro f32 algo más ancho que la ley (planes.ts): si cumple la ley y las
   // condiciones propias, es también la mejor de las que las cumplen; si no, se busca como siempre.
-  let food = percibida(CONSULTA.comida);
-  if (food && (disputada || !(foodOf(food, soaPercibida(CONSULTA.comida)) > UMBRAL.comida)
+  let food = percibida(CONSULTA.comida), comidaJ = 0;
+  if (cuerpo && materia) {
+    food = undefined;
+    let mejor = 0;
+    const kg = BOCADO_KG * escala * tramo, prevista = Math.max(basal * tramo, person.hunger * RESERVA_OBJETIVO_J_KG * masa);
+    for (let i = 0; i < reachableTiles.length; i++) {
+      const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
+      if (!puedePagar(pasos)) continue;
+      const j = comidaEnCelda(materia, cuerpo, tile, kg)
+        + (pasos === 0 ? comidaCargada : 0)
+        + (obra ? comidaEnObra(materia, cuerpo, tile, kg) : 0);
+      const valor = Math.min(j, prevista) / (tramo + pasos * 6 + recelo(tile) * 6);
+      if (valor > mejor) { food = tile; mejor = valor; comidaJ = j; }
+    }
+  } else if (food && (disputada || !(foodOf(food, soaPercibida(CONSULTA.comida)) > UMBRAL.comida)
     || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.comida), 0)))) {
     food = undefined;
     let foodKey = 0;
@@ -182,10 +226,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       if (!food || key < foodKey) { food = tile; foodKey = key; }
     }
   }
-  if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
+  if (food || (!cuerpo && (person.inventory > 0.01 || foodAvailable(world,person)>0))) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = copyBody(person, own ? chooseBody : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 });
   const forecastBody = own ? chooseForecast : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 };
-  const protection = bodilyShelter(world, person, tileIn, fast), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person, tileIn, fast);
+  const protection = bodilyShelter(world, person, tileIn, fast), damage = bodilyDamage(world, person, body, protection), meal = cuerpo ? 0 : immediateMeal(world, person, tileIn, fast);
   if (meal > 0) {
     const fed = copyBody(body, forecastBody); assimilateFood(fed, meal, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     const relief = avoidedDamageScore(person, damage, bodilyDamage(world, person, fed, protection));
@@ -327,7 +371,17 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // La consulta percibida solo ve el agua del suelo: con una cisterna cerca, o si su celda no sirve, se busca como siempre.
   let water = percibida(CONSULTA.agua);
   const cisterna = algunoCerca(world.structures, person, RADIUS + 2, structure => structure.components.includes('cistern'));
-  if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)
+  if (cuerpo) {
+    water = undefined;
+    let mejor = 0;
+    const sorbo = SORBO_KG * escala * tramo;
+    for (let i = 0; i < reachableTiles.length; i++) {
+      const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
+      if (!puedePagar(pasos)) continue;
+      const valor = Math.min(sorbo, aguaLibre(tile) + (pasos === 0 ? aguaCargada : 0)) / (tramo + pasos * 6 + recelo(tile) * 6);
+      if (valor > mejor) { water = tile; mejor = valor; }
+    }
+  } else if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)
     || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.agua), 0))))) {
     water = undefined;
     let waterKey = 0;
@@ -342,9 +396,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       }
     }
   }
-  const carriedWater = containedWaterQuanta(person) > 0;
+  const carriedWater = !cuerpo && containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
-  const localWater = waterAvailable(world, person) > 0;
+  const localWater = aguaLibre(person) + aguaCargada > 0;
   const recoverWater = carriedWater && !portableWater && !localWater && canRecoverWaterHandling(world, person, tileIn, fast);
   const seekingWater = !water && !portableWater && !localWater && !recoverWater && person.thirst > 0.6;
   // Memoria del agua (2026-09-22, `agua.memoria`, default 1 = conducta de hoy). Diagnóstico en la
@@ -434,15 +488,19 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       }
       const work = Math.max(0, (params.quimica.emergente && victim ? huntWorkDuration(person, victim) : Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25)))
         - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
-      if (victim && !huntPlan && planAffordable(person, payload, reachableSteps[huntOrder[h]!]!, work)) {
+      if (victim && !huntPlan && puedePagar(reachableSteps[huntOrder[h]!]!, work)) {
         huntPlan = { tile, victim, work };
         if (!params.quimica.emergente) break huntForecast;
       }
     }
   }
   const prey = huntPlan?.tile;
-  if (herdPlan && (person.hunger > 0.15 || !(person.compounds?.length))) candidates.push({ action: 'forage', target: herdPlan,
+  if (herdPlan && !ley(world, 'fauna') && (person.hunger > 0.15 || !(person.compounds?.length))) candidates.push({ action: 'forage', target: herdPlan,
     score: Math.max(0, person.hunger - 0.1) * 2 + 0.35, reason: 'Percibe un animal habituado; recoge alimento y fibra sin matarlo, pagando tiempo y biomasa.' });
+  if (cuerpo && food && basal > 0 && comidaCargada < basal * TICKS_PER_DAY && foodOf(food, soaCell(fast, food.x, food.y, food)) >= MIN_FORAGE_STOCK
+    && puedePagar(stepsTo(food)!, forageDuration(person))) candidates.push({ action: 'forage', target: food,
+    score: person.traits.care * (1 - person.hunger) * (1 - comidaCargada / (basal * TICKS_PER_DAY)),
+    reason: 'Recoge parte de lo que crece para llevar alimento a la próxima jornada.' });
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
   const seekingFood = !food && !prey && meal === 0 && person.hunger > .6;
   if (seekingFood) {
@@ -648,7 +706,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     if (candidate.action === 'explore') continue; // Its destination is selected later; no fictional roof there.
     const steps = stepsTo(candidate.target);
     const bypassEffort = desperateSubsistence && (candidate.action === 'eat' || candidate.action === 'drink');
-    if (steps === undefined || (!bypassEffort && !planAffordable(person, payload, steps, 0))) continue;
+    if (steps === undefined || (!bypassEffort && !puedePagar(steps))) continue;
     let cover = exposed && !(candidate.target.x === person.x && candidate.target.y === person.y)
       ? bodilyShelter(world, candidate.target, tileIn, fast) : protection, work = 0, travel = steps;
     // Accompany stops within 1.5 cells: another person's roof is not the follower's roof.
@@ -665,15 +723,23 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     if (cover > 0 && exposed) protectionPlan = true;
     let forecast = copyBody(body, forecastBody);
     if (candidate.action === 'eat') {
-      const over = candidate.target as Partial<Person>;
-      assimilateFood(forecast, immediateMeal(world, {
-        x: candidate.target.x, y: candidate.target.y,
-        inventory: over.inventory ?? person.inventory, hunger: over.hunger ?? person.hunger,
-      }, tileIn, fast), { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
+      if (cuerpo && masa > 0) forecast.hunger = clamp(person.hunger - comidaJ / (RESERVA_OBJETIVO_J_KG * masa));
+      else {
+        const over = candidate.target as Partial<Person>;
+        assimilateFood(forecast, immediateMeal(world, {
+          x: candidate.target.x, y: candidate.target.y,
+          inventory: over.inventory ?? person.inventory, hunger: over.hunger ?? person.hunger,
+        }, tileIn, fast), { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
+      }
     }
-    if (candidate.action === 'drink') forecast = drinkingBody(world, person, candidate.target, forecastBody);
+    if (candidate.action === 'drink') {
+      if (cuerpo && masa > 0) {
+        const kg = aguaLibre(candidate.target) + (steps === 0 ? aguaCargada : 0);
+        forecast.thirst = clamp(person.thirst - Math.min(kg, tramo * SORBO_KG * escala) / (AGUA_OBJETIVO_KG_KG * masa));
+      } else forecast = drinkingBody(world, person, candidate.target, forecastBody);
+    }
     // Historical worlds defer to an immediate plant meal; V23 compares paid yield.
-    if (candidate.action === 'hunt' && huntPlan && (params.quimica.emergente
+    if (!cuerpo && candidate.action === 'hunt' && huntPlan && (params.quimica.emergente
       ? person.hunger > 0.28 || animalBiomass(huntPlan.victim) * 0.8 / Math.max(1, huntPlan.work) > Math.min(FORAGE_AMOUNT, food?.food ?? 0) / forageDuration(person)
       : !food && meal === 0)) {
       // Conditional on that visible animal remaining until the paid hunt ends.

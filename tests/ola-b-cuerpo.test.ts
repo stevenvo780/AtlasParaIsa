@@ -10,7 +10,7 @@ import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
   KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
-  extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
+  costeGestacionJ, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
   plantillaDe, plantillaHumana, plantillaPorId, provecho, reservaJ, soltar, tasasBasales, vistaCuerpo,
 } from '../src/world/materia/cuerpo.js';
 import { Rol, type LoteRef, type VistaCuerpo } from '../src/world/materia/tipos.js';
@@ -141,6 +141,11 @@ test('una cría crece con lo que come y un adulto no pasa de su masa adulta', ()
 
 test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => {
   const madre = crearCuerpo(c, humana.id, 60);
+  const masaUnidad = humana.partes.reduce((mg, p) => mg + p.nu * c.quimica.sustancia(p.id).masa, 0) * 1e-6;
+  const grasa = humana.sintesis.entradas.find(p => p.id === m.S.CH2)!;
+  const costeGrasa = humana.m0 / masaUnidad * grasa.nu * c.quimica.sustancia(grasa.id).prop.qOxidacion;
+  assert.equal(humana.sintesis.dH, 0);
+  assert.ok(Math.abs(costeGestacionJ(c, madre) - costeGrasa) < 1e-6);
   concebir(c, madre, { otro: 9, genoma: [0.5], inicio: 100 });
   ingerirSelecto(c, madre, vida, 2);
   beber(c, madre, agua, 3);
@@ -150,11 +155,15 @@ test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => 
   assert.ok(embrion > 0.3 && embrion <= humana.m0 + 0.01, `embrión de ${embrion} kg`);
   assert.ok(Math.abs(masaDe(c, madre) + embrion - total) < 1e-6, 'lo que gana el embrión lo pierde la madre');
   assert.equal(lotesDe(madre, []).length, 4);
+  const reservaAntes = reservaJ(c, madre), aguaAntes = m.arena.cuantos(madre.reserva, m.S.H2O);
   const cria = parir(c, madre);
   assert.equal(madre.gestacion, undefined);
   assert.ok(Math.abs(masaLote(c, cria.tejido) - embrion) < 1e-9);
   const v = vistaCuerpo(c, cria, vista());
-  assert.ok(v.hambre === 1 && v.sed === 1 && v.salud > 0, 'la cría nace sin reserva');
+  assert.ok(v.hambre < 1 && v.sed < 1 && v.salud > 0, 'la cría recibe reserva de la gestante');
+  assert.ok(Math.abs(reservaJ(c, madre) + reservaJ(c, cria) - reservaAntes) < 1e-6);
+  assert.equal(m.arena.cuantos(madre.reserva, m.S.H2O) + m.arena.cuantos(cria.reserva, m.S.H2O), aguaAntes);
+  assert.equal(masaLote(c, cria.digestivo), 0);
 
   const otra = crearCuerpo(c, humana.id, 60), antes = masaDe(c, otra);
   concebir(c, otra, { otro: 9, genoma: [0.5], inicio: 100 });

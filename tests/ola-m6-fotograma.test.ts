@@ -47,13 +47,14 @@ function contextos() {
 const evento: ChronicleEvent = { id: 'e7', tick: 11, kind: 'birth', actors: ['vecina'], text: 'Nació una vecina', cause: 'nacer', source: 'simulation' };
 const pagina: VistaPaginaFotograma = Array<VistaPaginaFotograma[number]>(PAGE_CELLS).fill({ terrain: 'soil', moisture: 0.4, vegetation: 0.1, food: 0.3 });
 const uidPersona = 2 ** 40 + 1, uidAnimal = 2 ** 40 + 2;
+const ficha = { id: 'vecina', role: 'neighbor' as const, fatigue: 0.416,
+  cuerpoVisto: { masa: 32, masaAdulta: 45, reserva: 0.5, agua: 0.5, digestivo: 0, carga: 0, T: 300, principal: 12 },
+  crianza: { cuidadores: ['S'], madurez: 0.6 }, experiences: [{ tick: 0, text: 'Ficha', causeId: 'prueba' }], trust: [] };
 const metadatos: SucesoFotograma[] = [
   { tipo: 'mundo', id: '', vista: { width: 40, height: 28, instanceId: 'prueba', lotes: [{ x: 2, y: 1, rol: 'fuego', forma: 0, principal: 3, masa: 2, T: 450 }] } },
   { tipo: 'clima', id: '', vista: 'rain' },
   { tipo: 'pagina', id: '-1,2', vista: pagina },
-  { tipo: 'persona', id: String(uidPersona), vista: { id: 'vecina', role: 'neighbor', fatigue: 0.416,
-    cuerpoVisto: { masa: 32, masaAdulta: 45, reserva: 0.5, agua: 0.5, digestivo: 0, carga: 0, T: 300, principal: 12 },
-    crianza: { cuidadores: ['S'], madurez: 0.6 } } },
+  { tipo: 'persona', id: String(uidPersona), vista: ficha },
   { tipo: 'animal', id: String(uidAnimal), vista: { id: 'animal-a', species: 'hare', fatigue: 0.012, generation: 0,
     parents: [], genes: { speed: 1, perception: 1, metabolism: 1, carnivory: 0, waterEfficiency: 1, camouflage: 1 }, age: 57,
     v23: { miedo: 0.5, linaje: 4 } } },
@@ -109,6 +110,7 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
     assert.deepEqual([p.id, p.name, p.action, p.hunger, p.thirst, p.energy, p.fatigue, p.recentMemory], ['vecina', 'Ada', 'rest', 0.2, 0.4, 0.8, 0.42, 'Ayer']);
     assert.equal(p.cuerpoVisto?.masa, 32.25);
     assert.equal(p.crianza?.madurez, 0.6);
+    assert.ok(!Object.hasOwn(p, 'experiences') && !Object.hasOwn(p, 'trust'));
     assert.equal(corte.vista.animals?.[0].age, 40);
     assert.equal(corte.vista.animals?.[0].v23?.linaje, 4);
     assert.equal(corte.vista.lotes?.[0].T, 450);

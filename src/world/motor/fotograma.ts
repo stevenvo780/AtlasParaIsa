@@ -25,7 +25,9 @@ export const ACCIONES_PERSONA_FOTOGRAMA: readonly Action[] = [
 ];
 
 /** Campos públicos que no están en las columnas ni en los sucesos de texto. */
-export type VistaPersonaFotograma = Omit<PersonView, 'name' | 'color' | 'reason' | 'need' | 'recentMemory' | 'specialty' | 'craftTint' | 'craftFocus' | 'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health'>;
+export type VistaPersonaFotograma = Omit<PersonView,
+  'name' | 'color' | 'reason' | 'need' | 'recentMemory' | 'specialty' | 'craftTint' | 'craftFocus' |
+  'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health' | 'experiences' | 'trust'>;
 export type VistaAnimalFotograma = Omit<AnimalView, 'reason' | 'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health'>;
 export type VistaPaginaFotograma = readonly Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[];
 export type VistaMundoFotograma = Omit<WorldView, 'version' | 'sequence' | 'tick' | 'day' | 'phase' | 'weather' | 'tiles' | 'people' | 'animals' | 'places' | 'events' | 'memories' | 'communities' | 'structures' | 'blueprints' | 'technology' | 'organization' | 'whispers'>;
@@ -198,7 +200,12 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
 
 function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[]): [number, number] {
   const desde = Atomics.load(enlace.sucesosEscritos, 0);
-  const registros = sucesos.map(s => serialize(s));
+  const registros = sucesos.map(s => {
+    if (s.tipo !== 'persona' || !s.vista) return serialize(s);
+    // La ficha a petición puede compartir tipo estructural con la vista pública de cinta.
+    const { experiences: _experiencias, trust: _confianza, ...vista } = s.vista as VistaPersonaFotograma & Pick<PersonView, 'experiences' | 'trust'>;
+    return serialize({ ...s, vista });
+  });
   const bytes = registros.reduce((n, body) => n + 4 + body.length, 0);
   if (!bytes) return [Number(desde), Number(desde)];
   const anillo = enlace.sucesos;

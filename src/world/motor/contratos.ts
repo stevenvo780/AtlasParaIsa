@@ -381,7 +381,8 @@ export interface CanalGpu {
 
 // ── Motor ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Un tick coherente reunido en una barrera para `Store.save`: el mundo y su materia en la misma operación (§1.2).
+/** Un tick coherente reunido en una barrera para `Store.guardar(i)` (con `v23.guardadoCompleto`): el mundo y su
+ * materia en la misma transacción (§1.2); `Store.cargarInstantanea()` la devuelve con la época reservada.
  * `materia` es null hasta que W conecte la materia al mundo (ola 2). El `World` lleva arrays normales, nunca un SAB. */
 export interface Instantanea { world: World; materia: MateriaCheckpoint | null }
 
@@ -390,7 +391,7 @@ export interface Instantanea { world: World; materia: MateriaCheckpoint | null }
 export interface Motor {
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] };
   instantanea(): Instantanea;
-  cargar(i: Instantanea, epoca: number): void; // reparte tras Store.load o una recuperación y abre la época: su primer fotograma es completo
+  cargar(i: Instantanea, epoca: number): void; // reparte tras Store.cargarInstantanea() o una recuperación y abre la época: su primer fotograma es completo
   /** Desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito (protocolo en shared/fotograma.ts). */
   enlazar(cinta: DescriptorEnlace): void;
   detalle(uid: number): Promise<Person | null>; // inspector: lo serializa el dueño en el F1 siguiente

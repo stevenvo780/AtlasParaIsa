@@ -75,18 +75,26 @@ function registroSintetico(semilla: number, n: number, dias: number, b: number, 
     individuos.push(i); return i;
   };
   let vivos = Array.from({ length: n }, () => nuevo(0, 'inicial'));
-  const paso = 120, fin = dias * DIA;
+  const paso = 120, fin = dias * DIA, bloques = Array.from({ length: dias }, () => new Map<string, number[]>());
+  // Cada persona se queda en su celda: el bloque donde ocurre todo es el suyo.
+  const anotar = (i: Individuo, t: number, campo: number, cuanto = 1) => {
+    const mapa = bloques[Math.ceil(t / DIA) - 1]!, k = `${Math.floor(i.x0 / 8)},${Math.floor(i.y0 / 8)}`;
+    if (!mapa.has(k)) mapa.set(k, new Array(7).fill(0));
+    mapa.get(k)![campo]! += cuanto;
+  };
   for (let t = paso; t <= fin; t += paso) {
     const siguientes: Individuo[] = [];
     for (const i of vivos) {
-      if (azar() < m * paso / DIA) { i.hasta = t; i.causa = 'starvation'; continue; }
+      anotar(i, t, 0, paso);
+      if (azar() < m * paso / DIA) { i.hasta = t; i.causa = 'starvation'; anotar(i, t, 2); continue; }
       siguientes.push(i);
-      if (azar() < 0.05 * paso / DIA) i.parejas.push(t);
-      if ((!sinNacimientosDia1 || t > DIA) && azar() < b * paso / DIA) { i.hijos.push(t, t); siguientes.push(nuevo(t, 'nacido')); }
+      if (azar() < 0.05 * paso / DIA) { i.parejas.push(t, t); anotar(i, t, 6); }
+      if ((!sinNacimientosDia1 || t > DIA) && azar() < b * paso / DIA) { i.hijos.push(t, t); siguientes.push(nuevo(t, 'nacido')); anotar(i, t, 1); }
     }
     vivos = siguientes;
   }
-  const dia = (d: number) => ({ dia: d, tick: d * DIA, vivos: 0, fueraDeZona: 0, muestras: 1, vecinos3: 0, vecinos8: 0, embudo: { adultosFertiles: 1, listos: 1, conPareja: 1, conParejaYLugar: 1 }, hambre: new Array(10).fill(0), sed: new Array(10).fill(0), msPared: 1, ticksPorSegundo: 1, carga: [0, 0, 0] });
+  const dia = (d: number) => ({ dia: d, tick: d * DIA, vivos: 0, fueraDeZona: 0, muestras: 1, vecinos3: 0, vecinos8: 0, embudo: { adultosFertiles: 1, listos: 1, conPareja: 1, conParejaYLugar: 1 },
+    bloques: [...bloques[d - 1]!].map(([k, v]) => [k, ...v] as [string, ...number[]]), hambre: new Array(10).fill(0), sed: new Array(10).fill(0), msPared: 1, ticksPorSegundo: 1, carga: [0, 0, 0] });
   const piramide = { anchoDias: 1, clases: [], etapas: { juveniles: 0, fertiles: 0, mayores: 0 } };
   return { inicio: 0, fin, zona: ZONA, caminables: 1536, individuos, dias: Array.from({ length: dias }, (_, k) => dia(k + 1)), piramideInicial: piramide, piramideFinal: piramide, violaciones: { duras: 0, blandas: 0, comprobaciones: 0 } };
 }
@@ -98,8 +106,12 @@ test('las tasas por habitante recuperan las verdaderas con su IC y el transitori
     const e = a.bloques[tasa];
     assert.ok(e.ic95[0] <= verdad && verdad <= e.ic95[1], `${tasa}: ${e.valor} [${e.ic95}] no cubre ${verdad}`);
   }
-  assert.equal(transitorio(constante).dias, 1, 'sin transitorio real queda el mínimo');
-  assert.equal(transitorio(registroSintetico(2, 2000, 5, 0.3, 0.2, true), 0).dias, 1, 'un primer día sin nacimientos es transitorio');
+  // La regla hace tres pruebas al 5 %: con tasas constantes añade a veces un día de más (pierde datos, no sesga); un
+  // primer día sin nacimientos no se le escapa nunca.
+  const constantes = Array.from({ length: 20 }, (_, k) => transitorio(registroSintetico(200 + k, 1000, 5, 0.3, 0.2, false)).dias);
+  const conTransitorio = Array.from({ length: 20 }, (_, k) => transitorio(registroSintetico(300 + k, 1000, 5, 0.3, 0.2, true), 0).dias);
+  assert.ok(constantes.filter(d => d === 1).length >= 14, `sin transitorio real: ${constantes}`);
+  assert.ok(conTransitorio.every(d => d >= 1) && conTransitorio.filter(d => d === 1).length >= 14, `con un día de transitorio: ${conTransitorio}`);
   // Cobertura del IC por bloques en réplicas independientes: cerca del 95 %.
   let cubre = 0;
   for (let s = 0; s < 40; s++) { const e = analizar(registroSintetico(100 + s, 400, 4, 0.3, 0.2, false), { transitorio: 0, bloque: 8, replicas: 400 }).bloques.r; if (e.ic95[0] <= 0.1 && 0.1 <= e.ic95[1]) cubre++; }

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertWorld, createWorld, stepWorld } from '../src/world/index.js';
+import { assertWorld, createWorld, stepWorld, TICKS_PER_DAY } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf } from '../src/world/params.js';
 import { crearComprobador } from '../src/world/invariantes.js';
-import { archivoDeChunks, cargarPunto, guardarPunto, medir, paramsDeCorrida, poblar, type Registro, type Zona } from '../scripts/lab/poblacion.mjs';
+import { agrupar, agruparEspacio, archivoDeChunks, cargarPunto, clavePersona, guardarPunto, medir, paramsDeCorrida, poblar, ventana, type Grupo, type Registro, type Zona } from '../scripts/lab/poblacion.mjs';
 
 // Pruebas con el mundo de verdad (régimen abierto del panel, un hilo, sin tarjeta). Sondas cortas: la torre va cargada.
 const ZONA: Zona = { x: 0, y: 0, ancho: 48, alto: 32 };
@@ -37,6 +37,13 @@ test('(a) poblar y medir es reproducible con un hilo y semilla, y cada sembrado 
       assert.equal(registro.individuos.filter(i => i.causa === causa).length, mundo.demographyDynamics.causes[causa] - muertes[causa]);
     assert.equal(registro.individuos.filter(i => i.hasta === null).length, mundo.people.filter(p => p.role === 'neighbor').length);
     assert.equal(registro.individuos.reduce((s, i) => s + i.hijos.length, 0), 2 * nacidos.length);
+    // Lo anotado por bloques, donde ocurrió, suma lo mismo que lo anotado por persona.
+    const [ti, tf] = ventana(registro, 0), espacio = agruparEspacio(registro, ti, tf, 16), personas = agrupar(registro.individuos, ti, tf, clavePersona);
+    const total = (gs: Grupo[]) => gs.reduce((t, g) => ({ e: t.e + g.exposicion, b: t.b + g.nacimientos, m: t.m + Object.values(g.muertes).reduce((a, x) => a + x, 0), p: t.p + g.parejas }), { e: 0, b: 0, m: 0, p: 0 });
+    const te = total(espacio), tp = total(personas), muertos = registro.individuos.filter(i => i.hasta !== null).length;
+    assert.equal(te.b, tp.b); assert.equal(te.m, tp.m); assert.equal(te.p, tp.p);
+    // Por persona cuenta (desde, hasta]; por bloque, cada paso en que está viva: difieren en un paso por nacimiento o muerte.
+    assert.ok(Math.abs(te.e - tp.e) * TICKS_PER_DAY <= muertos + nacidos.length + 1e-6, `exposición ${te.e} frente a ${tp.e}`);
     return { inicial, final: digestoCanonico(mundo), registro };
   };
   const a = correrSonda(), b = correrSonda();

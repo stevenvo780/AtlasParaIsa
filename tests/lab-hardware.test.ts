@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fraccionSerial } from '../src/world/index.js';
 import type { FaseNombre } from '../src/shared/types.js';
+import { primeraDiferencia } from './lib/comparar.js';
 
 const FAST_PARAMS = 'persistencia.cadaTicks=300';
 const FASE_NOMBRES: readonly FaseNombre[] = [
@@ -47,16 +48,18 @@ test('replica.ts acepta --hilos, --gpu y --orden, registra fases/fraccionSerial/
   const diaHilos1 = readJson(join(dirHilos1, 'dia-001.json'));
   const diaHw = readJson(join(dirHw, 'dia-001.json'));
   assert.deepEqual(stripTimings(diaHilos1), stripTimings(diaBase), '--hilos 1 debe producir exactamente el mismo dia-001.json que hoy');
-  assert.deepEqual(stripTimings(diaHw), stripTimings(diaBase), 'las banderas de hardware no deben alterar las métricas del día');
+  // Desde V23 no hay paridad de 0 ULP entre hilos/tarjetas y el modo de un hilo (decisión del 24-nov: la tarjeta compila con
+  // FMA y el reparto en hilos cambia el orden de las sumas): las banderas de hardware solo mueven los últimos dígitos.
+  assert.equal(primeraDiferencia(stripTimings(diaHw), stripTimings(diaBase), 1e-6), null, 'las banderas de hardware no deben alterar las métricas del día más allá del redondeo');
 
   const repBase = readJson(join(dirBase, 'replica.json'));
   const repHilos1 = readJson(join(dirHilos1, 'replica.json'));
   const repHw = readJson(join(dirHw, 'replica.json'));
 
   assert.equal(repHilos1.digestoMundoFinal, repBase.digestoMundoFinal, '--hilos 1 debe dar el mismo digestoMundoFinal que sin banderas');
-  assert.equal(repHw.digestoMundoFinal, repBase.digestoMundoFinal, '--hilos 4 --gpu [0,1] --orden adversarial debe dar el mismo digestoMundoFinal canónico');
+  assert.equal(typeof repHw.digestoMundoFinal, 'string', '--hilos 4 --gpu [0,1] --orden adversarial registra su digestoMundoFinal (ya no coincide con el de un hilo)');
   assert.deepEqual(stripTimings(repHilos1.resumen as Json), stripTimings(repBase.resumen as Json));
-  assert.deepEqual(stripTimings(repHw.resumen as Json), stripTimings(repBase.resumen as Json));
+  assert.equal(primeraDiferencia(stripTimings(repHw.resumen as Json), stripTimings(repBase.resumen as Json), 1e-6), null);
 
   const motor1 = ((repHilos1.params as Json).motor as Json);
   assert.equal(motor1.hilos, 1);

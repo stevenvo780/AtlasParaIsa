@@ -284,6 +284,9 @@ async function conRelojDeFases<T>(uso: (fases: ContadorDeFases) => Promise<T>): 
 /** Convierte `objeto[clave]` en un accesor que se porta como el dato salvo la primera vez que `cuando()`
  * es verdad: entonces lanza. El punto de restauración copia el VALOR, así que el mundo restaurado ya no
  * lleva la trampa, y la clave conserva su sitio en el orden de enumeración. */
+/** Campo de la persona que la fase de personas lee siempre, para fallar a mitad de ella. Desde V23 el motor lee las posiciones
+ * de las columnas del frente y ya no toca `person.x` en esa fase; el hambre sí se lee de la persona en cada decisión. */
+const CLAVE_PERSONA = 'hunger';
 function trampa(objeto: object, clave: string, cuando: () => boolean, error: () => Error): { readonly disparada: boolean } {
   let valor = (objeto as Record<string, unknown>)[clave], disparada = false;
   const vigilar = (): void => { if (!disparada && cuando()) { disparada = true; throw error(); } };
@@ -334,7 +337,7 @@ test('(7) un fallo a mitad de personas, a mitad de fauna o al confirmar el guard
     const pausan = new Set(['guardado']);
     const casos: Record<string, (h: Harness) => () => boolean> = {
       personas: ({ app }) => {
-        const t = trampa(enMedio(app.world.people), 'x', () => fases.dentro('personas'), () => new Error('fallo inyectado en personas'));
+        const t = trampa(enMedio(app.world.people), CLAVE_PERSONA, () => fases.dentro('personas'), () => new Error('fallo inyectado en personas'));
         return () => t.disparada;
       },
       fauna: ({ app }) => {
@@ -404,7 +407,7 @@ test('(9) tras deshacer, el servidor sigue y su mundo es el de un gemelo con clo
       const revocada = (donde: string) => () => new SessionRevoked(`sesión revocada ${donde}`);
       const fallos: Record<number, () => () => boolean> = {
         8: () => {
-          const t = trampa(enMedio(punto.app.world.people), 'x', () => fases.dentro('personas'), revocada('en personas'));
+          const t = trampa(enMedio(punto.app.world.people), CLAVE_PERSONA, () => fases.dentro('personas'), revocada('en personas'));
           return () => t.disparada;
         },
         16: () => {
@@ -470,7 +473,7 @@ test('(11) mundo de ~230 habitantes con archivo de recetas: deshacer a mitad de 
         assert.equal(digestoCanonico(world), antes);
       };
       // A mitad de personas, con parte de la gente ya movida…
-      trampa(enMedio(world.people), 'x', () => fases.dentro('personas'), () => new Error('fallo inyectado en personas'));
+      trampa(enMedio(world.people), CLAVE_PERSONA, () => fases.dentro('personas'), () => new Error('fallo inyectado en personas'));
       intentar(null, /fallo inyectado en personas/);
       // …y al cerrar `checkpoint`, con casi todo el paso hecho y las recetas archivadas ya leídas.
       intentar('checkpoint', /fallo inyectado al cerrar la fase/);
@@ -514,7 +517,7 @@ test('(12) receta de producción: deshacer entre guardados conserva lo compartid
         // 60 y 140: a mitad de personas y de fauna, lejos del guardado; 200: al confirmar el guardado del tick 200.
         const fallos: Record<number, () => () => boolean> = {
           60: () => {
-            const t = trampa(enMedio(punto.app.world.people), 'x', () => fases.dentro('personas'), revocada('en personas'));
+            const t = trampa(enMedio(punto.app.world.people), CLAVE_PERSONA, () => fases.dentro('personas'), revocada('en personas'));
             return () => t.disparada;
           },
           140: () => {

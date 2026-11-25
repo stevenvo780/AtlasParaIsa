@@ -151,7 +151,9 @@ test('T102: defaults deterministas y opciones reservadas sin activar nuevas etap
   assert.equal(PARAM_DESCRIPTORS['motor.clonPorPaso']!.kind, 'boolean');
   for (const range of Object.values(PARAM_RANGES)) assert.ok(range.every(Number.isFinite));
 
-  const normal = createWorld(4821), reserved = createWorld(4821, parseParams('motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.soaTerreno=true,motor.particionarPersonas=true,motor.orden=adversarial,persistencia.paginasSucias=true,red.deltas=true,limites.comunidades=12'));
+  // `motor.gpu` queda fuera: desde V23 la tarjeta compila con FMA (sin paridad de 0 ULP con la CPU, decisión del 24-nov) y su
+  // coincidencia con la CPU se prueba con tolerancia en `gpu-incremental-page-sync.test.ts`.
+  const normal = createWorld(4821), reserved = createWorld(4821, parseParams('motor.hilos=8,motor.clonPorPaso=false,motor.soaTerreno=true,motor.particionarPersonas=true,motor.orden=adversarial,persistencia.paginasSucias=true,red.deltas=true,limites.comunidades=12'));
   for (let tick = 0; tick < 200; tick++) { stepWorld(normal); stepWorld(reserved); }
   assert.deepEqual(reserved, normal, 'T102 sólo declara opciones; no cambia la física ni levanta topes');
   assert.notEqual(digestoCanonico(reserved), digestoCanonico(normal), 'el digesto completo sigue incluyendo la configuración');

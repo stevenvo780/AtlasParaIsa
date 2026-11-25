@@ -26,6 +26,11 @@ const FIELD_BYTES_PER_CELL = GPU_FIELDS.reduce((s, f) => s + f.bytes, 0);
 /** Bytes de una página en un sync incremental (13 campos + sellos + pageX/Y + 9 `around` + 256 `cells`). */
 const PAGE_SYNC_BYTES = 256 * FIELD_BYTES_PER_CELL + 256 * 4 + 8 + 9 * 36 + 256 * 4;
 
+const TOLERANCIA_RELATIVA = 1e-9;
+function casiIgual(a: number, b: number): boolean {
+  return Object.is(a, b) || Math.abs(a - b) <= TOLERANCIA_RELATIVA * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
 function hash(x: number, y: number, salt: number): number {
   let v = (Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77) ^ Math.imul(salt + 1, 0xc2b2ae3d)) >>> 0;
   v = Math.imul(v ^ (v >>> 16), 0x7feb352d) >>> 0; v = Math.imul(v ^ (v >>> 15), 0x846ca68b) >>> 0;
@@ -124,7 +129,12 @@ class MiniArena {
     return { regions: [{ id: 0, begin: 0, end: this.cells.length }], buffers, version: this.version };
   }
   swap(twin: Twin): void { for (const f of GPU_FIELDS) { const x = twin.front[f.name]!; twin.front[f.name] = twin.back[f.name]!; twin.back[f.name] = x; } }
-  /** Diferencias `Object.is` en los 13 campos de todas las celdas presentes. */
+  /**
+   * Celdas en que CPU y GPU difieren, en los 13 campos de todas las celdas presentes. Desde V23 el kernel de la tarjeta
+   * se compila con la contracción FMA activa (decisión de Steven del 24-nov: sin paridad de 0 ULP entre CPU y GPU), así que
+   * dos números cuentan como iguales si distan menos de `TOLERANCIA_RELATIVA`; una página mal sincronizada difiere en
+   * magnitudes del orden de 1e-2 o más, muy por encima.
+   */
   diffs(): { count: number; first: string | null } {
     let count = 0, first: string | null = null;
     const [cpu, gpu] = this.twins as [Twin, Twin];
@@ -132,7 +142,7 @@ class MiniArena {
       const a = cpu.front[f.name]!, b = gpu.front[f.name]!;
       for (let i = 0; i < this.cells.length; i++) {
         const c = this.cells[i]!;
-        if (!Object.is(a[c], b[c])) { count++; first ??= `${f.name}@${c}: cpu=${a[c]} gpu=${b[c]}`; }
+        if (!casiIgual(a[c]!, b[c]!)) { count++; first ??= `${f.name}@${c}: cpu=${a[c]} gpu=${b[c]}`; }
       }
     }
     return { count, first };
@@ -238,7 +248,7 @@ const CONFIGS: { name: string; devices: number[]; options?: { sharded?: boolean;
 ];
 
 for (const cfg of CONFIGS) {
-  test(`v15 sync incremental ${cfg.name}: 0 diferencias Object.is en 13 campos al activar/retirar chunks (64→${cfg.bands.at(-1)} páginas, redimensiones, costura)`, { skip, timeout: 600_000 }, async t => {
+  test(`v15 sync incremental ${cfg.name}: 0 diferencias (tolerancia 1e-9 relativa, FMA) en 13 campos al activar/retirar chunks (64→${cfg.bands.at(-1)} páginas, redimensiones, costura)`, { skip, timeout: 600_000 }, async t => {
     const arena = new MiniArena(64);
     const sc = scenario(64);
     arena.load(sc.desired, 0);
@@ -282,7 +292,7 @@ for (const cfg of CONFIGS) {
     assert.equal(totalDiffs, 0);
     assert.ok(deltaAdds >= cfg.bands.length * 4, `altas incrementales: ${deltaAdds}`);
     t.diagnostic(`${cfg.name}: ${steps} ticks eco+kernel, ${arena.cells.length} celdas finales (${arena.regions.size} páginas, cap ${arena.cap}), `
-      + `${arena.resizes} redimensiones; syncs ${JSON.stringify(bridge.syncCounts)}; bytes de sync por alta de 1 chunk: máx ${Math.max(...deltaBytes)} B; 0 diferencias Object.is`);
+      + `${arena.resizes} redimensiones; syncs ${JSON.stringify(bridge.syncCounts)}; bytes de sync por alta de 1 chunk: máx ${Math.max(...deltaBytes)} B; 0 diferencias (tolerancia 1e-9)`);
   });
 }
 

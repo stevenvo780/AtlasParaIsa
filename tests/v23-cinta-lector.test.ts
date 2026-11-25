@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { closeSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readdirSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { request, type IncomingHttpHeaders, type Server } from 'node:http';
 import { loadavg, uptime } from 'node:os';
 import { join } from 'node:path';
@@ -246,6 +247,26 @@ test('un salto con cámara omite un sector lejano, la franja de teselas y las de
   assert.equal(r.t1, 0);
   assert.throws(() => lector.chunk({ t: 0, n: 1 }), /CRC32/, 'la clave completa requiere la parte lejana');
   assert.throws(() => lector.chunk({ t: 4, n: 1, ...camara }), /CRC32/, 'al avanzar debe verificarse la delta');
+});
+
+test('quien entra en la cámara desde un sector que la cámara no cubre se lee igual', t => {
+  const camara = { x: 0, y: 0, width: 8, height: 8 };
+  const fondo: Fondo = (x, y) => ({ x, y, terrain: 'meadow', food: 0.1, moisture: 0.5, vegetation: 0.5 });
+  const base = { ...clon(plantilla), tick: 0, sequence: 0, tiles: [], places: [], structures: [],
+    people: [{ ...plantilla.people[0]!, id: 'viajera', x: 900, y: 900 }],
+    animals: [{ ...plantilla.animals![0]!, id: 'presa', x: -700, y: 3 }] } as WorldView & { seed?: number };
+  delete base.seed;
+  const llega = { ...clon(base), tick: 4, sequence: 4, people: [{ ...base.people[0]!, x: 2, y: 2 }],
+    animals: [{ ...base.animals![0]!, x: 5 }] };
+  const sigue = { ...clon(llega), tick: 8, sequence: 8, people: [{ ...llega.people[0]!, x: 3 }] };
+  const bloque = codificarBloque(0, base, [clientDelta(base, llega), clientDelta(llega, sigue)]);
+  const { ruta } = grabarBloque(t, bloque);
+  const lector = new LectorCinta(ruta, 0);
+  t.after(() => lector.close());
+  const r = JSON.parse(lector.chunk({ t: 0, n: 3, x: camara.x, y: camara.y, w: camara.width, h: camara.height }, fondo)) as ChunkResp;
+  const vistos = reproducir(r.baseFrame, r.deltas);
+  assert.deepEqual(vistos.map(v => v.people.map(p => p.id)), [[], ['viajera'], ['viajera']]);
+  assert.deepEqual(vistos, [base, llega, sigue].map(v => recortar(v, camara, fondo)));
 });
 
 test('un índice de bloque cacheado no permite leer un segmento con magia alterada', t => {
@@ -766,7 +787,7 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
   t.diagnostic(JSON.stringify({ ...resumen, escrituraSegundos: Math.round((performance.now() - inicio) / 1000) }));
   assert.ok(resumen.escritos >= objetivo && resumen.bytesFisicos >= objetivo, `cinta de ${resumen.escritos} bytes, ${resumen.bytesFisicos} físicos`);
   if (!mundo) assert.ok(resumen.claveCruda[0]! >= 5_200_000, 'se conserva la clave grande de L0');
-  // Índice en RAM con la caché de decodificación deshabilitada. El SO mantiene su gestión normal de páginas.
+  // Índice en RAM con la caché de índices del lector deshabilitada.
   const lector = new LectorCinta(join(dir, 'cinta'), 0);
   t.after(() => lector.close());
   const meta = lector.meta();
@@ -781,6 +802,11 @@ test('I5: salto a un tick cualquiera en una cinta de 5 GB con p95 < 100 ms en ca
   for (const n of meta.niveles) {
     const ticks = Array.from({ length: 1000 }, () => n.t0 + Math.floor(azar() * (n.t1 - n.t0 + 1)));
     for (const conCamara of [true, false]) {
+      // Caché fría (cinta-sonnet §7, I5): el SO suelta las páginas de los segmentos antes de cada serie.
+      for (const nivel of NIVELES) for (const f of readdirSync(join(dir, 'cinta', `n${nivel}`))) {
+        const dd = spawnSync('dd', [`if=${join(dir, 'cinta', `n${nivel}`, f)}`, 'iflag=nocache', 'count=0', 'status=none']);
+        assert.equal(dd.status, 0, String(dd.stderr));
+      }
       const pared: number[] = [], cpus: number[] = [];
       for (const tick of ticks) {
         const inicio = performance.now();

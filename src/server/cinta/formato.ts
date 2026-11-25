@@ -11,10 +11,12 @@ const CABECERA_FOTOGRAMA = 16;
 const ENTRADA_PARTE = 16;
 const ENTRADA_SECTOR = 33;
 const MAX_INDICE = 16 * 1024 ** 2;
-const MAX_PARTE = 64 * 1024 ** 2;
+// Cota de lo que descomprime una lectura de un fotograma (cada parte y la suma de las que lee), no del bloque: un
+// mundo grande sigue grabando y lo que pase de ella se lee por sectores. Ronda el largo máximo de una cadena de V8.
 const MAX_CRUDO = 512 * 1024 ** 2;
-const LADO_SECTOR = 16;
-const MIN_COMPRESION = 4096;
+// Medido con el banco del códec (revisión de C1c): con 64 el bloque ocupa menos que con 16 o 32 y el salto con
+// cámara de un mundo de 50.000 entidades sigue siendo el más rápido; con 128 la cámara lee casi un cuadrante entero.
+const LADO_SECTOR = 64;
 const COMPRESION = { params: { [constants.ZSTD_c_compressionLevel]: 1 } };
 const VENTANA = { [constants.ZSTD_d_windowLogMax]: 23 };
 // JSON.stringify escapa este separador dentro de cualquier valor.
@@ -65,6 +67,8 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
   const domicilios = listasEspaciales.map(() => new Map<string, Domicilio>());
   const sector = (x: number, y: number, margen = 0): number => {
     const sx = sectorDe(x), sy = sectorDe(y);
+    // Sin una posición representable va con lo global, que se lee siempre; ninguna cámara la ve.
+    if (!Number.isSafeInteger(sx) || !Number.isSafeInteger(sy)) return 0;
     const plano = porOrigen[margen]!;
     let fila = plano.get(sy);
     if (!fila) plano.set(sy, fila = new Map());
@@ -75,9 +79,11 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     return i;
   };
   const extender = ({ sector: i, pos }: Domicilio) => {
-    const r = sectores[i - 1]!;
+    const r = sectores[i - 1];
+    if (!r) return;
     const agregar = (x: number, y: number) => {
       const sx = sectorDe(x), sy = sectorDe(y);
+      if (!Number.isSafeInteger(sx) || !Number.isSafeInteger(sy)) return;
       r.x0 = Math.min(r.x0, sx); r.y0 = Math.min(r.y0, sy);
       r.x1 = Math.max(r.x1, sx); r.y1 = Math.max(r.y1, sy);
     };
@@ -86,7 +92,6 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     if (pos.footprint) agregar(pos.x + pos.footprint.width - 1, pos.y + pos.footprint.height - 1);
   };
 
-  let totalCrudo = 0;
   const marcos: MarcoComprimido[] = [];
   for (let i = 0; i <= deltas.length; i++) {
     const delta = deltas[i - 1], frame = delta ?? base;
@@ -179,9 +184,9 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
         lineas.push(`${r.campo}:${r.inicio}:${json}`);
       }
       const crudo = Buffer.from(lineas.join('\n')), crudos = crudo.length;
-      totalCrudo += crudos;
-      if (!crudos || crudos > MAX_PARTE || totalCrudo > MAX_CRUDO) throw errorFormato('Tamaño descomprimido');
-      const comprimido = crudos >= MIN_COMPRESION ? zstdCompressSync(crudo, COMPRESION) : crudo;
+      if (crudos > MAX_CRUDO) throw errorFormato('Tamaño descomprimido');
+      // También las partes pequeñas: las deltas se reparten en muchas y, sin comprimir, doblaban el bloque.
+      const comprimido = zstdCompressSync(crudo, COMPRESION);
       const datos = comprimido.length < crudos ? comprimido : crudo;
       partes.push({ sector: s, datos, crudos, crc: crc32(datos) });
     }
@@ -249,7 +254,7 @@ export function leerIndiceBloque(leer: LeerBytes, longitud: number): IndiceBloqu
   if (!nivelValido(nivel) || !fotogramas || !tickValido(t0) || !tickValido(t1) || t0 > t1) throw errorFormato('Metadatos');
   const cantidad = indice.readUInt32LE(0);
   const sectores: Rectangulo[] = [];
-  let cursor = 4, offset = CABECERA + bytesIndice, crudos = 0, previo = -1;
+  let cursor = 4, offset = CABECERA + bytesIndice, previo = -1;
   if (ENTRADA_SECTOR * cantidad + CABECERA_FOTOGRAMA * fotogramas > bytesIndice - cursor) throw errorFormato('Índice');
   for (let i = 0; i < cantidad; i++, cursor += ENTRADA_SECTOR) {
     const x0 = indice.readDoubleLE(cursor), y0 = indice.readDoubleLE(cursor + 8);
@@ -270,9 +275,8 @@ export function leerIndiceBloque(leer: LeerBytes, longitud: number): IndiceBloqu
     for (let j = 0; j < n; j++, cursor += ENTRADA_PARTE) {
       const sector = indice.readUInt32LE(cursor), bytes = indice.readUInt32LE(cursor + 4);
       const bruto = indice.readUInt32LE(cursor + 8), crc = indice.readUInt32LE(cursor + 12);
-      crudos += bruto;
       if (sector > cantidad || vistos.has(sector) || !bytes || bytes > bruto || offset + bytes > longitud
-          || !bruto || bruto > MAX_PARTE || crudos > MAX_CRUDO) throw errorFormato('Índice de parte');
+          || !bruto || bruto > MAX_CRUDO) throw errorFormato('Índice de parte');
       partes[j] = { sector, offset, bytes, crudos: bruto, crc };
       vistos.add(sector);
       offset += bytes;
@@ -315,6 +319,9 @@ export function sectoresVisibles(indice: IndiceBloque, camara: Viewport): Set<nu
 /** Reúne las partes pedidas sin parsear sus filas. Cada racha conserva el orden del array original. */
 export function leerMarcoJson(indice: IndiceBloque, i: number, leer: LeerBytes, visibles?: ReadonlySet<number>, tesela?: LeerTesela): string {
   const { tick, campos, partes } = indice.marcos[i]!;
+  let crudos = 0;
+  for (const p of partes) if (!visibles || visibles.has(p.sector)) crudos += p.crudos;
+  if (crudos > MAX_CRUDO) throw errorFormato('Tamaño descomprimido');
   const filas: Record<number, string>[] = [];
   let global = '';
   let bloque: Buffer, desde = -1, fin = 0;

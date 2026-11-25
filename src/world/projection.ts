@@ -24,17 +24,5 @@ export function projectCraft(person: Person, view: PersonView): void {
 }
 
 export function projectWorld(world: World, viewport?: Viewport, context?: WorldContext): WorldView {
-  const view = projectBase(world, viewport, context);
-  decoratePeople(view.people, world.people);
-  return view;
-}
-
-/** Outside simulation phases: bounded inventory decoration of the visible population. */
-function decoratePeople(views: PersonView[], population: readonly Person[]): void {
-  let slot = 0;
-  // Projection preserves population order, including when clipping the viewport.
-  for (const p of views) {
-    while (slot < population.length && population[slot]!.id !== p.id) slot++;
-    if (slot < population.length) projectCraft(population[slot++]!, p);
-  }
+  return projectBase(world, viewport, context, projectCraft);
 }

@@ -150,11 +150,15 @@ test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => 
   assert.ok(embrion > 0.3 && embrion <= humana.m0 + 0.01, `embrión de ${embrion} kg`);
   assert.ok(Math.abs(masaDe(c, madre) + embrion - total) < 1e-6, 'lo que gana el embrión lo pierde la madre');
   assert.equal(lotesDe(madre, []).length, 4);
+  const reservaAntes = reservaJ(c, madre), aguaAntes = m.arena.cuantos(madre.reserva, m.S.H2O);
   const cria = parir(c, madre);
   assert.equal(madre.gestacion, undefined);
   assert.ok(Math.abs(masaLote(c, cria.tejido) - embrion) < 1e-9);
   const v = vistaCuerpo(c, cria, vista());
-  assert.ok(v.hambre === 1 && v.sed === 1 && v.salud > 0, 'la cría nace sin reserva');
+  assert.ok(v.hambre < 1 && v.sed < 1 && v.salud > 0, 'la cría recibe reserva de la gestante');
+  assert.ok(Math.abs(reservaJ(c, madre) + reservaJ(c, cria) - reservaAntes) < 1e-6);
+  assert.equal(m.arena.cuantos(madre.reserva, m.S.H2O) + m.arena.cuantos(cria.reserva, m.S.H2O), aguaAntes);
+  assert.equal(masaLote(c, cria.digestivo), 0);
 
   const otra = crearCuerpo(c, humana.id, 60), antes = masaDe(c, otra);
   concebir(c, otra, { otro: 9, genoma: [0.5], inicio: 100 });

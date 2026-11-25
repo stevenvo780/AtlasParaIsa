@@ -289,9 +289,14 @@ export function vistaCuerpo(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaCuerpo):
   const tejido = masaLote(c, cuerpo.tejido);
   // Los objetivos crecen con el tejido; sin tejido no hay objetivo y todo lo que falta, falta entero.
   const hay = tejido > 0;
-  out.hambre = hay ? 1 - clamp01(reservaJ(c, cuerpo) / (RESERVA_OBJETIVO_J_KG * tejido)) : 1;
+  const j = reservaJ(c, cuerpo);
+  out.hambre = hay ? 1 - clamp01(j / (RESERVA_OBJETIVO_J_KG * tejido)) : 1;
   out.sed = hay ? 1 - clamp01(a.cuantos(cuerpo.reserva, S.H2O) * c.quimica.sustancia(S.H2O).masa * MG / (AGUA_OBJETIVO_KG_KG * tejido)) : 1;
-  out.energia = hay ? clamp01(a.cuantos(cuerpo.reserva, S.O2) / (CAPACIDAD_GAS_KG * FRACCION_O2_REFERENCIA * tejido)) : 0;
+  // Lo que puede gastar de golpe lo limita el reactivo más escaso de `quemar`: el O₂ de la reserva o el combustible.
+  // Sin combustible no hay trabajo que pagar aunque el pulmón esté lleno.
+  const o2J = a.cuantos(cuerpo.reserva, S.O2) * d.jPorO2;
+  const lleno = CAPACIDAD_GAS_KG * FRACCION_O2_REFERENCIA * tejido;
+  out.energia = !hay ? 0 : d.jPorO2 > 0 ? clamp01(Math.min(o2J, j) / (lleno * d.jPorO2)) : clamp01(a.cuantos(cuerpo.reserva, S.O2) / lleno);
   out.salud = clamp01(unidades(a, cuerpo.tejido, p) * d.masaMg * MG / p.masaAdulta);
   out.masa = tejido + masaLote(c, cuerpo.reserva) + masaLote(c, cuerpo.digestivo);
   out.carga = 0;
@@ -741,8 +746,11 @@ export function gestar(c: CtxLeyMateria, madre: Cuerpo, dt: number): number {
   if (!g) return 0;
   const p = plantillaDe(c, madre), d = datosDe(c, p);
   const alNacer = p.m0 / (d.masaMg * MG), falta = alNacer - masaLote(c, g.embrion) / (d.masaMg * MG);
-  if (falta > 0 && dt > 0) sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt));
-  const paga = reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
+  // Una gestación se sostiene si la reserva cubre un día de basal Y el embrión crece (o ya está hecho): un embrión al
+  // que la madre no puede dar alguna de sus partes (N, P) no crece y, como el que no se paga, se pierde a los DIAS_ABORTO.
+  const hechas = falta > 0 && dt > 0 ? sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
+  const crece = !(falta > 0) || hechas > 0 || !(dt > 0);
+  const paga = crece && reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
   g.bajoBasalDesde = paga ? -1 : g.bajoBasalDesde < 0 ? c.tick : g.bajoBasalDesde;
   return masaLote(c, g.embrion);
 }
@@ -758,8 +766,10 @@ export function abortar(c: CtxLeyMateria, madre: Cuerpo): void {
   madre.gestacion = undefined;
 }
 
-/** Parto: el embrión pasa a ser el tejido de un cuerpo nuevo (con reserva y digestivo vacíos), que devuelve; borra
- * `gestacion` de la madre. No crea ni destruye nada. */
+/** Parto: el embrión pasa a ser el tejido de un cuerpo nuevo, que devuelve; borra `gestacion` de la madre. La reserva de
+ * la madre (combustible, agua libre y gases: lo que la placenta comparte) se reparte entre las dos en proporción a su
+ * tejido, así que la cría nace con el hambre y la sed de su madre en ese momento. El digestivo nace vacío. No crea ni
+ * destruye nada: todo son traslados de la madre a la cría. */
 export function parir(c: CtxLeyMateria, madre: Cuerpo): Cuerpo {
   const g = madre.gestacion, a = c.materia;
   if (!g) throw new Error('b: parir exige una gestación abierta.');
@@ -770,6 +780,14 @@ export function parir(c: CtxLeyMateria, madre: Cuerpo): Cuerpo {
   a.moverParte(g.embrion, cria.tejido, TODO);
   a.liberar(g.embrion);
   madre.gestacion = undefined;
+  const m = masaLote(c, cria.tejido), f = m / (m + masaLote(c, madre.tejido));
+  if (f > 0) {
+    for (const id of especiesDe(a, madre.reserva)) {
+      const n = Math.floor(a.cuantos(madre.reserva, id) * f);
+      if (n > 0) a.moverParte(madre.reserva, cria.reserva, exacta(id, n));
+    }
+    repartirCalor(c, [cria.tejido, cria.reserva]);
+  }
   contextos.set(cria, c);
   return cria;
 }

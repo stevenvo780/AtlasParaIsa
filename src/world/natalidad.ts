@@ -164,14 +164,6 @@ export interface Balance {
   parir(p: Person): Dote;
 }
 
-/** Gestaciones del mundo escalar: van en `Person.gestacion` y se guardan con el mundo (integrador, pedido 1 del carril n).
- * Con `v23.cuerpos` la gestación va en `Cuerpo.gestacion`. */
-const gestacionesEscalares = {
-  get: (p: Person): EnCurso | undefined => p.gestacion,
-  set(p: Person, g: EnCurso): void { p.gestacion = g; },
-  delete(p: Person): void { p.gestacion = undefined; },
-};
-
 type Rasgos = ReturnType<typeof demographicTraits>;
 const rasgosPorGenoma = new WeakMap<Genome, { ley: object; rasgos: Rasgos }>();
 /** Rasgos demográficos de un genoma (edades, enfriamiento, demanda), calculados una vez por genoma y ley de longevidad. */
@@ -202,10 +194,10 @@ export function balanceEscalar(world: World): Balance {
     coste: () => m0 / ETA,
     salud: p => p.demography.health,
     madurez: p => p.demography.age / rasgosDe(world, p).maturityAge,
-    enCurso: p => gestacionesEscalares.get(p),
-    concebir(p, g) { gestacionesEscalares.set(p, { ...g, bajoBasalDesde: -1, masa: 0, m0, grano: m0 * 1e-9 }); },
+    enCurso: p => p.gestacion,
+    concebir(p, g) { p.gestacion = { ...g, bajoBasalDesde: -1, masa: 0, m0, grano: m0 * 1e-9 }; },
     gestar(p, dt, tick) {
-      const g = gestacionesEscalares.get(p);
+      const g = p.gestacion;
       if (!g) return 0;
       const sobra = reserva(p) - basal(p, TICKS_PER_DAY);
       if (!(sobra > 0)) { if (g.bajoBasalDesde < 0) g.bajoBasalDesde = tick; return g.masa; }
@@ -215,14 +207,14 @@ export function balanceEscalar(world: World): Balance {
       return g.masa;
     },
     abortar(p) {
-      const g = gestacionesEscalares.get(p);
+      const g = p.gestacion;
       if (!g) return;
       p.inventory += g.masa;
-      gestacionesEscalares.delete(p);
+      p.gestacion = undefined;
     },
     parir(p) {
-      const g = gestacionesEscalares.get(p);
-      gestacionesEscalares.delete(p);
+      const g = p.gestacion;
+      p.gestacion = undefined;
       return { inventario: g ? g.masa : 0 };
     },
   };
@@ -481,6 +473,14 @@ function genomaDeCria(madre: Person, g: EnCurso, idOtro: string | undefined): Ge
   };
 }
 
+/** ¿Sigue vivo el cuidador `id`? Sin intentos el mundo es un solo heap (los muertos ya salieron de `mundo.people` o
+ * llevan causa); con intentos, lo vivo es su fila en el frente (como en `parto`). */
+function cuidadorVive(c: CtxLey, id: string): boolean {
+  if (!ley(c.mundo, 'intentos')) return c.mundo.people.some(o => o.id === id && o.demography.deathCause === null);
+  const uid = c.uidDe(id);
+  return uid > 0 && c.ref(uid) !== REF_NULA;
+}
+
 function parto(c: CtxLey, b: Balance, madre: Person): void {
   const mundo = c.mundo, g = b.enCurso(madre);
   if (!g) return;
@@ -550,7 +550,12 @@ export const leyNatalidad: Ley = {
       if (p.crianza) {
         const madurez = b.madurez(p);
         if (madurez >= 1) p.crianza = undefined;
-        else p.crianza.madurez = Math.max(0, madurez);
+        else {
+          p.crianza.madurez = Math.max(0, madurez);
+          // Un cuidador muerto deja de cuidar: la lista la leen la decisión y el reparto de comida.
+          const vivos = p.crianza.cuidadores.filter(id => cuidadorVive(c, id));
+          if (vivos.length !== p.crianza.cuidadores.length) p.crianza.cuidadores = vivos;
+        }
       }
       if (p.role !== 'neighbor') continue;
       const g = b.enCurso(p);

@@ -234,26 +234,9 @@ export const GEN = {
 } as const;
 export const GENES_FAUNA = 11;
 
-// ── Constantes físicas (para `shared/naturaleza.ts`) ──────────────────────────────────────────────────────
-/** m²·kg^(−2/3): huella = HUELLA_FORMA·masa^(2/3) (sección de un cuerpo de densidad ≈ agua, tumbado o de pie). */
-export const HUELLA_FORMA = 1;
-/** m²: superficie de una celda para la huella (10 m × 10 m). El mundo no fija metros por tesela; solo la fauna los
- * necesita, y solo como cociente huella/área. */
-export const AREA_CELDA = 100;
-/** celdas/(tick·kg^VELOCIDAD_EXPONENTE): velocidad de crucero v = VELOCIDAD_L0·masa^VELOCIDAD_EXPONENTE·(½ + gen). */
-export const VELOCIDAD_L0 = 0.25;
-/** Exponente alométrico de la velocidad máxima de carrera (≈ 0,17 en mamíferos terrestres). */
-export const VELOCIDAD_EXPONENTE = 0.17;
-/** celdas: radio de visión r = RADIO_VISTA_MIN + RADIO_VISTA_GEN·percepción (2–6, como hoy). */
-export const RADIO_VISTA_MIN = 2;
-export const RADIO_VISTA_GEN = 4;
-/** Alarma por debajo de la cual una celda cuenta como tranquila para habituarse (leyes-opus §3e «alarma ≈ 0»). */
-export const ALARMA_CALMA = 0.01;
-/** 1/tick: olvido de la habituación sin agentes grandes cerca, h −= OLVIDO_HABITUACION·h (vida media ≈ 3 días). */
-export const OLVIDO_HABITUACION = 1 / 10000;
-/** Distancia genética máxima para que dos animales críen (Σ |Δgen| en [0, 1] + |Δ ln masa| + 2·|Δ acuático|): los dos
- * fundadores más parecidos (ciervo y jabalí) quedan a 0,62; dos hermanos, a menos de 0,1. */
-export const DISTANCIA_CRUCE = 0.5;
+// ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
+import { HUELLA_FORMA, AREA_CELDA, VELOCIDAD_L0, VELOCIDAD_EXPONENTE, RADIO_VISTA_MIN, RADIO_VISTA_GEN, ALARMA_CALMA, OLVIDO_HABITUACION, DISTANCIA_CRUCE } from '../../shared/naturaleza.js';
+export { HUELLA_FORMA, AREA_CELDA, VELOCIDAD_L0, VELOCIDAD_EXPONENTE, RADIO_VISTA_MIN, RADIO_VISTA_GEN, ALARMA_CALMA, OLVIDO_HABITUACION, DISTANCIA_CRUCE };
 
 const sat01 = (n: number): number => n < 0 ? 0 : n > 1 ? 1 : n;
 

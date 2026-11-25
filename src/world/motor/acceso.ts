@@ -22,7 +22,9 @@ import type { Animal } from '../animals.js';
 import type { Violacion } from '../invariantes.js';
 import type { Person, World } from '../mundo/tipos.js';
 import type { WorldParams } from '../params.js';
-import type { ChunkId, CtxDueno, CtxMateria, Intento, Ref, TipoColumna, TipoIntento } from './contratos.js';
+import type {
+  ChunkId, CtxDueno, CtxMateria, Intento, LotePercepcion, Percepcion, Plan, Ref, TipoColumna, TipoIntento,
+} from './contratos.js';
 import type { PasoMateriaGpu } from '../gpu/materia-gpu.js';
 
 /** El contexto de una ley: el del dueño más su parte del mundo y los parámetros. Lo arma m4a (`motor/contexto.ts`):
@@ -37,6 +39,9 @@ export interface CtxLey extends CtxDueno {
    * o si ya se olvidó (muerto hace más de un día). Vale para personas y fauna. */
   idDe(uid: number): string | undefined;
   uidDe(id: string): number;
+  /** Percepción en lote del dueño (CPU en piscina o GPU) para las leyes que no son personas (carril f). Opcional: sin
+   * ella la ley percibe en CPU por su cuenta. */
+  percibir?(lote: LotePercepcion, planes: readonly Plan[]): Percepcion;
 }
 /** El de las leyes que exigen `v23.materia`: además, la arena de lotes y la química. */
 export type CtxLeyMateria = CtxLey & CtxMateria & {
@@ -76,6 +81,8 @@ export interface Ley {
   readonly sustituye?: readonly PasoHeredado[];
   /** Columnas que añade al frente público (se registran antes de arrancar, con la ley encendida). */
   readonly columnas?: readonly (readonly [nombre: string, tipo: TipoColumna, ancho: number])[];
+  /** Campos del terreno que la ley añade (se registran antes de arrancar, con la ley encendida). */
+  readonly camposTerreno?: readonly (readonly [nombre: string, tipo: 'f64' | 'f32' | 'i32' | 'u8', relleno: number])[];
   /** Una vez por dueño al arrancar una época (mundo creado, cargado o ley recién encendida), antes de su primer tick:
    * crea lo que falte (lotes de sus teselas, cuerpos de quien no los tenga). Idempotente: no repite lo ya hecho. */
   iniciar?(c: CtxLey): void;

@@ -11,12 +11,9 @@
  */
 import type { CtxLey } from '../motor/acceso.js';
 
-// ── Constantes físicas (para `shared/naturaleza.ts`) ──────────────────────────────────────────────────────
-/** Ticks: vida media (1/e) de la alarma de una celda. El olor de la sangre y el recuerdo de un ataque duran unas horas:
- * 240 ticks ≈ 2,4 h de mundo (2.400 ticks por día); el `lastHunted < 120` de hoy era la mitad. */
-export const TAU_ALARMA = 240;
-/** Celdas: alcance del aviso de una muerte violenta (olor, gritos). Cae como 1/(1 + d²) con la distancia d. */
-export const RADIO_ALARMA = 6;
+// ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
+import { TAU_ALARMA, RADIO_ALARMA } from '../../shared/naturaleza.js';
+export { TAU_ALARMA, RADIO_ALARMA };
 
 export const CAMPO_ALARMA = 'alarma';
 export const CAMPO_ALARMA_DESDE = 'alarmaDesde';

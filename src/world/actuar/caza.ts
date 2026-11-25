@@ -139,9 +139,9 @@ export function pursuePrey(world: World, person: Person, tileIn: TileLookup): vo
 // La presa es un organismo de otro (aunque sea del mismo hilo): se le golpea con un `Golpear` y se le pide reserva o
 // fibra con un `Tomar` (`leyFauna.aplicar`). Lo que cuesta se paga quemando la reserva propia. Nada lee especie.
 
-/** kg/(tick·kg^0,75) que unas manos sacan al ordeñar o esquilar: la misma escala que comer (`TASA_INGESTA` de la fauna)
- * por seis, porque se saca de un animal que no se resiste. */
-export const TASA_EXTRACCION = 5e-4;
+// ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
+import { TASA_EXTRACCION } from '../../shared/naturaleza.js';
+export { TASA_EXTRACCION };
 
 /** El contexto de materia del dueño de `world`, si el motor ya lo enlazó. */
 function materiaDe(world: World): CtxLeyMateria | undefined {

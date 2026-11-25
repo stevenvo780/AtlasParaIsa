@@ -291,3 +291,63 @@ export const KAPPA_HUMANA: readonly [number, number, number, number] = [KAPPA0, 
 export const UNIDAD_HUMANA = { H2O: 40, proteina: 7, CH2: 12, orgP: 1 } as const;
 /** Linaje de la plantilla humana (solo lo leen la proyección y el cliente). */
 export const LINAJE_HUMANO = 0;
+
+// ── Carril f: la fauna sobre átomos (cada fichero de f las reexporta) ─────────────────────────────────────
+
+// soa/alarma.ts
+/** Ticks: vida media (1/e) de la alarma de una celda. El olor de la sangre y el recuerdo de un ataque duran unas horas:
+ * 240 ticks ≈ 2,4 h de mundo (2.400 ticks por día); el `lastHunted < 120` de hoy era la mitad. */
+export const TAU_ALARMA = 240;
+/** Celdas: alcance del aviso de una muerte violenta (olor, gritos). Cae como 1/(1 + d²) con la distancia d. */
+export const RADIO_ALARMA = 6;
+
+// decision/fauna.ts
+/** m²·kg^(−2/3): huella = HUELLA_FORMA·masa^(2/3) (sección de un cuerpo de densidad ≈ agua, tumbado o de pie). */
+export const HUELLA_FORMA = 1;
+/** m²: superficie de una celda para la huella (10 m × 10 m). El mundo no fija metros por tesela; solo la fauna los
+ * necesita, y solo como cociente huella/área. */
+export const AREA_CELDA = 100;
+/** celdas/(tick·kg^VELOCIDAD_EXPONENTE): velocidad de crucero v = VELOCIDAD_L0·masa^VELOCIDAD_EXPONENTE·(½ + gen). */
+export const VELOCIDAD_L0 = 0.25;
+/** Exponente alométrico de la velocidad máxima de carrera (≈ 0,17 en mamíferos terrestres). */
+export const VELOCIDAD_EXPONENTE = 0.17;
+/** celdas: radio de visión r = RADIO_VISTA_MIN + RADIO_VISTA_GEN·percepción (2–6, como hoy). */
+export const RADIO_VISTA_MIN = 2;
+export const RADIO_VISTA_GEN = 4;
+/** Alarma por debajo de la cual una celda cuenta como tranquila para habituarse (leyes-opus §3e «alarma ≈ 0»). */
+export const ALARMA_CALMA = 0.01;
+/** 1/tick: olvido de la habituación sin agentes grandes cerca, h −= OLVIDO_HABITUACION·h (vida media ≈ 3 días). */
+export const OLVIDO_HABITUACION = 1 / 10000;
+/** Distancia genética máxima para que dos animales críen (Σ |Δgen| en [0, 1] + |Δ ln masa| + 2·|Δ acuático|): los dos
+ * fundadores más parecidos (ciervo y jabalí) quedan a 0,62; dos hermanos, a menos de 0,1. */
+export const DISTANCIA_CRUCE = 0.5;
+
+// ley-fauna.ts
+/** kg/(tick·kg^0,75): lo que una boca mete al tubo por tick. Un ciervo de 80 kg come ≈ 2,5 kg al día en la mitad de
+ * las horas: 80^0,75·8·10⁻⁵·1.200 ≈ 2,6 kg. */
+export const TASA_INGESTA = 8e-5;
+/** kg/(tick·kg^0,75): lo que bebe por tick quien está junto al agua (beber va a sorbos rápidos: 2,5 × la ingesta). */
+export const TASA_BEBER = 2e-4;
+/** kg de contenido del tubo por kg de cuerpo con el tubo lleno (rumiantes ≈ 0,15; carnívoros ≈ 0,06). */
+export const CAPACIDAD_DIGESTIVO = 0.1;
+/** kg de agua por kg de cuerpo: convierte la sed (fracción de déficit) en kg que beber. */
+export const AGUA_CORPORAL = 0.65;
+/** J por kg del que muerde y por tick de contacto, a carnivoría 1: la potencia muscular de un ataque (≈ 3 W/kg
+ * sostenidos durante los 36 s de un tick). */
+export const TRABAJO_MORDISCO = 100;
+/** Fracción de la masa adulta desde la que un animal es fértil (la madurez sexual de los mamíferos llega al 50–70 %). */
+export const MADUREZ_MASA = 0.6;
+/** Anchura (uniforme, centrada) de la mutación de un gen en [0, 1] al concebir. */
+export const MUTACION_GEN = 0.03;
+/** Anchura de la mutación de ln(masa adulta) al concebir: ±2,5 % de masa. */
+export const MUTACION_LNMASA = 0.05;
+/** Resolución de ln(masa adulta) con que se registra una plantilla (≈ 4 % de masa): dos genomas que solo difieren por
+ * debajo comparten plantilla, así el registro no crece con cada cría. */
+export const PASO_LNMASA = 1 / 24;
+/** Resolución de la carnivoría con que se fija la κ de una plantilla (κ entera en J por cuanto). */
+export const PASO_CARNIVORIA = 1 / 32;
+
+// actuar/caza.ts
+/** kg/(tick·kg^0,75) que unas manos sacan al ordeñar o esquilar: la misma escala que comer (`TASA_INGESTA` de la fauna)
+ * por seis, porque se saca de un animal que no se resiste. */
+export const TASA_EXTRACCION = 5e-4;

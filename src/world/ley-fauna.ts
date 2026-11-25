@@ -36,30 +36,9 @@ import { TICKS_PER_DAY, type World } from './mundo/tipos.js';
 import { alarmaEn, alarmaPorAtaque, podarAlarmaLocal, subirAlarma, TAU_ALARMA } from './soa/alarma.js';
 import { COLUMNA_FAUNA, escribirFilaFaunaV23, FAUNA_ANCHO } from './soa/fauna.js';
 
-// ── Constantes físicas (para `shared/naturaleza.ts`) ──────────────────────────────────────────────────────
-/** kg/(tick·kg^0,75): lo que una boca mete al tubo por tick. Un ciervo de 80 kg come ≈ 2,5 kg al día en la mitad de
- * las horas: 80^0,75·8·10⁻⁵·1.200 ≈ 2,6 kg. */
-export const TASA_INGESTA = 8e-5;
-/** kg/(tick·kg^0,75): lo que bebe por tick quien está junto al agua (beber va a sorbos rápidos: 2,5 × la ingesta). */
-export const TASA_BEBER = 2e-4;
-/** kg de contenido del tubo por kg de cuerpo con el tubo lleno (rumiantes ≈ 0,15; carnívoros ≈ 0,06). */
-export const CAPACIDAD_DIGESTIVO = 0.1;
-/** kg de agua por kg de cuerpo: convierte la sed (fracción de déficit) en kg que beber. */
-export const AGUA_CORPORAL = 0.65;
-/** J por kg del que muerde y por tick de contacto, a carnivoría 1: la potencia muscular de un ataque (≈ 3 W/kg
- * sostenidos durante los 36 s de un tick). */
-export const TRABAJO_MORDISCO = 100;
-/** Fracción de la masa adulta desde la que un animal es fértil (la madurez sexual de los mamíferos llega al 50–70 %). */
-export const MADUREZ_MASA = 0.6;
-/** Anchura (uniforme, centrada) de la mutación de un gen en [0, 1] al concebir. */
-export const MUTACION_GEN = 0.03;
-/** Anchura de la mutación de ln(masa adulta) al concebir: ±2,5 % de masa. */
-export const MUTACION_LNMASA = 0.05;
-/** Resolución de ln(masa adulta) con que se registra una plantilla (≈ 4 % de masa): dos genomas que solo difieren por
- * debajo comparten plantilla, así el registro no crece con cada cría. */
-export const PASO_LNMASA = 1 / 24;
-/** Resolución de la carnivoría con que se fija la κ de una plantilla (κ entera en J por cuanto). */
-export const PASO_CARNIVORIA = 1 / 32;
+// ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
+import { TASA_INGESTA, TASA_BEBER, CAPACIDAD_DIGESTIVO, AGUA_CORPORAL, TRABAJO_MORDISCO, MADUREZ_MASA, MUTACION_GEN, MUTACION_LNMASA, PASO_LNMASA, PASO_CARNIVORIA } from '../shared/naturaleza.js';
+export { TASA_INGESTA, TASA_BEBER, CAPACIDAD_DIGESTIVO, AGUA_CORPORAL, TRABAJO_MORDISCO, MADUREZ_MASA, MUTACION_GEN, MUTACION_LNMASA, PASO_LNMASA, PASO_CARNIVORIA };
 
 /** Las seis plantillas fundadoras: genes de partida y masa adulta en kg. El índice es el linaje (`Plantilla.linaje`), en
  * el orden de `SPECIES`, con que el cliente las pinta; ninguna regla lo lee. Los genes son los de hoy (`animals.ts`). */
@@ -724,6 +703,7 @@ function barajar<T>(c: CtxLey, v: T[]): void {
 export const leyFauna: Ley = {
   id: 'f', interruptor: 'fauna', sustituye: ['fauna'],
   columnas: [[COLUMNA_FAUNA, 'f32', FAUNA_ANCHO]],
+  camposTerreno: [['alarma', 'f64', 0], ['alarmaDesde', 'f64', 0]],
   iniciar(cl) { sincronizar(ctxMateriaDe(cl.mundo)); },
   alAdoptar(cl, o) {
     if (!('fauna' in o) || !o.cuerpo) return;

@@ -497,6 +497,9 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
     uid, id: idDeCria(uid), genome: genomaDeCria(madre, g, idOtro), policy: g.politica ? { weights: g.politica } : undefined,
     cuidadores, madurez: M0, apego: APEGO_NACER, inventario: dote.inventario, cuerpo: dote.cuerpo, carga: dote.carga,
   });
+  // La copia de la gestante trae su `communityId`. Con `v23.comunidades` la pertenencia no se hereda: la da la red de
+  // vínculos (F0 de la ley s la calcula y su F1 la asigna); hasta entonces la cría no figura en ninguna lista de miembros.
+  if (ley(mundo, 'comunidades')) cria.communityId = null;
   madre.lastBirth = c.tick;
   madre.bonds[cria.id] = APEGO_NACER;
   mundo.birthCounter += 1;

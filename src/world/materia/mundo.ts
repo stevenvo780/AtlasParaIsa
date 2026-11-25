@@ -164,6 +164,15 @@ export const FISICA = {
   /** Fracción del índice foliar medio de la página que llega a cada tesela como plántulas (lluvia de semillas,
    * adimensional): sin ella una tesela pelada no rebrota nunca. Real: 0,1–1 % de la cobertura vecina por estación. */
   dispersionSemillas: 0.01,
+  /** Solubilidad de Henry del NH₃ en el agua del suelo, adimensional (concentración disuelta / concentración en el gas
+   * del poro) a 298 K. Real: H^cp = 0,59 mol/(m³·Pa) → H^cc = H^cp·R·T ≈ 1.460 (Sander 2015); es un mínimo, porque no
+   * cuenta el amonio (NH₄⁺) ni el que retiene la arcilla. Sin ella el N mineral se repartía con el aire por volúmenes
+   * (CAP_SUELO / (CAP_SUELO + CAP_AIRE_TESELA) = 1/11) y el suelo se quedaba con el 9 %: fertilidad 0,78 → 0,076 en 120
+   * ticks (semilla 7). Los demás gases del mundo (N₂ 0,015; O₂ 0,03; H₂ 0,02; CO₂ 0,8) quedan por debajo de 1. */
+  solubilidadNH3: 1460,
+  /** Volumen de agua de un suelo a capacidad de campo (humedad 1) sobre el de su poro con aire (adimensional). Real: a
+   * capacidad de campo el agua ocupa más o menos la mitad de la porosidad, así que ≈ 1. */
+  aguaPorPoro: 1,
   /** Temperatura por debajo de la cual una brasa se apaga (K). Real: 500–700 K. */
   tBrasa: 600,
   /** Tiro: fracción de su exceso de temperatura sobre la de brasa que un fuego gasta en calentar el aire que aspira en un
@@ -1174,15 +1183,18 @@ export class MundoMaterial {
     for (const [s, nu] of PARTES[o]) this.arena.moverParte(de, a, this.pide(this.S[s], k * nu));
   }
 
-  /** Intercambio de gases suelo–aire (`intercambioBruto` por cada gas presente en cualquiera de los dos). */
+  /** Intercambio de gases suelo–aire (`intercambioBruto` por cada gas presente en cualquiera de los dos). El NH₃ se
+   * disuelve en el agua del suelo (Henry): al volumen del poro se le suma el del agua por su solubilidad, así que un suelo
+   * húmedo retiene casi todo su N mineral y uno seco lo pierde al aire (volatilización). */
   private intercambiar(l: LoteRef, aire: LoteRef, g: number, capL: number, capA: number, dt: number, T: number): void {
-    const vistos = this.vistos;
+    const vistos = this.vistos, fi = this.params.fisica;
     vistos.clear();
     for (const lote of [l, aire]) for (const id of this.especies(lote)) {
       if (vistos.has(id) || id === this.S.H2O || !this.esGas(id, T)) continue;
       vistos.add(id);
     }
-    for (const id of vistos) intercambioBruto(this.ctx, l, aire, id, g, capL, capA, dt);
+    const disuelve = 1 + fi.solubilidadNH3 * fi.aguaPorPoro * this.arena.cuantos(l, this.S.H2O) / this.params.escalas.humedad;
+    for (const id of vistos) intercambioBruto(this.ctx, l, aire, id, g, id === this.S.NH3 ? capL * disuelve : capL, capA, dt);
   }
 
   /**
@@ -1214,9 +1226,8 @@ export class MundoMaterial {
    * El cielo y el mar de la página. El arrastre mezcla la capa límite con el cielo (flujos brutos en los dos sentidos:
    * las concentraciones se igualan): el vapor, que en el aire de la página solo ocupa la capa límite, y los gases de la
    * columna (N₂, O₂ y CO₂), de los que la capa límite es la fracción h/H; así el CO₂ que la vegetación fija vuelve del
-   * aire del planeta, que es finito. Los gases que el aire libre no tiene (NH₃, H₂) no se mezclan: la librería no
-   * disuelve el NH₃ en el agua del suelo, así que en el aire está el que en un suelo real estaría disuelto, y llevárselo
-   * sería sacar nitrógeno de los suelos. Después el mar evapora hacia el cielo lo que le falta para saturarse a la
+   * aire del planeta, que es finito. Los gases que el aire libre no tiene (NH₃, H₂) no se mezclan: el NH₃ que un suelo
+   * seco suelta se queda en el aire de la página y vuelve a sus suelos cuando se mojan (`intercambiar`). Después el mar evapora hacia el cielo lo que le falta para saturarse a la
    * temperatura de la altura (Dalton, en los dos sentidos: un cielo sobresaturado condensa sobre el mar).
    */
   private mezclarCielo(p: number, dt: number, Taire: number): void {

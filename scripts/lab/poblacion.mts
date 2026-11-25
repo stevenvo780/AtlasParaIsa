@@ -693,9 +693,12 @@ export function correr(o: OpcionesCorrida): unknown {
   try {
     const registro = medir(mundo, { dias: o.dias, ticks: o.ticks, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar,
       alDia: d => appendFileSync(`${o.salida}.progreso`, `${JSON.stringify({ dia: d.dia, vivos: d.vivos, msPared: Math.round(d.msPared), carga: d.carga })}\n`) });
-    assertWorld(mundo);
+    // Con la V23 los hijos se llaman `nacido-<uid>` (natalidad.ts `idDeCria`) y `assertWorld` (validar.ts, exige `descendant-N`) rechaza el
+    // mundo en cuanto nace uno. Aquí el rechazo se anota en el informe (`aserto`) en vez de perder la corrida.
+    let aserto: string | null = null;
+    try { assertWorld(mundo); } catch (error) { aserto = String(error); }
     if (o.guardar) { chunks.archivar(); guardarPunto(o.guardar, mundo, chunks.archivo); }
-    const informe = { tipo: 'poblacion-corrida', opciones: o, params: paramsOf(mundo), interruptores: paramsOf(mundo).v23, siembra, msSiembra, msTotal: performance.now() - t0,
+    const informe = { tipo: 'poblacion-corrida', aserto, opciones: o, params: paramsOf(mundo), interruptores: paramsOf(mundo).v23, siembra, msSiembra, msTotal: performance.now() - t0,
       carga: { inicio: cargaInicio, fin: loadavg() }, uptime: { inicio: uptimeInicio, fin: uptime() }, maxRssMiB: process.resourceUsage().maxRSS / 1024, registro };
     writeFileSync(o.salida, JSON.stringify(informe));
     return informe;

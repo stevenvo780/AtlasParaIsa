@@ -197,8 +197,8 @@ async function fases(): Promise<void> {
     console.log(`| ${nombre} | ${(n / pasos).toFixed(0)} | ${(consultas[k]! / n).toFixed(1)} | ${(reacciones[k]! / n).toFixed(1)} | ${(aplicadas[k]! / n).toFixed(2)} | ${(veces[k]! / Math.max(1, aplicadas[k]!)).toFixed(1)} |`);
   });
   const integ = cuentaIntegrador.integraciones - c0.integraciones, comp = cuentaIntegrador.compartidas - c0.compartidas;
-  const sub = cuentaIntegrador.subpasos - c0.subpasos;
-  console.log(`integrador: ${integ} integraciones, ${(100 * comp / integ).toFixed(1)} % con reactivo compartido, ${(sub / Math.max(1, comp)).toFixed(1)} subpasos en esas, ${((integ - comp + sub) / integ).toFixed(2)} pasos de integración por integración`);
+  const sub = cuentaIntegrador.subpasos - c0.subpasos, inst = cuentaIntegrador.instantaneas - c0.instantaneas;
+  console.log(`integrador: ${integ} integraciones, ${(100 * comp / integ).toFixed(1)} % con reactivo compartido (${(100 * inst / Math.max(1, comp)).toFixed(1)} % de ellas con fase instantánea), ${(sub / Math.max(1, comp)).toFixed(1)} subpasos en esas, ${((integ - comp + sub) / integ).toFixed(2)} pasos de integración por integración`);
   console.log(`fuera de la cinética (crecer, fuego…): ${consultas[3]} consultas, ${aplicadas[3]} aplicaciones; sustancias por suelo ${(especies / muestras).toFixed(1)}; total de sustancias ${q.totalSustancias()}`);
 }
 

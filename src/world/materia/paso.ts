@@ -24,7 +24,9 @@
  *   mitad, con el reparto del punto medio (orden 2), hasta que le quedan 2⁻¹⁰ cuantos (`AGOTADO`; un canal saturado
  *   necesita ~log₂ n + 10 subpasos). Frente a la EDO integrada fina (combustión contra dimerización, 12 regímenes con k hasta
  *   ν y hasta 10¹² cuantos) queda dentro del 5 %; repartir las demandas ya saturadas, como antes, daba a la combustión 60
- *   veces lo que le toca.
+ *   veces lo que le toca. Antes de los subpasos, los reactivos instantáneos a la escala del paso (Λ·dt ≥ 64: la madera,
+ *   la proteína y el orgP de un suelo catalizado) se agotan en forma cerrada repartidos entre sus canales como en el
+ *   límite de subpasos muy pequeños (`instantaneos`), y los subpasos integran lo demás.
  * - ξ no sale de redondear con un uniforme: los cuantos de cada reactivo se sortean entre sus canales en una multinomial
  *   con las medias de la integración, que es la suma de las de las mitades del lote (I5, para particiones que conservan
  *   grupos enteros de la estequiometría); a + a sortea pares enteros. Cada canal a + b lo sortea el reactivo cuyo sorteo
@@ -67,6 +69,12 @@ const SUBPASO = 0.5;
  * 7), 3.287 de 20.000 pasos dejaban sus 2 H₂ y salían al aire (0,15 % del H a los 200 recambios, sin meseta). Con
  * 2⁻¹⁰ lo que se pierde de media es < 10⁻³ veces por canal, a costa de ~10 subpasos más en un canal saturado. */
 const AGOTADO = 2 ** -10;
+/** Λ·dt (riesgo por cuanto en el paso) desde el que un reactivo es instantáneo: queda e^(−64) de él (nada, hasta 2⁹²
+ * cuantos) y su vida media es ≤ 1/64 del paso. */
+const INSTANTANEO = 64;
+/** Fracción del riesgo de un instantáneo que puede venir de canales cuyo ritmo cambia mientras se agota (a + a, o
+ * compañero también instantáneo), y la que puede tener un compañero lento de riesgo propio frente al del instantáneo. */
+const VARIABLE = 1 / 64;
 /** Tope de subpasos: medio cuanto desde 2⁵³ son 54 mitades; si se llegara, lo que falta va en uno. */
 const SUBPASOS_MAX = 200;
 /** Pases encadenados tras el principal (ventanas dt/2, dt/4, …, dt/2⁸): lo que aún quede nuevo espera al paso siguiente. */
@@ -124,6 +132,10 @@ let cant = new Float64Array(16), x = new Float64Array(16), xm = new Float64Array
 let L = new Float64Array(16), L0 = new Float64Array(16), aa = new Int32Array(16);
 let gastoLineal = new Float64Array(16), gastoAa = new Float64Array(16);
 let consumo = new Float64Array(16), usos = new Int32Array(16), inicio = new Int32Array(17);
+// Fase instantánea (`instantaneos`): riesgo por cuanto total y de canales fijos, riesgo propio de un compañero lento,
+// lo que piden de él los instantáneos, lo que queda por repartir de cada instantáneo y si lo es.
+let riesgo = new Float64Array(16), riesgoFijo = new Float64Array(16), riesgoLento = new Float64Array(16);
+let demanda = new Float64Array(16), reparto = new Float64Array(16), rapido = new Uint8Array(16);
 // Por canal: sus reactivos (j = i − 1: sola; j = i: a + a) y sus coeficientes ν, su reacción y k por tick; riesgos
 // integrados e instantáneos por reactivo; extensión del subpaso y acumulada; quién lo sortea, orden de sorteo, veces y
 // veces antes de recortar.
@@ -151,6 +163,8 @@ function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
     H = new Float64Array(t); L = new Float64Array(t); L0 = new Float64Array(t); aa = new Int32Array(t);
     gastoLineal = new Float64Array(t); gastoAa = new Float64Array(t);
     consumo = new Float64Array(t); usos = new Int32Array(t); inicio = new Int32Array(t + 1); esNueva = new Uint8Array(t);
+    riesgo = new Float64Array(t); riesgoFijo = new Float64Array(t); riesgoLento = new Float64Array(t);
+    demanda = new Float64Array(t); reparto = new Float64Array(t); rapido = new Uint8Array(t);
     n = arena.especies(l, ids);
   }
   // Orden de id (nada depende de en qué ranura esté cada sustancia): por inserción, sin asignar.
@@ -279,9 +293,92 @@ function consumir(m: number, n: number, desde: Float64Array, destino: Float64Arr
   }
 }
 
+/**
+ * Fase instantánea de `integrar`: los reactivos con Λ·dt ≥ INSTANTANEO (Λ, su riesgo por cuanto al empezar) se agotan
+ * dentro del paso en un tiempo en que lo demás apenas cambia, así que se resuelven primero y en forma cerrada, y el resto
+ * del paso se integra después con lo que dejan (separación de escalas; el error en los canales lentos de un compañero es
+ * ≤ lo que le piden por 1/(Λ·dt)). Lo que pierde un instantáneo s, x_s(1 − e^(−Λ·dt)), se reparte entre sus canales
+ * fijos (solo, o con un compañero lento, de riesgo λ constante mientras s vive) en proporción a λ, que es el límite de los
+ * subpasos muy pequeños: ∫λ·x_s dt / ∫Λ·x_s dt. Los canales de ritmo variable (a + a, o con el compañero también
+ * instantáneo) se llevan ∫k·x_a·x_b/V dt con los dos decayendo a su Λ, que es exacto cuando son una parte pequeña del
+ * riesgo (≤ VARIABLE), y se descuentan antes del reparto. Los compañeros lentos entran en el punto medio de lo que les
+ * piden (predictor y corrector, orden 2), así que pueden perder hasta SUBPASO; un instantáneo con un compañero que pierde
+ * más, o que tiene riesgo propio comparable (> VARIABLE·Λ), o con demasiado riesgo variable, deja de serlo y va a los
+ * subpasos; si ya no queda ninguno, no se hace nada. Antes, cada uno de ellos fijaba el subpaso en ~1/(2Λ) hasta bajar
+ * de AGOTADO: unos 49 subpasos con madera, proteína y orgP en un suelo catalizado (k = 414 por tick). Deja en `ext` las
+ * veces de cada canal (0 en los que no tocan un instantáneo) y en `x` lo que queda; devuelve si resolvió alguno.
+ */
+function instantaneos(m: number, n: number, V: number, dt: number): boolean {
+  const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, kT = kTick, iI = lI, iJ = lJ, ex = ext, xs = x, med = xm;
+  const Lt = riesgo, Lf = riesgoFijo, Ll = riesgoLento, D = demanda, B = reparto, rap = rapido;
+  Lt.fill(0, 0, n);
+  for (let k = 0; k < m; k++) {
+    const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+    if (j < i) Lt[i]! += kt;
+    else if (j === i) Lt[i]! += pI[k]! * kt * xs[i]! / V;
+    else { Lt[i]! += pI[k]! * kt * xs[j]! / V; Lt[j]! += pJ[k]! * kt * xs[i]! / V; }
+  }
+  let alguno = false;
+  for (let s = 0; s < n; s++) { rap[s] = Lt[s]! * dt >= INSTANTANEO ? 1 : 0; if (rap[s]) alguno = true; }
+  // Cada vuelta quita al menos un instantáneo que no cumple, así que acaba en ≤ n vueltas.
+  while (alguno) {
+    for (let s = 0; s < n; s++) med[s] = xs[s]!;
+    for (let corrector = 0; corrector < 2; corrector++) {
+      Lt.fill(0, 0, n); Lf.fill(0, 0, n); Ll.fill(0, 0, n); D.fill(0, 0, n);
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+        if (j < i) { iI[k] = kt; Lt[i]! += kt; Ll[i]! += kt; if (rap[i]) Lf[i]! += kt; continue; }
+        if (j === i) { const l = pI[k]! * kt * xs[i]! / V; iI[k] = l; Lt[i]! += l; Ll[i]! += l; continue; }
+        // Un compañero lento entra con su punto medio; uno instantáneo, con lo que tiene al empezar (decae aparte).
+        const li = pI[k]! * kt * (rap[j] ? xs[j]! : med[j]!) / V, lj = pJ[k]! * kt * (rap[i] ? xs[i]! : med[i]!) / V;
+        iI[k] = li; iJ[k] = lj; Lt[i]! += li; Lt[j]! += lj;
+        if (!rap[j]) { Ll[i]! += li; if (rap[i]) Lf[i]! += li; }
+        if (!rap[i]) { Ll[j]! += lj; if (rap[j]) Lf[j]! += lj; }
+      }
+      for (let s = 0; s < n; s++) B[s] = rap[s] ? xs[s]! * -expm1(-Lt[s]! * dt) : 0;
+      // Canales de ritmo variable: ∫k·x_a(t)·x_b(t)/V dt con x = x0·e^(−Λt), descontados de lo que pierde cada uno.
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!;
+        ex[k] = 0;
+        if (j < i || !rap[i] || (j > i && !rap[j])) continue;
+        const L2 = j === i ? 2 * Lt[i]! : Lt[i]! + Lt[j]!;
+        const e = kT[k]! * xs[i]! * xs[j]! / V * -expm1(-L2 * dt) / L2;
+        ex[k] = e; B[i]! -= pI[k]! * e;
+        if (j > i) B[j]! -= pJ[k]! * e;
+      }
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!;
+        if (j < i) { if (rap[i] && Lf[i]! > 0) ex[k] = Math.max(0, B[i]!) * iI[k]! / Lf[i]! / pI[k]!; continue; }
+        if (j === i || rap[i] === rap[j]) continue;
+        const s = rap[i] ? i : j, r = rap[i] ? j : i;
+        const l = s === i ? iI[k]! : iJ[k]!, p = s === i ? pI[k]! : pJ[k]!;
+        const e = Lf[s]! > 0 ? Math.max(0, B[s]!) * l / Lf[s]! / p : 0;
+        ex[k] = e; D[r]! += (r === i ? pI[k]! : pJ[k]!) * e;
+      }
+      for (let s = 0; s < n; s++) if (!rap[s]) med[s] = xs[s]! - D[s]! / 2;
+    }
+    let quita = false;
+    for (let s = 0; s < n; s++) if (rap[s] && Lt[s]! - Lf[s]! > VARIABLE * Lt[s]!) { rap[s] = 0; quita = true; }
+    for (let k = 0; k < m; k++) {
+      const i = cI[k]!, j = cJ[k]!;
+      if (j <= i || rap[i] === rap[j]) continue;
+      const s = rap[i] ? i : j, r = rap[i] ? j : i;
+      if (D[r]! > SUBPASO * xs[r]! || Ll[r]! > VARIABLE * Lt[s]!) { rap[s] = 0; quita = true; }
+    }
+    if (!quita) break;
+    alguno = false;
+    for (let s = 0; s < n; s++) if (rap[s]) alguno = true;
+  }
+  if (!alguno) return false;
+  consumir(m, n, xs, xs);
+  // Lo que queda de un instantáneo es e^(−Λ·dt) de lo que había (nada): sin restas que dejen el redondeo vivo.
+  for (let s = 0; s < n; s++) if (rap[s]) xs[s] = cant[s]! * Math.exp(-Lt[s]! * dt);
+  return true;
+}
+
 /** Contadores del integrador en este hilo (los lee el banco): integraciones, cuántas con algún reactivo compartido y
  * subpasos que dieron esas. */
-export const cuentaIntegrador = { integraciones: 0, compartidas: 0, subpasos: 0 };
+export const cuentaIntegrador = { integraciones: 0, compartidas: 0, subpasos: 0, instantaneas: 0 };
 
 /** Medias de veces de cada canal en dt, en `xi`: un paso si ningún reactivo se comparte; si no, subpasos (cabecera). */
 function integrar(m: number, n: number, V: number, dt: number): void {
@@ -297,6 +394,10 @@ function integrar(m: number, n: number, V: number, dt: number): void {
     return;
   }
   cuentaIntegrador.compartidas++;
+  if (instantaneos(m, n, V, dt)) {
+    cuentaIntegrador.instantaneas++;
+    for (let k = 0; k < m; k++) acum[k] = ext[k]!;
+  }
   let resta = dt;
   for (let pasos = 1; resta > 0; pasos++) {
     cuentaIntegrador.subpasos++;

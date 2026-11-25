@@ -18,7 +18,6 @@ import {
   MAX_ACTIVE_ANIMALS, MAX_ANIMAL_DECISIONS_PER_TICK, mascaraFauna, materializeAnimals, stepAnimals, syncFauna,
   type AnimalWorld,
 } from '../src/world/animals.js';
-import { closeFaunaParallelPools } from '../src/world/paralelo/fauna-motor.js';
 import {
   DEFAULT_PARAMS, limitsOf, OPEN_WORLD_MAX_BLUEPRINTS, openWorldCaps, paramsOf, parseParams, setParams,
 } from '../src/world/params.js';
@@ -188,7 +187,7 @@ test('blueprints: default world caps at 64 (and generation <= 64) while open-wor
   assert.ok(inventionOpportunity(openAt64, pOpen) !== undefined);
 });
 
-test('fauna: default world windows at 8192/1024 while open-world V15 runs all animals & decisions (serial + parallel parity)', async () => {
+test('fauna: default world windows at 8192/1024 while open-world V15 runs all due decisions', () => {
   const count = MAX_ACTIVE_ANIMALS + 400; // 8592 > 8192
   const makeHerd = (params = DEFAULT_PARAMS): AnimalWorld => {
     const tiles: Tile[] = Array.from({ length: count }, (_, x) => ({
@@ -207,32 +206,19 @@ test('fauna: default world windows at 8192/1024 while open-world V15 runs all an
     return w;
   };
 
-  try {
-    // Legacy caps active window at 8192 and decisions at 1024
-    const legacy = makeHerd(DEFAULT_PARAMS);
-    const legacyMask = mascaraFauna(legacy);
-    assert.equal(legacyMask.seleccion.length, MAX_ACTIVE_ANIMALS);
-    stepAnimals(legacy, undefined, legacyMask);
-    const legacyDecided = legacy.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
-    assert.equal(legacyDecided, MAX_ANIMAL_DECISIONS_PER_TICK);
+  const legacy = makeHerd(DEFAULT_PARAMS);
+  const legacyMask = mascaraFauna(legacy);
+  assert.equal(legacyMask.seleccion.length, MAX_ACTIVE_ANIMALS);
+  stepAnimals(legacy, undefined, legacyMask);
+  const legacyDecided = legacy.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
+  assert.equal(legacyDecided, MAX_ANIMAL_DECISIONS_PER_TICK);
 
-    // Open-world selects ALL 8592 active animals and decides ALL 1400 due animals (serial)
-    const openSerial = makeHerd(parseParams('motor.hilos=1', OPEN_PARAMS));
-    const openMask = mascaraFauna(openSerial);
-    assert.equal(openMask.seleccion.length, count);
-    stepAnimals(openSerial, undefined, openMask);
-    const openSerialDecided = openSerial.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
-    assert.equal(openSerialDecided, 1400);
-
-    // Open-world parallel (4 workers) produces bit-exact identical decisions & state for all 1400 due animals
-    const openParallel = makeHerd(parseParams('motor.hilos=4', OPEN_PARAMS));
-    const openParallelMask = mascaraFauna(openParallel);
-    assert.equal(openParallelMask.seleccion.length, count);
-    stepAnimals(openParallel, undefined, openParallelMask);
-    assert.deepEqual(openParallel.animals, openSerial.animals);
-  } finally {
-    await closeFaunaParallelPools();
-  }
+  const open = makeHerd(OPEN_PARAMS);
+  const openMask = mascaraFauna(open);
+  assert.equal(openMask.seleccion.length, count);
+  stepAnimals(open, undefined, openMask);
+  const openDecided = open.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
+  assert.equal(openDecided, 1400);
 });
 
 test('in-place V15 production upgrade: old 5092-chunk snapshot reloads, lifts limites.* via CARTA_PARAMS, saves and cold-reloads cleanly', () => {

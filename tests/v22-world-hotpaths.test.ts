@@ -7,8 +7,6 @@ import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { constructionSite, depositMaterials, storedMaterialsNear, repairOpportunity } from '../src/world/inventions.js';
-import { EstadoFaunaCompartido } from '../src/world/paralelo/fauna-motor.js';
-import { DI } from '../src/world/paralelo/fauna-worker.js';
 
 const OPEN = 'poblacion.natalidadVecindad=true,social.maxComunidades=0,limites.aplicacion=parametros,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296,construccion.modular=true,construccion.poliminosYSinergia=true,terreno.caminosFisicos=true,quimica.emergente=true,motor.soaTerreno=true,motor.particionarPersonas=true';
 const GOLDEN: Record<string, string> = {
@@ -61,9 +59,6 @@ test('V22: diagnóstico de costes en una escena de 85 páginas, 81 personas y 65
     world.structures.push({ ...structure, id: `bench-structure-${index}`, x: 1000 + index * 16 });
   }
   setParams(world, parseParams('construccion.modular=true'));
-  world.animals.forEach((animal, index) => { animal.id = `bench-animal-${String(index).padStart(4, '0')}`; });
-  const fauna = new EstadoFaunaCompartido();
-  const state = { occupants: new Map(), counts: new Map() };
   const measure = (fn: () => void): string => {
     fn(); const start = performance.now();
     for (let i = 0; i < 20; i++) fn();
@@ -71,24 +66,11 @@ test('V22: diagnóstico de costes en una escena de 85 páginas, 81 personas y 65
   };
   const costs: Record<string, string | number> = {
     pages: world.tiles.length / 256,
-    faunaPackMs: measure(() => fauna.empaquetar(world, world.animals.slice(0, 32), state)),
-    faunaSparseDueMs: measure(() => fauna.empaquetar(world, world.animals.slice(0, 16), state)),
     inventionsMs: measure(() => { for (const p of world.people) { constructionSite(world, p); storedMaterialsNear(world, p); repairOpportunity(world, p); } }),
     inventionsBuilderMs: measure(() => { for (const p of world.people) {
       const action = p.action; p.action = 'build'; depositMaterials(world, p, world.structures[0]!); p.action = action;
     } }),
     worldStatisticsMs: measure(() => { world.tick++; worldStatistics(world); }),
   };
-  const baseAnimals = [...world.animals];
-  while (world.animals.length < 4096) {
-    const index = world.animals.length;
-    const animal = structuredClone(baseAnimals[index % baseAnimals.length]!);
-    animal.id = `bench-animal-${String(index).padStart(4, '0')}`;
-    world.animals.push(animal);
-  }
-  const due = world.animals.slice(2048, 2064);
-  costs.faunaSparse4096Ms = measure(() => fauna.empaquetar(world, due, state));
-  const view = fauna.vista();
-  for (let i = 0; i < due.length; i++) assert.equal(view.di[DI.rango * fauna.params.capDue + i], 2048 + i);
   t.diagnostic(JSON.stringify(costs));
 });

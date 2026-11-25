@@ -9,8 +9,10 @@ import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, paramsOf } from './params
 import { tileLookup, verifiedChunkBlocks } from './tile-index.js';
 import { residentFaunaCapacity, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from './soa/terreno.js';
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
-import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
-import { primero, primerosDos } from './orden.js';
+import { decidirFauna, habitableParaPlan, planFauna, presaDe, type PercepcionFauna, type PlanFauna, type VisibleTile } from './decision/fauna.js';
+import { primero } from './orden.js';
+import { faunaDe, faunaRegistrada } from './soa/fauna.js';
+import { registrar } from './invariantes.js';
 import { assertAnimalTraits } from './validation.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
@@ -21,13 +23,12 @@ export const MAX_ANIMALS_PER_TILE = 6;
 export const MAX_STORED_ANIMALS = LEGACY_WORLD_LIMITS.fauna;
 export const MAX_ANIMAL_MEMORY = 12;
 export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
-const MEMORY_TTL = 480;
+export const MEMORY_TTL = 480;
 const MATURITY = 600;
 /** V19/R: biomasa que cada progenitor aporta a la cría (0,03 + 0,03 = los 0,06 de la biomasa natal histórica). */
 export const RESERVA_POR_PROGENITOR = 0.03;
 /** V19/R: cota de la reserva de un animal; permite cuatro aportes y es lo que `assertAnimal` valida. */
 export const RESERVA_MAXIMA = 0.12;
-/** Razón de la aproximación a pareja (V19/M); `fauna-motor.ts` la repite literal. */
 export const RAZON_PAREJA = 'Está listo para criar y se acerca, pagando cada paso, a una pareja compatible que percibe.';
 /** V19/M y V19/R: puertas corporales de la cría SIN la acción (`flee`), que `choose` no debe leer de otro animal
  * porque otra decisión del mismo paso puede haberla escrito. Con `reserva`, además la reserva alcanza su aporte. */
@@ -43,13 +44,12 @@ export function listoSalvoEnergia(a: Animal, reserva: boolean): boolean {
     && a.hunger < 0.4 && a.thirst < 0.4 && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
 }
 /** V19/M: alcance (Manhattan, en celdas) del olor o la llamada con que un animal listo detecta a una pareja lista de
- * su especie más allá de su vista. Es una lectura local de ocupantes, menor que `HALO_CELDAS` (14): la región que
- * decide la ve completa. `fauna-worker.ts` la repite literal (la prueba lo comprueba). */
+ * su especie más allá de su vista. */
 export const RADIO_PAREJA = 12;
-/** Razón del reposo de cría (V19/M); `fauna-worker.ts` la repite literal. */
 export const RAZON_REPOSO_CRIA = 'Saciado y listo para criar salvo por las fuerzas; descansa para recuperarlas, sin dejar de tener hambre y sed.';
-const SPECIES: AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
-const ACTIONS: AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
+export const SPECIES: readonly AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
+/** Orden de las acciones de la fauna: su índice es la columna `accion` del frente. */
+export const ACTIONS: readonly AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
 const LIFESPAN: Record<AnimalSpecies, number> = { hare: 18000, deer: 36000, boar: 30000, fish: 20000, wolf: 32000, fox: 26000 };
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 interface Point { x: number; y: number; }
@@ -88,7 +88,7 @@ const coordinate = (v: unknown): v is number => typeof v === 'number' && Number.
 const point = (v: unknown): v is Point => !!v && typeof v === 'object' && coordinate((v as Point).x) && coordinate((v as Point).y);
 const unit = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 
-function hash(seed: number, text: string): number {
+export function hash(seed: number, text: string): number {
   let n = seed >>> 0;
   for (let i = 0; i < text.length; i++) n = Math.imul(n ^ text.charCodeAt(i), 16777619);
   n = Math.imul(n ^ (n >>> 16), 0x7feb352d);
@@ -124,8 +124,8 @@ function ensureMorphology(animal: Animal, seed: number): AnimalMorphology {
 export const isHerdAnimal = (animal: Animal): boolean => animal.species === 'deer' || animal.species === 'boar' || animal.species === 'hare';
 export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[animal.species] * (0.75 + (animal.morphology?.size ?? 0.5) * 0.65);
 
-/** V23 serial physical overlay, after both implementations of choose. All sensing is local
- * (Manhattan ≤ 6); no person/structure data enters the parallel decision/halo phase.
+/** V23 serial physical overlay, after the fauna decision. All sensing is local
+ * (Manhattan ≤ 6); no person/structure data enters the fauna Plan.
  * Point buckets are built once per step rather than scanning the population per animal. */
 function settlementBuckets(points: readonly Point[]): Map<Cell, Point[]> {
   const result = new Map<Cell, Point[]>();
@@ -138,7 +138,7 @@ function settlementOverlay(animal: Animal, tick: number, state: LocalState, huma
   let nearSettlement = false;
   const alarm = animal.lastHunted !== undefined && tick - animal.lastHunted < 120;
   const fleeRadius = Math.max(alarm ? 3 : 0, 1 + m.caution * (1 - (animal.habituation ?? 0) * 0.78) * 5);
-  // This serial neighborhood is deliberately separate from choose/localTiles (the worker halo).
+  // This serial neighborhood is deliberately separate from the fauna Plan.
   for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
     const d = Math.abs(dx) + Math.abs(dy); if (d > 6) continue;
     const x = animal.x + dx, y = animal.y + dy, k = cellXY(x, y);
@@ -351,7 +351,7 @@ interface IndiceFauna {
 }
 /** Ámbito del paso: guarda el arreglo de fauna vigente, que los escritores de este módulo
  * (`stepAnimals`, `harvestAt`) refrescan con `refrescarAmbitoFauna` cada vez que lo reemplazan. */
-interface AmbitoFauna { profundidad: number; arreglo: Animal[]; indice?: IndiceFauna }
+interface AmbitoFauna { profundidad: number; arreglo: Animal[]; indice?: IndiceFauna; publicar?: boolean }
 const ambitosFauna = new WeakMap<AnimalWorld, AmbitoFauna>();
 const rejillaFaunaDesactivada = new WeakMap<AnimalWorld, number>();
 
@@ -408,12 +408,55 @@ export function conRejillaFauna<R>(world: AnimalWorld, fn: () => R): R {
   let ambito = ambitosFauna.get(world);
   if (!ambito) { ambito = { profundidad: 0, arreglo: world.animals }; ambitosFauna.set(world, ambito); }
   ambito.profundidad++;
-  try { return fn(); }
-  finally {
+  try {
+    const resultado = fn();
+    if (ambito.profundidad === 1 && ambito.publicar) publicarFrenteFauna(world);
+    return resultado;
+  } finally {
     ambito.profundidad--;
     if (ambito.profundidad === 0) ambitosFauna.delete(world);
   }
 }
+/** Del tick: animales vencidos antes de decidir, cupo de decisiones y cuántos decidieron, contados por su
+ * `lastDecision` y no por vueltas del bucle: así un filtro o una salida temprana en la decisión se ven. */
+interface ActividadFauna { readonly tick: number; readonly vencidos: number; readonly cupo: number; readonly decisiones: number }
+const actividadFauna = new WeakMap<AnimalWorld, ActividadFauna>();
+export const decisionesFauna = (world: AnimalWorld): ActividadFauna | undefined => actividadFauna.get(world);
+const decididosEn = (animales: readonly Animal[], tick: number): number => {
+  let n = 0;
+  for (const a of animales) if (a.lastDecision === tick) n++;
+  return n;
+};
+let frenteRegistrado = false;
+function publicarFrenteFauna(world: AnimalWorld): void {
+  const fauna = faunaDe(world);
+  fauna.sincronizar(world.animals);
+  const terreno = residentTileReader(world.tiles);
+  const reserva = paramsOf(world).fauna.reservaReproductiva;
+  fauna.publicar(world.tick, terreno?.cellAt.bind(terreno), celda => celda >> 8,
+    animal => animal.action !== 'flee' && listoParaCriar(animal, reserva), animal => Math.max(world.tick + 1, animal.lastDecision + 8));
+  if (!frenteRegistrado) {
+    registrar({ id: 'motor-frente', carril: 'M2a', gravedad: 'dura', cadaTicks: 60, alcance: 'global', comprobar(mundo) {
+      faunaRegistrada(mundo)?.tabla.verificarFrente();
+      return [];
+    } });
+    registrar({ id: 'fauna.decisiones', carril: 'M2a', gravedad: 'dura', cadaTicks: 1, alcance: 'global', comprobar(mundo) {
+      const actividad = decisionesFauna(mundo);
+      if (!actividad || actividad.tick !== mundo.tick) return [];
+      const esperado = Math.min(actividad.vencidos, actividad.cupo);
+      if (actividad.decisiones === esperado) return [];
+      return [{ id: 'fauna.decisiones', gravedad: 'dura', tick: mundo.tick, detalle: 'Cada animal vencido debe decidir una vez en el tick, hasta el cupo.',
+        esperado, observado: actividad.decisiones, contexto: { vencidos: actividad.vencidos, cupo: actividad.cupo } }];
+    } });
+    frenteRegistrado = true;
+  }
+}
+function solicitarFrenteFauna(world: AnimalWorld): void {
+  const ambito = ambitosFauna.get(world);
+  if (ambito) ambito.publicar = true;
+  else publicarFrenteFauna(world);
+}
+
 /** Animales vivos en la celda exacta `(x, y)`, en orden de slot: dentro del ámbito, los mismos
  * objetos y el mismo orden que `filter(a => a.x === x && a.y === y && a.health > 0)` sobre el
  * arreglo vigente; `undefined` fuera del ámbito o con la rejilla inválida, para que el llamador
@@ -469,10 +512,7 @@ function habitat(animal: Animal, tile: Tile): boolean {
   return animal.species === 'fish' ? tile.terrain === 'water' : tile.terrain !== 'water' && tile.terrain !== 'shelter';
 }
 function edible(animal: Animal, prey: Animal): boolean {
-  if (animal.genes.carnivory < 0.6 || animal.species === prey.species) return false;
-  const p = prey.species;
-  return animal.species === 'wolf' ? p === 'hare' || p === 'deer' || p === 'boar' || p === 'fox'
-    : animal.species === 'fox' ? p === 'hare' : false;
+  return animal.genes.carnivory >= 0.6 && presaDe(animal.species, prey.species);
 }
 function waterAt(animal: Animal, tile: Tile): number {
   return animal.species === 'fish' ? tile.moisture : tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0;
@@ -525,17 +565,15 @@ function remember(animal: Animal, tile: Point, tick: number, visited: boolean, f
 /** `tile(x, y)` es el índice de terreno fijado al empezar el paso (el `Map` de claves `"x,y"` que se
  * construía aquí, ahora compartido con `tileAt` en tile-index.ts): misma tesela para las mismas
  * coordenadas, y como antes no ve teselas añadidas a mitad del paso. */
-interface Resource extends Point { food: number; water: number; }
-interface VisibleTile extends Resource { growth: number | undefined; novelty: number | undefined; cell: Cell; }
 /** Vecina candidata de `move`: las coordenadas de la consulta, su tesela y su celda residente (o -1). */
 interface Step extends Point { tile: Tile; at: number; }
 /** Radio máximo de percepción (`2 + ⌊1·4⌋`) y lado del cuadrado de desplazamientos que lo contiene. */
 const MAX_RADIUS = 6, SEEN_SIDE = 2 * MAX_RADIUS + 1;
-interface LocalState {
+interface LocalState extends PercepcionFauna {
   tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>; counts: Map<Cell, number>;
   reader: ResidentTileReader | undefined;
   fast: ResidentFastAccess | undefined;
-  visible: VisibleTile[]; pool: VisibleTile[]; resources: Resource[]; adjacent: VisibleTile[]; neighbors: Step[]; steps: Step[];
+  visible: VisibleTile[]; pool: VisibleTile[]; neighbors: Step[]; steps: Step[];
   /** Desplazamientos (dx, dy) de la última `localTiles` que entraron en lo visible: valen `stamp`. */
   seen: Int32Array; stamp: number;
   /** V19: leyes de fauna del paso (`paramsOf(world).fauna`), leídas una vez por `stepAnimals`. */
@@ -545,8 +583,8 @@ interface LocalState {
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
 const seenAt = (state: LocalState, dx: number, dy: number): boolean => Math.abs(dx) <= MAX_RADIUS && Math.abs(dy) <= MAX_RADIUS
   && state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] === state.stamp;
-function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
-  const radius = 2 + Math.floor(animal.genes.perception * 4), result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
+function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): VisibleTile[] {
+  const radius = plan.radio, result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
   result.length = 0;
   for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
     if (Math.abs(dx) + Math.abs(dy) > radius) continue;
@@ -555,8 +593,7 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
       const at = reader.cellAt(x, y);
       if (at < 0) continue;
       const terrain = reader.terrainCode(at);
-      if (animal.species === 'fish' ? terrain !== reader.TERRAIN_WATER
-        : terrain === reader.TERRAIN_WATER || terrain === reader.TERRAIN_SHELTER) continue;
+      if (!habitableParaPlan(plan, terrain === reader.TERRAIN_WATER, terrain === reader.TERRAIN_SHELTER)) continue;
       growth = reader.growth(at); vegetation = reader.vegetation(at)!;
       water = animal.species === 'fish' ? reader.moisture(at)!
         : reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
@@ -568,12 +605,11 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
       if (!tile) continue;
       const at = fast?.cellOf(tile) ?? -1;
       if (at < 0) {
-        if (!habitat(animal, tile)) continue;
+        if (!habitableParaPlan(plan, tile.terrain === 'water', tile.terrain === 'shelter')) continue;
         growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
       } else {
         const terrain = fast!.terrainCode(at);
-        if (animal.species === 'fish' ? terrain !== fast!.TERRAIN_WATER
-          : terrain === fast!.TERRAIN_WATER || terrain === fast!.TERRAIN_SHELTER) continue;
+        if (!habitableParaPlan(plan, terrain === fast!.TERRAIN_WATER, terrain === fast!.TERRAIN_SHELTER)) continue;
         growth = fast!.growth(at); vegetation = fast!.vegetation(at)!;
         water = animal.species === 'fish' ? fast!.moisture(at)!
           : fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
@@ -582,98 +618,12 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
     }
     // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
     // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
-    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined, cell: 0 };
-    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined; t.cell = cellXY(x, y);
+    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined };
+    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined;
     result.push(t);
     state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] = stamp;
   }
   return result;
-}
-/** Distancia de `p` al depredador más cercano. */
-function safety(threats: readonly Animal[], p: Point): number {
-  let min = Infinity;
-  for (const t of threats) min = Math.min(min, distance(t, p));
-  return min;
-}
-/** Atractivo de explorar la tesela: función pura de la tesela, calculada una vez (`t.novelty`) y no en cada comparación. */
-function novelty(animal: Animal, seed: number, tick: number, t: VisibleTile): number {
-  let value = t.novelty;
-  if (value === undefined) {
-    const visit = animal.memory.find(m => m.visited && m.x === t.x && m.y === t.y);
-    value = (visit ? Math.min(1, (tick - visit.tick) / MEMORY_TTL) : 2) + hash(seed, `${animal.id}:${key(t)}:${Math.floor(tick / 60)}`) / 4294967296 * 0.2;
-    t.novelty = value;
-  }
-  return value;
-}
-/** V19/M: la pareja conespecífica lista (viva, otra identidad) más cercana a ≤ `RADIO_PAREJA` celdas Manhattan, con
- * desempate canónico. Lee sólo los ocupantes de las celdas del rombo (que `choose` no escribe). */
-function parejaCercana(animal: Animal, state: LocalState): Animal | undefined {
-  let mate: Animal | undefined, best = Infinity;
-  for (let dy = -RADIO_PAREJA; dy <= RADIO_PAREJA; dy++) {
-    const span = RADIO_PAREJA - Math.abs(dy);
-    for (let dx = -span; dx <= span; dx++) {
-      const here = state.occupants.get(cellXY(animal.x + dx, animal.y + dy));
-      if (!here) continue;
-      const d = Math.abs(dx) + Math.abs(dy);
-      if (d > best) continue;
-      for (const other of here) {
-        if (other === animal || other.id === animal.id || !(other.health > 0) || other.species !== animal.species
-          || !listoParaCriar(other, state.reserva)) continue;
-        if (!mate || d < best || canonical(other, mate) < 0) { mate = other; best = d; }
-      }
-    }
-  }
-  return mate;
-}
-function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
-  const visible = localTiles(animal, state), near = visible.flatMap(t => state.occupants.get(cell(t)) ?? []).filter(a => a.id !== animal.id && a.health > 0);
-  const threats = near.filter(a => edible(a, animal) && distance(a, animal) <= 1 + Math.floor(animal.genes.perception * 5));
-  const adjacent = state.adjacent;
-  adjacent.length = 0;
-  for (const t of visible) if (distance(t, animal) === 1 && (state.counts.get(t.cell) ?? 0) < MAX_ANIMALS_PER_TILE) adjacent.push(t);
-  let action: AnimalAction = 'roam', target: Point = animal, reason = 'Explora celdas cercanas y evita recorridos que recuerda.';
-  let preyId: string | null = null;
-  // Los dos primeros del mismo orden estable, sin ordenar todo lo visible (orden.ts).
-  for (const tile of primerosDos(visible, (a, b) => (b.water + (b.growth ?? 0)) - (a.water + (a.growth ?? 0)) || distance(a, animal) - distance(b, animal) || a.y - b.y || a.x - b.x,
-    t => (t.growth ?? 0) > 0.05 || t.water > 0.005)) remember(animal, tile, world.tick, distance(tile, animal) === 0, tile.food, tile.water);
-  if (threats.length) {
-    const escape = primero(adjacent, (a, b) => safety(threats, b) - safety(threats, a) || a.y - b.y || a.x - b.x);
-    action = 'flee'; target = escape && safety(threats, escape) > safety(threats, animal) ? escape : animal;
-    reason = 'Percibe un depredador cercano y se aleja físicamente de su alcance.';
-  } else {
-    // Mismo orden: rombo visible, seguido de recuerdos válidos que no están en el rombo.
-    const resources = state.resources;
-    resources.length = 0;
-    for (const t of visible) resources.push(t);
-    for (const m of animal.memory) {
-      if (world.tick - m.tick > MEMORY_TTL || !(state.reader ? state.reader.cellAt(m.x, m.y) >= 0 : state.tile(m.x, m.y) !== undefined)) continue;
-      if (!seenAt(state, m.x - animal.x, m.y - animal.y)) resources.push(m);
-    }
-    const water = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.water - a.water || a.y - b.y || a.x - b.x, t => t.water > 0.001);
-    const food = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.food - a.food || a.y - b.y || a.x - b.x, t => t.food > 0.001);
-    const prey = primero(near, (a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b), a => edible(animal, a));
-    if (animal.thirst > 0.42 && water) { action = 'drink'; target = water; reason = 'La sed orienta su camino hacia agua percibida o recordada.'; }
-    else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
-    else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
-    else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
-    // V19/M: saciado, hidratado, sano, maduro y (con R) con reserva, sólo le faltan fuerzas para criar: descansa en vez
-    // de gastarlas vagando. `feed` lo despierta al superar 0,75 de energía; el hambre y la sed siguen subiendo y, al
-    // cruzar sus umbrales, la caza, el pasto o la bebida vuelven a ganar.
-    else if (state.encuentro && listoSalvoEnergia(animal, state.reserva)) { action = 'rest'; reason = RAZON_REPOSO_CRIA; }
-    else {
-      // V19/M: sin amenaza ni necesidad urgente, un animal listo para criar se acerca a la pareja conespecífica
-      // lista más cercana (desempate canónico) que detecta por olor o llamada a ≤ `RADIO_PAREJA` celdas: incluye a
-      // todas las que ve (su vista es ≤ 6). Es el movimiento pagado de siempre; nadie se traslada ni aparece.
-      const mate = state.encuentro && listoParaCriar(animal, state.reserva) ? parejaCercana(animal, state) : undefined;
-      if (mate) { target = mate; reason = RAZON_PAREJA; }
-      else {
-        const seed = world.seed, tick = world.tick;
-        target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
-      }
-    }
-  }
-  if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
-  animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = reason; animal.preyId = preyId; animal.lastDecision = world.tick;
 }
 /** Cadena secuencial: cada movimiento libera y ocupa celdas en `state.counts`/`state.occupants`,
  * que el siguiente `move` lee para el cupo `MAX_ANIMALS_PER_TILE`; liberar una celda habilita la
@@ -1000,6 +950,12 @@ export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]):
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map(),
+    visibles: (animal, plan) => localTiles(animal, state, plan),
+    ocupantes: (x, y) => state.occupants.get(cellXY(x, y)),
+    puedeEntrar: t => (state.counts.get(cell(t)) ?? 0) < MAX_ANIMALS_PER_TILE,
+    residente: t => state.reader ? state.reader.cellAt(t.x, t.y) >= 0 : state.tile(t.x, t.y) !== undefined,
+    visto: (dx, dy) => seenAt(state, dx, dy),
+    recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
     contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
   const { fauna: leyesFauna } = paramsOf(world);
@@ -1012,6 +968,9 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   if (mascara && (mascara.tick !== world.tick || mascara.animales !== world.animals || mascara.poblacion !== world.animals.length || !mismosObjetos(world.animals, mascara.orden)))
     throw new Error('Máscara de fauna de otro paso.');
   const seleccion = mascara?.seleccion ?? calcularMascara(world);
+  const fauna = faunaDe(world);
+  fauna.sincronizar(world.animals);
+  const { columnaEspecie } = fauna;
   // Con toda la fauna seleccionada (≤ MAX_ACTIVE_ANIMALS) todos piensan: no hace falta preguntar por id.
   const todos = seleccion.length === world.animals.length;
   const piensan = todos ? null : mascara?.ids ?? new Set(seleccion.map(a => a.id));
@@ -1039,12 +998,10 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   const active = seleccion.filter(a => a.health > 0);
   // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
   const decisionCap = openWorldCaps(world) ? limitsOf(world).fauna : MAX_ANIMAL_DECISIONS_PER_TICK;
-  const due = active.filter(a => world.tick - a.lastDecision >= 8)
-    .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, decisionCap);
-  // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
-  const motor = paramsOf(world).motor, parallel = motor.hilos > 1 && due.length >= 384;
-  if (parallel) applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));
-  else for (const animal of due) choose(animal, world, state);
+  const vencidos = active.filter(a => world.tick - a.lastDecision >= 8);
+  const due = vencidos.sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, decisionCap);
+  for (const animal of due) decidirFauna(animal, world, state, planFauna(animal, columnaEspecie));
+  actividadFauna.set(world, { tick: world.tick, vencidos: vencidos.length, cupo: decisionCap, decisiones: decididosEn(active, world.tick) });
   if (emergent) {
     const humans = settlementBuckets(world.people ?? []);
     const structures = world.structures ?? [];
@@ -1096,6 +1053,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   world.animals = world.animals.filter(a => a.health > 0);
   const previos = world.animals.length;
   reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); invalidarRejillaFauna(world); syncFauna(world.tiles, world.animals);
+  solicitarFrenteFauna(world);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */
@@ -1108,6 +1066,7 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
   if (paramsOf(world).quimica.emergente) alarmHerd(world.animals, victim, world.tick);
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
+  solicitarFrenteFauna(world);
   return paramsOf(world).quimica.emergente ? animalBiomass(victim) : FOOD_PER_ANIMAL[victim.species];
 }
 

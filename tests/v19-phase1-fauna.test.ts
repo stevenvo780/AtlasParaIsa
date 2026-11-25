@@ -6,16 +6,11 @@
 // · Cada ley, aislada, con un escenario mínimo y verificable.
 // · Hábitat productivo de depredadores (zorro y lobo) con las tres leyes: caza real, acumulación de reserva,
 //   aproximación a pareja y nacimientos G1+; la deuda de reserva es exactamente 0,06 por cría.
-// · Paridad 0 ULP entre `motor.hilos = 1` (serie) y `motor.hilos = 4` (workers, ≥ 384 decisiones por paso).
 
-import test, { after } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RAZON_PAREJA, RESERVA_MAXIMA, RESERVA_POR_PROGENITOR, assertAnimal, type Animal } from '../src/world/animals.js';
-import { closeFaunaParallelPools, despachosFaunaParalelos } from '../src/world/paralelo/fauna-motor.js';
-import { RAZON_PAREJA_FAUNA } from '../src/world/paralelo/fauna-worker.js';
 import { fundador, huella, mundo, parches, paso, tile } from './v19-phase1-fauna-fixture.js';
-
-after(async () => { await closeFaunaParallelPools(); });
 
 const TODAS = 'fauna.contactoContinuo=true,fauna.reservaReproductiva=true,fauna.encuentroFertil=true';
 /** Huellas del fixture `parches()` con params por defecto, calculadas sobre V18 (commit anterior a V19). */
@@ -29,18 +24,13 @@ function quieto(a: Animal, x = a.x, y = a.y): Animal {
 const cuadricula = (lado: number, o: Parameters<typeof tile>[2] = {}) =>
   Array.from({ length: lado * lado }, (_, i) => tile(i % lado, Math.floor(i / lado), o));
 
-test('V19 fauna: con F, R y M apagados la fauna es V18 bit a bit (huellas del commit anterior), también con workers', () => {
+test('V19 fauna: con F, R y M apagados la fauna es V18 bit a bit', () => {
   const serie = parches(), w = mundo(serie.tiles, serie.animals);
   for (let n = 1; n <= 300; n++) { paso(w); if (n === 60 || n === 300) assert.equal(huella(w), V18[n], `serie, paso ${n}`); }
   // Las constantes asociadas a un interruptor apagado son inertes: no mueven un solo bit.
   const inerte = parches(), wi = mundo(inerte.tiles, inerte.animals, 'fauna.fraccionReservaCria=0.9');
   for (let n = 1; n <= 60; n++) paso(wi);
   assert.equal(huella(wi), V18[60], 'fraccionReservaCria sin R es inerte');
-  // Con workers (hilos 4, ≥ 384 decisiones en el primer paso) el despacho apagado tampoco cambia nada.
-  const antes = despachosFaunaParalelos(), par = parches(), wp = mundo(par.tiles, par.animals, 'motor.hilos=4,motor.orden=adversarial');
-  for (let n = 1; n <= 60; n++) paso(wp);
-  assert.ok(despachosFaunaParalelos() > antes, 'la decisión se despachó realmente a la piscina');
-  assert.equal(huella(wp), V18[60], 'workers apagados = V18');
 });
 
 test('V19/F: la preparación del ataque decae poco a poco al separarse y el alcance (≤ 1) resuelve el contacto con esfuerzo pagado', () => {
@@ -143,7 +133,6 @@ test('V19/M: un animal listo se acerca con pasos pagados a una pareja conespecí
   // Sin reserva (R exige ≥ 0,03 en cada uno) o sin M, nadie busca pareja.
   assert.ok(!enfoque(montar(TODAS, 0)).razones.has(RAZON_PAREJA), 'sin reserva no están listos');
   assert.ok(!enfoque(montar('fauna.reservaReproductiva=true,fauna.contactoContinuo=true', 0.05)).razones.has(RAZON_PAREJA), 'sin M no hay búsqueda');
-  assert.equal(RAZON_PAREJA, RAZON_PAREJA_FAUNA, 'serie y workers escriben la misma razón');
 });
 
 test('V19 F+R+M: en un hábitat productivo zorros y lobos cazan, acumulan reserva, se buscan y crían G1+; deuda exacta 0,06 por cría', () => {
@@ -188,26 +177,4 @@ test('V19 F+R+M: en un hábitat productivo zorros y lobos cazan, acumulan reserv
   const nacimientos = w.animalDynamics.births;
   assert.equal(nacimientos, Object.values(crias).reduce((s, n) => s + n, 0));
   assert.ok(pagado <= nacimientos * 0.06 + 1e-9 && pagado > 0, `reserva pagada ${pagado} ≤ 0,06 × ${nacimientos}`);
-});
-
-test('V19 F+R+M: serie (hilos 1) y workers (hilos 4, orden adversarial) dan el mismo mundo, 0 ULP, con M y R activos', () => {
-  const correr = (params: string) => {
-    const { tiles, animals } = parches();
-    // Condición inicial: la mitad de los fundadores trae reserva (como si ya hubieran comido), para que M y R
-    // actúen desde el primer paso en el rato corto de la prueba. No altera ninguna ley.
-    animals.forEach((a, i) => { if (i % 2 === 0) a.reproReserve = 0.05; });
-    const w = mundo(tiles, animals, `${TODAS},${params}`), razones = new Set<string>();
-    for (let n = 1; n <= 200; n++) { paso(w); for (const a of w.animals) razones.add(a.reason); }
-    return { w, razones };
-  };
-  const serie = correr('motor.hilos=1');
-  const antes = despachosFaunaParalelos();
-  const workers = correr('motor.hilos=4,motor.orden=adversarial');
-  assert.ok(despachosFaunaParalelos() > antes, 'la decisión corrió en la piscina de workers');
-  assert.ok(serie.razones.has(RAZON_PAREJA) && workers.razones.has(RAZON_PAREJA), 'M actuó en ambos');
-  assert.ok(serie.w.animalDynamics.births > 0 && serie.w.animalDynamics.predations > 0);
-  assert.equal(huella(workers.w), huella(serie.w));
-  assert.deepStrictEqual(workers.w.animals, serie.w.animals); // distingue −0 y NaN
-  assert.deepStrictEqual(workers.w.tiles, serie.w.tiles);
-  assert.deepStrictEqual(workers.w.animalDynamics, serie.w.animalDynamics);
 });

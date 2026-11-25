@@ -129,27 +129,29 @@ function loteDelCuerpo(cuerpo: Cuerpo | undefined, rol: Rol): LoteRef {
   }
 }
 
-function responder(c: CtxLey, i: Intento, nuevo: Intento): void {
-  const s = slotVivo(c, nuevo.a);
-  const dueno = s === REF_NULA ? duenoDeCelda(c, nuevo.celda) : c.frente.dueno[s];
-  if (dueno < 0) throw new Error(`Intento ${i.nonce} sin ruta de retorno.`);
-  c.buzon.enviar(dueno, nuevo);
+function respuesta(c: CtxLey, i: Intento, tipo: typeof TipoIntento.Concedido | typeof TipoIntento.Devuelto): Intento {
+  const concedido = tipo === TipoIntento.Concedido;
+  return {
+    tipo, de: i.a, a: i.de, nonce: i.nonce,
+    lote: concedido ? i.dato?.[DATO_TOMAR.loteDestino] ?? REF_NULA : REF_NULA,
+    celda: celdaDe(c, i.de, i.celda), bytes: null, materia: concedido ? VACIO : i.materia,
+    dato: concedido ? AL_DIGESTIVO : i.dato?.[DATO_MATERIA.rol] === Rol.Objeto ? i.dato : A_LA_RESERVA,
+  };
 }
 
-function conceder(c: CtxLey, i: Intento, materia: Float64Array): void {
-  responder(c, i, {
-    tipo: TipoIntento.Concedido, de: i.a, a: i.de, nonce: i.nonce,
-    lote: i.dato?.[DATO_TOMAR.loteDestino] ?? REF_NULA,
-    celda: celdaDe(c, i.de, i.celda), dato: AL_DIGESTIVO, bytes: null, materia,
-  });
+function duenoDeRespuesta(c: CtxLey, i: Intento): Hilo {
+  const s = slotVivo(c, i.a);
+  return s === REF_NULA ? duenoDeCelda(c, i.celda) : c.frente.dueno[s];
 }
 
-function tomar(c: CtxLeyMateria, i: Intento, s: Slot): Resultado {
-  let garantia: Float64Array = VACIO;
+function tomar(c: CtxLeyMateria, i: Intento, s: Slot, permitido = true): Resultado {
+  const concedido = respuesta(c, i, TipoIntento.Concedido);
+  const dueno = duenoDeRespuesta(c, concedido);
+  if (dueno < 0) throw new Error(`Tomar ${i.nonce} sin ruta de retorno.`);
   const dato = i.dato;
-  if (dato && (i.a === REF_NULA || s !== REF_NULA)) {
+  if (permitido && dato) {
     const rol = dato[DATO_TOMAR.rol] as Rol;
-    const loteDeCuerpo = loteDelCuerpo(cuerpoEn(c, s), rol);
+    const loteDeCuerpo = i.lote === REF_NULA ? loteDelCuerpo(cuerpoEn(c, s), rol) : REF_NULA;
     const celda = celdaDe(c, i.a, i.celda);
     const lote = i.lote !== REF_NULA ? i.lote : loteDeCuerpo !== REF_NULA ? loteDeCuerpo
       : duenoDeCelda(c, celda) === c.hilo ? loteEnCelda(c, celda, rol) : REF_NULA;
@@ -161,11 +163,11 @@ function tomar(c: CtxLeyMateria, i: Intento, s: Slot): Resultado {
         kappa: parte !== Parte.Digerible ? null
           : dato.length >= k + 4 ? [dato[k], dato[k + 1], dato[k + 2], dato[k + 3]] : kappaDeRol(rol),
       };
-      garantia = c.materia.garantizar(lote, pedido, c.libro);
+      concedido.materia = c.materia.garantizar(lote, pedido, c.libro);
     }
   }
-  conceder(c, i, garantia);
-  return 'aplicados';
+  c.buzon.enviar(dueno, concedido);
+  return permitido ? 'aplicados' : 'devueltos';
 }
 
 function alSuelo(c: CtxLeyMateria, i: Intento, celda: number, garantia: Float64Array): Resultado {
@@ -227,19 +229,16 @@ function recibir(c: CtxLeyMateria, i: Intento, s: Slot): Resultado {
 }
 
 function rechazar(c: CtxLey, i: Intento): Resultado {
-  if (i.tipo === TipoIntento.Tomar) {
-    conceder(c, i, VACIO);
-  } else if (i.materia?.length) {
-    const cm = c as CtxLeyMateria;
-    if (i.tipo === TipoIntento.Devuelto || i.de === REF_NULA) {
-      return alSuelo(cm, i, celdaDe(c, i.a, i.celda), i.materia);
+  if (i.tipo === TipoIntento.Tomar) return tomar(c as CtxLeyMateria, i, REF_NULA, false);
+  if (i.tipo !== TipoIntento.Devuelto && i.de !== REF_NULA) {
+    const devuelto = respuesta(c, i, TipoIntento.Devuelto);
+    const dueno = duenoDeRespuesta(c, devuelto);
+    if (dueno >= 0) {
+      c.buzon.enviar(dueno, devuelto);
+      return 'devueltos';
     }
-    responder(c, i, {
-      tipo: TipoIntento.Devuelto, de: i.a, a: i.de, nonce: i.nonce, lote: REF_NULA,
-      celda: celdaDe(c, i.de, i.celda), materia: i.materia,
-      dato: i.dato?.[DATO_MATERIA.rol] === Rol.Objeto ? i.dato : A_LA_RESERVA, bytes: null,
-    });
   }
+  if (i.materia?.length) return alSuelo(c as CtxLeyMateria, i, celdaDe(c, i.a, i.celda), i.materia);
   return 'devueltos';
 }
 

@@ -201,7 +201,6 @@ function compartirPorIntento(c: CtxLeyMateria, donante: Person): void {
     materia, dato: PORCION_AL_DIGESTIVO, bytes: null,
   });
   donante.lastShared = c.tick;
-  outcome(c.mundo, donante, 'share', 0.16);
   const evento = c.suceso({
     kind: 'care', actors: [donante.id, id], x: donante.x, y: donante.y, source: 'simulation',
     text: `${donante.name} ofreció alimento en ${lugar.name}.`,
@@ -217,7 +216,7 @@ function enCompania(p: Person): boolean {
 function publicarCompania(c: CtxLey): void {
   const columna = c.escritura.u8(COLUMNA_COMPANIA);
   for (const [s, persona] of c.personas) {
-    if (persona.role === 'S' || persona.role === 'I') columna[s] = enCompania(persona) ? 1 : 0;
+    columna[s] = (persona.role === 'S' || persona.role === 'I') && enCompania(persona) ? 1 : 0;
   }
 }
 
@@ -233,7 +232,7 @@ function encuentrosPorFrente(c: CtxLey): void {
     if (a >= f.alta || f.vivo[a] !== 1 || f.gen[a] !== genDe(otro) || f.dueno[a] < 0) continue;
 
     const separacion = Math.hypot(f.x[a] - f.x[s], f.y[a] - f.y[s]);
-    if (vinculoEncuentro > 0) {
+    if (vinculoEncuentro > 0 && 'partnerMemory' in p) {
       if (separacion <= RADIUS) {
         p.partnerMemory = { x: f.x[a], y: f.y[a], tick };
       } else if (tick % 120 === 0) {
@@ -251,7 +250,7 @@ function encuentrosPorFrente(c: CtxLey): void {
     const desde = p.lastMeeting > 0 ? tick - p.lastMeeting : 0;
     p.lastMeeting = tick;
     if (vinculoEncuentro > 0) {
-      p.partnerMemory = { x: p.x, y: p.y, tick };
+      if ('partnerMemory' in p) p.partnerMemory = { x: p.x, y: p.y, tick };
       if (p.role === 'S') {
         aportarVinculo(p, otroId, 0.08);
         enviarVinculo(c, refDe(s, f.gen[s]), a, 0.08);

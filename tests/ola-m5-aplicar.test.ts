@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { escalon } from '../src/shared/interruptores.js';
-import { TIPOS } from '../src/shared/materia.js';
+import { TIPOS, codigoForma } from '../src/shared/materia.js';
 import { leyFauna } from '../src/world/ley-fauna.js';
 import { ArenaLotes, LOTES_POR_BLOQUE } from '../src/world/materia/arena.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
@@ -170,4 +170,26 @@ test('el envío que cambia de dueño conserva el tipo y el nonce, y se abona una
   assert.equal(balanceAplicador(anterior.c).duplicados, 1);
   assert.equal(aplicarCola(actual.c, 'A'), 1);
   assert.equal(actual.materia.calor(lote), 10);
+});
+
+test('crea un lote con la forma solicitada y una entrega a un lote caducado va al Suelo', () => {
+  const { duenos, colas } = escenario();
+  const receptor = duenos[1];
+  const sinForma = receptor.materia.nuevo(Rol.Objeto, 256, 0);
+  const forma = codigoForma({ largo: 0.5, ancho: 0.5, grueso: 0.1, hueco: 0, filo: 0 });
+  const caduco = receptor.materia.nuevo(Rol.Objeto, 256, 0);
+  receptor.materia.liberar(caduco);
+  colas[1].push(
+    intento({ tipo: TipoIntento.Depositar, a: REF_NULA, dato: Float64Array.of(Rol.Objeto, forma), materia: Float64Array.of(0, 33) }),
+    intento({ nonce: 43, lote: caduco, materia: Float64Array.of(0, 59) }),
+  );
+  assert.equal(aplicarCola(receptor.c, 'A'), 2);
+  const lotes = new Float64Array(2);
+  assert.equal(receptor.materia.lotes(256, Rol.Objeto, lotes), 2);
+  const formado = lotes.find(l => l !== sinForma)!;
+  assert.equal(receptor.materia.vista(formado).forma, forma);
+  assert.equal(receptor.materia.calor(formado), 33);
+  assert.equal(receptor.materia.calor(sinForma), 0);
+  assert.equal(receptor.materia.lotes(256, Rol.Suelo, lotes), 1);
+  assert.equal(receptor.materia.calor(lotes[0]), 59);
 });

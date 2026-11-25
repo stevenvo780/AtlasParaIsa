@@ -121,6 +121,12 @@ test('realizable() distingue moléculas reales, unidades, contraejemplos de graf
     ['urea CON2H4', B([[E('C', 'O', 2), 1], [E('C', 'N'), 2], [E('H', 'N'), 4]])],
     ['ácido acético', B([[E('C', 'C'), 1], [E('C', 'O', 2), 1], [E('C', 'O'), 1], [E('H', 'C'), 3], [E('H', 'O'), 1]])],
     ['butatrieno C4H4', B([[E('C', 'C', 2), 3], [E('H', 'C'), 4]])],
+    // Átomos lineales en cadena (enmienda 3): aleno, ceteno y carbodiimida siguen siendo moléculas; el ciclopropeno no
+    // tiene ningún C lineal (el del C=C tiene un H como tercer vecino σ).
+    ['aleno C3H4', B([[E('C', 'C', 2), 2], [E('H', 'C'), 4]])],
+    ['ceteno C2H2O', B([[E('C', 'C', 2), 1], [E('C', 'O', 2), 1], [E('H', 'C'), 2]])],
+    ['carbodiimida HN=C=NH', B([[E('C', 'N', 2), 2], [E('H', 'N'), 2]])],
+    ['ciclopropeno C3H4', B([[E('C', 'C'), 2], [E('C', 'C', 2), 1], [E('H', 'C'), 4]])],
   ];
   for (const [nombre, en] of moleculas) {
     assert.equal(realizable(en), true, `${nombre} debe ser molécula realizable`);
@@ -149,6 +155,12 @@ test('realizable() distingue moléculas reales, unidades, contraejemplos de graf
     ['Jaula K2,4 poli-CO2 C2O4', B([[E('C', 'O'), 8]])],
     ['Jaula K2,3 Si2O3H2', B([[E('O', 'Si'), 6], [E('H', 'Si'), 2]])],
     ['Jaula K4 N4', B([[E('N', 'N'), 6]])],
+    // Regla del átomo lineal (enmienda 3): un átomo con dos vecinos σ, valencia ≥ 4 y sin H (dos π, sin par libre) es
+    // lineal y no cabe en un anillo de ≤ 8 átomos. Antes C₃{C=C:3} era molécula y el carbón sublimaba en el horno.
+    ['anillo C3 {C=C:3}', B([[E('C', 'C', 2), 3]])],
+    ['anillo C4 {C=C:4}', B([[E('C', 'C', 2), 4]])],
+    ['anillo C4 {C–C:2, C≡C:2}', B([[E('C', 'C'), 2], [E('C', 'C', 3), 2]])],
+    ['anillo N=C=N–O–N', B([[E('C', 'N', 2), 2], [E('N', 'O'), 2]])],
   ];
   for (const [nombre, en] of noRealizables) {
     assert.equal(realizable(en), false, `${nombre} NO debe ser molécula`);
@@ -398,7 +410,7 @@ test('invariante I4 registrada en invariantes.ts detecta corrupciones e integra 
       a: idC, b: idO2, nivelT: nivelDeT(1095),
       entradas: [{ id: idC, nu: 1 }, { id: idO2, nu: 1 }],
       salidas: [{ id: idC, nu: 1 }], // pierde O2
-      dH: 999, ea: 100, catalisis: 2,
+      dH: 999, ea: 100, catalisis: 2, paresCatalisis: 1,
     };
     const falso: ServicioQuimicoAuditable = {
       modo: 'inmediato',
@@ -445,6 +457,72 @@ test('cinética de digestión (310 K, KAPPA0) y suelo (295 K, KAPPA_SUELO) coher
   assert.ok(tasaArrhenius(310, rMad, KAPPA0) < 1e-4, 'con KAPPA0=60, CH2O no carboniza rápido en estómago');
   assert.ok(tasaArrhenius(295, rComb, KAPPA_SUELO) > 1e-4, 'con KAPPA_SUELO=105, el suelo mineraliza con O2');
   assert.ok(tasaArrhenius(295, rProt, KAPPA_SUELO) > 1, 'el suelo libera NH3 de proteínas');
+});
+
+test('enmienda 3: energía de dos centros de los metales (carburo endotérmico, Fe–O en su intervalo) y hierro sin carburo', async () => {
+  // Con la cohesión de banda (dPropia) en los enlaces con otro elemento, Pauling no puede dar un compuesto metal–no metal
+  // endotérmico: C₃Fe₄ se formaba de 2 Fe₂ + 3 C con dH −186 y la fogata hacía carburo. Con dDosCentros (D₀ del dímero)
+  // el carburo pasa a +438 y el óxido sigue muy exotérmico; Fe–O = 367 está en [363, 371], la ventana de enteros con la
+  // que la reducción por O, 2·D(Fe–O) − D(Fe–Fe) − D(C=O)/2·… (medida en lab-materia), cae entre la llama y el horno.
+  const fe = TABLA[ELEMENTOS.indexOf('Fe' as never)]!, ca = TABLA[ELEMENTOS.indexOf('Ca' as never)]!;
+  assert.ok(fe.dDosCentros < fe.dPropia && ca.dDosCentros < ca.dPropia, 'en los metales la energía de dos centros es menor que la de red');
+  for (const t of TABLA) if (t !== fe && t !== ca) assert.equal(t.dDosCentros, t.dPropia, 'en los no metales no cambia nada');
+  assert.equal(TIPOS[E('Fe', 'Fe')]!.d, 275, 'Fe–Fe (cohesión del metal) intacto');
+  const dFeO = TIPOS[E('O', 'Fe')]!.d;
+  assert.ok(Number.isInteger(dFeO) && dFeO >= 363 && dFeO <= 371, `Fe–O ${dFeO}`);
+  const sus = (pares: [number, number][]) => construirSustancia(1, B(pares));
+  const carburo = sus([[E('C', 'Fe'), 12]]), fe2 = sus([[E('Fe', 'Fe'), 3]]), c = sus([[E('C', 'C'), 2]]);
+  const o2 = sus([[E('O', 'O', 2), 1]]), fe2o3 = sus([[E('O', 'Fe'), 6]]);
+  assert.ok(carburo.energia - 2 * fe2.energia - 3 * c.energia > 0, `C₃Fe₄: ΔHf ${carburo.energia - 2 * fe2.energia - 3 * c.energia}`);
+  assert.ok(2 * fe2o3.energia - 2 * fe2.energia - 3 * o2.energia < -1000, 'el óxido de hierro sigue muy exotérmico (2 Fe₂ + 3 O₂)');
+  // Ningún óxido de hierro (ni el hierro) con carbón da carburo entre la fogata y el horno alto; Fe₂O₃ + C no reduce en
+  // fogata ni en llama abierta, y en horno da hierro metálico y CO₂.
+  const serv = crearServicioQuimico({ modo: 'inmediato' });
+  try {
+    const S = registrarSustanciasBase(serv);
+    for (const ox of [S.Fe2O3, S.Fe2O2, S.Fe2O, S.Fe2]) for (let l = nivelDeT(800); l <= nivelDeT(1500); l++) {
+      const r = serv.reaccion(ox, S.C, l);
+      assert.ok(!r?.salidas.some(p => serv.sustancia(p.id).enlaces.some((x, i) => i % 2 === 0 && x === E('C', 'Fe'))), `carburo desde ${ox} en el nivel ${l}`);
+    }
+    assert.equal(serv.reaccion(S.Fe2O3, S.C, nivelDeT(800)), null, 'fogata: sin reacción');
+    assert.equal(serv.reaccion(S.Fe2O3, S.C, nivelDeT(1095)), null, 'llama abierta: sin reacción');
+    const horno = serv.reaccion(S.Fe2O3, S.C, nivelDeT(1250))!;
+    assert.ok(horno.salidas.some(p => p.id === S.Fe2) && horno.salidas.some(p => p.id === S.CO2), 'el horno reduce a hierro');
+  } finally { await serv.cerrar(); }
+});
+
+test('enmienda 3: la catálisis abre κ por par del enlace que decide; el HCN se oxida en el suelo y no en el tubo', async () => {
+  const serv = crearServicioQuimico({ modo: 'inmediato' });
+  try {
+    const S = registrarSustanciasBase(serv);
+    const hcn = serv.internar(B([[E('H', 'C'), 1], [E('C', 'N', 3), 1]]));
+    const kSuelo = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH] as const;
+    // HCN + O₂: decide el C≡N (297 por par < H–C 403) con sus 3 pares; ea = GAMMA·D(C≡N) = 311,8 ≤ 3·105.
+    const r = serv.reaccion(hcn, S.O2, nivelDeT(295))!;
+    assert.equal(r.catalisis, 1);
+    assert.equal(r.paresCatalisis, 3);
+    assert.ok(Math.abs(r.ea - GAMMA * TIPOS[E('C', 'N', 3)]!.d) < 1e-9, `ea ${r.ea}`);
+    assert.ok(r.dH < 0 && r.salidas.some(p => p.id === S.CO2));
+    assert.equal(tasaArrhenius(295, r, [...kSuelo]), NU, 'el suelo con O₂ lo oxida sin barrera');
+    assert.ok(tasaArrhenius(310, r, KAPPA0) < 1e-9, 'el tubo (KAPPA0 = 60) no lo digiere: 311,8 − 180');
+    // Enlaces simples: nada cambia (1 par). Un enlace que solo baja de orden abre k − k′ pares: el C=O del CO₂ que
+    // fragua en CaCO₃ (pasa a C–O) abre uno.
+    const madera = serv.reaccion(S.madera, S.O2, nivelDeT(295))!;
+    assert.deepEqual([madera.catalisis, madera.paresCatalisis], [0, 1]);
+    const fragua = serv.reaccion(S.CaOH2, S.CO2, nivelDeT(295))!;
+    assert.ok(fragua.salidas.some(p => p.id === S.CaCO3));
+    assert.deepEqual([fragua.catalisis, fragua.paresCatalisis], [0, 1]);
+    // Con calcularCinetica directo: el triple que solo pasa a doble abre 1 par (y su par vale D≡ − D=).
+    const hcnE = { enlaces: B([[E('H', 'C'), 1], [E('C', 'N', 3), 1]]), nu: 1 }, h2E = { enlaces: B([[E('H', 'H'), 1]]), nu: 1 };
+    const iminaE = { enlaces: B([[E('H', 'C'), 2], [E('C', 'N', 2), 1], [E('H', 'N'), 1]]), nu: 1 };
+    const c = calcularCinetica([hcnE, h2E], [iminaE], -1);
+    assert.deepEqual([c.catalisis, c.paresCatalisis], [1, 1], 'HC≡N + H₂ → H₂C=NH abre un par del C≡N');
+    // Contrato: 0 pares exactamente cuando no hay familia, en todo el memo.
+    for (const [a, b] of [[S.NH3, S.O2], [S.N2, S.O2], [S.H2, S.O2], [S.CH4, S.O2], [S.CaCO3, 0], [S.arcilla, 0]] as const) {
+      const x = serv.reaccion(a, b, nivelDeT(295)) ?? serv.reaccion(a, b, nivelDeT(1250));
+      if (x) assert.equal(x.paresCatalisis === 0, x.catalisis === -1, `${a}+${b}`);
+    }
+  } finally { await serv.cerrar(); }
 });
 
 test('banco de rendimiento de productos() cumple p99 < 50 ms hasta 16 átomos en frío y en caliente', () => {

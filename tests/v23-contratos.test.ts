@@ -188,8 +188,11 @@ test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable en la familia
     [0, 0, 1, 2, 2, 3, -1, -1, -1]);
   assert.equal(tipos.FAMILIAS_CATALITICAS, 4);
   // La barrera efectiva: κ rebaja solo exotérmicas; una endotérmica o sin familia paga ea (≥ dH).
-  const r = (ea: number, dH: number, catalisis: -1 | 0 | 1 | 2 | 3) => ({ ea, dH, catalisis });
+  const r = (ea: number, dH: number, catalisis: -1 | 0 | 1 | 2 | 3, paresCatalisis: 0 | 1 | 2 | 3 = catalisis === -1 ? 0 : 1) =>
+    ({ ea, dH, catalisis, paresCatalisis });
   assert.equal(tipos.barreraEfectiva(r(100, -5, 3), [0, 0, 0, 30]), 70);
+  // Enmienda 3: la rebaja es κ por par del enlace que decide la familia.
+  assert.equal(tipos.barreraEfectiva(r(100, -5, 0, 2), [30, 0, 0, 0]), 40);
   assert.equal(tipos.barreraEfectiva(r(100, 5, 3), [0, 0, 0, 1e3]), 100);
   assert.equal(tipos.barreraEfectiva(r(100, -5, -1), [1e3, 1e3, 1e3, 1e3]), 100);
   assert.equal(materia.ATOMOS_POR_REACCION, 2 * materia.ATOMOS_POR_UNIDAD);

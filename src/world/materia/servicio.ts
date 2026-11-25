@@ -291,6 +291,7 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
         dH: res.dH,
         ea: res.ea,
         catalisis: res.catalisis,
+        paresCatalisis: res.paresCatalisis,
       });
     }
     const fila = Object.freeze({ a, b, nivelT, reaccion: reac });
@@ -582,6 +583,10 @@ function revisarFila(servicio: ServicioQuimicoAuditable, fila: FilaMemoQuimico, 
   if (!Number.isFinite(r.ea) || r.ea < 0 || r.ea < r.dH) fallo('Barrera ea inválida o menor que dH.', { a: r.a, b: r.b, ea: r.ea, dH: r.dH });
   if (!(Number.isInteger(r.catalisis) && r.catalisis >= -1 && r.catalisis < FAMILIAS_CATALITICAS)) {
     fallo('Familia catalítica inválida.', { a: r.a, b: r.b, catalisis: r.catalisis });
+  }
+  // Enmienda 3: los pares del enlace que decide la familia, 1–3, y 0 exactamente cuando no hay familia.
+  if (!(Number.isInteger(r.paresCatalisis) && r.paresCatalisis >= 0 && r.paresCatalisis <= 3 && (r.paresCatalisis === 0) === (r.catalisis === -1))) {
+    fallo('Pares de catálisis inválidos.', { a: r.a, b: r.b, catalisis: r.catalisis, paresCatalisis: r.paresCatalisis });
   }
 }
 

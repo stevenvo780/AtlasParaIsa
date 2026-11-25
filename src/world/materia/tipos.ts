@@ -5,6 +5,8 @@
 // los ciclos, archivo/v23-orquesta/fin/): H–H con familia catalítica propia (3) y `Kappa` de 4 familias; la catálisis
 // solo rebaja barreras de reacciones exotérmicas (dH ≤ 0); un lote catalizado elige productos al menos en el nivel 2
 // (`nivelDeLote`); `copiar` mueve el calor con la materia.
+// ENMIENDA 3 (2026-11-24, «química de principios»; integrador Claude Opus 5.5 tras cerrar las filas 7 y 8 de la tabla de
+// cordura y el sumidero de HCN): la catálisis va por pares de electrones (`Reaccion.paresCatalisis`, `barreraEfectiva`).
 /**
  * Contratos de la materia en el servidor (ARQ-materia §2 con PLAN-V23 §1.2): sustancias internadas, lotes y su
  * arena, el `Libro` único de conservación, reacciones, plantillas, cuerpos, procesos y el punto de control.
@@ -85,9 +87,10 @@ export type Kappa = readonly [number, number, number, number];
  * reactivos tal cual; para ser reacción, el mínimo debe ganar en más de EPSILON_G a todo reparto de p·a + q·b en dos
  * grupos que reaccionen por separado (sin espectadores ni uniones de reacciones menores). Así 2 H₂ + O₂ → 2 H₂O.
  * Lo calcula Q; lo aplica P con Arrhenius, x = ν·exp(−b/(R·T))·… con la barrera efectiva (`barreraEfectiva`)
- *   b = max(0, ea − κ[catalisis])  si dH ≤ 0 y catalisis ≥ 0,
- *   b = ea (≥ dH)                  si dH > 0 o catalisis = −1,
- * es decir, la catálisis solo rebaja barreras de reacciones exotérmicas (enmienda 2; en la 1 era max(0, ea − κ, dH)).
+ *   b = max(0, ea − κ[catalisis]·paresCatalisis)  si dH ≤ 0 y catalisis ≥ 0,
+ *   b = ea (≥ dH)                                 si dH > 0 o catalisis = −1,
+ * es decir, la catálisis solo rebaja barreras de reacciones exotérmicas (enmienda 2; en la 1 era max(0, ea − κ, dH)) y
+ * rebaja κ por cada par de electrones que abre del enlace que la decide (enmienda 3; en los simples, κ como antes).
  * Por qué: en V23 una endotérmica a ~295 K solo es espontánea por T·S_GAS del gas que suelta (≈ 53 J por molécula), y
  * catalizada era una fuente sin retorno: CH₂ → H₂ + C y 2 madera → 2 H₂ + C + CO₂ en el suelo, proteína → H₂ + HCN en
  * frío (validación de los ciclos, hallazgos 1, 3 y 11). La vida cataliza lo que le rinde calor; lo endotérmico solo
@@ -102,20 +105,32 @@ export interface Reaccion extends Ecuacion {
    * pierde ningún σ. Si el vector de enlaces se conserva: 0 en una asociación (un solo producto) y GAMMA·D del enlace más
    * débil de las entradas si alguna se parte. Nunca menor que dH. */
   ea: number;
-  /** Familia del enlace catalizable más débil que disminuye, índice de `Kappa` (0 = C–O, 1 = C–N, 2 = C–C/C–H,
-   * 3 = H–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
-   * catalizable. Sustituye al «más fuerte» de ARQ-materia §3.1, con el que C–C y C–H tapaban a C–O (azúcares, celulosa)
-   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H) < D(H–H), que fija tests/v23-contratos.test.ts, así
-   * que H–H solo decide cuando no baja ningún otro catalizable: 2 H₂ + O₂ → 2 H₂O, 3 H₂ + N₂ → 2 NH₃, 4 H₂ + CO₂ (C=O
-   * pesa más que H–H). Con familia propia el suelo oxida el H₂ que llega sin acelerar con ello la carbonización ni la
-   * respiración del resto (enmienda 2; en la 1 compartía la familia 2 con C–C/C–H). */
+  /** Familia del enlace catalizable que disminuye con el par de electrones más débil (D/k), índice de `Kappa` (0 = C–O,
+   * 1 = C–N, 2 = C–C/C–H, 3 = H–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia.
+   * −1 = ninguno catalizable. Sustituye al «más fuerte» de ARQ-materia §3.1, con el que C–C y C–H tapaban a C–O
+   * (azúcares, celulosa) y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H) < D(H–H), que fija
+   * tests/v23-contratos.test.ts, así que H–H solo decide cuando no baja ningún otro catalizable: 2 H₂ + O₂ → 2 H₂O,
+   * 3 H₂ + N₂ → 2 NH₃. Con familia propia el suelo oxida el H₂ que llega sin acelerar con ello la carbonización ni la
+   * respiración del resto (enmienda 2; en la 1 compartía la familia 2 con C–C/C–H). Enmienda 3: se compara por par (D/k,
+   * la medida con que Q ordena los enlaces de cada elemento), no por enlace, así que entre simples nada cambia; un
+   * múltiple decide si su par es el más débil: C≡N (297 por par) frente a H–C (403) en el HCN, C=O (351,5) frente a
+   * H–H (436) en 4 H₂ + CO₂. */
   catalisis: FamiliaCatalitica;
+  /** Orden k (1–3) del enlace que decide `catalisis`: los pares de electrones que abre el catalizador, cada uno con la
+   * rebaja κ de su familia (`barreraEfectiva`); 0 si catalisis = −1 (enmienda 3). Por qué: un catalizador abre un enlace
+   * múltiple par a par (adición a cada π, como las nitrilasas y la hidratasa del cianuro con el C≡N), así que la rebaja
+   * de un triple es la de tres simples. Sin esto el HCN que deja un fuego pobre en O₂ no tenía salida por debajo de una
+   * llama (ea = GAMMA·D(C≡N) = 311,8 y κ = 105: k(295 K) ≈ 2·10⁻²⁸, el 47 % del C acumulado como HCN); con 3·KAPPA_SUELO
+   * = 315 ≥ 311,8 el suelo con O₂ lo oxida sin barrera (3 O₂ + 3 HCN → NH₃ + 3 CO₂ + N₂). En enlaces simples es 1 y nada
+   * cambia; KAPPA0 = 60 deja el HCN del tubo en 311,8 − 180. */
+  paresCatalisis: 0 | 1 | 2 | 3;
 }
 
 /** Barrera efectiva (J por cuanto de reacción) de `r` en un lote con catálisis `kappa`, la de `Reaccion`: la catálisis
- * solo rebaja exotérmicas. La usan P (`pasoLote`, CPU y GPU), el laboratorio y quien estime tasas (W, B, G). */
-export const barreraEfectiva = (r: Pick<Reaccion, 'ea' | 'dH' | 'catalisis'>, kappa: Kappa): number =>
-  r.dH > 0 || r.catalisis === -1 ? Math.max(r.ea, r.dH) : Math.max(0, r.ea - kappa[r.catalisis]);
+ * solo rebaja exotérmicas, κ por cada par que abre. La usan P (`pasoLote`, CPU y GPU), el laboratorio y quien estime
+ * tasas (W, B, G). */
+export const barreraEfectiva = (r: Pick<Reaccion, 'ea' | 'dH' | 'catalisis' | 'paresCatalisis'>, kappa: Kappa): number =>
+  r.dH > 0 || r.catalisis === -1 ? Math.max(r.ea, r.dH) : Math.max(0, r.ea - kappa[r.catalisis] * r.paresCatalisis);
 
 /** Nivel con el que reacciona un lote a T K con la catálisis `kappa` (enmienda 2): `nivelDeT(T)`, pero nunca por debajo
  * de NIVEL_CATALIZADO (= 2, 282,84 K) si algún κ > 0; la tasa sigue usando la T real. Por qué y con qué medidas, en

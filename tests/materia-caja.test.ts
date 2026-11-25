@@ -130,3 +130,7 @@ test('control: sin la catálisis H–H (familia 3), la misma caja acumula H₂ (
   t.diagnostic(`H₂ ${antes.toFixed(0)} → ${tarde.toFixed(0)}; final ${fin.h2} (${(100 * fin.hH2 / fin.hTotal).toFixed(3)} % del H); agua ${f[0]!.agua} → ${fin.agua}`);
   assert.ok(tarde > 1.15 * antes, 'sin la catálisis H–H el H₂ seguiría creciendo');
 });
+
+// El subconjunto rápido de la batería de 74 cajas de la validación (HCN, H₂ y agua, N a N₂ con fuego, P bloqueado; enmienda
+// 3) está en tests/materia-caja-bateria.test.ts: con la caja de 400 recambios con fuego de este fichero, juntos pasaban
+// de los 600 s que da el --test-timeout a cada fichero con la torre cargada; separados corren en paralelo.

@@ -228,8 +228,15 @@ export function grafoElementosConexo(enlaces: Uint16Array, atomos: Uint8Array): 
  *   único enlace iónico es el de Ca, así que el corte por Δχ no decide nada; queda por si se recalibra χ.
  * - Regla de Q: coordinación media del núcleo r < R_RIGIDEZ. Sin ella las jaulas K₅ (C₅), K₂,₄ (Si₂O₄) o K₂,₅ (P₂O₅)
  *   serían gas con la misma energía de enlace que su red (falla la fila de roca estable de la tabla de cordura). Es
- *   un sustituto de la energía de tensión que el modelo no tiene, y depende de la unidad elegida: C₃{C=C:3} es
- *   molécula y C₂{C–C:4} no, así que una red de carbono puede volatilizarse según cómo se escriba su unidad.
+ *   un sustituto de la energía de tensión de las jaulas, que el modelo no tiene.
+ * - Regla del átomo lineal (enmienda 3): un átomo con solo dos vecinos σ y valencia ≥ 4 tiene dos o más enlaces π y
+ *   ningún par libre (el C de un aleno, de un alquino o del CO₂): es lineal (VSEPR, 180°) y no puede estar en un anillo.
+ *   Un anillo de n átomos le impone 180°·(n − 2)/n; el menor aislable con un átomo así es el ciclooctino (8 C + 12 H) y
+ *   el ciclo[n]carbono solo existe desde n ≈ 10, todos con más de ATOMOS_POR_UNIDAD átomos. El P con dos vecinos y sin H
+ *   tiene tres π y tampoco par libre: también es lineal. En los demás elementos de la TABLA dos vecinos implican un par
+ *   libre (N, O: angulares, en anillo sin problema) o no hay π (Si; Ca y Fe nunca forman moléculas). Sin la regla,
+ *   C₃{C=C:3} (tres C sp en un triángulo, sin tensión en el modelo) sublimaba del carbón en el horno (fila 8 de la tabla
+ *   de cordura); con ella ningún C_n de ≤ 8 átomos es molécula y el carbón no se volatiliza.
  *
  * Contraejemplos que descarta respecto a la condición relajada E ≥ N − 1 + cotas por par:
  * - {C=C:3, O=O:1} (N=5, E=4): grafo de elementos disconexo.
@@ -283,6 +290,7 @@ export function realizable(enlaces: Uint16Array, atomosPre?: Uint8Array): boolea
 
   // Búsqueda exacta sobre los vértices del núcleo (3 ≤ nCore ≤ 8, eCore ≤ 9).
   const remVal = new Int8Array(nCore);
+  const valV = new Int8Array(nCore);
   const inicioElem = new Int8Array(NE).fill(-1);
   const finElem = new Int8Array(NE).fill(-1);
   let cursor = 0;
@@ -290,7 +298,7 @@ export function realizable(enlaces: Uint16Array, atomosPre?: Uint8Array): boolea
     const ne = atomos[e]!;
     if (ne === 0) continue;
     inicioElem[e] = cursor;
-    for (let j = 0; j < ne; j++) remVal[cursor++] = VAL[e]!;
+    for (let j = 0; j < ne; j++) { valV[cursor] = VAL[e]!; remVal[cursor++] = VAL[e]!; }
     finElem[e] = cursor;
   }
 
@@ -307,20 +315,36 @@ export function realizable(enlaces: Uint16Array, atomosPre?: Uint8Array): boolea
   const m = coreBonds.length;
   const fullMask = (1 << nCore) - 1;
 
-  function dfs(bi: number, parPrevio: number): boolean {
-    if (bi === m) {
-      let vis = 1;
-      let pila = 1;
-      while (pila !== 0) {
-        const bit = pila & -pila;
-        const u = Math.clz32(bit) ^ 31;
-        pila ^= bit;
-        const nb = adjMask[u]! & ~vis;
-        vis |= nb;
-        pila |= nb;
-      }
-      return vis === fullMask;
+  /** Alcanzables desde `desde` sin pasar por los vértices de `prohibidos` (máscara de bits). */
+  const alcanzables = (desde: number, prohibidos: number): number => {
+    let vis = (1 << desde) | prohibidos;
+    let pila = 1 << desde;
+    while (pila !== 0) {
+      const bit = pila & -pila;
+      const u = Math.clz32(bit) ^ 31;
+      pila ^= bit;
+      const nb = adjMask[u]! & ~vis;
+      vis |= nb;
+      pila |= nb;
     }
+    return vis & ~prohibidos;
+  };
+
+  /** Regla del átomo lineal: ningún átomo con dos vecinos σ (ambos del núcleo: sin H) y valencia ≥ 4 en un ciclo, es
+   * decir, sus dos vecinos no se alcanzan sin pasar por él. */
+  const sinLinealEnAnillo = (): boolean => {
+    for (let u = 0; u < nCore; u++) {
+      const vec = adjMask[u]!, sinPrimero = vec & (vec - 1);
+      // Dos vecinos del núcleo exactos (sinPrimero tiene un solo bit) y ninguna valencia libre para un H.
+      if (valV[u]! < 4 || remVal[u]! !== 0 || sinPrimero === 0 || (sinPrimero & (sinPrimero - 1)) !== 0) continue;
+      const a = Math.clz32(vec & -vec) ^ 31, b = Math.clz32(sinPrimero) ^ 31;
+      if (alcanzables(a, 1 << u) & (1 << b)) return false;
+    }
+    return true;
+  };
+
+  function dfs(bi: number, parPrevio: number): boolean {
+    if (bi === m) return alcanzables(0, 0) === fullMask && sinLinealEnAnillo();
     const bond = coreBonds[bi]!;
     const mismoTipo = bi > 0
       && coreBonds[bi - 1]!.e === bond.e
@@ -545,13 +569,17 @@ export interface EntradaSalidaEnlaces { enlaces: Uint16Array; nu: number }
  * - Si el vector de enlaces se conserva y sale una sola especie, es una asociación (CaO + H₂O → Ca(OH)₂): no se corta
  *   nada. Con dos o más productos alguna entrada se parte, así que se corta y se rehace al menos un enlace suyo: cuenta
  *   el más débil de las entradas, como cota inferior (arcilla → SiO₂ + H₂O, 2 CH₂ → CH₄ + C, arcilla + CaO).
- * `catalisis` es la familia del enlace catalizable más débil que disminuye (contrato de `Reaccion`), −1 si no hay.
+ * `catalisis` es la familia del enlace catalizable que disminuye con el par de electrones más débil (contrato de
+ * `Reaccion`), −1 si no hay; `paresCatalisis` son los pares que el catalizador abre de ese enlace (enmienda 3; 0 sin
+ * familia): k si se corta (y su par vale D/k), k − k′ si solo baja a orden k′ (y su par vale (D_k − D_k′)/(k − k′)). En
+ * los enlaces simples coincide con el «más débil» de la enmienda 1; un C≡N (891, 297 por par) decide frente a un H–C
+ * (403) con 3 pares, y el C=O del CO₂ que fragua en CaCO₃ (pasa a C–O) abre uno (`barreraEfectiva`).
  */
 export function calcularCinetica(
   entradas: readonly EntradaSalidaEnlaces[],
   salidas: readonly EntradaSalidaEnlaces[],
   dH: number,
-): { ea: number; catalisis: FamiliaCatalitica } {
+): { ea: number; catalisis: FamiliaCatalitica; paresCatalisis: 0 | 1 | 2 | 3 } {
   const bIn = new Int32Array(NT);
   const bOut = new Int32Array(NT);
   const parIn = new Int32Array(NE * NE);
@@ -582,6 +610,7 @@ export function calcularCinetica(
   let maxD = 0;
   let minCatD = Infinity;
   let catalisis: FamiliaCatalitica = -1;
+  let paresCatalisis: 0 | 1 | 2 | 3 = 0;
   let huboDescenso = false;
 
   for (let ti = 0; ti < NT; ti++) {
@@ -591,17 +620,20 @@ export function calcularCinetica(
     const e = T_E[ti]!, f = T_F[ti]!, k = T_K[ti]!;
     const par = e * NE + f;
     let dRoto = T_D[ti]!;
+    let abiertos = k; // pares que se abren: todos si se corta, k − k′ si solo baja a orden k′ (su parte π)
     if (k > 1 && parOut[par]! >= parIn[par]!) {
       for (let kMenor = k - 1; kMenor >= 1; kMenor--) {
         const tiMenor = indiceTipoEnlace(e, f, kMenor as 1 | 2);
-        if (bOut[tiMenor]! > bIn[tiMenor]!) { dRoto = T_D[ti]! - T_D[tiMenor]!; break; }
+        if (bOut[tiMenor]! > bIn[tiMenor]!) { dRoto = T_D[ti]! - T_D[tiMenor]!; abiertos = k - kMenor; break; }
       }
     }
     if (dRoto > maxD) maxD = dRoto;
     const fam = familiaCatalitica(ti);
-    if (fam !== -1 && T_D[ti]! < minCatD) {
-      minCatD = T_D[ti]!;
+    const porPar = dRoto / abiertos; // = D/k (D_PER_K) si se corta entero
+    if (fam !== -1 && porPar < minCatD) {
+      minCatD = porPar;
       catalisis = fam;
+      paresCatalisis = abiertos as 1 | 2 | 3;
     }
   }
 
@@ -614,7 +646,7 @@ export function calcularCinetica(
     for (let ti = 0; ti < NT; ti++) if (bIn[ti]! > 0 && T_D[ti]! < minD) minD = T_D[ti]!;
     ea = GAMMA * minD;
   }
-  return { ea: Math.max(ea, dH), catalisis };
+  return { ea: Math.max(ea, dH), catalisis, paresCatalisis };
 }
 
 // ── Mínimo global exacto de energía libre: productos(A, B, nivelT) ──────────────────────────────────────
@@ -1190,6 +1222,8 @@ export interface ResultadoProductos {
   dH: number;
   ea: number;
   catalisis: FamiliaCatalitica;
+  /** Pares que el catalizador abre del enlace que decide `catalisis` (0 sin familia), enmienda 3. */
+  paresCatalisis: 0 | 1 | 2 | 3;
 }
 
 const CONTEXTO_DEFECTO = new ContextoSolver();
@@ -1270,9 +1304,9 @@ function candidato(
     ? [{ enlaces: a.enlaces, nu: p }]
     : [{ enlaces: a.enlaces, nu: p }, { enlaces: b.enlaces, nu: q }];
   const dH = opt.energia - eReac;
-  const { ea, catalisis } = calcularCinetica(entradas, salidas, dH);
+  const { ea, catalisis, paresCatalisis } = calcularCinetica(entradas, salidas, dH);
   const atomos = p * sumaAtomos(a.atomos) + (b ? q * sumaAtomos(b.atomos) : 0);
-  return { res: { nu: [p, q], productos: salidas, dH, ea, catalisis }, dE: dH, dGas: opt.gases - gasReac, atomos };
+  return { res: { nu: [p, q], productos: salidas, dH, ea, catalisis, paresCatalisis }, dE: dH, dGas: opt.gases - gasReac, atomos };
 }
 
 /** ¿Baja más G por átomo `x` que `y`? Producto cruzado: entero exacto si los gases no deciden, un solo redondeo si deciden. */

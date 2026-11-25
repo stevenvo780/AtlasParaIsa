@@ -2,6 +2,9 @@
 // y los de L): ninguna barrera por debajo de dH; las constantes que eligió Q viven aquí con su intervalo; FRACTURA.
 // ENMIENDA 2 (2026-11-24, «ciclos cerrados, validados»; integrador Claude Opus 5.5): KAPPA_SUELO_HH (familia H–H propia),
 // la catálisis solo en exotérmicas (`Reaccion` en world/materia/tipos.ts) y NIVEL_CATALIZADO (suelo frío sin HCN).
+// ENMIENDA 3 (2026-11-24, «química de principios»; integrador Claude Opus 5.5): `dDosCentros` de los metales (la cohesión
+// de la red no se transfiere a un enlace con otro elemento) y χ(Fe) = 1,86; la regla del átomo lineal fuera de anillos y
+// la catálisis por pares (`Reaccion.paresCatalisis`) viven en world/materia/{quimica,tipos}.ts.
 /**
  * Constantes de la naturaleza de V23: el ÚNICO fichero con números de física, química y biología elegidos a
  * mano. No son topes: dicen cómo se comporta la materia. Las puertas demográficas solo calibran aquí
@@ -28,8 +31,17 @@ export interface ConstantesElemento {
   valencia: number;
   /** Electronegatividad de Pauling (adimensional). */
   chi: number;
-  /** J por cuanto: enlace simple consigo mismo; en los metales, la cohesión por enlace. */
+  /** J por cuanto: enlace simple consigo mismo; en los metales, la cohesión por enlace (2·E_coh/valencia). */
   dPropia: number;
+  /** J por cuanto: energía de enlace de dos centros, la que el elemento aporta (su mitad) a un enlace con OTRO elemento en
+   * la media de Pauling (enmienda 3). En los no metales es dPropia, que ya es un enlace de dos centros (H–H, C–C del
+   * etano, O–O del H₂O₂). En un metal, dPropia es la cohesión de la red repartida por enlace, y casi toda es energía de
+   * banda: existe solo entre átomos de metal, como la energía de red solo entre iones (E_red), y no la hereda un enlace
+   * M–X; lo que el metal sí aporta es su enlace de dos centros, el del dímero M₂ (D₀ medido). Sin esto la fórmula de Pauling
+   * da a todo compuesto metal–no metal una entalpía de formación ≤ 0 (−PAULING·Δχ² por enlace): el carburo C₃Fe₄ salía
+   * exotérmico (−186) y ganaba al hierro en cualquier fuego (fila 7 de la tabla de cordura), cuando el Fe₃C real es
+   * endotérmico (+25 kJ/mol). */
+  dDosCentros: number;
   /** J por cuanto que suma cada orden de enlace por encima de 1; 0 = no forma enlaces múltiples. */
   pi: number;
   /** mg por cuanto (g/mol). */
@@ -39,14 +51,24 @@ export interface ConstantesElemento {
 /** Una fila por elemento, en el orden de `ELEMENTOS`. Con un mundo creado, las valencias y qué π son 0 ya no cambian:
  * fijan cuántos `TIPOS` hay y sus índices, que son la clave de toda sustancia guardada. Los demás valores se calibran. */
 export const TABLA: readonly ConstantesElemento[] = [
-  { valencia: 1, chi: 2.20, dPropia: 436, pi: 0, masa: 1.008 },    // H
-  { valencia: 4, chi: 2.55, dPropia: 346, pi: 266, masa: 12.011 }, // C
-  { valencia: 3, chi: 3.04, dPropia: 167, pi: 300, masa: 14.007 }, // N
-  { valencia: 2, chi: 3.44, dPropia: 142, pi: 352, masa: 15.999 }, // O
-  { valencia: 5, chi: 2.19, dPropia: 201, pi: 15, masa: 30.974 },  // P (con k·PAULING: P=O = 546 ≈ 544 real y < 2·P–O = 644)
-  { valencia: 4, chi: 1.90, dPropia: 222, pi: 0, masa: 28.085 },   // Si
-  { valencia: 2, chi: 1.00, dPropia: 178, pi: 0, masa: 40.078 },   // Ca
-  { valencia: 3, chi: 2.15, dPropia: 275, pi: 0, masa: 55.845 },   // Fe (Fe–O = 369: el carbón reduce Fe₂O₃ desde 1.178 K; nivel de T desde 1.131 K)
+  { valencia: 1, chi: 2.20, dPropia: 436, dDosCentros: 436, pi: 0, masa: 1.008 },    // H
+  { valencia: 4, chi: 2.55, dPropia: 346, dDosCentros: 346, pi: 266, masa: 12.011 }, // C
+  { valencia: 3, chi: 3.04, dPropia: 167, dDosCentros: 167, pi: 300, masa: 14.007 }, // N
+  { valencia: 2, chi: 3.44, dPropia: 142, dDosCentros: 142, pi: 352, masa: 15.999 }, // O
+  { valencia: 5, chi: 2.19, dPropia: 201, dDosCentros: 201, pi: 15, masa: 30.974 },  // P (con k·PAULING: P=O = 546 ≈ 544 real y < 2·P–O = 644)
+  { valencia: 4, chi: 1.90, dPropia: 222, dDosCentros: 222, pi: 0, masa: 28.085 },   // Si
+  // Ca: cohesión 178 = E_coh real; dDosCentros = D₀(Ca₂) ≈ 0,13 eV (dímero de van der Waals). Como cada Ca de una red
+  // no metálica tiene sus 2 enlaces con otros elementos, el cambio desplaza igual todo Ca–X y no mueve ninguna reacción
+  // entre compuestos de Ca (calcinar, fraguar, fosfatos); solo encarece frente al Ca metálico, que no aparece. Medido: la
+  // tabla de cordura pasa entera con dDosCentros(Ca) en todo [0, 178]; 13 es la D₀ física, no una calibración.
+  { valencia: 2, chi: 1.00, dPropia: 178, dDosCentros: 13, pi: 0, masa: 40.078 },
+  // Fe: cohesión 1,5·275 = 412,5 ≈ E_coh real (413); dDosCentros = D₀(Fe₂) ≈ 1,14 eV. χ = 1,86 (Pauling real 1,83) deja
+  // Fe–O = 126 + 96,5·1,58² = 367: el carbón reduce Fe₂O₃ desde 1.133 K (102 J por O frente a 0,09·T de CO₂), en el nivel
+  // 10 (horno, desde 1.131 K) y no en el 8 (fogata) ni en el 9 (llama). Fe–C = 274 < (275 + 346)/2: ningún carburo gana
+  // al hierro y al carbón por separado (C₃Fe₄, +438), y Fe–H = 284 (sin hidruro). Intervalos (barrido de la tabla de
+  // cordura, enmienda 3): la fila 7 pide D(Fe–O) ∈ [363, 371] (reduce entre 1.037,5 y 1.233,8 K: 12·D − 3.792 = 0,54·T) y
+  // D(Fe–C) ≤ 310 (sin carburo); con dDosCentros 110, χ ∈ [1,845, 1,870]; con χ 1,86, dDosCentros ∈ [102, 119].
+  { valencia: 3, chi: 1.86, dPropia: 275, dDosCentros: 110, pi: 0, masa: 55.845 },
 ];
 
 // ── Enlaces ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -82,20 +104,27 @@ export const EPSILON_G = 1;
  * C–O a ~2/tick; si la pone C–H, O–H u O=O (carbonizar o dismutar CH₂O, oxidar) queda en ~2·10⁻⁵/tick o menos: B y Q la
  * calibran contra las rutas que dé `productos()`. Se queda en 60: antes de la enmienda 2, con 105 el tubo soltaba el 3 %
  * del H como H₂ y la caja perdía el 4 % del agua; con la enmienda 2 ya no (0,09 % y 99,1 %, 400 recambios), así que hoy
- * lo fija la digestión, no el ciclo del H. En H–H, 2 H₂ + O₂ queda en ~10⁻¹⁰ L/(cuanto·tick). */
+ * lo fija la digestión, no el ciclo del H. En H–H, 2 H₂ + O₂ queda en ~10⁻¹⁰ L/(cuanto·tick). Enmienda 3 (κ por par):
+ * el HCN del tubo queda en 311,8 − 3·60 = 131,8 (no se digiere; lo haría desde 3·κ₀ ≳ 260, κ₀ ≳ 87). La tabla de cordura
+ * pasa con κ₀ en todo [0, 120]: no la ata. */
 export const KAPPA0 = 60;
 /** κ del suelo (descomposición microbiana a ~295 K) en las familias C–O, C–N y C–C/C–H de los lotes Suelo y Cadaver: la
  * oxidación con O₂ va a ~10⁻³ L/(cuanto·tick) (cientos de ticks con [O₂] ≈ 5 mmol/L; con KAPPA0 quedaría en ~10⁻¹¹ y el
  * suelo no devolvería nada) y las rutas exotérmicas sin O₂ (madera → H₂O + C, proteína → NH₃ + C) a ~400/tick. Las
  * endotérmicas no se catalizan (enmienda 2): CH₂ → H₂ + C (dH +24) y madera + H₂O → 2 H₂ + CO₂ (+102) quedan en su tasa
- * sin catálisis, < 10⁻¹⁵. Con κ ≥ ea y dH ≤ 0, la tasa satura en ν. */
+ * sin catálisis, < 10⁻¹⁵. Con κ ≥ ea y dH ≤ 0, la tasa satura en ν. Enmienda 3: κ por par del enlace que decide la
+ * familia, así que el HCN (C≡N, 3 pares) se oxida con O₂ sin barrera, 3·105 = 315 ≥ GAMMA·D(C≡N) = 311,8.
+ * Intervalo en la tabla de cordura: [100, ≥ 200] (barrido de la enmienda 3). El piso lo pone el carbón del suelo con O₂,
+ * k > 10⁻⁴: b < R·T·ln(10¹³) = 73,4, κ > 172,9 − 73,4 = 99,5. La salida del HCN pide k > 10⁻²: 311,8 − 3κ < 62,1, κ > 83,2,
+ * y no ata. */
 export const KAPPA_SUELO = 105;
 /** κ del suelo en la familia H–H (bacterias del hidrógeno; las hidrogenasas del suelo son el sumidero principal del H₂
  * atmosférico real): ≥ GAMMA·D(O=O) = 172,9, así que 2 H₂ + O₂ → 2 H₂O no tiene barrera en un suelo con O₂ y el H₂ que
  * llega al suelo se oxida al paso (con KAPPA_SUELO tardaba ~120 ticks y el aire, que no cataliza, lo acumulaba en
  * proporción a su volumen: un mundo con mucho aire por poro se secaba). La misma familia lleva 3 H₂ + N₂ → 2 NH₃ (ea
- * 268,4: ~3·10⁻⁸ L/(cuanto·tick), fijación lenta) y H₂ + CO₂ (a 295 K Q no da reacción; a 259 K, 2 H₂ + CO₂ → 2 H₂O + C
- * va a ~3·10⁻⁵, pero un lote catalizado no reacciona por debajo del nivel 2, `NIVEL_CATALIZADO`).
+ * 268,4: ~3·10⁻⁸ L/(cuanto·tick), fijación lenta). Desde la enmienda 3 (familia por par) el H₂ con CO₂ va por la familia
+ * C–O con 2 pares (C=O, 351,5 por par < H–H 436): a 295 K Q no da reacción; a 259 K, 2 H₂ + CO₂ → 2 H₂O + C, pero un lote
+ * catalizado no reacciona por debajo del nivel 2 (`NIVEL_CATALIZADO`).
  * Intervalo [~120, ∞): medido con la caja de la validación con aire 100 veces mayor y sin herbívoro (1.000 recambios), el
  * H₂ final es el 1,99 % del H con 105 (k(295 K) ≈ 10⁻³ L/(cuanto·tick)), 0,0588–0,0589 % con 120, 130 y 140 (con 120,
  * k ≈ 0,4) y 0,0587–0,0588 % con 160 y 175 (estable); en la caja del autor (200 recambios), 0,0006–0,0008 % con 175, 250

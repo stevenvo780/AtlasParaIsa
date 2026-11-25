@@ -3,7 +3,7 @@
  * que da la química con tasa de Arrhenius y un número entero de veces. Todo cambio pasa por `ArenaMateria.aplicar`, que
  * conserva átomos y energía exactos (I2); aquí solo se decide cuántas veces.
  *
- * Enmiendas 1 y 2 (contrato de `Reaccion`): la barrera es `barreraEfectiva`, max(0, ea − κ[catalisis]) en una
+ * Enmiendas 1 a 3 (contrato de `Reaccion`): la barrera es `barreraEfectiva`, max(0, ea − κ[catalisis]·paresCatalisis) en una
  * exotérmica y ea (≥ dH) en una endotérmica, así que la catálisis solo acelera lo que suelta calor (κ en 4 familias:
  * C–O, C–N, C–C/C–H y H–H) y un lote con algún κ > 0 elige productos al menos en el nivel 2 (`nivelDeLote`: el suelo frío
  * no hace HCN); y una vez consume ν_a de a y ν_b de b con los coeficientes que elige Q (2 H₂ + O₂ → 2 H₂O). Las

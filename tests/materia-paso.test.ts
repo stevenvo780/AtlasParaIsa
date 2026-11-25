@@ -185,8 +185,12 @@ test('extremo: k·dt ≫ 1 (κ del suelo frente a C–N a 295 K, ~400/tick) agot
 
 test('enmienda 2: la catálisis solo rebaja exotérmicas y el H–H tiene familia propia (índice 3 de Kappa)', async () => {
   // La regla, en sus cuatro casos: exotérmica catalizada (rebaja hasta 0), endotérmica (ea, la cataliza nadie) y sin familia.
-  const r = (ea: number, dH: number, catalisis: Reaccion['catalisis']) => ({ ea, dH, catalisis });
+  const r = (ea: number, dH: number, catalisis: Reaccion['catalisis'], paresCatalisis: Reaccion['paresCatalisis'] = catalisis === -1 ? 0 : 1) =>
+    ({ ea, dH, catalisis, paresCatalisis });
   assert.equal(barreraEfectiva(r(100, -10, 0), [30, 0, 0, 0]), 70);
+  // Enmienda 3: κ por cada par del enlace que decide la familia (un triple, 3κ).
+  assert.equal(barreraEfectiva(r(100, -10, 1, 3), [0, 30, 0, 0]), 10);
+  assert.equal(barreraEfectiva(r(311.8, -10, 1, 3), [0, 105, 0, 0]), 0);
   assert.equal(barreraEfectiva(r(100, -10, 0), [200, 0, 0, 0]), 0);
   assert.equal(barreraEfectiva(r(100, 50, 0), [1e3, 1e3, 1e3, 1e3]), 100, 'endotérmica: sin rebaja');
   assert.equal(barreraEfectiva(r(100, -10, -1), [1e3, 1e3, 1e3, 1e3]), 100, 'sin familia: sin rebaja');
@@ -465,7 +469,7 @@ test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico',
       let r = filas.get(clave);
       if (!r) {
         const entradas = b === 0 ? [{ id: a, nu: 1 }] : a === b ? [{ id: a, nu: 2 }] : [{ id: a, nu: 1 }, { id: b, nu: 1 }];
-        filas.set(clave, r = { a, b, nivelT: 0, entradas, salidas: [], dH: 0, ea: 120, catalisis: -1 });
+        filas.set(clave, r = { a, b, nivelT: 0, entradas, salidas: [], dH: 0, ea: 120, catalisis: -1, paresCatalisis: 0 });
       }
       return r;
     };

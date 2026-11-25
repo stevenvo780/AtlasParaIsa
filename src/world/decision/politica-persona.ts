@@ -7,7 +7,7 @@ import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { vecinos } from '../rejilla.js';
 import { computeLocalPolicyObservation } from '../politica-obs.js';
-import type { Percepcion } from '../motor/contratos.js';
+import type { LotePercepcion, Percepcion } from '../motor/contratos.js';
 import type { Vencidos, VistaMundo } from './percepcion.js';
 import { PLAN } from './planes.js';
 
@@ -56,18 +56,22 @@ export function decideConCerebro(world: World, person: Person): boolean {
 
 const observacionF2 = new Float64Array(POLICY_INPUTS);
 
-/** F2: las columnas del cerebro antes de lanzar. Todo slot cuyo ocupante cambió se publica con sus pesos heredados
- * aunque no decida en este tick (contrato: los pesos se escriben para todo slot cuya `gen` cambió; quien los espeje por
- * `gen` los toma en cuanto la ve), y cada slot del lote con plan `conCerebro`, con su observación y su plasticidad de ahora. */
-export function prepararCerebros(world: World, vista: VistaMundo, lote: Vencidos, tileIn: (x: number, y: number) => Tile | undefined): void {
+/** F2: las columnas del cerebro antes de lanzar. Toda ranura cuyo ocupante cambió se publica con sus pesos heredados
+ * aunque no decida en este tick (contrato: los pesos se escriben para toda ranura cuya `gen` cambió; quien los espeje por
+ * `gen` los toma en cuanto la ve), y cada ranura del despacho con plan `conCerebro`, con su observación y su plasticidad
+ * de ahora. */
+export function prepararCerebros(world: World, vista: VistaMundo, despacho: LotePercepcion, tileIn: (x: number, y: number) => Tile | undefined): void {
   if (paramsOf(world).conducta.politicaPeso <= 0) return;
-  const { personas } = vista;
   // Sin crearle la política a nadie: la de un fundador que aún no decidió es la misma que le dará `ensurePersonPolicy`.
-  for (let s = 0; s < personas.length; s++) if (!vista.pesosAlDia(s)) vista.escribirPesos(s, (personas[s]!.policy ?? founderPolicy(world.seed, personas[s]!.id)).weights);
+  for (const s of vista.ranurasPersonas) {
+    if (vista.pesosAlDia(s)) continue;
+    const persona = vista.persona(s)!;
+    vista.escribirPesos(s, (persona.policy ?? founderPolicy(world.seed, persona.id)).weights);
+  }
   const fast = residentFastAccess(world.tiles);
-  for (let i = 0; i < lote.slots.length; i++) {
-    if (lote.plan[i] !== PLAN.conCerebro) continue;
-    const slot = lote.slots[i]!, person = personas[slot]!;
+  for (let i = 0; i < despacho.slots.length; i++) {
+    if (despacho.plan[i] !== PLAN.conCerebro) continue;
+    const slot = despacho.slots[i]!, person = vista.persona(slot)!;
     const { genome, plasticity } = ensurePersonPolicy(world, person);
     localPolicyObservation(world, person, tileIn, fast, observacionF2);
     vista.escribirPesos(slot, genome.weights);

@@ -225,4 +225,13 @@ export function assertLifeState(world: World): void {
     const serial=/^animal-born-\d+-\d+-([1-9]\d*)$/.exec(animal.id);
     if(serial&&!integer(Number(serial[1]),world.animalCounter))fail();
   }
+  // Uid del motor: de un solo contador para personas y fauna (también la archivada), así que únicos y menores que él.
+  if(world.siguienteUid!==undefined&&(!integer(world.siguienteUid)||world.siguienteUid<1))fail();
+  const uids=new Set<number>();
+  for(const organismo of [...world.people,...world.animals,...world.retiredChunks.flatMap(c=>c.animals??[])]){
+    const uid=organismo.uid;
+    if(uid===undefined)continue;
+    if(!integer(uid)||uid<1||world.siguienteUid===undefined||uid>=world.siguienteUid||uids.has(uid))fail();
+    uids.add(uid);
+  }
 }

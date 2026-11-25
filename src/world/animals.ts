@@ -11,7 +11,7 @@ import { residentFaunaCapacity, residentFastAccess, residentTileReader, type Res
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
 import { decidirFauna, habitableParaPlan, planFauna, presaDe, type PercepcionFauna, type PlanFauna, type VisibleTile } from './decision/fauna.js';
 import { primero } from './orden.js';
-import { faunaDe, faunaRegistrada } from './soa/fauna.js';
+import { faunaDe, faunaRegistrada, organismosDe } from './soa/organismos-mundo.js';
 import { registrar } from './invariantes.js';
 import { assertAnimalTraits } from './validation.js';
 
@@ -58,10 +58,12 @@ export interface Animal extends AnimalView {
   /** V23: persistent biological costs/cooldowns; absent in historical worlds. */
   lastTended?: number;
   lastHunted?: number;
+  /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
+  uid?: number;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;
-  animalDynamics: AnimalDynamics; reproductionEnabled?: boolean;
+  animalDynamics: AnimalDynamics; reproductionEnabled?: boolean; siguienteUid?: number;
   people?: readonly Point[];
   structures?: readonly (Point & { condition: number; components: readonly string[] })[];
   weather?: 'clear' | 'rain';
@@ -424,12 +426,12 @@ const decididosEn = (animales: readonly Animal[], tick: number): number => {
 };
 let frenteRegistrado = false;
 function publicarFrenteFauna(world: AnimalWorld): void {
-  const fauna = faunaDe(world);
-  fauna.sincronizar(world.animals);
+  const organismos = organismosDe(world);
+  organismos.fauna.sincronizar(world.animals);
   const terreno = residentTileReader(world.tiles);
   const reserva = paramsOf(world).fauna.reservaReproductiva;
-  fauna.publicar(world.tick, terreno?.cellAt.bind(terreno), celda => celda >> 8,
-    animal => animal.action !== 'flee' && listoParaCriar(animal, reserva));
+  organismos.publicar(world.tick, { celda: terreno?.cellAt.bind(terreno), chunkDe: celda => celda >> 8,
+    fertil: animal => animal.action !== 'flee' && listoParaCriar(animal, reserva) });
   if (!frenteRegistrado) {
     registrar({ id: 'motor-frente', carril: 'M2a', gravedad: 'dura', cadaTicks: 60, alcance: 'global', comprobar(mundo) {
       faunaRegistrada(mundo)?.tabla.verificarFrente();

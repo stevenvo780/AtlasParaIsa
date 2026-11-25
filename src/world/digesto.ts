@@ -35,7 +35,17 @@ function canonical(value: unknown): Canonical {
  * Persisted archive contents must be checked separately; a digest cannot read a host's disk.
  */
 function canonicalWorld(world: World): Canonical {
-  return canonical({ world, params: paramsParaDigesto(world) });
+  return canonical({ world: sinUidsDelMotor(world), params: paramsParaDigesto(world) });
+}
+/** V23: el uid de la tabla de organismos (`uid`, `siguienteUid`) es una etiqueta del motor que ninguna ley lee: queda
+ * fuera del digesto, así que los digestos históricos no cambian. Su durabilidad la prueban sus propias pruebas. */
+function sinUidsDelMotor(world: World): World {
+  const sinUid = <T extends { uid?: number }>(o: T): T => o.uid === undefined ? o : { ...o, uid: undefined };
+  const conUid = (lista: readonly { uid?: number }[] | undefined) => lista?.some(o => o.uid !== undefined) ?? false;
+  if (world.siguienteUid === undefined && !conUid(world.people) && !conUid(world.animals)
+    && !world.retiredChunks.some(c => conUid(c.animals))) return world;
+  return { ...world, siguienteUid: undefined, people: world.people.map(sinUid), animals: world.animals.map(sinUid),
+    retiredChunks: world.retiredChunks.map(c => conUid(c.animals) ? { ...c, animals: c.animals!.map(sinUid) } : c) };
 }
 
 /** T148 + V16: `motor.depuracion` es diagnóstico y las claves opt-in de V16 cuando están apagadas
@@ -116,7 +126,7 @@ export function digestoCanonico(world: World, gobernadorLegado?: GobernadorLegad
   const hash = createHash('sha256');
   let pieces: string[] = [], length = 0;
   const flush = () => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
-  emitCanonical({ world, params: paramsParaDigesto(world, gobernadorLegado) }, text => {
+  emitCanonical({ world: sinUidsDelMotor(world), params: paramsParaDigesto(world, gobernadorLegado) }, text => {
     pieces.push(text); length += text.length;
     // No full-world copy or string: a large valid world can exceed V8's string limit.
     // Flush only between complete JSON tokens so UTF-16 pairs are never split.

@@ -47,6 +47,8 @@ export function reproduce(world: World): void {
       blueprintId: null, lastInvention: world.tick,
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
+    // La cría parte de una copia de su madre: el uid es identidad del motor y se le da uno propio al entrar en la tabla.
+    delete child.uid;
     delete child.home;
     delete child.partnerMemory;
     delete child.agreement;

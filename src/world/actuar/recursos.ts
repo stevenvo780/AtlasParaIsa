@@ -17,6 +17,7 @@ import { useTool, recordTechnologyBenefit } from '../technology.js';
 import { compoundToolBonus, performChemistryExperiment } from '../chemistry.js';
 import { harvestMaterial } from '../ecosystem.js';
 import { filtrarCerca } from '../indice-puntos.js';
+import { marcarTesela } from '../soa/barrera-percepcion.js';
 
 export const MIN_FORAGE_STOCK = 0.005;
 
@@ -30,6 +31,7 @@ export function eat(world: World, person: Person, current: Tile, currentCell: nu
   count(world, 'foodHarvested', harvest);
   const vegBefore = fast && currentCell >= 0 ? fast.vegetationArr[currentCell]! : current.vegetation;
   current.vegetation = clamp(vegBefore - harvest * 0.1);
+  marcarTesela(current);
   // Harvested biomass is divided between today's meal and a bounded portable reserve.
   const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
   person.inventory += saved;
@@ -95,6 +97,7 @@ export function forageFood(world: World, person: Person, tile: Tile): boolean {
   const foodBefore = tile.food, harvested = Math.min(foodBefore, FORAGE_AMOUNT, Math.max(0, 0.25 - person.inventory));
   tile.food = clamp(foodBefore - harvested);
   tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
+  marcarTesela(tile);
   person.inventory += harvested;
   count(world, 'foodHarvested', harvested);
   success = harvested > 0;

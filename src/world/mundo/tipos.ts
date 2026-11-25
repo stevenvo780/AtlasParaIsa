@@ -49,6 +49,8 @@ export interface Habit {
 }
 
 export interface Person extends PersonView {
+  /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
+  uid?: number;
   huntingPreyId?: string;
   tending?: { id: string; work: number };
   compounds?: CompoundLot[];
@@ -102,6 +104,8 @@ export interface World {
   cooperationEnabled: boolean; reproductionEnabled: boolean; communities: CommunityView[]; communityCounter: number; birthCounter: number;
   history: WorldSample[]; totals: Record<string, number>;
   animals: Animal[]; animalCounter: number; animalDynamics: AnimalDynamics;
+  /** V23: el próximo uid de la tabla de organismos, común a personas y fauna (ausente hasta la primera alta). */
+  siguienteUid?: number;
   blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
   technology: TechnologyState; legacy: LegacyRecord[]; retiredLegacy: LegacyRecord[];
   demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };

@@ -36,7 +36,45 @@ function crecerColumna<T extends TipoColumna>(columna: Vector<T>, tipo: T, ancho
 }
 
 type Lado = 0 | 1;
-interface Campo { ancho: number; tipo: TipoColumna; lados: [Vector, Vector] }
+
+/** Para los hilos de cálculo: las columnas de los dos lados sobre SAB y el estado del frente publicado. Una columna que
+ * agota su reserva virtual cambia de SAB, y el descriptor con ella (`TablaOrganismosSoA.compartir`). */
+export interface FrenteCompartido {
+  /** f64: [lado publicado, tick, alta]. */
+  estado: SharedArrayBuffer;
+  columnas: { nombre: string; tipo: TipoColumna; lados: [SharedArrayBuffer, SharedArrayBuffer] }[];
+}
+const ESTADO_LADO = 0, ESTADO_TICK = 1, ESTADO_ALTA = 2;
+
+function armarFrente(col: (nombre: string) => Col, columnas: readonly string[], tick: number, alta: number): FrentePublico {
+  return Object.freeze({
+    tick, alta, columnas, col,
+    gen: col('gen'), vivo: col('vivo'), clase: col('clase'), uid: col('uid'), dueno: col('dueno'),
+    x: col('x'), y: col('y'), chunk: col('chunk'), accion: col('accion'), objetivo: col('objetivo'),
+    decideEn: col('decideEn'), cuerpo: col('cuerpo'), rasgos: col('rasgos'), genoma: col('genoma'), pareja: col('pareja'),
+  });
+}
+
+/** El frente publicado ahora mismo, leído desde otro hilo: `leer()` arma el del lado y el tick del estado compartido. */
+export function conectarFrente(d: FrenteCompartido): { leer(): FrentePublico } {
+  const estado = new Float64Array(d.estado), columnas = Object.freeze(d.columnas.map(c => c.nombre));
+  const lados = [0, 1].map(lado => new Map(d.columnas.map(c => [c.nombre, new VECTORES[c.tipo](c.lados[lado as Lado]) as Col])));
+  let ultimo: FrentePublico | undefined;
+  return {
+    leer() {
+      const lado = estado[ESTADO_LADO]!, tick = estado[ESTADO_TICK]!, alta = estado[ESTADO_ALTA]!;
+      if (ultimo && ultimo.tick === tick && ultimo.alta === alta && ultimo.gen === lados[lado]!.get('gen')) return ultimo;
+      const col = (nombre: string): Col => {
+        const c = lados[lado]!.get(nombre);
+        if (!c) throw new Error(`Columna de organismos desconocida: ${nombre}.`);
+        return c;
+      };
+      return ultimo = armarFrente(col, columnas, tick, alta);
+    },
+  };
+}
+/** `unLado`: un solo vector para los dos frentes (`lados[0] === lados[1]`). */
+interface Campo { ancho: number; tipo: TipoColumna; lados: [Vector, Vector]; unLado: boolean }
 
 /** El coordinador intercambia los frentes en F6, tras publicar todos sus dueños. */
 export class TablaOrganismosSoA implements TablaOrganismos {
@@ -52,19 +90,30 @@ export class TablaOrganismosSoA implements TablaOrganismos {
   private primerRetiro = 0;
   private readonly libres: Slot[] = [];
   private escritoPor = new Int32Array(0);
+  private readonly estado = new Float64Array(new SharedArrayBuffer(3 * Float64Array.BYTES_PER_ELEMENT));
 
-  constructor(private readonly verificar = false) {
+  constructor(readonly verificar = false) {
     for (const [nombre, tipo, ancho] of COLUMNAS_FIJAS) this.declarar(nombre, tipo, ancho);
     this.lecturaActual = this.frente(0, 0);
   }
 
-  columna(nombre: string, tipo: TipoColumna, ancho: number): void {
+  /**
+   * Con `unLado`, la columna no tiene doble búfer: es una entrada del despacho que el dueño escribe en F2 y que solo leen
+   * los percibidores dentro de ese despacho (el cerebro). Copiarla al publicar costaría su ancho por cada fila de la
+   * tabla, también las de la fauna, y el sello CRC del frente no la cubre.
+   */
+  columna(nombre: string, tipo: TipoColumna, ancho: number, unLado = false): void {
     if (this.iniciado || this.altas) throw new Error('Las columnas se declaran antes de arrancar la tabla de organismos.');
-    this.declarar(nombre, tipo, ancho);
+    this.declarar(nombre, tipo, ancho, unLado);
     this.lecturaActual = this.frente(this.lecturaActual.tick, 0);
   }
 
   lectura(): FrentePublico { return this.lecturaActual; }
+
+  compartir(): FrenteCompartido {
+    return { estado: this.estado.buffer as SharedArrayBuffer, columnas: [...this.campos].map(([nombre, { tipo, lados }]) =>
+      ({ nombre, tipo, lados: [lados[0].buffer as SharedArrayBuffer, lados[1].buffer as SharedArrayBuffer] })) };
+  }
 
   escritura(hilo: Hilo): FrenteEscritura {
     const lectura = this.lecturaActual, lado = this.siguiente;
@@ -155,8 +204,8 @@ export class TablaOrganismosSoA implements TablaOrganismos {
     for (const slot of this.bajas) this.cuarentena.push({ tick: tick + 2, slot });
     this.bajas.length = 0;
     this.crecer(this.siguiente, this.altas);
-    for (const { ancho, lados } of this.campos.values()) {
-      lados[this.siguiente].set(lados[this.lado].subarray(0, this.altas * ancho));
+    for (const { ancho, lados, unLado } of this.campos.values()) {
+      if (!unLado) lados[this.siguiente].set(lados[this.lado].subarray(0, this.altas * ancho));
     }
     return publicado;
   }
@@ -189,19 +238,22 @@ export class TablaOrganismosSoA implements TablaOrganismos {
     }
   }
 
-  private declarar(nombre: string, tipo: TipoColumna, ancho: number): void {
+  private declarar(nombre: string, tipo: TipoColumna, ancho: number, unLado = false): void {
     if (this.campos.has(nombre) || !Number.isSafeInteger(ancho) || ancho < 1) {
       throw new Error(`Columna de organismos inválida o duplicada: ${nombre}.`);
     }
-    this.campos.set(nombre, { ancho, tipo, lados: [reservarColumna(tipo, ancho), reservarColumna(tipo, ancho)] });
+    const primero = reservarColumna(tipo, ancho);
+    this.campos.set(nombre, { ancho, tipo, lados: [primero, unLado ? primero : reservarColumna(tipo, ancho)], unLado });
   }
 
   private crecer(lado: Lado, filas: number): void {
     const anterior = this.capacidad[lado];
     if (filas <= anterior) return;
     const capacidad = Math.min(RANURAS_REF, Math.max(filas, Math.ceil(anterior * 1.25)));
-    for (const { ancho, lados, tipo } of this.campos.values()) {
+    for (const campo of this.campos.values()) {
+      const { ancho, lados, tipo } = campo;
       lados[lado] = crecerColumna(lados[lado], tipo, ancho, capacidad);
+      if (campo.unLado) lados[lado === 0 ? 1 : 0] = lados[lado];
     }
     this.capacidad[lado] = capacidad;
   }
@@ -220,17 +272,14 @@ export class TablaOrganismosSoA implements TablaOrganismos {
 
   private frente(tick: number, alta: number): FrentePublico {
     const lado = this.lado, col = (nombre: string): Col => this.campo(nombre).lados[lado];
-    return Object.freeze({
-      tick, alta, columnas: Object.freeze([...this.campos.keys()]), col,
-      gen: col('gen'), vivo: col('vivo'), clase: col('clase'), uid: col('uid'), dueno: col('dueno'),
-      x: col('x'), y: col('y'), chunk: col('chunk'), accion: col('accion'), objetivo: col('objetivo'),
-      decideEn: col('decideEn'), cuerpo: col('cuerpo'), rasgos: col('rasgos'), genoma: col('genoma'), pareja: col('pareja'),
-    });
+    this.estado[ESTADO_LADO] = lado; this.estado[ESTADO_TICK] = tick; this.estado[ESTADO_ALTA] = alta;
+    return armarFrente(col, Object.freeze([...this.campos.keys()]), tick, alta);
   }
 
   private sello(frente: FrentePublico): number {
     let crc = 0;
-    for (const [nombre, { ancho }] of this.campos) {
+    for (const [nombre, { ancho, unLado }] of this.campos) {
+      if (unLado) continue;
       const col = frente.col(nombre);
       crc = crc32(new Uint8Array(col.buffer, col.byteOffset, frente.alta * ancho * col.BYTES_PER_ELEMENT), crc);
     }

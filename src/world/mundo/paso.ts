@@ -109,11 +109,11 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     const fast = residentFastAccess(world.tiles) ?? null;
     // F2
     const percepcion = percepcionDe(world), lote = lotePersonas(world);
-    const salida = percepcion.percibir(world.people, world.tick, lote, tileIn, fast ?? undefined, vista => prepararCerebros(world, vista, lote, tileIn));
+    const salida = percepcion.percibir(world.people, world.tick, lote, tileIn, fast ?? undefined, (vista, despacho) => prepararCerebros(world, vista, despacho, tileIn));
     const policyScores = puntuacionesPercibidas(world, lote, salida);
     // F3–F4
     try {
-      for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, slot, policyScores, tileIn, fast);
+      for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, policyScores, tileIn, fast);
     } finally { percepcion.cerrar(); }
     // F5
     for (const person of world.people) {

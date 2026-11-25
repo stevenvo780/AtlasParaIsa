@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, stepWorld } from '../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, stepWorld } from '../src/world/index.js';
 import { comprobarInvariantes } from '../src/world/invariantes.js';
 import { CAMPOS_CUERPO, CUERPO_ANCHO, Clase, COLUMNAS_FIJAS, genDe, slotDe } from '../src/world/motor/contratos.js';
 import { parseParams, DEFAULT_PARAMS } from '../src/world/params.js';
-import { FaunaSoA, faunaRegistrada } from '../src/world/soa/fauna.js';
+import { FaunaSoA } from '../src/world/soa/fauna.js';
+import { faunaRegistrada } from '../src/world/soa/organismos-mundo.js';
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
 import { materializeAnimals, SPECIES, type Animal } from '../src/world/animals.js';
 
@@ -72,7 +73,7 @@ test('stepWorld publica la fauna del tick y conserva las vistas clonables', () =
   const fauna = faunaRegistrada(mundo)!;
   const frente = fauna.tabla.lectura();
   assert.equal(frente.tick, mundo.tick);
-  assert.equal(frente.columnas.at(-1), 'especie');
+  assert.ok(frente.columnas.includes('especie'));
   for (const animal of mundo.animals) {
     const s = slotDe(fauna.ref(animal));
     assert.equal(fauna.animal(s), animal);
@@ -103,7 +104,7 @@ test('fauna.decisiones detecta a un animal vivo que no decidió en el tick', () 
   assert.equal(violacion?.observado, mundo.animals.length - 1);
 });
 
-test('FaunaSoA: el uid se conserva al volver del archivo o al deshacer un paso, y una muerte lo libera', () => {
+test('FaunaSoA: el uid vive en el animal: vuelve con él del archivo, de un paso deshecho y de un clon, y uno nuevo recibe otro', () => {
   const fauna = new FaunaSoA();
   const [a, b] = materializeAnimals(7, [{ x: 0, y: 0, terrain: 'meadow', moisture: 0.5, vegetation: 0.5, food: 0.2, fauna: 2, species: 'deer' }], 0);
   let tick = 0;
@@ -111,22 +112,48 @@ test('FaunaSoA: el uid se conserva al volver del archivo o al deshacer un paso, 
     fauna.publicar(++tick);
     return fauna.tabla.lectura().uid[slotDe(fauna.ref(animal))]!;
   };
-  const viva = (animal: Animal): Animal => ({ ...structuredClone(animal), health: 1 });
   fauna.sincronizar([a!, b!]);
   const uidA = uid(a!), uidB = uid(b!);
   assert.notEqual(uidA, uidB);
-  b!.health = 0;
-  const deshecha = viva(b!);
+  assert.deepEqual([a!.uid, b!.uid], [uidA, uidB]);
+  // Un paso deshecho devuelve una copia del objeto: misma identidad, aunque la fila sea otra.
+  const deshecha = structuredClone(b!);
   fauna.sincronizar([a!, deshecha]);
   assert.equal(uid(deshecha), uidB);
+  // Del archivo vuelve el animal serializado.
   fauna.sincronizar([deshecha]);
   fauna.publicar(++tick);
-  fauna.sincronizar([deshecha, a!]);
-  assert.equal(uid(a!), uidA);
-  deshecha.health = 0;
-  fauna.sincronizar([a!]);
-  fauna.publicar(++tick);
-  const otra = viva(deshecha);
-  fauna.sincronizar([a!, otra]);
-  assert.ok(uid(otra) > Math.max(uidA, uidB));
+  const archivado = JSON.parse(JSON.stringify(a!)) as Animal;
+  fauna.sincronizar([deshecha, archivado]);
+  assert.equal(uid(archivado), uidA);
+  // Uno que nace no trae uid: recibe el siguiente, que nadie tuvo.
+  const [cria] = materializeAnimals(8, [{ x: 1, y: 0, terrain: 'meadow', moisture: 0.5, vegetation: 0.5, food: 0.2, fauna: 1, species: 'deer' }], tick);
+  fauna.sincronizar([deshecha, archivado, cria!]);
+  assert.ok(uid(cria!) > Math.max(uidA, uidB));
+});
+
+test('personas y fauna toman el uid de un solo contador del mundo, que sobrevive al clon y a guardar y cargar', () => {
+  const mundo = createWorld(51926);
+  for (let i = 0; i < 300; i++) stepWorld(mundo);
+  const organismos = () => [...mundo.people, ...mundo.animals];
+  const uids = (m: typeof mundo) => [...m.people, ...m.animals].map(o => o.uid!);
+  assert.ok(organismos().every(o => Number.isSafeInteger(o.uid) && o.uid! >= 1 && o.uid! < mundo.siguienteUid!));
+  assert.equal(new Set(uids(mundo)).size, organismos().length, 'únicos entre personas y fauna');
+  assert.deepEqual(uids(cloneWorld(mundo)), uids(mundo));
+  const cargado = JSON.parse(JSON.stringify(mundo)) as typeof mundo;
+  assertWorld(cargado);
+  assert.deepEqual([uids(cargado), cargado.siguienteUid], [uids(mundo), mundo.siguienteUid]);
+  // Lo que había al cargar, también la fauna de regiones archivadas, que vuelve con su uid.
+  const vistos = new Set([...uids(cargado), ...cargado.retiredChunks.flatMap(c => c.animals ?? []).map(a => a.uid!)]), tope = cargado.siguienteUid!;
+  for (let i = 0; i < 600; i++) stepWorld(cargado);
+  const nuevos = uids(cargado).filter(u => !vistos.has(u));
+  assert.ok(nuevos.length > 0, 'nacieron organismos tras la carga');
+  assert.ok(nuevos.every(u => u >= tope), 'la carga continúa el contador, no lo reinicia');
+  // Un uid repetido o fuera del contador no se carga.
+  const repetido = JSON.parse(JSON.stringify(mundo)) as typeof mundo;
+  repetido.animals[0]!.uid = repetido.people[0]!.uid;
+  assert.throws(() => assertWorld(repetido));
+  const fuera = JSON.parse(JSON.stringify(mundo)) as typeof mundo;
+  fuera.people[0]!.uid = fuera.siguienteUid;
+  assert.throws(() => assertWorld(fuera));
 });

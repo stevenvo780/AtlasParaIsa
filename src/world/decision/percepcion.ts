@@ -8,14 +8,18 @@
  * entera (`PercepcionCpu.ventana`): la elección necesita los pasos hasta objetivos que no salen de ninguna consulta
  * (pareja, hogar, lugar, refugio, caza, exploración).
  */
-import { CAMPOS_CUERPO, COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, TIPO_CEREBRO, genDe, refDe, slotDe, type Col, type CtxLectura,
-  type FrentePublico, type LotePercepcion, type Percepcion, type Percibidor, type Plan, type Terreno, type TipoColumna } from '../motor/contratos.js';
+import { COLUMNAS_CEREBRO, COLUMNAS_FIJAS, CEREBRO, ErrorDispositivo, REF_NULA, RASGOS_ANCHO, genDe, refDe, slotDe, type Col, type CtxLectura,
+  type FrentePublico, type LotePercepcion, type Percepcion, type Percibidor, type Plan, type Terreno } from '../motor/contratos.js';
 import { distance, type TileLookup } from '../mundo/geometria.js';
 import { RADIUS, type Person } from '../mundo/tipos.js';
-import type { Tile } from '../../shared/types.js';
+import { paramsOf, type WorldParams } from '../params.js';
 import { softSign } from '../politica.js';
-import { CAMPOS_PERCEPCION, PLAN, TERRENOS, planesPersonas } from './planes.js';
-import type { ResidentFastAccess } from '../soa/terreno.js';
+import { abrirBarrera, cerrarBarrera, type DestinoBarrera } from '../soa/barrera-percepcion.js';
+import { conectarFrente, type FrenteCompartido } from '../soa/organismos.js';
+import { organismosDe, type MundoOrganismos, type OrganismosMundo } from '../soa/organismos-mundo.js';
+import type { ResidentFastAccess, TerrenoCompartido } from '../soa/terreno.js';
+import { PLAN, planesPersonas } from './planes.js';
+import { TerrenoPercepcion } from './terreno-percepcion.js';
 
 type Lectura = Pick<CtxLectura, 'frente' | 'terreno'>;
 
@@ -248,10 +252,10 @@ function percibirActor(p: Preparado, slot: number, plan: PlanResuelto, x: number
  * celdas sin ruta), y gana la primera celda en orden de filas (dy, luego dx) con la clave estrictamente menor.
  */
 export function percibirLote(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], salida: PercepcionCpu, desde = 0, hasta = lote.slots.length): void {
-  const p = preparar(ctx, planes, salida.a);
+  const p = preparar(ctx, planes, salida.a), { frente } = p;
   for (let i = desde; i < hasta; i++) {
     const slot = lote.slots[i]!;
-    percibirActor(p, slot, p.planes[lote.plan[i]!]!, ctx.frente.x[slot]!, ctx.frente.y[slot]!, salida, i);
+    percibirActor(p, slot, p.planes[lote.plan[i]!]!, frente.x[slot]!, frente.y[slot]!, salida, i);
   }
 }
 
@@ -340,393 +344,233 @@ export class PercibidorCpu implements Percibidor {
   }
 }
 
-/** Un NaN del SoA es un campo ausente: 0, como lo lee `choose`. */
-const numero = (v: number): number => v === v ? v : 0;
+// ── Vista del mundo ──────────────────────────────────────────────────────────────────────────────────────
 
-// ── Vista del mundo de la ola 1 ──────────────────────────────────────────────────────────────────────────
-
-type Columna = Int32Array | Uint8Array | Uint16Array | Float32Array | Float64Array;
-const CONSTRUCTOR: Record<TipoColumna, { new (b: SharedArrayBuffer): Columna; BYTES_PER_ELEMENT: number }> = {
-  i32: Int32Array, u8: Uint8Array, u16: Uint16Array, f32: Float32Array, f64: Float64Array,
-};
-/** Columnas registradas del cerebro, del tipo del contrato (f64): la red da lo mismo que `evaluatePolicySingle` hasta el
- * redondeo final a la `utilidad` f32. */
-export const REGISTRADAS: readonly (readonly [string, TipoColumna, number])[] = [
-  ['observacion', TIPO_CEREBRO, COLUMNAS_CEREBRO.observacion], ['politica', TIPO_CEREBRO, COLUMNAS_CEREBRO.politica],
-  ['sesgo', TIPO_CEREBRO, COLUMNAS_CEREBRO.sesgo],
-];
-const COLUMNAS_VISTA = [...COLUMNAS_FIJAS, ...REGISTRADAS];
-
-/** Lo que otro hilo necesita para rehacer la vista: los SAB y los contadores. */
-export interface DescriptorVista {
-  tick: number; alta: number; paginas: number;
-  columnas: Record<string, SharedArrayBuffer>; paginaX: SharedArrayBuffer; paginaY: SharedArrayBuffer; versionPagina: SharedArrayBuffer;
-  campos: SharedArrayBuffer[];
-}
-
-/** Frente de las personas en la ola 1: una fila por persona (slot = índice en `world.people` al capturar), con solo lo
- * que lee la percepción: vida, clase, posición, hambre, sed y energía y las tres columnas del cerebro. Cuando el slot
- * cambia de ocupante su `gen` sube, así que un `Ref` nunca nombra a otra persona y quien guarde algo por slot (los pesos
- * en la GPU) sabe que caducó. Las demás columnas del contrato quedan a cero hasta que M2a dé el frente de verdad. */
-class FrenteMundo implements FrentePublico {
-  tick = 0; alta = 0;
-  readonly columnas = COLUMNAS_VISTA.map(([nombre]) => nombre);
-  datos: Record<string, Columna> = {};
-  /** Persona de cada slot al capturar (solo en el hilo que capturó): la identidad no se lee del arreglo vivo. */
-  readonly ocupantes: Person[] = [];
-  /** `gen` del slot cuando se escribieron sus pesos heredados (solo en el hilo que capturó). */
-  pesosGen = new Int32Array(0);
-  #abandonado = false;
-  constructor(buffers?: Record<string, SharedArrayBuffer>) {
-    if (buffers) for (const [nombre, tipo] of COLUMNAS_VISTA) this.datos[nombre] = new CONSTRUCTOR[tipo](buffers[nombre]!);
-    else this.#reservar(16, false);
-  }
-  get gen() { return this.datos.gen!; } get vivo() { return this.datos.vivo!; } get clase() { return this.datos.clase!; }
-  get uid() { return this.datos.uid!; } get dueno() { return this.datos.dueno!; } get x() { return this.datos.x!; } get y() { return this.datos.y!; }
-  get chunk() { return this.datos.chunk!; } get accion() { return this.datos.accion!; } get objetivo() { return this.datos.objetivo!; }
-  get decideEn() { return this.datos.decideEn!; } get cuerpo() { return this.datos.cuerpo!; } get rasgos() { return this.datos.rasgos!; }
-  get genoma() { return this.datos.genoma!; } get pareja() { return this.datos.pareja!; }
-  col(nombre: string): Col {
-    const c = this.datos[nombre];
-    if (!c) throw new Error(`Columna desconocida: ${nombre}`);
-    return c;
-  }
-  /** Un lector pudo quedarse con estos búferes (venció su plazo): no se vuelven a escribir. */
-  abandonar(): void { this.#abandonado = true; }
-  /** Cabida para `filas`; con `renovar`, búferes nuevos aunque quepa (con lo que tenían los de antes). */
-  #reservar(filas: number, renovar: boolean): void {
-    const actual = this.datos.gen?.length ?? 0;
-    if (!renovar && actual >= filas) return;
-    const cap = actual >= filas ? actual : Math.max(filas, 2 * actual);
-    for (const [nombre, tipo, ancho] of COLUMNAS_VISTA) {
-      const nueva = new CONSTRUCTOR[tipo](new SharedArrayBuffer(cap * ancho * CONSTRUCTOR[tipo].BYTES_PER_ELEMENT));
-      const previa = this.datos[nombre];
-      if (previa) nueva.set(previa as never);
-      this.datos[nombre] = nueva;
-    }
-    if (this.pesosGen.length < cap) { const pesos = new Int32Array(cap); pesos.set(this.pesosGen); this.pesosGen = pesos; }
-  }
-  capturar(personas: readonly Person[], tick: number): void {
-    this.#reservar(personas.length, this.#abandonado);
-    this.#abandonado = false;
-    casillasPorFrente.delete(this);   // recapturar en el mismo tick (fuera de la fase de personas) mueve a la gente
-    const vivo = this.datos.vivo!, clase = this.datos.clase!, x = this.datos.x!, y = this.datos.y!, cuerpo = this.datos.cuerpo!;
-    const gen = this.datos.gen!, ocupantes = this.ocupantes;
-    for (let s = 0; s < personas.length; s++) {
-      const p = personas[s]!;
-      if (ocupantes[s] !== p) { gen[s]!++; ocupantes[s] = p; }
-      vivo[s] = 1; clase[s] = Clase.Persona; x[s] = p.x; y[s] = p.y;
-      cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.hambre] = p.hunger; cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.sed] = p.thirst;
-      cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.energia] = p.energy;
-    }
-    vivo.fill(0, personas.length, Math.max(personas.length, this.alta));
-    ocupantes.length = personas.length;
-    this.tick = tick; this.alta = personas.length;
-  }
-}
-
-/** Terreno capturado del mundo de la ola 1: solo los discos r = 7 de quien percibe, en páginas 16×16 con la
- * disposición de celdas del contrato y sobre SAB, para que lo lean otros hilos. Con el SoA residente lee sus
- * arreglos como `choose` (un NaN, campo ausente, vale 0); si no, los campos de la tesela. Cada captura reparte
- * de nuevo los índices de página, así que `versionPagina` sube en cada página que se asigna: quien espeje el
- * terreno (la GPU) vuelve a subir justo esas. Con un solo dueño, `duenoChunk` es 0 en todas. */
-export class TerrenoMundo implements Terreno {
-  paginas = 0;
-  paginaX: Int32Array<ArrayBufferLike> = new Int32Array(0); paginaY: Int32Array<ArrayBufferLike> = new Int32Array(0);
-  versionPagina: Uint32Array<ArrayBufferLike> = new Uint32Array(0); versionVisible = new Uint32Array(0); duenoChunk = new Int16Array(0);
-  readonly campos: readonly string[] = CAMPOS_PERCEPCION;
-  valores: Float64Array<ArrayBufferLike>[] = [];
-  /** Tesela y celda del SoA residente (−1 sin él) de cada celda capturada: solo existen en el hilo que capturó. */
-  teselas: (Tile | undefined)[] = [];
-  soa = new Int32Array(0);
-  #visto: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
-  #indice = new Map<number, number>();
-  #ultimaClave = NaN; #ultimo = -1;
-  #abandonado = false;
-  readonly #cuadrante = new Int32Array(4);
-
-  constructor(d?: DescriptorVista) {
-    if (!d) { this.#reservar(4, false); return; }
-    this.paginas = d.paginas;
-    this.paginaX = new Int32Array(d.paginaX); this.paginaY = new Int32Array(d.paginaY); this.versionPagina = new Uint32Array(d.versionPagina);
-    this.versionVisible = new Uint32Array(this.paginaX.length); this.duenoChunk = new Int16Array(this.paginaX.length);
-    this.valores = d.campos.map(b => new Float64Array(b));
-    for (let c = 0; c < d.paginas; c++) this.#indice.set(claveCasilla(this.paginaX[c]!, this.paginaY[c]!), c);
-  }
-  /** Cabida para `paginas`; con `renovar`, SAB nuevos aunque quepa. `versionPagina` conserva su cuenta: una página nunca
-   * vuelve a una versión que un espejo ya vio. */
-  #reservar(paginas: number, renovar: boolean): void {
-    if (!renovar && this.paginaX.length >= paginas) return;
-    const cap = this.paginaX.length >= paginas ? this.paginaX.length : Math.max(paginas, 2 * this.paginaX.length);
-    const sab = (bytes: number) => new SharedArrayBuffer(Math.max(8, bytes));
-    const crecer = <T extends Int32Array<ArrayBufferLike> | Uint32Array<ArrayBufferLike> | Uint8Array<ArrayBufferLike> | Float64Array<ArrayBufferLike>>(previo: T, nuevo: T): T => { nuevo.set(previo); return nuevo; };
-    this.paginaX = crecer(this.paginaX, new Int32Array(sab(cap * 4))); this.paginaY = crecer(this.paginaY, new Int32Array(sab(cap * 4)));
-    this.versionPagina = crecer(this.versionPagina, new Uint32Array(sab(cap * 4)));
-    this.versionVisible = new Uint32Array(cap); this.duenoChunk = new Int16Array(cap);
-    this.valores = CAMPOS_PERCEPCION.map((_, i) => crecer(this.valores[i] ?? new Float64Array(0), new Float64Array(sab(cap * 256 * 8))));
-    if (this.#visto.length < cap * 256) {
-      this.#visto = crecer(this.#visto, new Uint8Array(cap * 256));
-      // Arreglo denso desde el principio: escribir índices sueltos en uno vacío lo pasa a diccionario.
-      this.teselas = Object.assign(new Array<Tile | undefined>(cap * 256).fill(undefined), this.teselas);
-      this.soa = crecer(this.soa, new Int32Array(cap * 256));
-    }
-  }
-  /** Un lector pudo quedarse con estos búferes (venció su plazo): la próxima captura va a SAB nuevos. */
-  abandonar(): void { this.#abandonado = true; }
-  reiniciar(): void {
-    if (this.#abandonado) { this.#reservar(this.paginaX.length, true); this.#abandonado = false; }
-    // `terreno` = 0 marca la celda como no capturada; los demás campos se sobrescriben al capturarla.
-    this.#visto.fill(0, 0, this.paginas * 256); this.valores[0]!.fill(0, 0, this.paginas * 256);
-    this.#indice.clear(); this.paginas = 0; this.#ultimaClave = NaN; this.#ultimo = -1;
-  }
-  #pagina(px: number, py: number): number {
-    const clave = claveCasilla(px, py);
-    if (clave === this.#ultimaClave) return this.#ultimo;
-    this.#ultimaClave = clave; this.#ultimo = this.#indice.get(clave) ?? -1;
-    return this.#ultimo;
-  }
-  celda(x: number, y: number): number {
-    if ((x | 0) !== x || (y | 0) !== y) return -1;
-    const pagina = this.#pagina(x >> 4, y >> 4);
-    if (pagina < 0) return -1;
-    const c = (pagina << 8) | ((y & 15) << 4) | (x & 15);
-    return this.valores[0]![c]! > 0 ? c : -1;
-  }
-  chunkDe(celda: number): number { return celda >> 8; }
-  campo(nombre: string): Col {
-    const i = CAMPOS_PERCEPCION.indexOf(nombre as typeof CAMPOS_PERCEPCION[number]);
-    if (i < 0) throw new Error(`Campo desconocido: ${nombre}`);
-    return this.valores[i]!;
-  }
-  /** Copia las celdas del disco r = 7 de (cx, cy) que aún no estén capturadas. */
-  capturarDisco(cx: number, cy: number, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
-    if ((cx | 0) !== cx || (cy | 0) !== cy) return;
-    this.#reservar(this.paginas + 4, false);   // una ventana de 15×15 toca a lo sumo 2×2 páginas
-    const [terreno, comida, aguaPotable, madera, piedra, humedad, vegetacion] = this.valores as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
-    // Las (a lo sumo) 2×2 páginas del disco se buscan una vez y no por celda.
-    const px0 = (cx - RADIUS) >> 4, py0 = (cy - RADIUS) >> 4, cuadrante = this.#cuadrante.fill(-1);
-    for (let k = 0; k < CELDAS_VENTANA; k++) {
-      if (!EN_DISCO[k]) continue;
-      const x = cx + k % LADO_VENTANA - RADIUS, y = cy + ((k / LADO_VENTANA) | 0) - RADIUS;
-      const q = ((y >> 4) - py0) * 2 + (x >> 4) - px0;
-      let pagina = cuadrante[q]!;
-      if (pagina < 0) {
-        pagina = this.#pagina(x >> 4, y >> 4);
-        if (pagina < 0) {
-          pagina = this.paginas++;
-          this.paginaX[pagina] = x >> 4; this.paginaY[pagina] = y >> 4; this.versionPagina[pagina]!++;
-          this.#indice.set(claveCasilla(x >> 4, y >> 4), pagina);
-          this.#ultimaClave = NaN;
-        }
-        cuadrante[q] = pagina;
-      }
-      const c = (pagina << 8) | ((y & 15) << 4) | (x & 15);
-      if (this.#visto[c]) continue;
-      this.#visto[c] = 1;
-      const tile = tileIn(x, y);
-      this.teselas[c] = tile;
-      if (!tile) continue;
-      let s = fast?.exact ? fast.exact.cellAt(x, y) : -1;
-      if (fast && s < 0) s = fast.cellOf(tile);
-      this.soa[c] = s;
-      if (s >= 0) {
-        terreno[c] = fast!.terrainArr[s]!;
-        comida[c] = numero(fast!.foodArr[s]!); aguaPotable[c] = numero(fast!.drinkingWaterArr[s]!); madera[c] = numero(fast!.woodArr[s]!);
-        humedad[c] = numero(fast!.moistureArr[s]!); vegetacion[c] = numero(fast!.vegetationArr[s]!);
-      } else {
-        terreno[c] = TERRENOS.indexOf(tile.terrain) + 1;
-        comida[c] = tile.food; aguaPotable[c] = tile.drinkingWater ?? 0; madera[c] = tile.wood ?? 0;
-        humedad[c] = tile.moisture; vegetacion[c] = tile.vegetation;
-      }
-      piedra[c] = tile.stone ?? 0;
-    }
-  }
-  /**
-   * ¿Sigue el disco r = 7 de (cx, cy) como se capturó? Compara cada campo de cada celda con su valor vivo, leído como
-   * al capturar (la misma tesela o la misma celda del SoA). Si todo coincide, cualquier consulta sobre lo capturado da
-   * lo mismo que sobre el estado de ahora; si algo cambió (alguien comió, bebió, recogió o construyó antes en este
-   * tick), lo percibido puede haber dejado de servir o de ser lo mejor. Un disco que no se capturó entero no vale.
-   */
-  vigente(cx: number, cy: number, fast: ResidentFastAccess | undefined): boolean {
-    if ((cx | 0) !== cx || (cy | 0) !== cy) return false;
-    const [terreno, comida, aguaPotable, madera, piedra, humedad, vegetacion] = this.valores as [Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array, Float64Array];
-    const px0 = (cx - RADIUS) >> 4, py0 = (cy - RADIUS) >> 4, cuadrante = this.#cuadrante.fill(-1);
-    for (let k = 0; k < CELDAS_VENTANA; k++) {
-      if (!EN_DISCO[k]) continue;
-      const x = cx + k % LADO_VENTANA - RADIUS, y = cy + ((k / LADO_VENTANA) | 0) - RADIUS;
-      const q = ((y >> 4) - py0) * 2 + (x >> 4) - px0;
-      let pagina = cuadrante[q]!;
-      if (pagina < 0) {
-        pagina = this.#pagina(x >> 4, y >> 4);
-        if (pagina < 0) return false;
-        cuadrante[q] = pagina;
-      }
-      const c = (pagina << 8) | ((y & 15) << 4) | (x & 15);
-      if (!this.#visto[c]) return false;
-      const tile = this.teselas[c];
-      if (!tile) continue;
-      const s = this.soa[c]!;
-      if (s >= 0) {
-        if (!fast || terreno[c] !== fast.terrainArr[s] || comida[c] !== numero(fast.foodArr[s]!) || aguaPotable[c] !== numero(fast.drinkingWaterArr[s]!)
-          || madera[c] !== numero(fast.woodArr[s]!) || humedad[c] !== numero(fast.moistureArr[s]!) || vegetacion[c] !== numero(fast.vegetationArr[s]!)) return false;
-      } else if (terreno[c] !== TERRENOS.indexOf(tile.terrain) + 1 || comida[c] !== tile.food || aguaPotable[c] !== (tile.drinkingWater ?? 0)
-        || madera[c] !== (tile.wood ?? 0) || humedad[c] !== tile.moisture || vegetacion[c] !== tile.vegetation) return false;
-      if (piedra[c] !== (tile.stone ?? 0)) return false;
-    }
-    return true;
-  }
-}
+/** Lo que otro hilo necesita para rehacer la vista: el terreno y el frente, compartidos sobre SAB. */
+export interface DescriptorVista { terreno: TerrenoCompartido; frente: FrenteCompartido }
 
 /**
- * Vista de lectura del mundo de la ola 1 para percibir (`CtxLectura` sin globales): el frente de todas las personas y
- * el terreno de los discos de quien percibe, copiados una vez por tick. La rehace otro hilo con `desde(descriptor)`.
- * Un despacho cuyo lector pudo sobrevivir a su plazo deja sus búferes abandonados: la captura siguiente escribe en SAB
- * nuevos, así que ese lector sigue viendo un solo tick entero (frente, páginas e índice) hasta que los suelte.
+ * Lo que perciben las personas: el frente de la tabla común de organismos (M2a), con las personas tal como empiezan la
+ * fase, y el terreno del mundo (M1, `TerrenoPercepcion`). En el hilo dueño la vista sabe qué persona ocupa cada ranura;
+ * otro hilo la rehace con `desde(descriptor)` y solo lee. Los percibidores la leen dentro de `lanzar` (los hilos de la
+ * piscina terminan antes de que vuelva; la tarjeta copia lo que sube), así que nadie la lee mientras el dueño la escribe.
  */
 export class VistaMundo implements Lectura {
-  readonly frente: FrenteMundo;
-  readonly terreno: TerrenoMundo;
-  private constructor(d?: DescriptorVista) {
-    this.frente = new FrenteMundo(d?.columnas);
-    this.terreno = new TerrenoMundo(d);
-    if (d) { this.frente.tick = d.tick; this.frente.alta = d.alta; }
+  private constructor(readonly terreno: TerrenoPercepcion, private readonly leer: () => FrentePublico, readonly organismos?: OrganismosMundo) {}
+  static de(organismos: OrganismosMundo, terreno: TerrenoPercepcion): VistaMundo {
+    return new VistaMundo(terreno, () => organismos.tabla.lectura(), organismos);
   }
-  static nueva(): VistaMundo { return new VistaMundo(); }
-  static desde(d: DescriptorVista): VistaMundo { return new VistaMundo(d); }
+  static desde(d: DescriptorVista): VistaMundo {
+    const frente = conectarFrente(d.frente);
+    return new VistaMundo(TerrenoPercepcion.conectar(d.terreno), () => frente.leer());
+  }
+  get frente(): FrentePublico { return this.leer(); }
   get tick(): number { return this.frente.tick; }
-  /** Persona de cada slot al capturar (solo en el hilo que capturó). */
-  get personas(): readonly Person[] { return this.frente.ocupantes; }
 
-  /** Captura el frente de `personas` y el terreno alrededor de las de `discos` (slots). */
+  /** Ranura de la persona en la tabla común (−1 si aún no tiene) y persona de una ranura (solo en el hilo dueño). */
+  slot(persona: Person): number { return this.organismos!.personas.slot(persona); }
+  persona(slot: number): Person | undefined { return this.organismos!.personas.persona(slot) as Person | undefined; }
+  get ranurasPersonas(): IterableIterator<number> { return this.organismos!.personas.ranuras; }
+
+  /** F2: publica a `personas` en el frente si no lo están ya donde están ahora, y pone al día el terreno de los discos de
+   * `discos` (índices en `personas`). */
   capturar(personas: readonly Person[], tick: number, discos: Iterable<number>, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
-    this.frente.capturar(personas, tick);
-    this.terreno.reiniciar();
+    const organismos = this.organismos!;
+    if (organismos.personas.sincronizar(personas) || !organismos.personas.alDia(personas)) organismos.publicar(tick, undefined, personas);
+    this.terreno.empezarCaptura();
     for (const s of discos) this.terreno.capturarDisco(personas[s]!.x, personas[s]!.y, tileIn, fast);
+    this.terreno.fijarCaptura();
   }
-  abandonar(): void { this.frente.abandonar(); this.terreno.abandonar(); }
-  /** ¿Tiene el slot escritos los pesos de su ocupante de ahora? */
-  pesosAlDia(slot: number): boolean { return this.frente.pesosGen[slot] === this.frente.gen[slot]; }
-  /** Pesos heredados del ocupante del slot. */
+  /** ¿Tiene la ranura escritos los pesos de su ocupante de ahora? */
+  pesosAlDia(slot: number): boolean { return this.organismos!.personas.pesosGen[slot] === this.frente.gen[slot]; }
+  /** Pesos heredados del ocupante de la ranura. Las columnas del cerebro no tienen doble búfer: se escriben en el frente. */
   escribirPesos(slot: number, pesos: ArrayLike<number>): void {
-    (this.frente.datos.politica as Float64Array).set(pesos, slot * COLUMNAS_CEREBRO.politica);
-    this.frente.pesosGen[slot] = this.frente.gen[slot]!;
+    (this.frente.col('politica') as Float64Array).set(pesos, slot * COLUMNAS_CEREBRO.politica);
+    this.organismos!.personas.pesosGen[slot] = this.frente.gen[slot]!;
   }
-  /** Observación y plasticidad del slot para este despacho. */
+  /** Observación y plasticidad de la ranura para este despacho. */
   escribirEstado(slot: number, observacion: ArrayLike<number>, sesgo: ArrayLike<number>): void {
-    (this.frente.datos.observacion as Float64Array).set(observacion, slot * COLUMNAS_CEREBRO.observacion);
-    (this.frente.datos.sesgo as Float64Array).set(sesgo, slot * COLUMNAS_CEREBRO.sesgo);
+    (this.frente.col('observacion') as Float64Array).set(observacion, slot * COLUMNAS_CEREBRO.observacion);
+    (this.frente.col('sesgo') as Float64Array).set(sesgo, slot * COLUMNAS_CEREBRO.sesgo);
   }
-  descriptor(): DescriptorVista {
-    const buffer = (c: ArrayBufferView) => c.buffer as SharedArrayBuffer;
-    return {
-      tick: this.frente.tick, alta: this.frente.alta, paginas: this.terreno.paginas,
-      columnas: Object.fromEntries(Object.entries(this.frente.datos).map(([n, c]) => [n, buffer(c)])),
-      paginaX: buffer(this.terreno.paginaX), paginaY: buffer(this.terreno.paginaY), versionPagina: buffer(this.terreno.versionPagina),
-      campos: this.terreno.valores.map(buffer),
-    };
-  }
+  descriptor(): DescriptorVista { return { terreno: this.terreno.compartir(), frente: this.organismos!.tabla.compartir() }; }
 }
 
 // ── Percepción del paso ──────────────────────────────────────────────────────────────────────────────────
 
 /** Fila de percepción de una persona: dónde leerla y sobre qué terreno se calculó. */
-export interface FilaPercibida { readonly salida: PercepcionCpu; readonly fila: number; readonly terreno: TerrenoMundo }
+export interface FilaPercibida { readonly salida: PercepcionCpu; readonly fila: number; readonly terreno: TerrenoPercepcion }
+
+/** Un percibidor que puede servir a varios mundos (la piscina y las tarjetas del proceso): lee la vista que se le da. */
+export interface PercibidorCompartido extends Percibidor { fuentes(vista: VistaMundo): void }
 
 /** Plazo de una tarjeta antes de recalcular su lote en CPU (ARQ-motor §3.1, B2). */
 const PLAZO_PERCEPCION_MS = 2000;
 
+/** Cuánto rehace el dueño y cuánto le cuesta decidirlo (con `medir`): el criterio de versiones de página, que es el que
+ * manda, y el de valores celda a celda de antes, evaluado sobre el mismo estado. */
+export interface MedidaRevalidacion {
+  filas: number; aceptadas: number; rehechasPorPagina: number; rehechasPorValor: number; fallosBarrera: number;
+  sueltas: number; msPaginas: number; msValores: number; msSueltas: number;
+}
+const medidaVacia = (): MedidaRevalidacion => ({ filas: 0, aceptadas: 0, rehechasPorPagina: 0, rehechasPorValor: 0, fallosBarrera: 0, sueltas: 0, msPaginas: 0, msValores: 0, msSueltas: 0 });
+
+/** Elige el percibidor del lote según `motor` (hilos y tarjetas); lo registra `despacho.ts`. */
+export type ElegirPercibidor = (motor: WorldParams['motor'], cpu: PercibidorCpu) => Percibidor | PercibidorCompartido;
+let elegir: ElegirPercibidor | undefined;
+export function registrarPercibidores(e: ElegirPercibidor | undefined): void { elegir = e; }
+
 /**
  * La percepción de las personas en un mundo: el lote de F2 (quienes pueden decidir en este tick, sobre el estado al
  * empezar la fase) y, para quien decide sin estar en él, o cuando su disco cambió desde la captura, una percepción
- * suelta en el momento sobre el estado vivo.
+ * suelta en el momento sobre el estado vivo. Lo percibido en F2 sigue valiendo si las páginas de su disco conservan la
+ * versión de la captura: toda escritura de un campo percibido durante la fase sube la de su página.
  */
 export class PercepcionDelPaso {
-  readonly vista = VistaMundo.nueva();
-  readonly planes: Plan[] = planesPersonas(this.vista.terreno.campos);
-  /** Quien percibe el lote; por defecto este mismo hilo. Otro percibidor (la GPU de M3) debe leer `vista`: las
-   * celdas que devuelve se resuelven contra su terreno. */
-  percibidor: Percibidor = new PercibidorCpu(this.vista);
-  #cpu = this.percibidor;
+  readonly vista: VistaMundo;
+  readonly planes: Plan[];
+  /** Quien percibe el lote; por defecto este mismo hilo. Otro percibidor (la piscina de M1, la GPU de M3) lee `vista`. */
+  percibidor: Percibidor | PercibidorCompartido;
+  /** Con `medir`, `medida` cuenta las filas rehechas por cada criterio y lo que cuesta cada uno. */
+  medir = false;
+  medida = medidaVacia();
+  readonly #cpu: PercibidorCpu;
+  readonly #depuracion: boolean;
   #salida: PercepcionCpu | undefined;
   #ventanas: PercepcionCpu | undefined;
+  #lote = new Int32Array(0);
   #fila = new Int32Array(0);
+  #tick = -1;
   #activa = false;
+  #barrera: DestinoBarrera | undefined;
   #despachos = 0;
   #respaldos = 0;
-  readonly #suelta = { terreno: new TerrenoMundo(), salida: reservarPercepcion(1, this.planes) };
+  #instantanea: Float64Array[] = [];
+  readonly #suelta: PercepcionCpu;
+
+  constructor(mundo: MundoOrganismos) {
+    const { motor } = paramsOf(mundo as never);
+    this.#depuracion = motor.depuracion;
+    this.vista = VistaMundo.de(organismosDe(mundo), new TerrenoPercepcion(motor.depuracion));
+    this.planes = planesPersonas(this.vista.terreno.campos);
+    this.#cpu = new PercibidorCpu(this.vista);
+    this.percibidor = elegir?.(motor, this.#cpu) ?? this.#cpu;
+    this.#suelta = reservarPercepcion(1, this.planes);
+  }
 
   /** Despachos que hubo que recalcular en CPU porque el percibidor falló, venció o devolvió otra cosa. */
   get respaldos(): number { return this.#respaldos; }
 
-  /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro. Si la tarjeta falla o vence su plazo, o devuelve
-   * algo que no es de este lote, el lote entero se percibe aquí en CPU en el mismo tick. */
+  /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro de las ranuras del despacho. Si la tarjeta falla o
+   * vence su plazo, o devuelve algo que no es de este lote, el lote entero se percibe aquí en CPU en el mismo tick. */
   percibir(personas: readonly Person[], tick: number, vencidos: Vencidos, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
-    cerebro: (vista: VistaMundo) => void): PercepcionCpu {
-    this.vista.capturar(personas, tick, vencidos.slots, tileIn, fast);
-    cerebro(this.vista);
-    const despacho: LotePercepcion = { ...vencidos, despacho: ++this.#despachos };
+    cerebro: (vista: VistaMundo, despacho: LotePercepcion) => void): PercepcionCpu {
+    this.cerrar();
+    this.#barrera = abrirBarrera(this.vista.terreno);
+    this.#activa = true;
+    try { return this.#percibir(personas, tick, vencidos, tileIn, fast, cerebro); }
+    catch (error) { this.cerrar(); throw error; }
+  }
+  #percibir(personas: readonly Person[], tick: number, vencidos: Vencidos, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
+    cerebro: (vista: VistaMundo, despacho: LotePercepcion) => void): PercepcionCpu {
+    const { vista } = this, n = vencidos.slots.length;
+    vista.capturar(personas, tick, vencidos.slots, tileIn, fast);
+    if (this.medir) this.#fotografiar();
+    if (this.#lote.length < n) this.#lote = new Int32Array(Math.max(n, 2 * this.#lote.length));
+    for (let i = 0; i < n; i++) this.#lote[i] = vista.slot(personas[vencidos.slots[i]!]!);
+    const despacho: LotePercepcion = { tick, despacho: ++this.#despachos, slots: this.#lote.subarray(0, n), plan: vencidos.plan };
+    cerebro(vista, despacho);
     let salida: PercepcionCpu;
     try {
+      if ('fuentes' in this.percibidor) this.percibidor.fuentes(vista);
       this.percibidor.lanzar(despacho, this.planes);
       const p = this.percibidor.esperar(PLAZO_PERCEPCION_MS);
-      salida = 'ventana' in p ? p as PercepcionCpu : this.#ventanas = conVentanas(this.vista, despacho, this.planes, p, this.#ventanas);
+      salida = 'ventana' in p ? p as PercepcionCpu : this.#ventanas = conVentanas(vista, despacho, this.planes, p, this.#ventanas);
       if (salida.tick !== despacho.tick || salida.despacho !== despacho.despacho)
         throw new ErrorDispositivo(this.percibidor.dispositivo, `salida del despacho ${salida.despacho} (tick ${salida.tick}) en el ${despacho.despacho} (tick ${tick})`);
-      if (!('ventana' in p) && !coherente(this.vista, despacho, this.planes, salida))
+      if (!('ventana' in p) && !coherente(vista, despacho, this.planes, salida))
         throw new ErrorDispositivo(this.percibidor.dispositivo, 'salida que no casa con el lote');
     } catch (error) {
       if (!(error instanceof ErrorDispositivo) || this.percibidor === this.#cpu) throw error;
-      // Tras un fallo nada asegura que el lector soltó los búferes de este despacho (una respuesta de otro despacho
-      // puede llegar mientras aún lee este): no se vuelven a escribir.
-      this.vista.abandonar();
       this.#respaldos++;
       this.#cpu.lanzar(despacho, this.planes);
-      salida = this.#cpu.esperar(PLAZO_PERCEPCION_MS) as PercepcionCpu;
+      salida = this.#cpu.esperar();
     }
     this.#salida = salida;
-    if (this.#fila.length < personas.length) this.#fila = new Int32Array(Math.max(personas.length, 2 * this.#fila.length));
+    const alta = vista.frente.alta;
+    if (this.#fila.length < alta) this.#fila = new Int32Array(Math.max(alta, 2 * this.#fila.length));
     this.#fila.fill(-1);
-    for (let i = 0; i < despacho.slots.length; i++) this.#fila[despacho.slots[i]!] = i;
-    this.#activa = true;
-    return this.#salida;
+    for (let i = 0; i < n; i++) this.#fila[despacho.slots[i]!] = i;
+    this.#tick = tick;
+    return salida;
   }
-  /** Fin de la fase de personas: lo percibido deja de valer. */
-  cerrar(): void { this.#activa = false; }
+  /** Fin de la fase de personas: lo percibido deja de valer y la barrera de escritura se cierra. */
+  cerrar(): void {
+    if (!this.#activa) return;
+    this.#activa = false;
+    cerrarBarrera(this.#barrera);
+    this.#barrera = undefined;
+    this.vista.terreno.soltar();
+  }
 
   /** La fila de `persona`: la del lote si sigue donde la capturó y su disco no cambió desde entonces; si no, la percibe
    * ahora sobre el estado vivo y sin cerebro (en búferes propios si `reutilizar` es falso: una decisión anidada no pisa
    * la de quien la llamó). */
-  filaDe(personas: readonly Person[], tick: number, persona: Person, slot: number | undefined, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
-    reutilizar = true): FilaPercibida {
-    const { frente } = this.vista;
-    if (!this.#activa || frente.tick !== tick) { this.#recapturar(personas, tick, tileIn, fast); slot = undefined; }
-    if (slot === undefined || frente.ocupantes[slot] !== persona) slot = frente.ocupantes.indexOf(persona);
-    // Alguien entró en `world.people` después de capturar: el frente ya no es el de ahora.
-    if (slot < 0) { this.#recapturar(personas, tick, tileIn, fast); slot = frente.ocupantes.indexOf(persona); }
-    if (slot < 0) throw new Error(`${persona.id} no está en el mundo`);
-    const fila = this.#fila[slot] ?? -1;
-    if (fila >= 0 && frente.x[slot] === persona.x && frente.y[slot] === persona.y && this.vista.terreno.vigente(persona.x, persona.y, fast))
-      return { salida: this.#salida!, fila, terreno: this.vista.terreno };
-    const { terreno, salida } = reutilizar ? this.#suelta : { terreno: new TerrenoMundo(), salida: reservarPercepcion(1, this.planes) };
-    // Se percibe desde donde está ahora (el frente la sigue llevando donde la capturó y no se toca: es de solo lectura).
-    terreno.reiniciar();
+  filaDe(tick: number, persona: Person, tileIn: TileLookup, fast: ResidentFastAccess | undefined, reutilizar = true): FilaPercibida {
+    const { vista } = this, { terreno } = vista, frente = vista.frente;
+    const slot = vista.organismos!.personas.slot(persona);
+    const fila = this.#activa && this.#tick === tick && slot >= 0 ? this.#fila[slot] ?? -1 : -1;
+    if (fila >= 0 && frente.x[slot] === persona.x && frente.y[slot] === persona.y && this.#vigente(persona, tileIn, fast))
+      return { salida: this.#salida!, fila, terreno };
+    const inicio = this.medir ? performance.now() : 0;
+    const salida = reutilizar ? this.#suelta : reservarPercepcion(1, this.planes);
+    // Se percibe desde donde está ahora sobre su disco al día (el frente la sigue llevando donde la capturó).
     terreno.capturarDisco(persona.x, persona.y, tileIn, fast);
     const p = preparar({ frente, terreno }, this.planes, salida.a);
     percibirActor(p, slot, p.planes[PLAN.sinCerebro]!, persona.x, persona.y, salida, 0);
+    if (this.medir) { this.medida.sueltas++; this.medida.msSueltas += performance.now() - inicio; }
     return { salida, fila: 0, terreno };
   }
-  /** Frente de ahora, sin lote: quien decida a continuación se percibe suelto. */
-  #recapturar(personas: readonly Person[], tick: number, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
-    this.vista.capturar(personas, tick, [], tileIn, fast);
-    this.#fila.fill(-1);
-    this.#activa = false;
+
+  /** ¿Sigue el disco de la persona como en F2? Por versiones de página; con `depuracion`, la barrera se comprueba
+   * además contra los valores de ahora, y con `medir` se cuentan los dos criterios. */
+  #vigente(persona: Person, tileIn: TileLookup, fast: ResidentFastAccess | undefined): boolean {
+    const { terreno } = this.vista;
+    if (!this.medir) {
+      const vigente = terreno.vigenteDesdeCaptura(persona.x, persona.y);
+      if (vigente && this.#depuracion && !terreno.coincideConMundo(persona.x, persona.y, tileIn, fast))
+        throw new Error(`Barrera de percepción incompleta: el disco de ${persona.id} cambió sin subir la versión de su página (tick ${this.#tick}).`);
+      return vigente;
+    }
+    const m = this.medida;
+    let t = performance.now();
+    const porPagina = terreno.vigenteDesdeCaptura(persona.x, persona.y);
+    m.msPaginas += performance.now() - t;
+    t = performance.now();
+    const porValor = terreno.coincideConMundo(persona.x, persona.y, tileIn, fast, this.#instantanea);
+    m.msValores += performance.now() - t;
+    m.filas++;
+    if (porPagina) m.aceptadas++; else m.rehechasPorPagina++;
+    if (!porValor) m.rehechasPorValor++;
+    if (porPagina && !porValor) m.fallosBarrera++;
+    return porPagina;
+  }
+
+  /** Copia de lo capturado en F2, para evaluar sobre ella el criterio de valores aunque una percepción suelta ponga
+   * después una página al día. */
+  #fotografiar(): void {
+    const { terreno } = this.vista, valores = terreno.valores;
+    if (this.#instantanea.length !== valores.length || this.#instantanea[0]!.length < valores[0]!.length)
+      this.#instantanea = valores.map(v => new Float64Array(v.length));
+    for (const chunk of terreno.paginasCapturadas)
+      for (let k = 0; k < valores.length; k++) this.#instantanea[k]!.set(valores[k]!.subarray(chunk << 8, (chunk + 1) << 8), chunk << 8);
   }
 }
 
 const porMundo = new WeakMap<object, PercepcionDelPaso>();
 /** La percepción de personas de un mundo (una por mundo, creada al primer uso). */
-export function percepcionDe(mundo: object): PercepcionDelPaso {
+export function percepcionDe(mundo: MundoOrganismos): PercepcionDelPaso {
   let p = porMundo.get(mundo);
-  if (!p) { p = new PercepcionDelPaso(); porMundo.set(mundo, p); }
+  if (!p) { p = new PercepcionDelPaso(mundo); porMundo.set(mundo, p); }
   return p;
 }

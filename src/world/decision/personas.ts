@@ -65,7 +65,7 @@ let chooseDepth = 0;
  * de la persona (esfuerzo asumible, fuente disputada, cisternas, lugares cercanos) se busca otra vez como siempre.
  * La pareja y quien tiene hambre salen de la lista viva de cercanos, como siempre.
  */
-export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
+export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   const depth = ++chooseDepth;
   try {
   const own = depth === 1;
@@ -77,7 +77,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const params = paramsOf(world);
   // V19/L: un tramo de descanso se acredita con lo que el cuerpo recuperó DE VERDAD hasta esta nueva decisión.
   if (own && person.action === 'rest' && params.conducta.aprendizajeCausal && params.conducta.politicaPeso > 0 && world.adaptationEnabled) creditCausalOutcome(world, person, 'rest');
-  const { salida, fila, terreno } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, fast, own);
+  const { salida, fila, terreno } = percepcionDe(world).filaDe(world.tick, person, tileIn, fast, own);
   const ventana = salida.ventana, ventanaCelda = salida.ventanaCelda, base = fila * CELDAS_VENTANA;
   const celdaPercibida = (consulta: number): number => salida.celda[fila * salida.q + consulta]!;
   const percibida = (consulta: number): Tile | undefined => {

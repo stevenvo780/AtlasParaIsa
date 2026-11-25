@@ -11,10 +11,13 @@ import { bindWorldContext, worldContext } from '../src/world/spatial.js';
 import { distance } from '../src/world/mundo/geometria.js';
 import { RADIUS, type Person } from '../src/world/mundo/tipos.js';
 import { evaluatePolicySingle, founderPolicy } from '../src/world/politica.js';
-import { CAMPOS_CUERPO, CEREBRO, COLUMNAS_CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, slotDe, type LotePercepcion, type Percepcion, type Percibidor,
-  type Plan } from '../src/world/motor/contratos.js';
+import { CAMPOS_CUERPO, CEREBRO, COLUMNAS_CEREBRO, CUERPO_ANCHO, Clase, ErrorDispositivo, REF_NULA, slotDe, type Col, type LotePercepcion, type Percepcion,
+  type Percibidor, type Plan } from '../src/world/motor/contratos.js';
 import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercepcionDelPaso, PercibidorCpu, VistaMundo, percepcionDe, type DescriptorVista, type Vencidos,
   type PercepcionCpu } from '../src/world/decision/percepcion.js';
+import { TerrenoPercepcion } from '../src/world/decision/terreno-percepcion.js';
+import { OrganismosMundo, organismosDe } from '../src/world/soa/organismos-mundo.js';
+import { marcarTesela } from '../src/world/soa/barrera-percepcion.js';
 import { CONSULTA, PLAN, UMBRAL, f32Abajo, f32Arriba, planesPersonas } from '../src/world/decision/planes.js';
 import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararCerebros, puntuacionesPercibidas } from '../src/world/decision/politica-persona.js';
 import { choose } from '../src/world/decision/personas.js';
@@ -25,10 +28,17 @@ import { PercibidorHilos } from './v23-decision-hilos.js';
 const ABIERTO = parseParams({ motor: { ...hostOpenWorldParams().motor, hilos: 1, gpu: [] } }, hostOpenWorldParams());
 /** El mismo con el SoA residente, como lo arma `sim-worker`: dueño de topología y ecología en 2 hilos. */
 const RESIDENTE = parseParams({ motor: { ...ABIERTO.motor, hilos: 2 } }, ABIERTO);
+const conDepuracion = (p: WorldParams) => parseParams({ motor: { ...p.motor, depuracion: true } }, p);
+const RESIDENTES = new Set([RESIDENTE]);
+const RESIDENTE_DEPURADO = conDepuracion(RESIDENTE);
+RESIDENTES.add(RESIDENTE_DEPURADO);
+
+/** Las primeras `n` filas de una columna del frente. */
+const filas = (c: Col, n: number) => Array.from({ length: n }, (_, i) => c[i]!);
 
 function crear(seed: number, params: WorldParams = DEFAULT_PARAMS): World {
   const world = createWorld(seed, params);
-  if (params === RESIDENTE) {
+  if (RESIDENTES.has(params)) {
     const dueno = new ResidentTopologyOwner();
     world.tiles = dueno.tiles(world.tiles.map(t => dueno.tile(t)));
     bindWorldContext(world, { ...worldContext(world), tileOwnership: dueno });
@@ -39,7 +49,7 @@ function crear(seed: number, params: WorldParams = DEFAULT_PARAMS): World {
 function mundo(seed: number, pasos: number, params: WorldParams = DEFAULT_PARAMS): World {
   const world = crear(seed, params);
   for (let i = 0; i < pasos; i++) stepWorld(world);
-  if (params === RESIDENTE) assert.ok(residentFastAccess(world.tiles)?.exact, 'el SoA es residente');
+  if (RESIDENTES.has(params)) assert.ok(residentFastAccess(world.tiles)?.exact, 'el SoA es residente');
   return world;
 }
 
@@ -48,14 +58,23 @@ function multitud(world: World, n: number): Person[] {
   const tierra = world.tiles.filter(t => t.terrain !== 'water'), personas = world.people.slice();
   for (let i = 0; personas.length < n; i++) {
     const base = world.people[i % world.people.length]!, t = tierra[(i * 7919) % tierra.length]!;
-    personas.push({ ...structuredClone(base), id: `${base.id}-copia-${i}`, x: t.x, y: t.y });
+    personas.push({ ...structuredClone(base), id: `${base.id}-copia-${i}`, x: t.x, y: t.y, uid: undefined });
   }
   return personas;
 }
 
+/** Una tabla propia que da uid a partir del siguiente del mundo, sin gastárselos: las personas que trae ya tienen el suyo. */
+const organismosPropios = (world: World | undefined, depuracion = false) => {
+  let uid = world?.siguienteUid ?? 1;
+  return new OrganismosMundo(depuracion, () => uid++);
+};
+
+/** Una vista propia (tabla y terreno nuevos): en ella la ranura de cada persona es su índice en la primera captura. */
+const vistaNueva = (world?: World) => VistaMundo.de(organismosPropios(world), new TerrenoPercepcion(false));
+
 /** Lote de `personas` (todas las del mundo por defecto), con cerebro para quien decidiría con él, sobre el estado de ahora. */
 function percibirTodos(world: World, personas: readonly Person[] = world.people): { vista: VistaMundo; lote: LotePercepcion; salida: PercepcionCpu; planes: Plan[] } {
-  const vista = VistaMundo.nueva(), tileIn = tileLookup(world.tiles);
+  const vista = vistaNueva(world), tileIn = tileLookup(world.tiles);
   const slots = Int32Array.from(personas, (_, s) => s);
   const lote: LotePercepcion = { tick: world.tick, despacho: 1, slots, plan: Uint16Array.from(personas, () => PLAN.conCerebro) };
   vista.capturar(personas, world.tick, slots, tileIn, residentFastAccess(world.tiles));
@@ -146,18 +165,18 @@ test('la ventana y las consultas percibidas son las de la búsqueda de siempre',
 });
 
 test('las personas no llevan consultas de organismos: pareja y hambriento salen de la lista viva', () => {
-  const planes = planesPersonas(VistaMundo.nueva().terreno.campos);
+  const planes = planesPersonas(vistaNueva().terreno.campos);
   assert.deepEqual(planes.map(p => p.organismos.length), [0, 0]);
 });
 
 test('una ConsultaOrganismo da el organismo de una búsqueda directa sobre el frente', () => {
   const world = mundo(51926, 900, ABIERTO), tileIn = tileLookup(world.tiles);
   const personas = multitud(world, 300);
-  const vista = VistaMundo.nueva(), slots = Int32Array.from(personas, (_, s) => s);
+  // Hambre de la multitud repartida en [0, 1): el filtro y el criterio 1 tienen donde elegir.
+  personas.forEach((p, s) => { p.hunger = ((s * 2654435761) % 1000) / 1000; });
+  const vista = vistaNueva(world), slots = Int32Array.from(personas, (_, s) => s);
   vista.capturar(personas, world.tick, slots, tileIn, undefined);
   const { frente } = vista, cuerpo = frente.columnas.indexOf('cuerpo');
-  // Hambre de la multitud repartida en [0, 1): el filtro y el criterio 1 tienen donde elegir.
-  for (let s = 0; s < personas.length; s++) frente.cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.hambre] = ((s * 2654435761) % 1000) / 1000;
   const plan: Plan = {
     id: 0, transitable: Float32Array.of(0, 1, 4), celdas: [], acciones: 0, w: null, organismos: [
       { radio: RADIUS, clase: Clase.Persona, filtros: new Float32Array(0), criterio: 0, columna: 0, componente: 0 },
@@ -333,147 +352,139 @@ test('una respuesta de otro despacho se rechaza y el lote se percibe en CPU', ()
   assert.ok(otra.respaldos > 0, 'la guardia rechazó respuestas atrasadas');
 });
 
-test('un lector que sobrevive a su plazo sigue viendo un solo tick entero, y sin fallos los búferes no se rehacen', () => {
+test('la vista se comparte por SAB que crecen en su sitio: entre despachos, los mismos búferes', () => {
   const world = createWorld(42, DEFAULT_PARAMS), percepcion = percepcionDe(world);
-  let retenido: DescriptorVista | undefined, foto: number[][] = [];
-  const instantanea = (d: DescriptorVista) => {
-    const v = VistaMundo.desde(d), f = v.frente, t = v.terreno;
-    return [[f.tick, f.alta, t.paginas], Array.from(f.x.subarray(0, f.alta)), Array.from(f.y.subarray(0, f.alta)), Array.from(f.gen.subarray(0, f.alta)),
-      Array.from(f.vivo.subarray(0, f.alta)), Array.from(f.cuerpo.subarray(0, f.alta * CUERPO_ANCHO)), Array.from(t.paginaX.subarray(0, t.paginas)),
-      Array.from(t.paginaY.subarray(0, t.paginas)), Array.from(t.versionPagina.subarray(0, t.paginas)), ...t.valores.map(c => Array.from(c.subarray(0, t.paginas * 256)))];
-  };
-  const cpu = new PercibidorCpu(percepcion.vista);
-  let llamadas = 0;
-  const descriptores: DescriptorVista[] = [];
+  const cpu = new PercibidorCpu(percepcion.vista), descriptores: DescriptorVista[] = [];
   percepcion.percibidor = {
     dispositivo: 'gpu0',
-    lanzar(lote, planes) {
-      llamadas++;
-      descriptores.push(percepcion.vista.descriptor());
-      if (llamadas === 100) { retenido = descriptores.at(-1); foto = instantanea(retenido!); }
-      cpu.lanzar(lote, planes);
-    },
-    esperar() {
-      if (llamadas === 100) throw new ErrorDispositivo('gpu0', 'plazo vencido');
-      return cpu.esperar();
-    },
+    lanzar(lote, planes) { descriptores.push(percepcion.vista.descriptor()); cpu.lanzar(lote, planes); },
+    esperar() { return cpu.esperar(); },
   };
   for (let i = 0; i < 400; i++) stepWorld(world);
-  assert.equal(percepcion.respaldos, 1);
-  assert.deepEqual(instantanea(retenido!), foto);
-  assert.notEqual(descriptores[100]!.columnas.x, descriptores[99]!.columnas.x, 'tras el fallo, búferes nuevos');
-  // Entre despachos sin fallo ni crecimiento del frente, los mismos SAB.
-  const mismos = descriptores.slice(101).filter((d, i, ds) => i > 0 && d.alta === ds[i - 1]!.alta && d.columnas.x === ds[i - 1]!.columnas.x).length;
-  assert.ok(mismos > 250, `${mismos} despachos con los mismos búferes`);
+  assert.equal(percepcion.respaldos, 0);
+  const sab = (d: DescriptorVista) => [d.frente.estado, ...d.frente.columnas.flatMap(c => c.lados), d.terreno.topologia.buffer,
+    ...d.terreno.arena.columnas.map(c => c.memoria)];
+  const primero = sab(descriptores[0]!);
+  for (const d of descriptores) assert.deepEqual(sab(d).map((b, k) => b === primero[k]), primero.map(() => true));
+  // Otro hilo lee el frente publicado ahora mismo, del lado y del tick que toque.
+  const otra = VistaMundo.desde(descriptores.at(-1)!), frente = percepcion.vista.frente;
+  assert.equal(otra.frente.tick, frente.tick);
+  assert.deepEqual(filas(otra.frente.x, frente.alta), filas(frente.x, frente.alta));
 });
 
-test('el terreno sube la versión de cada página que reasigna, también en la vista de otro hilo', () => {
+test('una página solo sube de versión si cambia lo que lleva, también vista desde otro hilo', () => {
   const world = mundo(42, 300), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
-  const vista = VistaMundo.nueva(), a = world.people[0]!;
+  const vista = vistaNueva(world), a = world.people[0]!, { terreno } = vista;
   vista.capturar(world.people, world.tick, [0], tileIn, fast);
-  const antes = Array.from(vista.terreno.versionPagina.subarray(0, vista.terreno.paginas));
+  const versiones = () => Array.from(terreno.versionPagina.subarray(0, terreno.paginas));
+  const antes = versiones();
   assert.ok(antes.length > 0 && antes.every(v => v > 0));
-  const tierra = world.tiles.filter(t => t.terrain !== 'water');
-  const lejos = tierra.reduce((m, t) => distance(t, a) > distance(m, a) ? t : m, tierra[0]!);
-  assert.ok(distance(lejos, a) > 2 * RADIUS);
-  const [x, y] = [a.x, a.y];
-  a.x = lejos.x; a.y = lejos.y;
-  try { vista.capturar(world.people, world.tick + 1, [0], tileIn, fast); } finally { a.x = x; a.y = y; }
-  const { terreno } = vista;
-  for (let c = 0; c < terreno.paginas; c++) assert.ok(terreno.versionPagina[c]! > (antes[c] ?? 0), `página ${c}`);
+  vista.capturar(world.people, world.tick + 1, [0], tileIn, fast);
+  assert.deepEqual(versiones(), antes, 'sin cambios, ninguna versión sube');
+  const tile = disco(world, a).find(t => t.terrain !== 'water' && distance(t, a) <= RADIUS)!;
+  const c = terreno.celda(tile.x, tile.y), pagina = c >> 8;
+  tile.vegetation = tile.vegetation / 2 + 0.01;
+  vista.capturar(world.people, world.tick + 2, [0], tileIn, fast);
+  const despues = versiones();
+  despues.forEach((v, k) => assert.equal(v, k === pagina ? antes[k]! + 1 : antes[k], `página ${k}`));
+  assert.equal(terreno.valores[6]![c], tile.vegetation);
   const otra = VistaMundo.desde(vista.descriptor()).terreno;
   assert.equal(otra.paginas, terreno.paginas);
-  for (let c = 0; c < terreno.paginas; c++) {
-    assert.equal(otra.versionPagina[c], terreno.versionPagina[c]);
-    assert.ok(otra.duenoChunk[c]! >= 0);
-  }
+  assert.equal(otra.celda(tile.x, tile.y), c);
+  for (let k = 0; k < terreno.paginas; k++) assert.equal(otra.versionPagina[k], terreno.versionPagina[k]);
 });
 
-test('un slot que cambia de ocupante cambia de gen, y crecer el frente no la pierde', () => {
-  const world = mundo(42, 300), tileIn = tileLookup(world.tiles), vista = VistaMundo.nueva();
-  const gens = () => Array.from(vista.frente.gen.subarray(0, vista.frente.alta));
+test('una persona que sale da de baja su ranura: las demás la conservan y la ranura vuelve tras la cuarentena con otra gen', () => {
+  const world = mundo(42, 300), tileIn = tileLookup(world.tiles);
+  const organismos = organismosPropios(world, true), vista = VistaMundo.de(organismos, new TerrenoPercepcion(true));
   const antes = world.people.slice();
   assert.ok(antes.length > 3);
   vista.capturar(antes, 1, [], tileIn, undefined);
-  const g1 = gens();
-  assert.ok(g1.every(g => g > 0));
-  // Muere la persona 1: las de detrás se corren un slot; las de delante siguen en el suyo.
-  const despues = antes.filter((_, i) => i !== 1);
+  const ranura = (p: Person) => vista.slot(p), g1 = antes.map(p => vista.frente.gen[ranura(p)]!);
+  assert.deepEqual(antes.map(ranura), antes.map((_, i) => i));
+  const sale = antes[1]!, despues = antes.filter(p => p !== sale);
   vista.capturar(despues, 2, [], tileIn, undefined);
-  const g2 = gens();
-  assert.equal(g2[0], g1[0]);
-  for (let s = 1; s < despues.length; s++) assert.ok(g2[s]! > g1[s]!, `slot ${s}`);
-  assert.equal(vista.frente.vivo[despues.length], 0, 'el slot que sobra queda muerto');
-  // Más personas que capacidad: el frente crece sin volver a gen 0.
-  const muchas = Array.from({ length: 4 * vista.frente.gen.length }, (_, i) => despues[i % despues.length]!);
-  vista.capturar(muchas, 3, [], tileIn, undefined);
-  assert.equal(vista.frente.gen[0], g2[0]);
+  assert.equal(vista.slot(sale), -1);
+  despues.forEach(p => assert.equal(vista.frente.gen[ranura(p)], g1[antes.indexOf(p)], p.id));
+  assert.equal(vista.frente.vivo[1], 0);
+  assert.ok(vista.frente.gen[1]! > g1[1]!, 'la baja sube la gen de la ranura');
+  // La cuarentena cuenta frentes publicados (uno por tick al cerrar el paso): quien llega durante ella no hereda la
+  // ranura; pasada, sí, con una gen nueva y sin los pesos de la anterior.
+  const llegada = (id: string): Person => ({ ...structuredClone(sale), id, uid: undefined });
+  const primera = llegada('primera');
+  vista.capturar([...despues, primera], 3, [], tileIn, undefined);
+  assert.notEqual(vista.slot(primera), 1);
+  organismos.publicar(4);
+  const segunda = llegada('segunda');
+  vista.capturar([...despues, primera, segunda], 5, [], tileIn, undefined);
+  assert.equal(vista.slot(segunda), 1);
+  assert.ok(vista.frente.gen[1]! > g1[1]!, 'otra gen que la de la anterior');
+  assert.equal(vista.frente.uid[1], segunda.uid);
+  assert.ok(segunda.uid! > sale.uid! && primera.uid! > sale.uid!, 'uid nuevo, nunca el de la anterior');
+  assert.ok(!vista.pesosAlDia(1), 'los pesos de la anterior no valen para la nueva');
 });
 
-test('quien sustituye a otra persona en su slot y su sitio no recibe la percepción de la anterior', () => {
+test('quien llega al sitio de otra no recibe la percepción de la anterior', () => {
   const world = mundo(7, 300), tileIn = tileLookup(world.tiles);
-  const percepcion = new PercepcionDelPaso(), personas = world.people.slice();
+  const percepcion = new PercepcionDelPaso(world), personas = world.people.slice();
   const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
   const delLote = percepcion.percibir(personas, world.tick, lote, tileIn, undefined, () => {});
-  assert.equal(percepcion.filaDe(personas, world.tick, personas[0]!, 0, tileIn, undefined).salida, delLote);
-  const otra: Person = { ...structuredClone(personas[0]!), id: 'sustituta' };
-  personas[0] = otra;
-  assert.notEqual(percepcion.vista.personas[0], otra, 'los ocupantes se fijan al capturar');
-  const fila = percepcion.filaDe(personas, world.tick, otra, 0, tileIn, undefined);
+  assert.equal(percepcion.filaDe(world.tick, personas[0]!, tileIn, undefined).salida, delLote);
+  const otra: Person = { ...structuredClone(personas[0]!), id: 'sustituta', uid: undefined };
+  const fila = percepcion.filaDe(world.tick, otra, tileIn, undefined);
   assert.notEqual(fila.salida, delLote);
-  assert.equal(percepcion.vista.personas[0], otra);
   percepcion.cerrar();
 });
 
 test('quien decide fuera del lote se percibe donde está sin escribir en el frente', () => {
-  const world = mundo(7, 900), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles) ?? undefined;
-  const percepcion = new PercepcionDelPaso(), persona = world.people[0]!;
+  const world = mundo(7, 900, conDepuracion(DEFAULT_PARAMS)), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles) ?? undefined;
+  const percepcion = new PercepcionDelPaso(world), persona = world.people[0]!;
   const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
   percepcion.percibir(world.people, world.tick, lote, tileIn, fast, () => {});
-  const { datos } = percepcion.vista.frente;
-  const soloLectura = (c: ArrayBufferView) => new Proxy(c, { set: () => { throw new Error('escritura en el frente'); } });
-  const [x, y] = [datos.x!, datos.y!];
+  const { tabla } = organismosDe(world), frente = tabla.lectura(), x = filas(frente.x, frente.alta);
   const destino = vecinasDeTierra(world, persona.x, persona.y)[0]!;
   const origen = { x: persona.x, y: persona.y };
   Object.assign(persona, { x: destino.x, y: destino.y });
-  datos.x = soloLectura(x) as Float32Array; datos.y = soloLectura(y) as Float32Array;
   try {
-    const { salida, fila, terreno } = percepcion.filaDe(world.people, world.tick, persona, 0, tileIn, fast);
+    const { salida, fila, terreno } = percepcion.filaDe(world.tick, persona, tileIn, fast);
     const ref = referencia(world, persona.x, persona.y);
     for (const [consulta, tile] of Object.entries(ref.consultas)) {
       const c = salida.celda[fila * salida.q + Number(consulta)]!;
       assert.equal(c >= 0 ? terreno.teselas[c] : undefined, tile, `consulta ${consulta}`);
     }
-  } finally { datos.x = x; datos.y = y; Object.assign(persona, origen); percepcion.cerrar(); }
+    assert.equal(tabla.lectura(), frente, 'sin publicar otro frente');
+    assert.deepEqual(filas(frente.x, frente.alta), x);
+    tabla.verificarFrente();
+  } finally { Object.assign(persona, origen); percepcion.cerrar(); }
 });
 
-test('la fila del lote solo vale mientras el disco no cambie: bajar o subir cualquier campo la percibe de nuevo', () => {
+test('la fila del lote solo vale mientras su disco no cambie: toda escritura con barrera la percibe de nuevo', () => {
   for (const params of [DEFAULT_PARAMS, RESIDENTE]) {
     const world = mundo(51926, 300, params), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
-    const persona = world.people[0]!, percepcion = new PercepcionDelPaso();
+    const persona = world.people[0]!, percepcion = new PercepcionDelPaso(world);
     const lote: Vencidos = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
     const delLote = percepcion.percibir(world.people, world.tick, lote, tileIn, fast, () => {});
-    const fila = () => percepcion.filaDe(world.people, world.tick, persona, 0, tileIn, fast).salida;
+    const fila = () => percepcion.filaDe(world.tick, persona, tileIn, fast).salida;
     assert.equal(fila(), delLote, 'sin cambios, la del lote');
     const lejana = disco(world, persona).filter(t => t.terrain !== 'water' && distance(t, persona) <= RADIUS).at(-1)!;
-    const celda = fast ? fast.exact!.cellAt(lejana.x, lejana.y) : -1;
-    const campos: [string, Float64Array | undefined, keyof Tile][] = [['comida', fast?.foodArr, 'food'], ['aguaPotable', fast?.drinkingWaterArr, 'drinkingWater'],
-      ['madera', fast?.woodArr, 'wood'], ['humedad', fast?.moistureArr, 'moisture'], ['vegetacion', fast?.vegetationArr, 'vegetation'], ['piedra', undefined, 'stone']];
-    let probados = 0;
-    for (const [nombre, arr, clave] of campos) {
-      const leer = () => arr ? arr[celda]! : Number(lejana[clave] ?? 0), poner = (v: number) => { if (arr) arr[celda] = v; else (lejana as unknown as Record<string, number>)[clave] = v; };
-      const antes = arr ? arr[celda]! : lejana[clave];
-      for (const delta of [-1e-9, 1e-9]) {
-        const v = leer();
-        if (v + delta < 0) continue;
-        poner(v + delta);
-        try { assert.notEqual(fila(), delLote, `${nombre} ${delta > 0 ? 'sube' : 'baja'}`); probados++; }
-        finally { if (arr) arr[celda] = antes as number; else (lejana as unknown as Record<string, unknown>)[clave] = antes; }
-        assert.equal(fila(), delLote, `${nombre} restaurada`);
-      }
-    }
-    assert.ok(probados >= 6);
+    const fuera = world.tiles.find(t => Math.abs(t.x - persona.x) > 40 && Math.abs(t.y - persona.y) > 40);
+    if (fuera) { marcarTesela(fuera); assert.equal(fila(), delLote, 'una escritura lejos no la toca'); }
+    marcarTesela(lejana);
+    assert.notEqual(fila(), delLote, 'una escritura en su disco la percibe de nuevo');
     percepcion.cerrar();
+  }
+});
+
+test('con depuración, una escritura en el disco que no pasa por la barrera se detecta', () => {
+  for (const params of [conDepuracion(DEFAULT_PARAMS), RESIDENTE_DEPURADO]) {
+    const world = mundo(51926, 300, params);
+    const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
+    const persona = world.people[0]!, percepcion = new PercepcionDelPaso(world);
+    percepcion.percibir(world.people, world.tick, { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) }, tileIn, fast, () => {});
+    const lejana = disco(world, persona).filter(t => t.terrain !== 'water' && distance(t, persona) <= RADIUS).at(-1)!;
+    lejana.vegetation = lejana.vegetation / 2 + 1e-3;
+    try { assert.throws(() => percepcion.filaDe(world.tick, persona, tileIn, fast), /Barrera de percepción incompleta/); }
+    finally { percepcion.cerrar(); }
   }
 });
 
@@ -490,7 +501,7 @@ function decidirTrasCambio(world: World, persona: Person, slot: number, cambio: 
   percepcion.percibir(world.people, world.tick, { tick: world.tick, slots: Int32Array.of(slot), plan: Uint16Array.of(PLAN.sinCerebro) }, tileIn, undefined, () => {});
   try {
     cambio();
-    choose(world, persona, undefined, slot);
+    choose(world, persona);
   } finally { percepcion.cerrar(); }
 }
 
@@ -500,7 +511,7 @@ test('quien decide después de que otro agotó su fuente no la elige, aunque el 
   w1!.drinkingWater = 0.0055; w2!.drinkingWater = 0.1;
   decidirTrasCambio(world, persona, slot, () => {});
   assert.deepEqual([persona.action, persona.target], ['drink', { x: w1!.x, y: w1!.y }], 'sin cambios, la primera en orden de filas');
-  decidirTrasCambio(world, persona, slot, () => { w1!.drinkingWater = 0; });
+  decidirTrasCambio(world, persona, slot, () => { w1!.drinkingWater = 0; marcarTesela(w1!); });
   assert.deepEqual([persona.action, persona.target], ['drink', { x: w2!.x, y: w2!.y }]);
 });
 
@@ -510,7 +521,7 @@ test('si otro come de la mejor fuente y deja de ser la mejor, aunque siga valien
   f1!.food = 0.5; f2!.food = 0.3;
   decidirTrasCambio(world, persona, slot, () => {});
   assert.deepEqual([persona.action, persona.target], ['eat', { x: f1!.x, y: f1!.y }]);
-  decidirTrasCambio(world, persona, slot, () => { f1!.food = 0.05; });
+  decidirTrasCambio(world, persona, slot, () => { f1!.food = 0.05; marcarTesela(f1!); });
   assert.deepEqual([persona.action, persona.target], ['eat', { x: f2!.x, y: f2!.y }], 'la que quedó en 0,05 sigue valiendo, pero ya no es la mejor');
 });
 
@@ -546,20 +557,21 @@ test('quien comparte elige al más hambriento de ahora, no al que lo era cuando 
 });
 
 test('los pesos de un ocupante nuevo se publican con su gen aunque no decida con cerebro, sin crearle la política', () => {
-  const world = mundo(51926, 300, ABIERTO), tileIn = tileLookup(world.tiles), vista = VistaMundo.nueva();
-  const vacio: Vencidos = { tick: world.tick, slots: new Int32Array(0), plan: new Uint16Array(0) };
+  const world = mundo(51926, 300, ABIERTO), tileIn = tileLookup(world.tiles), vista = vistaNueva(world);
+  const vacio: LotePercepcion = { tick: world.tick, despacho: 1, slots: new Int32Array(0), plan: new Uint16Array(0) };
   const pesos = (s: number) => Array.from((vista.frente.col('politica') as Float64Array).subarray(s * COLUMNAS_CEREBRO.politica, (s + 1) * COLUMNAS_CEREBRO.politica));
   vista.capturar(world.people, world.tick, [], tileIn, undefined);
   prepararCerebros(world, vista, vacio, tileIn);
   world.people.forEach((p, s) => { assert.ok(vista.pesosAlDia(s)); assert.deepEqual(pesos(s), Array.from((p.policy ?? founderPolicy(world.seed, p.id)).weights)); });
-  const nueva: Person = { ...structuredClone(world.people[1]!), id: 'recien-llegada' };
+  const nueva: Person = { ...structuredClone(world.people[1]!), id: 'recien-llegada', uid: undefined };
   delete nueva.policy;
   const personas = [nueva, ...world.people.slice(1)];
   vista.capturar(personas, world.tick + 1, [], tileIn, undefined);
-  assert.ok(!vista.pesosAlDia(0) && vista.pesosAlDia(1));
+  const s0 = vista.slot(nueva);
+  assert.ok(!vista.pesosAlDia(s0) && vista.pesosAlDia(vista.slot(world.people[1]!)));
   prepararCerebros(world, vista, { ...vacio, tick: world.tick + 1 }, tileIn);
-  assert.ok(vista.pesosAlDia(0));
-  assert.deepEqual(pesos(0), Array.from(founderPolicy(world.seed, 'recien-llegada').weights));
+  assert.ok(vista.pesosAlDia(s0));
+  assert.deepEqual(pesos(s0), Array.from(founderPolicy(world.seed, 'recien-llegada').weights));
   assert.equal(nueva.policy, undefined);
 });
 

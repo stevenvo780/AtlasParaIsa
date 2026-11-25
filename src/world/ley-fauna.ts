@@ -554,6 +554,7 @@ export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por
   const e = estado(c), f = e.filas.get(animal), cu = animal.cuerpo;
   if (!cu || !f) return;
   const celda = c.terreno.celda(animal.x, animal.y);
+  const masa = masaDe(c, cu);
   morir(c, cu, celda);
   const violenta = por !== undefined || (animal.fauna !== undefined && c.tick - animal.fauna.heridoEn <= 2);
   if (violenta && propia(c, celda)) alarmaPorAtaque(c, animal.x, animal.y, 1);
@@ -565,7 +566,7 @@ export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por
   if (causa === 'caza humana') dyn.humanHunts++;
   else if (causa === 'depredación') dyn.predations++;
   const actores = por ? [por, animal.id] : [animal.id];
-  c.suceso({ kind: 'animal', actors: actores, x: animal.x, y: animal.y, text: `Muere un animal de ${Math.round(masaDe(c, cu) * 10) / 10} kg por ${causa}.`,
+  c.suceso({ kind: 'animal', actors: actores, x: animal.x, y: animal.y, text: `Muere un animal de ${Math.round(masa * 10) / 10} kg por ${causa}.`,
     cause: causa, source: 'simulation' });
   c.mundo.animals = c.mundo.animals.filter(x => x !== animal);
 }

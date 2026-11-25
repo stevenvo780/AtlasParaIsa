@@ -23,6 +23,8 @@ export interface AnimalView {
   habituation?: number;
   /** V23: count of non-lethal tending interactions received. */
   tends?: number;
+  /** V23 (`v23.fauna`): cuerpo de átomos y conducta visible sin especies. Ausentes sin la ley. */
+  cuerpoVisto?: import('./vistas-v23.js').CuerpoVisible; v23?: import('./vistas-v23.js').FaunaVisible;
 }
 export interface AnimalDynamics { births: number; deaths: number; predations: number; humanHunts: number; waterConsumed: number; plantConsumed: number; }
 export type StructureComponent = 'frame' | 'roof' | 'cistern' | 'granary' | 'garden' | 'hearth';
@@ -49,6 +51,8 @@ export interface StructureView {
     /** The old building remains operational; this paid delta reserves the target footprint. */
     expansion?: { blueprintId: string; components: StructureComponent[]; footprint?: { width: 1 | 2; height: 1 | 2 }; cells?: Array<{ x: number; y: number }> } };
   losses?: { water: number; food: number };
+  /** V23 (`v23.obra`): las piezas de obra de esta estructura, como lotes con forma. Ausente sin la ley. */
+  piezas?: import('./vistas-v23.js').LoteVisible[];
   installed?: Array<{ id: string; recipeId: string | null; mass: number; containment: number; insulation: number;
     cohesion: number; binding: number; condition: number;
     /** Fixed assets leave the portable technology ledger through its explicit estate outflow.

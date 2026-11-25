@@ -60,6 +60,8 @@ export interface Animal extends AnimalView {
   lastHunted?: number;
   /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
   uid?: number;
+  /** V23 (`v23.fauna`): cuerpo de átomos; se pone al crear el animal con la ley encendida, nunca después. */
+  cuerpo?: import('./materia/tipos.js').Cuerpo;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;

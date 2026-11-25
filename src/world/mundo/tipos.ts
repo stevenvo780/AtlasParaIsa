@@ -51,6 +51,9 @@ export interface Habit {
 export interface Person extends PersonView {
   /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
   uid?: number;
+  /** V23 (`v23.cuerpos`): cuerpo de átomos y lotes que lleva a cuestas (`LoteRef` de objetos y montones). Quien crea a la
+   * persona con la ley encendida los pone al crearla (nunca después: regla h de la oleada); ausentes sin la ley. */
+  cuerpo?: import('../materia/tipos.js').Cuerpo; carga?: number[];
   huntingPreyId?: string;
   tending?: { id: string; work: number };
   compounds?: CompoundLot[];

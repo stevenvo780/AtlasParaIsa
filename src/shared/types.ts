@@ -24,7 +24,10 @@ export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' |
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
 export type Feature = 'tree' | 'pine' | 'palm' | 'cactus' | 'reeds' | 'berries' | 'flowers' | 'rock' | 'clay' | 'stump' | 'spring' | 'pool' | 'none';
 export type Species = 'hare' | 'deer' | 'boar' | 'fish' | 'wolf' | 'fox';
-export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; paved?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number; }
+export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; paved?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number;
+  /** V23 (`v23.materia`): hasta 3 pares [sustancia, fracción de masa] de la superficie y su temperatura en K. Solo existen
+   * en la vista que viaja (los pone la proyección): la tesela del mundo no los lleva ni el guardado los escribe. */
+  mat?: import('./materia.js').MatTesela; T?: number; }
 export type Action = 'explore' | 'eat' | 'forage' | 'drink' | 'hunt' | 'rest' | 'approach' | 'accompany' | 'retreat' | 'share' | 'gather' | 'farm' | 'build' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft';
 export type Order = 'move' | 'explore' | 'forage' | 'gather' | 'farm' | 'build' | 'hunt' | 'drink' | 'rest' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft' | 'auto';
 export interface GenomeView { generation: number; parents: string[]; learningRate: number; cooperation: number; mutations: number; }
@@ -52,6 +55,8 @@ export interface PersonView {
   lifeStage?: 'juvenile' | 'adult' | 'senescent';
   /** V20: conserved chemical compound lots carried by this inhabitant. */
   compounds?: import('./chemistry.js').CompoundLot[];
+  /** V23 (`v23.cuerpos`, `v23.natalidad`): cuerpo de átomos y crianza. Ausentes sin la ley. */
+  cuerpoVisto?: import('./vistas-v23.js').CuerpoVisible; crianza?: import('./vistas-v23.js').CrianzaVisible;
   /** V23: emergent craft colorHex (dominant compound/tool tint) and continuous vocation focus derived from real deeds & chemistry. */
   craftTint?: string;
   craftFocus?: string;
@@ -109,6 +114,11 @@ export interface WorldView {
   geologyKey?: number;
   /** V20: emergent algebraic chemistry summary (discovered formulas, active lots, highest temperature tier). */
   chemistry?: import('./chemistry.js').ChemistrySummaryView;
+  /** V23: materia del mundo (panel «Materia»), lotes con forma visibles en la cámara, sustancias que esta vista
+   * referencia, aire de las páginas visibles (clave «px,py») y reparto de dueños. Cada uno ausente sin su ley. */
+  materia?: import('./vistas-v23.js').MateriaMundoVisible; lotes?: import('./vistas-v23.js').LoteVisible[];
+  sustancias?: import('./vistas-v23.js').SustanciasVisibles; aire?: Record<string, import('./vistas-v23.js').AireVisible>;
+  reparto?: import('./vistas-v23.js').RepartoVisible;
   /** V24: active/recent asynchronous Divine Whispers (non-coercive inspirations awaiting reception). */
   whispers?: import('./worldmap.js').DivineWhisper[];
   /** Identity of the served world; the projection omits it and the server adds it. */

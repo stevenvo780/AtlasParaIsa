@@ -40,7 +40,8 @@ export function fastEqual(a: unknown, b: unknown): boolean {
 /** Propiedades opcionales de `WorldView`: las únicas que un delta puede borrar (viajan como `null`).
  * El tipo obliga a mantener esta lista al día con `WorldView`. */
 const OPCIONALES = ['paused', 'pauseReason', 'originX', 'originY', 'infinite', 'discoveredChunks', 'settlementCount', 'activeChunks',
-  'stats', 'performance', 'communities', 'animals', 'blueprints', 'structures', 'technology', 'organization', 'geologyKey', 'chemistry', 'whispers', 'instanceId', 'regionesVivas', 'demography'] as const;
+  'stats', 'performance', 'communities', 'animals', 'blueprints', 'structures', 'technology', 'organization', 'geologyKey', 'chemistry', 'whispers', 'instanceId', 'regionesVivas', 'demography',
+  'materia', 'lotes', 'sustancias', 'aire', 'reparto'] as const;
 type ClavesOpcionales = { [K in keyof WorldView]-?: object extends Pick<WorldView, K> ? K : never }[keyof WorldView];
 const exhaustivo: Exclude<ClavesOpcionales, (typeof OPCIONALES)[number]> extends never ? true : never = true;
 void exhaustivo;

@@ -5,7 +5,7 @@ import { decodeSnapshotTileRows, encodeSnapshotTileRows, SNAPSHOT_TILE_FIELDS } 
 
 /** Un valor distinto en cada campo: si el codificador y `SNAPSHOT_TILE_FIELDS` se desalinean, dos
  * campos intercambian valores y la tupla deja de coincidir con la lista. */
-const tile: Required<Tile> = {
+const tile: Required<Omit<Tile, 'mat' | 'T'>> = { // `mat` y `T` (V23) solo existen en la vista: no se guardan
   x: 3, y: -4, terrain: 'meadow', moisture: 0.11, vegetation: 0.12, food: 0.13, biome: 'forest', elevation: 0.14,
   wood: 1.5, stone: 2.5, feature: 'spring', variety: 0.15, growth: 0.16, fertility: 0.17, cultivation: 0.18,
   traffic: 0.19, drinkingWater: 0.21, species: 'deer', fauna: 4, life: 0.22, paved: 0.5,

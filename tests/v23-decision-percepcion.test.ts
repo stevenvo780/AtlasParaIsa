@@ -526,6 +526,22 @@ test('la comida apenas por encima del umbral se percibe y se elige; la que no lo
   assert.notDeepEqual(persona.target, { x: f1!.x, y: f1!.y });
 });
 
+test('quien comparte elige al más hambriento de ahora, no al que lo era cuando se capturó el lote', () => {
+  const world = mundo(7, 300), { persona, slot, vecinas: [ca, cb] } = personaConVecinas(world);
+  const [a, b] = world.people.filter(p => p !== persona && p.role === 'neighbor');
+  assert.ok(a && b && world.places.length > 0, 'hacen falta dos vecinos y un lugar');
+  Object.assign(persona, { hunger: 0.1, thirst: 0, fatigue: 0, energy: 1, socialLoad: 0, inventory: 1, generosity: 1, lastShared: -1e9 });
+  world.places.push({ ...structuredClone(world.places[0]!), id: 'plaza-de-prueba', x: persona.x, y: persona.y });
+  world.animals = world.animals.filter(x => distance(x, persona) > 3 * RADIUS);
+  Object.assign(a, { x: ca!.x, y: ca!.y, hunger: 0.86 });
+  Object.assign(b, { x: cb!.x, y: cb!.y, hunger: 0.81 });
+  decidirTrasCambio(world, persona, slot, () => {});
+  assert.deepEqual([persona.action, persona.target], ['share', { x: a.x, y: a.y }], 'sin cambios, el de 0,86');
+  // Alguien da de comer a A antes de que decida: ya no es el más hambriento.
+  decidirTrasCambio(world, persona, slot, () => { a.hunger = 0.74; });
+  assert.deepEqual([persona.action, persona.target], ['share', { x: b.x, y: b.y }]);
+});
+
 test('los pesos de un ocupante nuevo se publican con su gen aunque no decida con cerebro, sin crearle la política', () => {
   const world = mundo(51926, 300, ABIERTO), tileIn = tileLookup(world.tiles), vista = VistaMundo.nueva();
   const vacio: LotePercepcion = { tick: world.tick, slots: new Int32Array(0), plan: new Uint16Array(0) };

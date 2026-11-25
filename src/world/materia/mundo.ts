@@ -17,8 +17,8 @@
  * resultado no depende del número de hilos (salvo las sustancias nuevas que descubra cada química local).
  *
  * Fuentes y sumideros declarados: la materia inicial (`levantar`), el sol (calor que paga la síntesis), la radiación
- * (termostato, en los dos sentidos), la ignición de un fuego, la atmósfera libre (vapor que entra y sale de la capa
- * límite), el desagüe (el agua que las charcas llenas no retienen y se va del mundo) y lo que se extrae (`extraer` y
+ * (termostato, en los dos sentidos), la ignición de un fuego, la atmósfera libre (vapor y gases que entran y salen de la
+ * capa límite), el desagüe (el agua que las charcas llenas no retienen y se va del mundo) y lo que se extrae (`extraer` y
  * `beber`, el sumidero de comer y beber de la etapa siguiente). Todo lo demás se conserva por construcción en la arena.
  */
 import { CAPACIDAD_ATOMO, ELEMENTOS, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NE, NIVEL_CATALIZADO, NU, R } from '../../shared/naturaleza.js';
@@ -113,24 +113,28 @@ const TROUTON = 88 / 8.314;
 // entra en la capa límite por arrastre lento y trae aire con el punto de rocío de la noche (el mínimo nocturno es el punto
 // de rocío de la masa de aire); con lluvia la convección la renueva deprisa con aire saturado a la temperatura del día
 // mientras la columna está DT_LLUVIA más fría, y el exceso llueve. Unidades SI; un tick son 86.400 s / 2.400 = 36 s.
-// Entre corchetes, el intervalo barrido (un factor a cada lado, el resto fijo) en el que el laboratorio sigue pasando.
+// Entre corchetes, el intervalo barrido (de uno en uno, el resto fijo; puntos a, c y c2 a 32 × 32 y 5.000 ticks) en el que
+// el laboratorio sigue pasando, y lo que falla fuera. Que el agua pase en intervalos tan anchos no es robustez: la lluvia
+// de hoy es tanta que charcas y suelos se llenan en los dos mundos, y (c) recarga y (c2) solo ven eso.
 const SEGUNDOS_TICK = 86_400 / TICKS_PER_DAY, GRAVEDAD = 9.81, R_MOL = 1000 * R;
 
 /** Parámetros físicos del mundo material (cada uno con su unidad, su valor real y, entre corchetes, el intervalo barrido). */
 export const FISICA = {
-  /** Altura de la capa límite (m). Real: 300 m de noche a 1–2 km de día. [ALTURA_CAPA_LIMITE] */
+  /** Altura de la capa límite (m). Real: 300 m de noche a 1–2 km de día. [100–10.000: todo el barrido pasa] */
   alturaCapaLimite: 1000,
-  /** Conductancia aerodinámica del vapor sobre la superficie, C_E·U (m/s): 1,3·10⁻³ × 7,7 m/s. [CONDUCTANCIA_SUPERFICIE] */
+  /** Conductancia aerodinámica del vapor sobre la superficie, C_E·U (m/s): 1,3·10⁻³ × 7,7 m/s. [0,001–0,1: todo pasa. Igualar la
+   * evaporación escalar del suelo, 0,5 de humedad al día, pediría ~0,075 m/s: 58 m/s de viento] */
   conductanciaSuperficie: 0.01,
-  /** Velocidad de arrastre de la atmósfera libre en la capa límite con tiempo seco (m/s). Real: 0,5–5 cm/s. [ARRASTRE_SECO] */
+  /** Velocidad de arrastre de la atmósfera libre en la capa límite con tiempo seco (m/s). Real: 0,5–5 cm/s. [0,001–0,1: todo pasa] */
   arrastreSeco: 0.01,
-  /** Velocidad vertical de la convección que renueva la capa límite mientras llueve (m/s). Real: 0,1–10 m/s. [CONVECCION_LLUVIA] */
+  /** Velocidad vertical de la convección que renueva la capa límite mientras llueve (m/s). Real: 0,1–10 m/s. [0,25–5; con 0,05 las charcas
+   * quedan en 0,63 de las de hoy y con 0,005 en 0,35 y la recarga en 0,71] */
   conveccionLluvia: 0.5,
-  /** Viento que mezcla el aire de páginas vecinas (teselas por tick: el mundo no fija metros por tesela). [VIENTO] */
+  /** Viento que mezcla el aire de páginas vecinas (teselas por tick: el mundo no fija metros por tesela). [0,01–1: todo pasa] */
   viento: 0.1,
-  /** Coeficiente de extinción de la luz en el dosel (adimensional). Real: 0,3–0,8; 0,5 en gramíneas. [EXTINCION_LUZ] */
+  /** Coeficiente de extinción de la luz en el dosel (adimensional). Real: 0,3–0,8; 0,5 en gramíneas. [0,125–1; con 2 el rebrote sale 1,20] */
   extincionLuz: 0.5,
-  /** Índice foliar (m² de hoja por m² de suelo) de una cobertura completa, vegetación 1. Real: 3–6. [INDICE_FOLIAR] */
+  /** Índice foliar (m² de hoja por m² de suelo) de una cobertura completa, vegetación 1. Real: 3–6. [1–8; con 16 el rebrote sale 1,20] */
   indiceFoliarCobertura: 4,
 };
 export type Fisica = typeof FISICA;
@@ -371,10 +375,11 @@ export function intercambioBruto(c: CtxPaso, l: LoteRef, aire: LoteRef, id: Sust
 // ── Estado compartido ────────────────────────────────────────────────────────────────────────────────────
 
 /** Contabilidad por hilo: sol, radiación que entra y que sale, ignición (J), tejido caído al suelo (cuantos), agua que
- * entra de la atmósfera libre, que sale a ella y que se va por el desagüe (cuantos de H₂O) y la energía neta de esos
- * intercambios con el exterior (J, con signo: la del H₂O y su calor). */
+ * entra de la atmósfera libre, que sale a ella y que se va por el desagüe (cuantos de H₂O), la energía neta de los
+ * intercambios con el exterior (J, con signo) y, desde EXTERIOR_AT, los átomos netos que entraron del exterior por
+ * elemento (con signo: agua, y los gases que la atmósfera libre renueva). */
 const SOL = 0, RAD_ENTRA = 1, RAD_SALE = 2, IGNICION = 3, CAIDA = 4, CIELO_ENTRA = 5, CIELO_SALE = 6, DESAGUE = 7, EXTERIOR_J = 8,
-  CUENTAS = 9;
+  EXTERIOR_AT = 9, CUENTAS = EXTERIOR_AT + NE;
 const LIBRO = 3 * (NE + 1);
 
 export interface DescriptorMundo {
@@ -786,32 +791,49 @@ export class MundoMaterial {
     return gases;
   }
 
-  /** Agua que entra (k > 0) o sale (k < 0) del lote `l` hacia el exterior `cuenta`, a la T del lote, con su energía. */
-  private exterior(l: LoteRef, k: number, T: number, cuenta: number): void {
-    const H2O = this.S.H2O;
+  /** `k` cuantos de `id` que entran (k > 0) o salen (k < 0) del lote `l` desde el exterior, a la T del lote, con su energía
+   * y sus átomos en la contabilidad. Devuelve los que se movieron (con signo). */
+  private exterior(l: LoteRef, id: SustanciaId, k: number, T: number): number {
+    if (k === 0) return 0;
+    const s = this.quimica.sustancia(id), at = s.atomos.reduce((x, v) => x + v, 0);
+    let n = k, j: number;
     if (k > 0) {
-      const calor = Math.round(T * CAPACIDAD_ATOMO * 3 * k);
-      this.arena.fuente(l, Float64Array.of(H2O, k, 0, calor), this.libro);
-      this.cuentas[cuenta]! += k; this.cuentas[EXTERIOR_J]! += k * this.eH2O + calor;
-    } else if (k < 0) {
-      const sale = this.arena.sumidero(l, Float64Array.of(H2O, -k, 0, Math.round(T * CAPACIDAD_ATOMO * 3 * -k)), this.libro);
-      let n = 0, j = 0;
-      for (let x = 0; x < sale.length; x += 2) if (sale[x] === H2O) n += sale[x + 1]!; else if (sale[x] === 0) j += sale[x + 1]!;
-      this.cuentas[cuenta]! += n; this.cuentas[EXTERIOR_J]! -= n * this.eH2O + j;
+      j = Math.round(T * CAPACIDAD_ATOMO * at * k);
+      this.arena.fuente(l, Float64Array.of(id, k, 0, j), this.libro);
+    } else {
+      const sale = this.arena.sumidero(l, Float64Array.of(id, -k, 0, Math.round(T * CAPACIDAD_ATOMO * at * -k)), this.libro);
+      n = 0; j = 0;
+      for (let x = 0; x < sale.length; x += 2) if (sale[x] === id) n -= sale[x + 1]!; else if (sale[x] === 0) j -= sale[x + 1]!;
     }
+    this.cuentas[EXTERIOR_J]! += n * s.energia + j;
+    for (let e = 0; e < NE; e++) if (s.atomos[e]) this.cuentas[EXTERIOR_AT + e]! += n * s.atomos[e]!;
+    return n;
+  }
+
+  private exteriorAgua(l: LoteRef, k: number, T: number, desague: boolean): void {
+    const n = this.exterior(l, this.S.H2O, k, T);
+    if (n > 0) this.cuentas[CIELO_ENTRA]! += n; else if (n < 0) this.cuentas[desague ? DESAGUE : CIELO_SALE]! -= n;
   }
 
   /**
    * La atmósfera libre renueva la capa límite de la página con r = 1 − e^(−dt/τ): sale r·v y entra r·v_libre, el vapor del
    * aire que llega. Con tiempo seco τ es el del arrastre y ese aire trae el punto de rocío de la noche; con lluvia τ es el
-   * de la convección y el aire llega saturado a la T del día (T) a una columna DT_LLUVIA más fría (Taire).
+   * de la convección y el aire llega saturado a la T del día (T) a una columna DT_LLUVIA más fría (Taire). El N₂, el O₂ y
+   * el CO₂ de la capa límite (la fracción h/H de la columna) se renuevan igual hacia la composición del aire libre (la de
+   * AIRE_COLUMNA): el CO₂ que la vegetación fija vuelve del aire del planeta. Los gases que el aire libre no tiene (NH₃,
+   * H₂) no se renuevan: la librería no disuelve el NH₃ en el agua del suelo (amonio), así que en el aire está el que en
+   * un suelo real estaría disuelto, y sacarlo sería una fuga de nitrógeno de la sombra (medido: en 32 × 32 salía en un
+   * día tanto N como tiene el suelo).
    */
   private cielo(p: number, f: Forzamiento, T: number, Taire: number): void {
-    const a = this.aire[p]!, gases = this.gasesSecos(a, Taire), z = this.ctx.azar;
+    const a = this.aire[p]!, gases = this.gasesSecos(a, Taire), z = this.ctx.azar, A = this.arena, S = this.S;
     const tLibre = f.lluvia ? T : Math.min(T, T_NOCHE + this.dT[p]!);
     const r = -Math.expm1(-f.dt / (f.lluvia ? this.params.tauLluvia : this.params.tauSeco));
-    const neto = entero(r * this.vaporSaturado(gases, Taire, tLibre), z) - binomial(this.arena.cuantos(a, this.S.H2O), r, z);
-    this.exterior(a, neto, Taire, neto > 0 ? CIELO_ENTRA : CIELO_SALE);
+    this.exteriorAgua(a, entero(r * this.vaporSaturado(gases, Taire, tLibre), z) - binomial(A.cuantos(a, S.H2O), r, z), Taire, false);
+    const rCapa = r * this.capaLimite(Taire), nT = this.inicio[p + 1]! - this.inicio[p]!;
+    for (const [id, libre] of [[S.N2, AIRE_COLUMNA.N2], [S.O2, AIRE_COLUMNA.O2], [S.CO2, AIRE_COLUMNA.CO2]] as const) {
+      this.exterior(a, id, entero(rCapa * libre * nT, z) - binomial(A.cuantos(a, id), rCapa, z), Taire);
+    }
   }
 
   /** Lo que el aire de la página tiene por encima de la saturación llueve, repartido por igual entre sus teselas: en la
@@ -845,11 +867,11 @@ export class MundoMaterial {
         if (k > 0) { A.moverParte(suelo, this.agua[j]!, { parte: Parte.Exacta, esp: H2O, cuantos: k, kappa: null }); sobra -= k; }
         if (hueco(j) <= 0) j++;
       }
-      if (sobra > 0) { this.exterior(suelo, -sobra, this.temperaturaLote(suelo), DESAGUE); fuera += sobra; }
+      if (sobra > 0) { this.exteriorAgua(suelo, -sobra, this.temperaturaLote(suelo), true); fuera += sobra; }
     }
     for (let i = i0; i < i1; i++) {
       const h = this.agua[i]! >= 0 ? hueco(i) : 0;
-      if (h < 0) { this.exterior(this.agua[i]!, h, this.temperaturaLote(this.agua[i]!), DESAGUE); fuera -= h; }
+      if (h < 0) { this.exteriorAgua(this.agua[i]!, h, this.temperaturaLote(this.agua[i]!), true); fuera -= h; }
     }
     this.desague[p] = fuera;
   }
@@ -984,5 +1006,5 @@ export class MundoMaterial {
   bytes(): number { return this.memorias.lotes.bytes + this.memorias.desborde.bytes + this.memorias.paginas.bytes; }
 }
 
-export const CUENTA = { SOL, RAD_ENTRA, RAD_SALE, IGNICION, CAIDA, CIELO_ENTRA, CIELO_SALE, DESAGUE, EXTERIOR_J } as const;
+export const CUENTA = { SOL, RAD_ENTRA, RAD_SALE, IGNICION, CAIDA, CIELO_ENTRA, CIELO_SALE, DESAGUE, EXTERIOR_J, EXTERIOR_AT } as const;
 export const totalesVacios = () => ({ esperado: Array<bigint>(NE + 1).fill(0n), cuentas: Array<bigint>(CUENTAS).fill(0n) });

@@ -44,9 +44,9 @@ const sumaVistas = (m: MundoMaterial): number[] => {
 test('el libro cuadra en cada paso con el día, la noche y la lluvia alternándose (la radiación entra y sale)', async () => {
   const x = levantar(3, 16), s0 = x.m.saldo();
   for (let k = 0; k < 36; k++) { x.paso(CLIMA[k % 3]!); assert.ok(x.cuadra(), `paso ${k} (luz ${CLIMA[k % 3]!.luz})`); }
-  const s1 = x.m.saldo(), c = x.tot.cuentas, neto = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
-  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, ELEMENTOS[e] === 'H' ? 2n * neto : ELEMENTOS[e] === 'O' ? neto : 0n, `átomos de ${ELEMENTOS[e]}`);
-  assert.ok(c.every((x, k) => k === CUENTA.EXTERIOR_J || x >= 0n));
+  const s1 = x.m.saldo(), c = x.tot.cuentas;
+  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, c[CUENTA.EXTERIOR_AT + e]!, `átomos de ${ELEMENTOS[e]}`);
+  assert.ok(c.every((x, k) => k >= CUENTA.EXTERIOR_J || x >= 0n));
   const declarada = c[CUENTA.SOL]! + c[CUENTA.RAD_ENTRA]! - c[CUENTA.RAD_SALE]! + c[CUENTA.IGNICION]! + c[CUENTA.EXTERIOR_J]!;
   assert.equal(s1[NE]! - s0[NE]!, declarada, 'la energía cuadra con lo declarado');
   await x.q.cerrar();

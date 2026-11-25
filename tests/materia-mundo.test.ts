@@ -49,8 +49,8 @@ test('el libro cuadra exacto en cada paso y los átomos solo cambian por el agua
   const { q, m, tot, exacto } = levantar();
   const s0 = m.saldo();
   for (let k = 0; k < 12; k++) { correr(m, tot, 1); assert.ok(exacto(), `paso ${k}`); }
-  const s1 = m.saldo(), c = tot.cuentas, neto = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
-  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, ELEMENTOS[e] === 'H' ? 2n * neto : ELEMENTOS[e] === 'O' ? neto : 0n, ELEMENTOS[e]);
+  const s1 = m.saldo(), c = tot.cuentas;
+  for (let e = 0; e < NE; e++) assert.equal(s1[e]! - s0[e]!, c[CUENTA.EXTERIOR_AT + e]!, ELEMENTOS[e]);
   assert.notEqual(s1[NE], s0[NE], 'el sol y la radiación mueven energía');
   await q.cerrar();
 });

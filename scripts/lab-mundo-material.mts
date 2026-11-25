@@ -160,11 +160,10 @@ function puntoAB(A: ReturnType<typeof args>) {
   const dAtomos = ELEMENTOS.map((x, k) => `${x} ${s1[k]! - s0[k]!}`).join(', ');
   const c = tot.cuentas, energia = s1[NE]! - s0[NE]!;
   const declarada = c[CUENTA.SOL]! + c[CUENTA.RAD_ENTRA]! - c[CUENTA.RAD_SALE]! + c[CUENTA.IGNICION]! + c[CUENTA.EXTERIOR_J]!;
-  // Los átomos cambian solo por el agua declarada con el exterior: H 2 y O 1 por cuanto de H₂O.
-  const aguaNeta = c[CUENTA.CIELO_ENTRA]! - c[CUENTA.CIELO_SALE]! - c[CUENTA.DESAGUE]!;
-  const esperadoAt = ELEMENTOS.map((x) => x === 'H' ? 2n * aguaNeta : x === 'O' ? aguaNeta : 0n);
+  // Los átomos cambian solo por lo declarado con el exterior (agua y gases de la atmósfera libre, desagüe).
+  const esperadoAt = ELEMENTOS.map((_, k) => c[CUENTA.EXTERIOR_AT + k]!);
   const atomosOk = s1.slice(0, NE).every((x, k) => x - s0[k]! === esperadoAt[k]);
-  console.log(`  Δ átomos: ${dAtomos}; agua con el exterior: ${exteriorAgua(c)} → Δ átomos − agua declarada = ${ELEMENTOS.map((x, k) => `${x} ${s1[k]! - s0[k]! - esperadoAt[k]!}`).join(', ')} (debe ser 0)`);
+  console.log(`  Δ átomos: ${dAtomos}; agua con el exterior: ${exteriorAgua(c)} → Δ átomos − exterior declarado = ${ELEMENTOS.map((x, k) => `${x} ${s1[k]! - s0[k]! - esperadoAt[k]!}`).join(', ')} (debe ser 0)`);
   console.log(`  Δ energía ${energia} J = sol ${c[CUENTA.SOL]} + radiación entrante ${c[CUENTA.RAD_ENTRA]} − saliente ${c[CUENTA.RAD_SALE]} + ignición ${c[CUENTA.IGNICION]} + exterior ${c[CUENTA.EXTERIOR_J]} = ${declarada} J → ${energia === declarada ? 'cuadra' : 'NO cuadra'}`);
   console.log(`  pasos con Σ lotes ≠ libro: ${fallos} de ${pasos} → ${veredicto(fallos === 0 && energia === declarada && atomosOk)}`);
   console.log(`  ${(ms / pasos).toFixed(0)} ms por paso (${(1000 * ms / pasos / m.n / A.cada).toFixed(2)} µs por tesela y tick, 1 hilo, con el libro bigint aparte), ${carga()}`);

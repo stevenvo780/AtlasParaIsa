@@ -1,12 +1,15 @@
 import type { StructureView } from '../../shared/life.js';
-import { formaDeCodigo } from '../../shared/materia.js';
+import { ClaseSustancia, formaDeCodigo } from '../../shared/materia.js';
+import { ELEMENTOS, TABLA } from '../../shared/naturaleza.js';
 import type { Tile, WorldView } from '../../shared/types.js';
 import type { LoteVisible } from '../../shared/vistas-v23.js';
 import { INTERVALO_ECOLOGIA_TICKS } from '../ecologia-constantes.js';
+import { algunoCerca, filtrarCerca } from '../indice-puntos.js';
 import type { Violacion } from '../invariantes.js';
 import type { CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
+import { CHUNK_SIZE } from '../terrain.js';
 import { fluirCalor } from './fluir.js';
-import { kappaDeRol, lotesDeCelda, sustanciasDe } from './ley-mundo.js';
+import { fuegoEn, kappaDeRol, lotesDeCelda } from './ley-mundo.js';
 import { pasoLote } from './paso.js';
 import { desprender } from './romper.js';
 import { Parte, Rol, type LoteRef, type Pedido, type ProcesoMaterial, type VistaLote } from './tipos.js';
@@ -21,12 +24,17 @@ export const DENSIDAD_AGUA_KG_M3 = 1000;
 export const DENSIDAD_GRANO_KG_M3 = 750;
 export const FLUJO_CAPTACION_KG_M2_TICK = 0.001;
 const MG_POR_KG = 1e6;
+export const KG_POR_CUANTO_AGUA = (2 * TABLA[ELEMENTOS.indexOf('H')].masa + TABLA[ELEMENTOS.indexOf('O')].masa) / MG_POR_KG;
 
 type Punto = { x: number; y: number };
 export interface PiezaColocada extends Punto { lote: LoteRef }
+export interface PiezaPendiente extends PiezaColocada {
+  proceso: ProcesoMaterial | null;
+  trabajoJ: number;
+}
 export interface EstadoObra {
   piezas: PiezaColocada[];
-  proceso: ProcesoMaterial | null;
+  pendiente: PiezaPendiente | null;
   agua: LoteRef;
   comida: LoteRef;
   terminada: boolean;
@@ -37,6 +45,14 @@ type Propiedades = Pick<VistaLote, 'sellado' | 'aislamiento' | 'dureza' | 'tenac
 type Prestaciones = Propiedades & { cobertura: number; cobijo: number; volumen: number; calor: number };
 export const estadoObra = (s: StructureView): EstadoObra | undefined =>
   (s as StructureView & { obraMaterial?: EstadoObra }).obraMaterial;
+
+export function loteReservadoObra(c: CtxLey, ref: LoteRef): boolean {
+  if (ref < 0) return false;
+  return c.mundo.structures.some(s => {
+    const obra = estadoObra(s);
+    return obra && (obra.agua === ref || obra.comida === ref || obra.pendiente?.lote === ref);
+  });
+}
 
 export function celdaObra(c: CtxLey, p: Punto): number {
   const celda = c.terreno.celda(p.x, p.y);
@@ -88,7 +104,7 @@ export function areaPortante(pieza: VistaLote): number {
   return Math.min(f.largo * f.ancho, pieza.masa / MASA_PORTANTE_KG_M2);
 }
 
-export function prestacionesDePiezas(piezas: Iterable<VistaLote>, celdas: number): Prestaciones {
+export function prestacionesDePiezas(piezas: Iterable<VistaLote>, celdas: number, areaCubierta = Infinity): Prestaciones {
   const r: Prestaciones = { masa: 0, sellado: 0, aislamiento: 0, dureza: 0, tenacidad: 0, cobertura: 0, cobijo: 0, volumen: 0, calor: 0 };
   let area = 0, volumen = 0, calor = 0;
   for (const v of piezas) {
@@ -105,7 +121,7 @@ export function prestacionesDePiezas(piezas: Iterable<VistaLote>, celdas: number
     calor += soporte * v.dureza * Math.max(0, v.T - T_HOGAR_K);
   }
   if (!area || !celdas) return r;
-  r.cobertura = Math.min(1, area / (celdas * AREA_OBRA_M2));
+  r.cobertura = Math.min(1, Math.min(area, areaCubierta) / (celdas * AREA_OBRA_M2));
   r.sellado /= area; r.aislamiento /= area; r.dureza /= area; r.tenacidad /= area;
   if (r.cobertura < COBERTURA_COBIJO) return r;
   r.cobijo = r.cobertura * r.sellado;
@@ -115,11 +131,17 @@ export function prestacionesDePiezas(piezas: Iterable<VistaLote>, celdas: number
 }
 
 export function prestacionesObra(c: CtxLeyMateria, s: StructureView): Prestaciones {
-  const obra = estadoObra(s);
-  function* vistas() {
-    for (const { lote } of obra?.piezas ?? []) if (c.materia.propio(lote)) yield c.materia.vista(lote);
+  const vistas: VistaLote[] = [], areas = new Map<number, number>();
+  for (const p of estadoObra(s)?.piezas ?? []) {
+    const celda = celdaObra(c, p);
+    if (celda < 0 || !c.materia.propio(p.lote)) continue;
+    const v = c.materia.vista(p.lote);
+    vistas.push(v);
+    areas.set(celda, Math.min(AREA_OBRA_M2, (areas.get(celda) ?? 0) + areaPortante(v)));
   }
-  return prestacionesDePiezas(vistas(), s.cells?.length ?? 1);
+  let cubierta = 0;
+  for (const area of areas.values()) cubierta += area;
+  return prestacionesDePiezas(vistas, s.cells?.length ?? 1, cubierta);
 }
 
 export function servicioDe(c: CtxLeyMateria, estructura: string): Propiedades {
@@ -142,15 +164,17 @@ export function stockObra(c: CtxLeyMateria, s: StructureView, tipo: DepositoObra
 
 function moverKg(c: CtxLeyMateria, de: LoteRef, a: LoteRef, kg: number, tipo?: DepositoObra): number {
   const arena = c.materia;
-  const vista = arena.vista(de);
-  if (!(kg > 0) || (tipo === 'comida' && vista.digerible <= 0)) return 0;
+  if (!(kg > 0)) return 0;
+  if (tipo === 'agua') {
+    const cuantos = Math.min(arena.vista(de).agua, Math.floor(kg / KG_POR_CUANTO_AGUA));
+    return cuantos > 0 ? arena.moverParte(de, a, { parte: Parte.Agua, esp: 0, cuantos, kappa: null }) * KG_POR_CUANTO_AGUA : 0;
+  }
+  if (tipo === 'comida' && arena.vista(de).digerible <= 0) return 0;
   let ids = new Uint32Array(1);
   let n = arena.especies(de, ids);
   if (n > ids.length) n = arena.especies(de, ids = new Uint32Array(n));
-  const agua = tipo === 'agua' ? sustanciasDe(c).H2O : 0;
   let movido = 0;
   for (const esp of ids.subarray(0, n)) {
-    if (tipo === 'agua' && esp !== agua) continue;
     const masa = c.quimica.sustancia(esp).masa / MG_POR_KG;
     const redondear = tipo ? Math.floor : Math.ceil;
     const cuantos = Math.min(arena.cuantos(de, esp), redondear((kg - movido) / masa));
@@ -168,6 +192,7 @@ export function depositarEnObra(c: CtxLeyMateria, s: StructureView, tipo: Deposi
   const ocupado = stockObra(c, s, 'agua') / densidad('agua') + stockObra(c, s, 'comida') / densidad('comida');
   const hueco = prestacionesObra(c, s).volumen - ocupado;
   if (hueco <= 0) return 0;
+  if (obra[tipo] >= 0 && !c.materia.propio(obra[tipo])) return 0;
   const nuevo = obra[tipo] < 0;
   const destino = nuevo ? c.materia.nuevo(Rol.Objeto, celda, 0) : obra[tipo];
   const movido = moverKg(c, de, destino, Math.min(kg, hueco * densidad(tipo)), tipo);
@@ -182,11 +207,21 @@ function pasoPieza(c: CtxLeyMateria, lote: LoteRef, celda: number): void {
   const vista = c.materia.vista(lote);
   const f = formaDeCodigo(vista.forma);
   pasoLote(ctx, lote, INTERVALO_ECOLOGIA_TICKS, kappaDeRol(Rol.Pieza));
-  const intercambio = fluirCalor(ctx, lote, entorno.aire,
-    CONDUCTANCIA_PIEZA_J_POR_K_TICK_M2 * f.largo * f.ancho * (1 - vista.aislamiento), INTERVALO_ECOLOGIA_TICKS);
+  const g = CONDUCTANCIA_PIEZA_J_POR_K_TICK_M2 * f.largo * f.ancho * (1 - vista.aislamiento);
+  const fuego = fuegoEn(c, celda);
+  const caliente = fuego >= 0 ? fluirCalor(ctx, fuego, lote, g, INTERVALO_ECOLOGIA_TICKS) : 0;
+  const ambiente = fluirCalor(ctx, lote, entorno.aire, g, INTERVALO_ECOLOGIA_TICKS);
   // La variación térmica ejerce trabajo de dilatación. Lo desprendido vuelve al suelo con su calor.
   desprender(c.materia, c.quimica, lote, entorno.suelo,
-    Math.abs(intercambio) * FRACCION_FRACTURA_TERMICA * (1 - vista.tenacidad), ctx.azar);
+    (Math.abs(caliente) + Math.abs(ambiente)) * FRACCION_FRACTURA_TERMICA * (1 - vista.tenacidad), ctx.azar);
+}
+
+function retirarPiezaVacia(c: CtxLeyMateria, lote: LoteRef, celda: number): boolean {
+  if (c.materia.vista(lote).masa > 0) return false;
+  const { suelo } = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
+  c.materia.moverParte(lote, suelo, TODO);
+  c.materia.liberar(lote);
+  return true;
 }
 
 function derramar(c: CtxLeyMateria, obra: EstadoObra, suelo: LoteRef, volumen: number): void {
@@ -208,6 +243,7 @@ function derramar(c: CtxLeyMateria, obra: EstadoObra, suelo: LoteRef, volumen: n
 
 function pasoObra(c: CtxLeyMateria): void {
   if (c.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
+  const ocupadas = new Set<LoteRef>();
   for (const s of c.mundo.structures) {
     const obra = estadoObra(s);
     const celda = celdaObra(c, s);
@@ -217,13 +253,8 @@ function pasoObra(c: CtxLeyMateria): void {
       const sitio = celdaObra(c, p);
       if (sitio < 0 || !c.materia.propio(p.lote)) continue;
       pasoPieza(c, p.lote, sitio);
-      const vista = c.materia.vista(p.lote);
-      if (vista.masa === 0) {
-        const { suelo } = lotesDeCelda(c, sitio, { suelo: -1, agua: -1, vida: -1, aire: -1 });
-        c.materia.moverParte(p.lote, suelo, TODO);
-        c.materia.liberar(p.lote);
-        obra.piezas.splice(i, 1);
-      }
+      if (retirarPiezaVacia(c, p.lote, sitio)) obra.piezas.splice(i, 1);
+      else ocupadas.add(p.lote);
       c.propio.marcar(c.terreno.chunkDe(sitio), true);
     }
     const servicio = prestacionesObra(c, s);
@@ -236,6 +267,16 @@ function pasoObra(c: CtxLeyMateria): void {
           FLUJO_CAPTACION_KG_M2_TICK * servicio.cobijo * (s.cells?.length ?? 1) * AREA_OBRA_M2 * INTERVALO_ECOLOGIA_TICKS);
       }
     }
+  }
+  for (const [chunk, celdas] of indiceCaminos(c)) for (const celda of celdas) {
+    let queda = false;
+    for (const l of lotesEnObra(c, celda, Rol.Pieza)) {
+      if (!c.materia.propio(l) || ocupadas.has(l)) continue;
+      pasoPieza(c, l, celda);
+      queda = !retirarPiezaVacia(c, l, celda) || queda;
+      c.propio.marcar(chunk, true);
+    }
+    if (!queda) celdas.delete(celda);
   }
 }
 
@@ -255,10 +296,19 @@ function comprobarObra(c: CtxLeyMateria): Violacion[] {
     const obra = estadoObra(s);
     if (!obra) continue;
     const anotar = (detalle: string) => errores.push({ id: 't2-obra', gravedad: 'dura', tick: c.tick, detalle, contexto: { obra: s.id } });
-    const celdas = new Set((s.cells ?? [s]).map(p => celdaObra(c, p)));
+    const planta = s.cells ?? [s];
+    const ancla = celdaObra(c, s);
+    const celdas = new Set(planta.map(p => celdaObra(c, p)));
+    if (ancla < 0 || !celdas.has(ancla) || celdas.has(-1) || celdas.size !== planta.length
+      || [...celdas].some(l => c.terreno.chunkDe(l) !== c.terreno.chunkDe(ancla))) anotar('Planta inválida para el chunk de la obra.');
+    if (obra.pendiente && (!Number.isFinite(obra.pendiente.trabajoJ) || obra.pendiente.trabajoJ < 0
+      || obra.pendiente.proceso && (obra.pendiente.proceso.lote !== obra.pendiente.lote
+        || obra.pendiente.proceso.x !== obra.pendiente.x || obra.pendiente.proceso.y !== obra.pendiente.y))) {
+      anotar('Proceso pendiente incoherente con su lote, celda o trabajo pagado.');
+    }
     for (const [p, lote, rol] of [
       ...obra.piezas.map(p => [p, p.lote, Rol.Pieza] as const),
-      ...(obra.proceso ? [[obra.proceso, obra.proceso.lote, Rol.Objeto] as const] : []),
+      ...(obra.pendiente ? [[obra.pendiente, obra.pendiente.lote, Rol.Objeto] as const] : []),
       ...([obra.agua, obra.comida].filter(ref => ref !== -1).map(ref => [s, ref, Rol.Objeto] as const)),
     ]) {
       const celda = celdaObra(c, p);
@@ -271,14 +321,46 @@ function comprobarObra(c: CtxLeyMateria): Violacion[] {
   return errores;
 }
 
+const caminosLocales = new WeakMap<CtxLey['mundo'], Map<number, Set<number>>>();
+function indiceCaminos(c: CtxLey): Map<number, Set<number>> {
+  let indice = caminosLocales.get(c.mundo);
+  if (!indice) caminosLocales.set(c.mundo, indice = new Map());
+  return indice;
+}
+
+export function registrarEmpedrado(c: CtxLey, celda: number): void {
+  const chunk = c.terreno.chunkDe(celda), indice = indiceCaminos(c);
+  let celdas = indice.get(chunk);
+  if (!celdas) indice.set(chunk, celdas = new Set());
+  celdas.add(celda);
+}
+
+function cargarEmpedrados(c: CtxLeyMateria, chunk: number): void {
+  const x = c.terreno.paginaX[chunk]! * CHUNK_SIZE, y = c.terreno.paginaY[chunk]! * CHUNK_SIZE;
+  const enObra = new Set(filtrarCerca(c.mundo.structures, { x, y }, CHUNK_SIZE,
+    s => celdaObra(c, s) >= 0 && c.terreno.chunkDe(celdaObra(c, s)) === chunk).flatMap(s => estadoObra(s)?.piezas.map(p => p.lote) ?? []));
+  for (let dy = 0; dy < CHUNK_SIZE; dy++) for (let dx = 0; dx < CHUNK_SIZE; dx++) {
+    const celda = celdaObra(c, { x: x + dx, y: y + dy });
+    if (celda >= 0 && lotesEnObra(c, celda, Rol.Pieza).some(l => !enObra.has(l))) registrarEmpedrado(c, celda);
+  }
+}
+
+export function esPiedraDeObra(c: CtxLeyMateria, vista: VistaLote): boolean {
+  if (areaPortante(vista) <= 0 || vista.dureza <= 0) return false;
+  const sustancia = c.quimica.sustancia(vista.principal);
+  return sustancia.clase === ClaseSustancia.Unidad && sustancia.prop.qOxidacion <= 0;
+}
+
 export function calidadEmpedrado(c: CtxLeyMateria, tesela: Tile): number {
   const celda = celdaObra(c, tesela);
   if (celda < 0 || tesela.terrain === 'water' || tesela.terrain === 'shelter') return 0;
-  if (c.mundo.structures.some(s => estadoObra(s) && (s.cells ?? [s]).some(p => p.x === tesela.x && p.y === tesela.y))) return 0;
+  const lotes = lotesEnObra(c, celda, Rol.Pieza);
+  if (!lotes.length || algunoCerca(c.mundo.structures, tesela, CHUNK_SIZE,
+    s => !!estadoObra(s) && (s.cells ?? [s]).some(p => p.x === tesela.x && p.y === tesela.y))) return 0;
   let area = 0;
-  for (const lote of lotesEnObra(c, celda, Rol.Pieza)) if (c.materia.propio(lote)) {
+  for (const lote of lotes) if (c.materia.propio(lote)) {
     const v = c.materia.vista(lote);
-    area += areaPortante(v) * v.dureza;
+    if (esPiedraDeObra(c, v)) area += areaPortante(v) * v.dureza;
   }
   return Math.min(1, area / AREA_OBRA_M2);
 }
@@ -290,9 +372,7 @@ export function desgastarEmpedrado(c: CtxLeyMateria, tesela: Tile, trabajoJ: num
   const { suelo } = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
   for (const l of lotes) {
     desprender(c.materia, c.quimica, l, suelo, trabajoJ / lotes.length, () => c.azar());
-    if (c.materia.vista(l).masa !== 0) continue;
-    c.materia.moverParte(l, suelo, TODO);
-    c.materia.liberar(l);
+    retirarPiezaVacia(c, l, celda);
   }
   c.propio.marcar(c.terreno.chunkDe(celda), true);
 }
@@ -310,6 +390,9 @@ function proyectarObra(c: CtxLeyMateria, vista: WorldView): void {
 
 export const leyObra: Ley = {
   id: 't2', interruptor: 'obra', sustituye: ['estructuras'],
+  iniciar: c => { for (const chunk of c.chunks) cargarEmpedrados(c as CtxLeyMateria, chunk); },
+  alActivar: (c, chunk) => cargarEmpedrados(c as CtxLeyMateria, chunk),
+  alRetirar: (c, chunk) => { indiceCaminos(c).delete(chunk); },
   F4: c => pasoObra(c as CtxLeyMateria),
   proyectar: {
     mundo: (c, vista) => proyectarObra(c as CtxLeyMateria, vista),

@@ -55,7 +55,10 @@ export interface WhisperPersonLike {
   thirst: number;
   fatigue: number;
   genome: { alleles: readonly number[] };
+  /** Escucha ya derivada (el frente la publica en `act.oido`); sin ella, se deriva de `genome`. */
+  escucha?: number;
 }
+const escuchaDeOyente = (p: WhisperPersonLike): number => p.escucha ?? escuchaDe(p.genome);
 
 export type WhisperFadeReason = 'gone' | 'unreachable' | 'deadline' | 'unheard' | 'forgotten';
 export interface WhisperStepOutcome {
@@ -255,7 +258,7 @@ export function stepWhispersCon(
       if (tick - (w.heardTick ?? w.createdTick) >= FULFIL_DEADLINE_TICKS) { fade(w, 'deadline', listener); continue; }
       if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', listener); continue; }
       const oido = Math.min(elapsed, tick - (w.heardTick ?? w.createdTick));
-      if (deterministicUnit(seed, tick, listener.id, `${w.id}:olvido`) < enPasos(riesgoDeOlvido(escuchaDe(listener.genome)), oido)) { fade(w, 'forgotten', listener); continue; }
+      if (deterministicUnit(seed, tick, listener.id, `${w.id}:olvido`) < enPasos(riesgoDeOlvido(escuchaDeOyente(listener)), oido)) { fade(w, 'forgotten', listener); continue; }
       // Sólo cuenta como atasco el tiempo que la persona lo persigue (comer, beber o descansar no cuentan).
       const pursuing = listener.action === 'explore' && listener.target?.x === w.x && listener.target?.y === w.y;
       if (w.bestDistance === undefined || away < w.bestDistance - 0.5) { w.bestDistance = away; w.stalledChecks = 0; }
@@ -275,7 +278,7 @@ export function stepWhispersCon(
     // Cada persona oye con su tasa; la primera en oírlo es la suya con probabilidad proporcional a ella, y el mensaje se
     // oye en esta comprobación con la probabilidad de que alguna lo haga (tiempos exponenciales en competencia). Un solo
     // sorteo por mensaje; un mensaje dirigido llega entero, uno regional con su audibilidad a quien está a su alcance.
-    const tasaDe = (person: WhisperPersonLike): number => probabilidadDeOir(escuchaDe(person.genome), calma(person),
+    const tasaDe = (person: WhisperPersonLike): number => probabilidadDeOir(escuchaDeOyente(person), calma(person),
       dirigido ? 1 : audibilidadDeCuadrado((person.x - w.x) ** 2 + (person.y - w.y) ** 2));
     let suma = 0;
     candidatos.length = 0; tasas.length = 0;

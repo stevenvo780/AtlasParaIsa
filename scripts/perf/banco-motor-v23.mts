@@ -23,19 +23,29 @@
  *  - la política de planificación de los hilos del proceso (SCHED_OTHER / SCHED_IDLE) al terminar.
  * Con `--adaptativo si`, la piscina de F2 usa cada 10 ticks los núcleos que el resto de la torre deja libres.
  * Necesita `COMPUTE_NVRTC` para `--gpu si`.
+ *
+ * Modo de dueños (`--modo duenos`, M7): en vez de `stepWorld`, arma `crearMotor` con `--hilos` dueños (exige los
+ * interruptores v23 hasta `rebalanceo`) y mide Hz, pared del tick y, de `motor.telemetria()`, el desequilibrio de los
+ * hilos (media y p95 de las muestras, una cada 10 ticks), la ocupación y las migraciones. `--ajena 0,16` repite la
+ * medida con ese número de procesos ajenos quemando CPU (`--binario-ajeno <ruta>`: con un enlace de otro nombre a node
+ * compiten en igualdad, porque `node` cae en SCHED_IDLE por ananicy y no le quitaría CPU a nadie); el resumen da el
+ * Hz con carga sobre el Hz en reposo (objetivo M7: ≥ 0,4) y si el mundo del motor sigue validando (`corrupcion`).
+ * Ejemplo: node --import tsx scripts/perf/banco-motor-v23.mts --modo duenos --personas 400,4000 --hilos 8,28 --ajena 0,16
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { availableParallelism, loadavg } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
+import { escalon } from '../../src/shared/interruptores.js';
 import { cpuDelProceso, cerrarPercibidores, PercibidorTarjetas, type PercibidorPiscina } from '../../src/world/decision/despacho.js';
 import { percepcionDe } from '../../src/world/decision/percepcion.js';
 import { initialDemography } from '../../src/world/demography.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { createWorld, stepWorld } from '../../src/world/index.js';
 import { walkable } from '../../src/world/mundo/crear.js';
+import { crearMotor } from '../../src/world/motor/coordinador.js';
 import { fraccionSerial } from '../../src/world/mundo/paso.js';
 import { assertWorld } from '../../src/world/mundo/validar.js';
 import { paramsOf, parseParams, setParams } from '../../src/world/params.js';
@@ -43,7 +53,13 @@ import { activate } from '../../src/world/spatial.js';
 import { initialTechnologyKnowledge } from '../../src/world/technology.js';
 import { tileLookup } from '../../src/world/tile-index.js';
 
-interface Config { personas: number; hilos: number; gpu: boolean; pasos: number; calentar: number; semilla: number; adaptativo: boolean }
+interface Config {
+  personas: number; hilos: number; gpu: boolean; pasos: number; calentar: number; semilla: number; adaptativo: boolean;
+  /** 'pared' (por defecto): `stepWorld` con la piscina de M1; 'duenos': `crearMotor` con `hilos` dueños (M7). */
+  modo?: 'pared' | 'duenos';
+  /** Solo en 'duenos': procesos ajenos quemando CPU mientras se mide. */
+  ajena?: number;
+}
 
 const arg = (flag: string): string | undefined => {
   const i = process.argv.indexOf(flag);
@@ -214,21 +230,73 @@ async function correrUna(c: Config): Promise<Record<string, unknown>> {
   return resultado;
 }
 
+/** Lanza `n` procesos que queman un núcleo cada uno; devuelve la función que los detiene. */
+function cargaAjena(n: number, binario: string): () => void {
+  const hijos: ChildProcess[] = [];
+  for (let i = 0; i < n; i++) hijos.push(spawn(binario, ['-e', 'for (;;) {}'], { stdio: 'ignore' }));
+  return () => { for (const h of hijos) h.kill('SIGKILL'); };
+}
+
+/** M7: el motor de dueños con `c.hilos` hilos, con o sin carga ajena. Mide el reparto por su telemetría, no por trazas. */
+async function correrDuenos(c: Config): Promise<Record<string, unknown>> {
+  const { world, conMotor } = await sembrarMundo(c.personas, c.semilla);
+  const abiertos = hostOpenWorldParams();
+  setParams(world, parseParams({ v23: escalon('rebalanceo'), motor: { ...conMotor({ hilos: c.hilos, gpu: c.gpu ? [0, 1] : [] }).motor } }, abiertos));
+  const motor = crearMotor(world, { hilos: c.hilos, gpu: c.gpu ? [0, 1] : [], decisionGpu: 'siempre', verificar: false, semilla: null });
+  const parar = cargaAjena(c.ajena ?? 0, arg('--binario-ajeno') ?? process.execPath);
+  try {
+    for (let i = 0; i < c.calentar; i++) motor.paso([]);
+    const antes = uptime(), paredes: number[] = [], deseq: number[] = [], ocupacion: number[] = [];
+    let migraciones0 = motor.telemetria().migraciones, personas = 0;
+    const inicio = performance.now();
+    for (let i = 0; i < c.pasos; i++) {
+      const t0 = performance.now();
+      motor.paso([]);
+      paredes.push(performance.now() - t0);
+      if (i % 10 === 9) {
+        const tel = motor.telemetria();
+        deseq.push(tel.desequilibrio);
+        ocupacion.push(tel.ocupacion.length ? tel.ocupacion.reduce((a, b) => a + b, 0) / tel.ocupacion.length : 0);
+      }
+    }
+    const pared = performance.now() - inicio, tel = motor.telemetria();
+    const copia = motor.instantanea();
+    personas = copia.world.people.length;
+    let corrupcion: string | null = null;
+    try { assertWorld(copia.world); } catch (e) { corrupcion = (e as Error).message.slice(0, 300); }
+    await motor.cerrar();
+    return {
+      config: c, uptimeAntes: antes, uptimeDespues: uptime(), binario: process.argv0, personas,
+      hz: r(c.pasos / (pared / 1000), 2), tickMs: { media: r(pared / c.pasos), p50: r(percentil(paredes, 0.5)), p95: r(percentil(paredes, 0.95)) },
+      desequilibrio: { media: r(deseq.reduce((a, b) => a + b, 0) / Math.max(deseq.length, 1)), p95: r(percentil(deseq, 0.95)), max: r(Math.max(1, ...deseq)) },
+      ocupacionMedia: r(ocupacion.reduce((a, b) => a + b, 0) / Math.max(ocupacion.length, 1)),
+      migraciones: tel.migraciones - migraciones0, esperaBarreraMs: r(tel.esperaBarreraMs), faseMs: tel.faseMs,
+      hilosTelemetria: tel.hilos, corrupcion, politicas: politicas(),
+    };
+  } finally {
+    parar();
+  }
+}
+
 const directo = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (!directo) { /* importado: solo `sembrarMundo` */ } else if (arg('--uno')) {
-  const resultado = await correrUna(JSON.parse(arg('--uno')!) as Config);
+  const config = JSON.parse(arg('--uno')!) as Config;
+  const resultado = config.modo === 'duenos' ? await correrDuenos(config) : await correrUna(config);
   process.stdout.write(`RESULTADO ${JSON.stringify(resultado)}\n`);
   process.exit(0);
 } else {
   // Las combinaciones se intercalan en cada repetición: la carga de la torre cambia en minutos y así no cae sobre una sola.
   const salida = arg('--salida'), repeticiones = Number(arg('--repeticiones') ?? 1);
   const binarios = lista('--binarios', process.execPath), configs: Config[] = [];
+  const modo = arg('--modo') === 'duenos' ? 'duenos' : 'pared';
   for (const personas of lista('--personas', '40,400,4000').map(Number))
     for (const gpu of lista('--gpu', 'no,si').map(s => s === 'si'))
       for (const hilos of lista('--hilos', '1,8,28').map(Number))
         for (const adaptativo of lista('--adaptativo', 'no').map(s => s === 'si'))
-          if (hilos > 1 || !adaptativo) configs.push({ personas, hilos, gpu, adaptativo, pasos: Number(arg('--pasos') ?? 120),
-            calentar: Number(arg('--calentar') ?? 30), semilla: Number(arg('--semilla') ?? 51926) });
+          for (const ajena of modo === 'duenos' ? lista('--ajena', '0').map(Number) : [undefined])
+            if (modo === 'duenos' ? !adaptativo : hilos > 1 || !adaptativo)
+              configs.push({ personas, hilos, gpu, adaptativo, pasos: Number(arg('--pasos') ?? 120),
+                calentar: Number(arg('--calentar') ?? 30), semilla: Number(arg('--semilla') ?? 51926), ...(modo === 'duenos' ? { modo, ajena } : {}) });
   const resultados: Record<string, any>[] = [];
   for (let rep = 0; rep < repeticiones; rep++) for (const c of configs) for (const binario of binarios) {
     process.stderr.write(`${new Date().toISOString()} ${JSON.stringify(c)} ${binario} | ${uptime()} | carga ${loadavg()[0]!.toFixed(1)}\n`);
@@ -243,11 +311,35 @@ if (!directo) { /* importado: solo `sembrarMundo` */ } else if (arg('--uno')) {
   }
   // Resumen: mediana de las repeticiones por combinación.
   const mediana = (xs: number[]) => percentil(xs, 0.5);
-  const grupos = new Map<string, Record<string, any>[]>();
+  const grupos = new Map<string, Record<string, any>[]>(), gruposDuenos = new Map<string, Record<string, any>[]>();
   for (const res of resultados) {
+    if ((res.config as Config).modo === 'duenos') {
+      const { personas, hilos, gpu, ajena } = res.config as Config;
+      const clave = `${personas}\t${hilos}\t${gpu ? 'GPU' : 'CPU'}\t${ajena ?? 0}`;
+      gruposDuenos.set(clave, [...gruposDuenos.get(clave) ?? [], res]);
+      continue;
+    }
     const { personas, hilos, gpu, adaptativo } = res.config as Config;
     const clave = `${personas}\t${hilos}${adaptativo ? ' adapt.' : ''}\t${gpu ? 'GPU' : 'CPU'}\t${res.binario}`;
     grupos.set(clave, [...grupos.get(clave) ?? [], res]);
+  }
+  if (gruposDuenos.size) {
+    // Hz con carga ajena sobre el Hz en reposo de la misma combinación (objetivo M7: ≥ 0,4 con 16 procesos ajenos).
+    const hzReposo = new Map<string, number>();
+    for (const [clave, rs] of gruposDuenos) {
+      const [personas, hilos, gpu, ajena] = clave.split('\t');
+      if (Number(ajena) === 0) hzReposo.set(`${personas}\t${hilos}\t${gpu}`, mediana(rs.map(x => x.hz)));
+    }
+    process.stdout.write(`TABLA_DUENOS ${['personas', 'hilos', 'disp.', 'ajena', 'n', 'Hz', 'Hz/reposo', 'ms/tick', 'p95', 'deseq. media', 'deseq. p95', 'deseq. max',
+      'ocupación', 'migraciones', 'espera barrera ms', 'corrupción'].join('\t')}\n`);
+    for (const [clave, rs] of gruposDuenos) {
+      const [personas, hilos, gpu] = clave.split('\t');
+      const hz = mediana(rs.map(x => x.hz)), reposo = hzReposo.get(`${personas}\t${hilos}\t${gpu}`);
+      const m = (f: (x: Record<string, any>) => number) => r(mediana(rs.map(f)), 3);
+      process.stdout.write(`TABLA_DUENOS ${clave}\t${rs.length}\t${[r(hz, 2), reposo ? r(hz / reposo, 3) : 'n/d', m(x => x.tickMs.media), m(x => x.tickMs.p95),
+        m(x => x.desequilibrio.media), m(x => x.desequilibrio.p95), m(x => x.desequilibrio.max), m(x => x.ocupacionMedia), m(x => x.migraciones),
+        m(x => x.esperaBarreraMs)].join('\t')}\t${rs.some(x => x.corrupcion) ? 'SI' : 'no'}\n`);
+    }
   }
   const columnas = ['personas', 'hilos', 'disp.', 'binario', 'n', 'ms/tick', 'p95', 'CPU princ.', 'µs/pers', 'µs/anim', 'animales', 'F2 captura',
     'F2 cerebro', 'F2 despacho', 'serie', 'espera/pared', 'B/tick', 'puerta ms', 'puerta B', 'SCHED'];

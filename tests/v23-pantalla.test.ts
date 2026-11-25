@@ -124,7 +124,10 @@ test('histogramaTamanos: clases que se doblan hasta la mayor comunidad, con medi
 test('escuchaFicha: barra propia junto a la de sus progenitores, «sin dato» si el mundo no trae la escucha', () => {
   const view = projectWorld(createWorld(51926));
   const [s, i, hija] = [view.people.find(p => p.id === 's')!, view.people.find(p => p.id === 'i')!, view.people.find(p => p.id === 'neighbor-3')!];
-  assert.match(escuchaFicha(hija, view), /data-escucha="sin-dato"/);
+  const sinEscucha = { ...hija, escucha: undefined, traits: { ...hija.traits!, escucha: undefined } };
+  assert.match(escuchaFicha(sinEscucha as typeof hija, view), /data-escucha="sin-dato"/);
+  // `PersonView.escucha` manda sobre `traits.escucha`: se fijan los dos.
+  Object.assign(s, { escucha: .8 }); Object.assign(i, { escucha: .4 }); Object.assign(hija, { escucha: .6 });
   Object.assign(s.traits as object, { escucha: .8 }); Object.assign(i.traits as object, { escucha: .4 }); Object.assign(hija.traits as object, { escucha: .6 });
   hija.genome = { ...hija.genome!, generation: 1, parents: ['s', 'i'] };
   const html = escuchaFicha(hija, view);

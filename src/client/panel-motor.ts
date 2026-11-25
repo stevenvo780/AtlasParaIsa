@@ -140,6 +140,15 @@ function tarjetas(v: VistaMotor): string {
   return `<div class="motor-bloque" data-motor-tarjetas="${v.tarjetas.length}"><h4 class="detail-subtitle">Tarjetas</h4><div class="motor-tarjetas">${filas}</div></div>`;
 }
 
+/** Qué dicen en claro el desequilibrio, las migraciones y los intentos; null si el motor no los informa. */
+export function lecturaReparto(v: Pick<VistaMotor, 'desequilibrio' | 'migraciones' | 'intentos' | 'rechazados'>): string | null {
+  const partes: string[] = [];
+  if (v.desequilibrio !== null) partes.push(v.desequilibrio < .1 ? 'Los hilos trabajan casi por igual.' : `El hilo más cargado pasa un ${number(v.desequilibrio * 100)} % de la media: el reparto por tiempo de pared aún no lo iguala.`);
+  if (v.migraciones !== null) partes.push(v.migraciones === 0 ? 'Ninguna página cambió de dueño.' : `${number(v.migraciones)} ${v.migraciones === 1 ? 'página cambió' : 'páginas cambiaron'} de dueño para repartir la carga.`);
+  if (v.intentos !== null && v.rechazados !== null) partes.push(v.intentos === 0 ? 'Aún no hubo intentos entre dueños.' : `${number(v.rechazados)} de ${number(v.intentos)} intentos entre dueños fueron rechazados (${number(v.rechazados / v.intentos * 100, 1)} %).`);
+  return partes.length ? partes.join(' ') : null;
+}
+
 function trafico(v: VistaMotor): string {
   const rechazo = v.intentos && v.rechazados !== null ? ` <small>(${esc(number(v.rechazados / v.intentos * 100, 1))} %)</small>` : '';
   const enCpu = v.tarjetas.filter(t => t.estado === 'cpu').length;
@@ -148,7 +157,7 @@ function trafico(v: VistaMotor): string {
     + `<span>Intentos entre dueños<strong>${cifra(v.intentos)}</strong></span><span>Rechazados<strong>${cifra(v.rechazados)}${rechazo}</strong></span>`
     + `<span>Migraciones<strong>${cifra(v.migraciones)}</strong></span><span data-motor-saltados>Fotogramas saltados<strong>${cifra(v.saltados)}</strong></span>`
     + `<span data-motor-recargas>Recargas tras un fallo del paso<strong>${cifra(v.recargas)}</strong></span><span>Tarjetas en respaldo de CPU<strong>${v.tarjetas.length ? esc(number(enCpu)) : sinDato}</strong></span>`
-    + '</div><p class="stats-note">Un fallo de tarjeta se recalcula en CPU en el mismo paso; un fallo del paso recarga el último guardado y el mundo sigue.</p></div>';
+    + '</div>' + (lecturaReparto(v) ? `<p class="stats-note" data-motor-lectura>${esc(lecturaReparto(v)!)}</p>` : '') + '<p class="stats-note">Un fallo de tarjeta se recalcula en CPU en el mismo paso; un fallo del paso recarga el último guardado y el mundo sigue.</p></div>';
 }
 
 export function renderPanelMotor(v: VistaMotor, luz: LuzSalud): string {

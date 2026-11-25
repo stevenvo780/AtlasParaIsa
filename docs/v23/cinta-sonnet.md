@@ -163,7 +163,7 @@ Cada etapa deja el mundo funcionando. Propietarios disjuntos entre paréntesis.
 | **E4** Cliente (C) | `dvr-player.ts` por fotogramas, niveles y cambio de escala; barra con insignia de escala, «Presente» y serie; marcadores y fijación (pin) | `src/client/{dvr-player,dvr-bar,game}.ts`; `src/server/cinta/marcadores.ts` | pruebas del reproductor con cinta sintética multinivel |
 | **E5** Respaldo (D) | `scripts/respaldo-cinta.sh`, unidades systemd, restauración | `scripts/`, `scripts/systemd/torre/` | prueba de restauración (§7, I8) |
 | **E6** Retirada (A) | borrar lo de §4; conversor opcional `scripts/cinta-migrar.ts` (~100 líneas) del formato viejo a L0 de un mundo que se arrastre | los de §4 | `npm run typecheck && npm test` verdes |
-| **E7** Sectores espaciales (B) | **condicional**: si el keyframe medido supera ≈ 5 MB, partirlo en sectores de 128×128 teselas comprimidos por separado; el lector solo decodifica los de la cámara | `formato.ts`, `lector.ts` | salto p95 sigue < 100 ms con 50.000 entidades |
+| **E7** Sectores espaciales (B) | **condicional**: si el keyframe medido supera ≈ 5 MB, partirlo en sectores de 64×64 teselas comprimidos por separado; el lector solo decodifica los de la cámara | `formato.ts`, `lector.ts` | salto p95 sigue < 100 ms con 50.000 entidades |
 | **E8** Carga y calibración (todos) | cinta sintética de 50 GB, ráfaga a 2×Hz, restauración, caída del escritor | `scripts/perf/` | §6 y §7 con números reales |
 
 El mundo nuevo V23 nace ya con el formato nuevo (decisión 12), así que la migración de datos es opcional. El lector del formato viejo no se mantiene.

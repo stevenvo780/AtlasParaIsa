@@ -125,6 +125,11 @@ export const CONTROL_ENLACE_BYTES = 40;
  * `Atomics.store` + `Atomics.notify(sucesosLeidos, 0)` y, al soltar la ranura, `Atomics.add(creditos, 0, 1)`. Los contadores
  * BigInt64 no desbordan en la vida del mundo. `pedirCompleto[0] = 1` lo pone la cinta y lo baja el motor; `cadencia[0]`
  * son ticks entre fotogramas y la cinta lo sube si se atrasa.
+ * Si el consumidor muere o el enlace queda inutilizable, el supervisor publica
+ * Atomics.store(sucesosLeidos, 0, -1n) y Atomics.notify(sucesosLeidos, 0).
+ * El productor comprueba -1n antes de reservar, publicar y al comprobar espacio
+ * para sucesos, también después de despertar. Un enlace abandonado no se vuelve
+ * a usar; el productor omite los fotogramas hasta que Motor.enlazar reciba uno nuevo.
  */
 export interface EnlaceCinta {
   readonly ranuras: readonly SharedArrayBuffer[];

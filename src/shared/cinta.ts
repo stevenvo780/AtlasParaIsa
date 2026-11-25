@@ -53,7 +53,8 @@ export interface EntradaCatalogo { t: number; sustancia: SustanciaVista }
 export interface Apertura { instanciaId: string; epoca: number; tMundo: number; motivo: 'reinicio' | 'restauracion' }
 /** Historia que el mundo olvidó: [desde, hasta] de la época anterior quedan huérfanos y son lo primero que se poda. */
 export interface Bifurcacion { epoca: number; desde: number; hasta: number; motivo: Apertura['motivo'] }
-export interface Laguna { t0: number; t1: number }
+/** Sin nivel afecta a la historia visible de todos los niveles. Con nivel, solo a esa pista. */
+export interface Laguna { t0: number; t1: number; nivel?: Nivel }
 
 /** Nacimientos y muertes van acumulados por época: entre dos puntos de una época, Δpoblación = Δnacimientos − Δmuertes (I9). */
 export type SeriePunto = { t: number } & Record<CampoSerie, number>;
@@ -73,7 +74,7 @@ export interface ChunkReq { t: number; n: number; nivel?: Nivel | 'auto'; epoca?
 export interface ChunkResp {
   nivel: Nivel; paso: number; epoca: number; t0: number; t1: number; hayMas: boolean;
   cambioDeNivelEn?: number;              // t donde termina el nivel servido
-  baseFrame?: WorldView;                 // el fotograma clave más cercano ≤ t: el primer pintado
+  baseFrame?: WorldView;                 // Con n=1, el último fotograma ≤ t del nivel servido. Con n>1, la base del tramo para el primer pintado.
   deltas: TapeClientDelta[];
 }
 

@@ -1,56 +1,92 @@
 /**
- * V21 — Barra de transporte DVR («cine»): reproducir/pausar, paso a paso, velocidad, línea de tiempo con
- * sparkline de población y telemetría del motor turbo. `renderDvrBar` es HTML puro (se prueba sin DOM);
- * `mountDvrBar` lo monta y solo PARCHEA texto/valores en cada fotograma para no perder el foco ni el arrastre.
+ * V23 — Barra de transporte de la cinta («cine»): reproducir/pausar, paso a paso, velocidad, insignia de escala (nivel
+ * y paso en tiempo de mundo), botón «Presente» con el desfase, y la serie de población de toda la vida como fondo de la
+ * barra con marcas de bifurcación y laguna. `renderDvrBar` es HTML puro (se prueba sin DOM); `mountDvrBar` lo monta y
+ * solo PARCHEA texto/valores en cada fotograma para no perder el foco ni el arrastre.
  */
-import { TAPE_SPEEDS, type TapeSpeed, type TapeTimelinePoint } from '../shared/tape.js';
+import { CINTA, type Bifurcacion, type Laguna, type Nivel, type SeriePunto } from '../shared/cinta.js';
 import { esc } from './ui-catalog.js';
-import type { DvrState } from './dvr-player.js';
+import { TICKS_POR_DIA, VELOCIDADES, type DvrState, type Velocidad } from './dvr-player.js';
 
-export type DvrBarState = Pick<DvrState, 'playing' | 'speed' | 'currentTick' | 'minTick' | 'maxTick' | 'latestDay' | 'simHz' | 'timeline' | 'aheadOfPlayhead' | 'atLiveEdge'> & Partial<Pick<DvrState, 'loading'>>;
+export type DvrBarState = Pick<DvrState, 'playing' | 'speed' | 'currentTick' | 'minTick' | 'maxTick' | 'latestDay' | 'simHz' | 'serie' | 'bifurcaciones' | 'lagunas' | 'nivel' | 'aheadOfPlayhead' | 'atLiveEdge'> & Partial<Pick<DvrState, 'loading' | 'estado'>>;
 
 export interface DvrBarHandlers {
   togglePlay(): void;
   step(delta: -1 | 1): void;
-  setSpeed(speed: TapeSpeed): void;
+  setSpeed(speed: Velocidad): void;
   seek(tick: number): void;
   jumpLive(): void;
 }
 export interface DvrBarController { update(state: DvrBarState): void; destroy(): void; }
 
-/** Puntos máximos que se dibujan en el sparkline (el servidor ya reduce la serie; esto es solo un seguro). */
+/** Puntos máximos que se dibujan de la serie (el servidor ya la decima a ≤ 400; esto es solo un seguro). */
 const SPARK_POINTS = 160;
 const SPARK_W = 100, SPARK_H = 24;
-/** El arrastre del deslizador pide un `seek` como mucho cada tanto, y siempre al soltar. */
+/** El arrastre del deslizador pide un `seek` como mucho cada tanto, y siempre al soltar (ms). */
 const SCRUB_DEBOUNCE_MS = 150;
+/** Segundos de mundo por tick: un día de mundo son 86 400 s repartidos en `TICKS_POR_DIA` ticks. */
+const SEGUNDOS_POR_TICK = 86_400 / TICKS_POR_DIA;
+
+/** Nombre del nivel de la cinta (cinta-sonnet §2): lo que el usuario ve en la insignia. */
+export const NOMBRE_NIVEL: Record<Nivel, string> = {
+  0: 'Detalle completo', 1: 'Sin telemetría', 2: 'Fauna en densidad', 3: 'Resumen diario', 4: 'Resumen de 10 días',
+};
 
 /** Cualquier valor del servidor se vuelve número finito: nada llega al HTML sin pasar por aquí. */
 const num = (value: unknown): number => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
 const int = (value: unknown): number => Math.round(num(value));
 
-/** Último punto de la línea de tiempo cuyo tick no pasa de `tick` (o el primero si todos son posteriores). */
-export function nearestTimelinePoint(timeline: readonly TapeTimelinePoint[], tick: number): TapeTimelinePoint | null {
-  let best: TapeTimelinePoint | null = null, bestDistance = Infinity;
-  for (const point of timeline) {
-    const distance = Math.abs(num(point.tick) - tick);
+/** Duración de mundo legible: «14 min», «6 d», «2 d 4 h». Entrada en segundos de mundo. */
+export function duracionDeMundo(segundos: number): string {
+  const s = Math.max(0, num(segundos));
+  if (s < 60) return `${Math.max(1, Math.round(s))} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  if (s < 86_400) { const h = Math.floor(s / 3600), m = Math.round((s - h * 3600) / 60); return m && h < 10 ? `${h} h ${m} min` : `${Math.round(s / 3600)} h`; }
+  const d = Math.floor(s / 86_400), h = Math.round((s - d * 86_400) / 3600);
+  return h && d < 10 ? `${d} d ${h} h` : `${Math.round(s / 86_400)} d`;
+}
+
+/** Duración de mundo de un número de ticks: «4 d 6 h». */
+export function duracionDeTicks(ticks: number): string { return duracionDeMundo(Math.max(0, num(ticks)) * SEGUNDOS_POR_TICK); }
+
+/** Segundos de mundo que pasan por cada segundo real al nivel y velocidad dados: fps del nivel × paso × velocidad. */
+export function segundosDeMundoPorSegundo(nivel: Nivel, velocidad: number): number {
+  return CINTA.fpsNormal * CINTA.pasos[nivel] * Math.max(0, num(velocidad)) * SEGUNDOS_POR_TICK;
+}
+
+/** Insignia de escala: «Detalle completo · 1 s = 14 min de mundo». Sin nivel (aún sin fotograma) devuelve cadena vacía. */
+export function escalaLabel(nivel: Nivel | null | undefined, velocidad: number): string {
+  if (nivel === null || nivel === undefined || !(nivel in NOMBRE_NIVEL)) return '';
+  return `${NOMBRE_NIVEL[nivel]} · 1 s = ${duracionDeMundo(segundosDeMundoPorSegundo(nivel, velocidad))} de mundo`;
+}
+
+/** Punto de la serie más cercano al tick (o `null` si no hay serie). */
+export function nearestSeriePoint(serie: readonly SeriePunto[], tick: number): SeriePunto | null {
+  let best: SeriePunto | null = null, bestDistance = Infinity;
+  for (const point of serie) {
+    const distance = Math.abs(num(point.t) - tick);
     if (distance < bestDistance) { best = point; bestDistance = distance; }
   }
   return best;
 }
 
-/** «Día X · Paso Y» para el cabezal. El día sale de la línea de tiempo; sin ella, el último conocido. */
-export function dvrTimeLabel(state: Pick<DvrBarState, 'currentTick' | 'timeline' | 'latestDay'>, tick = state.currentTick): string {
-  const point = nearestTimelinePoint(state.timeline, tick);
-  return `Día ${int(point ? point.day : state.latestDay)} · Paso ${int(tick)}`;
+/** «Día X · HH:MM» para el cabezal: el día y la hora de mundo salen del tick. */
+export function dvrTimeLabel(state: Pick<DvrBarState, 'currentTick'>, tick = state.currentTick): string {
+  const t = Math.max(0, int(tick)), dia = Math.floor(t / TICKS_POR_DIA) + 1;
+  const minutos = Math.floor((t % TICKS_POR_DIA) / TICKS_POR_DIA * 1440);
+  return `Día ${dia} · ${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
 }
 
-/** Vista previa al pasar/arrastrar sobre la línea: «Día · Pob · Obras · Fórmulas». */
-export function dvrHoverLabel(point: TapeTimelinePoint | null): string {
-  return point ? `Día ${int(point.day)} · Pob ${int(point.pop)} · Obras ${int(point.structures)} · Fórmulas ${int(point.formulas)}` : '';
+/** Vista previa al pasar/arrastrar sobre la línea: «Día · Pob · Fauna · Obras · Sustancias». */
+export function dvrHoverLabel(point: SeriePunto | null): string {
+  return point ? `${dvrTimeLabel({ currentTick: 0 }, point.t)} · Pob ${int(point.poblacion)} · Fauna ${int(point.fauna)} · Obras ${int(point.estructuras)} · Sustancias ${int(point.sustancias)}` : '';
 }
 
-export function dvrEngineLabel(state: Pick<DvrBarState, 'simHz' | 'latestDay' | 'aheadOfPlayhead'>): string {
-  return `⚡ ${int(state.simHz)} Hz · Día ${int(state.latestDay)} (+${int(state.aheadOfPlayhead)} adel.)`;
+export function dvrEngineLabel(state: Pick<DvrBarState, 'simHz'>): string { return `⚡ ${int(state.simHz)} Hz`; }
+
+/** «a 4 d 6 h del presente», o «en el presente» dentro del margen del borde. */
+export function desfaseLabel(state: Pick<DvrBarState, 'aheadOfPlayhead' | 'atLiveEdge'>): string {
+  return state.atLiveEdge ? 'en el presente' : `a ${duracionDeTicks(state.aheadOfPlayhead)} del presente`;
 }
 
 /** Posición horizontal (0–100) de un tick dentro de la cinta. */
@@ -59,39 +95,56 @@ export function dvrPercent(tick: number, minTick: number, maxTick: number): numb
   return span > 0 ? Math.min(100, Math.max(0, (num(tick) - num(minTick)) / span * 100)) : 100;
 }
 
-/** Contenido interior del `<svg>` del sparkline: área + línea de población (y marcador del cabezal aparte). */
-export function sparklineMarkup(timeline: readonly TapeTimelinePoint[], minTick: number, maxTick: number): string {
-  const sorted = [...timeline].map(p => ({ tick: num(p.tick), pop: Math.max(0, num(p.pop)) })).sort((a, b) => a.tick - b.tick);
-  if (!sorted.length) return `<line class="dvr-spark-base" x1="0" y1="${SPARK_H - 1}" x2="${SPARK_W}" y2="${SPARK_H - 1}"/>`;
+/** Marcas verticales de bifurcación y tramos de laguna, dentro del `<svg>` de la serie (atributos propios: no necesitan CSS). */
+export function marcasMarkup(bifurcaciones: readonly Bifurcacion[], lagunas: readonly Laguna[], minTick: number, maxTick: number): string {
+  const lagunasSvg = lagunas.map(l => {
+    const x0 = dvrPercent(l.t0, minTick, maxTick), x1 = dvrPercent(l.t1, minTick, maxTick);
+    return `<rect class="dvr-marca dvr-marca-laguna" data-dvr-laguna="${int(l.t0)}" x="${x0.toFixed(2)}" y="0" width="${Math.max(0.4, x1 - x0).toFixed(2)}" height="${SPARK_H}" fill="#000" fill-opacity="0.55"/>`;
+  });
+  const bifurcacionesSvg = bifurcaciones.map(b => {
+    const x = dvrPercent(b.desde, minTick, maxTick).toFixed(2);
+    return `<line class="dvr-marca dvr-marca-bifurcacion" data-dvr-bifurcacion="${int(b.epoca)}" x1="${x}" y1="0" x2="${x}" y2="${SPARK_H}" stroke="#e8a86a" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+  });
+  return lagunasSvg.join('') + bifurcacionesSvg.join('');
+}
+
+/** Contenido interior del `<svg>`: área + línea de población de toda la vida y las marcas encima. */
+export function sparklineMarkup(serie: readonly SeriePunto[], minTick: number, maxTick: number, bifurcaciones: readonly Bifurcacion[] = [], lagunas: readonly Laguna[] = []): string {
+  const sorted = [...serie].map(p => ({ t: num(p.t), pop: Math.max(0, num(p.poblacion)) })).sort((a, b) => a.t - b.t);
+  const marcas = marcasMarkup(bifurcaciones, lagunas, minTick, maxTick);
+  if (!sorted.length) return `<line class="dvr-spark-base" x1="0" y1="${SPARK_H - 1}" x2="${SPARK_W}" y2="${SPARK_H - 1}"/>${marcas}`;
   const stride = Math.max(1, Math.ceil(sorted.length / SPARK_POINTS));
   const points = sorted.filter((_, i) => i % stride === 0 || i === sorted.length - 1);
   const top = Math.max(1, ...points.map(p => p.pop));
-  const coords = points.map(p => `${dvrPercent(p.tick, minTick, maxTick).toFixed(2)},${(SPARK_H - 2 - p.pop / top * (SPARK_H - 5)).toFixed(2)}`);
+  const coords = points.map(p => `${dvrPercent(p.t, minTick, maxTick).toFixed(2)},${(SPARK_H - 2 - p.pop / top * (SPARK_H - 5)).toFixed(2)}`);
   const first = coords[0]!.split(',')[0], last = coords[coords.length - 1]!.split(',')[0];
-  return `<path class="dvr-spark-area" d="M${first},${SPARK_H} L${coords.join(' L')} L${last},${SPARK_H} Z"/><path class="dvr-spark-line" d="M${coords.join(' L')}"/>`;
+  return `<path class="dvr-spark-area" d="M${first},${SPARK_H} L${coords.join(' L')} L${last},${SPARK_H} Z"/><path class="dvr-spark-line" d="M${coords.join(' L')}"/>${marcas}`;
 }
 
-export function renderDvrBar(state: DvrBarState, hoverPoint: TapeTimelinePoint | null = null): string {
-  const speed = TAPE_SPEEDS.includes(state.speed) ? state.speed : 1;
+export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null = null): string {
+  const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1;
   const min = int(state.minTick), max = Math.max(min, int(state.maxTick)), tick = Math.min(max, Math.max(min, int(state.currentTick)));
   const time = esc(dvrTimeLabel(state));
   const playing = !!state.playing, live = !!state.atLiveEdge;
+  const escala = escalaLabel(state.nivel, speed);
   return `<div class="dvr-transport" role="group" aria-label="Reproductor del mundo"${state.loading ? ' data-loading="true"' : ''}>`
     + `<div class="dvr-controls"><button type="button" class="dvr-button" data-dvr-step="-1" aria-label="Fotograma anterior (,)" title="Fotograma anterior (,)">⏮</button>`
     + `<button type="button" class="dvr-button dvr-play" data-dvr-play aria-pressed="${playing}" aria-label="${playing ? 'Pausar' : 'Reproducir'}" title="Espacio">${playing ? '⏸' : '▶'}</button>`
     + `<button type="button" class="dvr-button" data-dvr-step="1" aria-label="Fotograma siguiente (.)" title="Fotograma siguiente (.)">⏭</button></div>`
-    + `<div class="dvr-speeds" role="group" aria-label="Velocidad">${TAPE_SPEEDS.map(s => `<button type="button" class="dvr-speed" data-dvr-speed="${s}" aria-pressed="${s === speed}">${s}×</button>`).join('')}</div>`
-    + `<div class="dvr-scrubber"><svg class="dvr-sparkline" viewBox="0 0 ${SPARK_W} ${SPARK_H}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${sparklineMarkup(state.timeline, min, max)}</svg>`
+    + `<div class="dvr-speeds" role="group" aria-label="Velocidad">${VELOCIDADES.map(s => `<button type="button" class="dvr-speed" data-dvr-speed="${s}" aria-pressed="${s === speed}">${s}×</button>`).join('')}</div>`
+    + `<div class="dvr-scrubber"><svg class="dvr-sparkline" viewBox="0 0 ${SPARK_W} ${SPARK_H}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${sparklineMarkup(state.serie, min, max, state.bifurcaciones, state.lagunas)}</svg>`
     + `<span class="dvr-playhead" data-dvr-playhead style="left:${dvrPercent(tick, min, max).toFixed(2)}%" aria-hidden="true"></span>`
     + `<input type="range" class="dvr-range" data-dvr-range min="${min}" max="${max}" step="1" value="${tick}" aria-label="Línea de tiempo del mundo" aria-valuetext="${time}">`
-    + `<div class="dvr-readout"><span class="dvr-time" data-dvr-time>${time}</span><span class="dvr-hover" data-dvr-hover>${esc(dvrHoverLabel(hoverPoint))}</span></div></div>`
-    + `<div class="dvr-engine"><span class="dvr-badge" data-dvr-engine title="Velocidad del motor y ticks ya calculados por delante">${esc(dvrEngineLabel(state))}</span>`
-    + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="Volver al borde vivo (0)">● Borde vivo</button></div></div>`;
+    + `<div class="dvr-readout"><span class="dvr-time" data-dvr-time>${time}</span><span class="dvr-desfase" data-dvr-desfase>${esc(desfaseLabel(state))}</span><span class="dvr-hover" data-dvr-hover>${esc(dvrHoverLabel(hoverPoint))}</span></div>`
+    + `<div class="dvr-estado" data-dvr-estado role="status">${state.estado === 'error' ? '⚠ La cinta dejó de grabar: el mundo sigue, pero esto no se guarda.' : ''}</div></div>`
+    + `<div class="dvr-engine"><span class="dvr-badge dvr-escala" data-dvr-escala title="Qué tanto mundo pasa por cada segundo de reproducción">${esc(escala)}</span>`
+    + `<span class="dvr-badge" data-dvr-engine title="Velocidad del motor (ticks por segundo)">${esc(dvrEngineLabel(state))}</span>`
+    + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="Volver al presente (0)">● Presente</button></div></div>`;
 }
 
 /** Monta la barra en `container` (`#dvr-bar`). Delegación de eventos: el HTML interior se puede reemplazar sin reenganchar. */
 export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): DvrBarController {
-  let structure = '', timelineKey = '', scrubbing = false, last: DvrBarState | null = null;
+  let structure = '', serieKey = '', scrubbing = false, last: DvrBarState | null = null;
   let scrubTimer: ReturnType<typeof setTimeout> | undefined;
   const query = <T extends Element>(selector: string): T | null => container.querySelector<T>(selector);
   const setText = (selector: string, text: string): void => { const node = query(selector); if (node && node.textContent !== text) node.textContent = text; };
@@ -104,8 +157,8 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     else if (button.hasAttribute('data-dvr-live')) handlers.jumpLive();
     else if (button.hasAttribute('data-dvr-step')) handlers.step(button.getAttribute('data-dvr-step') === '-1' ? -1 : 1);
     else if (button.hasAttribute('data-dvr-speed')) {
-      const speed = Number(button.getAttribute('data-dvr-speed')) as TapeSpeed;
-      if (TAPE_SPEEDS.includes(speed)) handlers.setSpeed(speed);
+      const speed = Number(button.getAttribute('data-dvr-speed')) as Velocidad;
+      if (VELOCIDADES.includes(speed)) handlers.setSpeed(speed);
     }
   };
   const rangeValue = (event: Event): number => Number((event.target as HTMLInputElement).value);
@@ -113,7 +166,7 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     if (!(event.target as Element | null)?.hasAttribute?.('data-dvr-range')) return;
     scrubbing = true;
     const tick = rangeValue(event);
-    if (last) { setText('[data-dvr-time]', dvrTimeLabel(last, tick)); setText('[data-dvr-hover]', dvrHoverLabel(nearestTimelinePoint(last.timeline, tick))); }
+    if (last) { setText('[data-dvr-time]', dvrTimeLabel(last, tick)); setText('[data-dvr-hover]', dvrHoverLabel(nearestSeriePoint(last.serie, tick))); }
     clearTimeout(scrubTimer);
     scrubTimer = setTimeout(() => handlers.seek(tick), SCRUB_DEBOUNCE_MS);
   };
@@ -129,7 +182,7 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     const rect = scrubber.getBoundingClientRect(), x = (event as MouseEvent).clientX;
     if (!(rect.width > 0) || !Number.isFinite(x)) return;
     const tick = last.minTick + Math.min(1, Math.max(0, (x - rect.left) / rect.width)) * (last.maxTick - last.minTick);
-    setText('[data-dvr-hover]', dvrHoverLabel(nearestTimelinePoint(last.timeline, tick)));
+    setText('[data-dvr-hover]', dvrHoverLabel(nearestSeriePoint(last.serie, tick)));
   };
   const onLeave = (): void => setText('[data-dvr-hover]', '');
 
@@ -142,15 +195,15 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
   return {
     update(state: DvrBarState): void {
       last = state;
-      const nextStructure = `${state.playing}|${state.speed}|${state.atLiveEdge}|${!!state.loading}`;
+      const nextStructure = `${state.playing}|${state.speed}|${state.atLiveEdge}|${!!state.loading}|${state.estado ?? 'ok'}`;
       const min = int(state.minTick), max = Math.max(min, int(state.maxTick));
-      const lastPoint = state.timeline[state.timeline.length - 1];
-      const nextTimeline = `${state.timeline.length}|${lastPoint ? int(lastPoint.tick) : ''}|${min}|${max}`;
+      const lastPoint = state.serie[state.serie.length - 1];
+      const nextSerie = `${state.serie.length}|${lastPoint ? int(lastPoint.t) : ''}|${min}|${max}|${state.bifurcaciones.length}|${state.lagunas.length}`;
       if (nextStructure !== structure || !query('[data-dvr-range]')) {
-        if (!scrubbing) { structure = nextStructure; timelineKey = nextTimeline; container.innerHTML = renderDvrBar(state); }
-      } else if (nextTimeline !== timelineKey) {
-        timelineKey = nextTimeline;
-        const svg = query('.dvr-sparkline'); if (svg) svg.innerHTML = sparklineMarkup(state.timeline, min, max);
+        if (!scrubbing) { structure = nextStructure; serieKey = nextSerie; container.innerHTML = renderDvrBar(state); }
+      } else if (nextSerie !== serieKey) {
+        serieKey = nextSerie;
+        const svg = query('.dvr-sparkline'); if (svg) svg.innerHTML = sparklineMarkup(state.serie, min, max, state.bifurcaciones, state.lagunas);
         const range = query<HTMLInputElement>('[data-dvr-range]'); if (range) { range.min = String(min); range.max = String(max); }
       }
       const tick = Math.min(max, Math.max(min, int(state.currentTick)));
@@ -158,6 +211,8 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
       if (range && !scrubbing) { range.min = String(min); range.max = String(max); range.value = String(tick); range.setAttribute('aria-valuetext', dvrTimeLabel(state)); }
       const head = query<HTMLElement>('[data-dvr-playhead]'); if (head) head.style.left = `${dvrPercent(tick, min, max).toFixed(2)}%`;
       if (!scrubbing) setText('[data-dvr-time]', dvrTimeLabel(state));
+      setText('[data-dvr-desfase]', desfaseLabel(state));
+      setText('[data-dvr-escala]', escalaLabel(state.nivel, state.speed));
       setText('[data-dvr-engine]', dvrEngineLabel(state));
     },
     destroy(): void {

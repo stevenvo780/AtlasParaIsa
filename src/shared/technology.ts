@@ -66,6 +66,35 @@ export interface TechnologyKnowledge {
   waterCarryAt?: number;
   /** Bounded autonomous preparation at a perceived local source; no liquid is reserved in advance. */
   waterPreparation?: { itemId: string; sourceX: number; sourceY: number; initialQuanta: number; targetQuanta: number; startedAt: number };
+  /** V23 (`v23.tecnica`): recetas recordadas y proceso en curso sobre lotes. Ausente con la ley apagada. */
+  tecnica?: TecnicaPersona;
+}
+
+/** Paso de un proceso técnico tal como se guarda: la misma forma que `Paso` de `world/materia/tipos.ts`. */
+export type PasoTecnico =
+  | { op: 'romper'; forma: import('./materia.js').Forma }
+  | { op: 'unir'; insumo: number; forma: number; masa: number }
+  | { op: 'calentar' | 'mojar'; hasta: { T?: number; ticks?: number } };
+/** `ProcesoMaterial` (world/materia/tipos.ts) tal como se guarda en la persona. */
+export interface ProcesoTecnicoDatos { lote: number; pasos: readonly PasoTecnico[]; i: number; desde: number; x: number; y: number }
+/** Una receta que alguien recuerda. Su fuerza es e^(−(tick − usada)/τ): usarla, aprenderla o enseñarla la pone a 1 y
+ * se olvida cuando baja de `OLVIDO_RECETA` (shared/naturaleza.ts). `vector` es lo que hizo la última vez
+ * (propiedades del lote × forma, en el orden de `CLAVES_FUNCIONALES` de world/materia/proceso.ts). */
+export interface RecetaRecordada { id: number; usada: number; generacion: number; padres: number[]; vector: number[] }
+/** Un proceso de investigación (receta nueva que aún no se sabe si sirve) o de fabricación (una receta recordada). */
+export interface ProcesoEnCurso {
+  tipo: 'research' | 'craft'; receta: number; generacion: number; padres: number[]; proceso: ProcesoTecnicoDatos;
+  /** Investigación: la receta tal como se propuso (el proceso lleva una copia que unir va gastando); se registra solo
+   * si su producto resulta una novedad. En fabricación, `receta` es el id del registro y esto falta. */
+  original?: readonly PasoTecnico[];
+}
+export interface TecnicaPersona {
+  recetas: RecetaRecordada[];
+  proceso: ProcesoEnCurso | null;
+  /** Último tick en que alguien avanzó su proceso: un proceso avanza a lo sumo una vez por tick. */
+  avanzadoEn: number;
+  intentos: number;
+  ultimoIntento: number;
 }
 export interface ResourceMass { resourceId: string; mass: number; }
 export interface TechnologyExecution {

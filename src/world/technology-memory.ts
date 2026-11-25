@@ -1,4 +1,6 @@
-import type { TechnologyKnowledge } from '../shared/technology.js';
+import { OLVIDO_RECETA, TAU_RECETA_APRENDIZAJE, TAU_RECETA_BASE } from '../shared/naturaleza.js';
+import type { RecetaRecordada, TechnologyKnowledge, TecnicaPersona } from '../shared/technology.js';
+import { TICKS_PER_DAY } from './mundo/tipos.js';
 
 export interface RecipeMemoryOptions {
   capacity: number;
@@ -130,4 +132,53 @@ export function rememberRecipe(knowledge: TechnologyKnowledge, id: string, optio
   }
   knowledge.knownRecipes = knownRecipes;
   return { remembered: true, forgotten };
+}
+
+// ── V23 (`v23.tecnica`): memoria de recetas con olvido ───────────────────────────────────────────────────
+// Sin capacidad fija: lo que alguien recuerda es la tasa con que usa sus recetas por τ (leyes-opus §3d).
+
+/** Estado técnico vacío de una persona con la ley encendida. */
+export const nuevaTecnica = (): TecnicaPersona => ({ recetas: [], proceso: null, avanzadoEn: -1, intentos: 0, ultimoIntento: -Number.MAX_SAFE_INTEGER });
+
+/** τ_m en ticks: TAU_RECETA_BASE + TAU_RECETA_APRENDIZAJE·learningRate días (heredable por el gen de aprendizaje). */
+export const tauRecetaTicks = (learningRate: number): number =>
+  (TAU_RECETA_BASE + TAU_RECETA_APRENDIZAJE * Math.max(0, learningRate)) * TICKS_PER_DAY;
+
+/** Fuerza de una receta: fuerza ← fuerza·e^(−Δt/τ) desde la última vez que se usó, enseñó o aprendió (allí valía 1). */
+export const fuerzaReceta = (r: Pick<RecetaRecordada, 'usada'>, tick: number, tau: number): number =>
+  Math.exp(-Math.max(0, tick - r.usada) / tau);
+
+/** Ticks sin uso tras los que una receta baja de OLVIDO_RECETA: τ·ln(1/OLVIDO_RECETA). */
+export const vidaReceta = (tau: number): number => tau * Math.log(1 / OLVIDO_RECETA);
+
+export const recetaRecordada = (t: TecnicaPersona, id: number): RecetaRecordada | undefined => t.recetas.find(r => r.id === id);
+
+/** Recuerda (o refresca) una receta con fuerza 1: al inventarla, fabricarla, aprenderla o enseñarla. El vector y la
+ * generación son los de la última vez que se hizo o se aprendió. */
+export function recordarReceta(t: TecnicaPersona, r: RecetaRecordada): RecetaRecordada {
+  const previa = recetaRecordada(t, r.id);
+  if (!previa) { t.recetas.push(r); return r; }
+  previa.usada = Math.max(previa.usada, r.usada);
+  if (r.vector.length) previa.vector = r.vector;
+  previa.generacion = Math.min(previa.generacion, r.generacion);
+  return previa;
+}
+
+/** Pone a 1 la fuerza de una receta que ya se recuerda. */
+export function usarReceta(t: TecnicaPersona, id: number, tick: number): boolean {
+  const r = recetaRecordada(t, id);
+  if (r) r.usada = Math.max(r.usada, tick);
+  return r !== undefined;
+}
+
+/** Olvida las recetas cuya fuerza bajó de OLVIDO_RECETA (limpieza numérica, no una capacidad) y devuelve sus ids. */
+export function olvidarRecetas(t: TecnicaPersona, tick: number, tau: number): number[] {
+  const vida = vidaReceta(tau), olvidadas: number[] = [];
+  let j = 0;
+  for (const r of t.recetas) {
+    if (tick - r.usada > vida) olvidadas.push(r.id);
+    else t.recetas[j++] = r;
+  }
+  t.recetas.length = j;
+  return olvidadas;
 }

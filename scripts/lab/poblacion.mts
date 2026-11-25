@@ -8,7 +8,7 @@
  * emparejamientos y r = nacimientos − muertes. La curva r(densidad) dice si el mundo tiene punto de equilibrio.
  *
  *   tsx scripts/lab/poblacion.mts correr --semilla 7 --n 200 --zona 0,0,48,32 [--siembra S] [--dias 5] [--regimen abierto|defecto]
- *        [--params p.json] [--hilos 1] [--gpu sin|0,1] [--bloque 8] [--tope N] [--desde punto.v8] [--guardar punto.v8] --salida corrida.json
+ *        [--params p.json] [--hilos 1] [--gpu sin|0,1] [--bloque 8] [--tope N] [--ticks T] [--desde punto.v8] [--guardar punto.v8] --salida corrida.json
  *   tsx scripts/lab/poblacion.mts curva --semillas 7,51926 --n 50,100,200,400 --zona 0,0,48,32 [--coherencia 200] [--paralelo 6] --salida dir
  *   tsx scripts/lab/poblacion.mts resumir dir [--transitorio auto|K] [--bloque 8]
  *
@@ -582,6 +582,8 @@ export function analizar(registro: Registro, opciones: { transitorio: number; bl
 export interface OpcionesCorrida {
   semilla: number; n: number; zona: Zona; siembra: number; dias: number; regimen: 'abierto' | 'defecto'; params?: string;
   hilos: number; gpu: number[]; bloque: number; tope?: number; desde?: string; guardar?: string; salida: string;
+  /** Sonda corta: duración en ticks en vez de días. */
+  ticks?: number;
 }
 
 export function paramsDeCorrida(o: Pick<OpcionesCorrida, 'regimen' | 'params' | 'hilos' | 'gpu'>): WorldParams {
@@ -607,7 +609,7 @@ export function correr(o: OpcionesCorrida): unknown {
   assertWorld(mundo);
   const msSiembra = performance.now() - t0, chunks = archivoDeChunks(mundo, archivo);
   try {
-    const registro = medir(mundo, { dias: o.dias, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar,
+    const registro = medir(mundo, { dias: o.dias, ticks: o.ticks, zona: o.zona, caminables, tope: o.tope, archivar: chunks.archivar,
       alDia: d => appendFileSync(`${o.salida}.progreso`, `${JSON.stringify({ dia: d.dia, vivos: d.vivos, msPared: Math.round(d.msPared), carga: d.carga })}\n`) });
     assertWorld(mundo);
     if (o.guardar) { chunks.archivar(); guardarPunto(o.guardar, mundo, chunks.archivo); }
@@ -768,6 +770,7 @@ export function argumentosCorrida(args: string[]): OpcionesCorrida {
       case '--gpu': o.gpu = valor === 'sin' ? [] : valor.split(',').map(s => entero(s, bandera)); break;
       case '--bloque': o.bloque = entero(valor, bandera, 1); break;
       case '--tope': o.tope = entero(valor, bandera, 1); break;
+      case '--ticks': o.ticks = entero(valor, bandera, 1); break;
       case '--desde': o.desde = resolve(valor); break;
       case '--guardar': o.guardar = resolve(valor); break;
       case '--salida': o.salida = resolve(valor); break;

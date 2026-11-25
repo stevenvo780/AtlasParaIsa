@@ -122,7 +122,7 @@ class Arena {
   foto(): string { return JSON.stringify([...this.arena.muestras()].map((x) => [x.ref, [...x.pares]])); }
 }
 
-const base = { kappa: [0, 0, 0] as const, captura: 0.1, masaAdulta: 1, m0: 0.05, linaje: 0 };
+const base = { kappa: [0, 0, 0, 0] as const, captura: 0.1, masaAdulta: 1, m0: 0.05, linaje: 0 };
 const datos = (partes: { id: SustanciaId; nu: number }[], entradas: SustanciaId[], subproductos: SustanciaId[] = [O2]): DatosPlantilla =>
   ({ partes, entradas, subproductos, ...base });
 const golpe = (trabajo: number, filo: number, tenacidad: number, esbeltez: number, dureza: number) => {
@@ -233,10 +233,10 @@ test('crearPlantilla: una sustancia puede ser parte y entrada, o parte y subprod
 });
 
 test('crearPlantilla: la plantilla no cambia si luego se tocan los datos', () => {
-  const kappa: [number, number, number] = [1, 2, 3];
+  const kappa: [number, number, number, number] = [1, 2, 3, 4];
   const p = crearPlantilla(q, new RegistroPrueba(), { ...datos([{ id: CH2O, nu: 1 }], [CO2, H2O]), kappa })!;
   kappa[0] = 42;
-  assert.deepEqual(p.kappa, [1, 2, 3]);
+  assert.deepEqual(p.kappa, [1, 2, 3, 4]);
 });
 
 test('crearPlantilla: el id es el del registro por contenido', () => {
@@ -261,10 +261,31 @@ test('copiar: sintetiza en el destino, los subproductos van al residuo y conserv
   assert.equal(a.cuantos(vida, O2), 0);
   assert.equal(a.cuantos(aire, CO2), 900);
   assert.equal(a.cuantos(agua, H2O), 900);
-  assert.equal(a.calor(vida), 7, 'la síntesis gasta exactamente n·dH');
+  // La síntesis gasta exactamente n·dH; el O₂ sale al residuo con su parte del calor que queda (enmienda 2).
+  assert.equal(a.calor(vida) + a.calor(residuo), 7, 'la síntesis gasta exactamente n·dH');
   assert.deepEqual(a.totales(), antes);
   assert.deepEqual(a.totales(), a.esperado());
   assert.deepEqual(a.libro, libro, 'sin fuentes ni sumideros');
+});
+
+test('copiar: cada entrada y cada subproducto viajan con su parte del calor; la fuente no se calienta al vaciarse', () => {
+  // Validación de los ciclos, hallazgo 9: con `mover`, que no lleva calor, de un charco de 1.000 H₂O a 295 K del que la
+  // planta toma 945 quedaban 55 con todo el calor (5.364 K, y el agua se partía sin catálisis). Ahora es `moverParte`
+  // exacta, como en `fluir`: lo que queda en la fuente sigue a su T, y lo que entra en la vida trae su calor.
+  const a = new Arena();
+  const charco = a.aT([[H2O, 1000]], 295), aire = a.aT([[CO2, 100_000]], 295);
+  const vida = a.aT([[CH2O, 20_000]], 295), residuo = a.crear();
+  a.poner(vida, [], 1000 * foto.sintesis.dH); // la luz que paga la síntesis
+  const antes = a.totales();
+  assert.equal(copiar(a.arena, q, foto, vida, [charco, aire], residuo, Infinity, 945), 945);
+  assert.equal(a.cuantos(charco, H2O), 55);
+  for (const [nombre, l] of [['charco', charco], ['aire', aire]] as const) {
+    assert.ok(Math.abs(a.vista(l).T - 295) < 1, `${nombre} a ${a.vista(l).T.toFixed(1)} K`);
+  }
+  // La vida queda con 55·dH de luz sin usar más el calor de lo que trajo; el O₂ sale a su misma T.
+  assert.ok(Math.abs(a.vista(residuo).T - a.vista(vida).T) < 1, `residuo ${a.vista(residuo).T} K, vida ${a.vista(vida).T} K`);
+  assert.deepEqual(a.totales(), antes);
+  assert.deepEqual(a.totales(), a.esperado());
 });
 
 test('copiar: ley del mínimo de Liebig (manda el elemento más escaso; lo demás se queda)', () => {

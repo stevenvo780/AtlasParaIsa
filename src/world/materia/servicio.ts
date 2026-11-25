@@ -15,7 +15,7 @@ import { ATOMOS_POR_REACCION, ClaseSustancia, TIPOS, type SustanciaId } from '..
 import type { World } from '../index.js';
 import { registrar, type Violacion } from '../invariantes.js';
 import {
-  NIVELES_T, tDeNivel,
+  FAMILIAS_CATALITICAS, NIVELES_T, tDeNivel,
   type Reaccion, type ServicioQuimico, type Sustancia,
 } from './tipos.js';
 import {
@@ -580,7 +580,7 @@ function revisarFila(servicio: ServicioQuimicoAuditable, fila: FilaMemoQuimico, 
     fallo('La reacción publicada no baja la energía libre en más de ε.', { a: r.a, b: r.b, nivelT: r.nivelT, dG });
   }
   if (!Number.isFinite(r.ea) || r.ea < 0 || r.ea < r.dH) fallo('Barrera ea inválida o menor que dH.', { a: r.a, b: r.b, ea: r.ea, dH: r.dH });
-  if (r.catalisis !== -1 && r.catalisis !== 0 && r.catalisis !== 1 && r.catalisis !== 2) {
+  if (!(Number.isInteger(r.catalisis) && r.catalisis >= -1 && r.catalisis < FAMILIAS_CATALITICAS)) {
     fallo('Familia catalítica inválida.', { a: r.a, b: r.b, catalisis: r.catalisis });
   }
 }

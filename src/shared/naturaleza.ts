@@ -1,5 +1,7 @@
 // ENMIENDA 1 (2026-11-24, «ciclos cerrados»; integrador Claude Opus 5.5 en sprint/v23l-materia, pedidos 3, 6 y 7 de Q
 // y los de L): ninguna barrera por debajo de dH; las constantes que eligió Q viven aquí con su intervalo; FRACTURA.
+// ENMIENDA 2 (2026-11-24, «ciclos cerrados, validados»; integrador Claude Opus 5.5): KAPPA_SUELO_HH (familia H–H propia),
+// la catálisis solo en exotérmicas (`Reaccion` en world/materia/tipos.ts) y NIVEL_CATALIZADO (suelo frío sin HCN).
 /**
  * Constantes de la naturaleza de V23: el ÚNICO fichero con números de física, química y biología elegidos a
  * mano. No son topes: dicen cómo se comporta la materia. Las puertas demográficas solo calibran aquí
@@ -75,17 +77,43 @@ export const GAMMA = 0.35;
 export const S_GAS = 0.18;
 /** ε: J por cuanto de energía libre que un reparto debe ganar a los reactivos para que haya reacción. */
 export const EPSILON_G = 1;
-/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de su familia de enlace (`Reaccion.catalisis`).
- * A 310 K, una ruta cuya barrera ponga C–N va a ~400/tick y una de C–O a ~2/tick; si la pone C–H, O–H u O=O (carbonizar o
- * dismutar CH₂O, oxidar) queda en ~2·10⁻⁵/tick o menos: B y Q la calibran contra las rutas que dé `productos()`.
- * Se queda en 60 con la enmienda 1: con 80 el digestivo haría H₂ y carbón de la grasa (CH₂ → H₂ + C a 5·10⁻²/tick). */
+/** κ₀: J por cuanto que la digestión de una plantilla fundadora rebaja la barrera de cada una de sus 4 familias de enlace
+ * (`Kappa`, `Reaccion.catalisis`; solo en exotérmicas). A 310 K, una ruta cuya barrera ponga C–N va a ~400/tick y una de
+ * C–O a ~2/tick; si la pone C–H, O–H u O=O (carbonizar o dismutar CH₂O, oxidar) queda en ~2·10⁻⁵/tick o menos: B y Q la
+ * calibran contra las rutas que dé `productos()`. Se queda en 60: antes de la enmienda 2, con 105 el tubo soltaba el 3 %
+ * del H como H₂ y la caja perdía el 4 % del agua; con la enmienda 2 ya no (0,09 % y 99,1 %, 400 recambios), así que hoy
+ * lo fija la digestión, no el ciclo del H. En H–H, 2 H₂ + O₂ queda en ~10⁻¹⁰ L/(cuanto·tick). */
 export const KAPPA0 = 60;
-/** κ del suelo (descomposición microbiana a ~295 K), igual en las tres familias, en los lotes Suelo y Cadaver: la oxidación
- * con O₂ va a ~10⁻³ L/(cuanto·tick) (cientos de ticks con [O₂] ≈ 5 mmol/L; con KAPPA0 quedaría en ~10⁻¹¹ y el suelo no
- * devolvería nada), también la del H₂ (2 H₂ + O₂ → 2 H₂O, familia C–C/C–H/H–H: bacterias del hidrógeno). Acelera las
- * rutas sin O₂ (carbonizar, ~400/tick), pero nunca por debajo de dH (enmienda 1): madera + H₂O → 2 H₂ + CO₂ (dH +102)
- * queda en ~10⁻⁹. Con κ ≥ ea y dH ≤ 0, la tasa satura en ν. */
+/** κ del suelo (descomposición microbiana a ~295 K) en las familias C–O, C–N y C–C/C–H de los lotes Suelo y Cadaver: la
+ * oxidación con O₂ va a ~10⁻³ L/(cuanto·tick) (cientos de ticks con [O₂] ≈ 5 mmol/L; con KAPPA0 quedaría en ~10⁻¹¹ y el
+ * suelo no devolvería nada) y las rutas exotérmicas sin O₂ (madera → H₂O + C, proteína → NH₃ + C) a ~400/tick. Las
+ * endotérmicas no se catalizan (enmienda 2): CH₂ → H₂ + C (dH +24) y madera + H₂O → 2 H₂ + CO₂ (+102) quedan en su tasa
+ * sin catálisis, < 10⁻¹⁵. Con κ ≥ ea y dH ≤ 0, la tasa satura en ν. */
 export const KAPPA_SUELO = 105;
+/** κ del suelo en la familia H–H (bacterias del hidrógeno; las hidrogenasas del suelo son el sumidero principal del H₂
+ * atmosférico real): ≥ GAMMA·D(O=O) = 172,9, así que 2 H₂ + O₂ → 2 H₂O no tiene barrera en un suelo con O₂ y el H₂ que
+ * llega al suelo se oxida al paso (con KAPPA_SUELO tardaba ~120 ticks y el aire, que no cataliza, lo acumulaba en
+ * proporción a su volumen: un mundo con mucho aire por poro se secaba). La misma familia lleva 3 H₂ + N₂ → 2 NH₃ (ea
+ * 268,4: ~3·10⁻⁸ L/(cuanto·tick), fijación lenta) y H₂ + CO₂ (a 295 K Q no da reacción; a 259 K, 2 H₂ + CO₂ → 2 H₂O + C
+ * va a ~3·10⁻⁵, pero un lote catalizado no reacciona por debajo del nivel 2, `NIVEL_CATALIZADO`).
+ * Intervalo [~120, ∞): medido con la caja de la validación con aire 100 veces mayor y sin herbívoro (1.000 recambios), el
+ * H₂ final es el 1,99 % del H con 105 (k(295 K) ≈ 10⁻³ L/(cuanto·tick)), 0,0588–0,0589 % con 120, 130 y 140 (con 120,
+ * k ≈ 0,4) y 0,0587–0,0588 % con 160 y 175 (estable); en la caja del autor (200 recambios), 0,0006–0,0008 % con 175, 250
+ * y 300. Desde 172,9 la barrera es 0 y ya no cambia nada; 175 deja ese margen. */
+export const KAPPA_SUELO_HH = 175;
+/** Nivel de temperatura (world/materia/tipos.ts, `nivelDeT`) mínimo con el que elige productos un lote con algún κ > 0
+ * (enmienda 2, `nivelDeLote`): un suelo, un cadáver o un digestivo por debajo de 282,84 K (frontera del nivel 2)
+ * reacciona con los productos del nivel 2 y a la tasa de su T real (más lenta). Por qué: el nivel 1 se calcula a 259,4 K
+ * y en el modelo el NH₃ hierve a 273,6 K (el real, a 240 K), así que ahí deja de contar como gas; el mínimo de G de la
+ * proteína pasa a ser H₂ + HCN (dH +39) y NH₃ + orgP → H₂ + HCN + HPO₃ (dH −86) va catalizado a ~2·10⁴ L/(cuanto·tick)
+ * en el suelo, y el HCN no tiene salida por debajo de una llama (ea 311,8: k ≤ 10⁻¹⁷ aun catalizado), un sumidero
+ * absorbente de C, N y H. En el nivel 2 (308,4 K) el NH₃ es gas y la proteína da NH₃ + C. Medido con la caja de la
+ * validación: con el piso, el suelo a 275 K todo el tiempo y las estaciones de 200 y de 2.400 ticks a 275 K cierran a 400
+ * recambios (biomasa ≥ 96.600, HCN 0; a 260 K la planta queda limitada por el CO₂, biomasa 32.727, con el carbono
+ * enterrado como C, sin deriva); sin el piso, a 275 K colapsa en 9 recambios y, con plantas que fijan N₂, el HCN se lleva
+ * el 8–13 % del carbono en 400 recambios y sigue subiendo; sin catálisis en frío (la otra salida), el frío permanente
+ * colapsa en 8 recambios y las estaciones de 2.400 ticks en 31 (nada devuelve el P). */
+export const NIVEL_CATALIZADO = 2;
 
 // ── Propiedades por estructura ───────────────────────────────────────────────────────────────────────────
 

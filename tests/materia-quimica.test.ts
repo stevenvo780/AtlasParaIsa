@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Worker } from 'node:worker_threads';
-import { ELEMENTOS, GAMMA, KAPPA0, KAPPA_SUELO, NE, S_GAS, TABLA } from '../src/shared/naturaleza.js';
+import { ELEMENTOS, GAMMA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NE, NU, S_GAS, TABLA } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS } from '../src/shared/materia.js';
 import { createWorld } from '../src/world/index.js';
 import { comprobarInvariantes, listaInvariantes } from '../src/world/invariantes.js';
@@ -544,11 +544,13 @@ test('enmienda 1: Q elige p, q enteros por −ΔG por átomo; ninguna otra multi
     const g = r.productos.reduce((s, x) => s + x.nu * gDe(x.enlaces, tDeNivel(l)), 0);
     assert.ok(Math.abs(g - minimoFuerzaBruta(objetivo, l)!.g) < 1e-6, `2 H₂ + O₂ @L${l}: G=${g}`);
   }
-  // H–H es de la familia C–C/C–H (2): el suelo oxida el H₂ a ~10⁻³ L/(cuanto·tick); sin κ, en frío, no.
+  // H–H tiene familia propia (3, enmienda 2): el suelo, con KAPPA_SUELO_HH ≥ ea, oxida el H₂ sin barrera (k = ν); el
+  // κ de C–C/C–H no la toca, y sin κ, en frío, no reacciona.
   const rH2 = productos(h2, o2, nivelDeT(295), ctx)!;
-  assert.equal(rH2.catalisis, 2);
-  const kSuelo = tasaArrhenius(295, rH2, KAPPA_SUELO);
-  assert.ok(kSuelo > 1e-4 && kSuelo < 1e-2, `2 H₂ + O₂ en suelo a ${kSuelo}`);
+  assert.equal(rH2.catalisis, 3);
+  assert.ok(KAPPA_SUELO_HH >= rH2.ea, `KAPPA_SUELO_HH ${KAPPA_SUELO_HH} frente a ea ${rH2.ea}`);
+  assert.equal(tasaArrhenius(295, rH2, [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH]), NU);
+  assert.ok(tasaArrhenius(295, rH2, [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, 0]) < 1e-18);
   assert.ok(tasaArrhenius(295, rH2, 0) < 1e-18);
 });
 

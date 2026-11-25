@@ -10,8 +10,10 @@
  *     con KAPPA0, descomposición del suelo a 295 K con KAPPA_SUELO, margen llama en aire (1.095 K) vs horno (1.131 K).
  *  4. Invariante I4 sobre el registro y el memo completos.
  *  5. Banco de rendimiento de `productos()` hasta 16 átomos en frío y con memoria caliente (puerta: p99 < 50 ms).
- *  6. Caja cerrada (enmienda 1): 40 recambios de biomasa con piezas reales (arena, química, pasoLote, fluir, copiar,
- *     desprender, quemar; tests/lib/caja-cerrada.ts), sin y con fuego: agua, H₂, balance exacto y destino de N y P.
+ *  6. Caja cerrada (enmiendas 1 y 2): 40 recambios de biomasa con piezas reales (arena, química, pasoLote, fluir,
+ *     copiar, desprender, quemar; tests/lib/caja-cerrada.ts): sin fuego, con fuego (plantas que aceptan N₂ y P₂O₅ gas),
+ *     con 100 veces más aire por poro y sin herbívoro, y con el suelo a 275 K: agua, H₂, biomasa, balance exacto y
+ *     destino de N y P.
  *
  * Uso: npx tsx scripts/lab-materia.mts [--json] [--solo-banco] [--sin-caja]
  */
@@ -20,7 +22,7 @@ import {
   CAPACIDAD_ATOMO, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, NU, R,
 } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS, type SustanciaId } from '../src/shared/materia.js';
-import { nivelDeT, tDeNivel, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
+import { barreraEfectiva, nivelDeT, tDeNivel, type Kappa, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import {
   ContextoSolver, esGasA, indiceTipoEnlace, productos,
 } from '../src/world/materia/quimica.js';
@@ -43,15 +45,16 @@ function vec(pares: readonly [number, number][]): Uint16Array {
   return out;
 }
 
-/** Tasa de Arrhenius de ARQ-materia §3.1 con la enmienda 1, k(T) = ν·exp(−max(0, ea − κ, dH)/(R·T)), en 1/tick o
- * L/(cuanto·tick) por vez de reacción: la catálisis nunca baja la barrera de una endotérmica por debajo de su dH. */
+/** Tasa de Arrhenius de ARQ-materia §3.1 con las enmiendas 1 y 2, k(T) = ν·exp(−b/(R·T)) con b = `barreraEfectiva`
+ * (max(0, ea − κ) en una exotérmica, ea en una endotérmica: la catálisis solo rebaja lo que suelta calor), en 1/tick o
+ * L/(cuanto·tick) por vez de reacción. Un κ numérico vale para las 4 familias. */
 export function tasaArrhenius(
   T: number,
   r: Pick<Reaccion, 'ea' | 'catalisis' | 'dH'>,
-  kappa: readonly [number, number, number] | number = 0,
+  kappa: Kappa | number = 0,
 ): number {
-  const kEff = r.catalisis === -1 ? 0 : typeof kappa === 'number' ? kappa : kappa[r.catalisis]!;
-  return NU * Math.exp(-Math.max(0, r.ea - kEff, r.dH) / (R * T));
+  const b = barreraEfectiva(r, typeof kappa === 'number' ? [kappa, kappa, kappa, kappa] : kappa);
+  return b === 0 ? NU : NU * Math.exp(-b / (R * T));
 }
 
 function formula(s: Readonly<Sustancia>): string {
@@ -406,14 +409,23 @@ async function cli(): Promise<void> {
   // La caja usa la memoria de prueba de M1 (tests/lib): se importa solo aquí, al ejecutar el laboratorio.
   const cajas = soloBanco || process.argv.includes('--sin-caja') ? [] : await (async () => {
     const { cajaCerrada } = await import('../tests/lib/caja-cerrada.js');
-    return [['sin fuego', cajaCerrada({ recambios: 40 })], ['fuego cada 4 recambios (30 %)', cajaCerrada({ recambios: 40, cadaFuego: 4 })]] as const;
+    const aire = { N2: 780_000_000, O2: 210_000_000, CO2: 20_000_000 };
+    // Con 100 veces más aire por poro el H₂ tarda más de 40 recambios en llegar a su meseta (~0,06 % del H a 1.000): ahí
+    // no se exige que esté estable, solo que no pase del 0,2 % del H (antes de la enmienda 2 llegaba al 2,6 % en 10).
+    return [
+      ['sin fuego', cajaCerrada({ recambios: 40 }), true],
+      ['fuego cada 4 recambios (30 %), plantas con N₂ y P₂O₅ gas', cajaCerrada({ recambios: 40, cadaFuego: 4, nitrogenos: ['NH3', 'N2'], fosfatoGas: true }), true],
+      ['aire ×100 por poro, sin herbívoro', cajaCerrada({ recambios: 40, aire, capAire: 10_000, fTubo: 0 }), false],
+      ['suelo a 275 K', cajaCerrada({ recambios: 40, tAmbiente: 275 }), true],
+    ] as const;
   })();
-  const resumenCaja = cajas.map(([nombre, r]) => {
+  const resumenCaja = cajas.map(([nombre, r, exigeEstable]) => {
     const f = r.fotos, fin = f[f.length - 1]!, h2 = (a: number, b: number) => {
       const xs = f.filter(x => x.recambio >= a && x.recambio <= b).map(x => x.h2);
       return xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length);
     };
     const exacto = f.every(x => x.exacto), aguaMin = Math.min(...f.map(x => x.agua)) / f[0]!.agua;
+    const biomasaMin = Math.min(...f.filter(x => x.recambio >= 31).map(x => x.biomasa)) / Math.max(...f.map(x => x.biomasa));
     const estable = h2(31, 40) <= 1.15 * h2(21, 30);
     let nQuemado = 0, nN2 = 0;
     const pDestino: Record<string, number> = {};
@@ -427,7 +439,8 @@ async function cli(): Promise<void> {
     return { nombre, recambios: fin.recambio, ticks: r.ticks, ms: Math.round(r.ms), exacto, aguaMin, h2Final: fin.h2,
       h2PorcientoH: 100 * fin.hH2 / fin.hTotal, h2Estable: estable, fuegos: r.fuegos.length, nQuemado, nN2, pDestino,
       nFinal: fin.n, pFinal: fin.p, biomasa: [f.find(x => x.recambio === 0)!.biomasa, fin.biomasa], flujosH2: Object.fromEntries(Object.entries(r.flujos).map(([k, v]) => [k, v.H2])),
-      ok: exacto && aguaMin >= 0.97 && estable && fin.hH2 < 0.005 * fin.hTotal };
+      biomasaMin, ok: exacto && aguaMin >= 0.97 && (exigeEstable ? estable : f.every(x => x.hH2 < 0.002 * x.hTotal))
+        && fin.hH2 < 0.005 * fin.hTotal && biomasaMin >= 0.5 };
   });
 
   const todoOk = cordura.every(c => c.cumple) && violacionesI4.length === 0 && banco.cumpleP99Frio && banco.cumpleP99Caliente
@@ -462,9 +475,9 @@ async function cli(): Promise<void> {
     console.log(`  FRÍO     : p50=${banco.frioMs.p50.toFixed(2)} ms | p95=${banco.frioMs.p95.toFixed(2)} ms | p99=${banco.frioMs.p99.toFixed(2)} ms | max=${banco.frioMs.max.toFixed(2)} ms [${banco.cumpleP99Frio ? 'OK < 50ms' : 'FAIL'}]`);
     console.log(`  CALIENTE : p50=${(banco.calienteMs.p50 * 1000).toFixed(1)} µs | p95=${(banco.calienteMs.p95 * 1000).toFixed(1)} µs | p99=${(banco.calienteMs.p99 * 1000).toFixed(1)} µs | max=${(banco.calienteMs.max * 1000).toFixed(1)} µs [${banco.cumpleP99Caliente ? 'OK' : 'FAIL'}]`);
     console.log(`  Nivel 10 (horno) = ${tDeNivel(10).toFixed(1)} K; Nivel 9 (llama aire) = ${tDeNivel(9).toFixed(1)} K`);
-    if (resumenCaja.length) console.log('\n=== CAJA CERRADA (40 recambios; aire, agua, suelo KAPPA_SUELO, planta, tubo KAPPA0, quemar) ===');
+    if (resumenCaja.length) console.log('\n=== CAJA CERRADA (40 recambios; aire, agua, suelo [KAPPA_SUELO ×3, KAPPA_SUELO_HH], planta, tubo KAPPA0, quemar) ===');
     for (const c of resumenCaja) {
-      console.log(`  [${c.ok ? 'OK  ' : 'FAIL'}] ${c.nombre}: ${c.recambios} recambios en ${c.ticks} ticks (${c.ms} ms); balance ${c.exacto ? 'exacto' : 'DESCUADRE'}; agua mín ${(100 * c.aguaMin).toFixed(1)} %; H₂ ${c.h2Final} (${c.h2PorcientoH.toFixed(3)} % del H, ${c.h2Estable ? 'estable' : 'CRECE'}); biomasa ${c.biomasa.join(' → ')}`);
+      console.log(`  [${c.ok ? 'OK  ' : 'FAIL'}] ${c.nombre}: ${c.recambios} recambios en ${c.ticks} ticks (${c.ms} ms); balance ${c.exacto ? 'exacto' : 'DESCUADRE'}; agua mín ${(100 * c.aguaMin).toFixed(1)} %; H₂ ${c.h2Final} (${c.h2PorcientoH.toFixed(3)} % del H, ${c.h2Estable ? 'estable' : 'aún sube'}); biomasa ${c.biomasa.join(' → ')} (mín. de los recambios 31–40: ${(100 * c.biomasaMin).toFixed(0)} % del máximo)`);
       console.log(`         H₂ neto por proceso: ${JSON.stringify(c.flujosH2)}`);
       if (c.fuegos) console.log(`         ${c.fuegos} fuegos: N fijado quemado ${c.nQuemado}, a N₂ ${c.nN2}; P quemado → ${JSON.stringify(c.pDestino)}`);
       console.log(`         N final ${JSON.stringify(c.nFinal)}; P final ${JSON.stringify(c.pFinal)}`);

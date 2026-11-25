@@ -1,25 +1,27 @@
 /**
- * Carril P (cinética, fluir y reparto entre hilos) sobre la arena real de A y la química real de Q (enmienda 1): las
- * reacciones son las que da `productos()` con sus coeficientes, y la velocidad se elige con κ por familia, que es
- * entrada de P (k = ν·exp(−max(0, ea − κ, dH)/RT)). Dobles solo para M1 (memoria, terreno y piscina, tests/lib) y para
+ * Carril P (cinética, fluir y reparto entre hilos) sobre la arena real de A y la química real de Q (enmiendas 1 y 2): las
+ * reacciones son las que da `productos()` con sus coeficientes, y la velocidad se elige con κ por familia (4: C–O, C–N,
+ * C–C/C–H, H–H), que es entrada de P: k = ν·exp(−b/RT) con b = `barreraEfectiva` (max(0, ea − κ) en exotérmicas, ea en
+ * endotérmicas). Dobles solo para M1 (memoria, terreno y piscina, tests/lib) y para
  * la prueba de coste, que necesita una tabla en la que reaccionen todas las parejas de 1.024 sustancias.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadavg } from 'node:os';
 import { performance } from 'node:perf_hooks';
-import { KAPPA0, KAPPA_SUELO, NU, R } from '../src/shared/naturaleza.js';
+import { KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NU, R } from '../src/shared/naturaleza.js';
 import type { SustanciaId } from '../src/shared/materia.js';
 import { binomial, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
 import { fluir, fluirCalor } from '../src/world/materia/fluir.js';
 import { pasarLotes } from '../src/world/materia/paso-worker.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
 import { slotDe } from '../src/world/motor/contratos.js';
-import { Parte, nivelDeT, type ArenaMateria, type LoteRef, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
+import { Parte, barreraEfectiva, nivelDeLote, nivelDeT, type ArenaMateria, type LoteRef, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import { registrarSustanciasBase } from '../scripts/lab-materia.mjs';
 import { PiscinaReal, azarSembrado, materiaReal, type Base, type Contenido, type MateriaReal } from './lib/materia-real.js';
 
-const SIN: Kappa = [0, 0, 0];
+const SIN: Kappa = [0, 0, 0, 0];
+const SUELO: Kappa = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH];
 
 /** KS de dos muestras con la p asintótica de Kolmogorov (Numerical Recipes); con empates es conservadora. */
 function ks(x: number[], y: number[]): { d: number; p: number } {
@@ -83,7 +85,7 @@ test('I2: átomos y energía exactos tras reaccionar y fluir (enteros, sin un á
     const lotes = mezclas.map(([c, T]) => m.lote(c, T));
     const { arena, recortes } = conRecortes(m.arena);
     const c: CtxPaso = { ...m.ctx(2026), arena };
-    const kappas: Kappa[] = [SIN, [KAPPA0, KAPPA0, KAPPA0], SIN, [0, 0, KAPPA0], [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO], [0, KAPPA0, 120]];
+    const kappas: Kappa[] = [SIN, [KAPPA0, KAPPA0, KAPPA0, KAPPA0], SIN, [0, 0, KAPPA0, KAPPA0], SUELO, [0, KAPPA0, 120, 120]];
     let veces = 0, movidos = 0;
     for (let t = 0; t < 300; t++) {
       const dt = t % 3 === 0 ? 10 : 1;
@@ -111,12 +113,12 @@ test('I5: dividir un lote en dos mitades no cambia la distribución de productos
     { nombre: 'combustión y carbonización, 3 ticks', contenido: { madera: 2e6, O2: 1.5e6 }, T: 700, ticks: 3, kappa: SIN, mide: [S.CO2, S.C] },
     // Primer orden casi isoterma (N₂ inerte). Con pocos cuantos por paso manda el ruido, y el de redondear cada canal
     // con un uniforme (§3.1) no crece con el lote: el segundo caso lo distingue.
-    { nombre: 'descomposición de primer orden', contenido: { proteina: 1e5, N2: 1e7 }, T: 310, ticks: 4, kappa: [0, 73, 0], mide: [S.proteina] },
-    { nombre: 'descomposición con pocos cuantos', contenido: { proteina: 2000, N2: 2e6 }, T: 310, ticks: 40, kappa: [0, 73, 0], mide: [S.proteina] },
+    { nombre: 'descomposición de primer orden', contenido: { proteina: 1e5, N2: 1e7 }, T: 310, ticks: 4, kappa: [0, 73, 0, 0], mide: [S.proteina] },
+    { nombre: 'descomposición con pocos cuantos', contenido: { proteina: 2000, N2: 2e6 }, T: 310, ticks: 40, kappa: [0, 73, 0, 0], mide: [S.proteina] },
     // ν = 2 con pocos cuantos (2 H₂ + O₂ en N₂): sortear cuantos sueltos y no veces de reacción perdía de media media vez
     // por lote y paso, el doble con dos mitades.
-    { nombre: '2 H₂ + O₂ con pocos cuantos', contenido: { H2: 40, O2: 40, N2: 1e6 }, T: 295, ticks: 10, kappa: [0, 0, 139], mide: [S.H2O] },
-    { nombre: '2 H₂ + O₂ con cuatro cuantos de H₂', contenido: { H2: 4, O2: 2, N2: 1e6 }, T: 295, ticks: 1, kappa: [0, 0, 142], mide: [S.H2O] },
+    { nombre: '2 H₂ + O₂ con pocos cuantos', contenido: { H2: 40, O2: 40, N2: 1e6 }, T: 295, ticks: 10, kappa: [0, 0, 0, 139], mide: [S.H2O] },
+    { nombre: '2 H₂ + O₂ con cuatro cuantos de H₂', contenido: { H2: 4, O2: 2, N2: 1e6 }, T: 295, ticks: 1, kappa: [0, 0, 0, 142], mide: [S.H2O] },
   ];
   for (const e of escenarios) {
     const muestras: number[][][] = [];
@@ -145,14 +147,14 @@ test('extremo: con κ ≥ ea (k = ν) la reacción se completa en una llamada ha
     // proteína → NH₃ + C (C–N, ea 141,05) con κ = 142 y 2⁴⁰ cuantos: con «partir dt» serían del orden de ν·dt = 10⁹ subpasos.
     const unaria = m.lote({ proteina: 2 ** 40 }, 295);
     let t0 = performance.now();
-    pasoLote(m.ctx(1), unaria, 1, [0, 142, 0]);
+    pasoLote(m.ctx(1), unaria, 1, [0, 142, 0, 0]);
     const msUnaria = performance.now() - t0;
     assert.equal(m.arena.cuantos(unaria, m.S.proteina), 0);
     assert.equal(m.arena.cuantos(unaria, m.S.NH3), 2 ** 40);
     // 2 H₂ + O₂ → 2 H₂O con la barrera anulada: el O₂ (limitante con ν = 2 de H₂) se agota exacto y sobra H₂.
     const par = m.lote({ H2: 1e12, O2: 4e11 }, 295);
     t0 = performance.now();
-    pasoLote(m.ctx(2), par, 1, [0, 0, 200]);
+    pasoLote(m.ctx(2), par, 1, [0, 0, 0, 200]);
     const msPar = performance.now() - t0;
     assert.equal(m.arena.cuantos(par, m.S.O2), 0);
     assert.equal(m.arena.cuantos(par, m.S.H2), 2e11);
@@ -160,7 +162,7 @@ test('extremo: con κ ≥ ea (k = ν) la reacción se completa en una llamada ha
     // A 150 K (ℓ = 0), el borde bajo de la tabla de niveles: lo mismo, con H₂ limitante.
     const helado = m.lote({ H2: 1e6, O2: 1e6 }, 150);
     assert.equal(nivelDeT(m.arena.vista(helado).T), 0);
-    pasoLote(m.ctx(3), helado, 1, [0, 0, 200]);
+    pasoLote(m.ctx(3), helado, 1, [0, 0, 0, 200]);
     assert.deepEqual([m.arena.cuantos(helado, m.S.H2), m.arena.cuantos(helado, m.S.O2), m.arena.cuantos(helado, m.S.H2O)], [0, 5e5, 1e6]);
     assert.ok(msUnaria < 50 && msPar < 50, `coste acotado: ${msUnaria.toFixed(2)} y ${msPar.toFixed(2)} ms`);
     assert.deepEqual(m.arena.saldo(), m.esperado());
@@ -174,10 +176,66 @@ test('extremo: k·dt ≫ 1 (κ del suelo frente a C–N a 295 K, ~400/tick) agot
     const r = m.quimica.reaccion(m.S.proteina, 0, nivelDeT(295))!;
     const k = NU * Math.exp(-(r.ea - KAPPA_SUELO) / (R * 295));
     assert.ok(r.catalisis === 1 && k > 300 && k < 500, `k = ${k.toFixed(0)}/tick`);
-    pasoLote(m.ctx(4), l, 1, [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO]);
+    pasoLote(m.ctx(4), l, 1, SUELO);
     assert.equal(m.arena.cuantos(l, m.S.proteina), 0);
     assert.equal(m.arena.cuantos(l, m.S.NH3), 3 ** 24);
     assert.equal(m.arena.cuantos(l, m.S.C), 3 ** 24);
+  } finally { await m.cerrar(); }
+});
+
+test('enmienda 2: la catálisis solo rebaja exotérmicas y el H–H tiene familia propia (índice 3 de Kappa)', async () => {
+  // La regla, en sus cuatro casos: exotérmica catalizada (rebaja hasta 0), endotérmica (ea, la cataliza nadie) y sin familia.
+  const r = (ea: number, dH: number, catalisis: Reaccion['catalisis']) => ({ ea, dH, catalisis });
+  assert.equal(barreraEfectiva(r(100, -10, 0), [30, 0, 0, 0]), 70);
+  assert.equal(barreraEfectiva(r(100, -10, 0), [200, 0, 0, 0]), 0);
+  assert.equal(barreraEfectiva(r(100, 50, 0), [1e3, 1e3, 1e3, 1e3]), 100, 'endotérmica: sin rebaja');
+  assert.equal(barreraEfectiva(r(100, -10, -1), [1e3, 1e3, 1e3, 1e3]), 100, 'sin familia: sin rebaja');
+  assert.equal(barreraEfectiva(r(100, -10, 3), [0, 0, 1e3, 40]), 60, 'H–H usa su propio κ');
+  const m = materiaReal();
+  try {
+    // Grasa en un suelo con κ enorme: CH₂ → H₂ + C es endotérmica (dH +24) y queda en su tasa sin catálisis (~10⁻¹⁶/tick).
+    // Con la barrera de la enmienda 1, max(0, ea − κ, dH) = 24 J, iba a ~6·10⁴/tick y la grasa del suelo era H₂. (Con
+    // SiO₂ de relleno: con N₂, N₂ + 3 CH₂ → 2 NH₃ + 3 C es exotérmica y un κ de 1.000 la satura.)
+    const grasa = m.quimica.reaccion(m.S.CH2, 0, nivelDeT(295))!;
+    assert.ok(grasa.dH > 0 && grasa.catalisis === 2, `CH₂ → H₂ + C: dH ${grasa.dH}, familia ${grasa.catalisis}`);
+    const l = m.lote({ CH2: 1e6, SiO2: 1e6 }, 295);
+    for (let t = 0; t < 100; t++) pasoLote(m.ctx(40 + t), l, 1, [1e3, 1e3, 1e3, 1e3]);
+    assert.equal(m.arena.cuantos(l, m.S.H2), 0, 'ningún κ parte la grasa');
+    assert.equal(m.arena.cuantos(l, m.S.CH2), 1e6);
+    // 2 H₂ + O₂ → 2 H₂O es de la familia H–H (3): κ en C–C/C–H no la toca; el κ H–H del suelo la satura (k = ν).
+    const h2 = m.quimica.reaccion(m.S.H2, m.S.O2, nivelDeT(295))!;
+    assert.equal(h2.catalisis, 3);
+    const sinHH = m.lote({ H2: 1e6, O2: 1e6, N2: 1e6 }, 295);
+    for (let t = 0; t < 100; t++) pasoLote(m.ctx(200 + t), sinHH, 1, [KAPPA_SUELO, KAPPA_SUELO, 1e3, 0]);
+    assert.equal(m.arena.cuantos(sinHH, m.S.H2O), 0, 'κ de C–C/C–H no oxida el H₂');
+    const conHH = m.lote({ H2: 1e6, O2: 1e6, N2: 1e6 }, 295);
+    pasoLote(m.ctx(300), conHH, 1, SUELO);
+    assert.deepEqual([m.arena.cuantos(conHH, m.S.H2), m.arena.cuantos(conHH, m.S.H2O)], [0, 1e6], 'el suelo oxida el H₂ al paso');
+    assert.deepEqual(m.arena.saldo(), m.esperado());
+  } finally { await m.cerrar(); }
+});
+
+test('enmienda 2: un lote catalizado por debajo de 282,84 K elige los productos del nivel 2 (el suelo frío no hace HCN)', async () => {
+  const m = materiaReal();
+  try {
+    // En el nivel 1 (275 K; Q calcula a 259,4 K, donde el NH₃ del modelo no es gas) NH₃ + orgP → H₂ + HCN + HPO₃ es
+    // exotérmica y catalizable; en el nivel 2 no reaccionan, y la proteína da NH₃ + C.
+    assert.equal(nivelDeT(275), 1);
+    const frio = m.quimica.reaccion(m.S.NH3, m.S.orgP, 1);
+    assert.ok(frio && frio.dH < 0 && frio.catalisis >= 0 && frio.salidas.some((t) => m.quimica.sustancia(t.id).atomos[2] && t.id !== m.S.NH3),
+      'a 259 K NH₃ + orgP da un producto con N');
+    assert.equal(m.quimica.reaccion(m.S.NH3, m.S.orgP, 2), null);
+    assert.deepEqual([nivelDeLote(275, SUELO), nivelDeLote(275, SIN), nivelDeLote(275, [0, 0, 0, 1]), nivelDeLote(1000, SUELO)],
+      [2, 1, 2, nivelDeT(1000)]);
+    // Poca materia orgánica en mucha roca: el calor que sueltan apenas sube la T (sigue en el nivel 1).
+    const l = m.lote({ NH3: 1000, orgP: 1000, proteina: 1000, SiO2: 1_000_000 }, 275);
+    for (let t = 0; t < 10; t++) pasoLote(m.ctx(500 + t), l, 1, SUELO);
+    assert.equal(nivelDeT(m.arena.vista(l).T), 1, `T ${m.arena.vista(l).T}`);
+    const ids = new Uint32Array(64), n = m.arena.especies(l, ids);
+    const conN = [...ids.subarray(0, n)].filter((id) => m.quimica.sustancia(id).atomos[2]! > 0);
+    assert.deepEqual(conN.filter((id) => id !== m.S.NH3 && id !== m.S.proteina), [], 'ningún otro compuesto de N (HCN)');
+    assert.equal(m.arena.cuantos(l, m.S.NH3), 2000, 'la proteína se mineraliza a NH₃ + C con la química del nivel 2');
+    assert.deepEqual(m.arena.saldo(), m.esperado());
   } finally { await m.cerrar(); }
 });
 
@@ -209,31 +267,31 @@ test('extremo: barrera enorme, frío, sin calor, endotérmica recortada, lote va
     // Lotes de un cuanto: la proteína se parte entera; madera + O₂ con barrera 0 reacciona; un H₂ solo no tiene los dos
     // que pide 2 H₂ + O₂, y dos sí.
     const unaProt = m.lote({ proteina: 1 }, 295);
-    pasoLote(m.ctx(9), unaProt, 1, [0, 141, 0]);
+    pasoLote(m.ctx(9), unaProt, 1, [0, 141, 0, 0]);
     assert.equal(m.arena.cuantos(unaProt, m.S.NH3), 1);
     const unPar = m.lote({ madera: 1, O2: 1 }, 295);
-    pasoLote(m.ctx(10), unPar, 1, [200, 0, 0]);
+    pasoLote(m.ctx(10), unPar, 1, [200, 0, 0, 0]);
     assert.equal(m.arena.cuantos(unPar, m.S.CO2), 1);
     const unH2 = m.lote({ H2: 1, O2: 1 }, 295);
-    assert.equal(pasoLote(m.ctx(11), unH2, 1, [0, 0, 200]), 0);
+    assert.equal(pasoLote(m.ctx(11), unH2, 1, [0, 0, 0, 200]), 0);
     const dosH2 = m.lote({ H2: 2, O2: 1 }, 295);
-    assert.equal(pasoLote(m.ctx(12), dosH2, 1, [0, 0, 200]), 1);
+    assert.equal(pasoLote(m.ctx(12), dosH2, 1, [0, 0, 0, 200]), 1);
     assert.equal(m.arena.cuantos(dosH2, m.S.H2O), 2);
     // Lote vacío.
     assert.equal(pasoLote(m.ctx(13), m.lote({}, 300), 1, SIN), 0);
     // Química encolada (servicio diferido con las mismas sustancias): nada este paso; tras la barrera, sí.
     registrarSustanciasBase(diferida);
     const encolada = m.lote({ proteina: 1000 }, 295);
-    assert.equal(pasoLote(m.ctx(14, diferida), encolada, 1, [0, 141, 0]), 0);
+    assert.equal(pasoLote(m.ctx(14, diferida), encolada, 1, [0, 141, 0, 0]), 0);
     assert.equal(m.arena.cuantos(encolada, m.S.proteina), 1000);
     await diferida.esperarBarrera();
-    assert.equal(pasoLote(m.ctx(15, diferida), encolada, 1, [0, 141, 0]), 1000);
+    assert.equal(pasoLote(m.ctx(15, diferida), encolada, 1, [0, 141, 0, 0]), 1000);
     assert.deepEqual(m.arena.saldo(), m.esperado());
   } finally { await m.cerrar(); await diferida.cerrar(); }
 });
 
 test('cadencia: un paso con dt = 10 da la misma distribución que diez de dt = 1, con la media de primer orden', async () => {
-  const kappa: Kappa = [0, 73, 0], n0 = 20_000, replicas = 400;
+  const kappa: Kappa = [0, 73, 0, 0], n0 = 20_000, replicas = 400;
   const m = materiaReal({ capacidad: 2 * replicas + 16 });
   const r = m.quimica.reaccion(m.S.proteina, 0, nivelDeT(310))!; // ea = γ·D(C–H) = 141,05
   const k = NU * Math.exp(-(r.ea - 73) / (R * 310));
@@ -278,8 +336,7 @@ function canalesDe(m: MateriaReal, l: LoteRef, kappa: Kappa) {
   for (let i = 0; i < ids.length; i++) for (let j = -1; j <= i; j++) {
     const r = m.quimica.reaccion(ids[i]!, j < 0 ? 0 : ids[j]!, nivel);
     if (!r) continue;
-    const barrera = Math.max(0, r.ea - (r.catalisis === -1 ? 0 : kappa[r.catalisis]), r.dH);
-    canales.push({ r, k: NU * Math.exp(-barrera / (R * T)) });
+    canales.push({ r, k: NU * Math.exp(-barreraEfectiva(r, kappa) / (R * T)) });
   }
   return { canales, V };
 }
@@ -318,13 +375,15 @@ function edo(canales: ReturnType<typeof canalesDe>['canales'], V: number, n0: Ma
 
 test('competencia: canales reales que comparten reactivo conservan su diferencia de velocidad (frente a la EDO fina)', async () => {
   // Medias de 10 réplicas con dt = 1 frente a RK4 a T y V fijos, como en pasoLote. Madera a 310 K con κ₀ = 80: se
-  // carboniza (unaria), da 2 H₂ + C + CO₂ de dos en dos (a + a, ν = 2, endotérmica) y arde (a + b); a 600 K, solo
-  // carbonización y combustión, con O₂ o madera escasos.
+  // carboniza (unaria), da 2 H₂ + C + CO₂ de dos en dos (a + a, ν = 2, endotérmica: sin catálisis, enmienda 2) y arde
+  // (a + b). El glicósido a 310 K da los mismos tres canales con su a + a exotérmica (2 glicósido → 2 H₂ + C + CO₂,
+  // dH −78), así que compite de verdad (Bernoulli). A 600 K, solo carbonización y combustión, con O₂ o madera escasos.
   const casos: { nombre: string; contenido: Contenido; T: number; kappa: Kappa; canales: number }[] = [
-    { nombre: 'tres canales a 310 K', contenido: { madera: 1e6, O2: 1e6 }, T: 310, kappa: [80, 0, 0], canales: 3 },
-    { nombre: 'parecidas a 600 K', contenido: { madera: 1e6, O2: 1e6 }, T: 600, kappa: [26, 0, 0], canales: 2 },
-    { nombre: 'O₂ escaso', contenido: { madera: 1e6, O2: 1e3 }, T: 600, kappa: [40, 0, 0], canales: 2 },
-    { nombre: 'madera escasa', contenido: { madera: 1e3, O2: 1e6 }, T: 600, kappa: [60, 0, 0], canales: 2 },
+    { nombre: 'tres canales a 310 K', contenido: { madera: 1e6, O2: 1e6 }, T: 310, kappa: [80, 0, 0, 0], canales: 3 },
+    { nombre: 'tres canales con a + a exotérmica', contenido: { glicosido: 1e6, O2: 1e6 }, T: 310, kappa: [130, 0, 0, 0], canales: 3 },
+    { nombre: 'parecidas a 600 K', contenido: { madera: 1e6, O2: 1e6 }, T: 600, kappa: [26, 0, 0, 0], canales: 2 },
+    { nombre: 'O₂ escaso', contenido: { madera: 1e6, O2: 1e3 }, T: 600, kappa: [40, 0, 0, 0], canales: 2 },
+    { nombre: 'madera escasa', contenido: { madera: 1e3, O2: 1e6 }, T: 600, kappa: [60, 0, 0, 0], canales: 2 },
   ];
   for (const e of casos) {
     const medias = new Map<SustanciaId, number>();
@@ -346,7 +405,7 @@ test('competencia: canales reales que comparten reactivo conservan su diferencia
       assert.ok(Math.abs(v - x) <= 0.05 * x + 3, `${e.nombre}: sustancia ${id} ${v.toFixed(1)} frente a ${x.toFixed(1)}`);
     }
   }
-  // El caso del revisor: 2 H₂ + O₂ con k = ν (κ C–C/C–H/H–H = ea) frente a la madera, que arde con k ~ 10⁻²² en el
+  // El caso del revisor: 2 H₂ + O₂ con k = ν (κ H–H ≥ ea) frente a la madera, que arde con k ~ 10⁻²² en el
   // mismo O₂. Repartir las demandas ya saturadas le daba a la lenta una fracción del O₂. Defecto de P hallado con la
   // química real (enmienda 1): P dejaba de vigilar un reactivo cuando le quedaba 10⁻⁴ de lo que tenía y el último subpaso
   // repartía por el punto medio, donde ya no hay H₂, así que el O₂ le daba 0 y quedaban ~100 de 10⁶ H₂ (igual con C + O₂
@@ -356,7 +415,7 @@ test('competencia: canales reales que comparten reactivo conservan su diferencia
   const m = materiaReal({ capacidad: 32 });
   for (let r = 0; r < 10; r++) {
     const l = m.lote({ H2: 1e6, madera: 1e6, O2: 1e6 }, 295);
-    pasoLote(m.ctx(1 + r), l, 1, [0, 0, 175]);
+    pasoLote(m.ctx(1 + r), l, 1, [0, 0, 0, KAPPA_SUELO_HH]);
     const co2r = m.arena.cuantos(l, m.S.CO2), h2 = m.arena.cuantos(l, m.S.H2);
     co2 += co2r;
     assert.ok(h2 % 2 === 0 && h2 <= 2, `H₂ sin gastar: ${h2}`);
@@ -490,7 +549,7 @@ test('dueños: un hilo solo escribe sus lotes; los caducados se saltan; la arena
     m.arena.liberar(muerto);
     m.arena.barrera();
     duenos(m)[slotDe(l1)] = 1;
-    const c = m.ctx(3), kappas = new Float64Array(9).fill(KAPPA_SUELO);
+    const c = m.ctx(3), kappas = new Float64Array(12).fill(KAPPA_SUELO);
     assert.throws(() => pasarLotes(c, Float64Array.from([l0, l1, muerto]), kappas, 0, 3, 1), /otro dueño/);
     assert.equal(m.arena.cuantos(l1, m.S.proteina), 100, 'el lote ajeno no se tocó');
     assert.equal(pasarLotes(c, Float64Array.from([l0, muerto]), kappas, 0, 2, 1), 1, 'el caducado se salta');
@@ -516,23 +575,27 @@ test('reparto entre hilos: µs por lote con 1 y 28 hilos desde la misma mezcla, 
       { madera: 2000 + l % 97, O2: 1500, H2O: 300, proteina: 500 + l % 13 }, 650 + l % 200));
     const foto = [...m.arena.muestras()].map(x => x.pares);
     const dueno = duenos(m);
+    // Entre despachos, como el coordinador en F0: la barrera devuelve el desborde que soltaron los lotes. Con la enmienda
+    // 2 la proteína caliente ya no se va entera a H₂ + HCN en un paso (endotérmica, sin catálisis) y cada lote acaba con 9
+    // especies, una fila de desborde cada uno: sin la barrera, seis despachos agotaban el desborde de la memoria de prueba.
     const restaurar = () => {
       for (const l of lotes) dueno[slotDe(l)] = 0;
       [...m.arena.muestras()].forEach((x, i) => {
         m.arena.sumidero(x.ref, x.pares, m.libro);
         m.arena.fuente(x.ref, foto[i]!, m.libro);
       });
+      m.arena.barrera();
     };
     const productos = () => [m.S.CO2, m.S.C, m.S.H2].map(esp => total(m, lotes, esp));
     // Dueños por bloques contiguos, como las páginas de un chunk, la lista agrupada por dueño y dónde empieza cada grupo.
     const despacho = (hilos: number) => {
-      const lista = new Float64Array(new SharedArrayBuffer(8 * n)), kappas = new Float64Array(new SharedArrayBuffer(24 * n));
+      const lista = new Float64Array(new SharedArrayBuffer(8 * n)), kappas = new Float64Array(new SharedArrayBuffer(32 * n));
       const cortes = new Float64Array(new SharedArrayBuffer(8 * (hilos + 1)));
       lotes.forEach((l, i) => { dueno[slotDe(l)] = Math.floor(i * hilos / n); });
       let i = 0;
       for (let h = 0; h < hilos; h++) {
         cortes[h] = i;
-        lotes.forEach((l, j) => { if (Math.floor(j * hilos / n) === h) { lista[i] = l; kappas[3 * i + 1] = KAPPA0 / 2; i++; } });
+        lotes.forEach((l, j) => { if (Math.floor(j * hilos / n) === h) { lista[i] = l; kappas[4 * i + 1] = KAPPA0 / 2; i++; } });
       }
       cortes[hilos] = n;
       return { lotes: lista.buffer as SharedArrayBuffer, kappas: kappas.buffer as SharedArrayBuffer, cortes: cortes.buffer as SharedArrayBuffer };

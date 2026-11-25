@@ -16,7 +16,7 @@ import {
   ATOMOS_POR_REACCION, ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS,
   type Propiedades, type SustanciaId,
 } from '../../shared/materia.js';
-import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type Sustancia } from './tipos.js';
+import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type FamiliaCatalitica, type Sustancia } from './tipos.js';
 
 // ── Tablas derivadas de TABLA y TIPOS (sin números mágicos duplicados) ──────────────────────────────────
 
@@ -523,13 +523,15 @@ export function esGasA(s: Pick<Sustancia, 'clase' | 'prop'>, T: number): boolean
 
 // ── Cinética (ea, familia catalítica y Arrhenius) ───────────────────────────────────────────────────────
 
-/** Familia catalítica de un tipo de enlace: 0 = C–O, 1 = C–N, 2 = C–C/C–H/H–H, −1 = no catalizable. H–H entra en la
- * familia 2 con la enmienda 1: el suelo oxida el H₂ con O₂ en frío (bacterias del hidrógeno) y cierra el ciclo del H. */
-export function familiaCatalitica(tipo: number): -1 | 0 | 1 | 2 {
+/** Familia catalítica de un tipo de enlace (`Kappa`): 0 = C–O, 1 = C–N, 2 = C–C/C–H, 3 = H–H, −1 = no catalizable.
+ * H–H es catalizable desde la enmienda 1 (el suelo oxida el H₂ con O₂ en frío: bacterias del hidrógeno) y tiene familia
+ * propia desde la 2, para que el suelo pueda oxidarlo al paso sin acelerar la carbonización ni la respiración del resto. */
+export function familiaCatalitica(tipo: number): FamiliaCatalitica {
   const e = T_E[tipo]!, f = T_F[tipo]!;
   if (e === 1 && f === 3) return 0; // C–O, C=O
   if (e === 1 && f === 2) return 1; // C–N, C=N, C≡N
-  if ((e === 1 && f === 1) || (e === 0 && f === 1) || (e === 0 && f === 0)) return 2; // C–C..C≡C, H–C, H–H
+  if ((e === 1 && f === 1) || (e === 0 && f === 1)) return 2; // C–C..C≡C, H–C
+  if (e === 0 && f === 0) return 3; // H–H
   return -1;
 }
 
@@ -549,7 +551,7 @@ export function calcularCinetica(
   entradas: readonly EntradaSalidaEnlaces[],
   salidas: readonly EntradaSalidaEnlaces[],
   dH: number,
-): { ea: number; catalisis: -1 | 0 | 1 | 2 } {
+): { ea: number; catalisis: FamiliaCatalitica } {
   const bIn = new Int32Array(NT);
   const bOut = new Int32Array(NT);
   const parIn = new Int32Array(NE * NE);
@@ -579,7 +581,7 @@ export function calcularCinetica(
 
   let maxD = 0;
   let minCatD = Infinity;
-  let catalisis: -1 | 0 | 1 | 2 = -1;
+  let catalisis: FamiliaCatalitica = -1;
   let huboDescenso = false;
 
   for (let ti = 0; ti < NT; ti++) {
@@ -1187,7 +1189,7 @@ export interface ResultadoProductos {
   productos: readonly { enlaces: Uint16Array; nu: number }[];
   dH: number;
   ea: number;
-  catalisis: -1 | 0 | 1 | 2;
+  catalisis: FamiliaCatalitica;
 }
 
 const CONTEXTO_DEFECTO = new ContextoSolver();

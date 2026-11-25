@@ -6,7 +6,7 @@
  * sumideros en todo momento.
  *
  * Compartimentos (lotes reales, sin celda): aire (N₂, O₂, CO₂), agua, suelo (minerales, poros de aire, catálisis
- * microbiana KAPPA_SUELO en las tres familias), planta (tejido de una plantilla de Q que crece con `copiar` y luz),
+ * microbiana [KAPPA_SUELO ×3, KAPPA_SUELO_HH], enmienda 2), planta (tejido de una plantilla de Q que crece con `copiar` y luz),
  * tubo digestivo (KAPPA0 a 310 K), reserva del cuerpo (absorbe azúcares y grasas del tubo y los quema con `quemar` y
  * el O₂ que respira) y, con fuego, una hoguera. Cada tick: la planta crece con la luz (fuente) y lo que hay en suelo,
  * agua y aire (Liebig, `copiar`); el herbívoro arranca una fracción de la planta (`desprender`); el tubo digiere
@@ -17,8 +17,12 @@
  * Lo que la caja enseñó sobre el reparto entre leyes (para W y B): `quemar` quema todo lo que en su lote arde con O₂,
  * así que la reserva no debe tener NH₃ ni proteína (2 NH₃ + O₂ → H₂ + 2 H₂O + N₂ y 2 proteína + 3 O₂ → H₂ + … + N₂, por
  * el tope de 16 átomos): con ellos el cuerpo perdía el N fijado a N₂ y soltaba H₂.
+ *
+ * Opciones de la validación de los ciclos (enmienda 2): la geometría (aire y capacidades de `fluir` del aire y de los
+ * poros), la hojarasca (la parte de lo arrancado que cae al suelo sin pasar por el tubo), las formas de N y de P que
+ * aceptan las plantillas (N₂ y el P₂O₅ gaseoso que deja el fuego) y la temperatura (fija o por estaciones).
  */
-import { CAPACIDAD_ATOMO, ELEMENTOS, FRACTURA, KAPPA0, KAPPA_SUELO, NE, NU, R } from '../../src/shared/naturaleza.js';
+import { CAPACIDAD_ATOMO, ELEMENTOS, FRACTURA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NE, NU, R } from '../../src/shared/naturaleza.js';
 import type { SustanciaId } from '../../src/shared/materia.js';
 import type { Registro } from '../../src/world/motor/contratos.js';
 import { esGasA } from '../../src/world/materia/quimica.js';
@@ -26,7 +30,7 @@ import { medir, pasoLote, type CtxPaso, type Kappa } from '../../src/world/mater
 import { fluir } from '../../src/world/materia/fluir.js';
 import { copiar, crearPlantilla } from '../../src/world/materia/copiar.js';
 import { desprender, quemar } from '../../src/world/materia/romper.js';
-import { nivelDeT, type LoteRef, type Plantilla, type Reaccion, type ServicioQuimico } from '../../src/world/materia/tipos.js';
+import { barreraEfectiva, nivelDeLote, nivelDeT, type LoteRef, type Plantilla, type Reaccion, type ServicioQuimico } from '../../src/world/materia/tipos.js';
 import { materiaReal, type Base, type Contenido, type MateriaReal } from './materia-real.js';
 
 /** Registro de plantillas de M1 (doble): un id por contenido. */
@@ -48,8 +52,25 @@ export interface OpcionesCaja {
   cadaFuego?: number;
   fraccionFuego?: number;
   semilla?: number;
-  /** Control: la química que ve la cinética (P), p. ej. sin la catálisis H–H de la enmienda 1. */
+  /** Control: la química que ve la cinética (P), p. ej. sin la catálisis H–H. */
   cinetica?: (q: ServicioQuimico) => ServicioQuimico;
+  /** Geometría: contenido del aire y capacidades de `fluir` del aire y de los poros del suelo (de ellas solo cuenta la
+   * razón; la meseta de H₂ crecía como 1 + capAire/capSuelo antes de la enmienda 2). */
+  aire?: Contenido;
+  capAire?: number;
+  capSuelo?: number;
+  /** Fracción de lo que se arranca que pasa por el tubo del herbívoro; el resto cae al suelo como hojarasca (0: sin
+   * herbívoro). Por defecto 1. */
+  fTubo?: number;
+  /** Formas de N que aceptan las plantillas (una plantilla por forma de N y de P), por defecto solo NH₃. */
+  nitrogenos?: ('NH3' | 'N2')[];
+  /** Añade el P₂O₅ molecular (gas) que deja el fuego a las formas de P que aceptan las plantillas. */
+  fosfatoGas?: boolean;
+  /** T de aire, agua, suelo y planta (por defecto 295 K); con `periodo` > 0 alterna `periodo` ticks a `tAmbiente` y
+   * `periodo` a `tFrio`. */
+  tAmbiente?: number;
+  tFrio?: number;
+  periodo?: number;
 }
 
 /** Totales de la caja en un instante: cuantos por sustancia (nombre de la base o fórmula) y átomos por elemento y sitio. */
@@ -95,12 +116,14 @@ export interface ResultadoCaja {
 }
 
 const T_AMBIENTE = 295, T_CUERPO = 310, T_IGNICION = 1100;
-const KAPPA_SUELO_3: Kappa = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO];
-const KAPPA_TUBO: Kappa = [KAPPA0, KAPPA0, KAPPA0];
-const SIN: Kappa = [0, 0, 0];
+/** Nivel en que Q da el P₂O₅ molecular de la combustión del fósforo orgánico (orgP + O₂ a ~1.250 K, como en un fuego). */
+const NIVEL_FUEGO = 10;
+const KAPPA_SUELO_4: Kappa = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH];
+const KAPPA_TUBO: Kappa = [KAPPA0, KAPPA0, KAPPA0, KAPPA0];
+const SIN: Kappa = [0, 0, 0, 0];
 /** Capacidades de `fluir` (de gas o de agua de cada compartimento; solo cuentan sus razones). Los poros del suelo tienen
  * el 10 % del aire, que se renueva en ~1 tick: el aire libre no cataliza nada, así que el H₂ que llega a él solo vuelve a
- * oxidarse cuando pasa por el suelo (bacterias del hidrógeno, familia H–H de la enmienda 1). */
+ * oxidarse cuando pasa por el suelo (bacterias del hidrógeno, familia H–H propia de la enmienda 2, sin barrera). */
 const CAP_AIRE = 100, CAP_SUELO = 10, CAP_TUBO = 0.05, CAP_AGUA = 10, CAP_AGUA_SUELO = 1;
 /** Por tick: unidades de plantilla que paga la luz, fracción de la planta que se come y fracción del tubo que se excreta. */
 const LUZ_UNIDADES = 40, HERBIVORIA = 0.01, EXCRECION = 0.05;
@@ -109,37 +132,50 @@ const TICKS_FUEGO = 60, ARRANQUE = 3;
 export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
   const inicio = performance.now();
   const recambios = op.recambios ?? 40, cadaFuego = op.cadaFuego ?? 0, fraccionFuego = op.fraccionFuego ?? 0.3;
+  const capAire = op.capAire ?? CAP_AIRE, capSuelo = op.capSuelo ?? CAP_SUELO, fTubo = op.fTubo ?? 1;
+  const tAmb = op.tAmbiente ?? T_AMBIENTE, periodo = op.periodo ?? 0, tFrio = op.tFrio ?? tAmb;
+  /** T del entorno en el tick t: fija, o `periodo` ticks templados y `periodo` fríos. */
+  const tEntorno = (t: number) => (periodo > 0 && Math.floor(t / periodo) % 2 === 1 ? tFrio : tAmb);
   const m = materiaReal({ capacidad: 256 });
   const { arena, quimica: Q, S, libro } = m;
   const c: CtxPaso = m.ctx(op.semilla ?? 1, op.cinetica ? op.cinetica(m.quimica) : m.quimica);
   const nombres = new Map<SustanciaId, string>(Object.entries(S).map(([k, v]) => [v, k]));
   const nombre = (id: SustanciaId) => nombres.get(id) ?? `${formula(m, id)}#${id}`;
-  const gas = (id: SustanciaId) => esGasA(Q.sustancia(id), T_AMBIENTE);
+  const gas = (id: SustanciaId) => esGasA(Q.sustancia(id), tAmb);
 
-  // Tejido de la planta: celulosa, grasa, proteína y fósforo orgánico, desde CO₂, agua, NH₃ y fosfato; sale O₂. Varias
-  // plantillas con las mismas partes, una por forma del fosfato en el suelo: H₃PO₄; CaHPO₄, como las raíces que
-  // disuelven el fosfato cálcico (el Ca vuelve como caliza; la caliza precipita el H₃PO₄ así, química real de Q); y HPO₃
-  // y P₂O₅, que en Q son el mismo fosfato salvo agua (HPO₃ + H₂O ⇌ H₃PO₄ y 2 HPO₃ ⇌ P₂O₅ + H₂O tienen dH = 0 exacto: el
-  // mismo vector de enlaces), así que nada los hidrata y sin esto el suelo acumularía el P como P₂O₅.
+  // Tejido de la planta: celulosa, grasa, proteína y fósforo orgánico, desde CO₂, agua, N y fosfato; sale O₂. Varias
+  // plantillas con las mismas partes, una por forma del N (NH₃ y, si se pide, N₂) y del fosfato en el suelo: H₃PO₄;
+  // CaHPO₄, como las raíces que disuelven el fosfato cálcico (el Ca vuelve como caliza; la caliza precipita el H₃PO₄ así,
+  // química real de Q); y HPO₃ y P₂O₅, que en Q son el mismo fosfato salvo agua (HPO₃ + H₂O ⇌ H₃PO₄ y 2 HPO₃ ⇌ P₂O₅ + H₂O
+  // tienen dH = 0 exacto: el mismo vector de enlaces), así que nada los hidrata y sin esto el suelo acumularía el P como
+  // P₂O₅; con `fosfatoGas`, también el P₂O₅ molecular que deja el fuego. En el orden de esas listas (NH₃ antes que N₂).
   const registro = new RegistroCaja();
-  const datosPlanta = (fosfato: SustanciaId, subproductos: SustanciaId[]) => crearPlantilla(Q, registro, {
+  const nitrogenos = (op.nitrogenos ?? ['NH3']).map((k) => S[k]);
+  const datosPlanta = (n: SustanciaId, fosfato: SustanciaId, subproductos: SustanciaId[]) => crearPlantilla(Q, registro, {
     partes: [{ id: S.madera, nu: 20 }, { id: S.CH2, nu: 2 }, { id: S.proteina, nu: 2 }, { id: S.orgP, nu: 1 }],
-    entradas: [S.CO2, S.H2O, S.NH3, fosfato], subproductos,
+    entradas: [S.CO2, S.H2O, n, fosfato], subproductos,
     kappa: SIN, captura: 0.1, masaAdulta: 1, m0: 0.05, linaje: 0,
   });
-  const planta = datosPlanta(S.H3PO4, [S.O2]), plantaCa = datosPlanta(S.CaHPO4, [S.O2, S.CaCO3]);
-  if (!planta || !plantaCa) throw new Error('Las plantillas de la caja no balancean.');
-  const orgP = Q.reaccion(S.orgP, 0, nivelDeT(T_AMBIENTE))!, aguaOrgP = Q.reaccion(S.orgP, S.H2O, nivelDeT(T_AMBIENTE))!;
-  const fosforo = (r: Reaccion) => r.salidas.find((t) => Q.sustancia(t.id).atomos[ELEMENTOS.indexOf('P' as never)])!.id;
-  const otras = [fosforo(orgP), fosforo(aguaOrgP)].map((id) => datosPlanta(id, [S.O2]));
-  if (otras.some((p) => !p)) throw new Error('Las plantillas de HPO₃ y P₂O₅ no balancean.');
-  const plantas = [planta, plantaCa, ...otras as Plantilla[]];
+  const ambiente = nivelDeT(T_AMBIENTE);
+  const fosforo = (r: Reaccion | null | undefined) => r?.salidas.find((t) => Q.sustancia(t.id).atomos[ELEMENTOS.indexOf('P' as never)])?.id ?? 0;
+  const fosfatos: [SustanciaId, SustanciaId[]][] = [[S.H3PO4, [S.O2]], [S.CaHPO4, [S.O2, S.CaCO3]],
+    [fosforo(Q.reaccion(S.orgP, 0, ambiente)), [S.O2]], [fosforo(Q.reaccion(S.orgP, S.H2O, ambiente)), [S.O2]]];
+  if (op.fosfatoGas) fosfatos.push([fosforo(Q.reaccion(S.orgP, S.O2, NIVEL_FUEGO)), [S.O2]]);
+  const plantas: Plantilla[] = [];
+  for (const [f, sub] of fosfatos) for (const n of nitrogenos) {
+    const p = f ? datosPlanta(n, f, sub) : null;
+    if (!p || !p.sintesis.entradas.some((t) => t.id === n) || !p.sintesis.entradas.some((t) => t.id === f)) {
+      throw new Error(`La plantilla de N ${n} y P ${f} no balancea.`);
+    }
+    plantas.push(p);
+  }
+  const planta = plantas[0]!;
 
-  const aire = m.lote({ N2: 7_800_000, O2: 2_100_000, CO2: 200_000 }, T_AMBIENTE);
-  const agua = m.lote({ H2O: 3_000_000 }, T_AMBIENTE);
-  const suelo = m.lote({ H2O: 300_000, NH3: 30_000, H3PO4: 10_000, CaCO3: 100_000, SiO2: 1_000_000, N2: 78_000, O2: 21_000, CO2: 2_000 }, T_AMBIENTE);
+  const aire = m.lote(op.aire ?? { N2: 7_800_000, O2: 2_100_000, CO2: 200_000 }, tAmb);
+  const agua = m.lote({ H2O: 3_000_000 }, tAmb);
+  const suelo = m.lote({ H2O: 300_000, NH3: 30_000, H3PO4: 10_000, CaCO3: 100_000, SiO2: 1_000_000, N2: 78_000, O2: 21_000, CO2: 2_000 }, tAmb);
   const tejido = Object.fromEntries(planta.partes.map((t) => [nombres.get(t.id)!, 2000 * t.nu])) as Contenido;
-  const hoja = m.lote(tejido, T_AMBIENTE);
+  const hoja = m.lote(tejido, tAmb);
   const tubo = m.lote({}, 0), reserva = m.lote({}, 0), fuego = m.lote({}, 0);
   const flujos: ResultadoCaja['flujos'] = {};
   /** Corre `f` y anota lo que cambió en H₂, N₂, H₂O y NH₃ de `l` bajo `proceso`. */
@@ -167,7 +203,7 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
   /** Lleva la fracción f de `de` a `a` con `desprender` (FRACTURA·D̄ por cuanto). */
   const fraccion = (de: LoteRef, a: LoteRef, f: number) => desprender(arena, Q, de, a, f * FRACTURA * cohesion(de), c.azar);
   const respirar = (l: LoteRef, capL: number, ids: Iterable<SustanciaId> = new Set([...especies(l), ...especies(aire)].filter(gas))) => {
-    for (const id of ids) fluir(c, l, aire, id, 1, capL, CAP_AIRE, 0, 1);
+    for (const id of ids) fluir(c, l, aire, id, 1, capL, capAire, 0, 1);
   };
   /** El cuerpo solo intercambia O₂, CO₂ y N₂ con el aire (los pulmones no toman NH₃ para quemarlo). */
   const PULMON = [S.O2, S.CO2, S.N2];
@@ -203,6 +239,7 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
   fotos.push(foto(0, recambio));
   while (recambio < recambios) {
     tick++;
+    const T = tEntorno(tick);
     // 1. Luz y crecimiento (Liebig sobre suelo, agua y aire); el O₂ y la caliza van a su sitio.
     const luz = LUZ_UNIDADES * energiaUnidad;
     arena.fuente(hoja, Float64Array.from([0, luz]), libro);
@@ -211,10 +248,11 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
       const n = copiar(arena, Q, p, hoja, [suelo, agua, aire], aire, energia, resta);
       resta -= n; energia -= n * p.sintesis.dH;
     }
-    termostato(hoja, T_AMBIENTE); // la luz que no fijó se va (sumidero): no calienta la hoja
+    termostato(hoja, T); // la luz que no fijó se va (sumidero): no calienta la hoja
     for (const id of especies(aire)) if (!gas(id)) arena.mover({ de: aire, a: suelo, esp: id, cuantos: arena.cuantos(aire, id) });
-    // 2. Herbivoría: el tubo arranca una fracción de la planta en pie.
-    arrancado += fraccion(hoja, tubo, HERBIVORIA);
+    // 2. Herbivoría: el tubo arranca una fracción de la planta en pie (con `fTubo` < 1, el resto cae como hojarasca).
+    if (fTubo > 0) arrancado += fraccion(hoja, tubo, HERBIVORIA * fTubo);
+    if (fTubo < 1) arrancado += fraccion(hoja, suelo, HERBIVORIA * (1 - fTubo));
     // 3. Química de cada compartimento a su temperatura. El tubo digiere con KAPPA0; el cuerpo absorbe la mitad de los
     // azúcares y grasas que hay en él a su reserva y quema allí su trabajo con el O₂ que respira (la proteína y el NH₃
     // no son combustible del cuerpo: salen con las heces).
@@ -233,12 +271,12 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
     }
     respirar(tubo, CAP_TUBO);
     fraccion(tubo, suelo, EXCRECION);
-    anotar('suelo (pasoLote, KAPPA_SUELO)', suelo, () => pasoLote(c, suelo, 1, KAPPA_SUELO_3));
+    anotar('suelo (pasoLote, KAPPA_SUELO)', suelo, () => pasoLote(c, suelo, 1, KAPPA_SUELO_4));
     for (const [nom, l] of [['aire', aire], ['agua', agua], ['planta', hoja]] as const) anotar(nom, l, () => pasoLote(c, l, 1, SIN));
     // 4. Intercambio: poros del suelo con el aire, agua con el suelo.
-    respirar(suelo, CAP_SUELO);
+    respirar(suelo, capSuelo);
     fluir(c, agua, suelo, S.H2O, 0.1, CAP_AGUA, CAP_AGUA_SUELO, 0, 1);
-    for (const l of [aire, agua, suelo, hoja]) termostato(l, T_AMBIENTE);
+    for (const l of [aire, agua, suelo, hoja]) termostato(l, T);
     termostato(tubo, T_CUERPO);
     termostato(reserva, T_CUERPO);
     // 5. Fuego: una fracción de la planta arde con aire en una hoguera aislada y sus restos vuelven.
@@ -263,7 +301,7 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
       });
       const h2 = arena.cuantos(fuego, S.H2);
       fuegos.push({ tick, quemado, tMax, nAntes, nDespues: enLote(fuego, N), pAntes, pDespues: enLote(fuego, P), h2 });
-      termostato(fuego, T_AMBIENTE); // se enfría: calor al sumidero
+      termostato(fuego, T); // se enfría: calor al sumidero
       for (const id of especies(fuego)) arena.mover({ de: fuego, a: gas(id) ? aire : suelo, esp: id, cuantos: arena.cuantos(fuego, id) });
       arena.moverCalor(fuego, suelo, arena.calor(fuego));
     }
@@ -286,15 +324,15 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
     lotes[nom] = Object.fromEntries(especies(l).map((id) => [nombre(id), arena.cuantos(l, id)]));
   }
   const canalesH2: ResultadoCaja['canalesH2'] = [];
-  for (const [nom, l, kappa] of [['suelo', suelo, KAPPA_SUELO_3], ['tubo', tubo, KAPPA_TUBO], ['aire', aire, SIN]] as const) {
-    const { T, V } = medir(c, l), ids = especies(l), nivel = nivelDeT(T);
+  for (const [nom, l, kappa] of [['suelo', suelo, KAPPA_SUELO_4], ['tubo', tubo, KAPPA_TUBO], ['aire', aire, SIN]] as const) {
+    const { T, V } = medir(c, l), ids = especies(l), nivel = nivelDeLote(T, kappa);
     for (let i = 0; i < ids.length; i++) for (let j = i - 1; j < ids.length; j++) {
       const a = ids[i]!, b = j < i ? 0 : ids[j]!;
       const r = Q.reaccion(a, b, nivel);
       if (!r) continue;
       const h2 = r.salidas.reduce((s, t) => s + (t.id === S.H2 ? t.nu : 0), 0) - r.entradas.reduce((s, t) => s + (t.id === S.H2 ? t.nu : 0), 0);
       if (h2 === 0) continue;
-      const k = NU * Math.exp(-Math.max(0, r.ea - (r.catalisis === -1 ? 0 : kappa[r.catalisis]), r.dH) / (R * T));
+      const barrera = barreraEfectiva(r, kappa), k = barrera === 0 ? NU : NU * Math.exp(-barrera / (R * T));
       const na = arena.cuantos(l, a), nb = b ? arena.cuantos(l, b) : 0;
       const veces = b === 0 ? k * na : a === b ? k * na * na / V : k * na * nb / V;
       canalesH2.push({ lote: nom, reaccion: describirR(m, r, nombre), veces: veces * h2 });

@@ -31,7 +31,7 @@ const USADO = 2; // Distingue la primera asignación de la reutilización de una
 const GEN_MAX = genDe(Number.MAX_SAFE_INTEGER);
 const UINT32_MAX = 0xffffffff;
 const CELDAS_PAGINA = 256;
-const KAPPA_BASE = [KAPPA0, KAPPA0, KAPPA0] as const;
+const KAPPA_BASE = [KAPPA0, KAPPA0, KAPPA0, KAPPA0] as const;
 
 function natural(n: number, nombre: string, max = Number.MAX_SAFE_INTEGER): number {
   if (!Number.isSafeInteger(n) || n < 0 || n > max) throw new RangeError(`${nombre} inválido: ${n}`);

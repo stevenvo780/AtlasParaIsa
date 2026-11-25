@@ -152,6 +152,16 @@ pasoLote(l, dt):   T ← calor/(0,025·átomos);  V ← Σ cant·vMolar(fase);  
 
 La tasa depende de cant/V, así que dividir un lote en dos no cambia la tasa total.
 
+**Enmiendas de la integración (sprint/v23l-materia, 2026-11-24).** El contrato vigente está en `world/materia/tipos.ts` (`Reaccion`, `barreraEfectiva`, `nivelDeLote`) y en `shared/naturaleza.ts`. Lo que cambia del pseudocódigo de arriba:
+
+- **Enmienda 1.** Q elige los coeficientes enteros (p, q), con 16 átomos como máximo por reacción. La familia catalítica es la del enlace catalizable **más débil** que disminuye, no la del más fuerte. La barrera era max(0, ea − κ, dH).
+- **Enmienda 2** (validación independiente de los ciclos, `archivo/v23-orquesta/fin/`):
+  - **Solo se catalizan exotérmicas.** b = max(0, ea − κ[familia]) si dH ≤ 0; b = ea (≥ dH) si dH > 0 o no hay familia. A ~295 K, una endotérmica solo es espontánea por la entropía del gas que suelta, unos 53 J por molécula. Catalizada era una fuente de H₂ sin retorno en el suelo: CH₂ → H₂ + C y 2 madera → 2 H₂ + C + CO₂.
+  - **H–H tiene familia propia (3).** `Kappa` pasa a tener 4 entradas: C–O, C–N, C–C/C–H y H–H. El suelo usa [KAPPA_SUELO ×3, KAPPA_SUELO_HH = 175], así que 2 H₂ + O₂ → 2 H₂O va sin barrera en un suelo con O₂.
+  - **Piso de nivel en lotes catalizados.** Un lote con algún κ > 0 elige productos al menos en el nivel `NIVEL_CATALIZADO` = 2 (282,84 K), aunque esté más frío; la tasa sigue usando su T real. El nivel 1 se calcula a 259,4 K, y ahí el NH₃ del modelo (que hierve a 273,6 K) no es gas, así que el suelo frío producía HCN, un sumidero absorbente.
+  - **`copiar` mueve cada entrada y cada subproducto con su parte del calor** (`moverParte`, parte exacta).
+  - **Medidas** en la caja cerrada (`tests/materia-caja.test.ts`, `tests/lib/caja-cerrada.ts`). Con 100 veces más aire por poro y sin herbívoro, el H₂ queda en el 0,06 % del H, frente al 96,8 % con la caja seca de antes. El suelo a 275 K y las estaciones cierran.
+
 - **Cadencia:** los lotes con T > ambiente + 5 K, los cuerpos y los tocados en el paso corren en cada tick. Los quietos corren cada 10 ticks con dt = 10, la misma cadencia que la ecología de hoy, y la esperanza no cambia.
 - **Propiedades por sustancia**, de la estructura (Fable P5):
   - r es la coordinación media del núcleo, sin átomos de valencia 1.

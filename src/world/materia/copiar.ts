@@ -7,7 +7,7 @@
 import { NE } from '../../shared/naturaleza.js';
 import type { SustanciaId } from '../../shared/materia.js';
 import type { Registro } from '../motor/contratos.js';
-import type { ArenaMateria, Ecuacion, LoteRef, Plantilla, ServicioQuimico } from './tipos.js';
+import { Parte, type ArenaMateria, type Ecuacion, type LoteRef, type Plantilla, type ServicioQuimico } from './tipos.js';
 
 type Termino = { id: SustanciaId; nu: number };
 const MAX = Number.MAX_SAFE_INTEGER;
@@ -80,7 +80,7 @@ export function crearPlantilla(q: ServicioQuimico, registro: Registro, d: DatosP
   // Exacta si cabe en la cota de `balanceada`; si no, la plantilla no se podría copiar nunca y no es viable.
   if (!balanceada(q, sintesis)) return null;
 
-  const resto = { kappa: [d.kappa[0], d.kappa[1], d.kappa[2]] as const, // copia: los bytes registrados no cambian
+  const resto = { kappa: [d.kappa[0], d.kappa[1], d.kappa[2], d.kappa[3]] as const, // copia: los bytes registrados no cambian
     captura: d.captura, masaAdulta: d.masaAdulta, m0: d.m0, linaje: d.linaje };
   return { id: registro.insertar(canonico(partes, sintesis, resto)), partes, sintesis, ...resto };
 }
@@ -89,9 +89,12 @@ export function crearPlantilla(q: ServicioQuimico, registro: Registro, d: DatosP
  * Sintetiza en `destino` unidades enteras de `p`: n = min(⌊maxUnidades⌋, Liebig sobre la suma de `fuentes`,
  * ⌊min(energia, calor del destino)/dH⌋ si la síntesis es endotérmica). Mueve n·nu de cada entrada desde las fuentes (en
  * su orden) al destino, aplica la síntesis y lleva al lote `residuo` (aire, agua, digestivo) lo que sale por encima de
- * las partes, que se quedan en el destino. `energia` es lo que el llamador autoriza a fijar (luz captada, o lo quemado
- * por η): el calor ambiente del lote no paga síntesis. Destino, fuentes y residuo son lotes distintos del mismo dueño.
- * Devuelve n.
+ * las partes, que se quedan en el destino. Cada traslado lleva su parte del calor (`moverParte` Exacta, enmienda 2):
+ * la materia sale a la T de su lote, así que tomar casi todo un charco no lo calienta (antes el calor se quedaba en la
+ * fuente: 1.000 H₂O de los que la planta toma 945 pasaban de 295 a 5.364 K y el agua que quedaba se partía). `energia`
+ * es lo que el llamador autoriza a fijar (luz captada, o lo quemado por η): el calor ambiente del lote no paga síntesis
+ * (la cota de n usa el calor del destino antes de recibir las entradas). Destino, fuentes y residuo son lotes distintos
+ * del mismo dueño. Devuelve n.
  */
 export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, destino: LoteRef,
   fuentes: readonly LoteRef[], residuo: LoteRef, energia: number, maxUnidades: number): number {
@@ -114,14 +117,15 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
     if (sobra > 0) n = Math.min(n, cabe(arena.cuantos(residuo, t.id), sobra));
   }
   if (!(n > 0)) return 0;
+  const exacta = (esp: SustanciaId, cuantos: number) => ({ parte: Parte.Exacta, esp, cuantos, kappa: null });
   for (const t of e.entradas) {
     let falta = n * t.nu;
-    for (const f of fuentes) if (falta > 0) falta -= arena.mover({ de: f, a: destino, esp: t.id, cuantos: falta });
+    for (const f of fuentes) if (falta > 0) falta -= arena.moverParte(f, destino, exacta(t.id, falta));
   }
   const hechas = arena.aplicar(destino, e, n);
   for (const t of e.salidas) {
     const sobra = t.nu - (enPartes.get(t.id) ?? 0);
-    if (sobra > 0) arena.mover({ de: destino, a: residuo, esp: t.id, cuantos: hechas * sobra });
+    if (sobra > 0 && hechas > 0) arena.moverParte(destino, residuo, exacta(t.id, hechas * sobra));
   }
   return hechas;
 }

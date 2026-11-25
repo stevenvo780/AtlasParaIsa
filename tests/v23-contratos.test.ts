@@ -182,10 +182,16 @@ test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable en la familia
   assert.equal(nivelDeT(295), 2, 'suelo'); assert.equal(nivelDeT(310), 2, 'cuerpo: mismo nivel que el suelo');
   for (const T of [0, -5, NaN, 199.9]) assert.equal(nivelDeT(T), 0, `T = ${T}`);
   assert.equal(nivelDeT(Infinity), NIVELES_T - 1);
-  // Familias: C–O 0, C–N 1, C–C/C–H/H–H 2; O=O, O–H y lo demás no catalizable.
+  // Familias (enmienda 2): C–O 0, C–N 1, C–C/C–H 2, H–H 3; O=O, O–H y lo demás no catalizable. `Kappa` tiene una por familia.
   const i = (a: string, b: string, k: 1 | 2 | 3 = 1) => indiceTipoEnlace(ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never), k);
   assert.deepEqual([i('C', 'O'), i('C', 'O', 2), i('C', 'N'), i('C', 'C'), i('C', 'H'), i('H', 'H'), i('O', 'O', 2), i('O', 'H'), i('N', 'H')].map(familiaCatalitica),
-    [0, 0, 1, 2, 2, 2, -1, -1, -1]);
+    [0, 0, 1, 2, 2, 3, -1, -1, -1]);
+  assert.equal(tipos.FAMILIAS_CATALITICAS, 4);
+  // La barrera efectiva: κ rebaja solo exotérmicas; una endotérmica o sin familia paga ea (≥ dH).
+  const r = (ea: number, dH: number, catalisis: -1 | 0 | 1 | 2 | 3) => ({ ea, dH, catalisis });
+  assert.equal(tipos.barreraEfectiva(r(100, -5, 3), [0, 0, 0, 30]), 70);
+  assert.equal(tipos.barreraEfectiva(r(100, 5, 3), [0, 0, 0, 1e3]), 100);
+  assert.equal(tipos.barreraEfectiva(r(100, -5, -1), [1e3, 1e3, 1e3, 1e3]), 100);
   assert.equal(materia.ATOMOS_POR_REACCION, 2 * materia.ATOMOS_POR_UNIDAD);
   assert.equal(naturaleza.FRACTURA, 1);
   // Las constantes de Q (enmienda 1) viven en naturaleza con su intervalo escrito, sin marcadores por rellenar.
@@ -326,13 +332,13 @@ test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción m
 
 test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', () => {
   const { TIPOS } = materia;
-  const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
+  const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
   const D = (a: string, b: string, k = 1): number => {
     const [e, f] = [ELEMENTOS.indexOf(a as never), ELEMENTOS.indexOf(b as never)].sort((x, y) => x - y);
     return TIPOS.find(t => t.e === e && t.f === f && t.k === k)!.d;
   };
-  // Enmienda 1: la barrera nunca baja de dH (k = ν·exp(−max(0, ea − κ, dH)/RT)).
-  const kRate = (T: number, d: number, kappa = 0, dH = 0) => NU * Math.exp(-Math.max(0, GAMMA * d - kappa, dH) / (R * T));
+  // Enmiendas 1 y 2 (`barreraEfectiva`): κ rebaja la barrera de una exotérmica hasta 0; una endotérmica paga ea ≥ dH.
+  const kRate = (T: number, d: number, kappa = 0, dH = 0) => NU * Math.exp(-(dH > 0 ? Math.max(GAMMA * d, dH) : Math.max(0, GAMMA * d - kappa)) / (R * T));
 
   // 1. CO₂ gas supera al polímero sólido [4×C–O] incluso a 0 K; fosfatos (H₃PO₄/CaHPO₄) son más estables que P=O extra.
   assert.ok(2 * D('C', 'O', 2) > 4 * D('C', 'O', 1), 'CO₂ gas debe vencer al polímero sólido [4×C–O]');
@@ -369,7 +375,9 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
   assert.ok(kRate(310, D('C', 'N'), KAPPA0) > 1 && kRate(310, D('C', 'O'), KAPPA0) > 1 && kRate(310, D('C', 'C'), KAPPA0) > 1e-2);
   assert.ok(kRate(310, D('C', 'H'), KAPPA0) < 1e-4 && kRate(310, D('O', 'O', 2), KAPPA0) < 1e-9);
   assert.ok(kRate(295, D('O', 'O', 2), KAPPA_SUELO) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
-  // …y oxidar el H₂ con O₂ (H–H en la familia 2), pero ningún κ parte el agua: 2 H₂O → 2 H₂ + O₂ cuesta su dH.
+  // …y oxidar el H₂ con O₂ sin barrera (H–H, familia 3: KAPPA_SUELO_HH ≥ γ·D(O=O)), pero ningún κ parte el agua: 2 H₂O →
+  // 2 H₂ + O₂ es endotérmica y paga su barrera entera.
+  assert.ok(KAPPA_SUELO_HH >= GAMMA * D('O', 'O', 2) && kRate(295, D('O', 'O', 2), KAPPA_SUELO_HH) === NU, 'el suelo oxida el H₂ al paso');
   const dH_agua = 4 * D('O', 'H') - 2 * D('H', 'H') - D('O', 'O', 2);
   assert.ok(dH_agua > 300 && kRate(310, D('O', 'H'), 1e9, dH_agua) < 1e-50, 'ni el suelo ni el tubo parten el agua');
 

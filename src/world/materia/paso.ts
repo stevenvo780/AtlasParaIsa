@@ -3,8 +3,10 @@
  * que da la química con tasa de Arrhenius y un número entero de veces. Todo cambio pasa por `ArenaMateria.aplicar`, que
  * conserva átomos y energía exactos (I2); aquí solo se decide cuántas veces.
  *
- * Enmienda 1 (contrato de `Reaccion`): la barrera es max(0, ea − κ[catalisis], dH), así que ningún catalizador la baja
- * por debajo de dH; y una vez consume ν_a de a y ν_b de b con los coeficientes que elige Q (2 H₂ + O₂ → 2 H₂O). Las
+ * Enmiendas 1 y 2 (contrato de `Reaccion`): la barrera es `barreraEfectiva`, max(0, ea − κ[catalisis]) en una
+ * exotérmica y ea (≥ dH) en una endotérmica, así que la catálisis solo acelera lo que suelta calor (κ en 4 familias:
+ * C–O, C–N, C–C/C–H y H–H) y un lote con algún κ > 0 elige productos al menos en el nivel 2 (`nivelDeLote`: el suelo frío
+ * no hace HCN); y una vez consume ν_a de a y ν_b de b con los coeficientes que elige Q (2 H₂ + O₂ → 2 H₂O). Las
  * veces por tick son k·n_a·n_b/V (a + b), k·n_a²/V (a + a) y k·n_a (a sola) sean cuales sean los ν: los coeficientes son
  * estequiométricos, no órdenes cinéticos (el ritmo lo ponen los encuentros de un a con un b). En unidades de vez
  * (α = n_a/ν_a, β = n_b/ν_b) un a + b es el problema 1:1 con constante ν_a·ν_b·k, así que la forma cerrada no cambia.
@@ -25,11 +27,14 @@
  *   con las medias de la integración, que es la suma de las de las mitades del lote (I5); a + a sortea pares enteros.
  * - Lo sorteado se recorta antes de aplicar, en proporción y en orden de id (nunca en el de las ranuras), a lo que hay de
  *   cada reactivo y al calor que pagan las endotérmicas tras sumar el que sueltan las exotérmicas del mismo paso.
- * La temperatura, el nivel ℓ y el volumen se fijan al empezar el paso: los productos reaccionan desde el paso siguiente.
+ * La temperatura, el nivel ℓ (`nivelDeLote`) y el volumen se fijan al empezar el paso: los productos reaccionan desde el
+ * paso siguiente.
  */
 import { CAPACIDAD_ATOMO, NU, R } from '../../shared/naturaleza.js';
 import type { SustanciaId } from '../../shared/materia.js';
-import { nivelDeT, type ArenaMateria, type LoteRef, type Reaccion, type ServicioQuimico, type Sustancia } from './tipos.js';
+import {
+  barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type LoteRef, type Reaccion, type ServicioQuimico, type Sustancia,
+} from './tipos.js';
 
 /** Lo que el paso necesita de su hilo: la arena del dueño, la química y su azar sembrado (nunca Math.random). */
 export interface CtxPaso {
@@ -38,8 +43,8 @@ export interface CtxPaso {
   azar(): number;
 }
 
-/** J por cuanto de rebaja de barrera por familia (C–O, C–N, C–C/C–H/H–H), como `Plantilla.kappa`; la pone el rol del lote. */
-export type Kappa = readonly [number, number, number];
+/** J por cuanto de rebaja de barrera por familia (C–O, C–N, C–C/C–H, H–H): el `Kappa` de tipos.ts; lo pone el rol del lote. */
+export type { Kappa };
 
 /** kPa: un cuanto de gas ocupa R·T/ATMOSFERA litros a la presión de una atmósfera. */
 const ATMOSFERA = 101.325;
@@ -241,7 +246,7 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   const { atomos, T, V } = medir(c, l);
   if (atomos === 0) return 0;
   const n = presentes;
-  const nivel = nivelDeT(T);
+  const nivel = nivelDeLote(T, kappa);
   usos.fill(0, 0, n);
   let m = 0;
   for (let i = 0; i < n; i++) for (let j = i - 1; j < n; j++) {
@@ -260,8 +265,7 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
       throw new Error(`Reacción (${r.a}, ${r.b}) con entradas que no son las del canal (${a}, ${b}).`);
     }
     if (cant[i]! < pa || (j > i && cant[j]! < pb)) continue; // ni una vez entera
-    const familia = r.catalisis;
-    const barrera = Math.max(0, r.ea - (familia === -1 ? 0 : kappa[familia]), r.dH);
+    const barrera = barreraEfectiva(r, kappa);
     const k = barrera === 0 ? NU : T > 0 ? NU * Math.exp(-barrera / (R * T)) : 0;
     if (!(k * dt > 0)) continue;
     if (m === canalI.length) crecerCanales();

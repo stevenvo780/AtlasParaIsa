@@ -5,14 +5,15 @@
  * devuelve `manejador` con los SAB del despacho, `params` y el índice del hilo. Cómo se abre la arena de A y la química
  * de Q en un hilo lo da `abrir`.
  */
-import type { LoteRef } from './tipos.js';
+import { FAMILIAS_CATALITICAS, type LoteRef } from './tipos.js';
 import { pasoLote, type CtxPaso } from './paso.js';
 
-/** Avanza dt los lotes [desde, hasta) de `lotes`; `kappas` lleva 3 por lote (C–O, C–N, C–C/C–H). Devuelve cuántos avanzó:
+/** Avanza dt los lotes [desde, hasta) de `lotes`; `kappas` lleva FAMILIAS_CATALITICAS = 4 por lote (`Kappa`: C–O, C–N,
+ * C–C/C–H, H–H). Devuelve cuántos avanzó:
  * los que caducaron se saltan, y uno vivo de otro dueño es un error de quien repartió. */
 export function pasarLotes(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>,
   desde: number, hasta: number, dt: number): number {
-  const kappa: [number, number, number] = [0, 0, 0];
+  const kappa: [number, number, number, number] = [0, 0, 0, 0];
   let avanzados = 0;
   for (let i = desde; i < hasta; i++) {
     const l = lotes[i]!;
@@ -20,14 +21,14 @@ export function pasarLotes(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayL
       if (c.arena.vivo(l)) throw new Error(`pasarLotes: el lote ${l} es de otro dueño`);
       continue;
     }
-    kappa[0] = kappas[3 * i]!; kappa[1] = kappas[3 * i + 1]!; kappa[2] = kappas[3 * i + 2]!;
+    for (let f = 0; f < FAMILIAS_CATALITICAS; f++) kappa[f] = kappas[FAMILIAS_CATALITICAS * i + f]!;
     pasoLote(c, l, dt, kappa);
     avanzados++;
   }
   return avanzados;
 }
 
-/** Lo que lleva un despacho: SAB `lotes` (Float64, n, agrupados por dueño), `kappas` (Float64, 3·n) y `cortes`
+/** Lo que lleva un despacho: SAB `lotes` (Float64, n, agrupados por dueño), `kappas` (Float64, 4·n) y `cortes`
  * (Float64, hilos + 1: inicio del grupo de cada hilo y el final); dt. */
 export interface TrabajoPaso {
   buffers: { lotes: SharedArrayBuffer; kappas: SharedArrayBuffer; cortes: SharedArrayBuffer } & Record<string, SharedArrayBuffer>;

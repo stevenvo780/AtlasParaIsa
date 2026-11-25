@@ -1,13 +1,17 @@
 // ENMIENDA 1 (2026-11-24, «ciclos cerrados»; integrador Claude Opus 5.5 en sprint/v23l-materia, pedidos 1–4, 6 y 7 de
-// Q y los de L): coeficientes enteros que elige Q, H–H catalizable en la familia 2, ninguna barrera por debajo de dH,
-// energía de red y reglas de ea escritas, fronteras exactas de nivelDeT y precisiones de `aplicar`.
+// Q y los de L): coeficientes enteros que elige Q, H–H catalizable, ninguna barrera por debajo de dH, energía de red y
+// reglas de ea escritas, fronteras exactas de nivelDeT y precisiones de `aplicar`.
+// ENMIENDA 2 (2026-11-24, «ciclos cerrados, validados»; integrador Claude Opus 5.5 tras la validación independiente de
+// los ciclos, archivo/v23-orquesta/fin/): H–H con familia catalítica propia (3) y `Kappa` de 4 familias; la catálisis
+// solo rebaja barreras de reacciones exotérmicas (dH ≤ 0); un lote catalizado elige productos al menos en el nivel 2
+// (`nivelDeLote`); `copiar` mueve el calor con la materia.
 /**
  * Contratos de la materia en el servidor (ARQ-materia §2 con PLAN-V23 §1.2): sustancias internadas, lotes y su
  * arena, el `Libro` único de conservación, reacciones, plantillas, cuerpos, procesos y el punto de control.
  * Lo que también ve el cliente está en `shared/materia.ts`; los números de la naturaleza, en `shared/naturaleza.ts`.
  * Entre dueños la materia viaja en un `Intento` del motor (`motor/contratos.ts`): ya no hay `IntentoMateria`.
  */
-import { NE } from '../../shared/naturaleza.js';
+import { NE, NIVEL_CATALIZADO } from '../../shared/naturaleza.js';
 import type { ClaseSustancia, Forma, Propiedades, SustanciaId } from '../../shared/materia.js';
 
 // ── Química ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -62,6 +66,17 @@ export interface Ecuacion {
   dH: number; // J por vez (un cuanto de reacción)
 }
 
+/** Familias catalíticas: índices de `Kappa` y valores de `Reaccion.catalisis` ≥ 0 (0 = C–O, 1 = C–N, 2 = C–C/C–H,
+ * 3 = H–H; enmienda 2). */
+export const FAMILIAS_CATALITICAS = 4;
+export type FamiliaCatalitica = -1 | 0 | 1 | 2 | 3;
+/** J por cuanto de rebaja de barrera por familia catalítica, en el orden de `Reaccion.catalisis`: C–O, C–N, C–C/C–H y
+ * H–H. Lo lleva el lote que cataliza: el dueño se lo pasa a `pasoLote` según su rol (W: Suelo y Cadaver con
+ * [KAPPA_SUELO ×3, KAPPA_SUELO_HH]; aire, agua, roca, objetos y tejido sin catálisis, [0, 0, 0, 0]; B: el digestivo con
+ * `Plantilla.kappa`), y viaja en `Pedido.kappa` (el comedor que digiere). Con algún κ > 0 el lote elige productos al menos
+ * en el nivel NIVEL_CATALIZADO (`nivelDeLote`), aunque esté más frío. */
+export type Kappa = readonly [number, number, number, number];
+
 /**
  * Reparto de menor energía libre de a + b al nivel de temperatura `nivelT`, como `Ecuacion`: entradas a y b con los
  * coeficientes enteros p, q ≥ 1 que elige Q (los de mayor −ΔG por átomo sin reactivo sobrante, con p·|a| + q·|b| ≤
@@ -69,10 +84,16 @@ export interface Ecuacion {
  * sola con nu 1) y salidas los productos del mínimo global de G = E − T·S_GAS·#gas sobre esos átomos. ΔG es frente a los
  * reactivos tal cual; para ser reacción, el mínimo debe ganar en más de EPSILON_G a todo reparto de p·a + q·b en dos
  * grupos que reaccionen por separado (sin espectadores ni uniones de reacciones menores). Así 2 H₂ + O₂ → 2 H₂O.
- * Lo calcula Q; lo aplica P con Arrhenius, x = ν·exp(−max(0, ea − κ[catalisis], dH)/(R·T))·… (ARQ-materia §3.1 con la
- * enmienda 1: ningún catalizador baja la barrera por debajo de dH), con veces por tick k·n_a·n_b/V (a + b), k·n_a²/V
- * (a + a) y k·n_a (sola) sean cuales sean los nu, y cada vez gasta nu de cada entrada. `quemar` (L) no es cinético: el
- * cuerpo paga su trabajo aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
+ * Lo calcula Q; lo aplica P con Arrhenius, x = ν·exp(−b/(R·T))·… con la barrera efectiva (`barreraEfectiva`)
+ *   b = max(0, ea − κ[catalisis])  si dH ≤ 0 y catalisis ≥ 0,
+ *   b = ea (≥ dH)                  si dH > 0 o catalisis = −1,
+ * es decir, la catálisis solo rebaja barreras de reacciones exotérmicas (enmienda 2; en la 1 era max(0, ea − κ, dH)).
+ * Por qué: en V23 una endotérmica a ~295 K solo es espontánea por T·S_GAS del gas que suelta (≈ 53 J por molécula), y
+ * catalizada era una fuente sin retorno: CH₂ → H₂ + C y 2 madera → 2 H₂ + C + CO₂ en el suelo, proteína → H₂ + HCN en
+ * frío (validación de los ciclos, hallazgos 1, 3 y 11). La vida cataliza lo que le rinde calor; lo endotérmico solo
+ * ocurre por el calor del lote (horno, llama). Veces por tick k·n_a·n_b/V (a + b), k·n_a²/V (a + a) y k·n_a (sola)
+ * sean cuales sean los nu, y cada vez gasta nu de cada entrada. `quemar` (L) no es cinético: el cuerpo paga su trabajo
+ * aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
  */
 export interface Reaccion extends Ecuacion {
   a: SustanciaId; b: SustanciaId; nivelT: number;
@@ -81,13 +102,28 @@ export interface Reaccion extends Ecuacion {
    * pierde ningún σ. Si el vector de enlaces se conserva: 0 en una asociación (un solo producto) y GAMMA·D del enlace más
    * débil de las entradas si alguna se parte. Nunca menor que dH. */
   ea: number;
-  /** Familia del enlace catalizable más débil que disminuye, índice de `Plantilla.kappa` (0 = C–O, 1 = C–N,
-   * 2 = C–C/C–H/H–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
+  /** Familia del enlace catalizable más débil que disminuye, índice de `Kappa` (0 = C–O, 1 = C–N, 2 = C–C/C–H,
+   * 3 = H–H); los enlaces del oxidante y del agua (O=O, O–H) y los demás no deciden la familia. −1 = ninguno
    * catalizable. Sustituye al «más fuerte» de ARQ-materia §3.1, con el que C–C y C–H tapaban a C–O (azúcares, celulosa)
-   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H), que fija tests/v23-contratos.test.ts. H–H solo decide
-   * cuando no baja ningún otro catalizable: el suelo oxida así el H₂ con O₂ en frío (enmienda 1). */
-  catalisis: -1 | 0 | 1 | 2;
+   * y a C–N (proteínas); exige D(C–N) < D(C–O) < D(C–C) < D(C–H) < D(H–H), que fija tests/v23-contratos.test.ts, así
+   * que H–H solo decide cuando no baja ningún otro catalizable: 2 H₂ + O₂ → 2 H₂O, 3 H₂ + N₂ → 2 NH₃, 4 H₂ + CO₂ (C=O
+   * pesa más que H–H). Con familia propia el suelo oxida el H₂ que llega sin acelerar con ello la carbonización ni la
+   * respiración del resto (enmienda 2; en la 1 compartía la familia 2 con C–C/C–H). */
+  catalisis: FamiliaCatalitica;
 }
+
+/** Barrera efectiva (J por cuanto de reacción) de `r` en un lote con catálisis `kappa`, la de `Reaccion`: la catálisis
+ * solo rebaja exotérmicas. La usan P (`pasoLote`, CPU y GPU), el laboratorio y quien estime tasas (W, B, G). */
+export const barreraEfectiva = (r: Pick<Reaccion, 'ea' | 'dH' | 'catalisis'>, kappa: Kappa): number =>
+  r.dH > 0 || r.catalisis === -1 ? Math.max(r.ea, r.dH) : Math.max(0, r.ea - kappa[r.catalisis]);
+
+/** Nivel con el que reacciona un lote a T K con la catálisis `kappa` (enmienda 2): `nivelDeT(T)`, pero nunca por debajo
+ * de NIVEL_CATALIZADO (= 2, 282,84 K) si algún κ > 0; la tasa sigue usando la T real. Por qué y con qué medidas, en
+ * naturaleza.ts. Lo aplica P (`pasoLote`; G lo replica): W, B y F solo pasan el κ de su rol. */
+export const nivelDeLote = (T: number, kappa: Kappa): number => {
+  const n = nivelDeT(T);
+  return n < NIVEL_CATALIZADO && (kappa[0] > 0 || kappa[1] > 0 || kappa[2] > 0 || kappa[3] > 0) ? NIVEL_CATALIZADO : n;
+};
 
 /** Servicio de un solo escritor en su propio worker. Implementa: Q (`materia/{quimica,servicio}.ts`). Consumen: P, L, W, T1, G. */
 export interface ServicioQuimico {
@@ -118,7 +154,7 @@ export interface VistaLote {
   fase: 0 | 1 | 2 | 3;   // sólido, líquido, gas, mezcla
   dureza: number; tenacidad: number; sellado: number; aislamiento: number; // [0, 1]
   energia: number;       // J que libera su oxidación completa
-  digerible: number;     // J digeribles con KAPPA0; con otro κ los calcula el dueño del comedor
+  digerible: number;     // J digeribles con [KAPPA0 ×4] (solo exotérmicas: `barreraEfectiva`); con otro κ, el dueño del comedor
   agua: number;          // cuantos de agua
   color: number;         // 0xRRGGBB
   forma: number;         // `codigoForma`; 0 = sin forma
@@ -132,8 +168,9 @@ export interface Traslado { de: LoteRef; a: LoteRef; esp: SustanciaId; cuantos: 
 export const Parte = { Exacta: 0, Digerible: 1, Agua: 2, Todo: 3 } as const;
 export type Parte = (typeof Parte)[keyof typeof Parte];
 
-/** `cuantos` de `esp` (Exacta), de lo que digiere `kappa` (Digerible), de agua (Agua) o el lote entero con su calor (Todo). */
-export interface Pedido { parte: Parte; esp: SustanciaId; cuantos: number; kappa: readonly [number, number, number] | null }
+/** `cuantos` de `esp` (Exacta), de lo que digiere `kappa` (Digerible), de agua (Agua) o el lote entero con su calor (Todo).
+ * Todas las partes llevan su parte del calor (la de sus átomos), así que lo movido sale a la T del lote. */
+export interface Pedido { parte: Parte; esp: SustanciaId; cuantos: number; kappa: Kappa | null }
 
 /**
  * Libro único de conservación (§1.2), uno por hilo; el motor, la poda y la materia usan este mismo.
@@ -209,7 +246,7 @@ export interface Plantilla {
    * produce entera (sus salidas son estas partes más los subproductos, como O₂ y H₂O). */
   partes: readonly { id: SustanciaId; nu: number }[];
   sintesis: Ecuacion;
-  kappa: readonly [number, number, number]; // J por cuanto de rebaja de barrera: C–O, C–N, C–C/C–H/H–H
+  kappa: Kappa;       // J por cuanto de rebaja de barrera del digestivo: C–O, C–N, C–C/C–H, H–H (fundadoras: KAPPA0 ×4)
   captura: number;    // fracción de la luz que fija (plantas)
   masaAdulta: number; // kg
   m0: number;         // kg al nacer

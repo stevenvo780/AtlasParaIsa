@@ -6,7 +6,7 @@ import { CINTA, type Apertura, type Corte, type EntradaCatalogo, type Hito, type
 import type { TapeClientDelta } from '../../shared/tape-delta.js';
 import type { PersonView, Tile, WorldView } from '../../shared/types.js';
 import { CatalogoCinta, MAX_SEGMENTO, NIVELES, sincronizarDirectorio, type PuntoEscritura } from './catalogo.js';
-import { clientDelta, codificarBloque } from './formato.js';
+import { clientDelta, codificarBloque, cotaIndiceBloque } from './formato.js';
 import { podar } from './poda.js';
 import { reducir, reducirTesela } from './reducir.js';
 
@@ -14,7 +14,12 @@ const FOTOGRAMAS_BLOQUE = 32;
 export const PASO_MAXIMO = 32;
 export const cintaDeMundo = (worldPath: string): string => join(dirname(worldPath), 'cinta');
 
-interface BloquePendiente { base: WorldView; previo: WorldView; deltas: TapeClientDelta[] }
+interface BloquePendiente {
+  base: WorldView;
+  previo: WorldView;
+  deltas: TapeClientDelta[];
+  cabe: ReturnType<typeof cotaIndiceBloque>;
+}
 export interface OpcionesEscritor {
   directorio: string;
   topeBytes?: number;
@@ -147,14 +152,19 @@ export class EscritorCinta {
       const vista = reducir(nivel, sinTeselas, this.notables);
       const parche = this.parcheTeselas(nivel);
       const bloque = this.bloques[nivel];
-      if (!bloque) this.bloques[nivel] = { base: { ...vista, tiles: this.teselasDe(nivel) }, previo: vista, deltas: [] };
-      else {
+      if (bloque) {
         const delta = clientDelta(bloque.previo, vista);
         if (parche.length) delta.tilesPatch = parche;
-        bloque.deltas.push(delta);
-        bloque.previo = vista;
+        if (bloque.cabe(delta)) {
+          bloque.deltas.push(delta);
+          bloque.previo = vista;
+          if (bloque.deltas.length + 1 >= FOTOGRAMAS_BLOQUE) this.escribir(nivel);
+          continue;
+        }
+        this.escribir(nivel);
       }
-      if (this.bloques[nivel]!.deltas.length + 1 >= FOTOGRAMAS_BLOQUE) this.escribir(nivel);
+      const base = { ...vista, tiles: this.teselasDe(nivel) };
+      this.bloques[nivel] = { base, previo: vista, deltas: [], cabe: cotaIndiceBloque(base) };
     }
   }
 

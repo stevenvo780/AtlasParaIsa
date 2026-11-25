@@ -11,6 +11,7 @@ const CABECERA_FOTOGRAMA = 16;
 const ENTRADA_PARTE = 16;
 const ENTRADA_SECTOR = 33;
 const MAX_INDICE = 16 * 1024 ** 2;
+const UMBRAL_INDICE = 15 * 1024 ** 2;
 // Cota de lo que descomprime una lectura de un fotograma (cada parte y la suma de las que lee), no del bloque: un
 // mundo grande sigue grabando y lo que pase de ella se lee por sectores. Ronda el largo máximo de una cadena de V8.
 const MAX_CRUDO = 512 * 1024 ** 2;
@@ -51,9 +52,40 @@ const errorFormato = (detalle: string): Error => new Error(`${detalle} CNT2 inv�
 
 type Posicion = { x: number; y: number; cells?: StructureView['cells']; footprint?: StructureView['footprint'] };
 interface Domicilio { sector: number; pos: Posicion }
-interface Racha { campo: number; inicio: number; valores: unknown[] }
+interface FilasSector { indices: number[]; valores: unknown[] }
 interface ParteComprimida { sector: number; datos: Buffer; crudos: number; crc: number }
 interface MarcoComprimido { tick: number; campos: number; partes: ParteComprimida[] }
+
+/** Cota acumulada del índice. Un parche parcial conserva su sector de origen y no añade sectores. */
+export function cotaIndiceBloque(base: WorldView): (delta: TapeClientDelta) => boolean {
+  const sectores = new Set<string>();
+  const agregar = (x: number, y: number, margen: number): void => {
+    const sx = sectorDe(x), sy = sectorDe(y);
+    if (Number.isSafeInteger(sx) && Number.isSafeInteger(sy)) sectores.add(`${sx},${sy},${margen}`);
+  };
+  for (const nombre of listasClave) {
+    for (const fila of base[nombre] ?? []) agregar(fila.x, fila.y, margenDe(nombre));
+  }
+  let bytes = 4 + ENTRADA_SECTOR * sectores.size + CABECERA_FOTOGRAMA + ENTRADA_PARTE * (sectores.size + 1);
+  return delta => {
+    const previos = sectores.size;
+    let filas = (delta.tilesPatch?.length ?? 0) + (delta.removedTiles?.length ?? 0);
+    for (const t of delta.tilesPatch ?? []) agregar(t.x, t.y, 0);
+    for (const k of delta.removedTiles ?? []) {
+      const coma = k.indexOf(',');
+      agregar(Number(k.slice(0, coma)), Number(k.slice(coma + 1)), 0);
+    }
+    for (const nombre of listasEspaciales) {
+      const p = delta[`${nombre}Patch`];
+      if (!p) continue;
+      filas += p.removed.length + p.upserts.length;
+      for (const u of p.upserts) if (!('_p' in u)) agregar(u.x, u.y, margenDe(nombre));
+    }
+    bytes += ENTRADA_SECTOR * (sectores.size - previos) + CABECERA_FOTOGRAMA
+      + ENTRADA_PARTE * (1 + Math.min(filas, sectores.size));
+    return bytes <= UMBRAL_INDICE;
+  };
+}
 
 /**
  * Los ticks viven en el índice, separados del JSON. Cada entidad conserva su sector de entrada al bloque:
@@ -100,16 +132,17 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     const global = cabecera as Record<string, unknown>;
     delete global.seed;
     let campos = 0;
-    const rachas = new Map<number, Racha[]>();
+    const filasPorSector = new Map<number, Map<number, FilasSector>>();
     const agregar = <T>(campo: number, filas: readonly T[], ubicacion: (fila: T) => number) => {
       campos |= 1 << campo;
-      filas.forEach((fila, inicio) => {
+      filas.forEach((fila, indice) => {
         const s = ubicacion(fila);
-        let lista = rachas.get(s);
-        if (!lista) rachas.set(s, lista = []);
-        const ultima = lista.at(-1);
-        if (ultima?.campo === campo && ultima.inicio + ultima.valores.length === inicio) ultima.valores.push(fila);
-        else lista.push({ campo, inicio, valores: [fila] });
+        let sector = filasPorSector.get(s);
+        if (!sector) filasPorSector.set(s, sector = new Map());
+        let grupo = sector.get(campo);
+        if (!grupo) sector.set(campo, grupo = { indices: [], valores: [] });
+        grupo.indices.push(indice);
+        grupo.valores.push(fila);
       });
     };
 
@@ -174,14 +207,16 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     }
 
     const partes: ParteComprimida[] = [];
-    if (!rachas.has(0)) rachas.set(0, []);
-    for (const [s, lista] of rachas) {
+    if (!filasPorSector.has(0)) filasPorSector.set(0, new Map());
+    for (const [s, grupos] of filasPorSector) {
       const lineas = s === 0 ? [JSON.stringify(global)] : [];
-      for (const r of lista) {
-        const json = r.campo === 0
-          ? (r.valores as Tile[]).map(t => `${t.x},${t.y}:${JSON.stringify(t)}`).join(SEPARADOR_TESELA)
-          : r.valores.length === 1 ? JSON.stringify(r.valores[0]) : JSON.stringify(r.valores).slice(1, -1);
-        lineas.push(`${r.campo}:${r.inicio}:${json}`);
+      for (const [campo, { indices, valores }] of grupos) {
+        const inicio = indices[0]!;
+        const posiciones = indices.at(-1)! - inicio === indices.length - 1 ? inicio : `@${indices.join(',')}`;
+        const json = campo === 0
+          ? (valores as Tile[]).map(t => `${t.x},${t.y}:${JSON.stringify(t)}`).join(SEPARADOR_TESELA)
+          : JSON.stringify(valores).slice(1, -1);
+        lineas.push(`${campo}:${posiciones}:${json}`);
       }
       const crudo = Buffer.from(lineas.join('\n')), crudos = crudo.length;
       if (crudos > MAX_CRUDO) throw errorFormato('Tamaño descomprimido');
@@ -316,7 +351,26 @@ export function sectoresVisibles(indice: IndiceBloque, camara: Viewport): Set<nu
   return visibles;
 }
 
-/** Reúne las partes pedidas sin parsear sus filas. Cada racha conserva el orden del array original. */
+/** Separa las filas de un grupo sin volver a parsear ni serializar los objetos. */
+function* piezasJson(json: string): Generator<string> {
+  let desde = 0, profundidad = 0, cadena = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i]!;
+    if (cadena) {
+      if (c === '\\') i++;
+      else if (c === '"') cadena = false;
+    } else if (c === '"') cadena = true;
+    else if (c === '[' || c === '{') profundidad++;
+    else if (c === ']' || c === '}') profundidad--;
+    else if (c === ',' && profundidad === 0) {
+      yield json.slice(desde, i);
+      desde = i + 1;
+    }
+  }
+  yield json.slice(desde);
+}
+
+/** Reúne las partes pedidas sin parsear sus filas. Los índices conservan el orden entre sectores. */
 export function leerMarcoJson(indice: IndiceBloque, i: number, leer: LeerBytes, visibles?: ReadonlySet<number>, tesela?: LeerTesela): string {
   const { tick, campos, partes } = indice.marcos[i]!;
   let crudos = 0;
@@ -345,10 +399,28 @@ export function leerMarcoJson(indice: IndiceBloque, i: number, leer: LeerBytes, 
     if (!p.sector) global = lineas[j++]!;
     for (; j < lineas.length; j++) {
       const linea = lineas[j]!, a = linea.indexOf(':'), b = linea.indexOf(':', a + 1);
-      const campo = Number(linea.slice(0, a)), inicio = Number(linea.slice(a + 1, b));
+      const campo = Number(linea.slice(0, a)), posiciones = linea.slice(a + 1, b);
       if (a < 1 || b < a + 2 || campo < 0 || campo >= 14 || !Number.isInteger(campo)
-          || !(campos & (1 << campo)) || !Number.isInteger(inicio) || inicio < 0 || inicio >= MAX_CRUDO) throw errorFormato('Racha');
-      (filas[campo] ??= Object.create(null))[inicio] = linea.slice(b + 1);
+          || !(campos & (1 << campo))) throw errorFormato('Filas de sector');
+      const destino = filas[campo] ??= Object.create(null) as Record<number, string>;
+      const json = linea.slice(b + 1);
+      const guardar = (texto: string, valor: string, anterior: number): number => {
+        const indice = Number(texto);
+        if (!texto || !valor || !Number.isInteger(indice) || indice <= anterior || indice >= MAX_CRUDO || indice in destino) {
+          throw errorFormato('Índice de fila');
+        }
+        destino[indice] = valor;
+        return indice;
+      };
+      if (posiciones[0] !== '@') guardar(posiciones, json, -1);
+      else {
+        const indices = posiciones.slice(1).split(',');
+        let n = 0, anterior = -1;
+        for (const valor of campo === 0 ? json.split(SEPARADOR_TESELA) : piezasJson(json)) {
+          anterior = guardar(indices[n++] ?? '', valor, anterior);
+        }
+        if (n !== indices.length) throw errorFormato('Cantidad de filas');
+      }
     }
   }
   if (global[0] !== '{' || global.at(-1) !== '}') throw errorFormato('Cabecera JSON');

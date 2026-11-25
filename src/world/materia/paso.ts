@@ -3,6 +3,12 @@
  * que da la química con tasa de Arrhenius y un número entero de veces. Todo cambio pasa por `ArenaMateria.aplicar`, que
  * conserva átomos y energía exactos (I2); aquí solo se decide cuántas veces.
  *
+ * Enmienda 1 (contrato de `Reaccion`): la barrera es max(0, ea − κ[catalisis], dH), así que ningún catalizador la baja
+ * por debajo de dH; y una vez consume ν_a de a y ν_b de b con los coeficientes que elige Q (2 H₂ + O₂ → 2 H₂O). Las
+ * veces por tick son k·n_a·n_b/V (a + b), k·n_a²/V (a + a) y k·n_a (a sola) sean cuales sean los ν: los coeficientes son
+ * estequiométricos, no órdenes cinéticos (el ritmo lo ponen los encuentros de un a con un b). En unidades de vez
+ * (α = n_a/ν_a, β = n_b/ν_b) un a + b es el problema 1:1 con constante ν_a·ν_b·k, así que la forma cerrada no cambia.
+ *
  * Diferencias con el pseudocódigo de §3.1, todas por necesidad:
  * - Cada canal da en forma cerrada (primer orden, segundo orden con reactivos distintos o iguales) el riesgo integrado
  *   h = −ln(fracción que sobrevive) de sus reactivos, así que una constante enorme (κ ≥ ea: k = ν; o k·dt ≫ 1) agota el
@@ -11,9 +17,10 @@
  *   (`extensiones`). Es exacto con canales que no comparten reactivo y con competidores cuyo compañero no se gasta (pseudo
  *   primer orden: el O₂ del suelo entre muchas sustancias orgánicas). Si el compañero de un competidor también se gasta,
  *   las proporciones cambian dentro de dt y el paso se parte en subpasos en los que ningún compañero pierde más de la
- *   mitad, con el reparto del punto medio (orden 2). Frente a la EDO integrada fina (combustión contra dimerización, 12
- *   regímenes con k hasta ν y hasta 10¹² cuantos) queda dentro del 5 % con 2–16 subpasos; repartir las demandas ya
- *   saturadas, como antes, daba a la combustión 60 veces lo que le toca.
+ *   mitad, con el reparto del punto medio (orden 2), hasta que le queda medio cuanto (`AGOTADO`; un canal saturado
+ *   necesita ~log₂ n subpasos). Frente a la EDO integrada fina (combustión contra dimerización, 12 regímenes con k hasta
+ *   ν y hasta 10¹² cuantos) queda dentro del 5 %; repartir las demandas ya saturadas, como antes, daba a la combustión 60
+ *   veces lo que le toca.
  * - ξ no sale de redondear con un uniforme: los cuantos de cada reactivo se sortean entre sus canales en una multinomial
  *   con las medias de la integración, que es la suma de las de las mitades del lote (I5); a + a sortea pares enteros.
  * - Lo sorteado se recorta antes de aplicar, en proporción y en orden de id (nunca en el de las ranuras), a lo que hay de
@@ -31,16 +38,19 @@ export interface CtxPaso {
   azar(): number;
 }
 
-/** J por cuanto de rebaja de barrera por familia (C–O, C–N, C–C/C–H), como `Plantilla.kappa`; la pone el rol del lote. */
+/** J por cuanto de rebaja de barrera por familia (C–O, C–N, C–C/C–H/H–H), como `Plantilla.kappa`; la pone el rol del lote. */
 export type Kappa = readonly [number, number, number];
 
 /** kPa: un cuanto de gas ocupa R·T/ATMOSFERA litros a la presión de una atmósfera. */
 const ATMOSFERA = 101.325;
 const MG_POR_KG = 1e6;
-/** Fracción que un compañero de un competidor puede perder en un subpaso, y la que le queda cuando ya no se vigila. */
+/** Fracción que un compañero de un competidor puede perder en un subpaso. */
 const SUBPASO = 0.5;
-const AGOTADO = 1e-4;
-/** Tope de subpasos: con SUBPASO y AGOTADO han bastado ≤ 16; si se llegara, lo que falta va en uno. */
+/** Cuantos (absolutos) por debajo de los cuales un reactivo ya no se vigila: lo que queda no llega a una vez. Antes era
+ * una fracción (10⁻⁴ de lo que había) y un canal saturado (k = ν) con un compañero compartido dejaba ese resto sin
+ * gastar: el último subpaso reparte por el punto medio, donde ya no queda reactivo, y el compañero le daba 0. */
+const AGOTADO = 0.5;
+/** Tope de subpasos: medio cuanto desde 2⁵³ son 54 mitades; si se llegara, lo que falta va en uno. */
 const SUBPASOS_MAX = 200;
 
 /** Litros que ocupa un cuanto: gas ideal desde su ebullición, si no su densidad en fase condensada. */
@@ -62,10 +72,12 @@ let cant = new Float64Array(16), x = new Float64Array(16), xm = new Float64Array
 let L = new Float64Array(16), L0 = new Float64Array(16), aa = new Int32Array(16);
 let gastoLineal = new Float64Array(16), gastoAa = new Float64Array(16);
 let consumo = new Float64Array(16), usos = new Int32Array(16), inicio = new Int32Array(17);
-// Por canal: sus reactivos (j = i − 1: sola; j = i: a + a), su reacción y k por tick; riesgos integrados e instantáneos
-// por reactivo; extensión del subpaso y acumulada; quién lo sortea, orden de sorteo, veces y veces antes de recortar.
+// Por canal: sus reactivos (j = i − 1: sola; j = i: a + a) y sus coeficientes ν, su reacción y k por tick; riesgos
+// integrados e instantáneos por reactivo; extensión del subpaso y acumulada; quién lo sortea, orden de sorteo, veces y
+// veces antes de recortar.
 let canales: (Reaccion | null)[] = [];
-let canalI = new Int32Array(16), canalJ = new Int32Array(16), gobierna = new Int32Array(16), orden = new Int32Array(16);
+let canalI = new Int32Array(16), canalJ = new Int32Array(16), nuI = new Int32Array(16), nuJ = new Int32Array(16);
+let gobierna = new Int32Array(16), orden = new Int32Array(16);
 let kTick = new Float64Array(16), hI = new Float64Array(16), hJ = new Float64Array(16);
 let lI = new Float64Array(16), lJ = new Float64Array(16), l0I = new Float64Array(16), l0J = new Float64Array(16);
 let ext = new Float64Array(16), xi = new Float64Array(16), veces = new Float64Array(16), pedidas = new Float64Array(16);
@@ -87,7 +99,7 @@ function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
 function crecerCanales(): void {
   const t = 2 * canalI.length;
   const mas = <A extends Int32Array | Float64Array>(a: A): A => { const b = new (a.constructor as new (n: number) => A)(t); b.set(a); return b; };
-  canalI = mas(canalI); canalJ = mas(canalJ); kTick = mas(kTick);
+  canalI = mas(canalI); canalJ = mas(canalJ); nuI = mas(nuI); nuJ = mas(nuJ); kTick = mas(kTick);
   gobierna = new Int32Array(t); orden = new Int32Array(t); hI = new Float64Array(t); hJ = new Float64Array(t);
   lI = new Float64Array(t); lJ = new Float64Array(t); l0I = new Float64Array(t); l0J = new Float64Array(t);
   ext = new Float64Array(t); xi = new Float64Array(t); veces = new Float64Array(t); pedidas = new Float64Array(t);
@@ -112,16 +124,16 @@ export function medir(c: CtxPaso, l: LoteRef): Readonly<Estado> {
   return estado;
 }
 
-/** Cuántos cuantos de su reactivo s consume una vez el canal k (2 en a + a). */
-const nuDe = (k: number, s: number): number => (canalI[k] === s && canalJ[k] === s ? 2 : 1);
+/** Cuántos cuantos de su reactivo s consume una vez el canal k (ν de la reacción; s es uno de sus reactivos). */
+const nuDe = (k: number, s: number): number => (canalI[k] === s ? nuI[k]! : nuJ[k]!);
 
 /** Parte del canal k (no a + a) entre los de s que no son a + a: por su riesgo en el punto medio, o en el de partida si
  * allí ya no queda compañero. */
 const reparto = (s: number, l: number, l0: number): number => (L[s]! > 0 ? l / L[s]! : L0[s]! > 0 ? l0 / L0[s]! : 0);
 
 /**
- * Extensión media de cada canal en un subpaso h: riesgos integrados desde `xa`; reparto con los riesgos de `xb`.
- * Lo que se gasta de s: sin a + a, sobrevive e^(−H). Con a + a (β = 2·k·h/V) y el resto de canales con riesgo por
+ * Extensión media (veces) de cada canal en un subpaso h: riesgos integrados desde `xa`; reparto con los riesgos de `xb`.
+ * Lo que se gasta de s: sin a + a, sobrevive e^(−H). Con a + a (β = ν·k·h/V) y el resto de canales con riesgo por
  * cuanto μ (Bernoulli: dA/dτ = −μA − βA²) quedan μ·A0·e^(−μ)/(μ + β·A0·(1 − e^(−μ))), y los canales de μ se llevan
  * (μ/β)·ln(1 + β·A0·(1 − e^(−μ))/μ). Así a + a compite sin subpasos con los de compañero que no se gasta.
  */
@@ -130,19 +142,22 @@ function extensiones(m: number, n: number, V: number, h: number, xa: Float64Arra
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!, kt = kTick[k]! * h, s = kt / V, na = xa[i]!;
     if (j < i) { hI[k] = lI[k] = l0I[k] = kt; }
-    else if (j === i) { aa[i] = k; lI[k] = 2 * s; continue; }
+    else if (j === i) { aa[i] = k; lI[k] = nuI[k]! * s; continue; }
     else {
-      // dξ/dt = k·(na − ξ)(nb − ξ)/V cerrada. Con e = 1 − e^(−d·s) sobreviven d(1 − e)/(d + lo·e) del menor y
-      // d/(d + lo·e) del mayor; con d = 0, 1/(1 + lo·s) de los dos.
-      const nb = xa[j]!, lo = Math.min(na, nb), d = Math.abs(na - nb);
+      // dξ/dt = k·(na − p·ξ)(nb − q·ξ)/V = p·q·k·(α − ξ)(β − ξ)/V con α = na/p y β = nb/q, cerrada. Con s′ = p·q·s y
+      // e = 1 − e^(−d·s′) sobreviven d(1 − e)/(d + lo·e) del menor (en veces) y d/(d + lo·e) del mayor; con d = 0,
+      // 1/(1 + lo·s′) de los dos.
+      const p = nuI[k]!, q = nuJ[k]!, nb = xa[j]!, alfa = na / p, beta = nb / q, s2 = p * q * s;
+      const lo = Math.min(alfa, beta), d = Math.abs(alfa - beta);
       let hMenor: number, hMayor: number;
-      if (d === 0) hMenor = hMayor = Math.log1p(lo * s);
+      if (d === 0) hMenor = hMayor = Math.log1p(lo * s2);
       else {
-        const e = -Math.expm1(-d * s);
-        hMayor = Math.log1p(lo * e / d); hMenor = hMayor + d * s;
+        const e = -Math.expm1(-d * s2);
+        hMayor = Math.log1p(lo * e / d); hMenor = hMayor + d * s2;
       }
-      hI[k] = na <= nb ? hMenor : hMayor; hJ[k] = na <= nb ? hMayor : hMenor;
-      lI[k] = xb[j]! * s; lJ[k] = xb[i]! * s; l0I[k] = nb * s; l0J[k] = na * s;
+      hI[k] = alfa <= beta ? hMenor : hMayor; hJ[k] = alfa <= beta ? hMayor : hMenor;
+      // Riesgo instantáneo por cuanto: a pierde p por vez, a ritmo k·b/V por cuanto de a.
+      lI[k] = p * xb[j]! * s; lJ[k] = q * xb[i]! * s; l0I[k] = p * nb * s; l0J[k] = q * na * s;
       H[j]! += hJ[k]!; L[j]! += lJ[k]!; L0[j]! += l0J[k]!;
     }
     H[i]! += hI[k]!; L[i]! += lI[k]!; L0[i]! += l0I[k]!;
@@ -164,9 +179,9 @@ function extensiones(m: number, n: number, V: number, h: number, xa: Float64Arra
   }
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!;
-    if (j === i) { ext[k] = gastoAa[i]! / 2; continue; }
-    let e = gastoLineal[i]! * reparto(i, lI[k]!, l0I[k]!);
-    if (j > i) e = Math.min(e, gastoLineal[j]! * reparto(j, lJ[k]!, l0J[k]!));
+    if (j === i) { ext[k] = gastoAa[i]! / nuI[k]!; continue; }
+    let e = gastoLineal[i]! * reparto(i, lI[k]!, l0I[k]!) / nuI[k]!;
+    if (j > i) e = Math.min(e, gastoLineal[j]! * reparto(j, lJ[k]!, l0J[k]!) / nuJ[k]!);
     ext[k] = e;
   }
 }
@@ -176,8 +191,8 @@ function consumir(m: number, n: number, desde: Float64Array, destino: Float64Arr
   if (destino !== desde) destino.set(desde.subarray(0, n));
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!;
-    destino[i] = Math.max(0, destino[i]! - nuDe(k, i) * ext[k]!);
-    if (j > i) destino[j] = Math.max(0, destino[j]! - ext[k]!);
+    destino[i] = Math.max(0, destino[i]! - nuI[k]! * ext[k]!);
+    if (j > i) destino[j] = Math.max(0, destino[j]! - nuJ[k]! * ext[k]!);
   }
 }
 
@@ -188,15 +203,15 @@ function integrar(m: number, n: number, V: number, dt: number): void {
   let compite = false;
   for (let s = 0; s < n; s++) if (usos[s]! > 1) compite = true;
   if (!compite) { extensiones(m, n, V, dt, x, x); xi.set(ext.subarray(0, m)); return; }
-  const vivo = (s: number) => x[s]! > AGOTADO * cant[s]!;
+  const vivo = (s: number) => x[s]! > AGOTADO;
   let resta = dt;
   for (let pasos = 1; resta > 0; pasos++) {
     consumo.fill(0, 0, n);
     for (let k = 0; k < m; k++) {
       const i = canalI[k]!, j = canalJ[k]!;
       const r = j < i ? kTick[k]! * x[i]! : kTick[k]! * x[i]! * x[j]! / V;
-      consumo[i]! += nuDe(k, i) * r;
-      if (j > i) consumo[j]! += r;
+      consumo[i]! += nuI[k]! * r;
+      if (j > i) consumo[j]! += nuJ[k]! * r;
     }
     let h = resta;
     const vigilar = (p: number) => { if (vivo(p) && consumo[p]! > 0) h = Math.min(h, SUBPASO * x[p]! / consumo[p]!); };
@@ -234,12 +249,23 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
     const a: SustanciaId = ids[i]!, b: SustanciaId = j < i ? 0 : ids[j]!;
     const r = quimica.reaccion(a, b, nivel);
     if (!r) continue; // null: no reaccionan; undefined: encolada para la barrera siguiente
+    // Coeficientes de la reacción para los reactivos del canal (contrato de `Reaccion`): otra forma es un fallo de Q.
+    let pa = 0, pb = 0;
+    for (const t of r.entradas) {
+      if (t.id === a && pa === 0) pa = t.nu;
+      else if (j > i && t.id === b && pb === 0) pb = t.nu;
+      else pa = -1;
+    }
+    if (!(pa >= 1 && (j <= i || pb >= 1) && Number.isSafeInteger(pa) && Number.isSafeInteger(pb))) {
+      throw new Error(`Reacción (${r.a}, ${r.b}) con entradas que no son las del canal (${a}, ${b}).`);
+    }
+    if (cant[i]! < pa || (j > i && cant[j]! < pb)) continue; // ni una vez entera
     const familia = r.catalisis;
-    const barrera = Math.max(0, r.ea - (familia === -1 ? 0 : kappa[familia]));
+    const barrera = Math.max(0, r.ea - (familia === -1 ? 0 : kappa[familia]), r.dH);
     const k = barrera === 0 ? NU : T > 0 ? NU * Math.exp(-barrera / (R * T)) : 0;
     if (!(k * dt > 0)) continue;
     if (m === canalI.length) crecerCanales();
-    canales[m] = r; canalI[m] = i; canalJ[m] = j; kTick[m] = k;
+    canales[m] = r; canalI[m] = i; canalJ[m] = j; nuI[m] = pa; nuJ[m] = pb; kTick[m] = k;
     usos[i]!++;
     if (j > i) usos[j]!++;
     m++;
@@ -250,8 +276,8 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   H.fill(0, 0, n); // aquí: fracción media que se gasta de cada sustancia
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!;
-    H[i]! += nuDe(k, i) * xi[k]! / cant[i]!;
-    if (j > i) H[j]! += xi[k]! / cant[j]!;
+    H[i]! += nuI[k]! * xi[k]! / cant[i]!;
+    if (j > i) H[j]! += nuJ[k]! * xi[k]! / cant[j]!;
   }
   inicio.fill(0, 0, n + 1);
   for (let k = 0; k < m; k++) {
@@ -262,25 +288,29 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   for (let s = 0; s < n; s++) inicio[s + 1]! += inicio[s]!;
   consumo.fill(0, 0, n); // aquí: siguiente hueco de cada grupo
   for (let k = 0; k < m; k++) { const g = gobierna[k]!; orden[inicio[g]! + consumo[g]!] = k; consumo[g]!++; }
-  // Multinomial por reactivo con binomiales condicionadas: el canal k se lleva ν·ξ_k/cant de sus cuantos. a + a va al
-  // final y sortea pares enteros de los que quedan (sortear cuantos y descartar el impar sesgaba, I5).
+  // Multinomial por reactivo con binomiales condicionadas: el canal k se lleva la fracción ν·ξ_k/cant de sus cuantos,
+  // en grupos enteros de ν (una vez cada uno). a + a va al final y sortea grupos de ν de los que quedan (sortear cuantos
+  // y descartar el resto sesgaba, I5).
   for (let s = 0; s < n; s++) {
     let quedan = cant[s]!, resto = 1;
     const kAa = aa[s]!; // de la última `extensiones`; a + a siempre lo sortea su único reactivo
     for (let o = inicio[s]!; o < inicio[s + 1]!; o++) {
       const k = orden[o]!;
       if (k === kAa) continue;
-      const parte = xi[k]! / cant[s]!;
-      const v = binomial(quedan, Math.min(1, parte / resto), c.azar);
-      veces[k] = v; quedan -= v; resto -= parte;
+      const nu = nuDe(k, s), parte = nu * xi[k]! / cant[s]!;
+      const v = binomial(Math.floor(quedan / nu), Math.min(1, parte / resto), c.azar);
+      veces[k] = v; quedan -= nu * v; resto -= parte;
     }
-    if (kAa >= 0) veces[kAa] = binomial(Math.floor(quedan / 2), Math.min(1, 2 * xi[kAa]! / cant[s]! / resto), c.azar);
+    if (kAa >= 0) {
+      const nu = nuI[kAa]!;
+      veces[kAa] = binomial(Math.floor(quedan / nu), Math.min(1, nu * xi[kAa]! / cant[s]! / resto), c.azar);
+    }
   }
   // Recorte a existencias: un reactivo que no sortea puede quedar pedido de más por canales que sortean otros.
   consumo.fill(0, 0, n); // aquí: demanda
   for (let k = 0; k < m; k++) {
-    consumo[canalI[k]!]! += nuDe(k, canalI[k]!) * veces[k]!;
-    if (canalJ[k]! > canalI[k]!) consumo[canalJ[k]!]! += veces[k]!;
+    consumo[canalI[k]!]! += nuI[k]! * veces[k]!;
+    if (canalJ[k]! > canalI[k]!) consumo[canalJ[k]!]! += nuJ[k]! * veces[k]!;
   }
   let falta = false;
   for (let s = 0; s < n; s++) if (consumo[s]! > cant[s]!) falta = true;
@@ -293,16 +323,16 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
     x.set(cant.subarray(0, n)); // aquí: lo que queda
     for (let k = 0; k < m; k++) {
       const i = canalI[k]!, j = canalJ[k]!;
-      x[i]! -= nuDe(k, i) * veces[k]!;
-      if (j > i) x[j]! -= veces[k]!;
+      x[i]! -= nuI[k]! * veces[k]!;
+      if (j > i) x[j]! -= nuJ[k]! * veces[k]!;
     }
     // Lo que el redondeo hacia abajo dejó libre, una vez más por canal en orden de id: sin esto, dos canales que piden
     // el último cuanto se lo negarían los dos para siempre.
     for (let k = 0; k < m; k++) {
-      const i = canalI[k]!, j = canalJ[k]!, nu = nuDe(k, i);
-      if (veces[k]! < pedidas[k]! && x[i]! >= nu && (j <= i || x[j]! >= 1)) {
-        veces[k]!++; x[i]! -= nu;
-        if (j > i) x[j]!--;
+      const i = canalI[k]!, j = canalJ[k]!, p = nuI[k]!, q = nuJ[k]!;
+      if (veces[k]! < pedidas[k]! && x[i]! >= p && (j <= i || x[j]! >= q)) {
+        veces[k]!++; x[i]! -= p;
+        if (j > i) x[j]! -= q;
       }
     }
   }

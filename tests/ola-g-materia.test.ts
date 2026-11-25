@@ -3,7 +3,7 @@ import test from 'node:test';
 import { ClaseSustancia } from '../src/shared/materia.js';
 import { CAPACIDAD_ATOMO } from '../src/shared/naturaleza.js';
 import { CanalCompartido } from '../src/world/gpu/canal.js';
-import { crearPasoMateriaGpu, empaquetarMateriaGpu, prepararMateriaGpu } from '../src/world/gpu/materia-gpu.js';
+import { aplicarVecesGpu, crearPasoMateriaGpu, empaquetarMateriaGpu, prepararMateriaGpu } from '../src/world/gpu/materia-gpu.js';
 import type { CtxPaso } from '../src/world/materia/paso.js';
 import type { Reaccion, Sustancia } from '../src/world/materia/tipos.js';
 import { ErrorDispositivo, type CanalGpu } from '../src/world/motor/contratos.js';
@@ -21,6 +21,7 @@ function fixture() {
   reacciones[1] = { ...reacciones[1]!, a: 11, b: 13 };
   const cantidades = new Map([[9, 20], [11, 20]]);
   const consultas: [number, number, number][] = [];
+  const aplicaciones: [number, Reaccion, number][] = [];
   const quimica = {
     sustancia(id: number) {
       return { atomos: Uint16Array.of(id === 16 || id === 17 ? 3 : 1), masa: 10, clase: ClaseSustancia.Molecula,
@@ -38,10 +39,14 @@ function fixture() {
     calor: () => 270 * 40 * CAPACIDAD_ATOMO,
     especies(_id: number, salida: Uint32Array) { salida.set([11, 9]); return 2; },
     cuantos: (_id: number, especie: number) => cantidades.get(especie)!,
+    aplicar(lote: number, reaccion: Reaccion, veces: number) {
+      aplicaciones.push([lote, reaccion, veces]);
+      return veces;
+    },
   } as unknown as CtxPaso['arena'];
   const ctx: CtxPaso = { arena, quimica, azar: () => 0.25 };
   const kappa = [0, 0, 0, 100];
-  return { ctx, consultas, reacciones, kappa };
+  return { ctx, consultas, aplicaciones, reacciones, kappa };
 }
 
 test('G empaqueta composición, catálisis, nivel y tabla compartida con productos encadenados', () => {
@@ -107,6 +112,7 @@ class CanalMemoria implements CanalGpu {
   cerrado = false;
   ecoRancio = false;
   offsetMalo = false;
+  fallo?: ErrorDispositivo;
   get bytes() { return this.memoria.length; }
   crecer(bytes: number) { this.memoria = new Uint8Array(bytes); }
   escribir(desde: number, datos: ArrayBufferView) {
@@ -117,6 +123,7 @@ class CanalMemoria implements CanalGpu {
   }
   enviar(orden: Uint8Array) { this.orden = JSON.parse(Buffer.from(orden).toString()); }
   recibir() {
+    if (this.fallo) throw this.fallo;
     const { tick, despacho, salida, cabecera } = this.orden;
     this.escribir(salida, Int32Array.of(0, this.offsetMalo ? 4 : 3));
     this.escribir(salida + cabecera, Float64Array.of(9, 0, 20));
@@ -144,6 +151,30 @@ test('G material comparte el tramo SHM, comprueba ambos ecos y rechaza offsets d
   dañado.offsetMalo = true;
   paso.lanzar(ctx, [1], kappa, 1, 8);
   assert.throws(() => paso.esperar(100), /Offsets inválidos/);
+});
+
+test('G confirma el nivel de todas las tripletas antes de aplicar con la arena del dueño', () => {
+  const { ctx, kappa, reacciones, aplicaciones } = fixture();
+  const desde = Int32Array.of(0, 6, 6);
+  const kappas = [...kappa, 0, 0, 0, 0];
+  const tripletas = Float64Array.of(9, 0, 20, 11, 17, 10);
+  assert.throws(() => aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }), /en el nivel 2/);
+  assert.deepEqual(aplicaciones, []);
+  tripletas[4] = 13;
+  assert.equal(aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }), 30);
+  assert.deepEqual(aplicaciones, [[1, reacciones[0], 20], [1, reacciones[1], 10]]);
+});
+
+test('G invalida el cliente al vencer o caer el dispositivo durante la espera', () => {
+  const { ctx, kappa } = fixture();
+  for (const motivo of ['Venció el plazo', 'El servidor se cerró']) {
+    const canal = new CanalMemoria(), paso = crearPasoMateriaGpu(canal);
+    const fallo = canal.fallo = new ErrorDispositivo('gpu0', motivo);
+    paso.lanzar(ctx, [1], kappa, 1, 7);
+    assert.throws(() => paso.esperar(100), fallo);
+    assert.ok(canal.cerrado);
+    assert.throws(() => paso.lanzar(ctx, [1], kappa, 1, 8), fallo);
+  }
 });
 
 test('G CUDA real aplica catálisis por par, encadena con composición nueva y veta por fase a 270 K', {

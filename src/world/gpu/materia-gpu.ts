@@ -1,6 +1,6 @@
 import { ClaseSustancia, type SustanciaId } from '../../shared/materia.js';
 import { CAPACIDAD_ATOMO, EPSILON_G, NU, R, S_GAS } from '../../shared/naturaleza.js';
-import { PASES_ENCADENADOS, type CtxPaso } from '../materia/paso.js';
+import { medir, PASES_ENCADENADOS, type CtxPaso } from '../materia/paso.js';
 import { FAMILIAS_CATALITICAS, nivelDeLote, type Kappa, type LoteRef, type Reaccion } from '../materia/tipos.js';
 import { ErrorDispositivo, type CanalGpu } from '../motor/contratos.js';
 import { CanalGpuOcupado, enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
@@ -17,6 +17,34 @@ export interface PasoMateriaGpu {
   lanzar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, dt: number, tick: number): void;
   esperar(plazoMs: number): VecesGpu;
   cerrar(): void;
+}
+
+/** Relee cada fila con el nivel inicial, antes de mutar ningún lote. Solo el dueño aplica las ecuaciones. */
+export function aplicarVecesGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, r: VecesGpu): number {
+  if (r.desde.length !== lotes.length + 1 || r.desde[0] !== 0 || r.desde[lotes.length] !== r.tripletas.length
+      || kappas.length !== lotes.length * FAMILIAS_CATALITICAS) throw new Error('Respuesta material desalineada.');
+  const filas: Reaccion[] = [];
+  for (let l = 0; l < lotes.length; l++) {
+    const desde = r.desde[l]!, hasta = r.desde[l + 1]!;
+    if (desde === hasta) continue;
+    const lote = lotes[l]!, k = l * FAMILIAS_CATALITICAS;
+    if (hasta < desde || (hasta - desde) % 3 || hasta > r.tripletas.length || !c.arena.propio(lote))
+      throw new Error('Lote o offsets inválidos al aplicar tripletas GPU.');
+    const nivel = nivelDeLote(medir(c, lote).T, [kappas[k]!, kappas[k + 1]!, kappas[k + 2]!, kappas[k + 3]!]);
+    for (let i = desde; i < hasta; i += 3) {
+      const a = r.tripletas[i]!, b = r.tripletas[i + 1]!, veces = r.tripletas[i + 2]!;
+      const fila = c.quimica.reaccion(a, b, nivel);
+      if (!fila || !Number.isSafeInteger(veces) || veces <= 0)
+        throw new Error(`Tripleta material (${a}, ${b}, ${veces}) inválida en el nivel ${nivel}.`);
+      filas.push(fila);
+    }
+  }
+  let total = 0, fila = 0;
+  for (let l = 0; l < lotes.length; l++) {
+    for (let i = r.desde[l]!; i < r.desde[l + 1]!; i += 3)
+      total += c.arena.aplicar(lotes[l]!, filas[fila++]!, r.tripletas[i + 2]!);
+  }
+  return total;
 }
 
 interface EspecieGpu { id: SustanciaId; atomos: number; ebullicion: number; condensado: number; molecula: boolean }

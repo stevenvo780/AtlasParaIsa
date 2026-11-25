@@ -173,6 +173,10 @@ export const FISICA = {
   /** Volumen de agua de un suelo a capacidad de campo (humedad 1) sobre el de su poro con aire (adimensional). Real: a
    * capacidad de campo el agua ocupa más o menos la mitad de la porosidad, así que ≈ 1. */
   aguaPorPoro: 1,
+  /** Tiempo en que un cadáver que yace en una tesela se incorpora a su suelo (días, constante de la exponencial): lo
+   * entierran y lo deshacen los carroñeros pequeños y el agua, y la catálisis del suelo lo mineraliza. Real: el tejido
+   * blando de un animal en clima templado desaparece en 1–4 semanas. */
+  incorporacionCadaver: 10,
   /** Temperatura por debajo de la cual una brasa se apaga (K). Real: 500–700 K. */
   tBrasa: 600,
   /** Tiro: fracción de su exceso de temperatura sobre la de brasa que un fuego gasta en calentar el aire que aspira en un
@@ -624,6 +628,7 @@ export class MundoMaterial {
   private readonly u: Unidades = unidadesVacias();
   private readonly pedido: Pedido = { parte: Parte.Exacta, esp: 0, cuantos: 0, kappa: null };
   private readonly buscado = new Float64Array(1);
+  private cadaveres = new Float64Array(8);
   private readonly pideSuelo: Tasas = { hoja: 0, fruto: 0, tronco: 0 };
   private readonly pideFijado: Tasas = { hoja: 0, fruto: 0, tronco: 0 };
   /** Masa molar media de la columna de aire (kg/mol), para su altura de escala. */
@@ -1104,6 +1109,7 @@ export class MundoMaterial {
     this.manar(p, dt);
     this.enviar(p, dt);
     this.posar(p, Taire);
+    this.descomponer(p, dt);
     if (partido) this.vivir(p, luzFin, dt / 2, false);
     for (let i = i0; i < i1; i++) {
       this.termostato(this.suelo[i]!, T); this.termostato(this.vida[i]!, T);
@@ -1351,6 +1357,36 @@ export class MundoMaterial {
     const a = this.aire[p]!, suelo = this.suelo[this.inicio[p]!]!;
     for (const id of [...this.especies(a)]) if (id !== this.S.H2O && !this.esGas(id, T)) {
       this.arena.moverParte(a, suelo, this.pide(id, this.arena.cuantos(a, id)));
+    }
+  }
+
+  /**
+   * Los cadáveres vuelven al suelo: de cada lote Cadaver propio que yace en una tesela de la página, cada cuanto pasa al
+   * Suelo de esa tesela con la probabilidad 1 − e^(−dt/τ) (τ = `incorporacionCadaver`), con su parte del calor; allí lo
+   * mineraliza la catálisis del suelo, como a la hojarasca. Nada sale del mundo: es un traslado entre lotes. El lote que
+   * se queda vacío se libera.
+   */
+  private descomponer(p: number, dt: number): void {
+    const A = this.arena, pasa = -Math.expm1(-dt / (this.params.fisica.incorporacionCadaver * TICKS_PER_DAY));
+    for (let i = this.inicio[p]!, i1 = this.fin[p]!; i < i1; i++) {
+      let n = A.lotes(this.celda[i]!, Rol.Cadaver, this.cadaveres);
+      if (n === 0) continue;
+      if (n > this.cadaveres.length) n = A.lotes(this.celda[i]!, Rol.Cadaver, this.cadaveres = new Float64Array(2 * n));
+      const suelo = this.suelo[i]!;
+      for (let k = 0; k < n; k++) {
+        const l = this.cadaveres[k]!;
+        if (!A.propio(l)) continue;
+        let queda = 0;
+        for (const id of [...this.especies(l)]) {
+          const hay = A.cuantos(l, id), va = binomial(hay, pasa, this.ctx.azar);
+          if (va > 0) A.moverParte(l, suelo, this.pide(id, va));
+          queda += hay - va;
+        }
+        if (queda > 0) continue;
+        const calor = A.calor(l);
+        if (calor !== 0) A.moverCalor(l, suelo, calor);
+        A.liberar(l);
+      }
     }
   }
 

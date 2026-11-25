@@ -10,6 +10,7 @@ import { createWorld } from '../src/world/mundo/crear.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
 import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, unidadesVida, vistaVacia, type Organos } from '../src/world/materia/vistas.js';
+import { Parte, Rol } from '../src/world/materia/tipos.js';
 
 const pagina = (semilla: number): Tile[] => createWorld(semilla).tiles.filter((t) => t.x >= 0 && t.y >= 0 && t.x < 16 && t.y < 16);
 const CLIMA: Forzamiento[] = [{ dt: 10, luz: 1, lluvia: false }, { dt: 10, luz: 0.4, lluvia: true }, { dt: 10, luz: 0, lluvia: false }];
@@ -95,6 +96,34 @@ test('una tesela quemada pierde su vida, conserva la materia y rebrota', async (
   assert.ok(quemada < 0.11 * antes + 1e-9);
   for (let k = 0; k < 60; k++) { m.prepararPaso(); m.pasar({ dt: 10, luz: 1, lluvia: false }); m.plegar(tot); }
   assert.ok(m.vista(i, v).vegetation > quemada, 'rebrota');
+  assert.ok(exacto());
+  await q.cerrar();
+});
+
+test('un cadáver que yace en una tesela vuelve a su suelo: su masa baja, el suelo gana sus átomos y el libro cuadra', async () => {
+  const { q, m, tot, exacto } = levantar();
+  const u = unidadesVacias(), A = m.arena, P = ELEMENTOS.indexOf('P');
+  let i = 0;
+  while (m.unidades(i, u).hoja < 1500) i++;
+  // El cadáver de la prueba es tejido que ya estaba en el mundo (la vegetación de la tesela): nada entra por una fuente.
+  const cadaver = A.nuevo(Rol.Cadaver, m.celda[i]!, 0);
+  A.moverParte(m.vida[i]!, cadaver, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
+  const masa0 = A.vista(cadaver).masa, proteina0 = A.cuantos(cadaver, m.S.proteina), orgP0 = A.cuantos(cadaver, m.S.orgP);
+  const atomosSuelo = (k: number) => { let n = 0; for (const id of [...m.especies(m.suelo[i]!)]) n += A.cuantos(m.suelo[i]!, id) * q.sustancia(id).atomos[k]!; return n; };
+  const p0 = atomosSuelo(P);
+  assert.ok(masa0 > 0 && proteina0 > 1000 && orgP0 > 1000);
+  m.plegar(tot);
+  assert.ok(exacto());
+  // Un día de pasos de 60 ticks: con τ = 10 días se va 1 − e^(−0,1) = 9,5 %.
+  for (let k = 0; k < 40; k++) { m.prepararPaso(); m.pasar({ dt: 60, luz: 0, lluvia: false }); m.plegar(tot); assert.ok(exacto(), `paso ${k}`); }
+  const queda = A.vista(cadaver).masa / masa0, esperado = Math.exp(-1 / m.params.fisica.incorporacionCadaver);
+  assert.ok(Math.abs(queda - esperado) < 0.02, `queda ${queda.toFixed(4)} de la masa (se espera ${esperado.toFixed(4)})`);
+  // El P no es gas ni se lo lleva nadie de noche: el que perdió el cadáver está en el suelo, átomo por átomo.
+  assert.equal(atomosSuelo(P) - p0, orgP0 - A.cuantos(cadaver, m.S.orgP));
+  // Con el tiempo no queda nada y el lote se libera.
+  m.params.fisica.incorporacionCadaver = 0.01;
+  for (let k = 0; k < 40 && A.vivo(cadaver); k++) { m.prepararPaso(); m.pasar({ dt: 60, luz: 0, lluvia: false }); m.plegar(tot); }
+  assert.ok(!A.vivo(cadaver), 'el lote vacío se libera');
   assert.ok(exacto());
   await q.cerrar();
 });

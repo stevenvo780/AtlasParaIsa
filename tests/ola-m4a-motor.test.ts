@@ -2,6 +2,7 @@
 // dueños) y un humo del conductor del tick con un dueño. No mide ni simula: pocos ticks, para ver que el camino corre.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { escalon } from '../src/shared/interruptores.js';
 import { TerrenoPercepcion } from '../src/world/decision/terreno-percepcion.js';
 import { ctxSi } from '../src/world/motor/acceso.js';
 import { cuentaPorDueno, duenoDeVecino, ordenMorton, repartirPorTramos } from '../src/world/motor/bloques.js';
@@ -191,13 +192,28 @@ test('m4a: con v23.materia el dueño arma la arena de lotes y la química, con u
   const d = duenoSi(mundo)!;
   assert.ok(d.materia && d.quimica, 'el contexto lleva materia y química');
   assert.equal(d.materia.vivo(-1), false);
-  // `ArenaLotes.guardar` ya existe (carril ps): la instantánea lleva la arena volcada, con la materia del dueño.
-  const inst = unico.instantanea();
-  assert.ok(inst.materia, 'la instantánea de un mundo con materia lleva la arena volcada');
+  const punto = unico.instantanea().materia;
+  assert.equal(punto?.tick, 2);
+  assert.ok(punto.paginas.length > 0, 'la instantánea conserva las páginas de materia');
   const repartido = createWorld(17, { ...DEFAULT_PARAMS, v23: { ...v23, duenos: true } });
   const motor = crearMotor(repartido, { ...unSoloDueno(17), hilos: 2 });
   try {
     assert.equal(motor.paso([]).tick, 1);
     assert.equal(motor.paso([]).tick, 2);
+  } finally { await motor.cerrar(); }
+});
+
+test('m4a: las leyes completas conservan materia y actualizan la edad en todos los dueños', async () => {
+  const params = { ...DEFAULT_PARAMS, motor: { ...DEFAULT_PARAMS.motor, hilos: 2 }, v23: escalon('duenos') };
+  const mundo = createWorld(7, params);
+  const motor = crearMotor(mundo, { ...unSoloDueno(7), hilos: 2 });
+  try {
+    for (let i = 0; i < 4; i++) motor.paso([]);
+    const { world } = motor.instantanea(), d = duenoSi(mundo)!;
+    for (const p of world.people) assert.equal(p.demography.age, world.tick - p.bornAt);
+    const { esperado, hallado } = d.balanceMateria();
+    assert.deepEqual(hallado, esperado);
+    const { enviados, recibidos, pendientes } = d.balanceIntentos();
+    assert.equal(enviados, recibidos + pendientes);
   } finally { await motor.cerrar(); }
 });

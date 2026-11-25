@@ -17,7 +17,7 @@ import { lotesDeCelda } from '../materia/ley-mundo.js';
 import { desprender, reparto } from '../materia/romper.js';
 import { Rol, type LoteRef, type VistaCuerpo } from '../materia/tipos.js';
 import { GEN, vidaMaxima } from '../decision/fauna.js';
-import { CAMPOS_FAUNA, COLUMNA_FAUNA, FAUNA_ANCHO } from '../soa/fauna.js';
+import { CAMPOS_FAUNA, COLUMNA_FAUNA, FAUNA_ANCHO } from '../soa/fauna-v23.js';
 
 export const HUNT_ORGANIC: ElementVector = { C: 0.48, H: 0.28, Ca: 0.16, S: 0.05, Si: 0.02, Fe: 0.01 };
 

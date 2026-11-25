@@ -27,6 +27,7 @@ const distinto = (a: number, b: number): boolean => a !== b || (a === 0 && 1 / a
  */
 export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   readonly valores: readonly Float64Array[];
+  readonly duenoSiguiente: Int16Array;
   teselas: (Tile | undefined)[] = [];
   soa = new Int32Array(0);
   /** Páginas comparadas con el mundo y cuántas de ellas habían cambiado, desde que se creó. */
@@ -53,6 +54,7 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
 
   constructor(verificar = false, compartido?: TerrenoCompartido) {
     super(verificar, compartido);
+    this.duenoSiguiente = this.paginasMateria.field('duenoSiguiente', Int16Array, 1, -1);
     if (!compartido) for (const campo of CAMPOS_PERCEPCION) this.registrarCampo(campo, 'f64');
     this.valores = CAMPOS_PERCEPCION.map(campo => this.campo(campo) as Float64Array);
   }

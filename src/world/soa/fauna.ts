@@ -1,6 +1,5 @@
 import { ACTIONS, animalBiomass, SPECIES, type Animal } from '../animals.js';
 import { CAMPOS_CUERPO, Clase, CUERPO_ANCHO, GENOMA_ANCHO, REF_NULA, slotDe, type FrenteEscritura, type FrentePublico, type Ref } from '../motor/contratos.js';
-import type { VistaCuerpo } from '../materia/tipos.js';
 import { TablaOrganismosSoA } from './organismos.js';
 
 const ESPECIE = 'especie';
@@ -32,12 +31,28 @@ export class FaunaSoA {
 
   animal(slot: number): Animal | undefined { return this.residentes.get(slot)?.animal; }
 
+  soltar(animal: Animal): Ref {
+    const fila = this.filas.get(animal);
+    if (!fila) return REF_NULA;
+    this.filas.delete(animal);
+    this.residentes.delete(fila.slot);
+    return fila.ref;
+  }
+
+  adoptar(animal: Animal, ref: Ref): void {
+    const uid = animal.uid ??= this.uids();
+    const s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
+    const fila = { slot, ref, uid, animal };
+    this.filas.set(animal, fila);
+    this.residentes.set(slot, fila);
+  }
+
   sincronizar(animales: readonly Animal[]): void {
     if (this.residentes.size === animales.length && animales.every(animal => this.filas.has(animal))) return;
     const vigentes = new Set(animales);
     for (const [slot, fila] of this.residentes) {
       if (vigentes.has(fila.animal)) continue;
-      this.tabla.baja(0, fila.ref);
+      this.tabla.baja(this.tabla.hilo, fila.ref);
       this.filas.delete(fila.animal);
       this.residentes.delete(slot);
     }
@@ -91,45 +106,6 @@ export class FaunaSoA {
   }
 
   private alta(animal: Animal): void {
-    const uid = animal.uid ??= this.uids();
-    // `slotDe` divide un double: `| 0` deja la misma ranura como entero pequeño, y así las claves del mapa y los
-    // índices de las columnas no hacen que V8 desoptimice cada escritura del frente.
-    const ref = this.tabla.alta(0, Clase.Animal), s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
-    const fila = { slot, ref, uid, animal };
-    this.filas.set(animal, fila);
-    this.residentes.set(slot, fila);
+    this.adoptar(animal, this.tabla.alta(this.tabla.hilo, Clase.Animal));
   }
-}
-
-// ── V23 (`v23.fauna`): filas de la fauna con cuerpo en el frente del motor ────────────────────────────────────
-
-export { COLUMNA_FAUNA, CAMPOS_FAUNA, FAUNA_ANCHO } from './fauna-columnas.js';
-import { COLUMNA_FAUNA, CAMPOS_FAUNA, FAUNA_ANCHO } from './fauna-columnas.js';
-
-export interface FilaFaunaV23 {
-  slot: number; uid: number; x: number; y: number; chunk: number; objetivo: number; accion: number; tick: number;
-  fertil: boolean; vista: VistaCuerpo; genoma: readonly number[];
-  miedo: number; habituacion: number; huella: number; velocidad: number;
-}
-
-/** Escribe en F6 la fila de un animal propio en el frente t+1. Todos deciden en cada tick: `decideEn` = tick + 1.
- * `pareja` = 0 si es fértil (consiente con cualquiera compatible), −1 si no. */
-export function escribirFilaFaunaV23(w: FrenteEscritura, f: FilaFaunaV23): void {
-  const s = f.slot;
-  w.fila(s);
-  w.f64('uid')[s] = f.uid;
-  w.f32('x')[s] = f.x; w.f32('y')[s] = f.y;
-  w.i32('chunk')[s] = f.chunk; w.i32('objetivo')[s] = f.objetivo;
-  w.u8('accion')[s] = f.accion < 0 ? 0 : f.accion;
-  w.f64('decideEn')[s] = f.tick + 1;
-  w.f64('pareja')[s] = f.fertil ? 0 : -1;
-  const cuerpo = w.f32('cuerpo'), b = s * CUERPO_ANCHO, v = f.vista;
-  cuerpo[b + CAMPOS_CUERPO.hambre] = v.hambre; cuerpo[b + CAMPOS_CUERPO.sed] = v.sed;
-  cuerpo[b + CAMPOS_CUERPO.energia] = v.energia; cuerpo[b + CAMPOS_CUERPO.salud] = v.salud;
-  cuerpo[b + CAMPOS_CUERPO.masa] = v.masa; cuerpo[b + CAMPOS_CUERPO.carga] = v.carga; cuerpo[b + CAMPOS_CUERPO.T] = v.T;
-  const genoma = w.f32('genoma'), g = s * GENOMA_ANCHO;
-  for (let k = 0; k < GENOMA_ANCHO; k++) genoma[g + k] = f.genoma[k] ?? 0;
-  const fauna = w.f32(COLUMNA_FAUNA), q = s * FAUNA_ANCHO;
-  fauna[q + CAMPOS_FAUNA.miedo] = f.miedo; fauna[q + CAMPOS_FAUNA.habituacion] = f.habituacion;
-  fauna[q + CAMPOS_FAUNA.huella] = f.huella; fauna[q + CAMPOS_FAUNA.velocidad] = f.velocidad;
 }

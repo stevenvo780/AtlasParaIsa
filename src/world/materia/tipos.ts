@@ -260,6 +260,11 @@ export interface ArenaMateria {
   /** Salida declarada (radiación, el sumidero de comer de la ola 2), recortada a existencias: `libro.sumideros`.
    * Devuelve lo que salió. */
   sumidero(l: LoteRef, pares: Float64Array, libro: Libro): Float64Array;
+  /** Σ de los lotes vivos de este hilo dueño (`propio`) por posición del libro (NE elementos y energía: química más calor),
+   * en bigint. Cuenta todos los suyos, estén donde estén: teselas, aire, mar y cielo, objetos y piezas de cualquier celda,
+   * y los ligados a un organismo (`celda === −1`) aunque el organismo duerma archivado con su chunk. Es el «hallado» de la
+   * conservación por dueño (w). */
+  saldoPropio(): bigint[];
 }
 
 // ── Plantillas y cuerpos ─────────────────────────────────────────────────────────────────────────────────

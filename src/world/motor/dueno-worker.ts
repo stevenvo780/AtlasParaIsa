@@ -7,14 +7,18 @@
  *   percibir = F1 (adoptar, cola B, Ley.F1) · eco · F2      ── B2
  *   actuar   = F3 · F4                                       ── B3
  *   aplicar  = F5 (cola A, Ley.F5) · F6 (filas, Ley.F6, páginas, fotograma, emigrar, parte del tick)   ── B4
- * Con dueños no hay pasos heredados: `REQUIERE` garantiza que todas las leyes están encendidas.
+ * Con dueños están encendidas todas las leyes. La demografía base sigue evaluando edad, daño y muerte en cada heap.
  */
 import { deserialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { cargarSustancias } from '../materia/servicio.js';
+import { transferEstate } from '../demografia/morir.js';
+import { advancePopulation } from '../lineage.js';
+import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
+import { crearServicioQuimico } from '../materia/servicio.js';
 import type { Libro } from '../materia/tipos.js';
+import { deathContext } from '../mundo/crear.js';
 import type { World } from '../mundo/tipos.js';
 import { setParams, type WorldParams } from '../params.js';
 import { conRejilla } from '../rejilla.js';
@@ -29,7 +33,7 @@ import type { Hilo } from './contratos.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
-export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5 } as const;
+export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6 } as const;
 
 /** Lo que cada worker recibe al nacer (por `workerData`: los SAB se comparten, lo demás se copia). */
 export interface DatosDueno {
@@ -42,8 +46,8 @@ export interface DatosDueno {
   libros: Libro[];
   lotes: ArenaCompartida | null;
   desborde: ArenaCompartida | null;
-  /** Registro químico al abrir la época (null sin `v23.materia`). */
-  sustancias: Uint8Array | null;
+  /** Identidad de sustancias compartida durante la época (null sin `v23.materia`). */
+  sustancias: MemoriaRegistro | null;
   control: SharedArrayBuffer;
   enlace: DescriptorEnlace | null;
   /** null: entropía real. Con semilla, cada dueño siembra la suya de (semilla, hilo). */
@@ -88,7 +92,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
     registro: new RegistroContenido(datos.registro), azar, control: new Float64Array(datos.control), enlace: datos.enlace,
     materia: datos.sustancias && datos.lotes && datos.desborde ? {
       lotes: PageArena.conectar(datos.lotes), desborde: PageArena.conectar(datos.desborde),
-      quimica: cargarSustancias(datos.sustancias, { modo: 'inmediato' }),
+      quimica: crearServicioQuimico({ modo: 'inmediato', registroSustancias: new RegistroContenido(datos.sustancias) }),
     } : null,
   };
   const dueno = new Dueno(mundo, piezas);
@@ -120,6 +124,7 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     case TRAMO.percibir: {
       if (d.hilo !== 0) {
         m.tick = control[CTL.tick]!;
+        m.weather = control[CTL.lluvia] === 1 ? 'rain' : 'clear';
         m.invitations = m.invitations.filter(invitacion => invitacion.until > m.tick);
         m.reminders = m.reminders.filter(aviso => aviso.until > m.tick);
         d.abrirTick();
@@ -148,6 +153,11 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     }
     case TRAMO.aplicar: {
       d.aplicar('A');
+      if (d.params.v23.intentos) advancePopulation(m, {
+        emit: evento => { d.suceso(deathContext(m, evento)); },
+        beforeDeath: (mundo, persona) => transferEstate(mundo, persona, evento => { d.suceso(evento); }),
+        comunidadesGlobales: true,
+      });
       d.gancho('F5');
       d.publicarFilas();
       d.gancho('F6');
@@ -163,6 +173,9 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     case TRAMO.reunir:
       // Instantánea: cada dueño manda su parte del mundo; el coordinador la arma tras la barrera.
       if (d.hilo !== 0) d.avisarCoordinador([AVISO.parte, d.hilo], m);
+      break;
+    case TRAMO.cerrar:
+      cerrarMateriaGpu(m);
       break;
     default: throw new Error(`Tramo de dueño desconocido: ${tramo}.`);
   }

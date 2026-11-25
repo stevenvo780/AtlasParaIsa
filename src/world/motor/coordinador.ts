@@ -14,9 +14,11 @@ import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
 import { applyGesture } from '../actuar/gestos.js';
+import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { cargarSustancias, crearServicioQuimico, serializarSustancias } from '../materia/servicio.js';
+import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
+import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
 import { addEvent } from '../mundo/crear.js';
 import { stepWorld, type FaseMedicion } from '../mundo/paso.js';
@@ -37,9 +39,9 @@ import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
   AVISO, CTL, CTL_DUENO, Dueno, ORDEN, RESERVA_DESBORDE, RESERVA_LOTES, celdaDueno, duenoDe, duenoSi,
-  type MigranteChunk, type ParteTick,
+  type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
-import { Clase, slotDe, type ChunkId, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type TelemetriaMotor } from './contratos.js';
+import { Clase, TipoIntento, slotDe, type ChunkId, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import { leyesActivas } from './leyes.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
@@ -112,6 +114,7 @@ class MotorUnico implements Motor {
   }
 
   cargar(i: Instantanea, epoca: number): void {
+    cerrarMateriaGpu(this.#mundo);
     this.#mundo = i.world;
     this.#epoca = epoca;
     const activo = leyesActivas(paramsOf(i.world).v23).length > 0 || this.#enlace !== null;
@@ -136,7 +139,10 @@ class MotorUnico implements Motor {
 
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
 
-  cerrar(): Promise<void> { return Promise.resolve(); }
+  cerrar(): Promise<void> {
+    cerrarMateriaGpu(this.#mundo);
+    return Promise.resolve();
+  }
 }
 
 // ── Varios dueños ────────────────────────────────────────────────────────────────────────────────────────
@@ -167,7 +173,7 @@ class MotorDuenos implements Motor {
   // Lo que llega por la cola F0 del coordinador.
   #resultados: GestureResult[] = [];
   #partesTick: ParteTick[] = [];
-  #partesMundo: World[] = [];
+  readonly #partesMundo = new Map<Hilo, World>();
   #altas: [number, string][] = [];
   readonly #detalles = new Map<number, ((p: Person | null) => void)[]>();
   readonly #t: TelemetriaMotor;
@@ -181,12 +187,11 @@ class MotorDuenos implements Motor {
 
   #arrancar(materia: MateriaCheckpoint | null): void {
     const m = this.#mundo, hilos = this.#hilos, params = paramsOf(m), verificar = this.#config.verificar || params.motor.depuracion;
-    void this.#piscina?.cerrar().catch(() => {});
-    this.#piscina = null;
+    void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
-    this.#resultados = []; this.#partesTick = []; this.#partesMundo = []; this.#altas = [];
+    this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#altas = [];
 
     // Memoria compartida de la época. La reserva de filas crece con el mundo que se carga: agotarla es fatal y la
     // recarga siguiente la abre mayor.
@@ -207,7 +212,9 @@ class MotorDuenos implements Motor {
     control[CTL.tick] = m.tick; control[CTL.epoca] = this.#epoca; control[CTL.fotoRanura] = -1;
     const azar = azarDeHilo(this.#config.semilla, 0);
     const conMateria = params.v23.materia;
-    const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, { modo: 'inmediato' }) : crearServicioQuimico({ modo: 'inmediato' });
+    const registroSustancias = conMateria ? new RegistroContenido(hilos) : null;
+    const opcionesQuimica = { modo: 'inmediato', registroSustancias: registroSustancias ?? undefined } as const;
+    const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, opcionesQuimica) : crearServicioQuimico(opcionesQuimica);
     const lotes = conMateria ? new PageArena(RESERVA_LOTES) : null, desborde = conMateria ? new PageArena(RESERVA_DESBORDE) : null;
     const d = this.#d = new Dueno(m, {
       hilo: 0, hilos, buzones, buzon: buzones.dueno(0, azar), libros, contadores, registro, azar, control, enlace: this.#enlace,
@@ -241,7 +248,7 @@ class MotorDuenos implements Motor {
     const datos: DatosDueno = {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: lotes?.compartir() ?? null, desborde: desborde?.compartir() ?? null,
-      sustancias: quimica && serializarSustancias(quimica), control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
+      sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, conMateriaCargada: materia !== null,
     };
     try {
@@ -273,7 +280,10 @@ class MotorDuenos implements Motor {
       control[CTL.tick] = m.tick;
       // F0: serie y corto. Todos los dueños están detenidos en la barrera.
       buzones.fijarFase(0);
-      for (const [chunk, destino] of this.#cesiones.splice(0)) if (destino >= 0) this.#terreno.asignar(chunk, destino);
+      for (const [chunk, destino] of this.#cesiones.splice(0)) {
+        this.#terreno.asignar(chunk, destino);
+        this.#terreno.duenoSiguiente[chunk] = -1;
+      }
       this.#regiones();
       this.#rebalancear();
       const resultados = this.#gestos(gestos);
@@ -288,6 +298,7 @@ class MotorDuenos implements Motor {
       }
       this.#pedirDetalles();
       d.F0();
+      control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
       // B1 · percibir · B2 · actuar · B3 · aplicar · B4
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
@@ -317,7 +328,7 @@ class MotorDuenos implements Motor {
     switch (clase) {
       case AVISO.resultado: this.#resultados.push(deserialize(i.bytes!) as GestureResult); break;
       case AVISO.tick: this.#partesTick.push(deserialize(i.bytes!) as ParteTick); break;
-      case AVISO.parte: this.#partesMundo.push(deserialize(i.bytes!) as World); break;
+      case AVISO.parte: this.#partesMundo.set(i.dato![1]!, deserialize(i.bytes!) as World); break;
       case AVISO.detalle: {
         const persona = i.bytes ? deserialize(i.bytes) as Person : null;
         for (const resolver of this.#detalles.get(i.dato![1]!) ?? []) resolver(persona);
@@ -448,6 +459,7 @@ class MotorDuenos implements Motor {
       const chunk = medida.chunks[i]!, de = medida.dueno[i]!, a = nuevo[i]!;
       if (a === de || a < 0 || a >= hilos) continue;
       this.#d.ordenar(de, [ORDEN.ceder, chunk, a]);
+      terreno.duenoSiguiente[chunk] = a;
       this.#cesiones.push([chunk, a]);
     }
     this.#historial.length = 0;
@@ -462,11 +474,31 @@ class MotorDuenos implements Motor {
       this.#buzones.fijarFase(0);
       this.#piscina.ejecutar(TRAMO.reunir);
       this.#recoger();
-      const partes = this.#partesMundo.splice(0);
-      if (partes.length !== this.#hilos - 1) throw new Error(`Instantánea incompleta: ${partes.length} de ${this.#hilos - 1} dueños.`);
+      const partes = Array.from({ length: this.#hilos - 1 }, (_, i) => {
+        const parte = this.#partesMundo.get(i + 1);
+        if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
+        return parte;
+      });
+      this.#partesMundo.clear();
       const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
+      const pendientes = this.#d.pendientes();
+      for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
+        // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
+        const mig = deserialize(i.bytes!) as Migrante;
+        if (mig.tipo === 'chunk') {
+          world.chunks[mig.key] = mig.meta;
+          world.tiles.push(...mig.tiles);
+          world.structures.push(...mig.structures);
+          world.animals.push(...mig.animals);
+          for (const p of mig.personas) world.people.push(p.persona);
+        } else {
+          if (mig.persona) world.people.push(mig.persona.persona);
+          if (mig.animal) world.animals.push(mig.animal.animal);
+        }
+      }
+      if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
       recordSample(world);
-      return { world, materia: this.#d.instantaneaMateria(this.#d.pendientes()) };
+      return { world, materia: this.#d.instantaneaMateria(pendientes) };
     } catch (error) { throw this.#fallo(error); }
   }
 
@@ -534,10 +566,18 @@ class MotorDuenos implements Motor {
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
 
   async cerrar(): Promise<void> {
-    const piscina = this.#piscina;
-    this.#piscina = null;
     for (const resolvedores of this.#detalles.values()) for (const resolver of resolvedores) resolver(null);
     this.#detalles.clear();
-    await piscina?.cerrar();
+    await this.#cerrarPiscina();
+  }
+
+  async #cerrarPiscina(): Promise<void> {
+    const piscina = this.#piscina;
+    if (!piscina) return;
+    this.#piscina = null;
+    try {
+      if (this.#fatal || !paramsOf(this.#d.mundo).v23.materiaGpu) cerrarMateriaGpu(this.#d.mundo);
+      else piscina.ejecutar(TRAMO.cerrar);
+    } finally { await piscina.cerrar(); }
   }
 }

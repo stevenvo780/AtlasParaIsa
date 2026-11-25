@@ -15,7 +15,7 @@ import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.j
 import { decidirFauna, habitableParaPlan, planFauna, presaDe, type PercepcionFauna, type PlanFauna, type VisibleTile } from './decision/fauna.js';
 import { primero } from './orden.js';
 import { faunaDe, faunaRegistrada, organismosDe } from './soa/organismos-mundo.js';
-import { registrar } from './invariantes.js';
+import { registrar } from './registro-invariantes.js';
 import { assertAnimalTraits } from './validation.js';
 
 // Los importadores del perfil de hardware y del soak aún usan las cifras históricas.

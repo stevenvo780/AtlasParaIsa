@@ -1183,8 +1183,9 @@ export function mantenerTecnica(c: CtxLeyMateria): void {
   }
 }
 
-/** F4: los pasos que solo esperan al mundo (calentar junto a un fuego, mojar) siguen aunque nadie trabaje en ellos;
- * quien está investigando o fabricando ya avanzó el suyo por `researchTechnology`/`craftTechnology`. */
+/** F5: los pasos que solo esperan al mundo (calentar junto a un fuego, mojar) siguen aunque nadie trabaje en ellos;
+ * quien está investigando o fabricando ya avanzó el suyo este tick por `researchTechnology`/`craftTechnology`, que
+ * corren antes (en F3–F4). */
 export function avanzarTecnicaDelMundo(c: CtxLeyMateria): void {
   for (const p of c.mundo.people) {
     const t = p.technology.tecnica, pe = t?.proceso;
@@ -1345,7 +1346,12 @@ function trabajarTecnica(c: CtxLeyMateria, p: PersonaTecnica, tipo: 'research' |
   if (!t.proceso && !empezarProceso(c, p, t, tipo, recetaId)) { interrumpir(p, t, c.tick, c); return false; }
   t.avanzadoEn = c.tick;
   const pr = t.proceso!.proceso as ProcesoMaterial;
-  return avanzarProcesoCon(c, pr, p.cuerpo, mejorUtil(c, p), p.carga ?? []) === 'hecho' && terminarTecnica(c, p, t);
+  const avance = avanzarProcesoCon(c, pr, p.cuerpo, mejorUtil(c, p), p.carga ?? []);
+  // Espera aun con quien trabaja delante: aquí no hay lo que el paso pide (insumo, fuego que prender, agua) o no le
+  // quedan fuerzas. Lo deja (el lote se queda donde está); si no, seguir ese proceso volvía a ser su oportunidad
+  // técnica cada tick y se quedaba esperando sin fin.
+  if (avance === 'espera') { interrumpir(p, t, c.tick, c); return false; }
+  return avance === 'hecho' && terminarTecnica(c, p, t);
 }
 
 /** Si quien lo hizo está en la celda y cabe en su carga (masa y volumen), el lote pasa a ir a cuestas; si no, se queda
@@ -1467,6 +1473,16 @@ export function recetaParaEnsenar(c: CtxLeyMateria, maestro: Person, aprendiz: P
     .sort((a, b) => b.usada - a.usada || a.id - b.id)[0];
 }
 
+/** Con `v23.tecnica` y contexto de motor, la receta de lotes que `maestro` enseñaría a `aprendiz` (su id del registro
+ * en texto, o undefined si no hay); null si la técnica de lotes no rige y manda el catálogo viejo. */
+export function recetaTecnicaParaEnsenar(host: object, maestro: Person, aprendiz: Person): string | undefined | null {
+  const c = ctxTecnica(host);
+  if (!c) return null;
+  if (!esPersonaV23(maestro)) return undefined;
+  const r = recetaParaEnsenar(c, maestro, aprendiz);
+  return r ? String(r.id) : undefined;
+}
+
 /** Enseñar = intento Ensenar al dueño del aprendiz; quien enseña paga un tick de trabajo y la receta vuelve a 1. */
 export function ensenarTecnica(c: CtxLeyMateria, maestro: Person, aprendizUid: number, recetaId?: number, aprendiz: Person | null = null): boolean {
   if (!maestro.cuerpo) return false;
@@ -1474,6 +1490,12 @@ export function ensenarTecnica(c: CtxLeyMateria, maestro: Person, aprendizUid: n
   if (!r || ref === REF_NULA) return false;
   if (!(pagar(c, maestro.cuerpo, POTENCIA_TRABAJO * SEGUNDOS_TICK) > 0)) return false;
   usarReceta(tecnicaDe(maestro), r.id, c.tick);
+  // Sin v23.intentos nadie vacía la cola A (la enseñanza se perdía y la cola crecía): el mundo es un solo heap y se
+  // aprende directo, como hace natalidad con el vínculo.
+  if (!ley(c.mundo, 'intentos')) {
+    const quien = aprendiz ?? c.mundo.people.find(o => o.uid === aprendizUid);
+    return !!quien && aprenderReceta(c, quien, r, maestro.uid === undefined ? REF_NULA : c.ref(maestro.uid));
+  }
   c.buzon.enviar(c.frente.dueno[slotDe(ref)]!, { tipo: TipoIntento.Ensenar, de: maestro.uid === undefined ? REF_NULA : c.ref(maestro.uid), a: ref,
     celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: null, bytes: codificarEnsenanza(r) });
   return true;

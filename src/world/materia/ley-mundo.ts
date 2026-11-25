@@ -24,10 +24,10 @@ import { asentarHuella, enlazarMateria, rasgoPorMadera, rasgoPorPiedra, type Pue
 import { marcarTesela } from '../soa/barrera-percepcion.js';
 import { tileLookup } from '../tile-index.js';
 import { CanalCompartido } from '../gpu/canal.js';
-import { crearPasoMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
+import { aplicarVecesGpu, crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
 import type { TotalesMateria } from './libro.js';
 import { CUENTA, MundoMaterial, NOMBRE_CUENTA, N_CUENTAS, luzDe, luzMedia, type BaseMundo, type Forzamiento } from './mundo.js';
-import { Rol, nivelDeLote, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
+import { Rol, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
 import { vistaAireVacia, vistaVacia, type VistaAire, type VistaTesela } from './vistas.js';
 
 export const leyMundo: Ley = {
@@ -45,6 +45,7 @@ export const leyMundo: Ley = {
 const AMPLITUD_TERMICA_K = 10;
 /** Plazo de la tarjeta para devolver la química de los suelos de un tick (ms); vencido, ese paso se da en CPU. */
 const PLAZO_GPU_MS = 50;
+const ARRANQUE_GPU_MS = 30_000;
 /** Ticks que w espera antes de volver a abrir la tarjeta tras un fallo. */
 const REINTENTO_GPU_TICKS = 600;
 /** Ticks entre dos inventarios para el panel «Materia» (recorre todos los lotes del dueño). */
@@ -86,7 +87,7 @@ interface Estado {
   fuegos: Map<number, LoteRef[]>;
   cuentas: bigint[];
   libro: { ancla: bigint[] | null; neto: bigint[]; vistoF: Float64Array; vistoS: Float64Array };
-  gpu: { paso: PasoMateriaGpu | null; canal: CanalCompartido | null; reintento: number; fallo: string };
+  gpu: { paso: PasoMateriaGpu | null; canal: CanalCompartido | null; reintento: number; fallo: string; tandas: number; tripletas: number };
   panel: MateriaMundoVisible | null;
   panelTick: number;
   desde: Map<SustanciaId, number>;
@@ -142,7 +143,7 @@ function crear(c0: CtxLeyMateria): Estado {
     caja, m, teselas: [], ultimo: new Int32Array(0), sal: new Uint32Array(0), pendientes: new Set(), asientoPagina: 0,
     fuegos: new Map(), cuentas: Array<bigint>(N_CUENTAS).fill(0n),
     libro: { ancla: null, neto: Array<bigint>(NE + 1).fill(0n), vistoF: new Float64Array(NE + 1), vistoS: new Float64Array(NE + 1) },
-    gpu: { paso: null, canal: null, reintento: 0, fallo: '' },
+    gpu: { paso: null, canal: null, reintento: 0, fallo: '', tandas: 0, tripletas: 0 },
     panel: null, panelTick: 0, desde: new Map(), aire: new Map(), aireVista: null, mat: [], matTick: [],
     tocan: [], forzamientos: [], luces: new Map(), lucesTick: -1,
     puente: undefined as never, v: vistaVacia(), va: vistaAireVacia(),
@@ -335,7 +336,21 @@ function eco(c: CtxLey): void {
  * nadie lo pone y `motor.gpu` nombra una tarjeta, w abre el suyo sobre la primera. */
 export function enlazarPasoGpu(c: CtxLeyMateria, paso: PasoMateriaGpu | null): void {
   const g = estado(c).gpu;
+  if (g.paso === paso) return;
+  cerrarMateriaGpu(c.mundo);
   g.paso = paso; g.canal = null; g.fallo = '';
+}
+
+export function diagnosticoMateriaGpu(mundo: CtxLey['mundo']): { tandas: number; tripletas: number; fallo: string } | null {
+  const g = estados.get(mundo)?.gpu;
+  return g ? { tandas: g.tandas, tripletas: g.tripletas, fallo: g.fallo } : null;
+}
+
+export function cerrarMateriaGpu(mundo: CtxLey['mundo']): void {
+  const g = estados.get(mundo)?.gpu;
+  if (!g) return;
+  try { g.paso?.cerrar(); }
+  finally { g.canal?.cerrar(); g.paso = null; g.canal = null; }
 }
 
 function pasoGpu(e: Estado): PasoMateriaGpu | null {
@@ -344,6 +359,7 @@ function pasoGpu(e: Estado): PasoMateriaGpu | null {
   if (c.tick < g.reintento || c.params.motor.gpu.length === 0) return null;
   try {
     g.canal = new CanalCompartido(c.params.motor.gpu[0]!);
+    prepararMateriaGpu(g.canal, ARRANQUE_GPU_MS);
     g.paso = crearPasoMateriaGpu(g.canal);
   } catch (error) { soltarGpu(e, error); }
   return g.paso;
@@ -351,9 +367,8 @@ function pasoGpu(e: Estado): PasoMateriaGpu | null {
 
 function soltarGpu(e: Estado, error: unknown): void {
   const g = e.gpu;
-  try { g.paso?.cerrar(); } catch { /* la tarjeta ya no responde */ }
-  try { g.canal?.cerrar(); } catch { /* ídem */ }
-  g.paso = null; g.canal = null; g.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error);
+  try { cerrarMateriaGpu(e.caja.c.mundo); } catch { /* la tarjeta ya no responde */ }
+  g.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error);
 }
 
 /**
@@ -374,7 +389,8 @@ function quimicaSuelos(e: Estado, tocan: readonly number[]): void {
         grupo.push(p);
       }
       for (const [dt, grupo] of porDt) {
-        suelosEnTarjeta(e, paso, grupo, dt);
+        e.gpu.tripletas += quimicaSuelosEnTarjeta(m, paso, grupo, dt, c.tick);
+        e.gpu.tandas++;
         for (const p of grupo) hechas.add(p);
       }
     } catch (error) {
@@ -385,28 +401,19 @@ function quimicaSuelos(e: Estado, tocan: readonly number[]): void {
   for (const p of tocan) if (!hechas.has(p)) m.quimicaSuelos(p, e.forzamientos[p]!.dt);
 }
 
-function suelosEnTarjeta(e: Estado, paso: PasoMateriaGpu, paginas: readonly number[], dt: number): void {
-  const c = e.caja.c, m = e.m;
+export function quimicaSuelosEnTarjeta(m: MundoMaterial, paso: PasoMateriaGpu, paginas: readonly number[], dt: number, tick: number): number {
   let n = 0;
   for (const p of paginas) n += m.fin[p]! - m.inicio[p]!;
-  const lotes = new Float64Array(n), kappas = new Float64Array(4 * n), T = new Float64Array(n);
+  const lotes = new Float64Array(n), kappas = new Float64Array(4 * n);
   let k = 0;
   for (const p of paginas) for (let i = m.inicio[p]!; i < m.fin[p]!; i++, k++) {
-    lotes[k] = m.suelo[i]!; T[k] = m.temperaturaLote(m.suelo[i]!);
+    lotes[k] = m.suelo[i]!;
     kappas.set(CATALISIS_SUELO, 4 * k);
   }
-  paso.lanzar(m.ctx, lotes, kappas, dt, c.tick);
-  const r = paso.esperar(PLAZO_GPU_MS), total = r.tripletas.length / 3;
-  // `desde[i]` es la primera tripleta (a, b, veces) del lote i; las suyas acaban donde empiezan las del siguiente.
-  for (let i = 0; i < n; i++) {
-    const fin = i + 1 < r.desde.length ? r.desde[i + 1]! : total;
-    for (let t = r.desde[i]!; t < fin; t++) {
-      const veces = r.tripletas[3 * t + 2]!;
-      if (!(veces > 0)) continue;
-      const reaccion = c.quimica.reaccion(r.tripletas[3 * t]!, r.tripletas[3 * t + 1]!, nivelDeLote(T[i]!, CATALISIS_SUELO));
-      if (reaccion) c.materia.aplicar(lotes[i]!, reaccion, veces);
-    }
-  }
+  paso.lanzar(m.ctx, lotes, kappas, dt, tick);
+  const propuesta = paso.esperar(PLAZO_GPU_MS);
+  aplicarVecesGpu(m.ctx, lotes, kappas, propuesta);
+  return propuesta.tripletas.length / 3;
 }
 
 // ── Vistas ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -715,8 +722,10 @@ function asentar(e: Estado): void {
 
 interface Inventario { atomos: bigint[][]; energia: bigint[]; masa: Map<SustanciaId, number> }
 
-/** Recorre los lotes que este dueño tiene: los del mundo material por sus tablas, los de los cuerpos por sus organismos
- * y los que yacen en sus celdas (objetos, cadáveres y piezas) por la arena. Suma en dobles por tramos cortos (una página,
+/** Reparto por compartimento para el panel «Materia» (no es la conservación: esa usa `saldoPropio`). Recorre los lotes
+ * que este dueño tiene: los del mundo material por sus tablas, los de los cuerpos y la carga por los organismos que hay
+ * en el mundo y los que yacen en sus celdas (objetos, cadáveres y piezas) por la arena. No ve los cuerpos de los
+ * organismos archivados con su chunk ni los lotes sueltos sin celda (fuego en curso, carne en reparto). Suma en dobles por tramos cortos (una página,
  * cien cuerpos) y pliega cada tramo en bigint: el total del mundo puede pasar de 2⁵³. */
 function inventariar(e: Estado): Inventario {
   const c = e.caja.c, m = e.m, A = c.materia, q = c.quimica, nC = COMPARTIMENTOS.length;
@@ -737,14 +746,16 @@ function inventariar(e: Estado): Inventario {
       if (en[comp] !== 0) { energia[comp]! += BigInt(en[comp]!); en[comp] = 0; }
     }
   };
-  const buf = new Float64Array(32);
+  let buf = new Float64Array(32);
   for (let p = 0; p < m.np; p++) {
     if (!m.tiene(p) || !A.propio(m.aire[p]!)) continue;
     for (let i = m.inicio[p]!; i < m.fin[p]!; i++) {
       sumar(m.suelo[i]!, Rol.Suelo); sumar(m.vida[i]!, Rol.Vida);
       if (m.agua[i]! >= 0) sumar(m.agua[i]!, Rol.Agua);
       for (const rol of ROLES_EN_CELDA) {
-        const n = Math.min(buf.length, A.lotes(m.celda[i]!, rol, buf));
+        // Una celda puede tener más objetos que el búfer (lascas, montones): se agranda y se vuelve a pedir.
+        let n = A.lotes(m.celda[i]!, rol, buf);
+        if (n > buf.length) n = A.lotes(m.celda[i]!, rol, buf = new Float64Array(2 * n));
         for (let k = 0; k < n; k++) sumar(buf[k]!, rol);
       }
     }
@@ -752,7 +763,9 @@ function inventariar(e: Estado): Inventario {
     plegar();
   }
   let cuerpos = 0;
-  const cuerpo = (o: { cuerpo?: import('./tipos.js').Cuerpo }): void => {
+  const cuerpo = (o: { cuerpo?: import('./tipos.js').Cuerpo; carga?: number[] }): void => {
+    // Lo que lleva a cuestas (objetos de t1, agua acarreada) cuenta como objeto, con o sin cuerpo.
+    if (o.carga) for (const l of o.carga) if (A.propio(l)) sumar(l, Rol.Objeto);
     const k = o.cuerpo;
     if (!k || !A.propio(k.tejido)) return;
     sumar(k.tejido, Rol.Tejido);
@@ -767,27 +780,22 @@ function inventariar(e: Estado): Inventario {
   return { atomos, energia, masa };
 }
 
-/** Σ de los lotes de este dueño por posición del libro. Con un solo dueño, si la arena lo sabe dar entero (`saldo`, pedido
- * al contrato; el de `ArenaLotes` suma los lotes de todos los hilos), es el suyo; si no, el del inventario, que no ve los
- * lotes que un organismo lleva a cuestas. */
-function saldoDe(e: Estado, inventario?: Inventario): bigint[] {
-  const c = e.caja.c, arena = c.materia as Partial<{ saldo(): bigint[] }>;
-  // `v23.duenos` con un solo hilo sigue siendo un dueño: su arena es entera suya.
-  const unDueno = !c.params.v23.duenos || (c as Partial<{ hilos: number }>).hilos === 1;
-  if (typeof arena.saldo === 'function' && unDueno) return arena.saldo();
-  const inv = inventario ?? inventariar(e), out = Array<bigint>(NE + 1).fill(0n);
-  for (let comp = 0; comp < EN_VUELO; comp++) {
-    for (let k = 0; k < NE; k++) out[k]! += inv.atomos[comp]![k]!;
-    out[NE]! += inv.energia[comp]!;
-  }
-  return out;
-}
+/** Σ de los lotes de este dueño por posición del libro: la arena recorre todos los suyos (`saldoPropio`), con uno o con
+ * varios dueños. No sale del inventario del panel, que recorre teselas y organismos vivos en el mundo y no ve los cuerpos
+ * de los animales que duermen archivados con su chunk (sus lotes siguen en la arena): eran los ≈ 5,6·10⁸ mmol de H que
+ * faltaban en el tick 97 de la semilla 7. */
+function saldoDe(e: Estado): bigint[] { return e.caja.c.materia.saldoPropio(); }
 
-function balance(e: Estado, inventario?: Inventario): BalanceMateria {
+function balance(e: Estado): BalanceMateria {
   const c = e.caja.c, L = e.libro;
   e.m.volcarCuentas(e.cuentas);
   asentar(e);
-  const hallado = saldoDe(e, inventario);
+  const cuentas: Record<string, bigint> = {};
+  NOMBRE_CUENTA.forEach((nombre, k) => { cuentas[nombre] = e.cuentas[k]!; });
+  for (let k = 0; k < NE; k++) cuentas[`neto con el exterior (mmol de ${ELEMENTOS[k]})`] = e.cuentas[CUENTA.EXTERIOR_AT + k]!;
+  const motor = c as Partial<{ hilos: number; balanceMateria(): Omit<BalanceMateria, 'cuentas'> }>;
+  if (c.hilo === 0 && (motor.hilos ?? 1) > 1 && motor.balanceMateria) return { ...motor.balanceMateria(), cuentas };
+  const hallado = saldoDe(e);
   for (let k = 0; k <= NE; k++) hallado[k]! += BigInt(c.libro.enVuelo[k]!);
   // Lo plegado por el coordinador, si el contexto lo ofrece (pedido al contrato); si no, el tramo que w ha visto pasar
   // por el libro del hilo desde que ancló la cuenta.
@@ -800,9 +808,6 @@ function balance(e: Estado, inventario?: Inventario): BalanceMateria {
     L.ancla ??= hallado.map((h, k) => h - L.neto[k]!);
     esperado = L.ancla.map((a, k) => a + L.neto[k]!);
   }
-  const cuentas: Record<string, bigint> = {};
-  NOMBRE_CUENTA.forEach((nombre, k) => { cuentas[nombre] = e.cuentas[k]!; });
-  for (let k = 0; k < NE; k++) cuentas[`neto con el exterior (mmol de ${ELEMENTOS[k]})`] = e.cuentas[CUENTA.EXTERIOR_AT + k]!;
   return { esperado, hallado, cuentas };
 }
 
@@ -826,7 +831,7 @@ function comprobar(c: CtxLey): Violacion[] {
 function panel(e: Estado): MateriaMundoVisible {
   const c = e.caja.c;
   if (e.panel && c.tick - e.panelTick < PANEL_TICKS) return e.panel;
-  const inv = inventariar(e), b = balance(e, inv);
+  const inv = inventariar(e), b = balance(e);
   for (let k = 0; k < NE; k++) {
     inv.atomos[EN_VUELO]![k] = BigInt(c.libro.enVuelo[k]!);
     inv.atomos[EXTERIOR]![k] = -e.cuentas[CUENTA.EXTERIOR_AT + k]!;

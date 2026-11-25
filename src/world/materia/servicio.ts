@@ -13,7 +13,8 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import { EPSILON_G, NE, S_GAS, TABLA } from '../../shared/naturaleza.js';
 import { ATOMOS_POR_REACCION, ClaseSustancia, TIPOS, type SustanciaId } from '../../shared/materia.js';
 import type { World } from '../index.js';
-import { registrar, type Violacion } from '../invariantes.js';
+import { registrar, type Violacion } from '../registro-invariantes.js';
+import type { RegistroContenido } from '../motor/registro.js';
 import {
   FAMILIAS_CATALITICAS, NIVELES_T, tDeNivel,
   type Reaccion, type ServicioQuimico, type Sustancia,
@@ -30,6 +31,7 @@ export type ModoServicioQuimico = 'worker' | 'diferido' | 'inmediato';
 export interface OpcionesServicioQuimico {
   /** 'worker': hilo propio (ARQ-materia §3.1); 'diferido': misma semántica de barrera en el hilo actual; 'inmediato': síncrono para laboratorio. */
   modo?: ModoServicioQuimico;
+  registroSustancias?: RegistroContenido;
 }
 
 export interface FilaMemoQuimico {
@@ -129,6 +131,7 @@ interface TrabajoPendiente {
 
 export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
   readonly modo: ModoServicioQuimico;
+  private readonly registroSustancias: RegistroContenido | undefined;
   private readonly sustancias: (Readonly<Sustancia> | undefined)[] = [undefined]; // índice 0 reservado (ninguna)
   private readonly porClave = new Map<string, SustanciaId>();
   private readonly memo = new Map<number, FilaMemoQuimico>();
@@ -146,6 +149,7 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
 
   constructor(opciones: OpcionesServicioQuimico = {}) {
     this.modo = opciones.modo ?? 'worker';
+    this.registroSustancias = opciones.registroSustancias;
     if (this.modo === 'worker') this.arrancarWorker();
     if (this.modo !== 'inmediato') sinAsociar.add(this);
   }
@@ -206,6 +210,12 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
     const clave = claveEnlaces(canon);
     const existente = this.porClave.get(clave);
     if (existente !== undefined) return existente;
+    const registro = this.registroSustancias;
+    if (registro) {
+      const id = 1 + registro.insertar(new Uint8Array(canon.buffer, canon.byteOffset, canon.byteLength));
+      this.sustancia(id);
+      return id;
+    }
     const id = this.sustancias.length;
     if (id >= BASE_ID) throw new RangeError('Límite de SustanciaId alcanzado.');
     const sust = construirSustancia(id, canon);
@@ -215,8 +225,17 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
   }
 
   sustancia(id: SustanciaId): Readonly<Sustancia> {
-    if (!Number.isInteger(id) || id <= 0 || id >= this.sustancias.length) {
+    if (!Number.isInteger(id) || id <= 0 || id >= BASE_ID ||
+      id >= this.sustancias.length && id > this.totalSustancias()) {
       throw new RangeError(`SustanciaId inexistente: ${id}`);
+    }
+    // Cada dueño memoriza las sustancias que lee; la identidad de los lotes pertenece al registro compartido.
+    while (this.sustancias.length <= id) {
+      const siguiente = this.sustancias.length;
+      const bytes = this.registroSustancias!.leer(siguiente - 1)!;
+      const enlaces = new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / Uint16Array.BYTES_PER_ELEMENT);
+      this.sustancias.push(construirSustancia(siguiente, enlaces));
+      this.porClave.set(claveEnlaces(enlaces), siguiente);
     }
     return this.sustancias[id]!;
   }
@@ -344,7 +363,7 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
     return this.publicarBarrera();
   }
 
-  totalSustancias(): number { return this.sustancias.length - 1; }
+  totalSustancias(): number { return this.registroSustancias?.n ?? this.sustancias.length - 1; }
   totalMemo(): number { return this.memo.size; }
   pendientes(): number { return this.enCola.size; }
   filasMemo(): readonly FilaMemoQuimico[] { return this.filas; }

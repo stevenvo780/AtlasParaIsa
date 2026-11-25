@@ -105,7 +105,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   for (let k = 0; k < CELDAS_VENTANA; k++) {
     const c = ventanaCelda[base + k]!;
     if (c < 0) continue;
-    const t = terreno.teselas[c]!, st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? terreno.soa[c]! : -1;
+    // El BFS compartido cruza páginas ajenas. Los candidatos que leen una tesela JS requieren la del heap propio.
+    const t = terreno.teselas[c];
+    if (!t) continue;
+    const st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? terreno.soa[c]! : -1;
     const i = nearbyTiles.length;
     nearbyTiles.push(t); nearbyCells.push(cell); nearbySteps[i] = st; nearbyDist[i] = d;
     if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }

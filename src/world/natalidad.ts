@@ -485,27 +485,33 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
   const mundo = c.mundo, g = b.enCurso(madre);
   if (!g) return;
   const idOtro = c.idDe(g.otro), dote = b.parir(madre), uid = c.id('uid');
-  const cuidadores = idOtro !== undefined ? [madre.id, idOtro] : [madre.id];
+  // Quien dio el genoma puede haber muerto durante la gestación: el directorio recuerda su id un día (para el
+  // parentesco del genoma), pero un muerto no cría ni tiene vínculos. Sin intentos el mundo es un solo heap y las
+  // muertes de este tick ya salieron de `mundo.people` (F5 va tras la demografía); con intentos, lo vivo es su fila
+  // en el frente.
+  const intentos = ley(mundo, 'intentos'), refOtro = c.ref(g.otro);
+  const otro = idOtro === undefined || intentos ? undefined : mundo.people.find(o => o.id === idOtro);
+  const otroVivo = idOtro !== undefined && (intentos ? refOtro !== REF_NULA : otro !== undefined);
+  const cuidadores = otroVivo ? [madre.id, idOtro] : [madre.id];
   const cria = crearCria(mundo, madre, {
     uid, id: idDeCria(uid), genome: genomaDeCria(madre, g, idOtro), policy: g.politica ? { weights: g.politica } : undefined,
     cuidadores, madurez: M0, apego: APEGO_NACER, inventario: dote.inventario, cuerpo: dote.cuerpo, carga: dote.carga,
   });
+  // La copia de la gestante trae su `communityId`. Con `v23.comunidades` la pertenencia no se hereda: la da la red de
+  // vínculos (F0 de la ley s la calcula y su F1 la asigna); hasta entonces la cría no figura en ninguna lista de miembros.
+  if (ley(mundo, 'comunidades')) cria.communityId = null;
   madre.lastBirth = c.tick;
   madre.bonds[cria.id] = APEGO_NACER;
   mundo.birthCounter += 1;
   const ref = c.alta(Clase.Persona, cria);
   if (!mundo.people.includes(cria)) mundo.people.push(cria);
   // El otro cuidador se vincula a la cría por su propio dueño; sin intentos, el mundo es un solo heap y se escribe directo.
-  if (idOtro !== undefined) {
-    const refOtro = c.ref(g.otro);
-    if (ley(mundo, 'intentos')) {
-      const dueno = refOtro === REF_NULA ? -1 : c.frente.dueno[slotDe(refOtro)]!;
+  if (otroVivo) {
+    if (intentos) {
+      const dueno = c.frente.dueno[slotDe(refOtro)]!;
       if (dueno >= 0) c.buzon.enviar(dueno, { tipo: TipoIntento.Vincular, de: ref, a: refOtro, celda: -1, lote: REF_NULA,
         nonce: c.id('nonce'), materia: null, dato: Float64Array.of(APEGO_NACER), bytes: null });
-    } else {
-      const otro = mundo.people.find(o => o.id === idOtro);
-      if (otro) otro.bonds[cria.id] = APEGO_NACER;
-    }
+    } else otro!.bonds[cria.id] = APEGO_NACER;
   }
   if (!ley(mundo, 'comunidades')) {
     const grupo = mundo.communities.find(k => k.id === madre.communityId);
@@ -538,6 +544,9 @@ export const leyNatalidad: Ley = {
     const mundo = c.mundo, tick = c.tick, b = balanceDe(c), radio = c.params.poblacion.radioPareja;
     const partos: Person[] = [];
     for (const [slot, p] of c.personas) {
+      // `c.personas` se pone al día con `mundo.people` en F6 (`publicarFilas`): quien murió en la demografía de este
+      // tick sigue aquí, ya sin cuerpo (su materia es un cadáver). Un muerto ni madura ni gesta ni concibe.
+      if (p.demography.deathCause !== null) continue;
       if (p.crianza) {
         const madurez = b.madurez(p);
         if (madurez >= 1) p.crianza = undefined;

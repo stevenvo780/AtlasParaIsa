@@ -12,7 +12,7 @@
  * F5 muertes y partos; F6 publica sus filas. A los demás se les escribe por intento (`Golpear`, `Tomar`).
  */
 import type { AnimalView } from '../shared/life.js';
-import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
+import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, KAPPA_HUMANA, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
 import { ACTIONS, SPECIES, syncFauna, type Animal, type EstadoFauna } from './animals.js';
 import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, elegirFaunaV23, huella, radioVista, velocidadDe,
@@ -21,7 +21,7 @@ import {
 import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
-  abortar, beber, concebir, crearCuerpo, crecer, extraer, gestar, herir, ingerir, lotesDe, masaDe, metabolizar, morir,
+  abortar, beber, concebir, crearCuerpo, crecer, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
   pagar, parir, pedidoComida, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
@@ -34,8 +34,8 @@ import {
 import { cercanos } from './motor/vecinos.js';
 import { TICKS_PER_DAY, type World } from './mundo/tipos.js';
 import { alarmaEn, alarmaPorAtaque, podarAlarmaLocal, subirAlarma, TAU_ALARMA } from './soa/alarma.js';
-import { COLUMNA_FAUNA, FAUNA_ANCHO } from './soa/fauna-columnas.js';
-import { escribirFilaFaunaV23 } from './soa/fauna.js';
+import { COLUMNA_FAUNA, escribirFilaFaunaV23, FAUNA_ANCHO } from './soa/fauna-v23.js';
+import { faunaRegistrada } from './soa/organismos-mundo.js';
 
 // ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
 import { TASA_INGESTA, TASA_BEBER, CAPACIDAD_DIGESTIVO, AGUA_CORPORAL, TRABAJO_MORDISCO, MADUREZ_MASA, MUTACION_GEN, MUTACION_LNMASA, PASO_LNMASA, PASO_CARNIVORIA } from '../shared/naturaleza.js';
@@ -82,8 +82,6 @@ interface Estado {
   /** Agua bebible desde una celda de tierra por tener una vecina de agua, por tick. */
   aguaVecina: Map<number, number>;
   partos: Fila[];
-  /** Animales sin fila en el frente (heredados o materializados): se dan de alta al empezar F4. */
-  sinFila: Animal[];
   orden: Fila[];
   lotes: LotesCelda;
   buf: Float64Array;
@@ -94,7 +92,7 @@ function estado(c: CtxLey): Estado {
   let e = estados.get(c.mundo);
   if (!e) estados.set(c.mundo, e = {
     filas: new Map(), porSlot: new Map(), plantillas: new Map(), jPorComida: 0, ocupacion: new Map(), aguaVecina: new Map(),
-    partos: [], sinFila: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
+    partos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
     buf: new Float64Array(16), campos: null,
   });
   return e;
@@ -125,7 +123,10 @@ export function genomaFundador(k: number): number[] {
 
 /** Plantilla de un genoma: tejido de la misma química para toda la fauna, masa adulta del gen `lnMasa` y κ del gen de
  * carnivoría. La κ reparte un mismo presupuesto catalítico entre C–O (celulosa, la hierba) y C–N (proteína, la carne):
- * κ_CO = 2κ₀(1 − carnivoría), κ_CN = 2κ₀·carnivoría; C–C/C–H y H–H quedan en κ₀. */
+ * κ_CO = 2κ₀(1 − carnivoría), κ_CN = 2κ₀·carnivoría. C–C/C–H es la del tubo humano (`KAPPA_HUMANA`) y H–H queda en κ₀.
+ * Abrir C–O o C–N no basta para comer: en el tubo la celulosa y la proteína se carbonizan antes de oxidarse (barrera
+ * γ·D(C–H) − κ frente a γ·D(O=O) − κ, `materia/cuerpo.ts`), y lo que la reserva recibe es carbono y grasa, que solo se
+ * absorben con C–C/C–H abierta. Con κ₀ ahí (9·10⁻¹¹ por tick) un herbívoro convertía su pasto en carbón y lo excretaba. */
 export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], linaje: number): Plantilla {
   const e = estado(c);
   const qm = Math.round((genoma[GEN.lnMasa] ?? 0) / PASO_LNMASA), qc = Math.round(sat01(genoma[GEN.carnivoria] ?? 0) / PASO_CARNIVORIA);
@@ -133,7 +134,7 @@ export function plantillaFauna(c: CtxLeyMateria, genoma: readonly number[], lina
   const hecha = e.plantillas.get(clave);
   if (hecha) return hecha;
   const S = sustanciasDe(c), carn = qc * PASO_CARNIVORIA, masaAdulta = Math.exp(qm * PASO_LNMASA);
-  const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA0, KAPPA0];
+  const kappa: Kappa = [Math.round(2 * KAPPA0 * (1 - carn)), Math.round(2 * KAPPA0 * carn), KAPPA_HUMANA[2], KAPPA0];
   // Tejido animal: proteína (músculo, pelo), grasa (CH₂), agua y hueso (CaHPO₄). Se sintetiza de lo mismo que hay en el
   // tubo, y el N y el P sobrantes vuelven como NH₃ y H₃PO₄.
   const p = crearPlantilla(c.quimica, c.globales.registro, {
@@ -180,7 +181,7 @@ function fundadorMasCercano(a: Animal, acuatico: boolean): number {
  * con su chunk»), con el genoma de su fundador más cercano y sus propios genes de hoy. Devuelve un objeto NUEVO con todas
  * sus propiedades (regla h: nada se añade a un objeto ya creado); quien llama lo pone en su lugar.
  */
-function convertir(c: CtxLeyMateria, a: Animal): Animal {
+function convertir(c: CtxLeyMateria, a: Animal): void {
   const e = estado(c), cols = campos(c, e), celda = c.terreno.celda(a.x, a.y);
   const acuatico = celda >= 0 && cols.terreno !== null && cols.terreno[celda] === T_AGUA;
   const k = fundadorMasCercano(a, acuatico), genoma = genomaFundador(k);
@@ -193,9 +194,11 @@ function convertir(c: CtxLeyMateria, a: Animal): Animal {
   const plantilla = plantillaFauna(c, genoma, k);
   const cuerpo = crearCuerpo(c, plantilla.id, plantilla.masaAdulta);
   const habituacion = a.habituation ?? 0;
-  return { ...a, target: { x: a.target.x, y: a.target.y }, memory: [], parents: [...a.parents], uid: a.uid ?? c.id('uid'),
+  // En el mismo objeto: la tabla de la fauna (`FaunaSoA`) lleva la ranura del animal por identidad; un objeto nuevo
+  // la perdía (baja de la vieja y alta de otra en F6) y la fila de esta ley quedaba apuntando a una ranura muerta.
+  Object.assign(a, { target: { x: a.target.x, y: a.target.y }, memory: [], parents: [...a.parents], uid: a.uid ?? c.id('uid'),
     genes: genesDe(genoma), morphology: morfologiaDe(genoma), habituation: habituacion, tends: a.tends ?? 0,
-    species: SPECIES[k]!, work: 0, preyId: null, cuerpo, fauna: estadoNuevo(genoma, habituacion) };
+    species: SPECIES[k]!, work: 0, preyId: null, cuerpo, fauna: estadoNuevo(genoma, habituacion) });
 }
 
 /** Animal nuevo con todas sus propiedades (cría o fundador). `linaje` solo decide cómo se pinta. */
@@ -242,18 +245,24 @@ function filaDeRef(e: Estado, r: Ref): Fila | undefined {
   return f && f.ref === r ? f : undefined;
 }
 
-/** Pone al día las filas con `c.mundo.animals`: cuerpo a quien no lo tenga, fila en el frente a quien no la tenga
- * (alta) y olvida a quien ya no es de este dueño (migró o murió fuera de esta ley). */
+/** Pone al día las filas con `c.mundo.animals`: cuerpo a quien no lo tenga, fila a quien tenga ranura y olvida a quien
+ * ya no es de este dueño (migró o murió fuera de esta ley). La ranura de un animal la da UNA sola tabla, la de la fauna
+ * (`FaunaSoA`, que `CtxDueno.publicarFilas` sincroniza en F6 antes de `Ley.F6`): la fila toma su `ref` de ella y la
+ * sigue si cambia (tabla rehecha en una época nueva). Quien aún no tiene ranura (una cría de este tick, un chunk que
+ * vuelve del archivo) recibe la fila en el F6 en que la tabla le da el alta; hasta entonces no actúa. */
 function sincronizar(c: CtxLeyMateria): void {
-  const e = estado(c), animales = c.mundo.animals;
+  const e = estado(c), animales = c.mundo.animals, tabla = faunaRegistrada(c.mundo);
   for (let i = 0; i < animales.length; i++) {
-    let a = animales[i]!;
-    if (!a.cuerpo || !a.fauna) { a = convertir(c, a); animales[i] = a; }
-    if (e.filas.has(a)) continue;
-    const ref = a.uid === undefined ? REF_NULA : c.ref(a.uid);
-    // Sin fila en el frente: el alta solo se puede pedir en F4–F5 (`CtxDueno.alta`); hasta entonces no actúa.
-    if (ref === REF_NULA) { if (!e.sinFila.includes(a)) e.sinFila.push(a); }
-    else nuevaFila(e, a, ref);
+    const a = animales[i]!;
+    if (!a.cuerpo || !a.fauna) convertir(c, a);
+    const ref = tabla?.ref(a) ?? REF_NULA, f = e.filas.get(a);
+    if (f && f.ref === ref) continue;
+    if (f && ref !== REF_NULA) {
+      if (e.porSlot.get(slotDe(f.ref)) === f) e.porSlot.delete(slotDe(f.ref));
+      f.ref = ref;
+      e.porSlot.set(slotDe(ref), f);
+    } else if (f) olvidar(e, f);
+    else if (ref !== REF_NULA) nuevaFila(e, a, ref);
   }
   if (e.filas.size !== animales.length) {
     const vigentes = new Set(animales);
@@ -353,14 +362,13 @@ function medirPasto(c: CtxLeyMateria, e: Estado): void {
 
 // ── F3: elegir ────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Fértil: sin gestación, salud suficiente, masa de adulto y reserva para pagar la síntesis de una cría (m0 kg de tejido
- * a la densidad de energía del suyo, con rendimiento η). */
-function fertil(c: CtxLeyMateria, f: Fila, pl: Plantilla): boolean {
+/** J de reserva que pide una cría: m0 kg de tejido a la densidad de energía del suyo, con rendimiento η (el mismo coste
+ * que `natalidad.ts`). 0 si no puede criar ahora (gesta, le falta salud o no tiene masa de adulto). */
+function costeCria(c: CtxLeyMateria, f: Fila, pl: Plantilla): number {
   const cu = f.animal.cuerpo!;
-  if (cu.gestacion || f.vista.salud < SALUD_FERTIL || f.vista.masa < MADUREZ_MASA * pl.masaAdulta) return false;
+  if (cu.gestacion || f.vista.salud < SALUD_FERTIL || f.vista.masa < MADUREZ_MASA * pl.masaAdulta) return 0;
   const vt = c.materia.vista(cu.tejido);
-  const jPorKg = vt.masa > 0 ? vt.energia / vt.masa : 0;
-  return f.yo.reservaJ >= pl.m0 * jPorKg / ETA;
+  return vt.masa > 0 ? pl.m0 * (vt.energia / vt.masa) / ETA : 0;
 }
 
 function prepararYo(c: CtxLeyMateria, f: Fila): void {
@@ -371,7 +379,12 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   yo.habituacion = fa.habituacion; yo.sobresalto = sobresaltoActual(fa, c.tick);
   const vt = c.materia.vista(cu.tejido);
   yo.jPorKgCarne = vt.masa > 0 ? vt.digerible / vt.masa : 0;
-  f.fertil = fertil(c, f, plantillaDe(c, cu));
+  // Fértil: reserva para pagar la cría. Ese coste es ≈ 2,3 veces la reserva llena (M0·Q_tejido / (η·RESERVA_OBJETIVO_J_KG),
+  // la misma para toda la fauna), así que un adulto que puede criar sigue con hambre hasta reunirla, como la gestante de
+  // `natalidad.ts` (`provisionCrianza`): sin esto comía solo hasta la reserva llena y ninguno llegaba nunca a fértil.
+  const coste = costeCria(c, f, plantillaDe(c, cu));
+  f.fertil = coste > 0 && yo.reservaJ >= coste;
+  if (coste > 0 && !f.fertil) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / coste);
   yo.fertil = f.fertil;
 }
 
@@ -402,12 +415,12 @@ function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol): v
   if (!(libre > 0)) return;
   if (rol === Rol.Vida) {
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
-    if (vida !== REF_NULA) ingerir(c, cu, vida, pedidoComida(c, cu, Math.min(libre, boca)));
+    if (vida !== REF_NULA) ingerirSelecto(c, cu, vida, Math.min(libre, boca));
     return;
   }
   const n = Math.min(c.materia.lotes(celda, rol, e.buf), e.buf.length);
   for (let i = 0; i < n && libre > 0 && boca > 0; i++) {
-    const kg = ingerir(c, cu, e.buf[i]!, pedidoComida(c, cu, Math.min(libre, boca)));
+    const kg = ingerirSelecto(c, cu, e.buf[i]!, Math.min(libre, boca));
     libre -= kg; boca -= kg;
   }
 }
@@ -541,6 +554,7 @@ export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por
   const e = estado(c), f = e.filas.get(animal), cu = animal.cuerpo;
   if (!cu || !f) return;
   const celda = c.terreno.celda(animal.x, animal.y);
+  const masa = masaDe(c, cu);
   morir(c, cu, celda);
   const violenta = por !== undefined || (animal.fauna !== undefined && c.tick - animal.fauna.heridoEn <= 2);
   if (violenta && propia(c, celda)) alarmaPorAtaque(c, animal.x, animal.y, 1);
@@ -552,7 +566,7 @@ export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por
   if (causa === 'caza humana') dyn.humanHunts++;
   else if (causa === 'depredación') dyn.predations++;
   const actores = por ? [por, animal.id] : [animal.id];
-  c.suceso({ kind: 'animal', actors: actores, x: animal.x, y: animal.y, text: `Muere un animal de ${Math.round(masaDe(c, cu) * 10) / 10} kg por ${causa}.`,
+  c.suceso({ kind: 'animal', actors: actores, x: animal.x, y: animal.y, text: `Muere un animal de ${Math.round(masa * 10) / 10} kg por ${causa}.`,
     cause: causa, source: 'simulation' });
   c.mundo.animals = c.mundo.animals.filter(x => x !== animal);
 }
@@ -578,14 +592,13 @@ function nacer(c: CtxLeyMateria, e: Estado, f: Fila): void {
   // El embrión se sintetizó con la plantilla de la madre (el mismo tejido para toda la fauna); su masa adulta y su κ
   // son las de su propio genoma.
   cria.plantilla = plantillaFauna(c, genoma, linaje).id;
-  const ref = c.alta(Clase.Animal), uid = c.id('uid');
+  const uid = c.id('uid');
   const padre = c.idDe(otro);
   const parents = [madre.id, padre !== undefined && padre !== madre.id && ID_ANIMAL.test(padre) ? padre : `animal-u${otro}`];
   const hijo = animalNuevo(c, { uid, x: madre.x, y: madre.y, genoma, cuerpo: cria, linaje, generation: madre.generation + 1, parents });
   madre.lastBirth = c.tick; madre.lastBirthAge = Math.max(0, c.tick - madre.bornAt);
   c.mundo.animals.push(hijo);
   c.mundo.animalDynamics.births++;
-  nuevaFila(e, hijo, ref);
   c.suceso({ kind: 'animal', actors: [...parents, hijo.id], x: hijo.x, y: hijo.y,
     text: `Nace una cría de generación ${hijo.generation}.`, cause: 'gestación pagada con la reserva de la madre', source: 'simulation' });
 }
@@ -724,6 +737,13 @@ export const leyFauna: Ley = {
       const celda = c.terreno.celda(f.animal.x, f.animal.y);
       if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + huella(f.vista.masa));
     }
+    // Quien aún no tiene fila (un chunk que vuelve del archivo: el alta llega en F4) ya ocupa su celda: si no contara,
+    // otro podría entrar en ella este tick y la huella pasaría del área.
+    if (e.filas.size !== c.mundo.animals.length) for (const a of c.mundo.animals) {
+      if (!a.cuerpo || e.filas.has(a)) continue;
+      const celda = c.terreno.celda(a.x, a.y);
+      if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + huella(masaDe(c, a.cuerpo)));
+    }
     medirPasto(c, e);
     for (const f of e.filas.values()) percibir(c, e, f);
   },
@@ -737,8 +757,6 @@ export const leyFauna: Ley = {
     for (const f of e.filas.values()) orden.push(f);
     barajar(c, orden);
     e.partos.length = 0;
-    for (const a of e.sinFila) if (a.uid !== undefined && !e.filas.has(a) && c.mundo.animals.includes(a)) nuevaFila(e, a, c.alta(Clase.Animal));
-    e.sinFila.length = 0;
     for (const f of orden) actuar(c, e, f);
     barajar(c, orden);
     for (const f of orden) moverse(c, e, f);
@@ -758,6 +776,7 @@ export const leyFauna: Ley = {
   },
   F6(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c), w = c.escritura;
+    sincronizar(c);
     for (const f of e.filas.values()) {
       const a = f.animal, fa = a.fauna!, celda = c.terreno.celda(a.x, a.y);
       vistaCuerpo(c, a.cuerpo!, f.vista);

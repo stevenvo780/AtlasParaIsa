@@ -7,6 +7,11 @@ import { resolveTechnologyRecipe } from './technology-catalogue.js';
 import { ELEMENTS, vectorMass } from '../shared/chemistry.js';
 import type { CompoundLot } from '../shared/chemistry.js';
 import { CHUNK_SIZE, chunkKey } from './terrain.js';
+import { ctxSi, type CtxLey, type Ley } from './motor/acceso.js';
+import type { BalanceBuzones } from './motor/contadores.js';
+import type { CtxMateria } from './motor/contratos.js';
+import { conservacion } from './materia/ley-mundo.js';
+import { ley, paramsOf } from './params.js';
 
 export type Gravedad = 'dura' | 'blanda';
 export interface RegionRef { chunkX: number; chunkY: number }
@@ -311,11 +316,181 @@ inicial('balances.actuales', 'global', m => {
   return h.resultado;
 });
 
+// ── V23: invariantes de la oleada (carril lab). Todos devuelven [] con su interruptor apagado ─────────────────────────
+
+/** Un invariante de la V23: como `inicial`, pero con su carril y gravedad, y registrado bajo el id del documento de arquitectura. */
+function v23(id: string, carril: string, gravedad: Gravedad, alcance: Invariante['alcance'], comprobar: Invariante['comprobar'], cadaTicks = 60): void {
+  registrar({ id, carril, gravedad, cadaTicks, alcance, comprobar });
+}
+/** El contexto del dueño con materia, o `undefined` si el mundo aún no pasó por el motor o no la tiene. */
+function ctxConMateria(m: World): (CtxLey & CtxMateria) | undefined {
+  const c = ctxSi(m) as (Partial<CtxMateria> & CtxLey) | undefined;
+  return c?.materia && c.quimica ? c as CtxLey & CtxMateria : undefined;
+}
+const comoNumero = (n: bigint): number => Number(n);
+
+/** I-C `motor-conservacion`: Σ lotes + Σ en vuelo = inicial + fuentes − sumideros, por posición y exacto (bigint), y ningún
+ * stock negativo. Con varios dueños comprueba lo del dueño del contexto enlazado a `mundo`. */
+v23('motor-conservacion', 'I-C', 'dura', 'global', m => {
+  if (!ley(m, 'materia')) return [];
+  const c = ctxConMateria(m);
+  if (!c) return [];
+  const h = hallazgos('motor-conservacion', m);
+  const { esperado, hallado, cuentas } = conservacion(c as Parameters<typeof conservacion>[0]);
+  if (esperado.length !== hallado.length) h.fallo('El libro y los lotes tienen posiciones distintas.', { esperado: esperado.length, hallado: hallado.length });
+  const energia = Math.min(esperado.length, hallado.length) - 1;
+  for (let i = 0; i < Math.min(esperado.length, hallado.length); i++) {
+    const e = esperado[i]!, o = hallado[i]!;
+    const contexto = { posicion: i, energia: i === energia, esperado: String(e), hallado: String(o), diferencia: String(o - e),
+      cuentas: Object.fromEntries(Object.entries(cuentas).map(([k, v]) => [k, String(v)])) };
+    if (e !== o) h.fallo('La materia no se conserva: Σ lotes + en vuelo distinto de inicial + fuentes − sumideros.', contexto, comoNumero(e), comoNumero(o));
+    else if (o < 0n) h.fallo('Stock negativo.', contexto, 0, comoNumero(o));
+  }
+  return h.resultado;
+});
+
+let lectorBuzones: ((mundo: World) => BalanceBuzones | null) | null = null;
+/** Quien conduce el tick (motor/coordinador, el servidor o el laboratorio) dice de dónde leer los contadores de buzones. */
+export function fijarLectorBuzones(leer: ((mundo: World) => BalanceBuzones | null) | null): void { lectorBuzones = leer; }
+
+/** I-B `motor-garantias`: ninguna garantía vive más de 2 ticks y, sin pendientes, el libro no guarda nada en vuelo (con un
+ * solo dueño; con varios cada libro puede ser negativo mientras el global suma cero). El saldo enviados = acreditados lo
+ * comprueba `motor-buzones` (`motor/contadores.ts`). */
+v23('motor-garantias', 'I-B', 'dura', 'global', m => {
+  if (!ley(m, 'intentos') || !lectorBuzones) return [];
+  const balance = lectorBuzones(m);
+  if (!balance) return [];
+  const h = hallazgos('motor-garantias', m);
+  if (!Number.isSafeInteger(balance.edadMaxGarantia) || balance.edadMaxGarantia < 0) h.fallo('Edad de garantía inválida.', { balance });
+  else if (balance.edadMaxGarantia > 2) h.fallo('Hay una garantía con más de dos ticks.', { balance }, 2, balance.edadMaxGarantia);
+  const c = ctxSi(m);
+  if (c && paramsOf(m).motor.hilos === 1) {
+    for (let i = 0; i < c.libro.enVuelo.length; i++) {
+      const v = c.libro.enVuelo[i]!;
+      if (!Number.isFinite(v) || v < 0) h.fallo('Materia en vuelo inválida.', { posicion: i, valor: v }, 0, v);
+      else if (balance.pendientes === 0 && v !== 0) h.fallo('Hay materia en vuelo sin ninguna garantía pendiente.', { posicion: i, valor: v }, 0, v);
+    }
+  }
+  return h.resultado;
+});
+
+/** I-N `motor-nacimientos` (parte sin historia): ningún uid repetido o nulo y cada gestación con su embrión vivo y propio. */
+v23('motor-nacimientos', 'I-N', 'dura', 'global', m => {
+  const h = hallazgos('motor-nacimientos', m);
+  const vistos = new Map<number, string>();
+  for (const o of [...m.people, ...m.animals]) {
+    if (o.uid === undefined) continue;
+    if (!Number.isSafeInteger(o.uid) || o.uid < 1) h.fallo('uid inválido (0 queda reservado).', { entidad: o.id, uid: o.uid });
+    else if (vistos.has(o.uid)) h.fallo('uid repetido.', { uid: o.uid, entidad: o.id, otra: vistos.get(o.uid) });
+    else vistos.set(o.uid, o.id);
+  }
+  const c = ley(m, 'cuerpos') ? ctxConMateria(m) : undefined;
+  if (c) {
+    const embriones = new Map<number, string>();
+    for (const o of [...m.people, ...m.animals]) {
+      const g = o.cuerpo?.gestacion;
+      if (!g) continue;
+      const contexto = { entidad: o.id, uid: o.uid, embrion: g.embrion };
+      if (embriones.has(g.embrion)) h.fallo('Dos gestaciones comparten embrión.', { ...contexto, otra: embriones.get(g.embrion) });
+      embriones.set(g.embrion, o.id);
+      if (!c.materia.vivo(g.embrion)) h.fallo('Gestación con un embrión caducado.', contexto);
+      if (g.otro === o.uid) h.fallo('Una gestación es de sí mismo.', contexto);
+      if (!Number.isFinite(g.inicio) || g.inicio > m.tick) h.fallo('Gestación que empieza en el futuro.', { ...contexto, inicio: g.inicio }, m.tick, g.inicio);
+    }
+  }
+  return h.resultado;
+});
+
+/** I-N `motor-nacimientos` (parte con historia): cada nacido de una pareja con cuerpos y natalidad tuvo a su madre gestando
+ * en la comprobación anterior. Solo vale si se comprueba cada tick: con huecos mayores no concluye nada. */
+export function crearObservadorNacimientos(): (mundo: World) => Violacion[] {
+  let anterior: { tick: number; ids: Set<string>; gestantes: Set<string> } | undefined;
+  return m => {
+    const resultado: Violacion[] = [];
+    const ids = new Set(m.people.map(p => p.id));
+    const gestantes = new Set(m.people.filter(p => p.cuerpo?.gestacion).map(p => p.id));
+    if (anterior && m.tick === anterior.tick + 1 && ley(m, 'cuerpos') && ley(m, 'natalidad')) {
+      for (const p of m.people) {
+        if (anterior.ids.has(p.id) || p.genome.generation === 0 || p.genome.parents.length === 0) continue;
+        if (!p.genome.parents.some(id => anterior!.gestantes.has(id))) {
+          resultado.push({ id: 'motor-nacimientos', gravedad: 'dura', tick: m.tick, detalle: 'Nacimiento sin gestación previa de ninguno de sus padres.',
+            contexto: { entidad: p.id, uid: p.uid, padres: p.genome.parents } });
+        }
+      }
+    }
+    anterior = { tick: m.tick, ids, gestantes };
+    return resultado;
+  };
+}
+
+/** I-R `motor-referencias` (parte del cuerpo): con `cuerpos`, todo organismo tiene cuerpo y ninguna referencia de su cuerpo,
+ * de su carga o de su embrión apunta a un lote caducado; con la ley apagada nadie lo tiene. */
+v23('motor-referencias', 'I-R', 'dura', 'global', m => {
+  const personas = ley(m, 'cuerpos'), animales = ley(m, 'fauna');
+  const h = hallazgos('motor-referencias', m);
+  const c = personas ? ctxConMateria(m) : undefined;
+  const revisar = (o: World['people'][number] | World['animals'][number], debe: boolean): void => {
+    const contexto = { entidad: o.id, uid: o.uid };
+    if (!o.cuerpo) { if (debe && c) h.fallo('Organismo sin cuerpo con la ley encendida.', contexto); return; }
+    if (!debe) { h.fallo('Cuerpo con la ley apagada.', contexto); return; }
+    if (!c) return;
+    for (const campo of ['tejido', 'reserva', 'digestivo'] as const) {
+      if (!c.materia.vivo(o.cuerpo[campo])) h.fallo('Cuerpo con un lote caducado.', { ...contexto, campo, lote: o.cuerpo[campo] });
+    }
+    if (o.cuerpo.gestacion && !c.materia.vivo(o.cuerpo.gestacion.embrion)) h.fallo('Cuerpo con un embrión caducado.', { ...contexto, lote: o.cuerpo.gestacion.embrion });
+    for (const lote of 'carga' in o ? o.carga ?? [] : []) if (!c.materia.vivo(lote)) h.fallo('Carga con un lote caducado.', { ...contexto, lote });
+  };
+  for (const p of m.people) revisar(p, personas);
+  for (const a of m.animals) revisar(a, animales);
+  return h.resultado;
+});
+
+/** `vistas.materia`: las vistas que w escribe en las teselas (`mat`, `T`) son legibles: fracciones en [0, 1] que suman ≤ 1, de
+ * mayor a menor, y temperatura finita y positiva. */
+v23('vistas.materia', 'lab', 'dura', 'region', (m, r) => {
+  if (!ley(m, 'materia')) return [];
+  const h = hallazgos('vistas.materia', m, r);
+  for (const t of teselas(m, r)) {
+    const contexto = { x: t.x, y: t.y };
+    if (t.T !== undefined && (!Number.isFinite(t.T) || t.T <= 0)) h.fallo('Temperatura de tesela inválida.', { ...contexto, T: t.T });
+    if (!t.mat) continue;
+    if (t.mat.length > 3) h.fallo('Una tesela con más de tres sustancias visibles.', { ...contexto, n: t.mat.length });
+    let suma = 0, previa = Infinity;
+    for (const [id, fraccion] of t.mat) {
+      if (!Number.isInteger(id) || id < 0) h.fallo('Sustancia visible inválida.', { ...contexto, id });
+      if (!Number.isFinite(fraccion) || fraccion < 0 || fraccion > 1) h.fallo('Fracción visible fuera de [0, 1].', { ...contexto, fraccion });
+      if (fraccion > previa) h.fallo('Fracciones visibles no ordenadas de mayor a menor.', contexto);
+      previa = fraccion; suma += fraccion;
+    }
+    if (suma > 1 + 1e-6) h.fallo('Las fracciones visibles suman más de 1.', contexto, 1, suma);
+  }
+  return h.resultado;
+}, 120);
+
+/** Corre los `comprobar` de las leyes encendidas (en el orden dado) sobre el contexto del dueño de `mundo`. Sin contexto
+ * (mundo que no pasó por el motor) no hay nada que comprobar. Una excepción cuenta como violación dura. */
+export function comprobarLeyes(mundo: World, leyes: readonly Ley[]): Violacion[] {
+  const c = ctxSi(mundo);
+  if (!c) return [];
+  const resultado: Violacion[] = [];
+  for (const l of leyes) {
+    if (!l.comprobar || !ley(mundo, l.interruptor)) continue;
+    try {
+      for (const v of l.comprobar(c)) resultado.push({ ...v, tick: v.tick ?? mundo.tick, contexto: { ...v.contexto, ley: l.id } });
+    } catch (error) {
+      resultado.push({ id: `ley.${l.id}.excepcion`, gravedad: 'dura', tick: mundo.tick, detalle: 'El comprobador de la ley lanzó una excepción.',
+        contexto: { ley: l.id, error: error instanceof Error ? error.message : String(error) } });
+    }
+  }
+  return resultado;
+}
+
 /** Observador por corrida: las diferencias sólo son válidas entre estados de la misma historia. */
-export function crearComprobador(): (mundo: World) => Violacion[] {
+export function crearComprobador(opciones: { cadencia?: boolean } = {}): (mundo: World) => Violacion[] {
+  const nacimientos = crearObservadorNacimientos();
   let anterior: { tick: number; poblacion: number; nacimientos: number; muertes: number; acumulados: Record<string, number> } | undefined;
   return m => {
-    const resultado = comprobarInvariantes(m);
+    const resultado = [...comprobarInvariantes(m, { cadencia: opciones.cadencia }), ...nacimientos(m)];
     const acumulados = { ...m.totals, ...Object.fromEntries(Object.entries(m.animalDynamics).map(([k, v]) => [`fauna.${k}`, v])),
       muertes: m.demographyDynamics.deaths, nacimientos: m.birthCounter, eventos: m.eventCounter, comunidades: m.communityCounter,
       estructuras: m.structureCounter, planos: m.blueprintCounter, animales: m.animalCounter };

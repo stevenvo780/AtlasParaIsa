@@ -9,7 +9,8 @@ import {
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
-import { masaDe } from '../src/world/materia/cuerpo.js';
+import { concebir, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
+import { Parte } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
 import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
 import { DATO_GOLPEAR } from '../src/world/motor/contratos.js';
@@ -132,6 +133,30 @@ test('F5 aplica un golpe local con intentos apagados y la muerte conserva la mat
   const masa = Math.round(masaDe(c, otra.cuerpo) * 10) / 10;
   matarAnimal(c, otra, 'senescencia');
   assert.ok(mundo.events.some(e => e.kind === 'animal' && e.actors.includes(otra.id) && e.text.includes(`${masa} kg`)));
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('un embrión completo nace con su masa y cabe en la huella', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo, plantilla = plantillaDe(c, cuerpo);
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  const embrion = cuerpo.gestacion!.embrion;
+  const unidadKg = plantilla.partes.reduce((suma, t) => suma + c.quimica.sustancia(t.id).masa * t.nu, 0) / 1e6;
+  const unidades = Math.ceil(plantilla.m0 / unidadKg);
+  for (const { id, nu } of plantilla.partes) {
+    const cuantos = unidades * nu;
+    assert.equal(c.materia.moverParte(cuerpo.tejido, embrion, { parte: Parte.Exacta, esp: id, cuantos, kappa: null }), cuantos);
+  }
+  stepWorld(mundo);
+
+  const cria = mundo.animals.find(a => a.parents[0] === madre.id);
+  assert.ok(cria?.cuerpo);
+  assert.ok(masaDe(c, cria.cuerpo) >= plantilla.m0);
+  assert.equal(mundo.animalDynamics.births, 1);
+  assert.deepEqual(leyFauna.comprobar!(c), []);
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

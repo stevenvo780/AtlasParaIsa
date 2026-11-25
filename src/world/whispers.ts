@@ -179,6 +179,35 @@ function resolve(w: WhisperRecord, status: 'fulfilled' | 'faded', tick: number) 
 }
 
 /**
+ * Quiénes pueden oír y cumplir un mensaje, sin decir de dónde salen: el arreglo de personas del mundo (el tick
+ * heredado) o el frente público (la ley de actuar, con dueños), con un índice espacial para los regionales.
+ */
+export interface OyentesSusurro {
+  /** La persona viva con ese id, o undefined. */
+  porId(id: string): WhisperPersonLike | undefined;
+  /** Recorre a quienes pueden oír un mensaje regional que suena en (x, y). El arreglo heredado recorre a todos, en su
+   * orden; el frente, solo a quienes la voz llega por encima de `CAIDA_AUDIBLE` (`RADIO_AUDIBLE`). */
+  cerca(x: number, y: number, f: (p: WhisperPersonLike) => void): void;
+}
+
+/** Fracción de la audibilidad junto al mensaje por debajo de la cual el oído ya no la distingue del ruido (adimensional). */
+export const CAIDA_AUDIBLE = 1e-3;
+/** Distancia (celdas) a la que la audibilidad cae a `CAIDA_AUDIBLE`: el radio del índice espacial de los regionales. */
+export const RADIO_AUDIBLE = ALCANCE_VOZ * Math.sqrt(1 / CAIDA_AUDIBLE - 1);
+
+/** Oyentes sobre el arreglo de personas de siempre: el índice por id se arma la primera vez que se pide. */
+export function oyentesDeArreglo(people: readonly WhisperPersonLike[]): OyentesSusurro {
+  let byId: Map<string, WhisperPersonLike> | undefined;
+  return {
+    porId(id) {
+      if (!byId) { byId = new Map(); for (let i = 0; i < people.length; i++) byId.set(people[i]!.id, people[i]!); }
+      return byId.get(id);
+    },
+    cerca(_x, _y, f) { for (let i = 0; i < people.length; i++) f(people[i]!); },
+  };
+}
+
+/**
  * Avanza la cola de mensajes (llamar cada 10 pasos, sólo con mensajes). `isWater` dice si el destino es
  * agua (`undefined` si la celda no está cargada: se sabrá al acercarse). `elapsed` son los pasos desde la comprobación
  * anterior: el riesgo por paso se compone sobre ellos, así que el ritmo de las comprobaciones no cambia la ley. Sin
@@ -192,16 +221,25 @@ export function stepWhispers(
   isWater?: (x: number, y: number) => boolean | undefined,
   elapsed: number = WHISPER_CHECK_TICKS,
 ): WhisperStepOutcome {
+  return stepWhispersCon(whispers, oyentesDeArreglo(people), tick, seed, isWater, elapsed);
+}
+
+/** `stepWhispers` sobre cualquier fuente de oyentes. */
+export function stepWhispersCon(
+  whispers: WhisperRecord[],
+  oyentes: OyentesSusurro,
+  tick: number,
+  seed: number,
+  isWater?: (x: number, y: number) => boolean | undefined,
+  elapsed: number = WHISPER_CHECK_TICKS,
+): WhisperStepOutcome {
   const outcome: WhisperStepOutcome = { heard: [], fulfilled: [], faded: [] };
-  let byId: Map<string, WhisperPersonLike> | undefined;
-  const find = (id: string): WhisperPersonLike | undefined => {
-    if (!byId) { byId = new Map(); for (let i = 0; i < people.length; i++) byId.set(people[i]!.id, people[i]!); }
-    return byId.get(id);
-  };
+  const find = (id: string): WhisperPersonLike | undefined => oyentes.porId(id);
   const fade = (w: WhisperRecord, reason: WhisperFadeReason, person?: WhisperPersonLike) => {
     resolve(w, 'faded', tick);
     outcome.faded.push({ whisper: w, reason, ...(person ? { person } : {}) });
   };
+  const candidatos: WhisperPersonLike[] = [], tasas: number[] = [];
 
   for (const w of whispers) {
     if (!isActive(w)) continue;
@@ -236,22 +274,23 @@ export function stepWhispers(
     if (pasos <= 0) continue;
     // Cada persona oye con su tasa; la primera en oírlo es la suya con probabilidad proporcional a ella, y el mensaje se
     // oye en esta comprobación con la probabilidad de que alguna lo haga (tiempos exponenciales en competencia). Un solo
-    // sorteo por mensaje, sin una lectura por persona; un mensaje dirigido llega entero, uno regional con su audibilidad.
+    // sorteo por mensaje; un mensaje dirigido llega entero, uno regional con su audibilidad a quien está a su alcance.
     const tasaDe = (person: WhisperPersonLike): number => probabilidadDeOir(escuchaDe(person.genome), calma(person),
       dirigido ? 1 : audibilidadDeCuadrado((person.x - w.x) ** 2 + (person.y - w.y) ** 2));
     let suma = 0;
+    candidatos.length = 0; tasas.length = 0;
     if (dirigido) suma = tasaDe(dirigido);
-    else for (let i = 0; i < people.length; i++) suma += tasaDe(people[i]!);
+    else oyentes.cerca(w.x, w.y, person => { const tasa = tasaDe(person); candidatos.push(person); tasas.push(tasa); suma += tasa; });
     const u = deterministicUnit(seed, tick, w.id, dirigido ? dirigido.id : 'oído');
     const algunoOye = enPasos(suma, pasos);
     if (!(u < algunoOye)) continue;
     let oyente: WhisperPersonLike | undefined = dirigido;
     if (!oyente) {
       let resto = (u / algunoOye) * suma;
-      for (let i = 0; i < people.length; i++) {
-        const tasa = tasaDe(people[i]!);
+      for (let i = 0; i < candidatos.length; i++) {
+        const tasa = tasas[i]!;
         if (tasa <= 0) continue;
-        oyente = people[i];
+        oyente = candidatos[i];
         if ((resto -= tasa) < 0) break;
       }
     }

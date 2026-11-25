@@ -73,3 +73,17 @@ Lo que frena no es escribir código sino los paneles: cada mundo vivo de 500 hab
 - **Puerta 0a (base técnica):** contratos firmados, partición verificada, poda y suite completa en verde y revisada. Al cerrarse, pueden empezar a ESCRIBIR todos los carriles de la ola 1, también los del motor (M1, M2a, M2b, M3, M8): ninguno toca `mundo/crear.ts` ni depende de las cifras del control.
 - **Puerta 0b (demografía):** fundadores validado con 12 semillas y panel de control medido. Hace falta antes de INTEGRAR la ola 1 (la equivalencia de I1 se mide contra ese control), no antes de escribirla.
 - **Regla general:** las puertas gobiernan lo que se integra en `sprint/v23l-core`. Un carril puede escribirse por adelantado en su worktree cuando sus entradas están congeladas (contratos y librerías ya revisadas). El mundo material (W) se adelanta así en cuanto la química esté revisada, porque está en el camino crítico; cuerpos, natalidad, fauna y técnica (B, N, F, T1, T2) esperan a que W esté integrado, porque dependen de su calibración.
+
+## 10. Método: experimento antes que lectura (Steven, 24-nov noche)
+Steven preguntó si hacen falta tantas revisiones y si no es mejor «hacer, ejecutar y mirar como todo experimento científico». El balance del día le da la razón en lo principal: los defectos graves salieron sobre todo de experimentos independientes (cajas cerradas de materia, digestos, mutaciones de pruebas, bancos de coste), y las rondas de lectura y cierre costaron tanto como escribir. Desde ahora:
+- **Cada carril nace con su experimento de aceptación** escrito en el encargo: qué se predice, cómo se mide y con qué umbral. El carril está hecho cuando lo pasa.
+- **Una sola verificación independiente, de otro modelo, que ejecuta**: repite el experimento de aceptación con su propio guion, rompe a propósito cada garantía para comprobar que alguna prueba falla y mide el coste. No hay segunda ronda salvo que el experimento falle.
+- **Si el cambio debe conservar la conducta, la aceptación es la identidad exacta** del mundo de un hilo (digestos), no un panel ni una estadística.
+- **La lectura adversarial del código se reserva** para los tres núcleos donde un error silencioso lo envenena todo y un experimento corriente no lo ve: conservación de átomos y energía en la materia, concurrencia del motor y durabilidad de la cinta.
+- **Integrar pronto y mirar el mundo**: lo escrito se junta cuanto antes en una rama de mundo que corre con los invariantes encendidos y graba; lo que se vea ahí se arregla ahí. Las puertas siguen gobernando lo que entra en `sprint/v23l-core`.
+
+## 11. Paneles: no simular dos veces lo mismo (24-nov, noche)
+- Panel fijo de 8 semillas (7, 51926, 19101 a 19106), **una réplica por semilla** (con un hilo las réplicas son idénticas), 30 días y `--tope-mortales 300`: el crecimiento sin freno ya es un hallazgo conocido y simularlo durante horas no enseña nada.
+- Un panel solo cuando el carril cambia una ley del mundo. Para diagnosticar, corridas cortas instrumentadas (minutos), no paneles.
+- El «antes» de un mismo commit base se simula una vez y se comparte (caché del panel, carril `panel`).
+- No se lanzan más corridas que núcleos libres: en una máquina saturada cada corrida tarda varias veces más. El portátil lo comparten otros trabajos; `portatil.sh` encola por memoria.

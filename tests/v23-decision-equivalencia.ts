@@ -3,17 +3,20 @@
  * cada decisión (acción y distancia al objetivo) y lo que recorre cada persona por día; luego compara brazos con χ²
  * sobre las acciones y KS sobre las distancias.
  *
- *   tsx tests/v23-decision-equivalencia.ts correr --raiz <árbol> --semilla N --dias D [--hilos 32] --salida f.json
+ *   tsx tests/v23-decision-equivalencia.ts correr --raiz <árbol> --semilla N --dias D [--hilos 32] [--residente] [--placebo] --salida f.json
  *   tsx tests/v23-decision-equivalencia.ts analizar <brazoA> <brazoB> [<brazoC>]   (cada brazo: carpeta con f.json por semilla)
  *
  * Con `--hilos` la percepción va al doble de hilos de `v23-decision-hilos.ts` (solo existe en el árbol nuevo).
+ * `--residente`: el terreno en el SoA residente, como en el servidor (dueño de topología y ecología en 2 hilos).
+ * `--placebo`: las mismas leyes con `world.people` invertido al crear el mundo; un orden arbitrario distinto basta
+ * para que la trayectoria diverja, así que mide cuánto difieren dos corridas del mismo motor solo por el caos.
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 interface Corrida { raiz: string; semilla: number; dias: number; hilos: number; digesto: string; personasPorDia: number[];
-  acciones: Record<string, number>; distObjetivo: number[]; recorrido: number[]; ms: number }
+  acciones: Record<string, number>; accionesPorDia: Record<string, number>[]; distObjetivo: number[]; recorrido: number[]; ms: number }
 
 const args = process.argv.slice(2);
 const opcion = (nombre: string) => { const i = args.indexOf(`--${nombre}`); return i >= 0 ? args[i + 1] : undefined; };
@@ -29,9 +32,18 @@ async function correr(): Promise<void> {
   const { parseParams } = await imp('src/world/params.ts');
   const { hostOpenWorldParams } = await imp('src/server/hardware-limits.ts');
   const { digestoCanonico } = await imp('src/world/digesto.ts');
+  const residente = args.includes('--residente');
   let params = hostOpenWorldParams();
-  params = parseParams({ motor: { ...params.motor, hilos: 1, gpu: [] } }, params);
+  params = parseParams({ motor: { ...params.motor, hilos: residente ? 2 : 1, gpu: [] } }, params);
   const world = createWorld(semilla, params);
+  if (residente) {
+    const { ResidentTopologyOwner } = await imp('src/world/soa/topologia.ts');
+    const { bindWorldContext, worldContext } = await imp('src/world/spatial.ts');
+    const dueno = new ResidentTopologyOwner();
+    world.tiles = dueno.tiles(world.tiles.map((t: unknown) => dueno.tile(t)));
+    bindWorldContext(world, { ...worldContext(world), tileOwnership: dueno });
+  }
+  if (args.includes('--placebo')) world.people = [...world.people].reverse();
   let cerrar = async () => {};
   if (hilos > 1) {
     const { percepcionDe } = await imp('src/world/decision/percepcion.ts');
@@ -40,11 +52,11 @@ async function correr(): Promise<void> {
     percepcion.percibidor = doble;
     cerrar = () => doble.cerrar();
   }
-  const r: Corrida = { raiz, semilla, dias, hilos, digesto: '', personasPorDia: [], acciones: {}, distObjetivo: [], recorrido: [], ms: 0 };
+  const r: Corrida = { raiz, semilla, dias, hilos, digesto: '', personasPorDia: [], acciones: {}, accionesPorDia: [], distObjetivo: [], recorrido: [], ms: 0 };
   const t0 = performance.now();
   type P = { id: string; x: number; y: number; action: string; decisionAt: number; target: { x: number; y: number } };
   for (let dia = 0; dia < dias; dia++) {
-    const andado = new Map<string, number>();
+    const andado = new Map<string, number>(), delDia: Record<string, number> = {};
     for (let t = 0; t < 2400; t++) {
       const antes = new Map((world.people as P[]).map(p => [p.id, { x: p.x, y: p.y, decisionAt: p.decisionAt }]));
       stepWorld(world);
@@ -54,18 +66,20 @@ async function correr(): Promise<void> {
         andado.set(p.id, (andado.get(p.id) ?? 0) + Math.hypot(p.x - a.x, p.y - a.y));
         if (p.decisionAt !== a.decisionAt) {
           r.acciones[p.action] = (r.acciones[p.action] ?? 0) + 1;
+          delDia[p.action] = (delDia[p.action] ?? 0) + 1;
           r.distObjetivo.push(Math.hypot(p.target.x - p.x, p.target.y - p.y));
         }
       }
     }
     r.recorrido.push(...andado.values());
     r.personasPorDia.push(world.people.length);
+    r.accionesPorDia.push(delDia);
   }
   await cerrar();
   r.ms = performance.now() - t0;
   r.digesto = digestoCanonico(world);
   writeFileSync(opcion('salida')!, JSON.stringify(r));
-  console.log(JSON.stringify({ semilla, hilos, personas: r.personasPorDia, decisiones: r.distObjetivo.length, ms: Math.round(r.ms), digesto: r.digesto }));
+  console.log(JSON.stringify({ semilla, hilos, residente, personas: r.personasPorDia, decisiones: r.distObjetivo.length, ms: Math.round(r.ms), digesto: r.digesto }));
 }
 
 // ── Estadística ──────────────────────────────────────────────────────────────────────────────────────────
@@ -181,7 +195,12 @@ function analizar(carpetas: string[]): void {
       return v.reduce((x, y) => x + y, 0) / Math.max(1, v.length);
     };
     const misma = semillas.map(s => dvt(base.get(s)!.acciones, otro.get(s)!.acciones));
-    console.log(`DVT media misma semilla A↔B: ${(misma.reduce((x, y) => x + y, 0) / misma.length).toFixed(4)}; entre semillas dentro de A: ${entre(base).toFixed(4)}; dentro de B: ${entre(otro).toFixed(4)}\n`);
+    console.log(`DVT media misma semilla A↔B: ${(misma.reduce((x, y) => x + y, 0) / misma.length).toFixed(4)}; entre semillas dentro de A: ${entre(base).toFixed(4)}; dentro de B: ${entre(otro).toFixed(4)}`);
+    // Cuándo divergen: DVT de las acciones de cada día, media sobre las semillas.
+    const dias = Math.min(...semillas.flatMap(s => [base.get(s)!.accionesPorDia?.length ?? 0, otro.get(s)!.accionesPorDia?.length ?? 0]));
+    if (dias > 0) console.log('DVT por día A↔B: ' + Array.from({ length: dias }, (_, d) =>
+      (semillas.reduce((x, s) => x + dvt(base.get(s)!.accionesPorDia[d]!, otro.get(s)!.accionesPorDia[d]!), 0) / semillas.length).toFixed(4)).join(', '));
+    console.log('');
   }
   // Las decisiones de una corrida no son independientes (un mundo caótico es UNA muestra por semilla): la prueba
   // honesta es por semilla, emparejada, con el signo de la diferencia permutado (2^semillas casos, exacta).

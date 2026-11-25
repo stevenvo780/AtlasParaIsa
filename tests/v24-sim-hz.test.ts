@@ -4,8 +4,8 @@
  *   projection of every resident tile on every scan), serially and with the parallel SoA kernel.
  * - The tape writer normalizes an owned structured clone in place instead of a JSON round trip and
  *   compares structurally: same rows, byte for byte, as the copying writer.
- * - Turbo frames between live mirror posts carry the slow summaries: every tick is still on the tape,
- *   in order, and each reconstructed frame has its summaries.
+ * - Turbo frames between live mirror posts carry the slow summaries: the tape holds a frame at least every
+ *   `PASO_MAXIMO` ticks (its cadence widens under load), in order, and each reconstructed frame has its summaries.
  */
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,12 +21,24 @@ import { bindWorldContext, worldContext } from '../src/world/spatial.js';
 import { ResidentTopologyOwner, residentBackingArray } from '../src/world/soa/topologia.js';
 import { residentFastAccess } from '../src/world/soa/terreno.js';
 import { createTileObserver, projectMirrorTile, projectTapeFrame } from '../src/server/sim-worker.js';
-import { TapeReader, TapeWriter, tapePathForWorld, tileEqual } from '../src/server/tape-store.js';
+import { TapeWriter, tileEqual } from '../src/server/tape-store.js';
+import { cintaDeMundo, PASO_MAXIMO } from '../src/server/cinta/escritor.js';
+import { LectorCinta } from '../src/server/cinta/lector.js';
+import { CINTA, type ChunkResp } from '../src/shared/cinta.js';
+import { applyClientTapeDelta } from '../src/shared/tape-delta.js';
 import { CARRIED_VIEW_FIELDS, withCarriedFields } from '../src/server/tape-worker.js';
 import { cerrarPiscinasDeComputo } from '../src/server/app.js';
 import { createWorkerGateway, saludDelEspejo } from '../src/server/gateway.js';
 import type { OperacionSalud, Salud } from '../src/shared/salud.js';
 import type { Tile, WorldView } from '../src/shared/types.js';
+
+/** Los fotogramas de L0 de un tramo, reconstruidos desde su fotograma clave. */
+function tramoL0(lector: LectorCinta, t: number, n: number): WorldView[] {
+  const r = JSON.parse(lector.chunk({ t, n, nivel: 0 })) as ChunkResp;
+  const frames = r.baseFrame ? [r.baseFrame] : [];
+  for (const d of r.deltas) frames.push(applyClientTapeDelta(frames.at(-1)!, d).frame);
+  return frames;
+}
 
 function directory(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'v24-sim-hz-'));
@@ -216,11 +228,11 @@ test('un guardado rutinario no degrada la salud, pero uno que deja el paso parad
   assert.equal(saludDelEspejo(medicion, { type: 'operacion', operacion: { ...operacion, tipo: 'arrancando' }, medidaEn: 1_500 }, false, 3_000).estado, 'degradado');
 });
 
-test('turbo gateway: every tick on the tape in order, summaries on every frame, live mirror at its cadence', { timeout: 120_000 }, async t => {
+test('turbo gateway: tape frames in order without gaps, summaries on every frame, live mirror at its cadence', { timeout: 120_000 }, async t => {
   const dir = directory(t);
   const worldPath = join(dir, 'world.sqlite');
   const gateway = createWorkerGateway({ worldPath, origin: 'https://carta.test', secure: true, password: 'private-v24-hz-password',
-    seed: 42, params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true, tapeKeyframeInterval: 30 });
+    seed: 42, params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true });
   t.after(() => gateway.close());
   let mirrorTick = -1;
   gateway.events.on('mirror', (tick: number) => { mirrorTick = tick; });
@@ -236,26 +248,28 @@ test('turbo gateway: every tick on the tape in order, summaries on every frame, 
   const ticks = end.latestTick - start.latestTick;
   t.diagnostic(`turbo: ${ticks} ticks on the tape`);
   assert.ok(ticks > 10, `the world advanced (${ticks} ticks)`);
-  const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
+  const reader = new LectorCinta(cintaDeMundo(worldPath));
   try {
-    const meta = reader.readMeta();
-    // The world keeps running after the flush: the tape holds at least the flushed frames, one per tick.
-    assert.ok(meta.totalFrames >= end.frames);
-    assert.equal(meta.totalFrames, meta.maxTick - meta.minTick + 1);
-    let expected = meta.minTick, read = 0;
-    while (expected <= meta.maxTick) {
-      const chunk = reader.readChunk(expected, 120);
-      assert.ok(chunk.frames.length > 0);
-      for (const frame of chunk.frames) {
-        // Frames written after readMeta are past this snapshot.
-        if (frame.tick > meta.maxTick) break;
-        assert.equal(frame.tick, expected, 'no tick is missing or repeated');
+    const meta = reader.meta(), l0 = meta.niveles[0]!;
+    // The world keeps running after the flush: the tape holds at least the flushed frames.
+    assert.ok(l0.fotogramas >= end.frames);
+    assert.deepEqual(meta.lagunas, []);
+    let next = l0.t0, previous = -1, read = 0;
+    while (next <= l0.t1) {
+      const frames = tramoL0(reader, next, 120).filter(frame => frame.tick >= next);
+      assert.ok(frames.length > 0);
+      for (const frame of frames) {
+        // Frames written after meta() are past this snapshot.
+        if (frame.tick > l0.t1) break;
+        if (previous < 0) assert.equal(frame.tick, l0.t0);
+        else assert.ok(frame.tick > previous && frame.tick - previous <= PASO_MAXIMO, `step ${previous} → ${frame.tick}`);
+        assert.equal(frame.tick % CINTA.pasos[0], 0);
         for (const field of ['stats', 'technology', 'organization', 'demography', 'places', 'memories'] as const) assert.ok(frame[field] !== undefined, `${field} at tick ${frame.tick}`);
         assert.ok(frame.people.length > 0 && frame.tiles.length > 0);
-        expected++; read++;
+        previous = frame.tick; next = frame.tick + 1; read++;
       }
     }
-    assert.equal(read, meta.totalFrames);
+    assert.equal(read, l0.fotogramas);
   } finally { reader.close(); }
   // The live mirror follows the world (throttled, never stalled).
   assert.ok(mirrorTick >= start.latestTick + 1, `mirror tick ${mirrorTick} moved past ${start.latestTick}`);
@@ -273,38 +287,44 @@ test('carried frames still project per tick what must agree with that tick\'s pe
   for (const field of ['communities', 'demography', 'places', 'memories']) assert.ok(frame[field] !== undefined, `${field} on every frame`);
 });
 
-test('turbo gateway: the first frame a reopened tape accepts is a full keyframe (terrain not lost after a restart)', { timeout: 180_000 }, async t => {
+test('turbo gateway: the first frame of a reopened tape\'s epoch is a full keyframe (terrain not lost after a restart)', { timeout: 180_000 }, async t => {
   const dir = directory(t);
   const worldPath = join(dir, 'world.sqlite');
   const options = { worldPath, origin: 'https://carta.test', secure: true, password: 'private-v24-hz-password', seed: 42,
-    params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true, tapeKeyframeInterval: 100_000 };
-  const frameAt = (tick: number) => {
-    const reader = new TapeReader({ path: tapePathForWorld(worldPath) });
-    try { return reader.readChunk(tick, 1).frames.find(frame => frame.tick === tick); } finally { reader.close(); }
+    params: parseParams('motor.hilos=1,persistencia.cadaTicks=200'), manual: true, turbo: true, tape: true };
+  const leer = <T>(f: (lector: LectorCinta) => T): T => {
+    const lector = new LectorCinta(cintaDeMundo(worldPath));
+    try { return f(lector); } finally { lector.close(); }
   };
   let gateway = createWorkerGateway(options);
   try {
     await gateway.ready;
-    const publicado = esperarEspejo(gateway, 5, t.signal);
+    const publicado = esperarEspejo(gateway, 2 * CINTA.pasos[0] + 1, t.signal);
     gateway.start();
     await publicado;
   } finally { await gateway.close(); }
-  const first = new TapeReader({ path: tapePathForWorld(worldPath) });
-  const before = first.readMeta();
-  first.close();
-  assert.ok((frameAt(before.maxTick)?.tiles.length ?? 0) > 100, 'resident terrain on the tape before the restart');
+  const before = leer(lector => lector.meta());
+  assert.equal(before.epoca, 0);
+  const last = leer(lector => tramoL0(lector, before.t1, 1).at(-1));
+  assert.equal(last?.tick, before.t1);
+  assert.ok((last?.tiles.length ?? 0) > 100, 'resident terrain on the tape before the restart');
   gateway = createWorkerGateway(options);
   t.after(() => gateway.close());
   await gateway.ready;
-  const publicado = esperarEspejo(gateway, before.maxTick + 3, t.signal);
+  const publicado = esperarEspejo(gateway, before.t1 + 2 * CINTA.pasos[0] + 1, t.signal);
   gateway.start();
   await publicado;
-  assert.ok((await gateway.flushTape()).latestTick >= before.maxTick + 3);
-  const resumed = frameAt(before.maxTick + 1);
+  let after = await gateway.flushTape();
+  for (let i = 0; i < 100 && after.latestTick <= before.t1 + 2 * CINTA.pasos[0]; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    after = await gateway.flushTape();
+  }
+  // El servidor reabre el mundo donde lo guardó al cerrar: la época nueva empieza ahí, con un fotograma clave.
+  const { meta, resp } = leer(lector => ({ meta: lector.meta(), resp: JSON.parse(lector.chunk({ t: before.t1, n: 1, nivel: 0 })) as ChunkResp }));
+  assert.equal(meta.epoca, 1); assert.equal(resp.epoca, 1);
+  const resumed = resp.baseFrame;
+  assert.equal(resumed?.tick, before.t1, 'the new epoch starts at the saved tick');
   assert.ok(resumed?.performance?.activeTiles);
   // El terreno residente puede cambiar al paso siguiente, incluso sin reiniciar.
   assert.equal(resumed.tiles.length, resumed.performance.activeTiles, 'the reopened frame keeps every resident tile of its own tick');
-  const reopened = new TapeReader({ path: tapePathForWorld(worldPath) });
-  try { assert.ok(reopened.readMeta().keyframeTicks.includes(resumed.tick)); }
-  finally { reopened.close(); }
 });

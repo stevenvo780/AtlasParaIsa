@@ -196,8 +196,14 @@ import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardw
 import { resumenDespacho } from './resumen-vivo.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
-import { tapePathForWorld, tileEqual } from './tape-store.js';
-import { CARRIED_VIEW_FIELDS, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
+import { tileEqual } from './tape-store.js';
+import { CARRIED_VIEW_FIELDS, crearEnlaceCortes, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
+import { cintaDeMundo } from './cinta/escritor.js';
+import { enlaceCinta } from '../shared/fotograma.js';
+import { CINTA, type Apertura, type Corte, type Hito } from '../shared/cinta.js';
+import type { ChronicleEvent } from '../shared/types.js';
+import { chronicleSerial } from '../world/chronicle-journal.js';
+import { registrar } from '../world/invariantes.js';
 import { TAPE_KEYFRAME_INTERVAL } from '../shared/tape.js';
 import type { AppOptions } from './app.js';
 import type { OperacionSalud, Salud } from '../shared/salud.js';
@@ -214,12 +220,15 @@ export interface SimWorkerOptions {
   deployment?: boolean;
   /** Test-only synchronous block, deliberately occupying the worker event loop. */
   testStepDelayMs?: number;
-  /** V21: uncapped loop (`tickMs = 0`, a step per `setImmediate`); the live mirror is throttled to
-   * `TURBO_MIRROR_MS` while the tape still records every tick. */
+  /** Un paso por `setImmediate`, con frecuencia propia para el espejo y la cinta. */
   turbo?: boolean;
   turboSaveIntervalMs?: number;
-  /** V21: record every step in the DVR tape (`tapePathForWorld(worldPath)`). Defaults to `turbo`. */
+  /** Graba la cinta multirresolución. Por defecto se activa en turbo. */
   tape?: boolean;
+  tapeTopeBytes?: number;
+  /** Tiempo sin que la cinta devuelva un crédito tras el cual se la da por perdida (por defecto, 5 min). */
+  tapeSinCreditoMs?: number;
+  // Se retiran del gateway al integrar C1b.
   tapeMaxFrames?: number;
   tapeKeyframeInterval?: number;
   /** V21: inhabitants act autonomously; direct NPC orders are rejected. */
@@ -388,6 +397,27 @@ export function tapeKeyframeDue(tick: number, interval: number | undefined, firs
 /** Minimum spacing between live mirror posts while the turbo loop runs uncapped. */
 export const TURBO_MIRROR_MS = 250;
 
+function demografiaCinta(world: World) {
+  return { poblacion: world.people.length, nacimientos: world.birthCounter, muertes: world.demographyDynamics.deaths };
+}
+const basesDemografia = new WeakMap<World, ReturnType<typeof demografiaCinta>>();
+registrar({ id: 'cinta.serie-demografia', carril: 'C1a', gravedad: 'dura', alcance: 'global', cadaTicks: 200,
+  comprobar(world) {
+    const base = basesDemografia.get(world);
+    if (!base) return [];
+    const { poblacion, nacimientos, muertes } = demografiaCinta(world);
+    const esperado = base.poblacion + nacimientos - base.nacimientos - (muertes - base.muertes);
+    if (poblacion === esperado && nacimientos >= base.nacimientos && muertes >= base.muertes) return [];
+    return [{ id: 'cinta.serie-demografia', gravedad: 'dura', tick: world.tick, esperado, observado: poblacion,
+      detalle: 'La serie no conserva el balance demográfico de su época.' }];
+  },
+});
+
+function hitoCinta(suceso: ChronicleEvent): Hito {
+  const importancia = Number(['birth', 'death', 'community', 'settlement', 'discovery', 'invention'].includes(suceso.kind));
+  return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
+}
+
 async function runSimulation(options: SimWorkerOptions) {
   const port = parentPort!;
   let operacion: OperacionSalud | null = null;
@@ -416,21 +446,28 @@ async function runSimulation(options: SimWorkerOptions) {
   store.sessionValid = hash => (!sessionFlags.has(hash) || Atomics.load(sessionFlags.get(hash)!, 0) === 1) && realSessionValid(hash);
   const initialSessions = (store.db.prepare('SELECT hash,expires FROM sessions WHERE expires>?').all(Date.now()) as { hash: string; expires: number }[])
     .map(row => { const validity = new SharedArrayBuffer(4); const flag = new Int32Array(validity); flag[0] = 1; sessionFlags.set(row.hash, flag); return { ...row, validity }; });
-  const observer = createTileObserver();
+  let observer = createTileObserver();
   const turbo = !!options.turbo || options.tickMs === 0;
   const tapeEnabled = options.tape ?? turbo;
   let tapeWorker: Worker | undefined;
   let tapeClosed = false;
   let tapeError: Error | undefined;
-  let inFlightFrames = 0;
+  const descriptor = crearEnlaceCortes();
+  const enlace = enlaceCinta(descriptor);
   let tapeRequestId = 0;
   type TapeResult = { frames: number; latestTick: number };
   const tapeCalls = new Map<number, { resolve(value: TapeResult): void; reject(error: Error): void }>();
   let tapeExited: Promise<void> | undefined;
-  let firstTapeFrame = true;
-  /** Latest tick a reopened tape already holds: the writer drops frames up to it (append-only), so they are
-   * not even projected, and the first frame it DOES accept must be a full keyframe (it has no base yet). */
-  let tapeLatestTick = -1;
+  let epoca = -1, seq = 0, ultimoCorte = -Infinity, ultimoPuntoSerie = -1;
+  let recargaPendiente = false;
+  // Sin crédito los hitos se acumulan aquí: una cinta que no vuelve no puede llevarse la memoria del motor.
+  const sinCreditoMaxMs = options.tapeSinCreditoMs ?? 300_000;
+  let sinCreditoDesde: number | undefined;
+  let serialCronica = 0;
+  let baseDemografia: ReturnType<typeof demografiaCinta>;
+  const hitosPendientes: Hito[] = [];
+  const teselasPendientes = new Map<string, Tile>();
+  const eventoGuardado = store.db.prepare('SELECT body FROM events WHERE id=?');
   let lastSimHz = 0;
   /** Chunks changed since the last mirror post (turbo accumulates across throttled ticks). */
   const unpostedChunks = new Set<string>();
@@ -441,7 +478,8 @@ async function runSimulation(options: SimWorkerOptions) {
   function failTape(error: Error) {
     if (tapeError) return;
     tapeError = error;
-    inFlightFrames = 0;
+    hitosPendientes.length = 0;
+    teselasPendientes.clear();
     for (const call of tapeCalls.values()) call.reject(error);
     tapeCalls.clear();
     port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error.message } });
@@ -459,11 +497,46 @@ async function runSimulation(options: SimWorkerOptions) {
   async function closeTape() {
     if (!tapeWorker || tapeClosed) return;
     tapeClosed = true;
-    try { await tapeCommand('close'); await tapeExited; }
+    try { if (!tapeError) { await tapeCommand('close'); await tapeExited; } }
+    catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
     finally { if (tapeError) await tapeWorker.terminate(); }
   }
   let instanceId: string | undefined;
-  function publish({ forcePost = false, record = true }: { forcePost?: boolean; record?: boolean } = {}) {
+  function abrirCinta(world: World, motivo: Apertura['motivo']) {
+    tapeWorker!.postMessage({ type: 'abrir', apertura: { instanciaId: instanceId!, epoca: ++epoca,
+      tMundo: world.tick, motivo }, hitosPrevios: hitosPendientes } satisfies TapeWorkerRequest);
+    Atomics.store(enlace.pedirCompleto, 0, 1);
+    ultimoCorte = -Infinity;
+    ultimoPuntoSerie = -1;
+    serialCronica = world.eventCounter;
+    baseDemografia = demografiaCinta(world);
+    teselasPendientes.clear();
+    hitosPendientes.length = 0;
+    for (const suceso of world.events) if (suceso.tick === world.tick && (epoca === 0 || chronicleSerial(suceso.id) === null)) {
+      hitosPendientes.push(hitoCinta(suceso));
+    }
+  }
+
+  function serieCinta(world: World): Corte['serie'] {
+    const demografia = demografiaCinta(world);
+    return { poblacion: demografia.poblacion, nacimientos: demografia.nacimientos - baseDemografia.nacimientos,
+      muertes: demografia.muertes - baseDemografia.muertes, fauna: world.animals.length,
+      estructuras: world.structures.length, sustancias: world.chemistry?.formulas.length ?? 0, hz: lastSimHz };
+  }
+
+  function recogerCronica(world: World) {
+    const diario = world.chronicleJournal;
+    while (serialCronica < world.eventCounter) {
+      const serial = ++serialCronica;
+      // En un paso que guardó, Store ya pasó los nuevos sucesos del diario al archivo.
+      const suceso = diario?.pending[serial - diario.committedThrough - 1];
+      const body = suceso ? undefined : eventoGuardado.get(`e${serial}`)?.body;
+      if (!suceso && typeof body !== 'string') throw new Error(`Falta el suceso ${serial} de la crónica.`);
+      hitosPendientes.push(hitoCinta(suceso ?? JSON.parse(body as string) as ChronicleEvent));
+    }
+  }
+
+  function publish({ forcePost = false, forzarCorte = false }: { forcePost?: boolean; forzarCorte?: boolean } = {}) {
     const live = app!;
     // A failed in-place step must NEVER leak its partially mutated world into the mirror (nor the tape).
     if (live.failed) {
@@ -474,30 +547,59 @@ async function runSimulation(options: SimWorkerOptions) {
     // The world's identity never changes under its single writer: read once, not per (turbo) tick.
     instanceId ??= readWorldInstance(store.db)!;
     const now = performance.now();
-    const recording = record && !!tapeWorker && !tapeClosed && !tapeError && world.tick > tapeLatestTick;
-    const keyframe = recording && tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, firstTapeFrame);
-    let postDue = !turbo || forcePost || now - lastPostAt >= TURBO_MIRROR_MS;
-    // V24 turbo: the terrain and the slow summaries are sampled at the live mirror's cadence (and on every
-    // keyframe); the frames between them still record every inhabitant, animal, work and event of their tick.
-    const refresh = postDue || keyframe;
+    if (recargaPendiente) {
+      observer = createTileObserver();
+      unpostedChunks.clear();
+      lastSimHz = 0;
+    }
+    if (tapeWorker && !tapeClosed && !tapeError) {
+      if (Atomics.load(enlace.creditos, 0) > 0) sinCreditoDesde = undefined;
+      else if (now - (sinCreditoDesde ??= now) >= sinCreditoMaxMs) {
+        failTape(new Error(`La cinta no devolvió ningún corte en ${Math.round(sinCreditoMaxMs / 1000)} s.`));
+        void tapeWorker.terminate();
+      }
+    }
+    if (tapeWorker && !tapeClosed && !tapeError) {
+      try {
+        if (epoca < 0 || recargaPendiente) abrirCinta(world, epoca < 0 && live.respaldo ? 'restauracion' : 'reinicio');
+        basesDemografia.set(world, baseDemografia);
+        recogerCronica(world);
+        if (ultimoPuntoSerie < 0 || world.tick > ultimoPuntoSerie && world.tick % CINTA.seriePaso === 0) {
+          // La serie conserva sus ticks aunque no quede crédito para una vista.
+          tapeWorker.postMessage({ type: 'serie', epoca, punto: { t: world.tick, ...serieCinta(world) } } satisfies TapeWorkerRequest);
+          ultimoPuntoSerie = world.tick;
+        }
+      } catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
+    }
+    let postDue = !turbo || forcePost || recargaPendiente || now - lastPostAt >= TURBO_MIRROR_MS;
+    recargaPendiente = false;
+    const activa = !!tapeWorker && !tapeClosed && !tapeError;
+    const completa = Atomics.load(enlace.pedirCompleto, 0) === 1;
+    const recording = activa && Atomics.load(enlace.creditos, 0) > 0 && world.tick > ultimoCorte
+      && (completa || forzarCorte || world.tick - ultimoCorte >= Atomics.load(enlace.cadencia, 0));
     let observation: TileObservation | undefined;
-    if (refresh) {
+    if (postDue || recording) {
       observation = observer.scan(world);
       for (const key of observation.dirty) unpostedChunks.add(key);
+      if (activa && !completa) for (const tile of observation.changed) teselasPendientes.set(`${tile.x},${tile.y}`, tile);
       if (observation.force) postDue = true;
     }
     let frame: WorldView | undefined;
     if (recording) {
-      // Every tick reaches the tape, even when the live mirror is throttled. A delta frame carries only
-      // the tiles whose public value changed; a keyframe, every resident tile.
-      let tiles: Tile[] = observation?.changed ?? [];
-      if (keyframe) { tiles = []; for (const chunk of observation!.chunks.values()) for (const tile of chunk) tiles.push(tile); }
-      frame = projectTapeFrame(world, live.runtime, instanceId, tiles, !refresh);
       try {
-        tapeWorker!.postMessage({ type: 'record', view: frame, simHz: lastSimHz,
-          partialTiles: !keyframe, ...(refresh ? {} : { carried: true as const }) } satisfies TapeWorkerRequest);
-        inFlightFrames++;
-        firstTapeFrame = false;
+        const tiles: Tile[] = [];
+        if (completa) for (const chunk of observation!.chunks.values()) for (const tile of chunk) tiles.push(tile);
+        frame = projectTapeFrame(world, live.runtime, instanceId, tiles);
+        const corte: Corte = { seq: ++seq, epoca, t: world.tick, vista: frame,
+          tilesCambiadas: completa ? 'todas' : [...teselasPendientes.values()], hitos: hitosPendientes, catalogo: [], hz: lastSimHz,
+          serie: serieCinta(world) };
+        Atomics.sub(enlace.creditos, 0, 1);
+        Atomics.add(enlace.entregados, 0, 1n);
+        tapeWorker!.postMessage({ type: 'corte', corte } satisfies TapeWorkerRequest);
+        Atomics.store(enlace.pedirCompleto, 0, 0);
+        ultimoCorte = world.tick;
+        teselasPendientes.clear();
+        hitosPendientes.length = 0;
       } catch (error) {
         // A DVR is an observer: it never pauses the world. It stops recording and says so once.
         failTape(error instanceof Error ? error : new Error(String(error)));
@@ -567,15 +669,15 @@ async function runSimulation(options: SimWorkerOptions) {
       // publish sends to the dedicated writer thread; the inner app must not open another writer.
       tape: false,
       turboSaveIntervalMs: options.turboSaveIntervalMs,
-      onOperacion: publicarOperacion,
+      onOperacion: tipo => {
+        if (tipo === 'recargando') recargaPendiente = true;
+        publicarOperacion(tipo);
+      },
       params: options.deployment ? () => deploymentParams(base()) : options.params,
-      beforeStep: () => {
-        if (inFlightFrames >= 64) return false;
-        if (options.testStepDelayMs) {
+      beforeStep: options.testStepDelayMs ? () => {
           port.postMessage({ type: 'step-blocked', tick: app!.world.tick });
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.testStepDelayMs);
-        }
-      },
+      } : undefined,
       // A step that applied a Mensaje Divino posts the mirror at once (and still records its frame).
       afterStep: simHz => { lastSimHz = simHz; publish({ forcePost: app!.susurrosEnUltimoPaso }); } });
     if (options.deployment) setParams(app.world, deploymentParams(paramsOf(app.world)));
@@ -592,7 +694,7 @@ async function runSimulation(options: SimWorkerOptions) {
       informarAvance();
     }
     if (motor.gpu.length === 0) port.postMessage({ type: 'log', level: 'info', value: { gpuAutoprueba: null, v15: resumenDespacho(app.world) } });
-    if (tapeEnabled) {
+    if (tapeEnabled) try {
       let moduleURL = new URL('./tape-worker.js', import.meta.url);
       const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
       if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
@@ -605,27 +707,20 @@ async function runSimulation(options: SimWorkerOptions) {
       `, { eval: true, execArgv: [], name: 'carta-tape', workerData: {
         role: 'carta-tape', moduleURL: moduleURL.href,
         loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
-        options: { path: tapePathForWorld(options.worldPath), maxFrames: options.tapeMaxFrames,
-          keyframeInterval: options.tapeKeyframeInterval },
+        descriptor, options: { directorio: cintaDeMundo(options.worldPath), topeBytes: options.tapeTopeBytes },
       } });
       tapeWorker.on('message', (message: TapeWorkerReply) => {
-        if (message.type === 'ack') inFlightFrames--;
-        else {
-          tapeCalls.get(message.id)?.resolve({ frames: message.frames, latestTick: message.latestTick });
-          tapeCalls.delete(message.id);
-        }
+        tapeCalls.get(message.id)?.resolve({ frames: message.frames, latestTick: message.latestTick });
+        tapeCalls.delete(message.id);
       });
       tapeWorker.on('error', failTape);
       tapeExited = new Promise(resolve => tapeWorker!.once('exit', code => {
         if (!tapeClosed || code !== 0 || tapeCalls.size) failTape(new Error(`Tape worker exited (code ${code}).`));
         resolve();
       }));
-    }
-    tapeLatestTick = (await tapeCommand('flush')).latestTick;
+    } catch (error) { failTape(error instanceof Error ? error : new Error(String(error))); }
     informarAvance();
     publish({ forcePost: true });
-    // The gateway opens its read-only TapeReader on `ready`: the initial frame must already be durable.
-    await tapeCommand('flush');
     port.on('message', (message: SimRpc) => { void handle(message); });
     publicarOperacion(null);
     port.postMessage({ type: 'ready', sessions: initialSessions });
@@ -674,9 +769,9 @@ async function runSimulation(options: SimWorkerOptions) {
           closing = true;
           try {
             await app!.close();
-            if (!app!.failed) {
-              // Turbo throttles the mirror: the last steps reach the gateway before it goes away.
-              if (turbo) publish({ forcePost: true, record: false });
+            if (!app!.failed && (turbo || tapeWorker)) {
+              if (tapeWorker && !tapeError) await tapeCommand('flush').catch(() => undefined);
+              publish({ forcePost: true, forzarCorte: true });
             }
           } finally { try { await closeTape(); } finally { store.close(); } }
           break;

@@ -12,11 +12,12 @@ import { CHUNK_SIZE, generateChunk, legacyStructures, type Chunk } from '../worl
 import { initializeEcosystem } from '../world/ecosystem.js';
 import { projectAnimal } from '../world/animals.js';
 import { clavesVivasEn } from './regiones-vivas.js';
-import { TapeReader, tapePathForWorld } from './tape-store.js';
+import { cintaDeMundo } from './cinta/escritor.js';
+import { LectoresCinta } from './cinta/lector-worker.js';
+import { CINTA } from '../shared/cinta.js';
 import { projectMirrorTile, type MirrorUpdate, type OperacionWorker, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
 import type { RuntimeStats, Tile, Viewport, WorldView } from '../shared/types.js';
 import type { Salud } from '../shared/salud.js';
-import type { TapeChunkEncoding } from '../shared/tape.js';
 import type { World } from '../world/index.js';
 
 export interface WorkerGatewayOptions extends GatewayAppOptions, SimWorkerOptions {}
@@ -46,8 +47,11 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   /** V21: same rule as the worker (`tickMs: 0` is turbo; the tape follows turbo unless set). */
   const turbo = !!options.turbo || options.tickMs === 0;
   const tapeEnabled = options.tape ?? turbo;
-  /** Read-only WAL view of the worker's tape: scrubbing never sends an RPC to the simulation. */
-  let tapeReader: TapeReader | undefined;
+  /** Lectores de la cinta que graba `carta-tape`: el DVR nunca manda una RPC a la simulación. */
+  const lectores = tapeEnabled ? new LectoresCinta({ directorio: cintaDeMundo(options.worldPath), mundo: options.worldPath,
+    topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly: !!options.observerOnly, turbo }) : undefined;
+  /** El motivo con el que la simulación dio la cinta por perdida. */
+  let errorCinta: string | undefined;
   let fatal: Error | undefined;
   const creadoEn = Date.now();
   let avance: OperacionWorker = { type: 'operacion', operacion: { tipo: 'arrancando', inicio: creadoEn, progresoEn: creadoEn }, medidaEn: performance.now() };
@@ -156,38 +160,6 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     }
     return generated;
   }
-  /** Static/unmodified tiles for one tape chunk request, the way `view` fills terrain outside the live
-   * pages: archive/pending/generated chunk, ecosystem initialization, mirror projection. Cached per
-   * request, so 240 frames of one camera read each chunk once. */
-  function tapeBackground() {
-    if (!mirror) throw new HttpError(503, 'El mundo todavía está cargando.');
-    const seed = mirror.seed, cuencas = mirror.cuencas;
-    const chunks = new Map<string, Chunk>(), tiles = new Map<string, Tile>();
-    return (x: number, y: number): Tile => {
-      const id = `${x},${y}`;
-      let tile = tiles.get(id);
-      if (tile) return tile;
-      const cx = Math.floor(x / CHUNK_SIZE), cy = Math.floor(y / CHUNK_SIZE), key = `${cx},${cy}`;
-      let chunk = chunks.get(key);
-      if (!chunk) { chunk = chunkAt(key, cx, cy); chunks.set(key, chunk); }
-      tile = projectMirrorTile(initializeEcosystem(seed, chunk.tiles[(y - cy * CHUNK_SIZE) * CHUNK_SIZE + x - cx * CHUNK_SIZE]!, cuencas));
-      tiles.set(id, tile);
-      return tile;
-    };
-  }
-  /** Opens the read-only tape once the worker is ready. A DVR that cannot open is a 503 on its own
-   * endpoints, retried on the next request: it never takes the live gateway down with it. */
-  function openTape(): TapeReader | undefined {
-    if (tapeReader || !tapeEnabled || !isReady || closing) return tapeReader;
-    try { tapeReader = new TapeReader({ path: tapePathForWorld(options.worldPath), observerOnly: !!options.observerOnly, turbo }); }
-    catch (error) { if (options.deployment) console.warn(JSON.stringify({ cinta: 'no se pudo abrir', motivo: error instanceof Error ? error.message : String(error) })); }
-    return tapeReader;
-  }
-  function tape(): TapeReader {
-    const reader = openTape();
-    if (!reader) throw new HttpError(503, 'La cinta todavía no está disponible.');
-    return reader;
-  }
   function view(viewport?: Viewport): WorldView {
     if (!mirror) throw new HttpError(503, 'El mundo todavía está cargando.');
     const v = normalizeViewport(viewport), source = mirror.view;
@@ -274,13 +246,10 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     get deltas() { return mirror?.deltas ?? false; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
     get respaldo() { return mirror?.respaldo; },
-    ...(tapeEnabled ? {
-      tapeMeta: () => tape().readMeta(240),
-      tapeChunk: (fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding) => {
-        const reader = tape();
-        return reader.readChunk(fromTick, count, viewport, viewport ? tapeBackground() : undefined, encoding);
-      },
-    } : {}),
+    // Hasta el primer espejo no se sabe de qué instancia es el mundo: la cinta de otra no se sirve ni un momento.
+    ...(lectores ? { cinta: { leer: (peticion, gzip, senal) => mirror ? lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok',
+      instancia: mirror.view.instanceId, fondo: { seed: mirror.seed, cuencas: mirror.cuencas } }, senal)
+      : Promise.reject(new HttpError(503, 'El mundo todavía está cargando.')) } } : {}),
   };
   // Validate credentials/origins before spawning, so configuration errors cannot orphan a worker.
   const transport = createReadOnlyApp(options, backend);
@@ -298,7 +267,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
       options: { worldPath: options.worldPath, commit: options.commit, seed: options.seed, params: options.params, tickMs: options.tickMs,
         deployment: options.deployment, testStepDelayMs: options.testStepDelayMs,
-        turbo, tape: tapeEnabled, tapeMaxFrames: options.tapeMaxFrames, tapeKeyframeInterval: options.tapeKeyframeInterval,
+        turbo, tape: tapeEnabled, tapeTopeBytes: options.tapeTopeBytes,
         turboSaveIntervalMs: options.turboSaveIntervalMs,
         observerOnly: options.observerOnly } satisfies SimWorkerOptions } });
   let workerExited = false;
@@ -363,8 +332,6 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
             }
             archive = new Store(options.worldPath, { readOnly: true });
             isReady = true;
-            // The worker flushed its initial frame before `ready`: the tape file exists from here on.
-            openTape();
             readyResolve();
             if (started) void rpc('start').catch(fail);
           } else { isReady = true; readyResolve(); }
@@ -374,6 +341,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
         simulationPaused = true;
         if (mirror) transport.broadcast();
       } else if (message.type === 'log') {
+        const aviso = message.value as { cinta?: string; motivo?: string } | undefined;
+        if (aviso?.cinta === 'detenida') errorCinta = aviso.motivo ?? 'La cinta se detuvo.';
         if (options.deployment) {
           const log = message.level === 'warn' ? console.warn : console.info;
           log(JSON.stringify(message.value));
@@ -407,8 +376,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
           if (!workerExited) await rpc('shutdown');
           await exited;
         } finally {
-          try { tapeReader?.close(); } finally {
-            tapeReader = undefined;
+          try { await lectores?.close(); } finally {
             archive?.close();
             if (!workerExited) await worker.terminate();
           }

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -20,7 +20,7 @@ import { technologyRecipeDetail } from '../world/technology.js';
 import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
 import { technologyJournalNearCapacity } from '../world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
-import type { ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
+import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
@@ -30,11 +30,16 @@ import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
-import { TapeReader, TapeWriter, tapePathForWorld } from './tape-store.js';
+import { Worker } from 'node:worker_threads';
+import { cintaDeMundo } from './cinta/escritor.js';
+import { LectoresCinta, type PeticionCinta, type RespuestaCinta } from './cinta/lector-worker.js';
+import { CINTA, type ChunkReq, type Corte, type Hito, type Nivel } from '../shared/cinta.js';
+import { enlaceCinta } from '../shared/fotograma.js';
+import { crearEnlaceCortes, type TapeWorkerRequest } from './tape-worker.js';
+import { chronicleSerial } from '../world/chronicle-journal.js';
 import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
-import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import type { Chunk } from '../world/terrain.js';
-import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, tapeKeyframeDue, TURBO_MIRROR_MS } from './sim-worker.js';
+import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, TURBO_MIRROR_MS } from './sim-worker.js';
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
@@ -75,11 +80,10 @@ export interface AppOptions {
   turbo?: boolean;
   /** Minimum wall-clock spacing of routine turbo saves; gestures and close always persist. */
   turboSaveIntervalMs?: number;
-  /** V21: record the DVR tape and serve `/api/tape/*` (defaults to `turbo`). In `createApp` the
-   * app owns the writer; behind the worker gateway a dedicated tape thread owns it. */
+  /** Graba la cinta en el hilo `carta-tape` y sirve `/api/cinta/*` y su alias `/api/tape/*` (por defecto, con `turbo`). */
   tape?: boolean;
-  tapeMaxFrames?: number;
-  tapeKeyframeInterval?: number;
+  /** Bytes que puede ocupar la cinta (por defecto `CINTA.topeBytes`). */
+  tapeTopeBytes?: number;
   /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
   observerOnly?: boolean;
 }
@@ -112,9 +116,8 @@ export interface ReadOnlyBackend {
   readonly deltas: boolean;
   readonly failed: boolean;
   readonly respaldo: unknown;
-  /** V21 DVR (read-only, never an RPC to the simulation). Absent when the tape is disabled. */
-  tapeMeta?(): TapeMetaResponse;
-  tapeChunk?(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse;
+  /** Lectura de la cinta en sus hilos (nunca una RPC a la simulación). Ausente si la cinta está apagada. */
+  cinta?: ServicioCinta;
   /** V24: discovered-terrain minimap, global directory and Mensajes Divinos. Each read returns the SAME
    * object while nothing changed, so the HTTP layer reuses its encoded (and gzipped) body. */
   worldmap?(): WorldMapResponse;
@@ -123,6 +126,8 @@ export interface ReadOnlyBackend {
   whisper?(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper>;
 }
 export interface WhispersResponse { tick: number; whispers: DivineWhisper[] }
+/** La respuesta ya serializada (y comprimida si se pide) en un hilo lector: el HTTP solo la escribe. */
+export interface ServicioCinta { leer(peticion: PeticionCinta, gzip: boolean, senal?: AbortSignal): Promise<RespuestaCinta> }
 
 /**
  * V24 — Last known 4×4 palette summary of every chunk this process has seen: resident chunks refresh
@@ -364,13 +369,34 @@ function esOrdenDirecta(value: unknown): boolean {
   return kind === 'command' || kind === 'order';
 }
 /** Ventana de cámara opcional en la consulta (`x`, `y`, `width`, `height`): o las cuatro o ninguna. */
-function camaraDeConsulta(params: URLSearchParams): Viewport | undefined {
-  const keys = ['x', 'y', 'width', 'height'] as const;
+function camaraDeConsulta(params: URLSearchParams, ancho = 'width', alto = 'height'): Viewport | undefined {
+  const keys = ['x', 'y', ancho, alto];
   const present = keys.filter(k => params.has(k));
   if (!present.length) return undefined;
   if (present.length !== keys.length) throw new HttpError(400, 'Ventana de cámara no válida.');
-  try { return normalizeViewport({ x: Number(params.get('x')), y: Number(params.get('y')), width: Number(params.get('width')), height: Number(params.get('height')) }); }
+  try { return normalizeViewport({ x: Number(params.get('x')), y: Number(params.get('y')), width: Number(params.get(ancho)), height: Number(params.get(alto)) }); }
   catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+}
+const RUTAS_CINTA = new Set(['/api/cinta/meta', '/api/cinta/chunk', '/api/tape/meta', '/api/tape/chunk']);
+/** Consulta de `RutasCinta` (`shared/cinta.ts`) o del alias `/api/tape/*`, validada antes de ir a un lector. */
+function consultaCinta(url: URL): PeticionCinta {
+  const q = url.searchParams, MAX = Number.MAX_SAFE_INTEGER;
+  const opcional = (k: string) => q.has(k) ? enteroDeConsulta(q, k, 0, MAX) : undefined;
+  if (url.pathname === '/api/tape/meta') return { tipo: 'meta-antigua' };
+  if (url.pathname === '/api/tape/chunk') {
+    const encoding = q.get('encoding') ?? 'full';
+    if (encoding !== 'full' && encoding !== 'delta') throw new HttpError(400, 'Codificación de cinta no válida.');
+    return { tipo: 'chunk-antiguo', fromTick: enteroDeConsulta(q, 'fromTick', 0, MAX, 0), count: enteroDeConsulta(q, 'count', 1, 240, 60),
+      camara: camaraDeConsulta(q), encoding };
+  }
+  if (url.pathname === '/api/cinta/meta') return { tipo: 'meta', t0: opcional('t0'), t1: opcional('t1') };
+  const nivel = q.get('nivel') ?? 'auto';
+  if (!['auto', '0', '1', '2', '3', '4'].includes(nivel)) throw new HttpError(400, 'Nivel de cinta no válido.');
+  const camara = camaraDeConsulta(q, 'w', 'h');
+  const req: ChunkReq = { t: enteroDeConsulta(q, 't', 0, MAX), n: enteroDeConsulta(q, 'n', 1, CINTA.maxFotogramas),
+    nivel: nivel === 'auto' ? 'auto' : Number(nivel) as Nivel, epoca: opcional('epoca'),
+    ...(camara ? { x: camara.x, y: camara.y, w: camara.width, h: camara.height } : {}) };
+  return { tipo: 'chunk', req };
 }
 /** Entero de la consulta dentro de [min, max]; `fallback` si falta. */
 function enteroDeConsulta(params: URLSearchParams, key: string, min: number, max: number, fallback?: number): number {
@@ -634,52 +660,113 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
   }
   if (!gateway) renovarReserva();
-  /** V21 DVR of a world simulated in this thread (`createApp`). Behind the gateway the worker records
-   * and `gateway.tapeMeta/tapeChunk` read; here the app owns both ends of the same tape. */
-  const tapePath = !gateway && tapeRequested ? (store.path === ':memory:' ? ':memory:' : tapePathForWorld(store.path)) : undefined;
-  let tapeWriter = tapePath ? new TapeWriter({ path: tapePath, maxFrames: options.tapeMaxFrames, keyframeInterval: options.tapeKeyframeInterval }) : undefined;
-  const observadorCinta = createTileObserver();
-  let ultimoTickGrabado = -1;
+  /** Cinta de un mundo simulado en este hilo (`createApp`): la graba el hilo `carta-tape`, como tras la pasarela, con
+   * la misma cadencia, créditos y épocas; los lectores van en los suyos. Ni abrir un catálogo roto ni comprimir o
+   * sincronizar un bloque ocurre en este hilo, y un fallo de la cinta nunca impide arrancar ni pausa el mundo. */
+  const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:' ? cintaDeMundo(store.path) : undefined;
+  const descriptorCortes = crearEnlaceCortes(), enlaceCortes = enlaceCinta(descriptorCortes);
+  let hiloCinta: Worker | undefined, salidaCinta: Promise<void> | undefined, cerrandoCinta = false;
+  let errorCinta: string | undefined;
+  let observadorCinta = createTileObserver();
+  let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, serialCronica = 0;
+  let recargaCinta = false, baseNacimientos = 0, baseMuertes = 0;
+  const hitosCinta: Hito[] = [];
+  const eventoGuardado = directorioCinta ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
+  function perderCinta(error: unknown) {
+    if (errorCinta) return;
+    // La cinta observa: deja de grabar, lo dice una vez y `/api/cinta/meta` lo muestra.
+    errorCinta = error instanceof Error ? error.message : String(error);
+    console.warn(`La cinta dejó de grabar: ${errorCinta}.`);
+    hitosCinta.length = 0;
+    void hiloCinta?.terminate();
+  }
+  if (directorioCinta) {
+    let moduleURL = new URL('./tape-worker.js', import.meta.url);
+    const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
+    if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
+    const hilo = hiloCinta = new Worker(`
+      const { workerData } = require('node:worker_threads');
+      (async () => {
+        if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
+        await import(workerData.moduleURL);
+      })().catch(error => { setImmediate(() => { throw error; }); });
+    `, { eval: true, execArgv: [], name: 'carta-tape', workerData: { role: 'carta-tape', moduleURL: moduleURL.href,
+      loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined, descriptor: descriptorCortes,
+      options: { directorio: directorioCinta, topeBytes: options.tapeTopeBytes } } });
+    hilo.on('error', perderCinta);
+    salidaCinta = new Promise(resolve => hilo.once('exit', code => {
+      if (!cerrandoCinta || code !== 0) perderCinta(new Error(`El hilo de la cinta terminó (código ${code}).`));
+      resolve();
+    }));
+  }
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
   let ultimaDifusionTurbo = -Infinity;
-  function grabarCinta() {
-    if (!tapeWriter || failed || aMedioPaso || world.tick === ultimoTickGrabado) return;
-    // A reopened tape already holds this tick (a world restarted from its last save): the writer would drop
-    // the frame, and the first one it does accept must be a full keyframe, since it has no base to patch.
-    if (world.tick <= tapeWriter.latestTick) return;
-    try {
-      const { chunks, changed } = observadorCinta.scan(world);
-      const keyframe = tapeKeyframeDue(world.tick, options.tapeKeyframeInterval, ultimoTickGrabado < 0);
-      let tiles = changed;
-      if (keyframe) { tiles = []; for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile); }
-      tapeWriter.record(projectTapeFrame(world, runtime, instanceId, tiles), simHz, !keyframe);
-      ultimoTickGrabado = world.tick;
-    } catch (error) {
-      // A DVR is an observer: it never pauses the world. It stops recording and says so once.
-      console.warn(`La cinta dejó de grabar: ${error instanceof Error ? error.message : 'error desconocido'}.`);
-      try { tapeWriter.close(); } catch { /* ya está perdida */ }
-      tapeWriter = undefined;
+  function hitoCinta(suceso: ChronicleEvent): Hito {
+    const importancia = Number(['birth', 'death', 'community', 'settlement', 'discovery', 'invention'].includes(suceso.kind));
+    return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
+  }
+  function abrirCinta(hilo: Worker) {
+    epocaCinta++;
+    // Lo que quedó sin cortar pertenece a la época que se cierra; tras recargar, el mundo nuevo vuelve a contar.
+    hilo.postMessage({ type: 'abrir', apertura: { instanciaId: instanceId!, epoca: epocaCinta, tMundo: world.tick,
+      motivo: epocaCinta === 0 && respaldo ? 'restauracion' : 'reinicio' }, hitosPrevios: epocaCinta > 0 ? hitosCinta : [] } satisfies TapeWorkerRequest);
+    hitosCinta.length = 0;
+    recargaCinta = false; ultimoCorte = -Infinity; observadorCinta = createTileObserver();
+    serialCronica = world.eventCounter; baseNacimientos = world.birthCounter; baseMuertes = world.demographyDynamics.deaths;
+    for (const suceso of world.events) if (suceso.tick === world.tick && (epocaCinta === 0 || chronicleSerial(suceso.id) === null)) {
+      hitosCinta.push(hitoCinta(suceso));
     }
   }
-  grabarCinta();
-  tapeWriter?.flush();
-  const tapeReader = tapePath ? new TapeReader({ path: tapePath, observerOnly, turbo }) : undefined;
-  /** Static/unmodified tiles of one chunk request: one projection of the camera, not one per frame. */
-  function fondoDeCinta(viewport?: Viewport) {
-    if (!viewport || aMedioPaso) return undefined;
-    let fondo: Map<string, Tile> | undefined;
-    return (x: number, y: number): Tile => {
-      if (!fondo) {
-        fondo = new Map();
-        for (const tile of projectWorld(world, viewport, context).tiles) fondo.set(`${tile.x},${tile.y}`, tile);
-      }
-      return fondo.get(`${x},${y}`) ?? projectWorld(world, { x, y, width: 1, height: 1 }, context).tiles[0]!;
-    };
+  function recogerCronica() {
+    const diario = world.chronicleJournal;
+    while (serialCronica < world.eventCounter) {
+      const serial = ++serialCronica;
+      // En un paso que guardó, Store ya pasó los nuevos sucesos del diario al archivo.
+      const suceso = diario?.pending[serial - diario.committedThrough - 1];
+      const cuerpo = suceso ? undefined : eventoGuardado!.get(`e${serial}`)?.body;
+      if (!suceso && typeof cuerpo !== 'string') throw new Error(`Falta el suceso ${serial} de la crónica.`);
+      hitosCinta.push(hitoCinta(suceso ?? JSON.parse(cuerpo as string) as ChronicleEvent));
+    }
   }
-  const cinta: { meta(): TapeMetaResponse; chunk(fromTick: number, count: number, viewport?: Viewport, encoding?: TapeChunkEncoding): TapeChunkResponse } | null =
-    gateway ? (gateway.tapeMeta && gateway.tapeChunk ? { meta: () => gateway.tapeMeta!(), chunk: (f, c, v, e) => gateway.tapeChunk!(f, c, v, e) } : null)
-      : tapeReader ? { meta: () => tapeReader.readMeta(240), chunk: (f, c, v, e) => tapeReader.readChunk(f, c, v, fondoDeCinta(v), e) } : null;
+  /** Sin crédito no se corta (la cinta se atrasa, el mundo no espera), salvo el primero de cada época y el del cierre. */
+  function grabarCinta(forzar = false) {
+    if (!hiloCinta || errorCinta || failed || aMedioPaso) return;
+    try {
+      if (epocaCinta < 0 || recargaCinta) abrirCinta(hiloCinta);
+      recogerCronica();
+      const completo = ultimoCorte < 0;
+      if (world.tick > ultimoCorte && (forzar || completo || Atomics.load(enlaceCortes.creditos, 0) > 0
+        && world.tick - ultimoCorte >= Atomics.load(enlaceCortes.cadencia, 0))) {
+        const { chunks, changed } = observadorCinta.scan(world);
+        const tiles: Tile[] = [];
+        if (completo) for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile);
+        const corte: Corte = { seq: ++seqCinta, epoca: epocaCinta, t: world.tick, vista: projectTapeFrame(world, runtime, instanceId, tiles),
+          tilesCambiadas: completo ? 'todas' : changed, hitos: hitosCinta.splice(0), catalogo: [], hz: simHz,
+          serie: { poblacion: world.people.length, nacimientos: world.birthCounter - baseNacimientos,
+            muertes: world.demographyDynamics.deaths - baseMuertes, fauna: world.animals.length, estructuras: world.structures.length,
+            sustancias: world.chemistry?.formulas.length ?? 0, hz: simHz } };
+        Atomics.sub(enlaceCortes.creditos, 0, 1);
+        Atomics.add(enlaceCortes.entregados, 0, 1n);
+        hiloCinta.postMessage({ type: 'corte', corte } satisfies TapeWorkerRequest);
+        ultimoCorte = world.tick;
+      }
+    } catch (error) { perderCinta(error); }
+  }
+  /** Graba el último tick y espera a que el hilo vacíe lo que retiene y salga. */
+  async function cerrarCinta() {
+    grabarCinta(true);
+    cerrandoCinta = true;
+    if (!errorCinta) hiloCinta?.postMessage({ type: 'close', id: 0 } satisfies TapeWorkerRequest);
+    await salidaCinta;
+  }
+  grabarCinta();
+  const lectores = directorioCinta ? new LectoresCinta({ directorio: directorioCinta, mundo: store.path,
+    topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly, turbo }) : undefined;
+  const cinta: ServicioCinta | undefined = gateway ? gateway.cinta : lectores && {
+    leer: (peticion, gzip, senal) => lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok', instancia: instanceId,
+      fondo: { seed: world.seed, cuencas: paramsOf(world).agua.cuencas } }, senal),
+  };
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
@@ -1229,9 +1316,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       world.tiles = tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)));
       bindWorldContext(world, { ...worldContext(world), tileOwnership });
     }
-    // Las cachés por tick y la cinta describían el mundo descartado: el próximo fotograma va completo.
+    // Las cachés por tick describían el mundo descartado; la cinta abre una época, que bifurca lo ya grabado.
     mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
-    ultimoTickGrabado = -1;
+    recargaCinta = true;
     // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
     cambiosPendientes.length = 0;
     normalizarReproduccion();
@@ -1308,22 +1395,19 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           return res.end(cuerpo);
         }
         if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
-        // V21 DVR: read-only, from the tape alone (never an RPC to the simulation).
-        if (req.method === 'GET' && url.pathname === '/api/tape/meta') {
+        // Cinta: solo lectura, en los hilos lectores (nunca una RPC a la simulación). `/api/tape/*` es el alias del
+        // reproductor actual hasta la ola 2.
+        if (req.method === 'GET' && RUTAS_CINTA.has(url.pathname)) {
           if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
-          return json(res, 200, cinta.meta());
-        }
-        if (req.method === 'GET' && url.pathname === '/api/tape/chunk') {
-          if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
-          const fromTick = enteroDeConsulta(url.searchParams, 'fromTick', 0, Number.MAX_SAFE_INTEGER, 0);
-          const count = enteroDeConsulta(url.searchParams, 'count', 1, 240, 60);
-          const encoding = url.searchParams.get('encoding') ?? 'full';
-          if (encoding !== 'full' && encoding !== 'delta') throw new HttpError(400, 'Codificación de cinta no válida.');
-          const chunk = cinta.chunk(fromTick, count, camaraDeConsulta(url.searchParams), encoding);
-          if (!aceptaGzip(req)) return json(res, 200, chunk);
-          const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(chunk)), { level: 3 });
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
-          return res.end(cuerpo);
+          const peticion = consultaCinta(url);
+          // Un cliente que se va (arrastrar el cabezal cancela el salto anterior) retira lo que aún espera hilo.
+          const cancelada = new AbortController();
+          res.once('close', () => cancelada.abort());
+          let r: RespuestaCinta;
+          try { r = await cinta.leer(peticion, aceptaGzip(req), cancelada.signal); }
+          catch { throw new HttpError(503, 'La cinta no se pudo leer ahora.'); }
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...(r.gzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}) });
+          return res.end(r.cuerpo);
         }
         // V24: discovered-terrain minimap and global directory (whole world, never clipped to a camera).
         if (req.method === 'GET' && url.pathname === '/api/worldmap') {
@@ -1594,8 +1678,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => store.save(world));
           } finally {
             try {
-              // The writer flushes what it still buffers before closing (graceful shutdown keeps every frame).
-              try { tapeReader?.close(); } finally { tapeWriter?.close(); tapeWriter = undefined; }
+              try { await cerrarCinta(); } finally { await lectores?.close(); }
             } finally {
               try { await muestreador?.vaciar(); }
               catch (error) { console.warn(`La bitácora de invariantes no se pudo escribir: ${error instanceof Error ? error.message : String(error)}`); }

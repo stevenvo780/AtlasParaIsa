@@ -1,8 +1,8 @@
-/** The sole DVR writer: compression, JSON copies, diffing and SQLite stay on this thread. */
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { TapeWriter } from './tape-store.js';
-import type { TapeWriterOptions } from '../shared/tape.js';
+import { CINTA, type Apertura, type Corte, type Hito, type SeriePunto } from '../shared/cinta.js';
+import { CONTROL_ENLACE_BYTES, enlaceCinta, type DescriptorEnlace, type EnlaceCinta } from '../shared/fotograma.js';
 import type { WorldView } from '../shared/types.js';
+import { EscritorCinta, PASO_MAXIMO, type OpcionesEscritor } from './cinta/escritor.js';
 
 /** V24: the costly, slow-moving summaries of a view (each walks every tile or a whole catalogue). A turbo
  * frame between two live mirror posts may leave them out: this writer carries the previous frame's values,
@@ -23,38 +23,77 @@ export function withCarriedFields(view: WorldView, previous: WorldView): WorldVi
   return out as unknown as WorldView;
 }
 
-export type TapeWorkerRequest =
-  /** `carried`: the view leaves out `CARRIED_VIEW_FIELDS`; they are the previous frame's. */
-  | { type: 'record'; view: WorldView; simHz: number; partialTiles: boolean; carried?: true }
+const CREDITOS_CORTES = 16;
+
+export function crearEnlaceCortes(): DescriptorEnlace {
+  // En ola 1 el crédito corresponde a un Corte en vuelo por el puerto. M6 añade las ranuras binarias.
+  const descriptor = { control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES), ranuras: [], sucesos: null };
+  const enlace = enlaceCinta(descriptor);
+  Atomics.store(enlace.creditos, 0, CREDITOS_CORTES);
+  Atomics.store(enlace.cadencia, 0, CINTA.pasos[0]);
+  return descriptor;
+}
+
+export function ajustarCadencia(enlace: EnlaceCinta, leidos: bigint, ahora: number, ultimoAtraso: number): number {
+  const paso = Atomics.load(enlace.cadencia, 0);
+  const atraso = Atomics.load(enlace.entregados, 0) - leidos;
+  if (atraso > 8n) {
+    Atomics.store(enlace.cadencia, 0, Math.min(PASO_MAXIMO, paso * 2));
+    return ahora;
+  }
+  if (atraso === 0n && ahora - ultimoAtraso >= 2000 && paso > CINTA.pasos[0]) {
+    Atomics.store(enlace.cadencia, 0, Math.max(CINTA.pasos[0], paso / 2));
+    return ahora;
+  }
+  return ultimoAtraso;
+}
+
+export type TapeWorkerRequest = { type: 'abrir'; apertura: Apertura; hitosPrevios: readonly Hito[] } | { type: 'corte'; corte: Corte }
+  | { type: 'serie'; epoca: number; punto: SeriePunto }
   | { type: 'flush' | 'close'; id: number };
-export type TapeWorkerReply =
-  | { type: 'ack' }
-  | { type: 'reply'; id: number; frames: number; latestTick: number };
+export type TapeWorkerReply = { type: 'reply'; id: number; frames: number; latestTick: number };
 
 if (!isMainThread && workerData?.role === 'carta-tape') {
   const port = parentPort!;
-  const writer = new TapeWriter(workerData.options as TapeWriterOptions);
-  let previous: WorldView | undefined;
-  // MessagePort preserves FIFO: a flush/close is a barrier behind every submitted frame.
-  port.on('message', (message: TapeWorkerRequest) => {
+  const writer = new EscritorCinta(workerData.options as OpcionesEscritor);
+  const enlace = enlaceCinta(workerData.descriptor as DescriptorEnlace);
+  let leidos = 0n;
+  let ultimoAtraso = performance.now();
+  function ejecutar(accion: () => void): void {
     try {
-      if (message.type === 'record') {
-        if (message.carried && !previous) throw new Error('A carried tape frame needs a previous frame.');
-        const view = message.carried ? withCarriedFields(message.view, previous!) : message.view;
-        // The structured clone is this thread's own copy: the writer normalizes it instead of copying it.
-        writer.record(view, message.simHz, message.partialTiles, true);
-        previous = view;
-        port.postMessage({ type: 'ack' } satisfies TapeWorkerReply);
-      } else {
-        if (message.type === 'close') writer.close();
-        else writer.flush();
-        port.postMessage({ type: 'reply', id: message.id, frames: writer.frameCount,
-          latestTick: writer.latestTick } satisfies TapeWorkerReply);
-        if (message.type === 'close') port.close();
-      }
+      accion();
     } catch (error) {
-      try { writer.close(); } finally { port.close(); }
+      clearInterval(timer);
+      try { writer.close(false); } catch { /* conserva el fallo original de la cinta */ }
+      port.close();
       throw error;
     }
-  });
+  }
+  const timer = setInterval(() => ejecutar(() => {
+    writer.flush();
+    ultimoAtraso = ajustarCadencia(enlace, leidos, performance.now(), ultimoAtraso);
+  }), 1000);
+  // El orden FIFO publica la época después de los cortes viejos y antes de la nueva base.
+  port.on('message', (message: TapeWorkerRequest) => ejecutar(() => {
+    if (message.type === 'abrir') {
+      writer.abrir(message.apertura, message.hitosPrevios);
+      Atomics.store(enlace.cadencia, 0, CINTA.pasos[0]);
+      ultimoAtraso = performance.now();
+    } else if (message.type === 'corte') {
+      ultimoAtraso = ajustarCadencia(enlace, leidos, performance.now(), ultimoAtraso);
+      writer.registrar(message.corte);
+      leidos++;
+      Atomics.add(enlace.creditos, 0, 1);
+    } else if (message.type === 'serie') {
+      writer.registrarSerie(message.epoca, message.punto);
+    } else {
+      writer.flush();
+      port.postMessage({ type: 'reply', id: message.id, ...writer.estado() } satisfies TapeWorkerReply);
+      if (message.type === 'close') {
+        clearInterval(timer);
+        writer.close(false);
+        port.close();
+      }
+    }
+  }));
 }

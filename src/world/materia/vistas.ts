@@ -65,5 +65,10 @@ export function vistaTesela(cuantos: Cuantos, t: LotesTesela, agua: SustanciaId,
   return out;
 }
 
+/** El aire de una página: humedad relativa de su capa límite (1 = saturada: nube o niebla) y lo que llovió y lo que se
+ * fue por el desagüe en el último paso, en unidades de humedad por tesela. */
+export interface VistaAire { humedadRelativa: number; lluvia: number; desague: number }
+
+export const vistaAireVacia = (): VistaAire => ({ humedadRelativa: 0, lluvia: 0, desague: 0 });
 export const vistaVacia = (): VistaTesela => ({ drinkingWater: 0, moisture: 0, vegetation: 0, food: 0, wood: 0, stone: 0 });
 export const unidadesVacias = (): Unidades => ({ hoja: 0, fruto: 0, tronco: 0 });

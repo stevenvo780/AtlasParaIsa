@@ -18,7 +18,7 @@ import { Rol } from '../src/world/materia/tipos.js';
 import {
   CUENTA, MundoMaterial, REFERENCIA, humedadMediaEscalar, intercambioBruto, totalesVacios, type Forzamiento,
 } from '../src/world/materia/mundo.js';
-import { vistaVacia } from '../src/world/materia/vistas.js';
+import { vistaAireVacia, vistaVacia } from '../src/world/materia/vistas.js';
 
 function teselas(semilla: number, lado: number): Tile[] {
   const w = createWorld(semilla);
@@ -67,6 +67,11 @@ test('un día de lluvia llena las charcas desde la atmósfera libre; lo que no c
   assert.ok(c[CUENTA.CIELO_ENTRA]! > 0n, 'la lluvia viene de la atmósfera libre');
   assert.ok(c[CUENTA.DESAGUE]! > 0n, 'el agua que no cabe se va por el desagüe');
   assert.ok(media() > Math.max(0.9, a0), `charcas ${a0.toFixed(3)} → ${media().toFixed(3)}`);
+  const aire = vistaAireVacia();
+  for (let p = 0; p < x.m.np; p++) {
+    x.m.vistaAire(p, x.m.temperatura(p, 0) - 4, aire);
+    assert.ok(aire.lluvia > 0 && aire.humedadRelativa > 0.95 && aire.humedadRelativa <= 1.001, `página ${p}: ${JSON.stringify(aire)}`);
+  }
   // Con tiempo seco la capa límite se seca hacia el punto de rocío de la noche: el agua vuelve a la atmósfera libre.
   const salida = c[CUENTA.CIELO_SALE]!;
   for (let t = 0; t < 2400; t += 20) x.paso({ dt: 20, luz: 1, lluvia: false });

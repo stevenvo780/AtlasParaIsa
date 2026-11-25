@@ -43,7 +43,9 @@ import {
   Parte, Rol, barreraEfectiva, nivelDeLote,
   type Kappa, type Libro, type LoteRef, type Plantilla, type ServicioQuimico, type Sustancia,
 } from './tipos.js';
-import { unidadesVacias, unidadesVida, vistaTesela, type Escalas, type LotesTesela, type Organos, type Unidades, type VistaTesela } from './vistas.js';
+import {
+  unidadesVacias, unidadesVida, vistaTesela, type Escalas, type LotesTesela, type Organos, type Unidades, type VistaAire, type VistaTesela,
+} from './vistas.js';
 
 // ── Sustancias ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -379,9 +381,10 @@ export interface DescriptorMundo {
   n: number; np: number; hilos: number;
   lotes: ArenaCompartida; desborde: ArenaCompartida; paginas: ArenaCompartida;
   /** Por tesela (ordenadas por página): suelo, agua, vida, latente, celda; por página: inicio, aire, dueño, azar, dT, sus
-   * cuatro vecinas (x−1, x+1, y−1, y+1; −1 si no hay) y el vapor en vuelo hacia cada una (cuantos y calor). */
+   * cuatro vecinas (x−1, x+1, y−1, y+1; −1 si no hay), el vapor en vuelo hacia cada una (cuantos y calor) y lo que
+   * llovió y lo que se fue por el desagüe en su último paso (cuantos). */
   sab: Record<'suelo' | 'agua' | 'vida' | 'latente' | 'celda' | 'x' | 'y' | 'inicio' | 'aire' | 'dueno' | 'azar' | 'dT' | 'vecinas'
-    | 'transito' | 'libros', SharedArrayBuffer>;
+    | 'transito' | 'lluvia' | 'desague' | 'libros', SharedArrayBuffer>;
   sustancias: Uint8Array;
   base: BaseMundo; plantillas: PlantillasMundo; params: ParamsMundo;
 }
@@ -416,6 +419,8 @@ export class MundoMaterial {
   readonly dT: Float64Array;
   readonly vecinas: Int32Array;
   readonly transito: Float64Array;
+  readonly lluvia: Float64Array;
+  readonly desague: Float64Array;
   readonly S: BaseMundo;
   readonly plantillas: PlantillasMundo;
   readonly params: ParamsMundo;
@@ -447,6 +452,7 @@ export class MundoMaterial {
     this.estadoAzar = new Uint32Array(d.sab.azar); this.dT = new Float64Array(d.sab.dT);
     this.libros = new Float64Array(d.sab.libros);
     this.vecinas = new Int32Array(d.sab.vecinas); this.transito = new Float64Array(d.sab.transito);
+    this.lluvia = new Float64Array(d.sab.lluvia); this.desague = new Float64Array(d.sab.desague);
     const S0 = d.base, col = AIRE_COLUMNA.N2 + AIRE_COLUMNA.O2 + AIRE_COLUMNA.CO2;
     this.masaAire = (AIRE_COLUMNA.N2 * quimica.sustancia(S0.N2).masa + AIRE_COLUMNA.O2 * quimica.sustancia(S0.O2).masa
       + AIRE_COLUMNA.CO2 * quimica.sustancia(S0.CO2).masa) / col / 1000;
@@ -509,7 +515,7 @@ export class MundoMaterial {
       sab: {
         suelo: sab(8 * n), agua: sab(8 * n), vida: sab(8 * n), latente: sab(8 * n), celda: sab(4 * n), x: sab(4 * n), y: sab(4 * n),
         inicio: sab(4 * (np + 1)), aire: sab(8 * np), dueno: sab(2 * np), azar: sab(4 * np), dT: sab(8 * np),
-        vecinas: sab(4 * 4 * np), transito: sab(8 * 2 * 4 * np),
+        vecinas: sab(4 * 4 * np), transito: sab(8 * 2 * 4 * np), lluvia: sab(8 * np), desague: sab(8 * np),
         libros: sab(8 * hilos * (LIBRO + CUENTAS)),
       },
       sustancias: new Uint8Array(0), base: S, plantillas, params,
@@ -607,6 +613,16 @@ export class MundoMaterial {
     let n = this.arena.especies(l, this.ids);
     if (n > this.ids.length) n = this.arena.especies(l, this.ids = new Uint32Array(2 * n));
     return this.ids.subarray(0, n);
+  }
+
+  /** Vista del aire de la página p (para dibujar nubes, lluvia y ríos): su humedad relativa a T, y lo que llovió y lo que
+   * se fue por el desagüe en su último paso, en unidades de humedad por tesela. */
+  vistaAire(p: number, T: number, out: VistaAire): VistaAire {
+    const a = this.aire[p]!, nT = this.inicio[p + 1]! - this.inicio[p]!, hum = this.params.escalas.humedad;
+    out.humedadRelativa = this.arena.cuantos(a, this.S.H2O) / this.vaporSaturado(this.gasesSecos(a, T), T);
+    out.lluvia = this.lluvia[p]! / nT / hum;
+    out.desague = this.desague[p]! / nT / hum;
+    return out;
   }
 
   lotesTesela(i: number): LotesTesela {
@@ -803,6 +819,7 @@ export class MundoMaterial {
   private llover(p: number, T: number): void {
     const a = this.aire[p]!, H2O = this.S.H2O, i0 = this.inicio[p]!, nT = this.inicio[p + 1]! - i0;
     const exceso = this.arena.cuantos(a, H2O) - Math.floor(this.vaporSaturado(this.gasesSecos(a, T), T));
+    this.lluvia[p] = Math.max(0, exceso);
     if (exceso <= 0) return;
     const cada = Math.floor(exceso / nT), resto = exceso - cada * nT, primero = Math.floor(this.ctx.azar() * nT);
     for (let j = 0; j < nT; j++) {
@@ -818,7 +835,7 @@ export class MundoMaterial {
    */
   private escurrir(p: number): void {
     const H2O = this.S.H2O, A = this.arena, e = this.params.escalas, i0 = this.inicio[p]!, i1 = this.inicio[p + 1]!;
-    let j = i0;
+    let j = i0, fuera = 0;
     const hueco = (i: number) => this.agua[i]! >= 0 ? e.agua - A.cuantos(this.agua[i]!, H2O) : 0;
     for (let i = i0; i < i1; i++) {
       const suelo = this.suelo[i]!;
@@ -828,9 +845,13 @@ export class MundoMaterial {
         if (k > 0) { A.moverParte(suelo, this.agua[j]!, { parte: Parte.Exacta, esp: H2O, cuantos: k, kappa: null }); sobra -= k; }
         if (hueco(j) <= 0) j++;
       }
-      if (sobra > 0) this.exterior(suelo, -sobra, this.temperaturaLote(suelo), DESAGUE);
+      if (sobra > 0) { this.exterior(suelo, -sobra, this.temperaturaLote(suelo), DESAGUE); fuera += sobra; }
     }
-    for (let i = i0; i < i1; i++) if (this.agua[i]! >= 0 && hueco(i) < 0) this.exterior(this.agua[i]!, hueco(i), this.temperaturaLote(this.agua[i]!), DESAGUE);
+    for (let i = i0; i < i1; i++) {
+      const h = this.agua[i]! >= 0 ? hueco(i) : 0;
+      if (h < 0) { this.exterior(this.agua[i]!, h, this.temperaturaLote(this.agua[i]!), DESAGUE); fuera -= h; }
+    }
+    this.desague[p] = fuera;
   }
 
   /** El viento lleva a cada página vecina una fracción del vapor (flujos brutos, a concentración por tesela), que queda en

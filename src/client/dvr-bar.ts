@@ -121,6 +121,8 @@ export function sparklineMarkup(serie: readonly SeriePunto[], minTick: number, m
   return `<path class="dvr-spark-area" d="M${first},${SPARK_H} L${coords.join(' L')} L${last},${SPARK_H} Z"/><path class="dvr-spark-line" d="M${coords.join(' L')}"/>${marcas}`;
 }
 
+const ESTADO_ERROR = '⚠ La cinta dejó de grabar: el mundo sigue, pero esto no se guarda.';
+
 export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null = null): string {
   const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1;
   const min = int(state.minTick), max = Math.max(min, int(state.maxTick)), tick = Math.min(max, Math.max(min, int(state.currentTick)));
@@ -136,7 +138,7 @@ export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null =
     + `<span class="dvr-playhead" data-dvr-playhead style="left:${dvrPercent(tick, min, max).toFixed(2)}%" aria-hidden="true"></span>`
     + `<input type="range" class="dvr-range" data-dvr-range min="${min}" max="${max}" step="1" value="${tick}" aria-label="Línea de tiempo del mundo" aria-valuetext="${time}">`
     + `<div class="dvr-readout"><span class="dvr-time" data-dvr-time>${time}</span><span class="dvr-desfase" data-dvr-desfase>${esc(desfaseLabel(state))}</span><span class="dvr-hover" data-dvr-hover>${esc(dvrHoverLabel(hoverPoint))}</span></div>`
-    + `<div class="dvr-estado" data-dvr-estado role="status">${state.estado === 'error' ? '⚠ La cinta dejó de grabar: el mundo sigue, pero esto no se guarda.' : ''}</div></div>`
+    + `<div class="dvr-estado" data-dvr-estado role="status">${state.estado === 'error' ? ESTADO_ERROR : ''}</div></div>`
     + `<div class="dvr-engine"><span class="dvr-badge dvr-escala" data-dvr-escala title="Qué tanto mundo pasa por cada segundo de reproducción">${esc(escala)}</span>`
     + `<span class="dvr-badge" data-dvr-engine title="Velocidad del motor (ticks por segundo)">${esc(dvrEngineLabel(state))}</span>`
     + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="Volver al presente (0)">● Presente</button></div></div>`;
@@ -144,7 +146,7 @@ export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null =
 
 /** Monta la barra en `container` (`#dvr-bar`). Delegación de eventos: el HTML interior se puede reemplazar sin reenganchar. */
 export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): DvrBarController {
-  let structure = '', serieKey = '', scrubbing = false, last: DvrBarState | null = null;
+  let serieKey = '', scrubbing = false, last: DvrBarState | null = null;
   let scrubTimer: ReturnType<typeof setTimeout> | undefined;
   const query = <T extends Element>(selector: string): T | null => container.querySelector<T>(selector);
   const setText = (selector: string, text: string): void => { const node = query(selector); if (node && node.textContent !== text) node.textContent = text; };
@@ -185,6 +187,22 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     setText('[data-dvr-hover]', dvrHoverLabel(nearestSeriePoint(last.serie, tick)));
   };
   const onLeave = (): void => setText('[data-dvr-hover]', '');
+  const setAttr = (node: Element | null, name: string, value: string | null): void => {
+    if (!node || node.getAttribute(name) === value) return;
+    if (value === null) node.removeAttribute(name); else node.setAttribute(name, value);
+  };
+  /** Lo que `renderDvrBar` deriva de `playing`, `speed`, `atLiveEdge`, `loading` y `estado`, sobre los mismos nodos. */
+  const ajustarControles = (state: DvrBarState): void => {
+    const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1, playing = !!state.playing, live = !!state.atLiveEdge;
+    setAttr(query('.dvr-transport'), 'data-loading', state.loading ? 'true' : null);
+    const play = query('[data-dvr-play]');
+    setAttr(play, 'aria-pressed', String(playing)); setAttr(play, 'aria-label', playing ? 'Pausar' : 'Reproducir');
+    setText('[data-dvr-play]', playing ? '⏸' : '▶');
+    for (const b of container.querySelectorAll('[data-dvr-speed]')) setAttr(b, 'aria-pressed', String(Number(b.getAttribute('data-dvr-speed')) === speed));
+    const vivo = query('[data-dvr-live]');
+    setAttr(vivo, 'aria-pressed', String(live)); vivo?.classList.toggle('is-live', live);
+    setText('[data-dvr-estado]', state.estado === 'error' ? ESTADO_ERROR : '');
+  };
 
   container.addEventListener('click', onClick);
   container.addEventListener('input', onInput);
@@ -195,12 +213,15 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
   return {
     update(state: DvrBarState): void {
       last = state;
-      const nextStructure = `${state.playing}|${state.speed}|${state.atLiveEdge}|${!!state.loading}|${state.estado ?? 'ok'}`;
       const min = int(state.minTick), max = Math.max(min, int(state.maxTick));
       const lastPoint = state.serie[state.serie.length - 1];
       const nextSerie = `${state.serie.length}|${lastPoint ? int(lastPoint.t) : ''}|${min}|${max}|${state.bifurcaciones.length}|${state.lagunas.length}`;
-      if (nextStructure !== structure || !query('[data-dvr-range]')) {
-        if (!scrubbing) { structure = nextStructure; serieKey = nextSerie; container.innerHTML = renderDvrBar(state); }
+      // La barra se pinta entera una sola vez: rehacerla al cambiar `loading` (cada trozo que llega) o la velocidad
+      // cambiaba los botones bajo el puntero y el clic caía en un nodo ya retirado (con el motor a ~100 Hz y 25×, el
+      // botón «Presente» no se podía pulsar). Lo demás se ajusta en su sitio.
+      const pintada = !!query('[data-dvr-range]');
+      if (!pintada) {
+        if (!scrubbing) { serieKey = nextSerie; container.innerHTML = renderDvrBar(state); }
       } else if (nextSerie !== serieKey) {
         serieKey = nextSerie;
         const svg = query('.dvr-sparkline'); if (svg) svg.innerHTML = sparklineMarkup(state.serie, min, max, state.bifurcaciones, state.lagunas);
@@ -214,6 +235,7 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
       setText('[data-dvr-desfase]', desfaseLabel(state));
       setText('[data-dvr-escala]', escalaLabel(state.nivel, state.speed));
       setText('[data-dvr-engine]', dvrEngineLabel(state));
+      if (pintada) ajustarControles(state);
     },
     destroy(): void {
       clearTimeout(scrubTimer);

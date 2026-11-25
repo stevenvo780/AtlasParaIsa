@@ -652,6 +652,12 @@ export function matDeCelda(c: CtxLeyMateria, celda: number): MatTesela {
 /** Recursos de la vista heredada que una ley aún escalar saca de una tesela o le aporta. */
 export type RecursoEscalar = 'comida' | 'agua' | 'madera' | 'piedra';
 
+/** Los depósitos escalares descuentan lo transferido: ni el redondeo del producto puede exceder su presupuesto. */
+function cuantosAguaHasta(cantidad: number, escala: number): number {
+  const cuantos = Math.floor(cantidad * escala);
+  return cuantos / escala > cantidad ? cuantos - 1 : cuantos;
+}
+
 function refrescar(e: Estado, i: number): void {
   const t = e.teselas[i];
   if (t) escribirTesela(e, i, t);
@@ -664,7 +670,7 @@ function sacar(e: Estado, i: number, recurso: RecursoEscalar, cantidad: number):
   switch (recurso) {
     case 'comida': hecho = m.extraer(i, 'fruto', Math.round(cantidad * es.alimento)) / es.alimento; break;
     // El agua potable es la de la charca: donde no hay vaso, el escalar es 0 y no se saca nada.
-    case 'agua': hecho = m.agua[i]! >= 0 ? m.beber(i, Math.round(cantidad * es.agua)) / es.agua : 0; break;
+    case 'agua': hecho = m.agua[i]! >= 0 ? m.beber(i, cuantosAguaHasta(cantidad, es.agua)) / es.agua : 0; break;
     case 'madera': hecho = m.extraer(i, 'tronco', Math.round(cantidad * es.madera)) / es.madera; break;
     case 'piedra': hecho = m.moverLatente(i, Math.round(cantidad * es.piedra)) / es.piedra; break;
   }
@@ -691,7 +697,7 @@ export function aportarEscalar(c: CtxLeyMateria, celda: number, recurso: Recurso
   let hecho = 0;
   switch (recurso) {
     case 'comida': hecho = m.aportar(i, 'fruto', Math.round(cantidad * es.alimento)) / es.alimento; break;
-    case 'agua': hecho = m.regar(i, Math.round(cantidad * es.agua)) / es.agua; break;
+    case 'agua': hecho = m.regar(i, cuantosAguaHasta(cantidad, es.agua)) / es.agua; break;
     case 'madera': hecho = m.aportar(i, 'tronco', Math.round(cantidad * es.madera)) / es.madera; break;
     case 'piedra': hecho = -m.moverLatente(i, -Math.round(cantidad * es.piedra)) / es.piedra; break;
   }

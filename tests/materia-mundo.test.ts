@@ -12,7 +12,7 @@ import { ctxSi, type CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
-import { aportarEscalar, extraerEscalar } from '../src/world/materia/ley-mundo.js';
+import { aportarEscalar, conservacion, extraerEscalar } from '../src/world/materia/ley-mundo.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
 import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, unidadesVida, vistaVacia, type Organos } from '../src/world/materia/vistas.js';
@@ -80,6 +80,24 @@ test('el guardado completo admite madera y piedra por encima de la escala de sus
   const celdaRestaurada = restaurado.terreno.celda(tesela.x, tesela.y);
   assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'madera', 20), 20);
   assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'piedra', 20), 20);
+});
+
+test('los traslados de agua al mundo escalar se ajustan al presupuesto en cuantos enteros', async (t) => {
+  const mundo = createWorld(7, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true } });
+  const motor = crearMotor(mundo, unSoloDueno(7));
+  t.after(() => motor.cerrar());
+  motor.paso([]);
+  const c = ctxSi(mundo) as CtxLeyMateria;
+  const charca = mundo.tiles.find(tile => (tile.drinkingWater ?? 0) > 0.01)!;
+  const celda = c.terreno.celda(charca.x, charca.y);
+  const pedido = 0.00001;
+  const extraido = extraerEscalar(c, celda, 'agua', pedido);
+  const aportado = aportarEscalar(c, celda, 'agua', pedido);
+  assert.ok(extraido > 0 && extraido <= pedido);
+  assert.equal(aportado, extraido);
+  assert.equal(aportarEscalar(c, celda, 'agua', 0.0000018), 0);
+  const { esperado, hallado } = conservacion(c);
+  assert.deepEqual(hallado, esperado);
 });
 
 test('el libro cuadra exacto en cada paso y ningún átomo entra ni sale: el agua circula entre lotes (cielo, mar, suelos y charcas)', async () => {

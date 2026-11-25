@@ -124,9 +124,10 @@ export class EscritorCinta {
       || corte.t < this.tMundo || corte.t <= this.ultimoTick || corte.vista.tick !== corte.t
       || completo !== (this.ultimoTick < 0) || corte.serie.hz !== corte.hz) throw new Error('Corte fuera de época, secuencia o tick.');
     const anterior = this.ultimoTick < 0 ? this.tMundo : this.ultimoTick;
-    if (corte.t - anterior > (this.ultimoTick < 0 ? 0 : PASO_MAXIMO)) {
+    const declarada = corte.hitos.some(h => h.tipo === 'laguna' && h.laguna.t0 === anterior && h.laguna.t1 === corte.t);
+    if (declarada || corte.t - anterior > (this.ultimoTick < 0 ? 0 : PASO_MAXIMO)) {
       this.flush();
-      this.hitos.push({ t: corte.t, importancia: 1, tipo: 'laguna', laguna: { t0: anterior, t1: corte.t } });
+      if (!declarada) this.hitos.push({ t: corte.t, importancia: 1, tipo: 'laguna', laguna: { t0: anterior, t1: corte.t } });
     }
     this.ultimaSecuencia = corte.seq;
     this.ultimoTick = corte.t;

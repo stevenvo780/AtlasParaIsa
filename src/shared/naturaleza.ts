@@ -410,3 +410,22 @@ export const CARNE_A_CUESTAS_KG = 2;
 // whispers.ts (RADIO_AUDIBLE se queda allí: deriva de ALCANCE_VOZ)
 /** Fracción de la audibilidad junto al mensaje por debajo de la cual el oído ya no la distingue del ruido (adimensional). */
 export const CAIDA_AUDIBLE = 1e-3;
+
+// ── Carril m7: reparto por tiempo de pared (`world/motor/rebalanceo.ts` las reexporta) ─────────────────────
+
+/** Periodo del rebalanceo regular, en ticks. */
+export const PERIODO_REBALANCEO_TICKS = 240;
+/** Ventanas de medida consecutivas con desequilibrio por encima del umbral que fuerzan un rebalanceo antes de plazo. */
+export const VENTANAS_DESEQUILIBRADAS = 3;
+/** Umbral de desequilibrio (máximo de ms de pared de un hilo sobre su media; 1 = perfecto, sin unidad). */
+export const UMBRAL_DESEQUILIBRIO = 1.3;
+/** Fracción de T que `hilosAuto` compara contra T (sin unidad): T y ¾T. */
+export const FRACCION_HILOS_MENOS = 0.75;
+/** Diferencia relativa de Hz por debajo de la cual dos números de hilos cuentan como empate; gana el menor, que deja
+ * más CPU a la torre (sin unidad). */
+export const MARGEN_EMPATE_HZ = 0.02;
+/** Peso de la última ventana en la media móvil del coste por chunk (sin unidad, en (0, 1]). */
+export const PESO_EMA = 0.25;
+/** Cota del retraso relativo de un hilo (asignado / pared): ni un hilo con medida absurda se queda sin chunks ni uno
+ * ganador acapara todo el reparto (sin unidad; el peso va en [COTA_RETRASO, 1 / COTA_RETRASO]). */
+export const COTA_RETRASO = 0.25;

@@ -30,6 +30,12 @@ export interface CtxLey extends CtxDueno {
   /** Parte del mundo en el heap de este dueño (ver DISCIPLINA DE DUEÑO). `mundo.tick === tick`. */
   readonly mundo: World;
   readonly params: Readonly<WorldParams>;
+  /** Directorio de identidades: el `id` de texto con que las leyes heredadas nombran a alguien (vínculos, parentesco,
+   * miembros de una comunidad) a partir de su uid del frente, y al revés. Es una réplica global que el motor pone al día
+   * en F0 con las altas del tick anterior: `undefined` y 0 si aún no se conoce (nacido en otro dueño en este mismo tick)
+   * o si ya se olvidó (muerto hace más de un día). Vale para personas y fauna. */
+  idDe(uid: number): string | undefined;
+  uidDe(id: string): number;
 }
 /** El de las leyes que exigen `v23.materia`: además, la arena de lotes y la química. */
 export type CtxLeyMateria = CtxLey & CtxMateria;

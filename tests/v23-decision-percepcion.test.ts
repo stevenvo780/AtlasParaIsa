@@ -9,8 +9,8 @@ import { residentFastAccess } from '../src/world/soa/terreno.js';
 import { distance } from '../src/world/mundo/geometria.js';
 import { RADIUS } from '../src/world/mundo/tipos.js';
 import { evaluatePolicySingle } from '../src/world/politica.js';
-import { REF_NULA, slotDe, type LotePercepcion } from '../src/world/motor/contratos.js';
-import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercibidorCpu, VistaMundo, percepcionDe, type PercepcionCpu } from '../src/world/decision/percepcion.js';
+import { ErrorDispositivo, REF_NULA, slotDe, type LotePercepcion, type Percepcion, type Percibidor, type Plan } from '../src/world/motor/contratos.js';
+import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercepcionDelPaso, PercibidorCpu, VistaMundo, percepcionDe, type PercepcionCpu } from '../src/world/decision/percepcion.js';
 import { CONSULTA, ORGANISMO, PLAN, UMBRAL, planesPersonas } from '../src/world/decision/planes.js';
 import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararCerebros } from '../src/world/decision/politica-persona.js';
 import type { Tile } from '../src/shared/types.js';
@@ -127,6 +127,79 @@ test('repartir el lote en 32 hilos da la misma percepción que un hilo', async (
     for (const [campo, w] of Object.entries(ancho) as [keyof typeof ancho, number][])
       assert.deepEqual(Array.from(repartida[campo].subarray(0, n * w)), Array.from(salida[campo].subarray(0, n * w)), campo);
   } finally { await hilos.cerrar(); }
+});
+
+/** Doble de tarjeta: percibe en CPU sobre la vista, pero devuelve solo lo que pide el contrato (sin ventanas) y,
+ * si `falla(llamada)`, lanza `ErrorDispositivo` en `esperar`, como una tarjeta que cae o vence a media fase. */
+class TarjetaDoble implements Percibidor {
+  readonly dispositivo = 'gpu0' as const;
+  llamadas = 0; fallos = 0;
+  readonly #cpu: PercibidorCpu;
+  constructor(vista: VistaMundo, private readonly falla: (llamada: number) => boolean) { this.#cpu = new PercibidorCpu(vista); }
+  lanzar(lote: LotePercepcion, planes: readonly Plan[]): void { this.#cpu.lanzar(lote, planes); }
+  esperar(): Percepcion {
+    if (this.falla(++this.llamadas)) { this.fallos++; throw new ErrorDispositivo(this.dispositivo, 'plazo vencido'); }
+    const { q, v, a, celda, pasos, valor, organismo, utilidad } = this.#cpu.esperar();
+    return { q, v, a, celda, pasos, valor, organismo, utilidad };
+  }
+}
+
+test('con una tarjeta que no da ventanas, o que cae a media fase, el mundo acaba igual que en CPU', () => {
+  const pasos = 600, uno = digestoCanonico(mundo(7, pasos));
+  for (const falla of [() => false, (llamada: number) => llamada % 3 === 0]) {
+    const world = createWorld(7, DEFAULT_PARAMS), percepcion = percepcionDe(world);
+    const tarjeta = new TarjetaDoble(percepcion.vista, falla);
+    percepcion.percibidor = tarjeta;
+    for (let i = 0; i < pasos; i++) stepWorld(world);
+    assert.equal(tarjeta.llamadas, pasos);
+    assert.equal(tarjeta.fallos > 0, falla(3));
+    assert.equal(digestoCanonico(world), uno);
+  }
+});
+
+test('el terreno sube la versión de cada página que reasigna, también en la vista de otro hilo', () => {
+  const world = mundo(42, 300), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
+  const vista = VistaMundo.nueva(), a = world.people[0]!;
+  vista.capturar(world.people, world.tick, [0], tileIn, fast);
+  const antes = Array.from(vista.terreno.versionPagina.subarray(0, vista.terreno.paginas));
+  assert.ok(antes.length > 0 && antes.every(v => v > 0));
+  const tierra = world.tiles.filter(t => t.terrain !== 'water');
+  const lejos = tierra.reduce((m, t) => distance(t, a) > distance(m, a) ? t : m, tierra[0]!);
+  assert.ok(distance(lejos, a) > 2 * RADIUS);
+  const [x, y] = [a.x, a.y];
+  a.x = lejos.x; a.y = lejos.y;
+  try { vista.capturar(world.people, world.tick + 1, [0], tileIn, fast); } finally { a.x = x; a.y = y; }
+  const { terreno } = vista;
+  for (let c = 0; c < terreno.paginas; c++) assert.ok(terreno.versionPagina[c]! > (antes[c] ?? 0), `página ${c}`);
+  const otra = VistaMundo.desde(vista.descriptor()).terreno;
+  assert.equal(otra.paginas, terreno.paginas);
+  for (let c = 0; c < terreno.paginas; c++) {
+    assert.equal(otra.versionPagina[c], terreno.versionPagina[c]);
+    assert.ok(otra.duenoChunk[c]! >= 0);
+  }
+});
+
+test('quien decide fuera del lote se percibe donde está sin escribir en el frente', () => {
+  const world = mundo(7, 900), tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles) ?? undefined;
+  const percepcion = new PercepcionDelPaso(), persona = world.people[0]!;
+  const lote: LotePercepcion = { tick: world.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
+  percepcion.percibir(world.people, world.tick, lote, tileIn, fast, () => {});
+  const { datos } = percepcion.vista.frente;
+  const soloLectura = (c: ArrayBufferView) => new Proxy(c, { set: () => { throw new Error('escritura en el frente'); } });
+  const [x, y] = [datos.x!, datos.y!];
+  const destino = [{ x: persona.x + 1, y: persona.y }, { x: persona.x - 1, y: persona.y }, { x: persona.x, y: persona.y + 1 }]
+    .find(p => (tileIn(p.x, p.y)?.terrain ?? 'water') !== 'water')!;
+  const origen = { x: persona.x, y: persona.y };
+  Object.assign(persona, destino);
+  datos.x = soloLectura(x) as Float32Array; datos.y = soloLectura(y) as Float32Array;
+  try {
+    const { salida, fila, terreno } = percepcion.filaDe(world.people, world.tick, persona, 0, tileIn, fast);
+    const ref = referencia(world, persona.x, persona.y);
+    for (const [consulta, tile] of Object.entries(ref.consultas)) {
+      const c = salida.celda[fila * salida.q + Number(consulta)]!;
+      assert.equal(c >= 0 ? terreno.teselas[c] : undefined, tile, `consulta ${consulta}`);
+    }
+  } finally { datos.x = x; datos.y = y; Object.assign(persona, origen); percepcion.cerrar(); }
 });
 
 test('un mundo que percibe en 32 hilos acaba igual que el de un hilo', async () => {

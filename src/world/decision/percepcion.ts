@@ -139,8 +139,7 @@ export function columnaFrente(frente: FrentePublico, indice: number): { datos: C
 interface FiltroOrganismo { datos: Col; ancho: number; componente: number; min: number; max: number }
 interface OrganismoResuelto { radio: number; clase: number; filtros: FiltroOrganismo[]; criterio: 0 | 1; valor: { datos: Col; ancho: number; componente: number } | null }
 
-function organismoCercano(frente: FrentePublico, rejilla: Casillas, actor: number, o: OrganismoResuelto): number {
-  const x = frente.x[actor]!, y = frente.y[actor]!;
+function organismoCercano(frente: FrentePublico, rejilla: Casillas, actor: number, x: number, y: number, o: OrganismoResuelto): number {
   const bx0 = Math.floor((x - o.radio) / LADO_CASILLA), bx1 = Math.floor((x + o.radio) / LADO_CASILLA);
   const by0 = Math.floor((y - o.radio) / LADO_CASILLA), by1 = Math.floor((y + o.radio) / LADO_CASILLA);
   let mejor = -1, mejorValor = 0;
@@ -188,6 +187,51 @@ function resolver(plan: Plan, { frente, terreno }: Lectura): PlanResuelto {
 
 const ocultas = new Float64Array(CEREBRO.ocultas);
 
+/** Lo que comparten los actores de una llamada: los planes resueltos contra el frente y el terreno, la rejilla de
+ * organismos y las columnas del cerebro. */
+interface Preparado {
+  frente: FrentePublico; terreno: Terreno; planes: PlanResuelto[]; rejilla: Casillas | undefined;
+  obs: Col | undefined; pol: Col | undefined; ses: Col | undefined;
+}
+
+function preparar(ctx: Lectura, planes: readonly Plan[], acciones: number): Preparado {
+  const { frente, terreno } = ctx, resueltos = planes.map(p => resolver(p, ctx)), cerebro = acciones > 0;
+  return {
+    frente, terreno, planes: resueltos, rejilla: resueltos.some(p => p.organismos.length > 0) ? casillas(frente) : undefined,
+    obs: cerebro ? frente.col('observacion') : undefined, pol: cerebro ? frente.col('politica') : undefined, ses: cerebro ? frente.col('sesgo') : undefined,
+  };
+}
+
+/** Fila `i` de `salida`: el actor `slot` con su plan, percibido desde (x, y). */
+function percibirActor(p: Preparado, slot: number, plan: PlanResuelto, x: number, y: number, salida: PercepcionCpu, i: number): void {
+  const { frente, terreno } = p, { q, v, a } = salida, base = i * CELDAS_VENTANA;
+  calcularVentana(terreno, x, y, plan.transitable, salida.ventana, salida.ventanaCelda, base);
+  for (let j = 0; j < q; j++) {
+    const r = i * q + j, consulta = plan.celdas[j];
+    let mejor = -1, mejorClave = Infinity;
+    if (consulta) for (let k = 0; k < CELDAS_VENTANA; k++) {
+      const c = salida.ventanaCelda[base + k]!;
+      if (c < 0) continue;
+      const pasos = salida.ventana[base + k]!;
+      if (pasos < 0 && (consulta.alcanzable || consulta.pesoPasos !== 0)) continue;
+      if (!cumple(consulta.filtros, c)) continue;
+      let clave = consulta.pesoDist * DISTANCIA_VENTANA[k]!;
+      if (consulta.pesoPasos !== 0) clave += consulta.pesoPasos * pasos;
+      for (const { datos, w } of consulta.pesos) clave += w * datos[c]!;
+      if (mejor < 0 || clave < mejorClave) { mejor = k; mejorClave = clave; }
+    }
+    salida.celda[r] = mejor < 0 ? -1 : salida.ventanaCelda[base + mejor]!;
+    salida.pasos[r] = mejor < 0 ? -1 : salida.ventana[base + mejor]!;
+    salida.valor[r] = mejor < 0 ? Infinity : mejorClave;
+  }
+  for (let j = 0; j < v; j++) {
+    const o = plan.organismos[j], s = o ? organismoCercano(frente, p.rejilla!, slot, x, y, o) : -1;
+    salida.organismo[i * v + j] = s < 0 ? REF_NULA : refDe(s, frente.gen[s]!);
+  }
+  for (let j = 0; j < a; j++) salida.utilidad[i * a + j] = 0;
+  if (plan.acciones > 0) cerebro(p.obs!, p.pol!, p.ses!, slot, plan, frente, salida.utilidad, i * a);
+}
+
 /**
  * Percibe los actores `[desde, hasta)` del lote y escribe sus filas de `salida`. Pura: solo lee el frente y el
  * terreno, y cada fila depende solo de ellos, así que cualquier reparto del lote entre hilos da la misma salida.
@@ -195,40 +239,24 @@ const ocultas = new Float64Array(CEREBRO.ocultas);
  * celdas sin ruta), y gana la primera celda en orden de filas (dy, luego dx) con la clave estrictamente menor.
  */
 export function percibirLote(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], salida: PercepcionCpu, desde = 0, hasta = lote.slots.length): void {
-  const { frente, terreno } = ctx;
-  const resueltos = planes.map(p => resolver(p, ctx));
-  const { q, v, a } = salida;
-  const rejilla = resueltos.some(p => p.organismos.length > 0) ? casillas(frente) : undefined;
-  const obs = a > 0 ? frente.col('observacion') : undefined, pol = a > 0 ? frente.col('politica') : undefined, ses = a > 0 ? frente.col('sesgo') : undefined;
+  const p = preparar(ctx, planes, salida.a);
   for (let i = desde; i < hasta; i++) {
-    const slot = lote.slots[i]!, plan = resueltos[lote.plan[i]!]!;
-    const base = i * CELDAS_VENTANA;
-    calcularVentana(terreno, frente.x[slot]!, frente.y[slot]!, plan.transitable, salida.ventana, salida.ventanaCelda, base);
-    for (let j = 0; j < q; j++) {
-      const r = i * q + j, consulta = plan.celdas[j];
-      let mejor = -1, mejorClave = Infinity;
-      if (consulta) for (let k = 0; k < CELDAS_VENTANA; k++) {
-        const c = salida.ventanaCelda[base + k]!;
-        if (c < 0) continue;
-        const p = salida.ventana[base + k]!;
-        if (p < 0 && (consulta.alcanzable || consulta.pesoPasos !== 0)) continue;
-        if (!cumple(consulta.filtros, c)) continue;
-        let clave = consulta.pesoDist * DISTANCIA_VENTANA[k]!;
-        if (consulta.pesoPasos !== 0) clave += consulta.pesoPasos * p;
-        for (const { datos, w } of consulta.pesos) clave += w * datos[c]!;
-        if (mejor < 0 || clave < mejorClave) { mejor = k; mejorClave = clave; }
-      }
-      salida.celda[r] = mejor < 0 ? -1 : salida.ventanaCelda[base + mejor]!;
-      salida.pasos[r] = mejor < 0 ? -1 : salida.ventana[base + mejor]!;
-      salida.valor[r] = mejor < 0 ? Infinity : mejorClave;
-    }
-    for (let j = 0; j < v; j++) {
-      const o = plan.organismos[j], s = o ? organismoCercano(frente, rejilla!, slot, o) : -1;
-      salida.organismo[i * v + j] = s < 0 ? REF_NULA : refDe(s, frente.gen[s]!);
-    }
-    for (let j = 0; j < a; j++) salida.utilidad[i * a + j] = 0;
-    if (plan.acciones > 0) cerebro(obs!, pol!, ses!, slot, plan, frente, salida.utilidad, i * a);
+    const slot = lote.slots[i]!;
+    percibirActor(p, slot, p.planes[lote.plan[i]!]!, ctx.frente.x[slot]!, ctx.frente.y[slot]!, salida, i);
   }
+}
+
+/** Ventanas en CPU para una percepción que no las trae (la de una tarjeta: el contrato no las pide). */
+function conVentanas({ frente, terreno }: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: Percepcion, previa: PercepcionCpu | undefined): PercepcionCpu {
+  const n = lote.slots.length;
+  const ventana = previa && previa.ventana.length >= n * CELDAS_VENTANA ? previa.ventana : new Int16Array(Math.max(16, 2 * n) * CELDAS_VENTANA);
+  const ventanaCelda = previa && previa.ventanaCelda.length >= n * CELDAS_VENTANA ? previa.ventanaCelda : new Int32Array(ventana.length);
+  const transitable = planes.map(plan => filtrosTerreno(terreno, plan.transitable));
+  for (let i = 0; i < n; i++) {
+    const slot = lote.slots[i]!;
+    calcularVentana(terreno, frente.x[slot]!, frente.y[slot]!, transitable[lote.plan[i]!]!, ventana, ventanaCelda, i * CELDAS_VENTANA);
+  }
+  return { q: p.q, v: p.v, a: p.a, celda: p.celda, pasos: p.pasos, valor: p.valor, organismo: p.organismo, utilidad: p.utilidad, ventana, ventanaCelda };
 }
 
 /** Red 12→8→12 de `politica.ts` (mismas operaciones FP64 y en el mismo orden) con la plasticidad dentro de la
@@ -285,7 +313,8 @@ const COLUMNAS_VISTA = [...COLUMNAS_FIJAS, ...REGISTRADAS];
 /** Lo que otro hilo necesita para rehacer la vista: los SAB y los contadores. */
 export interface DescriptorVista {
   tick: number; alta: number; paginas: number;
-  columnas: Record<string, SharedArrayBuffer>; paginaX: SharedArrayBuffer; paginaY: SharedArrayBuffer; campos: SharedArrayBuffer[];
+  columnas: Record<string, SharedArrayBuffer>; paginaX: SharedArrayBuffer; paginaY: SharedArrayBuffer; versionPagina: SharedArrayBuffer;
+  campos: SharedArrayBuffer[];
 }
 
 /** Frente de las personas en la ola 1: una fila por persona (slot = índice en `world.people` al capturar), con solo lo
@@ -317,6 +346,7 @@ class FrenteMundo implements FrentePublico {
   capturar(personas: readonly Person[], tick: number): void {
     this.reservar(personas.length);
     this.tick = tick; this.alta = personas.length;
+    casillasPorFrente.delete(this);   // recapturar en el mismo tick (fuera de la fase de personas) mueve a la gente
     const vivo = this.datos.vivo!, clase = this.datos.clase!, x = this.datos.x!, y = this.datos.y!, cuerpo = this.datos.cuerpo!;
     const protegido = this.datos[COLUMNA_PROTEGIDO]!;
     for (let s = 0; s < personas.length; s++) {
@@ -331,11 +361,13 @@ class FrenteMundo implements FrentePublico {
 
 /** Terreno capturado del mundo de la ola 1: solo los discos r = 7 de quien percibe, en páginas 16×16 con la
  * disposición de celdas del contrato y sobre SAB, para que lo lean otros hilos. Con el SoA residente lee sus
- * arreglos como `choose` (un NaN, campo ausente, vale 0); si no, los campos de la tesela. */
+ * arreglos como `choose` (un NaN, campo ausente, vale 0); si no, los campos de la tesela. Cada captura reparte
+ * de nuevo los índices de página, así que `versionPagina` sube en cada página que se asigna: quien espeje el
+ * terreno (la GPU) vuelve a subir justo esas. Con un solo dueño, `duenoChunk` es 0 en todas. */
 export class TerrenoMundo implements Terreno {
   paginas = 0;
   paginaX: Int32Array<ArrayBufferLike> = new Int32Array(0); paginaY: Int32Array<ArrayBufferLike> = new Int32Array(0);
-  versionPagina = new Uint32Array(0); versionVisible = new Uint32Array(0); duenoChunk = new Int16Array(0);
+  versionPagina: Uint32Array<ArrayBufferLike> = new Uint32Array(0); versionVisible = new Uint32Array(0); duenoChunk = new Int16Array(0);
   readonly campos: readonly string[] = CAMPOS_PERCEPCION;
   valores: Float64Array<ArrayBufferLike>[] = [];
   /** Tesela y celda del SoA residente (−1 sin él) de cada celda capturada: solo existen en el hilo que capturó. */
@@ -349,7 +381,8 @@ export class TerrenoMundo implements Terreno {
   constructor(d?: DescriptorVista) {
     if (!d) { this.#reservar(4); return; }
     this.paginas = d.paginas;
-    this.paginaX = new Int32Array(d.paginaX); this.paginaY = new Int32Array(d.paginaY);
+    this.paginaX = new Int32Array(d.paginaX); this.paginaY = new Int32Array(d.paginaY); this.versionPagina = new Uint32Array(d.versionPagina);
+    this.versionVisible = new Uint32Array(this.paginaX.length); this.duenoChunk = new Int16Array(this.paginaX.length);
     this.valores = d.campos.map(b => new Float64Array(b));
     for (let c = 0; c < d.paginas; c++) this.#indice.set(claveCasilla(this.paginaX[c]!, this.paginaY[c]!), c);
   }
@@ -357,9 +390,10 @@ export class TerrenoMundo implements Terreno {
     if (this.paginaX.length >= paginas) return;
     const cap = Math.max(paginas, 2 * this.paginaX.length);
     const sab = (bytes: number) => new SharedArrayBuffer(Math.max(8, bytes));
-    const crecer = <T extends Int32Array<ArrayBufferLike> | Uint8Array<ArrayBufferLike> | Float64Array<ArrayBufferLike>>(previo: T, nuevo: T): T => { nuevo.set(previo); return nuevo; };
+    const crecer = <T extends Int32Array<ArrayBufferLike> | Uint32Array<ArrayBufferLike> | Uint8Array<ArrayBufferLike> | Float64Array<ArrayBufferLike>>(previo: T, nuevo: T): T => { nuevo.set(previo); return nuevo; };
     this.paginaX = crecer(this.paginaX, new Int32Array(sab(cap * 4))); this.paginaY = crecer(this.paginaY, new Int32Array(sab(cap * 4)));
-    this.versionPagina = new Uint32Array(cap); this.versionVisible = new Uint32Array(cap); this.duenoChunk = new Int16Array(cap);
+    this.versionPagina = crecer(this.versionPagina, new Uint32Array(sab(cap * 4)));
+    this.versionVisible = new Uint32Array(cap); this.duenoChunk = new Int16Array(cap);
     this.valores = CAMPOS_PERCEPCION.map((_, i) => crecer(this.valores[i] ?? new Float64Array(0), new Float64Array(sab(cap * 256 * 8))));
     this.#visto = crecer(this.#visto, new Uint8Array(cap * 256));
     // Arreglo denso desde el principio: escribir índices sueltos en uno vacío lo pasa a diccionario.
@@ -406,7 +440,7 @@ export class TerrenoMundo implements Terreno {
         pagina = this.#pagina(x >> 4, y >> 4);
         if (pagina < 0) {
           pagina = this.paginas++;
-          this.paginaX[pagina] = x >> 4; this.paginaY[pagina] = y >> 4;
+          this.paginaX[pagina] = x >> 4; this.paginaY[pagina] = y >> 4; this.versionPagina[pagina]!++;
           this.#indice.set(claveCasilla(x >> 4, y >> 4), pagina);
           this.#ultimaClave = NaN;
         }
@@ -471,7 +505,8 @@ export class VistaMundo implements Lectura {
     return {
       tick: this.frente.tick, alta: this.frente.alta, paginas: this.terreno.paginas,
       columnas: Object.fromEntries(Object.entries(this.frente.datos).map(([n, c]) => [n, buffer(c)])),
-      paginaX: buffer(this.terreno.paginaX), paginaY: buffer(this.terreno.paginaY), campos: this.terreno.valores.map(buffer),
+      paginaX: buffer(this.terreno.paginaX), paginaY: buffer(this.terreno.paginaY), versionPagina: buffer(this.terreno.versionPagina),
+      campos: this.terreno.valores.map(buffer),
     };
   }
 }
@@ -491,15 +526,18 @@ const PLAZO_PERCEPCION_MS = 2000;
 export class PercepcionDelPaso {
   readonly vista = VistaMundo.nueva();
   readonly planes: Plan[] = planesPersonas(this.vista.terreno.campos, this.vista.frente.columnas);
-  /** Quien percibe el lote; por defecto este mismo hilo. */
+  /** Quien percibe el lote; por defecto este mismo hilo. Otro percibidor (la GPU de M3) debe leer `vista`: las
+   * celdas que devuelve se resuelven contra su terreno. */
   percibidor: Percibidor = new PercibidorCpu(this.vista);
   #cpu = this.percibidor;
   #salida: PercepcionCpu | undefined;
+  #ventanas: PercepcionCpu | undefined;
   #fila = new Int32Array(0);
   #activa = false;
   readonly #suelta = { terreno: new TerrenoMundo(), salida: reservarPercepcion(1, this.planes) };
 
-  /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro de los slots con plan `conCerebro`. */
+  /** F2. Antes de lanzar, `cerebro` pone las columnas del cerebro de los slots con plan `conCerebro`. Si la tarjeta
+   * falla o vence su plazo, el lote entero se percibe aquí en CPU en el mismo tick. */
   percibir(personas: readonly Person[], tick: number, lote: LotePercepcion, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
     cerebro: (vista: VistaMundo) => void): PercepcionCpu {
     this.vista.capturar(personas, tick, lote.slots, tileIn, fast);
@@ -513,8 +551,8 @@ export class PercepcionDelPaso {
       this.#cpu.lanzar(lote, this.planes);
       salida = this.#cpu.esperar(PLAZO_PERCEPCION_MS);
     }
-    if (!('ventana' in salida)) throw new Error('La percepción del lote no trae la ventana de pasos');
-    this.#salida = salida as PercepcionCpu;
+    this.#salida = 'ventana' in salida ? salida as PercepcionCpu
+      : this.#ventanas = conVentanas(this.vista, lote, this.planes, salida, this.#ventanas);
     if (this.#fila.length < personas.length) this.#fila = new Int32Array(Math.max(personas.length, 2 * this.#fila.length));
     this.#fila.fill(-1);
     for (let i = 0; i < lote.slots.length; i++) this.#fila[lote.slots[i]!] = i;
@@ -535,13 +573,11 @@ export class PercepcionDelPaso {
     const fila = this.#fila[slot] ?? -1;
     if (fila >= 0 && frente.x[slot] === persona.x && frente.y[slot] === persona.y) return { salida: this.#salida!, fila, terreno: this.vista.terreno, personas: this.vista.personas };
     const { terreno, salida } = reutilizar ? this.#suelta : { terreno: new TerrenoMundo(), salida: reservarPercepcion(1, this.planes) };
-    // Posición nueva desde la captura: el frente la sigue llevando a la antigua, así que se percibe con la de ahora.
-    const x = frente.x[slot]!, y = frente.y[slot]!;
-    frente.x[slot] = persona.x; frente.y[slot] = persona.y;
+    // Se percibe desde donde está ahora (el frente la sigue llevando donde la capturó y no se toca: es de solo lectura).
     terreno.reiniciar();
     terreno.capturarDisco(persona.x, persona.y, tileIn, fast);
-    percibirLote({ frente, terreno }, { tick, slots: Int32Array.of(slot), plan: Uint16Array.of(PLAN.sinCerebro) }, this.planes, salida);
-    frente.x[slot] = x; frente.y[slot] = y;
+    const p = preparar({ frente, terreno }, this.planes, salida.a);
+    percibirActor(p, slot, p.planes[PLAN.sinCerebro]!, persona.x, persona.y, salida, 0);
     return { salida, fila: 0, terreno, personas: this.vista.personas };
   }
 }

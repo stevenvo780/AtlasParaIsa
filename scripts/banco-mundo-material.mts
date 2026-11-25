@@ -75,7 +75,7 @@ function vistas(m: MundoMaterial): Float64Array {
 /** Todo el estado material: cada lote vivo con su ref, celda y pares en el orden de sus ranuras. */
 function lotes(m: MundoMaterial): string {
   const h = createHash('sha1');
-  for (const x of m.arena.muestras()) {
+  for (const x of m.arenaLab.muestras()) {
     h.update(new Uint8Array(Float64Array.of(x.ref, x.celda, x.rol, x.dueno, x.pares.length).buffer));
     h.update(new Uint8Array(x.pares.buffer, x.pares.byteOffset, x.pares.byteLength));
   }
@@ -116,26 +116,28 @@ function comparar(): void {
 // ── Fases ──
 
 type Privado = {
-  crecer(i: number, a: LoteRef, f: Forzamiento): void; caer(i: number, dt: number): void;
+  crecer(i: number, p: number, a: LoteRef, luz: number, dt: number): void; caer(i: number, dt: number): void;
   intercambiar(l: LoteRef, a: LoteRef, g: number, capL: number, capA: number, dt: number, T: number): void;
-  vapor(p: number, dt: number, T: number): void; posar(p: number, T: number): void; semilla: number; estadoAzar: Uint32Array;
+  vapor(p: number, dt: number, T: number): void; mezclarCielo(p: number, dt: number, T: number): void;
+  llover(p: number, f: Forzamiento, T: number): void; escurrir(p: number): void; manar(p: number, dt: number): void;
+  enviar(p: number, dt: number): void; posar(p: number, T: number): void; semilla: number; estadoAzar: Uint32Array;
 };
 const FASES = ['crecer', 'caer', 'cinética suelo', 'cinética agua', 'cinética aire', 'intercambio suelo–aire', 'charca–suelo',
-  'vapor', 'posar', 'termostato', 'barrera y reservas', 'libro (plegar)', 'vistas'] as const;
+  'vapor', 'posar', 'termostato', 'barrera y reservas', 'libro (plegar)', 'vistas', 'cielo, lluvia, mar y viento'] as const;
 
-/** `pasarPagina` de mundo.ts con un reloj por fase (mismo orden de llamadas, así que el mismo resultado). */
+/** `pasarPagina` de mundo.ts con un reloj por fase (mismo orden de llamadas, así que el mismo resultado; la cobertura
+ * foliar media de la página, que siembra las teselas peladas, no se actualiza aquí). */
 function paginaMedida(m: MundoMaterial, p: number, f: Forzamiento, t: Float64Array, lotesCuenta: Float64Array): void {
   const x = m as unknown as Privado, c = m.ctx;
   const { dt } = f, a = m.aire[p]!, i0 = m.inicio[p]!, i1 = m.inicio[p + 1]!;
-  const T = m.temperatura(p, f.luz), Taire = f.lluvia ? T - DT_LLUVIA : T;
+  const partido = m.params.reparto === 'strang' && dt > 1, dtVida = partido ? dt / 2 : dt, luzFin = f.luzFin ?? f.luz;
+  const T = m.temperatura(p, partido ? (f.luz + luzFin) / 2 : f.luz), Taire = f.lluvia ? T - DT_LLUVIA : T;
   x.semilla = x.estadoAzar[p]!;
   let r = performance.now();
   const marca = (k: number) => { const s = performance.now(); t[k]! += s - r; r = s; };
-  for (let i = i0; i < i1; i++) { x.crecer(i, a, f); marca(0); x.caer(i, dt); marca(1); }
-  for (let i = i0; i < i1; i++) {
-    tipo = 0; pasoLote(c, m.suelo[i]!, dt, SUELO); marca(2); lotesCuenta[0]!++;
-    if (m.agua[i]! >= 0) { tipo = 1; pasoLote(c, m.agua[i]!, dt, SIN); marca(3); lotesCuenta[1]!++; }
-  }
+  for (let i = i0; i < i1; i++) { x.crecer(i, p, a, f.luz, dtVida); marca(0); x.caer(i, dtVida); marca(1); }
+  for (let i = i0; i < i1; i++) { tipo = 0; pasoLote(c, m.suelo[i]!, dt, SUELO); marca(2); lotesCuenta[0]!++; }
+  for (let i = i0; i < i1; i++) if (m.agua[i]! >= 0) { tipo = 1; pasoLote(c, m.agua[i]!, dt, SIN); marca(3); lotesCuenta[1]!++; }
   tipo = 2; pasoLote(c, a, dt, SIN); marca(4); lotesCuenta[2]!++;
   tipo = 3;
   const capAire = 100 * (i1 - i0);
@@ -146,12 +148,14 @@ function paginaMedida(m: MundoMaterial, p: number, f: Forzamiento, t: Float64Arr
     }
   }
   x.vapor(p, dt, Taire); marca(7);
+  x.mezclarCielo(p, dt, Taire); x.llover(p, f, Taire); x.escurrir(p); x.manar(p, dt); x.enviar(p, dt); marca(13);
   x.posar(p, Taire); marca(8);
+  if (partido) for (let i = i0; i < i1; i++) { x.crecer(i, p, a, luzFin, dtVida); marca(0); x.caer(i, dtVida); marca(1); }
   for (let i = i0; i < i1; i++) {
     m.termostato(m.suelo[i]!, T); m.termostato(m.vida[i]!, T);
     if (m.agua[i]! >= 0) m.termostato(m.agua[i]!, T);
   }
-  m.termostato(a, Taire); marca(9);
+  m.termostato(a, Taire); m.termostato(m.mar[p]!, T); m.termostato(m.cielo[p]!, Taire - m.params.fisica.enfriamientoAltura); marca(9);
   x.estadoAzar[p] = x.semilla;
 }
 const SIN = [0, 0, 0, 0] as [number, number, number, number];
@@ -175,7 +179,7 @@ async function fases(): Promise<void> {
   for (let k = 0, tk = 0; k < pasos; k++, tk += cada) {
     const f = clima(tk, cada);
     const t0 = performance.now();
-    m.prepararPaso(); m.arena.barrera();
+    m.prepararPaso(); m.arenaLab.barrera();
     t[10]! += performance.now() - t0;
     for (let p = 0; p < m.np; p++) paginaMedida(m, p, f, t, lotesCuenta);
     const t1 = performance.now();
@@ -230,7 +234,7 @@ async function velocidad(): Promise<void> {
     const coste = new Float64Array(m.np);
     for (; t < 30 * cada; t += cada) {
       const f = clima(t, cada);
-      m.prepararPaso(); m.arena.barrera();
+      m.prepararPaso(); m.arenaLab.barrera();
       for (let p = 0; p < m.np; p++) { const t0 = performance.now(); m.pasarPagina(p, f); coste[p]! += performance.now() - t0; }
     }
     repartir(m, hilos, reparto === 'coste' ? coste : null);
@@ -284,7 +288,8 @@ function lluvias(semilla: number): (t: number) => boolean {
 /**
  * `pasarPagina` con un grupo de procesos cada K ticks (dt = K, con la luz media de su ventana) y los demás cada tick:
  * vida (crecer y caer), cinética (pasoLote de suelo, agua y aire, y el termostato que se lleva su calor) o intercambio
- * (suelo–aire, charca–suelo, vapor y posar). Así se ve qué procesos aguantan qué K.
+ * (suelo–aire, charca–suelo, vapor, cielo, lluvia, escorrentía, manantiales y posar). Así se ve qué procesos aguantan qué
+ * K. La vida va aquí de una vez (reparto 'inicio'): el de Strang se mide con el paso entero (`--reparto`).
  */
 function paginaMixta(m: MundoMaterial, p: number, t: number, K: number, grupo: Grupo, lluvia: (t: number) => boolean): void {
   const x = m as unknown as Privado, c = m.ctx, a = m.aire[p]!, i0 = m.inicio[p]!, i1 = m.inicio[p + 1]!;
@@ -294,7 +299,7 @@ function paginaMixta(m: MundoMaterial, p: number, t: number, K: number, grupo: G
   };
   x.semilla = x.estadoAzar[p]!;
   const fv = ventana('vida'), fc = ventana('cinetica'), fi = ventana('intercambio');
-  if (fv) for (let i = i0; i < i1; i++) { x.crecer(i, a, fv); x.caer(i, fv.dt); }
+  if (fv) for (let i = i0; i < i1; i++) { x.crecer(i, p, a, fv.luz, fv.dt); x.caer(i, fv.dt); }
   if (fc) {
     for (let i = i0; i < i1; i++) {
       pasoLote(c, m.suelo[i]!, fc.dt, SUELO);
@@ -309,6 +314,7 @@ function paginaMixta(m: MundoMaterial, p: number, t: number, K: number, grupo: G
       if (m.agua[i]! >= 0) fluir(c, m.agua[i]!, m.suelo[i]!, m.S.H2O, m.params.gCharca, m.params.escalas.agua, m.params.escalas.humedad, 0, fi.dt);
     }
     x.vapor(p, fi.dt, Taire);
+    x.mezclarCielo(p, fi.dt, Taire); x.llover(p, fi, Taire); x.escurrir(p); x.manar(p, fi.dt);
     x.posar(p, Taire);
   }
   if (fc) {
@@ -317,7 +323,7 @@ function paginaMixta(m: MundoMaterial, p: number, t: number, K: number, grupo: G
       m.termostato(m.suelo[i]!, T); m.termostato(m.vida[i]!, T);
       if (m.agua[i]! >= 0) m.termostato(m.agua[i]!, T);
     }
-    m.termostato(a, Taire);
+    m.termostato(a, Taire); m.termostato(m.mar[p]!, T); m.termostato(m.cielo[p]!, Taire - m.params.fisica.enfriamientoAltura);
   }
   x.estadoAzar[p] = x.semilla;
 }
@@ -329,7 +335,8 @@ function cadencia(): void {
   mkdirSync(salida, { recursive: true });
   for (const K of lista('k', '1,10,60,120')) {
     const q = crearServicioQuimico({ modo: 'inmediato' });
-    const m = MundoMaterial.levantar(teselas(mapa, lado), q, { semilla, luz: luzMedia(0, grupo ? 1 : K) });
+    // --reparto inicio|strang: dónde se evalúa la vida dentro de la ventana (para medir cuánto baja el sesgo de K).
+    const m = MundoMaterial.levantar(teselas(mapa, lado), q, { semilla, luz: luzMedia(0, grupo ? 1 : K), reparto: opt('reparto', 'strang') === 'inicio' ? 'inicio' : 'strang' });
     const tot = totalesVacios(), clima = tiempo(mapa), lluvia = lluvias(mapa);
     m.plegar(tot);
     const fotos: Record<string, unknown> = {};
@@ -337,7 +344,7 @@ function cadencia(): void {
     let t = 0;
     for (const dia of dias) {
       if (grupo) for (; t < dia * TICKS_PER_DAY; t++) {
-        m.prepararPaso(); m.arena.barrera();
+        m.prepararPaso(); m.arenaLab.barrera();
         for (let p = 0; p < m.np; p++) paginaMixta(m, p, t, K, grupo, lluvia);
         m.plegar(tot);
       }

@@ -1,4 +1,7 @@
-/** Campo climático regional puro: hash entero, ruido suave y fase estacional sin estado ni RNG. */
+/** Campo climático regional puro: hash entero, ruido suave y fase estacional sin estado ni RNG; y el sorteo del tiempo. */
+import type { ChronicleEvent } from '../shared/types.js';
+import { PROB_LLUVIA } from './ecologia-constantes.js';
+
 const HASH_SALT = 0x6d2b79f5;
 const TAU = 2 * Math.PI;
 
@@ -41,4 +44,20 @@ export function regionalClimateFactor(seed: number, tick: number, x: number, y: 
     evapScale: 1 - amplitud * seasonal,
     growthScale: 1 + amplitud * productive,
   };
+}
+
+/**
+ * El tiempo del mundo: cada INTERVALO_TIEMPO_TICKS se sortea si llueve (`sorteo` uniforme en [0, 1), contra PROB_LLUVIA) y
+ * el cambio se cuenta en la crónica con `avisar`. Lo usan la ecología escalar (con el azar guardado del mundo) y el
+ * mundo material (con el azar del dueño y, como causa, de dónde sale el agua que llueve).
+ */
+export function sortearTiempo(world: { weather: 'clear' | 'rain' }, sorteo: number, avisar: (e: Omit<ChronicleEvent, 'id' | 'tick'>) => void,
+  cause = 'Cambio de tiempo del generador guardado; la lluvia aporta agua, no alimento instantáneo.'): void {
+  const previous = world.weather;
+  world.weather = sorteo < PROB_LLUVIA ? 'rain' : 'clear';
+  if (world.weather !== previous) avisar({
+    kind: 'ecology', actors: [], source: 'simulation',
+    text: world.weather === 'rain' ? 'La lluvia humedece la tierra; el alimento crecerá si también hay luz.' : 'La lluvia deja paso al cielo abierto.',
+    cause,
+  });
 }

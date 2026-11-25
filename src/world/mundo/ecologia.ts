@@ -2,12 +2,12 @@ import type { World, WorldContext } from './tipos.js';
 import { random, addEvent, phaseAt } from './crear.js';
 import { clamp } from './geometria.js';
 import type { EcologyExecution } from '../ecosystem-kernel.js';
-import { INTERVALO_TIEMPO_TICKS, PROB_LLUVIA, INTERVALO_ECOLOGIA_TICKS, LUZ_CREPSCULO, CRECIMIENTO_COMIDA } from '../ecologia-constantes.js';
+import { INTERVALO_TIEMPO_TICKS, INTERVALO_ECOLOGIA_TICKS, LUZ_CREPSCULO, CRECIMIENTO_COMIDA } from '../ecologia-constantes.js';
 import { paramsOf } from '../params.js';
 import { gpuNvrtcAvailable } from '../gpu/puente.js';
 import { stepLocalEcology } from '../ecosystem.js';
 import { worldContext } from '../spatial.js';
-import { regionalClimateFactor } from '../clima.js';
+import { regionalClimateFactor, sortearTiempo } from '../clima.js';
 import { tileLookup } from '../tile-index.js';
 import { residentFastAccess } from '../soa/terreno.js';
 import { residentBackingArray } from '../soa/topologia.js';
@@ -15,15 +15,7 @@ import { residentBackingArray } from '../soa/topologia.js';
 
 /** Exportada para que la evidencia de T013 aplique la ley real a un mapa amplio sin pagar el coste del paso completo. */
 export function ecology(world: World, execution?: EcologyExecution): void {
-  if (world.tick % INTERVALO_TIEMPO_TICKS === 0) {
-    const previous = world.weather;
-    world.weather = random(world) < PROB_LLUVIA ? 'rain' : 'clear';
-    if (world.weather !== previous) addEvent(world, {
-      kind: 'ecology', actors: [], source: 'simulation',
-      text: world.weather === 'rain' ? 'La lluvia humedece la tierra; el alimento crecerá si también hay luz.' : 'La lluvia deja paso al cielo abierto.',
-      cause: 'Cambio de tiempo del generador guardado; la lluvia aporta agua, no alimento instantáneo.',
-    });
-  }
+  if (world.tick % INTERVALO_TIEMPO_TICKS === 0) sortearTiempo(world, random(world), event => { addEvent(world, event); });
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
   const climateParams = paramsOf(world).ecologia;

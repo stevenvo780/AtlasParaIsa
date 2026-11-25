@@ -8,7 +8,7 @@ import type { BlueprintView, StructureView } from './life.js';
 import type { SustanciaVista } from './materia.js';
 import type { OrganizationSummary } from './organization.js';
 import type { TechnologyView } from './technology.js';
-import type { ChronicleEvent, CommunityView, MemoryView, PlaceView, WorldView } from './types.js';
+import type { AnimalView, ChronicleEvent, CommunityView, MemoryView, PersonView, PlaceView, Tile, WorldView } from './types.js';
 import type { DivineWhisper } from './worldmap.js';
 
 export type TipoCampo = 'u8' | 'u16' | 'i16' | 'u32' | 'i32' | 'f32' | 'f64';
@@ -48,6 +48,10 @@ export const ESQUEMA_ORGANISMO: readonly CampoVisible[] = [
   { nombre: 'masa', tipo: 'f32' },        // kg
   { nombre: 'forma', tipo: 'u32' },       // `codigoForma`
   { nombre: 'principal', tipo: 'u32' },   // SustanciaId de más masa
+  { nombre: 'escucha', tipo: 'u8', escala: 255 },
+  { nombre: 'fatiga', tipo: 'f32' },
+  { nombre: 'carga', tipo: 'f32' },       // kg
+  { nombre: 'T', tipo: 'f32' },           // K
 ];
 
 /** Celda visible: `Tile.mat` (3 sustancias y sus fracciones) y `Tile.T` (K). Mismas reglas de crecimiento que arriba. */
@@ -81,12 +85,29 @@ export interface Fotograma {
 
 // ── Sucesos: lo que cambia sin pérdida ───────────────────────────────────────────────────────────────────
 
+/** Campos públicos de persona, fauna, página y mundo que no van en las columnas ni en los sucesos de texto (M6). */
+export type VistaPersonaFotograma = Omit<PersonView,
+  'name' | 'color' | 'reason' | 'need' | 'recentMemory' | 'specialty' | 'craftTint' | 'craftFocus' |
+  'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health' | 'experiences' | 'trust'>;
+export type VistaAnimalFotograma = Omit<AnimalView,
+  'reason' | 'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health'>;
+export type VistaPaginaFotograma = readonly Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[];
+export type VistaMundoFotograma = Omit<WorldView,
+  'version' | 'sequence' | 'tick' | 'day' | 'phase' | 'weather' | 'tiles' | 'people' | 'animals' |
+  'places' | 'events' | 'memories' | 'communities' | 'structures' | 'blueprints' | 'technology' |
+  'organization' | 'whispers'>;
+
 /** Vistas lentas que la cinta necesita para rehacer el `WorldView`: se mandan enteras al nacer o cambiar (null = baja).
  * Clima, tecnología y organización son únicos en el mundo (id ''). M6 puede añadir clases al final. */
 export interface VistasLentas {
   lugar: PlaceView; comunidad: CommunityView; estructura: StructureView; plano: BlueprintView;
   recuerdo: MemoryView; tecnologia: TechnologyView; organizacion: OrganizationSummary;
   clima: WorldView['weather']; susurro: DivineWhisper;
+  mundo: VistaMundoFotograma;
+  cronicaVista: readonly ChronicleEvent[];
+  persona: VistaPersonaFotograma;
+  animal: VistaAnimalFotograma;
+  pagina: VistaPaginaFotograma;
 }
 export type SucesoVista = { [K in keyof VistasLentas]: { tipo: K; id: string; vista: VistasLentas[K] | null } }[keyof VistasLentas];
 /** Texto visible de un organismo (nombre, razón, necesidad, color, recentMemory…), solo al cambiar (null = borrado). */

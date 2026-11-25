@@ -2,8 +2,9 @@ import { serialize } from 'node:v8';
 import {
   disposicion, ESQUEMA_CELDA, ESQUEMA_ORGANISMO, RANURA_F64, RANURA_I32, regionesRanura, SERIE_CAMPOS,
   type CampoSerie, type EnlaceCinta, type Suceso,
+  type VistaAnimalFotograma, type VistaMundoFotograma, type VistaPaginaFotograma, type VistaPersonaFotograma,
 } from '../../shared/fotograma.js';
-import type { Action, AnimalView, ChronicleEvent, PersonView, Tile, WorldView } from '../../shared/types.js';
+import type { Action, ChronicleEvent, PersonView } from '../../shared/types.js';
 import { ESCUCHA_LOCUS } from '../genetics.js';
 import { matDeCelda, temperaturaDe } from '../materia/ley-mundo.js';
 import { ErrorFatalMotor, PLAZO_BARRERA_MS } from '../paralelo/barrera.js';
@@ -25,12 +26,7 @@ export const ACCIONES_PERSONA_FOTOGRAMA: readonly Action[] = [
 ];
 
 /** Campos públicos que no están en las columnas ni en los sucesos de texto. */
-export type VistaPersonaFotograma = Omit<PersonView,
-  'name' | 'color' | 'reason' | 'need' | 'recentMemory' | 'specialty' | 'craftTint' | 'craftFocus' |
-  'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health' | 'experiences' | 'trust'>;
-export type VistaAnimalFotograma = Omit<AnimalView, 'reason' | 'action' | 'x' | 'y' | 'energy' | 'hunger' | 'thirst' | 'health'>;
-export type VistaPaginaFotograma = readonly Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[];
-export type VistaMundoFotograma = Omit<WorldView, 'version' | 'sequence' | 'tick' | 'day' | 'phase' | 'weather' | 'tiles' | 'people' | 'animals' | 'places' | 'events' | 'memories' | 'communities' | 'structures' | 'blueprints' | 'technology' | 'organization' | 'whispers'>;
+export type { VistaAnimalFotograma, VistaMundoFotograma, VistaPaginaFotograma, VistaPersonaFotograma } from '../../shared/fotograma.js';
 
 export type SucesoVistaAdicional =
   | { tipo: 'mundo'; id: string; vista: VistaMundoFotograma | null }

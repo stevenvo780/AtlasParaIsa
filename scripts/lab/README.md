@@ -641,3 +641,28 @@ TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --seed 7 --pas
 Cifras: `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3.
 
 La medición histórica de E/S entre pasos largos se conserva en el apartado PERF3 de [Reglas](../../docs/REGLAS.md).
+
+## Puesta a punto de la V23
+
+La V23 se enciende de una ley en una, acumulando, en el orden de `ORDEN_ENCENDIDO` (`src/shared/interruptores.ts`):
+`guardadoCompleto, fotograma, cohesion, natalidad, comunidades, materia, cuerpos, fauna, tecnica, obra, intentos, duenos,
+rebalanceo, materiaGpu`. `--hasta <interruptor>` (en `encender.mts`, `panel.ts` y `poblacion.mts`) enciende todos hasta ese
+inclusive (`escalon()`), encima de lo que diga `--params`; el modo de referencia es un hilo, sin tarjeta y con semilla. Cada
+instrumento deja en su salida los interruptores con que corrió el mundo (`interruptores`, o `params.v23` en la fila de inicio).
+
+| Pregunta | Instrumento | Cómo |
+|---|---|---|
+| ¿Esta ley, recién encendida, rompe algo? ¿En qué tick y en qué ley? | `encender.mts` | `tsx scripts/lab/encender.mts --semilla 51926 --hasta materia --dias 3` corre un mundo de un hilo, comprueba cada tick los invariantes y los `Ley.comprobar` de las leyes encendidas y **para en la primera violación dura** con tick, ley y entorno. `--cada N` espacia las comprobaciones; `--continuar` las anota todas. |
+| ¿Cuánta población, nacimientos, muertes por causa y fauna da cada día? ¿Se conserva la materia? | `encender.mts` | Una línea JSON por día: población, nacimientos y muertes (acumulados y del día, por causa), fauna, totales (con los contadores de dieta y carga de `act`) y, con materia, el balance exacto de `conservacion` (diferencias por posición del libro). |
+| ¿El mundo sobrevive y crece con esta ley, en varias semillas? | `panel.ts` | `--hasta X` y, si hace falta, `--params`; el panel de 8 semillas, una réplica por semilla, `--tope-mortales 300`. Solo cuando el carril cambia una ley del mundo (AJUSTES §11). |
+| ¿Qué tasas por habitante y qué equilibrio tiene la ley con muchos habitantes? | `poblacion.mts` | `correr`/`curva` con `--hasta X`; `--desde` acepta los puntos de `panel.ts --guardar-dia N --guardar-en dir` (el panel deja `<semilla>-<réplica>.atlas-punto` junto a su `.punto`). La regla de pareja la da `confianzaMutuaMinima()`, que seguirá a la de `natalidad.ts`. |
+| ¿Se pierde o se duplica materia? | invariante I-C `motor-conservacion` | Σ lotes + en vuelo = inicial + fuentes − sumideros, por posición y exacto; ningún stock negativo. Corre dentro de `encender.mts`, del panel (M5) y de las pruebas. |
+| ¿Alguna garantía vive más de 2 ticks? | invariante I-B `motor-garantias` (y `motor-buzones`, de `motor/contadores.ts`) | Necesita `fijarLectorBuzones(leer)` (lo llama quien conduce el tick); sin lector calla. |
+| ¿Hay uids repetidos o partos sin gestación? | invariante I-N `motor-nacimientos` | La parte de historia (`crearObservadorNacimientos`, dentro de `crearComprobador`) solo concluye si se comprueba cada tick: `encender.mts` sin `--cada` lo hace. |
+| ¿Algún cuerpo apunta a un lote caducado? | invariante I-R `motor-referencias` | Tejido, reserva, digestivo, embrión y carga deben estar vivos en la arena; con la ley apagada nadie tiene cuerpo. |
+| ¿Las vistas de materia que ve el cliente son legibles? | invariante `vistas.materia` | `Tile.mat` (fracciones en [0, 1], suma ≤ 1, de mayor a menor) y `Tile.T` finita y positiva. |
+| ¿Se recupera el servidor de un `kill -9` en cualquier fase? | `caidas.mts` | `tsx scripts/lab/caidas.mts --worktree DIR --hasta guardadoCompleto`: 20 `SIGKILL` en fases al azar (arranque, marcha, pegado a un guardado, pegado a una escritura de la cinta) sobre un `CARTA_DATA_DIR` temporal; comprueba que vuelve a servir, que no retrocede de un guardado ya visto, que la época es nueva y que la cinta abre una época de reinicio y marca lo huérfano. Lo que `/health` aún no dice sale como «desconocido». |
+
+Los invariantes y `Ley.comprobar` solo corren con contexto de dueño (`ctxSi(mundo)`): hasta que el motor enlace el contexto,
+`encender.mts` avisa («sin contexto de dueño») en vez de dar por buenas las leyes. Salida de `encender.mts`: 0 completo,
+2 violación dura, 1 error. Salida de `caidas.mts`: 0 todas bien, 3 alguna caída con problemas, 1 error del instrumento.

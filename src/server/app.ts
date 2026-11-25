@@ -41,6 +41,7 @@ import { LectoresCinta, type PeticionCinta, type RespuestaCinta } from './cinta/
 import { abrirMarcadores, leerMarcador } from './cinta/marcadores.js';
 import { CINTA, type ChunkReq, type CintaMeta, type Corte, type Hito, type Nivel } from '../shared/cinta.js';
 import { chronicleSerial } from '../world/chronicle-journal.js';
+import { fuenteFotograma, serieDeCinta } from './cinta/fuente.js';
 import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
 import type { Chunk } from '../world/terrain.js';
 import { GrabadorCinta, createTileObserver, demografiaDeCinta, fijarBaseDemograficaCinta, projectMirrorTile,
@@ -138,26 +139,16 @@ export interface ReadOnlyBackend {
 export type SaludServidor = Salud & { epoca?: number; ultimoTickGuardado?: number };
 
 type Recibos = NonNullable<Parameters<Store['save']>[1]>;
-type StoreCompleto = Store & {
-  cargarInstantanea(): { instantanea: Instantanea; epoca: number } | null;
-  verificarGuardado?(): LoadedSnapshot | null;
-  guardar(i: Instantanea): void;
-  guardarConEntradas?(i: Instantanea, recibos: Recibos, sesiones: string[]): void;
-};
 
 function cargarGuardado(store: Store, deployment: boolean | undefined): (LoadedSnapshot & Omit<Instantanea, 'world'> & { epoca: number | null }) | null {
-  const completo = store as StoreCompleto;
-  // Con todo apagado se lee con `load()`, como antes de la V23; solo un mundo ya guardado «completo» pasa por la verificación.
-  const base = store.usaGuardadoCompleto() ? store.verificarGuardado() : store.load();
+  const carga = store.cargarGuardadoCompleto();
+  const base = carga ? { ...carga.metadatos, world: carga.instantanea.world } : store.load();
   if (!base) return null;
   const params = paramsOf(base.world);
   if (params.v23.guardadoCompleto !== paramsDelArranque(params, deployment).v23.guardadoCompleto) {
     throw new Error('Cambiar v23.guardadoCompleto requiere un mundo nuevo.');
   }
-  if (!params.v23.guardadoCompleto) return { ...base, materia: null, epoca: null };
-  const carga = completo.cargarInstantanea();
-  if (!carga) throw new Error('No se pudo recargar la instantánea completa.');
-  return { ...base, ...carga.instantanea, epoca: carga.epoca };
+  return { ...base, materia: carga?.instantanea.materia ?? null, epoca: carga?.epoca ?? null };
 }
 
 function paramsDelArranque(params: WorldParams, deployment: boolean | undefined): WorldParams {
@@ -568,8 +559,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const params = paramsDelArranque(paramsOf(world), options.deployment);
     if (params.v23.duenos || params.v23.fotograma || params.v23.guardadoCompleto) setParams(world, params);
   }
-  const usaMotor = !gateway && (ley(world, 'fotograma') || ley(world, 'duenos'));
-  const turbo = turboSolicitado || usaMotor;
+  const usaMotor = !gateway && (ley(world, 'fotograma') || ley(world, 'duenos') || ley(world, 'guardadoCompleto') && ley(world, 'materia'));
+  const turbo = turboSolicitado || !gateway && (ley(world, 'fotograma') || ley(world, 'duenos'));
   const binario = !gateway && ley(world, 'fotograma');
   const tapeRequested = options.tape ?? (binario || turboSolicitado);
   const config = usaMotor ? motorConfig(options.seed) : undefined;
@@ -618,19 +609,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const instantanea = motor?.instantanea();
     const duradero = instantanea?.world ?? draft;
     if (ley(draft, 'guardadoCompleto')) {
-      const completo = store as StoreCompleto;
-      const carga = instantanea ?? { world: draft, materia: loaded?.materia ?? null };
-      if (sesiones.length || recibos.length) {
-        if (!completo.guardarConEntradas) throw new Error('El guardado completo aún no admite entradas con sesión.');
-        completo.guardarConEntradas(carga, recibos, sesiones);
-      } else completo.guardar(carga);
+      store.guardarConEntradas(instantanea ?? { world: draft, materia: null }, recibos, sesiones);
     } else store.save(duradero, recibos, sesiones, cambios);
     ultimoTickGuardado = duradero.tick;
     ultimoGuardadoEn = Date.now();
     return instantanea;
   }
   function adoptarGuardado(guardado: Instantanea | undefined): void {
-    if (!motor || !guardado) return;
+    if (!motor || !guardado || guardado.world === world) return;
     // Los diarios y las colas de archivo se confirman sobre la instantánea que recibió Store.
     motor.cargar(guardado, epoca);
     world = guardado.world;
@@ -638,7 +624,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   if (!gateway) {
     try {
-      if (motor && loaded) motor.cargar({ world, materia: loaded.materia }, epoca);
+      motor?.cargar({ world, materia: loaded?.materia ?? null }, epoca);
       adoptarGuardado(guardarMundo(world, [], [], cambiosPendientes));
       cambiosPendientes.length = 0;
     } catch (error) {
@@ -747,6 +733,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), fuente = mundoParaEmision(), projected = projectWorld(fuente, viewport, context);
+    if (projected.lotes) {
+      const { x, y, width, height } = normalizeViewport(viewport);
+      projected.lotes = projected.lotes.filter(l => l.x >= x && l.x < x + width && l.y >= y && l.y < y + height);
+    }
+    const reparto = motor?.reparto();
+    if (reparto) projected.reparto = reparto;
     runtime.projectionMs = monotonicNow() - start;
     return { ...projected, instanceId, regionesVivas: clavesVivasEn(fuente, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
@@ -788,7 +780,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   let ultimoPuntoSerie = -1;
   let baseDemografia: ReturnType<typeof demografiaDeCinta> | undefined;
   const hitosCinta: Hito[] = [];
-  const eventoGuardado = directorioCinta && !binario ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
+  const eventoGuardado = directorioCinta ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
+  function leerEventoGrabado(serial: number): ChronicleEvent | undefined {
+    const cuerpo = eventoGuardado?.get(`e${serial}`)?.body;
+    return typeof cuerpo === 'string' ? JSON.parse(cuerpo) as ChronicleEvent : undefined;
+  }
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
   let ultimaDifusionTurbo = -Infinity;
@@ -819,18 +815,19 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         epocaCinta < 0 || arranque ? [] : hitosCinta);
     } catch (error) { grabador.fallar(error); return; }
     epocaCinta = epoca;
+    const muestra = mundoParaEmision(true);
+    baseDemografia = demografiaDeCinta(muestra);
+    ultimoPuntoSerie = -1;
     if (binario && motor) {
-      if (arranque) {
-        try { motor.enlazar(arranque.descriptor); }
-        catch (error) { grabador.fallar(error); throw error; }
+      try {
+        motor.enlazar(grabador.descriptor!, fuenteFotograma(muestra, epoca, instanceId!, runtime, () => simHz, leerEventoGrabado));
       }
+      catch (error) { grabador.fallar(error); throw error; }
       return;
     }
-    const muestra = mundoParaEmision(true);
     hitosCinta.length = 0;
-    ultimoCorte = -Infinity; ultimoPuntoSerie = -1; observadorCinta = createTileObserver();
+    ultimoCorte = -Infinity; observadorCinta = createTileObserver({ v23: true });
     serialCronica = muestra.eventCounter;
-    baseDemografia = demografiaDeCinta(muestra);
     Atomics.store(grabador.activo.pedirCompleto, 0, 1);
     for (const suceso of muestra.events) if (suceso.tick === muestra.tick && (epocaCinta === 0 || chronicleSerial(suceso.id) === null)) {
       hitosCinta.push(hitoCinta(suceso));
@@ -842,33 +839,30 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const serial = ++serialCronica;
       // En un paso que guardó, Store ya pasó los nuevos sucesos del diario al archivo.
       const suceso = diario?.pending[serial - diario.committedThrough - 1];
-      const cuerpo = suceso ? undefined : eventoGuardado!.get(`e${serial}`)?.body;
-      if (!suceso && typeof cuerpo !== 'string') throw new Error(`Falta el suceso ${serial} de la crónica.`);
-      hitosCinta.push(hitoCinta(suceso ?? JSON.parse(cuerpo as string) as ChronicleEvent));
+      const evento = suceso ?? leerEventoGrabado(serial);
+      if (!evento) throw new Error(`Falta el suceso ${serial} de la crónica.`);
+      hitosCinta.push(hitoCinta(evento));
     }
   }
   function grabarCinta(forzar = false): void {
     const enlace = grabador?.activo;
-    if (binario || !grabador || !enlace || failed || aMedioPaso || !observadorCinta || !baseDemografia) return;
+    if (!grabador || !enlace || failed || aMedioPaso || !baseDemografia) return;
     const tick = motor ? tickMotor : world.tick;
     const completo = ultimoCorte < 0;
     const punto = ultimoPuntoSerie < 0 || tick > ultimoPuntoSerie && tick % CINTA.seriePaso === 0;
-    const corta = tick > ultimoCorte && (forzar || completo || Atomics.load(enlace.creditos, 0) > 0
+    const corta = !binario && tick > ultimoCorte && (forzar || completo || Atomics.load(enlace.creditos, 0) > 0
       && tick - ultimoCorte >= Atomics.load(enlace.cadencia, 0));
-    if (conDuenos && !punto && !corta) return;
+    if (!punto && !corta) return;
     try {
       const muestra = mundoParaEmision(true);
-      recogerCronica(muestra);
-      const actual = demografiaDeCinta(muestra);
-      const serie = { poblacion: actual.poblacion, nacimientos: actual.nacimientos - baseDemografia.nacimientos,
-        muertes: actual.muertes - baseDemografia.muertes, fauna: muestra.animals.length, estructuras: muestra.structures.length,
-        sustancias: muestra.chemistry?.formulas.length ?? 0, hz: simHz };
+      if (!binario) recogerCronica(muestra);
+      const serie = serieDeCinta(muestra, baseDemografia, simHz);
       if (punto) {
         grabador.enviar({ type: 'serie', epoca, punto: { t: tick, ...serie } });
         ultimoPuntoSerie = tick;
       }
       if (corta) {
-        const { chunks, changed } = observadorCinta.scan(muestra);
+        const { chunks, changed } = observadorCinta!.scan(muestra);
         const tiles: Tile[] = [];
         if (completo) for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile);
         const corte: Corte = { seq: ++seqCinta, epoca, t: tick, vista: projectTapeFrame(muestra, runtime, instanceId, tiles),
@@ -970,7 +964,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (gateway) return gateway.whisper!(request, hash);
     if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
     if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa.');
-    comprobarGuardadoDeEntradas();
     if (pendingWhispers.length >= 16) throw new HttpError(429, 'Hay varios mensajes en camino. Espera un momento.');
     // What only the world knows (a living listener, a land destination) fails at once, not a step later.
     try { validateWhisper(mundoConsultable(), request); }
@@ -1177,7 +1170,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     catch (error) { if (error instanceof GestureConflict) throw new HttpError(409, error.message); throw error; }
     if (saved) return Promise.resolve(saved);
     if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa. Este gesto sigue sin confirmación.');
-    comprobarGuardadoDeEntradas();
     const existing = pending.get(gesture.id);
     if (existing) {
       if (fingerprint(existing.gesture) !== fingerprint(gesture)) throw new HttpError(409, 'Ese identificador ya se usó para otro gesto.');
@@ -1189,11 +1181,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const promise = new Promise<GestureResult>((yes, no) => { resolve = yes; reject = no; });
     pending.set(gesture.id, { gesture, hash, resolve, reject, promise });
     return promise;
-  }
-  function comprobarGuardadoDeEntradas(): void {
-    if (ley(world, 'guardadoCompleto') && !(store as StoreCompleto).guardarConEntradas) {
-      throw new HttpError(503, 'El guardado completo todavía no puede confirmar esta entrada.');
-    }
   }
   function stepOnce() {
     const desde = relojReal();
@@ -1327,7 +1314,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const tick = pasoMotor?.tick ?? draft.tick;
       let guardado: Instantanea | undefined;
       const routineSaveDue = tick % paramsOf(draft).persistencia.cadaTicks === 0
-        && (!turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
+        && (ley(draft, 'guardadoCompleto') || !turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
       if (valid.length > 0 || susurrosAplicados.length > 0 || routineSaveDue
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
@@ -1434,6 +1421,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         return;
       }
       if (guardando) {
+        console.error(`El guardado del paso ${tickObjetivo} falló: ${motivo}`);
         // Simular sin poder guardar perdería mundo y confirmaría lo que no es durable: se conserva
         // la pausa protectora. `/health` dice `parado` y el vigilante externo reinicia el servicio
         // sobre el último guardado; esa es la recuperación de un fallo de persistencia.
@@ -1519,7 +1507,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const nuevaEpoca = Math.max(epoca + 1, cargado.epoca ?? 0);
     try { motor?.cargar({ world, materia: cargado.materia }, nuevaEpoca); }
     catch (error) {
-      console.error('El motor no pudo cargar el último guardado.', error);
+      console.error(`El motor no pudo cargar el último guardado tras el fallo del paso (${motivo}).`, error);
       failed = true; aMedioPaso = true; salirFatal(75); return false;
     }
     epoca = nuevaEpoca;
@@ -1598,8 +1586,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
         if (req.method === 'GET' && url.pathname === '/api/motor') {
           const telemetria = gateway ? gateway.motor?.() : !failed && motor ? motor.telemetria() : undefined;
-          if (!telemetria) throw new HttpError(404, 'No hay telemetría del motor disponible.');
-          return json(res, 200, telemetriaEnJson(telemetria));
+          if (telemetria) return json(res, 200, telemetriaEnJson(telemetria));
+          // Con motor pero caído o a medio recargar: no hay lectura ahora, sí más tarde.
+          if (!gateway && motor) throw new HttpError(503, 'La telemetría del motor no está disponible ahora.');
+          // Sin motor (paso heredado): la ruta existe y no hay nada que medir. 204 y no 404, que el navegador anota
+          // como un error de carga en la consola; el panel Motor usa entonces el paso y /health.
+          res.writeHead(204); res.end(); return;
         }
         if (url.pathname === '/api/cinta/marcador' && (req.method === 'GET' || req.method === 'PUT')) {
           const directorio = servicioCinta()?.directorio;
@@ -1871,6 +1863,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     get guardado() { return { epoca, ultimoTickGuardado, ultimoGuardado: ultimoGuardadoEn }; },
     flushTape: () => grabador?.flush() ?? Promise.resolve({ enabled: false, frames: 0, latestTick: -1 }),
     get telemetriaMotor() { return !failed && !aMedioPaso ? motor?.telemetria() : undefined; },
+    get repartoMotor() { return motor?.reparto(); },
     /** V24: Mensajes Divinos waiting for their step (tests and benches), and whether the last step applied one. */
     get susurrosPendientes() { return pendingWhispers.length; },
     get susurrosEnUltimoPaso() { return susurrosEnUltimoPaso; },

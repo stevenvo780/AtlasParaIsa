@@ -190,6 +190,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     const structures = [...source.structures ?? [], ...[...chunks.values()].flatMap(c => c.structures ?? legacyStructures(c.tiles, c.lastTick))].filter(s => visible(s, 1));
     const blueprintIds = new Set(structures.map(s => s.blueprintId));
     return { ...source, width: v.width, height: v.height, originX: v.x, originY: v.y, tiles, people,
+      ...(source.lotes && { lotes: source.lotes.filter(l => visible(l)) }),
       places: [...places.values()].filter(p => visible(p)),
       animals: [...source.animals ?? [], ...[...chunks.values()].flatMap(c => (c.animals ?? []).map(a => projectAnimal(a, source.tick)))].filter(a => visible(a)),
       structures, blueprints: source.blueprints?.filter(b => blueprintIds.has(b.id)),
@@ -347,7 +348,6 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
         if (mirror) transport.broadcast();
       } else if (message.type === 'cinta') {
         errorCinta = typeof message.error === 'string' ? message.error : undefined;
-        if (options.deployment && errorCinta) console.warn(JSON.stringify({ cinta: 'detenida', motivo: errorCinta }));
       } else if (message.type === 'log') {
         if (options.deployment) {
           const log = message.level === 'warn' ? console.warn : console.info;

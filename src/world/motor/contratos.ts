@@ -395,9 +395,10 @@ export interface Motor {
   instantanea(): Instantanea;
   cargar(i: Instantanea, epoca: number): void; // reparte tras Store.cargarInstantanea() o una recuperación y abre la época: su primer fotograma es completo
   /** Desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito (protocolo en shared/fotograma.ts). */
-  enlazar(cinta: DescriptorEnlace): void;
+  enlazar(cinta: DescriptorEnlace, fuente?: import('./fotograma.js').FuenteFotograma): void;
   detalle(uid: number): Promise<Person | null>; // inspector: lo serializa el dueño en el F1 siguiente
   telemetria(): TelemetriaMotor;
+  reparto(): import('../../shared/vistas-v23.js').RepartoVisible | undefined;
   cerrar(): Promise<void>;
 }
 

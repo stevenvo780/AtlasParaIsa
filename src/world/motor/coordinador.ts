@@ -12,6 +12,8 @@
 import { availableParallelism } from 'node:os';
 import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
+import type { FuenteFotograma } from './fotograma.js';
+import type { RepartoVisible } from '../../shared/vistas-v23.js';
 import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
 import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
@@ -86,6 +88,7 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
 class MotorUnico implements Motor {
   #mundo: World;
   #enlace: DescriptorEnlace | null = null;
+  #fuente?: FuenteFotograma;
   #epoca = 0;
   readonly #t = telemetriaVacia(1);
   readonly #medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
@@ -121,15 +124,16 @@ class MotorUnico implements Motor {
     if (!activo && !i.materia) return;
     const d = duenoDe(i.world, i.materia?.sustancias);
     d.epoca = epoca;
-    d.enlazar(this.#enlace);
+    d.enlazar(this.#enlace, this.#fuente);
     d.abrirEpoca(i.materia);
   }
 
-  enlazar(cinta: DescriptorEnlace): void {
+  enlazar(cinta: DescriptorEnlace, fuente?: FuenteFotograma): void {
     this.#enlace = cinta;
+    this.#fuente = fuente;
     const d = duenoDe(this.#mundo);
     d.epoca = this.#epoca;
-    d.enlazar(cinta);
+    d.enlazar(cinta, fuente);
   }
 
   detalle(uid: number): Promise<Person | null> {
@@ -138,6 +142,14 @@ class MotorUnico implements Motor {
   }
 
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
+
+  reparto(): RepartoVisible | undefined {
+    const d = duenoSi(this.#mundo);
+    if (!d) return;
+    const t = d.terreno;
+    return { paginas: Array.from(d.chunks, c => [t.paginaX[c]!, t.paginaY[c]!, 0]),
+      msPorHilo: this.#t.hz > 0 ? [1000 / this.#t.hz] : [] };
+  }
 
   cerrar(): Promise<void> {
     cerrarMateriaGpu(this.#mundo);
@@ -155,6 +167,14 @@ class MotorDuenos implements Motor {
   readonly #hilos: number;
   #epoca = 0;
   #enlace: DescriptorEnlace | null = null;
+  #fuente?: FuenteFotograma;
+  #fuenteReunida(): FuenteFotograma | undefined {
+    const fuente = this.#fuente;
+    if (fuente) return {
+      corte: (c, f, paginas) => fuente.corte(c, f, paginas, this.#reunirMundo().world),
+      confirmar: f => fuente.confirmar(f),
+    };
+  }
   #piscina: Piscina<DatosDueno> | null = null;
   #fatal: ErrorFatalMotor | undefined;
   // Vigentes mientras hay piscina (los arma `#arrancar`).
@@ -220,6 +240,7 @@ class MotorDuenos implements Motor {
       hilo: 0, hilos, buzones, buzon: buzones.dueno(0, azar), libros, contadores, registro, azar, control, enlace: this.#enlace,
       materia: quimica && lotes && desborde ? { lotes, desborde, quimica } : null,
     });
+    if (this.#fuente) d.enlazar(this.#enlace, this.#fuenteReunida());
     d.epoca = this.#epoca;
     d.avisar = (clase, i) => this.#aviso(clase, i);
     d.prepararEpoca();
@@ -471,35 +492,40 @@ class MotorDuenos implements Motor {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
-      this.#buzones.fijarFase(0);
-      this.#piscina.ejecutar(TRAMO.reunir);
-      this.#recoger();
-      const partes = Array.from({ length: this.#hilos - 1 }, (_, i) => {
-        const parte = this.#partesMundo.get(i + 1);
-        if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
-        return parte;
-      });
-      this.#partesMundo.clear();
-      const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
-      const pendientes = this.#d.pendientes();
-      for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
-        // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
-        const mig = deserialize(i.bytes!) as Migrante;
-        if (mig.tipo === 'chunk') {
-          world.chunks[mig.key] = mig.meta;
-          world.tiles.push(...mig.tiles);
-          world.structures.push(...mig.structures);
-          world.animals.push(...mig.animals);
-          for (const p of mig.personas) world.people.push(p.persona);
-        } else {
-          if (mig.persona) world.people.push(mig.persona.persona);
-          if (mig.animal) world.animals.push(mig.animal.animal);
-        }
-      }
-      if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
+      const { world, pendientes } = this.#reunirMundo();
       recordSample(world);
       return { world, materia: this.#d.instantaneaMateria(pendientes) };
     } catch (error) { throw this.#fallo(error); }
+  }
+
+  #reunirMundo(): { world: World; pendientes: Intento[] } {
+    this.#buzones.fijarFase(0);
+    this.#piscina!.ejecutar(TRAMO.reunir);
+    this.#recoger();
+    const partes = Array.from({ length: this.#hilos - 1 }, (_, i) => {
+      const parte = this.#partesMundo.get(i + 1);
+      if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
+      return parte;
+    });
+    this.#partesMundo.clear();
+    const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
+    const pendientes = this.#d.pendientes();
+    for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
+      // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
+      const mig = deserialize(i.bytes!) as Migrante;
+      if (mig.tipo === 'chunk') {
+        world.chunks[mig.key] = mig.meta;
+        world.tiles.push(...mig.tiles);
+        world.structures.push(...mig.structures);
+        world.animals.push(...mig.animals);
+        for (const p of mig.personas) world.people.push(p.persona);
+      } else {
+        if (mig.persona) world.people.push(mig.persona.persona);
+        if (mig.animal) world.animals.push(mig.animal.animal);
+      }
+    }
+    if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
+    return { world, pendientes };
   }
 
   cargar(i: Instantanea, epoca: number): void {
@@ -508,13 +534,28 @@ class MotorDuenos implements Motor {
     this.#arrancar(i.materia);
   }
 
-  enlazar(cinta: DescriptorEnlace): void {
+  enlazar(cinta: DescriptorEnlace, fuente?: FuenteFotograma): void {
+    const nuevo = this.#enlace !== cinta;
     this.#enlace = cinta;
+    this.#fuente = fuente;
     if (!this.#piscina) return;
+    if (!nuevo) {
+      this.#d.enlazar(cinta, this.#fuenteReunida());
+      return;
+    }
     // Las ranuras de la cinta son memoria compartida que los workers reciben al nacer: se reparte de nuevo.
     const { world, materia } = this.instantanea();
     this.#mundo = world;
     this.#arrancar(materia);
+  }
+
+  reparto(): RepartoVisible | undefined {
+    if (!this.#piscina) return;
+    return {
+      paginas: [...this.#paginas.values()].filter(p => p.estado === 'activo')
+        .map(({ px, py, chunk }) => [px, py, this.#terreno.duenoChunk[chunk]!]),
+      msPorHilo: Array.from({ length: this.#hilos }, (_, h) => this.#control[celdaDueno(h, CTL_DUENO.msTick)]!),
+    };
   }
 
   detalle(uid: number): Promise<Person | null> {

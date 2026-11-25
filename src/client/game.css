@@ -62,7 +62,7 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 /* M1: el recuento de Vidas distingue la cámara del mundo. */
 .population-drawer h2>#population-count{display:block;margin:6px 0 0;font-size:13px;line-height:1.4}
 /* V21 — barra de transporte DVR («cine»): vidrio oscuro sobre el mismo verde pergamino del HUD; sólo existe con la cinta activa. */
-.dvr-bar{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:24;width:min(920px,calc(100% - 40px));padding:8px 12px 7px;background:#1b2c23ed;border:1px solid #81977799;border-radius:12px;color:#eef3e1;box-shadow:0 8px 30px #0a1810a8,0 1px 0 #ffffff1a inset;backdrop-filter:blur(12px)}
+.dvr-bar{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:24;width:min(1080px,calc(100% - 40px));padding:8px 12px 7px;background:#1b2c23ed;border:1px solid #81977799;border-radius:12px;color:#eef3e1;box-shadow:0 8px 30px #0a1810a8,0 1px 0 #ffffff1a inset;backdrop-filter:blur(12px)}
 .dvr-bar[hidden]{display:none}
 .dvr-transport{display:grid;grid-template-columns:auto auto minmax(160px,1fr) auto;gap:6px 14px;align-items:center;font-size:12px}
 .dvr-controls,.dvr-speeds,.dvr-engine{display:flex;align-items:center;gap:4px}
@@ -84,6 +84,11 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .dvr-hover{color:#b8c9a8;overflow:hidden;text-overflow:ellipsis;min-height:1em}
 .dvr-engine{flex-wrap:nowrap;gap:8px}
 .dvr-badge{padding:5px 9px;background:#00000040;border:1px solid #ffffff1c;border-radius:999px;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* V23 — cinta por niveles: escala (nivel y paso en tiempo de mundo), desfase con el presente y aviso de la grabación. */
+.dvr-escala{max-width:280px;overflow:hidden;text-overflow:ellipsis;color:#e6efcf;background:#d6e8a41c;border-color:#d6e8a450}
+.dvr-desfase{color:#d9c79a;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dvr-desfase:empty,.dvr-estado:empty{display:none}
+.dvr-estado{margin-top:4px;padding:3px 8px;border-radius:6px;background:#e8b06a;color:#2a1a12;font-size:11px;font-weight:700;line-height:1.35}
 .dvr-live{padding:0 11px;color:#c9b4a8;white-space:nowrap}
 .dvr-live.is-live{color:#1b2c23;background:#e87a6a;border-color:#e87a6a;font-weight:700}
 .dvr-transport[data-loading=true] .dvr-time::after{content:" …";opacity:.7}
@@ -91,12 +96,17 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 /* V21 — observador puro: ninguna orden ni gesto; todo lo demás sigue vivo. */
 .game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette){display:none!important}
 .game-shell.is-observer-only .control-pair{grid-template-columns:1fr}
-@media(max-width:1100px) and (min-width:761px){.dvr-transport{grid-template-columns:auto 1fr auto;}.dvr-scrubber{grid-column:1/-1;grid-row:2}}
+@media(max-width:1100px) and (min-width:761px){.dvr-transport{grid-template-columns:auto 1fr auto;}.dvr-scrubber{grid-column:1/-1;grid-row:2}.dvr-badge:not(.dvr-escala){display:none}.dvr-escala{max-width:170px}}
 @media(max-width:760px){
 .dvr-bar{left:8px;right:8px;bottom:88px;width:auto;transform:none;padding:7px 9px}
-.dvr-transport{grid-template-columns:1fr auto;gap:6px 8px}
+.dvr-transport{grid-template-columns:auto minmax(0,1fr);gap:6px 8px}
 .dvr-controls{grid-column:1;grid-row:1}.dvr-engine{grid-column:2;grid-row:1}.dvr-speeds{grid-column:1/-1;grid-row:3;flex-wrap:wrap}.dvr-scrubber{grid-column:1/-1;grid-row:2}
-.dvr-button,.dvr-speed,.dvr-live{min-height:40px}.dvr-badge{display:none}
+.dvr-button,.dvr-speed,.dvr-live{min-height:40px}.dvr-badge:not(.dvr-escala){display:none}
+/* La fila de arriba cabe en 360 px: la escala se recorta con puntos suspensivos (el texto entero va en su title). */
+.dvr-engine{min-width:0;justify-content:flex-end}.dvr-live{flex:none}
+.dvr-escala{max-width:none;min-width:0;flex:0 1 auto;padding:4px 7px;font-size:11px}
+/* Con una ficha o un panel abierto la barra de la cinta taparía su parte de abajo: se aparta mientras se lee. */
+.game-shell.has-dvr:has(.game-drawer:not([hidden])) .dvr-bar{display:none}
 .dvr-speeds .dvr-speed{flex:1}
 .game-shell.has-dvr .world-coordinates{bottom:222px}.game-shell.has-dvr .camera-controls{bottom:232px}.game-shell.has-dvr .heat-legend{bottom:232px}
 }

@@ -108,6 +108,7 @@ function proyectar(vista: WorldView, camara?: Viewport): WorldView {
   const visible = (p: { x: number; y: number }, margen = 0): boolean => p.x >= x - margen && p.y >= y - margen
     && p.x < x + width + margen && p.y < y + height + margen;
   r.originX = x; r.originY = y; r.width = width; r.height = height;
+  if (r.lotes) r.lotes = r.lotes.filter(l => visible(l));
   r.people = r.people.filter(p => visible(p, 1));
   const ids = new Set(r.people.map(p => p.id));
   if (r.animals) r.animals = r.animals.filter(a => visible(a));

@@ -18,6 +18,9 @@ import type { WorldSample } from '../../shared/types.js';
 import { assertTechnology } from '../technology.js';
 import { resolveTechnologyRecipe } from '../technology-catalogue.js';
 import { COLUMNAS_CEREBRO, GENOMA_ANCHO } from '../motor/contratos.js';
+import { TOTALES_V23 } from '../totales-v23.js';
+
+const ES_TOTAL_V23: ReadonlySet<string> = new Set(TOTALES_V23);
 
 function esRegistro(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -142,7 +145,11 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     if (expectedVersion >= 3) assertEcosystemTile(tile);
     const key = `${tile.x},${tile.y}`;
     if (tile.biome !== undefined && !['grassland','forest','desert','mountain','wetland','ocean'].includes(tile.biome) || tile.elevation !== undefined && (typeof tile.elevation !== 'number' || !Number.isFinite(tile.elevation) || tile.elevation < 0 || tile.elevation > 1)) fail();
-    if (keys.has(key) || !w.chunks[chunkKey(tile.x, tile.y)] || (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || tile.wood > 12)) || (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || tile.stone > 8))) fail();
+    if (keys.has(key) || !w.chunks[chunkKey(tile.x, tile.y)]) fail();
+    if (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || tile.wood > 12))
+      throw new Error(`Estado procedural inválido. Madera fuera de rango en la tesela ${key}.`);
+    if (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || tile.stone > 8))
+      throw new Error(`Estado procedural inválido. Piedra fuera de rango en la tesela ${key}.`);
     keys.add(key);
   }
   for (const [key, chunk] of Object.entries(w.chunks)) {
@@ -153,6 +160,14 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
   }
   const numericMap = (v: unknown, min: number, max: number, limit: number) => v && typeof v === 'object' && !Array.isArray(v) && Object.entries(v).length <= limit && Object.entries(v).every(([k, n]) => k.length <= 50 && typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max);
+  // Los contadores V23 se suman a los heredados (y no cuentan en su tope): sin esto, el primer mundo con cuerpos que
+  // come y bebe pasa de 13 claves y ningún guardado suyo se puede leer ni (con v23.guardadoCompleto) escribir.
+  const totalesValidos = (v: unknown, heredados: number): boolean => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+    const entradas = Object.entries(v), v23 = entradas.filter(([k]) => ES_TOTAL_V23.has(k));
+    return !!numericMap(Object.fromEntries(entradas.filter(([k]) => !ES_TOTAL_V23.has(k))), 0, 1e12, heredados)
+      && v23.every(([, n]) => typeof n === 'number' && Number.isFinite(n) && n >= 0);
+  };
   for (const p of w.people) {
     if (validarCuerpos) {
       assertCuerpo(p.cuerpo, w.tick, true);
@@ -183,7 +198,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
   }
   if (expectedVersion >= 3) {
-    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, expectedVersion >= 14 ? 13 : 12)) fail();
+    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !totalesValidos(w.totals, expectedVersion >= 14 ? 13 : 12)) fail();
     const communityIds = new Set<string>();
     for (const c of w.communities) {
       if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();

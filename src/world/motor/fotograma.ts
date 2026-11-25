@@ -1,16 +1,16 @@
 import { serialize } from 'node:v8';
 import {
-  disposicion, ESQUEMA_CELDA, ESQUEMA_ORGANISMO, RANURA_F64, RANURA_I32, regionesRanura, SERIE_CAMPOS,
+  disposicion, ESQUEMA_CELDA, ESQUEMA_ORGANISMO, fotogramaDe, RANURA_F64, RANURA_I32, regionesRanura, SERIE_CAMPOS,
   type CampoSerie, type EnlaceCinta, type Suceso,
   type VistaAnimalFotograma, type VistaMundoFotograma, type VistaPaginaFotograma, type VistaPersonaFotograma,
 } from '../../shared/fotograma.js';
 import type { Action, ChronicleEvent, PersonView } from '../../shared/types.js';
 import { ESCUCHA_LOCUS } from '../genetics.js';
 import { matDeCelda, temperaturaDe } from '../materia/ley-mundo.js';
-import { ErrorFatalMotor, PLAZO_BARRERA_MS } from '../paralelo/barrera.js';
 import { ley } from '../params.js';
 import { crecerSAB } from '../soa/arena.js';
 import { PAGE_CELLS, PAGE_SIDE } from '../soa/region.js';
+import type { World } from '../mundo/tipos.js';
 import { type CtxF0, type CtxLey, type CtxLeyMateria } from './acceso.js';
 import { CAMPOS_CUERPO, Clase, CUERPO_ANCHO, GENOMA_ANCHO } from './contratos.js';
 
@@ -38,7 +38,7 @@ export type SucesoFotograma = Suceso | SucesoVistaAdicional;
 
 /** F0 reúne los partes de los dueños; después de B4 presenta el lote desde el último fotograma entregado. */
 export interface FuenteFotograma {
-  corte(c: CtxF0, f: FotogramaEnCurso): {
+  corte(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, mundo?: World): {
     sucesos: readonly SucesoFotograma[];
     serie: Readonly<Record<CampoSerie, number>>;
   };
@@ -51,9 +51,8 @@ export function enlazarFuenteFotograma(enlace: EnlaceCinta, fuente: FuenteFotogr
 }
 
 /** Estado del fotograma en curso, que el coordinador abre en F0 y los dueños rellenan en F6. */
-export interface FotogramaEnCurso { readonly ranura: SharedArrayBuffer; readonly completo: boolean; readonly tick: number; readonly epoca: number }
-
-interface FotogramaConVersiones extends FotogramaEnCurso {
+export interface FotogramaEnCurso {
+  readonly ranura: SharedArrayBuffer; readonly completo: boolean; readonly tick: number; readonly epoca: number;
   readonly versiones: Float64Array; // Por chunk, versionVisible entregada + 1. 0 significa que aún no viajó.
 }
 interface EstadoEnlace {
@@ -62,18 +61,19 @@ interface EstadoEnlace {
   saltados: number;
   primero: boolean;
   versiones: Float64Array;
-  enCurso: FotogramaConVersiones | null;
+  enCurso: FotogramaEnCurso | null;
 }
 const estados = new WeakMap<EnlaceCinta, EstadoEnlace>();
 const capacidad = (n: number): number => Math.ceil(n * (1 + HOLGURA_RANURA)) + 1;
 
 /** F0: reserva una sola ranura por tick elegible. */
 export function abrirFotograma(c: CtxF0, enlace: EnlaceCinta, epoca: number): FotogramaEnCurso | null {
-  if (!ley(c.mundo, 'fotograma')) return null;
+  if (!ley(c.mundo, 'fotograma') || Atomics.load(enlace.saturado, 0) || Atomics.load(enlace.sucesosLeidos, 0) < 0n) return null;
   let e = estados.get(enlace);
   if (e?.enCurso) throw new Error('La ranura anterior sigue abierta.');
   if (e?.epoca !== epoca) {
-    e = { epoca, ultimoIntento: -Infinity, saltados: 0, primero: true, versiones: new Float64Array(0), enCurso: null };
+    enlace.versiones?.fill(0);
+    e = { epoca, ultimoIntento: -Infinity, saltados: 0, primero: true, versiones: enlace.versiones ?? new Float64Array(0), enCurso: null };
     estados.set(enlace, e);
   }
   if (c.tick - e.ultimoIntento < Math.max(1, Atomics.load(enlace.cadencia, 0))) return null;
@@ -89,9 +89,12 @@ export function abrirFotograma(c: CtxF0, enlace: EnlaceCinta, epoca: number): Fo
   const ranura = enlace.ranuras[Number(entregados % BigInt(enlace.ranuras.length))];
   crecerSAB(ranura, regionesRanura(capOrganismos, capPaginas).total);
   if (e.versiones.length < capPaginas) {
-    const versiones = new Float64Array(new SharedArrayBuffer(capPaginas * Float64Array.BYTES_PER_ELEMENT));
-    versiones.set(e.versiones);
-    e.versiones = versiones;
+    if (enlace.versiones) crecerSAB(enlace.versiones.buffer as SharedArrayBuffer, capPaginas * Float64Array.BYTES_PER_ELEMENT);
+    else {
+      const versiones = new Float64Array(capPaginas);
+      versiones.set(e.versiones);
+      e.versiones = versiones;
+    }
   }
 
   Atomics.sub(enlace.creditos, 0, 1);
@@ -116,7 +119,7 @@ function* indices(n: number): Iterable<number> {
 
 /** F6: reserva un bloque por dueño y lee sus columnas del frente que se está cerrando. */
 export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
-  const versiones = (f as FotogramaConVersiones).versiones;
+  const versiones = f.versiones;
   const i32 = new Int32Array(f.ranura, 0, 8);
   const capO = i32[RANURA_I32.capOrganismos], capP = i32[RANURA_I32.capPaginas];
   const r = regionesRanura(capO, capP), binario = new DataView(f.ranura);
@@ -194,7 +197,7 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
   return true;
 }
 
-function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[]): [number, number] {
+function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[]): [number, number] | null {
   const desde = Atomics.load(enlace.sucesosEscritos, 0);
   const registros = sucesos.map(s => {
     if (s.tipo !== 'persona' || !s.vista) return serialize(s);
@@ -205,20 +208,13 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
   const bytes = registros.reduce((n, body) => n + 4 + body.length, 0);
   if (!bytes) return [Number(desde), Number(desde)];
   const anillo = enlace.sucesos;
-  if (!anillo || bytes > anillo.length) throw new ErrorFatalMotor('El lote de sucesos de un fotograma no cabe en el anillo de cinta.');
-  const hasta = desde + BigInt(bytes), capacidad = BigInt(anillo.length);
-  if (!Number.isSafeInteger(Number(hasta))) throw new ErrorFatalMotor('El cursor de sucesos no cabe en la cabecera del fotograma.');
-
-  let leidos = Atomics.load(enlace.sucesosLeidos, 0);
-  let vence = performance.now() + PLAZO_BARRERA_MS;
-  while (hasta - leidos > capacidad) {
-    const restante = vence - performance.now();
-    if (restante <= 0) throw new ErrorFatalMotor('Plazo agotado esperando espacio para los sucesos de cinta.');
-    Atomics.wait(enlace.sucesosLeidos, 0, leidos, restante);
-    const actual = Atomics.load(enlace.sucesosLeidos, 0);
-    if (actual !== leidos) vence = performance.now() + PLAZO_BARRERA_MS;
-    leidos = actual;
+  const hasta = desde + BigInt(bytes);
+  if (!anillo || !Number.isSafeInteger(Number(hasta))
+    || hasta - Atomics.load(enlace.sucesosLeidos, 0) > BigInt(anillo.length)) {
+    Atomics.store(enlace.saturado, 0, 1);
+    return null;
   }
+  const capacidad = BigInt(anillo.length);
 
   let posicion = Number(desde % capacidad);
   const copiar = (v: Uint8Array): void => {
@@ -237,7 +233,7 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
 }
 
 /** Tras B4: aborta sin avanzar los cursores o publica sucesos, serie y fotograma en ese orden. */
-export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCurso, valido: boolean): void {
+export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCurso, valido: boolean): boolean {
   const e = estados.get(enlace);
   if (!e || e.enCurso !== f) throw new Error('El fotograma no es la ranura abierta de este enlace.');
   const i32 = new Int32Array(f.ranura, 0, 8), f64 = new Float64Array(f.ranura, 0, 8);
@@ -245,20 +241,22 @@ export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCur
   const n = Atomics.load(i32, RANURA_I32.n), p = Atomics.load(i32, RANURA_I32.paginas);
   let publicado = false;
   try {
-    if (!valido || n < 0 || n > capO || p < 0 || p > capP) return;
+    if (!valido || n < 0 || n > capO || p < 0 || p > capP || Atomics.load(enlace.sucesosLeidos, 0) < 0n) return false;
     const fuente = fuentes.get(enlace);
     if (!fuente) throw new Error('El enlace de fotogramas necesita una fuente de sucesos y serie.');
-    const { sucesos, serie } = fuente.corte(c, f);
+    const paginas = fotogramaDe(f.ranura).paginas;
+    const { sucesos, serie } = fuente.corte(c, f, paginas);
     const r = regionesRanura(capO, capP);
     new Float64Array(f.ranura, r.serie, SERIE_CAMPOS.length).set(SERIE_CAMPOS.map(k => serie[k]));
-    const paginas = new Int32Array(f.ranura, r.paginas, 2 * p);
     const t = c.terreno, chunks: number[] = [];
     for (let i = 0; i < paginas.length; i += 2) {
       const celda = t.celda(paginas[i] * PAGE_SIDE, paginas[i + 1] * PAGE_SIDE);
       if (celda < 0) throw new Error('La página escrita dejó de estar residente antes de cerrar el fotograma.');
       chunks.push(t.chunkDe(celda));
     }
-    const [desde, hasta] = escribirSucesos(enlace, sucesos);
+    const rango = escribirSucesos(enlace, sucesos);
+    if (!rango) return false;
+    const [desde, hasta] = rango;
     for (const chunk of chunks) e.versiones[chunk] = t.versionVisible[chunk] + 1;
     f64[RANURA_F64.sucesosDesde] = desde;
     f64[RANURA_F64.sucesosHasta] = hasta;
@@ -269,6 +267,7 @@ export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCur
     Atomics.notify(enlace.entregados, 0);
     publicado = true;
     fuente.confirmar(f);
+    return true;
   } finally {
     e.enCurso = null;
     if (!publicado) {

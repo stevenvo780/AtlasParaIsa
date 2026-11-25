@@ -174,7 +174,8 @@ export function firmaMotor(v: VistaMotor, luz: LuzSalud): string {
 /** Lectura de `RUTA_MOTOR`: 404 significa que este servidor aún no la sirve (no es un fallo que reintentar). */
 export async function pedirTelemetria(session: AbortSignal): Promise<TelemetriaRecibida | 'sin-ruta'> {
   const response = await fetch(RUTA_MOTOR, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([session, AbortSignal.timeout(8000)]) });
-  if (response.status === 404) return 'sin-ruta';
+  // 204: el servidor no usa el motor (paso heredado); 404: un servidor anterior sin la ruta.
+  if (response.status === 204 || response.status === 404) return 'sin-ruta';
   if (!response.ok) throw new Error('Telemetría del motor no disponible.');
   const t = leerTelemetria(await response.json());
   if (!t) throw new Error('Telemetría del motor con forma inesperada.');

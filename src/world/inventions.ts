@@ -210,7 +210,7 @@ function fittingMaterial(world: World, anchor: Point, plano: Readonly<PlanoObra>
   const key = chunkKey(anchor.x, anchor.y);
   const ocupadas = new Set(filtrarCerca(world.structures, anchor, CHUNK_SIZE, s => s !== existing
     && chunkKey(s.x, s.y) === key).flatMap(s => structureFootprintCells(s).map(cellKey)));
-  const cells = existing ? completedStructureCells(existing).slice() : [anchor];
+  const cells = (existing ? completedStructureCells(existing) : [anchor]).map(({ x, y }) => ({ x, y }));
   const libre = (p: Point) => {
     if (chunkKey(p.x, p.y) !== key || ocupadas.has(cellKey(p))) return false;
     const tile = tileAt(world, p);

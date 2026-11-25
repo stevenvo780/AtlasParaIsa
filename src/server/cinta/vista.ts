@@ -190,7 +190,7 @@ export function fotogramaAVista(estado: EstadoVista, f: Fotograma, sucesos: read
     const paginas = Array.from(f.reparto, (dueno, i): [number, number, number] => [f.paginas[2 * i], f.paginas[2 * i + 1], dueno]);
     estado.reparto = { paginas, msPorHilo: mundo.reparto?.msPorHilo ?? [] };
   }
-  const reparto = mundo.reparto ?? estado.reparto;
+  const reparto = estado.reparto ?? mundo.reparto;
   const serie = Object.fromEntries(SERIE_CAMPOS.map((k, i) => [k, f.serie[i]])) as Corte['serie'];
   const vista: WorldView = {
     ...mundo, version: PROTOCOL_VERSION, sequence: f.tick, tick: f.tick, day: Math.floor(f.tick / TICKS_PER_DAY) + 1,

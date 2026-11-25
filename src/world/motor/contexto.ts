@@ -39,11 +39,11 @@ import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  Clase, REF_NULA, TipoIntento, genDe, slotDe,
+  Clase, REF_NULA, TipoIntento, genDe, refDe, slotDe,
   type Buzon, type ChunkId, type FrenteEscritura, type FrentePublico, type Globales, type Hilo, type Intento, type Ref, type Slot,
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
-import { abrirFotograma, cerrarFotograma, escribirFotograma, type FotogramaEnCurso } from './fotograma.js';
+import { abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type FotogramaEnCurso, type FuenteFotograma } from './fotograma.js';
 import { leyesActivas } from './leyes.js';
 import { RegistroContenido } from './registro.js';
 
@@ -264,8 +264,7 @@ export class Dueno implements CtxF0 {
     if (organismos.personas.retirar(r)) return;
     // La fila de un animal que lleva la tabla de fauna cae sola cuando el animal sale de `mundo.animals`.
     if (organismos.fauna.animal(slot) && organismos.fauna.ref(organismos.fauna.animal(slot)!) === r) return;
-    const frente = this.frente;
-    if (slot < frente.alta) organismos.tabla.baja(this.hilo, r);
+    organismos.tabla.baja(this.hilo, r);
   }
 
   suceso(e: Omit<ChronicleEvent, 'id' | 'tick'>): string {
@@ -330,7 +329,10 @@ export class Dueno implements CtxF0 {
   /** ¿Conduce este dueño el tick? Con todo apagado y sin cinta enlazada, no: el tick es el heredado. */
   get activo(): boolean { return leyesActivas(this.params.v23).length > 0 || this.#enlace !== null; }
 
-  enlazar(cinta: DescriptorEnlace | null): void { this.#enlace = cinta && enlaceCinta(cinta); }
+  enlazar(cinta: DescriptorEnlace | null, fuente?: FuenteFotograma): void {
+    this.#enlace = cinta && enlaceCinta(cinta);
+    if (this.#enlace && fuente) enlazarFuenteFotograma(this.#enlace, fuente);
+  }
 
   /**
    * Antes del primer tick de una época con un solo dueño (mundo creado o cargado, o una ley recién encendida): columnas
@@ -357,7 +359,7 @@ export class Dueno implements CtxF0 {
       const columnas = leyes.flatMap(l => l.columnas ?? []), declaradas = this.frente.columnas;
       if (columnas.some(([nombre]) => !declaradas.includes(nombre))) { olvidarPercepcion(m); olvidarOrganismos(m); this.#escritura = this.#indice = undefined; }
       for (const [nombre, tipo, ancho] of columnas) this.organismos.tabla.columna(nombre, tipo, ancho);
-      observarRegiones(m, leyes.length ? { activado: (key, cx, cy) => this.#activado(key, cx, cy), retirar: (_k, cx, cy) => this.#retirar(cx, cy) } : undefined);
+      observarRegiones(m, leyes.length || this.params.v23.fotograma ? { activado: (key, cx, cy) => this.#activado(key, cx, cy), retirar: (_k, cx, cy) => this.#retirar(cx, cy) } : undefined);
       const terreno = this.terrenoPercibido, tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
       for (const [key, meta] of Object.entries(m.chunks)) {
         const chunk = terreno.asegurarPagina(meta.cx, meta.cy, 0);
@@ -488,6 +490,7 @@ export class Dueno implements CtxF0 {
     const m = this.mundo;
     maintainRegions(m, context);
     if (!this.#pendientes.length && !this.#vaciar.length) return;
+    if (this.#enlace) Atomics.store(this.#enlace.pedirCompleto, 0, 1);
     const terreno = this.terrenoPercibido;
     for (const chunk of this.#vaciar.splice(0)) terreno.vaciarPagina(chunk);
     const nuevos = this.#pendientes.splice(0);
@@ -554,19 +557,33 @@ export class Dueno implements CtxF0 {
     const control = this.#piezas.control!;
     const ranura = control[CTL.fotoRanura]!;
     this.#foto = ranura >= 0 && this.#enlace
-      ? { ranura: this.#enlace.ranuras[ranura]!, completo: control[CTL.fotoCompleto] === 1, tick: this.mundo.tick, epoca: this.epoca } : null;
+      ? { ranura: this.#enlace.ranuras[ranura]!, completo: control[CTL.fotoCompleto] === 1, tick: this.mundo.tick,
+        epoca: this.epoca, versiones: this.#enlace.versiones! } : null;
   }
 
   /** F6, antes de `Ley.F6`: cada organismo propio tiene fila y sus columnas base quedan escritas en el frente t+1. Las
    * leyes escriben después las suyas (`c.escritura`). */
   publicarFilas(): void {
     const m = this.mundo, organismos = this.organismos, terreno = this.terrenoPercibido;
-    organismos.fauna.sincronizar(m.animals);
-    organismos.escribir(m.tick, { celda: (x, y) => terreno.celda(x, y), chunkDe: c => c >> 8 }, m.people);
+    const faunaHeredada = !this.params.v23.fauna;
+    organismos.fauna.sincronizar(faunaHeredada ? m.animals : []);
+    if (!faunaHeredada) this.#retirarFilasFaunaAusente();
+    organismos.escribir(m.tick, faunaHeredada ? { celda: (x, y) => terreno.celda(x, y), chunkDe: c => c >> 8 } : undefined, m.people);
     const w = this.escritura, chunk = w.i32('chunk');
     for (const [slot, p] of organismos.personas.mapa) {
       const celda = terreno.celda(p.x, p.y);
       chunk[slot] = celda < 0 ? -1 : celda >> 8;
+    }
+  }
+
+  #retirarFilasFaunaAusente(): void {
+    const presentes = new Set(this.mundo.animals.map(a => a.uid));
+    const frente = this.frente, vivo = this.escritura.u8('vivo'), gen = this.escritura.i32('gen');
+    for (let s = 0; s < frente.alta; s++) {
+      if (frente.vivo[s] && frente.clase[s] === Clase.Animal && frente.dueno[s] === this.hilo
+        && vivo[s] && gen[s] === frente.gen[s] && !presentes.has(frente.uid[s])) {
+        this.organismos.tabla.baja(this.hilo, refDe(s, frente.gen[s]!));
+      }
     }
   }
 
@@ -579,6 +596,7 @@ export class Dueno implements CtxF0 {
   /** F6: escribe la parte de este dueño en el fotograma abierto en F0, si lo hay. */
   escribirFoto(): void {
     if (!this.#foto) return;
+    if (this.hilos === 1) this.publicarTerreno();
     const cupo = escribirFotograma(this, this.#foto);
     if (cupo) return;
     this.#fotoValida = false;
@@ -593,9 +611,8 @@ export class Dueno implements CtxF0 {
     if (this.#foto && this.#enlace) {
       const control = this.#piezas.control;
       const valido = this.#fotoValida && (!control || control[CTL.fotoInvalido] === 0);
-      cerrarFotograma(this, this.#enlace, this.#foto, valido);
+      perdido = !cerrarFotograma(this, this.#enlace, this.#foto, valido);
       this.#foto = null;
-      perdido = !valido;
       if (perdido) this.fotogramasPerdidos++;
     }
     this.visiblesTick.length = 0;
@@ -829,6 +846,8 @@ export class Dueno implements CtxF0 {
     // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
     const lotes = guardados.map(l => ({ ...l, celda: celdaLocal(terreno, l.celda), dueno: 0 }));
     this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
+    // La composición guardada puede ocupar varias ranuras de desborde por lote.
+    this.#desborde!.prepararF0(lotes.reduce((n, l) => n + l.pares.length / 2, 0));
     (this.materia as ArenaLotes).cargar(lotes, libres);
     this.registro.cargar(cp.registro);
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };

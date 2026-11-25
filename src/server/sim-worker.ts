@@ -221,8 +221,8 @@ import { deploymentParams, paramsNuevosDeDespliegue } from './deployment-params.
 import { resumenDespacho } from './resumen-vivo.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
-import { crearEnlaceCortes, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
-import { enlaceCinta, regionesRanura } from '../shared/fotograma.js';
+import { crearEnlaceCortes, type TapeWorkerMessage, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
+import { enlaceCinta, regionesRanura, type DescriptorEnlace } from '../shared/fotograma.js';
 import type { Apertura, Hito } from '../shared/cinta.js';
 import { registrar } from '../world/invariantes.js';
 import type { AppOptions, SaludServidor } from './app.js';
@@ -290,10 +290,18 @@ function packed(value: unknown): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(serialize(value));
 }
 
+/** V23: la composición visible de una tesela (`mat`, de la ley w) comparada por valor; la ley rehace el arreglo en cada paso material. */
+function matEqual(a: Tile['mat'], b: Tile['mat']): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]![0] !== b[i]![0] || a[i]![1] !== b[i]![1]) return false;
+  return true;
+}
+
 function tileEqual(a: Tile | undefined, b: Tile | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.x === b.x && a.y === b.y && a.terrain === b.terrain
+  return a.x === b.x && a.y === b.y && a.terrain === b.terrain && a.T === b.T && matEqual(a.mat, b.mat)
     && a.moisture === b.moisture && a.vegetation === b.vegetation && a.food === b.food
     && a.biome === b.biome && a.elevation === b.elevation
     && a.wood === b.wood && a.stone === b.stone && a.feature === b.feature
@@ -322,7 +330,9 @@ export interface TileObservation {
  * and it is reported only when that projection differs from the cached one (`tileEqual`, the tape's own
  * equality). The 16×16 grouping is rebuilt only when the resident set changes (another tile object or
  * coordinates at some slot). A scan with nothing written is one allocation-free pass over the slots. */
-export function createTileObserver() {
+/** `v23`: las teselas proyectadas llevan además lo que añaden las leyes V23 encendidas (`mat`, `T`), como en
+ * `teselasParaEmision`. La cinta lo necesita: sin ello, el cliente que mira la cinta no ve la materia. */
+export function createTileObserver(opciones: { v23?: boolean } = {}) {
   let lastWorld: World | undefined;
   let lastGate: ReturnType<typeof residentSnapshotGate>;
   let lastGateSerial = 0;
@@ -375,6 +385,9 @@ export function createTileObserver() {
         if (tile !== slotTiles[i] || tile.x !== slotX[i] || tile.y !== slotY[i]) same = false;
       }
       const previous = same ? undefined : regroup(raw);
+      const ctx = opciones.v23 ? ctxSi(world) : undefined;
+      const decorar = ctx ? leyesActivas(paramsOf(world).v23).flatMap(ley => ley.proyectar?.tesela ? [ley.proyectar.tesela] : []) : [];
+      const conMateria = decorar.length > 0;
       let any = false;
       for (let i = 0; i < raw.length; i++) {
         const tile = raw[i]!;
@@ -383,12 +396,13 @@ export function createTileObserver() {
         const cached = chunkTiles[slotChunk[i]!]![slotIndex[i]!];
         // The SAB stamp covers kernel/ecology writes which bypass the JS setters.
         const moved = revision !== slotRevision[i];
-        if (cached && !moved && !(parallelChanged && gate!.stampOfTile(tile) > lastGateSerial)) continue;
+        if (!conMateria && cached && !moved && !(parallelChanged && gate!.stampOfTile(tile) > lastGateSerial)) continue;
         slotRevision[i] = revision;
         const cell = cached && !moved && fast ? fast.cellOf(tile) : -1;
         // Stamped only: the object-held fields cannot have moved; compare the shared-array ones first.
-        if (cell >= 0 && !force && soaFieldsEqual(cached!, fast!, cell)) continue;
+        if (!conMateria && cell >= 0 && !force && soaFieldsEqual(cached!, fast!, cell)) continue;
         const projected = cell >= 0 ? refreshSoaTile(cached!, fast!, cell) : projectMirrorTile(tile, fast);
+        if (ctx) for (const gancho of decorar) gancho(ctx, tile, projected);
         const before = cached ?? previous?.get(`${projected.x},${projected.y}`);
         if (!force && before && tileEqual(before, projected)) { if (!cached) chunkTiles[slotChunk[i]!]![slotIndex[i]!] = before; continue; }
         chunkTiles[slotChunk[i]!]![slotIndex[i]!] = projected;
@@ -416,7 +430,7 @@ export function createTileObserver() {
  * tick.
  */
 export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
-  const view = projectMirror(world, worldContext(world), { quantize: true });
+  const view = projectMirror(world, worldContext(world), { quantize: true, v23: true });
   if (instanceId !== undefined) view.instanceId = instanceId;
   view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.
@@ -454,10 +468,7 @@ const ANILLO_SUCESOS_BYTES = 256 * 1024 * 1024;
 const CINTA_SIN_CREDITO_MS = 300_000;
 
 type EstadoGrabacion = Pick<TapeWorkerReply, 'frames' | 'latestTick'>;
-type HiloCinta = { worker: Worker; enlace: ReturnType<typeof enlaceCinta>; salida: Promise<void> };
-type MensajeGrabador = TapeWorkerReply & { error?: string }
-  | { type: 'estado'; estado: 'ok' }
-  | { type: 'estado'; estado: 'error'; motivo: string };
+type HiloCinta = { worker: Worker; enlace: ReturnType<typeof enlaceCinta>; descriptor: DescriptorEnlace; salida: Promise<void> };
 
 export function descriptorCinta(binario: boolean) {
   const base = crearEnlaceCortes();
@@ -467,7 +478,8 @@ export function descriptorCinta(binario: boolean) {
   const maxByteLength = Math.max(cabecera, totalmem());
   const ranuras = Array.from({ length: Atomics.load(control.creditos, 0) },
     () => new SharedArrayBuffer(cabecera, { maxByteLength }));
-  return { control: base.control, ranuras, sucesos: new SharedArrayBuffer(ANILLO_SUCESOS_BYTES) };
+  return { control: base.control, ranuras, sucesos: new SharedArrayBuffer(ANILLO_SUCESOS_BYTES),
+    versiones: new SharedArrayBuffer(0, { maxByteLength }) };
 }
 
 export class GrabadorCinta {
@@ -475,9 +487,11 @@ export class GrabadorCinta {
   private esperaSalida?: Promise<void>;
   private reintentoEn = -Infinity;
   private sinCreditoDesde?: number;
+  private ultimoEntregado = 0n;
   private siguiente = 0;
   private cerrando = false;
   private enError = false;
+  private motivoError?: Error;
   private reintento?: ReturnType<typeof setTimeout>;
   private readonly llamadas = new Map<number, { resolve(value: EstadoGrabacion): void; reject(error: Error): void }>();
 
@@ -487,6 +501,7 @@ export class GrabadorCinta {
 
   get estado() { return this.enError ? 'error' as const : 'ok' as const; }
   get activo() { return this.hilo?.enlace; }
+  get descriptor() { return this.hilo?.descriptor; }
 
   iniciar() {
     if (this.cerrando || this.hilo || this.esperaSalida || performance.now() < this.reintentoEn) return;
@@ -514,9 +529,9 @@ export class GrabadorCinta {
         }
         resolve();
       }));
-      this.hilo = { worker, enlace, salida };
+      this.hilo = { worker, enlace, descriptor, salida };
       worker.on('error', error => { if (this.hilo?.worker === worker) this.fallar(error); });
-      worker.on('message', (mensaje: MensajeGrabador) => {
+      worker.on('message', (mensaje: TapeWorkerMessage) => {
         if (this.hilo?.worker !== worker) return;
         if (mensaje.type === 'estado') {
           if (mensaje.estado === 'error') this.fallar(new Error(mensaje.motivo));
@@ -534,16 +549,12 @@ export class GrabadorCinta {
 
   abrir(apertura: Apertura, hitosPrevios: readonly Hito[]): void {
     this.enviar({ type: 'abrir', apertura, hitosPrevios });
-    if (!this.enError) return;
-    const hilo = this.hilo;
-    void this.orden('flush').then(() => {
-      if (this.hilo === hilo) this.confirmarApertura();
-    }, error => { if (this.hilo === hilo && hilo) this.fallar(error); });
   }
 
   private confirmarApertura(): void {
     if (!this.enError) return;
     this.enError = false;
+    this.motivoError = undefined;
     this.avisar(null);
   }
 
@@ -554,9 +565,18 @@ export class GrabadorCinta {
 
   comprobarCredito(plazo = CINTA_SIN_CREDITO_MS): void {
     if (!this.hilo) return;
-    if (Atomics.load(this.hilo.enlace.creditos, 0) > 0) { this.sinCreditoDesde = undefined; return; }
+    if (Atomics.load(this.hilo.enlace.saturado, 0)) {
+      this.fallar(new Error('El anillo de sucesos de cinta se saturó.'));
+      return;
+    }
+    const entregados = Atomics.load(this.hilo.enlace.entregados, 0);
+    const huboAvance = entregados !== this.ultimoEntregado;
+    this.ultimoEntregado = entregados;
+    if (huboAvance || Atomics.load(this.hilo.enlace.creditos, 0) > 0) { this.sinCreditoDesde = undefined; return; }
     const ahora = performance.now();
-    if (ahora - (this.sinCreditoDesde ??= ahora) >= plazo) this.fallar(new Error('La cinta dejó de devolver créditos.'));
+    if (ahora - (this.sinCreditoDesde ??= ahora) >= plazo) {
+      this.fallar(new Error(`La cinta no devolvió ningún corte en ${Math.ceil(plazo / 1000)} s.`));
+    }
   }
 
   fallar(causa: unknown): void {
@@ -564,9 +584,11 @@ export class GrabadorCinta {
     const hilo = this.hilo;
     this.hilo = undefined;
     this.sinCreditoDesde = undefined;
+    this.ultimoEntregado = 0n;
     this.reintentoEn = performance.now() + REINTENTO_CINTA_MS;
     if (hilo) {
       Atomics.store(hilo.enlace.creditos, 0, 0);
+      Atomics.store(hilo.enlace.sucesosLeidos, 0, -1n);
       this.esperaSalida = hilo.salida;
       void hilo.worker.terminate().catch(() => undefined);
       void hilo.salida.then(() => {
@@ -579,6 +601,7 @@ export class GrabadorCinta {
     this.llamadas.clear();
     const avisar = !this.enError;
     this.enError = true;
+    this.motivoError = error;
     if (avisar) this.avisar(error.message);
   }
 
@@ -598,6 +621,7 @@ export class GrabadorCinta {
   }
 
   async flush(): Promise<EstadoGrabacion & { enabled: boolean }> {
+    if (this.motivoError) throw this.motivoError;
     if (!this.hilo) return { enabled: false, frames: 0, latestTick: -1 };
     return { enabled: true, ...await this.orden('flush') };
   }
@@ -668,18 +692,18 @@ async function runSimulation(options: SimWorkerOptions) {
     const updates: MirrorUpdate['chunks'] = [];
     const minimap: NonNullable<MirrorUpdate['minimap']> = [];
     const transfers: ArrayBuffer[] = [];
-    const binario = ley(world, 'fotograma');
-    const observacion = binario ? undefined : (observer ??= createTileObserver()).scan(world);
-    const chunks = observacion?.chunks ?? teselasParaEmision(world);
-    for (const key of observacion?.dirty ?? chunks.keys()) {
+    const observacion = (observer ??= createTileObserver({ v23: true })).scan(world);
+    const chunks = observacion.chunks;
+    for (const key of observacion.dirty) {
       const tiles = chunks.get(key)!;
       const data = packed(tiles);
       updates.push({ key, data }); transfers.push(data.buffer as ArrayBuffer);
       const comma = key.indexOf(',');
       minimap.push({ key, cells: encodeChunkMinimapCells(tiles, Number(key.slice(0, comma)), Number(key.slice(comma + 1))) });
     }
-    const base = binario ? vistaParaEmision(world, store.context) : projectMirrorWorld(world, undefined, worldContext(world));
-    const view: WorldView = { ...base, tiles: [], instanceId, performance: live.runtime,
+    const base = vistaParaEmision(world, store.context);
+    const reparto = live.repartoMotor;
+    const view: WorldView = { ...base, tiles: [], instanceId, performance: live.runtime, ...(reparto && { reparto }),
       ...(base.technology ? { technology: { ...base.technology } } : {}) };
     const pages: MirrorUpdate['pages'] = [];
     function packPages(field: MirrorPageField, values: readonly unknown[], count = 64) {
@@ -721,7 +745,10 @@ async function runSimulation(options: SimWorkerOptions) {
     app = createApp({ store, commit: options.commit, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
       deployment: options.deployment, tape: options.tape, tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
-      onEstadoCinta: error => port.postMessage({ type: 'cinta', error }),
+      onEstadoCinta: error => {
+        port.postMessage({ type: 'cinta', error });
+        if (error) port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error } });
+      },
       turboSaveIntervalMs: options.turboSaveIntervalMs,
       onOperacion: tipo => {
         if (tipo === 'recargando') recargaPendiente = true;

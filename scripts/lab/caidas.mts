@@ -11,20 +11,23 @@
  *   3. la época es nueva: `/health.epoca` mayor que todas las vistas;
  *   4. la cinta marca lo huérfano: el catálogo (`cinta.idx.sqlite`) abre una época de «reinicio» y, si el mundo vuelve por
  *      detrás de lo que la cinta tenía, la época vieja queda visible solo hasta ese tick y con su bifurcación.
- * Lo que `/health` aún no diga (época, último tick guardado: los dejará srv) sale como «desconocido», no como fallo ni acierto.
+ *   5. el catálogo y el CRC de cada bloque durable siguen siendo legibles.
+ * El tiempo de recuperación va desde el nuevo arranque hasta que `/health` informa un mundo cargado.
  *
  * Código de salida: 0 todas bien, 3 alguna caída con problemas, 1 error del instrumento. No lee credenciales: el mundo es
  * temporal y su contraseña, aleatoria, solo vive en el entorno del proceso hijo.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { escalon, INTERRUPTORES, type Interruptor } from '../../src/shared/interruptores.js';
+import { rutaSegmento, type BloqueCinta } from '../../src/server/cinta/catalogo.js';
+import { verificarBloqueLeido } from '../../src/server/cinta/formato.js';
 
 export const FASES = ['arranque', 'marcha', 'guardado', 'cinta'] as const;
 export type Fase = typeof FASES[number];
@@ -164,6 +167,29 @@ export function leerCatalogo(ruta: string): { epocas: EpocaCatalogo[]; bifurcaci
   } finally { db.close(); }
 }
 
+function verificarCinta(ruta: string): number {
+  const db = new DatabaseSync(ruta, { readOnly: true });
+  try {
+    db.exec('PRAGMA busy_timeout=5000; BEGIN');
+    if (db.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok'
+      || db.prepare('SELECT 1 FROM cuarentena LIMIT 1').get()) throw new Error('El catálogo de la cinta está dañado.');
+    const bloques = db.prepare('SELECT * FROM bloques ORDER BY segmento, offset').all() as unknown as BloqueCinta[];
+    for (const b of bloques) {
+      const fd = openSync(rutaSegmento(dirname(ruta), b.nivel, b.segmento), 'r');
+      try {
+        const meta = verificarBloqueLeido((desde, bytes) => {
+          const datos = Buffer.allocUnsafe(bytes);
+          if (readSync(fd, datos, 0, bytes, b.offset + desde) !== bytes) throw new Error('Bloque de cinta truncado.');
+          return datos;
+        }, b.bytes);
+        if (meta.crc !== b.crc || meta.t0 !== b.t0 || meta.t1 !== b.t1 || meta.nivel !== b.nivel)
+          throw new Error('El bloque de cinta discrepa del catálogo.');
+      } finally { closeSync(fd); }
+    }
+    return bloques.length;
+  } finally { db.close(); }
+}
+
 /**
  * La cinta tras un reinicio (puro): `antes` son las épocas que había, `despues` las de ahora. Debe haber una época nueva de
  * reinicio y, si el mundo volvió por detrás de lo que la cinta tenía, lo de después queda marcado: la época vieja solo visible
@@ -228,8 +254,9 @@ function arrancar(o: OpcionesCaidas, env: NodeJS.ProcessEnv): Servidor {
 async function salud(puerto: number): Promise<EstadoServidor | null> {
   try {
     const r = await fetch(`http://127.0.0.1:${puerto}/health`, { signal: AbortSignal.timeout(2000) });
-    if (!r.ok && r.status !== 503) return null;
-    return leerSalud(await r.json());
+    if (!r.ok) return null;
+    const estado = leerSalud(await r.json());
+    return estado.epoca === null || estado.ultimoTickGuardado === null ? null : estado;
   } catch { return null; }
 }
 
@@ -252,8 +279,9 @@ const tamanoCinta = (dir: string): number => {
 };
 
 export interface Caida {
-  n: number; fase: Fase; lista: boolean; msHastaMatar: number; antes: Antes; despues: EstadoServidor | null;
+  n: number; fase: Fase; lista: boolean; msHastaMatar: number; msRecuperacion: number | null; antes: Antes; despues: EstadoServidor | null;
   salidaDelHijo: { codigo: number | null; senal: NodeJS.Signals | null }; recuperacion: Juicio; cinta: Juicio; problemas: string[]; desconocidos: string[]; colaDelHijo?: string;
+  bloquesVerificados: number;
 }
 
 export async function caidas(o: OpcionesCaidas, escribirFila: (fila: Record<string, unknown>) => void): Promise<number> {
@@ -290,6 +318,7 @@ export async function caidas(o: OpcionesCaidas, escribirFila: (fila: Record<stri
       // La fase decide cuándo cae: justo al arrancar, en marcha, pegada a un guardado o pegada a una escritura de la cinta.
       if (fase === 'arranque') {
         await dormir(100 + Math.floor(azar() * 6000));
+        observar(await salud(puerto));
       } else {
         const s0 = await esperarHasta(() => salud(puerto), o.esperaLista * 1000, 100);
         lista = !!s0; observar(s0);
@@ -309,19 +338,26 @@ export async function caidas(o: OpcionesCaidas, escribirFila: (fila: Record<stri
       const catalogoAntes = buscarCatalogo(datos), epocasAntes = catalogoAntes ? leerCatalogo(catalogoAntes).epocas : [];
       const msHastaMatar = Date.now() - t0;
       const salidaDelHijo = await matar(servidor);
+      const reinicio = performance.now();
       servidor = arrancar(o, env);
       const despues = await esperarHasta(() => salud(puerto), o.esperaLista * 1000, 250);
+      const msRecuperacion = despues ? Math.round(performance.now() - reinicio) : null;
       const recuperacion = juzgarRecuperacion(antes, despues);
       if (despues?.epoca !== null && despues?.epoca !== undefined) epocasVistas.push(despues.epoca);
-      let cinta: Juicio = { problemas: [], desconocidos: ['cinta: no hay catálogo (¿CARTA_TAPE?)'] };
-      const catalogoDespues = buscarCatalogo(datos);
-      if (despues && catalogoDespues) {
+      let cinta: Juicio = { problemas: [], desconocidos: [] };
+      let bloquesVerificados = 0;
+      if (despues) {
         // El catálogo ya se abrió si hay época nueva: se lee con el servidor vivo (solo lectura) tras darle un respiro.
         await dormir(500);
-        const { epocas, bifurcaciones } = leerCatalogo(catalogoDespues);
-        cinta = juzgarCinta(epocasAntes, epocas, bifurcaciones, fase !== 'arranque' || lista);
+        const catalogoDespues = buscarCatalogo(datos);
+        if (catalogoDespues) {
+          const { epocas, bifurcaciones } = leerCatalogo(catalogoDespues);
+          cinta = juzgarCinta(epocasAntes, epocas, bifurcaciones, true);
+          try { bloquesVerificados = verificarCinta(catalogoDespues); }
+          catch (error) { cinta.problemas.push(error instanceof Error ? error.message : String(error)); }
+        } else cinta.problemas.push('Falta el catálogo de la cinta tras el arranque.');
       }
-      const caida: Caida = { n, fase, lista, msHastaMatar, antes, despues, salidaDelHijo, recuperacion, cinta,
+      const caida: Caida = { n, fase, lista, msHastaMatar, msRecuperacion, antes, despues, salidaDelHijo, recuperacion, cinta, bloquesVerificados,
         problemas: [...recuperacion.problemas, ...cinta.problemas], desconocidos: [...recuperacion.desconocidos, ...cinta.desconocidos],
         ...(despues ? {} : { colaDelHijo: servidor.cola() }) };
       resultados.push(caida);

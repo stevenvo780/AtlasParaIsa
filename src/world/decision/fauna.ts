@@ -13,7 +13,6 @@ export interface VisibleTile extends Resource { growth: number | undefined; nove
 export interface PercepcionFauna {
   visibles(animal: Animal, plan: PlanFauna): readonly VisibleTile[];
   ocupantes(x: number, y: number): readonly Animal[] | undefined;
-  puedeEntrar(t: Point): boolean;
   residente(t: Point): boolean;
   visto(dx: number, dy: number): boolean;
   recordar(animal: Animal, tile: Point, tick: number, visited: boolean, food: number, water: number): void;
@@ -143,7 +142,7 @@ export function decidirFauna(animal: Animal, world: AnimalWorld, state: Percepci
   }
   const adjacent = state.adjacent;
   adjacent.length = 0;
-  for (const t of visible) if (distancia(t, animal) === 1 && state.puedeEntrar(t)) adjacent.push(t);
+  for (const t of visible) if (distancia(t, animal) === 1) adjacent.push(t);
   let action: AnimalAction = 'roam', target: Point = animal, reason = 'Explora celdas cercanas y evita recorridos que recuerda.';
   let preyId: string | null = null;
   // Los dos primeros del mismo orden estable, sin ordenar todo lo visible (orden.ts).
@@ -168,9 +167,7 @@ export function decidirFauna(animal: Animal, world: AnimalWorld, state: Percepci
     else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
-    // V19/M: saciado, hidratado, sano, maduro y (con R) con reserva, sólo le faltan fuerzas para criar: descansa en vez
-    // de gastarlas vagando. `feed` lo despierta al superar 0,75 de energía; el hambre y la sed siguen subiendo y, al
-    // cruzar sus umbrales, la caza, el pasto o la bebida vuelven a ganar.
+    // Si solo le faltan fuerzas para criar, descansa. El hambre y la sed siguen subiendo durante la recuperación.
     else if (state.encuentro && listoSalvoEnergia(animal, state.reserva)) { action = 'rest'; reason = RAZON_REPOSO_CRIA; }
     else {
       // V19/M: sin amenaza ni necesidad urgente, un animal listo para criar se acerca a la pareja conespecífica

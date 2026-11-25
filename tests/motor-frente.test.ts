@@ -6,7 +6,7 @@ import { CAMPOS_CUERPO, CUERPO_ANCHO, Clase, COLUMNAS_FIJAS, genDe, slotDe } fro
 import { parseParams, DEFAULT_PARAMS } from '../src/world/params.js';
 import { FaunaSoA, faunaRegistrada } from '../src/world/soa/fauna.js';
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
-import { decisionesFauna, materializeAnimals, SPECIES, type Animal } from '../src/world/animals.js';
+import { materializeAnimals, SPECIES, type Animal } from '../src/world/animals.js';
 
 test('motor-frente conserva el frente t mientras cada dueño escribe t+1', () => {
   const tabla = new TablaOrganismosSoA(true);
@@ -77,7 +77,7 @@ test('stepWorld publica la fauna del tick y conserva las vistas clonables', () =
     const s = slotDe(fauna.ref(animal));
     assert.equal(fauna.animal(s), animal);
     assert.equal(frente.vivo[s], 1);
-    assert.equal(frente.decideEn[s], Math.max(mundo.tick + 1, animal.lastDecision + 8));
+    assert.equal(frente.decideEn[s], mundo.tick + 1);
     assert.equal(frente.clase[s], Clase.Animal);
     assert.equal(frente.col('especie')[s], SPECIES.indexOf(animal.species));
     assert.equal(frente.cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.salud], Math.fround(animal.health));
@@ -90,18 +90,17 @@ test('stepWorld publica la fauna del tick y conserva las vistas clonables', () =
   assert.equal(comprobarInvariantes(mundo, { ids: ['motor-frente'] })[0]?.id, 'motor-frente');
 });
 
-test('fauna.decisiones: cada animal vencido decide una vez en el tick, hasta el cupo', () => {
+test('fauna.decisiones detecta a un animal vivo que no decidió en el tick', () => {
   const mundo = createWorld(51926);
-  let decisiones = 0;
-  for (let i = 0; i < 48; i++) {
-    stepWorld(mundo);
-    assert.deepEqual(comprobarInvariantes(mundo, { ids: ['fauna.decisiones'] }), []);
-    const actividad = decisionesFauna(mundo)!;
-    assert.equal(actividad.tick, mundo.tick);
-    assert.equal(actividad.decisiones, Math.min(actividad.vencidos, actividad.cupo));
-    decisiones += actividad.decisiones;
-  }
-  assert.ok(decisiones > mundo.animals.length, 'en 48 ticks cada animal vence al menos una vez');
+  stepWorld(mundo);
+  assert.ok(mundo.animals.length > 0);
+  assert.deepEqual(comprobarInvariantes(mundo, { ids: ['fauna.decisiones'] }), []);
+  const animal = mundo.animals[0]!;
+  animal.lastDecision = mundo.tick - 1;
+  const [violacion] = comprobarInvariantes(mundo, { ids: ['fauna.decisiones'] });
+  assert.equal(violacion?.id, 'fauna.decisiones');
+  assert.equal(violacion?.esperado, mundo.animals.length);
+  assert.equal(violacion?.observado, mundo.animals.length - 1);
 });
 
 test('FaunaSoA: el uid se conserva al volver del archivo o al deshacer un paso, y una muerte lo libera', () => {

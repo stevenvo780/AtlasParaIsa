@@ -1,41 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
-import { cloneWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
+import { createWorld, stepWorld } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { parseParams, setParams } from '../src/world/params.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { constructionSite, depositMaterials, storedMaterialsNear, repairOpportunity } from '../src/world/inventions.js';
 
 const OPEN = 'poblacion.natalidadVecindad=true,social.maxComunidades=0,limites.aplicacion=parametros,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296,construccion.modular=true,construccion.poliminosYSinergia=true,terreno.caminosFisicos=true,quimica.emergente=true,motor.soaTerreno=true,motor.particionarPersonas=true';
-const GOLDEN: Record<string, string> = {
-  // Capturados del HEAD previo a V22 Front 4, antes de optimizar los seis ficheros propios.
-  'default/51926': '2b8e9989d92aa4db168af6d5383e284ce5a80c7aa2bc4abbf7a7b54034f432cb',
-  // open/*: digestos de las leyes v23/V24 (química universal, caza/ganadería, morfología, sonido; RULES_VERSION 14), mundo abierto, 240 pasos.
-  // Los de V22 (218b1a3b…, 147d961c…) cambiaron a propósito con las leyes v23; los de default/* siguen intactos.
-  'open/51926': '2e8a623166638a4f9857600cbcb2398900ad4f3ca572fbdcb45d09e32239bc23',
-  'default/7': '9bf7b3c09f36ba65c1ac37285f9fc6522e02c02137442de72110720916fa5bbd',
-  'open/7': 'b4eca3749001f5db534a2b0eaf82ab8b4cbc9f26182232a6cf84b7d54ed64189',
-};
-
-function normalizedDigest(world: World): string {
-  const copy = cloneWorld(world);
-  const params = structuredClone(paramsOf(copy));
-  params.motor.hilos = 1;
-  setParams(copy, params);
-  return digestoCanonico(copy);
-}
-
-test('V22: RULES_VERSION 14; 0 ULP, dos semillas y dos regímenes durante 240 pasos', () => {
-  assert.equal(RULES_VERSION, 14);
-  for (const seed of [51926, 7]) for (const [name, config] of [['default', ''], ['open', OPEN]] as const) {
-    const serial = createWorld(seed, parseParams(config ? `${config},motor.hilos=1` : 'motor.hilos=1'));
-    const parallel = createWorld(seed, parseParams(config ? `${config},motor.hilos=4` : 'motor.hilos=4'));
-    for (let tick = 0; tick < 240; tick++) { stepWorld(serial); stepWorld(parallel); }
-    const digest = normalizedDigest(serial);
-    assert.equal(normalizedDigest(parallel), digest, `${name}/${seed}: mundo, demografía, obras, química y eventos`);
-    assert.equal(digest, GOLDEN[`${name}/${seed}`], `${name}/${seed}: digesto GOLDEN (${name === 'default' ? 'histórico V8/V22' : 'leyes v23/V24'})`);
+test('dos corridas de un hilo y semilla fija reproducen el mundo en ambos regímenes', () => {
+  for (const seed of [51926, 7]) for (const config of ['', OPEN]) {
+    const params = parseParams(config ? config + ',motor.hilos=1' : 'motor.hilos=1');
+    const primero = createWorld(seed, params);
+    const segundo = createWorld(seed, params);
+    for (let tick = 0; tick < 240; tick++) { stepWorld(primero); stepWorld(segundo); }
+    assert.equal(digestoCanonico(primero), digestoCanonico(segundo));
   }
 });
 

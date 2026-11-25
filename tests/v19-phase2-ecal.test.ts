@@ -39,8 +39,8 @@ test('R: herbívoros reservan biomasa ingerida con suficiente rapidez para el co
   for (const species of ['hare', 'deer', 'boar', 'fish'] as const) {
     const animal = fundador(species, 1, 1, `calibrated-${species}`);
     animal.hunger = 0.6;
-    animal.action = 'graze'; animal.lastDecision = 1_000_000; animal.target = { x: 1, y: 1 };
-    const tiles = Array.from({ length: 9 }, (_, i) => tile(i % 3, Math.floor(i / 3)));
+    const habitat = species === 'fish' ? { terrain: 'water', biome: 'ocean' } as const : {};
+    const tiles = Array.from({ length: 9 }, (_, i) => tile(i % 3, Math.floor(i / 3), habitat));
     const world = mundo(tiles, [animal], 'fauna.reservaReproductiva=true');
     let reached = 0;
     for (let tick = 1; tick <= 450 && (animal.reproReserve ?? 0) < 0.03; tick++) { paso(world); reached = tick; }

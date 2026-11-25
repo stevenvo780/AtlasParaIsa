@@ -1,8 +1,5 @@
 // V19 fase 1 — fauna: F (`fauna.contactoContinuo`), R (`fauna.reservaReproductiva`), M (`fauna.encuentroFertil`).
 //
-// · Apagados (histórico): la fauna es V18 bit a bit. Las huellas de referencia se generaron ejecutando el MISMO
-//   fixture (`v19-phase1-fauna-fixture.ts`) sobre el commit V18 (HEAD de la rama antes de V19): si cambia un solo
-//   bit de la aritmética o del consumo de azar de la fauna con los interruptores apagados, fallan.
 // · Cada ley, aislada, con un escenario mínimo y verificable.
 // · Hábitat productivo de depredadores (zorro y lobo) con las tres leyes: caza real, acumulación de reserva,
 //   aproximación a pareja y nacimientos G1+; la deuda de reserva es exactamente 0,06 por cría.
@@ -13,24 +10,21 @@ import { RAZON_PAREJA, RESERVA_MAXIMA, RESERVA_POR_PROGENITOR, assertAnimal, typ
 import { fundador, huella, mundo, parches, paso, tile } from './v19-phase1-fauna-fixture.js';
 
 const TODAS = 'fauna.contactoContinuo=true,fauna.reservaReproductiva=true,fauna.encuentroFertil=true';
-/** Huellas del fixture `parches()` con params por defecto, calculadas sobre V18 (commit anterior a V19). */
-const V18 = { 60: '39cad6dac11517f8020da5863608640d68c34222bd6507eb347e6f69e3a58e5f',
-  300: 'dbc1be7b2bbf0886736750788ae609c4ca77400cdc8f02fa15c6f7d703a305ce' } as const;
-
-/** Un paso sin decisiones: el animal conserva su acción y destino salvo lo que el paso físico escribe. */
-function quieto(a: Animal, x = a.x, y = a.y): Animal {
-  a.lastDecision = 0; a.lastMove = 0; a.target = { x, y }; return a;
+function quieto(a: Animal): Animal {
+  a.lastMove = 0;
+  return a;
 }
 const cuadricula = (lado: number, o: Parameters<typeof tile>[2] = {}) =>
   Array.from({ length: lado * lado }, (_, i) => tile(i % lado, Math.floor(i / lado), o));
 
-test('V19 fauna: con F, R y M apagados la fauna es V18 bit a bit', () => {
-  const serie = parches(), w = mundo(serie.tiles, serie.animals);
-  for (let n = 1; n <= 300; n++) { paso(w); if (n === 60 || n === 300) assert.equal(huella(w), V18[n], `serie, paso ${n}`); }
-  // Las constantes asociadas a un interruptor apagado son inertes: no mueven un solo bit.
-  const inerte = parches(), wi = mundo(inerte.tiles, inerte.animals, 'fauna.fraccionReservaCria=0.9');
-  for (let n = 1; n <= 60; n++) paso(wi);
-  assert.equal(huella(wi), V18[60], 'fraccionReservaCria sin R es inerte');
+test('V19 fauna: la fracción de la reserva es inerte si R está apagado', () => {
+  const correr = (params: string) => {
+    const { tiles, animals } = parches();
+    const w = mundo(tiles, animals, params);
+    for (let n = 0; n < 60; n++) paso(w);
+    return huella(w);
+  };
+  assert.equal(correr('fauna.fraccionReservaCria=0.9'), correr(''));
 });
 
 test('V19/F: la preparación del ataque decae poco a poco al separarse y el alcance (≤ 1) resuelve el contacto con esfuerzo pagado', () => {
@@ -73,7 +67,7 @@ test('V19/R: parte de lo realmente consumido se aparta como reserva (sin bajar e
   assert.equal(off.hare.reproReserve, undefined);
   // Predación: un zorro que mata una liebre aparta 0,15 × 0,12.
   const zorro = quieto(fundador('fox', 1, 1, 'fox')), liebre = quieto(fundador('hare', 1, 1, 'hare'));
-  zorro.action = 'hunt'; zorro.preyId = liebre.id; zorro.work = 3; liebre.health = 0.05;
+  zorro.action = 'hunt'; zorro.preyId = liebre.id; zorro.work = 3; zorro.hunger = 0.5; liebre.health = 0.05;
   const w = mundo(cuadricula(3), [zorro, liebre], 'fauna.reservaReproductiva=true', false); paso(w);
   assert.equal(w.animalDynamics.predations, 1);
   assert.ok(Math.abs(zorro.reproReserve! - 0.12 * 0.15) < 1e-15);

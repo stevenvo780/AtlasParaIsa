@@ -50,7 +50,7 @@ export class FaunaSoA {
   }
 
   publicar(tick: number, celda?: (x: number, y: number) => number, chunkDe?: (celda: number) => number,
-    fertil?: (animal: Animal) => boolean, vence?: (animal: Animal) => number): FrentePublico {
+    fertil?: (animal: Animal) => boolean): FrentePublico {
     const w = this.tabla.escritura(0);
     const uid = w.f64('uid'), x = w.f32('x'), y = w.f32('y'), chunk = w.i32('chunk'), objetivo = w.i32('objetivo');
     const cuerpo = w.f32('cuerpo'), genoma = w.f32('genoma'), accion = w.u8('accion'), especie = w.u8(ESPECIE);
@@ -64,7 +64,7 @@ export class FaunaSoA {
       objetivo[slot] = celda?.(animal.target.x, animal.target.y) ?? -1;
       accion[slot] = ACTIONS.indexOf(animal.action);
       especie[slot] = SPECIES.indexOf(animal.species);
-      decideEn[slot] = vence?.(animal) ?? tick + 1;
+      decideEn[slot] = tick + 1;
       pareja[slot] = fertil?.(animal) ? 0 : -1;
       const base = slot * CUERPO_ANCHO;
       cuerpo[base + CAMPOS_CUERPO.hambre] = animal.hunger;

@@ -125,30 +125,31 @@ function previousAnimalBasal(a: Animal, patch: Tile): BodyState {
 }
 
 test('real grazer bodies assimilate exactly the scarce growth and plant moisture debited from their cell', () => {
+  const stock = 0.0012;
   for (const species of ['hare', 'boar'] as const) {
-    const w = scene(species, { action: 'graze', hunger: 0.7 }, [tile(0, { growth: 0.0007, moisture: 0.0002 })]);
+    const w = scene(species, { hunger: 0.7 }, [tile(0, { growth: stock, moisture: 0.0002 })]);
     const a = w.animals[0]!, expected = previousAnimalBasal(a, w.tiles[0]!);
-    expected.hunger = clamp(expected.hunger - 0.0007 * 4 * (1 - a.genes.carnivory));
-    expected.energy = clamp(expected.energy + 0.0007 * 0.8); expected.thirst = clamp(expected.thirst - 0.0002 * 0.3);
+    expected.hunger = clamp(expected.hunger - stock * 4 * (1 - a.genes.carnivory));
+    expected.energy = clamp(expected.energy + stock * 0.8); expected.thirst = clamp(expected.thirst - 0.0002 * 0.3);
     next(w); assert.deepEqual(bars(a), expected); assert.equal(w.tiles[0]!.growth, 0); assert.equal(w.tiles[0]!.moisture, 0);
-    assert.equal(w.animalDynamics.plantConsumed, 0.0007);
+    assert.equal(w.animalDynamics.plantConsumed, stock);
     const empty = previousAnimalBasal(a, w.tiles[0]!);
-    // Keep this paid action for one further turn to exercise a genuinely empty local source.
-    a.lastDecision = w.tick; next(w); assert.deepEqual(bars(a), empty); assert.equal(w.animalDynamics.plantConsumed, 0.0007);
+    next(w); assert.deepEqual(bars(a), empty); assert.equal(w.animalDynamics.plantConsumed, stock);
   }
 });
 
 test('terrestrial and aquatic hydration share bodily conversion but debit their actual distinct local stocks', () => {
+  const stock = 0.0012;
   for (const species of ['deer', 'fish'] as const) {
     const aquatic = species === 'fish';
-    const w = scene(species, { action: 'drink', thirst: 0.7 }, [tile(0, { terrain: aquatic ? 'water' : 'meadow',
-      biome: aquatic ? 'ocean' : 'grassland', drinkingWater: aquatic ? 0 : 0.0007, moisture: aquatic ? 0.0007 : 0.8 })]);
+    const w = scene(species, { thirst: 0.7 }, [tile(0, { terrain: aquatic ? 'water' : 'meadow',
+      biome: aquatic ? 'ocean' : 'grassland', drinkingWater: aquatic ? 0 : stock, moisture: aquatic ? stock : 0.8 })]);
     const a = w.animals[0]!, expected = previousAnimalBasal(a, w.tiles[0]!);
-    expected.thirst = clamp(expected.thirst - 0.0007 * 3);
-    next(w); assert.deepEqual(bars(a), expected); assert.equal(w.animalDynamics.waterConsumed, 0.0007);
+    expected.thirst = clamp(expected.thirst - stock * 3);
+    next(w); assert.deepEqual(bars(a), expected); assert.equal(w.animalDynamics.waterConsumed, stock);
     assert.equal(w.tiles[0]![aquatic ? 'moisture' : 'drinkingWater'], 0);
-    const exhausted = previousAnimalBasal(a, w.tiles[0]!); a.lastDecision = w.tick; next(w);
-    assert.deepEqual(bars(a), exhausted); assert.equal(w.animalDynamics.waterConsumed, 0.0007);
+    const exhausted = previousAnimalBasal(a, w.tiles[0]!); next(w);
+    assert.deepEqual(bars(a), exhausted); assert.equal(w.animalDynamics.waterConsumed, stock);
   }
 });
 

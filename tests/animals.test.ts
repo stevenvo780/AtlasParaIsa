@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Tile, ChronicleEvent } from '../src/shared/types.js';
 import type { AnimalSpecies } from '../src/shared/life.js';
 import { advanceNeeds } from '../src/world/needs.js';
-import { assertAnimal, assertAnimals, harvestAt, materializeAnimals, MAX_ACTIVE_ANIMALS, MAX_STORED_ANIMALS, MAX_ANIMAL_DECISIONS_PER_TICK, MAX_ANIMAL_MEMORY, projectAnimal, stepAnimals, syncFauna, type Animal, type AnimalWorld } from '../src/world/animals.js';
+import { assertAnimal, assertAnimals, decisionesFauna, harvestAt, materializeAnimals, MAX_ACTIVE_ANIMALS, MAX_ANIMAL_MEMORY, projectAnimal, stepAnimals, syncFauna, type Animal, type AnimalWorld } from '../src/world/animals.js';
 
 function tile(x = 0, y = 0, overrides: Partial<Tile> = {}): Tile {
   return { x, y, terrain: 'meadow', biome: 'grassland', moisture: 0.8, vegetation: 0.8, growth: 0.8,
@@ -46,7 +46,9 @@ test('V3 stock materialization preserves exact species/count, stable identities 
   assert.equal(new Set(first.map(a => a.id)).size, 5);
   assert.equal(first.filter(a => a.species === 'hare').length, 3);
   assert.equal(materializeAnimals(42, [tile(1, 0)], 120).length, 0);
-  assert.throws(() => materializeAnimals(42, [tile(0, 0, { fauna: 7, species: 'hare' })], 0));
+  const crowded = materializeAnimals(42, [tile(0, 0, { fauna: 7, species: 'hare' })], 0);
+  assert.equal(crowded.length, 7);
+  assert.equal(new Set(crowded.map(a => a.id)).size, 7);
 });
 
 test('grazing and drinking debit local finite resources and alter the individual body', () => {
@@ -116,18 +118,16 @@ test('predation transfers only a real prey identity once, even with two competin
   run(w, 50, events); assert.equal(w.animalDynamics.predations, 1);
 });
 
-test('fleeing changes survival in paired contact-predation experiments', () => {
+test('physical escape changes survival in paired contact-predation experiments', () => {
   const predator = animal('wolf'), prey = animal('hare'); predator.hunger = 0.8; predator.genes.speed = 0;
   prey.genes.speed = 1; prey.health = 0.5;
   const mobile = world(Array.from({ length: 25 }, (_, x) => tile(x, 0)), [predator, prey]);
   const noFlee = structuredClone(mobile), victimId = prey.id;
   for (let n = 0; n < 100; n++) {
     run(mobile, 1);
-    noFlee.tick++;
     const pinned = noFlee.animals.find(a => a.id === victimId);
-    // Controlled behavioral ablation: suppress the prey's flight decision; its initial genes/body/resources are identical.
-    if (pinned) { pinned.action = 'rest'; pinned.target = { x: pinned.x, y: pinned.y }; pinned.lastDecision = noFlee.tick; }
-    stepAnimals(noFlee);
+    if (pinned) pinned.lastMove = noFlee.tick + 1;
+    run(noFlee, 1);
   }
   assert.ok(mobile.animals.some(a => a.id === victimId)); assert.ok(prey.x > 0);
   assert.ok(!noFlee.animals.some(a => a.id === victimId)); assert.equal(noFlee.animalDynamics.predations, 1);
@@ -155,12 +155,11 @@ test('mating needs two mature same-species bodies, debits parents/patch and tran
   run(breeding, 100); assert.equal(breeding.animalDynamics.births, 1, 'cooldown and immature child prevent another birth');
 });
 
-test('zero food, absent mate, immaturity and full local population prevent reproduction', () => {
-  for (const variant of ['zero', 'alone', 'young', 'full', 'species'] as const) {
+test('zero food, absent mate, immaturity and incompatible species prevent reproduction', () => {
+  for (const variant of ['zero', 'alone', 'young', 'species'] as const) {
     const a = animal('hare', 0, 0, 'one'), b = animal(variant === 'species' ? 'deer' : 'hare', 0, 0, 'two');
     const animals = variant === 'alone' ? [a] : [a, b];
     if (variant === 'young') { a.bornAt = 0; b.bornAt = 0; a.age = 0; b.age = 0; }
-    if (variant === 'full') for (let n = 0; n < 4; n++) animals.push(animal('hare', 0, 0, `extra${n}`));
     const w = world([tile(0, 0, { growth: variant === 'zero' ? 0 : 0.8 })], animals); w.reproductionEnabled = true; w.tick = 99;
     run(w, 1); assert.equal(w.animalDynamics.births, 0, variant);
   }
@@ -190,15 +189,38 @@ test('human hunting removes a real local ID once and emits the actual victim', (
   assert.equal(w.tiles[0]!.fauna, 0); assert.equal(w.tiles[0]!.species, undefined);
 });
 
-test('mixed-species projection is deterministic and cannot exceed six local animals', () => {
-  const animals = [animal('hare', 0, 0, 'a'), animal('deer', 0, 0, 'b')], tiles = [tile()];
-  syncFauna(tiles, animals); assert.equal(tiles[0]!.fauna, 2); assert.equal(tiles[0]!.species, 'deer');
-  const reverse = [tile()]; syncFauna(reverse, [...animals].reverse()); assert.deepEqual(reverse, tiles);
-  const crowded = Array.from({ length: 7 }, (_, n) => animal('hare', 0, 0, `n${n}`));
-  assert.throws(() => syncFauna(tiles, crowded)); assert.throws(() => assertAnimals(crowded, 0, tiles));
-  const a = animal('hare', -1, 0), b = animal('hare', 1, 0);
-  const w = world([tile(-1, 0), tile(), tile(1, 0)], [...crowded.slice(0, 5), a, b]);
-  for (let n = 0; n < 100; n++) { run(w, 1); assert.ok(w.tiles.every(t => t.fauna! <= 6)); assert.equal(w.animals.length, 7); }
+test('mixed-species projection and movement support more than six animals on one tile', () => {
+  const animals = [animal('deer', 0, 0), ...Array.from({ length: 6 }, (_, n) => animal('hare', 0, 0, String(n)))];
+  for (const resident of animals) resident.lastMove = 0;
+  const move = animal('hare', 1, 0); move.thirst = 0.8;
+  const w = world([tile(), tile(1, 0, { drinkingWater: 0 })], [...animals, move]);
+  assert.equal(w.tiles[0]!.fauna, 7);
+  assert.equal(w.tiles[0]!.species, 'deer');
+  const reverse = [tile(), tile(1, 0, { drinkingWater: 0 })];
+  syncFauna(reverse, [...w.animals].reverse());
+  assert.deepEqual(reverse, w.tiles);
+
+  run(w, 1);
+  assert.equal(move.x, 0);
+  assert.equal(w.tiles[0]!.fauna, 8);
+  assert.equal(w.tiles[1]!.fauna, 0);
+  assertAnimals(w.animals, w.tick, w.tiles);
+});
+
+test('mature partners can pay for a birth in an occupied tile above six', () => {
+  const adults = [animal('deer', 0, 0, 'a'), animal('deer', 0, 0, 'b')];
+  const juveniles = Array.from({ length: 5 }, (_, n) => animal('deer', 0, 0, String(n)));
+  for (const juvenile of juveniles) {
+    juvenile.age = 0; juvenile.bornAt = 0; juvenile.lastBirth = 0; juvenile.lastBirthAge = 0;
+  }
+  const w = world([tile(), tile(1, 0), tile(0, 1), tile(1, 1)], [...adults, ...juveniles]);
+  for (const a of w.animals) a.lastMove = 0;
+  w.reproductionEnabled = true;
+
+  run(w, 1);
+  assert.equal(w.animalDynamics.births, 1);
+  assert.equal(w.tiles[0]!.fauna, 8);
+  assertAnimals(w.animals, w.tick, w.tiles);
 });
 
 test('P2: incremental syncFauna cache matches a from-scratch recomputation through movement, births and predation over 500 ticks', () => {
@@ -243,41 +265,29 @@ test('archive validation rejects corrupt physiology, duplicate IDs, oversized me
   ]) { const bad = structuredClone(original); mutate(bad); assert.throws(() => assertAnimal(bad, 0)); }
   assert.throws(() => assertAnimals([original, structuredClone(original)], 0));
   assert.throws(() => assertAnimals([original], 0, [tile(1, 0)]));
-  assert.throws(() => assertAnimals(Array(MAX_STORED_ANIMALS + 1).fill(original), 0));
+  assert.throws(() => assertAnimals([original, animal('hare', 1)], 0, undefined, 1));
   const view = projectAnimal(original, 100); view.genes.speed = 0; view.parents.push('fake');
   assert.notEqual(original.genes.speed, 0); assert.equal(original.parents.length, 0); assert.equal(view.age, 600);
 });
 
-test('decision work is bounded while deferred individuals still metabolize and receive a later turn', () => {
-  const tiles = Array.from({ length: MAX_ANIMAL_DECISIONS_PER_TICK + 1 }, (_, x) => tile(x * 3, 0, { fauna: 1, species: 'hare' }));
-  const animals = materializeAnimals(42, tiles, 0), w = world(tiles, animals);
-  const before = new Map(animals.map(a => [a.id, a.hunger]));
-  run(w, 1);
-  assert.equal(w.animals.filter(a => a.lastDecision === 1).length, MAX_ANIMAL_DECISIONS_PER_TICK);
-  const deferred = w.animals.find(a => a.lastDecision !== 1)!;
-  assert.ok(deferred.hunger > before.get(deferred.id)!);
-  run(w, 1); assert.equal(deferred.lastDecision, 2);
-  assert.equal(w.animals.length, MAX_ANIMAL_DECISIONS_PER_TICK + 1);
-});
-
-test('8210 regional identities survive work-budget rotation without dropping stock and every body gets a turn', () => {
+test('all 8210 residents metabolize and decide on consecutive ticks', () => {
   const count = MAX_ACTIVE_ANIMALS + 18;
   const tiles = Array.from({ length: count }, (_, x) => tile(x * 8, 0, { fauna: 1, species: 'hare' }));
   const animals = materializeAnimals(42, tiles, 0);
   animals.forEach(a => { a.hunger = 0.25; });
-  const w = world(tiles, animals), reversed = structuredClone(w); reversed.animals.reverse(); reversed.tiles.reverse();
-  const ids = animals.map(a => a.id), before = new Map(animals.map(a => [a.id, structuredClone(a)]));
-  run(w, 1); run(reversed, 1);
-  assert.equal(w.animals.length, count); assert.deepEqual(w.animals.map(a => a.id), ids);
-  assert.equal(w.animals.filter(a => a.age === 601).length, MAX_ACTIVE_ANIMALS);
-  const deferred = w.animals.filter(a => a.age === 600); assert.equal(deferred.length, 18);
-  for (const a of deferred) assert.deepEqual(a, before.get(a.id), 'a deferred animal retains its body and memory exactly');
-  assert.equal(w.tiles.reduce((sum, t) => sum + t.fauna!, 0), count);
-  run(w, 1); run(reversed, 1);
-  assert.equal(w.animals.length, count); assert.ok(w.animals.every(a => a.age >= 601));
-  assert.equal(w.animals.reduce((sum, a) => sum + a.age - 600, 0), MAX_ACTIVE_ANIMALS * 2);
-  assert.equal(w.animalDynamics.deaths, 0); assert.equal(w.animalDynamics.births, 0);
-  assert.deepEqual(normalized(w), normalized(reversed)); assertAnimals(w.animals, w.tick, w.tiles);
+  const w = world(tiles, animals);
+  const ids = animals.map(a => a.id);
+  for (let tick = 1; tick <= 2; tick++) {
+    run(w, 1);
+    assert.deepEqual(w.animals.map(a => a.id), ids);
+    assert.ok(w.animals.every(a => a.age === 600 + tick));
+    assert.ok(w.animals.every(a => a.lastDecision === tick));
+    assert.deepEqual(decisionesFauna(w), { tick, vivos: count, decisiones: count });
+    assert.equal(w.tiles.reduce((sum, t) => sum + t.fauna!, 0), count);
+  }
+  assert.equal(w.animalDynamics.deaths, 0);
+  assert.equal(w.animalDynamics.births, 0);
+  assertAnimals(w.animals, w.tick, w.tiles);
 });
 
 test('calendar dormancy cannot age animals into senescence, maturity or another reproductive cooldown', () => {
@@ -296,58 +306,11 @@ test('calendar dormancy cannot age animals into senescence, maturity or another 
   assert.ok(parents.every(p => p.lastBirthAge === p.age)); assertAnimals(dormant.animals, dormant.tick, dormant.tiles);
 });
 
-test('biological reproduction eligibility is not locked to a global calendar phase or rotating cohort', () => {
+test('mature partners can reproduce between calendar phases', () => {
   const parents = [animal('deer', 0, 0, 'one'), animal('deer', 0, 0, 'two')];
   const w = world([tile()], parents); w.reproductionEnabled = true; w.tick = 1000;
   run(w, 1); assert.equal(w.animalDynamics.births, 1); assert.equal(w.animals.length, 3);
   assert.ok(parents.every(a => a.lastBirth === 1001 && a.lastBirthAge === a.age));
-});
-
-function opposingCohorts(): AnimalWorld {
-  const tiles = Array.from({ length: MAX_ACTIVE_ANIMALS * 2 }, (_, x) => tile(x * 8, 0, { fauna: 1, species: 'hare' }));
-  const animals = materializeAnimals(42, tiles, 0);
-  animals.forEach((a, i) => { a.id = `animal-n${String(i).padStart(5, '0')}`; a.x = i * 8; a.y = 0; a.target = { x: a.x, y: 0 }; a.hunger = 0.25; });
-  return world(tiles, animals);
-}
-
-test('opposite scheduling cohorts can reproduce through a resident partner without giving that partner extra physiology', () => {
-  const w = opposingCohorts(), first = w.animals[0]!, second = w.animals[MAX_ACTIVE_ANIMALS]!;
-  second.x = first.x; second.target = { x: first.x, y: first.y }; syncFauna(w.tiles, w.animals); w.reproductionEnabled = true;
-  const control = structuredClone(w);
-  [control.animals[1]!.id, control.animals[MAX_ACTIVE_ANIMALS]!.id] = [control.animals[MAX_ACTIVE_ANIMALS]!.id, control.animals[1]!.id];
-  const passive = structuredClone(first), unrelated = structuredClone(w.animals[1]!);
-  run(w, 1); run(control, 1);
-  assert.equal(w.animalDynamics.births, 1, 'the active parent can mate with its physically adjacent passive partner');
-  assert.equal(first.age, passive.age); assert.equal(first.lastDecision, passive.lastDecision); assert.equal(first.lastMove, passive.lastMove);
-  assert.ok(Math.abs(first.energy - (passive.energy - 0.18)) < 1e-12);
-  assert.ok(Math.abs(first.hunger - (passive.hunger + 0.12)) < 1e-12);
-  assert.ok(Math.abs(first.thirst - (passive.thirst + 0.07)) < 1e-12);
-  assert.ok(Math.abs(first.fatigue - (passive.fatigue + 0.1)) < 1e-12);
-  assert.equal(first.lastBirthAge, passive.age); assert.deepEqual(w.animals.find(a => a.id === unrelated.id), unrelated);
-  assert.equal(w.animals.filter(a => a.generation === 0 && a.age === 601).length, MAX_ACTIVE_ANIMALS);
-  assert.ok(Math.abs(w.animalDynamics.plantConsumed - 0.06) < 1e-12); assert.ok(Math.abs(w.animalDynamics.waterConsumed - 0.012) < 1e-12);
-  run(w, 1); run(control, 1);
-  assert.equal(w.animalDynamics.births, 1); assert.equal(control.animalDynamics.births, 1, 'renaming an unrelated identity cannot make the pair sterile');
-  assertAnimals(w.animals, w.tick, w.tiles); assertAnimals(control.animals, control.tick, control.tiles);
-});
-
-test('two active predators can reach one resident prey in the opposite cohort without double killing or extra prey physiology', () => {
-  const w = opposingCohorts(), prey = w.animals[0]!, wolves = [w.animals[MAX_ACTIVE_ANIMALS]!, w.animals[MAX_ACTIVE_ANIMALS + 1]!];
-  prey.health = 0.1;
-  for (const wolf of wolves) {
-    wolf.species = 'wolf'; wolf.genes = structuredClone(animal('wolf').genes); wolf.x = prey.x; wolf.y = prey.y;
-    wolf.target = { x: prey.x, y: prey.y }; wolf.action = 'hunt'; wolf.preyId = prey.id; wolf.work = 3; wolf.lastDecision = 0; wolf.hunger = 0.8;
-  }
-  syncFauna(w.tiles, w.animals);
-  const before = structuredClone(prey), events: Omit<ChronicleEvent, 'id' | 'tick'>[] = [];
-  run(w, 1, events);
-  assert.equal(w.animals.length, MAX_ACTIVE_ANIMALS * 2 - 1); assert.equal(w.animalDynamics.predations, 1); assert.equal(w.animalDynamics.deaths, 1);
-  assert.equal(events.filter(e => e.cause === 'depredación').length, 1); assert.equal(events[0]!.actors[1], prey.id);
-  assert.equal(prey.age, before.age); assert.equal(prey.hunger, before.hunger); assert.equal(prey.thirst, before.thirst);
-  assert.equal(prey.energy, before.energy); assert.equal(prey.fatigue, before.fatigue);
-  assert.equal(w.animals.filter(a => a.age === 601).length, MAX_ACTIVE_ANIMALS);
-  assert.equal(wolves.filter(a => a.hunger < 0.7).length, 1, 'only the killer receives prey biomass');
-  run(w, 1, events); assert.equal(w.animalDynamics.predations, 1); assertAnimals(w.animals, w.tick, w.tiles);
 });
 
 test('materializing and processing in the same tick cannot advance biological age beyond its calendar provenance', () => {

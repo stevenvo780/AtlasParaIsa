@@ -343,7 +343,6 @@ function referenceSyncFauna(tiles: Tile[], animals: Animal[]): void {
     const p = cellKey(animal.x, animal.y), existing = counts.get(p);
     if (existing) { existing.count++; if (animal.species < existing.species) existing.species = animal.species; }
     else counts.set(p, { count: 1, species: animal.species, x: animal.x, y: animal.y });
-    if (counts.get(p)!.count > 8) throw new Error('Capacidad local de fauna excedida.');
   }
   let cache = referenceCaches.get(tiles);
   if (!cache || cache.length !== tiles.length) {
@@ -429,7 +428,7 @@ test('V18 syncFauna: lo que cambia en una tesela se refleja en la llamada siguie
   syncFauna(tiles, animals);
   assert.ok(Object.is(tiles[2]!.fauna, 0));
   assert.equal(tiles.length, 3);
-  // Más de ocho animales en una celda: error, igual que antes.
   const crowd = Array.from({ length: 9 }, () => ({ x: 0, y: 0, species: 'hare' })) as Animal[];
-  assert.throws(() => syncFauna(tiles, crowd), /Capacidad local de fauna excedida/);
+  syncFauna(tiles, crowd);
+  assert.deepEqual(tiles.map(t => [t.fauna, t.species]), [[9, 'hare'], [0, undefined], [0, undefined]]);
 });

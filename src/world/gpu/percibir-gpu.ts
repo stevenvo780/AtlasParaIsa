@@ -486,7 +486,8 @@ export class PercibidorGpu implements Percibidor {
   fuentes(frente: FrentePublico, terreno: Terreno): void {
     if (this.pendiente) throw new Error('El lote GPU pendiente todavía usa sus fuentes');
     if (terreno !== this.terreno || frente.tick < this.frente.tick) { this.paginas.clear(); this.csr = undefined; }
-    if (frente.tick < this.frente.tick) this.cerebros.clear();
+    // Otro terreno es otro mundo (un clon, una carga): su tabla da las mismas gen a otros ocupantes de los mismos slots.
+    if (terreno !== this.terreno || frente.tick < this.frente.tick) this.cerebros.clear();
     this.frente = frente; this.terreno = terreno;
   }
 

@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
+// Registra los percibidores del proceso: con motor.hilos > 1 o motor.gpu, F2 se reparte por la piscina y las tarjetas.
+import { cerrarPercibidores } from '../world/decision/despacho.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
@@ -431,7 +433,7 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
 }
 
 /**
- * Suelta las piscinas de proceso (GPU de políticas y ecología).
+ * Suelta las piscinas de proceso (GPU de políticas, ecología y percepción).
  * Son globales: un `createApp` que avanzó con `motor.hilos > 1` o con GPU las deja vivas
  * aunque el llamador solo cierre el HTTP. Cada cierre es idempotente. Un rechazo no se traga
  * en silencio ni impide intentar las demás.
@@ -441,6 +443,7 @@ export async function cerrarPiscinasDeComputo(): Promise<void> {
   const paso = async (fn: () => unknown) => { try { await fn(); } catch (error) { errores.push(error); } };
   await paso(() => closePolicyGpuBatchers());
   await paso(() => closeEcosystemWorkers());
+  await paso(() => cerrarPercibidores());
   if (errores.length === 1) throw errores[0];
   if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');
 }

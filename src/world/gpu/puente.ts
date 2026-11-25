@@ -162,7 +162,7 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
     catch (error) { if (error instanceof ErrorDispositivo) return undefined; throw error; }
   };
   // Los servidores arrancan en paralelo y el arranque (contexto CUDA y NVRTC) no gasta el plazo de 2 s del primer B2.
-  const canales: (CanalCompartido | undefined)[] = [];
+  const canales: (CanalCompartido | undefined)[] = [], canalesActivos: CanalCompartido[] = [];
   try {
     if (process.env.COMPUTE_NVRTC) for (const dispositivo of dispositivos) canales.push(abrir(dispositivo));
     for (const canal of canales) {
@@ -173,6 +173,7 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
         percibidor: new PercibidorGpu(canal, frente, terreno), activa: true,
         cerrar() { this.activa = false; canal.cerrar(); },
       });
+      canalesActivos.push(canal);
     }
   } catch (error) {
     for (const canal of canales) canal?.cerrar();
@@ -181,6 +182,15 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
   const puente = new PuentePercepcion(cpu, tarjetas);
   return {
     puente,
+    /** Tarjetas que arrancaron y siguen activas. */
+    get tarjetas(): number { return tarjetas.filter(t => t.activa).length; },
+    /** Procesos de los servidores CUDA de las tarjetas activas (para observarlos, o para pruebas de caída). */
+    pids(): { dispositivo: number; pid: number }[] {
+      return tarjetas.flatMap((t, i) => {
+        const canal = canalesActivos[i], pid = canal?.pid;
+        return t.activa && canal && pid ? [{ dispositivo: canal.dispositivo, pid }] : [];
+      });
+    },
     fuentes(siguiente: FrentePublico, suelo: Terreno): void {
       for (const tarjeta of tarjetas) if (tarjeta.activa) tarjeta.percibidor.fuentes(siguiente, suelo);
     },

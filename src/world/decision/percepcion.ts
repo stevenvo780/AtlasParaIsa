@@ -259,18 +259,30 @@ export function percibirLote(ctx: Lectura, lote: LotePercepcion, planes: readonl
   }
 }
 
-/** Ventanas en CPU para una percepción que no las trae (la de una tarjeta: el contrato no las pide). */
-function conVentanas({ frente, terreno }: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: Percepcion, previa: PercepcionCpu | undefined): PercepcionCpu {
-  const n = lote.slots.length;
-  const ventana = previa && previa.ventana.length >= n * CELDAS_VENTANA ? previa.ventana : new Int16Array(Math.max(16, 2 * n) * CELDAS_VENTANA);
-  const ventanaCelda = previa && previa.ventanaCelda.length >= n * CELDAS_VENTANA ? previa.ventanaCelda : new Int32Array(ventana.length);
+/** Solo las ventanas de los actores `[desde, hasta)`: lo que la percepción de una tarjeta no trae (el contrato no las
+ * pide) y que `choose` recorre. Pura como `percibirLote`. */
+export function ventanasLote({ frente, terreno }: Lectura, lote: LotePercepcion, planes: readonly Plan[],
+  salida: Pick<PercepcionCpu, 'ventana' | 'ventanaCelda'>, desde = 0, hasta = lote.slots.length): void {
   const transitable = planes.map(plan => filtrosTerreno(terreno, plan.transitable));
-  for (let i = 0; i < n; i++) {
+  for (let i = desde; i < hasta; i++) {
     const slot = lote.slots[i]!;
-    calcularVentana(terreno, frente.x[slot]!, frente.y[slot]!, transitable[lote.plan[i]!]!, ventana, ventanaCelda, i * CELDAS_VENTANA);
+    calcularVentana(terreno, frente.x[slot]!, frente.y[slot]!, transitable[lote.plan[i]!]!, salida.ventana, salida.ventanaCelda, i * CELDAS_VENTANA);
+  }
+}
+
+/** La percepción de una tarjeta con las ventanas de `ventanas` (que ya las tiene) o calculadas aquí. */
+export function conVentanas(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: Percepcion, previa: PercepcionCpu | undefined,
+  ventanas?: Pick<PercepcionCpu, 'ventana' | 'ventanaCelda'>): PercepcionCpu {
+  let salida = ventanas;
+  if (!salida) {
+    const n = lote.slots.length;
+    const ventana = previa && previa.ventana.length >= n * CELDAS_VENTANA ? previa.ventana : new Int16Array(Math.max(16, 2 * n) * CELDAS_VENTANA);
+    const ventanaCelda = previa && previa.ventanaCelda.length >= n * CELDAS_VENTANA ? previa.ventanaCelda : new Int32Array(ventana.length);
+    salida = { ventana, ventanaCelda };
+    ventanasLote(ctx, lote, planes, salida);
   }
   return { q: p.q, v: p.v, a: p.a, tick: p.tick, despacho: p.despacho, celda: p.celda, pasos: p.pasos, valor: p.valor,
-    organismo: p.organismo, utilidad: p.utilidad, ventana, ventanaCelda };
+    organismo: p.organismo, utilidad: p.utilidad, ventana: salida.ventana, ventanaCelda: salida.ventanaCelda };
 }
 
 /**
@@ -279,7 +291,7 @@ function conVentanas({ frente, terreno }: Lectura, lote: LotePercepcion, planes:
  * vivir con la generación de su `Ref` y dentro del radio. El eco de `tick` y `despacho` descarta antes las salidas de otro
  * lote; esto atrapa las que traen el eco bien y las filas mal. No comprueba que la celda sea la mejor.
  */
-function coherente(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: PercepcionCpu): boolean {
+export function coherente(ctx: Lectura, lote: LotePercepcion, planes: readonly Plan[], p: PercepcionCpu): boolean {
   const { frente, terreno } = ctx, resueltos = planes.map(plan => resolver(plan, ctx)), n = lote.slots.length;
   if (p.celda.length < n * p.q || p.pasos.length < n * p.q || p.organismo.length < n * p.v || p.utilidad.length < n * p.a) return false;
   for (let i = 0; i < n; i++) {
@@ -416,7 +428,7 @@ export interface MedidaRevalidacion {
 const medidaVacia = (): MedidaRevalidacion => ({ filas: 0, aceptadas: 0, rehechasPorPagina: 0, rehechasPorValor: 0, fallosBarrera: 0, sueltas: 0, msPaginas: 0, msValores: 0, msSueltas: 0 });
 
 /** Elige el percibidor del lote según `motor` (hilos y tarjetas); lo registra `despacho.ts`. */
-export type ElegirPercibidor = (motor: WorldParams['motor'], cpu: PercibidorCpu) => Percibidor | PercibidorCompartido;
+export type ElegirPercibidor = (motor: WorldParams['motor'], cpu: PercibidorCpu) => Percibidor | PercibidorCompartido | undefined;
 let elegir: ElegirPercibidor | undefined;
 export function registrarPercibidores(e: ElegirPercibidor | undefined): void { elegir = e; }
 
@@ -429,10 +441,17 @@ export function registrarPercibidores(e: ElegirPercibidor | undefined): void { e
 export class PercepcionDelPaso {
   readonly vista: VistaMundo;
   readonly planes: Plan[];
-  /** Quien percibe el lote; por defecto este mismo hilo. Otro percibidor (la piscina de M1, la GPU de M3) lee `vista`. */
-  percibidor: Percibidor | PercibidorCompartido;
+  /** Quien percibe el lote. Sin fijarlo, el que elige `registrarPercibidores` para el `motor` del mundo en cada despacho
+   * (la piscina de M1, las tarjetas de M3), o este mismo hilo. Otro percibidor lee `vista`. */
+  get percibidor(): Percibidor | PercibidorCompartido { return this.#fijado ?? elegir?.(this.#motor(), this.#cpu) ?? this.#cpu; }
+  set percibidor(p: Percibidor | PercibidorCompartido) { this.#fijado = p; }
+  #fijado: Percibidor | PercibidorCompartido | undefined;
+  readonly #motor: () => WorldParams['motor'];
   /** Con `medir`, `medida` cuenta las filas rehechas por cada criterio y lo que cuesta cada uno. */
   medir = false;
+  /** Lo que lleva F2 desde que se creó: captura (frente y páginas), columnas del cerebro y despacho (lanzar, esperar,
+   * ventanas que falten y comprobación), en ms de pared del hilo que simula. */
+  readonly tiempos = { despachos: 0, filas: 0, capturaMs: 0, cerebroMs: 0, despachoMs: 0 };
   medida = medidaVacia();
   readonly #cpu: PercibidorCpu;
   readonly #depuracion: boolean;
@@ -450,11 +469,11 @@ export class PercepcionDelPaso {
 
   constructor(mundo: MundoOrganismos) {
     const { motor } = paramsOf(mundo as never);
+    this.#motor = () => paramsOf(mundo as never).motor;
     this.#depuracion = motor.depuracion;
     this.vista = VistaMundo.de(organismosDe(mundo), new TerrenoPercepcion(motor.depuracion));
     this.planes = planesPersonas(this.vista.terreno.campos);
     this.#cpu = new PercibidorCpu(this.vista);
-    this.percibidor = elegir?.(motor, this.#cpu) ?? this.#cpu;
     this.#suelta = reservarPercepcion(1, this.planes);
   }
 
@@ -473,30 +492,37 @@ export class PercepcionDelPaso {
   }
   #percibir(personas: readonly Person[], tick: number, vencidos: Vencidos, tileIn: TileLookup, fast: ResidentFastAccess | undefined,
     cerebro: (vista: VistaMundo, despacho: LotePercepcion) => void): PercepcionCpu {
-    const { vista } = this, n = vencidos.slots.length;
+    const { vista } = this, n = vencidos.slots.length, t = this.tiempos, inicio = performance.now();
     vista.capturar(personas, tick, vencidos.slots, tileIn, fast);
+    const capturado = performance.now();
+    t.despachos++; t.filas += n; t.capturaMs += capturado - inicio;
     if (this.medir) this.#fotografiar();
     if (this.#lote.length < n) this.#lote = new Int32Array(Math.max(n, 2 * this.#lote.length));
     for (let i = 0; i < n; i++) this.#lote[i] = vista.slot(personas[vencidos.slots[i]!]!);
     const despacho: LotePercepcion = { tick, despacho: ++this.#despachos, slots: this.#lote.subarray(0, n), plan: vencidos.plan };
     cerebro(vista, despacho);
+    const preparado = performance.now();
+    t.cerebroMs += preparado - capturado;
     let salida: PercepcionCpu;
+    const percibidor = this.percibidor;
     try {
-      if ('fuentes' in this.percibidor) this.percibidor.fuentes(vista);
-      this.percibidor.lanzar(despacho, this.planes);
-      const p = this.percibidor.esperar(PLAZO_PERCEPCION_MS);
+      if ('fuentes' in percibidor) percibidor.fuentes(vista);
+      percibidor.lanzar(despacho, this.planes);
+      const p = percibidor.esperar(PLAZO_PERCEPCION_MS);
       salida = 'ventana' in p ? p as PercepcionCpu : this.#ventanas = conVentanas(vista, despacho, this.planes, p, this.#ventanas);
       if (salida.tick !== despacho.tick || salida.despacho !== despacho.despacho)
-        throw new ErrorDispositivo(this.percibidor.dispositivo, `salida del despacho ${salida.despacho} (tick ${salida.tick}) en el ${despacho.despacho} (tick ${tick})`);
-      if (!('ventana' in p) && !coherente(vista, despacho, this.planes, salida))
-        throw new ErrorDispositivo(this.percibidor.dispositivo, 'salida que no casa con el lote');
+        throw new ErrorDispositivo(percibidor.dispositivo, `salida del despacho ${salida.despacho} (tick ${salida.tick}) en el ${despacho.despacho} (tick ${tick})`);
+      // Lo que viene de una tarjeta se comprueba contra las ventanas; los hilos de la piscina ejecutan este mismo código.
+      if ((!('ventana' in p) || percibidor.dispositivo !== 'cpu') && !coherente(vista, despacho, this.planes, salida))
+        throw new ErrorDispositivo(percibidor.dispositivo, 'salida que no casa con el lote');
     } catch (error) {
-      if (!(error instanceof ErrorDispositivo) || this.percibidor === this.#cpu) throw error;
+      if (!(error instanceof ErrorDispositivo) || percibidor === this.#cpu) throw error;
       this.#respaldos++;
       this.#cpu.lanzar(despacho, this.planes);
       salida = this.#cpu.esperar();
     }
     this.#salida = salida;
+    t.despachoMs += performance.now() - preparado;
     const alta = vista.frente.alta;
     if (this.#fila.length < alta) this.#fila = new Int32Array(Math.max(alta, 2 * this.#fila.length));
     this.#fila.fill(-1);

@@ -219,7 +219,12 @@ async function resolverParams(t: Pick<Trabajo, 'raiz' | 'regimen' | 'params' | '
 
 const arbolGit = (raiz: string): { arbol: string; sucio: boolean } | null => {
   const git = (...args: string[]) => execFileSync('git', ['-C', raiz, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  try { return { arbol: git('rev-parse', 'HEAD^{tree}'), sucio: git('status', '--porcelain', '--untracked-files=normal') !== '' }; } catch { return null; }
+  // `git status` no ve los cambios de un fichero marcado skip-worktree o assume-unchanged (`ls-files -v`: S o letra minúscula):
+  // con esa marca el árbol de trabajo puede no ser el del commit, así que cuenta como sucio.
+  try {
+    return { arbol: git('rev-parse', 'HEAD^{tree}'),
+      sucio: git('status', '--porcelain', '--untracked-files=normal') !== '' || /^(?:[a-z]|S) /m.test(git('ls-files', '-v')) };
+  } catch { return null; }
 };
 
 // ---- Caché de corridas: con un hilo y semilla el mismo árbol, parámetros y semilla dan el mismo censo, así que se guarda y se reutiliza.

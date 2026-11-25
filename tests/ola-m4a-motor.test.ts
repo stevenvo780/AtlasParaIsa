@@ -11,7 +11,19 @@ import { crearMotor } from '../src/world/motor/coordinador.js';
 import { fundir, nuevosDe } from '../src/world/motor/reunir.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { mortonCode } from '../src/world/soa/morton.js';
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
+
+test('m4a: el código Morton ordena por cuadrantes y cubre todo int32', () => {
+  // Pedido de m2b.cierre2 (lo probaba gpu-reparto.test.ts): orden, extremos y límites.
+  assert.equal(mortonCode(-0x80000000, -0x80000000), 0n);
+  assert.equal(mortonCode(0x7fffffff, 0x7fffffff), 2n ** 64n - 1n);
+  assert.ok(mortonCode(0, 0) < mortonCode(1, 0) && mortonCode(1, 0) < mortonCode(0, 1) && mortonCode(0, 1) < mortonCode(1, 1));
+  assert.ok(mortonCode(-1, -1) < mortonCode(0, -1) && mortonCode(0, -1) < mortonCode(-1, 0) && mortonCode(-1, 0) < mortonCode(0, 0));
+  assert.throws(() => mortonCode(0x80000000, 0), RangeError);
+  assert.throws(() => mortonCode(0, -0x80000001), RangeError);
+  assert.throws(() => mortonCode(0.5, 0), RangeError);
+});
 
 test('m4a: el reparto corta el orden Morton en tramos contiguos y parejos', () => {
   const lado = 8, px: number[] = [], py: number[] = [];

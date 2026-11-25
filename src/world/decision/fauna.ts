@@ -251,9 +251,9 @@ export const RADIO_VISTA_GEN = 4;
 export const ALARMA_CALMA = 0.01;
 /** 1/tick: olvido de la habituación sin agentes grandes cerca, h −= OLVIDO_HABITUACION·h (vida media ≈ 3 días). */
 export const OLVIDO_HABITUACION = 1 / 10000;
-/** Distancia genética máxima para que dos animales críen (Σ |Δgen| en [0, 1] + |Δ ln masa| + 2·|Δ acuático|): dos
- * fundadores distintos quedan siempre por encima, dos hermanos muy por debajo. */
-export const DISTANCIA_CRUCE = 1;
+/** Distancia genética máxima para que dos animales críen (Σ |Δgen| en [0, 1] + |Δ ln masa| + 2·|Δ acuático|): los dos
+ * fundadores más parecidos (ciervo y jabalí) quedan a 0,62; dos hermanos, a menos de 0,1. */
+export const DISTANCIA_CRUCE = 0.5;
 
 const sat01 = (n: number): number => n < 0 ? 0 : n > 1 ? 1 : n;
 

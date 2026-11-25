@@ -1,7 +1,6 @@
 import type { Point } from './geometria.js';
 import type { WorldContext as SpatialWorldContext, ChunkMeta } from '../spatial.js';
 import type { EcologyExecution } from '../ecosystem-kernel.js';
-import type { PersonasExecution } from '../paralelo/personas-motor.js';
 import type { PersonView, Order, MemoryView, Action, Tile, PlaceView, ChronicleEvent, CommunityView, WorldSample } from '../../shared/types.js';
 import type { CompoundLot } from '../../shared/chemistry.js';
 import type { Genome } from '../genetics.js';
@@ -22,7 +21,7 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 export { POPULATION_HARD_LIMIT } from '../../shared/life.js';
 
 /** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
-export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution; personasExecution?: PersonasExecution };
+export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution };
 
 
 // V12 adds opt-in local neighborhood natality (D2), uncapped organic communities (`maxComunidades=0`),
@@ -50,6 +49,8 @@ export interface Habit {
 }
 
 export interface Person extends PersonView {
+  /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
+  uid?: number;
   huntingPreyId?: string;
   tending?: { id: string; work: number };
   compounds?: CompoundLot[];
@@ -103,6 +104,8 @@ export interface World {
   cooperationEnabled: boolean; reproductionEnabled: boolean; communities: CommunityView[]; communityCounter: number; birthCounter: number;
   history: WorldSample[]; totals: Record<string, number>;
   animals: Animal[]; animalCounter: number; animalDynamics: AnimalDynamics;
+  /** V23: el próximo uid de la tabla de organismos, común a personas y fauna (ausente hasta la primera alta). */
+  siguienteUid?: number;
   blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
   technology: TechnologyState; legacy: LegacyRecord[]; retiredLegacy: LegacyRecord[];
   demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };

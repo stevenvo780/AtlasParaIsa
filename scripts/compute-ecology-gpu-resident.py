@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persistent resident GPU worker for T122. Binary stdio, FP64, --fmad=false.
+"""Persistent resident GPU worker for T122. Binary stdio and FP64.
 
 Buffers stay in VRAM between steps. Node uploads a full topology+front sync
 (first step, arena growth, VRAM-authoritative ticks), an incremental `delta`
@@ -18,7 +18,7 @@ DOWNLOAD_FIELDS = {1: [('moisture',8),('vegetation',8),('food',8)],
                    2: [(f,e) for f,e in FIELDS if f not in ('food','terrain','biome')],
                    '2_halo': [(f,e) for f,e in FIELDS if f not in ('terrain','biome')]}
 # V22: ecología local con estacionalidad regional. Se compila en la MISMA unidad que el .cu residente
-# (reutiliza `bounded` y `neighborCell`) con las mismas opciones NVRTC (FP64, sin contracción).
+# (reutiliza `bounded` y `neighborCell`) con las mismas opciones NVRTC.
 # `climate` = 3 dobles por ranura LOCAL (rainScale, evapScale, growthScale), calculados en JS con
 # `regionalClimateFactor` (seno/coseno de V8: nunca se evalúan aquí). Orden aritmético literal de la
 # rama `seasonal` de `ecology()` en src/world/index.ts y de `runParallelEcology`.
@@ -146,7 +146,7 @@ class Device:
         make = bind(lib,'nvrtcCreateProgram',[C.POINTER(p),C.c_char_p,C.c_char_p,i,p,p]); comp = bind(lib,'nvrtcCompileProgram',[p,i,C.POINTER(C.c_char_p)])
         size = bind(lib,'nvrtcGetPTXSize',[p,C.POINTER(z)]); get = bind(lib,'nvrtcGetPTX',[p,p]); dest = bind(lib,'nvrtcDestroyProgram',[C.POINTER(p)])
         prog = p(); checked(make(C.byref(prog), source.encode(), b'compute-ecology-resident.cu', 0, None, None))
-        opts = [f'--gpu-architecture={self.arch}'.encode(), b'--fmad=false', b'--std=c++11']
+        opts = [f'--gpu-architecture={self.arch}'.encode(), b'--std=c++11']
         st = comp(prog, len(opts), (C.c_char_p*len(opts))(*opts))
         if st:
             lsz = bind(lib,'nvrtcGetProgramLogSize',[p,C.POINTER(z)]); glog = bind(lib,'nvrtcGetProgramLog',[p,p])
@@ -572,7 +572,7 @@ def main():
         SHM = None
     try:
         for idx in indices: devices.append(Device(idx,a.nvrtc,source))
-        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass1_seasonal','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
+        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':True,'kernels':['ecology_pass1','ecology_pass1_seasonal','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
         cached_halo_per = None
         cached_halo_plan = None
         def release_body(b):

@@ -7,12 +7,14 @@ import { settlementOpportunity } from '../src/world/society.js';
 
 // Medidos en un checkout temporal detached de main 2ee2658, con createWorld(seed),
 // 1200 llamadas a stepWorld y digestoCanonico, antes de declarar social.hogarTrabajo.
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
 const REFERENCIAS_1200 = {
-  42: '8502e1fd0ad07b01e96d93098acaf483e66fe17ccb3babbcc52880cbd54cffcc',
-  2001: '0d803e129a475045e74b9badf66b6d76d649a78949a5c251e5e68e14dad9a3a2',
+  42: '126b7daa73d7920f81460fc1e6e8e2cd404134a0ffe09b413a57bbebbb4d48c3',
+  2001: 'e1f561925d68dd610c6e136724cb66cda643e78356cedc2a2c653e60e26e363a',
 } as const;
 
-for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de 2ee2658: semilla ${seed}`, { timeout: 600000 }, () => {
+for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de referencia: semilla ${seed}`, { timeout: 600000 }, () => {
   assert.equal(DEFAULT_PARAMS.social.hogarTrabajo, 0);
   assert.equal(HISTORICAL_PARAMS.social.hogarTrabajo, 0);
   const world = createWorld(seed);

@@ -1,4 +1,9 @@
 // CONGELADOS desde el 2026-11-24 (firma de Claude Opus tras la revisión de GPT-6.1 Sol; refirmados por Claude Opus el mismo día tras la pasada adversarial de Gemini 4 Neon): cambiar cualquier contrato de V23 (este fichero, materia/tipos.ts y shared/{materia,naturaleza,cinta,fotograma}.ts) exige pasar por el integrador.
+// ENMIENDA 2 del motor (2026-11-24, integración de M1, M2b, M3 y M2a; integrador Claude Opus 5.5), pedida en
+// archivo/v23-orquesta/fin/{m2b.cierre2,pedidos-contratos-ola1}.md: dominio de coordenadas; columnas del cerebro en f64
+// escritas en F2; W opcional en un plan con cerebro; utilidad = softSign(capa2 + sesgo) + W·rasgos (la ley vigente); eco
+// de tick y despacho en lote y salida; qué vale tras esperar o tras un ErrorDispositivo; DATO_TOMAR con los 4 κ de la
+// materia. Cada cambio lleva su porqué junto a él.
 /**
  * Contratos del motor V23 (ARQ-motor §2), congelados en la ola 0 con la reconciliación de PLAN-V23 §1.2 y
  * AJUSTES-ORQUESTADOR aplicadas: un solo `Intento` (la materia viaja como pares [SustanciaId, cuantos]), sin
@@ -76,6 +81,8 @@ export interface FrentePublico {
   readonly gen: Col; readonly vivo: Col; readonly clase: Col;
   readonly uid: Col;                     // identidad durable (f64, ≥ 1), nunca reutilizada
   readonly dueno: Col;                   // hilo que tiene al organismo durante el tick siguiente (−1 si no asignado)
+  /** Posición en celdas, f32. Enmienda 2: |x|, |y| < 2²⁴, para que f32 la guarde exacta mientras sea entera (hoy
+   * lo es: MAX_COORDINATE = 10 000 000, terrain.ts); ampliarla exige otra columna o pasar x e y a f64. */
   readonly x: Col; readonly y: Col; readonly chunk: Col;
   readonly accion: Col;                  // índice en la lista de acciones de su clase
   readonly objetivo: Col;                // celda objetivo (`Terreno.celda`); −1 si no tiene
@@ -110,19 +117,25 @@ export interface TablaOrganismos {
 export const CEREBRO = { entradas: 12, ocultas: 8, acciones: 12 } as const;
 
 /**
- * Columnas f32 del cerebro, con su ancho. Las registra M2b con `TablaOrganismos.columna`; M3 las sube a la tarjeta
- * por filas sucias. La fauna no las usa (sus filas quedan a 0).
- * - `observacion`: las 12 entradas, en el orden de `LocalObservationInput` (politica.ts). La escribe el dueño en F6
- *   con el estado de t: quien decide en t+1 decide con lo que vio en t.
+ * Columnas del cerebro, de tipo `TIPO_CEREBRO` y con su ancho. Las registra M2b con `TablaOrganismos.columna`; M3 las
+ * sube a la tarjeta por filas sucias. La fauna no las usa (sus filas quedan a 0).
+ * - `observacion`: las 12 entradas, en el orden de `LocalObservationInput` (politica.ts). La escribe el dueño en F2,
+ *   antes de lanzar, para las filas con cerebro y con el estado de ese momento. Enmienda 2: antes se escribía en F6
+ *   de t, y decidir con lo visto un tick atrás cambiaba la conducta respecto de `choose` (m2b.cierre2, H7).
  * - `politica`: los pesos heredados con la disposición de `PolicyGenome.weights` (W1[oculta][entrada], b1,
- *   W2[acción][oculta], b2). Se escriben al nacer y no cambian.
- * - `sesgo`: la plasticidad adquirida (`PolicyPlasticity.bias`), por acción. El dueño la pone al día en F6.
+ *   W2[acción][oculta], b2). El dueño los escribe para todo slot cuya `gen` cambió desde su última escritura, decida
+ *   o no en ese tick. Enmienda 2: «al nacer» dejaba en un slot reutilizado los pesos del muerto (m2b.cierre2, H7).
+ * - `sesgo`: la plasticidad adquirida (`PolicyPlasticity.bias`), por acción. El dueño la escribe en F2 junto con
+ *   `observacion`.
  */
 export const COLUMNAS_CEREBRO = {
   observacion: CEREBRO.entradas,
   politica: CEREBRO.entradas * CEREBRO.ocultas + CEREBRO.ocultas + CEREBRO.ocultas * CEREBRO.acciones + CEREBRO.acciones,
   sesgo: CEREBRO.acciones,
 } as const;
+/** Enmienda 2: f64, el formato de la ley en CPU (`evaluatePolicySingle`); en f32 la CPU dejaba de dar lo mismo que la
+ * ley. Un backend f32 convierte al subir (el error medido por M3 es 2,4·10⁻⁷) y el dueño valida su salida. */
+export const TIPO_CEREBRO = 'f64' satisfies TipoColumna;
 
 // ── Terreno ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -132,8 +145,10 @@ export const COLUMNAS_CEREBRO = {
  * Implementa: M1 (`soa/{arena,terreno}.ts`). Consumen: M2b, M3, M4a, M4b, M5, M6, W. */
 export interface Terreno {
   readonly paginas: number;              // cota de ChunkId asignados: los residentes tienen c < paginas y duenoChunk[c] ≥ 0
-  readonly paginaX: Int32Array;          // coordenada px del chunk c (para BFS GPU y Fotograma.paginas)
-  readonly paginaY: Int32Array;          // coordenada py del chunk c
+  /** Coordenadas px, py del chunk c (para BFS GPU y Fotograma.paginas). Enmienda 2: |px|, |py| < 2²⁵, lo que piden las
+   * claves de página exactas en un double de quien las indexa por pares (m2b.cierre2, H14). */
+  readonly paginaX: Int32Array;
+  readonly paginaY: Int32Array;
   readonly versionPagina: Uint32Array;   // por chunk; la sube el dueño y la GPU solo sube lo que cambió
   readonly versionVisible: Uint32Array;  // por chunk; la sube marcar(c, true): M6 compara con la última entregada (saltar no pierde cambios)
   readonly duenoChunk: Int16Array;       // vigente durante el tick (−1 si libre); lo cambia el coordinador en F0
@@ -192,7 +207,8 @@ export interface Intento {
 export const DATO_MATERIA = { rol: 0, forma: 1 } as const;
 /** Posiciones en `dato` de un Tomar: qué lote del destino (Rol, si `lote` es REF_NULA), qué `Parte`, de qué sustancia,
  * cuántos cuantos, el lote propio donde se abonará (lo crea antes quien pide; vuelve como `lote` del Concedido) y,
- * solo con Parte.Digerible, los 3 κ del comedor. */
+ * solo con Parte.Digerible, los 4 κ del comedor en dato[kappa … kappa + 3], en el orden de las familias catalíticas
+ * (C–O, C–N, C–C/C–H, H–H). Enmienda 2: eran 3; la enmienda 2 de la materia dio al H–H su propia familia. */
 export const DATO_TOMAR = { rol: 0, parte: 1, esp: 2, cuantos: 3, loteDestino: 4, kappa: 5 } as const;
 /** Posiciones en `dato` de un Golpear: el trabajo en J y lo que la ley de romper necesita del útil o cuerpo que golpea. */
 export const DATO_GOLPEAR = { trabajo: 0, filo: 1, tenacidad: 2, esbeltez: 3, dureza: 4 } as const;
@@ -290,29 +306,43 @@ export interface ConsultaOrganismo {
 /** Lo que un actor necesita percibir para decidir. Los definen M2b (`decision/planes.ts`) y M2a (fauna); los ejecutan M2b (CPU) y M3 (GPU).
  * `transitable` son tripletas [campo, mínimo, máximo] sobre `Terreno.campos` para el BFS r = 7 (tierra para personas, agua
  * para peces; vacío = toda celda residente). Con cerebro, `acciones` = CEREBRO.acciones y `w` es la tabla W
- * (acciones × RASGOS_ANCHO, por filas); sin él, 0 y null. */
+ * (acciones × RASGOS_ANCHO, por filas) o null si el plan no tiene cabeza lineal (W·rasgos = 0); sin cerebro, 0 y null.
+ * Enmienda 2: W opcional, porque la ventaja comparativa de las personas depende de la urgencia y del candidato y no
+ * cabe en W·rasgos; sus planes llevan cerebro y w = null. */
 export interface Plan {
   id: number; transitable: Float32Array; celdas: readonly Consulta[]; organismos: readonly ConsultaOrganismo[];
   acciones: number; w: Float32Array | null;
 }
 /** Vencidos de un tick que van a un mismo percibidor (lotes de 64 slots en CPU, miles en GPU).
- * `plan[i]` es el índice en `planes` (`0 ≤ plan[i] < planes.length`, con `planes[k].id === k`). */
-export interface LotePercepcion { tick: number; slots: Int32Array; plan: Uint16Array }
+ * `plan[i]` es el índice en `planes` (`0 ≤ plan[i] < planes.length`, con `planes[k].id === k`). `despacho` numera los
+ * lanzamientos de quien lo arma, sin repetirse en su vida; un tramo de un lote repartido entre tarjetas lleva el
+ * `tick` y el `despacho` del lote entero. */
+export interface LotePercepcion { tick: number; despacho: number; slots: Int32Array; plan: Uint16Array }
 /** Alineada con `slots`: N×q celdas, pasos y valores, N×v organismos (Ref) y N×a utilidades; q, v y a son los máximos
- * sobre `planes` (sin resultado o sobrante: celda = −1, pasos = −1, valor = Infinity, organismo = REF_NULA).
- * utilidad[j] = red(observacion)[j] + sesgo[j] + Σₖ w[j·RASGOS_ANCHO + k]·rasgos[k]. */
+ * sobre `planes` (sin resultado o sobrante: celda = −1, pasos = −1, valor = Infinity, organismo = REF_NULA, utilidad = 0).
+ * Con cerebro, utilidad[j] = softSign(capa2(observacion)[j] + sesgo[j]) + Σₖ w[j·RASGOS_ANCHO + k]·rasgos[k], la ley de
+ * `evaluateRow` (politica.ts). Enmienda 2: el texto sumaba el sesgo fuera de la activación, y así el argmax de la red
+ * cambiaba en 2 de cada 41 personas según decidiera la tarjeta o la CPU (m2b.cierre).
+ * El percibidor copia `tick` y `despacho` del lote en su salida (una tarjeta, de la respuesta de su servidor); el dueño
+ * rechaza con ErrorDispositivo la salida cuyo `tick` o `despacho` no sean los del lote que espera y recalcula ese lote en
+ * CPU. Enmienda 2: sin ese eco, una salida rancia de otro despacho que pasara las comprobaciones se aceptaba (m2b.cierre2, H2). */
 export interface Percepcion {
   readonly q: number; readonly v: number; readonly a: number;
+  readonly tick: number; readonly despacho: number;
   celda: Int32Array; pasos: Int16Array; valor: Float32Array; organismo: Float64Array; utilidad: Float32Array;
 }
 
 export type Dispositivo = 'cpu' | `gpu${number}`;
 
-/** Implementan: M2b (CPU, `decision/percepcion.ts`) y M3 (GPU, `gpu/percibir-gpu.ts`). Consumen: M2b (T=1) y M4a. */
+/** Implementan: M2b (CPU, `decision/percepcion.ts`) y M3 (GPU, `gpu/percibir-gpu.ts`). Consumen: M2b (T=1) y M4a.
+ * Cuando `esperar` devuelve, el percibidor ya no lee la vista ni escribe la salida. Si lanza ErrorDispositivo (plazo
+ * vencido o fallo), el dueño da al lector por vivo: la captura siguiente se publica en búferes nuevos y los del despacho
+ * fallido no se reutilizan hasta que el percibidor confirme que terminó o canceló. Enmienda 2: reutilizarlos dejaba a un
+ * lector tardío ver medio tick nuevo (m2b.cierre2, H3). */
 export interface Percibidor {
   readonly dispositivo: Dispositivo;
   lanzar(l: LotePercepcion, planes: readonly Plan[]): void;
-  esperar(plazoMs: number): Percepcion;  // ErrorDispositivo si vence el plazo o falla
+  esperar(plazoMs: number): Percepcion;  // ErrorDispositivo si vence el plazo, falla o el eco no casa
 }
 
 /** Plazo vencido o tarjeta caída: quien lo captura recalcula ese lote en CPU en el mismo tick (la GPU nunca es autoridad).

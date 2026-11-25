@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import type { Tile } from '../../src/shared/types.js';
 import { assertAnimals, MAX_ANIMALS_PER_TILE, materializeAnimals, stepAnimals, type AnimalWorld } from '../../src/world/animals.js';
-import { closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld } from '../../src/world/index.js';
+import { closePolicyGpuBatchers, createWorld, stepWorld } from '../../src/world/index.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { parseParams } from '../../src/world/params.js';
@@ -19,7 +19,6 @@ import { residentTileReader, TileStore } from '../../src/world/soa/terreno.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 
@@ -87,7 +86,9 @@ function own(source: Tile[]): Tile[] {
 }
 
 const SCALE_TICKS = 600;
-const BASE_SCALE_FOOTPRINT = '9d98c10338d62eb8a3aab73a7cad7cc330fcbd78fc4adf7ccd606e6dd36e1834';
+// V23: re-grabada al quitar los topes de fauna (M2a, 1aae52f); 9d98c103… pasó sin cambios hasta 98e750c
+// (sprint/v23l-motor). Residente = plana se sigue comprobando paso a paso.
+const BASE_SCALE_FOOTPRINT = '930d0bdc279f9a06715e896a327f090a81424ab9424972a6b563ff9acc8552b7';
 
 test(`escala: ≈ 2 500 animales sobre 8 064 teselas, ${SCALE_TICKS} pasos, planas y residentes idénticas a la base`, () => {
   const source = scaleTiles(), plain = scaleWorld(source.map(t => ({ ...t }))), resident = scaleWorld(own(source));

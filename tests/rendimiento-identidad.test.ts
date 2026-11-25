@@ -166,16 +166,18 @@ function clavesPosterioresApagadas(params: WorldParams): void {
   }
 }
 
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
 const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [
   { seed: 51926, params: LEYES_CANDIDATAS, digestos: {
-    1200: '846f36fe7b2766130429979704868dc301ea34f73ab0f511ec95395efeb74a77',
-    2400: '3629949dd8df3432faf3df0b77f82a5683bc3fadcbca7ddc5fb153c03023b2eb' } },
+    1200: '147e80d4bcd93d85280393c4a50d94ea70274c098573c2be8fa1e30d2c88420b',
+    2400: '0198b7ace122f7a55d7bd557c266dd27eceaa9b8c3892fb890d22a769b527e3c' } },
   { seed: 7, params: LEYES_CANDIDATAS, digestos: {
-    1200: '6e378d73d46b90df176a42f31d4f86c4f566d35db365ddb0163159f81a94618a',
-    2400: 'ea9cb210139a3cf75c8fe9cac66bfd6e3497b02fefd9480df215a38286975b11' } },
+    1200: '8672fdd7c4b72777de02481271ee2582bcf41597666d44a797dd84e94471cdea',
+    2400: 'd4e767d6ae5483612a896150a4d9e09a28d35cbd2f457b200fd28b6bd3f50c4d' } },
   { seed: 42, digestos: {
-    1200: 'b58515151286b85a7e8bfc29ceb8da04f0adce10aa9b991daa00721344fd9f25',
-    2400: 'a74f2704b25bbc382c4ead56c86434c76ff271ee7660c91b0c9eea931112e844' } },
+    1200: '62ebfde90e5bd85f80b52099a40d43f903df80dc19791a36e52462757569673d',
+    2400: 'de730397844963696b9084c27df0527e3404664b4ed9b926956d8dc911582cb3' } },
 ];
 
 test('las leyes candidatas del laboratorio son las del control', () => {
@@ -186,7 +188,7 @@ test('las leyes candidatas del laboratorio son las del control', () => {
 });
 
 for (const { seed, params, digestos } of REFERENCIA) {
-  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
+  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al de referencia tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
     clavesPosterioresApagadas(parseParams(params, HISTORICAL_PARAMS));
     assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10), digestos);
   });

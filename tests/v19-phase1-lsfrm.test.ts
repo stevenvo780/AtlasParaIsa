@@ -13,7 +13,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cloneWorld, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, migrateWorld,
+  cloneWorld, closePolicyGpuBatchers, createWorld, migrateWorld,
   RULES_VERSION, stepWorld, type Person, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
@@ -27,8 +27,6 @@ import { readSnapshotParams } from '../src/server/snapshot.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 
@@ -80,11 +78,13 @@ test('V19 fase 1: una instantánea con params V18 (sin claves V19) carga con tod
 // ───────────────────────── 1. 0 ULP frente a V18 ─────────────────────────
 // Medidos con el código de HEAD antes de la fase 1 (RULES_VERSION 12), 60 pasos con DEFAULT_PARAMS y 300 con el
 // anfitrión abierto (sondeo fijo de hardware, un hilo): ver el encabezado.
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
 const V18_DEFAULT_60: Record<number, string> = {
-  7: '95017b600163b8ccc51e6be2961d7d6d2be31412ecdaba3ad0cac4b4fd0420ca',
-  42: '66271ffc4b6b424214fc1a6fdfc784be354c45651133affc2703c0829f376828',
-  51926: '98189db6f8697a10a0374b627d2c2938677b8953dbb92e07f2fe860b4b278b43',
-  104729: 'c2ff0fde8cbafec05559c3dc7e59d2fb375f26959d71356949af42d8b784af8c',
+  7: 'a51569cce46eeb91069cce9533fa664f354b9463b08fe788617e3bf5bce19c65',
+  42: 'ae19695dd28c5585405706dbf7a7c559a07e254ec90a010a498be2254f5edc09',
+  51926: 'de2a8fb250950df5a9011e8407e71ed252d17f338325b36f8b73d550268f383d',
+  104729: 'b161d30770a268309353351722e381f51347900f40031096a5eaeb7126a7b89b',
 };
 const V18_HOST_300: Record<number, string> = {
   7: 'f0ab8eb74989f614bfc3de1cac658ad27bc269f8a8eabb49723f17745e343655',
@@ -100,7 +100,7 @@ function run(world: World, ticks: number): World { for (let i = 0; i < ticks; i+
 
 for (const [seedText, expected] of Object.entries(V18_DEFAULT_60)) {
   const seed = Number(seedText);
-  test(`V19 fase 1: DEFAULT_PARAMS semilla ${seed}, 60 pasos = digesto V18, tanto creado como cargado desde version = 12`, () => {
+  test(`V19 fase 1: DEFAULT_PARAMS semilla ${seed}, 60 pasos = digesto de referencia, tanto creado como cargado desde version = 12`, () => {
     const created = run(createWorld(seed, DEFAULT_PARAMS), 60);
     assert.equal(created.version, 14);
     assert.equal(digestAsV18(created), expected, 'mundo nuevo con interruptores apagados');

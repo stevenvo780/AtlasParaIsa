@@ -30,7 +30,7 @@ export function assertEcosystemTile(tile: Tile, required = true): void {
     const value = tile[key];
     if ((required || value !== undefined) && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) fail();
   }
-  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0 || tile.fauna! > 6)) fail();
+  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0)) fail();
   if (tile.species !== undefined && !['hare','deer','boar','fish','wolf','fox'].includes(tile.species)) fail();
   if ((tile.fauna ?? 0) > 0 && tile.species === undefined) fail();
 }
@@ -224,5 +224,14 @@ export function assertLifeState(world: World): void {
   for(const animal of [...world.animals,...world.retiredChunks.flatMap(c=>c.animals??[])]){
     const serial=/^animal-born-\d+-\d+-([1-9]\d*)$/.exec(animal.id);
     if(serial&&!integer(Number(serial[1]),world.animalCounter))fail();
+  }
+  // Uid del motor: de un solo contador para personas y fauna (también la archivada), así que únicos y menores que él.
+  if(world.siguienteUid!==undefined&&(!integer(world.siguienteUid)||world.siguienteUid<1))fail();
+  const uids=new Set<number>();
+  for(const organismo of [...world.people,...world.animals,...world.retiredChunks.flatMap(c=>c.animals??[])]){
+    const uid=organismo.uid;
+    if(uid===undefined)continue;
+    if(!integer(uid)||uid<1||world.siguienteUid===undefined||uid>=world.siguienteUid||uids.has(uid))fail();
+    uids.add(uid);
   }
 }

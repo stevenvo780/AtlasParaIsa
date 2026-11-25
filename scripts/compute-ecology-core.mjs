@@ -123,8 +123,9 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // SHA256 del cuerpo de step() con comentarios /* */, // y secuencias de
   // espacios colapsadas. Hay que bumpear la versión (y este hash) junto con
   // cualquier cambio intencional de reglas.
-  // La recuperación de GPU a CPU de 0D cambia el despacho de step(), sin cambiar las fórmulas.
-  canonicalStepBodyHash: '934b43f99d86d36aaa3af818d8273cce921131d2e0a13ac3fc863f32d104db24',
+  // La recuperación de GPU a CPU de 0D y `prepararGpu` de M3 (f260be2) cambian el despacho de step(), sin cambiar
+  // las fórmulas (mismos términos).
+  canonicalStepBodyHash: '9ea14d3cb38055c49a71e4296d34def16ff3879e51734a87807e6f7411355fb2',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas

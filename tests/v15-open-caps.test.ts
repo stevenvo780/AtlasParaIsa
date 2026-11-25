@@ -14,11 +14,7 @@ import {
   blueprintCap, blueprintCost, completeConstruction, constructionOpportunity,
   inventionOpportunity, MAX_BLUEPRINTS, MAX_STRUCTURES, structureCap,
 } from '../src/world/inventions.js';
-import {
-  MAX_ACTIVE_ANIMALS, MAX_ANIMAL_DECISIONS_PER_TICK, mascaraFauna, materializeAnimals, stepAnimals, syncFauna,
-  type AnimalWorld,
-} from '../src/world/animals.js';
-import { closeFaunaParallelPools } from '../src/world/paralelo/fauna-motor.js';
+import { materializeAnimals, stepAnimals, syncFauna, type AnimalWorld } from '../src/world/animals.js';
 import {
   DEFAULT_PARAMS, limitsOf, OPEN_WORLD_MAX_BLUEPRINTS, openWorldCaps, paramsOf, parseParams, setParams,
 } from '../src/world/params.js';
@@ -188,50 +184,24 @@ test('blueprints: default world caps at 64 (and generation <= 64) while open-wor
   assert.ok(inventionOpportunity(openAt64, pOpen) !== undefined);
 });
 
-test('fauna: default world windows at 8192/1024 while open-world V15 runs all animals & decisions (serial + parallel parity)', async () => {
-  const count = MAX_ACTIVE_ANIMALS + 400; // 8592 > 8192
-  const makeHerd = (params = DEFAULT_PARAMS): AnimalWorld => {
-    const tiles: Tile[] = Array.from({ length: count }, (_, x) => ({
-      x, y: 0, terrain: 'meadow', biome: 'grassland', moisture: 0.8, vegetation: 0.8, growth: 0.8,
+test('fauna: all residents decide in both default and open-world V15 settings', () => {
+  const count = 1100;
+  for (const params of [DEFAULT_PARAMS, OPEN_PARAMS]) {
+    const tiles: Tile[] = Array.from({ length: count }, (_, i) => ({
+      x: i * 8, y: 0, terrain: 'meadow', biome: 'grassland', moisture: 0.8, vegetation: 0.8, growth: 0.8,
       food: 0.4, fauna: 1, species: 'hare', drinkingWater: 0.8, fertility: 0.6,
     }));
     const animals = materializeAnimals(42, tiles, 0);
-    // Mark first 1400 animals as due for decision (> MAX_ANIMAL_DECISIONS_PER_TICK = 1024)
-    for (let i = 0; i < animals.length; i++) animals[i]!.lastDecision = i < 1400 ? 0 : 100;
+    animals.forEach(a => { a.hunger = 0.25; a.lastDecision = 0; });
     syncFauna(tiles, animals);
     const w: AnimalWorld = {
-      seed: 42, tick: 100, tiles, animals, animalCounter: 0, reproductionEnabled: false,
+      seed: 42, tick: 1, tiles, animals, animalCounter: 0, reproductionEnabled: false,
       animalDynamics: { births: 0, deaths: 0, predations: 0, humanHunts: 0, waterConsumed: 0, plantConsumed: 0 },
     };
     setParams(w, params);
-    return w;
-  };
-
-  try {
-    // Legacy caps active window at 8192 and decisions at 1024
-    const legacy = makeHerd(DEFAULT_PARAMS);
-    const legacyMask = mascaraFauna(legacy);
-    assert.equal(legacyMask.seleccion.length, MAX_ACTIVE_ANIMALS);
-    stepAnimals(legacy, undefined, legacyMask);
-    const legacyDecided = legacy.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
-    assert.equal(legacyDecided, MAX_ANIMAL_DECISIONS_PER_TICK);
-
-    // Open-world selects ALL 8592 active animals and decides ALL 1400 due animals (serial)
-    const openSerial = makeHerd(parseParams('motor.hilos=1', OPEN_PARAMS));
-    const openMask = mascaraFauna(openSerial);
-    assert.equal(openMask.seleccion.length, count);
-    stepAnimals(openSerial, undefined, openMask);
-    const openSerialDecided = openSerial.animals.filter(a => a.lastDecision === 100).length - (count - 1400);
-    assert.equal(openSerialDecided, 1400);
-
-    // Open-world parallel (4 workers) produces bit-exact identical decisions & state for all 1400 due animals
-    const openParallel = makeHerd(parseParams('motor.hilos=4', OPEN_PARAMS));
-    const openParallelMask = mascaraFauna(openParallel);
-    assert.equal(openParallelMask.seleccion.length, count);
-    stepAnimals(openParallel, undefined, openParallelMask);
-    assert.deepEqual(openParallel.animals, openSerial.animals);
-  } finally {
-    await closeFaunaParallelPools();
+    stepAnimals(w);
+    assert.equal(w.animals.length, count);
+    assert.ok(w.animals.every(a => a.lastDecision === w.tick));
   }
 });
 

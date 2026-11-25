@@ -88,11 +88,13 @@ function digestoSinMemoria(world: World, conMemoria = false): string {
 //     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin agua.memoria \
 //     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$BASE_LAB" --sin agua.memoria
 // (`fisico` → FISICO_*, `completo` → COMPLETO_*; en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-const FISICO_51926_1200 = 'cd99990ad944bdf7ce9004da8c92d2f5d3e0e64a841dc1d470c06a61065d64eb';
-const FISICO_42_BASE_1200 = '955227fac6184fd65ff2d663c576d527cd1b88b5b49d37cc65ef9a615457597b';
+// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
+// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
+const FISICO_51926_1200 = '657690d64d7d6e1c3ed0734c7a950b8a9ef3123fa4956f7588bebff7eac6d35d';
+const FISICO_42_BASE_1200 = '30130811b8b7f0406005a92e7924084d4fc03947a046f3edcab3515e5596331a';
 // Los mismos mundos con la clave ya declarada (default 1): sólo cambia el hash, no el estado.
-const COMPLETO_51926_1200 = 'ff1913ab7046d79ca2dcc2a05b23268f99212ee30187778bcb705e11a770df9a';
-const COMPLETO_42_BASE_1200 = 'e2c5b02334ff74228f79d05d9f6b121378d302f17d0141cc19f3eb2d94a93f71';
+const COMPLETO_51926_1200 = 'e52e1d46ae417f71f7da47b0f968bcfe335fb3b5d29af26727d9d56b0882bc4a';
+const COMPLETO_42_BASE_1200 = '5e6b1fc0603af83a7641999a02f98b813a60255338983ed112725d9228e27c14';
 
 test('(i) con agua.memoria=1 el mundo es bit a bit el de antes (params históricos y régimen del laboratorio)', { timeout: 1_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.agua.memoria, 1, 'reglas 10 no adopta la memoria del agua');

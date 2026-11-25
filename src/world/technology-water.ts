@@ -10,6 +10,7 @@ import { updateTechnologyRecipeStats } from './technology-catalogue.js';
 import { firstTileAt } from './tile-index.js';
 import { assertWaterContents, capacityOverflowReturns, containerAffordance, DEFAULT_WATER_POLICY, flowQuantized,
   leakIntegerRemainder, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
+import { marcarTesela } from './soa/barrera-percepcion.js';
 
 export const WATER_WORK_ENERGY = 0.00045;
 export const WATER_WORK_FATIGUE = 0.00032;
@@ -260,6 +261,7 @@ export function fillContainedWater(host: TechnologyHost, actor: WaterActor, item
   // Quantized withdrawal can exceed the floating representation of an exact
   // source multiple by one rounding ulp; a depleted source remains zero.
   tile.drinkingWater = Math.max(0, before - flow.movedQuanta / WATER_QUANTA_PER_UNIT);
+  marcarTesela(tile);
   item.contents = { version: 1, water: flow.destinationWater, leakRemainder: item.contents?.leakRemainder ?? 0, lastTick: host.tick };
   actor.technology.waterActionAt = host.tick;
   exertBody(actor, { energy, fatigue: flow.workSpent * WATER_WORK_FATIGUE });

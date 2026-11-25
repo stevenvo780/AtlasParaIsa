@@ -4,6 +4,7 @@ import { initialWood } from './forest.js';
 import { ruidoCuenca } from './agua.js';
 import type { WorldParams } from './params.js';
 import { residentBackingArray } from './soa/topologia.js';
+import { marcarTesela } from './soa/barrera-percepcion.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -207,6 +208,7 @@ export function harvestMaterial(tile: Tile, material: 'wood' | 'stone', amount: 
   if (!Number.isFinite(amount) || amount < 0) throw new RangeError('La extracción requiere una cantidad finita no negativa.');
   const harvested = Math.min(tile[material] ?? 0, amount);
   tile[material] = Math.max(0, (tile[material] ?? 0) - harvested);
+  marcarTesela(tile);
   if (harvested <= 0) return 0;
   if (material === 'wood') {
     tile.growth = clamp((tile.growth ?? tile.vegetation) - harvested * 0.035);
@@ -222,6 +224,7 @@ export function cultivateTile(tile: Tile): boolean {
   tile.fertility = clamp((tile.fertility ?? 0) + 0.06);
   tile.growth = clamp((tile.growth ?? tile.vegetation) + 0.03);
   tile.vegetation = clamp(tile.vegetation + 0.04);
+  marcarTesela(tile);
   if (tile.feature === 'none' || tile.feature === 'stump') tile.feature = 'flowers';
   return true;
 }
@@ -232,4 +235,5 @@ export function trampleTile(tile: Tile): void {
   tile.growth = clamp((tile.growth ?? tile.vegetation) - 0.006);
   tile.vegetation = clamp(tile.vegetation - 0.003);
   tile.life = clamp((tile.life ?? 0) - 0.01);
+  marcarTesela(tile);
 }

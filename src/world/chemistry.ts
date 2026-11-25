@@ -25,6 +25,7 @@ import type {
   MaterialProperties, StructureMaterialProfile, ThermalPhase,
 } from '../shared/chemistry.js';
 import type { MaterialBatch } from '../shared/technology.js';
+import { marcarTesela } from './soa/barrera-percepcion.js';
 
 export type TemperatureTier = 0 | 1 | 2;
 
@@ -520,7 +521,7 @@ export function performChemistryExperiment(
     consumed = plan.b !== undefined ? [plan.a, plan.b] : [plan.a];
     if (result.waterConsumed > 0) {
       if (waterSource) waterSource.water = Math.max(0, waterSource.water - result.waterConsumed);
-      else tile.drinkingWater = Math.max(0, (tile.drinkingWater ?? 0) - result.waterConsumed);
+      else { tile.drinkingWater = Math.max(0, (tile.drinkingWater ?? 0) - result.waterConsumed); marcarTesela(tile); }
     }
   }
 

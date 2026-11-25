@@ -47,8 +47,10 @@ export function reproduce(world: World): void {
       blueprintId: null, lastInvention: world.tick,
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
+    // La cría parte de una copia de su madre: el uid es identidad del motor y se le da uno propio al entrar en la tabla.
     // `undefined` en vez de `delete`: el campo se lee igual (ausente) y el objeto conserva su forma
     // compartida en V8; con `delete` cada cría nacía en modo diccionario y cada lectura era una búsqueda.
+    child.uid = undefined;
     child.home = undefined;
     child.partnerMemory = undefined;
     child.agreement = undefined;

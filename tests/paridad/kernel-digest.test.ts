@@ -30,15 +30,16 @@ import { HISTORICAL_PARAMS } from '../../src/world/params.js';
 const huella = (valor: unknown): string => createHash('sha256').update(JSON.stringify(valor)).digest('hex').slice(0, 16);
 const huellaMundo = (world: World): string => huella({ tiles: world.tiles, people: world.people, animals: world.animals });
 
-test('600 pasos conservan la trayectoria declarada de 2026-09-22; el kernel aislado conserva su ley', () => {
+test('600 pasos conservan la trayectoria de referencia; el kernel aislado conserva su ley', () => {
   // Reglas 10, etapa 1: la trayectoria declarada es la del mundo de antes (`HISTORICAL_PARAMS`).
   const world = createWorld(51926, HISTORICAL_PARAMS);
   for (let paso = 0; paso < 600; paso++) stepWorld(world);
-  // Huella del mundo con las leyes históricas: solo cambia con un cambio de ley deliberado.
-  assert.equal(world.tiles.length, 2048);
+  // Huella del mundo con las leyes históricas: solo cambia con un cambio de ley deliberado. V23: re-grabada al quitar
+  // los topes de fauna (M2a, 1aae52f); hasta 98e750c (sprint/v23l-motor) eran 2048 teselas, 41 animales y 06ce08ae….
+  assert.equal(world.tiles.length, 2304);
   assert.equal(world.people.length, 18);
-  assert.equal(world.animals.length, 41);
-  assert.equal(huellaMundo(world), '06ce08ae78df91ac');
+  assert.equal(world.animals.length, 61);
+  assert.equal(huellaMundo(world), '5ccdf3470eb71224');
 });
 
 /** Mapa de 25 chunks (6400 teselas) directamente contra el kernel: aísla el bucle caliente del

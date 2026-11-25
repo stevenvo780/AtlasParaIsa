@@ -2,13 +2,14 @@ import { type World, type Person, RADIUS } from '../mundo/tipos.js';
 import { distance } from '../mundo/geometria.js';
 import type { Action, Tile } from '../../shared/types.js';
 import { paramsOf } from '../params.js';
-import { updatePolicyPlasticityCausal, type PolicyGenome, type PolicyPlasticity, founderPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS } from '../politica.js';
+import { updatePolicyPlasticityCausal, type PolicyGenome, type PolicyPlasticity, founderPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS } from '../politica.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { vecinos } from '../rejilla.js';
 import { computeLocalPolicyObservation } from '../politica-obs.js';
-import { gpuNvrtcAvailable } from '../gpu/puente.js';
-import { residentPolicyRegistry, evaluatePoliciesBatch } from '../gpu/politica-gpu.js';
+import type { LotePercepcion, Percepcion } from '../motor/contratos.js';
+import type { Vencidos, VistaMundo } from './percepcion.js';
+import { PLAN } from './planes.js';
 
 
 /** V19/L (`conducta.aprendizajeCausal`): acredita la consecuencia corporal REAL observada desde la última marca a la
@@ -30,7 +31,7 @@ export function ensurePersonPolicy(world: World, person: Person): { genome: Poli
 
 
 /** Observación estrictamente local (radio ≤ 4 en teselas, ≤ 7 en vecinos) para la red de política V12.
- * El índice de teselas llega ya construido desde `precomputePolicyScores` (una vez por paso). */
+ * El índice de teselas llega ya construido desde `prepararCerebros` (una vez por paso). */
 const policyNearby: Person[] = [];
 
 export function localPolicyObservation(
@@ -48,52 +49,42 @@ export function localPolicyObservation(
 }
 
 
-/** Evalúa por lote (CPU o Dual-GPU FP64 exacta) las políticas de los actores con decisión prevista en este paso.
- * En Dual-GPU lanza el kernel de forma no bloqueante (`begin`) para solaparlo con los workers CPU de `personas`. */
-export function precomputePolicyScores(world: World): (() => Map<string, Float64Array>) | undefined {
-  const params = paramsOf(world);
-  if (params.conducta.politicaPeso <= 0) return undefined;
-  const deciding: Person[] = [];
-  for (const person of world.people) {
-    if (world.tick >= person.decisionAt && person.hunger <= 0.75 && person.thirst <= 0.75) deciding.push(person);
+/** Quien decide con la red en este tick: decisión vencida y sin urgencia corporal severa (> 0,75), como en `choose`. */
+export function decideConCerebro(world: World, person: Person): boolean {
+  return paramsOf(world).conducta.politicaPeso > 0 && world.tick >= person.decisionAt && person.hunger <= 0.75 && person.thirst <= 0.75;
+}
+
+const observacionF2 = new Float64Array(POLICY_INPUTS);
+
+/** F2: las columnas del cerebro antes de lanzar. Toda ranura cuyo ocupante cambió se publica con sus pesos heredados
+ * aunque no decida en este tick (contrato: los pesos se escriben para toda ranura cuya `gen` cambió; quien los espeje por
+ * `gen` los toma en cuanto la ve), y cada ranura del despacho con plan `conCerebro`, con su observación y su plasticidad
+ * de ahora. */
+export function prepararCerebros(world: World, vista: VistaMundo, despacho: LotePercepcion, tileIn: (x: number, y: number) => Tile | undefined): void {
+  if (paramsOf(world).conducta.politicaPeso <= 0) return;
+  // Sin crearle la política a nadie: la de un fundador que aún no decidió es la misma que le dará `ensurePersonPolicy`.
+  for (const s of vista.ranurasPersonas) {
+    if (vista.pesosAlDia(s)) continue;
+    const persona = vista.persona(s)!;
+    vista.escribirPesos(s, (persona.policy ?? founderPolicy(world.seed, persona.id)).weights);
   }
-  const count = deciding.length;
-  if (count === 0) return undefined;
-  const tileIn = tileLookup(world.tiles), fast = residentFastAccess(world.tiles);
-  const devices = params.motor.gpu.length > 0 && gpuNvrtcAvailable() ? params.motor.gpu : [];
-  const toMap = (raw: Float64Array): Map<string, Float64Array> => {
-    const byId = new Map<string, Float64Array>();
-    for (let i = 0; i < count; i++) {
-      const start = i * POLICY_ACTIONS.length;
-      byId.set(deciding[i]!.id, raw.subarray(start, start + POLICY_ACTIONS.length));
-    }
-    return byId;
-  };
-  if (devices.length > 0) {
-    const actors = new Array<{ id: string; weights: readonly number[]; obs: Float64Array; bias: Float64Array }>(count);
-    for (let i = 0; i < count; i++) {
-      const person = deciding[i]!;
-      const { genome, plasticity } = ensurePersonPolicy(world, person);
-      actors[i] = {
-        id: person.id,
-        weights: genome.weights,
-        obs: localPolicyObservation(world, person, tileIn, fast),
-        bias: Float64Array.from(plasticity.bias),
-      };
-    }
-    const pending = residentPolicyRegistry(devices).begin(actors);
-    return () => toMap(pending.wait());
-  }
-  const obs = new Float64Array(count * POLICY_INPUTS);
-  const weights = new Float64Array(count * POLICY_WEIGHTS);
-  const biases = new Float64Array(count * POLICY_ACTIONS.length);
-  for (let i = 0; i < count; i++) {
-    const person = deciding[i]!;
+  const fast = residentFastAccess(world.tiles);
+  for (let i = 0; i < despacho.slots.length; i++) {
+    if (despacho.plan[i] !== PLAN.conCerebro) continue;
+    const slot = despacho.slots[i]!, person = vista.persona(slot)!;
     const { genome, plasticity } = ensurePersonPolicy(world, person);
-    localPolicyObservation(world, person, tileIn, fast, obs, i * POLICY_INPUTS);
-    weights.set(genome.weights, i * POLICY_WEIGHTS);
-    biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
+    localPolicyObservation(world, person, tileIn, fast, observacionF2);
+    vista.escribirPesos(slot, genome.weights);
+    vista.escribirEstado(slot, observacionF2, plasticity.bias);
   }
-  const ready = toMap(evaluatePoliciesBatch(obs, weights, biases, count, devices));
-  return () => ready;
+}
+
+/** Las utilidades del cerebro percibidas, por persona, como las lee `choose`: vistas de una sola copia en f64 por tick. */
+export function puntuacionesPercibidas(world: World, lote: Vencidos, salida: Percepcion): Map<string, Float64Array> {
+  const puntuaciones = new Map<string, Float64Array>(), n = lote.slots.length, a = salida.a;
+  if (a === 0) return puntuaciones;
+  const utilidades = Float64Array.from(salida.utilidad.subarray(0, n * a));
+  for (let i = 0; i < n; i++)
+    if (lote.plan[i] === PLAN.conCerebro) puntuaciones.set(world.people[lote.slots[i]!]!.id, utilidades.subarray(i * a, i * a + POLICY_ACTIONS.length));
+  return puntuaciones;
 }

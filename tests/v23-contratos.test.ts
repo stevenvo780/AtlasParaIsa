@@ -142,12 +142,16 @@ test('las columnas del cerebro tienen las dimensiones de la red de politica.ts',
   const { CEREBRO, COLUMNAS_CEREBRO } = contratos;
   assert.deepEqual([CEREBRO.entradas, CEREBRO.ocultas, CEREBRO.acciones], [POLICY_INPUTS, POLICY_HIDDEN, POLICY_ACTIONS.length]);
   assert.deepEqual(COLUMNAS_CEREBRO, { observacion: POLICY_INPUTS, politica: POLICY_WEIGHTS, sesgo: POLICY_ACTIONS.length });
+  assert.equal(contratos.TIPO_CEREBRO, 'f64', 'enmienda 2: el formato de la ley en CPU');
 });
 
 test('los códigos de intento, de rol y de las posiciones de dato no se repiten', () => {
   const distintos = (o: object) => new Set(Object.values(o)).size === Object.keys(o).length;
   for (const o of [contratos.TipoIntento, contratos.Clase, tipos.Rol, tipos.Parte, contratos.DATO_TOMAR, contratos.DATO_GOLPEAR, contratos.DATO_MATERIA, materia.ClaseSustancia]) assert.ok(distintos(o));
   assert.ok(!Object.values(contratos.TipoIntento).includes(0 as never), '0 queda para «sin intento»');
+  // Enmienda 2: los 4 κ van en dato[kappa … kappa + 3], detrás de las demás posiciones.
+  const { kappa, ...resto } = contratos.DATO_TOMAR;
+  assert.ok(Object.values(resto).every(i => i < kappa));
 });
 
 test('codigoForma cabe en 30 bits y es su propia inversa sobre los códigos', () => {
@@ -264,6 +268,7 @@ test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción m
     ctx: contratos.CtxMateria,
     canal: contratos.CanalGpu,
     plan: contratos.Plan,
+    lote: contratos.LotePercepcion,
     perc: contratos.Percepcion,
     gest: tipos.Gestacion,
     corte: cinta.Corte,
@@ -282,12 +287,16 @@ test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción m
     const q: contratos.ConsultaOrganismo = { radio: 7, clase: 0, filtros: new Float32Array(4), criterio: 1, columna: 11, componente: contratos.CAMPOS_CUERPO.masa };
     const tr: Float32Array = plan.transitable;
     const dims: [number, number, number] = [perc.q, perc.v, perc.a];
+    // Enmienda 2: eco de `tick` y `despacho`, y W opcional en un plan con cerebro.
+    const eco: boolean = perc.tick === lote.tick && perc.despacho === lote.despacho;
+    const sinW: contratos.Plan = { ...plan, acciones: contratos.CEREBRO.acciones, w: null };
+    const tc: contratos.TipoColumna = contratos.TIPO_CEREBRO;
     const pol: number[] | undefined = gest.politica;
     const nac: number = corte.serie.nacimientos;
     const tNulo: fotograma.SucesoTexto = { ...texto, valor: null };
     const cl: fotograma.VistasLentas['clima'] = vistas.clima;
     const su: fotograma.VistasLentas['susurro'] = vistas.susurro;
-    return [colas, px, py, vv, okProp, resp, q, tr, dims, pol, nac, tNulo, cl, su];
+    return [colas, px, py, vv, okProp, resp, q, tr, dims, eco, sinW, tc, pol, nac, tNulo, cl, su];
   };
   assert.equal(typeof chequearTipos, 'function');
 });

@@ -14,6 +14,7 @@ import { esMiembro, techoDelArchivo } from './indices.js';
 import { openWorldCaps, OPEN_WORLD_MAX_BLUEPRINTS, paramsOf } from './params.js';
 import { vecinos } from './rejilla.js';
 import { constructionWorkFactor, consumeConstructionTools, installTechnologyItem, recordTechnologyBenefit, toolEffectsEnabled, useTool } from './technology.js';
+import { marcarTesela } from './soa/barrera-percepcion.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -865,7 +866,7 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= paidWork; world.structureCounter = identity.counter;
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
-  world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
+  world.structures.push(structure); tile.terrain = 'shelter'; marcarTesela(tile); world.settlementCount++;
   installTechnologyItem(world, person, structure);
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
     description: `Construido por ${person.name}; componentes ${blueprint.components.join(', ')}.`, gatherings: 0 };
@@ -938,7 +939,7 @@ export function contributeConstruction(world: World, person: Person, structure: 
     }
   }
   delete structure.site; structure.condition = 1;
-  for (const cell of structureFootprintCells(structure)) tileAt(world, cell)!.terrain = 'shelter';
+  for (const cell of structureFootprintCells(structure)) { const celda = tileAt(world, cell)!; celda.terrain = 'shelter'; marcarTesela(celda); }
   const tile = tileAt(world, structure)!;
   if (!site.expansion) { structure.builtAt = world.tick; world.settlementCount++; }
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: structure.name, x: tile.x, y: tile.y,
@@ -1093,6 +1094,7 @@ export function takeWater(world: World, person: Person, requested: number): numb
   const tile = tileAt(world, person); if (!tile) return 0;
   const needed = Math.min(requested, person.thirst / SED_POR_UNIDAD), ambient = Math.min(tile.drinkingWater ?? 0, needed);
   tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
+  marcarTesela(tile);
   let taken = ambient;
   for (const structure of functionalNear(world, person, 0.5)) {
     if (!structure.components.includes('cistern')) continue;
@@ -1248,7 +1250,7 @@ export function stepStructures(world: World, _emit: Emit): void {
       let budget = Math.min(structure.water, a.irrigation * structure.condition);
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);
-        garden.moisture += amount; structure.water -= amount; budget -= amount;
+        garden.moisture += amount; marcarTesela(garden); structure.water -= amount; budget -= amount;
       }
       // V23 (`quimica.emergente`): ash, lime and ground organics banked here manure the irrigated garden ground.
       if (chemistryEra(world) && structure.storedCompounds?.length) {

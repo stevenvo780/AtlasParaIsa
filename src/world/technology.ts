@@ -18,6 +18,7 @@ import { BROKEN_CONDITION, storedMaterialsNear, withdrawMaterials, structureDist
 import { filtrarCerca } from './indice-puntos.js';
 import { blendForgedProfile, compoundHuntBonus, forgeWithCompound } from './chemistry.js';
 import type { CompoundLot } from '../shared/chemistry.js';
+import { marcarTesela } from './soa/barrera-percepcion.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -245,7 +246,7 @@ export function validTechnologyProgram(program: TechnologyProgram, state = defau
 }
 function fuelCost(program: TechnologyProgram): number { return program.steps.reduce((n, s) => n + (s.op === 'heat' ? s.intensity * 50 : 0), 0); }
 export function technologyWorkCost(program: TechnologyProgram): number { return 10 + program.inputs.length * 3 + program.steps.reduce((n, s) => n + 3 + s.intensity * (s.op === 'heat' ? 3 : 1), 0); }
-interface Withdrawal { inputs: MaterialBatch[]; imported: Composition; fuel: Composition; fuelInputs: ResourceMass[]; itemMasses: Map<string, number>; itemCompositions: Map<string, Composition>; residue: Composition; waterTile?: { drinkingWater?: number }; }
+interface Withdrawal { inputs: MaterialBatch[]; imported: Composition; fuel: Composition; fuelInputs: ResourceMass[]; itemMasses: Map<string, number>; itemCompositions: Map<string, Composition>; residue: Composition; waterTile?: { readonly x: number; readonly y: number; drinkingWater?: number }; }
 /** Plans aggregate demands before touching stocks; repeating an input cannot overspend it. */
 function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram): Withdrawal | undefined {
   if (!validTechnologyProgram(program, host.technology)) return;
@@ -295,7 +296,7 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   }
   actor.materials.wood = Math.max(0, actor.materials.wood - plan.imported.wood / MASS_UNIT);
   actor.materials.stone = Math.max(0, actor.materials.stone - plan.imported.stone / MASS_UNIT);
-  if (plan.waterTile) plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000);
+  if (plan.waterTile) { plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000); marcarTesela(plan.waterTile); }
   for (const item of actor.technology.items) {
     const amount = plan.itemMasses.get(item.id) ?? 0;
     if (amount && actor.technology.waterPreparation?.itemId === item.id) delete actor.technology.waterPreparation;

@@ -1,7 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  assertWorld, cloneWorld, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld, TICKS_PER_DAY, type World,
+  assertWorld, cloneWorld, closePolicyGpuBatchers, createWorld, stepWorld, TICKS_PER_DAY, type World,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -15,7 +15,6 @@ function digestoSinMotor(world: World): string {
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

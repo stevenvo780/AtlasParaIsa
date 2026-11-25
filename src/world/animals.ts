@@ -5,29 +5,26 @@ import { SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
-import { LEGACY_WORLD_LIMITS, limitsOf, openWorldCaps, paramsOf } from './params.js';
+import { paramsOf } from './params.js';
 import { tileLookup, verifiedChunkBlocks } from './tile-index.js';
 import { residentFaunaCapacity, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from './soa/terreno.js';
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
-import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
-import { primero, primerosDos } from './orden.js';
+import { decidirFauna, habitableParaPlan, planFauna, presaDe, type PercepcionFauna, type PlanFauna, type VisibleTile } from './decision/fauna.js';
+import { primero } from './orden.js';
+import { faunaDe, faunaRegistrada, organismosDe } from './soa/organismos-mundo.js';
+import { registrar } from './invariantes.js';
 import { assertAnimalTraits } from './validation.js';
 
+// Los importadores del perfil de hardware y del soak aún usan las cifras históricas.
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
-// Historical ceiling, kept only for legacy admission defaults and reporting: the live
-// admission ceiling is `limitsOf(world).fauna` (throws in `stepAnimals`); breeding capacity is
-// the natural one, never a limit: the machine does not decide conduct.
-export const MAX_STORED_ANIMALS = LEGACY_WORLD_LIMITS.fauna;
 export const MAX_ANIMAL_MEMORY = 12;
-export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
-const MEMORY_TTL = 480;
+export const MEMORY_TTL = 480;
 const MATURITY = 600;
 /** V19/R: biomasa que cada progenitor aporta a la cría (0,03 + 0,03 = los 0,06 de la biomasa natal histórica). */
 export const RESERVA_POR_PROGENITOR = 0.03;
 /** V19/R: cota de la reserva de un animal; permite cuatro aportes y es lo que `assertAnimal` valida. */
 export const RESERVA_MAXIMA = 0.12;
-/** Razón de la aproximación a pareja (V19/M); `fauna-motor.ts` la repite literal. */
 export const RAZON_PAREJA = 'Está listo para criar y se acerca, pagando cada paso, a una pareja compatible que percibe.';
 /** V19/M y V19/R: puertas corporales de la cría SIN la acción (`flee`), que `choose` no debe leer de otro animal
  * porque otra decisión del mismo paso puede haberla escrito. Con `reserva`, además la reserva alcanza su aporte. */
@@ -43,13 +40,12 @@ export function listoSalvoEnergia(a: Animal, reserva: boolean): boolean {
     && a.hunger < 0.4 && a.thirst < 0.4 && (!reserva || (a.reproReserve ?? 0) >= RESERVA_POR_PROGENITOR);
 }
 /** V19/M: alcance (Manhattan, en celdas) del olor o la llamada con que un animal listo detecta a una pareja lista de
- * su especie más allá de su vista. Es una lectura local de ocupantes, menor que `HALO_CELDAS` (14): la región que
- * decide la ve completa. `fauna-worker.ts` la repite literal (la prueba lo comprueba). */
+ * su especie más allá de su vista. */
 export const RADIO_PAREJA = 12;
-/** Razón del reposo de cría (V19/M); `fauna-worker.ts` la repite literal. */
 export const RAZON_REPOSO_CRIA = 'Saciado y listo para criar salvo por las fuerzas; descansa para recuperarlas, sin dejar de tener hambre y sed.';
-const SPECIES: AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
-const ACTIONS: AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
+export const SPECIES: readonly AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
+/** Orden de las acciones de la fauna: su índice es la columna `accion` del frente. */
+export const ACTIONS: readonly AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
 const LIFESPAN: Record<AnimalSpecies, number> = { hare: 18000, deer: 36000, boar: 30000, fish: 20000, wolf: 32000, fox: 26000 };
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 interface Point { x: number; y: number; }
@@ -62,10 +58,12 @@ export interface Animal extends AnimalView {
   /** V23: persistent biological costs/cooldowns; absent in historical worlds. */
   lastTended?: number;
   lastHunted?: number;
+  /** V23: identidad durable en la tabla de organismos (`World.siguienteUid`); ninguna ley la lee. */
+  uid?: number;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;
-  animalDynamics: AnimalDynamics; reproductionEnabled?: boolean;
+  animalDynamics: AnimalDynamics; reproductionEnabled?: boolean; siguienteUid?: number;
   people?: readonly Point[];
   structures?: readonly (Point & { condition: number; components: readonly string[] })[];
   weather?: 'clear' | 'rain';
@@ -88,7 +86,7 @@ const coordinate = (v: unknown): v is number => typeof v === 'number' && Number.
 const point = (v: unknown): v is Point => !!v && typeof v === 'object' && coordinate((v as Point).x) && coordinate((v as Point).y);
 const unit = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 
-function hash(seed: number, text: string): number {
+export function hash(seed: number, text: string): number {
   let n = seed >>> 0;
   for (let i = 0; i < text.length; i++) n = Math.imul(n ^ text.charCodeAt(i), 16777619);
   n = Math.imul(n ^ (n >>> 16), 0x7feb352d);
@@ -124,8 +122,8 @@ function ensureMorphology(animal: Animal, seed: number): AnimalMorphology {
 export const isHerdAnimal = (animal: Animal): boolean => animal.species === 'deer' || animal.species === 'boar' || animal.species === 'hare';
 export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[animal.species] * (0.75 + (animal.morphology?.size ?? 0.5) * 0.65);
 
-/** V23 serial physical overlay, after both implementations of choose. All sensing is local
- * (Manhattan ≤ 6); no person/structure data enters the parallel decision/halo phase.
+/** V23 serial physical overlay, after the fauna decision. All sensing is local
+ * (Manhattan ≤ 6); no person/structure data enters the fauna Plan.
  * Point buckets are built once per step rather than scanning the population per animal. */
 function settlementBuckets(points: readonly Point[]): Map<Cell, Point[]> {
   const result = new Map<Cell, Point[]>();
@@ -138,7 +136,7 @@ function settlementOverlay(animal: Animal, tick: number, state: LocalState, huma
   let nearSettlement = false;
   const alarm = animal.lastHunted !== undefined && tick - animal.lastHunted < 120;
   const fleeRadius = Math.max(alarm ? 3 : 0, 1 + m.caution * (1 - (animal.habituation ?? 0) * 0.78) * 5);
-  // This serial neighborhood is deliberately separate from choose/localTiles (the worker halo).
+  // This serial neighborhood is deliberately separate from the fauna Plan.
   for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
     const d = Math.abs(dx) + Math.abs(dy); if (d > 6) continue;
     const x = animal.x + dx, y = animal.y + dy, k = cellXY(x, y);
@@ -156,7 +154,7 @@ function settlementOverlay(animal: Animal, tick: number, state: LocalState, huma
   bestSafety = safetyAt(best);
   for (const [dx, dy] of BREEDING_CELLS) {
     const p = { x: animal.x + dx, y: animal.y + dy }, tile = state.tile(p.x, p.y);
-    if (!tile || !habitat(animal, tile) || (state.counts.get(cell(p)) ?? 0) >= MAX_ANIMALS_PER_TILE) continue;
+    if (!tile || !habitat(animal, tile)) continue;
     const safe = safetyAt(p);
     if (safe > bestSafety) { best = p; bestSafety = safe; }
   }
@@ -174,7 +172,7 @@ export function materializeAnimals(seed: number, tiles: Tile[], tick: number): A
     if (positions.has(key(tile))) throw new Error('Coordenadas de fauna duplicadas.');
     positions.add(key(tile));
     const population = tile.fauna ?? 0;
-    if (!Number.isInteger(population) || population < 0 || population > MAX_ANIMALS_PER_TILE
+    if (!Number.isSafeInteger(population) || population < 0
       || population > 0 && !SPECIES.includes(tile.species!)) throw new Error('Existencias de fauna inválidas.');
     for (let n = 0; n < population; n++) {
       const id = `animal-${seed >>> 0}-${tile.x}-${tile.y}-${n}`;
@@ -281,10 +279,9 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   const counts = new Map<Cell, { count: number; species: AnimalSpecies; x: number; y: number }>();
   for (const animal of animals) {
     const p = cell(animal);
-    let entry = counts.get(p);
+    const entry = counts.get(p);
     if (entry) { entry.count++; if (animal.species < entry.species) entry.species = animal.species; }
-    else counts.set(p, entry = { count: 1, species: animal.species, x: animal.x, y: animal.y });
-    if (entry.count > MAX_ANIMALS_PER_TILE) throw new Error('Capacidad local de fauna excedida.');
+    else counts.set(p, { count: 1, species: animal.species, x: animal.x, y: animal.y });
   }
   const raw = residentBackingArray(tiles);
   const inPlaceRev = residentInPlaceRevision(tiles);
@@ -356,7 +353,7 @@ interface IndiceFauna {
 }
 /** Ámbito del paso: guarda el arreglo de fauna vigente, que los escritores de este módulo
  * (`stepAnimals`, `harvestAt`) refrescan con `refrescarAmbitoFauna` cada vez que lo reemplazan. */
-interface AmbitoFauna { profundidad: number; arreglo: Animal[]; indice?: IndiceFauna }
+interface AmbitoFauna { profundidad: number; arreglo: Animal[]; indice?: IndiceFauna; publicar?: boolean }
 const ambitosFauna = new WeakMap<AnimalWorld, AmbitoFauna>();
 const rejillaFaunaDesactivada = new WeakMap<AnimalWorld, number>();
 
@@ -403,7 +400,7 @@ function refrescarAmbitoFauna(world: AnimalWorld): void {
   const ambito = ambitosFauna.get(world);
   if (ambito && ambito.arreglo !== world.animals) { ambito.arreglo = world.animals; ambito.indice = undefined; }
 }
-/** Descarta el índice al cerrar la fauna del paso: `ordenCanonico` puede haber reordenado el
+/** Descarta el índice al cerrar la fauna del paso: el orden canónico puede haber reordenado el
  * mismo arreglo en el sitio, y eso no lo delata ningún cambio de identidad ni de longitud. */
 function invalidarRejillaFauna(world: AnimalWorld): void {
   const ambito = ambitosFauna.get(world);
@@ -413,12 +410,56 @@ export function conRejillaFauna<R>(world: AnimalWorld, fn: () => R): R {
   let ambito = ambitosFauna.get(world);
   if (!ambito) { ambito = { profundidad: 0, arreglo: world.animals }; ambitosFauna.set(world, ambito); }
   ambito.profundidad++;
-  try { return fn(); }
-  finally {
+  try {
+    const resultado = fn();
+    if (ambito.profundidad === 1 && ambito.publicar) publicarFrenteFauna(world);
+    return resultado;
+  } finally {
     ambito.profundidad--;
     if (ambito.profundidad === 0) ambitosFauna.delete(world);
   }
 }
+interface ActividadFauna { readonly tick: number; readonly vivos: number; readonly decisiones: number }
+const actividadFauna = new WeakMap<AnimalWorld, ActividadFauna>();
+/** Vivos tras la fisiología y cuántos de ellos decidieron en el tick, contados por su `lastDecision`, no por
+ * vueltas del bucle: así un filtro o una salida temprana en la decisión se ven. */
+export const decisionesFauna = (world: AnimalWorld): ActividadFauna | undefined => actividadFauna.get(world);
+const decididosEn = (animales: readonly Animal[], tick: number): number => {
+  let n = 0;
+  for (const a of animales) if (a.lastDecision === tick) n++;
+  return n;
+};
+let frenteRegistrado = false;
+function publicarFrenteFauna(world: AnimalWorld): void {
+  const organismos = organismosDe(world);
+  organismos.fauna.sincronizar(world.animals);
+  const terreno = residentTileReader(world.tiles);
+  const reserva = paramsOf(world).fauna.reservaReproductiva;
+  organismos.publicar(world.tick, { celda: terreno?.cellAt.bind(terreno), chunkDe: celda => celda >> 8,
+    fertil: animal => animal.action !== 'flee' && listoParaCriar(animal, reserva) });
+  if (!frenteRegistrado) {
+    registrar({ id: 'motor-frente', carril: 'M2a', gravedad: 'dura', cadaTicks: 60, alcance: 'global', comprobar(mundo) {
+      faunaRegistrada(mundo)?.tabla.verificarFrente();
+      return [];
+    } });
+    registrar({ id: 'fauna.decisiones', carril: 'M2a', gravedad: 'dura', cadaTicks: 1, alcance: 'global', comprobar(mundo) {
+      const actividad = decisionesFauna(mundo);
+      if (!actividad || actividad.tick !== mundo.tick) return [];
+      // Al cerrar el tick, también las crías (nacen con su decisión hecha) y los que siguen vivos tras la caza.
+      const decididos = decididosEn(mundo.animals, mundo.tick);
+      if (actividad.vivos === actividad.decisiones && decididos === mundo.animals.length) return [];
+      return [{ id: 'fauna.decisiones', gravedad: 'dura', tick: mundo.tick, detalle: 'Cada animal vivo debe decidir una vez en el tick.',
+        esperado: mundo.animals.length, observado: decididos, contexto: { vivosTrasFisiologia: actividad.vivos, decidieron: actividad.decisiones } }];
+    } });
+    frenteRegistrado = true;
+  }
+}
+function solicitarFrenteFauna(world: AnimalWorld): void {
+  const ambito = ambitosFauna.get(world);
+  if (ambito) ambito.publicar = true;
+  else publicarFrenteFauna(world);
+}
+
 /** Animales vivos en la celda exacta `(x, y)`, en orden de slot: dentro del ámbito, los mismos
  * objetos y el mismo orden que `filter(a => a.x === x && a.y === y && a.health > 0)` sobre el
  * arreglo vigente; `undefined` fuera del ámbito o con la rejilla inválida, para que el llamador
@@ -474,10 +515,7 @@ function habitat(animal: Animal, tile: Tile): boolean {
   return animal.species === 'fish' ? tile.terrain === 'water' : tile.terrain !== 'water' && tile.terrain !== 'shelter';
 }
 function edible(animal: Animal, prey: Animal): boolean {
-  if (animal.genes.carnivory < 0.6 || animal.species === prey.species) return false;
-  const p = prey.species;
-  return animal.species === 'wolf' ? p === 'hare' || p === 'deer' || p === 'boar' || p === 'fox'
-    : animal.species === 'fox' ? p === 'hare' : false;
+  return animal.genes.carnivory >= 0.6 && presaDe(animal.species, prey.species);
 }
 function waterAt(animal: Animal, tile: Tile): number {
   return animal.species === 'fish' ? tile.moisture : tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0;
@@ -530,17 +568,15 @@ function remember(animal: Animal, tile: Point, tick: number, visited: boolean, f
 /** `tile(x, y)` es el índice de terreno fijado al empezar el paso (el `Map` de claves `"x,y"` que se
  * construía aquí, ahora compartido con `tileAt` en tile-index.ts): misma tesela para las mismas
  * coordenadas, y como antes no ve teselas añadidas a mitad del paso. */
-interface Resource extends Point { food: number; water: number; }
-interface VisibleTile extends Resource { growth: number | undefined; novelty: number | undefined; cell: Cell; }
 /** Vecina candidata de `move`: las coordenadas de la consulta, su tesela y su celda residente (o -1). */
 interface Step extends Point { tile: Tile; at: number; }
 /** Radio máximo de percepción (`2 + ⌊1·4⌋`) y lado del cuadrado de desplazamientos que lo contiene. */
 const MAX_RADIUS = 6, SEEN_SIDE = 2 * MAX_RADIUS + 1;
-interface LocalState {
-  tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>; counts: Map<Cell, number>;
+interface LocalState extends PercepcionFauna {
+  tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>;
   reader: ResidentTileReader | undefined;
   fast: ResidentFastAccess | undefined;
-  visible: VisibleTile[]; pool: VisibleTile[]; resources: Resource[]; adjacent: VisibleTile[]; neighbors: Step[]; steps: Step[];
+  visible: VisibleTile[]; pool: VisibleTile[]; neighbors: Step[]; steps: Step[];
   /** Desplazamientos (dx, dy) de la última `localTiles` que entraron en lo visible: valen `stamp`. */
   seen: Int32Array; stamp: number;
   /** V19: leyes de fauna del paso (`paramsOf(world).fauna`), leídas una vez por `stepAnimals`. */
@@ -550,8 +586,8 @@ interface LocalState {
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
 const seenAt = (state: LocalState, dx: number, dy: number): boolean => Math.abs(dx) <= MAX_RADIUS && Math.abs(dy) <= MAX_RADIUS
   && state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] === state.stamp;
-function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
-  const radius = 2 + Math.floor(animal.genes.perception * 4), result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
+function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): VisibleTile[] {
+  const radius = plan.radio, result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
   result.length = 0;
   for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
     if (Math.abs(dx) + Math.abs(dy) > radius) continue;
@@ -560,8 +596,7 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
       const at = reader.cellAt(x, y);
       if (at < 0) continue;
       const terrain = reader.terrainCode(at);
-      if (animal.species === 'fish' ? terrain !== reader.TERRAIN_WATER
-        : terrain === reader.TERRAIN_WATER || terrain === reader.TERRAIN_SHELTER) continue;
+      if (!habitableParaPlan(plan, terrain === reader.TERRAIN_WATER, terrain === reader.TERRAIN_SHELTER)) continue;
       growth = reader.growth(at); vegetation = reader.vegetation(at)!;
       water = animal.species === 'fish' ? reader.moisture(at)!
         : reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
@@ -573,12 +608,11 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
       if (!tile) continue;
       const at = fast?.cellOf(tile) ?? -1;
       if (at < 0) {
-        if (!habitat(animal, tile)) continue;
+        if (!habitableParaPlan(plan, tile.terrain === 'water', tile.terrain === 'shelter')) continue;
         growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
       } else {
         const terrain = fast!.terrainCode(at);
-        if (animal.species === 'fish' ? terrain !== fast!.TERRAIN_WATER
-          : terrain === fast!.TERRAIN_WATER || terrain === fast!.TERRAIN_SHELTER) continue;
+        if (!habitableParaPlan(plan, terrain === fast!.TERRAIN_WATER, terrain === fast!.TERRAIN_SHELTER)) continue;
         growth = fast!.growth(at); vegetation = fast!.vegetation(at)!;
         water = animal.species === 'fish' ? fast!.moisture(at)!
           : fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
@@ -587,103 +621,13 @@ function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
     }
     // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
     // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
-    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined, cell: 0 };
-    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined; t.cell = cellXY(x, y);
+    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined };
+    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined;
     result.push(t);
     state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] = stamp;
   }
   return result;
 }
-/** Distancia de `p` al depredador más cercano. */
-function safety(threats: readonly Animal[], p: Point): number {
-  let min = Infinity;
-  for (const t of threats) min = Math.min(min, distance(t, p));
-  return min;
-}
-/** Atractivo de explorar la tesela: función pura de la tesela, calculada una vez (`t.novelty`) y no en cada comparación. */
-function novelty(animal: Animal, seed: number, tick: number, t: VisibleTile): number {
-  let value = t.novelty;
-  if (value === undefined) {
-    const visit = animal.memory.find(m => m.visited && m.x === t.x && m.y === t.y);
-    value = (visit ? Math.min(1, (tick - visit.tick) / MEMORY_TTL) : 2) + hash(seed, `${animal.id}:${key(t)}:${Math.floor(tick / 60)}`) / 4294967296 * 0.2;
-    t.novelty = value;
-  }
-  return value;
-}
-/** V19/M: la pareja conespecífica lista (viva, otra identidad) más cercana a ≤ `RADIO_PAREJA` celdas Manhattan, con
- * desempate canónico. Lee sólo los ocupantes de las celdas del rombo (que `choose` no escribe). */
-function parejaCercana(animal: Animal, state: LocalState): Animal | undefined {
-  let mate: Animal | undefined, best = Infinity;
-  for (let dy = -RADIO_PAREJA; dy <= RADIO_PAREJA; dy++) {
-    const span = RADIO_PAREJA - Math.abs(dy);
-    for (let dx = -span; dx <= span; dx++) {
-      const here = state.occupants.get(cellXY(animal.x + dx, animal.y + dy));
-      if (!here) continue;
-      const d = Math.abs(dx) + Math.abs(dy);
-      if (d > best) continue;
-      for (const other of here) {
-        if (other === animal || other.id === animal.id || !(other.health > 0) || other.species !== animal.species
-          || !listoParaCriar(other, state.reserva)) continue;
-        if (!mate || d < best || canonical(other, mate) < 0) { mate = other; best = d; }
-      }
-    }
-  }
-  return mate;
-}
-function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
-  const visible = localTiles(animal, state), near = visible.flatMap(t => state.occupants.get(cell(t)) ?? []).filter(a => a.id !== animal.id && a.health > 0);
-  const threats = near.filter(a => edible(a, animal) && distance(a, animal) <= 1 + Math.floor(animal.genes.perception * 5));
-  const adjacent = state.adjacent;
-  adjacent.length = 0;
-  for (const t of visible) if (distance(t, animal) === 1 && (state.counts.get(t.cell) ?? 0) < MAX_ANIMALS_PER_TILE) adjacent.push(t);
-  let action: AnimalAction = 'roam', target: Point = animal, reason = 'Explora celdas cercanas y evita recorridos que recuerda.';
-  let preyId: string | null = null;
-  // Los dos primeros del mismo orden estable, sin ordenar todo lo visible (orden.ts).
-  for (const tile of primerosDos(visible, (a, b) => (b.water + (b.growth ?? 0)) - (a.water + (a.growth ?? 0)) || distance(a, animal) - distance(b, animal) || a.y - b.y || a.x - b.x,
-    t => (t.growth ?? 0) > 0.05 || t.water > 0.005)) remember(animal, tile, world.tick, distance(tile, animal) === 0, tile.food, tile.water);
-  if (threats.length) {
-    const escape = primero(adjacent, (a, b) => safety(threats, b) - safety(threats, a) || a.y - b.y || a.x - b.x);
-    action = 'flee'; target = escape && safety(threats, escape) > safety(threats, animal) ? escape : animal;
-    reason = 'Percibe un depredador cercano y se aleja físicamente de su alcance.';
-  } else {
-    // Mismo orden: rombo visible, seguido de recuerdos válidos que no están en el rombo.
-    const resources = state.resources;
-    resources.length = 0;
-    for (const t of visible) resources.push(t);
-    for (const m of animal.memory) {
-      if (world.tick - m.tick > MEMORY_TTL || !(state.reader ? state.reader.cellAt(m.x, m.y) >= 0 : state.tile(m.x, m.y) !== undefined)) continue;
-      if (!seenAt(state, m.x - animal.x, m.y - animal.y)) resources.push(m);
-    }
-    const water = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.water - a.water || a.y - b.y || a.x - b.x, t => t.water > 0.001);
-    const food = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.food - a.food || a.y - b.y || a.x - b.x, t => t.food > 0.001);
-    const prey = primero(near, (a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b), a => edible(animal, a));
-    if (animal.thirst > 0.42 && water) { action = 'drink'; target = water; reason = 'La sed orienta su camino hacia agua percibida o recordada.'; }
-    else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
-    else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
-    else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
-    // V19/M: saciado, hidratado, sano, maduro y (con R) con reserva, sólo le faltan fuerzas para criar: descansa en vez
-    // de gastarlas vagando. `feed` lo despierta al superar 0,75 de energía; el hambre y la sed siguen subiendo y, al
-    // cruzar sus umbrales, la caza, el pasto o la bebida vuelven a ganar.
-    else if (state.encuentro && listoSalvoEnergia(animal, state.reserva)) { action = 'rest'; reason = RAZON_REPOSO_CRIA; }
-    else {
-      // V19/M: sin amenaza ni necesidad urgente, un animal listo para criar se acerca a la pareja conespecífica
-      // lista más cercana (desempate canónico) que detecta por olor o llamada a ≤ `RADIO_PAREJA` celdas: incluye a
-      // todas las que ve (su vista es ≤ 6). Es el movimiento pagado de siempre; nadie se traslada ni aparece.
-      const mate = state.encuentro && listoParaCriar(animal, state.reserva) ? parejaCercana(animal, state) : undefined;
-      if (mate) { target = mate; reason = RAZON_PAREJA; }
-      else {
-        const seed = world.seed, tick = world.tick;
-        target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
-      }
-    }
-  }
-  if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
-  animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = reason; animal.preyId = preyId; animal.lastDecision = world.tick;
-}
-/** Cadena secuencial: cada movimiento libera y ocupa celdas en `state.counts`/`state.occupants`,
- * que el siguiente `move` lee para el cupo `MAX_ANIMALS_PER_TILE`; liberar una celda habilita la
- * entrada de otro. Permanece en la fase serial del coordinador: repartirlo por región cambiaría
- * quién entra. */
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
   const physicalInterval = paramsOf(world).quimica.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
@@ -697,7 +641,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
     // Las coordenadas de la consulta valen lo mismo que las de la tesela (salvo el signo de un cero, que
     // ni `cellXY` ni las restas del comparador distinguen); la posición nueva se copia de la tesela.
     const x = animal.x + dx, y = animal.y + dy, at = reader ? reader.cellAt(x, y) : -1;
-    if (!livable(animal, t, reader, fast, at) || (state.counts.get(cellXY(x, y)) ?? 0) >= MAX_ANIMALS_PER_TILE) continue;
+    if (!livable(animal, t, reader, fast, at)) continue;
     const step = state.steps[neighbors.length] ??= { x, y, tile: t, at };
     step.x = x; step.y = y; step.tile = t; step.at = at;
     neighbors.push(step);
@@ -707,7 +651,6 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const current = state.tile(animal.x, animal.y)!, here = reader ? reader.cellAt(animal.x, animal.y) : -1;
   remember(animal, current, world.tick, true, plantIn(current, reader, fast, here), waterIn(animal, current, reader, fast, here));
   const from = cell(animal);
-  state.counts.set(from, state.counts.get(from)! - 1);
   // Nadie conserva los arreglos de ocupantes (quien los lee copia sus elementos): quitar y añadir en el
   // sitio da el mismo contenido y el mismo orden que los arreglos nuevos de antes.
   const left = state.occupants.get(from);
@@ -716,7 +659,6 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const to = next.tile;
   animal.x = to.x; animal.y = to.y; animal.lastMove = world.tick; animalMovido(world, animal);
   const arrival = cell(animal);
-  state.counts.set(arrival, (state.counts.get(arrival) ?? 0) + 1);
   const arrived = state.occupants.get(arrival);
   if (arrived) arrived.push(animal); else state.occupants.set(arrival, [animal]);
   exertBody(animal, { energy: animal.action === 'flee' ? 0.003 : 0.0015, fatigue: animal.action === 'flee' ? 0.004 : 0.002 });
@@ -768,14 +710,11 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState)
       tile.moisture = clamp(tile.moisture - moisture); hydrateBody(animal, moisture, 0.3);
       world.animalDynamics.waterConsumed += moisture * 0.1;
     }
-    if (animal.hunger < 0.15 || (tile.growth ?? 0) <= 0.001) animal.lastDecision = world.tick - 12;
   } else if (animal.action === 'drink') {
     const water = takeWater(animal, tile, Math.min(0.0016, animal.thirst / 3));
     hydrateBody(animal, water); world.animalDynamics.waterConsumed += water;
-    if (animal.thirst < 0.15 || water <= 0) animal.lastDecision = world.tick - 12;
   } else if (animal.action === 'rest') {
     restBody(animal, { fatigue: 0.002, energy: 0.0015 });
-    if (animal.energy > 0.75 && animal.fatigue < 0.2) animal.lastDecision = world.tick - 12;
   }
 }
 /** Same number as `world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length`,
@@ -801,9 +740,8 @@ function faunaCapacity(tiles: readonly Tile[]): number {
 const BREEDING_CELLS = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]] as const;
 function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit?: AnimalEmitter): void {
   if (world.reproductionEnabled === false) return;
-  // Eligibility uses biological time. A global modulo would permanently exclude some rotating cohorts.
+  // La madurez y el intervalo entre crías se miden en edad biológica.
   let capacity: number | undefined;
-  // Only initiators consume an action slot. Resident partners can receive costs without an extra physiological turn.
   const reserva = state.reserva;
   const eligible = (a: Animal): boolean => a.age >= MATURITY && a.age - a.lastBirthAge >= MATURITY
     && a.health > 0.75 && a.energy > 0.65 && a.hunger < 0.4 && a.thirst < 0.4 && a.action !== 'flee'
@@ -814,15 +752,12 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     const tile = state.tile(a.x, a.y)!;
     // V19/R: la cría se financia con el cuerpo de los progenitores; el agua natal que la celda no tenga la ponen ellos
     // (abajo), así que con R la celda no necesita guardar 0,012 de agua.
-    if ((state.counts.get(cell(a)) ?? 0) >= MAX_ANIMALS_PER_TILE || (!reserva && waterAt(a, tile) < 0.012)
-      || (!reserva && (tile.growth ?? 0) < 0.08)) continue;
+    if (!reserva && (waterAt(a, tile) < 0.012 || (tile.growth ?? 0) < 0.08)) continue;
     // La pareja es la primera en orden canónico (`sort(canonical)[0]`) de las elegibles de su vecindad.
     let b: Animal | undefined;
     for (const [dx, dy] of BREEDING_CELLS) for (const c of state.occupants.get(cellXY(a.x + dx!, a.y + dy!)) ?? [])
       if (c !== a && c.species === a.species && eligible(c) && (!b || canonical(c, b) < 0)) b = c;
     if (!b) continue;
-    // Capacidad de cría = capacidad NATURAL del terreno. `limites.fauna` es admisión (lanza en
-    // `stepAnimals`), nunca una política silenciosa: la máquina no decide cuántos animales nacen.
     capacity ??= faunaCapacity(world.tiles);
     if (world.animals.length >= capacity) break;
     const parents = [a.id, b.id].sort(), id = `animal-born-${world.seed >>> 0}-${world.tick}-${++world.animalCounter}`;
@@ -852,159 +787,19 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
       for (const field of MORPH_FIELDS) child.morphology[field] = Math.max(0.05, Math.min(0.95,
         (ma[field] + mb[field]) / 2 + (hash(world.seed, `${id}:morph:${field}`) / 4294967296 - 0.5) * 0.06));
     }
-    const here = cell(a);
-    world.animals.push(child); state.counts.set(here, (state.counts.get(here) ?? 0) + 1); world.animalDynamics.births++;
+    world.animals.push(child); world.animalDynamics.births++;
     emit?.({ kind: 'animal', actors: [...parents, id], x: a.x, y: a.y, text: `Nace ${a.species} de generación ${child.generation}.`, cause: 'reproducción con costes corporales, alimento y agua', source: 'simulation' });
   }
 }
 
-/** Certificado del orden canónico (T116): la fauna tal como quedó en orden y, si el mundo se clona entre
- * pasos, también sus ids. Un arreglo cuyos elementos son, en el mismo orden, una subsecuencia de los
- * certificados también está en orden: lo que otro código hace entre pasos es quitar (una caza, un chunk
- * que se retira) o añadir al final (un chunk que se activa), y el orden por `id` de lo que queda no
- * cambia. Por objeto, verlo compara punteros sin leer ningún animal (la premisa es que un `id` no se
- * reasigna nunca: es la identidad). El clon de cada paso (`motor.clonPorPaso`) trae objetos nuevos, así
- * que ahí se comparan los ids, que `cloneWorld` comparte (comparar es otra vez comparar punteros).
- * Es solo una caché: decide qué parte hay que comprobar, nunca qué arreglo sale. Tiene un único
- * hueco; si lo ocupa otro mundo, se comprueba por pares. */
-let certificado: { objetos: readonly Animal[]; ids: readonly string[] | null } = { objetos: [], ids: null };
-/** El certificado lleva ids: la última comprobación no reconoció la fauna por sus objetos y sí (o
- * quizá) por sus ids, que es lo que pasa cuando el mundo se clona entre pasos. */
-let porIds = false;
-/** Los ids de `animals` al cerrar un paso con crías, sin leer los animales ya certificados: salvo las
- * `crias`, `animals` es una subsecuencia de los objetos del certificado, cuyos ids ya se conocen. `null` si
- * no lo es (el hueco es de otro mundo): entonces se leen. */
-function idsSinLeer(animals: readonly Animal[], crias: ReadonlySet<Animal>): string[] | null {
-  const { objetos, ids } = certificado, m = objetos.length;
-  if (!ids) return null;
-  const r = new Array<string>(animals.length);
-  for (let i = 0, k = 0; i < animals.length; i++) {
-    const animal = animals[i]!;
-    if (k < m && animal === objetos[k]) { r[i] = ids[k++]!; continue; }
-    if (crias.has(animal)) { r[i] = animal.id; continue; }
-    while (k < m && animal !== objetos[k]) k++;
-    if (k === m) return null;
-    r[i] = ids[k++]!;
-  }
-  return r;
-}
-function certificar(animals: readonly Animal[], ids: readonly string[] | null): void {
-  if (porIds && !ids) { const nuevos = new Array<string>(animals.length); for (let i = 0; i < animals.length; i++) nuevos[i] = animals[i]!.id; ids = nuevos; }
-  // Sin `Object.freeze`: leer un arreglo congelado en el recorrido cuesta ~3,6 veces más.
-  certificado = { objetos: animals.slice(), ids: porIds ? ids : null };
-}
-/** Hasta dónde el principio de `animals` es, en orden, una subsecuencia del certificado (por objeto o,
- * si lo lleva, por id); `exacto` si es el mismo arreglo de objetos, y `mismosIds` si es la misma
- * secuencia de ids, sin saltos, y el certificado la lleva. Los saltos por el certificado no pasan de
- * `animals.length`, así que el recorrido es O(A) aunque el certificado sea de un mundo mayor. */
-function prefijoCertificado(animals: readonly Animal[]): { hasta: number; exacto: boolean; mismosIds: boolean } {
-  const { objetos, ids } = certificado, n = animals.length, m = objetos.length;
-  let i = 0;
-  while (i < n && i < m && animals[i] === objetos[i]) i++;
-  if (i === n && n === m) { porIds = false; return { hasta: n, exacto: true, mismosIds: false }; }
-  let k = i, saltos = 0, porId = false;
-  for (; i < n; i++, k++) {
-    const animal = animals[i]!, id = ids ? animal.id : undefined;
-    while (k < m && saltos <= n && animal !== objetos[k] && (id === undefined || id !== ids![k])) { k++; saltos++; }
-    if (k === m || saltos > n) break;
-    if (animal !== objetos[k]) porId = true;
-  }
-  // Sin ningún animal reconocido por objeto, o reconocidos por id: se clona entre pasos (o es otro mundo).
-  porIds = porId || i === 0 && n > 0 && m > 0;
-  return { hasta: i, exacto: false, mismosIds: !!ids && saltos === 0 && i === n && k === m };
-}
-/** Mete `cola`, en orden canónico, en `animals[0, hasta)`, también en orden, sobre el propio arreglo
- * (que mide `hasta + cola.length`). Da lo mismo que el `sort` estable de `animals[0, hasta) ++ cola`:
- * cada elemento de la cola va detrás de los de delante con su mismo id (el primer id mayor) y la cola
- * conserva su orden. El sitio se busca galopando hacia atrás desde el anterior: las crías de un paso
- * comparten prefijo de id y caen juntas, así que casi todas cuestan una comparación. */
-function mezclar(animals: Animal[], hasta: number, cola: readonly Animal[]): void {
-  let i = hasta; // animals[0, i) sigue en su sitio de origen
-  for (let c = cola.length - 1; c >= 0; c--) {
-    const animal = cola[c]!, id = animal.id;
-    let lo = i;
-    if (lo > 0 && id < animals[lo - 1]!.id) {
-      // animals[alto].id > id; se galopa hasta un `bajo` con id <= id (o -1) y se busca entre ambos.
-      let alto = lo - 1, bajo = -1, salto = 1;
-      for (let cand = alto - salto; cand >= 0; cand = alto - salto) {
-        if (id < animals[cand]!.id) { alto = cand; salto *= 2; } else { bajo = cand; break; }
-      }
-      let a = bajo + 1, b = alto;
-      while (a < b) { const mid = (a + b) >>> 1; if (id < animals[mid]!.id) b = mid; else a = mid + 1; }
-      lo = a;
-    }
-    while (i > lo) { i--; animals[i + c + 1] = animals[i]!; }
-    animals[lo + c] = animal;
-  }
-}
-/** Deja `animals` en orden canónico, en su sitio: el mismo arreglo que `animals.sort(canonical)`, y lo
- * certifica. `animals[0, desde)` se sabe en orden; al empezar el paso (`desde` = 0) se sabe hasta donde
- * llegue el certificado. Desde ahí se recorren los pares hasta el primer desorden, y lo que queda —las
- * crías del paso, la fauna de un chunk recién activado, o todo si se perdió el orden— se ordena aparte
- * y se mezcla. El `sort` O(A log A) de la fauna entera queda para cuando se pierde el orden entero.
- * Al cerrar un paso sin crías no hay nada que hacer: lo que queda es una subsecuencia de lo certificado
- * al empezarlo, y el paso siguiente lo reconoce así. */
-function ordenCanonico(animals: Animal[], desde = 0): void {
-  let ids: readonly string[] | null = null, crias: ReadonlySet<Animal> | null = null;
-  if (desde === 0) {
-    const prefijo = prefijoCertificado(animals);
-    if (prefijo.exacto) return;
-    if (prefijo.mismosIds) ids = certificado.ids;
-    desde = prefijo.hasta;
-  } else if (desde >= animals.length) return;
-  else if (porIds) crias = new Set(animals.slice(desde));
-  let j = Math.max(1, desde);
-  while (j < animals.length && animals[j - 1]!.id < animals[j]!.id) j++;
-  if (j < animals.length) { mezclar(animals, j, animals.slice(j).sort(canonical)); ids = null; }
-  certificar(animals, ids ?? (crias && idsSinLeer(animals, crias)));
-}
-
-/** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el
- * coordinador una vez, con la ventana sobre la población GLOBAL en orden canónico; las regiones sólo
- * consultan pertenencia (`seleccionDe`). Una ventana o un offset por región cambiaría qué animales
- * piensan en qué tick. `animales`, `tick`, `poblacion` y `orden` (toda la fauna en orden canónico, tal
- * como estaba al calcularla) la atan al paso para el que se calculó. */
-export interface MascaraFauna {
-  readonly tick: number; readonly animales: readonly Animal[]; readonly poblacion: number; readonly orden: readonly Animal[];
-  readonly seleccion: readonly Animal[]; readonly ids: ReadonlySet<string>;
-}
-const mismosObjetos = (a: readonly Animal[], b: readonly Animal[]): boolean => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-};
-/** La máscara del coordinador. Su `orden` es una copia congelada: el certificado no sale nunca del módulo. */
-export function mascaraFauna(world: AnimalWorld): MascaraFauna {
-  const seleccion = calcularMascara(world), animales = world.animals;
-  return Object.freeze({ tick: world.tick, animales, poblacion: animales.length, orden: Object.freeze(certificado.objetos.slice()),
-    seleccion: Object.freeze(seleccion), ids: new Set(seleccion.map(a => a.id)) });
-}
-/** La selección de la máscara: deja la fauna en orden canónico y devuelve, en ese orden, quién piensa. */
-function calcularMascara(world: AnimalWorld): Animal[] {
-  ordenCanonico(world.animals);
-  const animals = world.animals, population = animals.length;
-  const activeCap = openWorldCaps(world) ? limitsOf(world).fauna : MAX_ACTIVE_ANIMALS;
-  const offset = population ? ((world.tick % population) * activeCap) % population : 0;
-  let selected: Animal[];
-  if (population <= activeCap) selected = [...animals];
-  else {
-    // Los dos tramos ya están en orden canónico: si la vuelta queda entera por delante, el `sort` de la
-    // ventana los dejaría así; con ids repetidos entre ambos, lo decide el `sort`.
-    const tramo = animals.slice(offset, offset + activeCap), vuelta = animals.slice(0, Math.max(0, offset + activeCap - population));
-    selected = !vuelta.length ? tramo : vuelta[vuelta.length - 1]!.id < tramo[0]!.id ? [...vuelta, ...tramo] : [...tramo, ...vuelta].sort(canonical);
-  }
-  return selected;
-}
-/** Los animales de una región que la máscara selecciona, en orden canónico. */
-export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]): Animal[] {
-  return animales.filter(a => mascara.ids.has(a.id)).sort(canonical);
-}
-
-/** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant.
- * `mascara` es la del coordinador para este paso; sin ella se calcula aquí, con el mismo resultado. */
-export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
-  if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
-  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map(),
+export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
+  world.animals.sort(canonical);
+  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(),
+    visibles: (animal, plan) => localTiles(animal, state, plan),
+    ocupantes: (x, y) => state.occupants.get(cellXY(x, y)),
+    residente: t => state.reader ? state.reader.cellAt(t.x, t.y) >= 0 : state.tile(t.x, t.y) !== undefined,
+    visto: (dx, dy) => seenAt(state, dx, dy),
+    recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
     contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
   const { fauna: leyesFauna } = paramsOf(world);
@@ -1014,20 +809,17 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     state.contacto = leyesFauna.contactoContinuo; state.reserva = leyesFauna.reservaReproductiva;
     state.fraccionReserva = leyesFauna.fraccionReservaCria; state.encuentro = leyesFauna.encuentroFertil;
   }
-  if (mascara && (mascara.tick !== world.tick || mascara.animales !== world.animals || mascara.poblacion !== world.animals.length || !mismosObjetos(world.animals, mascara.orden)))
-    throw new Error('Máscara de fauna de otro paso.');
-  const seleccion = mascara?.seleccion ?? calcularMascara(world);
-  // Con toda la fauna seleccionada (≤ MAX_ACTIVE_ANIMALS) todos piensan: no hace falta preguntar por id.
-  const todos = seleccion.length === world.animals.length;
-  const piensan = todos ? null : mascara?.ids ?? new Set(seleccion.map(a => a.id));
+  const fauna = faunaDe(world);
+  fauna.sincronizar(world.animals);
+  const { columnaEspecie } = fauna;
   // Vista residente validada (o ninguna) para todo el paso: la fauna no cambia la topología ni el SoA.
   const reader = state.reader = residentTileReader(world.tiles);
   state.fast = residentFastAccess(world.tiles);
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    if (!piensan || piensan.has(animal.id)) physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
-    if (emergent && (!piensan || piensan.has(animal.id)) && animal.species !== 'fish') {
+    physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
+    if (emergent && animal.species !== 'fish') {
       const m = animal.morphology!, cold = tile.biome === 'mountain' || world.tick % 2400 >= 1800 || world.weather === 'rain';
       // Physical heat loss, paid by the body. Insulation protects in cold conditions,
       // but traps heat in desert; these costs affect survival and breeding eligibility.
@@ -1039,25 +831,17 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     const p = cell(animal), here = state.occupants.get(p);
     if (here) here.push(animal); else state.occupants.set(p, [animal]);
   }
-  for (const [p, here] of state.occupants) state.counts.set(p, here.length);
   world.animals = world.animals.filter(a => a.health > 0);
-  const active = seleccion.filter(a => a.health > 0);
-  // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
-  const decisionCap = openWorldCaps(world) ? limitsOf(world).fauna : MAX_ANIMAL_DECISIONS_PER_TICK;
-  const due = active.filter(a => world.tick - a.lastDecision >= 8)
-    .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, decisionCap);
-  // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
-  const motor = paramsOf(world).motor, parallel = motor.hilos > 1 && due.length >= 384;
-  if (parallel) applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));
-  else for (const animal of due) choose(animal, world, state);
+  const active = world.animals;
+  for (const animal of active) decidirFauna(animal, world, state, planFauna(animal, columnaEspecie));
+  actividadFauna.set(world, { tick: world.tick, vivos: active.length, decisiones: decididosEn(active, world.tick) });
   if (emergent) {
     const humans = settlementBuckets(world.people ?? []);
     const structures = world.structures ?? [];
     const hearths = settlementBuckets(structures.filter(s => s.condition > 0.1 && s.components.includes('hearth')));
-    for (const animal of due) settlementOverlay(animal, world.tick, state, humans, hearths);
+    for (const animal of active) settlementOverlay(animal, world.tick, state, humans, hearths);
   }
-  // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador. `active` ya está
-  // en orden canónico (la selección de la máscara), así que dos pasadas (`flee` primero) son idénticas al `sort`.
+  // Las huidas preceden al contacto, con desempate por id dentro de cada grupo.
   for (const animal of active) if (animal.action === 'flee') move(animal, world, state);
   for (const animal of active) if (animal.action !== 'flee') move(animal, world, state);
   let byId: Map<string, Animal> | undefined;
@@ -1076,7 +860,6 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     if (emergent && prey && hash(world.seed, `${animal.id}:${prey.id}:defense:${Math.floor(world.tick / 8)}`) / 4294967296 < (prey.morphology?.defense ?? 0) * 0.65) {
       animal.work = 0; continue;
     }
-    // A resident prey is physically reachable even when its own routine is deferred; archived animals are absent from byId.
     if (state.contacto && prey && prey.health > 0 && edible(animal, prey)) {
       // V19/F: el alcance es el contacto o la adyacencia (≤ 1 celda, también tras cruzarse); una separación breve
       // sólo resta un paso de preparación en vez de borrarla. El daño sigue exigiendo contacto/alcance actual.
@@ -1088,19 +871,19 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
       * (emergent ? 1 - (prey.morphology?.defense ?? 0) * 0.5 : 1));
     if (prey.health > 0) continue;
     death(world, prey, 'depredación', emit, animal.id); world.animalDynamics.predations++;
-    state.counts.set(cell(prey), state.counts.get(cell(prey))! - 1);
     const botin = emergent ? animalBiomass(prey) : FOOD_PER_ANIMAL[prey.species];
     assimilateFood(animal, state.reserva ? botin - reservar(animal, botin, state.fraccionReserva) : botin, { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     // V19/R: una presa es también agua. Como el pasto (`feed`: 3 unidades de agua por unidad de biomasa, 0,3 de sed
     // por unidad), el cuerpo de la presa aporta la que conservaba: `botín · 3 · (1 − sed de la presa)`. Sale de ESE
     // cuerpo (que la bebió antes, ya contada en `waterConsumed`), no de un depósito invisible; una presa sedienta da menos.
     if (state.reserva) hydrateBody(animal, botin * 3 * (1 - prey.thirst), 0.3);
-    animal.lastDecision = world.tick - 12;
   }
-  // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.
   world.animals = world.animals.filter(a => a.health > 0);
   const previos = world.animals.length;
-  reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); invalidarRejillaFauna(world); syncFauna(world.tiles, world.animals);
+  reproduce(world, state, active, emit);
+  if (world.animals.length !== previos) world.animals.sort(canonical);
+  invalidarRejillaFauna(world); syncFauna(world.tiles, world.animals);
+  solicitarFrenteFauna(world);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */
@@ -1113,13 +896,13 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
   if (paramsOf(world).quimica.emergente) alarmHerd(world.animals, victim, world.tick);
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
+  solicitarFrenteFauna(world);
   return paramsOf(world).quimica.emergente ? animalBiomass(victim) : FOOD_PER_ANIMAL[victim.species];
 }
 
 function alarmHerd(animals: readonly Animal[], at: Point, tick: number): void {
   for (const animal of animals) if (animal.health > 0 && distance(animal, at) <= 3) {
     animal.lastHunted = tick; animal.habituation = clamp((animal.habituation ?? 0) - 0.15);
-    animal.lastDecision = tick - 12;
   }
 }
 
@@ -1156,14 +939,13 @@ export function assertAnimal(value: unknown, tick: number): asserts value is Ani
     seen.add(key(memory));
   }
 }
-export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = LEGACY_WORLD_LIMITS.fauna): asserts value is Animal[] {
+export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = Number.MAX_SAFE_INTEGER): asserts value is Animal[] {
   if (!Number.isSafeInteger(maxAnimals) || maxAnimals < 1 || !Array.isArray(value) || value.length > maxAnimals) throw new Error('Colección de fauna inválida.');
-  const ids = new Set<string>(), counts = new Map<string, number>();
+  const ids = new Set<string>();
   const positions = tiles && new Map(residentBackingArray(tiles).map(t => [key(t), t]));
   for (const animal of value) {
     assertAnimal(animal, tick);
-    const p = key(animal), count = (counts.get(p) ?? 0) + 1;
-    if (ids.has(animal.id) || count > MAX_ANIMALS_PER_TILE || positions && !positions.has(p)) throw new Error('Identidad, región o capacidad animal inválida.');
-    ids.add(animal.id); counts.set(p, count);
+    if (ids.has(animal.id) || positions && !positions.has(key(animal))) throw new Error('Identidad o región animal inválida.');
+    ids.add(animal.id);
   }
 }

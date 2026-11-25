@@ -1,7 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  assertWorld, closePersonasParallelPools, closePolicyGpuBatchers, createWorld, stepWorld, tileAt,
+  assertWorld, closePolicyGpuBatchers, createWorld, stepWorld, tileAt,
 } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -14,7 +14,6 @@ import { proyectoInvestigacion } from './lib/escenas.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 

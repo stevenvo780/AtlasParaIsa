@@ -2,7 +2,9 @@ import type { World, WorldContext } from './tipos.js';
 import { applyGesture, advanceWhispers } from '../actuar/gestos.js';
 import { ecology } from './ecologia.js';
 import { phaseAt, addEvent, remember, deathContext } from './crear.js';
-import { precomputePolicyScores } from '../decision/politica-persona.js';
+import { decideConCerebro, prepararCerebros, puntuacionesPercibidas } from '../decision/politica-persona.js';
+import { percepcionDe, type Vencidos } from '../decision/percepcion.js';
+import { PLAN } from '../decision/planes.js';
 import { bodyAndAction } from '../actuar/cuerpo.js';
 import { encounters } from '../actuar/interacciones.js';
 import { transferEstate } from '../demografia/morir.js';
@@ -18,7 +20,6 @@ import { paramsOf } from '../params.js';
 import { gpuNvrtcAvailable } from '../gpu/puente.js';
 import { stepEcosystem } from '../ecosystem.js';
 import { stepStructures } from '../inventions.js';
-import { precomputePersonasParallel } from '../paralelo/personas-motor.js';
 import { tileLookup } from '../tile-index.js';
 import { residentFastAccess } from '../soa/terreno.js';
 import { chunkKey, proceduralPlaceName } from '../terrain.js';
@@ -73,7 +74,21 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   return withArchiveReadBatch(world, () => conRejilla(world, () => conRejillaFauna(world, () => advanceTick(world, inputs, boundContext, medicion))));
 }
 
+/**
+ * Un tick en las fases de ARQ-motor §3.1 con un solo dueño (el hilo de simulación):
+ * F0 coordinador: regiones, gestos, caducidad de invitaciones y avisos, y el entorno (ecología, kernel, fauna y
+ *    estructuras), que hoy corre aquí entero porque no tiene dueños por chunk;
+ * F1 adoptar migrantes y vaciar el buzón B: no hay con un dueño;
+ * F2 percibir: el lote de personas que pueden decidir, sobre el estado al empezar la fase (`percibirPersonas`);
+ * F3–F4 elegir y actuar, persona a persona y en el orden de `world.people`: `bodyAndAction` avanza el cuerpo,
+ *    decide si toca (`choose` lee su fila de F2), mueve y trabaja, así que la elección de cada cual ve lo que
+ *    hicieron antes en este tick quienes la preceden, salvo lo percibido en F2, que ve el estado de antes de todos;
+ * F5 aplicar lo que cruza personas: descubrimientos, susurros, encuentros y convivencia, muertes, comunidades y
+ *    crianza, en el orden de siempre;
+ * F6 publicar: memoria técnica, checkpoint y muestra.
+ */
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
+  // F0
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
@@ -90,15 +105,17 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, caminosFisicos: paramsOf(world).terreno.caminosFisicos, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => withRecipeSession(world, () => {
-    const motor = paramsOf(world).motor;
-    const collectPolicyScores = precomputePolicyScores(world);
-    const precomputedMoves = motor.particionarPersonas
-      ? precomputePersonasParallel(world, motor, context.personasExecution)
-      : undefined;
-    const policyScores = collectPolicyScores?.();
     const tileIn = tileLookup(world.tiles);
     const fast = residentFastAccess(world.tiles) ?? null;
-    for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores, tileIn, fast);
+    // F2
+    const percepcion = percepcionDe(world), lote = lotePersonas(world);
+    const salida = percepcion.percibir(world.people, world.tick, lote, tileIn, fast ?? undefined, (vista, despacho) => prepararCerebros(world, vista, despacho, tileIn));
+    const policyScores = puntuacionesPercibidas(world, lote, salida);
+    // F3–F4
+    try {
+      for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, policyScores, tileIn, fast);
+    } finally { percepcion.cerrar(); }
+    // F5
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
       if (!chunk.discovered) {
@@ -114,10 +131,28 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
   medirFase(medicion, 'reproduccion', () => reproduce(world));
+  // F6
   medirFase(medicion, 'checkpoint', () => {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
   });
   medirFase(medicion, 'muestreo', () => recordSample(world));
   return results;
+}
+
+/**
+ * F2: quienes pueden decidir en este tick: su decisión vence, o la urgencia corporal de `bodyAndAction` (hambre o sed
+ * > 0,9 sin estar comiendo o bebiendo) puede dispararse tras avanzar el cuerpo; el margen 0,01 cubre de sobra el
+ * avance de un tick (≈ 0,0003 en reposo). Quien decide sin estar aquí (su objetivo se agotó en este tick, o el margen
+ * no bastó) se percibe en el momento (`PercepcionDelPaso.filaDe`), sobre el estado de ese momento.
+ */
+function lotePersonas(world: World): Vencidos {
+  const slots: number[] = [], plan: number[] = [];
+  for (let slot = 0; slot < world.people.length; slot++) {
+    const p = world.people[slot]!;
+    const urgente = (p.hunger > 0.89 && p.action !== 'eat' && p.action !== 'hunt') || (p.thirst > 0.89 && p.action !== 'drink');
+    if (world.tick < p.decisionAt && !urgente) continue;
+    slots.push(slot); plan.push(decideConCerebro(world, p) ? PLAN.conCerebro : PLAN.sinCerebro);
+  }
+  return { tick: world.tick, slots: Int32Array.from(slots), plan: Uint16Array.from(plan) };
 }

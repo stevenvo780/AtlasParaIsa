@@ -118,12 +118,14 @@ function replicaIdentidad(seed: number, extra?: string): string {
  * en los dos carriles: `control` (DEFAULT_PARAMS puros) y `com` (+ `social.radioConvivencia=12`,
  * que ejercita las ramas `else` nuevas de `reviseByCohabitation` con `disolver=false`).
  */
+// V23: los de 61001–61005 se re-grabaron en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia
+// el mundo a propósito; los anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor). 61006 no cambió.
 const SEMILLAS_REFERENCIA: Readonly<Record<number, { control: string; com: string }>> = {
-  61001: { control: '52858e78267bdbc739b474e05896591bfd6b77b68b7f1286858f730d8305eb07', com: '125f8633b9bf48e7e7139c0ded454ab15a0e955806395c295fdea3fb35ce22ce' },
-  61002: { control: '702235957626744907a30109c65898dd6f6c1a892a59c9c1f3ab0f9569091ce9', com: '5f1b3a5e9aeb7fb45a05bca60ccefd26f27936e10ab2c25ffa753d9a7c7f254e' },
-  61003: { control: 'f79f3d6f033334bf10005999b4cd468efdd4d787eeba2af59f1eeb7b91fc72fd', com: 'cb2ed6e811e206d1bc027eadf29fd01a17f8a3cedf69cfdcf1a269f53f1ca1f7' },
-  61004: { control: '26fbd00eed190527ff6753bb3c484445aa3914f338f2ef109d29e075b3a3aad6', com: '761dc31f9d3d2b94c33d050e2d181095c216791040fcc36b196d6af94fe6885b' },
-  61005: { control: '8b5569aa14c5c50cc8928983d5cef544bb99798c50f5be863af8f4289ad2f24e', com: 'be58b4c5ab59e7f3e2c4aea35bfe22cbec249cb4c34e0f5c7969a3c76169ecf3' },
+  61001: { control: '766a3936d390d5df18fb27b765a623212dfd95b7ebf5d3cf83e220812efa35f0', com: '95378c1036b936dec4229b458c345b1f5a7f2da6f1b697947c1537db40227d90' },
+  61002: { control: '4d7437092312e12ac6f619d798848c034629dd20afc1f6d39a4efe07c7245a11', com: 'bff79e4d17f584de66574e03d1ca2c9a29ea133db4f1c13e5335c87f85bed04e' },
+  61003: { control: '474893f1ae4318515e9680ac707f3be675bc115fbe88bdeb8055b1b9343867f0', com: '9320999127ea2c879ce182be5b37ecdc91499371c0721dfec443b002ee956ad8' },
+  61004: { control: '618a7d308d4719d7e487de7b5f8f61efdf4f47604ecf7c9b46d5f064e90c50fd', com: '7993d1699ce5f50a8703dbd45f08d39737848edddc64d440cc6e4c721db700ef' },
+  61005: { control: '0007297186a9fba6d5618fb23fd24adb83f9c1b53f5b755b41fc7c38c213e2f4', com: '310303d5cbc5c1823c2207afe578a7a187c222ede05d2c886ebe9ea239b72795' },
   61006: { control: '9e09df116fac3b307400bfe5f47ecc4ee1abc509fe45ca723a0a5bc0f87134c3', com: 'a301b7bdf1f6147e7ebabf4f7e4b0f9c0509dfcdfc69c9399baa8957bd8f9a28' },
 };
 

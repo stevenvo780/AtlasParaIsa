@@ -10,7 +10,7 @@ import { enableTechnologyCatalogue } from '../src/world/technology-catalogue.js'
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { createWorld, RULES_VERSION, assertWorld, migrateWorld, projectWorld, type World } from '../src/world/index.js';
 import { activate, maintainRegions } from '../src/world/spatial.js';
-import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
+import { harvestAt, materializeAnimals, syncFauna, stepAnimals, decisionesFauna, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
 import { decodeSnapshot,encodeSnapshot } from '../src/server/snapshot.js';
 import { generateChunk, type Chunk } from '../src/world/terrain.js';
 import type { Gesture, GestureResult } from '../src/shared/types.js';
@@ -322,12 +322,29 @@ test('a structure counter cannot move backward behind an identity that only exis
   assert.throws(()=>store.load(),/Archived structure identity exceeds snapshot counter/);
 });
 
-test('activating another region above the per-step animal budget preserves every identity and advances a bounded cohort',()=>{
+test('activating another region above 8192 animals preserves and advances every identity',()=>{
   const world=createWorld(42);world.animals=[];world.reproductionEnabled=false;
   for(let cy=0;cy<4;cy++)for(let cx=0;cx<4;cx++)activate(world,cx*16,cy*16);
   let remaining=MAX_ACTIVE_ANIMALS;for(const tile of world.tiles){tile.fauna=Math.min(6,remaining);remaining-=tile.fauna;if(tile.fauna)tile.species=tile.terrain==='water'?'fish':'hare';else delete tile.species;}
   world.animals=materializeAnimals(world.seed,world.tiles,world.tick);assert.equal(world.animals.length,MAX_ACTIVE_ANIMALS);
   for(let cx=10;cx<30&&world.animals.length===MAX_ACTIVE_ANIMALS;cx++)activate(world,cx*16,0);
-  assert.ok(world.animals.length>MAX_ACTIVE_ANIMALS);const ages=new Map(world.animals.map(a=>[a.id,a.age]));fixtureTick(world,world.tick+1);stepAnimals(world);
-  assert.equal(world.animals.length,ages.size);assert.equal(world.animals.reduce((sum,a)=>sum+a.age-ages.get(a.id)!,0),MAX_ACTIVE_ANIMALS);assertWorld(world);
+  assert.ok(world.animals.length>MAX_ACTIVE_ANIMALS);const ages=new Map(world.animals.map(a=>[a.id,a.age]));
+  for(const animal of world.animals)animal.lastMove=world.tick;
+  fixtureTick(world,world.tick+1);stepAnimals(world);
+  assert.equal(world.animals.length,ages.size);assert.ok(world.animals.every(a=>a.age===ages.get(a.id)!+1));
+  assert.deepEqual(decisionesFauna(world),{tick:world.tick,vivos:ages.size,decisiones:ages.size});assertWorld(world);
+});
+
+test('a world with more than six animals on one tile saves, reloads and keeps them', t => {
+  const { store } = fixture(t);
+  const world = createWorld(42); world.reproductionEnabled = false;
+  const tile = world.tiles.find(x => x.terrain === 'meadow')!;
+  for (const animal of world.animals) if (animal.species !== 'fish') { animal.x = tile.x; animal.y = tile.y; animal.target = { x: tile.x, y: tile.y }; animal.memory = []; }
+  syncFauna(world.tiles, world.animals);
+  assert.ok(tile.fauna! > 6, `fauna en la tesela: ${tile.fauna}`);
+  assertWorld(world);
+  store.save(world);
+  const loaded = store.load()!.world;
+  assert.equal(loaded.tiles.find(x => x.x === tile.x && x.y === tile.y)!.fauna, tile.fauna);
+  assert.equal(loaded.animals.filter(a => a.x === tile.x && a.y === tile.y).length, tile.fauna);
 });

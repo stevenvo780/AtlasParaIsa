@@ -4,11 +4,13 @@
 // hilos, la CPU, un reloj o el azar del proceso. Esos valores solo pueden vivir en el
 // despacho (`src/world/paralelo/`, `src/world/gpu/`), y allí solo como espera,
 // diagnóstico o reparto de trabajo: nunca deciden qué sale del mundo.
-// Lente 2 (orden de llegada): el reparto por regiones es estático y por contenido;
-// las colas de workers no roban trabajo y la partición no depende del orden de entrada.
+// Lente 2 (reparto): el reparto por regiones es estático, completo y sin robo. Desde V23
+// no hay paridad entre hilos que defender, así que las colas siguen el orden de entrada.
 // Lente 3 (cambio de mundo no declarado): los defaults siguen siendo las reglas 11 con
-// la Fase B en valores históricos, y el mundo por defecto es bit a bit el mismo con
-// 1 hilo, con 4 hilos o con el SoA de terreno.
+// la Fase B en valores históricos, y el mundo por defecto de un hilo con semilla es bit a
+// bit el mismo con o sin el SoA de terreno. Desde V23 el mundo con varios hilos o con GPU
+// es irrepetible (AJUSTES-ORQUESTADOR §1): no se prueba su paridad, ni se exige FP64 sin FMA
+// en la GPU.
 //
 // Este fichero es la guarda automática de esa revisión: si un diff futuro mete
 // hardware en una ley, compila CUDA con fast-math o mueve un default, falla aquí
@@ -96,15 +98,23 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
   const conOs = despacho.filter(ruta => sinComentarios(readFileSync(ruta, 'utf8')).includes("from 'node:os'"));
   assert.deepEqual(conOs, []);
   // Lista blanca estricta de relojes en el despacho, con su único uso legítimo:
-  // · piscina.ts — `performance.now` mide la espera adversarial y alimenta el
+  // · piscina.ts — `performance.now` mide tiempos activos y de barrera para el
   //   diagnóstico del despacho; no escribe ningún valor del mundo.
+  // · barrera.ts — `performance.now` acota la barrera y los cerrojos compartidos (60 s);
+  //   si vence, el paso es fatal y el servidor sale con 75.
   // · gpu/puente.ts — `Date.now` acota la espera al subproceso GPU (60 s) y el
   //   hook de aborto de la prueba (2 s); si vence, el paso lanza y no se confirma.
+  //   `performance.now` da el plazo de B2 a las tarjetas y mide su rendimiento para
+  //   repartir el lote siguiente: decide qué dispositivo percibe, no qué percibe.
+  // · gpu/canal.ts — `performance.now` da el plazo de cada respuesta del servidor y
+  //   la espera activa de 1 ms antes de bloquear.
   // · gpu/autoprueba.ts — `process.hrtime` mide el presupuesto de 200 ms de la
   //   autoprueba de paridad; su resultado habilita o no un dispositivo, no una ley.
   const blanca: Readonly<Record<string, readonly string[]>> = {
     'paralelo/piscina.ts': ['performance.now'],
-    'gpu/puente.ts': ['Date.now'],
+    'paralelo/barrera.ts': ['performance.now'],
+    'gpu/puente.ts': ['Date.now', 'performance.now'],
+    'gpu/canal.ts': ['performance.now'],
     'gpu/autoprueba.ts': ['hrtime'],
   };
   for (const ruta of despacho) {
@@ -116,38 +126,23 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
   }
 });
 
-test('T171 lente 1/2: los kernels GPU compilan FP64 con --fmad=false y sin fast-math', () => {
-  for (const nombre of ['compute-ecology-gpu-resident.py', 'compute-ecology-gpu.py', 'compute-policy-gpu.py']) {
+test('T171 lente 1/2: los kernels GPU compilan sin fast-math', () => {
+  // FMA sí se admite (V23 no pide paridad con la CPU); fast-math no: cambia los resultados
+  // fuera del redondeo (divisiones y raíces aproximadas, sin NaN ni infinitos).
+  for (const nombre of ['compute-ecology-gpu-resident.py', 'compute-ecology-gpu.py', 'compute-policy-gpu.py', 'gpu/servidor-gpu.py',
+    'compute-ecology-resident.cu', 'compute-ecology.cu', 'gpu/percibir.cu']) {
     const fuente = readFileSync(join(SCRIPTS_DIR, nombre), 'utf8');
-    assert.ok(fuente.includes('--fmad=false'), `${nombre}: debe compilar con --fmad=false`);
     assert.ok(!fuente.includes('use_fast_math') && !fuente.includes('fast_math'), `${nombre}: fast-math prohibido`);
-  }
-  // El backend residente (el que usa el puente del motor) no admite otro modo:
-  // su única lista de opciones NVRTC lleva el literal `--fmad=false`.
-  const residente = readFileSync(join(SCRIPTS_DIR, 'compute-ecology-gpu-resident.py'), 'utf8');
-  assert.ok(!residente.includes('fmad=true'), 'compute-ecology-gpu-resident.py: sin rama fmad=true');
-  for (const nombre of ['compute-ecology-resident.cu', 'compute-ecology.cu']) {
-    const fuente = readFileSync(join(SCRIPTS_DIR, nombre), 'utf8');
-    assert.ok(fuente.includes('--fmad=false'), `${nombre}: la cabecera debe declarar --fmad=false`);
-    assert.ok(!fuente.includes('__fma') && !fuente.includes('fma('), `${nombre}: sin FMA explícito`);
   }
 });
 
 test('T171 lente 2: la partición por regiones es estática, completa y sin robo', () => {
   const regiones: StaticRegion[] = Array.from({ length: 10 }, (_, id) => ({ id, begin: id * 4, end: id * 4 + 4 }));
   const desordenadas = [regiones[7]!, regiones[0]!, regiones[9]!, regiones[3]!, ...regiones.slice(4, 7), regiones[1]!, regiones[2]!, regiones[8]!];
-  for (const orden of ['natural', 'inverso', 'adversarial'] as const) {
-    const colas = partitionRegions(desordenadas, 3, orden);
-    assert.equal(colas.length, 3);
-    const vistos = colas.flatMap(cola => cola.map(region => region.id));
-    assert.deepEqual([...vistos].sort((a, b) => Number(a) - Number(b)), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'cada región se calcula exactamente una vez');
-    // La pertenencia a cada cola no depende del orden en que llegaron las regiones.
-    assert.deepEqual(partitionRegions(regiones, 3, orden), colas);
-  }
-  const natural = partitionRegions(regiones, 3, 'natural');
-  const inverso = partitionRegions(regiones, 3, 'inverso');
-  assert.deepEqual(inverso.map(cola => cola.map(r => r.id)), natural.map(cola => [...cola].reverse().map(r => r.id)),
-    'invertir solo recorre la misma cola al revés: no mueve regiones entre workers');
+  const colas = partitionRegions(desordenadas, 3);
+  assert.equal(colas.length, 3);
+  assert.deepEqual(colas.flat(), desordenadas, 'cada región se calcula exactamente una vez, en tramos contiguos de la entrada');
+  assert.deepEqual(partitionRegions(desordenadas, 3), colas, 'la misma entrada da siempre las mismas colas');
 });
 
 test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt-in en su valor histórico', () => {
@@ -187,18 +182,15 @@ function mundoTras(seed: number, params?: string, pasos = 120): World {
   return world;
 }
 
-test('T171 lente 3: el mundo por defecto no cambia con hilos ni con SoA (semilla 7)', () => {
+test('T171 lente 3: el mundo por defecto de un hilo no cambia con SoA (semilla 7)', () => {
   const serie = mundoTras(7);
   const explicita = mundoTras(7, 'tecnologia.dosisCuanto=0,tecnologia.mejoraLocal=0,tecnologia.enfriamiento=45,tecnologia.evitarNoOp=false');
   assert.equal(digestoCanonico(explicita), digestoCanonico(serie),
     'declarar la Fase B con sus valores históricos no puede mover ni el mundo ni su digesto');
-  const paralelo = mundoTras(7, 'motor.hilos=4');
   const soa = mundoTras(7, 'motor.soaTerreno=true');
-  for (const [nombre, mundo] of [['hilos=4', paralelo], ['soaTerreno=true', soa]] as const) {
-    assert.equal(mundo.tiles.length, serie.tiles.length, `${nombre}: mismas teselas`);
-    assert.equal(mundo.people.length, serie.people.length, `${nombre}: misma población`);
-    assert.equal(digestoNormalizado(mundo), digestoNormalizado(serie), `${nombre}: mismo mundo bit a bit`);
-  }
+  assert.equal(soa.tiles.length, serie.tiles.length, 'mismas teselas');
+  assert.equal(soa.people.length, serie.people.length, 'misma población');
+  assert.equal(digestoNormalizado(soa), digestoNormalizado(serie), 'mismo mundo bit a bit');
 });
 
 test('T171 lente 3: paridad serie/SoA en la semilla 51926', () => {

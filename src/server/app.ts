@@ -6,8 +6,10 @@ import type { Duplex } from 'node:stream';
 import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld, submitWhisper, validateWhisper, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, bindWorldContext, worldContext, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
+// Registra los percibidores del proceso: con motor.hilos > 1 o motor.gpu, F2 se reparte por la piscina y las tarjetas.
+import { cerrarPercibidores } from '../world/decision/despacho.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
@@ -431,7 +433,7 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
 }
 
 /**
- * Suelta las cuatro piscinas de proceso (GPU de políticas, fauna, personas, ecología).
+ * Suelta las piscinas de proceso (GPU de políticas, ecología y percepción).
  * Son globales: un `createApp` que avanzó con `motor.hilos > 1` o con GPU las deja vivas
  * aunque el llamador solo cierre el HTTP. Cada cierre es idempotente. Un rechazo no se traga
  * en silencio ni impide intentar las demás.
@@ -440,9 +442,8 @@ export async function cerrarPiscinasDeComputo(): Promise<void> {
   const errores: unknown[] = [];
   const paso = async (fn: () => unknown) => { try { await fn(); } catch (error) { errores.push(error); } };
   await paso(() => closePolicyGpuBatchers());
-  await paso(() => closeFaunaParallelPools());
-  await paso(() => closePersonasParallelPools());
   await paso(() => closeEcosystemWorkers());
+  await paso(() => cerrarPercibidores());
   if (errores.length === 1) throw errores[0];
   if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');
 }
@@ -1045,14 +1046,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // se encadena cualquier `onBarrier` previo del contexto y solo se acumulan ms.
       let paraleloCapturadoMs = 0, barreraCapturadaMs = 0, ocupacionPonderada = 0;
       const ejecucionPrevia = context.ecologyExecution;
-      const personasPrevia = context.personasExecution;
       const contextoPaso: typeof context = {
         ...context,
         tileOwnership: worldContext(draft).tileOwnership ?? context.tileOwnership,
         ecologyExecution: { ...ejecucionPrevia,
           onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
-        personasExecution: { ...personasPrevia,
-          onStep: d => { personasPrevia?.onStep?.(d); if (d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
       };
       const results = stepWorld(draft, valid.map(item => item.gesture), contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;

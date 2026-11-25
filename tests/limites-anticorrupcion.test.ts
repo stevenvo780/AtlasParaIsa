@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { updateCommunities } from '../src/world/society.js';
-import { materializeAnimals, stepAnimals, syncFauna, type AnimalWorld } from '../src/world/animals.js';
+import { assertAnimals, materializeAnimals, stepAnimals, syncFauna, type AnimalWorld } from '../src/world/animals.js';
 import type { Tile } from '../src/shared/types.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, limitsOf, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { Store } from '../src/server/store.js';
 import { filaInstantanea, reescribirInstantanea } from './lib/store.js';
@@ -165,8 +165,7 @@ test('T100: 2 097 152 teselas y 8192 chunks conservan el digesto confirmado al r
     + `(${(bytes / escritura.tiles).toFixed(0)} B/tesela); heap configurado ${(heap / 1048576).toFixed(0)} MiB.`);
 });
 
-/** El techo de cría animal es el límite efectivo del mundo, no una constante del binario.
- * Rebaño sintético: sin activación de chunks, la población sólo crece por reproducción. */
+/** Rebaño sintético: sin activación de chunks, la población sólo crece por reproducción. */
 const meadow = (x: number, y: number): Tile => ({ x, y, terrain: 'meadow', biome: 'grassland', moisture: 0.9,
   vegetation: 0.9, growth: 0.9, food: 0.2, fauna: 0, drinkingWater: 0.9, fertility: 0.8 });
 function herd(limit?: number): AnimalWorld {
@@ -189,10 +188,14 @@ function grazed(world: AnimalWorld, ticks = 2000): number {
   return peak;
 }
 
-test('T100: la capacidad de cría animal es la natural; `limites.fauna` sólo admite o lanza, nunca recorta en silencio', () => {
-  assert.equal(grazed(herd()), 6);
-  assert.equal(grazed(herd(6)), 6, 'un límite igual a la capacidad natural admite sin cambiar la cría');
-  assert.throws(() => grazed(herd(5)), /fauna excedida/, 'por debajo de lo natural la admisión falla cerrado en vez de recortar la cría');
+test('T100: la admisión de snapshots no limita la cría animal', () => {
+  const natural = herd();
+  const limitado = herd(5);
+  assert.equal(grazed(natural), 6);
+  assert.equal(grazed(limitado), 6);
+  assert.deepEqual(limitado.animals, natural.animals);
+  assert.doesNotThrow(() => assertAnimals(limitado.animals, limitado.tick, limitado.tiles));
+  assert.throws(() => assertAnimals(limitado.animals, limitado.tick, limitado.tiles, limitsOf(limitado).fauna), /Colección de fauna inválida/);
 });
 
 /** Trío conviviente y compatible: sólo el tope de fundación puede impedir la comunidad. */

@@ -3,6 +3,199 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { SharedTerrain } from '../soa/terreno.js';
 import type { WorldParams } from '../params.js';
+import {
+  ErrorDispositivo, type Dispositivo, type FrentePublico, type LotePercepcion,
+  type Percepcion, type Percibidor, type Plan, type Terreno,
+} from '../motor/contratos.js';
+import { CanalCompartido } from './canal.js';
+import { PercibidorGpu } from './percibir-gpu.js';
+
+interface TransferenciaPercepcion {
+  subidos: number;
+  bajados: number;
+  ms: number;
+}
+export interface LoteGpuMedido extends TransferenciaPercepcion {
+  dispositivo: Dispositivo;
+  actores: number;
+}
+interface TarjetaPercepcion {
+  percibidor: Percibidor & { readonly ultimasTransferencias: TransferenciaPercepcion };
+  cerrar(): void;
+}
+interface TramoPercepcion {
+  desde: number;
+  lote: LotePercepcion;
+  tarjeta?: number;
+}
+
+/** F0 despacha, B2 reúne. Sólo el dueño puede confirmar los efectos de las propuestas. */
+export class PuentePercepcion implements Percibidor {
+  readonly dispositivo = 'cpu' as const;
+  readonly #tasas: number[];
+  readonly #apagadas = new Set<number>();
+  #pendiente?: { tramos: TramoPercepcion[]; planes: readonly Plan[]; actores: number };
+  #ultimos: LoteGpuMedido[] = [];
+  #cerrado = false;
+
+  constructor(private readonly cpu: Percibidor, private readonly tarjetas: readonly TarjetaPercepcion[]) {
+    // Arranque de la torre según el spike. Cada tarjeta corrige la estimación con sus propios lotes.
+    this.#tasas = tarjetas.map(({ percibidor }, i) => percibidor.dispositivo === 'gpu0' ? 16
+      : percibidor.dispositivo === 'gpu1' ? 1 : 1 / (i + 1));
+  }
+
+  get ultimosLotes(): readonly LoteGpuMedido[] { return this.#ultimos; }
+
+  #apagar(i: number): void {
+    if (this.#apagadas.has(i)) return;
+    this.#apagadas.add(i);
+    this.tarjetas[i]!.cerrar();
+  }
+
+  #cancelar(tramos: readonly TramoPercepcion[]): void {
+    for (const { tarjeta } of tramos) if (tarjeta !== undefined) this.#apagar(tarjeta);
+  }
+
+  lanzar(lote: LotePercepcion, planes: readonly Plan[]): void {
+    if (this.#cerrado || this.#pendiente) throw new Error('El puente está cerrado o tiene un lote pendiente.');
+    if (lote.slots.length !== lote.plan.length) throw new RangeError('Planes y slots desalineados.');
+    const actores = lote.slots.length;
+    const activas = this.#tasas.map((_, i) => i).filter(i => !this.#apagadas.has(i));
+    const pesoTotal = activas.reduce((total, i) => total + this.#tasas[i]!, 0);
+    let desde = 0, peso = 0;
+    const tramos: TramoPercepcion[] = [];
+    try {
+      for (const i of activas) {
+        peso += this.#tasas[i]!;
+        const hasta = Math.round(actores * peso / pesoTotal);
+        if (hasta <= desde) continue;
+        const tramo = { tick: lote.tick, despacho: lote.despacho, slots: lote.slots.subarray(desde, hasta), plan: lote.plan.subarray(desde, hasta) };
+        try {
+          this.tarjetas[i]!.percibidor.lanzar(tramo, planes);
+          tramos.push({ desde, lote: tramo, tarjeta: i });
+        } catch (error) {
+          if (!(error instanceof ErrorDispositivo)) throw error;
+          this.#apagar(i);
+          tramos.push({ desde, lote: tramo });
+        }
+        desde = hasta;
+      }
+    } catch (error) {
+      this.#cancelar(tramos);
+      throw error;
+    }
+    if (!tramos.length) tramos.push({ desde: 0, lote });
+    this.#pendiente = { tramos, planes, actores };
+  }
+
+  esperar(plazoMs: number): Percepcion {
+    if (!Number.isFinite(plazoMs) || plazoMs < 0) throw new RangeError('Plazo de percepción inválido.');
+    const pendiente = this.#pendiente;
+    if (!pendiente) throw new Error('No hay lote de percepción pendiente.');
+    this.#pendiente = undefined;
+    try { return this.#reunir(pendiente, plazoMs); }
+    catch (error) { this.#cancelar(pendiente.tramos); throw error; }
+  }
+
+  #reunir(pendiente: { tramos: TramoPercepcion[]; planes: readonly Plan[]; actores: number }, plazoMs: number): Percepcion {
+    const fin = performance.now() + plazoMs;
+    const { tramos, planes, actores } = pendiente;
+    this.#ultimos = [];
+    let reunida: Percepcion | undefined;
+    for (const tramo of tramos) {
+      const { desde, lote, tarjeta } = tramo;
+      let percepcion: Percepcion | undefined;
+      if (tarjeta !== undefined) {
+        const gpu = this.tarjetas[tarjeta]!.percibidor;
+        try {
+          percepcion = gpu.esperar(Math.max(0, fin - performance.now()));
+          const datos = gpu.ultimasTransferencias;
+          const tasa = lote.slots.length / Math.max(0.001, datos.ms);
+          this.#tasas[tarjeta] = 0.75 * this.#tasas[tarjeta]! + 0.25 * tasa;
+          this.#ultimos.push({ dispositivo: gpu.dispositivo, actores: lote.slots.length, ...datos });
+        } catch (error) {
+          if (!(error instanceof ErrorDispositivo)) throw error;
+          this.#apagar(tarjeta);
+        }
+      }
+      if (!percepcion) {
+        const inicio = performance.now();
+        this.cpu.lanzar(lote, planes);
+        // El plazo pertenece a la tarjeta. El mismo tick aún necesita el resultado de CPU.
+        percepcion = this.cpu.esperar(Infinity);
+        this.#ultimos.push({ dispositivo: 'cpu', actores: lote.slots.length,
+          subidos: 0, bajados: 0, ms: performance.now() - inicio });
+      }
+      if (tramos.length === 1) {
+        reunida = percepcion;
+        break;
+      }
+      const { q, v, a } = percepcion;
+      reunida ??= { q, v, a, tick: percepcion.tick, despacho: percepcion.despacho, celda: new Int32Array(actores * q), pasos: new Int16Array(actores * q),
+        valor: new Float32Array(actores * q), organismo: new Float64Array(actores * v), utilidad: new Float32Array(actores * a) };
+      reunida.celda.set(percepcion.celda, desde * q);
+      reunida.pasos.set(percepcion.pasos, desde * q);
+      reunida.valor.set(percepcion.valor, desde * q);
+      reunida.organismo.set(percepcion.organismo, desde * v);
+      reunida.utilidad.set(percepcion.utilidad, desde * a);
+    }
+    return reunida!;
+  }
+
+  cerrar(): void {
+    if (this.#cerrado) return;
+    this.#cerrado = true;
+    this.#pendiente = undefined;
+    this.tarjetas.forEach((_, i) => this.#apagar(i));
+  }
+}
+
+const ARRANQUE_GPU_MS = 30_000;
+
+/** El coordinador actualiza las fuentes de su percibidor CPU junto con las de las tarjetas. */
+export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor) {
+  if (new Set(dispositivos).size !== dispositivos.length || dispositivos.some(d => !Number.isSafeInteger(d) || d < 0))
+    throw new RangeError('Se requieren índices GPU no negativos y sin repetir.');
+  const tarjetas: { percibidor: PercibidorGpu; activa: boolean; cerrar: () => void }[] = [];
+  const abrir = (dispositivo: number) => {
+    try { return new CanalCompartido(dispositivo); }
+    catch (error) { if (error instanceof ErrorDispositivo) return undefined; throw error; }
+  };
+  // Los servidores arrancan en paralelo y el arranque (contexto CUDA y NVRTC) no gasta el plazo de 2 s del primer B2.
+  const canales: (CanalCompartido | undefined)[] = [], canalesActivos: CanalCompartido[] = [];
+  try {
+    if (process.env.COMPUTE_NVRTC) for (const dispositivo of dispositivos) canales.push(abrir(dispositivo));
+    for (const canal of canales) {
+      if (!canal) continue;
+      try { canal.iniciar(ARRANQUE_GPU_MS); }
+      catch (error) { if (error instanceof ErrorDispositivo) continue; throw error; }
+      tarjetas.push({
+        percibidor: new PercibidorGpu(canal, frente, terreno), activa: true,
+        cerrar() { this.activa = false; canal.cerrar(); },
+      });
+      canalesActivos.push(canal);
+    }
+  } catch (error) {
+    for (const canal of canales) canal?.cerrar();
+    throw error;
+  }
+  const puente = new PuentePercepcion(cpu, tarjetas);
+  return {
+    puente,
+    /** Tarjetas que arrancaron y siguen activas. */
+    get tarjetas(): number { return tarjetas.filter(t => t.activa).length; },
+    /** Procesos de los servidores CUDA de las tarjetas activas (para observarlos, o para pruebas de caída). */
+    pids(): { dispositivo: number; pid: number }[] {
+      return tarjetas.flatMap((t, i) => {
+        const canal = canalesActivos[i], pid = canal?.pid;
+        return t.activa && canal && pid ? [{ dispositivo: canal.dispositivo, pid }] : [];
+      });
+    },
+    fuentes(siguiente: FrentePublico, suelo: Terreno): void {
+      for (const tarjeta of tarjetas) if (tarjeta.activa) tarjeta.percibidor.fuentes(siguiente, suelo);
+    },
+  };
+}
 
 export const GPU_FIELDS = [
   { name: 'moisture', bytes: 8 }, { name: 'vegetation', bytes: 8 }, { name: 'food', bytes: 8 },
@@ -35,7 +228,6 @@ const FIELD_BY_NAME = Object.fromEntries(FIELDS.map(f => [f.name, f]));
 const DOWNLOAD_FIELDS = {
   1: ['moisture', 'vegetation', 'food'],
   2: FIELDS.map(f => f.name).filter(n => n !== 'food' && n !== 'terrain' && n !== 'biome'),
-  '2_halo': FIELDS.map(f => f.name).filter(n => n !== 'terrain' && n !== 'biome'),
 };
 function runsOf(sorted) {
   const runs = [];
@@ -236,15 +428,14 @@ async function handle(job){
   { const src=bytesOf(buffers,haloField); const hb=256*haloSpec.bytes;
     for(const lst of (job.haloSlotsPerDevice||[])){ for(const [s0,c] of runsOf(lst)){ body.set(src.subarray(s0*hb,(s0+c)*hb),off); off+=c*hb; } } }
   if(climate){ body.set(new Uint8Array(climate.buffer, climate.byteOffset, climate.byteLength), off); off+=climate.byteLength; }
-  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params, climate:!!climate}, body);
+  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, params:job.params, climate:!!climate}, body);
   if(!reply.header.ok) throw new Error('GPU step failed');
   uploaded += reply.header.uploadedBytes||0; downloaded += reply.header.downloadedBytes||0;
   // Bajada selectiva coalescida: solo los campos de la pasada, por campo y por tramo.
   // Los campos no descargados se copian front->back en RAM local para los tramos tocados.
   let boff=0;
   const perDevice = reply.header.downloadRunsPerDevice||[];
-  const dlKey = (job.downloadSlots !== undefined && job.downloadSlots !== null && job.pass === 2) ? '2_halo' : job.pass;
-  const dlNames = DOWNLOAD_FIELDS[dlKey] || FIELDS.map(f=>f.name);
+  const dlNames = DOWNLOAD_FIELDS[job.pass];
   const dlSet = new Set(dlNames);
   const touched=new Set();
   for(let di=0; di<perDevice.length; di++){
@@ -736,40 +927,32 @@ export class ResidentGpuBridge {
    * `options.climate` (V22, solo `ecologia`): `regionalClimateFactor` por ranura de página
    * (`slots*3` dobles, calculados en JS); con él se lanza `ecology_pass1_seasonal` en vez de `ecology_pass1`.
    */
-  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[]; climate?: Float64Array }): GpuRunResult {
+  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { climate?: Float64Array }): GpuRunResult {
     if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
     if (this.broken) throw this.broken;
+    if (this.vramAhead) throw new Error('La pasada ecológica requiere el frente confirmado en RAM.');
     const buffers = terrain.buffers;
     const key = this.topologyKey(terrain, pageSetVersion, regionSide);
-    const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
+    const sharded = this.devices.length > 1 && this.shardedOption === true;
     if (options?.climate && (pass !== 'ecologia' || options.climate.length !== key.slots * 3))
       throw new RangeError('climate requiere la pasada ecologia y slots*3 dobles.');
     let plan: ReturnType<ResidentGpuBridge['planTopology']> | null = null;
-    // Incremental solo si el anfitrión es autoritativo (el último paso bajó todas las páginas propias).
-    if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
+    if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, true);
     const topo = this.topo!;
     const dirtyArr = new Uint8Array(buffers.dirty!);
     const dirtySlots = this.dirtySlotsOf(dirtyArr);
     const haloSlotsPerDevice = topo.haloLists();
-    let downloadSlots: number[] | undefined;
-    if (options?.downloadSlots !== undefined) {
-      const set = new Set<number>(options.downloadSlots);
-      if (pass === 'kernel') for (const lst of haloSlotsPerDevice) for (const s of lst) set.add(s);
-      downloadSlots = [...set].sort((a, b) => a - b);
-    }
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
       this.worker.postMessage({
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, haloSlotsPerDevice,
-        downloadSlots, capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
+        capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
         climate: options?.climate,
       }, this.transferables(plan?.full, plan?.delta));
     } catch (error) { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; throw error; }
     this.wait('ResidentGpuBridge', 120000);
     this.synced = key; this.syncedDirtyBuffer = buffers.dirty!;
-    if (plan?.full) this.vramAhead = false;
-    if (options?.downloadSlots !== undefined) this.vramAhead = true;
     return this.finish(buffers, dirtyArr, pass, plan?.kind ?? null);
   }
 

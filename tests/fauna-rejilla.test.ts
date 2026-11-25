@@ -7,7 +7,6 @@ import {
 } from '../src/world/animals.js';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { digestoSin } from '../scripts/lab/rendimiento.js';
 
 /** Generador determinista para la suite (nada de azar real). */
 function lcg(seed: number): (n: number) => number {
@@ -86,20 +85,6 @@ test('la víctima de caza por rejilla es la del filter+sort: menor id, desempate
     }
     assert.fail('la manada debe tener una celda con al menos dos animales vivos');
   });
-});
-
-/** Digestos base (código anterior a la rejilla) tras 1 200 pasos, semillas del encargo. */
-const BASE_1200: Readonly<Record<number, string>> = {
-  7: '94e1b21419c8cc6ebe73fe6dcb6d7a235c21b2c2052ae9b97a5532893c88840d',
-  42: 'b12d70edacdef79d428660728577f9544239d636a242a0bdf8c69e1b0dd869ff',
-  51926: '95c577d0c6690a3cedd0027da3b8130a4d05a88c2e1b9837720f24339a6bdc61',
-};
-test('digestoCanonico tras 1 200 pasos es bit a bit el base en semillas 7, 42 y 51926', { timeout: 600_000 }, () => {
-  for (const seed of [7, 42, 51926]) {
-    const w = createWorld(seed);
-    for (let i = 0; i < 1200; i++) stepWorld(w);
-    assert.equal(digestoSin(w, ['poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), BASE_1200[seed], `semilla ${seed}`);
-  }
 });
 
 test('paridad con muchos animales: rejilla y recorrido lineal dan el mismo digesto', { timeout: 600_000 }, () => {

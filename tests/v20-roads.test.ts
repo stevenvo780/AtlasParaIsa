@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
 import { publicGeologyKey, type ChemicalFormulaView, type CompoundLot } from '../src/shared/chemistry.js';
 import {
-  cloneWorld, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers,
+  cloneWorld, closePolicyGpuBatchers,
   createWorld, projectWorld, roadEffortFactor, stepWorld, tileAt, type World,
 } from '../src/world/index.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
@@ -20,8 +20,6 @@ import { proyectoInvestigacion } from './lib/escenas.js';
 
 after(async () => {
   closePolicyGpuBatchers();
-  await closeFaunaParallelPools();
-  await closePersonasParallelPools();
   await closeEcosystemWorkers();
 });
 
@@ -46,11 +44,12 @@ function walking(roads = true, traffic = 0, paved?: number, parallel = false) {
   return { world, actor, destination: tileAt(world, { x: 17, y: 12 })! };
 }
 
-test('roads OFF preserves the published V18 digest and never adds paving/chemistry state or zero totals', () => {
+// V23: the reference digest (shared with v19-phase1-lsfrm) was re-recorded when M2a removed the fauna caps (1aae52f).
+test('roads OFF preserves the reference digest and never adds paving/chemistry state or zero totals', () => {
   const world = createWorld(42, parseParams('terreno.caminosFisicos=false'));
   for (let i = 0; i < 60; i++) stepWorld(world);
   const legacy = cloneWorld(world); legacy.version = 12;
-  assert.equal(digestoCanonico(legacy), '66271ffc4b6b424214fc1a6fdfc784be354c45651133affc2703c0829f376828');
+  assert.equal(digestoCanonico(legacy), 'ae19695dd28c5585405706dbf7a7c559a07e254ec90a010a498be2254f5edc09');
   assert.ok(world.tiles.every(t => !Object.hasOwn(t, 'paved')));
   assert.ok(world.people.every(p => !Object.hasOwn(p, 'compounds')));
   assert.ok(!Object.hasOwn(world, 'chemistry'));

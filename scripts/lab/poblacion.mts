@@ -300,7 +300,8 @@ export function cargarPunto(ruta: string): { mundo: World; archivo: Map<string, 
 
 export interface Individuo {
   id: string; origen: 'inicial' | 'nacido'; x0: number; y0: number; desde: number; hasta: number | null; causa: DemographicDeathCause | null;
-  /** Ticks de los nacimientos de sus hijos y de las parejas que formó: cada evento vale ½ a cada miembro. */
+  /** Ticks de los nacimientos de sus hijos y de las parejas nuevas que formó (un par de confianza mutua no visto antes):
+   * cada evento vale ½ a cada uno de sus dos miembros. */
   hijos: number[]; parejas: number[];
 }
 export interface Embudo { adultosFertiles: number; listos: number; conPareja: number; conParejaYLugar: number }
@@ -379,14 +380,14 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
   };
   const alta = (p: Person, origen: Individuo['origen']) => individuos.set(p.id, { id: p.id, origen, x0: p.x, y0: p.y, desde: mundo.tick, hasta: null, causa: null, hijos: [], parejas: [] });
   for (const p of mortales(mundo)) alta(p, 'inicial');
-  let vivos = new Set(individuos.keys()), pares = parejasDeConfianza(mortales(mundo)), legado = mundo.retiredLegacy.length;
+  let vivos = new Set(individuos.keys()), legado = mundo.retiredLegacy.length;
   const causaDe = (id: string): DemographicDeathCause => {
     const registro = mundo.retiredLegacy.slice(legado).find(r => r.id === id) ?? mundo.legacy.find(r => r.id === id);
     if (!registro) throw new Error(`Muerte de ${id} sin registro de legado`);
     return registro.cause;
   };
   const fuera = (p: Person) => p.x < o.zona.x || p.y < o.zona.y || p.x >= o.zona.x + o.zona.ancho || p.y >= o.zona.y + o.zona.alto;
-  const piramideInicial = piramide(mundo);
+  const pares = parejasDeConfianza(mortales(mundo)), piramideInicial = piramide(mundo);
   revisar();
   let tope: number | undefined;
   const fin = inicio + (o.ticks ?? o.dias * DIA);
@@ -406,9 +407,8 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
       for (const id of vivos) if (!ids.has(id)) { const i = individuos.get(id)!; i.hasta = mundo.tick; i.causa = causaDe(id); }
       vivos = ids; legado = mundo.retiredLegacy.length;
       if (mundo.tick % cadaMuestra === 0) {
-        const actuales = parejasDeConfianza(ahora);
-        for (const par of actuales) if (!pares.has(par)) for (const id of par.split('|')) individuos.get(id)!.parejas.push(mundo.tick);
-        pares = actuales;
+        // Un vínculo que ronda el umbral entra y sale de él muestra a muestra: cuenta solo la primera vez que el par lo cruza.
+        for (const par of parejasDeConfianza(ahora)) if (!pares.has(par)) { pares.add(par); for (const id of par.split('|')) individuos.get(id)!.parejas.push(mundo.tick); }
         const e = embudo(mundo, ahora);
         suma.adultosFertiles += e.adultosFertiles; suma.listos += e.listos; suma.conPareja += e.conPareja; suma.conParejaYLugar += e.conParejaYLugar;
         for (const p of ahora) { hambre[clase(p.hunger)]!++; sed[clase(p.thirst)]!++; if (fuera(p)) fueraDeZona++; }

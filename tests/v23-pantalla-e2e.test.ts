@@ -27,7 +27,8 @@ function escena(): { view: WorldView; directorio: WorldDirectoryResponse; fichas
   const rio = ['s', 'i', 'neighbor-1', 'neighbor-2', 'neighbor-3', 'neighbor-4'], colina = ['neighbor-5', 'neighbor-6', 'neighbor-7', 'neighbor-8', 'neighbor-9', 'neighbor-10'];
   view.people.forEach((p, k) => {
     p.communityId = rio.includes(p.id) ? 'c-rio' : colina.includes(p.id) ? 'c-colina' : null;
-    (p.traits as Record<string, number>).escucha = [.82, .44, .3, .55, .61, .7, .25, .9, .5, .35, .66, .4, .2, .58, .47, .73][k]!;
+    // La proyección ya trae `PersonView.escucha` (del genoma) y la ficha la prefiere a `traits.escucha`: la escena fija las dos.
+    p.escucha = (p.traits as Record<string, number>).escucha = [.82, .44, .3, .55, .61, .7, .25, .9, .5, .35, .66, .4, .2, .58, .47, .73][k]!;
     if (p.id === 'neighbor-3') p.genome = { ...p.genome!, generation: 1, parents: ['s', 'i'] };
     if (p.id === 'neighbor-4') p.genome = { ...p.genome!, generation: 1, parents: ['neighbor-1', 'fallecida-7'] };
   });

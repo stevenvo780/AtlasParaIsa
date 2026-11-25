@@ -23,6 +23,7 @@ import type { Violacion } from '../invariantes.js';
 import type { Person, World } from '../mundo/tipos.js';
 import type { WorldParams } from '../params.js';
 import type { ChunkId, CtxDueno, CtxMateria, Intento, Ref, TipoColumna, TipoIntento } from './contratos.js';
+import type { PasoMateriaGpu } from '../gpu/materia-gpu.js';
 
 /** El contexto de una ley: el del dueño más su parte del mundo y los parámetros. Lo arma m4a (`motor/contexto.ts`):
  * con un dueño, sobre el `World` de siempre; con varios, uno por worker. */
@@ -38,7 +39,11 @@ export interface CtxLey extends CtxDueno {
   uidDe(id: string): number;
 }
 /** El de las leyes que exigen `v23.materia`: además, la arena de lotes y la química. */
-export type CtxLeyMateria = CtxLey & CtxMateria;
+export type CtxLeyMateria = CtxLey & CtxMateria & {
+  /** Cliente del paso material en la tarjeta de este dueño (carril g, `v23.materiaGpu`). Opcional hasta que m4a lo
+   * inicialice en `motor/contexto.ts` con el paso de `pasosMateria()` del mismo hilo; `null` o ausente = paso en CPU. */
+  readonly pasoMateriaGpu?: PasoMateriaGpu | null;
+};
 
 /** F0, solo en el coordinador (que es además el dueño 0): lo global. */
 export interface CtxF0 extends CtxLey {

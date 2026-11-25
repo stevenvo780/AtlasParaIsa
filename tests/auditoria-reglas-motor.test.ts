@@ -130,7 +130,7 @@ test('T171 lente 1/2: los kernels GPU compilan sin fast-math', () => {
   // FMA sí se admite (V23 no pide paridad con la CPU); fast-math no: cambia los resultados
   // fuera del redondeo (divisiones y raíces aproximadas, sin NaN ni infinitos).
   for (const nombre of ['compute-ecology-gpu-resident.py', 'compute-ecology-gpu.py', 'compute-policy-gpu.py', 'gpu/servidor-gpu.py',
-    'compute-ecology-resident.cu', 'compute-ecology.cu', 'gpu/percibir.cu']) {
+    'compute-ecology-resident.cu', 'compute-ecology.cu', 'gpu/percibir.cu', 'gpu/materia.cu', 'gpu/materia_kernel.py']) {
     const fuente = readFileSync(join(SCRIPTS_DIR, nombre), 'utf8');
     assert.ok(!fuente.includes('use_fast_math') && !fuente.includes('fast_math'), `${nombre}: fast-math prohibido`);
   }

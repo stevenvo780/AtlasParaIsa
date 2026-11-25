@@ -32,9 +32,11 @@ class Dispositivo:
         p, d, z, u, i = C.c_void_p, C.c_uint64, C.c_size_t, C.c_uint, C.c_int
         enlace(driver, 'cuInit', u)(0)
         atributo = enlace(driver, 'cuDeviceGetAttribute', C.POINTER(i), i, i)
-        mayor, menor = i(), i()
+        mayor, menor, multiprocesadores = i(), i(), i()
         atributo(C.byref(mayor), 75, indice)
         atributo(C.byref(menor), 76, indice)
+        atributo(C.byref(multiprocesadores), 16, indice)
+        self.multiprocesadores = multiprocesadores.value
         self.contexto = p()
         enlace(driver, 'cuCtxCreate_v2', C.POINTER(p), u, i)(C.byref(self.contexto), 0, indice)
         self.destruir = enlace(driver, 'cuCtxDestroy_v2', p)
@@ -166,7 +168,7 @@ def main():
     mm = None
     gpu = Dispositivo(args.device, args.nvrtc)
     try:
-        emitir({'listo': True})
+        emitir({'listo': True, 'multiprocesadores': gpu.multiprocesadores})
         while cabecera := sys.stdin.buffer.read(4):
             (largo,) = struct.unpack('<I', cabecera)
             if largo > 4096:

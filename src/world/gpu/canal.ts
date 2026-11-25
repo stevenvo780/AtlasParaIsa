@@ -70,6 +70,7 @@ export class CanalCompartido implements CanalGpu {
   #pendientes = 0;
   #leidas = 0;
   #listo = false;
+  #multiprocesadores = 1;
   #cerrado = false;
 
   constructor(readonly dispositivo: number, opciones: OpcionesCanalGpu = {}) {
@@ -134,6 +135,7 @@ export class CanalCompartido implements CanalGpu {
 
   get bytes(): number { return this.#bytes; }
   get pid(): number | null { return Atomics.load(this.#control, PID) || null; }
+  get multiprocesadores(): number { return this.#multiprocesadores; }
 
   #error(mensaje: string): ErrorDispositivo { return new ErrorDispositivo(`gpu${this.dispositivo}`, mensaje); }
   #vivo(): void {
@@ -271,13 +273,15 @@ export class CanalCompartido implements CanalGpu {
 
   #iniciar(fin: number): void {
     if (this.#listo) return;
-    let respuesta: { listo?: boolean };
-    try { respuesta = decodificar<{ listo?: boolean }>(this, this.#esperar(fin)); }
+    let respuesta: { listo?: boolean; multiprocesadores?: number };
+    try { respuesta = decodificar<typeof respuesta>(this, this.#esperar(fin)); }
     catch (error) { this.cerrar(); throw error; }
     if (!respuesta.listo) {
       this.cerrar();
       throw this.#error('El servidor GPU no confirmó el arranque.');
     }
+    if (respuesta.multiprocesadores && Number.isSafeInteger(respuesta.multiprocesadores) && respuesta.multiprocesadores > 0)
+      this.#multiprocesadores = respuesta.multiprocesadores;
     this.#listo = true;
   }
 
@@ -334,6 +338,10 @@ export function recibirRespuesta<T>(canal: CanalGpu, plazoMs: number): T {
 }
 
 const canalesOcupados = new WeakSet<CanalGpu>();
+
+export class CanalGpuOcupado extends ErrorDispositivo {
+  constructor(canal: CanalGpu) { super(`gpu${canal.dispositivo}`, 'El canal GPU ya tiene un despacho pendiente.'); }
+}
 
 /** Los clientes de una tarjeta comparten el tramo de /dev/shm desde el byte 0. */
 export function reservarCanalGpu(canal: CanalGpu): (() => void) | undefined {

@@ -3,7 +3,7 @@ import { CAPACIDAD_ATOMO, EPSILON_G, NU, R, S_GAS } from '../../shared/naturalez
 import { PASES_ENCADENADOS, type CtxPaso } from '../materia/paso.js';
 import { FAMILIAS_CATALITICAS, nivelDeLote, type Kappa, type LoteRef, type Reaccion } from '../materia/tipos.js';
 import { ErrorDispositivo, type CanalGpu } from '../motor/contratos.js';
-import { enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
+import { CanalGpuOcupado, enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
 
 // kPa y mg/kg, respectivamente. Son las mismas conversiones que usa paso.ts.
 const ATMOSFERA = 101.325, MG_POR_KG = 1e6;
@@ -164,7 +164,7 @@ export function empaquetarMateriaGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kapp
 export function prepararMateriaGpu(canal: CanalGpu, plazoMs: number): void {
   const dispositivo = `gpu${canal.dispositivo}` as const;
   const liberar = reservarCanalGpu(canal);
-  if (!liberar) throw new ErrorDispositivo(dispositivo, 'El canal GPU está ocupado.');
+  if (!liberar) throw new CanalGpuOcupado(canal);
   try {
     if (!canal.bytes) canal.crecer(1);
     enviarOrden(canal, { kind: 'prepararMateria', tick: 0, despacho: 0, subida: 0, bajada: 0, salida: 0 });
@@ -196,7 +196,7 @@ export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
       const n = limites.length, cabecera = Math.ceil((n + 1) / 2) * 8, subida = binario.byteLength;
       const salida = Math.ceil(subida / 8) * 8, bajada = cabecera + maxTripletas * 24;
       const liberar = maxTripletas ? reservarCanalGpu(canal) : () => {};
-      if (!liberar) throw new ErrorDispositivo(dispositivo, 'El canal GPU está ocupado; el lote material sigue en CPU.');
+      if (!liberar) throw new CanalGpuOcupado(canal);
       try {
         if (maxTripletas) {
           if (canal.bytes < salida + bajada) canal.crecer(salida + bajada);

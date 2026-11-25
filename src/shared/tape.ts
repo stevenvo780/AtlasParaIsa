@@ -2,13 +2,10 @@
  * V21 — Shared contract for Uncapped Turbo Simulation, Recorded DVR Tape,
  * 60 fps Cinema Player, and Observer-Only Mode (server + client).
  */
-import type { Tile, Viewport, WorldView } from './types.js';
+import type { WorldView } from './types.js';
 import type { TapeChunkEncoding, TapeClientDelta } from './tape-delta.js';
-export type {
-  TapeChunkEncoding, TapeClientDelta, TapeEntityPatch, TapeIdentified,
-  TapeObjectPatch, TapePartialUpsert, TapePatchEntry, TapeTechPatch,
-} from './tape-delta.js';
-export { applyClientTapeDelta, applyTapeEntityPatch, applyTapeObjectPatch, indexTiles } from './tape-delta.js';
+export type { TapeClientDelta } from './tape-delta.js';
+export { applyClientTapeDelta, indexTiles } from './tape-delta.js';
 
 /** Playback speeds supported by the 60 fps DVR Cinema Player (1x = 6 ticks/sec calm observation). */
 export const TAPE_SPEEDS = [0.5, 1, 2, 5, 10, 25] as const;
@@ -19,9 +16,6 @@ export const TAPE_BASE_TICKS_PER_SEC = 6;
 
 /** Default number of ticks between full compressed keyframes in tape.sqlite. */
 export const TAPE_KEYFRAME_INTERVAL = 60;
-
-/** Default rolling frame retention cap in tape.sqlite (~21 simulated days of tick-by-tick history). */
-export const TAPE_DEFAULT_MAX_FRAMES = 50_000;
 
 /** Lightweight summary point for the DVR timeline scrubber and sparkline. */
 export interface TapeTimelinePoint {
@@ -66,66 +60,4 @@ export interface TapeChunkResponse {
   frames: WorldView[];
   baseFrame?: WorldView;
   deltas?: TapeClientDelta[];
-}
-
-/** Optional tile provider used by TapeReader to fill static/unmodified background tiles in a viewport. */
-export type TapeBackgroundTileFn = (x: number, y: number, tick: number) => Tile;
-
-/** Writer options for TapeWriter (sibling SQLite DB `tape.sqlite`). */
-export interface TapeWriterOptions {
-  /** Path to tape.sqlite (created if missing, WAL mode). */
-  path: string;
-  /** Ticks between full keyframes (default TAPE_KEYFRAME_INTERVAL = 60). */
-  keyframeInterval?: number;
-  /** Maximum retained frames in rolling ring (default TAPE_DEFAULT_MAX_FRAMES = 50_000). */
-  maxFrames?: number;
-  /** Frames buffered before flushing in a single SQLite transaction (default 25). */
-  batchSize?: number;
-  /** Max milliseconds before flushing pending frames (default 250). */
-  flushIntervalMs?: number;
-}
-
-/** Reader options for TapeReader (read-only WAL connection on main gateway thread). */
-export interface TapeReaderOptions {
-  /** Path to tape.sqlite. */
-  path: string;
-  /** Observer-only flag exposed in meta. */
-  observerOnly?: boolean;
-  /** Turbo flag exposed in meta. */
-  turbo?: boolean;
-}
-
-/** Shared writer contract implemented by src/server/tape-store.ts. */
-export interface ITapeWriter {
-  /** Record one projected world snapshot (already stripped of private fields).
-   * Pass `partialTiles = true` when `view.tiles` contains only changed chunks so unchanged resident tiles are preserved. */
-  record(view: WorldView, simHz: number, partialTiles?: boolean): void;
-  /** Flush any buffered frames to SQLite synchronously in one transaction. */
-  flush(): void;
-  /** Total frames recorded in this DB (including buffered). */
-  readonly frameCount: number;
-  /** Highest recorded tick (-1 if empty). */
-  readonly latestTick: number;
-  /** Flush pending frames and close the SQLite handle cleanly. */
-  close(): void;
-}
-
-/** Shared reader contract implemented by src/server/tape-store.ts. */
-export interface ITapeReader {
-  /** Read timeline metadata + downsampled sparkline points. */
-  readMeta(maxTimelinePoints?: number): TapeMetaResponse;
-  /**
-   * Reconstruct up to `count` sequential frames starting at the first recorded tick >= `fromTick`,
-   * clipped cleanly to `viewport` (using `backgroundTile` for static unmodified tiles).
-   * Pass `encoding = 'delta'` (V22) to return 1 full `baseFrame` + compact viewport-clipped `deltas[]`.
-   */
-  readChunk(
-    fromTick: number,
-    count: number,
-    viewport?: Viewport,
-    backgroundTile?: TapeBackgroundTileFn,
-    encoding?: TapeChunkEncoding,
-  ): TapeChunkResponse;
-  /** Close the read-only SQLite handle cleanly. */
-  close(): void;
 }

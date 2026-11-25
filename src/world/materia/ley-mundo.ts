@@ -425,6 +425,8 @@ function escribirTesela(e: Estado, i: number, t: Tile): void {
   if (t.drinkingWater !== undefined || v.drinkingWater > 0) t.drinkingWater = unidad(v.drinkingWater);
   if (t.wood !== undefined || v.wood > 0) t.wood = hasta(v.wood, VISTA_MADERA_MAX);
   if (t.stone !== undefined || v.stone > 0) t.stone = hasta(v.stone, VISTA_PIEDRA_MAX);
+  if (v.stone > VISTA_PIEDRA_MAX || t.rocaLatente !== undefined)
+    t.rocaLatente = v.stone > VISTA_PIEDRA_MAX ? e.m.latente[i] : undefined;
   if (t.growth !== undefined || v.vegetation > 0) t.growth = unidad(v.vegetation);
   const fertilidad = unidad(e.m.fertilidad(i));
   if (t.fertility !== undefined || fertilidad > 0) t.fertility = fertilidad;

@@ -868,7 +868,7 @@ export class MundoMaterial {
       const tejido = new Map<SustanciaId, number>();
       for (const o of ORGANOS) for (const [k, nu] of PARTES[o]) tejido.set(S[k], (tejido.get(S[k]) ?? 0) + u[o] * nu);
       this.llenar(this.vida[i]!, [...tejido], T);
-      this.latente[i] = Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
     }
     // Aire de la página: la columna de cada tesela, con el vapor a la humedad relativa media de sus suelos. Si un vecino
     // ya le mandó vapor antes de materializarse, el lote existe y se aprovecha.
@@ -892,8 +892,8 @@ export class MundoMaterial {
 
   /**
    * Da de alta la página p con los lotes que ya tiene en la arena (un chunk que durmió, o un mundo cargado): los busca
-   * por celda y rol, sin crear nada. La roca latente y los manantiales se leen de `tiles`. Devuelve false, sin tocar
-   * nada, si la arena no tiene el suelo de su primera tesela (la página nunca se materializó).
+   * por celda y rol, sin crear nada. La roca latente y los manantiales se leen de `tiles`; los guardados cuya roca cabía
+   * en la vista solo traen `stone`. Devuelve false si la arena no tiene el suelo de su primera tesela.
    */
   adoptar(p: number, tiles: readonly Tile[]): boolean {
     if (!tiles.length || !this.buscar(p * 256 + local(tiles[0]!), Rol.Suelo)) return false;
@@ -903,7 +903,7 @@ export class MundoMaterial {
       this.suelo[i] = this.exigir(c, Rol.Suelo); this.vida[i] = this.exigir(c, Rol.Vida);
       this.agua[i] = this.buscar(c, Rol.Agua) ? this.buscado[0]! : -1;
       this.manantial[i] = this.agua[i]! >= 0 && t.feature === 'spring' ? 1 : 0;
-      this.latente[i] = Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
     }
     this.aire[p] = this.exigir(p * 256, Rol.Aire);
     this.mar[p] = this.exigir(p * 256 + CELDA_MAR, ROL_DEPOSITO); this.cielo[p] = this.exigir(p * 256 + CELDA_CIELO, ROL_DEPOSITO);

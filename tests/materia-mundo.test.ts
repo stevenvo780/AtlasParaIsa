@@ -4,9 +4,15 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Store } from '../src/server/store.js';
 import { ELEMENTOS, NE } from '../src/shared/naturaleza.js';
 import type { Tile } from '../src/shared/types.js';
 import { createWorld } from '../src/world/mundo/crear.js';
+import { ctxSi, type CtxLeyMateria } from '../src/world/motor/acceso.js';
+import { unSoloDueno } from '../src/world/motor/contratos.js';
+import { crearMotor } from '../src/world/motor/coordinador.js';
+import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { aportarEscalar, extraerEscalar } from '../src/world/materia/ley-mundo.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
 import { CUENTA, MundoMaterial, totalesVacios, type Forzamiento } from '../src/world/materia/mundo.js';
 import { unidadesVacias, unidadesVida, vistaVacia, type Organos } from '../src/world/materia/vistas.js';
@@ -44,6 +50,36 @@ test('las vistas reproducen los escalares de la tesela al levantar (dentro de me
   }
   assert.ok(exacto());
   await q.cerrar();
+});
+
+test('el guardado completo admite madera y piedra por encima de la escala de sus vistas', async (t) => {
+  const mundo = createWorld(7, {
+    ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true, guardadoCompleto: true },
+  });
+  const motor = crearMotor(mundo, unSoloDueno(7));
+  const store = new Store(':memory:');
+  t.after(async () => { store.close(); await motor.cerrar(); });
+  motor.paso([]);
+  const c = ctxSi(mundo) as CtxLeyMateria;
+  const tesela = mundo.tiles.find(tile => tile.terrain !== 'water')!;
+  const celda = c.terreno.celda(tesela.x, tesela.y);
+  assert.equal(aportarEscalar(c, celda, 'madera', 20), 20);
+  assert.equal(aportarEscalar(c, celda, 'piedra', 20), 20);
+  assert.equal(tesela.wood, 12);
+  assert.equal(tesela.stone, 8);
+
+  store.guardar(motor.instantanea());
+  const guardado = store.cargarInstantanea()!;
+  assert.ok(guardado.instantanea.materia);
+  const vista = guardado.instantanea.world.tiles.find(tile => tile.x === tesela.x && tile.y === tesela.y)!;
+  assert.equal(vista.wood, 12);
+  assert.equal(vista.stone, 8);
+
+  motor.cargar(guardado.instantanea, guardado.epoca);
+  const restaurado = ctxSi(guardado.instantanea.world) as CtxLeyMateria;
+  const celdaRestaurada = restaurado.terreno.celda(tesela.x, tesela.y);
+  assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'madera', 20), 20);
+  assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'piedra', 20), 20);
 });
 
 test('el libro cuadra exacto en cada paso y ningún átomo entra ni sale: el agua circula entre lotes (cielo, mar, suelos y charcas)', async () => {

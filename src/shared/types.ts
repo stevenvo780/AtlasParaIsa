@@ -25,6 +25,8 @@ export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
 export type Feature = 'tree' | 'pine' | 'palm' | 'cactus' | 'reeds' | 'berries' | 'flowers' | 'rock' | 'clay' | 'stump' | 'spring' | 'pool' | 'none';
 export type Species = 'hare' | 'deer' | 'boar' | 'fish' | 'wolf' | 'fox';
 export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; paved?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number;
+  /** Cuantos de roca latente cuando superan el fondo de escala de la vista `stone`. */
+  rocaLatente?: number;
   /** V23 (`v23.materia`): hasta 3 pares [sustancia, fracción de masa] de la superficie y su temperatura en K. Solo existen
    * en la vista que viaja (los pone la proyección): la tesela del mundo no los lleva ni el guardado los escribe. */
   mat?: import('./materia.js').MatTesela; T?: number; }

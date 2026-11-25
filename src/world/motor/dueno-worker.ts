@@ -7,14 +7,17 @@
  *   percibir = F1 (adoptar, cola B, Ley.F1) · eco · F2      ── B2
  *   actuar   = F3 · F4                                       ── B3
  *   aplicar  = F5 (cola A, Ley.F5) · F6 (filas, Ley.F6, páginas, fotograma, emigrar, parte del tick)   ── B4
- * Con dueños no hay pasos heredados: `REQUIERE` garantiza que todas las leyes están encendidas.
+ * Con dueños están encendidas todas las leyes. La demografía base sigue evaluando edad, daño y muerte en cada heap.
  */
 import { deserialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
+import { transferEstate } from '../demografia/morir.js';
+import { advancePopulation } from '../lineage.js';
 import { crearServicioQuimico } from '../materia/servicio.js';
 import type { Libro } from '../materia/tipos.js';
+import { deathContext } from '../mundo/crear.js';
 import type { World } from '../mundo/tipos.js';
 import { setParams, type WorldParams } from '../params.js';
 import { conRejilla } from '../rejilla.js';
@@ -120,6 +123,7 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     case TRAMO.percibir: {
       if (d.hilo !== 0) {
         m.tick = control[CTL.tick]!;
+        m.weather = control[CTL.lluvia] === 1 ? 'rain' : 'clear';
         m.invitations = m.invitations.filter(invitacion => invitacion.until > m.tick);
         m.reminders = m.reminders.filter(aviso => aviso.until > m.tick);
         d.abrirTick();
@@ -148,6 +152,11 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     }
     case TRAMO.aplicar: {
       d.aplicar('A');
+      if (d.params.v23.intentos) advancePopulation(m, {
+        emit: evento => { d.suceso(deathContext(m, evento)); },
+        beforeDeath: (mundo, persona) => transferEstate(mundo, persona, evento => { d.suceso(evento); }),
+        comunidadesGlobales: true,
+      });
       d.gancho('F5');
       d.publicarFilas();
       d.gancho('F6');

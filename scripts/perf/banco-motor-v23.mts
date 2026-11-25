@@ -57,6 +57,7 @@ interface Config {
   personas: number; hilos: number; gpu: boolean; pasos: number; calentar: number; semilla: number; adaptativo: boolean;
   /** 'pared' (por defecto): `stepWorld` con la piscina de M1; 'duenos': `crearMotor` con `hilos` dueños (M7). */
   modo?: 'pared' | 'duenos';
+  hasta?: 'duenos' | 'rebalanceo';
   /** Solo en 'duenos': procesos ajenos quemando CPU mientras se mide. */
   ajena?: number;
 }
@@ -241,7 +242,7 @@ function cargaAjena(n: number, binario: string): () => void {
 async function correrDuenos(c: Config): Promise<Record<string, unknown>> {
   const { world, conMotor } = await sembrarMundo(c.personas, c.semilla);
   const abiertos = hostOpenWorldParams();
-  setParams(world, parseParams({ v23: escalon('rebalanceo'), motor: { ...conMotor({ hilos: c.hilos, gpu: c.gpu ? [0, 1] : [] }).motor } }, abiertos));
+  setParams(world, parseParams({ v23: escalon(c.hasta ?? 'rebalanceo'), motor: { ...conMotor({ hilos: c.hilos, gpu: c.gpu ? [0, 1] : [] }).motor } }, abiertos));
   const motor = crearMotor(world, { hilos: c.hilos, gpu: c.gpu ? [0, 1] : [], decisionGpu: 'siempre', verificar: false, semilla: null });
   const parar = cargaAjena(c.ajena ?? 0, arg('--binario-ajeno') ?? process.execPath);
   try {
@@ -289,6 +290,7 @@ if (!directo) { /* importado: solo `sembrarMundo` */ } else if (arg('--uno')) {
   const salida = arg('--salida'), repeticiones = Number(arg('--repeticiones') ?? 1);
   const binarios = lista('--binarios', process.execPath), configs: Config[] = [];
   const modo = arg('--modo') === 'duenos' ? 'duenos' : 'pared';
+  const hasta = arg('--hasta') === 'duenos' ? 'duenos' : 'rebalanceo';
   for (const personas of lista('--personas', '40,400,4000').map(Number))
     for (const gpu of lista('--gpu', 'no,si').map(s => s === 'si'))
       for (const hilos of lista('--hilos', '1,8,28').map(Number))
@@ -296,7 +298,7 @@ if (!directo) { /* importado: solo `sembrarMundo` */ } else if (arg('--uno')) {
           for (const ajena of modo === 'duenos' ? lista('--ajena', '0').map(Number) : [undefined])
             if (modo === 'duenos' ? !adaptativo : hilos > 1 || !adaptativo)
               configs.push({ personas, hilos, gpu, adaptativo, pasos: Number(arg('--pasos') ?? 120),
-                calentar: Number(arg('--calentar') ?? 30), semilla: Number(arg('--semilla') ?? 51926), ...(modo === 'duenos' ? { modo, ajena } : {}) });
+                calentar: Number(arg('--calentar') ?? 30), semilla: Number(arg('--semilla') ?? 51926), ...(modo === 'duenos' ? { modo, hasta, ajena } : {}) });
   const resultados: Record<string, any>[] = [];
   for (let rep = 0; rep < repeticiones; rep++) for (const c of configs) for (const binario of binarios) {
     process.stderr.write(`${new Date().toISOString()} ${JSON.stringify(c)} ${binario} | ${uptime()} | carga ${loadavg()[0]!.toFixed(1)}\n`);

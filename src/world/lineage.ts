@@ -209,9 +209,11 @@ export function assertPopulation(world: World): void {
 }
 
 export interface PopulationCallbacks {
-  emit: (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
+  emit: (event: Omit<ChronicleEvent, 'id' | 'tick'>) => void;
   /** Owns every estate transfer/loss. All simultaneous deaths have been marked before it runs. */
   beforeDeath?: (world: World, person: Person) => void;
+  /** Las comunidades de un heap parcial son réplicas del coordinador. */
+  comunidadesGlobales?: boolean;
 }
 
 function carriesEstate(person: Person): boolean {
@@ -300,11 +302,13 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     const departed = new Set(dying.map(result => result.person.id));
     world.people = world.people.filter(person => !departed.has(person.id));
     pruneBonds(world.people, dying.map(result => result.person));
-    const alive = new Set(world.people.map(person => person.id));
-    for (const community of world.communities) community.members = community.members.filter(id => alive.has(id));
-    world.communities = world.communities.filter(community => community.members.length > 0);
-    const communities = new Set(world.communities.map(community => community.id));
-    for (const person of world.people) if (person.communityId !== null && !communities.has(person.communityId)) person.communityId = null;
+    if (!callbacks.comunidadesGlobales) {
+      const alive = new Set(world.people.map(person => person.id));
+      for (const community of world.communities) community.members = community.members.filter(id => alive.has(id));
+      world.communities = world.communities.filter(community => community.members.length > 0);
+      const communities = new Set(world.communities.map(community => community.id));
+      for (const person of world.people) if (person.communityId !== null && !communities.has(person.communityId)) person.communityId = null;
+    }
     const dyingById = new Map<string, Person>(dying.map(result => [result.person.id, result.person]));
     for (const record of records) {
       world.legacy.push(record); world.retiredLegacy.push(record);

@@ -14,6 +14,7 @@ import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
 import { applyGesture } from '../actuar/gestos.js';
+import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
@@ -290,6 +291,7 @@ class MotorDuenos implements Motor {
       }
       this.#pedirDetalles();
       d.F0();
+      control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
       // B1 · percibir · B2 · actuar · B3 · aplicar · B4
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
@@ -482,6 +484,7 @@ class MotorDuenos implements Motor {
           if (mig.animal) world.animals.push(mig.animal.animal);
         }
       }
+      if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
       recordSample(world);
       return { world, materia: this.#d.instantaneaMateria(pendientes) };
     } catch (error) { throw this.#fallo(error); }

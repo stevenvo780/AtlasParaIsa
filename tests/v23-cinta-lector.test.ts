@@ -31,7 +31,7 @@ const params = parseParams('motor.hilos=1,persistencia.cadaTicks=200');
 const plantilla = JSON.parse(JSON.stringify(projectMirrorWorld(createWorld(42, params)))) as WorldView;
 const clon = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-function directorio(t: TestContext, raiz = '/tmp/atlas-v23-c1c') {
+function directorio(t: TestContext, raiz = '/tmp/atlas-v23-o-cinta') {
   mkdirSync(raiz, { recursive: true });
   const temporal = mkdtempSync(join(raiz, 'lector-'));
   t.after(() => rmSync(temporal, { recursive: true, force: true }));

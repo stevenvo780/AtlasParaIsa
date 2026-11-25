@@ -60,7 +60,7 @@ function leer(ruta: string, bufer: Buffer, offset: number): void {
 }
 
 test('I2/I6/I10: la poda intermedia confirma la laguna con el borrado y conserva la lectura de L1', t => {
-  const raiz = '/tmp/atlas-v23-c1c';
+  const raiz = '/tmp/atlas-v23-o-cinta';
   mkdirSync(raiz, { recursive: true });
   const directorio = mkdtempSync(join(raiz, 'poda-laguna-'));
   t.after(() => rmSync(directorio, { recursive: true, force: true }));

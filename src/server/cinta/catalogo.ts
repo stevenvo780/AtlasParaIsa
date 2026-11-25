@@ -5,7 +5,7 @@ import {
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Apertura, Bifurcacion, EntradaCatalogo, Hito, Laguna, Nivel, SeriePunto } from '../../shared/cinta.js';
-import { verificarBloque } from './formato.js';
+import { verificarBloque, verificarBloqueLeido } from './formato.js';
 
 export const NIVELES = [0, 1, 2, 3, 4] as const;
 export const INDICE_CINTA = 'cinta.idx.sqlite';
@@ -23,6 +23,7 @@ export interface BloqueCinta {
   segmento: number; epoca: number; nivel: Nivel; t0: number; t1: number;
   offset: number; bytes: number; crc: number; fotogramas: number;
 }
+export type BloqueAislado = Pick<BloqueCinta, 'segmento' | 'offset' | 'epoca' | 'nivel' | 't0' | 't1'> & { motivo: string };
 
 export function rutaSegmento(directorio: string, nivel: Nivel, id: number): string {
   return join(directorio, `n${nivel}`, `seg-${String(id).padStart(6, '0')}.cnt`);
@@ -42,29 +43,45 @@ function escribir(fd: number, buffer: Buffer, offset: number, desde: number, has
   }
 }
 
-// Solo el último segmento de cada nivel recibe anexos, así que solo él puede traer una cola a medias; los demás se
-// sellaron con sus bloques ya sincronizados y basta con su tamaño. Releerlos todos costaría la cinta entera al abrir.
-function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: BloqueCinta[], leer: boolean): void {
-  const fd = openSync(path, 'r+');
+// La apertura normal relee el CRC del último segmento de cada nivel. La verificación explícita relee también los sellados.
+function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: BloqueCinta[], ultimo: boolean,
+  aislados: ReadonlySet<number>, aislar?: (fila: BloqueCinta, motivo: string) => void): void {
+  let fd: number | undefined;
+  try { fd = openSync(path, ultimo ? 'r+' : 'r'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || (!aislar && bloques.some(b => !aislados.has(b.offset)))) throw error;
+  }
   try {
-    const size = fstatSync(fd).size;
-    if (size < segmento.bytes) throw new Error(`Segmento confirmado truncado: ${segmento.id}.`);
+    const size = fd === undefined ? 0 : fstatSync(fd).size;
+    let intocable = aislados.size > 0;
     let offset = 0, t1 = -1;
     for (const fila of bloques) {
       if (fila.nivel !== segmento.nivel || fila.epoca !== segmento.epoca || fila.offset !== offset
         || fila.bytes <= 0 || fila.bytes > segmento.bytes - offset || fila.t0 <= t1) {
         throw new Error(`Índice de bloque incoherente: ${segmento.id}/${fila.offset}.`);
       }
-      if (!leer) { offset += fila.bytes; t1 = fila.t1; continue; }
-      const data = Buffer.allocUnsafe(fila.bytes);
-      for (let cursor = 0; cursor < data.length;) {
-        const n = readSync(fd, data, cursor, data.length - cursor, offset + cursor);
-        if (!n) throw new Error(`Bloque confirmado incompleto: ${segmento.id}/${offset}.`);
-        cursor += n;
-      }
-      const b = verificarBloque(data);
-      if (b.nivel !== fila.nivel || b.t0 !== fila.t0 || b.t1 !== fila.t1 || b.crc !== fila.crc || b.fotogramas !== fila.fotogramas) {
-        throw new Error(`El catálogo no coincide con el bloque confirmado: ${segmento.id}/${offset}.`);
+      if (!aislados.has(fila.offset)) {
+        try {
+          if (size - offset < fila.bytes) throw new Error(`Segmento confirmado truncado: ${segmento.id}/${offset}.`);
+          if (ultimo || aislar) {
+            const b = verificarBloqueLeido((desde, bytes) => {
+              const data = Buffer.allocUnsafe(bytes);
+              for (let cursor = 0; cursor < bytes;) {
+                const n = readSync(fd!, data, cursor, bytes - cursor, offset + desde + cursor);
+                if (!n) throw new Error(`Bloque confirmado incompleto: ${segmento.id}/${offset}.`);
+                cursor += n;
+              }
+              return data;
+            }, fila.bytes);
+            if (b.nivel !== fila.nivel || b.t0 !== fila.t0 || b.t1 !== fila.t1 || b.crc !== fila.crc || b.fotogramas !== fila.fotogramas) {
+              throw new Error(`El catálogo no coincide con el bloque confirmado: ${segmento.id}/${offset}.`);
+            }
+          }
+        } catch (error) {
+          if (!aislar || !(error instanceof Error) || (error as NodeJS.ErrnoException).code) throw error;
+          aislar(fila, error.message);
+          intocable = true;
+        }
       }
       offset += fila.bytes;
       t1 = fila.t1;
@@ -72,14 +89,14 @@ function verificarSegmento(path: string, segmento: SegmentoCinta, bloques: Bloqu
     if (offset !== segmento.bytes || t1 !== segmento.t1 || bloques[0]?.t0 !== segmento.t0) {
       throw new Error(`Extensión confirmada incoherente: ${segmento.id}.`);
     }
-    if (size > offset) { ftruncateSync(fd, offset); fdatasyncSync(fd); }
-  } finally { closeSync(fd); }
+    if (ultimo && !intocable && size > offset) { ftruncateSync(fd!, offset); fdatasyncSync(fd!); }
+  } finally { if (fd !== undefined) closeSync(fd); }
 }
 
 export class CatalogoCinta {
   readonly db: DatabaseSync;
 
-  constructor(readonly directorio: string, private readonly punto?: (p: PuntoEscritura) => void) {
+  constructor(readonly directorio: string, private readonly punto?: (p: PuntoEscritura) => void, verificar = false) {
     mkdirSync(directorio, { recursive: true });
     for (const nivel of NIVELES) mkdirSync(join(directorio, `n${nivel}`), { recursive: true });
     this.db = new DatabaseSync(join(directorio, INDICE_CINTA));
@@ -141,26 +158,39 @@ export class CatalogoCinta {
         PRAGMA user_version=${VERSION_CATALOGO};
         COMMIT;
       `);
-      this.recuperar();
+      this.db.exec(`CREATE TABLE IF NOT EXISTS cuarentena (
+        segmento INTEGER NOT NULL, offset INTEGER NOT NULL, epoca INTEGER NOT NULL REFERENCES epocas(id),
+        nivel INTEGER NOT NULL, t0 INTEGER NOT NULL, t1 INTEGER NOT NULL, motivo TEXT NOT NULL,
+        PRIMARY KEY (segmento,offset)
+      ) STRICT`);
+      this.recuperar(verificar);
       sincronizarDirectorio(directorio);
       sincronizarDirectorio(dirname(directorio));
     } catch (error) { this.db.close(); throw error; }
   }
 
-  private recuperar(): void {
+  private recuperar(verificar: boolean): void {
     if (this.db.prepare('PRAGMA quick_check').all().some(fila => fila.quick_check !== 'ok')
       || this.db.prepare('PRAGMA foreign_key_check').get()) throw new Error('Catálogo de cinta corrupto.');
     const segmentos = this.segmentos();
     const referenciados = new Set(segmentos.map(s => rutaSegmento(this.directorio, s.nivel, s.id)));
     const ultimos = new Set(new Map(segmentos.map(s => [s.nivel, s.id])).values());
     const bloques = this.db.prepare('SELECT * FROM bloques WHERE segmento=? ORDER BY offset');
+    const aislados = this.db.prepare('SELECT offset FROM cuarentena WHERE segmento=?');
+    const danados: BloqueAislado[] = [];
     for (const s of segmentos) {
-      verificarSegmento(rutaSegmento(this.directorio, s.nivel, s.id), s, bloques.all(s.id) as unknown as BloqueCinta[], ultimos.has(s.id));
+      verificarSegmento(rutaSegmento(this.directorio, s.nivel, s.id), s, bloques.all(s.id) as unknown as BloqueCinta[],
+        ultimos.has(s.id), new Set(aislados.all(s.id).map(r => Number(r.offset))),
+        verificar ? ({ segmento, offset, epoca, nivel, t0, t1 }, motivo) => danados.push({ segmento, offset, epoca, nivel, t0, t1, motivo }) : undefined);
     }
     const solape = this.db.prepare(`SELECT 1 FROM (
       SELECT t0,lag(t1) OVER (PARTITION BY epoca,nivel ORDER BY t0) AS anterior FROM bloques
     ) WHERE t0<=anterior LIMIT 1`).get();
     if (solape) throw new Error('Bloques solapados en una época de la cinta.');
+    if (danados.length) this.transaccion(() => {
+      const guardar = this.db.prepare('INSERT INTO cuarentena VALUES (?,?,?,?,?,?,?)');
+      for (const b of danados) guardar.run(b.segmento, b.offset, b.epoca, b.nivel, b.t0, b.t1, b.motivo);
+    });
     for (const nivel of NIVELES) {
       const path = join(this.directorio, `n${nivel}`);
       let borrado = false;
@@ -170,6 +200,11 @@ export class CatalogoCinta {
       }
       if (borrado) sincronizarDirectorio(path);
     }
+  }
+
+  cuarentena(): BloqueAislado[] {
+    return this.db.prepare('SELECT * FROM cuarentena ORDER BY segmento,offset').all()
+      .map(fila => ({ ...fila })) as unknown as BloqueAislado[];
   }
 
   private transaccion(escribir: () => void): void {
@@ -186,7 +221,8 @@ export class CatalogoCinta {
     const anterior = this.ultimaEpoca();
     const id = anterior ? Math.max(a.epoca, anterior.id + 1) : a.epoca;
     this.transaccion(() => {
-      const ultimoVisual = anterior ? Number(this.db.prepare('SELECT max(t1) AS t FROM bloques WHERE epoca=? AND nivel=0')
+      const ultimoVisual = anterior ? Number(this.db.prepare(`SELECT max(t1) AS t FROM bloques b WHERE epoca=? AND nivel=0
+        AND NOT EXISTS (SELECT 1 FROM cuarentena c WHERE c.segmento=b.segmento AND c.offset=b.offset)`)
         .get(anterior.id)!.t ?? anterior.tMundo) : 0;
       this.db.prepare('INSERT INTO epocas VALUES (?,?,?,?,?,NULL)').run(id, a.instanciaId, a.tMundo, a.motivo, a.tMundo);
       if (anterior && a.tMundo < anterior.t1) {
@@ -244,6 +280,9 @@ export class CatalogoCinta {
   }
 
   escribirBloque(epoca: number, data: Buffer, segmento: SegmentoCinta | undefined): void {
+    if (segmento && this.db.prepare('SELECT 1 FROM cuarentena WHERE segmento=? LIMIT 1').get(segmento.id)) {
+      throw new Error(`No se puede anexar al segmento ${segmento.id}: contiene bloques en cuarentena.`);
+    }
     const b = verificarBloque(data);
     const id = segmento?.id ?? Number(this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='segmentos'").get()?.seq ?? 0) + 1;
     const path = rutaSegmento(this.directorio, b.nivel, id);
@@ -279,7 +318,8 @@ export class CatalogoCinta {
     });
     if (!borrado) return false;
     this.punto?.('catálogo podado');
-    unlinkSync(rutaSegmento(this.directorio, s.nivel, s.id));
+    try { unlinkSync(rutaSegmento(this.directorio, s.nivel, s.id)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     sincronizarDirectorio(join(this.directorio, `n${s.nivel}`));
     return true;
   }

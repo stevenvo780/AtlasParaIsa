@@ -463,8 +463,11 @@ export function leerMarcoJson(indice: IndiceBloque, i: number, leer: LeerBytes, 
 
 /** El escritor y la recuperación verifican todo el bloque sin descomprimir. El salto valida solo las partes que lee. */
 export function verificarBloque(datos: Buffer): MetadatosBloque {
-  const leer: LeerBytes = (offset, bytes) => datos.subarray(offset, offset + bytes);
-  const { sectores: _, marcos, bytesIndice: __, ...meta } = leerIndiceBloque(leer, datos.length);
+  return verificarBloqueLeido((offset, bytes) => datos.subarray(offset, offset + bytes), datos.length);
+}
+
+export function verificarBloqueLeido(leer: LeerBytes, longitud: number): MetadatosBloque {
+  const { sectores: _, marcos, bytesIndice: __, ...meta } = leerIndiceBloque(leer, longitud);
   for (const m of marcos) for (const p of m.partes) verificarParte(p, leer(p.offset, p.bytes));
   return meta;
 }

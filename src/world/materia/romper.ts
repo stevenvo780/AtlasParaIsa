@@ -32,9 +32,9 @@ export function reparto(golpe: Float64Array, blanco: { dureza: number; tenacidad
 /** Golpea `blanco` y desprende lo que rompe hacia `fragmento` (el lote nuevo con la forma del patrón, que crea quien
  * golpea). Devuelve los cuantos desprendidos y los J de desgaste que el dueño del útil aplica con `desprender`. */
 export function romper(arena: ArenaMateria, q: ServicioQuimico, blanco: LoteRef, fragmento: LoteRef,
-  golpe: Float64Array, azar: () => number): { cuantos: number; desgaste: number } {
+  golpe: Float64Array, azar: () => number, fraccionEnlaces = FRACTURA): { cuantos: number; desgaste: number } {
   const r = reparto(golpe, arena.vista(blanco));
-  return { cuantos: desprender(arena, q, blanco, fragmento, r.blanco, azar), desgaste: r.util };
+  return { cuantos: desprender(arena, q, blanco, fragmento, r.blanco, azar, fraccionEnlaces), desgaste: r.util };
 }
 
 /**
@@ -43,12 +43,12 @@ export function romper(arena: ArenaMateria, q: ServicioQuimico, blanco: LoteRef,
  * y la parte del calor de los átomos que se van, para que el fragmento salga a la misma T. Devuelve los cuantos movidos.
  */
 export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef, a: LoteRef, j: number,
-  azar: () => number): number {
+  azar: () => number, fraccionEnlaces = FRACTURA): number {
   const ids = especies(arena, de);
   let cohesion = 0, atomos = 0;
   for (const id of ids) {
     const c = arena.cuantos(de, id), s = q.sustancia(id);
-    cohesion += FRACTURA * c * s.prop.dMedia;
+    cohesion += fraccionEnlaces * c * s.prop.dMedia;
     atomos += c * atomosDe(s.atomos);
   }
   if (!(cohesion > 0 && j > 0)) return 0;

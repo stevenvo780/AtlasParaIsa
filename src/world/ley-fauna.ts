@@ -60,6 +60,9 @@ const sat01 = (n: number): number => n < 0 ? 0 : n > 1 ? 1 : n;
 const T_AGUA = 1, T_SUELO = 2, T_PRADERA = 3;
 const habitableEn = (codigo: number, acuatico: boolean): boolean => acuatico ? codigo === T_AGUA : codigo === T_SUELO || codigo === T_PRADERA;
 const ID_ANIMAL = /^animal-[a-zA-Z0-9-]{1,110}$/;
+/** Fracción de enlaces del fragmento que se cortan al desgarrar tejido. Pagar todos costaba ≈20 MJ/kg de tejido
+ * efectivo (1,7 g por mordisco de lobo); se calibra la superficie de la rotura en ≈20 kJ/kg. */
+const FRACTURA_TEJIDO = 1e-3;
 
 // ── Estado del dueño ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -681,13 +684,13 @@ function aplicarGolpear(cl: CtxLey, i: Intento): Aplicado {
   const golpe = Float64Array.from(i.dato);
   golpe[DATO_GOLPEAR.trabajo] = golpe[DATO_GOLPEAR.trabajo]! / (1 + sat01(fa.genoma[GEN.defensa] ?? 0));
   const masa = masaDe(c, cu), celda = c.terreno.celda(a.x, a.y);
-  const carne = herir(c, cu, golpe);
+  const carne = herir(c, cu, golpe, FRACTURA_TEJIDO);
   let arrancado = 0;
   if (carne !== REF_NULA && c.materia.vivo(carne)) {
     arrancado = c.materia.vista(carne).masa;
     // La carne arrancada cae a su celda como un trozo de cadáver.
     if (celda >= 0) {
-      const trozo = c.materia.nuevo(Rol.Cadaver, celda, 0);
+      const trozo = c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0 ? e.buf[0]! : c.materia.nuevo(Rol.Cadaver, celda, 0);
       c.materia.moverParte(carne, trozo, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
       c.materia.liberar(carne);
     }

@@ -741,9 +741,9 @@ export function gestar(c: CtxLeyMateria, madre: Cuerpo, dt: number): number {
   if (!g) return 0;
   const p = plantillaDe(c, madre), d = datosDe(c, p);
   const alNacer = p.m0 / (d.masaMg * MG), falta = alNacer - masaLote(c, g.embrion) / (d.masaMg * MG);
-  if (falta > 0 && dt > 0) sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt));
-  // Un embrión al que le falta una entrada de su síntesis (Liebig) no crece aunque la reserva pague: cuenta como bajo basal.
-  const crece = falta <= 0 || p.sintesis.entradas.every((t) => c.materia.cuantos(madre.reserva, t.id) + c.materia.cuantos(madre.digestivo, t.id) >= t.nu);
+  const hechas = falta > 0 && dt > 0 ? sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
+  // El crecimiento cuenta aunque la síntesis haya agotado precisamente el último cuanto del precursor limitante.
+  const crece = falta <= 0 || hechas > 0;
   const paga = crece && reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
   g.bajoBasalDesde = paga ? -1 : g.bajoBasalDesde < 0 ? c.tick : g.bajoBasalDesde;
   return masaLote(c, g.embrion);

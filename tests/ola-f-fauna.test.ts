@@ -9,7 +9,7 @@ import {
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
-import { concebir, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
+import { concebir, gestar, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
 import { Parte } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
 import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
@@ -157,6 +157,24 @@ test('un embrión completo nace con su masa y cabe en la huella', () => {
   assert.ok(masaDe(c, cria.cuerpo) >= plantilla.m0);
   assert.equal(mundo.animalDynamics.births, 1);
   assert.deepEqual(leyFauna.comprobar!(c), []);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('el embrión sigue creciendo aunque consuma el último precursor disponible', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo;
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  for (const { id, nu } of plantillaDe(c, cuerpo).partes) {
+    assert.equal(c.materia.moverParte(cuerpo.tejido, cuerpo.digestivo, { parte: Parte.Exacta, esp: id, cuantos: nu, kappa: null }), nu);
+  }
+  const masa = gestar(c, cuerpo, 1);
+  assert.ok(masa > 0);
+  assert.equal(cuerpo.gestacion!.bajoBasalDesde, -1);
+  assert.equal(gestar(c, cuerpo, 1), masa);
+  assert.equal(cuerpo.gestacion!.bajoBasalDesde, c.tick);
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

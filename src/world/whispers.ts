@@ -1,32 +1,40 @@
 /**
- * V24 — Mensajes Divinos (susurros asíncronos).
+ * V24 — Mensajes Divinos (susurros asíncronos); V23 — la escucha.
  *
- * Quien observa deja un mensaje («ve allí», «explora esa región»…) y no sabe CUÁNDO lo oirá la persona:
- * el retraso es determinista (hash de semilla, paso y destinatario, nunca el RNG del mundo ni el reloj),
- * imprevisible para el observador y acotado: un mensaje dirigido a alguien vivo se oye seguro antes de
- * `HEAR_HORIZON_TICKS`. Una vez oído, la persona lo cumple caminando por tierra en cuanto su cuerpo no
- * tenga una necesidad aguda (`index.ts`, `choose`). Nunca hay teletransporte ni obediencia instantánea.
- * Se desvanece sólo si la persona muere, si el destino es inalcanzable o si pasa un plazo largo tras oírlo.
+ * Quien observa deja un mensaje («ve allí», «explora esa región»…) y no sabe CUÁNDO lo oirá la persona, ni si lo hará.
+ * En cada paso la probabilidad de oírlo es proporcional a `escucha² · calma · audibilidad` (`probabilidadDeOir`): la
+ * escucha es un gen (`genetics.ts`), la calma es lo poco acuciada que está su necesidad, y la audibilidad cae con la
+ * distancia en los mensajes regionales. No hay espera mínima, ni horizonte que lo garantice, ni umbral de calma: quien
+ * casi no escucha casi nunca oye, y el mensaje se desvanece si pasa su plazo sin oírse. El azar es un hash de semilla,
+ * paso y mensaje (nunca el RNG del mundo ni el reloj): con un hilo y semilla, la misma corrida. Una vez oído, la
+ * persona lo cumple caminando por tierra (`personas.ts`, `choose`) y puede olvidarlo por el camino con un riesgo que baja
+ * con su escucha. Nunca hay teletransporte ni obediencia instantánea.
  */
 import type { DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
+import { RADIUS } from './mundo/tipos.js';
+import { escuchaDe } from './genetics.js';
 
 export const WHISPER_INTENTS: readonly DivineWhisperIntent[] = ['travel', 'explore', 'gather', 'build', 'craft', 'tend'] as const;
 export const MAX_ACTIVE_WHISPERS = 16;
 export const MAX_RETAINED_WHISPERS = 32;
-/** Nadie oye un mensaje antes de 20 pasos (2 s del mundo): nunca es una orden de mando. */
-export const HEAR_MIN_DELAY_TICKS = 20;
-/** Un mensaje dirigido a una persona viva se oye, a más tardar, en un día del mundo. */
-export const HEAR_HORIZON_TICKS = 2400;
+/** Cada cuántos pasos se avanza la cola de mensajes (1 s del mundo). */
+export const WHISPER_CHECK_TICKS = 10;
+/** Probabilidad por paso de oír un mensaje de quien tiene escucha 1, calma plena y lo oye sin pérdida (audibilidad 1):
+ * fija la escala del tiempo. Con ella, con calma 0,7, escucha 0,8 espera de media ≈ 110 pasos (≈ 1 h del mundo),
+ * 0,4 ≈ 450 pasos (≈ 5 h) y 0,2 ≈ 1800 pasos (≈ 18 h); por debajo de ≈ 0,1 casi nunca lo oye antes del plazo. */
+export const OIDO_POR_TICK = 0.02;
+/** Riesgo por paso de olvidar un mensaje ya oído, por cada unidad que le falta a la escucha: `(1 − escucha) · OLVIDO_POR_TICK`. */
+export const OLVIDO_POR_TICK = 0.001;
+/** Distancia (celdas) a la que un mensaje regional se oye a la mitad: la que alcanza la vista de una persona. */
+export const ALCANCE_VOZ = RADIUS;
+/** Un mensaje que nadie oye en 3 días se desvanece. */
+export const WHISPER_LIFETIME_TICKS = 7200;
 /** Plazo para cumplirlo una vez oído (3 días); pasado, se desvanece. */
 export const FULFIL_DEADLINE_TICKS = 7200;
-/** Un mensaje regional (sin destinatario) que nadie oye en 3 días se desvanece. */
-export const WHISPER_LIFETIME_TICKS = 7200;
 /** Llegó: a 1,5 celdas o menos del destino. */
 export const FULFIL_RADIUS = 1.5;
 /** Comprobaciones seguidas (cada 10 pasos) persiguiéndolo sin acercarse nunca más: destino inalcanzable. */
 export const STALL_CHECKS = 60;
-/** Radio en el que un mensaje regional busca a quien lo oiga. */
-export const REGIONAL_RADIUS = 28;
 
 /** Estado interno que el mundo persiste junto a cada mensaje (nunca se proyecta: ver `whisperView`). */
 export interface WhisperRecord extends DivineWhisper {
@@ -43,11 +51,13 @@ export interface WhisperPersonLike {
   y: number;
   action?: string;
   target?: { x: number; y: number };
-  traits?: { curiosity?: number };
-  culture?: { openness?: number };
+  hunger: number;
+  thirst: number;
+  fatigue: number;
+  genome: { alleles: readonly number[] };
 }
 
-export type WhisperFadeReason = 'gone' | 'unreachable' | 'deadline' | 'unheard';
+export type WhisperFadeReason = 'gone' | 'unreachable' | 'deadline' | 'unheard' | 'forgotten';
 export interface WhisperStepOutcome {
   heard: Array<{ whisper: WhisperRecord; person: WhisperPersonLike }>;
   fulfilled: Array<{ whisper: WhisperRecord; person: WhisperPersonLike }>;
@@ -137,11 +147,30 @@ export function enqueueWhisper(
   return created;
 }
 
-/** Probabilidad de oírlo en esta comprobación: crece con la espera y la curiosidad; 1 al llegar al horizonte. */
-function hearingChance(person: WhisperPersonLike, age: number, targeted: boolean): number {
-  if (targeted && age >= HEAR_HORIZON_TICKS) return 1;
-  const ramp = Math.min(1, (age - HEAR_MIN_DELAY_TICKS) / (HEAR_HORIZON_TICKS - HEAR_MIN_DELAY_TICKS));
-  return 0.01 + (person.traits?.curiosity ?? 0.5) * 0.03 + (person.culture?.openness ?? 0.5) * 0.02 + ramp * 0.06;
+/** Cuánto le deja oír su cuerpo, en [0, 1]: cada necesidad acuciante le resta atención, sin umbral. */
+export function calma(person: Pick<WhisperPersonLike, 'hunger' | 'thirst' | 'fatigue'>): number {
+  const libre = (necesidad: number) => 1 - Math.min(1, Math.max(0, necesidad));
+  return libre(person.hunger) * libre(person.thirst) * libre(person.fatigue);
+}
+
+const audibilidadDeCuadrado = (distancia2: number): number => 1 / (1 + distancia2 / (ALCANCE_VOZ * ALCANCE_VOZ));
+/** Qué parte del mensaje llega a quien está a `distancia` de donde suena: 1 junto a él, 1/2 a `ALCANCE_VOZ`. */
+export const audibilidad = (distancia: number): number => audibilidadDeCuadrado(distancia * distancia);
+
+/** Probabilidad por paso de oír un mensaje: proporcional a `escucha² · calma · audibilidad`. Es también la tasa con que
+ * lo oye, en el sentido de que el tiempo hasta oírlo es exponencial de esa tasa: E[latencia] = 1 / probabilidad. */
+export function probabilidadDeOir(escucha: number, calmaCuerpo: number, audible: number): number {
+  return OIDO_POR_TICK * escucha * escucha * calmaCuerpo * audible;
+}
+
+/** Probabilidad de que algo con tasa `tasa` por paso ocurra en `pasos` pasos seguidos. */
+function enPasos(tasa: number, pasos: number): number {
+  return tasa <= 0 || pasos <= 0 ? 0 : -Math.expm1(-tasa * pasos);
+}
+
+/** Riesgo por paso de olvidar un mensaje ya oído. */
+export function riesgoDeOlvido(escucha: number): number {
+  return (1 - escucha) * OLVIDO_POR_TICK;
 }
 
 function resolve(w: WhisperRecord, status: 'fulfilled' | 'faded', tick: number) {
@@ -151,8 +180,9 @@ function resolve(w: WhisperRecord, status: 'fulfilled' | 'faded', tick: number) 
 
 /**
  * Avanza la cola de mensajes (llamar cada 10 pasos, sólo con mensajes). `isWater` dice si el destino es
- * agua (`undefined` si la celda no está cargada: se sabrá al acercarse). Sin `Math.random`, sin reloj y
- * sin el RNG del mundo.
+ * agua (`undefined` si la celda no está cargada: se sabrá al acercarse). `elapsed` son los pasos desde la comprobación
+ * anterior: el riesgo por paso se compone sobre ellos, así que el ritmo de las comprobaciones no cambia la ley. Sin
+ * `Math.random`, sin reloj y sin el RNG del mundo.
  */
 export function stepWhispers(
   whispers: WhisperRecord[],
@@ -160,6 +190,7 @@ export function stepWhispers(
   tick: number,
   seed: number,
   isWater?: (x: number, y: number) => boolean | undefined,
+  elapsed: number = WHISPER_CHECK_TICKS,
 ): WhisperStepOutcome {
   const outcome: WhisperStepOutcome = { heard: [], fulfilled: [], faded: [] };
   let byId: Map<string, WhisperPersonLike> | undefined;
@@ -185,6 +216,8 @@ export function stepWhispers(
       }
       if (tick - (w.heardTick ?? w.createdTick) >= FULFIL_DEADLINE_TICKS) { fade(w, 'deadline', listener); continue; }
       if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', listener); continue; }
+      const oido = Math.min(elapsed, tick - (w.heardTick ?? w.createdTick));
+      if (deterministicUnit(seed, tick, listener.id, `${w.id}:olvido`) < enPasos(riesgoDeOlvido(escuchaDe(listener.genome)), oido)) { fade(w, 'forgotten', listener); continue; }
       // Sólo cuenta como atasco el tiempo que la persona lo persigue (comer, beber o descansar no cuentan).
       const pursuing = listener.action === 'explore' && listener.target?.x === w.x && listener.target?.y === w.y;
       if (w.bestDistance === undefined || away < w.bestDistance - 0.5) { w.bestDistance = away; w.stalledChecks = 0; }
@@ -194,29 +227,42 @@ export function stepWhispers(
 
     // Latente.
     const age = tick - w.createdTick;
-    let candidate: WhisperPersonLike | undefined;
-    if (w.personId) {
-      candidate = find(w.personId);
-      if (!candidate) { fade(w, 'gone'); continue; }
-    } else {
-      if (age >= WHISPER_LIFETIME_TICKS) { fade(w, 'unheard'); continue; }
-      let best = REGIONAL_RADIUS;
+    if (age >= WHISPER_LIFETIME_TICKS) { fade(w, 'unheard', w.personId ? find(w.personId) : undefined); continue; }
+    const dirigido = w.personId ? find(w.personId) : undefined;
+    if (w.personId && !dirigido) { fade(w, 'gone'); continue; }
+    if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', dirigido); continue; }
+    // Sólo cuenta el tiempo que el mensaje lleva sonando: uno recién dejado no se oye con pasos que no existían.
+    const pasos = Math.min(elapsed, age);
+    if (pasos <= 0) continue;
+    // Cada persona oye con su tasa; la primera en oírlo es la suya con probabilidad proporcional a ella, y el mensaje se
+    // oye en esta comprobación con la probabilidad de que alguna lo haga (tiempos exponenciales en competencia). Un solo
+    // sorteo por mensaje, sin una lectura por persona; un mensaje dirigido llega entero, uno regional con su audibilidad.
+    const tasaDe = (person: WhisperPersonLike): number => probabilidadDeOir(escuchaDe(person.genome), calma(person),
+      dirigido ? 1 : audibilidadDeCuadrado((person.x - w.x) ** 2 + (person.y - w.y) ** 2));
+    let suma = 0;
+    if (dirigido) suma = tasaDe(dirigido);
+    else for (let i = 0; i < people.length; i++) suma += tasaDe(people[i]!);
+    const u = deterministicUnit(seed, tick, w.id, dirigido ? dirigido.id : 'oído');
+    const algunoOye = enPasos(suma, pasos);
+    if (!(u < algunoOye)) continue;
+    let oyente: WhisperPersonLike | undefined = dirigido;
+    if (!oyente) {
+      let resto = (u / algunoOye) * suma;
       for (let i = 0; i < people.length; i++) {
-        const d = dist(people[i]!, w);
-        if (d < best) { best = d; candidate = people[i]; }
+        const tasa = tasaDe(people[i]!);
+        if (tasa <= 0) continue;
+        oyente = people[i];
+        if ((resto -= tasa) < 0) break;
       }
     }
-    if (isWater?.(w.x, w.y) === true) { fade(w, 'unreachable', candidate); continue; }
-    if (!candidate || age < HEAR_MIN_DELAY_TICKS) continue;
-    if (deterministicUnit(seed, tick, candidate.id, w.id) < hearingChance(candidate, age, !!w.personId)) {
-      w.status = 'heard';
-      w.heardTick = tick;
-      w.heardById = candidate.id;
-      w.heardByName = candidate.name;
-      w.bestDistance = dist(candidate, w);
-      w.stalledChecks = 0;
-      outcome.heard.push({ whisper: w, person: candidate });
-    }
+    if (!oyente) continue;
+    w.status = 'heard';
+    w.heardTick = tick;
+    w.heardById = oyente.id;
+    w.heardByName = oyente.name;
+    w.bestDistance = dist(oyente, w);
+    w.stalledChecks = 0;
+    outcome.heard.push({ whisper: w, person: oyente });
   }
   return outcome;
 }

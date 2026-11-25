@@ -5,7 +5,8 @@ import type { Gesture, GestureResult } from '../../shared/types.js';
 import { validCoordinate, tileAt } from '../spatial.js';
 import { cancelTechnologyProject } from '../technology.js';
 import type { DivineWhisperRequest, DivineWhisper, DivineWhisperIntent } from '../../shared/worldmap.js';
-import { enqueueWhisper, type WhisperFadeReason, stepWhispers } from '../whispers.js';
+import { enqueueWhisper, type WhisperFadeReason, stepWhispers, WHISPER_CHECK_TICKS } from '../whispers.js';
+import { escuchaDe } from '../genetics.js';
 
 
 export function applyGesture(world: World, gesture: Gesture, order: number): GestureResult {
@@ -73,9 +74,6 @@ export function submitWhisper(world: World, req: DivineWhisperRequest): DivineWh
   return enqueueWhisper(world.whispers, req, world.tick, Math.floor(world.tick / TICKS_PER_DAY) + 1, listener?.name);
 }
 
-/** Cadencia de escucha: cada 10 pasos (1 s del mundo). */
-const WHISPER_INTERVAL_TICKS = 10;
-
 export const WHISPER_INTENT_LABEL: Record<DivineWhisperIntent, string> = {
   travel: 'viajar hasta allí', explore: 'explorar esa región', gather: 'recolectar materiales allí',
   build: 'construir allí', craft: 'trabajar un oficio allí', tend: 'cuidar a los animales de allí',
@@ -83,12 +81,13 @@ export const WHISPER_INTENT_LABEL: Record<DivineWhisperIntent, string> = {
 
 const WHISPER_FADE_CAUSE: Record<WhisperFadeReason, string> = {
   gone: 'quien debía oírlo ya no vive', unreachable: 'el destino no se alcanza por tierra',
-  deadline: 'pasaron tres días desde que lo oyó', unheard: 'nadie pasó cerca para oírlo',
+  deadline: 'pasaron tres días desde que lo oyó', unheard: 'pasaron tres días sin que nadie lo oyera',
+  forgotten: 'lo olvidó por el camino',
 };
 
 /** Sólo se llama con `world.whispers` no vacío (el paso de un mundo sin mensajes no llega aquí). */
 export function advanceWhispers(world: World): void {
-  if (world.tick % WHISPER_INTERVAL_TICKS !== 0) return;
+  if (world.tick % WHISPER_CHECK_TICKS !== 0) return;
   const whispers = world.whispers!;
   let pending = false;
   for (const w of whispers) if (w.status === 'latent' || w.status === 'heard') { pending = true; break; }
@@ -102,7 +101,7 @@ export function advanceWhispers(world: World): void {
     const note = whisper.note ? ` «${whisper.note}»` : '';
     const event = addEvent(world, { kind: 'gesture', actors: [listener.id], x: listener.x, y: listener.y, source: 'simulation',
       text: `${listener.name} oyó un susurro${note}: una llamada a ${WHISPER_INTENT_LABEL[whisper.intent]} (${whisper.x}, ${whisper.y}).`,
-      cause: `Mensaje divino ${whisper.id}, dejado en el paso ${whisper.createdTick} y oído ${world.tick - whisper.createdTick} pasos después. Irá en cuanto su cuerpo no tenga una necesidad aguda.` });
+      cause: `Mensaje divino ${whisper.id}, dejado en el paso ${whisper.createdTick} y oído ${world.tick - whisper.createdTick} pasos después, según su escucha heredada (${escuchaDe(listener.genome).toFixed(2)}) y lo tranquilo que estaba su cuerpo. Irá en cuanto su cuerpo no tenga una necesidad aguda, y puede olvidarlo por el camino.` });
     remember(listener, world, 'Un susurro le llamó a otro lugar.', event.id);
   }
   for (const { whisper, person } of outcome.fulfilled) {
@@ -114,7 +113,8 @@ export function advanceWhispers(world: World): void {
   }
   for (const { whisper, reason } of outcome.faded) {
     addEvent(world, { kind: 'gesture', actors: whisper.heardById ? [whisper.heardById] : [], x: whisper.x, y: whisper.y, source: 'simulation',
-      text: whisper.heardByName ? `El susurro que oyó ${whisper.heardByName} se desvaneció sin cumplirse.` : 'Un susurro se desvaneció sin que nadie lo oyera.',
+      text: reason === 'forgotten' ? `${whisper.heardByName} olvidó el susurro antes de llegar (${whisper.x}, ${whisper.y}).`
+        : whisper.heardByName ? `El susurro que oyó ${whisper.heardByName} se desvaneció sin cumplirse.` : 'Un susurro se desvaneció sin que nadie lo oyera.',
       cause: `Mensaje divino ${whisper.id}: ${WHISPER_FADE_CAUSE[reason]}.` });
   }
 }

@@ -7,7 +7,7 @@
 import { NE } from '../../shared/naturaleza.js';
 import type { SustanciaId } from '../../shared/materia.js';
 import type { Registro } from '../motor/contratos.js';
-import { Parte, type ArenaMateria, type Ecuacion, type LoteRef, type Plantilla, type ServicioQuimico } from './tipos.js';
+import { Parte, type ArenaMateria, type Ecuacion, type LoteRef, type Pedido, type Plantilla, type ServicioQuimico } from './tipos.js';
 
 type Termino = { id: SustanciaId; nu: number };
 const MAX = Number.MAX_SAFE_INTEGER;
@@ -98,9 +98,8 @@ export function crearPlantilla(q: ServicioQuimico, registro: Registro, d: DatosP
  */
 export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, destino: LoteRef,
   fuentes: readonly LoteRef[], residuo: LoteRef, energia: number, maxUnidades: number): number {
-  const e = p.sintesis;
-  if (!balanceada(q, e)) return 0;
-  const enPartes = new Map(p.partes.map((t) => [t.id, t.nu]));
+  const e = p.sintesis, sobras = sobrasDe(q, p);
+  if (!sobras) return 0;
   // Cuántas veces caben `por` más en algo que ya tiene `ya`: ningún estado intermedio puede pasar de 2⁵³ (I3).
   const cabe = (ya: number, por: number) => Math.floor((MAX - ya) / por);
   let n = Math.floor(maxUnidades);
@@ -111,10 +110,10 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
     for (const f of fuentes) hay += arena.cuantos(f, t.id);
     n = Math.min(n, Math.floor(hay / t.nu), cabe(arena.cuantos(destino, t.id), t.nu));
   }
-  for (const t of e.salidas) {
+  for (let k = 0; k < e.salidas.length; k++) {
+    const t = e.salidas[k]!;
     n = Math.min(n, cabe(arena.cuantos(destino, t.id), t.nu));
-    const sobra = t.nu - (enPartes.get(t.id) ?? 0);
-    if (sobra > 0) n = Math.min(n, cabe(arena.cuantos(residuo, t.id), sobra));
+    if (sobras[k]! > 0) n = Math.min(n, cabe(arena.cuantos(residuo, t.id), sobras[k]!));
   }
   if (!(n > 0)) return 0;
   // Calor (revisión de la enmienda 3, hallazgo 1): las entradas traen su parte del calor de cada fuente y los
@@ -122,7 +121,10 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
   // intermedio puede pasarse; si llega, n se recorta a lo que cabe con la operación entera simulada al julio (`cabeCalor`),
   // así que copiar nunca falla a medias (antes, con el destino a 2⁵³ − 6 J, movía una entrada y fallaba en la segunda).
   let enJuego = arena.calor(destino) + arena.calor(residuo) + n * Math.max(0, -e.dH);
-  for (const f of new Set(fuentes)) if (f !== residuo) enJuego += arena.calor(f);
+  for (let k = 0; k < fuentes.length; k++) {
+    const f = fuentes[k]!;
+    if (f !== residuo && fuentes.indexOf(f) === k) enJuego += arena.calor(f); // cada fuente una vez
+  }
   if (!(enJuego <= MAX) && !cabeCalor(arena, q, p, destino, fuentes, residuo, n)) {
     let si = 0, no = n;
     while (no - si > 1) {
@@ -132,17 +134,34 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
     n = si;
     if (!(n > 0)) return 0;
   }
-  const exacta = (esp: SustanciaId, cuantos: number) => ({ parte: Parte.Exacta, esp, cuantos, kappa: null });
   for (const t of e.entradas) {
     let falta = n * t.nu;
     for (const f of fuentes) if (falta > 0) falta -= arena.moverParte(f, destino, exacta(t.id, falta));
   }
   const hechas = arena.aplicar(destino, e, n);
-  for (const t of e.salidas) {
-    const sobra = t.nu - (enPartes.get(t.id) ?? 0);
-    if (sobra > 0 && hechas > 0) arena.moverParte(destino, residuo, exacta(t.id, hechas * sobra));
+  for (let k = 0; k < e.salidas.length; k++) {
+    if (sobras[k]! > 0 && hechas > 0) arena.moverParte(destino, residuo, exacta(e.salidas[k]!.id, hechas * sobras[k]!));
   }
   return hechas;
+}
+
+/** El pedido de `copiar`, reutilizado (la arena no lo guarda). */
+const PEDIDO: Pedido = { parte: Parte.Exacta, esp: 0, cuantos: 0, kappa: null };
+const exacta = (esp: SustanciaId, cuantos: number): Pedido => { PEDIDO.esp = esp; PEDIDO.cuantos = cuantos; return PEDIDO; };
+
+/** Por plantilla (y química): lo que cada salida de la síntesis deja por encima de las partes, o null si la síntesis no
+ * se balancea. Plantilla, ecuación y sustancias no cambian, así que se calcula una vez. */
+const sobrasPorPlantilla = new WeakMap<Plantilla, { q: ServicioQuimico; sobras: Float64Array | null }>();
+function sobrasDe(q: ServicioQuimico, p: Plantilla): Float64Array | null {
+  const memo = sobrasPorPlantilla.get(p);
+  if (memo && memo.q === q) return memo.sobras;
+  let sobras: Float64Array | null = null;
+  if (balanceada(q, p.sintesis)) {
+    const enPartes = new Map(p.partes.map((t) => [t.id, t.nu]));
+    sobras = Float64Array.from(p.sintesis.salidas, (t) => t.nu - (enPartes.get(t.id) ?? 0));
+  }
+  sobrasPorPlantilla.set(p, { q, sobras });
+  return sobras;
 }
 
 const porId = (a: Termino, b: Termino) => a.id - b.id;

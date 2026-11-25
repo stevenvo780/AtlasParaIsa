@@ -6,9 +6,13 @@ import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, distanciaGenetica, elegirFaunaV23, habituar, huella, miedoDe,
   rendimientoPresa, velocidadDe, vidaMaxima, type AgenteVisto, type CeldaVista, type PercepcionFaunaV23, type YoFauna,
 } from '../src/world/decision/fauna.js';
-import { FUNDADORES, genomaFundador } from '../src/world/ley-fauna.js';
+import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
+import { createWorld, stepWorld } from '../src/world/index.js';
+import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
+import { masaDe } from '../src/world/materia/cuerpo.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
-import type { CtxLey } from '../src/world/motor/acceso.js';
+import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
+import { DATO_GOLPEAR } from '../src/world/motor/contratos.js';
 
 const azarFijo = (): (() => number) => { let s = 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 
@@ -110,6 +114,25 @@ test('la alarma sube en la celda, cae con la distancia y decae sola', () => {
   assert.ok(Math.abs(alarmaEn(c1, centro) - Math.exp(-1)) < 1e-12);
   subirAlarma(c1, centro, 0.5);
   assert.ok(Math.abs(alarmaEn(c1, centro) - (Math.exp(-1) + 0.5)) < 1e-12);
+});
+
+test('F5 aplica un golpe local con intentos apagados y la muerte conserva la materia', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [presa, otra] = mundo.animals;
+  assert.ok(presa?.cuerpo && otra?.cuerpo && presa.uid && mundo.people[0]?.uid);
+  const golpe = new Float64Array(5);
+  golpe[DATO_GOLPEAR.trabajo] = 1e10;
+  golpe[DATO_GOLPEAR.dureza] = 1;
+  golpearAnimal(c, c.ref(mundo.people[0].uid), c.ref(presa.uid), golpe);
+  leyFauna.F5!(c);
+  assert.equal(mundo.animals.includes(presa), false);
+  assert.equal(mundo.animalDynamics.humanHunts, 1);
+
+  const masa = Math.round(masaDe(c, otra.cuerpo) * 10) / 10;
+  matarAnimal(c, otra, 'senescencia');
+  assert.ok(mundo.events.some(e => e.kind === 'animal' && e.actors.includes(otra.id) && e.text.includes(`${masa} kg`)));
+  assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
 test('I10: la ley de la fauna no lee especie ni linaje fundador', () => {

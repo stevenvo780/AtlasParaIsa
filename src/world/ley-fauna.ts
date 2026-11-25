@@ -84,6 +84,7 @@ interface Estado {
   /** Agua bebible desde una celda de tierra por tener una vecina de agua, por tick. */
   aguaVecina: Map<number, number>;
   partos: Fila[];
+  mordiscos: Intento[];
   orden: Fila[];
   lotes: LotesCelda;
   buf: Float64Array;
@@ -94,7 +95,7 @@ function estado(c: CtxLey): Estado {
   let e = estados.get(c.mundo);
   if (!e) estados.set(c.mundo, e = {
     filas: new Map(), porSlot: new Map(), plantillas: new Map(), jPorComida: 0, ocupacion: new Map(), aguaVecina: new Map(),
-    partos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
+    partos: [], mordiscos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
     buf: new Float64Array(16), campos: null,
   });
   return e;
@@ -398,8 +399,16 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
 // ── F4: actuar ────────────────────────────────────────────────────────────────────────────────────────────
 
 function enviar(c: CtxLey, a: Ref, i: Omit<Intento, 'a'>): void {
-  const slot = slotDe(a), dueno = c.frente.dueno[slot] ?? -1;
+  const dueno = c.frente.dueno[slotDe(a)] ?? -1;
   c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { ...i, a });
+}
+
+export function golpearAnimal(c: CtxLeyMateria, de: Ref, presa: Ref, golpe: Float64Array): void {
+  const i: Intento = { tipo: TipoIntento.Golpear, de, a: presa, celda: -1, lote: REF_NULA,
+    nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null };
+  const dueno = c.frente.dueno[slotDe(presa)]!;
+  if (c.params.v23.intentos) c.buzon.enviar(dueno, i);
+  else if (dueno === c.hilo) estado(c).mordiscos.push(i);
 }
 
 /** Un mordisco de un tick de contacto: trabajo pagado con la reserva, filo y esbeltez de dientes y garras según la
@@ -411,7 +420,7 @@ function morder(c: CtxLeyMateria, f: Fila, presa: Ref): void {
   const vt = c.materia.vista(cu.tejido), golpe = new Float64Array(5);
   golpe[DATO_GOLPEAR.trabajo] = trabajo; golpe[DATO_GOLPEAR.filo] = carn; golpe[DATO_GOLPEAR.tenacidad] = vt.tenacidad;
   golpe[DATO_GOLPEAR.esbeltez] = carn; golpe[DATO_GOLPEAR.dureza] = Math.max(vt.dureza, carn);
-  enviar(c, presa, { tipo: TipoIntento.Golpear, de: f.ref, celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null });
+  golpearAnimal(c, f.ref, presa, golpe);
 }
 
 /** Come de los lotes `rol` de su celda propia lo que quepa en el tubo, deje pasar la boca en un tick y no pase de `tope`
@@ -812,6 +821,9 @@ export const leyFauna: Ley = {
   },
   F5(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c);
+    // Antes de encender intentos, F5 resuelve los mordiscos locales que no pasan por la cola A.
+    for (const i of e.mordiscos) aplicarGolpear(c, i);
+    e.mordiscos.length = 0;
     for (const f of [...e.filas.values()]) {
       const causa = causaDeMuerte(c, f);
       if (!causa) continue;

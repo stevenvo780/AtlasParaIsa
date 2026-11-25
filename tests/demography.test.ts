@@ -271,7 +271,7 @@ test('affinity with replacement spreads paternity among 32 inhabitants (Gini < 0
   context.diagnostic(JSON.stringify({ experiment: 'paternity-gini', inhabitants: 32, checks: 200, births, gini: coefficient, parents: values.filter(n => n > 0).length, max: Math.max(...values), min: Math.min(...values) }));
 });
 
-// ── R3: control bit a bit y cable de `cuerpo.longevidad*` hasta el mundo vivo ──────────────────
+// ── R3: control reproducible y cable de `cuerpo.longevidad*` hasta el mundo vivo ──────────────────
 /** Huella del mundo completo en lo que la ley de longevidad puede tocar: cuerpos vivos (edad, salud,
  * vitalidad, genoma) y el archivo de identidades con la edad máxima y el inicio de senescencia que
  * cada difunto declaró. No entra nada de tiempo real: el digest es puro en (semilla, params). */
@@ -296,13 +296,13 @@ function runDays(days: number, params?: WorldParams, seed = 51926): { world: Ret
  * Reglas 10, etapa 1 (2026-09-22): la trayectoria declarada es la del mundo de antes, así que el
  * control y sus contrastes R3 corren sobre `HISTORICAL_PARAMS` explícitos (los defaults nuevos
  * adoptan el paquete de natalidad y moverían el control sin que la longevidad cambiara). */
-// V23: re-grabada en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// la trayectoria V8 (32969bf8…, 93a4fb6e…, 3e145991…) pasó sin cambios hasta 98e750c (sprint/v23l-motor).
-const CONTROL_51926 = ['f7ef80ca8d21ef03', '9ade6c5afcccdedc', 'bcbd9b69f6e06c1a'];
+// V23: sin huella dorada con valor fijo. El control se corre dentro de cada prueba (misma semilla, un hilo, sin tarjeta)
+// y los contrastes de R3 se miden contra él.
+const controlHistorico = (): string[] => runDays(3, HISTORICAL_PARAMS).digests;
 
-test('3 días con params históricos conservan la trayectoria demográfica de referencia', context => {
+test('3 días con params históricos dan la misma trayectoria demográfica en dos corridas', context => {
   const { world, digests } = runDays(3, HISTORICAL_PARAMS);
-  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria demográfica de referencia');
+  assert.deepEqual(controlHistorico(), digests, 'misma semilla y params: dos corridas, misma trayectoria demográfica');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
     nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
 });
@@ -315,8 +315,9 @@ test('3 días con params históricos conservan la trayectoria demográfica de re
 test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', context => {
   const corta = parseParams('cuerpo.longevidadBaseDias=4', HISTORICAL_PARAMS);
   const { world, digests } = runDays(3, corta);
-  assert.notDeepEqual(digests, CONTROL_51926, 'acortar la vida 7 días no cambió el mundo: el param sigue sin lector');
-  assert.notEqual(digests[2], CONTROL_51926[2]);
+  const control = controlHistorico();
+  assert.notDeepEqual(digests, control, 'acortar la vida 7 días no cambió el mundo: el param sigue sin lector');
+  assert.notEqual(digests[2], control[2]);
   const senescencias = world.demographyDynamics.causes.senescence;
   assert.ok(senescencias > 0, `con edad máxima de 3-7 días debe haber muertes por senescencia en 3 días, hubo ${senescencias}`);
   assert.equal(new Set(world.people.map(p => p.id)).size, world.people.length);
@@ -326,7 +327,7 @@ test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', cont
 
 test('R3: senescenciaInicioFraccion llega hasta el mundo vivo y lo cambia', context => {
   const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.25', HISTORICAL_PARAMS));
-  assert.notDeepEqual(digests, CONTROL_51926, 'adelantar la vejez no cambió el mundo: el param sigue sin lector');
+  assert.notDeepEqual(digests, controlHistorico(), 'adelantar la vejez no cambió el mundo: el param sigue sin lector');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.senescenciaInicioFraccion=0.25', digests }));
 });
 

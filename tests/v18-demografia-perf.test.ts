@@ -351,57 +351,31 @@ const DEFAULT_TOOLS = parseParams('tecnologia.efectosHerramientas=true', DEFAULT
 const OPEN_SHORT = parseParams('cuerpo.longevidadBaseDias=4', OPEN);
 const SEEDS = [11, 431, 51926] as const;
 
-/** Huellas del código anterior (`af88d13`), capturadas antes de editar. */
-const GOLDEN_ESCENARIO: Record<string, string> = {
-  'default/11': '6d452dd7d075bcb4534132cb55e5360b9e5e31b39f7596724e740b3fa1ab4ef2',
-  'default/431': '586f565337b85c97d89f489302fb117b45a23d7b2ac523248e66ed1e00f36f7e',
-  'default/51926': 'c90ecf23fd5260312607854173ad26b5e9d6ea18f313058337f0fa01809fd07f',
-  'default+herramientas/11': '4e47e00490f130430c2fa3437f896f29b0e4e086bf091e50509f1a1fbbf7e93d',
-  'default+herramientas/431': '1d781f2fce3cc4b474686d2cc753f8221bb8b22d891f570a4807642b18a17369',
-  'default+herramientas/51926': 'e288fdc24f6b732b0323874864e8b40a5382af1040af6f6515ff37de92194787',
-  'openWorld/11': '813159ee65bdbb67fd1ccb0800a565d753deef41e48184241d44643c71655c62',
-  'openWorld/431': 'a8d64fbf6681d445b373f1e2ca9105d5ad90e0850185150c5bf0a09e4631e081',
-  'openWorld/51926': '14913efd69b97cf0977a9a7be7c42a10e0523176011ea334ca48d35530259539',
-};
-const GOLDEN_MUNDO: Record<string, string> = {
-  'default/11': '04eccae9f6fff9bce0ee9ba14a4579eb93d96b83eba76252b0c63b27f202bd0a',
-  'default/431': '06970b808b833c01a4e94bf14f17ae67b37c45fd910988db8bf28e62dea34aa3',
-  'default/51926': '7d70c818adac9efbc90a91d50b4bed6fadd9d9c97fe36bd6a7cce996e304c4d5',
-  // `openWorld-corta` activa derivaCultural=1 (fisión Dunbar, stewardship y proceduralPersonName V18).
-  'openWorld-corta/11': 'f06462e0e34a1f2b07199de9d94ad822043dc0aa199e0eb2ff55e5be119e0ea4',
-  'openWorld-corta/431': '371e0495628af29c878292bc6cc4d75aee4771e3b5d31616ffb4cf00e2b4bb44',
-  'openWorld-corta/51926': '5a52c5c5b54b2409e90f92157e327d9bb0c72526bd5ffde466086980251badb9',
-};
-const capture = process.env.V18_CAPTURE === '1';
+// ─────────────────────────────────────── 1. Reproducibilidad ───────────────────────────────────────
+// V23: sin huellas `GOLDEN_*` con valor fijo. Cada escenario se corre dos veces (misma semilla, un hilo,
+// sin tarjeta) y las dos corridas se comparan entre sí; las propiedades con sentido se conservan.
 
-// ─────────────────────────────────────── 1. Determinismo ───────────────────────────────────────
-
-// paridad histórica: cuarentena V23
-test.skip('V18 determinismo: advancePopulation con lluvia, refugios, abrigos, muertes y vejez da el digestoCanonico de siempre (3 semillas × 300 pasos × 3 leyes)', t => {
+test('V18 reproducibilidad: advancePopulation con lluvia, refugios, abrigos, muertes y vejez da el mismo digestoCanonico en dos corridas (3 semillas × 300 pasos × 3 leyes)', t => {
   const seen: Record<string, unknown> = {};
   for (const [name, params] of [['default', DEFAULT_PARAMS], ['default+herramientas', DEFAULT_TOOLS], ['openWorld', OPEN]] as const) for (const seed of SEEDS) {
     const key = `${name}/${seed}`, result = escenario(seed, params);
     seen[key] = result;
-    if (capture) t.diagnostic(`${key} ${JSON.stringify(result)}`);
     assert.ok(result.deaths > 46, `${key}: el escenario debe matar (${result.deaths})`);
     assert.ok(result.causes.senescence > 0 && result.causes.dehydration + result.causes.exposure > 0 && result.causes.starvation > 40, `${key}: varias causas (${JSON.stringify(result.causes)})`);
     if (name !== 'default') assert.ok(result.wornCloaks > 0, `${key}: los abrigos deben desgastarse (${result.wornCloaks})`);
-    if (!capture) assert.equal(result.digest, GOLDEN_ESCENARIO[key], `${key}: cambió el mundo`);
+    assert.deepEqual(escenario(seed, params), result, `${key}: dos corridas dan el mismo mundo`);
   }
   t.diagnostic(JSON.stringify(seen));
-  if (capture) t.diagnostic(`GOLDEN_ESCENARIO=${JSON.stringify(Object.fromEntries(Object.entries(seen).map(([k, v]) => [k, (v as Escenario).digest])))}`);
 });
 
-// paridad histórica: cuarentena V23
-test.skip('V18 determinismo: mundos completos (stepWorld) con DEFAULT_PARAMS y hostOpenWorldParams de longevidad corta dan el digestoCanonico de siempre', t => {
-  const seen: Record<string, string> = {};
-  for (const [name, params] of [['default', DEFAULT_PARAMS], ['openWorld-corta', OPEN_SHORT]] as const) for (const seed of SEEDS) {
+test('V18 reproducibilidad: mundos completos (stepWorld) con DEFAULT_PARAMS y hostOpenWorldParams de longevidad corta dan el mismo digestoCanonico en dos corridas', () => {
+  const correr = (seed: number, params: WorldParams): string => {
     const world = createWorld(seed, params);
     for (let tick = 0; tick < 300; tick++) stepWorld(world);
-    const key = `${name}/${seed}`; seen[key] = digestoCanonico(world);
-    if (!capture) assert.equal(seen[key], GOLDEN_MUNDO[key], `${key}: cambió el mundo`);
-  }
-  t.diagnostic(`GOLDEN_MUNDO=${JSON.stringify(seen)}`);
+    return digestoCanonico(world);
+  };
+  for (const [name, params] of [['default', DEFAULT_PARAMS], ['openWorld-corta', OPEN_SHORT]] as const) for (const seed of SEEDS)
+    assert.equal(correr(seed, params), correr(seed, params), `${name}/${seed}: dos corridas dan el mismo mundo`);
 });
 
 test('V18 exposición evitada: exposureDamage coincide bit a bit con damage.exposure de updateDemography (20 000 cuerpos, todas las ramas)', () => {

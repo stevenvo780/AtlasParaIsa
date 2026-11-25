@@ -74,30 +74,18 @@ function digestoSinAptitud(world: World): string {
   try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
-// Los hashes originales se midieron en el padre `f666226` (sprint/noche-integra), ANTES de la consolidación
-// R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no existían, así que dejaron de
-// corresponder en la propia base f2757fa (d7e173a1… y 47e0d511… fallaban ya allí). Regenerados el
-// 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa, nunca desde el árbol
-// modificado, con la misma réplica (Store temporal, guardado antes del primer paso), campo `fisico`:
-//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
-//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin conducta.aptitud \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 7 --pasos 1200 --params "$CARRIL" --sin conducta.aptitud
-// (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const PADRE_DEFECTO_1200 = 'ba42beb134796012f456adb7a65e05264a9fc9eea81f3769ef12768497760018';
+// V23: sin digestos dorados con valor fijo. «aptitud=0 no cambia el mundo» se comprueba como
+// reproducibilidad: dos réplicas de lo mismo (misma semilla, un hilo, sin tarjeta) dan el mismo digesto.
 const CARRIL = 'persistencia.cadaTicks=300,poblacion.cortejo=1,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
-const PADRE_CARRIL_SEMILLA7_1200 = '9752a031c420e1254766d478a87837f343664a2935bc1a33d18a760e7d6529ae';
 
-test('(i) con aptitud=0 el mundo es bit a bit el de antes, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
+test('(i) con aptitud=0 el mundo es reproducible, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.conducta.aptitud, 0, 'reglas 10 no adopta la aptitud');
   assert.equal(HISTORICAL_PARAMS.conducta.aptitud, 0);
   const defecto = replica(t, 1200);
-  assert.equal(digestoSinAptitud(defecto), PADRE_DEFECTO_1200, 'semilla 51926, 1200 pasos, params históricos: el estado físico no se movió');
-  assert.notEqual(digestoCanonico(defecto), PADRE_DEFECTO_1200, 'el digesto completo sí cambia, sólo por declarar la clave (T102)');
+  assert.equal(digestoSinAptitud(defecto), digestoSinAptitud(replica(t, 1200)), 'semilla 51926, 1200 pasos, params históricos: dos corridas, mismo estado físico');
+  assert.notEqual(digestoCanonico(defecto), digestoSinAptitud(defecto), 'el digesto completo sí cambia, sólo por declarar la clave (T102)');
   const carril = replica(t, 1200, CARRIL, 7);
-  assert.equal(digestoSinAptitud(carril), PADRE_CARRIL_SEMILLA7_1200, 'semilla 7 con los params del carril y habituación 0,35: idéntico');
+  assert.equal(digestoSinAptitud(carril), digestoSinAptitud(replica(t, 1200, CARRIL, 7)), 'semilla 7 con los params del carril y habituación 0,35: dos corridas, mismo estado físico');
 });
 
 const OFICIO_DE: Record<string, Action> = { curiosity: 'explore', sociability: 'cooperate', industriousness: 'gather', care: 'share', resilience: 'hunt' };

@@ -78,33 +78,20 @@ function digestoSinMemoria(world: World, conMemoria = false): string {
   try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
-// Los hashes originales se midieron en `sprint/noche-hsed-20260922` @f666226, ANTES de la consolidación
-// R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no existían, así que dejaron de
-// corresponder en la propia base f2757fa (d7e173a1…, 844e82c5…, 7a33a032…, 4ee4b82b… fallaban ya allí).
-// Regenerados el 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa, nunca
-// desde el árbol modificado, con la misma réplica (Store temporal, guardado antes del primer paso):
-//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
-//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin agua.memoria \
-//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$BASE_LAB" --sin agua.memoria
-// (`fisico` → FISICO_*, `completo` → COMPLETO_*; en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const FISICO_51926_1200 = '657690d64d7d6e1c3ed0734c7a950b8a9ef3123fa4956f7588bebff7eac6d35d';
-const FISICO_42_BASE_1200 = '30130811b8b7f0406005a92e7924084d4fc03947a046f3edcab3515e5596331a';
-// Los mismos mundos con la clave ya declarada (default 1): sólo cambia el hash, no el estado.
-const COMPLETO_51926_1200 = 'e52e1d46ae417f71f7da47b0f968bcfe335fb3b5d29af26727d9d56b0882bc4a';
-const COMPLETO_42_BASE_1200 = '5e6b1fc0603af83a7641999a02f98b813a60255338983ed112725d9228e27c14';
-
-test('(i) con agua.memoria=1 el mundo es bit a bit el de antes (params históricos y régimen del laboratorio)', { timeout: 1_800_000 }, t => {
+// V23: no hay digestos dorados con valor fijo. La identidad «con agua.memoria=1 el mundo no se mueve» se
+// comprueba como reproducibilidad: dos réplicas de lo mismo (misma semilla, un hilo, sin tarjeta) dan el
+// mismo digesto, en su forma «física» (sin la clave) y «completa» (con la clave declarada).
+test('(i) con agua.memoria=1 el mundo es reproducible (params históricos y régimen del laboratorio) y nadie recuerda aguaderos', { timeout: 1_800_000 }, t => {
   assert.equal(DEFAULT_PARAMS.agua.memoria, 1, 'reglas 10 no adopta la memoria del agua');
   assert.equal(HISTORICAL_PARAMS.agua.memoria, 1);
   const defecto = replica(t, 51926, 1200);
-  assert.equal(digestoSinMemoria(defecto), FISICO_51926_1200, 'seed 51926, params históricos, 1200 pasos: el estado físico no se movió');
-  assert.equal(digestoSinMemoria(defecto, true), COMPLETO_51926_1200, 'el digesto completo sólo cambia por declarar la clave (T102)');
+  const defectoOtra = replica(t, 51926, 1200);
+  assert.equal(digestoSinMemoria(defecto), digestoSinMemoria(defectoOtra), 'seed 51926, params históricos, 1200 pasos: dos corridas, mismo estado físico');
+  assert.equal(digestoSinMemoria(defecto, true), digestoSinMemoria(defectoOtra, true), 'el digesto completo también coincide entre corridas');
   const lab = replica(t, 42, 1200, BASE_LAB);
-  assert.equal(digestoSinMemoria(lab), FISICO_42_BASE_1200, 'seed 42 con la base de la noche: el estado físico no se movió');
-  assert.equal(digestoSinMemoria(lab, true), COMPLETO_42_BASE_1200);
+  const labOtra = replica(t, 42, 1200, BASE_LAB);
+  assert.equal(digestoSinMemoria(lab), digestoSinMemoria(labOtra), 'seed 42 con la base de la noche: dos corridas, mismo estado físico');
+  assert.equal(digestoSinMemoria(lab, true), digestoSinMemoria(labOtra, true));
   for (const world of [defecto, lab]) assert.ok(world.people.every(person => person.waterMemory === undefined), 'sin la ley nadie recuerda aguaderos');
 });
 

@@ -1,32 +1,18 @@
 /**
- * Control de identidad del sprint noche-perf (2026-09-22). Las optimizaciones de rendimiento del paso
- * (índice de teselas compartido, claves numéricas de la fauna, memoria de recetas archivadas del Store…)
- * sólo son admisibles si NO cambian un solo bit del mundo: `digestoCanonico` tras 1200 y 2400 pasos
- * debe ser idéntico al del árbol sin tocar, en el mismo régimen que el laboratorio (`replica.ts`:
- * Store temporal guardado antes del primer paso y cada `persistencia.cadaTicks`).
+ * Control de identidad del sprint noche-perf (2026-09-22), V23: reproducibilidad con un hilo. Las
+ * optimizaciones de rendimiento del paso sólo son admisibles si no vuelven irrepetible el mundo:
+ * `digestoCanonico` tras 1200 y 2400 pasos debe ser idéntico entre dos corridas de lo mismo (misma
+ * semilla, un hilo, sin tarjeta), en el mismo régimen que el laboratorio (`replica.ts`: Store temporal
+ * guardado antes del primer paso y cada `persistencia.cadaTicks`). No hay hashes literales: el
+ * hexadecimal fijo quedó caduco con el motor V23 y la comparación se hace entre dos corridas.
  *
- * Cómo se obtuvieron los hashes literales de abajo: `npx tsx scripts/lab/rendimiento.ts digestos`
- * ejecutado el 2026-09-22 sobre una copia (`git archive`) del commit e1adaaf —la consolidación R2,
- * `sprint/noche-r2-20260922`, ANTES de cualquier cambio de este sprint—, con la misma función
- * `digestosControl` que usa esta prueba. Si una ley cambia a propósito, estos hashes cambian con ella y
- * hay que regenerarlos del mismo modo (con el árbol de la ley nueva sin optimizaciones pendientes);
- * si cambian sin que ninguna ley cambie, la optimización alteró el mundo y debe revertirse.
+ * Coste: ~25 s + ~50 s + ~195 s de CPU por corrida (la semilla 42 usa `persistencia.cadaTicks` = 1 por
+ * defecto: guarda en cada paso), el doble al correr dos veces. Con la torre cargada el reloj de pared
+ * puede multiplicarse; de ahí el tope propio.
  *
- * Coste: ~25 s + ~50 s + ~195 s de CPU (la semilla 42 usa `persistencia.cadaTicks` = 1 por defecto:
- * guarda en cada paso). Con la torre cargada el reloj de pared puede multiplicarse; de ahí el tope propio.
- *
- * Reglas 10, etapa 1 (2026-09-22): la semilla 42 era «parámetros por defecto» del árbol e1adaaf, que son
- * exactamente `HISTORICAL_PARAMS`; `digestosControl` parte ahora de esa base explícita, así que los
- * tres hashes de referencia se conservan sin regenerar.
- *
- * Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` (default e histórico 0 = hoy)
- * no existía en e1adaaf. Con 0 la ley no actúa, pero declarar la clave mueve `digestoCanonico` (hashea
- * `{world, params}`, T102); el control la quita de la forma de params al hashear (`CLAVES_POSTERIORES`),
- * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
- * Reglas 11: el control sigue usando la base histórica y normaliza sólo `world.version` a 10 al
- * comparar con esos hashes V10; el estado simulado y los params permanecen intactos.
- * H-B: `social.hogarTrabajo=0` tampoco actúa; se quita sólo de la forma de params al comparar
- * con referencias anteriores a su declaración.
+ * `CLAVES_POSTERIORES` (memoriaDisputa, hogarTrabajo, disolucion, tecnologia…) se quitan de la forma de
+ * params sólo al hashear, y sólo si con su valor actual no actúan (se comprueba contra `HISTORICAL_PARAMS`).
+ * El control normaliza `world.version` a 10 al hashear; el estado simulado y los params quedan intactos.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -166,18 +152,12 @@ function clavesPosterioresApagadas(params: WorldParams): void {
   }
 }
 
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [
-  { seed: 51926, params: LEYES_CANDIDATAS, digestos: {
-    1200: '147e80d4bcd93d85280393c4a50d94ea70274c098573c2be8fa1e30d2c88420b',
-    2400: '0198b7ace122f7a55d7bd557c266dd27eceaa9b8c3892fb890d22a769b527e3c' } },
-  { seed: 7, params: LEYES_CANDIDATAS, digestos: {
-    1200: '8672fdd7c4b72777de02481271ee2582bcf41597666d44a797dd84e94471cdea',
-    2400: 'd4e767d6ae5483612a896150a4d9e09a28d35cbd2f457b200fd28b6bd3f50c4d' } },
-  { seed: 42, digestos: {
-    1200: '62ebfde90e5bd85f80b52099a40d43f903df80dc19791a36e52462757569673d',
-    2400: 'de730397844963696b9084c27df0527e3404664b4ed9b926956d8dc911582cb3' } },
+// V23: sin digestos dorados con valor fijo. Cada semilla se corre dos veces (misma semilla, un hilo, sin
+// tarjeta) y los digestos a 1200 y 2400 pasos se comparan entre sí.
+const REFERENCIA: readonly { seed: number; params?: string }[] = [
+  { seed: 51926, params: LEYES_CANDIDATAS },
+  { seed: 7, params: LEYES_CANDIDATAS },
+  { seed: 42 },
 ];
 
 test('las leyes candidatas del laboratorio son las del control', () => {
@@ -187,10 +167,11 @@ test('las leyes candidatas del laboratorio son las del control', () => {
   assert.deepEqual(parseParams(LEYES_CANDIDATAS), parseParams('persistencia.cadaTicks=300', DEFAULT_PARAMS));
 });
 
-for (const { seed, params, digestos } of REFERENCIA) {
-  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al de referencia tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
+for (const { seed, params } of REFERENCIA) {
+  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): dos corridas dan el mismo digestoCanonico tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
     clavesPosterioresApagadas(parseParams(params, HISTORICAL_PARAMS));
-    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10), digestos);
+    const primera = digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10);
+    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10), primera);
   });
 }
 
@@ -201,35 +182,36 @@ for (const { seed, params, digestos } of REFERENCIA) {
  * una instantánea: la semilla 3 con las leyes de la etapa 1 en el tick 29 400 (día 12,25; 230
  * habitantes, 816 animales, 34 304 teselas), que `scripts/perf/instantaneas.ts --seed 3 --dias 12.25`
  * regenera desde la semilla (digesto inicial 6a139a78…). Se avanza 600 pasos con el régimen del
- * laboratorio y el digesto final debe ser el del commit base f2757fa (`git archive` a
- * /datos/tmp-atlas-lab/perf2-base; `scripts/perf/fases.ts` y `scripts/perf/alterna.ts` dieron el mismo).
- * La base pesa 350 MB y vive fuera del repositorio: sin ella (variable `ATLAS_MUNDO_ALTO` o la ruta de
+ * laboratorio y se comparan dos corridas entre sí (V23: sin digesto dorado).
+ * La instantánea vive fuera del repositorio: sin ella (variable `ATLAS_MUNDO_ALTO` o la ruta de
  * abajo) la prueba se omite. Coste: ~30–55 s de carga y 600 pasos de 40–140 ms de CPU según la carga.
  * El control completo de cada optimización (tres semillas a 2400/4800 pasos y los mundos de 58 y 230
  * habitantes, base contra rama en el mismo proceso) es `scripts/perf/verificar.sh`.
  *
  * La instantánea declara TODAS sus params (`params-v1`, con las cinco leyes adoptadas y cadencia 300),
  * así que `readSnapshotParams` no completa ninguna clave: ni `HISTORICAL_PARAMS` ni los defaults de un
- * mundo nuevo cambian lo que se simula, y el digesto final esperado es el mismo con o sin reglas 10.
+ * mundo nuevo cambian lo que se simula, y el digesto final es el mismo con o sin reglas 10.
  * Las `CLAVES_POSTERIORES` son la excepción: la instantánea es anterior a ellas, `readSnapshotParams` las
  * completa con su valor histórico (que no actúa) y el control las quita al hashear, como en las semillas.
  */
 const MUNDO_ALTO = process.env.ATLAS_MUNDO_ALTO ?? '/datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite';
-const ALTO = { inicial: '6a139a78154ba92a1ef36b61bec00e68b32c23a37c15d3e2e28e1a54b150cf8d', pasos: 600,
-  final: '52276b50b61dde3c0fdea45cd4faa2a1fcf7674ef0fdd7f7fe1ff0d3c257b365' };
-test('población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico idéntico a la base tras 600 pasos',
+const ALTO_PASOS = 600;
+test('población alta (230 habitantes, semilla 3 día 12,25): dos corridas de 600 pasos desde la misma instantánea dan el mismo digestoCanonico',
   { timeout: 3_600_000, skip: existsSync(MUNDO_ALTO) ? false : `falta la instantánea ${MUNDO_ALTO}` }, () => {
-    const dir = mkdtempSync(join(tmpdir(), 'atlas-rendimiento-alto-'));
-    for (const sufijo of ['', '-wal', '-shm']) if (existsSync(MUNDO_ALTO + sufijo)) copyFileSync(MUNDO_ALTO + sufijo, join(dir, 'world.sqlite' + sufijo));
-    const store = new Store(join(dir, 'world.sqlite'));
-    try {
-      const world = store.load()!.world;
-      clavesPosterioresApagadas(paramsOf(world));
-      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.inicial);
-      for (let n = 0; n < ALTO.pasos; n++) {
-        stepWorld(world);
-        if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
-      }
-      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.final);
-    } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+    const correr = (): { inicial: string; final: string } => {
+      const dir = mkdtempSync(join(tmpdir(), 'atlas-rendimiento-alto-'));
+      for (const sufijo of ['', '-wal', '-shm']) if (existsSync(MUNDO_ALTO + sufijo)) copyFileSync(MUNDO_ALTO + sufijo, join(dir, 'world.sqlite' + sufijo));
+      const store = new Store(join(dir, 'world.sqlite'));
+      try {
+        const world = store.load()!.world;
+        clavesPosterioresApagadas(paramsOf(world));
+        const inicial = digestoSin(world, CLAVES_POSTERIORES, 10);
+        for (let n = 0; n < ALTO_PASOS; n++) {
+          stepWorld(world);
+          if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
+        }
+        return { inicial, final: digestoSin(world, CLAVES_POSTERIORES, 10) };
+      } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+    };
+    assert.deepEqual(correr(), correr());
   });

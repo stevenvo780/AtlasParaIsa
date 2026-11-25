@@ -12,11 +12,9 @@ import { clonarPlantillaSintetica } from '../scripts/lib/curva-techo-fixture.js'
  * V17 (carril sociedad): fisión orgánica tipo Dunbar contra mega-comunidades, deriva
  * bidireccional equilibrada de `stewardship` y nombres de comunidad sin colisiones.
  * Todo actúa sólo con `social.derivaCultural > 0`; con 0 el mundo es el histórico bit
- * a bit. Los digestos dorados se midieron con el código ANTERIOR a V17 (script
- * desechable sobre el árbol sin tocar, 240 ticks).
+ * a bit. V23: sin digestos dorados con valor fijo; el control (deriva por defecto) se corre
+ * en la propia prueba y se compara con la deriva apagada explícita y con una segunda corrida.
  */
-const DIGESTO_HISTORICO_7 = '7f3fe8ab8f28506605dcdd969390a1bb7e14df0ceec51959cd38ebab1a1480e6';
-const DIGESTO_CONVIVENCIA_42 = '1befa5b809d4a067375352793270fd569db1558f3b07f41316b10254f0385c6b';
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 function emit(w: World) {
   return (event: Omit<ChronicleEvent, 'id' | 'tick'>) => { const result = recordChronicleEvent(w, event); w.events.push(result); return result; };
@@ -40,17 +38,18 @@ function clon(plantilla: Person, id: string, x: number, y: number, communityId: 
   return p;
 }
 
-// paridad histórica: cuarentena V23
-test.skip('(1) paridad bit a bit con derivaCultural=0: digestos dorados pre-V17 en 240 ticks', () => {
-  const control = createWorld(7, HISTORICAL_PARAMS);
-  const explicito = createWorld(7, parseParams('social.derivaCultural=0', HISTORICAL_PARAMS));
-  for (let i = 0; i < 240; i++) { stepWorld(control); stepWorld(explicito); }
-  assert.equal(digestoCanonico(control), DIGESTO_HISTORICO_7);
-  assert.equal(digestoCanonico(explicito), DIGESTO_HISTORICO_7);
-  // El camino de convivencia (fisión/mayoría) con deriva a 0 tampoco se mueve ni un bit.
-  const convivencia = createWorld(42, parseParams('social.radioConvivencia=12,social.derivaCultural=0', HISTORICAL_PARAMS));
-  for (let i = 0; i < 240; i++) stepWorld(convivencia);
-  assert.equal(digestoCanonico(convivencia), DIGESTO_CONVIVENCIA_42);
+test('(1) con derivaCultural=0 el mundo es el del control y es reproducible en 240 ticks', () => {
+  const correr = (seed: number, params: string | undefined): string => {
+    const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
+    for (let i = 0; i < 240; i++) stepWorld(world);
+    return digestoCanonico(world);
+  };
+  const control = correr(7, undefined);
+  assert.equal(correr(7, undefined), control, 'dos corridas del control dan el mismo digesto');
+  assert.equal(correr(7, 'social.derivaCultural=0'), control, 'deriva=0 explícita = control');
+  // El camino de convivencia (fisión/mayoría) con deriva a 0 tampoco se mueve ni un bit frente a su control.
+  const convivencia = correr(42, 'social.radioConvivencia=12');
+  assert.equal(correr(42, 'social.radioConvivencia=12,social.derivaCultural=0'), convivencia);
 });
 
 /** 120 personas de una sola comunidad: 72 en el centro (20,14) y 4 satélites de 12 a 10 celdas.

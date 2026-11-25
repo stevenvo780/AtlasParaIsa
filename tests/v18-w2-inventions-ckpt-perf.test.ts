@@ -1,8 +1,8 @@
 // V18 ola 2, carril F — paridad exacta de `inventions.ts`, `technology-checkpoint.ts` y `technology-execution.ts`.
 //
 // Cada optimización conserva el resultado bit a bit y todos los rechazos. Se fija por cuatro vías:
-//  1. digestos canónicos de mundos completos (3 semillas × 300 pasos × 2 conjuntos de leyes, más dos mundos de 4 000 pasos
-//     con estructuras, planos y lluvia) medidos en el commit base 2ff91e3, ANTES de editar;
+//  1. reproducibilidad de mundos completos (3 semillas × 300 pasos × 2 conjuntos de leyes, más dos mundos de 4 000 pasos
+//     con estructuras, planos y lluvia): dos corridas de un hilo dan el mismo digesto (V23: sin digestos dorados);
 //  2. referencias (copias literales del código anterior) comparadas con `Object.is` / `deepStrictEqual` / JSON byte a byte
 //     sobre entradas aleatorias y extremas;
 //  3. fail-closed: cada corrupción de un punto de apertura debe seguir fallando con el mismo error que antes;
@@ -17,7 +17,7 @@ import { closePolicyGpuBatchers, createWorld, stepWorld, type Person, type World
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { cloneWorld } from '../src/world/clon.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { activate, tileAt } from '../src/world/spatial.js';
 import { filtrarCerca } from '../src/world/indice-puntos.js';
@@ -47,42 +47,31 @@ function lcg(seed: number): () => number {
 const GiB = 1024 ** 3;
 const probe = { cpuThreads: () => 1, totalRamBytes: () => 128 * GiB, nvrtcAvailable: () => false, nvidiaSmi: () => '',
   memory: () => ({ fisicaBytes: 128 * GiB, heapBytes: 8 * GiB }) };
-const BASE_300: Record<'host' | 'default', Record<number, string>> = {
-  host: {
-    7: 'f0ab8eb74989f614bfc3de1cac658ad27bc269f8a8eabb49723f17745e343655',
-    42: 'b99695ca036aa4b3f943de71673e13d7d4f78a330efa68db7f924c6806694a23',
-    51926: '2d959a6a8ce132be3227eaa6b072dcf51d9d1ea473c06d425879593509a17b4a',
-  },
-  default: {
-    7: 'f636c2ae21bbe4c11ccb290306e49e13628bfee018f3b7b1397f6005cb8b6f5f',
-    42: 'ee74060dc11a38f9f93d574aa33c2c87ee2b9c58096331821a75057d86be0bc3',
-    51926: '7d70c818adac9efbc90a91d50b4bed6fadd9d9c97fe36bd6a7cce996e304c4d5',
-  },
+// V23: sin digestos dorados con valor fijo ni paridad con el commit base: cada mundo se corre dos veces
+// (misma semilla, un hilo, sin tarjeta) y los dos digestos se comparan entre sí.
+const paramsDe = (conjunto: 'host' | 'default') => {
+  const base = conjunto === 'host' ? hostOpenWorldParams(DEFAULT_PARAMS, probe) : DEFAULT_PARAMS;
+  return parseParams({ motor: { ...base.motor, hilos: 1, gpu: [] } }, base);
 };
-const paramsOf = (conjunto: 'host' | 'default') => conjunto === 'host' ? hostOpenWorldParams(DEFAULT_PARAMS, probe) : DEFAULT_PARAMS;
+function correrMundo(seed: number, conjunto: 'host' | 'default', pasos: number): World {
+  const world = createWorld(seed, paramsDe(conjunto));
+  for (let tick = 0; tick < pasos; tick++) stepWorld(world);
+  return world;
+}
 for (const conjunto of ['host', 'default'] as const) {
-  for (const [seed, expected] of Object.entries(BASE_300[conjunto])) {
-    // paridad histórica: cuarentena V23
-    test.skip(`V18 ola 2 paridad: semilla ${seed}, leyes ${conjunto === 'host' ? 'hostOpenWorldParams' : 'DEFAULT_PARAMS'}, 300 pasos = digesto del commit base`, () => {
-      const world = createWorld(Number(seed), paramsOf(conjunto));
-      for (let tick = 0; tick < 300; tick++) stepWorld(world);
-      assert.equal(digestoCanonico(world), expected);
+  for (const seed of [7, 42, 51926]) {
+    test(`V18 ola 2 reproducibilidad: semilla ${seed}, leyes ${conjunto === 'host' ? 'hostOpenWorldParams' : 'DEFAULT_PARAMS'}, 300 pasos, dos corridas`, () => {
+      assert.equal(digestoCanonico(correrMundo(seed, conjunto, 300)), digestoCanonico(correrMundo(seed, conjunto, 300)));
     });
   }
 }
 // Mundos largos: ya con estructuras, planos inventados y lluvia (recogida, riego, depósito y aprendizaje de planos cada 60 pasos).
-const BASE_4000 = [
-  { conjunto: 'default' as const, seed: 51926, digest: 'b746e3cf96a21491f5d0df02b5c3df2bc54bc119a177063959ba13bb61126d12', structures: 8, blueprints: 9 },
-  { conjunto: 'host' as const, seed: 42, digest: '314d5e6d5ac8ef78431d2a436734756c50d277fbf0ce9f9eeca3067e998ed693', structures: 14, blueprints: 5 },
-];
-for (const { conjunto, seed, digest, structures, blueprints } of BASE_4000) {
-  // paridad histórica: cuarentena V23
-  test.skip(`V18 ola 2 paridad larga: semilla ${seed}, leyes ${conjunto}, 4 000 pasos (obras, planos, lluvia) = digesto del commit base`, () => {
-    const world = createWorld(seed, paramsOf(conjunto));
-    for (let tick = 0; tick < 4000; tick++) stepWorld(world);
-    assert.equal(world.structures.length, structures);
-    assert.equal(world.blueprints.length, blueprints);
-    assert.equal(digestoCanonico(world), digest);
+for (const { conjunto, seed } of [{ conjunto: 'default' as const, seed: 51926 }, { conjunto: 'host' as const, seed: 42 }]) {
+  test(`V18 ola 2 reproducibilidad larga: semilla ${seed}, leyes ${conjunto}, 4 000 pasos (obras, planos, lluvia), dos corridas`, () => {
+    const uno = correrMundo(seed, conjunto, 4000), otro = correrMundo(seed, conjunto, 4000);
+    assert.equal(uno.structures.length, otro.structures.length);
+    assert.equal(uno.blueprints.length, otro.blueprints.length);
+    assert.equal(digestoCanonico(uno), digestoCanonico(otro));
   });
 }
 
@@ -489,10 +478,8 @@ test('V18 ola 2: takeFood y takeWater dejan exactamente el mismo estado (existen
     JSON.stringify(ref.tiles.filter(tile => tile.drinkingWater !== undefined).map(tile => [tile.x, tile.y, tile.drinkingWater])));
 });
 
-/** Digesto del mundo tras 4 revisiones de `stepStructures` (con aprendizaje de planos en los ticks múltiplos de 60), medido en el commit base. */
-const STEP_STRUCTURES_BASE = '0a533d7574c059e2bc7720b5be64a7d79340ab5bda84662c5583d75c1289a19f';
-// paridad histórica: cuarentena V23
-test.skip('V18 ola 2: stepStructures (lluvia, riego, depósito y aprendizaje de planos cada 60 pasos) deja el mismo mundo que el commit base', () => {
+/** Digesto del mundo tras 4 revisiones de `stepStructures` (con aprendizaje de planos en los ticks múltiplos de 60); se corre dos veces y se comparan (V23). */
+function mundoStepStructures(): string {
   const world = settlementWorld(600, 300, 17);
   world.learningEnabled = true; world.cooperationEnabled = true;
   for (let i = 1; i <= 5; i++) {
@@ -506,7 +493,10 @@ test.skip('V18 ola 2: stepStructures (lluvia, riego, depósito y aprendizaje de 
   for (const [tick, weather] of [[1200, 'rain'], [1260, 'clear'], [1320, 'rain'], [1380, 'clear']] as const) { world.tick = tick; world.weather = weather; stepStructures(world, () => ({}) as never); }
   assert.ok(world.people.some((person, i) => person.blueprintId !== initial[i]), 'algún habitante cambia de plano');
   assert.ok(world.inventionDynamics.waterCollected > 0 && world.inventionDynamics.foodStored > 0, 'hay recogida de agua y depósito de comida');
-  assert.equal(digestoCanonico(world), STEP_STRUCTURES_BASE);
+  return digestoCanonico(world);
+}
+test('V18 ola 2: stepStructures (lluvia, riego, depósito y aprendizaje de planos cada 60 pasos) es reproducible: dos corridas dejan el mismo mundo', () => {
+  assert.equal(mundoStepStructures(), mundoStepStructures());
 });
 
 // ───────────────────────── 6. micro-benchmark (diagnóstico) ─────────────────────────

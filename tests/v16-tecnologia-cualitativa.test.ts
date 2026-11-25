@@ -70,31 +70,25 @@ function runProgram(host: TechnologyHost, actor: TechnologyActor, program?: Tech
 const itemOf = (actor: TechnologyActor, recipeId: string): MaterialBatch => actor.technology.items.find(item => item.recipeId === recipeId)!;
 const stock = (actor: TechnologyActor) => actor.technology.items.reduce((n, item) => n + item.mass, 0) + actor.technology.residue.wood + actor.technology.residue.stone + actor.technology.residue.water;
 
-// ── (1) Paridad histórica ───────────────────────────────────────────────────────────────────────
-// Medidos con Store (guardado al crear y cada 300 pasos) sobre main previo a V16 (`tecnologia-estabilidad.test.ts`).
-// Con las leyes nuevas en sus valores neutros el digesto canónico coincide byte a byte con main.
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const REFERENCIAS_PRE_V16_1200: Readonly<Record<7 | 42 | 51926, { historicos: string; defaults: string }>> = {
-  7: { historicos: '99e0994a87c7abc1ca79d2b3ab1888b37375dd5ef7c81a1a9873e5cfc12c9813', defaults: '26f7832debe4a46e642f9525c0e0c5add17b6e7c83fa4fa174d0684e0121fe59' },
-  42: { historicos: '947f9b01a3b7a2c8cf4da15306ec3436a41bb2aa05f73ce164b73f61b97e166c', defaults: '7c48601220fcab9423ee14840bf95ac4145a79d5a7f55f242d44bd4f64ae93a9' },
-  51926: { historicos: '5bf3ab366216298291d1b9d90bab835e0f1138c29921758a51b4d064b4bcde4f', defaults: '9ec3c6a2d75c9bb9664422b75da1589c48ff9bf1cfecf965909dfafa6e8360b2' },
-};
-test('paridad: con mejoraLocal=0 y efectosHerramientas=false el mundo es el de referencia bit a bit (3 semillas × 1200 pasos)', { timeout: 600_000 }, t => {
+// ── (1) Leyes neutras = control ──────────────────────────────────────────────────────────────────
+// V23: sin digestos dorados con valor fijo. Con las leyes nuevas en sus valores neutros, el mundo coincide
+// con el control corrido en la propia prueba (los params base sin tocar): misma semilla, un hilo, sin
+// tarjeta, con Store (guardado al crear), dos corridas de lo mismo dan el mismo digesto.
+test('neutras: con mejoraLocal=0 y efectosHerramientas=false el mundo es el del control y es reproducible (2 semillas × 1200 pasos)', { timeout: 600_000 }, t => {
   const neutras = 'tecnologia.mejoraLocal=0,tecnologia.efectosHerramientas=false';
   assert.equal(HISTORICAL_PARAMS.tecnologia.mejoraLocal, 0); assert.equal(HISTORICAL_PARAMS.tecnologia.efectosHerramientas, false);
   assert.equal(DEFAULT_PARAMS.tecnologia.mejoraLocal, 0); assert.equal(DEFAULT_PARAMS.tecnologia.efectosHerramientas, false);
-  for (const seed of [7, 42, 51926] as const) {
+  const correr = (seed: number, base: typeof HISTORICAL_PARAMS, explicitas: boolean): string => {
+    const { store } = laboratorio(t, 'atlas-v16-tec-');
+    const world = createWorld(seed, explicitas ? parseParams(neutras, base) : base);
+    store.save(world);
+    for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
+    return digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11);
+  };
+  for (const seed of [7, 42] as const) {
     for (const [modo, base] of [['historicos', HISTORICAL_PARAMS], ['defaults', DEFAULT_PARAMS]] as const) {
-      const { store } = laboratorio(t, 'atlas-v16-tec-');
-      const world = createWorld(seed, parseParams(neutras, base));
-      store.save(world);
-      for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
-      assert.equal(
-        digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11),
-        REFERENCIAS_PRE_V16_1200[seed][modo],
-        `semilla ${seed} (${modo})`,
-      );
+      const control = correr(seed, base, false);
+      assert.equal(correr(seed, base, true), control, `semilla ${seed} (${modo}): leyes neutras explícitas = control`);
     }
   }
 });

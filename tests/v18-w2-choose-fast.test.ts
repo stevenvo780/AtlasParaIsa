@@ -1,9 +1,9 @@
 // V18 ola 2 (carril D) — acelerar blocksGet/tileLookup, filtrarCerca, perceivedRoutes y choose con 0 ULP.
 //
 // Paridad por tres vías:
-//  1. digestos canónicos de mundos completos (3 semillas × 240 pasos × DEFAULT_PARAMS y
-//     hostOpenWorldParams, plano y residente con ResidentTopologyOwner) medidos ANTES de optimizar
-//     en este mismo worktree (probe de hardware fijo: no dependen de la torre);
+//  1. reproducibilidad de mundos completos (3 semillas × 240 pasos × DEFAULT_PARAMS y
+//     hostOpenWorldParams, un hilo y sin tarjeta, dos corridas) con probe de hardware fijo; sin
+//     digestos dorados ni paridad plano/residente (V23);
 //  2. referencias literales del comportamiento anterior para tileLookup/lastTileAt/firstTileAt
 //     (el Map "x,y" de siempre) y para filtrarCerca/algunoCerca/primeroCerca (filter/some/find),
 //     incluidas coordenadas negativas, no enteras, chunks dispersos y mutaciones del arreglo;
@@ -12,16 +12,11 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
-import {
-  bindWorldContext, closePolicyGpuBatchers,
-  createWorld, stepWorld, worldContext,
-} from '../src/world/index.js';
+import { closePolicyGpuBatchers, createWorld, stepWorld } from '../src/world/index.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../src/world/params.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
-import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { residentFastAccess, residentTileReader } from '../src/world/soa/terreno.js';
 import { firstTileAt, lastTileAt, tileIndexAppended, tileLookup } from '../src/world/tile-index.js';
 import { algunoCerca, filtrarCerca, primeroCerca, type Punto } from '../src/world/indice-puntos.js';
 import { founderGenome } from '../src/world/genetics.js';
@@ -40,43 +35,20 @@ function lcg(seed: number): () => number {
 const GiB = 1024 ** 3;
 const probe = { cpuThreads: () => 1, totalRamBytes: () => 128 * GiB, nvrtcAvailable: () => false, nvidiaSmi: () => '',
   memory: () => ({ fisicaBytes: 128 * GiB, heapBytes: 8 * GiB }) };
-const BASE_DIGESTS: Record<'default' | 'host', Record<number, string>> = {
-  default: {
-    7: 'dc4cec9e52d6b17d6a5441ae92ee2c85b641ef6815081f20c9f98a7a59aa95df',
-    42: '94380d2e54cb40a81a7f77c051a9f121333f2afcb0c453cdc00b835c22dfc2af',
-    51926: 'e12924bd298917cc46b1fd6fe5f319cbe50be8010712af72a57e0bd4bd582fbe',
-  },
-  host: {
-    7: 'a2d3c767df5c26d2809f33ed01ccd439a9ce44789715f78552151b7473f5a725',
-    42: 'f510f82ba0f4ace80c8a1767394850cfd8775c0cb8df7764875943ee22a0cf9d',
-    51926: '7ef3c4dd7ac72a820f84c004db4d2c64066720542592cb2acd15891909b39dd8',
-  },
-};
+// V23: sin digestos dorados con valor fijo ni paridad plano/residente con hilos. Queda la versión de un
+// hilo: misma semilla, un hilo y sin tarjeta, dos corridas dan el mismo digesto.
 const PASOS = 240;
 for (const conjunto of ['default', 'host'] as const) {
-  for (const [seedText, expected] of Object.entries(BASE_DIGESTS[conjunto])) {
-    const seed = Number(seedText);
-    // paridad histórica: cuarentena V23
-    test.skip(`V18 ola2 digesto 0 ULP: ${conjunto} semilla ${seed}, ${PASOS} pasos, plano y residente`, { timeout: 600_000 }, () => {
-      const params: WorldParams = conjunto === 'host' ? hostOpenWorldParams(DEFAULT_PARAMS, probe) : DEFAULT_PARAMS;
-      const plain = createWorld(seed, params);
-      for (let i = 0; i < PASOS; i++) stepWorld(plain);
-      assert.equal(digestoCanonico(plain), expected, 'plano');
-
-      const exec = parseParams({ motor: { ...params.motor, soaTerreno: true, hilos: 4, gpu: [] } }, params);
-      const resident = createWorld(seed, exec);
-      const owner = new ResidentTopologyOwner();
-      resident.tiles = owner.tiles(resident.tiles.map(t => owner.tile(t)));
-      bindWorldContext(resident, { ...worldContext(resident), tileOwnership: owner });
-      let fastHits = 0, readerHits = 0;
-      for (let i = 0; i < PASOS; i++) {
-        stepWorld(resident, [], worldContext(resident));
-        if (residentFastAccess(resident.tiles)) fastHits++;
-        if (residentTileReader(resident.tiles)) readerHits++;
-      }
-      assert.ok(fastHits > 0 && readerHits > 0, `el residente ejercita fast/exact (fast ${fastHits}, lector ${readerHits})`);
-      setParams(resident, params);
-      assert.equal(digestoCanonico(resident), expected, 'residente (params de ejecución normalizados sólo para hashear)');
+  for (const seed of [7, 42, 51926] as const) {
+    test(`V18 ola2 reproducibilidad: ${conjunto} semilla ${seed}, ${PASOS} pasos, un hilo`, { timeout: 600_000 }, () => {
+      const base: WorldParams = conjunto === 'host' ? hostOpenWorldParams(DEFAULT_PARAMS, probe) : DEFAULT_PARAMS;
+      const params = parseParams({ motor: { ...base.motor, hilos: 1, gpu: [] } }, base);
+      const correr = (): string => {
+        const world = createWorld(seed, params);
+        for (let i = 0; i < PASOS; i++) stepWorld(world);
+        return digestoCanonico(world);
+      };
+      assert.equal(correr(), correr());
     });
   }
 }

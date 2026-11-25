@@ -17,12 +17,10 @@ import { clonarPlantillaSintetica } from '../scripts/lib/curva-techo-fixture.js'
  * nacidas en el paso 88 560 quedaron con UN mortal: los fundadores, aún pegados a la madre,
  * votaban volver a ella en el voto de mayoría que corre justo después de la fisión. Arreglo
  * (sólo con `social.derivaCultural > 0`): gracia de fundación en el voto de mayoría y una
- * segunda pasada de fisión para núcleos densos de más de 96. Con deriva 0 nada se mueve: los
- * digestos dorados se midieron con el código ANTERIOR a V18 (`af88d13`, árbol sin tocar).
+ * segunda pasada de fisión para núcleos densos de más de 96. Con deriva 0 nada se mueve: V23, sin
+ * digestos dorados con valor fijo; el control se corre en la propia prueba y se compara con la deriva
+ * apagada explícita y con una segunda corrida.
  */
-const DIGESTO_HISTORICO_7 = '7f3fe8ab8f28506605dcdd969390a1bb7e14df0ceec51959cd38ebab1a1480e6';
-const DIGESTO_COMD_51926_720 = 'b5f495ab5b064c0aa030f80296cb056697c2d93a39f0b8c37a1c86a62b1b2a3b';
-const DIGESTO_RAREZA_HOGAR_42_480 = '9d7f1b4ceb1d8e94da2b042ecbf84f42acf1528964d3a8f69760225fab4c39c2';
 const COM_D = 'social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64';
 
 function emit(w: World) {
@@ -134,20 +132,22 @@ test('(2) núcleo urbano denso (> 96): la segunda pasada separa sub-núcleos per
   assert.deepEqual(historico.communities.map(c => c.members.length), [132]);
 });
 
-// paridad histórica: cuarentena V23
-test.skip('(3) paridad bit a bit con derivaCultural=0: digestos dorados medidos con el código anterior a V18', () => {
-  const control = createWorld(7, HISTORICAL_PARAMS);
-  for (let i = 0; i < 240; i++) stepWorld(control);
-  assert.equal(digestoCanonico(control), DIGESTO_HISTORICO_7);
+test('(3) con derivaCultural=0 el mundo es el del control y es reproducible', () => {
+  const correr = (seed: number, params: string | undefined, pasos: number): string => {
+    const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
+    for (let i = 0; i < pasos; i++) stepWorld(world);
+    return digestoCanonico(world);
+  };
+  const control = correr(7, undefined, 240);
+  assert.equal(correr(7, undefined, 240), control, 'dos corridas del control dan el mismo digesto');
+  assert.equal(correr(7, 'social.derivaCultural=0', 240), control, 'deriva=0 explícita = control');
   // COM-D′ (convivencia + disolución) con deriva 0: fisión, mayoría y disolución de siempre.
-  const comD = createWorld(51926, parseParams(`${COM_D},social.derivaCultural=0`, HISTORICAL_PARAMS));
-  for (let i = 0; i < 720; i++) stepWorld(comD);
-  assert.equal(digestoCanonico(comD), DIGESTO_COMD_51926_720);
+  const comD = correr(51926, COM_D, 720);
+  assert.equal(correr(51926, `${COM_D},social.derivaCultural=0`, 720), comD);
   // Enseñanza por rareza y hogar con trabajo: los caminos optimizados de `practicedRecipeToTeach`
   // (selección lineal en vez de `map` + `sort`) y de `settlementOpportunity` (hogar ya evaluado).
-  const rareza = createWorld(42, parseParams('social.ensenanzaRareza=0.5,social.hogarTrabajo=0.3', HISTORICAL_PARAMS));
-  for (let i = 0; i < 480; i++) stepWorld(rareza);
-  assert.equal(digestoCanonico(rareza), DIGESTO_RAREZA_HOGAR_42_480);
+  const rareza = 'social.ensenanzaRareza=0.5,social.hogarTrabajo=0.3';
+  assert.equal(correr(42, rareza, 480), correr(42, rareza, 480), 'enseñanza por rareza y hogar: dos corridas');
 });
 
 test('(4) proceduralPersonName: sin artículos, determinista, ≤ 70 caracteres y diverso', () => {

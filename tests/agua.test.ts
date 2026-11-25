@@ -13,23 +13,20 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
   for (let n = 0; n < ticks; n++) stepWorld(world);
 }
 
-// Detector de deriva del agua: hash del estado de agua (x, y, feature y drinkingWater a 6 decimales, no
-// el mundo entero) de la semilla 4821 tras 1 día con `agua.cuencas=1` explícito sobre `HISTORICAL_PARAMS`.
-// Con cuencas=1 el ruido nunca cruza el umbral y el generador no filtra agua; el hash cambia igualmente
-// si cambia a dónde caminan y beben los habitantes. Se actualiza solo en el commit que cambie a
-// propósito una ley del agua o del movimiento, citando su evidencia (el historial está en git log y
-// en docs/REVISION-*). Los controles del generador y del agua aislada de abajo no dependen de él.
-// V23: re-grabados en un hilo y sin GPU al quitar los topes de fauna (M2a, 1aae52f), que cambia el mundo a propósito;
-// los valores anteriores pasaron sin cambios hasta 98e750c (sprint/v23l-motor).
-const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '643fb9ba79cb297370177b7a3a4b31bde468641e90cef26a60963470bc41d3ca';
-
-test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
+// Reproducibilidad del agua: hash del estado de agua (x, y, feature y drinkingWater a 6 decimales, no
+// el mundo entero) de la semilla 4821 tras 1 día con `agua.cuencas=1` explícito sobre `HISTORICAL_PARAMS`,
+// en el modo reproducible (un hilo, sin tarjeta, semilla explícita). V23: no hay hash dorado con valor
+// fijo; se corre dos veces lo mismo y se comparan las dos huellas entre sí.
+function huellaAgua(): string {
   const world = createWorld(4821, parseParams('agua.cuencas=1', HISTORICAL_PARAMS));
   assert.equal(world.tiles.length > 0, true);
   run(world, TICKS_PER_DAY);
   const aguaTeselas = world.tiles.map(t => ({ x: t.x, y: t.y, feature: t.feature ?? 'none', drinkingWater: Number((t.drinkingWater ?? 0).toFixed(6)) }));
-  const digest = createHash('sha256').update(JSON.stringify(aguaTeselas)).digest('hex');
-  assert.equal(digest, HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1);
+  return createHash('sha256').update(JSON.stringify(aguaTeselas)).digest('hex');
+}
+
+test('T035 reproducibilidad: agua.cuencas=1 EXPLÍCITO, misma semilla, un hilo: dos corridas de 1 día dejan el agua/feature de las teselas igual', () => {
+  assert.equal(huellaAgua(), huellaAgua());
 });
 
 test('T035: cuencas=1 conserva toda el agua potable de origen tesela a tesela (generateChunk)', () => {

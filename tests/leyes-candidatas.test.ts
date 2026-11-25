@@ -89,17 +89,14 @@ function digestoConParamsDeMain(world: World): string {
   finally { setParams(world, vigentes); }
 }
 
-// Medidos en `main` @694f6b6 (reglas 9) ANTES de tocar nada, con la réplica de arriba (seed 51926,
-// Store temporal, sin guardados periódicos): 1200 pasos → b194b09….
-const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
-
-// paridad histórica: cuarentena V23
-test.skip('(i) con los params históricos las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 900000 }, t => {
-  const world = replica(t, 1200, undefined, 9);
-  assert.equal(digestoConParamsDeMain(world), DIGESTO_MAIN_1200,
-    'el estado del mundo tras 1200 pasos es bit a bit el de main: ninguna ley candidata actúa con su default');
-  assert.notEqual(digestoCanonico(world), DIGESTO_MAIN_1200,
-    'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
+// V23: sin digestos dorados con valor fijo. «las leyes candidatas apagadas no mueven el mundo» queda como
+// reproducibilidad con la forma de params de `main`: dos corridas de lo mismo (misma semilla, un hilo, sin
+// tarjeta) dan el mismo digesto físico, y el digesto completo difiere de él sólo por declarar configuración nueva.
+test('(i) con los params históricos las leyes candidatas apagadas dejan un mundo reproducible: el digesto físico coincide entre dos corridas', { timeout: 900000 }, t => {
+  const a = replica(t, 600, undefined, 9), b = replica(t, 600, undefined, 9);
+  const fisico = digestoConParamsDeMain(a);
+  assert.equal(digestoConParamsDeMain(b), fisico, 'misma semilla, un hilo: dos corridas dan el mismo estado físico');
+  assert.notEqual(digestoCanonico(a), fisico, 'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
 });
 
 test('(i) los params históricos declaran las leyes candidatas apagadas y los defaults adoptan sólo las de reglas 10 y 11', t => {

@@ -126,7 +126,7 @@ export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'r
         tile.traffic = clamp(traffic - 0.00005);
         if (tile.traffic < 0.05) {
           const paved = Math.max(0, tile.paved! - 0.0005);
-          if (paved < 0.001) delete tile.paved; else tile.paved = paved;
+          if (paved < 0.001) tile.paved = undefined; else tile.paved = paved;
         }
       }
     };
@@ -181,7 +181,7 @@ function stepFauna(tiles: Tile[], tick: number): void {
   for (const cell of cells) {
     const tile = cell.tile, species = speciesAt.get(cell);
     let count = populations.get(cell)!;
-    if (!species || count === 0) { tile.fauna = 0; delete tile.species; continue; }
+    if (!species || count === 0) { tile.fauna = 0; tile.species = undefined; continue; }
     let growth = tile.growth ?? 0;
     const availableWater = animalWater(cell, species);
     let water = availableWater;
@@ -200,7 +200,7 @@ function stepFauna(tiles: Tile[], tick: number): void {
       tile.drinkingWater = clamp(cell.drinkingWater - potable);
       tile.moisture = clamp(cell.moisture - (consumed - potable) / 0.1);
     }
-    if (count === 0) delete tile.species; else tile.species = species;
+    if (count === 0) tile.species = undefined; else tile.species = species;
   }
 }
 

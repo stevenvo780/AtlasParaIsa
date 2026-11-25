@@ -663,7 +663,7 @@ export class TileStore {
       for (let f = 0; f < LAYOUT.length; f++) {
         const slot = LAYOUT[f]!, key = slot.kind === 'life' ? 'life' : slot.key;
         const value = decode(slot, (slot.kind === 'life' ? this.lives[this.parity]! : this.fields[f]!)[cell]!);
-        if (value !== undefined) tile[key] = value; else if (key in tile) delete tile[key];
+        if (value !== undefined) tile[key] = value; else if (tile[key] !== undefined) tile[key] = undefined;
       }
     }
     this.release();

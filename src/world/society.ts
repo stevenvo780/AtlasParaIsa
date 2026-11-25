@@ -6,7 +6,7 @@ import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
 import { activeSiteAt, contributeConstruction, partnerConstructionCost, storedMaterialsNear, structureDistance, waterAvailable } from './inventions.js';
-import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
+import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, recetaTecnicaParaEnsenar, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
@@ -403,6 +403,9 @@ function practicedRecipes(teacher: Person): string[] {
 }
 function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[], census?: { counts?: Map<string, number> }): string | undefined {
   if (!world.learningEnabled) return;
+  // V23 (`v23.tecnica`): se enseña una receta de lotes que recuerda (`recetaParaEnsenar`), no el catálogo viejo.
+  const deLotes = recetaTecnicaParaEnsenar(world, teacher, learner);
+  if (deLotes !== null) return deLotes;
   const practicedIds = practiced ?? practicedRecipes(teacher);
   if (!practicedIds.length) return;
   // Mismas recetas resueltas en el mismo orden que `knownRecipes.flatMap(…)` con los dos filtros puros.
@@ -704,8 +707,10 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   } else if (opportunity.recipeId) {
     if (practicedRecipeToTeach(world, person, other) !== opportunity.recipeId || !shareTechnology(world, person, other, emit, opportunity.recipeId)) return false;
     helperPaid = true; count(world, 'teaching');
-    const recipe = resolveTechnologyRecipe(world, opportunity.recipeId)!;
-    detail = `Mostró las operaciones practicadas ${recipe.program.steps.map(s => s.op).join(' → ')}; ${other.name} aprendió la receta por esta interacción cercana.`;
+    // Con la técnica de lotes el id es del registro, no del catálogo viejo (null = no rige).
+    const recipe = recetaTecnicaParaEnsenar(world, person, other) === null ? resolveTechnologyRecipe(world, opportunity.recipeId) : undefined;
+    detail = recipe ? `Mostró las operaciones practicadas ${recipe.program.steps.map(s => s.op).join(' → ')}; ${other.name} aprendió la receta por esta interacción cercana.`
+      : `Mostró un proceso material que practica; ${other.name} lo recuerda por esta interacción cercana.`;
   } else {
     const skill = practicedSkillToTeach(world, person, other);
     if (!skill) return false;

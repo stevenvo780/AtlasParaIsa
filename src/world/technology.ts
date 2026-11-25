@@ -1473,6 +1473,16 @@ export function recetaParaEnsenar(c: CtxLeyMateria, maestro: Person, aprendiz: P
     .sort((a, b) => b.usada - a.usada || a.id - b.id)[0];
 }
 
+/** Con `v23.tecnica` y contexto de motor, la receta de lotes que `maestro` enseñaría a `aprendiz` (su id del registro
+ * en texto, o undefined si no hay); null si la técnica de lotes no rige y manda el catálogo viejo. */
+export function recetaTecnicaParaEnsenar(host: object, maestro: Person, aprendiz: Person): string | undefined | null {
+  const c = ctxTecnica(host);
+  if (!c) return null;
+  if (!esPersonaV23(maestro)) return undefined;
+  const r = recetaParaEnsenar(c, maestro, aprendiz);
+  return r ? String(r.id) : undefined;
+}
+
 /** Enseñar = intento Ensenar al dueño del aprendiz; quien enseña paga un tick de trabajo y la receta vuelve a 1. */
 export function ensenarTecnica(c: CtxLeyMateria, maestro: Person, aprendizUid: number, recetaId?: number, aprendiz: Person | null = null): boolean {
   if (!maestro.cuerpo) return false;
@@ -1480,6 +1490,12 @@ export function ensenarTecnica(c: CtxLeyMateria, maestro: Person, aprendizUid: n
   if (!r || ref === REF_NULA) return false;
   if (!(pagar(c, maestro.cuerpo, POTENCIA_TRABAJO * SEGUNDOS_TICK) > 0)) return false;
   usarReceta(tecnicaDe(maestro), r.id, c.tick);
+  // Sin v23.intentos nadie vacía la cola A (la enseñanza se perdía y la cola crecía): el mundo es un solo heap y se
+  // aprende directo, como hace natalidad con el vínculo.
+  if (!ley(c.mundo, 'intentos')) {
+    const quien = aprendiz ?? c.mundo.people.find(o => o.uid === aprendizUid);
+    return !!quien && aprenderReceta(c, quien, r, maestro.uid === undefined ? REF_NULA : c.ref(maestro.uid));
+  }
   c.buzon.enviar(c.frente.dueno[slotDe(ref)]!, { tipo: TipoIntento.Ensenar, de: maestro.uid === undefined ? REF_NULA : c.ref(maestro.uid), a: ref,
     celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: null, bytes: codificarEnsenanza(r) });
   return true;

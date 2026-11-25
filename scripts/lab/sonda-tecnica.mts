@@ -21,11 +21,11 @@ process.title = 'carta-isa';
 function contar(): Record<string, unknown> {
   const c = ctxSi(mundo) as any;
   let conTecnica = 0, intentos = 0, recetas = 0, maxRecetas = 0, cargaLotes = 0, cargaVacios = 0, cargaUnicos = 0, cargaMasaMax = 0;
-  const pasos: Record<string, number> = {}, tipos: Record<string, number> = {};
+  const pasos: Record<string, number> = {}, tipos: Record<string, number> = {}, ids = new Set<number>();
   for (const p of mundo.people as any[]) {
     const t = p.technology?.tecnica;
     if (t) {
-      conTecnica++; intentos += t.intentos; recetas += t.recetas.length; maxRecetas = Math.max(maxRecetas, t.recetas.length);
+      conTecnica++; for (const r of t.recetas) ids.add(r.id); intentos += t.intentos; recetas += t.recetas.length; maxRecetas = Math.max(maxRecetas, t.recetas.length);
       const pe = t.proceso;
       if (pe) {
         tipos[pe.tipo] = (tipos[pe.tipo] ?? 0) + 1;
@@ -61,7 +61,7 @@ function contar(): Record<string, unknown> {
     const cab = new TextEncoder().encode('T1R');
     if (reg) for (let id = 0; id < reg.n; id++) { const b = reg.leer(id); if (b && b[0] === cab[0] && b[1] === cab[1] && b[2] === cab[2]) T1R++; }
   }
-  return { conTecnica, intentos, recetas, maxRecetas, procesos: tipos, pasos, cargaLotes, cargaVacios, cargaUnicos, cargaMasaMax: +cargaMasaMax.toFixed(3),
+  return { conTecnica, intentos, recetas, recetasDistintas: ids.size, maxRecetas, procesos: tipos, pasos, cargaLotes, cargaVacios, cargaUnicos, cargaMasaMax: +cargaMasaMax.toFixed(3),
     objetos, objetosConForma, masaObjetos: +masaObjetos.toFixed(3), T1R };
 }
 
@@ -70,5 +70,5 @@ fila({ tipo: 'inicio', semilla: o.semilla, hasta: o.hasta, personas: mundo.peopl
 for (let t = 1; t <= o.dias * TICKS_PER_DAY; t++) {
   stepWorld(mundo);
   if (t % cada === 0) fila({ tick: mundo.tick, poblacion: mundo.people.filter(p => p.role === 'neighbor').length,
-    nacimientos: mundo.totals.births ?? 0, muertes: mundo.demographyDynamics.deaths, fauna: mundo.animals.length, ...contar() });
+    nacimientos: mundo.totals.births ?? 0, muertes: mundo.demographyDynamics.deaths, fauna: mundo.animals.length, ensenanzas: mundo.totals.teaching ?? 0, ...contar() });
 }

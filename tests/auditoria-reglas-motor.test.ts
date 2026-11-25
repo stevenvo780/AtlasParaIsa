@@ -75,18 +75,32 @@ function violaciones(ruta: string, prohibidos: readonly string[]): string[] {
 }
 
 test('T171 lente 1: las leyes no leen hardware, relojes ni azar del proceso', () => {
-  // Leyes: todo `src/world` salvo el despacho paralelo y el puente GPU. El SoA de
+  // Leyes: todo `src/world` salvo el despacho paralelo, el de la percepción y el puente GPU. El SoA de
   // terreno (`soa/`) sí es ley a estos efectos: guarda el estado del que salen las
   // decisiones, así que tampoco puede mirar la máquina ni el reloj.
   const despacho = `${WORLD_DIR}paralelo/`;
   const gpu = `${WORLD_DIR}gpu/`;
+  // Del motor V23 (despacho de la percepción, coordinador y dueños de página) solo se admiten, por fichero, los relojes de
+  // espera y de medida y la cuenta de hilos del `auto`: ninguno entra en una decisión ni en el resultado de una ley.
+  //  · decision/despacho.ts — plazo de los mensajes a la piscina y tiempo de pared de cada lote.
+  //  · decision/percepcion.ts — contadores de tiempo del lote (diagnóstico).
+  //  · motor/coordinador.ts — `motor.hilos='auto'` pregunta cuántos hilos hay; mide cada fase para el reparto.
+  //  · motor/dueno-worker.ts y motor/fotograma.ts — medida del tramo de cada dueño y plazo de la barrera.
+  const permitidos: Readonly<Record<string, readonly string[]>> = {
+    'decision/despacho.ts': ['Date.now', 'performance.now'],
+    'decision/percepcion.ts': ['performance.now'],
+    'motor/coordinador.ts': ['availableParallelism', 'performance.now'],
+    'motor/dueno-worker.ts': ['performance.now'],
+    'motor/fotograma.ts': ['performance.now'],
+  };
+  const permitidosDe = (ruta: string): readonly string[] => permitidos[ruta.slice(WORLD_DIR.length)] ?? [];
   const leyes = ficherosTs(WORLD_DIR).filter(ruta => !ruta.startsWith(despacho) && !ruta.startsWith(gpu));
   assert.ok(leyes.length > 20, 'el escaneo debe cubrir el motor');
-  const encontradas = leyes.flatMap(ruta => violaciones(ruta, PROHIBIDOS_EN_LEY));
+  const encontradas = leyes.flatMap(ruta => violaciones(ruta, PROHIBIDOS_EN_LEY.filter(token => !permitidosDe(ruta).includes(token))));
   assert.deepEqual(encontradas, []);
   // Ninguna ley importa el módulo del sistema operativo: el reparto llega por
   // parámetros (`motor.hilos`, `motor.gpu`), nunca preguntando a la máquina.
-  const conOs = leyes.filter(ruta => sinComentarios(readFileSync(ruta, 'utf8')).includes("from 'node:os'"));
+  const conOs = leyes.filter(ruta => !permitidosDe(ruta).includes('availableParallelism')).filter(ruta => sinComentarios(readFileSync(ruta, 'utf8')).includes("from 'node:os'"));
   assert.deepEqual(conOs, []);
 });
 

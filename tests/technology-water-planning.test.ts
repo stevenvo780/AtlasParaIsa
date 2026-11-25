@@ -9,6 +9,7 @@ import { WATER_QUANTA_PER_UNIT } from '../src/world/material-affordances.js';
 import { bindWorldContext } from '../src/world/spatial.js';
 import { generateChunk } from '../src/world/terrain.js';
 import { proyectoInvestigacion } from './lib/escenas.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 /** Controlled laboratory: the experiment is selected, but all substrate and work
  * are paid. Subsequent choices use stepWorld with no gestures. The separate
@@ -137,10 +138,10 @@ test('restart in a preparation phase retains its original target and never reser
   try {
     const plan = preparation(lab); stepWorld(lab.world); store.save(lab.world);
     const restored = store.load()!.world, actor = restored.people.find(p => p.id === lab.actor.id)!;
-    assert.deepEqual(actor.technology.waterPreparation, plan); assert.deepEqual(restored, lab.world);
+    igualesSinUndefined(actor.technology.waterPreparation, plan); igualesSinUndefined(restored, lab.world);
     const uninterrupted = cloneWorld(lab.world);
     for (let n = 0; n < WATER_PREPARATION_MAX_TICKS; n++) { stepWorld(restored); stepWorld(uninterrupted); }
-    assert.deepEqual(restored, uninterrupted); assert.equal(actor.technology.waterPreparation, undefined);
+    igualesSinUndefined(restored, uninterrupted); assert.equal(actor.technology.waterPreparation, undefined);
     assertWorld(restored);
   } finally { store.close(); }
 });

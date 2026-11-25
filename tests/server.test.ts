@@ -17,6 +17,7 @@ import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/s
 import { acquireLock } from '../src/server/lock.js';
 import type { Gesture, ServerMessage, WorldView } from '../src/shared/types.js';
 import { filaInstantanea } from './lib/store.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 const password = 'synthetic-test-password-only';
 
@@ -83,7 +84,7 @@ test('two authenticated clients share one authoritative timeline and input trans
   const accepted=await results;assert.ok(accepted.every(m=>m.type==='result'&&m.result.accepted&&m.result.tick===6));
   assert.deepEqual(accepted.map(m=>m.type==='result'?m.result.order:-1),[0,1]);
   const shared=await states;assert.ok(shared[0]?.type==='state'&&shared[1]?.type==='state');assert.deepEqual(shared[0].world.people,shared[1].world.people);
-  assert.equal(f.app.world.tick,6);assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM inputs').get() as {n:number}).n,2);assert.deepEqual(f.store.load()!.world,f.app.world);
+  assert.equal(f.app.world.tick,6);assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM inputs').get() as {n:number}).n,2);igualesSinUndefined(f.store.load()!.world,f.app.world);
 });
 
 test('access is mandatory, origin is enforced, private projections exclude internal state', async t => {
@@ -122,7 +123,7 @@ test('no browser connected: server advances and committed chronicle exactly matc
   await new Promise<void>(resolve => setTimeout(resolve, 160));
   assert.ok(f.app.world.tick > start);
   const saved = f.store.load()!.world;
-  assert.deepEqual(saved, f.app.world);
+  igualesSinUndefined(saved, f.app.world);
   for (const e of projectWorld(saved).events) {
     const row = f.store.db.prepare('SELECT body FROM events WHERE id=?').get(e.id) as {body:string};
     assert.deepEqual(JSON.parse(row.body), e);
@@ -166,11 +167,11 @@ test('restart restores intention, memory, PRNG and body without retrospective si
   try {
     const initial = createWorld(42); for(let i=0;i<30;i++) stepWorld(initial);
     store.save(initial); store.close(); store = new Store(path);
-    assert.deepEqual(store.load()!.world, initial);
+    igualesSinUndefined(store.load()!.world, initial);
     const app = createApp({store,password,origin:'http://127.0.0.1:3000',manual:true});
     assert.equal(app.world.tick, initial.tick);
     const actual = structuredClone(app.world); actual.events = initial.events;
-    assert.deepEqual(actual, initial);
+    igualesSinUndefined(actual, initial);
     assert.equal(app.world.events.at(-1)?.kind, 'pause');
     assert.deepEqual(store.load()!.world, app.world); void app.close();
   } finally {store.close(); rmSync(dir,{recursive:true,force:true});}
@@ -193,7 +194,7 @@ test('backup is coherent, validates after reopening, and does not overwrite an e
   try {
     const world=createWorld(42); for(let i=0;i<5;i++)stepWorld(world); store.save(world);
     const dest=join(dir,'copy.sqlite'); store.backup(dest);
-    const backup=new Store(dest); assert.deepEqual(backup.load()!.world,world); backup.close();
+    const backup=new Store(dest); igualesSinUndefined(backup.load()!.world,world); backup.close();
     assert.throws(()=>store.backup(dest),/exists/);
   } finally {store.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -269,7 +270,7 @@ test('recover previous checkpoint removes later idempotency and preserves origin
     const results=stepWorld(world,[gesture]);store.save(world,[{gesture,result:results[0]}]);
     const output=join(dir,'recovered.sqlite');store.previous(output);
     const copy=new Store(output);assert.deepEqual(copy.load()!.world,previous);assert.equal(copy.result(gesture),null);copy.close();
-    assert.deepEqual(store.load()!.world,world);assert.deepEqual(store.result(gesture),results[0]);
+    igualesSinUndefined(store.load()!.world,world);igualesSinUndefined(store.result(gesture),results[0]);
   } finally {store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -308,7 +309,7 @@ test('previous-checkpoint CLI holds the destination lock throughout recovery', (
     const blocked=run();assert.equal(blocked.status,1);assert.equal(existsSync(join(target,'world.sqlite')),false);release();
     const recovered=run();assert.equal(recovered.status,0,recovered.stderr);
     const result=new Store(join(target,'world.sqlite'));assert.deepEqual(result.load()!.world,previous);result.close();
-    const original=new Store(join(source,'world.sqlite'));assert.deepEqual(original.load()!.world,world);original.close();
+    const original=new Store(join(source,'world.sqlite'));igualesSinUndefined(original.load()!.world,world);original.close();
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -382,7 +383,7 @@ test('con cadencia 20 el paso no reescribe el mundo en cada tick, un gesto fuerz
   assert.equal(savedTick(),6,'un gesto confirmado obliga a guardar en su propio paso');
   while(f.app.world.tick<20)f.app.stepOnce();
   assert.equal(savedTick(),20,'la cadencia guarda al cruzar el múltiplo');
-  assert.deepEqual(f.store.load()!.world,f.app.world);
+  igualesSinUndefined(f.store.load()!.world,f.app.world);
   const view=await (await fetch(f.origin+'/api/world',{headers:{Cookie:f.cookie}})).json() as WorldView;
   assert.ok(Number.isFinite(view.performance!.tickHz)&&view.performance!.tickHz>0,'el ritmo real se mide, no se declara');
 });

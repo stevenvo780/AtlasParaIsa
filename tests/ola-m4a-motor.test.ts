@@ -191,8 +191,9 @@ test('m4a: con v23.materia el dueño arma la arena de lotes y la química, con u
   const d = duenoSi(mundo)!;
   assert.ok(d.materia && d.quimica, 'el contexto lleva materia y química');
   assert.equal(d.materia.vivo(-1), false);
-  // Volcar la arena es un pedido al integrador (ArenaLotes.guardar): hasta entonces la instantánea lo dice claro.
-  assert.throws(() => unico.instantanea(), /ArenaLotes\.guardar/);
+  // `ArenaLotes.guardar` ya existe (carril ps): la instantánea lleva la arena volcada, con la materia del dueño.
+  const inst = unico.instantanea();
+  assert.ok(inst.materia, 'la instantánea de un mundo con materia lleva la arena volcada');
   const repartido = createWorld(17, { ...DEFAULT_PARAMS, v23: { ...v23, duenos: true } });
   const motor = crearMotor(repartido, { ...unSoloDueno(17), hilos: 2 });
   try {

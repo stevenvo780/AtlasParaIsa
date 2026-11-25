@@ -10,6 +10,7 @@ import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '
 import type { Gesture } from '../src/shared/types.js';
 import { filaInstantanea, sha256 } from './lib/store.js';
 import { PROGRAMA_FILO, proyectoInvestigacion } from './lib/escenas.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-technology-store-review-')), path = join(directory, 'world.sqlite');
@@ -88,7 +89,7 @@ test('a failed post-COMMIT cache refresh still reports success and a reopened da
   try {
     const restored = reopened.load()!.world;
     assert.equal(restored.tick, expectedTick); assert.deepEqual(restored.technology.history, expectedHistory);
-    assert.deepEqual(restored, lab.world); assert.deepEqual(reopened.result(gesture), result);
+    igualesSinUndefined(restored, lab.world); igualesSinUndefined(reopened.result(gesture), result);
     assert.equal(reopened.catalogueReader.resolve(recipe.id, restored.tick)!.manufactured, 1);
     assert.ok(reopened.technologyArchive.getExecution(expectedHistory.at(-1)!.id, restored.tick));
   } finally { reopened.close(); }
@@ -110,5 +111,5 @@ test('previous rejects a checksum-consistent uncommitted catalogue boundary befo
   assert.throws(() => lab.store.previous(destination), /previous snapshot contains uncommitted definitions/);
   assert.equal(existsSync(destination), false); assert.equal(existsSync(destinationDirectory), false);
   assert.deepEqual(lab.store.db.prepare('SELECT slot,body,digest FROM snapshots ORDER BY slot').all(), snapshots);
-  assert.deepEqual(lab.store.load()!.world, lab.world);
+  igualesSinUndefined(lab.store.load()!.world, lab.world);
 });

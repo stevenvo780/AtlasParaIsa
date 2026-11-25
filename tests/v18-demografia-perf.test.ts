@@ -257,7 +257,7 @@ function structure(id: string, x: number, y: number, condition: number, componen
   return { id, x, y, blueprintId: 'blueprint-base', name: id, components, condition, water: 0, food: 0, uses: 0, builtAt: 0, builderId: null };
 }
 /** Capa tejida fabricada por las leyes físicas (como tests/v16-insulation-demography.test.ts). */
-function grantCloak(world: World, person: Person) {
+function grantCloak(world: World, person: Person): boolean {
   person.materials.wood = 4; person.energy = 1; person.fatigue = 0;
   const program = {
     inputs: [{ source: 'raw' as const, material: 'wood' as const, mass: 1000 }],
@@ -266,7 +266,7 @@ function grantCloak(world: World, person: Person) {
   person.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
   for (let i = 0; i < 60 && person.technology.project; i++) researchTechnology(world, person);
   advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
-  assert.ok(person.technology.items.length > 0, 'la capa debe fabricarse');
+  return person.technology.items.length > 0;
 }
 
 /** Población sintética para `advancePopulation`: edades mezcladas (jóvenes, adultos y viejos cerca de la
@@ -319,12 +319,18 @@ function populate(world: World, seed: number, count: number, options: { cloaks: 
   world.legacy = [...dead];
   world.retiredLegacy = dead.slice(-options.pending);
   world.demographyDynamics.deaths = world.demographyDynamics.causes.starvation = dead.length;
-  for (let k = 0; k < options.cloaks; k++) {
-    const person = people[1 + 2 * k]!; // posiciones impares: a la intemperie
+  // Posiciones impares: a la intemperie. Con los parámetros del mundo abierto (`evitarNoOp`, `enfriamiento`) el mundo no deja
+  // reinvestigar el mismo programa a otras personas: la primera sale, las demás fallan. Se prueba en las siguientes posiciones
+  // impares hasta repartir las capas pedidas o agotarlas, y se exige al menos una (la prueba mide su desgaste).
+  let hechas = 0;
+  for (let slot = 1; slot < count && hechas < options.cloaks; slot += 2) {
+    const person = people[slot]!;
     const { hunger, thirst, fatigue, energy, materials } = person;
-    grantCloak(world, person);
+    const fabricada = grantCloak(world, person);
     Object.assign(person, { hunger, thirst, fatigue, energy, materials: { ...materials } });
+    if (fabricada) hechas++;
   }
+  assert.ok(options.cloaks === 0 || hechas > 0, 'al menos una capa debe fabricarse');
 }
 
 interface Escenario { digest: string; deaths: number; causes: World['demographyDynamics']['causes']; people: number; legacy: number; wornCloaks: number }

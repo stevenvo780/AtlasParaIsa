@@ -28,7 +28,7 @@ import {
 import { initializePerson, seededTraits } from '../../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams, type WorldParams } from '../../src/world/params.js';
 import { demographicTraits, initialDemography, updateDemography } from '../../src/world/demography.js';
-import { expressGenome, founderGenome, localRandom, type Genome } from '../../src/world/genetics.js';
+import { ALLELE_COUNT, expressGenome, founderGenome, localRandom, type Genome } from '../../src/world/genetics.js';
 import { founderPolicy, initialPolicyPlasticity } from '../../src/world/politica.js';
 import { activate, tileAt } from '../../src/world/spatial.js';
 import { CHUNK_SIZE, proceduralPersonName, type Chunk } from '../../src/world/terrain.js';
@@ -197,7 +197,7 @@ function estadoAEdad(genoma: Genome, cuerpo: WorldParams['cuerpo'], curva: Curva
 
 /** La mayor esperanza que permite la ley: resiliencia 1 y actividad 0 (la ley es afín en ambas, `longevityAges`). */
 function esperanzaMaxima(cuerpo: WorldParams['cuerpo']): number {
-  const alelos = new Array<number>(14).fill(0.5);
+  const alelos = new Array<number>(ALLELE_COUNT).fill(0.5);
   alelos[8] = alelos[9] = 1; alelos[4] = alelos[5] = 0;
   return curvaSupervivencia({ alleles: alelos }, cuerpo).esperanza;
 }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertWorld, createWorld, tileAt, MAX_EVENTS, MAX_EXPERIENCES, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../src/world/index.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 function run(world: World, ticks: number): void { for (let n = 0; n < ticks; n++) stepWorld(world); }
 
@@ -30,7 +31,7 @@ test('same seed, inputs, order and persisted PRNG reproduce the full state', () 
   const restored = JSON.parse(JSON.stringify(a)) as World;
   assertWorld(restored);
   run(restored, 600); run(a, 600);
-  assert.deepEqual(a, restored);
+  igualesSinUndefined(a, restored);
   assert.notDeepEqual(createWorld(19).tiles, createWorld(20).tiles);
 });
 

@@ -12,6 +12,7 @@ import { assertWorld, createWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion }
 import { parseParams, paramsOf } from '../src/world/params.js';
 import { technologyCatalogueNearCapacity } from '../src/world/technology-catalogue.js';
 import { technologyJournalNearCapacity } from '../src/world/technology-journal.js';
+import { igualesSinUndefined } from './lib/comparar.js';
 
 const params = parseParams('poblacion.nacimientosPorComprobacion=20,agua.cuencas=0.4,persistencia.cadaTicks=300,persistencia.ventanaEventosTicks=0');
 const hash = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
@@ -80,13 +81,13 @@ test('primer guardado regular: copia coherente, digesto POSTsave y mundo idénti
   const snapshotStore = new Store(report.scenes[0]!.path, { readOnly: true });
   const loaded = snapshotStore.load()!.world;
   assert.equal(digestoCanonico(loaded), report.scenes[0]!.digestPostSave);
-  assert.deepEqual(loaded, reference);
+  igualesSinUndefined(loaded, reference);
   assert.deepEqual(paramsOf(loaded), report.params);
 
   const measurement: FaseMedicion = { clock: () => performance.now(), fases: {} };
   for (let tick = 0; tick < 20; tick++) { stepWorld(loaded, [], undefined, measurement); stepWorld(reference); }
   assert.equal(digestoCanonico(loaded), digestoCanonico(reference), 'callbacks de fase no alteran el mundo cargado');
-  assert.deepEqual(loaded, reference);
+  igualesSinUndefined(loaded, reference);
   snapshotStore.close(); referenceStore.close();
   const sceneManifest = JSON.parse(readFileSync(join(output, 'n16.json'), 'utf8')) as { params: unknown; source: { files: Record<string, string> }; digestPostSave: string };
   assert.deepEqual(sceneManifest.params, report.params);

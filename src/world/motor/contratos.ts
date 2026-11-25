@@ -18,7 +18,6 @@ import type { DescriptorEnlace, SucesoVisible } from '../../shared/fotograma.js'
 import type { ChronicleEvent, CommunityView, Gesture, GestureResult, PlaceView } from '../../shared/types.js';
 import type { World, Person } from '../index.js';
 import type { ArenaMateria, Libro, LoteRef, MateriaCheckpoint, ServicioQuimico, VistaCuerpo } from '../materia/tipos.js';
-import type { TotalesMateria } from '../materia/libro.js';
 
 // ── Identidades ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -293,7 +292,7 @@ export interface CtxMateria extends CtxDueno {
   readonly materia: ArenaMateria;
   readonly quimica: ServicioQuimico;
   /** Totales del mundo ya plegados por el coordinador. */
-  readonly totales: TotalesMateria;
+  readonly totales: Pick<MateriaCheckpoint, 'inicial' | 'fuentes' | 'sumideros'>;
 }
 
 // ── Percepción ───────────────────────────────────────────────────────────────────────────────────────────

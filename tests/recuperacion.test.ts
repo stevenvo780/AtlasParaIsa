@@ -14,7 +14,7 @@ import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { bindWorldContext, cloneWorld, createWorld, stepWorld, worldContext, type World } from '../src/world/index.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
-import { digestoCanonico } from '../src/world/digesto.js';
+import { primeraDiferencia } from './lib/comparar.js';
 import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import { gpuNvrtcAvailable } from '../src/world/gpu/puente.js';
 import { dispositivosGpuApagados } from '../src/world/ecosystem-kernel.js';
@@ -26,9 +26,14 @@ function mudar(world: World, dx: number, dy: number): void {
   for (const person of world.people) { person.x += dx; person.y += dy; person.target = { x: person.x, y: person.y }; }
 }
 
-/** El digesto incluye los params efectivos: se comparan los mundos, no su `motor.gpu`. */
-const digestoDelMundo = (world: World): string => {
-  const copia = cloneWorld(world); setParams(copia, DEFAULT_PARAMS); return digestoCanonico(copia);
+/**
+ * Los params efectivos quedan fuera (se comparan los mundos, no su `motor.gpu`) y los números se comparan con tolerancia
+ * relativa de 1e-9: desde V23 la tarjeta compila con FMA (sin paridad de 0 ULP con la CPU, decisión del 24-nov), así que
+ * el mundo que corrió algunos ticks en la tarjeta y el gemelo de solo CPU difieren en el último dígito.
+ */
+const diferenciaDeMundos = (a: World, b: World): string | null => {
+  const ca = cloneWorld(a), cb = cloneWorld(b); setParams(ca, DEFAULT_PARAMS); setParams(cb, DEFAULT_PARAMS);
+  return primeraDiferencia(ca, cb);
 };
 
 /** Mundo turbo en memoria que guarda en cada paso (o según `params`), detenido en manual y con las salidas observadas. */
@@ -312,8 +317,8 @@ test('un fallo del puente GPU a mitad de paso termina el tick por CPU y apaga la
     stepWorld(soloCpu);
     assert.equal(conGpu.tick, 20);
     assert.ok(dispositivosGpuApagados.has(0), 'la tarjeta queda apagada hasta el siguiente arranque');
-    assert.equal(digestoDelMundo(conGpu), digestoDelMundo(soloCpu), 'el tick por CPU es el mismo mundo');
+    assert.equal(diferenciaDeMundos(conGpu, soloCpu), null, 'el tick por CPU es el mismo mundo');
     // Los ticks ecológicos siguientes, ya con la tarjeta apagada y un solo hilo, también los acaba la CPU.
     for (let i = 0; i < 20; i++) { assert.doesNotThrow(() => stepWorld(conGpu)); stepWorld(soloCpu); }
-    assert.equal(digestoDelMundo(conGpu), digestoDelMundo(soloCpu), 'y siguen siendo el mismo mundo');
+    assert.equal(diferenciaDeMundos(conGpu, soloCpu), null, 'y siguen siendo el mismo mundo');
   });

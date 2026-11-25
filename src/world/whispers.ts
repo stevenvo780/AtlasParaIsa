@@ -6,7 +6,7 @@
  * escucha es un gen (`genetics.ts`), la calma es lo poco acuciada que está su necesidad, y la audibilidad cae con la
  * distancia en los mensajes regionales. No hay espera mínima, ni horizonte que lo garantice, ni umbral de calma: quien
  * casi no escucha casi nunca oye, y el mensaje se desvanece si pasa su plazo sin oírse. El azar es un hash de semilla,
- * paso y destinatario (nunca el RNG del mundo ni el reloj): con un hilo y semilla, la misma corrida. Una vez oído, la
+ * paso y mensaje (nunca el RNG del mundo ni el reloj): con un hilo y semilla, la misma corrida. Una vez oído, la
  * persona lo cumple caminando por tierra (`personas.ts`, `choose`) y puede olvidarlo por el camino con un riesgo que baja
  * con su escucha. Nunca hay teletransporte ni obediencia instantánea.
  */
@@ -153,20 +153,19 @@ export function calma(person: Pick<WhisperPersonLike, 'hunger' | 'thirst' | 'fat
   return libre(person.hunger) * libre(person.thirst) * libre(person.fatigue);
 }
 
+const audibilidadDeCuadrado = (distancia2: number): number => 1 / (1 + distancia2 / (ALCANCE_VOZ * ALCANCE_VOZ));
 /** Qué parte del mensaje llega a quien está a `distancia` de donde suena: 1 junto a él, 1/2 a `ALCANCE_VOZ`. */
-export function audibilidad(distancia: number): number {
-  const r = distancia / ALCANCE_VOZ;
-  return 1 / (1 + r * r);
-}
+export const audibilidad = (distancia: number): number => audibilidadDeCuadrado(distancia * distancia);
 
-/** Probabilidad por paso de oír un mensaje: proporcional a `escucha² · calma · audibilidad`. */
+/** Probabilidad por paso de oír un mensaje: proporcional a `escucha² · calma · audibilidad`. Es también la tasa con que
+ * lo oye, en el sentido de que el tiempo hasta oírlo es exponencial de esa tasa: E[latencia] = 1 / probabilidad. */
 export function probabilidadDeOir(escucha: number, calmaCuerpo: number, audible: number): number {
   return OIDO_POR_TICK * escucha * escucha * calmaCuerpo * audible;
 }
 
-/** Probabilidad de que algo con riesgo `p` por paso ocurra en `pasos` pasos seguidos. */
-function enPasos(p: number, pasos: number): number {
-  return p <= 0 || pasos <= 0 ? 0 : p >= 1 ? 1 : -Math.expm1(pasos * Math.log1p(-p));
+/** Probabilidad de que algo con tasa `tasa` por paso ocurra en `pasos` pasos seguidos. */
+function enPasos(tasa: number, pasos: number): number {
+  return tasa <= 0 || pasos <= 0 ? 0 : -Math.expm1(-tasa * pasos);
 }
 
 /** Riesgo por paso de olvidar un mensaje ya oído. */
@@ -235,16 +234,26 @@ export function stepWhispers(
     // Sólo cuenta el tiempo que el mensaje lleva sonando: uno recién dejado no se oye con pasos que no existían.
     const pasos = Math.min(elapsed, age);
     if (pasos <= 0) continue;
-    // Un mensaje dirigido llega entero; uno regional lo oye quien esté cerca, y lo oye antes quien antes lo logre
-    // (menor u/P entre los que aciertan), con independencia del orden de la lista.
-    let oyente: WhisperPersonLike | undefined, mejor = Infinity;
-    const posibles: readonly WhisperPersonLike[] = dirigido ? [dirigido] : people;
-    for (let i = 0; i < posibles.length; i++) {
-      const person = posibles[i]!;
-      const probabilidad = enPasos(probabilidadDeOir(escuchaDe(person.genome), calma(person), dirigido ? 1 : audibilidad(dist(person, w))), pasos);
-      if (probabilidad <= 0) continue;
-      const u = deterministicUnit(seed, tick, person.id, w.id);
-      if (u < probabilidad && u / probabilidad < mejor) { mejor = u / probabilidad; oyente = person; }
+    // Cada persona oye con su tasa; la primera en oírlo es la suya con probabilidad proporcional a ella, y el mensaje se
+    // oye en esta comprobación con la probabilidad de que alguna lo haga (tiempos exponenciales en competencia). Un solo
+    // sorteo por mensaje, sin una lectura por persona; un mensaje dirigido llega entero, uno regional con su audibilidad.
+    const tasaDe = (person: WhisperPersonLike): number => probabilidadDeOir(escuchaDe(person.genome), calma(person),
+      dirigido ? 1 : audibilidadDeCuadrado((person.x - w.x) ** 2 + (person.y - w.y) ** 2));
+    let suma = 0;
+    if (dirigido) suma = tasaDe(dirigido);
+    else for (let i = 0; i < people.length; i++) suma += tasaDe(people[i]!);
+    const u = deterministicUnit(seed, tick, w.id, dirigido ? dirigido.id : 'oído');
+    const algunoOye = enPasos(suma, pasos);
+    if (!(u < algunoOye)) continue;
+    let oyente: WhisperPersonLike | undefined = dirigido;
+    if (!oyente) {
+      let resto = (u / algunoOye) * suma;
+      for (let i = 0; i < people.length; i++) {
+        const tasa = tasaDe(people[i]!);
+        if (tasa <= 0) continue;
+        oyente = people[i];
+        if ((resto -= tasa) < 0) break;
+      }
     }
     if (!oyente) continue;
     w.status = 'heard';

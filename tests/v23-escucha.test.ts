@@ -145,7 +145,7 @@ test('latencia: la mediana cae como 1/escucha² y nadie con escucha 0 oye jamás
   const medido = (e: number) => { const l = latenciasIndependientes(grupo(e), 77); return { oidos: l.filter(x => x !== null).length, mediana: mediana(l.map(x => x ?? WHISPER_LIFETIME_TICKS)) }; };
   const alta = medido(0.8), media = medido(0.4), baja = medido(0.2);
   // Mediana esperada con las comprobaciones cada 10 pasos y la calma de las personas de la prueba, (1 − 0,2)³.
-  const teorica = (e: number) => { const p = OIDO_POR_TICK * e * e * (1 - 0.2) ** 3; return WHISPER_CHECK_TICKS * Math.ceil(Math.LN2 / -Math.log1p(-(1 - (1 - p) ** WHISPER_CHECK_TICKS))); };
+  const teorica = (e: number) => WHISPER_CHECK_TICKS * Math.ceil(Math.LN2 / (WHISPER_CHECK_TICKS * OIDO_POR_TICK * e * e * (1 - 0.2) ** 3));
   for (const [e, m] of [[0.8, alta], [0.4, media], [0.2, baja]] as const)
     assert.ok(Math.abs(m.mediana / teorica(e) - 1) < 0.15, `escucha ${e}: mediana ${m.mediana} frente a ${teorica(e)} esperada`);
   assert.ok(media.mediana / alta.mediana > 3.2 && media.mediana / alta.mediana < 4.8, `0,4 frente a 0,8: ×${(media.mediana / alta.mediana).toFixed(2)}`);
@@ -155,15 +155,15 @@ test('latencia: la mediana cae como 1/escucha² y nadie con escucha 0 oye jamás
   assert.ok(sorda.every(x => x === null), 'escucha 0: ningún mensaje se oye');
 });
 
-test('latencia y escucha: Spearman negativo y la mayoría de los poco atentos no oye antes del plazo', () => {
+test('latencia y escucha: Spearman negativo; quien casi no escucha casi nunca oye y quien escucha mucho siempre', () => {
   const azar = localRandom(31, 'cohorte');
-  const personas = Array.from({ length: 600 }, (_, i) => persona(`c${i}`, 0.05 + azar() * 0.95));
+  const personas = Array.from({ length: 1500 }, (_, i) => persona(`c${i}`, 0.02 + azar() * 0.98));
   const l = latenciasIndependientes(personas, 3);
   const escucha = personas.map(p => escuchaDe(p.genome)), latencia = l.map(x => x ?? WHISPER_LIFETIME_TICKS);
   const rho = spearman(escucha, latencia);
   assert.ok(rho < -0.6, `rho ${rho.toFixed(3)}`);
-  const poco = l.filter((_, i) => escucha[i]! < 0.15), muchos = l.filter((_, i) => escucha[i]! > 0.8);
-  assert.ok(poco.filter(x => x === null).length / poco.length > 0.5, '«casi nunca» oyen quienes casi no escuchan');
+  const poco = l.filter((_, i) => escucha[i]! < 0.1), muchos = l.filter((_, i) => escucha[i]! > 0.6);
+  assert.ok(poco.filter(x => x === null).length / poco.length > 0.6, `«casi nunca»: ${poco.filter(x => x === null).length} de ${poco.length} sin oír`);
   assert.ok(muchos.filter(x => x !== null).length / muchos.length > 0.99, 'quienes escuchan mucho oyen siempre');
 });
 
@@ -178,7 +178,7 @@ test('un mensaje recién dejado no se oye en el mismo paso; un cuerpo agotado no
   assert.equal(w.status, 'faded'); assert.equal(fin.faded[0]!.reason, 'unheard');
 });
 
-test('mensaje regional: lo oye quien está cerca, con independencia del orden de la lista', () => {
+test('mensaje regional: lo oye quien está cerca, en proporción a su audibilidad y a su escucha', () => {
   const cerca = persona('cerca', 0.7, { x: 20, y: 20 }), lejos = persona('lejos', 0.7, { x: 20 + 10 * ALCANCE_VOZ, y: 20 }), mediano = persona('mediano', 0.7, { x: 20 + 3 * ALCANCE_VOZ, y: 20 });
   const quienOye = (lista: WhisperPersonLike[], i: number) => {
     const whispers: WhisperRecord[] = [];
@@ -187,13 +187,15 @@ test('mensaje regional: lo oye quien está cerca, con independencia del orden de
     return null;
   };
   const cuentas: Record<string, number> = { cerca: 0, mediano: 0, lejos: 0, nadie: 0 };
-  for (let i = 0; i < 300; i++) {
-    const a = quienOye([cerca, mediano, lejos], i), b = quienOye([lejos, mediano, cerca], i);
-    assert.equal(a, b, 'el orden de la lista no decide quién lo oye');
-    cuentas[a ?? 'nadie']!++;
-  }
-  assert.ok(cuentas.cerca! > 250, `cerca ${cuentas.cerca}, mediano ${cuentas.mediano}, lejos ${cuentas.lejos}`);
-  assert.ok(cuentas.cerca! > cuentas.mediano! && cuentas.mediano! >= cuentas.lejos!);
+  for (let i = 0; i < 600; i++) cuentas[quienOye([cerca, mediano, lejos], i) ?? 'nadie']!++;
+  // Audibilidades 1, 1/10 y 1/101: lo oye quien está cerca casi siempre, y el lejano casi nunca.
+  const total = 1 + 1 / 10 + 1 / 101;
+  assert.ok(Math.abs(cuentas.cerca! / 600 - 1 / total) < 0.05, `cerca ${cuentas.cerca}, mediano ${cuentas.mediano}, lejos ${cuentas.lejos}`);
+  assert.ok(Math.abs(cuentas.mediano! / 600 - 0.1 / total) < 0.05);
+  assert.ok(cuentas.lejos! < 600 * 0.03 && cuentas.nadie! === 0);
+  // Una persona sorda no lo oye aunque esté encima, y un mensaje que nadie oye se desvanece.
+  const sola = [persona('sorda', 0, { x: 20, y: 20 })];
+  assert.equal(quienOye(sola, 0), null);
 });
 
 test('la ley es determinista: misma semilla y mismas personas dan los mismos pasos de oído', () => {

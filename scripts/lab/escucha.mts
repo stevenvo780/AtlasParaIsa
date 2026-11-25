@@ -148,7 +148,9 @@ function correrReplica(semilla: number, dias: number, porDia: number, topeMortal
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
   try {
-    const params = parseParams(['motor.hilos=1', 'motor.gpu=[]', parametros].filter(Boolean).join(','), hostParams());
+    // Guardar en cada paso (el valor por defecto del servidor) multiplica el coste sin cambiar lo que se mide: el `Store` se
+    // liga igual antes de simular y se guarda cada 240 pasos, o antes si se llenan los diarios.
+    const params = parseParams(['motor.hilos=1', 'motor.gpu=[]', 'persistencia.cadaTicks=240', parametros].filter(Boolean).join(','), hostParams());
     const world: World = createWorld(semilla, params);
     store.save(world);
     const azar = localRandom(semilla, 'escucha-lab');

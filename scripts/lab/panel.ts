@@ -552,18 +552,28 @@ async function panel(o: Opciones): Promise<void> {
       cumplir(codigo);
     });
   });
+  // La clave lleva el árbol del brazo al arrancar el panel, pero cada proceso carga el código al empezar su corrida: si entretanto
+  // el brazo recibió un commit o cambios sin commitear, lo simulado ya no es de ese árbol y no puede guardarse bajo esa clave.
+  const arbolIntacto = (trabajo: Trabajo, arbol: string) => { const git = arbolGit(trabajo.raiz); return !!git && !git.sucio && git.arbol === arbol; };
+  const CAMBIO_ARBOL = 'el árbol del brazo cambió después de calcular la clave';
   const correr = async (trabajo: Trabajo) => {
     const registro = claves.get(trabajo);
     writeFileSync(trabajo.salida, '');
+    let guardable = !!registro;
     if (registro) {
       if (repetidos.has(trabajo)) await primeros.get(registro.clave);
       if (cancelado) return;
       if (servirDeCache(o.cache!, registro.clave, trabajo, registro.contexto.params)) { resumenCache.aciertos++; return; }
+      if (!arbolIntacto(trabajo, registro.contexto.arbol)) {
+        guardable = false; trabajo.cache = { estado: 'sin-cache', motivo: CAMBIO_ARBOL }; trabajo.paramsHash = undefined; resumenCache.sinCache++;
+      }
     }
     const codigo = await simular(trabajo);
-    if (!registro) return;
+    if (!registro || !guardable) return;
     resumenCache.fallos++;
-    if (codigo === 0) try { guardarEnCache(o.cache!, registro.clave, registro.componentes, trabajo); } catch (error) { process.stderr.write(`No se pudo guardar en caché ${trabajo.salida}: ${String(error)}\n`); }
+    if (codigo !== 0) return;
+    if (!arbolIntacto(trabajo, registro.contexto.arbol)) { process.stderr.write(`No se guarda en caché ${trabajo.salida}: ${CAMBIO_ARBOL} durante la corrida\n`); return; }
+    try { guardarEnCache(o.cache!, registro.clave, registro.componentes, trabajo); } catch (error) { process.stderr.write(`No se pudo guardar en caché ${trabajo.salida}: ${String(error)}\n`); }
   };
   let cursor = 0;
   try {

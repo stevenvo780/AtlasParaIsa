@@ -24,7 +24,9 @@
  *   mitad, con el reparto del punto medio (orden 2), hasta que le quedan 2⁻¹⁰ cuantos (`AGOTADO`; un canal saturado
  *   necesita ~log₂ n + 10 subpasos). Frente a la EDO integrada fina (combustión contra dimerización, 12 regímenes con k hasta
  *   ν y hasta 10¹² cuantos) queda dentro del 5 %; repartir las demandas ya saturadas, como antes, daba a la combustión 60
- *   veces lo que le toca.
+ *   veces lo que le toca. Antes de los subpasos, los reactivos instantáneos a la escala del paso (Λ·dt ≥ 64: la madera,
+ *   la proteína y el orgP de un suelo catalizado) se agotan en forma cerrada repartidos entre sus canales como en el
+ *   límite de subpasos muy pequeños (`instantaneos`), y los subpasos integran lo demás.
  * - ξ no sale de redondear con un uniforme: los cuantos de cada reactivo se sortean entre sus canales en una multinomial
  *   con las medias de la integración, que es la suma de las de las mitades del lote (I5, para particiones que conservan
  *   grupos enteros de la estequiometría); a + a sortea pares enteros. Cada canal a + b lo sortea el reactivo cuyo sorteo
@@ -67,20 +69,59 @@ const SUBPASO = 0.5;
  * 7), 3.287 de 20.000 pasos dejaban sus 2 H₂ y salían al aire (0,15 % del H a los 200 recambios, sin meseta). Con
  * 2⁻¹⁰ lo que se pierde de media es < 10⁻³ veces por canal, a costa de ~10 subpasos más en un canal saturado. */
 const AGOTADO = 2 ** -10;
+/** Λ·dt (riesgo por cuanto en el paso) desde el que un reactivo es instantáneo: queda e^(−64) de él (nada, hasta 2⁹²
+ * cuantos) y su vida media es ≤ 1/64 del paso. */
+const INSTANTANEO = 64;
+/** Fracción del riesgo de un instantáneo que puede venir de canales cuyo ritmo cambia mientras se agota (a + a, o
+ * compañero también instantáneo), y la que puede tener un compañero lento de riesgo propio frente al del instantáneo. */
+const VARIABLE = 1 / 64;
 /** Tope de subpasos: medio cuanto desde 2⁵³ son 54 mitades; si se llegara, lo que falta va en uno. */
 const SUBPASOS_MAX = 200;
 /** Pases encadenados tras el principal (ventanas dt/2, dt/4, …, dt/2⁸): lo que aún quede nuevo espera al paso siguiente. */
 export const PASES_ENCADENADOS = 8;
 
-/** Litros que ocupa un cuanto: gas ideal desde su ebullición, si no su densidad en fase condensada. */
-const volumenMolar = (s: Readonly<Sustancia>, T: number): number =>
-  T >= s.prop.tEbullicion ? R * T / ATMOSFERA : s.masa / (s.prop.densidad * MG_POR_KG);
+// Por sustancia (índice: su id), de la química en curso: átomos por cuanto (0: aún sin leer), temperatura de ebullición
+// y litros por cuanto en fase condensada. Las sustancias no cambian, así que se leen una vez por hilo.
+let quimicaLeida: ServicioQuimico | null = null;
+let atomosId = new Float64Array(64), ebullicionId = new Float64Array(64), condensadoId = new Float64Array(64);
 
-const atomosDe = (s: Readonly<Sustancia>): number => {
+function leerSustancia(q: ServicioQuimico, id: SustanciaId): void {
+  if (q !== quimicaLeida) { quimicaLeida = q; atomosId.fill(0); }
+  if (id >= atomosId.length) {
+    const t = Math.max(2 * atomosId.length, id + 1);
+    const mas = (a: Float64Array) => { const b = new Float64Array(t); b.set(a); return b; };
+    atomosId = mas(atomosId); ebullicionId = mas(ebullicionId); condensadoId = mas(condensadoId);
+  }
+  const s = q.sustancia(id);
   let n = 0;
   for (let e = 0; e < s.atomos.length; e++) n += s.atomos[e]!;
-  return n;
-};
+  ebullicionId[id] = s.prop.tEbullicion;
+  condensadoId[id] = s.masa / (s.prop.densidad * MG_POR_KG);
+  atomosId[id] = n;
+}
+
+/** Átomos por cuanto de `id` (y deja leídos sus datos de volumen). */
+function atomosDe(q: ServicioQuimico, id: SustanciaId): number {
+  if (q !== quimicaLeida || id >= atomosId.length || atomosId[id] === 0) leerSustancia(q, id);
+  return atomosId[id]!;
+}
+
+/** Litros que ocupa un cuanto de `id`: gas ideal desde su ebullición, si no su densidad en fase condensada. */
+function volumenMolar(q: ServicioQuimico, id: SustanciaId, T: number): number {
+  if (q !== quimicaLeida || id >= atomosId.length || atomosId[id] === 0) leerSustancia(q, id);
+  return T >= ebullicionId[id]! ? R * T / ATMOSFERA : condensadoId[id]!;
+}
+
+const DOS_M54 = 2 ** -54, DOS_M29 = 2 ** -29;
+/** Math.expm1 con su rama de argumento pequeño hecha aquí: la de fdlibm, que es la de V8 (|x| < 2⁻⁵⁴: x), así que el
+ * resultado es el mismo bit a bit (tests/materia-rendimiento.test.ts). Casi la mitad de los argumentos de un suelo
+ * vienen de canales lentos y no llegan a 2⁻⁵⁴. */
+export function expm1(x: number): number { return x > -DOS_M54 && x < DOS_M54 ? x : Math.expm1(x); }
+/** Math.log1p con sus ramas de fdlibm para |x| < 2⁻²⁹ (x, y x − x²/2 desde 2⁻⁵⁴), las de V8, bit a bit. */
+export function log1p(x: number): number {
+  const a = Math.abs(x);
+  return a < DOS_M29 ? (a < DOS_M54 ? x : x - x * x * 0.5) : Math.log1p(x);
+}
 
 // Búferes del hilo (cada worker tiene su propia copia del módulo).
 // Por sustancia, en orden de id: cuantos, media en curso y en el punto medio, riesgo integrado H y riesgo instantáneo
@@ -91,6 +132,10 @@ let cant = new Float64Array(16), x = new Float64Array(16), xm = new Float64Array
 let L = new Float64Array(16), L0 = new Float64Array(16), aa = new Int32Array(16);
 let gastoLineal = new Float64Array(16), gastoAa = new Float64Array(16);
 let consumo = new Float64Array(16), usos = new Int32Array(16), inicio = new Int32Array(17);
+// Fase instantánea (`instantaneos`): riesgo por cuanto total y de canales fijos, riesgo propio de un compañero lento,
+// lo que piden de él los instantáneos, lo que queda por repartir de cada instantáneo y si lo es.
+let riesgo = new Float64Array(16), riesgoFijo = new Float64Array(16), riesgoLento = new Float64Array(16);
+let demanda = new Float64Array(16), reparto = new Float64Array(16), rapido = new Uint8Array(16);
 // Por canal: sus reactivos (j = i − 1: sola; j = i: a + a) y sus coeficientes ν, su reacción y k por tick; riesgos
 // integrados e instantáneos por reactivo; extensión del subpaso y acumulada; quién lo sortea, orden de sorteo, veces y
 // veces antes de recortar.
@@ -100,9 +145,15 @@ let gobierna = new Int32Array(16), orden = new Int32Array(16);
 let kTick = new Float64Array(16), hI = new Float64Array(16), hJ = new Float64Array(16);
 let lI = new Float64Array(16), lJ = new Float64Array(16), l0I = new Float64Array(16), l0J = new Float64Array(16);
 let ext = new Float64Array(16), xi = new Float64Array(16), veces = new Float64Array(16), pedidas = new Float64Array(16);
-// Pases encadenados: lo que produjo el pase anterior (id → cuantos) y lo que produce este; por sustancia, si es nueva.
-let nuevos = new Map<SustanciaId, number>(), producidos = new Map<SustanciaId, number>();
+// Pases encadenados: lo que produjo el pase anterior y lo que produce este (cuantos por id, con la lista de ids tocados);
+// por sustancia del lote, si es nueva.
+let nuevos = new Float64Array(64), producidos = new Float64Array(64);
+let idsNuevos = new Uint32Array(16), idsProducidos = new Uint32Array(16);
+let nNuevos = 0, nProducidos = 0;
 let esNueva = new Uint8Array(16);
+// La química del pase en curso, para `favorableA` sin crear un cierre por pase.
+let quimicaPase: ServicioQuimico | null = null;
+const sustanciaPase = (id: SustanciaId): Readonly<Sustancia> => quimicaPase!.sustancia(id);
 
 function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
   let n = arena.especies(l, ids);
@@ -112,9 +163,17 @@ function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
     H = new Float64Array(t); L = new Float64Array(t); L0 = new Float64Array(t); aa = new Int32Array(t);
     gastoLineal = new Float64Array(t); gastoAa = new Float64Array(t);
     consumo = new Float64Array(t); usos = new Int32Array(t); inicio = new Int32Array(t + 1); esNueva = new Uint8Array(t);
+    riesgo = new Float64Array(t); riesgoFijo = new Float64Array(t); riesgoLento = new Float64Array(t);
+    demanda = new Float64Array(t); reparto = new Float64Array(t); rapido = new Uint8Array(t);
     n = arena.especies(l, ids);
   }
-  ids.subarray(0, n).sort(); // orden de id: nada depende de en qué ranura esté cada sustancia
+  // Orden de id (nada depende de en qué ranura esté cada sustancia): por inserción, sin asignar.
+  for (let a = 1; a < n; a++) {
+    const v = ids[a]!;
+    let b = a - 1;
+    for (; b >= 0 && ids[b]! > v; b--) ids[b + 1] = ids[b]!;
+    ids[b + 1] = v;
+  }
   return n;
 }
 
@@ -137,21 +196,17 @@ export function medir(c: CtxPaso, l: LoteRef): Readonly<Estado> {
   let atomos = 0;
   for (let i = 0; i < n; i++) {
     cant[i] = c.arena.cuantos(l, ids[i]!);
-    atomos += cant[i]! * atomosDe(c.quimica.sustancia(ids[i]!));
+    atomos += cant[i]! * atomosDe(c.quimica, ids[i]!);
   }
   const T = atomos > 0 ? c.arena.calor(l) / (CAPACIDAD_ATOMO * atomos) : 0;
   let V = 0;
-  for (let i = 0; i < n; i++) V += cant[i]! * volumenMolar(c.quimica.sustancia(ids[i]!), T);
+  for (let i = 0; i < n; i++) V += cant[i]! * volumenMolar(c.quimica, ids[i]!, T);
   estado.atomos = atomos; estado.T = T; estado.V = V;
   return estado;
 }
 
 /** Cuántos cuantos de su reactivo s consume una vez el canal k (ν de la reacción; s es uno de sus reactivos). */
 const nuDe = (k: number, s: number): number => (canalI[k] === s ? nuI[k]! : nuJ[k]!);
-
-/** Parte del canal k (no a + a) entre los de s que no son a + a: por su riesgo en el punto medio, o en el de partida si
- * allí ya no queda compañero. */
-const reparto = (s: number, l: number, l0: number): number => (L[s]! > 0 ? l / L[s]! : L0[s]! > 0 ? l0 / L0[s]! : 0);
 
 /**
  * Extensión media (veces) de cada canal en un subpaso h: riesgos integrados desde `xa`; reparto con los riesgos de `xb`.
@@ -160,51 +215,62 @@ const reparto = (s: number, l: number, l0: number): number => (L[s]! > 0 ? l / L
  * (μ/β)·ln(1 + β·A0·(1 − e^(−μ))/μ). Así a + a compite sin subpasos con los de compañero que no se gasta.
  */
 function extensiones(m: number, n: number, V: number, h: number, xa: Float64Array, xb: Float64Array): void {
-  H.fill(0, 0, n); L.fill(0, 0, n); L0.fill(0, 0, n); aa.fill(-1, 0, n);
+  // Las tablas del módulo en locales: así V8 no vuelve a cargar cada una (ni su longitud) en cada acceso.
+  const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, kT = kTick, rI = hI, rJ = hJ, iI = lI, iJ = lJ, i0I = l0I, i0J = l0J;
+  const Hs = H, Ls = L, L0s = L0, aas = aa, gL = gastoLineal, gA = gastoAa, ex = ext;
+  Hs.fill(0, 0, n); Ls.fill(0, 0, n); L0s.fill(0, 0, n); aas.fill(-1, 0, n);
   for (let k = 0; k < m; k++) {
-    const i = canalI[k]!, j = canalJ[k]!, kt = kTick[k]! * h, s = kt / V, na = xa[i]!;
-    if (j < i) { hI[k] = lI[k] = l0I[k] = kt; }
-    else if (j === i) { aa[i] = k; lI[k] = nuI[k]! * s; continue; }
+    const i = cI[k]!, j = cJ[k]!, kt = kT[k]! * h, s = kt / V, na = xa[i]!;
+    if (j < i) { rI[k] = iI[k] = i0I[k] = kt; }
+    else if (j === i) { aas[i] = k; iI[k] = pI[k]! * s; continue; }
     else {
       // dξ/dt = k·(na − p·ξ)(nb − q·ξ)/V = p·q·k·(α − ξ)(β − ξ)/V con α = na/p y β = nb/q, cerrada. Con s′ = p·q·s y
       // e = 1 − e^(−d·s′) sobreviven d(1 − e)/(d + lo·e) del menor (en veces) y d/(d + lo·e) del mayor; con d = 0,
       // 1/(1 + lo·s′) de los dos.
-      const p = nuI[k]!, q = nuJ[k]!, nb = xa[j]!, alfa = na / p, beta = nb / q, s2 = p * q * s;
+      const p = pI[k]!, q = pJ[k]!, nb = xa[j]!, alfa = na / p, beta = nb / q, s2 = p * q * s;
       const lo = Math.min(alfa, beta), d = Math.abs(alfa - beta);
       let hMenor: number, hMayor: number;
-      if (d === 0) hMenor = hMayor = Math.log1p(lo * s2);
+      if (d === 0) hMenor = hMayor = log1p(lo * s2);
       else {
-        const e = -Math.expm1(-d * s2);
-        hMayor = Math.log1p(lo * e / d); hMenor = hMayor + d * s2;
+        const e = -expm1(-d * s2);
+        hMayor = log1p(lo * e / d); hMenor = hMayor + d * s2;
       }
-      hI[k] = alfa <= beta ? hMenor : hMayor; hJ[k] = alfa <= beta ? hMayor : hMenor;
+      const hi = alfa <= beta ? hMenor : hMayor, hj = alfa <= beta ? hMayor : hMenor;
       // Riesgo instantáneo por cuanto: a pierde p por vez, a ritmo k·b/V por cuanto de a.
-      lI[k] = p * xb[j]! * s; lJ[k] = q * xb[i]! * s; l0I[k] = p * nb * s; l0J[k] = q * na * s;
-      H[j]! += hJ[k]!; L[j]! += lJ[k]!; L0[j]! += l0J[k]!;
+      const li = p * xb[j]! * s, lj = q * xb[i]! * s, l0i = p * nb * s, l0j = q * na * s;
+      rI[k] = hi; rJ[k] = hj; iI[k] = li; iJ[k] = lj; i0I[k] = l0i; i0J[k] = l0j;
+      Hs[j]! += hj; Ls[j]! += lj; L0s[j]! += l0j;
     }
-    H[i]! += hI[k]!; L[i]! += lI[k]!; L0[i]! += l0I[k]!;
+    Hs[i]! += rI[k]!; Ls[i]! += iI[k]!; L0s[i]! += i0I[k]!;
   }
   for (let s = 0; s < n; s++) {
     const A0 = xa[s]!;
-    gastoLineal[s] = gastoAa[s] = 0;
+    gL[s] = gA[s] = 0;
     if (A0 === 0) continue;
-    if (aa[s]! < 0) { gastoLineal[s] = A0 * -Math.expm1(-H[s]!); continue; }
-    const beta = lI[aa[s]!]!, mu = L[s]! > 0 ? L[s]! : L0[s]!;
+    const kAa = aas[s]!;
+    if (kAa < 0) { gL[s] = A0 * -expm1(-Hs[s]!); continue; }
+    const beta = iI[kAa]!, mu = Ls[s]! > 0 ? Ls[s]! : L0s[s]!;
     let fin: number;
     if (mu === 0) fin = A0 / (1 + beta * A0);
     else {
       const e = -Math.expm1(-mu);
       fin = mu * A0 * (1 - e) / (mu + beta * A0 * e);
-      gastoLineal[s] = beta * A0 > 0 ? mu / beta * Math.log1p(beta * A0 * e / mu) : A0 * e;
+      gL[s] = beta * A0 > 0 ? mu / beta * Math.log1p(beta * A0 * e / mu) : A0 * e;
     }
-    gastoAa[s] = Math.max(0, A0 - fin - gastoLineal[s]!);
+    gA[s] = Math.max(0, A0 - fin - gL[s]!);
   }
   for (let k = 0; k < m; k++) {
-    const i = canalI[k]!, j = canalJ[k]!;
-    if (j === i) { ext[k] = gastoAa[i]! / nuI[k]!; continue; }
-    let e = gastoLineal[i]! * reparto(i, lI[k]!, l0I[k]!) / nuI[k]!;
-    if (j > i) e = Math.min(e, gastoLineal[j]! * reparto(j, lJ[k]!, l0J[k]!) / nuJ[k]!);
-    ext[k] = e;
+    const i = cI[k]!, j = cJ[k]!;
+    if (j === i) { ex[k] = gA[i]! / pI[k]!; continue; }
+    // Parte del canal entre los de su reactivo que no son a + a: por su riesgo en el punto medio, o en el de partida si
+    // allí ya no queda compañero.
+    const Li = Ls[i]!, ri = Li > 0 ? iI[k]! / Li : L0s[i]! > 0 ? i0I[k]! / L0s[i]! : 0;
+    let e = gL[i]! * ri / pI[k]!;
+    if (j > i) {
+      const Lj = Ls[j]!, rj = Lj > 0 ? iJ[k]! / Lj : L0s[j]! > 0 ? i0J[k]! / L0s[j]! : 0;
+      e = Math.min(e, gL[j]! * rj / pJ[k]!);
+    }
+    ex[k] = e;
   }
 }
 
@@ -218,45 +284,160 @@ function holguraEnSigmas(r: number, nuR: number, s: number, nuS: number, xiK: nu
 
 /** `destino` = `desde` menos lo que consumen las extensiones `ext` (sin bajar de 0). */
 function consumir(m: number, n: number, desde: Float64Array, destino: Float64Array): void {
-  if (destino !== desde) destino.set(desde.subarray(0, n));
+  if (destino !== desde) for (let s = 0; s < n; s++) destino[s] = desde[s]!;
+  const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, ex = ext;
   for (let k = 0; k < m; k++) {
-    const i = canalI[k]!, j = canalJ[k]!;
-    destino[i] = Math.max(0, destino[i]! - nuI[k]! * ext[k]!);
-    if (j > i) destino[j] = Math.max(0, destino[j]! - nuJ[k]! * ext[k]!);
+    const i = cI[k]!, j = cJ[k]!;
+    destino[i] = Math.max(0, destino[i]! - pI[k]! * ex[k]!);
+    if (j > i) destino[j] = Math.max(0, destino[j]! - pJ[k]! * ex[k]!);
   }
 }
 
+/**
+ * Fase instantánea de `integrar`: los reactivos con Λ·dt ≥ INSTANTANEO (Λ, su riesgo por cuanto al empezar) se agotan
+ * dentro del paso en un tiempo en que lo demás apenas cambia, así que se resuelven primero y en forma cerrada, y el resto
+ * del paso se integra después con lo que dejan (separación de escalas; el error en los canales lentos de un compañero es
+ * ≤ lo que le piden por 1/(Λ·dt)). Lo que pierde un instantáneo s, x_s(1 − e^(−Λ·dt)), se reparte entre sus canales
+ * fijos (solo, o con un compañero lento, de riesgo λ constante mientras s vive) en proporción a λ, que es el límite de los
+ * subpasos muy pequeños: ∫λ·x_s dt / ∫Λ·x_s dt. Los canales de ritmo variable (a + a, o con el compañero también
+ * instantáneo) se llevan ∫k·x_a·x_b/V dt con los dos decayendo a su Λ, que es exacto cuando son una parte pequeña del
+ * riesgo (≤ VARIABLE), y se descuentan antes del reparto. Los compañeros lentos entran en el punto medio de lo que les
+ * piden (predictor y corrector, orden 2), así que pueden perder hasta SUBPASO; un instantáneo con un compañero que pierde
+ * más, o que tiene riesgo propio comparable (> VARIABLE·Λ), o con demasiado riesgo variable, deja de serlo y va a los
+ * subpasos; si ya no queda ninguno, no se hace nada. Antes, cada uno de ellos fijaba el subpaso en ~1/(2Λ) hasta bajar
+ * de AGOTADO: unos 49 subpasos con madera, proteína y orgP en un suelo catalizado (k = 414 por tick). Deja en `ext` las
+ * veces de cada canal (0 en los que no tocan un instantáneo) y en `x` lo que queda; devuelve si resolvió alguno.
+ */
+function instantaneos(m: number, n: number, V: number, dt: number): boolean {
+  const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, kT = kTick, iI = lI, iJ = lJ, ex = ext, xs = x, med = xm;
+  const Lt = riesgo, Lf = riesgoFijo, Ll = riesgoLento, D = demanda, B = reparto, rap = rapido;
+  Lt.fill(0, 0, n);
+  for (let k = 0; k < m; k++) {
+    const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+    if (j < i) Lt[i]! += kt;
+    else if (j === i) Lt[i]! += pI[k]! * kt * xs[i]! / V;
+    else { Lt[i]! += pI[k]! * kt * xs[j]! / V; Lt[j]! += pJ[k]! * kt * xs[i]! / V; }
+  }
+  for (let s = 0; s < n; s++) rap[s] = Lt[s]! * dt >= INSTANTANEO ? 1 : 0;
+  // El reactivo en exceso (más veces posibles) de un canal entre dos candidatos no se agota por él, solo pierde lo que
+  // el otro le pide: ese riesgo no cuenta para ser instantáneo (el CaCO₃ frente al orgP).
+  Lf.fill(0, 0, n);
+  for (let k = 0; k < m; k++) {
+    const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+    if (j < i) Lf[i]! += kt;
+    else if (j === i) Lf[i]! += pI[k]! * kt * xs[i]! / V;
+    else {
+      const ai = xs[i]! / pI[k]!, aj = xs[j]! / pJ[k]!, ambos = rap[i] && rap[j];
+      if (!ambos || ai <= aj) Lf[i]! += pI[k]! * kt * xs[j]! / V;
+      if (!ambos || aj <= ai) Lf[j]! += pJ[k]! * kt * xs[i]! / V;
+    }
+  }
+  let alguno = false;
+  for (let s = 0; s < n; s++) { if (rap[s] && Lf[s]! * dt < INSTANTANEO) rap[s] = 0; if (rap[s]) alguno = true; }
+  // Cada vuelta quita al menos un instantáneo que no cumple, así que acaba en ≤ n vueltas.
+  while (alguno) {
+    for (let s = 0; s < n; s++) med[s] = xs[s]!;
+    for (let corrector = 0; corrector < 2; corrector++) {
+      Lt.fill(0, 0, n); Lf.fill(0, 0, n); Ll.fill(0, 0, n); D.fill(0, 0, n);
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!, kt = kT[k]!;
+        if (j < i) { iI[k] = kt; Lt[i]! += kt; Ll[i]! += kt; if (rap[i]) Lf[i]! += kt; continue; }
+        if (j === i) { const l = pI[k]! * kt * xs[i]! / V; iI[k] = l; Lt[i]! += l; Ll[i]! += l; continue; }
+        // Un compañero lento entra con su punto medio; uno instantáneo, con lo que tiene al empezar (decae aparte).
+        const li = pI[k]! * kt * (rap[j] ? xs[j]! : med[j]!) / V, lj = pJ[k]! * kt * (rap[i] ? xs[i]! : med[i]!) / V;
+        iI[k] = li; iJ[k] = lj; Lt[i]! += li; Lt[j]! += lj;
+        if (!rap[j]) { Ll[i]! += li; if (rap[i]) Lf[i]! += li; }
+        if (!rap[i]) { Ll[j]! += lj; if (rap[j]) Lf[j]! += lj; }
+      }
+      for (let s = 0; s < n; s++) B[s] = rap[s] ? xs[s]! * -expm1(-Lt[s]! * dt) : 0;
+      // Canales de ritmo variable: ∫k·x_a(t)·x_b(t)/V dt con x = x0·e^(−Λt), descontados de lo que pierde cada uno.
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!;
+        ex[k] = 0;
+        if (j < i || !rap[i] || (j > i && !rap[j])) continue;
+        const L2 = j === i ? 2 * Lt[i]! : Lt[i]! + Lt[j]!;
+        const e = kT[k]! * xs[i]! * xs[j]! / V * -expm1(-L2 * dt) / L2;
+        ex[k] = e; B[i]! -= pI[k]! * e;
+        if (j > i) B[j]! -= pJ[k]! * e;
+      }
+      for (let k = 0; k < m; k++) {
+        const i = cI[k]!, j = cJ[k]!;
+        if (j < i) { if (rap[i] && Lf[i]! > 0) ex[k] = Math.max(0, B[i]!) * iI[k]! / Lf[i]! / pI[k]!; continue; }
+        if (j === i || rap[i] === rap[j]) continue;
+        const s = rap[i] ? i : j, r = rap[i] ? j : i;
+        const l = s === i ? iI[k]! : iJ[k]!, p = s === i ? pI[k]! : pJ[k]!;
+        const e = Lf[s]! > 0 ? Math.max(0, B[s]!) * l / Lf[s]! / p : 0;
+        ex[k] = e; D[r]! += (r === i ? pI[k]! : pJ[k]!) * e;
+      }
+      for (let s = 0; s < n; s++) if (!rap[s]) med[s] = Math.max(0, xs[s]! - D[s]! / 2);
+    }
+    let quita = false;
+    for (let s = 0; s < n; s++) if (rap[s] && Lt[s]! - Lf[s]! > VARIABLE * Lt[s]!) { rap[s] = 0; quita = true; }
+    for (let k = 0; k < m; k++) {
+      const i = cI[k]!, j = cJ[k]!;
+      if (j <= i || rap[i] === rap[j]) continue;
+      const s = rap[i] ? i : j, r = rap[i] ? j : i;
+      if (D[r]! > SUBPASO * xs[r]! || Ll[r]! > VARIABLE * Lt[s]!) { rap[s] = 0; quita = true; }
+    }
+    if (!quita) break;
+    alguno = false;
+    for (let s = 0; s < n; s++) if (rap[s]) alguno = true;
+  }
+  if (!alguno) return false;
+  consumir(m, n, xs, xs);
+  // Lo que queda de un instantáneo es e^(−Λ·dt) de lo que había (nada): sin restas que dejen el redondeo vivo.
+  for (let s = 0; s < n; s++) if (rap[s]) xs[s] = cant[s]! * Math.exp(-Lt[s]! * dt);
+  return true;
+}
+
+/** Contadores del integrador en este hilo (los lee el banco): integraciones, cuántas con algún reactivo compartido y
+ * subpasos que dieron esas. */
+export const cuentaIntegrador = { integraciones: 0, compartidas: 0, subpasos: 0, instantaneas: 0 };
+
 /** Medias de veces de cada canal en dt, en `xi`: un paso si ningún reactivo se comparte; si no, subpasos (cabecera). */
 function integrar(m: number, n: number, V: number, dt: number): void {
-  x.set(cant.subarray(0, n));
-  xi.fill(0, 0, m);
+  const cI = canalI, cJ = canalJ, pI = nuI, pJ = nuJ, kT = kTick, xs = x, ritmo = consumo, us = usos, acum = xi;
+  for (let s = 0; s < n; s++) xs[s] = cant[s]!;
+  acum.fill(0, 0, m);
   let compite = false;
-  for (let s = 0; s < n; s++) if (usos[s]! > 1) compite = true;
-  if (!compite) { extensiones(m, n, V, dt, x, x); xi.set(ext.subarray(0, m)); return; }
-  const vivo = (s: number) => x[s]! > AGOTADO;
+  for (let s = 0; s < n; s++) if (us[s]! > 1) compite = true;
+  cuentaIntegrador.integraciones++;
+  if (!compite) {
+    extensiones(m, n, V, dt, xs, xs);
+    for (let k = 0; k < m; k++) acum[k] = ext[k]!;
+    return;
+  }
+  cuentaIntegrador.compartidas++;
+  if (instantaneos(m, n, V, dt)) {
+    cuentaIntegrador.instantaneas++;
+    for (let k = 0; k < m; k++) acum[k] = ext[k]!;
+  }
   let resta = dt;
   for (let pasos = 1; resta > 0; pasos++) {
-    consumo.fill(0, 0, n);
+    cuentaIntegrador.subpasos++;
+    ritmo.fill(0, 0, n);
     for (let k = 0; k < m; k++) {
-      const i = canalI[k]!, j = canalJ[k]!;
-      const r = j < i ? kTick[k]! * x[i]! : kTick[k]! * x[i]! * x[j]! / V;
-      consumo[i]! += nuI[k]! * r;
-      if (j > i) consumo[j]! += nuJ[k]! * r;
+      const i = cI[k]!, j = cJ[k]!;
+      const r = j < i ? kT[k]! * xs[i]! : kT[k]! * xs[i]! * xs[j]! / V;
+      ritmo[i]! += pI[k]! * r;
+      if (j > i) ritmo[j]! += pJ[k]! * r;
     }
+    // Ningún compañero vivo (x > AGOTADO) de un reactivo compartido y vivo pierde en h más de SUBPASO de lo que tiene.
     let h = resta;
-    const vigilar = (p: number) => { if (vivo(p) && consumo[p]! > 0) h = Math.min(h, SUBPASO * x[p]! / consumo[p]!); };
     if (pasos < SUBPASOS_MAX) for (let k = 0; k < m; k++) {
-      const i = canalI[k]!, j = canalJ[k]!;
+      const i = cI[k]!, j = cJ[k]!;
       if (j > i) {
-        if (usos[i]! > 1 && vivo(i)) vigilar(j);
-        if (usos[j]! > 1 && vivo(j)) vigilar(i);
+        const vi = xs[i]! > AGOTADO, vj = xs[j]! > AGOTADO;
+        if (us[i]! > 1 && vi && vj && ritmo[j]! > 0) h = Math.min(h, SUBPASO * xs[j]! / ritmo[j]!);
+        if (us[j]! > 1 && vj && vi && ritmo[i]! > 0) h = Math.min(h, SUBPASO * xs[i]! / ritmo[i]!);
       }
     }
-    extensiones(m, n, V, h / 2, x, x);
-    consumir(m, n, x, xm);
-    extensiones(m, n, V, h, x, xm);
-    consumir(m, n, x, x);
-    for (let k = 0; k < m; k++) xi[k]! += ext[k]!;
+    extensiones(m, n, V, h / 2, xs, xs);
+    consumir(m, n, xs, xm);
+    extensiones(m, n, V, h, xs, xm);
+    consumir(m, n, xs, xs);
+    const ex = ext;
+    for (let k = 0; k < m; k++) acum[k]! += ex[k]!;
     resta = h === resta ? 0 : resta - h;
   }
 }
@@ -280,30 +461,55 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   const { atomos, T, V } = medir(c, l);
   if (atomos === 0) return 0;
   const nivel = nivelDeLote(T, kappa);
-  nuevos.clear(); producidos.clear();
+  vaciarNuevos(); vaciarProducidos();
   let total = pase(c, l, dt, kappa, T, V, nivel, false);
-  for (let p = 0, w = dt / 2; p < PASES_ENCADENADOS && producidos.size > 0; p++, w /= 2) {
+  for (let p = 0, w = dt / 2; p < PASES_ENCADENADOS && nProducidos > 0; p++, w /= 2) {
     [nuevos, producidos] = [producidos, nuevos];
-    producidos.clear();
+    [idsNuevos, idsProducidos] = [idsProducidos, idsNuevos];
+    [nNuevos, nProducidos] = [nProducidos, nNuevos];
+    vaciarProducidos();
     // Lo nuevo entra con lo que se produjo (nunca más de lo que hay); lo viejo, con lo que hay.
     const n = presentes = leerEspecies(c.arena, l);
     let vol = 0;
     for (let i = 0; i < n; i++) {
-      cant[i] = c.arena.cuantos(l, ids[i]!);
-      vol += cant[i]! * volumenMolar(c.quimica.sustancia(ids[i]!), T);
-      const d = nuevos.get(ids[i]!);
-      esNueva[i] = d === undefined ? 0 : 1;
-      if (d !== undefined) cant[i] = Math.min(cant[i]!, d);
+      const id = ids[i]!;
+      cant[i] = c.arena.cuantos(l, id);
+      vol += cant[i]! * volumenMolar(c.quimica, id, T);
+      const nueva = id < nuevos.length && nuevos[id]! > 0;
+      esNueva[i] = nueva ? 1 : 0;
+      if (nueva) cant[i] = Math.min(cant[i]!, nuevos[id]!);
     }
     total += pase(c, l, w, kappa, T, vol, nivel, true);
   }
-  producidos.clear();
+  vaciarNuevos(); vaciarProducidos();
   return total;
 }
 
-/** Anota en `producidos` las salidas de `v` veces de `r`. */
+function vaciarNuevos(): void {
+  for (let k = 0; k < nNuevos; k++) nuevos[idsNuevos[k]!] = 0;
+  nNuevos = 0;
+}
+function vaciarProducidos(): void {
+  for (let k = 0; k < nProducidos; k++) producidos[idsProducidos[k]!] = 0;
+  nProducidos = 0;
+}
+
+/** Anota en `producidos` las salidas de `v` veces de `r` (v > 0). */
 function producir(r: Reaccion, v: number): void {
-  if (v > 0) for (const t of r.salidas) producidos.set(t.id, (producidos.get(t.id) ?? 0) + v * t.nu);
+  if (!(v > 0)) return;
+  for (const t of r.salidas) {
+    const id = t.id;
+    if (id >= producidos.length) {
+      const b = new Float64Array(Math.max(2 * producidos.length, id + 1));
+      b.set(producidos);
+      producidos = b;
+    }
+    if (producidos[id] === 0) {
+      if (nProducidos === idsProducidos.length) { const b = new Uint32Array(2 * nProducidos); b.set(idsProducidos); idsProducidos = b; }
+      idsProducidos[nProducidos++] = id;
+    }
+    producidos[id]! += v * t.nu;
+  }
 }
 
 /**
@@ -312,7 +518,8 @@ function producir(r: Reaccion, v: number): void {
  */
 function pase(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa, T: number, V: number, nivel: number, encadenado: boolean): number {
   const { arena, quimica } = c;
-  const n = presentes, sustanciaDe = (id: SustanciaId) => quimica.sustancia(id);
+  const n = presentes;
+  quimicaPase = quimica;
   usos.fill(0, 0, n);
   let m = 0;
   for (let i = 0; i < n; i++) for (let j = i - 1; j < n; j++) {
@@ -332,7 +539,7 @@ function pase(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa, T: number, V: nu
       throw new Error(`Reacción (${r.a}, ${r.b}) con entradas que no son las del canal (${a}, ${b}).`);
     }
     if (cant[i]! < pa || (j > i && cant[j]! < pb)) continue; // ni una vez entera
-    if (!favorableA(r, T, sustanciaDe)) continue; // ΔG a la T y fases reales del lote (revisión de la enmienda 3, hallazgo 5)
+    if (!favorableA(r, T, sustanciaPase)) continue; // ΔG a la T y fases reales del lote (revisión de la enmienda 3, hallazgo 5)
     const barrera = barreraEfectiva(r, kappa);
     const k = barrera === 0 ? NU : T > 0 ? NU * Math.exp(-barrera / (R * T)) : 0;
     if (!(k * dt > 0)) continue;

@@ -11,7 +11,7 @@ import { loadavg } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { EPSILON_G, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NU, R } from '../src/shared/naturaleza.js';
 import type { SustanciaId } from '../src/shared/materia.js';
-import { binomial, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
+import { binomial, cuentaIntegrador, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
 import { fluir, fluirCalor } from '../src/world/materia/fluir.js';
 import { pasarLotes } from '../src/world/materia/paso-worker.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
@@ -441,9 +441,9 @@ function canalesDe(m: MateriaReal, l: LoteRef, kappa: Kappa) {
   return { canales, V };
 }
 
-/** EDO de acción de masas de esos canales, RK4 con pasos de ≤ 0,1 %. No abre los canales de los productos: los pases
+/** EDO de acción de masas de esos canales durante `dt` ticks, RK4 con pasos de ≤ 0,1 %. No abre los canales de los productos: los pases
  * encadenados de P sí, pero en estos casos ninguno reacciona a la T del paso (los productos son H₂O, C, CO₂ y H₂ sin κ H–H). */
-function edo(canales: ReturnType<typeof canalesDe>['canales'], V: number, n0: Map<SustanciaId, number>): Map<SustanciaId, number> {
+function edo(canales: ReturnType<typeof canalesDe>['canales'], V: number, n0: Map<SustanciaId, number>, dt = 1): Map<SustanciaId, number> {
   const ids = [...new Set([...n0.keys(), ...canales.flatMap(c => [...c.r.entradas, ...c.r.salidas].map(x => x.id))])];
   const ix = new Map(ids.map((id, i) => [id, i]));
   const tasas = (n: Float64Array) => canales.map(({ r, k }) => {
@@ -459,9 +459,9 @@ function edo(canales: ReturnType<typeof canalesDe>['canales'], V: number, n0: Ma
   };
   let n = Float64Array.from(ids, id => n0.get(id) ?? 0);
   const hechos = new Float64Array(canales.length);
-  for (let t = 0; t < 1;) {
+  for (let t = 0; t < dt;) {
     const { d } = derivada(n);
-    let h = 1 - t;
+    let h = dt - t;
     ids.forEach((_, i) => { if (n[i]! > 1e-9 && d[i]! < 0) h = Math.min(h, 1e-3 * n[i]! / -d[i]!); });
     const mas = (x: Float64Array, y: Float64Array, f: number) => x.map((v, i) => Math.max(0, v + f * y[i]!));
     const k1 = derivada(n), k2 = derivada(mas(n, k1.d, h / 2)), k3 = derivada(mas(n, k2.d, h / 2)), k4 = derivada(mas(n, k3.d, h));
@@ -524,6 +524,74 @@ test('competencia: canales reales que comparten reactivo conservan su diferencia
   }
   await m.cerrar();
   assert.ok(co2 <= 3, `CO₂ en 10 réplicas: ${co2}`);
+});
+
+test('instantáneos: madera, proteína y orgP de un suelo catalizado se agotan sin subpasos, repartidos como en la EDO fina', async () => {
+  // Con κ del suelo la madera, la proteína y el orgP se descomponen con k = 414 por tick, y el orgP además reacciona con
+  // el CaCO₃ (k = 414 por cuanto de CaCO₃ y litro), con el agua y con la madera; todos arden en el O₂ que comparten con
+  // el C. Con dt = 1, Λ·dt va de 414 a ~10⁴: la fase instantánea los resuelve antes de los subpasos (antes, ~45 por
+  // paso). El CaCO₃, en exceso, no es instantáneo aunque su riesgo al empezar lo sea. Medias de 10 réplicas frente a RK4,
+  // comparando lo que cambia cada sustancia; sin el O₂, el C, el CO₂ y el H₂, porque los pases encadenados queman el C y
+  // el H₂ que nacen (C + O₂, k ~ 10⁻³; H₂ + O₂ sin barrera) y la EDO no abre los canales de los productos (el integrador
+  // anterior se desviaba igual: CO₂ 10.244 frente a 9.906).
+  const casos: { nombre: string; contenido: Contenido; T?: number; subpasos?: number }[] = [
+    { nombre: 'suelo del banco', contenido: { O2: 2e5, N2: 8e5, H2O: 1.2e5, madera: 6e4, proteina: 2e4, orgP: 1e4, CaCO3: 1e6, C: 2e4 } },
+    // El CaCO₃ justo por encima del orgP: el canal compite con la descomposición y se lleva más de la mitad del CaCO₃,
+    // así que el reparto depende de su punto medio (corrector).
+    { nombre: 'CaCO₃ escaso', contenido: { O2: 1e5, N2: 4e5, H2O: 5e4, madera: 2e4, orgP: 1e4, CaCO3: 1.6e4, SiO2: 1e6 } },
+    // A 450 K el glicósido (con su a + a exotérmica) y el orgP son instantáneos y se comparten el O₂ y el C: el riesgo de ritmo
+    // variable (a + a, o con un compañero también instantáneo) no cabe en la fase si pasa de VARIABLE.
+    // Ahí el glicósido vuelve a los subpasos (unos 27 por integración): hay que mantener la exactitud, no el coste.
+    { nombre: 'glicósido y orgP a 450 K', contenido: { C: 1e7, O2: 1e5, H2O: 1e7, glicosido: 1e5, orgP: 1e5 }, T: 450, subpasos: 40 },
+  ];
+  for (const e of casos) {
+    const m = materiaReal({ capacidad: 32 });
+    const antes = { ...cuentaIntegrador };
+    const medias = new Map<SustanciaId, number>(), n0 = new Map(Object.entries(e.contenido).map(([k, q]) => [m.S[k as keyof Base], q!]));
+    let esperado = new Map<SustanciaId, number>();
+    for (let r = 0; r < 10; r++) {
+      const l = m.lote(e.contenido, e.T ?? 295);
+      if (r === 0) { const { canales, V } = canalesDe(m, l, SUELO); esperado = edo(canales, V, n0); }
+      pasoLote(m.ctx(40 + r), l, 1, SUELO);
+      for (const id of esperado.keys()) medias.set(id, (medias.get(id) ?? 0) + m.arena.cuantos(l, id) / 10);
+    }
+    await m.cerrar();
+    const compartidas = cuentaIntegrador.compartidas - antes.compartidas, sub = cuentaIntegrador.subpasos - antes.subpasos;
+    assert.ok(cuentaIntegrador.instantaneas - antes.instantaneas >= 10, `${e.nombre}: la fase instantánea no actuó`);
+    assert.ok(sub <= (e.subpasos ?? 3) * compartidas, `${e.nombre}: ${sub} subpasos en ${compartidas} integraciones`);
+    let cambia = 0;
+    for (const [id, x] of esperado) {
+      if (id === m.S.O2 || id === m.S.C || id === m.S.CO2 || id === m.S.H2) continue;
+      const x0 = n0.get(id) ?? 0, v = medias.get(id) ?? 0;
+      if (Math.abs(x - x0) > 100) cambia++;
+      // 2 % de lo que cambia, más 3σ del sorteo de la media de 10 réplicas (σ ≈ √(cambio/10)).
+      assert.ok(Math.abs(v - x) <= 0.02 * Math.abs(x - x0) + 3 * Math.sqrt(Math.abs(x - x0) / 10) + 3, `${e.nombre}: sustancia ${id} cambia ${(v - x0).toFixed(1)} frente a ${(x - x0).toFixed(1)} en la EDO`);
+    }
+    assert.ok(cambia >= 5, `${e.nombre}: solo ${cambia} sustancias cambian`);
+  }
+});
+
+test('instantáneos: del límite de subpasos pequeños (Λ·dt ≈ 1) al instantáneo (Λ·dt ≈ 10⁴) el suelo catalizado sigue a la EDO fina', async () => {
+  // Con el mismo suelo catalizado, dt recorre el umbral INSTANTANEO = 64 (k = 414 por tick en la madera, la proteína y el orgP):
+  // por debajo, subpasos; por encima, forma cerrada; en medio, un reactivo instantáneo y otro no a la vez.
+  const contenido: Contenido = { O2: 2e5, N2: 8e5, H2O: 1.2e5, madera: 6e4, proteina: 2e4, orgP: 1e4, CaCO3: 1e6, C: 2e4 };
+  const m = materiaReal({ capacidad: 128 });
+  const n0 = new Map(Object.entries(contenido).map(([k, q]) => [m.S[k as keyof Base], q!]));
+  const { canales, V } = canalesDe(m, m.lote(contenido, 295), SUELO);
+  for (const dt of [0.002, 0.01, 0.05, 0.12, 0.2, 0.5, 2, 20]) {
+    const esperado = edo(canales, V, n0, dt), medias = new Map<SustanciaId, number>();
+    for (let r = 0; r < 10; r++) {
+      const l = m.lote(contenido, 295);
+      pasoLote(m.ctx(300 + r), l, dt, SUELO);
+      for (const id of esperado.keys()) medias.set(id, (medias.get(id) ?? 0) + m.arena.cuantos(l, id) / 10);
+    }
+    for (const [id, x] of esperado) {
+      if (id === m.S.O2 || id === m.S.C || id === m.S.CO2 || id === m.S.H2) continue;
+      const x0 = n0.get(id) ?? 0, v = medias.get(id) ?? 0, cambio = Math.abs(x - x0);
+      assert.ok(Math.abs(v - x) <= 0.03 * cambio + 3 * Math.sqrt(cambio / 10) + 3, `dt ${dt}: sustancia ${id} ${v.toFixed(1)} frente a ${x.toFixed(1)} (partía de ${x0})`);
+    }
+  }
+  await m.cerrar();
 });
 
 test('calor y existencias: el recorte no depende del orden de las ranuras y reparte en proporción', async () => {

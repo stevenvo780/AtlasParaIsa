@@ -45,6 +45,57 @@ export function balancePares(
   return balance;
 }
 
+/** Cota de Σ|términos| bajo la que un balance en doble es exacto (la mitad de 2⁵³: margen para el redondeo de la cota). */
+const COTA_DOBLE = 2 ** 52;
+
+/**
+ * `balancePares` en doble para el camino caliente (fuentes, sumideros, garantías): las mismas comprobaciones con los mismos
+ * errores, en `out`. Devuelve false si alguna suma parcial pudiera dejar de ser exacta; entonces vale `balancePares`.
+ */
+export function balanceDoble(ids: ArrayLike<number>, cant: ArrayLike<number>, n: number,
+  sustancia: (id: number) => Readonly<Sustancia>, out: Float64Array): boolean {
+  out.fill(0);
+  let cota = 0;
+  for (let k = 0; k < n; k++) {
+    const id = ids[k]!, cuantos = cant[k]!;
+    if (!Number.isInteger(id) || id < 0 || id > 0xffffffff) throw new Error(`Sustancia inválida: ${id}.`);
+    if (!Number.isSafeInteger(cuantos)) throw new Error(`Entero inseguro en cantidad: ${cuantos}.`);
+    if (cuantos < 0) throw new Error(`Cantidad negativa: ${cuantos}.`);
+    if (id === 0) {
+      out[ENERGIA]! += cuantos;
+      cota += cuantos;
+      continue;
+    }
+    const s = sustancia(id);
+    if (!s || s.id !== id || s.atomos.length !== NE) throw new Error(`Sustancia inválida: ${id}.`);
+    if (!Number.isSafeInteger(s.energia)) throw new Error(`Entero inseguro en energía de enlace: ${s.energia}.`);
+    let atomos = 0;
+    for (let i = 0; i < NE; i++) {
+      out[i]! += cuantos * s.atomos[i]!;
+      atomos += s.atomos[i]!;
+    }
+    out[ENERGIA]! += cuantos * s.energia;
+    cota += cuantos * (atomos + Math.abs(s.energia));
+  }
+  return cota < COTA_DOBLE;
+}
+
+/** `prepararAsiento` con un delta de `balanceDoble`, en `out`: las mismas comprobaciones y errores. */
+export function prepararAsientoDoble(cuenta: Float64Array, delta: Float64Array, signo: 1 | -1, out: Float64Array): Float64Array {
+  if (cuenta.length !== ANCHO || delta.length !== ANCHO) throw new Error('Ancho de asiento inválido.');
+  for (let i = 0; i < ANCHO; i++) {
+    const v = cuenta[i]!;
+    if (!Number.isSafeInteger(v)) throw new Error(`Entero inseguro en cuenta[${i}]: ${v}.`);
+    // Si la suma exacta pasa de 2⁵³ − 1, la redondeada también: el error es el mismo que en bigint.
+    const r = v + signo * delta[i]!;
+    if (!(Math.abs(r) <= Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`Entero inseguro en cuenta[${i}]: ${BigInt(v) + BigInt(signo) * BigInt(delta[i]!)}.`);
+    }
+    out[i] = r;
+  }
+  return out;
+}
+
 /** Valida el asiento entero antes de modificar el lote o el libro. */
 export function prepararAsiento(cuenta: Float64Array, delta: readonly bigint[], signo: 1 | -1 = 1): Float64Array {
   if (cuenta.length !== ANCHO || delta.length !== ANCHO) throw new Error('Ancho de asiento inválido.');

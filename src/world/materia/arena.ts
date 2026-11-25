@@ -202,7 +202,7 @@ export class ArenaLotes implements ArenaMateria {
     if (celda === -1) return celda;
     natural(celda, 'Celda');
     if (celda >= this.primero.length) throw new RangeError(`Celda material fuera del terreno: ${celda}`);
-    return rol === Rol.Aire ? this.op.terreno.chunkDe(celda) * CELDAS_PAGINA : celda;
+    return rol === Rol.Aire || rol === Rol.Mar || rol === Rol.Cielo ? this.op.terreno.chunkDe(celda) * CELDAS_PAGINA : celda;
   }
 
   private duenoDe(s: number): Hilo {
@@ -229,13 +229,13 @@ export class ArenaLotes implements ArenaMateria {
   }
 
   nuevo(rol: Rol, celda: number, forma: number): LoteRef {
-    natural(rol, 'Rol', Rol.Pieza);
+    natural(rol, 'Rol', Rol.Cielo);
     natural(forma, 'Forma', UINT32_MAX);
     celda = this.celdaDe(celda, rol);
     if (celda !== -1 && this.op.terreno.duenoChunk[this.op.terreno.chunkDe(celda)] !== this.op.hilo) {
       throw new Error(`Celda ajena: ${celda}`);
     }
-    if (celda !== -1 && rol <= Rol.Aire && this.lotes(celda, rol, new Float64Array(0))) {
+    if (celda !== -1 && (rol <= Rol.Aire || rol === Rol.Mar || rol === Rol.Cielo) && this.lotes(celda, rol, new Float64Array(0))) {
       throw new Error(`Lote de rol ${rol} duplicado en celda ${celda}.`);
     }
     const s = this.op.lotes.reserve();

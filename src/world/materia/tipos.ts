@@ -168,6 +168,8 @@ export const Rol = {
   Suelo: 0, Agua: 1, Vida: 2, Aire: 3, Roca: 4,
   Tejido: 5, Reserva: 6, Digestivo: 7, Embrion: 8,
   Objeto: 9, Cadaver: 10, Pieza: 11,
+  /** w: depósitos finitos de cada página (mar y cielo), uno por página como el aire. */
+  Mar: 12, Cielo: 13,
 } as const;
 export type Rol = (typeof Rol)[keyof typeof Rol];
 

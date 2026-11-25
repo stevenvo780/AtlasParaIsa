@@ -152,10 +152,10 @@ function validarRanuras(ranuras: Set<number>): void {
 
 function validarLote(lote: LoteGuardado, exclusivos: Set<string>): void {
   const { celda, rol, dueno, pares } = lote;
-  entero(rol, Rol.Suelo, Rol.Pieza);
+  entero(rol, Rol.Suelo, Rol.Cielo);
   entero(dueno, 0, U32_MAX);
-  if (celda >= 0 && rol <= Rol.Aire) {
-    if (rol === Rol.Aire && celda % CELDAS_POR_PAGINA !== 0) throw new Error('Celda de aire fuera del inicio de página.');
+  if (celda >= 0 && (rol <= Rol.Aire || rol === Rol.Mar || rol === Rol.Cielo)) {
+    if (rol >= Rol.Aire && celda % CELDAS_POR_PAGINA !== 0) throw new Error('Celda de aire fuera del inicio de página.');
     const clave = `${celda}:${rol}`;
     if (exclusivos.has(clave)) throw new Error(`Lote exclusivo duplicado en celda ${celda}.`);
     exclusivos.add(clave);

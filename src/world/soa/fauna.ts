@@ -103,11 +103,8 @@ export class FaunaSoA {
 
 // ── V23 (`v23.fauna`): filas de la fauna con cuerpo en el frente del motor ────────────────────────────────────
 
-/** Columna que la ley de la fauna registra (`leyFauna.columnas`): lo que los demás leen de un animal para cazarlo,
- * ordeñarlo o evitarlo, además de las fijas. Sin columna de especie: la fauna V23 no la registra. */
-export const COLUMNA_FAUNA = 'fauna';
-export const CAMPOS_FAUNA = { miedo: 0, habituacion: 1, huella: 2, velocidad: 3 } as const;
-export const FAUNA_ANCHO = 4;
+export { COLUMNA_FAUNA, CAMPOS_FAUNA, FAUNA_ANCHO } from './fauna-columnas.js';
+import { COLUMNA_FAUNA, CAMPOS_FAUNA, FAUNA_ANCHO } from './fauna-columnas.js';
 
 export interface FilaFaunaV23 {
   slot: number; uid: number; x: number; y: number; chunk: number; objetivo: number; accion: number; tick: number;

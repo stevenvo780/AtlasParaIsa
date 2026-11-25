@@ -1,3 +1,7 @@
+// El registro vive en un módulo hoja y se importa PRIMERO: `invariantes` → `materia/ley-mundo` → `materia/servicio` llama a
+// `registrar` al cargarse, y ese módulo del ciclo se evalúa antes que el cuerpo de este si `invariantes` fue el primero en cargar.
+import { invariantesRegistrados, registrar } from './invariantes-registro.js';
+export { registrar, listaInvariantes } from './invariantes-registro.js';
 import type { World } from './index.js';
 import { worldContext } from './spatial.js';
 import { tileLookup } from './tile-index.js';
@@ -27,17 +31,6 @@ export interface Invariante {
   comprobar(mundo: World, region?: RegionRef): Violacion[];
 }
 
-const registro = new Map<string, Invariante>();
-/** Devuelve el retiro del registro para módulos descargables y pruebas aisladas. */
-export function registrar(invariante: Invariante): () => void {
-  if (!invariante.id || registro.has(invariante.id) || !Number.isSafeInteger(invariante.cadaTicks) || invariante.cadaTicks < 1) {
-    throw new Error(`Registro de invariante inválido o duplicado: ${invariante.id}`);
-  }
-  const entrada = Object.freeze({ ...invariante });
-  registro.set(entrada.id, entrada);
-  return () => { if (registro.get(entrada.id) === entrada) registro.delete(entrada.id); };
-}
-export function listaInvariantes(): readonly Invariante[] { return [...registro.values()]; }
 
 export function comprobarInvariante(inv: Invariante, mundo: World, region?: RegionRef): Violacion[] {
   try {
@@ -50,7 +43,7 @@ export function comprobarInvariante(inv: Invariante, mundo: World, region?: Regi
 /** Sin cadencia por defecto: las pruebas comprueban TODAS las leyes en cada barrera de fin de paso. */
 export function comprobarInvariantes(mundo: World, opciones: { region?: RegionRef; ids?: readonly string[]; cadencia?: boolean } = {}): Violacion[] {
   const resultado: Violacion[] = [];
-  for (const inv of registro.values()) {
+  for (const inv of invariantesRegistrados()) {
     if (opciones.ids && !opciones.ids.includes(inv.id) || opciones.cadencia && mundo.tick % inv.cadaTicks !== 0) continue;
     resultado.push(...comprobarInvariante(inv, mundo, opciones.region));
   }

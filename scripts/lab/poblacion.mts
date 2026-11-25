@@ -307,6 +307,8 @@ export interface Individuo {
 export interface Embudo { adultosFertiles: number; listos: number; conPareja: number; conParejaYLugar: number }
 export interface DiaMedido {
   dia: number; tick: number; vivos: number; fueraDeZona: number; muestras: number; embudo: Embudo;
+  /** Suma, sobre personas y muestras, de cuántos otros mortales tiene cada una a ≤ 3 y a ≤ 8 celdas. */
+  vecinos3: number; vecinos8: number;
   hambre: number[]; sed: number[]; msPared: number; ticksPorSegundo: number; carga: number[];
 }
 export interface Piramide { anchoDias: number; clases: number[]; etapas: { juveniles: number; fertiles: number; mayores: number } }
@@ -369,6 +371,24 @@ function embudo(mundo: World, vivos: readonly Person[]): Embudo {
   return e;
 }
 
+/** Apiñamiento que vive cada persona: otros mortales a ≤ 3 celdas (radio de pareja) y a ≤ 8. La gente se dispersa
+ * fuera de la zona sembrada, así que la densidad de la zona solo es la del primer instante. */
+function apinamiento(vivos: readonly Person[]): { a3: number; a8: number } {
+  const casillas = new Map<string, Person[]>(), lado = 8, clave = (x: number, y: number) => `${Math.floor(x / lado)},${Math.floor(y / lado)}`;
+  for (const p of vivos) { const k = clave(p.x, p.y), l = casillas.get(k); if (l) l.push(p); else casillas.set(k, [p]); }
+  let a3 = 0, a8 = 0;
+  for (const a of vivos) {
+    const cx = Math.floor(a.x / lado), cy = Math.floor(a.y / lado);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const b of casillas.get(`${cx + dx},${cy + dy}`) ?? []) {
+      if (b === a) continue;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d <= 8) a8++;
+      if (d <= 3) a3++;
+    }
+  }
+  return { a3, a8 };
+}
+
 /** Corre `dias` días y registra cada vida, cada nacimiento y cada pareja que se forma; no escribe el mundo. */
 export function medir(mundo: World, o: OpcionesMedida): Registro {
   const cadaMuestra = o.cadaMuestra ?? 120, cadaInvariantes = o.cadaInvariantes ?? DIA, comprobar = crearComprobador();
@@ -394,7 +414,7 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
   for (let dia = 1; mundo.tick < fin; dia++) {
     const desde = performance.now(), hambre = new Array<number>(10).fill(0), sed = new Array<number>(10).fill(0);
     const suma: Embudo = { adultosFertiles: 0, listos: 0, conPareja: 0, conParejaYLugar: 0 };
-    let muestras = 0, fueraDeZona = 0;
+    let muestras = 0, fueraDeZona = 0, vecinos3 = 0, vecinos8 = 0;
     for (let t = 0; t < DIA && mundo.tick < fin; t++) {
       stepWorld(mundo);
       const ahora = mortales(mundo), ids = new Set<string>();
@@ -412,13 +432,15 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
         const e = embudo(mundo, ahora);
         suma.adultosFertiles += e.adultosFertiles; suma.listos += e.listos; suma.conPareja += e.conPareja; suma.conParejaYLugar += e.conParejaYLugar;
         for (const p of ahora) { hambre[clase(p.hunger)]!++; sed[clase(p.thirst)]!++; if (fuera(p)) fueraDeZona++; }
+        const { a3, a8 } = apinamiento(ahora);
+        vecinos3 += a3; vecinos8 += a8;
         muestras++;
       }
       if (mundo.tick % cadaInvariantes === 0) revisar();
     }
     o.archivar?.();
     const ms = performance.now() - desde;
-    dias.push({ dia, tick: mundo.tick, vivos: vivos.size, fueraDeZona, muestras, embudo: suma, hambre, sed, msPared: ms, ticksPorSegundo: (mundo.tick - (dias.at(-1)?.tick ?? inicio)) * 1000 / ms, carga: loadavg() });
+    dias.push({ dia, tick: mundo.tick, vivos: vivos.size, fueraDeZona, muestras, embudo: suma, vecinos3, vecinos8, hambre, sed, msPared: ms, ticksPorSegundo: (mundo.tick - (dias.at(-1)?.tick ?? inicio)) * 1000 / ms, carga: loadavg() });
     o.alDia?.(dias.at(-1)!);
     if (o.tope !== undefined && vivos.size >= o.tope) { tope = dia; break; }
   }
@@ -522,6 +544,8 @@ export interface Analisis {
   transitorio: number; ventana: [number, number]; diasPersona: number; densidadInicial: number; densidadMedia: number;
   bloques: Record<Tasa, Estimacion>; personas: Record<Tasa, Estimacion>; anchoBloqueSobrePersona: number; replicasR: number[];
   fraccionConPareja: number; embudo: Embudo; hambre: number[]; sed: number[]; fraccionFueraDeZona: number; grupos: number;
+  /** Otros mortales a ≤ 3 y a ≤ 8 celdas de cada persona, de media en la ventana: la densidad que de verdad se vive. */
+  vecinos3: number; vecinos8: number;
 }
 
 export function analizar(registro: Registro, opciones: { transitorio: number; bloque: number; replicas?: number }): Analisis {
@@ -531,8 +555,9 @@ export function analizar(registro: Registro, opciones: { transitorio: number; bl
   const ancho = (e: Estimacion) => e.ic95[1] - e.ic95[0];
   const embudoVentana: Embudo = { adultosFertiles: 0, listos: 0, conPareja: 0, conParejaYLugar: 0 };
   const hambre = new Array<number>(10).fill(0), sed = new Array<number>(10).fill(0);
-  let muestras = 0, fuera = 0, vivosMedios = 0;
+  let muestras = 0, fuera = 0, vivosMedios = 0, v3 = 0, v8 = 0;
   for (const d of dias) {
+    v3 += d.vecinos3; v8 += d.vecinos8;
     for (const k of Object.keys(embudoVentana) as (keyof Embudo)[]) embudoVentana[k] += d.embudo[k];
     d.hambre.forEach((n, i) => { hambre[i]! += n; }); d.sed.forEach((n, i) => { sed[i]! += n; });
     muestras += d.hambre.reduce((a, b) => a + b, 0); fuera += d.fueraDeZona;
@@ -548,6 +573,7 @@ export function analizar(registro: Registro, opciones: { transitorio: number; bl
     fraccionConPareja: embudoVentana.adultosFertiles ? embudoVentana.conPareja / embudoVentana.adultosFertiles : NaN, embudo: embudoVentana,
     hambre: hambre.map(n => n / Math.max(1, muestras)), sed: sed.map(n => n / Math.max(1, muestras)),
     fraccionFueraDeZona: fuera / Math.max(1, muestras), grupos: porBloque.length,
+    vecinos3: v3 / Math.max(1, muestras), vecinos8: v8 / Math.max(1, muestras),
   };
 }
 
@@ -628,18 +654,20 @@ export function resumir(dir: string, opciones: { transitorio: 'auto' | number; b
   const filas = corridas.map(c => ({ c, a: analizar(c.registro, { transitorio: comun, bloque: opciones.bloque }), serie: serieDiaria(c.registro) }));
   const completas = filas.filter(f => f.c.opciones.zona.ancho * f.c.opciones.zona.alto === Math.max(...filas.filter(g => g.c.opciones.semilla === f.c.opciones.semilla).map(g => g.c.opciones.zona.ancho * g.c.opciones.zona.alto)));
   const lineas = [`Ventana: días ${comun + 1}..${Math.max(...corridas.map(c => c.registro.dias.length))} (transitorio común = ${comun} d; propio de cada corrida: ${propios.map(p => p.dias).join(', ')}). Tasas por habitante y día, IC 95 % por bloques de ${opciones.bloque}×${opciones.bloque} celdas.`, '',
-    '| semilla | N | zona | densidad (hab/celda de tierra) | r = b − m | nacimientos b | muertes m | hambre | sed | intemperie | vejez | parejas | con pareja | N final | IC bloque/persona | tiempo (min) | ticks/s | carga |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+    '| semilla | N | zona | densidad (hab/celda de tierra) | vecinos a ≤3 / ≤8 | fuera de zona | r = b − m | nacimientos b | muertes m | hambre | sed | intemperie | vejez | parejas | con pareja | N final | IC bloque/persona | tiempo (min) | ticks/s | carga |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const { c, a } of filas) {
     const b = a.bloques, z = c.opciones.zona;
-    lineas.push(`| ${c.opciones.semilla} | ${c.opciones.n} | ${z.x},${z.y},${z.ancho}×${z.alto} | ${fmt(a.densidadInicial)} (media ${fmt(a.densidadMedia)}) | ${fmtE(b.r)} | ${fmtE(b.nacimientos)} | ${fmtE(b.muertes)} | ${fmt(b.starvation.valor)} | ${fmt(b.dehydration.valor)} | ${fmt(b.exposure.valor)} | ${fmt(b.senescence.valor)} | ${fmtE(b.parejas)} | ${fmt(a.fraccionConPareja, 2)} | ${c.registro.dias.at(-1)?.vivos ?? '—'} | ${fmt(a.anchoBloqueSobrePersona, 2)} | ${fmt(c.msTotal / 60000, 1)} | ${fmt(c.registro.dias.reduce((s, d) => s + DIA, 0) * 1000 / c.registro.dias.reduce((s, d) => s + d.msPared, 0), 1)} | ${fmt(c.carga.inicio[0]!, 1)}→${fmt(c.carga.fin[0]!, 1)} |`);
+    lineas.push(`| ${c.opciones.semilla} | ${c.opciones.n} | ${z.x},${z.y},${z.ancho}×${z.alto} | ${fmt(a.densidadInicial)} (media ${fmt(a.densidadMedia)}) | ${fmt(a.vecinos3, 1)} / ${fmt(a.vecinos8, 1)} | ${fmt(a.fraccionFueraDeZona, 2)} | ${fmtE(b.r)} | ${fmtE(b.nacimientos)} | ${fmtE(b.muertes)} | ${fmt(b.starvation.valor)} | ${fmt(b.dehydration.valor)} | ${fmt(b.exposure.valor)} | ${fmt(b.senescence.valor)} | ${fmtE(b.parejas)} | ${fmt(a.fraccionConPareja, 2)} | ${c.registro.dias.at(-1)?.vivos ?? '—'} | ${fmt(a.anchoBloqueSobrePersona, 2)} | ${fmt(c.msTotal / 60000, 1)} | ${fmt((c.registro.fin - c.registro.inicio) * 1000 / c.registro.dias.reduce((s, d) => s + d.msPared, 0), 1)} | ${fmt(c.carga.inicio[0]!, 1)}→${fmt(c.carga.fin[0]!, 1)} |`);
   }
-  const pendientes: Record<string, Estimacion> = {};
+  // Dos ejes: la densidad sembrada (la variable del diseño) y el apiñamiento vivido (vecinos a ≤ 8 celdas).
+  const pendientes: Record<string, { sembrada: Estimacion; vivida: Estimacion }> = {};
   for (const semilla of [...new Set(completas.map(f => f.c.opciones.semilla))]) {
-    const puntos = completas.filter(f => f.c.opciones.semilla === semilla).map(f => ({ densidad: f.a.densidadInicial, r: f.a.bloques.r.valor, replicas: f.a.replicasR }));
-    if (puntos.length >= 2) pendientes[semilla] = pendiente(puntos);
+    const filasMapa = completas.filter(f => f.c.opciones.semilla === semilla);
+    const puntos = (x: (a: Analisis) => number) => filasMapa.map(f => ({ densidad: x(f.a), r: f.a.bloques.r.valor, replicas: f.a.replicasR }));
+    if (filasMapa.length >= 2) pendientes[semilla] = { sembrada: pendiente(puntos(a => a.densidadInicial)), vivida: pendiente(puntos(a => a.vecinos8)) };
   }
-  lineas.push('', 'Pendiente dr/d(densidad) por mapa (por día y por hab/celda): ' + Object.entries(pendientes).map(([s, e]) => `${s}: ${fmtE(e)}`).join(' · '));
+  lineas.push('', 'Pendiente de r por mapa: ' + Object.entries(pendientes).map(([s, e]) => `${s}: dr/d(densidad sembrada) ${fmtE(e.sembrada)} · dr/d(vecinos a ≤8) ${fmtE(e.vivida, 4)}`).join(' · '));
   const coherencia = coherenciaEscala(filas.map(f => f.c), comun, opciones.bloque);
   for (const k of coherencia) lineas.push(`Coherencia de escala, semilla ${k.semilla}: N=${k.n} entera r ${fmtE(k.entera.r)} · dos mitades N=${k.n / 2} r ${fmtE(k.mitades.r)} · diferencia r ${fmtE(k.diferencia.r)} → ${k.coinciden ? 'coinciden' : 'NO coinciden'} (b ${fmtE(k.diferencia.nacimientos)}, m ${fmtE(k.diferencia.muertes)}, parejas ${fmtE(k.diferencia.parejas)})`);
   lineas.push('', 'Serie diaria de r (sin ventana): ' + filas.map(f => `${f.c.opciones.semilla}/N${f.c.opciones.n}/${f.c.opciones.zona.ancho}: ${f.serie.map(s => fmt(s.tasas.r, 2)).join(' ')}`).join(' · '));

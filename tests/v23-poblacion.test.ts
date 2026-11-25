@@ -86,7 +86,7 @@ function registroSintetico(semilla: number, n: number, dias: number, b: number, 
     }
     vivos = siguientes;
   }
-  const dia = (d: number) => ({ dia: d, tick: d * DIA, vivos: 0, fueraDeZona: 0, muestras: 1, embudo: { adultosFertiles: 1, listos: 1, conPareja: 1, conParejaYLugar: 1 }, hambre: new Array(10).fill(0), sed: new Array(10).fill(0), msPared: 1, ticksPorSegundo: 1, carga: [0, 0, 0] });
+  const dia = (d: number) => ({ dia: d, tick: d * DIA, vivos: 0, fueraDeZona: 0, muestras: 1, vecinos3: 0, vecinos8: 0, embudo: { adultosFertiles: 1, listos: 1, conPareja: 1, conParejaYLugar: 1 }, hambre: new Array(10).fill(0), sed: new Array(10).fill(0), msPared: 1, ticksPorSegundo: 1, carga: [0, 0, 0] });
   const piramide = { anchoDias: 1, clases: [], etapas: { juveniles: 0, fertiles: 0, mayores: 0 } };
   return { inicio: 0, fin, zona: ZONA, caminables: 1536, individuos, dias: Array.from({ length: dias }, (_, k) => dia(k + 1)), piramideInicial: piramide, piramideFinal: piramide, violaciones: { duras: 0, blandas: 0, comprobaciones: 0 } };
 }

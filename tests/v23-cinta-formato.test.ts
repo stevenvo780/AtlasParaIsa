@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32 } from 'node:zlib';
-import { clientDelta, codificarBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
+import { clientDelta, codificarBloque, cotaIndiceBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
 import { projectTapeFrame } from '../src/server/sim-worker.js';
 import { applyClientTapeDelta, indexTiles } from '../src/shared/tape-delta.js';
 import type { PersonView, RuntimeStats, Tile, WorldView } from '../src/shared/types.js';
@@ -154,4 +154,22 @@ test('CNT2 acota lo que descomprime cada lectura, no la suma del bloque: un mund
   chico.writeUInt32LE(crc32(chico.subarray(29, descriptor.bytesIndice), crc32(chico.subarray(0, 25))), 25);
   const inflado = leerIndiceBloque(lector(chico), chico.length);
   assert.throws(() => leerMarcoJson(inflado, 0, lector(chico)), /Tamaño descomprimido/);
+});
+
+test('la cota del índice sella antes de añadir un fotograma disperso que la rebasaría', () => {
+  const tiles = Array.from({ length: 40_000 }, (_, i) => ({
+    x: i * 64, y: 0, terrain: 'soil' as const, moisture: 0, food: 0, vegetation: 0,
+  }));
+  const cabecera = { sequence: 0, tick: 0, day: 1, phase: 'dawn', weather: 'clear' } as const;
+  const base: WorldView = { ...cabecera, version: 10, width: 1, height: 1, tiles,
+    people: [], places: [], events: [], memories: [] };
+  const cabe = cotaIndiceBloque(base);
+  let admitidos = 0;
+  for (let i = 1; i < 32; i++) {
+    if (!cabe({ ...cabecera, tick: i, tilesPatch: tiles })) break;
+    admitidos++;
+  }
+  assert.ok(admitidos > 1 && admitidos < 31);
+  const disperso = cotaIndiceBloque(base);
+  for (let i = 1; i < 32; i++) assert.ok(disperso({ ...cabecera, tick: i }));
 });

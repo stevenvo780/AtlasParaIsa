@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { ChunkReq, CintaMeta } from '../../shared/cinta.js';
-import type { TapeChunkEncoding } from '../../shared/tape.js';
+import type { TapeChunkEncoding } from '../../shared/tape-delta.js';
 import type { Tile, Viewport } from '../../shared/types.js';
 import { LectorCinta, type Fondo } from './lector.js';
 

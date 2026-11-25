@@ -15,7 +15,7 @@ import type { PersonView, Tile, WorldView } from '../src/shared/types.js';
 import { ajustarCadencia, crearEnlaceCortes } from '../src/server/tape-worker.js';
 
 function directorio(t: TestContext) {
-  const raiz = '/tmp/atlas-v23-c1a';
+  const raiz = '/tmp/atlas-v23-o-cinta';
   mkdirSync(raiz, { recursive: true });
   const temporal = mkdtempSync(join(raiz, 'escritor-'));
   t.after(() => rmSync(temporal, { recursive: true, force: true }));

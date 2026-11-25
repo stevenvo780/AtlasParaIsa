@@ -13,7 +13,7 @@ import { podar } from '../src/server/cinta/poda.js';
 import { CINTA, type Nivel } from '../src/shared/cinta.js';
 import type { WorldView } from '../src/shared/types.js';
 
-const RAIZ = '/tmp/atlas-v23-c1a';
+const RAIZ = '/tmp/atlas-v23-o-cinta';
 const TOPE_PODA = 1_000_000;
 type Operacion = 'anexar' | 'nuevo' | 'podar';
 

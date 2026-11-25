@@ -2,8 +2,8 @@ import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { CINTA, type Bifurcacion, type ChunkReq, type ChunkResp, type CintaMeta, type Laguna, type Nivel, type SeriePunto } from '../../shared/cinta.js';
-import { applyClientTapeDelta, type TapeClientDelta, type TapeEntityPatch } from '../../shared/tape-delta.js';
-import type { TapeChunkEncoding, TapeChunkResponse, TapeMetaResponse, TapeTimelinePoint } from '../../shared/tape.js';
+import { applyClientTapeDelta, type TapeChunkEncoding, type TapeClientDelta, type TapeEntityPatch } from '../../shared/tape-delta.js';
+import type { TapeChunkResponse, TapeMetaResponse, TapeTimelinePoint } from '../../shared/tape.js';
 import type { Tile, Viewport, WorldView } from '../../shared/types.js';
 import { phaseAt } from '../../world/mundo/crear.js';
 import { TICKS_PER_DAY } from '../../world/mundo/tipos.js';
@@ -159,6 +159,7 @@ export class LectorCinta {
   private indice = new Map<number, Pista[]>();
   private lagunas: (Laguna & { epoca: number })[] = [];
   private lagunasPoda: (Laguna & { epoca: number; nivel: Nivel })[] = [];
+  private cuarentena: (Laguna & { epoca: number; nivel: Nivel })[] = [];
   private bifurcaciones: Bifurcacion[] = [];
   private readonly cache = new Map<string, { indice: IndiceBloque; coste: number }>();
   private cacheUsado = 0;
@@ -172,6 +173,7 @@ export class LectorCinta {
       this.db = undefined; this.ino = -1; this.version = -1; this.ultimoRowid = 0;
       this.epocas = []; this.segmentos.clear(); this.indice.clear(); this.lagunas = []; this.bifurcaciones = [];
       this.lagunasPoda = [];
+      this.cuarentena = [];
       this.cache.clear(); this.cacheUsado = 0; this.bordes.clear();
     }
   }
@@ -210,22 +212,29 @@ export class LectorCinta {
     this.epocas = epocas;
     const vivos = new Map((db.prepare('SELECT id,nivel,bytes FROM segmentos').all() as { id: number; nivel: Nivel; bytes: number }[])
       .map(s => [s.id, { nivel: s.nivel, bytes: s.bytes }]));
+    const cuarentena = db.prepare("SELECT 1 FROM sqlite_master WHERE name='cuarentena'").get()
+      ? db.prepare('SELECT epoca,nivel,t0,t1 FROM cuarentena ORDER BY t0').all() as unknown as typeof this.cuarentena : [];
     // La fila más nueva es del último segmento de su nivel, que la poda nunca borra: si baja, el catálogo es otro.
     const maximo = Number(db.prepare('SELECT coalesce(max(rowid),0) AS r FROM bloques').get()!.r);
-    if (maximo < this.ultimoRowid) { this.indice.clear(); this.ultimoRowid = 0; }
+    if (maximo < this.ultimoRowid || cuarentena.length !== this.cuarentena.length) {
+      this.indice.clear(); this.ultimoRowid = 0;
+    }
     else if ([...this.segmentos.keys()].some(id => !vivos.has(id))) {
       for (const pistas of this.indice.values()) for (const p of pistas) p.bloques = p.bloques.filter(b => vivos.has(b.segmento));
     }
     this.segmentos = vivos;
+    this.cuarentena = cuarentena;
     // El escritor añade los bloques de cada época y nivel en orden de tick, así que el rowid conserva ese orden.
-    const nuevos = db.prepare(`SELECT rowid AS r,segmento,epoca,nivel,t0,t1,offset,bytes,fotogramas,crc FROM bloques
-      WHERE rowid>? ORDER BY rowid`).all(this.ultimoRowid) as unknown as (Bloque & { r: number })[];
-    for (const { r, ...b } of nuevos) {
+    const sinAislados = cuarentena.length
+      ? 'AND NOT EXISTS (SELECT 1 FROM cuarentena c WHERE c.segmento=b.segmento AND c.offset=b.offset)' : '';
+    const nuevos = db.prepare(`SELECT segmento,epoca,nivel,t0,t1,offset,bytes,fotogramas,crc FROM bloques b
+      WHERE rowid>? ${sinAislados} ORDER BY rowid`).all(this.ultimoRowid) as unknown as Bloque[];
+    for (const b of nuevos) {
       let pistas = this.indice.get(b.epoca);
       if (!pistas) this.indice.set(b.epoca, pistas = NIVELES.map(() => ({ bloques: [], intervalos: [] })));
       pistas[b.nivel]!.bloques.push(b);
-      this.ultimoRowid = r;
     }
+    this.ultimoRowid = maximo;
     this.lagunas = db.prepare('SELECT epoca,t0,t1 FROM lagunas ORDER BY t0').all().map(l => ({ ...l })) as unknown as (Laguna & { epoca: number })[];
     this.lagunasPoda = db.prepare('SELECT epoca,nivel,t0,t1 FROM lagunas_poda ORDER BY t1').all() as unknown as typeof this.lagunasPoda;
     this.bifurcaciones = db.prepare('SELECT epoca,desde,hasta,motivo FROM bifurcaciones ORDER BY epoca').all()
@@ -236,13 +245,14 @@ export class LectorCinta {
   /** Cada laguna de poda corta solo la pista que perdió los segmentos. */
   private intervalos(epoca: number, nivel: Nivel, bloques: readonly Bloque[]): Intervalo[] {
     const lagunas = this.lagunas.filter(l => l.epoca === epoca)
-      .concat(this.lagunasPoda.filter(l => l.epoca === epoca && l.nivel === nivel)).sort((a, b) => a.t1 - b.t1);
-    let cursor = 0;
+      .concat(this.lagunasPoda.filter(l => l.epoca === epoca && l.nivel === nivel),
+        this.cuarentena.filter(l => l.epoca === epoca && l.nivel === nivel)).sort((a, b) => a.t0 - b.t0);
+    let cursor = 0, finLaguna = -Infinity;
     const r: Intervalo[] = [];
     bloques.forEach((b, i) => {
       const a = bloques[i - 1], ultimo = r.at(-1);
-      while (a && cursor < lagunas.length && lagunas[cursor]!.t1 <= a.t1) cursor++;
-      if (a && ultimo && (lagunas[cursor]?.t1 ?? Infinity) > b.t0) { ultimo.i1 = i; ultimo.t1 = b.t1; }
+      while (cursor < lagunas.length && lagunas[cursor]!.t0 < b.t0) finLaguna = Math.max(finLaguna, lagunas[cursor++]!.t1);
+      if (a && ultimo && finLaguna <= a.t1) { ultimo.i1 = i; ultimo.t1 = b.t1; }
       else r.push({ i0: i, i1: i, t0: b.t0, t1: b.t1 });
     });
     return r;
@@ -563,7 +573,8 @@ export class LectorCinta {
       const t0 = Math.min(...niveles.map(n => n.t0), ultima?.t1 ?? 0), t1 = ultima?.t1 ?? 0;
       const serie = this.serie(rango.t0 ?? t0, rango.t1 ?? t1, PUNTOS_SERIE);
       return { ...vacia, epoca: ultima?.id ?? 0, t0, t1, hz: this.ultimoHz(), bytes, niveles,
-        bifurcaciones: this.bifurcaciones, lagunas: this.lagunas.map(({ t0, t1 }) => ({ t0, t1 })), serie };
+        bifurcaciones: this.bifurcaciones, lagunas: [...this.lagunas, ...this.cuarentena]
+          .map(({ t0, t1 }) => ({ t0, t1 })).sort((a, b) => a.t0 - b.t0), serie };
     });
   }
 
@@ -586,6 +597,51 @@ export class LectorCinta {
     return Array.from({ length: puntos }, (_, i) => serie[Math.min(serie.length - 1, Math.round((i + 1) * salto) - 1)]!);
   }
 
+  private anterior(t: number, niveles: readonly Nivel[], pedida?: Epoca) {
+    const desde = this.epocaEn(t), epoca = pedida ?? this.epocas[desde]!;
+    const fino = niveles.find(n => this.intervaloEn(epoca, n, t, !!pedida));
+    const epocas = pedida ? [pedida] : this.epocas.slice(0, desde + 1).reverse();
+    let mejor: { e: Epoca; nivel: Nivel; i: number; tick: number; clave: boolean } | undefined;
+    for (const e of epocas) {
+      const hasta = pedida ? t : Math.min(t, e.fin - 1);
+      for (const nivel of fino === undefined ? niveles : [fino]) {
+        const { bloques } = this.pista(e.id, nivel);
+        const i = ultimoHasta(bloques, hasta, b => b.t0);
+        const b = bloques[i];
+        if (!b || (mejor && b.t1 <= mejor.tick)) continue;
+        let tick = b.t0 === hasta ? b.t0 : b.t1;
+        if (tick > hasta) for (const { indice } of this.abrirBloque(b)) {
+          tick = indice.marcos[ultimoHasta(indice.marcos, hasta, m => m.tick)]!.tick;
+        }
+        if (!mejor || tick > mejor.tick) mejor = { e, nivel, i, tick, clave: tick === b.t0 };
+      }
+      if (mejor) break;
+    }
+    return mejor;
+  }
+
+  private cambioNivel(e: Epoca, nivel: Nivel, iv: Intervalo, desde: number, niveles: readonly Nivel[], todo: boolean): number {
+    const fin = todo ? Infinity : e.fin;
+    let cambio = Infinity;
+    for (const k of niveles) {
+      const otro = k < nivel ? this.siguiente(e, k, desde, todo) : undefined;
+      if (otro && otro.t0 < fin) cambio = Math.min(cambio, otro.t0);
+    }
+    const ultimo = this.ultimo(e, nivel, iv, todo);
+    if (ultimo + 1 < cambio && niveles.some(k => k !== nivel && this.intervaloEn(e, k, ultimo + 1, todo))) cambio = ultimo + 1;
+    return cambio;
+  }
+
+  private haySiguiente(e: Epoca, nivel: Nivel, tick: number, todo: boolean): boolean {
+    if (todo) return tick < this.pista(e.id, nivel).bloques.at(-1)!.t1;
+    for (let i = this.epocas.length - 1; i >= 0 && this.epocas[i]!.id >= e.id; i--) {
+      const epoca = this.epocas[i]!, { intervalos } = this.pista(epoca.id, nivel);
+      const ultimo = intervalos[ultimoHasta(intervalos, epoca.fin - 1, p => p.t0)];
+      if (ultimo && this.ultimo(epoca, nivel, ultimo, false) > tick) return true;
+    }
+    return false;
+  }
+
   /**
    * `GET /api/cinta/chunk`. Sin `epoca` sirve lo visible y nunca cruza una época, una laguna ni un hueco; con ella, la
    * historia entera de esa época (también lo huérfano), que sigue siendo continua. El tramo termina donde empieza un
@@ -601,20 +657,24 @@ export class LectorCinta {
       const pedida = req.epoca === undefined ? undefined : this.epocas.find(x => x.id === req.epoca);
       if (req.epoca !== undefined && !pedida) return vacio(req.t, req.epoca);
       const todo = !!pedida, camara = req.w === undefined ? undefined : { x: req.x!, y: req.y!, width: req.w, height: req.h! };
+      if (n === 1) {
+        const anterior = this.anterior(req.t, niveles, pedida);
+        if (!anterior) return vacio(req.t, req.epoca ?? this.epocas[this.epocaEn(req.t)]!.id);
+        const { e, nivel, i, tick, clave } = anterior;
+        const tramo = this.tramo(e, nivel, i, i, tick, { clave, n, hasta: tick + 1, camara, fondo: fondoDe(nivel, fondo) });
+        const iv = this.intervaloEn(e, nivel, tick, todo)!;
+        const cambio = this.cambioNivel(e, nivel, iv, tick, niveles, todo);
+        return conCampos({ nivel, paso: CINTA.pasos[nivel], epoca: e.id, t0: tick, t1: tick,
+          hayMas: this.haySiguiente(e, nivel, tick, todo),
+          ...(cambio < Infinity ? { cambioDeNivelEn: cambio } : {}) }, `"baseFrame":${tramo.base},"deltas":[]`);
+      }
       // Entre t y el corte puede no haber fotogramas (un nivel más fino empieza antes del siguiente, o lo que queda
       // del bloque es huérfano): se sirve desde el corte.
       for (let t = req.t; ;) {
         const sitio = this.ubicar(t, niveles, pedida);
         if (!sitio) return vacio(t, req.epoca ?? this.epocas.at(-1)!.id);
         const { e, nivel, iv } = sitio, desde = Math.max(t, iv.t0), fin = todo ? Infinity : e.fin;
-        let cambio = Infinity;
-        for (const k of niveles) {
-          const otro = k < nivel ? this.siguiente(e, k, desde, todo) : undefined;
-          if (otro && otro.t0 < fin) cambio = Math.min(cambio, otro.t0);
-        }
-        // Un hueco de la poda en este nivel que otro cubre (una laguna no la cubre ninguno).
-        const ultimo = this.ultimo(e, nivel, iv, todo);
-        if (ultimo + 1 < cambio && niveles.some(k => k !== nivel && this.intervaloEn(e, k, ultimo + 1, todo))) cambio = ultimo + 1;
+        const cambio = this.cambioNivel(e, nivel, iv, desde, niveles, todo);
         const hasta = Math.min(fin, cambio), { bloques } = this.pista(e.id, nivel);
         const i = Math.max(iv.i0, ultimoHasta(bloques, desde, b => b.t0));
         const tramo = this.tramo(e, nivel, i, iv.i1, desde, { clave: true, n, hasta, camara, fondo: fondoDe(nivel, fondo) });

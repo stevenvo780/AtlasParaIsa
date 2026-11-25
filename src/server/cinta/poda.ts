@@ -1,10 +1,8 @@
 import { statfsSync } from 'node:fs';
 import { CINTA, type Nivel } from '../../shared/cinta.js';
-import { TICKS_PER_DAY } from '../../world/mundo/tipos.js';
 import type { CatalogoCinta, SegmentoCinta } from './catalogo.js';
+import { fijadosEn, segmentoFijado } from './marcadores.js';
 
-const PIN_DIAS = 14;
-const PIN_MS = PIN_DIAS * 86400_000;
 /** Lo que la cinta deja libre en su disco, que comparte con el mundo: un mundo que no puede guardar se para. */
 export const RESERVA_DISCO = 4 * 1024 ** 3;
 
@@ -36,12 +34,10 @@ export function podar(catalogo: CatalogoCinta, tope: number, nivel?: Nivel, entr
   { margen = 0, reservaDisco = RESERVA_DISCO, libre = libreEnDisco }: Holguras = {}): void {
   const segmentos = catalogo.segmentos();
   const ultimo = new Map(segmentos.map(s => [s.nivel, s.id]));
-  const activosDesde = Date.now() - PIN_MS;
-  const pins = catalogo.db.prepare('SELECT epoca,t FROM marcadores WHERE en>=?')
-    .all(activosDesde) as unknown as { epoca: number; t: number }[];
-  const pinActual = catalogo.db.prepare('SELECT 1 FROM marcadores WHERE en>=? AND epoca=? AND t BETWEEN ? AND ? LIMIT 1');
+  const ahora = Date.now();
+  const pins = fijadosEn(catalogo.db, ahora);
   const candidatos = segmentos.filter(s => ultimo.get(s.nivel) !== s.id && (s.nivel !== 0 || !pins.some(p =>
-    s.epoca === p.epoca && s.t1 >= p.t && s.t0 <= p.t + PIN_DIAS * TICKS_PER_DAY)));
+    s.epoca === p.epoca && s.t1 >= p.t0 && s.t0 <= p.t1)));
   const huerfano = (s: SegmentoCinta) => s.visibleHasta !== null && s.t0 > s.visibleHasta;
   const orden = (a: SegmentoCinta, b: SegmentoCinta) => Number(huerfano(b)) - Number(huerfano(a)) || a.id - b.id;
   candidatos.sort(orden);
@@ -49,7 +45,7 @@ export function podar(catalogo: CatalogoCinta, tope: number, nivel?: Nivel, entr
   let usado = nivel === undefined ? 0 : segmentos.reduce((suma, s) => suma + (s.nivel === nivel ? s.bytes : 0), 0);
   const eliminados = new Set<number>();
   const borrar = (s: SegmentoCinta) => {
-    const protegido = () => s.nivel === 0 && !!pinActual.get(activosDesde, s.epoca, s.t0 - PIN_DIAS * TICKS_PER_DAY, s.t1);
+    const protegido = () => segmentoFijado(catalogo.db, s, Date.now());
     if (!catalogo.borrarSegmento(s, protegido, () => declararLaguna(catalogo, s))) return false;
     eliminados.add(s.id);
     total -= s.bytes;

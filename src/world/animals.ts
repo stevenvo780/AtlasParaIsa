@@ -5,7 +5,10 @@ import { SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
-import { paramsOf } from './params.js';
+import { ley, paramsOf } from './params.js';
+import { ctxMateriaDe, ctxSi, type CtxLeyMateria } from './motor/acceso.js';
+import { extraerEscalar } from './materia/ley-mundo.js';
+import { matarAnimal } from './ley-fauna.js';
 import { tileLookup, verifiedChunkBlocks } from './tile-index.js';
 import { residentFaunaCapacity, residentFastAccess, residentTileReader, type ResidentFastAccess, type ResidentTileReader } from './soa/terreno.js';
 import { residentBackingArray, residentInPlaceRevision } from './soa/topologia.js';
@@ -62,6 +65,23 @@ export interface Animal extends AnimalView {
   uid?: number;
   /** V23 (`v23.fauna`): cuerpo de átomos; se pone al crear el animal con la ley encendida, nunca después. */
   cuerpo?: import('./materia/tipos.js').Cuerpo;
+  /** V23 (`v23.fauna`): genes continuos y estado de conducta sin especies (`ley-fauna.ts`); como `cuerpo`. */
+  fauna?: EstadoFauna;
+}
+/** Estado de un animal bajo `v23.fauna`. Uids del frente; 0 = nadie. */
+export interface EstadoFauna {
+  /** Genes continuos (`decision/fauna.ts`, `GEN`): los suyos, sorteados al concebir o heredados del fundador. */
+  genoma: number[];
+  habituacion: number;
+  /** Último miedo calculado (lo lee quien quiere extraerle algo: lo consiente si es menor que su reserva relativa). */
+  miedo: number;
+  /** Sobresalto de golpes y extracciones: S₀ en el tick `sobresaltoDesde`, decae como la alarma. */
+  sobresalto: number; sobresaltoDesde: number;
+  /** Celdas de movimiento acumuladas y aún no andadas (la velocidad es fraccionaria). */
+  avance: number;
+  persigue: number; huyeDe: number; pareja: number;
+  heridoPor: number; heridoEn: number;
+  extraido: { que: 'reserva' | 'fibra'; tick: number; por: number } | null;
 }
 export interface AnimalWorld {
   seed: number; tick: number; tiles: Tile[]; animals: Animal[]; animalCounter: number;
@@ -647,6 +667,13 @@ interface LocalState extends PercepcionFauna {
   celdas: CeldasFauna; fila: Int32Array;
   /** Plan de cada animal activo y el orden por cercanía de la decisión (`ordenEspacial`). */
   planes: PlanFauna[]; claves: Float64Array; orden: Int32Array;
+  /** Etapa intermedia (`v23.materia` sin `v23.fauna`): el contexto con el que comer y beber sacan materia. */
+  materia: CtxLeyMateria | undefined;
+}
+/** El contexto de materia del dueño de `world`, si el motor ya lo enlazó (un mundo de prueba sin motor no lo tiene). */
+function materiaDe(world: AnimalWorld): CtxLeyMateria | undefined {
+  const c = ctxSi(world as unknown as Parameters<typeof ctxSi>[0]) as Partial<CtxLeyMateria> | undefined;
+  return c?.materia && c.quimica ? c as CtxLeyMateria : undefined;
 }
 /** La celda a (dx, dy) del animal está en lo que devolvió su última `localTiles`: lo mismo que buscar su
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
@@ -950,6 +977,7 @@ function reservar(animal: Animal, consumed: number, fraccion: number): number {
 }
 function feed(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState): void {
   if (distance(animal, animal.target) > 0) return;
+  if (state.materia) { feedMaterial(animal, tile, world, state, state.materia); return; }
   if (animal.action === 'graze' && animal.genes.carnivory < 0.6) {
     const consumed = Math.min(tile.growth ?? tile.vegetation, 0.0015, animal.hunger / 4);
     tile.growth = clamp((tile.growth ?? tile.vegetation) - consumed);
@@ -967,6 +995,30 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState)
     }
   } else if (animal.action === 'drink') {
     const water = takeWater(animal, tile, Math.min(0.0016, animal.thirst / 3));
+    hydrateBody(animal, water); world.animalDynamics.waterConsumed += water;
+  } else if (animal.action === 'rest') {
+    restBody(animal, { fatigue: 0.002, energy: 0.0015 });
+  }
+}
+/** Etapa intermedia (`v23.materia` sin `v23.fauna`): el animal escalar de hoy come y bebe lo mismo que en `feed`, pero
+ * lo saca de la materia de la tesela con `extraerEscalar` (sumidero declarado «uso heredado»), que escribe la vista;
+ * solo asimila lo que de verdad salió. */
+function feedMaterial(animal: Animal, tile: Tile, world: AnimalWorld, state: LocalState, c: CtxLeyMateria): void {
+  const celda = c.terreno.celda(animal.x, animal.y);
+  if (celda < 0) return;
+  if (animal.action === 'graze' && animal.genes.carnivory < 0.6) {
+    const pedido = Math.min(tile.food, 0.0015, animal.hunger / 4);
+    const consumed = pedido > 0 ? extraerEscalar(c, celda, 'comida', pedido) : 0;
+    const apartado = state.reserva ? reservar(animal, consumed, Math.min(1, state.fraccionReserva * 4)) : 0;
+    assimilateFood(animal, state.reserva ? consumed - apartado : consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
+    world.animalDynamics.plantConsumed += consumed;
+    if (animal.species !== 'fish' && consumed > 0) {
+      const agua = extraerEscalar(c, celda, 'agua', consumed * 3);
+      hydrateBody(animal, agua, 0.3); world.animalDynamics.waterConsumed += agua * 0.1;
+    }
+  } else if (animal.action === 'drink') {
+    const pedido = Math.min(waterAt(animal, tile), 0.0016, animal.thirst / 3);
+    const water = pedido > 0 ? extraerEscalar(c, celda, 'agua', pedido) : 0;
     hydrateBody(animal, water); world.animalDynamics.waterConsumed += water;
   } else if (animal.action === 'rest') {
     restBody(animal, { fatigue: 0.002, energy: 0.0015 });
@@ -1057,7 +1109,8 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
     contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, emergente: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE),
-    planes: [], claves: new Float64Array(0), orden: new Int32Array(0) };
+    planes: [], claves: new Float64Array(0), orden: new Int32Array(0),
+    materia: ley(world, 'materia') && !ley(world, 'fauna') ? materiaDe(world) : undefined };
   const { fauna: leyesFauna } = paramsOf(world);
   const emergent = state.emergente = paramsOf(world).quimica.emergente;
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
@@ -1155,6 +1208,8 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
   const candidates = enCelda ?? world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0);
   const victim = (victimId === undefined ? candidates : candidates.filter(a => a.id === victimId)).sort(canonical)[0];
   if (!victim || !residentBackingArray(world.tiles).some(t => t.x === point.x && t.y === point.y)) return 0;
+  // V23: el animal tiene cuerpo; matarlo deja su cadáver en la celda (la comida sale de ahí, no de un escalar).
+  if (victim.cuerpo) { matarAnimal(ctxMateriaDe(world as unknown as Parameters<typeof ctxMateriaDe>[0]), victim, 'caza humana', hunterId); return 0; }
   if (paramsOf(world).quimica.emergente) alarmHerd(world.animals, victim, world.tick);
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);

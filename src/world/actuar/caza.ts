@@ -12,10 +12,10 @@ import { C_MOVER } from '../../shared/naturaleza.js';
 import { formaDeCodigo } from '../../shared/materia.js';
 import { ctxSi, type CtxLeyMateria } from '../motor/acceso.js';
 import { CAMPOS_CUERPO, CUERPO_ANCHO, DATO_GOLPEAR, DATO_TOMAR, GENOMA_ANCHO, REF_NULA, TipoIntento, slotDe, type Ref } from '../motor/contratos.js';
-import { masaDe, pagar, reservaJ } from '../materia/cuerpo.js';
+import { masaDe, pagar, reservaJ, vistaCuerpo } from '../materia/cuerpo.js';
 import { lotesDeCelda } from '../materia/ley-mundo.js';
 import { desprender, reparto } from '../materia/romper.js';
-import { Rol, type LoteRef } from '../materia/tipos.js';
+import { Rol, type LoteRef, type VistaCuerpo } from '../materia/tipos.js';
 import { GEN, vidaMaxima } from '../decision/fauna.js';
 import { CAMPOS_FAUNA, COLUMNA_FAUNA, FAUNA_ANCHO } from '../soa/fauna.js';
 
@@ -229,6 +229,9 @@ export function animalVisto(c: CtxLeyMateria, slot: number): { miedo: number; ha
   return { miedo, habituacion, reserva, consiente: miedo < reserva };
 }
 
+/** Borrador de `vistaCuerpo` para `valorDeAnimal` (un solo hilo por dueño). */
+const vistaPropia: VistaCuerpo = { hambre: 0, sed: 0, energia: 0, salud: 0, masa: 0, carga: 0, T: 0 };
+
 /**
  * Lo que vale para una persona un animal del frente, en J digeribles (leyes-opus §3e, «ganadería»): cazarlo ahora (su
  * masa a la densidad de la carne, menos perseguirlo y el riesgo de su defensa) o extraerle de forma sostenida (lo que
@@ -242,7 +245,7 @@ export function valorDeAnimal(c: CtxLeyMateria, person: Person, slot: number): {
   const d = Math.hypot((fr.x[slot] ?? 0) - person.x, (fr.y[slot] ?? 0) - person.y);
   const defensa = fr.genoma[slot * GENOMA_ANCHO + GEN.defensa] ?? 0;
   const cazar = masaP * jPorKg - C_MOVER * masaYo * d - defensa * (masaP / Math.max(masaYo, 1e-9)) * reservaJ(c, person.cuerpo);
-  const visto = animalVisto(c, slot), hambre = person.cuerpo ? Math.min(1, Math.max(0, fr.cuerpo[slotDe(c.ref(person.uid ?? 0)) * CUERPO_ANCHO + CAMPOS_CUERPO.hambre] ?? 0)) : 0;
+  const visto = animalVisto(c, slot), hambre = Math.min(1, Math.max(0, vistaCuerpo(c, person.cuerpo, vistaPropia).hambre));
   const masaAdulta = Math.exp(fr.genoma[slot * GENOMA_ANCHO + GEN.lnMasa] ?? 0);
   const extraer = visto.consiente
     ? TASA_EXTRACCION * masaYo ** 0.75 * jPorKg * vidaMaxima(masaAdulta) / 2 * (1 - hambre) - C_MOVER * masaYo * d

@@ -419,6 +419,7 @@ function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol): v
   const cu = f.animal.cuerpo!, masa = f.vista.masa;
   let libre = CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa;
   let boca = TASA_INGESTA * masa ** 0.75;
+  if (!(libre > 0)) return;
   if (rol === Rol.Vida) {
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
     if (vida !== REF_NULA) ingerir(c, cu, vida, pedidoComida(c, cu, Math.min(libre, boca)));
@@ -662,7 +663,7 @@ function aplicarTomar(cl: CtxLey, i: Intento): Aplicado {
   const kg = Math.max(0, (i.dato[DATO_TOMAR.cuantos] ?? 0) / 1000);
   const garantia = miedo < f.vista.energia && kg > 0 ? extraer(c, cu, parte, kg) : new Float64Array(0);
   const masa = f.vista.masa, sacado = masaPares(c, garantia);
-  fa.sobresalto = sobresaltoActual(fa, c.tick) + (masa > 0 ? Math.max(sacado, kg * 0.1) / masa : 0);
+  fa.sobresalto = sobresaltoActual(fa, c.tick) + (masa > 0 ? sacado / masa : 0);
   fa.sobresaltoDesde = c.tick;
   const por = c.frente.uid[slotDe(i.de)] ?? 0;
   if (sacado > 0) { fa.extraido = { que: parte, tick: c.tick, por }; a.tends = (a.tends ?? 0) + 1; a.lastTended = c.tick; }

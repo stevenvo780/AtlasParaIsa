@@ -11,12 +11,13 @@ import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
-import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
+import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
 import { DvrPlayer, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
 import type { TapeChunkResponse, TapeMetaResponse } from '../shared/tape.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
+import { anotarCiclo, cicloVacio, leerMateria, renderPanelMateria } from './panel-materia.js';
 import { firmaMotor, luzMotor, pedirTelemetria, renderPanelMotor, vistaMotor, type LuzSalud, type TelemetriaRecibida } from './panel-motor.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
 import { personLink, recentEvidence } from './world-evidence.js';
@@ -69,7 +70,7 @@ const cronica = new CronicaBuffer();
 let hitosGuardados: HitoGuardado[] = [];
 let journalFilter: GrupoCronica | 'todo' = 'todo';
 let populationSignature = '', inspectorSignature = '', statsSignature = '';
-let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
+let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'materia' | 'performance' = 'life';
 /** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
 let modoActual: Modo = 'completo';
 let populationKind: 'people' | 'animals' | 'communities' | 'structures' = 'people';
@@ -367,7 +368,7 @@ function wire(): void {
   el('inhabitant-card').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-parent]'); if (button) choosePerson(button.dataset.parent!); });
   for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-stats]')) {
     tab.addEventListener('click', () => selectStatsTab(tab.dataset.stats as typeof statsTab));
-    tab.addEventListener('keydown', event => { const names = ['life', 'land', 'communities', 'technology', 'performance'] as const; const index = names.indexOf(statsTab); let next = index; if (event.key === 'ArrowRight') next = (index + 1) % names.length; else if (event.key === 'ArrowLeft') next = (index + names.length - 1) % names.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = names.length - 1; else return; event.preventDefault(); selectStatsTab(names[next]!); el(`stats-tab-${statsTab}`).focus(); });
+    tab.addEventListener('keydown', event => { const names = ['life', 'land', 'communities', 'technology', 'materia', 'performance'] as const; const index = names.indexOf(statsTab); let next = index; if (event.key === 'ArrowRight') next = (index + 1) % names.length; else if (event.key === 'ArrowLeft') next = (index + names.length - 1) % names.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = names.length - 1; else return; event.preventDefault(); selectStatsTab(names[next]!); el(`stats-tab-${statsTab}`).focus(); });
   }
   el('hud-telemetry').addEventListener('click', event => {
     const nav = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-hud-nav]')?.dataset.hudNav as HudNav | undefined;
@@ -568,6 +569,12 @@ async function refreshSalud(): Promise<void> {
   el('panel-salud').innerHTML = renderPanelSalud(salud);
   ultimaSalud = salud; renderSaludIndicador();
 }
+/** Reparto de los átomos que ve este navegador, lectura a lectura, para el ciclo del panel «Materia». */
+const cicloMateria = cicloVacio();
+function anotarMateria(next: WorldView): void {
+  const lectura = leerMateria(next.materia);
+  if (lectura) anotarCiclo(cicloMateria, lectura);
+}
 const motorAbierto = (): boolean => !el('stats-drawer').hidden && statsTab === 'performance';
 async function refreshMotor(): Promise<void> {
   const session = uiSession;
@@ -715,6 +722,7 @@ function wireClientUi(): void {
 }
 
 function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles, changedTiles?: readonly Tile[]): void {
+  anotarMateria(next);
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
   // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
@@ -844,7 +852,7 @@ function renderInspector(): void {
     }
     const signature = JSON.stringify(animal); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = speciesNames[animal.species];
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="animal-avatar animal-portrait" style="--animal-color:${animalColors[animal.species]}" aria-hidden="true">${animalSilhouette(animal.species)}</div><div><strong>Una vida del paisaje</strong><span class="agency-state">${esc(animal.id)} · generación ${esc(animal.generation)}</span></div></div><p class="game-current-action">${animalActions[animal.action]} <span>· ${number(animal.x, 1)}, ${number(animal.y, 1)}</span></p><p class="game-reason">${esc(animal.reason)}</p><div class="game-needs"><h3>Necesidades de este individuo</h3>${meter('Energía', animal.energy)}${meter('Hambre', animal.hunger)}${meter('Sed', animal.thirst)}${meter('Cansancio', animal.fatigue)}${meter('Salud', animal.health)}</div>${renderAnimalTelemetry(animal)}<p class="drawer-note">Observas un animal autónomo. Su actividad y sus desplazamientos llegan del mundo.</p></section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><p class="drawer-note">La edad, generación y progenitores recibidos se muestran en Ahora. No se ha recibido una crónica individual de este animal.</p></section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="animal-avatar animal-portrait" style="--animal-color:${animalColors[animal.species]}" aria-hidden="true">${animalSilhouette(animal.species)}</div><div><strong>Una vida del paisaje</strong><span class="agency-state">${esc(animal.id)} · generación ${esc(animal.generation)}</span></div></div><p class="game-current-action">${animalActions[animal.action]} <span>· ${number(animal.x, 1)}, ${number(animal.y, 1)}</span></p><p class="game-reason">${esc(animal.reason)}</p><div class="game-needs"><h3>Necesidades de este individuo</h3>${meter('Energía', animal.energy)}${meter('Hambre', animal.hunger)}${meter('Sed', animal.thirst)}${meter('Cansancio', animal.fatigue)}${meter('Salud', animal.health)}</div>${renderAnimalTelemetry(animal)}${faunaFicha(animal, world)}<p class="drawer-note">Observas un animal autónomo. Su actividad y sus desplazamientos llegan del mundo.</p></section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><p class="drawer-note">La edad, generación y progenitores recibidos se muestran en Ahora. No se ha recibido una crónica individual de este animal.</p></section>`);
     return;
   }
   el('person-primary').classList.toggle('animal-primary', false);
@@ -887,8 +895,8 @@ function renderInspector(): void {
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
-    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.cells?.length ? s.cells.some(c => c.x === tile.x && c.y === tile.y) : tile.x >= s.x && tile.x < s.x + (s.footprint?.width ?? 1) && tile.y >= s.y && tile.y < s.y + (s.footprint?.height ?? 1)) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
-    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">${observerOnly ? OBSERVER_NOTE : 'Selecciona un habitante para dar una orden; puedes compartir un susurro desde Susurros.'}</p>`);
+    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.cells?.length ? s.cells.some(c => c.x === tile.x && c.y === tile.y) : tile.x >= s.x && tile.x < s.x + (s.footprint?.width ?? 1) && tile.y >= s.y && tile.y < s.y + (s.footprint?.height ?? 1)) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const sustanciasVista = world.sustancias; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo, lotesDeCelda(world.lotes, tile.x, tile.y), tile.mat?.map(([id]) => sustanciasVista?.some(s => s.id === id))]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
+    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div>${renderTileTelemetry(tile, world.geologyKey)}${materiaTeselaFicha(tile, world.sustancias)}${lotesFicha(world.lotes, world.sustancias, tile.x, tile.y)}<div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">${observerOnly ? OBSERVER_NOTE : 'Selecciona un habitante para dar una orden; puedes compartir un susurro desde Susurros.'}</p>`);
   }
 }
 function renderControls(): void {
@@ -1043,6 +1051,10 @@ function renderStatsContent(): void {
     const missing = focusedRecipe && recipeDetails.get(focusedRecipe) === null ? `<p class="stats-note">Los pasos de ${esc(focusedRecipe)} no están disponibles en este mundo ahora.</p>` : '';
     panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted, world.technology) : '')
       + renderChemistryTelemetry(world.chemistry) + technologyPane(world.technology, world.organization, recipeDetails, world.stats, world.performance?.conducta);
+    return;
+  }
+  if (statsTab === 'materia') {
+    panel.innerHTML = stamp + renderPanelMateria(leerMateria(world.materia), cicloMateria, world.sustancias, world.tick);
     return;
   }
   if (statsTab === 'performance') {

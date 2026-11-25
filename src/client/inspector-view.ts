@@ -1,12 +1,16 @@
-import type { AnimalView, BlueprintView, ChronicleEvent, PersonDetail, PersonView, StructureView, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, PersonDetail, PersonView, StructureView, Tile, WorldView } from '../shared/types.js';
+import type { CrianzaVisible, CuerpoVisible, LoteVisible, SustanciasVisibles } from '../shared/vistas-v23.js';
+import { ClaseSustancia, TIPOS, type Propiedades, type SustanciaVista } from '../shared/materia.js';
+import { ELEMENTOS } from '../shared/naturaleza.js';
 import { fertilidadFicha } from './natalidad-view.js';
 import { momento } from './cronica.js';
 import { enClaro } from './textos.js';
 import { edadFicha, genealogiaFicha } from './linaje-view.js';
 import { componentNames, componentPurpose } from './life-art.js';
 import { carriedWaterCard, recipeLabel } from './technology-art.js';
-import { esc, svg, icon, number, percentage } from './ui-catalog.js';
+import { esc, svg, icon, number, percentage, COLOR_ELEMENTO, NOMBRE_ELEMENTO } from './ui-catalog.js';
 import { nombreConocido } from './vistos.js';
+import { personLink } from './world-evidence.js';
 import { ejeDominante, ejesCultura } from './censo-view.js';
 import { footprintCells, footprintLabel, installedCount, siteFractions, type ExtendedStructure } from './structure-art.js';
 import { compoundLotsMarkup, swatch, phaseLabels, materialPropertiesMarkup } from './telemetry-hud.js';
@@ -221,9 +225,9 @@ export function vinculoSIFicha(p: PersonView, world: WorldView, eventos: readonl
 }
 
 /** Rasgos con la escucha de la ley E (`traits.escucha` ∈ [0,1], locus 8 del genoma); ausente en mundos sin esa ley. */
-type ConEscucha = { traits?: PersonView['traits'] & { escucha?: number } };
+type ConEscucha = { escucha?: number; traits?: PersonView['traits'] & { escucha?: number } };
 export function escuchaDe(p: ConEscucha | undefined): number | null {
-  const e = p?.traits?.escucha;
+  const e = p?.escucha ?? p?.traits?.escucha;
   return typeof e === 'number' && Number.isFinite(e) ? Math.max(0, Math.min(1, e)) : null;
 }
 /** 16 píxeles por barra: la escucha se lee como la cultura y las necesidades, de un vistazo. */
@@ -284,5 +288,193 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
   const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
-  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
+  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + cuerpoPersonaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
+}
+
+/* ------------------------------------------------------------------ */
+/* V23 — cuerpo de átomos, crianza, fauna y sustancias                 */
+/* ------------------------------------------------------------------ */
+
+const sinDatoV23 = '<em class="sin-dato">sin dato</em>';
+const finitoV23 = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const fraccion = (v: number): number => Math.max(0, Math.min(1, v));
+/** Barra de 16 píxeles, como la de escucha: se lee de un vistazo y el HTML no cambia con el ruido de una lectura. */
+const barraPixeles = (etiqueta: string, v: unknown, texto?: string): string => finitoV23(v)
+  ? `<div class="cuerpo-fila"><span>${esc(etiqueta)}</span><span class="cuerpo-barra" style="--e:${Math.round(fraccion(v) * 16)}" role="meter" aria-label="${esc(etiqueta)}" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${fraccion(v).toFixed(2)}"></span><strong>${esc(texto ?? percentage(fraccion(v)))}</strong></div>`
+  : `<div class="cuerpo-fila"><span>${esc(etiqueta)}</span>${sinDatoV23}</div>`;
+const dato = (etiqueta: string, valor: string | null, clave: string): string =>
+  `<div class="skill-row" data-cuerpo="${esc(clave)}"><span>${esc(etiqueta)}</span><strong>${valor === null ? sinDatoV23 : esc(valor)}</strong></div>`;
+const kg = (v: unknown): string | null => finitoV23(v) ? `${number(v, v < 1 ? 3 : 2)} kg` : null;
+const hex = (color: number): string => `#${(Math.max(0, Math.min(0xffffff, Math.floor(color))) >>> 0).toString(16).padStart(6, '0')}`;
+
+/** Temperatura en kelvin con su equivalente en °C (el cuerpo vivo se lee mejor en grados). */
+export function temperaturaTexto(T: unknown): string | null {
+  return finitoV23(T) ? `${number(T, 1)} K · ${number(T - 273.15, 1)} °C` : null;
+}
+
+const SUBINDICES = '₀₁₂₃₄₅₆₇₈₉';
+/** Fórmula por elementos en orden de Hill (C, H y luego alfabético; sin C, todo alfabético). Sin átomos: «—». */
+export function formulaDe(atomos: readonly number[] | undefined): string {
+  if (!atomos) return '—';
+  const partes = ELEMENTOS.map((simbolo, i) => ({ simbolo, n: atomos[i] ?? 0 })).filter(e => finitoV23(e.n) && e.n > 0);
+  if (!partes.length) return '—';
+  const hill = partes.some(e => e.simbolo === 'C');
+  const rango = (s: string): number => hill ? (s === 'C' ? 0 : s === 'H' ? 1 : 2) : 2;
+  partes.sort((a, b) => rango(a.simbolo) - rango(b.simbolo) || a.simbolo.localeCompare(b.simbolo));
+  return partes.map(e => e.simbolo + (e.n === 1 ? '' : String(Math.round(e.n)).split('').map(d => SUBINDICES[Number(d)] ?? d).join(''))).join('');
+}
+
+/** Nombre del tipo de enlace de `TIPOS`: «C–O», «C=O», «C≡N». */
+export function nombreEnlace(tipo: number): string {
+  const t = TIPOS[tipo];
+  if (!t) return `enlace ${tipo}`;
+  return `${ELEMENTOS[t.e]}${t.k === 1 ? '–' : t.k === 2 ? '=' : '≡'}${ELEMENTOS[t.f]}`;
+}
+
+/** Los `max` tipos de enlace de más cuenta de la sustancia (`enlaces` = pares [tipo, cuenta]). */
+export function enlacesDominantes(s: Pick<SustanciaVista, 'enlaces'>, max = 3): { nombre: string; cuenta: number }[] {
+  const pares: { nombre: string; cuenta: number }[] = [];
+  for (let i = 0; i + 1 < s.enlaces.length; i += 2) {
+    const tipo = s.enlaces[i], cuenta = s.enlaces[i + 1];
+    if (finitoV23(tipo) && finitoV23(cuenta) && cuenta > 0) pares.push({ nombre: nombreEnlace(tipo), cuenta });
+  }
+  return pares.sort((a, b) => b.cuenta - a.cuenta || a.nombre.localeCompare(b.nombre)).slice(0, max);
+}
+
+/** Nombre derivado de la estructura, sin tabla de nombres: «red Si–O rígida», «molécula C–H flexible». */
+export function nombreDerivado(s: SustanciaVista): string {
+  const principales = enlacesDominantes(s, 2).map(e => e.nombre);
+  const forma = s.clase === ClaseSustancia.Unidad ? 'red' : 'molécula';
+  const { dureza, flexibilidad } = s.prop;
+  const rasgo = finitoV23(dureza) && dureza >= .66 ? 'rígida' : finitoV23(flexibilidad) && flexibilidad >= .6 ? 'flexible' : finitoV23(dureza) && dureza <= .25 ? 'blanda' : '';
+  return [forma, principales.join(' · '), rasgo].filter(Boolean).join(' ');
+}
+
+export type FaseSustancia = 'sólido' | 'líquido' | 'gas';
+/** Fase a la temperatura T según sus puntos de fusión y ebullición. */
+export function faseA(prop: Pick<Propiedades, 'tFusion' | 'tEbullicion'>, T: number): FaseSustancia {
+  return T < prop.tFusion ? 'sólido' : T < prop.tEbullicion ? 'líquido' : 'gas';
+}
+
+export function sustanciaPorId(lista: SustanciasVisibles | undefined, id: number): SustanciaVista | undefined {
+  return lista?.find(s => s.id === id);
+}
+
+/** Los 8 átomos de la sustancia como barra apilada de 16 píxeles repartidos por fracción atómica (método del resto mayor). */
+export function barraAtomos(atomos: readonly number[]): string {
+  const total = ELEMENTOS.reduce((a, _, i) => a + Math.max(0, atomos[i] ?? 0), 0);
+  if (!(total > 0)) return '';
+  const cuotas = ELEMENTOS.map((_, i) => Math.max(0, atomos[i] ?? 0) / total * 16);
+  const pixeles = cuotas.map(Math.floor);
+  let resto = 16 - pixeles.reduce((a, b) => a + b, 0);
+  for (const i of cuotas.map((c, k) => k).sort((a, b) => (cuotas[b]! - pixeles[b]!) - (cuotas[a]! - pixeles[a]!))) { if (resto <= 0) break; pixeles[i]!++; resto--; }
+  const trozos = pixeles.map((n, i) => n > 0 ? `<i style="flex:${n} 1 0;background:${COLOR_ELEMENTO[i]}" title="${esc(`${NOMBRE_ELEMENTO[i]} · ${number(atomos[i] ?? 0)} átomos`)}"></i>` : '').join('');
+  return `<span class="atomos-barra" role="img" aria-label="${esc(ELEMENTOS.map((s, i) => `${s} ${number(atomos[i] ?? 0)}`).join(' · '))}">${trozos}</span>`;
+}
+
+/** Ficha de sustancia (SustanciaVista): fórmula, clase, fase a T, enlaces dominantes y propiedades. `undefined` = el servidor no la mandó. */
+export function sustanciaFicha(s: SustanciaVista | undefined, id: number, T?: number): string {
+  if (!s) return `<details class="person-detail sustancia-ficha" data-sustancia="${esc(id)}"><summary>Sustancia nº ${esc(id)}</summary><p class="drawer-note">${sinDatoV23}: el servidor no mandó su estructura en esta vista.</p></details>`;
+  const p = s.prop;
+  const fase = finitoV23(T) ? `${faseA(p, T)} a ${number(T, 0)} K` : null;
+  const enlaces = enlacesDominantes(s).map(e => `${e.nombre} ×${number(e.cuenta)}`).join(' · ') || null;
+  const medida = (v: unknown, unidad: string, dig = 1): string | null => finitoV23(v) ? `${number(v, dig)} ${unidad}` : null;
+  const filas = [
+    dato('Fórmula', formulaDe(s.atomos), 'formula'),
+    dato('Clase', s.clase === ClaseSustancia.Unidad ? 'unidad de red' : 'molécula', 'clase'),
+    dato('Fase', fase, 'fase'),
+    dato('Enlaces dominantes', enlaces, 'enlaces'),
+    dato('Masa molar', medida(s.masa, 'g/mol', 2), 'masa'),
+    dato('Densidad', medida(p.densidad, 'kg/L', 2), 'densidad'),
+    dato('Fusión', medida(p.tFusion, 'K', 0), 'fusion'),
+    dato('Ebullición', medida(p.tEbullicion, 'K', 0), 'ebullicion'),
+    dato('Calor al oxidarse', medida(p.qOxidacion, 'J/cuanto', 0), 'oxidacion'),
+    dato('Energía media de enlace', medida(p.dMedia, 'J/cuanto', 0), 'enlace-medio'),
+    dato('Coordinación media', medida(p.r, '', 2), 'coordinacion'),
+  ].join('');
+  const rasgos = [barraPixeles('Dureza', p.dureza), barraPixeles('Tenacidad', p.tenacidad), barraPixeles('Flexibilidad', p.flexibilidad), barraPixeles('Polaridad', p.polaridad)].join('');
+  return `<details class="person-detail sustancia-ficha" data-sustancia="${esc(s.id)}"><summary>${finitoV23(p.color) ? `<i class="chem-swatch" style="background:${hex(p.color)}" aria-hidden="true"></i> ` : ''}${esc(formulaDe(s.atomos))} <small>${esc(nombreDerivado(s))}</small></summary>${barraAtomos(s.atomos)}${filas}<div class="cuerpo-rasgos">${rasgos}</div></details>`;
+}
+
+/** Cuenta en el catálogo recibido (`world.sustancias`) o dice que falta. */
+function nombreCorto(lista: SustanciasVisibles | undefined, id: number): string {
+  const s = sustanciaPorId(lista, id);
+  return s ? formulaDe(s.atomos) : `sustancia nº ${id}`;
+}
+
+/** Ficha › Suelo: de qué está hecha la superficie de la casilla (hasta 3 sustancias) y la ficha de cada una. */
+export function materiaTeselaFicha(tile: Pick<Tile, 'mat' | 'T'>, sustancias: SustanciasVisibles | undefined): string {
+  if (!tile.mat?.length) return '';
+  const total = tile.mat.reduce((a, [, f]) => a + (finitoV23(f) ? Math.max(0, f) : 0), 0);
+  const filas = tile.mat.map(([id, f]) => {
+    const s = sustanciaPorId(sustancias, id);
+    const parte = total > 0 && finitoV23(f) ? f / total : null;
+    return `<div class="cuerpo-fila" data-mat="${esc(id)}"><span>${s && finitoV23(s.prop.color) ? `<i class="chem-swatch" style="background:${hex(s.prop.color)}" aria-hidden="true"></i>` : ''}${esc(nombreCorto(sustancias, id))}</span>${parte === null ? sinDatoV23 : `<span class="cuerpo-barra" style="--e:${Math.round(parte * 16)}" aria-hidden="true"></span><strong>${esc(percentage(parte))}</strong>`}</div>`;
+  }).join('');
+  const T = tile.T;
+  const fichas = tile.mat.map(([id]) => sustanciaFicha(sustanciaPorId(sustancias, id), id, T)).join('');
+  return `<section class="materia-tesela" data-materia-tesela><h4 class="detail-subtitle">De qué está hecha</h4>${filas}${dato('Temperatura', temperaturaTexto(T), 'temperatura')}${fichas}</section>`;
+}
+
+/** Lotes con forma de una casilla (objeto, cadáver, pieza, fuego) tal como los manda la vista. */
+export function lotesDeCelda(lotes: readonly LoteVisible[] | undefined, x: number, y: number): LoteVisible[] {
+  return lotes?.filter(l => l.x === x && l.y === y) ?? [];
+}
+const ROL_LOTE: Record<LoteVisible['rol'], string> = { objeto: 'Objeto', cadaver: 'Cadáver', pieza: 'Pieza de obra', fuego: 'Fuego' };
+/** Ficha de cada lote de la casilla: rol, masa, temperatura y la ficha de su sustancia principal. */
+export function lotesFicha(lotes: readonly LoteVisible[] | undefined, sustancias: SustanciasVisibles | undefined, x: number, y: number): string {
+  const aqui = lotesDeCelda(lotes, x, y);
+  if (!aqui.length) return '';
+  const cards = aqui.map(l => `<article class="lote-ficha" data-lote="${esc(l.rol)}"><strong>${esc(ROL_LOTE[l.rol] ?? l.rol)}</strong>${dato('Masa', kg(l.masa), 'masa')}${dato('Temperatura', temperaturaTexto(l.T), 'temperatura')}${dato('Forma', finitoV23(l.forma) ? (l.forma === 0 ? 'montón sin forma' : `forma ${number(l.forma)}`) : null, 'forma')}${sustanciaFicha(sustanciaPorId(sustancias, l.principal), l.principal, l.T)}</article>`).join('');
+  return `<section class="lotes-casilla" data-lotes><h4 class="detail-subtitle">Lo que hay en el suelo</h4>${cards}</section>`;
+}
+
+/** Ficha › Cuerpo: masa, reserva, agua, digestivo, carga y temperatura. Persona o animal; todo campo ausente dice «sin dato». */
+export function cuerpoFicha(c: CuerpoVisible | undefined, sustancias?: SustanciasVisibles): string {
+  if (!c) return '<section class="cuerpo-ficha" data-cuerpo-ficha="sin-dato"><h4 class="detail-subtitle">Cuerpo</h4><p class="drawer-note">Sin dato: este mundo no trae cuerpos de átomos.</p></section>';
+  const adulta = finitoV23(c.masaAdulta) && c.masaAdulta > 0 && finitoV23(c.masa) ? c.masa / c.masaAdulta : null;
+  const carga = finitoV23(c.carga) && finitoV23(c.masa) && c.masa > 0 ? c.carga / c.masa : null;
+  const principal = finitoV23(c.principal) ? sustanciaPorId(sustancias, c.principal) : undefined;
+  const embrion = c.embrion ? gestacionFicha(c.embrion) : '';
+  return `<section class="cuerpo-ficha" data-cuerpo-ficha="ok"><h4 class="detail-subtitle">Cuerpo</h4>`
+    + dato('Masa', kg(c.masa), 'masa') + (adulta === null ? '' : barraPixeles('Sobre su masa adulta', adulta, `${number(adulta * 100)} %`))
+    + barraPixeles('Reserva de energía', c.reserva) + barraPixeles('Agua del tejido', c.agua)
+    + dato('En el tubo digestivo', kg(c.digestivo), 'digestivo') + dato('Carga a cuestas', kg(c.carga), 'carga') + (carga === null ? '' : barraPixeles('Peso de la carga', carga))
+    + dato('Temperatura', temperaturaTexto(c.T), 'temperatura')
+    + (principal ? dato('Tejido principal', `${formulaDe(principal.atomos)} · ${nombreDerivado(principal)}`, 'principal') : '')
+    + embrion + '</section>';
+}
+
+/** Gestación en curso: masa del embrión sobre la que tendrá al nacer y la pareja que aportó su genoma (uid). */
+export function gestacionFicha(e: NonNullable<CuerpoVisible['embrion']>): string {
+  const avance = finitoV23(e.masa) && finitoV23(e.m0) && e.m0 > 0 ? e.masa / e.m0 : null;
+  return `<div class="gestacion-ficha" data-embrion><h4 class="detail-subtitle">Gestación</h4>${barraPixeles('Avance del embrión', avance, avance === null ? undefined : `${number(fraccion(avance) * 100)} %`)}${dato('Masa del embrión', kg(e.masa), 'embrion-masa')}${dato('Pesará al nacer', kg(e.m0), 'embrion-m0')}${dato('Genoma aportado por', finitoV23(e.otro) ? `el individuo nº ${number(e.otro)}` : null, 'embrion-otro')}</div>`;
+}
+
+/** Cría que aún depende de quienes la cuidan: quiénes son y cuánto le falta para su masa adulta. */
+export function crianzaFicha(c: CrianzaVisible | undefined, world: WorldView): string {
+  if (!c) return '';
+  const cuidadores = Array.isArray(c.cuidadores) ? c.cuidadores : null;
+  return `<section class="crianza-ficha" data-crianza><h4 class="detail-subtitle">Crianza</h4>${barraPixeles('Madurez', c.madurez, finitoV23(c.madurez) ? `${number(fraccion(c.madurez) * 100)} % de su masa adulta` : undefined)}<p class="drawer-note" data-cuidadores>${cuidadores === null ? sinDatoV23 : cuidadores.length ? `La cuidan: ${cuidadores.map(id => personLink(world, id)).join(' ')}` : 'Nadie la cuida ahora.'}</p></section>`;
+}
+
+/** Ficha de persona: cuerpo y, si es cría o está gestando, su crianza. Las dos aparecen solo con la ley encendida. */
+export function cuerpoPersonaFicha(p: Pick<PersonView, 'cuerpoVisto' | 'crianza'>, world: WorldView): string {
+  return cuerpoFicha(p.cuerpoVisto, world.sustancias) + crianzaFicha(p.crianza, world);
+}
+
+/** Qué se extrajo sin matar, en pasado y en claro. */
+const EXTRAIDO: Record<'reserva' | 'fibra', string> = { reserva: 'ordeñado', fibra: 'esquilado' };
+/** Ficha de animal: cuerpo, miedo, a quién persigue o de quién huye, habituación y última extracción. */
+export function faunaFicha(a: Pick<AnimalView, 'cuerpoVisto' | 'v23' | 'habituation'>, world: WorldView): string {
+  const f = a.v23;
+  const cuerpo = cuerpoFicha(a.cuerpoVisto, world.sustancias);
+  if (!f) return `${cuerpo}<section class="fauna-ficha" data-fauna-ficha="sin-dato"><h4 class="detail-subtitle">Conducta</h4><p class="drawer-note">Sin dato: este mundo no trae la conducta de la fauna sobre átomos.</p></section>`;
+  const animal = (uid: number): string => `el animal nº ${number(uid)}`;
+  const extraido = f.extraido ? `${EXTRAIDO[f.extraido.que] ?? f.extraido.que} por el individuo nº ${number(f.extraido.por)} · ${momento(f.extraido.tick)}` : null;
+  return cuerpo + `<section class="fauna-ficha" data-fauna-ficha="ok"><h4 class="detail-subtitle">Conducta</h4>`
+    + barraPixeles('Miedo', f.miedo) + barraPixeles('Habituación', a.habituation)
+    + dato('Persigue a', finitoV23(f.persigue) ? animal(f.persigue) : 'a nadie', 'persigue') + dato('Huye de', finitoV23(f.huyeDe) ? `el individuo nº ${number(f.huyeDe)}` : 'de nadie', 'huye')
+    + dato('Linaje fundador', finitoV23(f.linaje) ? `nº ${number(f.linaje)}` : null, 'linaje')
+    + dato('Última extracción', f.extraido ? extraido : 'ninguna registrada', 'extraido') + '</section>';
 }

@@ -5,7 +5,7 @@ import { ELEMENTS, type ThermalPhase } from '../shared/chemistry.js';
 import { DEMOGRAPHY_TICKS_PER_DAY } from '../shared/demography.js';
 import { esc, number, percentage } from './ui-catalog.js';
 
-export type MundoTab = 'life' | 'land' | 'communities' | 'technology' | 'performance';
+export type MundoTab = 'life' | 'land' | 'communities' | 'technology' | 'materia' | 'performance';
 
 export interface MundoDeepSummary {
   livingCount: number;
@@ -223,6 +223,7 @@ export function renderMundoDeepStats(world: WorldView, tab: MundoTab, directory?
     case 'land': return land(world, directory);
     case 'communities': return communities(world, directory);
     case 'technology': return technology(world);
+    case 'materia': return '';
     case 'performance': return performance(world);
   }
 }

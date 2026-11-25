@@ -39,3 +39,8 @@ const orderEntries: { order: Order; title: string; icon: string }[] = [
 export const orders = orderEntries.map(entry => ({ ...entry, group: ['forage', 'drink', 'rest', 'hunt'].includes(entry.order) ? 'sustenance' : ['build', 'invent', 'repair'].includes(entry.order) ? 'building' : 'work' }));
 export const number = (value: number | undefined, digits = 0): string => value !== undefined && Number.isFinite(value) ? value.toLocaleString('es-CO', { maximumFractionDigits: digits }) : '—';
 export const percentage = (value: number | undefined): string => value !== undefined && Number.isFinite(value) ? `${number(value * 100)}%` : '—';
+
+/** V23: color de cada uno de los 8 elementos (mismo orden que `ELEMENTOS`) en barras de átomos y del panel «Materia». Es solo paleta. */
+export const COLOR_ELEMENTO: readonly string[] = ['#5fb2d6', '#4a4743', '#6a7fb5', '#c8574a', '#d9a441', '#8d9bab', '#e1dccb', '#b5532e'];
+/** Nombre en claro de cada elemento, en el orden de `ELEMENTOS`. */
+export const NOMBRE_ELEMENTO: readonly string[] = ['Hidrógeno', 'Carbono', 'Nitrógeno', 'Oxígeno', 'Fósforo', 'Silicio', 'Calcio', 'Hierro'];

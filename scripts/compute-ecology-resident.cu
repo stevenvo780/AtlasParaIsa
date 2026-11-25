@@ -1,5 +1,5 @@
 // Resident GPU ecology kernels over TileStore page layout (T122).
-// Compile once with NVRTC: --fmad=false --std=c++11. FP64 only.
+// Compile once with NVRTC: --std=c++11 (FMA allowed since V23: the GPU world is not replayed on the CPU). FP64 only.
 // cell = slot*256 + (ly<<4)|lx ; slot=cell>>>8 in JS == cell>>8 here (cell>=0)
 __device__ double bounded(double x){ return x<0?0:(x>1?1:x); }
 __device__ double unitHash(unsigned int seed,int x,int y){

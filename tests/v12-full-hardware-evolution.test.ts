@@ -7,10 +7,9 @@ import {
   assertWorld, cloneWorld, closePolicyGpuBatchers, createWorld,
   migrateWorld, RULES_VERSION, stepWorld, type World,
 } from '../src/world/index.js';
-import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
+import { closeEcosystemWorkers, ecosystemGpuDiagnostics } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { gpuNvrtcAvailable } from '../src/world/gpu/puente.js';
-import { policyGpuBatcherStatus } from '../src/world/gpu/politica-gpu.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { policyDiversity } from '../src/world/politica.js';
 import { analyzeTechnologicalComplexity } from '../src/world/tecnologia-complejidad.js';
@@ -19,6 +18,7 @@ import { demographicTraits } from '../src/world/demography.js';
 import { updateCommunities } from '../src/world/society.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { Store } from '../src/server/store.js';
+import { asegurarTeselasParecidas } from './hardware/ecologia-gpu.js';
 
 after(async () => {
   closePolicyGpuBatchers();
@@ -100,22 +100,21 @@ test('V12: paridad bit a bit en evolución abierta entre serie, particionarPerso
   assert.equal(digestoSinMotor(part28Inv.world), dSerie, 'hilos=28 inverso debe ser bit a bit idéntico');
 });
 
-test('V12: paridad bit a bit CPU vs GPU [0] vs Dual-GPU [0,1] con política evolutiva y ecología CUDA activas', { skip: !gpuNvrtcAvailable() }, () => {
+// Desde V23 la GPU no repite a la CPU bit a bit (AJUSTES-ORQUESTADOR §1): se comparan por estadística.
+test('V12: CPU, GPU [0] y Dual-GPU [0,1] coinciden por estadística con política evolutiva y ecología CUDA activas', { skip: !gpuNvrtcAvailable() }, t => {
   const run = (motor: string) => {
     const world = createWorld(51926, parseParams(`${V12_OPEN_LAWS},${motor}`));
-    for (let t = 0; t < 120; t++) stepWorld(world);
+    for (let paso = 0; paso < 120; paso++) stepWorld(world);
     assertWorld(world);
     return world;
   };
-  const cpu = run('motor.hilos=1,motor.particionarPersonas=false,motor.gpu=[]');
-  const gpu0 = run('motor.hilos=4,motor.particionarPersonas=true,motor.soaTerreno=true,motor.gpu=[0]');
-  const gpu01 = run('motor.hilos=28,motor.particionarPersonas=true,motor.soaTerreno=true,motor.gpu=[0,1]');
-
-  const dCpu = digestoSinMotor(cpu);
-  assert.equal(digestoSinMotor(gpu0), dCpu, 'GPU [0] + 4 hilos debe ser bit a bit idéntico a CPU');
-  assert.equal(digestoSinMotor(gpu01), dCpu, 'Dual-GPU [0,1] + 28 hilos debe ser bit a bit idéntico a CPU');
-  const status01 = policyGpuBatcherStatus([0, 1]);
-  assert.equal(status01?.backend, 'gpu', `esperado backend gpu para [0,1], recibido: ${JSON.stringify(status01)}`);
+  const cpu = run('motor.hilos=1,motor.gpu=[]');
+  for (const gpu of ['[0]', '[0,1]']) {
+    const mundo = run(`motor.hilos=1,motor.soaTerreno=true,motor.gpu=${gpu}`);
+    assert.ok(ecosystemGpuDiagnostics(), `GPU ${gpu}: la ecología pasó por la GPU`);
+    asegurarTeselasParecidas(t, cpu.tiles, mundo.tiles);
+    assert.ok(Math.abs(mundo.people.length - cpu.people.length) <= Math.max(2, 0.05 * cpu.people.length), `GPU ${gpu}: población`);
+  }
 });
 
 test('V12: evolución real, no-herencia Baldwin de plasticidad, diversidad de políticas y round-trip SQLite', () => {

@@ -18,7 +18,7 @@ import { leyObra } from '../materia/piezas.js';
 import { leyTecnica } from '../materia/proceso.js';
 import { leyNatalidad } from '../natalidad.js';
 import type { Ley, PasoHeredado } from './acceso.js';
-import { leyInteracciones } from './aplicar.js';
+import { leyInteracciones } from '../actuar/interacciones.js';
 
 export const LEYES: readonly Ley[] = [
   leyMundo, leyCuerpos, leyFauna, leyCohesion, leyActuar, leyInteracciones, leyTecnica, leyObra, leyNatalidad, leyComunidades,

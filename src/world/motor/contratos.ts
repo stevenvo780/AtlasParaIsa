@@ -172,7 +172,9 @@ export interface TerrenoDueno extends Terreno {
  * - Tomar: `DATO_TOMAR`; siempre se contesta con Concedido (con lo que hubo, quizá nada).
  * - Depositar, Dar, Concedido, Devuelto: llevan `materia` y `DATO_MATERIA` (dato null: Suelo, sin forma). Devuelto
  *   devuelve al emisor `de` una garantía rechazada por un receptor vivo.
- * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] = cuánto sube el vínculo del receptor hacia el emisor.
+ * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] es el aumento de vínculo del receptor hacia el emisor. `bytes` puede
+ *   llevar `v8.serialize({ suceso: string, lugar: string, reunion: boolean })` para recordar el encuentro en el dueño
+ *   receptor. Con aumento cero solo se registra el recuerdo.
  * - Ensenar, Migrante, Gesto, Global: `bytes` (v8.serialize). Activar: dato = [cx, cy] del chunk nuevo.
  * Enrutado con garantía: si `a` sigue vivo (`vivo === 1 && gen === genDe(a)`) pero ahora pertenece a otro dueño
  * (`frente.dueno[slotDe(a)] !== hilo`, por migración o rebalanceo), el intento se reenvía a su dueño actual (en F1 entra
@@ -200,6 +202,8 @@ export interface Intento {
   materia: Float64Array | null;  // garantía ya debitada del emisor: pares [SustanciaId, cuantos]; [0, j] = j J de calor
   dato: Float64Array | null;
   bytes: Uint8Array | null;
+  /** Tick del primer envío del nonce. El buzón lo rellena si falta y lo conserva en respuestas y reenvíos (m5). */
+  tickOrigen?: number;
 }
 
 /** Posiciones en `dato` de los intentos con materia: Rol del lote que la recibe cuando `lote` es REF_NULA y forma

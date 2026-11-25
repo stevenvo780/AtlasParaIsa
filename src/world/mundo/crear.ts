@@ -15,6 +15,7 @@ import { initialCulture } from '../society.js';
 import { founderPolicy, initialPolicyPlasticity } from '../politica.js';
 import { initialDemography, demographicTraits } from '../demography.js';
 import { captureTechnologyCheckpoint } from '../technology-checkpoint.js';
+import { ctxSi } from '../motor/acceso.js';
 
 
 export function random(world: Pick<World, 'rng'>): number {
@@ -36,6 +37,10 @@ export function walkable(world: World, p: Point, lookup?: TileLookup): boolean {
 
 
 export function addEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
+  // Con varios dueños, el suceso se numera con el contador compartido y llega al diario por el dueño (m4a).
+  // Se comprueba por forma y no con `instanceof Dueno` para no cerrar el ciclo crear ↔ motor/contexto.
+  const c = ctxSi(world) as (object & { hilos?: number; registrarSuceso?(e: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent }) | undefined;
+  if (c?.registrarSuceso && (c.hilos ?? 1) > 1) return c.registrarSuceso(event);
   const result = recordChronicleEvent(world, event);
   world.events.push(result);
   if (world.events.length > MAX_EVENTS) world.events.shift();
@@ -110,6 +115,8 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   const colors = ['#f4ce7a', '#e7a8b9', '#9dc8ae', '#9ebacc', '#d8ba91', '#b8a6cc'];
   const varianzaFundadores = (params ?? DEFAULT_PARAMS).genes.varianzaFundadores;
   const politicaActiva = (params ?? DEFAULT_PARAMS).conducta.politicaPeso > 0;
+  // Con v23.intentos, S e I llevan la memoria del encuentro desde el principio (m5; forma estable, regla h).
+  const intentosActivos = (params ?? DEFAULT_PARAMS).v23.intentos;
   for (let n = 0; n < names.length; n++) {
     const place = world.places[Math.floor(n / 6) % world.places.length]!;
     const x = place.x + n % 3 - 1;
@@ -129,6 +136,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       heading: n * 2.399963229728653, command: null, work: 0, lastOutcome: 0, intentContext: 'ready', controlMode: 'auto',
       thirst: 0.15, genome: founderGenome(world.seed, id, traits, varianzaFundadores), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
       ...(politicaActiva ? { policy: founderPolicy(world.seed, id), policyPlasticity: initialPolicyPlasticity() } : {}),
+      ...(intentosActivos && n < 2 ? { partnerMemory: undefined } : {}),
       technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
     });
   }

@@ -681,6 +681,12 @@ export class ArenaLotes implements ArenaMateria {
     }
   }
 
+  /** Todos los lotes vivos y las ranuras retiradas, para el punto de control (en barrera). La celda va tal
+   * como la guarda la arena (la de `Terreno.celda`; el aire, en la primera celda de su página). */
+  guardar(): { lotes: LoteGuardado[]; libres: LoteRef[] } {
+    return { lotes: Array.from(this.muestras()), libres: Array.from(this.libres()) };
+  }
+
   saldo(): bigint[] {
     const saldo = Array<bigint>(NE + 1).fill(0n);
     for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) {

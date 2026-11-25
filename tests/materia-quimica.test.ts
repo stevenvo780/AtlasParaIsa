@@ -491,7 +491,7 @@ test('enmienda 3: energía de dos centros de los metales (carburo endotérmico, 
   } finally { await serv.cerrar(); }
 });
 
-test('enmienda 3: la catálisis abre κ por par del enlace que decide; el HCN se oxida en el suelo y no en el tubo', async () => {
+test('enmienda 3: la catálisis abre κ por par del enlace de su familia que más abre; el HCN y la cianamida se oxidan en el suelo y no en el tubo', async () => {
   const serv = crearServicioQuimico({ modo: 'inmediato' });
   try {
     const S = registrarSustanciasBase(serv);
@@ -517,6 +517,17 @@ test('enmienda 3: la catálisis abre κ por par del enlace que decide; el HCN se
     const iminaE = { enlaces: B([[E('H', 'C'), 2], [E('C', 'N', 2), 1], [E('H', 'N'), 1]]), nu: 1 };
     const c = calcularCinetica([hcnE, h2E], [iminaE], -1);
     assert.deepEqual([c.catalisis, c.paresCatalisis], [1, 1], 'HC≡N + H₂ → H₂C=NH abre un par del C≡N');
+    // Revisión de la enmienda 3 (validación, hallazgo 4): cuentan los más pares de un enlace de la familia que disminuye,
+    // no los del de par más débil. La cianamida {H–N:2, C–N, C≡N} decide por su C–N simple (280 < 297 por par) y contaba 1
+    // par (311,8 − 105: k = 2,4·10⁻²⁸ con O₂); abre también los 3 del C≡N, como el HCN y su isómero carbodiimida (10⁹).
+    const cian = serv.internar(B([[E('H', 'N'), 2], [E('C', 'N'), 1], [E('C', 'N', 3), 1]]));
+    for (const socio of [S.O2, S.madera, S.H2, hcn]) {
+      const x = serv.reaccion(cian, socio, nivelDeT(295))!;
+      assert.ok(x.dH < 0 && x.catalisis === 1 && x.paresCatalisis === 3, `cianamida + ${socio}: ${x.catalisis}/${x.paresCatalisis}`);
+      assert.ok(tasaArrhenius(295, x, [...kSuelo]) > 1e-2, `cianamida + ${socio} en el suelo: k ${tasaArrhenius(295, x, [...kSuelo])}`);
+    }
+    const sola = serv.reaccion(cian, 0, nivelDeT(295));
+    if (sola) assert.ok(sola.dH > 0 && tasaArrhenius(295, sola, [...kSuelo]) < 1e-30, 'su isomerización endotérmica no se cataliza');
     // Contrato: 0 pares exactamente cuando no hay familia, en todo el memo.
     for (const [a, b] of [[S.NH3, S.O2], [S.N2, S.O2], [S.H2, S.O2], [S.CH4, S.O2], [S.CaCO3, 0], [S.arcilla, 0]] as const) {
       const x = serv.reaccion(a, b, nivelDeT(295)) ?? serv.reaccion(a, b, nivelDeT(1250));
@@ -638,6 +649,39 @@ test('productos(): con ΔG = −ε exacto decide la aritmética entera, no el re
   const b = construirSustancia(2, B([[E('H', 'N'), 1], [E('H', 'O'), 1], [E('C', 'N', 2), 2], [E('N', 'O'), 1]]));
   assert.equal(productos(a, b, 4, new ContextoSolver()), null);
   assert.equal(productos(b, a, 4, new ContextoSolver()), null);
+});
+
+test('productos(): un empate en ΔG por átomo y en átomos no depende del orden de los reactivos ni del de internado', async () => {
+  // Revisión de la enmienda 3 (hallazgo 3) y validación (hallazgo 6): el desempate «menor p» miraba el coeficiente del
+  // primer argumento, que el servicio fija por id (orden de internado). Tres empates reales, con productos distintos
+  // según el orden antes del arreglo.
+  const casos: [string, number[], number[], number][] = [
+    ['HCOP + HC₂P @L11', [1, 1, 16, 3, 35, 2], [1, 1, 8, 1, 16, 5], 11],
+    ['{N–Si, N–Fe, Fe–Fe} + {C–P, N–P, N–Fe, P–P, Fe–Fe} @L2', [30, 4, 32, 2, 51, 2], [16, 4, 27, 2, 32, 1, 40, 2, 51, 1], 2],
+    ['{H–Fe, C=C, C–O, C–Fe} + {H–C, C=N, C–O, N–O, O–O} @L9', [7, 1, 9, 1, 14, 2, 21, 2], [1, 1, 12, 1, 14, 1, 25, 1, 33, 1], 9],
+  ];
+  const texto = (r: { nu: readonly number[]; productos: readonly { enlaces: Uint16Array; nu: number }[] } | null, invertir = false) =>
+    r ? `${invertir ? [r.nu[1], r.nu[0]] : r.nu} → ${r.productos.map((x) => `${x.nu}·${[...x.enlaces].join()}`).join(' + ')}` : 'null';
+  for (const [nombre, ea, eb, nivel] of casos) {
+    const a = construirSustancia(1, Uint16Array.from(ea)), b = construirSustancia(2, Uint16Array.from(eb));
+    const ab = productos(a, b, nivel, new ContextoSolver()), ba = productos(b, a, nivel, new ContextoSolver());
+    assert.ok(ab, `${nombre}: sin reacción`);
+    assert.equal(texto(ba, true), texto(ab), `${nombre}: el orden de los argumentos cambia la reacción`);
+    // Con el servicio, en los dos órdenes de internado: la misma reacción por sustancia.
+    const vistas: string[] = [];
+    for (const primero of [0, 1]) {
+      const s = crearServicioQuimico({ modo: 'inmediato' });
+      try {
+        const ids = primero === 0 ? [s.internar(Uint16Array.from(ea)), s.internar(Uint16Array.from(eb))]
+          : [s.internar(Uint16Array.from(eb)), s.internar(Uint16Array.from(ea))].reverse();
+        const r = s.reaccion(ids[0]!, ids[1]!, nivel)!;
+        const clave = (id: number) => [...s.sustancia(id).enlaces].join();
+        const lado = (ts: readonly { id: number; nu: number }[]) => ts.map((t) => `${t.nu}·${clave(t.id)}`).sort().join(' + ');
+        vistas.push(`${lado(r.entradas)} → ${lado(r.salidas)}`);
+      } finally { await s.cerrar(); }
+    }
+    assert.equal(vistas[1], vistas[0], `${nombre}: el orden de internado cambia la reacción`);
+  }
 });
 
 test('los tres modos del servicio publican las mismas reacciones; worker y diferido, los mismos ids', async () => {

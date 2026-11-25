@@ -27,6 +27,7 @@ import {
 } from '../../src/world/materia/tipos.js';
 import type { Registro } from '../../src/world/motor/contratos.js';
 import { materiaReal } from './materia-real.js';
+import { mesetaSerie } from './caja-cerrada.js';
 
 export type Contenido = Record<string, number>;
 
@@ -65,6 +66,8 @@ export interface FotoParam {
   /** Cuantos por sustancia (nombre base o fórmula#id) en toda la caja. */
   tot: Record<string, number>;
   exacto: boolean;
+  /** H₂ (cuantos) que hicieron y que gastaron las reacciones (todo `aplicar`) desde el arranque: la meseta prevista. */
+  h2Hecho: number; h2Gastado: number;
 }
 
 export interface FuegoParam { tick: number; recambio: number; quemado: number; tMax: number; antes: Record<string, number>; despues: Record<string, number>; o2Fin: number }
@@ -146,7 +149,7 @@ export async function cajaParam(op: OpcionesCaja = {}): Promise<ResultadoCajaPar
     };
 
     // ── Instrumentación: las leyes ven la arena real; solo se cuenta cada `aplicar` por proceso y ecuación ──
-    let proceso = '';
+    let proceso = '', h2Hecho = 0, h2Gastado = 0;
     const canales = new Map<string, Map<Ecuacion, number>>();
     const A: ArenaMateria = {
       nuevo: (r, c, f) => real.nuevo(r, c, f), liberar: (l) => real.liberar(l), vivo: (l) => real.vivo(l), propio: (l) => real.propio(l),
@@ -155,7 +158,11 @@ export async function cajaParam(op: OpcionesCaja = {}): Promise<ResultadoCajaPar
       mover: (t) => real.mover(t), moverParte: (de, a, p) => real.moverParte(de, a, p), moverCalor: (de, a, j) => real.moverCalor(de, a, j),
       aplicar: (l, e, veces) => {
         const v = real.aplicar(l, e, veces);
-        if (v > 0) { let mp = canales.get(proceso); if (!mp) canales.set(proceso, mp = new Map()); mp.set(e, (mp.get(e) ?? 0) + v); }
+        if (v > 0) {
+          let mp = canales.get(proceso); if (!mp) canales.set(proceso, mp = new Map()); mp.set(e, (mp.get(e) ?? 0) + v);
+          for (const t of e.salidas) if (t.id === S.H2) h2Hecho += v * t.nu;
+          for (const t of e.entradas) if (t.id === S.H2) h2Gastado += v * t.nu;
+        }
         return v;
       },
       garantizar: (l, p, lb) => real.garantizar(l, p, lb), abonar: (l, g, lb) => real.abonar(l, g, lb),
@@ -275,7 +282,7 @@ export async function cajaParam(op: OpcionesCaja = {}): Promise<ResultadoCajaPar
     };
     const fotos: FotoParam[] = [];
     const fuegos: FuegoParam[] = [];
-    const foto = (tick: number, recambio: number) => fotos.push({ tick, recambio, biomasa: biomasa(), tot: total(), exacto: exacto() });
+    const foto = (tick: number, recambio: number) => fotos.push({ tick, recambio, biomasa: biomasa(), tot: total(), exacto: exacto(), h2Hecho, h2Gastado });
 
     const energiaUnidad = plantas[0]!.p.sintesis.dH;
     const fuentesPlanta = cfg.mezclado ? [suelo] : fango ? [suelo, agua, aire, fango] : [suelo, agua, aire];
@@ -420,6 +427,17 @@ export interface MedidaCaja {
   nombre: string; estado: string; recambios: number; ticks: number; ms: number;
   /** `aguaMin`: agua no perdida (UMBRALES_CAJA.aguaMin); `aguaMinBruta`: H₂O mínimo / inicial. */
   exacto: boolean; aguaMin: number; aguaMinBruta: number; h2Max: number; h2Final: number; h2Sube: boolean;
+  /** Meseta de H₂ prevista (fracción del H): `mesetaSerie` de caja-cerrada.ts sobre la segunda mitad; ∞ si sube sin frenar.
+   * Si sube y está por debajo de `h2Discreto`, al menos `h2Discreto`. */
+  h2Previsto: number;
+  /** Suelo discreto del sumidero de H₂ (fracción del H): 2·capAire/capPoro cuantos de H₂ en el aire (el poro de más
+   * capacidad, suelo o fango; 0 si el suelo es el aire). Por debajo de él el suelo no oxida el H₂ del aire: 2 H₂ + O₂ pide
+   * dos cuantos a la vez en el poro, y `fluir` (equilibrio discreto de un cuanto) solo mete el segundo cuando el aire
+   * pasa de 2·capAire/capPoro + 1 (medido: 1.999 cuantos con 10.000/10, sin bajar desde 1.500). Una fuente de H₂ que va
+   * al aire (el tubo, el fuego) lo llena hasta ahí, al ritmo de la fuente. */
+  h2Discreto: number;
+  /** CO₂ al final, fracción del inicial, y si baja en el último cuarto (`exigeCO2`). */
+  co2Final: number; co2Baja: boolean;
   hcnFinal: number; hcnMax: number; hcnSube: boolean;
   /** N fuera del N₂ (fijado) al final, fracción del inicial. */
   nFijado: number;
@@ -432,10 +450,14 @@ export interface MedidaCaja {
 }
 
 /** Mide una caja frente a `UMBRALES_CAJA`. `exigeH2Estable`: el H₂ no sube en el último cuarto (con mucho aire por poro
- * tarda más de 40 recambios en llegar a su meseta). `h2Pulso`: el techo de H₂ se mira al final y no en el máximo; es para
+ * tarda más de 40 recambios en llegar a su meseta), salvo que suba por debajo de `h2Discreto`: entonces la meseta
+ * prevista es ese suelo, y es él el que debe quedar bajo el techo. `h2Pulso`: el techo de H₂ se mira al final y no en el máximo; es para
  * el fuego pobre en O₂, que hace H₂ de verdad (gas de síntesis, C + H₂O y CH₂ con poco O₂) en un pulso que el suelo
- * oxida después: lo que se mide ahí es que no se acumule. */
-export function medirCaja(r: ResultadoCajaParam, { exigeH2Estable = true, h2Pulso = false } = {}): MedidaCaja {
+ * oxida después: lo que se mide ahí es que no se acumule. En todas, además, la meseta prevista (`mesetaSerie`) bajo el
+ * techo (revisión de la enmienda 3, hallazgo 6: una caja que tarda en llegar a su meseta pasaba secándose).
+ * `exigeCO2` (validación de la enmienda 3, hallazgo 8; para el fango): el CO₂ no baja en el último cuarto ni acaba por
+ * debajo de la mitad del inicial (con g = 0,001 la caja pasaba la biomasa ≥ 50 % limitada por CO₂). */
+export function medirCaja(r: ResultadoCajaParam, { exigeH2Estable = true, h2Pulso = false, exigeCO2 = false } = {}): MedidaCaja {
   const U = UMBRALES_CAJA, f = r.fotos.filter((x) => x.recambio >= 0), fin = r.fotos[r.fotos.length - 1]!, f0 = r.fotos[0]!;
   const iH = ELEMENTOS.indexOf('H' as never), iC = ELEMENTOS.indexOf('C' as never), iN = ELEMENTOS.indexOf('N' as never), iP = ELEMENTOS.indexOf('P' as never);
   const elem = (x: FotoParam, e: number, filtro: (k: string) => boolean = () => true) =>
@@ -446,6 +468,12 @@ export function medirCaja(r: ResultadoCajaParam, { exigeH2Estable = true, h2Puls
   const media = (xs: number[]) => xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length);
   const sube = (g: (x: FotoParam) => number, suelo: number) => n >= 8 && media(q4.map(g)) > U.crece * media(q3.map(g)) + suelo;
   const h2 = (x: FotoParam) => parte(x, iH, (k) => k === 'H2'), hcn = (x: FotoParam) => parte(x, iC, esHCN);
+  const co2 = (x: FotoParam) => x.tot.CO2 ?? 0;
+  /** `mesetaSerie` (caja-cerrada.ts) de las fotos, en fracción del H. */
+  const previsto = () => {
+    const hTotal = Math.max(1, elem(fin, iH));
+    return 2 * mesetaSerie(f.map((x) => ({ tick: x.tick, h2: x.tot.H2 ?? 0, hecho: x.h2Hecho, gastado: x.h2Gastado })), 1e-5 * hTotal / 2) / hTotal;
+  };
   const fijado = (x: FotoParam) => elem(x, iN, (k) => k !== 'N2');
   const aceptadas = new Set([...r.entradasPlantillas, ...r.cfg.partes.map(([k]) => k)]);
   const biomasas = r.fotos.map((x) => x.biomasa), corte = Math.max(0, r.cfg.recambios - Math.ceil(r.cfg.recambios / 10));
@@ -463,11 +491,14 @@ export function medirCaja(r: ResultadoCajaParam, { exigeH2Estable = true, h2Puls
       if (g(fin) >= U.sumideroFraccion && sube(g, 0.002)) sumideros.push(`${k} (${(100 * g(fin)).toFixed(1)} % del ${s}, sube)`);
     }
   }
+  const poro = r.cfg.mezclado ? 0 : Math.max(r.cfg.capSuelo, r.cfg.fango?.cap ?? 0);
+  const h2Discreto = poro > 0 ? 2 * (2 * r.cfg.capAire / poro) / Math.max(1, elem(fin, iH)) : 0;
   const m: MedidaCaja = {
     nombre: r.cfg.nombre, estado: r.estado, recambios: r.recambios, ticks: r.ticks, ms: r.ms,
     exacto: r.fotos.every((x) => x.exacto),
     aguaMin: Math.min(...r.fotos.map(aguaEq)), aguaMinBruta: Math.min(...r.fotos.map((x) => x.tot.H2O ?? 0)) / agua0,
-    h2Max: Math.max(...r.fotos.map(h2)), h2Final: h2(fin), h2Sube: sube(h2, 1e-5),
+    h2Max: Math.max(...r.fotos.map(h2)), h2Final: h2(fin), h2Sube: sube(h2, 1e-5), h2Previsto: previsto(), h2Discreto,
+    co2Final: (fin.tot.CO2 ?? 0) / Math.max(1, f0.tot.CO2 ?? 0), co2Baja: n >= 8 && media(q4.map(co2)) < media(q3.map(co2)) / U.crece,
     hcnFinal: hcn(fin), hcnMax: Math.max(...r.fotos.map(hcn)), hcnSube: sube(hcn, 1e-4),
     nFijado: fijado(fin) / Math.max(1, fijado(f0)),
     pAccesible: parte(fin, iP, (k) => aceptadas.has(k)),
@@ -479,7 +510,15 @@ export function medirCaja(r: ResultadoCajaParam, { exigeH2Estable = true, h2Puls
   if (m.aguaMin < U.aguaMin) m.fallos.push(`agua mín ${(100 * m.aguaMin).toFixed(1)} %`);
   const h2Mirado = h2Pulso ? m.h2Final : m.h2Max;
   if (h2Mirado >= U.h2Techo) m.fallos.push(`H₂ ${(100 * h2Mirado).toFixed(2)} % del H${h2Pulso ? ' al final' : ''}`);
-  if (exigeH2Estable && m.h2Sube) m.fallos.push('H₂ sube');
+  // Si sube por debajo del suelo discreto, va hacia él (o hacia su meseta, si es menor): lo que se exige es que ese suelo
+  // quede bajo el techo. Si sube por encima, crece sin explicación.
+  const haciaSuelo = m.h2Sube && m.h2Max < m.h2Discreto;
+  // Por debajo del suelo el poro no oxida el H₂ del aire, así que `mesetaSerie` no ve sumidero (∞): la meseta es el suelo
+  // (más lo que cueste quemar la fuente por encima de él, que la serie aún no muestra).
+  if (haciaSuelo) m.h2Previsto = Number.isFinite(m.h2Previsto) ? Math.max(m.h2Previsto, m.h2Discreto) : m.h2Discreto;
+  if (exigeH2Estable && m.h2Sube && !haciaSuelo) m.fallos.push('H₂ sube');
+  if (!(m.h2Previsto < U.h2Techo)) m.fallos.push(`H₂ previsto ${(100 * m.h2Previsto).toFixed(2)} % del H${haciaSuelo ? ' (sube hacia el suelo discreto)' : ''}`);
+  if (exigeCO2 && (m.co2Baja || m.co2Final < 0.5)) m.fallos.push(`CO₂ ${(100 * m.co2Final).toFixed(1)} % del inicial${m.co2Baja ? ', baja' : ''}`);
   if (m.hcnFinal >= U.hcnTecho) m.fallos.push(`HCN ${(100 * m.hcnFinal).toFixed(1)} % del C`);
   if (m.hcnSube && m.hcnFinal >= U.hcnTecho / 10) m.fallos.push('HCN sube');
   if (m.biomasaMin < U.biomasaMin || m.estado.startsWith('colapso')) {

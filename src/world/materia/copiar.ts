@@ -117,6 +117,21 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
     if (sobra > 0) n = Math.min(n, cabe(arena.cuantos(residuo, t.id), sobra));
   }
   if (!(n > 0)) return 0;
+  // Calor (revisión de la enmienda 3, hallazgo 1): las entradas traen su parte del calor de cada fuente y los
+  // subproductos se llevan la suya al residuo. Si la suma de todo el calor en juego no llega a 2⁵³, ningún estado
+  // intermedio puede pasarse; si llega, n se recorta a lo que cabe con la operación entera simulada al julio (`cabeCalor`),
+  // así que copiar nunca falla a medias (antes, con el destino a 2⁵³ − 6 J, movía una entrada y fallaba en la segunda).
+  let enJuego = arena.calor(destino) + arena.calor(residuo) + n * Math.max(0, -e.dH);
+  for (const f of new Set(fuentes)) if (f !== residuo) enJuego += arena.calor(f);
+  if (!(enJuego <= MAX) && !cabeCalor(arena, q, p, destino, fuentes, residuo, n)) {
+    let si = 0, no = n;
+    while (no - si > 1) {
+      const medio = si + Math.floor((no - si) / 2);
+      if (cabeCalor(arena, q, p, destino, fuentes, residuo, medio)) si = medio; else no = medio;
+    }
+    n = si;
+    if (!(n > 0)) return 0;
+  }
   const exacta = (esp: SustanciaId, cuantos: number) => ({ parte: Parte.Exacta, esp, cuantos, kappa: null });
   for (const t of e.entradas) {
     let falta = n * t.nu;
@@ -131,6 +146,72 @@ export function copiar(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, de
 }
 
 const porId = (a: Termino, b: Termino) => a.id - b.id;
+
+/**
+ * ¿Hace `copiar` n unidades sin que ningún lote pase de 2⁵³ − 1 J? Simula en bigint los mismos traslados, en el mismo
+ * orden y con el mismo reparto del calor que `moverParte` Exacta (⌊calor·átomos tomados/átomos del lote⌋, con el lote tal
+ * como lo dejaron los traslados anteriores), la síntesis (−n·dH en el destino; los átomos no cambian) y los subproductos
+ * al residuo. Solo corre cuando el calor en juego roza 2⁵³ (las cantidades ya las recorta `cabe`).
+ */
+function cabeCalor(arena: ArenaMateria, q: ServicioQuimico, p: Plantilla, destino: LoteRef,
+  fuentes: readonly LoteRef[], residuo: LoteRef, n: number): boolean {
+  const TOPE = BigInt(MAX), N = BigInt(n);
+  const porCuanto = (id: SustanciaId) => BigInt(q.sustancia(id).atomos.reduce((s, v) => s + v, 0));
+  type Estado = { atomos: bigint; calor: bigint; cant: Map<SustanciaId, bigint> };
+  const estados = new Map<LoteRef, Estado>();
+  const estado = (l: LoteRef): Estado => {
+    let x = estados.get(l);
+    if (!x) {
+      let ids = new Uint32Array(16), k = arena.especies(l, ids);
+      if (k > ids.length) k = arena.especies(l, ids = new Uint32Array(k));
+      const cant = new Map<SustanciaId, bigint>();
+      let atomos = 0n;
+      for (const id of ids.subarray(0, k)) {
+        const c = BigInt(arena.cuantos(l, id));
+        cant.set(id, c);
+        atomos += c * porCuanto(id);
+      }
+      estados.set(l, x = { atomos, calor: BigInt(arena.calor(l)), cant });
+    }
+    return x;
+  };
+  /** Traslado Exacto de `cuantos` de `id` (como mucho los que hay) con su parte del calor; devuelve los movidos y lanza
+   * RANGO si `a` pasa de 2⁵³ − 1. */
+  const mover = (de: LoteRef, a: LoteRef, id: SustanciaId, cuantos: bigint): bigint => {
+    const o = estado(de), d = estado(a), hay = o.cant.get(id) ?? 0n, tomar = cuantos < hay ? cuantos : hay;
+    if (tomar === 0n) return 0n;
+    const at = tomar * porCuanto(id), calor = o.calor > 0n && at > 0n ? o.calor * at / o.atomos : 0n;
+    o.cant.set(id, hay - tomar); o.atomos -= at; o.calor -= calor;
+    d.cant.set(id, (d.cant.get(id) ?? 0n) + tomar); d.atomos += at; d.calor += calor;
+    if (d.calor > TOPE || d.cant.get(id)! > TOPE) throw RANGO;
+    return tomar;
+  };
+  const e = p.sintesis, enPartes = new Map(p.partes.map((t) => [t.id, t.nu]));
+  try {
+    for (const t of e.entradas) {
+      let falta = N * BigInt(t.nu);
+      for (const f of fuentes) if (falta > 0n) falta -= mover(f, destino, t.id, falta);
+    }
+    const d = estado(destino);
+    d.calor -= N * BigInt(e.dH);
+    if (d.calor < 0n || d.calor > TOPE) return false;
+    for (const t of e.entradas) d.cant.set(t.id, (d.cant.get(t.id) ?? 0n) - N * BigInt(t.nu));
+    for (const t of e.salidas) {
+      const c = (d.cant.get(t.id) ?? 0n) + N * BigInt(t.nu);
+      if (c > TOPE) return false;
+      d.cant.set(t.id, c);
+    }
+    for (const t of e.salidas) {
+      const sobra = t.nu - (enPartes.get(t.id) ?? 0);
+      if (sobra > 0) mover(destino, residuo, t.id, N * BigInt(sobra));
+    }
+    return true;
+  } catch (x) {
+    if (x === RANGO) return false;
+    throw x;
+  }
+}
+const RANGO = new Error('Fuera de 2⁵³.');
 
 /** Bytes canónicos de una plantilla: los mismos datos dan el mismo id del `Registro` desde cualquier hilo. */
 function canonico(partes: readonly Termino[], e: Ecuacion, r: Omit<Plantilla, 'id' | 'partes' | 'sintesis'>): Uint8Array {

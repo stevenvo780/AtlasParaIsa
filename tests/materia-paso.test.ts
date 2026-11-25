@@ -9,12 +9,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadavg } from 'node:os';
 import { performance } from 'node:perf_hooks';
-import { KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NU, R } from '../src/shared/naturaleza.js';
+import { EPSILON_G, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NU, R } from '../src/shared/naturaleza.js';
 import type { SustanciaId } from '../src/shared/materia.js';
 import { binomial, medir, pasoLote, type CtxPaso, type Kappa } from '../src/world/materia/paso.js';
 import { fluir, fluirCalor } from '../src/world/materia/fluir.js';
 import { pasarLotes } from '../src/world/materia/paso-worker.js';
 import { crearServicioQuimico } from '../src/world/materia/servicio.js';
+import { dGA, favorableA } from '../src/world/materia/quimica.js';
 import { slotDe } from '../src/world/motor/contratos.js';
 import { Parte, barreraEfectiva, nivelDeLote, nivelDeT, type ArenaMateria, type LoteRef, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
 import { registrarSustanciasBase } from '../scripts/lab-materia.mjs';
@@ -103,7 +104,7 @@ test('I2: átomos y energía exactos tras reaccionar y fluir (enteros, sin un á
   } finally { await m.cerrar(); }
 });
 
-test('I5: dividir un lote en dos mitades no cambia la distribución de productos (KS, p > 0,01)', async () => {
+test('I5: dividir un lote en dos mitades con grupos enteros no cambia la distribución de productos (KS, p > 0,01)', async () => {
   const replicas = 2000;
   const m0 = materiaReal(), S = m0.S;
   await m0.cerrar();
@@ -134,11 +135,25 @@ test('I5: dividir un lote en dos mitades no cambia la distribución de productos
       await m.cerrar();
     }
     e.mide.forEach((esp, k) => {
-      assert.ok(muestras[0]!.some(v => v[k]! !== muestras[0]![0]![k]!) || muestras[0]![0]![k]! > 0, `${e.nombre}: reacciona`);
+      // Reacciona de verdad: la media se aleja de lo que había al empezar (el producto aparece, el reactivo se gasta).
+      const inicial = Object.entries(e.contenido).reduce((s, [nombre, q]) => s + (S[nombre as keyof Base] === esp ? q! : 0), 0);
+      const media = muestras[0]!.reduce((s, v) => s + v[k]!, 0) / replicas;
+      assert.ok(Math.abs(media - inicial) >= 1, `${e.nombre}, sustancia ${esp}: media ${media} frente a ${inicial} al empezar`);
       const { d, p } = ks(muestras[0]!.map(v => v[k]!), muestras[1]!.map(v => v[k]!));
       assert.ok(p > 0.01, `${e.nombre}, sustancia ${esp}: KS D = ${d.toFixed(3)}, p = ${p.toExponential(2)}`);
     });
   }
+  // Alcance de I5 (revisión de la enmienda 3, hallazgo 7): vale para particiones en las que cada parte conserva grupos
+  // enteros de la estequiometría (cuantos ≥ ν de cada reactivo de los canales que cuentan), como todos los escenarios de
+  // arriba. Un cuanto es indivisible y P no junta lotes: 2 H₂ + 2 O₂ con k = ν hacen 2 H₂O en un lote y nada en dos
+  // de 1 H₂ + 1 O₂ (cada uno con medio grupo de 2 H₂ + O₂). Repartir así la materia es decisión de W, no de P.
+  const m = materiaReal({ capacidad: 8 });
+  try {
+    const entero = m.lote({ H2: 2, O2: 2, N2: 1e6 }, 295), mitades = repartido(m, 2, { H2: 2, O2: 2, N2: 1e6 }, 295);
+    for (const l of [entero, ...mitades]) pasoLote(m.ctx(5), l, 1, [0, 0, 0, KAPPA_SUELO_HH]);
+    assert.equal(m.arena.cuantos(entero, S.H2O), 2);
+    assert.equal(total(m, mitades, S.H2O), 0);
+  } finally { await m.cerrar(); }
 });
 
 test('extremo: con κ ≥ ea (k = ν) la reacción se completa en una llamada hasta el reactivo limitante, con sus coeficientes', async () => {
@@ -166,6 +181,87 @@ test('extremo: con κ ≥ ea (k = ν) la reacción se completa en una llamada ha
     assert.deepEqual([m.arena.cuantos(helado, m.S.H2), m.arena.cuantos(helado, m.S.O2), m.arena.cuantos(helado, m.S.H2O)], [0, 5e5, 1e6]);
     assert.ok(msUnaria < 50 && msPar < 50, `coste acotado: ${msUnaria.toFixed(2)} y ${msPar.toFixed(2)} ms`);
     assert.deepEqual(m.arena.saldo(), m.esperado());
+  } finally { await m.cerrar(); }
+});
+
+test('extremo: dos canales saturados que comparten el O₂ con coeficientes distintos lo dejan todo hecho en un paso', async () => {
+  // Revisión de la enmienda 3, hallazgo 4: 10⁶ H₂ + 10⁶ CH₄ + 2,5·10⁶ O₂ (2 H₂ + O₂ y CH₄ + 2 O₂, k = ν) dejaba con la
+  // semilla 9 549 CH₄ y 1.098 O₂: el O₂, gastado en 10⁻¹¹ más que el CH₄, sorteaba la combustión del CH₄ con p = 0,8 y el
+  // recorte no devolvía lo que sobraba. Con O₂ escaso, el que el H₂ agotado no pudo tomar se quedaba sin el CH₄ que había.
+  const m = materiaReal({ capacidad: 512 });
+  try {
+    const S = m.S, q = (l: LoteRef, id: SustanciaId) => m.arena.cuantos(l, id);
+    let peorExacto = 0, peorO2 = 0;
+    for (let semilla = 1; semilla <= 60; semilla++) {
+      const exacto = m.lote({ H2: 1_000_000, CH4: 1_000_000, O2: 2_500_000 }, 295);
+      pasoLote(m.ctx(semilla), exacto, 1, [0, 0, 200, 200]);
+      // Veces que aún cabrían de una u otra combustión.
+      peorExacto = Math.max(peorExacto, Math.min(Math.floor(q(exacto, S.H2) / 2), q(exacto, S.O2)), Math.min(q(exacto, S.CH4), Math.floor(q(exacto, S.O2) / 2)));
+      const escaso = m.lote({ H2: 1_000_000, CH4: 1_000_000, O2: 2_400_000 }, 295);
+      pasoLote(m.ctx(semilla), escaso, 1, [0, 0, 200, 200]);
+      peorO2 = Math.max(peorO2, q(escaso, S.O2));
+      assert.ok(q(escaso, S.CH4) > 40_000, 'con O₂ escaso sobra CH₄');
+    }
+    assert.equal(peorExacto, 0, `en la mezcla estequiométrica caben aún ${peorExacto} combustiones`);
+    assert.ok(peorO2 <= 8, `con O₂ escaso quedan hasta ${peorO2} O₂ (el resto de medio cuanto de la integración)`);
+    assert.deepEqual(m.arena.saldo(), m.esperado());
+  } finally { await m.cerrar(); }
+});
+
+test('encadenado: el H₂ que nace en un paso del suelo se oxida en ese mismo paso con el O₂ que hay', async () => {
+  // Validación de la enmienda 3, hallazgo 7: en un suelo denso el H₂ de 2 glicósido → 2 H₂ + C + CO₂ (o de H₂O + 2 orgP)
+  // salía por `fluir` antes de que el suelo, que lo oxida sin barrera (κ H–H), lo viera en el paso siguiente. Con los
+  // pases encadenados, lo que nace en el paso reacciona en él: el O₂ se agota en la misma llamada.
+  const m = materiaReal({ capacidad: 16 });
+  try {
+    const S = m.S, l = m.lote({ glicosido: 100_000, O2: 20_000, SiO2: 1_000_000, H2O: 300_000 }, 295);
+    const h2o = (x: LoteRef) => m.arena.cuantos(x, S.H2O);
+    pasoLote(m.ctx(3), l, 1, SUELO);
+    assert.ok(m.arena.cuantos(l, S.glicosido) < 100, `glicósido ${m.arena.cuantos(l, S.glicosido)}`);
+    assert.equal(m.arena.cuantos(l, S.O2), 0, 'el O₂ oxida en el mismo paso el H₂ que acaba de nacer');
+    // Cada O₂ hizo 2 H₂O de 2 H₂; el resto del agua nueva es de glicósido → H₂O + C (una por C que no salió con CO₂).
+    const c = m.arena.cuantos(l, S.C), co2 = m.arena.cuantos(l, S.CO2);
+    assert.equal(h2o(l) - 300_000, 2 * 20_000 + (c - co2));
+    assert.equal(m.arena.cuantos(l, S.H2), 2 * co2 - 2 * 20_000);
+    assert.deepEqual(m.arena.saldo(), m.esperado());
+  } finally { await m.cerrar(); }
+});
+
+test('ΔG a la T real: a 270 K el suelo no hace 3 H₂ + N₂ → 2 NH₃ (NH₃ líquido en el modelo), a 295 K sí', async () => {
+  // Revisión de la enmienda 3, hallazgo 5: el piso (NIVEL_CATALIZADO) elige en el nivel 2, donde el NH₃ es gas, y a 270 K
+  // el NH₃ del modelo es líquido (ebulle a 273,6 K): ΔG = −145 + 4·270·0,18 = +49,4 J. Con 4·10⁹ de cada uno y el κ del
+  // suelo se hacían ~3.700 en 50 ticks. P exige ΔG < −EPSILON_G a la T y fases del lote, como Q a la de su nivel.
+  const m = materiaReal({ capacidad: 16 });
+  try {
+    const S = m.S, r = m.quimica.reaccion(S.H2, S.N2, nivelDeLote(270, SUELO))!;
+    assert.ok(r && r.dH === -145 && r.salidas.some((t) => t.id === S.NH3), 'el nivel 2 da 3 H₂ + N₂ → 2 NH₃');
+    assert.ok(Math.abs(dGA(r, 270, (id) => m.quimica.sustancia(id)) - 49.4) < 1e-9 && !favorableA(r, 270, (id) => m.quimica.sustancia(id)));
+    assert.ok(favorableA(r, 295, (id) => m.quimica.sustancia(id)), 'a 295 K el NH₃ es gas y ΔG < 0');
+    const veces = (T: number) => {
+      const l = m.lote({ H2: 4e9, N2: 4e9 }, T);
+      let v = 0;
+      for (let t = 0; t < 50; t++) v += pasoLote(m.ctx(1 + t), l, 1, SUELO);
+      return v;
+    };
+    assert.equal(veces(270), 0);
+    assert.ok(veces(295) > 0);
+    assert.deepEqual(m.arena.saldo(), m.esperado());
+    // `favorableA` decide sin mirar fases cuando ningún reparto de gases cambia el signo: lo mismo que ΔG < −ε en todas
+    // las filas de las sustancias base, en los niveles 1–12 y de 150 a 2.000 K.
+    const ids = Object.values(S) as SustanciaId[], sus = (id: SustanciaId) => m.quimica.sustancia(id);
+    let filas = 0, cerca = 0;
+    for (let nivel = 1; nivel <= 12; nivel++) for (const a of ids) for (const b of [0 as SustanciaId, ...ids]) {
+      if (b !== 0 && b < a) continue;
+      const x = m.quimica.reaccion(a, b, nivel);
+      if (!x) continue;
+      filas++;
+      for (let T = 150; T <= 2000; T += 25) {
+        const g = dGA(x, T, sus);
+        if (Math.abs(g + EPSILON_G) < 60) cerca++;
+        assert.equal(favorableA(x, T, sus), g < -EPSILON_G, `${a}+${b} nivel ${nivel} a ${T} K: ΔG ${g}`);
+      }
+    }
+    assert.ok(filas > 200 && cerca > 100, `${filas} filas, ${cerca} casos a menos de 60 J del umbral`);
   } finally { await m.cerrar(); }
 });
 
@@ -334,7 +430,7 @@ test('binomial: momentos en las dos ramas y enteros en [0, n] hasta 2⁵³ − 1
 
 /** Canales que registra P al empezar un paso (los de las especies presentes), con su k y sus coeficientes. */
 function canalesDe(m: MateriaReal, l: LoteRef, kappa: Kappa) {
-  const { T, V } = medir(m.ctx(0), l), nivel = nivelDeT(T);
+  const { T, V } = medir(m.ctx(0), l), nivel = nivelDeLote(T, kappa); // el mismo selector que pasoLote
   const ids = Object.values(m.S).filter(id => m.arena.cuantos(l, id) > 0).sort((a, b) => a - b);
   const canales: { r: Reaccion; k: number }[] = [];
   for (let i = 0; i < ids.length; i++) for (let j = -1; j <= i; j++) {
@@ -345,7 +441,8 @@ function canalesDe(m: MateriaReal, l: LoteRef, kappa: Kappa) {
   return { canales, V };
 }
 
-/** EDO de acción de masas de esos canales (los productos no abren canales dentro del paso), RK4 con pasos de ≤ 0,1 %. */
+/** EDO de acción de masas de esos canales, RK4 con pasos de ≤ 0,1 %. No abre los canales de los productos: los pases
+ * encadenados de P sí, pero en estos casos ninguno reacciona a la T del paso (los productos son H₂O, C, CO₂ y H₂ sin κ H–H). */
 function edo(canales: ReturnType<typeof canalesDe>['canales'], V: number, n0: Map<SustanciaId, number>): Map<SustanciaId, number> {
   const ids = [...new Set([...n0.keys(), ...canales.flatMap(c => [...c.r.entradas, ...c.r.salidas].map(x => x.id))])];
   const ix = new Map(ids.map((id, i) => [id, i]));
@@ -458,7 +555,7 @@ test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico',
   // n sustancias que reaccionan todas con todas, lentas (nada se aplica): m ≈ n²/2 canales. Recorrer los m canales por
   // cada sustancia costaba n·m (de 512 a 1.024, ×8); agrupados, m (×4). Se mide la razón: no depende de la carga.
   // Doble de Q justificado: ninguna química real da una tabla en la que reaccionen todas las parejas de 1.024 sustancias.
-  const medirMs = (n: number): number => {
+  const preparar = (n: number): (() => number) => {
     const tabla = Array.from({ length: n + 1 }, (_, id): Sustancia => ({
       id, clase: 1, enlaces: new Uint16Array(0), atomos: Uint8Array.from([1, 0, 0, 0, 0, 0, 0, 0]), masa: 10, energia: 0,
       prop: { r: 0, dMedia: 0, tFusion: 0, tEbullicion: 1e9, qOxidacion: 0, dureza: 0, tenacidad: 0, flexibilidad: 0, polaridad: 0, densidad: 1, color: 0 },
@@ -469,7 +566,9 @@ test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico',
       let r = filas.get(clave);
       if (!r) {
         const entradas = b === 0 ? [{ id: a, nu: 1 }] : a === b ? [{ id: a, nu: 2 }] : [{ id: a, nu: 1 }, { id: b, nu: 1 }];
-        filas.set(clave, r = { a, b, nivelT: 0, entradas, salidas: [], dH: 0, ea: 120, catalisis: -1, paresCatalisis: 0 });
+        // dH < 0: P solo registra canales que ganan energía libre a la T del lote (`favorableA`: ΔG < −EPSILON_G; con
+        // −1.000 lo decide sin mirar fases, como en casi toda fila real).
+        filas.set(clave, r = { a, b, nivelT: 0, entradas, salidas: [], dH: -1000, ea: 120, catalisis: -1, paresCatalisis: 0 });
       }
       return r;
     };
@@ -479,12 +578,15 @@ test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico',
     } as unknown as ArenaMateria;
     const c: CtxPaso = { arena, quimica: { internar: () => 0, sustancia: id => tabla[id]!, reaccion }, azar: () => 0.5 };
     pasoLote(c, 0, 1, SIN); // llena la tabla de filas fuera de la medida
-    const ms: number[] = [];
-    for (let k = 0; k < 3; k++) { const t0 = performance.now(); pasoLote(c, 0, 1, SIN); ms.push(performance.now() - t0); }
-    return ms.sort((a, b) => a - b)[1]!;
+    return () => { const t0 = performance.now(); pasoLote(c, 0, 1, SIN); return performance.now() - t0; };
   };
-  medirMs(256); // calienta
-  const razon = medirMs(1024) / medirMs(512);
+  preparar(256)(); // calienta
+  // Mínimo de 5 medidas alternas de cada tamaño: con la mediana de 3 de cada uno por separado, la torre cargada daba
+  // razones de 4 a 6,7 con el mismo código (y la recolección tras otra prueba caía en una sola de las dos).
+  const [de512, de1024] = [preparar(512), preparar(1024)];
+  let t512 = Infinity, t1024 = Infinity;
+  for (let k = 0; k < 5; k++) { t512 = Math.min(t512, de512()); t1024 = Math.min(t1024, de1024()); }
+  const razon = t1024 / t512;
   assert.ok(razon < 6, `de 512 a 1.024 sustancias el coste crece ×${razon.toFixed(1)}`);
 });
 

@@ -25,7 +25,7 @@
 import { CAPACIDAD_ATOMO, ELEMENTOS, FRACTURA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, NE, NU, R } from '../../src/shared/naturaleza.js';
 import type { SustanciaId } from '../../src/shared/materia.js';
 import type { Registro } from '../../src/world/motor/contratos.js';
-import { esGasA } from '../../src/world/materia/quimica.js';
+import { esGasA, favorableA } from '../../src/world/materia/quimica.js';
 import { medir, pasoLote, type CtxPaso, type Kappa } from '../../src/world/materia/paso.js';
 import { fluir } from '../../src/world/materia/fluir.js';
 import { copiar, crearPlantilla } from '../../src/world/materia/copiar.js';
@@ -87,6 +87,9 @@ export interface FotoCaja {
   p: Record<string, number>;
   /** Saldo de la arena = fuentes − sumideros, al entero (bigint). */
   exacto: boolean;
+  /** H₂ (cuantos) que hicieron y que gastaron las reacciones (`aplicar` de todos los procesos) desde el arranque; con
+   * ellos, `mesetaH2`. */
+  h2Hecho: number; h2Gastado: number;
 }
 
 export interface InformeFuego {
@@ -139,6 +142,17 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
   const m = materiaReal({ capacidad: 256 });
   const { arena, quimica: Q, S, libro } = m;
   const c: CtxPaso = m.ctx(op.semilla ?? 1, op.cinetica ? op.cinetica(m.quimica) : m.quimica);
+  // Contadores brutos de H₂: las leyes ven la misma arena; solo se cuenta lo que cada `aplicar` hace y gasta.
+  let h2Hecho = 0, h2Gastado = 0;
+  const aplicarReal = arena.aplicar.bind(arena);
+  arena.aplicar = (l, r, veces) => {
+    const v = aplicarReal(l, r, veces);
+    if (v > 0) {
+      for (const t of r.salidas) if (t.id === S.H2) h2Hecho += v * t.nu;
+      for (const t of r.entradas) if (t.id === S.H2) h2Gastado += v * t.nu;
+    }
+    return v;
+  };
   const nombres = new Map<SustanciaId, string>(Object.entries(S).map(([k, v]) => [v, k]));
   const nombre = (id: SustanciaId) => nombres.get(id) ?? `${formula(m, id)}#${id}`;
   const gas = (id: SustanciaId) => esGasA(Q.sustancia(id), tAmb);
@@ -230,7 +244,7 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
     const h = porElemento(H);
     const hTotal = Object.values(h).reduce((s, v) => s + v, 0);
     return { tick, recambio, biomasa: biomasa(), agua: total(S.H2O), h2: total(S.H2), hAgua: h.H2O ?? 0, hH2: h.H2 ?? 0, hTotal,
-      n: porElemento(N), p: porElemento(P), exacto: exacto() };
+      n: porElemento(N), p: porElemento(P), exacto: exacto(), h2Hecho, h2Gastado };
   };
 
   const fotos: FotoCaja[] = [], fuegos: InformeFuego[] = [];
@@ -328,8 +342,8 @@ export function cajaCerrada(op: OpcionesCaja = {}): ResultadoCaja {
     const { T, V } = medir(c, l), ids = especies(l), nivel = nivelDeLote(T, kappa);
     for (let i = 0; i < ids.length; i++) for (let j = i - 1; j < ids.length; j++) {
       const a = ids[i]!, b = j < i ? 0 : ids[j]!;
-      const r = Q.reaccion(a, b, nivel);
-      if (!r) continue;
+      const r = c.quimica.reaccion(a, b, nivel); // la química que ve la cinética: con `cinetica`, la del control
+      if (!r || !favorableA(r, T, (id) => Q.sustancia(id))) continue;
       const h2 = r.salidas.reduce((s, t) => s + (t.id === S.H2 ? t.nu : 0), 0) - r.entradas.reduce((s, t) => s + (t.id === S.H2 ? t.nu : 0), 0);
       if (h2 === 0) continue;
       const barrera = barreraEfectiva(r, kappa), k = barrera === 0 ? NU : NU * Math.exp(-barrera / (R * T));
@@ -361,4 +375,41 @@ function describir(m: MateriaReal, p: Plantilla): string {
   const nombres = new Map<SustanciaId, string>(Object.entries(m.S as Base).map(([k, v]) => [v, k]));
   const lado = (l: readonly { id: SustanciaId; nu: number }[]) => l.map((t) => `${t.nu} ${nombres.get(t.id) ?? formula(m, t.id)}`).join(' + ');
   return `${lado(p.sintesis.entradas)} → ${lado(p.sintesis.salidas)} (dH ${p.sintesis.dH})`;
+}
+
+/** Un punto de la serie de H₂ de una caja: tick, cuantos de H₂ y H₂ hecho y gastado por las reacciones hasta ahí. */
+export interface PuntoH2 { tick: number; h2: number; hecho: number; gastado: number }
+
+/**
+ * Meseta de H₂ prevista (cuantos) desde la segunda mitad de una serie, por extrapolación de primer orden de su propia
+ * trayectoria: en cuatro tramos iguales, medias M₁…M₄; con r = dH/dt = S − λ·H en los dos pares de tramos, λ = (r_a −
+ * r_b)/(H_b − H_a) y la meseta es H_b + r_b/λ. Si en el último par el H₂ apenas cambia (≤ 5 % de su nivel más `suelo`
+ * cuantos), ya está en su meseta (o bajando): el mayor de M₃ y M₄. Si sube sin frenar (r_a ≤ r_b), o hay fuente y
+ * ningún sumidero (las reacciones no gastaron H₂ en la segunda mitad), infinita. Por qué (revisión de la enmienda 3,
+ * hallazgo 6): con aire ×100 la caja tarda ~1.000 recambios en llegar a su meseta, y a los 40 el control sin catálisis
+ * H–H tenía el 0,18 % del H en H₂ y el 98,75 % del agua: pasaba el techo del 0,2 % mientras se secaba (2,71 % y
+ * 96,17 % a los 650). No se usa P·H̄/C con los contadores brutos: el H₂ que el suelo hace y oxida en el mismo paso entra
+ * en los dos y la acercaba a H̄, y un sumidero limitado por el O₂ que llega (suelo denso) no es de primer orden.
+ */
+export function mesetaSerie(serie: readonly PuntoH2[], suelo: number): number {
+  const xs = serie.slice(Math.floor(serie.length / 2)), k = Math.floor(xs.length / 4);
+  if (k < 1) return NaN;
+  const a = xs[0]!, b = xs[xs.length - 1]!;
+  if (b.gastado - a.gastado <= 0 && b.hecho - a.hecho > 0) return Infinity;
+  const M = [0, 1, 2, 3].map((i) => {
+    const t = xs.slice(i * k, i === 3 ? xs.length : (i + 1) * k);
+    return { h: t.reduce((s, x) => s + x.h2, 0) / t.length, t: t.reduce((s, x) => s + x.tick, 0) / t.length };
+  });
+  const [m1, m2, m3, m4] = M as [typeof M[0], typeof M[0], typeof M[0], typeof M[0]];
+  const hA = (m1.h + m2.h) / 2, hB = (m3.h + m4.h) / 2;
+  if (m4.h - m3.h <= 0.05 * hB + suelo) return Math.max(m3.h, m4.h);
+  const rA = (m2.h - m1.h) / (m2.t - m1.t), rB = (m4.h - m3.h) / (m4.t - m3.t);
+  if (!(rA > rB) || !(hB > hA)) return Infinity;
+  return hB + rB * (hB - hA) / (rA - rB);
+}
+
+/** `mesetaSerie` de las fotos de una caja cerrada (recambio ≥ 0), como fracción del H total; suelo de 10⁻⁵ del H. */
+export function mesetaH2(fotos: readonly FotoCaja[]): number {
+  const f = fotos.filter((x) => x.recambio >= 0), hTotal = f[f.length - 1]!.hTotal;
+  return 2 * mesetaSerie(f.map((x) => ({ tick: x.tick, h2: x.h2, hecho: x.h2Hecho, gastado: x.h2Gastado })), 1e-5 * hTotal / 2) / hTotal;
 }

@@ -7,7 +7,11 @@ import { EPS_TENACIDAD, FRACTURA } from '../../shared/naturaleza.js';
 import type { SustanciaId } from '../../shared/materia.js';
 import { DATO_GOLPEAR } from '../motor/contratos.js';
 import { balanceada } from './copiar.js';
-import { nivelDeT, type ArenaMateria, type LoteRef, type ServicioQuimico } from './tipos.js';
+import { favorableA } from './quimica.js';
+import { nivelDeLote, type ArenaMateria, type Kappa, type LoteRef, type ServicioQuimico } from './tipos.js';
+
+/** Solo su signo cuenta para `nivelDeLote`: `quemar` no es cinético (la tasa la pone el trabajo pedido). */
+const METABOLISMO: Kappa = [1, 1, 1, 1];
 
 /**
  * J efectivos de un golpe (`dato` de un Golpear, `DATO_GOLPEAR`) sobre el blanco y sobre el útil que golpea:
@@ -70,16 +74,20 @@ export function desprender(arena: ArenaMateria, q: ServicioQuimico, de: LoteRef,
  * exotérmicas y balanceadas; las que Q no tiene aún (encoladas) no queman este tick. Con oxidante 0, que Q tomaría por
  * reacción unaria, no quema: ningún lote tiene cuantos de 0. El calor liberado queda en el lote (de ahí lo toman la
  * síntesis o fluir). Devuelve los J liberados: ≥ trabajo si alcanzó (sobra menos de una vez), menos si no.
+ * Los productos son los del lote catalizado (el metabolismo es enzimático): nivel `nivelDeLote` con κ > 0, es decir,
+ * nunca por debajo de NIVEL_CATALIZADO, como `pasoLote` en el tubo o en el suelo. Revisión de la enmienda 3 (hallazgo
+ * 8): con `nivelDeT`, un cuerpo a 275 K quemaba el metanol con los productos del nivel 1 y su propio tubo, con κ > 0,
+ * los elegía en el nivel 2.
  */
 export function quemar(arena: ArenaMateria, q: ServicioQuimico, lote: LoteRef, oxidante: SustanciaId, trabajo: number): number {
   if (!(trabajo > 0)) return 0; // NaN: la arena no admite veces NaN
   let liberado = 0;
-  const nivel = nivelDeT(arena.vista(lote).T);
+  const T = arena.vista(lote).T, nivel = nivelDeLote(T, METABOLISMO);
   for (const id of especies(arena, lote)) {
     if (liberado >= trabajo || arena.cuantos(lote, oxidante) === 0) break;
     if (id === oxidante) continue;
     const r = q.reaccion(id, oxidante, nivel);
-    if (!r || r.dH >= 0 || !balanceada(q, r)) continue;
+    if (!r || r.dH >= 0 || !balanceada(q, r) || !favorableA(r, T, (s) => q.sustancia(s))) continue; // ΔG a la T real, como P
     const veces = Math.min(Number.MAX_SAFE_INTEGER, Math.ceil((trabajo - liberado) / -r.dH)); // la arena pide un entero seguro
     liberado -= r.dH * arena.aplicar(lote, r, veces);
   }

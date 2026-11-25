@@ -4,7 +4,7 @@
 // tests/lib) y para lo que Q no puede dar: una reacción desbalanceada (`QuimicaCon`).
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CAPACIDAD_ATOMO, ELEMENTOS, EPS_TENACIDAD, FRACTURA, NE } from '../src/shared/naturaleza.js';
+import { CAPACIDAD_ATOMO, ELEMENTOS, EPS_TENACIDAD, FRACTURA, NE, NIVEL_CATALIZADO } from '../src/shared/naturaleza.js';
 import type { SustanciaId } from '../src/shared/materia.js';
 import { DATO_GOLPEAR, refDe, type Registro } from '../src/world/motor/contratos.js';
 import { Rol, libroVacio, nivelDeT, type LoteRef, type Reaccion, type ServicioQuimico } from '../src/world/materia/tipos.js';
@@ -355,6 +355,32 @@ test('copiar: ningún paso intermedio pasa de 2⁵³ (I3): se copia lo que cabe'
   assert.equal(caso(0, M - 4), 4, 'el residuo también cuenta');
 });
 
+test('copiar: el calor que traen las entradas y el que se lleva el residuo también cuentan; nunca falla a medias', () => {
+  // Revisión de la enmienda 3, hallazgo 1: el recorte miraba el calor del destino antes de recibir las entradas. Con el
+  // destino a 2⁵³ − 5 J y una fuente a 1 J por átomo, el CO₂ entraba con 3 J y el H₂O, con otros 3, reventaba la arena
+  // con el CO₂ ya movido; y un residuo casi lleno de calor reventaba al recibir el O₂ con la madera ya fabricada.
+  const M = Number.MAX_SAFE_INTEGER;
+  const caso = (calorVida: number, vida: Contenido, calorResiduo: number) => {
+    const { a, refs: [f, v, r] } = Arena.cargada([[[[CO2, 10], [H2O, 10]], 60], [vida, calorVida], [[[O2, 1]], calorResiduo]]);
+    const antes = a.totales(), quieto = a.foto();
+    const n = copiar(a.arena, q, foto, v!, [f!], r!, Infinity, 10);
+    assert.deepEqual(a.totales(), antes);
+    if (n === 0) assert.equal(a.foto(), quieto, 'sin unidades nada se mueve');
+    assert.equal(a.cuantos(v!, CH2O) - (vida.find(([id]) => id === CH2O)?.[1] ?? 0), n);
+    assert.equal(a.cuantos(f!, CO2), 10 - n);
+    return { n, residuo: a.calor(r!), vida: a.calor(v!) };
+  };
+  // Cada unidad trae 3 J con el CO₂ y 3 con el H₂O: con 5 J libres no cabe ninguna; con 6, una (el destino llega a 2⁵³ − 1
+  // con las entradas y luego la síntesis gasta dH).
+  assert.equal(caso(M - 5, [], 0).n, 0);
+  assert.equal(caso(M - 6, [], 0).n, 1);
+  // Residuo a 2⁵³ − 10 J: el O₂ sale con ⌊calor·2n/átomos⌋ de la vida (~1 J por átomo) y la copia se recorta a lo que cabe.
+  const dH = foto.sintesis.dH, vida: Contenido = [[CH2O, 1000]];
+  const libre = caso(4000 + 10 * dH, vida, 0), lleno = caso(4000 + 10 * dH, vida, M - 10);
+  assert.equal(libre.n, 10);
+  assert.ok(lleno.n > 0 && lleno.n < 10 && lleno.residuo <= M, `n ${lleno.n}, residuo ${lleno.residuo}`);
+});
+
 test('copiar: una ecuación desbalanceada no ocurre (la arena real la rechazaría lanzando)', () => {
   const a = new Arena();
   const f = a.crear([[CO2, 100], [H2O, 100]]), vida = a.crear([], 1e9), r = a.crear();
@@ -463,6 +489,22 @@ test('quemar: el comburente o el combustible se agotan a mitad; el orden de las 
     assert.equal(quemar(a.arena, q, dos, O2, Infinity), 8 * dH2, 'trabajo infinito: quema lo que hay sin pedir veces infinitas');
     assert.deepEqual(a.totales(), antes2);
   }
+});
+
+test('quemar: un cuerpo frío elige los productos del lote catalizado (nivel NIVEL_CATALIZADO), como su tubo en pasoLote', () => {
+  // Revisión de la enmienda 3, hallazgo 8: a 275 K (nivel 1) quemar elegía 2 metanol + 2 O₂ → 4 H₂O + C + CO₂ y el tubo
+  // del mismo cuerpo, con κ > 0 (`nivelDeLote`), metanol + O₂ → H₂ + H₂O + CO₂. El metabolismo es catalizado: los dos,
+  // los del nivel 2. (El metanol, de 6 átomos, no tiene combustión completa en 16: 2 CH₃OH + 3 O₂ son 18.)
+  const METANOL = sustancia([['C', 'H', 1, 3], ['C', 'O', 1, 1], ['H', 'O', 1, 1]]);
+  const frio = Q.reaccion(METANOL, O2, nivelDeT(275))!, catalizado = Q.reaccion(METANOL, O2, NIVEL_CATALIZADO)!;
+  assert.equal(nivelDeT(275), 1);
+  assert.notDeepEqual(frio.salidas, catalizado.salidas, 'los dos niveles dan productos distintos (la prueba distingue)');
+  const a = new Arena(), l = a.aT([[METANOL, 100], [O2, 1000]], 275), antes = a.totales();
+  const liberado = quemar(a.arena, q, l, O2, 10 * -catalizado.dH);
+  assert.equal(liberado, 10 * -catalizado.dH);
+  for (const t of catalizado.salidas) assert.equal(a.cuantos(l, t.id), 10 * t.nu, `producto ${t.id}`);
+  assert.equal(a.cuantos(l, METANOL), 100 - 10 * catalizado.entradas.find((t) => t.id === METANOL)!.nu);
+  assert.deepEqual(a.totales(), antes);
 });
 
 // ── Romper ─────────────────────────────────────────────────────────────────────────────────────────────────

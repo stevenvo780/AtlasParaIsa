@@ -10,6 +10,8 @@
  * veces por tick son k·n_a·n_b/V (a + b), k·n_a²/V (a + a) y k·n_a (a sola) sean cuales sean los ν: los coeficientes son
  * estequiométricos, no órdenes cinéticos (el ritmo lo ponen los encuentros de un a con un b). En unidades de vez
  * (α = n_a/ν_a, β = n_b/ν_b) un a + b es el problema 1:1 con constante ν_a·ν_b·k, así que la forma cerrada no cambia.
+ * Un canal solo corre si su reacción gana energía libre a la T y con las fases reales del lote (`favorableA`: ΔG < −ε,
+ * como Q a la de su nivel; revisión de la enmienda 3, hallazgo 5).
  *
  * Diferencias con el pseudocódigo de §3.1, todas por necesidad:
  * - Cada canal da en forma cerrada (primer orden, segundo orden con reactivos distintos o iguales) el riesgo integrado
@@ -19,18 +21,24 @@
  *   (`extensiones`). Es exacto con canales que no comparten reactivo y con competidores cuyo compañero no se gasta (pseudo
  *   primer orden: el O₂ del suelo entre muchas sustancias orgánicas). Si el compañero de un competidor también se gasta,
  *   las proporciones cambian dentro de dt y el paso se parte en subpasos en los que ningún compañero pierde más de la
- *   mitad, con el reparto del punto medio (orden 2), hasta que le queda medio cuanto (`AGOTADO`; un canal saturado
- *   necesita ~log₂ n subpasos). Frente a la EDO integrada fina (combustión contra dimerización, 12 regímenes con k hasta
+ *   mitad, con el reparto del punto medio (orden 2), hasta que le quedan 2⁻¹⁰ cuantos (`AGOTADO`; un canal saturado
+ *   necesita ~log₂ n + 10 subpasos). Frente a la EDO integrada fina (combustión contra dimerización, 12 regímenes con k hasta
  *   ν y hasta 10¹² cuantos) queda dentro del 5 %; repartir las demandas ya saturadas, como antes, daba a la combustión 60
  *   veces lo que le toca.
  * - ξ no sale de redondear con un uniforme: los cuantos de cada reactivo se sortean entre sus canales en una multinomial
- *   con las medias de la integración, que es la suma de las de las mitades del lote (I5); a + a sortea pares enteros.
+ *   con las medias de la integración, que es la suma de las de las mitades del lote (I5, para particiones que conservan
+ *   grupos enteros de la estequiometría); a + a sortea pares enteros. Cada canal a + b lo sortea el reactivo cuyo sorteo
+ *   menos arriesga pedirle al otro más de lo que le sobra (z = holgura/σ, revisión de la enmienda 3, hallazgo 4).
  * - Lo sorteado se recorta antes de aplicar, en proporción y en orden de id (nunca en el de las ranuras), a lo que hay de
- *   cada reactivo y al calor que pagan las endotérmicas tras sumar el que sueltan las exotérmicas del mismo paso.
- * La temperatura, el nivel ℓ (`nivelDeLote`) y el volumen se fijan al empezar el paso: los productos reaccionan desde el
- * paso siguiente.
+ *   cada reactivo y al calor que pagan las endotérmicas tras sumar el que sueltan las exotérmicas del mismo paso; lo que el
+ *   recorte libera de un reactivo se vuelve a sortear entre sus canales no recortados.
+ * - Pases encadenados (`PASES_ENCADENADOS`, validación de la enmienda 3, hallazgo 7): lo que produce un pase reacciona
+ *   en el mismo paso, en ventanas dt/2, dt/4, …, en los canales que tienen algún reactivo nuevo.
+ * La temperatura y el nivel ℓ (`nivelDeLote`) se fijan al empezar el paso y valen para todos sus pases; el volumen, en
+ * cada pase con lo que hay. G replica todo esto (pedido en ARQ-materia §3.1, enmienda 3).
  */
 import { CAPACIDAD_ATOMO, NU, R } from '../../shared/naturaleza.js';
+import { favorableA } from './quimica.js';
 import type { SustanciaId } from '../../shared/materia.js';
 import {
   barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type LoteRef, type Reaccion, type ServicioQuimico, type Sustancia,
@@ -51,12 +59,18 @@ const ATMOSFERA = 101.325;
 const MG_POR_KG = 1e6;
 /** Fracción que un compañero de un competidor puede perder en un subpaso. */
 const SUBPASO = 0.5;
-/** Cuantos (absolutos) por debajo de los cuales un reactivo ya no se vigila: lo que queda no llega a una vez. Antes era
- * una fracción (10⁻⁴ de lo que había) y un canal saturado (k = ν) con un compañero compartido dejaba ese resto sin
- * gastar: el último subpaso reparte por el punto medio, donde ya no queda reactivo, y el compañero le daba 0. */
-const AGOTADO = 0.5;
+/** Cuantos (absolutos) por debajo de los cuales un reactivo ya no se vigila. Antes era una fracción (10⁻⁴ de lo que
+ * había) y un canal saturado (k = ν) con un compañero compartido dejaba ese resto sin gastar: el último subpaso reparte
+ * por el punto medio, donde ya no queda reactivo, y el compañero le daba 0. Era medio cuanto hasta la revisión de la
+ * enmienda 3: con ν = 2 y una sola vez posible (2 H₂ recién nacidos en un suelo con O₂), lo que quedaba sin dar llegaba
+ * a 0,45 cuantos, ξ = 0,78, y en el 22 % de los pasos la vez no se daba; en el suelo denso de la validación (hallazgo
+ * 7), 3.287 de 20.000 pasos dejaban sus 2 H₂ y salían al aire (0,15 % del H a los 200 recambios, sin meseta). Con
+ * 2⁻¹⁰ lo que se pierde de media es < 10⁻³ veces por canal, a costa de ~10 subpasos más en un canal saturado. */
+const AGOTADO = 2 ** -10;
 /** Tope de subpasos: medio cuanto desde 2⁵³ son 54 mitades; si se llegara, lo que falta va en uno. */
 const SUBPASOS_MAX = 200;
+/** Pases encadenados tras el principal (ventanas dt/2, dt/4, …, dt/2⁸): lo que aún quede nuevo espera al paso siguiente. */
+export const PASES_ENCADENADOS = 8;
 
 /** Litros que ocupa un cuanto: gas ideal desde su ebullición, si no su densidad en fase condensada. */
 const volumenMolar = (s: Readonly<Sustancia>, T: number): number =>
@@ -86,6 +100,9 @@ let gobierna = new Int32Array(16), orden = new Int32Array(16);
 let kTick = new Float64Array(16), hI = new Float64Array(16), hJ = new Float64Array(16);
 let lI = new Float64Array(16), lJ = new Float64Array(16), l0I = new Float64Array(16), l0J = new Float64Array(16);
 let ext = new Float64Array(16), xi = new Float64Array(16), veces = new Float64Array(16), pedidas = new Float64Array(16);
+// Pases encadenados: lo que produjo el pase anterior (id → cuantos) y lo que produce este; por sustancia, si es nueva.
+let nuevos = new Map<SustanciaId, number>(), producidos = new Map<SustanciaId, number>();
+let esNueva = new Uint8Array(16);
 
 function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
   let n = arena.especies(l, ids);
@@ -94,7 +111,7 @@ function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
     ids = new Uint32Array(t); cant = new Float64Array(t); x = new Float64Array(t); xm = new Float64Array(t);
     H = new Float64Array(t); L = new Float64Array(t); L0 = new Float64Array(t); aa = new Int32Array(t);
     gastoLineal = new Float64Array(t); gastoAa = new Float64Array(t);
-    consumo = new Float64Array(t); usos = new Int32Array(t); inicio = new Int32Array(t + 1);
+    consumo = new Float64Array(t); usos = new Int32Array(t); inicio = new Int32Array(t + 1); esNueva = new Uint8Array(t);
     n = arena.especies(l, ids);
   }
   ids.subarray(0, n).sort(); // orden de id: nada depende de en qué ranura esté cada sustancia
@@ -191,6 +208,14 @@ function extensiones(m: number, n: number, V: number, h: number, xa: Float64Arra
   }
 }
 
+/** z de `pasoLote`: holgura media de r (cuantos que le sobran, `cant − L`) en desviaciones del sorteo del canal (de
+ * media ξ veces) por s, en cuantos de r. Infinito si ese sorteo no tiene ruido (p = 0 o 1). */
+function holguraEnSigmas(r: number, nuR: number, s: number, nuS: number, xiK: number): number {
+  const grupos = cant[s]! / nuS, p = Math.min(1, Math.max(0, xiK / grupos));
+  const sigma = Math.sqrt(grupos * p * (1 - p));
+  return sigma > 0 ? Math.max(0, cant[r]! - L[r]!) / (nuR * sigma) : Infinity;
+}
+
 /** `destino` = `desde` menos lo que consumen las extensiones `ext` (sin bajar de 0). */
 function consumir(m: number, n: number, desde: Float64Array, destino: Float64Array): void {
   if (destino !== desde) destino.set(desde.subarray(0, n));
@@ -238,18 +263,60 @@ function integrar(m: number, n: number, V: number, dt: number): void {
 
 /**
  * Avanza `dt` ticks las reacciones de `l` con la catálisis `kappa` y devuelve cuántas veces se aplicaron en total
- * (suma en number: es un contador, no un balance). Todos los canales (pares i ≤ j y cada sustancia sola) se evalúan a la
- * vez con las cantidades del inicio del paso.
+ * (suma en number: es un contador, no un balance). Un pase principal evalúa a la vez todos los canales (pares i ≤ j y
+ * cada sustancia sola) con las cantidades del inicio del paso; después, hasta PASES_ENCADENADOS pases encadenados dan a
+ * lo producido en el pase anterior el tiempo que de media le queda (ventanas dt/2, dt/4, …): solo los canales con algún
+ * reactivo nuevo, que entra con lo que se produjo (los demás, con lo que hay). La T y el nivel son los del inicio del
+ * paso en todos los pases (el calor que suelta o pide el paso cambia la T del siguiente, como antes); V, con lo que hay.
+ * Por qué (validación de la enmienda 3, hallazgo 7): en un suelo denso el H₂ que nace de 2 glicósido → 2 H₂ + C + CO₂ o
+ * de H₂O + 2 orgP salía por `fluir` antes de que el propio suelo, que lo oxida sin barrera, lo viera (le llegaba 1/1.001
+ * del gas): la caja llegaba al 15,4 % del H en H₂. En un tick una bacteria del hidrógeno encuentra el H₂ que nace a su
+ * lado muchas veces; sin encadenar, ninguna. No se cuentan dos veces: cada cuanto entra en un pase como viejo o como
+ * nuevo, nunca en los dos; quedan fuera los encuentros de lo nuevo de a con lo viejo de b cuando b también es nuevo.
+ * Con la T medida otra vez, un lote adiabático que arde (sin roca que se lleve el calor) disociaba en el mismo paso el
+ * agua que acababa de hacer y la volvía a hacer en el pase siguiente, ocho veces; con la del inicio, no.
  */
 export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): number {
-  const { arena, quimica } = c;
   const { atomos, T, V } = medir(c, l);
   if (atomos === 0) return 0;
-  const n = presentes;
   const nivel = nivelDeLote(T, kappa);
+  nuevos.clear(); producidos.clear();
+  let total = pase(c, l, dt, kappa, T, V, nivel, false);
+  for (let p = 0, w = dt / 2; p < PASES_ENCADENADOS && producidos.size > 0; p++, w /= 2) {
+    [nuevos, producidos] = [producidos, nuevos];
+    producidos.clear();
+    // Lo nuevo entra con lo que se produjo (nunca más de lo que hay); lo viejo, con lo que hay.
+    const n = presentes = leerEspecies(c.arena, l);
+    let vol = 0;
+    for (let i = 0; i < n; i++) {
+      cant[i] = c.arena.cuantos(l, ids[i]!);
+      vol += cant[i]! * volumenMolar(c.quimica.sustancia(ids[i]!), T);
+      const d = nuevos.get(ids[i]!);
+      esNueva[i] = d === undefined ? 0 : 1;
+      if (d !== undefined) cant[i] = Math.min(cant[i]!, d);
+    }
+    total += pase(c, l, w, kappa, T, vol, nivel, true);
+  }
+  producidos.clear();
+  return total;
+}
+
+/** Anota en `producidos` las salidas de `v` veces de `r`. */
+function producir(r: Reaccion, v: number): void {
+  if (v > 0) for (const t of r.salidas) producidos.set(t.id, (producidos.get(t.id) ?? 0) + v * t.nu);
+}
+
+/**
+ * Un pase de `pasoLote` en una ventana de `dt` ticks sobre las `presentes` sustancias de `ids` con sus cuantos en `cant`;
+ * `encadenado`: solo canales con algún reactivo nuevo (`esNueva`).
+ */
+function pase(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa, T: number, V: number, nivel: number, encadenado: boolean): number {
+  const { arena, quimica } = c;
+  const n = presentes, sustanciaDe = (id: SustanciaId) => quimica.sustancia(id);
   usos.fill(0, 0, n);
   let m = 0;
   for (let i = 0; i < n; i++) for (let j = i - 1; j < n; j++) {
+    if (encadenado && !esNueva[i] && (j <= i || !esNueva[j])) continue;
     if (j === i && cant[i]! < 2) continue;
     const a: SustanciaId = ids[i]!, b: SustanciaId = j < i ? 0 : ids[j]!;
     const r = quimica.reaccion(a, b, nivel);
@@ -265,6 +332,7 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
       throw new Error(`Reacción (${r.a}, ${r.b}) con entradas que no son las del canal (${a}, ${b}).`);
     }
     if (cant[i]! < pa || (j > i && cant[j]! < pb)) continue; // ni una vez entera
+    if (!favorableA(r, T, sustanciaDe)) continue; // ΔG a la T y fases reales del lote (revisión de la enmienda 3, hallazgo 5)
     const barrera = barreraEfectiva(r, kappa);
     const k = barrera === 0 ? NU : T > 0 ? NU * Math.exp(-barrera / (R * T)) : 0;
     if (!(k * dt > 0)) continue;
@@ -276,18 +344,32 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   }
   if (m === 0) return 0;
   integrar(m, n, V, dt);
-  // Cada canal lo sortea su reactivo más gastado (a igualdad, el de menos cuantos). Agrupados con un conteo: O(n + m).
+  // Quién sortea cada canal a + b: el reactivo cuyo sorteo menos arriesga pedirle al otro más de lo que le sobra de media.
+  // El sorteo del canal k por s es una binomial de cant_s/ν_s grupos con p = ν_s·ξ_k/cant_s (la marginal de la
+  // multinomial de s), de desviación σ_s; lo que sobra del otro, r, es su holgura E_r = cant_r − Σ ν·ξ. Sortea el de mayor
+  // z = E_r/(ν_r·σ_s) (σ_s = 0: sin ruido, z infinito); a igualdad, el más gastado y luego el de menos cuantos. Cuando uno
+  // de los dos es escaso y el otro sobra, es el escaso, como antes (z ≫ 1 frente a z ~ 1). Cuando los dos se agotan, el
+  // que se reparte entre menos canales: su p ≈ 1 no tiene ruido. Antes sorteaba siempre el más gastado, y en 10⁶ H₂ +
+  // 10⁶ CH₄ + 2,5·10⁶ O₂ saturados (revisión de la enmienda 3, hallazgo 4) el O₂, gastado en 10⁻¹¹ más que el CH₄,
+  // sorteaba su canal con p = 0,8 (σ ≈ 450 veces) y el recorte dejaba cientos de combustiones sin hacer.
   H.fill(0, 0, n); // aquí: fracción media que se gasta de cada sustancia
+  L.fill(0, 0, n); // aquí: cuantos que se gastan de media de cada sustancia
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!;
     H[i]! += nuI[k]! * xi[k]! / cant[i]!;
-    if (j > i) H[j]! += nuJ[k]! * xi[k]! / cant[j]!;
+    L[i]! += nuI[k]! * xi[k]!;
+    if (j > i) { H[j]! += nuJ[k]! * xi[k]! / cant[j]!; L[j]! += nuJ[k]! * xi[k]!; }
   }
   inicio.fill(0, 0, n + 1);
   for (let k = 0; k < m; k++) {
     const i = canalI[k]!, j = canalJ[k]!;
-    gobierna[k] = j > i && (H[j]! > H[i]! || (H[j] === H[i] && cant[j]! < cant[i]!)) ? j : i;
-    inicio[gobierna[k]! + 1]!++;
+    let g = i;
+    if (j > i) {
+      const zi = holguraEnSigmas(j, nuJ[k]!, i, nuI[k]!, xi[k]!), zj = holguraEnSigmas(i, nuI[k]!, j, nuJ[k]!, xi[k]!);
+      if (zj > zi || (zj === zi && (H[j]! > H[i]! || (H[j] === H[i] && cant[j]! < cant[i]!)))) g = j;
+    }
+    gobierna[k] = g;
+    inicio[g + 1]!++;
   }
   for (let s = 0; s < n; s++) inicio[s + 1]! += inicio[s]!;
   consumo.fill(0, 0, n); // aquí: siguiente hueco de cada grupo
@@ -330,6 +412,29 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
       x[i]! -= nuI[k]! * veces[k]!;
       if (j > i) x[j]! -= nuJ[k]! * veces[k]!;
     }
+    // Lo que el recorte quitó a los canales que sortea s se vuelve a sortear entre los de s que no se recortaron, con sus
+    // partes y hasta lo que quede de su compañero: el O₂ que el H₂ agotado no pudo tomar va al CH₄ que aún hay (revisión
+    // de la enmienda 3, hallazgo 4; antes quedaba sin reaccionar hasta el paso siguiente, ~σ del sorteo).
+    for (let s = 0; s < n; s++) {
+      let libre = 0, resto = 0;
+      for (let o = inicio[s]!; o < inicio[s + 1]!; o++) {
+        const k = orden[o]!, nu = nuDe(k, s);
+        libre += nu * (pedidas[k]! - veces[k]!);
+        if (veces[k] === pedidas[k]) resto += nu * xi[k]! / cant[s]!;
+      }
+      if (!(libre > 0 && resto > 0)) continue;
+      let quedan = Math.min(libre, x[s]!);
+      for (let o = inicio[s]!; o < inicio[s + 1]! && quedan > 0; o++) {
+        const k = orden[o]!;
+        if (veces[k] !== pedidas[k]) continue;
+        const i = canalI[k]!, j = canalJ[k]!, nu = nuDe(k, s), parte = nu * xi[k]! / cant[s]!;
+        const r = j > i ? (s === i ? j : i) : -1, nuR = r < 0 ? 0 : nuDe(k, r);
+        let v = binomial(Math.floor(quedan / nu), Math.min(1, parte / resto), c.azar);
+        if (r >= 0) v = Math.min(v, Math.floor(x[r]! / nuR));
+        veces[k]! += v; pedidas[k]! += v; x[s]! -= nu * v; quedan -= nu * v; resto -= parte;
+        if (r >= 0) x[r]! -= nuR * v;
+      }
+    }
     // Lo que el redondeo hacia abajo dejó libre, una vez más por canal en orden de id: sin esto, dos canales que piden
     // el último cuanto se lo negarían los dos para siempre.
     for (let k = 0; k < m; k++) {
@@ -345,7 +450,7 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
   for (let k = 0; k < m; k++) {
     const r = canales[k]!;
     if (r.dH > 0) pide += veces[k]! * r.dH;
-    else if (veces[k]! > 0) { const v = arena.aplicar(l, r, veces[k]!); total += v; calor -= v * r.dH; }
+    else if (veces[k]! > 0) { const v = arena.aplicar(l, r, veces[k]!); total += v; calor -= v * r.dH; producir(r, v); }
   }
   if (pide > calor) {
     const f = calor / pide;
@@ -359,7 +464,9 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
       if (dH > 0 && veces[k]! < pedidas[k]! && calor >= dH) { veces[k]!++; calor -= dH; }
     }
   }
-  for (let k = 0; k < m; k++) if (canales[k]!.dH > 0 && veces[k]! > 0) total += arena.aplicar(l, canales[k]!, veces[k]!);
+  for (let k = 0; k < m; k++) {
+    if (canales[k]!.dH > 0 && veces[k]! > 0) { const v = arena.aplicar(l, canales[k]!, veces[k]!); total += v; producir(canales[k]!, v); }
+  }
   canales.fill(null, 0, m);
   return total;
 }

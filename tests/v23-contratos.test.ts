@@ -11,6 +11,8 @@ import * as cinta from '../src/shared/cinta.js';
 import * as fotograma from '../src/shared/fotograma.js';
 import { POLICY_ACTIONS, POLICY_HIDDEN, POLICY_INPUTS, POLICY_WEIGHTS } from '../src/world/politica.js';
 import { familiaCatalitica, indiceTipoEnlace } from '../src/world/materia/quimica.js';
+import { crearServicioQuimico } from '../src/world/materia/servicio.js';
+import { registrarSustanciasBase } from '../scripts/lab-materia.mjs';
 
 // Si dos contratos exportan el mismo nombre, sea tipo o valor, `npm run typecheck` falla aquí (TS2308).
 export type * from '../src/world/motor/contratos.js';
@@ -164,7 +166,7 @@ test('codigoForma cabe en 30 bits y es su propia inversa sobre los códigos', ()
   assert.ok(codigoForma({ largo: 1e9, ancho: 1e9, grueso: 1e9, hueco: 1, filo: 1 }) < 2 ** 30);
 });
 
-test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable en la familia 2 y ATOMOS_POR_REACCION', () => {
+test('enmienda 1: fronteras exactas de nivelDeT, H–H catalizable (familia 3 desde la enmienda 2) y ATOMOS_POR_REACCION', () => {
   const { nivelDeT, tFronteraNivel, tDeNivel, NIVELES_T } = tipos;
   const anterior = (x: number) => {
     const v = new DataView(new ArrayBuffer(8));
@@ -333,7 +335,7 @@ test('los contratos fijan colas M/A/B/F0, canal GPU no bloqueante, percepción m
   assert.equal(typeof chequearTipos, 'function');
 });
 
-test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', () => {
+test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂ gas, digestión/suelo, hierro en horno y enteros seguros', async () => {
   const { TIPOS } = materia;
   const { R, NU, GAMMA, KAPPA0, KAPPA_SUELO, KAPPA_SUELO_HH, S_GAS, CAPACIDAD_ATOMO } = naturaleza;
   const D = (a: string, b: string, k = 1): number => {
@@ -368,21 +370,34 @@ test('naturaleza y enlaces mantienen coherencia física: fuego sostenible, CO₂
   const dG_etano = (2 * D('C', 'H') + D('C', 'C') - D('C', 'C', 2) - D('H', 'H')) - 295 * S_GAS;
   assert.ok(dG_etano > 20, 'el etano debe ser estable a 295 K');
 
-  // 4. Hierro (Fe₂O₃ + C → Fe₂O + CO₂): NO funde en fogata (800 K), SÍ funde en horno (1.400 K).
-  const dH_fe = (4 * D('Fe', 'O') - 2 * D('Fe', 'Fe')) + (2 * D('C', 'C') - 2 * D('C', 'O', 2));
-  assert.ok(dH_fe - 800 * S_GAS > 0, 'Fe₂O₃ no debe reducirse en fogata (800 K)');
-  assert.ok(dH_fe - 1400 * S_GAS < 0, 'Fe₂O₃ debe reducirse en horno (1.400 K)');
-
-  // 5. Digestión (310 K, KAPPA0) rompe C–N/C–O/C–C sin carbonizar C–H ni oxidar O=O; suelo (295 K, KAPPA_SUELO) cierra el ciclo.
-  assert.ok(D('C', 'N') < D('C', 'O') && D('C', 'O') < D('C', 'C') && D('C', 'C') < D('C', 'H'), 'orden catalítico C–N < C–O < C–C < C–H');
-  assert.ok(kRate(310, D('C', 'N'), KAPPA0) > 1 && kRate(310, D('C', 'O'), KAPPA0) > 1 && kRate(310, D('C', 'C'), KAPPA0) > 1e-2);
-  assert.ok(kRate(310, D('C', 'H'), KAPPA0) < 1e-4 && kRate(310, D('O', 'O', 2), KAPPA0) < 1e-9);
-  assert.ok(kRate(295, D('O', 'O', 2), KAPPA_SUELO) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
-  // …y oxidar el H₂ con O₂ sin barrera (H–H, familia 3: KAPPA_SUELO_HH ≥ γ·D(O=O)), pero ningún κ parte el agua: 2 H₂O →
-  // 2 H₂ + O₂ es endotérmica y paga su barrera entera.
-  assert.ok(KAPPA_SUELO_HH >= GAMMA * D('O', 'O', 2) && kRate(295, D('O', 'O', 2), KAPPA_SUELO_HH) === NU, 'el suelo oxida el H₂ al paso');
-  const dH_agua = 4 * D('O', 'H') - 2 * D('H', 'H') - D('O', 'O', 2);
-  assert.ok(dH_agua > 300 && kRate(310, D('O', 'H'), 1e9, dH_agua) < 1e-50, 'ni el suelo ni el tubo parten el agua');
+  // 4 y 5, con las reacciones reales de Q (revisión de la enmienda 3, hallazgo 9: antes se rehacían aquí con γ·D del enlace
+  // que se suponía decisivo y con un Fe₂O₃ + C → Fe₂O + CO₂ 1:1 que Q ya no elige).
+  const q = crearServicioQuimico({ modo: 'inmediato' });
+  try {
+    const S = registrarSustanciasBase(q), { nivelDeT, barreraEfectiva } = tipos;
+    const k = (a: number, b: number, T: number, kappa: readonly [number, number, number, number]) => {
+      const r = q.reaccion(a, b, nivelDeT(T));
+      return r ? NU * Math.exp(-barreraEfectiva(r, kappa) / (R * T)) : 0;
+    };
+    const K0 = [KAPPA0, KAPPA0, KAPPA0, KAPPA0] as const, KS = [KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO, KAPPA_SUELO_HH] as const;
+    // 4. Hierro: Fe₂O₃ + C no se reduce en fogata (800 K) ni en llama abierta (1.095 K); en horno (1.250 K) da CO₂ y metal.
+    assert.equal(q.reaccion(S.Fe2O3, S.C, nivelDeT(800)), null, 'Fe₂O₃ no se reduce en fogata');
+    assert.equal(q.reaccion(S.Fe2O3, S.C, nivelDeT(1095)), null, 'ni en llama abierta');
+    const horno = q.reaccion(S.Fe2O3, S.C, nivelDeT(1250));
+    assert.ok(horno && horno.salidas.some((t) => t.id === S.CO2) && horno.salidas.some((t) => t.id === S.Fe2), 'en horno, CO₂ y hierro');
+    // 5. Digestión (310 K, KAPPA0): las rutas sin O₂ de la proteína, la madera y el glicósido (→ NH₃ + C, → H₂O + C) tienen
+    // su barrera en γ·D(C–H) = 141,05 (rompen un C–H), así que con κ₀ = 60 van a ~2·10⁻⁵/tick: el tubo apenas digiere por
+    // química (pedido a B: κ del tubo ≳ 88 o plantillas cuya ruta la decida C–N o C–O). No oxida con O₂ ni carboniza la grasa.
+    for (const id of [S.proteina, S.madera, S.glicosido]) {
+      const v = k(id, 0, 310, K0);
+      assert.ok(v > 1e-6 && v < 1e-4, `digestión de ${id} a 310 K: k = ${v.toExponential(2)}`);
+    }
+    assert.ok(k(S.madera, S.O2, 310, K0) < 1e-9 && k(S.CH2, 0, 310, K0) < 1e-12, 'el tubo no quema ni carboniza');
+    // Suelo (295 K, KAPPA_SUELO): mineraliza con O₂ y oxida el H₂ sin barrera; nada parte el agua.
+    assert.ok(k(S.madera, S.O2, 295, KS) > 1e-4, 'el suelo debe mineralizar cadáveres con O₂');
+    assert.ok(KAPPA_SUELO_HH >= GAMMA * D('O', 'O', 2) && k(S.H2, S.O2, 295, KS) === NU, 'el suelo oxida el H₂ al paso');
+    assert.equal(q.reaccion(S.H2O, 0, nivelDeT(310)), null, 'ni el suelo ni el tubo parten el agua');
+  } finally { await q.cerrar(); }
 
   // 6. Magnitudes en enteros seguros (un chunk nuevo entero cabe con margen en Float64 entero antes de plegar a bigint en F0).
   const cuantosChunk = 256 * Math.round(2000e6 / 60.08);

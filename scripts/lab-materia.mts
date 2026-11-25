@@ -15,7 +15,7 @@
  *     con 100 veces más aire por poro y sin herbívoro, y con el suelo a 275 K: agua, H₂, biomasa, balance exacto y
  *     destino de N y P.
  *
- *  7. A demanda (`--cajas[=<regex>]`, enmienda 3): la batería de 74 cajas paramétricas de la validación de los ciclos
+ *  7. A demanda (`--cajas[=<regex>]`, enmienda 3): la batería de 80 cajas paramétricas de la validación de los ciclos
  *     (tests/lib/caja-param.ts) con sus umbrales y la expectativa de cada una, en procesos hijos.
  *
  * Uso: npx tsx scripts/lab-materia.mts [--json] [--solo-banco] [--sin-caja]
@@ -26,7 +26,7 @@ import {
   CAPACIDAD_ATOMO, E_CAT_IONICO, E_HID_IONICO, E_RES_IONICO, ELEMENTOS, KAPPA0, KAPPA_SUELO, NE, NU, R,
 } from '../src/shared/naturaleza.js';
 import { ClaseSustancia, TIPOS, type SustanciaId } from '../src/shared/materia.js';
-import { barreraEfectiva, nivelDeT, tDeNivel, type Kappa, type Reaccion, type Sustancia } from '../src/world/materia/tipos.js';
+import { barreraEfectiva, nivelDeT, tDeNivel, type Kappa, type Reaccion, type ServicioQuimico, type Sustancia } from '../src/world/materia/tipos.js';
 import {
   ContextoSolver, esGasA, indiceTipoEnlace, productos,
 } from '../src/world/materia/quimica.js';
@@ -426,7 +426,7 @@ export function ejecutarBancoRendimiento(): ResumenBanco {
   };
 }
 
-// ── Batería de cajas paramétricas (validación de los ciclos de Fable, 74 cajas; enmienda 3) ─────────────────────
+// ── Batería de cajas paramétricas (validación de los ciclos de Fable, 74 cajas, y 6 de la de la enmienda 3) ─────────────────────
 //
 // Cada caja es una geometría de tests/lib/caja-param.ts y una expectativa: «cierra» (ningún fallo frente a UMBRALES_CAJA:
 // balance exacto, agua no perdida ≥ 97 % (el H que no pasó a H₂ ni a una sustancia que nadie espera), H₂ < 0,5 % del H y
@@ -437,7 +437,7 @@ export function ejecutarBancoRendimiento(): ResumenBanco {
 // fallar la batería lo marca para que se revise) o «informa» (contrafactual de la validación: solo se mide).
 
 type Espera = { espera: 'cierra' } | { espera: 'falla' | 'abierto'; por: RegExp; motivo: string } | { espera: 'informa'; motivo: string };
-type OpcionesMedida = { exigeH2Estable?: boolean; h2Pulso?: boolean };
+type OpcionesMedida = { exigeH2Estable?: boolean; h2Pulso?: boolean; exigeCO2?: boolean };
 type CajaBateria = [nombre: string, cfg: Record<string, unknown>, espera?: Espera, op?: OpcionesMedida];
 
 const SUELO = { H2O: 300_000, NH3: 30_000, H3PO4: 10_000, CaCO3: 100_000, SiO2: 1_000_000, N2: 78_000, O2: 21_000, CO2: 2_000 };
@@ -457,8 +457,23 @@ const REBAJA_HH = contra('κ H–H rebajado en 68');
 const SIN_CAT_FRIO = contra('sin catálisis en la estación fría');
 /** Fuego pobre en O₂: hace H₂ de verdad (gas de síntesis) en un pulso que el suelo oxida; el techo se mira al final. */
 const PULSO: OpcionesMedida = { h2Pulso: true };
-/** Glicósido en suelo denso (enmienda 3, pendiente): ver ARQ-materia §3.1. */
-const GLIC_DENSO: Espera = { espera: 'abierto', por: /^H₂ \d/, motivo: 'el glicósido (–CH₂–O–, poliacetal) fermenta en el suelo, 2 glic → 2 H₂ + C + CO₂ (dH −78; en el POM real, −39,5 kJ: también exotérmica). Es bimolecular (k·n²/V): con poros ÷100 va a 261 veces/tick frente a 13,4 con poros normales, ~522 H₂/tick. El suelo oxida casi todo su H₂ en cada tick (2 H₂ + O₂ sin barrera: 515 de 525, vida ≈ 1 tick; ningún κ lo acelera), pero en sus poros solo está 1/(1 + V_aire/V_suelo) del gas: la meseta es ≈ 522 × 1,02 × 1.001 ≈ 533.000 H₂ (medido 525.730, 15,4 % del H); con poros normales, 28,5 × 1,05 × 11 ≈ 330 (medido 316, 0,009 %). Es geometría y paso de integración (el H₂ sale al aire antes de que el suelo lo vea), no una constante de la química; igual en la enmienda 2' };
+/** Fuego pobre en O₂ con otra geometría (validación de la enmienda 3, hallazgo 1): la salida del H₂ y del HCN la limita
+ * el transporte, no la química. La meseta es P·τ con τ = (1 + V_aire/V_poros)/(1 − e^(−g(1/V_poros + 1/V_aire))); cada
+ * fuego deja ~26.400 H₂ y ~1.320 HCN cada ~177 ticks (149 y 7,5 por tick) y en el suelo el consumo es inmediato: con la
+ * geometría del autor τ ≈ 106 ticks (HCN 0,09 % del C, H₂ 0,18 % del H); con poros ÷100, τ ≈ 1.001 (H₂ ~4 %, HCN ~2 %);
+ * con aire ×100, τ ≈ 10.508 (H₂ ≈ 149 × 10.508 ≈ 1,57 M, el 45 % del H). Con O₂ ≥ 1× el estequiométrico cierra (H₂
+ * 0,06 %). Pedido a W, F y T1 (fila de la puerta de W): todo fuego u horno con O₂ ≥ 1× lo que arde, o que siga tomando
+ * aire hasta quemar su H₂, o una geometría con P·τ ≪ el H del agua. */
+const FUEGO_POBRE = (tau: string): Espera => ({ espera: 'abierto', por: /H₂|HCN/, motivo: `fuego pobre (O₂ 0,5×) con τ ≈ ${tau} ticks: meseta P·τ, transporte y no química; pedido a W, F y T1 (O₂ ≥ 1× o aire hasta quemar el H₂)` });
+/** Fango con poco intercambio de gases (validación de la enmienda 3, hallazgo 8): con g = 0,001 la biomasa pasa del 50 %
+ * limitada por CO₂ (el carbón enterrado retiene el 54 % del C); con g ≥ 0,01 el CO₂ vuelve (63 %). Pedido a W. */
+/** Suelo discreto del sumidero de H₂ (revisión de la enmienda 3; `h2Discreto` de caja-param.ts): 2 H₂ + O₂ pide dos
+ * cuantos a la vez en el poro y `fluir` solo mete el segundo cuando el aire pasa de 2·capAire/capPoro + 1 cuantos. Con
+ * aire ×100 y poros ÷100 son 200.000 H₂ (5,8 % del H): el H₂ del tubo sube hacia ahí a ~0,004 H₂/tick. Granularidad de
+ * P (pendiente: `fluir` de flujos brutos, que lo baja a ~capAire/capPoro, o un sumidero de un cuanto); pedido a W. */
+const SUELO_DISCRETO: Espera = { espera: 'abierto', por: /H₂ previsto/, motivo: 'suelo discreto 2·capAire/capPoro = 200.000 H₂ (5,8 % del H): el H₂ del tubo sube hacia ahí; granularidad de P, pedido a W (2·capAire/capPoro ≪ 0,5 % del H)' };
+const FANGO_LENTO: Espera = { espera: 'abierto', por: /CO₂/, motivo: 'fango con g = 0,001: el C se entierra como carbón y la planta queda limitada por CO₂ (con g ≥ 0,01 cierra); pedido a W: conductancia de gases g ≥ 0,01 capacidad/tick en todo lote catalizado, o aceptar el enterramiento' };
+const CO2: OpcionesMedida = { exigeCO2: true };
 
 export const BATERIA_CAJAS: CajaBateria[] = [
   ['base-1000', { recambios: 1000, fotoCada: 2 }],
@@ -484,7 +499,8 @@ export const BATERIA_CAJAS: CajaBateria[] = [
   ['auditoria-400', { suelo: { SiO2: 1_000_000, arcilla: 100_000, CaCO3: 50_000, CaHPO4: 5000, Fe2O3: 20_000, NH3: 20_000 }, recambios: 400, fTubo: 0, mezclado: true, aire: { N2: 800_000, O2: 200_000, CO2: 400 }, agua: { H2O: 1_000_000 } }, { espera: 'abierto', por: /biomasa mín/, motivo: 'aire con 400 cuantos de CO₂ (0,04 %): la hojarasca pasa por carbón en el suelo (madera → H₂O + C, rápida) y el carbón vuelve a CO₂ despacio (C + O₂, la fila 8 pide k > 10⁻⁴); en estado estacionario el carbón retiene el 24 % del C, el CaCO₃ inicial otro 55 %, y la planta, sin CO₂ libre, baja al 39 %. Igual en la enmienda 2' }],
   ['aire1000-400', { ...AIRE10, recambios: 400 }],
   ['aire10000-400', { ...AIRE100, recambios: 400 }],
-  ['fango-400', { recambios: 400, fango: { f: 0.5, g: 0.001, cap: 10, contenido: { H2O: 300_000, SiO2: 1_000_000, N2: 78_000 } } }],
+  ['fango-400', { recambios: 400, fango: { f: 0.5, g: 0.001, cap: 10, contenido: { H2O: 300_000, SiO2: 1_000_000, N2: 78_000 } } }, FANGO_LENTO, CO2],
+  ['fango-g01-400', { recambios: 400, fango: { f: 0.5, g: 0.01, cap: 10, contenido: { H2O: 300_000, SiO2: 1_000_000, N2: 78_000 } } }, { espera: 'cierra' }, CO2],
   ['fangosellado-400', { recambios: 400, fango: { f: 0.5, g: 0, cap: 10, contenido: { H2O: 300_000, SiO2: 1_000_000, N2: 78_000 } } }, { espera: 'falla', por: /biomasa mín/, motivo: 'geometría: fango sellado (g = 0), lo que se entierra no vuelve; con g = 0,001 (fango-400) cierra' }],
   ['tubo105-400', { recambios: 400, kTubo: 105 }, contra('κ del tubo 105, el de antes de la enmienda 2')],
   ['fuego1-400', { ...N2P, recambios: 400, cadaFuego: 1 }],
@@ -497,8 +513,20 @@ export const BATERIA_CAJAS: CajaBateria[] = [
   ['aire10000-sinherb-1000', { ...AIRE100, recambios: 1000, fotoCada: 2, fTubo: 0 }],
   ['aire10000-sinherb-HH-1000', { ...AIRE100, recambios: 1000, fotoCada: 2, fTubo: 0, rebajaHH: 68 }, REBAJA_HH],
   ['denso-sinherb-600', { recambios: 600, fTubo: 0, capSuelo: 0.1 }],
+  // Seca y con poros ÷100: el suelo discreto es el 0,49 % del H (menos H en la caja), al borde del techo; el H₂ (de los
+  // H₂ sueltos de 3 O₂ + 2 proteína → H₂ + …) sube hacia él a ~4·10⁻⁵ % del H por recambio.
   ['denso-sinherb-seca-600', { suelo: SUELO, recambios: 600, fTubo: 0, capSuelo: 0.1, agua: {} }],
-  ['denso-sinherb-glic-600', { partes: GLIC, recambios: 600, fTubo: 0, capSuelo: 0.1 }, GLIC_DENSO],
+  ['denso-sinherb-glic-600', { partes: GLIC, recambios: 600, fTubo: 0, capSuelo: 0.1 }],
+  // Validación de la enmienda 3, hallazgo 7: madera con aire ×100 y poros ÷100, con herbívoro y sin fuego; antes, 2,92 %
+  // del H en H₂ a los 600 recambios y subiendo 1,65 H₂/tick. Los pases encadenados y AGOTADO de pasoLote cierran la fuente
+  // del suelo (el H₂ que nace allí se oxida en el mismo paso); queda la del tubo (madera + 2 orgP → 2 H₂ + …, ~0,004
+  // H₂/tick), que va al aire y se acumula hasta el suelo discreto (`h2Discreto`): 2·10.000/0,1 = 200.000 H₂, el 5,8 % del H.
+  ['tubo-aire10000-denso-600', { ...AIRE100, recambios: 600, capSuelo: 0.1 }, SUELO_DISCRETO],
+  // Hallazgo 1 de la misma validación: el fuego pobre con otras geometrías y su control con O₂ suficiente.
+  ['fuegopobre-denso-600', { ...N2P, recambios: 600, cadaFuego: 2, o2Fuego: 0.5, capSuelo: 0.1 }, FUEGO_POBRE('1.001'), PULSO],
+  ['fuegopobre-aire10000-600', { ...N2P, ...AIRE100, recambios: 600, cadaFuego: 2, o2Fuego: 0.5 }, FUEGO_POBRE('10.508'), PULSO],
+  ['fuegoO2-aire10000-600', { ...N2P, ...AIRE100, recambios: 600, cadaFuego: 2, o2Fuego: 1 }, { espera: 'cierra' }, PULSO],
+  ['fuegoO2-denso-600', { ...N2P, recambios: 600, cadaFuego: 2, o2Fuego: 1, capSuelo: 0.1 }, { espera: 'cierra' }, PULSO],
   ['denso-sinherb-glic-HH-600', { partes: GLIC, recambios: 600, fTubo: 0, capSuelo: 0.1, rebajaHH: 68 }, REBAJA_HH],
   ['sinherb-glic-400', { partes: GLIC, recambios: 400, fTubo: 0 }],
   ['sinherb-grasa-400', { partes: GRASA, recambios: 400, fTubo: 0 }],
@@ -541,9 +569,9 @@ export const BATERIA_CAJAS: CajaBateria[] = [
 /** Una caja en este proceso: imprime «CAJA <json>» con su medida y el reparto final de C, N y P (las 6 mayores). */
 async function unaCaja(cfgJson: string): Promise<void> {
   const { cajaParam, medirCaja } = await import('../tests/lib/caja-param.js');
-  const { exigeH2Estable = true, h2Pulso = false, ...cfg } = JSON.parse(cfgJson) as Record<string, unknown> & OpcionesMedida;
+  const { exigeH2Estable = true, h2Pulso = false, exigeCO2 = false, ...cfg } = JSON.parse(cfgJson) as Record<string, unknown> & OpcionesMedida;
   const r = await cajaParam(cfg);
-  const medida = medirCaja(r, { exigeH2Estable, h2Pulso });
+  const medida = medirCaja(r, { exigeH2Estable, h2Pulso, exigeCO2 });
   const fin = r.fotos[r.fotos.length - 1]!;
   const reparto: Record<string, string> = {};
   for (const [e, s] of [[1, 'C'], [2, 'N'], [4, 'P'], [0, 'H']] as const) {
@@ -586,7 +614,7 @@ async function bateria(filtro: RegExp, paralelo: number, salida: string | undefi
       const r = resultados[resultados.length - 1]!, m = r.datos?.medida;
       const etiqueta = !r.ok ? 'MAL ' : ({ cierra: 'OK  ', falla: 'CTRL', abierto: 'ABTO', informa: 'INFO' } as const)[r.espera.espera];
       console.log(m
-        ? `  [${etiqueta}] ${nombre}: ${m.estado}, ${m.recambios} recambios, ${m.ticks} ticks, ${(m.ms / 1000).toFixed(0)} s; agua mín ${(100 * m.aguaMin).toFixed(1)} % (bruta ${(100 * m.aguaMinBruta).toFixed(1)}); H₂ ${(100 * m.h2Final).toFixed(4)} % (máx ${(100 * m.h2Max).toFixed(4)}${m.h2Sube ? ', sube' : ''}); HCN ${(100 * m.hcnFinal).toFixed(2)} % del C (máx ${(100 * m.hcnMax).toFixed(2)}${m.hcnSube ? ', sube' : ''}); N fijado ×${m.nFijado.toFixed(3)}; P accesible ${(100 * m.pAccesible).toFixed(1)} %; biomasa ${m.biomasa.join(' → ')} (mín ${(100 * m.biomasaMin).toFixed(0)} %)${m.fallos.length ? `; fallos: ${m.fallos.join('; ')}` : ''}${r.espera.espera !== 'cierra' ? ` [${r.espera.espera}: ${r.espera.motivo}]` : ''}`
+        ? `  [${etiqueta}] ${nombre}: ${m.estado}, ${m.recambios} recambios, ${m.ticks} ticks, ${(m.ms / 1000).toFixed(0)} s; agua mín ${(100 * m.aguaMin).toFixed(1)} % (bruta ${(100 * m.aguaMinBruta).toFixed(1)}); H₂ ${(100 * m.h2Final).toFixed(4)} % (máx ${(100 * m.h2Max).toFixed(4)}${m.h2Sube ? ', sube' : ''}, previsto ${(100 * m.h2Previsto).toFixed(4)}, suelo discreto ${(100 * m.h2Discreto).toFixed(3)}); HCN ${(100 * m.hcnFinal).toFixed(2)} % del C (máx ${(100 * m.hcnMax).toFixed(2)}${m.hcnSube ? ', sube' : ''}); N fijado ×${m.nFijado.toFixed(3)}; P accesible ${(100 * m.pAccesible).toFixed(1)} %; biomasa ${m.biomasa.join(' → ')} (mín ${(100 * m.biomasaMin).toFixed(0)} %)${m.fallos.length ? `; fallos: ${m.fallos.join('; ')}` : ''}${r.espera.espera !== 'cierra' ? ` [${r.espera.espera}: ${r.espera.motivo}]` : ''}`
         : `  [MAL ] ${nombre}: ${r.error}`);
       resolver();
     });
@@ -627,26 +655,38 @@ async function cli(): Promise<void> {
     : ejecutarTablaCordura();
   const banco = ejecutarBancoRendimiento();
   // La caja usa la memoria de prueba de M1 (tests/lib): se importa solo aquí, al ejecutar el laboratorio.
-  const cajas = soloBanco || process.argv.includes('--sin-caja') ? [] : await (async () => {
-    const { cajaCerrada } = await import('../tests/lib/caja-cerrada.js');
+  const { cajas, mesetaH2 } = soloBanco || process.argv.includes('--sin-caja') ? { cajas: [], mesetaH2: () => NaN } : await (async () => {
+    const { cajaCerrada, mesetaH2 } = await import('../tests/lib/caja-cerrada.js');
     const aire = { N2: 780_000_000, O2: 210_000_000, CO2: 20_000_000 };
-    // Con 100 veces más aire por poro el H₂ tarda más de 40 recambios en llegar a su meseta (~0,06 % del H a 1.000): ahí
-    // no se exige que esté estable, solo que no pase del 0,2 % del H (antes de la enmienda 2 llegaba al 2,6 % en 10).
-    return [
-      ['sin fuego', cajaCerrada({ recambios: 40 }), true],
-      ['fuego cada 4 recambios (30 %), plantas con N₂ y P₂O₅ gas', cajaCerrada({ recambios: 40, cadaFuego: 4, nitrogenos: ['NH3', 'N2'], fosfatoGas: true }), true],
-      ['aire ×100 por poro, sin herbívoro', cajaCerrada({ recambios: 40, aire, capAire: 10_000, fTubo: 0 }), false],
-      ['suelo a 275 K', cajaCerrada({ recambios: 40, tAmbiente: 275 }), true],
-    ] as const;
+    // Control (revisión de la enmienda 3, hallazgo 6): sin la catálisis H–H el suelo no oxida el H₂ y con aire ×100 la caja
+    // se seca despacio (2,7 % del H en H₂ a los 650 recambios), pero a los 40 aún está bajo el 0,2 % y sobre el 97 % del
+    // agua: debe fallar por la meseta prevista (`mesetaSerie`, extrapolación de primer orden de la segunda mitad), que es
+    // lo que mira cada caja además del techo.
+    const sinHH = (q: ServicioQuimico): ServicioQuimico => ({
+      internar: (e) => q.internar(e), sustancia: (id) => q.sustancia(id),
+      reaccion: (a, b, n) => {
+        const x = q.reaccion(a, b, n);
+        const esH2 = (id: number) => id > 0 && q.sustancia(id).atomos.every((v, e) => (e === 0 ? v === 2 : v === 0));
+        return x && (esH2(a) || esH2(b)) && x.catalisis === 3 ? { ...x, catalisis: -1 as const } : x;
+      },
+    } as ServicioQuimico);
+    return { mesetaH2, cajas: [
+      ['sin fuego', cajaCerrada({ recambios: 40 }), 0.005, false],
+      ['fuego cada 4 recambios (30 %), plantas con N₂ y P₂O₅ gas', cajaCerrada({ recambios: 40, cadaFuego: 4, nitrogenos: ['NH3', 'N2'], fosfatoGas: true }), 0.005, false],
+      ['aire ×100 por poro, sin herbívoro', cajaCerrada({ recambios: 40, aire, capAire: 10_000, fTubo: 0 }), 0.002, false],
+      ['suelo a 275 K', cajaCerrada({ recambios: 40, tAmbiente: 275 }), 0.005, false],
+      ['control: aire ×100 sin catálisis H–H (debe fallar)', cajaCerrada({ recambios: 40, aire, capAire: 10_000, fTubo: 0, cinetica: sinHH }), 0.002, true],
+    ] as const };
   })();
-  const resumenCaja = cajas.map(([nombre, r, exigeEstable]) => {
-    const f = r.fotos, fin = f[f.length - 1]!, h2 = (a: number, b: number) => {
+  const resumenCaja = cajas.map(([nombre, r, techoH2, control]) => {
+    const f = r.fotos, fin = f[f.length - 1]!, n = fin.recambio, h2 = (a: number, b: number) => {
       const xs = f.filter(x => x.recambio >= a && x.recambio <= b).map(x => x.h2);
       return xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.length);
     };
     const exacto = f.every(x => x.exacto), aguaMin = Math.min(...f.map(x => x.agua)) / f[0]!.agua;
-    const biomasaMin = Math.min(...f.filter(x => x.recambio >= 31).map(x => x.biomasa)) / Math.max(...f.map(x => x.biomasa));
-    const estable = h2(31, 40) <= 1.15 * h2(21, 30);
+    const biomasaMin = Math.min(...f.filter(x => x.recambio >= n - 9).map(x => x.biomasa)) / Math.max(...f.map(x => x.biomasa));
+    // Los últimos 10 recambios frente a los 10 anteriores, con el suelo absoluto de 10⁻⁵ del H de medirCaja.
+    const estable = h2(n - 9, n) <= 1.15 * h2(n - 19, n - 10) + 1e-5 * fin.hTotal / 2, meseta = mesetaH2(f);
     let nQuemado = 0, nN2 = 0;
     const pDestino: Record<string, number> = {};
     for (const g of r.fuegos) {
@@ -656,11 +696,12 @@ async function cli(): Promise<void> {
       nN2 += (g.nDespues.N2 ?? 0) - nAire - (g.nAntes.N2 ?? 0);
       for (const [k, v] of Object.entries(g.pDespues)) pDestino[k] = (pDestino[k] ?? 0) + v;
     }
+    const cierra = exacto && aguaMin >= 0.97 && estable && f.every(x => x.hH2 < techoH2 * x.hTotal) && meseta < techoH2 && biomasaMin >= 0.5;
     return { nombre, recambios: fin.recambio, ticks: r.ticks, ms: Math.round(r.ms), exacto, aguaMin, h2Final: fin.h2,
-      h2PorcientoH: 100 * fin.hH2 / fin.hTotal, h2Estable: estable, fuegos: r.fuegos.length, nQuemado, nN2, pDestino,
+      h2PorcientoH: 100 * fin.hH2 / fin.hTotal, h2Estable: estable, h2Previsto: 100 * meseta, control, fuegos: r.fuegos.length, nQuemado, nN2, pDestino,
       nFinal: fin.n, pFinal: fin.p, biomasa: [f.find(x => x.recambio === 0)!.biomasa, fin.biomasa], flujosH2: Object.fromEntries(Object.entries(r.flujos).map(([k, v]) => [k, v.H2])),
-      biomasaMin, ok: exacto && aguaMin >= 0.97 && (exigeEstable ? estable : f.every(x => x.hH2 < 0.002 * x.hTotal))
-        && fin.hH2 < 0.005 * fin.hTotal && biomasaMin >= 0.5 };
+      // Un control está bien cuando falla, y por la meseta prevista (lo demás lo pasaría).
+      biomasaMin, ok: control ? !cierra && !(meseta < techoH2) : cierra };
   });
 
   const todoOk = cordura.every(c => c.cumple) && violacionesI4.length === 0 && banco.cumpleP99Frio && banco.cumpleP99Caliente
@@ -697,7 +738,7 @@ async function cli(): Promise<void> {
     console.log(`  Nivel 10 (horno) = ${tDeNivel(10).toFixed(1)} K; Nivel 9 (llama aire) = ${tDeNivel(9).toFixed(1)} K`);
     if (resumenCaja.length) console.log('\n=== CAJA CERRADA (40 recambios; aire, agua, suelo [KAPPA_SUELO ×3, KAPPA_SUELO_HH], planta, tubo KAPPA0, quemar) ===');
     for (const c of resumenCaja) {
-      console.log(`  [${c.ok ? 'OK  ' : 'FAIL'}] ${c.nombre}: ${c.recambios} recambios en ${c.ticks} ticks (${c.ms} ms); balance ${c.exacto ? 'exacto' : 'DESCUADRE'}; agua mín ${(100 * c.aguaMin).toFixed(1)} %; H₂ ${c.h2Final} (${c.h2PorcientoH.toFixed(3)} % del H, ${c.h2Estable ? 'estable' : 'aún sube'}); biomasa ${c.biomasa.join(' → ')} (mín. de los recambios 31–40: ${(100 * c.biomasaMin).toFixed(0)} % del máximo)`);
+      console.log(`  [${c.ok ? (c.control ? 'CTRL' : 'OK  ') : 'FAIL'}] ${c.nombre}: ${c.recambios} recambios en ${c.ticks} ticks (${c.ms} ms); balance ${c.exacto ? 'exacto' : 'DESCUADRE'}; agua mín ${(100 * c.aguaMin).toFixed(1)} %; H₂ ${c.h2Final} (${c.h2PorcientoH.toFixed(4)} % del H, ${c.h2Estable ? 'estable' : 'aún sube'}; meseta prevista ${c.h2Previsto.toFixed(4)} %); biomasa ${c.biomasa.join(' → ')} (mín. de los últimos 10 recambios: ${(100 * c.biomasaMin).toFixed(0)} % del máximo)`);
       console.log(`         H₂ neto por proceso: ${JSON.stringify(c.flujosH2)}`);
       if (c.fuegos) console.log(`         ${c.fuegos} fuegos: N fijado quemado ${c.nQuemado}, a N₂ ${c.nN2}; P quemado → ${JSON.stringify(c.pDestino)}`);
       console.log(`         N final ${JSON.stringify(c.nFinal)}; P final ${JSON.stringify(c.pFinal)}`);

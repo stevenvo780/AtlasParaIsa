@@ -5,6 +5,7 @@
 // ENMIENDA 3 (2026-11-24, «química de principios»; integrador Claude Opus 5.5): `dDosCentros` de los metales (la cohesión
 // de la red no se transfiere a un enlace con otro elemento) y χ(Fe) = 1,86; la regla del átomo lineal fuera de anillos y
 // la catálisis por pares (`Reaccion.paresCatalisis`) viven en world/materia/{quimica,tipos}.ts.
+// ENMIENDA 3, REVISIÓN (2026-11-25): ningún valor cambia; se escribe el alcance de `dDosCentros` (metal–no metal ligero).
 /**
  * Constantes de la naturaleza de V23: el ÚNICO fichero con números de física, química y biología elegidos a
  * mano. No son topes: dicen cómo se comporta la materia. Las puertas demográficas solo calibran aquí
@@ -40,7 +41,13 @@ export interface ConstantesElemento {
    * M–X; lo que el metal sí aporta es su enlace de dos centros, el del dímero M₂ (D₀ medido). Sin esto la fórmula de Pauling
    * da a todo compuesto metal–no metal una entalpía de formación ≤ 0 (−PAULING·Δχ² por enlace): el carburo C₃Fe₄ salía
    * exotérmico (−186) y ganaba al hierro en cualquier fuego (fila 7 de la tabla de cordura), cuando el Fe₃C real es
-   * endotérmico (+25 kJ/mol). */
+   * endotérmico (+25 kJ/mol).
+   * Alcance (validación de la enmienda 3, hallazgo 2): la regla es de principio para metal–no metal ligero (H, C, N, O).
+   * También debilita los enlaces de un metal con P o Si y los de dos metales, y ahí deja compuestos inestables que el
+   * mundo de hoy no forma: 2 FeP → P₂ + Fe₂ (dH −432, k 5·10⁻²/tick a 295 K sin catálisis), CaSi → Si + Ca (dH −8) y
+   * Ca–Fe 133 frente a 354. Si T1 añade aleaciones, siliciuros o fosfuros, esos enlaces necesitan su propia media (de
+   * dPropia o medida), no esta. La ventana que pasa la fila 7 es estrecha: dDosCentros(Fe) en [102, 119] y χ(Fe) en
+   * [1,845, 1,870] (la de Pauling, 1,83, la falla). */
   dDosCentros: number;
   /** J por cuanto que suma cada orden de enlace por encima de 1; 0 = no forma enlaces múltiples. */
   pi: number;

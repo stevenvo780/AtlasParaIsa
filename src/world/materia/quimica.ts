@@ -16,7 +16,7 @@ import {
   ATOMOS_POR_REACCION, ATOMOS_POR_UNIDAD, ClaseSustancia, TIPOS,
   type Propiedades, type SustanciaId,
 } from '../../shared/materia.js';
-import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type FamiliaCatalitica, type Sustancia } from './tipos.js';
+import { NIVELES_T, T_NIVEL_MAX, tDeNivel, type FamiliaCatalitica, type Reaccion, type Sustancia } from './tipos.js';
 
 // ── Tablas derivadas de TABLA y TIPOS (sin números mágicos duplicados) ──────────────────────────────────
 
@@ -545,6 +545,36 @@ export function esGasA(s: Pick<Sustancia, 'clase' | 'prop'>, T: number): boolean
   return s.clase === ClaseSustancia.Molecula && T > s.prop.tEbullicion;
 }
 
+/**
+ * ΔG de una vez de `r` a la temperatura `T` con las fases a esa T: dH − T·S_GAS·(gases de salida − gases de entrada),
+ * la G de Q (cabecera) a la T real del lote y no a la de su nivel. Q elige los productos en la T de un nivel
+ * (`tDeNivel`) y, en un lote catalizado frío, en la del nivel NIVEL_CATALIZADO; quien la aplica (P en `pasoLote`, L en
+ * `quemar`; G lo replica) exige además `favorableA`, ΔG < −EPSILON_G a su T, como Q. Por qué (revisión de la enmienda 3,
+ * hallazgo 5): a 270 K el piso daba 3 H₂ + N₂ → 2 NH₃ (catalizada, H–H), que con el NH₃ líquido del modelo (ebulle a
+ * 273,6 K) tiene ΔG = +49,4 J; y dentro del propio nivel 2 (calculado a 308,4 K) un suelo a 295 K hacía 2 H₂O + C →
+ * 2 H₂ + CO₂ con ΔG = +2,7 J. En la realidad el NH₃ ebulle a 240 K y su síntesis es favorable a 270 K (ΔG° ≈ −33 kJ por
+ * 2 mol): lo que falla ahí es la ebullición del modelo, que no tiene entalpía de condensación, no el veto.
+ */
+export function dGA(r: Pick<Reaccion, 'dH' | 'entradas' | 'salidas'>, T: number, sustancia: (id: SustanciaId) => Pick<Sustancia, 'clase' | 'prop'>): number {
+  let gases = 0;
+  for (const t of r.salidas) if (esGasA(sustancia(t.id), T)) gases += t.nu;
+  for (const t of r.entradas) if (esGasA(sustancia(t.id), T)) gases -= t.nu;
+  return r.dH - T * S_GAS * gases;
+}
+
+/** Cierto si `r` gana más de EPSILON_G de energía libre a la T real (`dGA`): la condición de Q, a la T del lote. Sin
+ * mirar fases decide si ni el peor reparto de gases cambia el signo (ΔG ∈ [dH − T·S_GAS·Σν_salidas, dH + T·S_GAS·Σν_entradas]):
+ * casi toda fila real es muy exotérmica o muy endotérmica, y P lo pregunta en cada canal de cada pase. */
+export function favorableA(r: Pick<Reaccion, 'dH' | 'entradas' | 'salidas'>, T: number, sustancia: (id: SustanciaId) => Pick<Sustancia, 'clase' | 'prop'>): boolean {
+  const ts = T * S_GAS;
+  let nuEntradas = 0, nuSalidas = 0;
+  for (const t of r.entradas) nuEntradas += t.nu;
+  for (const t of r.salidas) nuSalidas += t.nu;
+  if (r.dH + ts * nuEntradas < -EPSILON_G) return true;
+  if (r.dH - ts * nuSalidas >= -EPSILON_G) return false;
+  return dGA(r, T, sustancia) < -EPSILON_G;
+}
+
 // ── Cinética (ea, familia catalítica y Arrhenius) ───────────────────────────────────────────────────────
 
 /** Familia catalítica de un tipo de enlace (`Kappa`): 0 = C–O, 1 = C–N, 2 = C–C/C–H, 3 = H–H, −1 = no catalizable.
@@ -570,10 +600,14 @@ export interface EntradaSalidaEnlaces { enlaces: Uint16Array; nu: number }
  *   nada. Con dos o más productos alguna entrada se parte, así que se corta y se rehace al menos un enlace suyo: cuenta
  *   el más débil de las entradas, como cota inferior (arcilla → SiO₂ + H₂O, 2 CH₂ → CH₄ + C, arcilla + CaO).
  * `catalisis` es la familia del enlace catalizable que disminuye con el par de electrones más débil (contrato de
- * `Reaccion`), −1 si no hay; `paresCatalisis` son los pares que el catalizador abre de ese enlace (enmienda 3; 0 sin
- * familia): k si se corta (y su par vale D/k), k − k′ si solo baja a orden k′ (y su par vale (D_k − D_k′)/(k − k′)). En
- * los enlaces simples coincide con el «más débil» de la enmienda 1; un C≡N (891, 297 por par) decide frente a un H–C
- * (403) con 3 pares, y el C=O del CO₂ que fragua en CaCO₃ (pasa a C–O) abre uno (`barreraEfectiva`).
+ * `Reaccion`), −1 si no hay; `paresCatalisis` es el mayor número de pares que el catalizador abre de un enlace de esa
+ * familia que disminuye (enmienda 3; 0 sin familia): k si se corta (y su par vale D/k), k − k′ si solo baja a orden k′
+ * (y su par vale (D_k − D_k′)/(k − k′)). En los enlaces simples coincide con el «más débil» de la enmienda 1; un C≡N
+ * (891, 297 por par) decide frente a un H–C (403) con 3 pares, y el C=O del CO₂ que fragua en CaCO₃ (pasa a C–O) abre
+ * uno (`barreraEfectiva`). Hasta la revisión de la enmienda 3 contaban los pares del enlace de par más débil, y cortar
+ * además un enlace débil de la misma familia frenaba la reacción: la cianamida {H–N:2, C–N, C≡N} decidía por su C–N
+ * simple (280 < 297), contaba 1 par y no salía del suelo (k = 2,4·10⁻²⁸ con O₂, madera, H₂ o HCN), mientras su
+ * isómero carbodiimida iba a 10⁹ (validación, hallazgo 4).
  */
 export function calcularCinetica(
   entradas: readonly EntradaSalidaEnlaces[],
@@ -610,7 +644,7 @@ export function calcularCinetica(
   let maxD = 0;
   let minCatD = Infinity;
   let catalisis: FamiliaCatalitica = -1;
-  let paresCatalisis: 0 | 1 | 2 | 3 = 0;
+  const paresFamilia = [0, 0, 0, 0];
   let huboDescenso = false;
 
   for (let ti = 0; ti < NT; ti++) {
@@ -629,13 +663,12 @@ export function calcularCinetica(
     }
     if (dRoto > maxD) maxD = dRoto;
     const fam = familiaCatalitica(ti);
+    if (fam === -1) continue;
     const porPar = dRoto / abiertos; // = D/k (D_PER_K) si se corta entero
-    if (fam !== -1 && porPar < minCatD) {
-      minCatD = porPar;
-      catalisis = fam;
-      paresCatalisis = abiertos as 1 | 2 | 3;
-    }
+    if (porPar < minCatD) { minCatD = porPar; catalisis = fam; }
+    if (abiertos > paresFamilia[fam]!) paresFamilia[fam] = abiertos;
   }
+  const paresCatalisis = (catalisis === -1 ? 0 : paresFamilia[catalisis]!) as 0 | 1 | 2 | 3;
 
   let ea = 0;
   if (huboDescenso) {
@@ -1323,8 +1356,10 @@ function masPorAtomo(
  * - a sola: nu 1; es reacción si su mínimo G* baja más de ε de G(a).
  * - a + a: p ≥ 2 copias; a + b: p, q ≥ 1; siempre p·|a| + q·|b| ≤ ATOMOS_POR_REACCION.
  * - De los (p, q) irreducibles (`candidato`), el de mayor −ΔG por átomo, ΔG = G*(p·a + q·b) − p·G(a) − q·G(b); a
- *   igualdad, el de menos átomos y después el de menor p. Así 2 H₂ + O₂ → 2 H₂O y CH₄ + 2 O₂ → CO₂ + 2 H₂O, y no el
- *   H₂O₂ que da 1:1 o la oxidación a medias que suelta H₂.
+ *   igualdad, el de menos átomos y después el de menor coeficiente del reactivo de menor clave de enlaces
+ *   (`compararEnlaces`): el desempate no depende de cuál se pasa primero ni, por tanto, del orden en que se internaron
+ *   (revisión de la enmienda 3: HCOP + HC₂P en el nivel 11 daba 2:2 o 3:1 según cuál tuviera el id menor). Así
+ *   2 H₂ + O₂ → 2 H₂O y CH₄ + 2 O₂ → CO₂ + 2 H₂O, y no el H₂O₂ que da 1:1 o la oxidación a medias que suelta H₂.
  */
 export function productos(
   a: Readonly<Sustancia>,
@@ -1334,6 +1369,11 @@ export function productos(
 ): ResultadoProductos | null {
   if (!Number.isInteger(nivelT) || nivelT < 0 || nivelT >= NIVELES_T) {
     throw new RangeError(`nivelT fuera de rango [0, ${NIVELES_T}): ${nivelT}`);
+  }
+  if (b !== null && compararEnlaces(a.enlaces, b.enlaces) > 0) {
+    // Orden canónico de los reactivos; los coeficientes vuelven al orden del llamador.
+    const r = productos(b, a, nivelT, ctx);
+    return r && { ...r, nu: [r.nu[1], r.nu[0]] };
   }
   const Ts = TS_NIVEL[nivelT]!;
   const misma = b !== null && compararEnlaces(a.enlaces, b.enlaces) === 0;
@@ -1347,7 +1387,8 @@ export function productos(
     if (!c) return;
     if (!mejor) { mejor = c; return; }
     const d = masPorAtomo(c, mejor, Ts);
-    if (d > 0 || (d === 0 && c.atomos < mejor.atomos)) mejor = c; // a igualdad de átomos gana el primero: menor p
+    // A igualdad de átomos gana el primero: menor p, el coeficiente del reactivo de menor clave (orden canónico).
+    if (d > 0 || (d === 0 && c.atomos < mejor.atomos)) mejor = c;
   };
   if (misma) for (let p = 2; p * nA <= ATOMOS_POR_REACCION; p++) probar(p, 0);
   else for (let p = 1; p * nA + nB <= ATOMOS_POR_REACCION; p++) {

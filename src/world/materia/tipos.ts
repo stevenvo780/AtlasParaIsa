@@ -7,6 +7,10 @@
 // (`nivelDeLote`); `copiar` mueve el calor con la materia.
 // ENMIENDA 3 (2026-11-24, «química de principios»; integrador Claude Opus 5.5 tras cerrar las filas 7 y 8 de la tabla de
 // cordura y el sumidero de HCN): la catálisis va por pares de electrones (`Reaccion.paresCatalisis`, `barreraEfectiva`).
+// ENMIENDA 3, REVISIÓN (2026-11-25; integrador Claude Opus 5.5 tras la validación de Fable y la revisión de GPT-6.2 Sol
+// sobre 18470f9..703c6ef): `paresCatalisis` es el mayor número de pares que abre un enlace de la familia elegida; el
+// empate de (p, q) se decide en el orden canónico de los reactivos; P (y `quemar`) solo corre un canal con ΔG < −ε a la T
+// y fases reales del lote (`favorableA`), y lo que nace en un paso reacciona en ese mismo paso (`PASES_ENCADENADOS`).
 /**
  * Contratos de la materia en el servidor (ARQ-materia §2 con PLAN-V23 §1.2): sustancias internadas, lotes y su
  * arena, el `Libro` único de conservación, reacciones, plantillas, cuerpos, procesos y el punto de control.
@@ -82,8 +86,9 @@ export type Kappa = readonly [number, number, number, number];
 /**
  * Reparto de menor energía libre de a + b al nivel de temperatura `nivelT`, como `Ecuacion`: entradas a y b con los
  * coeficientes enteros p, q ≥ 1 que elige Q (los de mayor −ΔG por átomo sin reactivo sobrante, con p·|a| + q·|b| ≤
- * `ATOMOS_POR_REACCION` = 16 átomos; a igualdad, los de menos átomos y luego el menor p; a + a: a con nu p ≥ 2; b = 0: a
- * sola con nu 1) y salidas los productos del mínimo global de G = E − T·S_GAS·#gas sobre esos átomos. ΔG es frente a los
+ * `ATOMOS_POR_REACCION` = 16 átomos; a igualdad, los de menos átomos y luego el menor coeficiente del reactivo de menor
+ * clave de enlaces, así que no depende del orden de a y b ni del de internado (revisión de la enmienda 3, hallazgo 3; antes
+ * el menor p); a + a: a con nu p ≥ 2; b = 0: a sola con nu 1) y salidas los productos del mínimo global de G = E − T·S_GAS·#gas sobre esos átomos. ΔG es frente a los
  * reactivos tal cual; para ser reacción, el mínimo debe ganar en más de EPSILON_G a todo reparto de p·a + q·b en dos
  * grupos que reaccionen por separado (sin espectadores ni uniones de reacciones menores). Así 2 H₂ + O₂ → 2 H₂O.
  * Lo calcula Q; lo aplica P con Arrhenius, x = ν·exp(−b/(R·T))·… con la barrera efectiva (`barreraEfectiva`)
@@ -95,7 +100,9 @@ export type Kappa = readonly [number, number, number, number];
  * catalizada era una fuente sin retorno: CH₂ → H₂ + C y 2 madera → 2 H₂ + C + CO₂ en el suelo, proteína → H₂ + HCN en
  * frío (validación de los ciclos, hallazgos 1, 3 y 11). La vida cataliza lo que le rinde calor; lo endotérmico solo
  * ocurre por el calor del lote (horno, llama). Veces por tick k·n_a·n_b/V (a + b), k·n_a²/V (a + a) y k·n_a (sola)
- * sean cuales sean los nu, y cada vez gasta nu de cada entrada. `quemar` (L) no es cinético: el cuerpo paga su trabajo
+ * sean cuales sean los nu, y cada vez gasta nu de cada entrada. Q decide productos y ΔG a la T de su nivel; P solo corre
+ * la fila si también gana energía libre a la T y con las fases reales del lote (`favorableA` de quimica.ts: con el piso
+ * de `nivelDeLote`, un suelo a 270 K usaba la fila del nivel 2 y hacía 3 H₂ + N₂ → 2 NH₃ con ΔG real +49,4 J). `quemar` (L) no es cinético: el cuerpo paga su trabajo
  * aplicando la reacción de la reserva con O₂ tantas veces como pide el trabajo, recortado a existencias.
  */
 export interface Reaccion extends Ecuacion {
@@ -116,8 +123,10 @@ export interface Reaccion extends Ecuacion {
    * múltiple decide si su par es el más débil: C≡N (297 por par) frente a H–C (403) en el HCN, C=O (351,5) frente a
    * H–H (436) en 4 H₂ + CO₂. */
   catalisis: FamiliaCatalitica;
-  /** Orden k (1–3) del enlace que decide `catalisis`: los pares de electrones que abre el catalizador, cada uno con la
-   * rebaja κ de su familia (`barreraEfectiva`); 0 si catalisis = −1 (enmienda 3). Por qué: un catalizador abre un enlace
+  /** Pares de electrones que abre el catalizador, cada uno con la rebaja κ de su familia (`barreraEfectiva`): el mayor,
+   * entre los enlaces de la familia `catalisis` que disminuyen, de k (si se corta) o k − k′ (si baja a orden k′); 0 si
+   * catalisis = −1 (enmienda 3; hasta su revisión, los del enlace de par más débil, y la cianamida {H–N:2, C–N, C≡N}
+   * contaba el 1 de su C–N simple y no salía del suelo, k = 2,4·10⁻²⁸, mientras su isómero carbodiimida iba a 10⁹). Por qué: un catalizador abre un enlace
    * múltiple par a par (adición a cada π, como las nitrilasas y la hidratasa del cianuro con el C≡N), así que la rebaja
    * de un triple es la de tres simples. Sin esto el HCN que deja un fuego pobre en O₂ no tenía salida por debajo de una
    * llama (ea = GAMMA·D(C≡N) = 311,8 y κ = 105: k(295 K) ≈ 2·10⁻²⁸, el 47 % del C acumulado como HCN); con 3·KAPPA_SUELO

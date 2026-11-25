@@ -5,7 +5,7 @@
  *   c) equivalencia de flujos (rebrote de alimento y recarga de agua);       d) ciclos en 40 recambios, sin gente;
  *   e) fenómenos (rebrote tras el fuego, agua que se evapora y vuelve, suelo frío); f) coste por tesela y tick.
  * Uso: npx tsx scripts/lab-mundo-material.mts [--puntos a,b,c,e,f] [--lado 64] [--ticks 5000] [--cada 10]
- *      [--recambios 40] [--cada-d 240] [--hilos 1,8] [--semilla 7] [--salida dir]
+ *      [--recambios 40] [--cada-d 240] [--hilos 1,8] [--semilla 1] [--salida dir]
  */
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
@@ -33,7 +33,7 @@ function args() {
   return {
     puntos: new Set(v('puntos', 'a,b,c,e,f').split(',')), lado: +v('lado', '64'), ticks: +v('ticks', '5000'), cada: +v('cada', '10'),
     recambios: +v('recambios', '40'), cadaD: +v('cada-d', '240'), hilos: v('hilos', '1,8').split(',').map(Number),
-    semilla: +v('semilla', '7'), salida: v('salida', '/tmp/atlas-v23-w/lab'),
+    semilla: +v('semilla', '1'), salida: v('salida', '/tmp/atlas-v23-w/lab'),
   };
 }
 
@@ -244,7 +244,7 @@ function puntoE(A: ReturnType<typeof args>) {
   const q = crearServicioQuimico({ modo: 'inmediato' });
   const m = MundoMaterial.levantar(dos, q, { semilla: A.semilla });
   m.dT[1] = -20;
-  const S = m.S, A_ = m.arena, clima = tiempo(A.semilla + 1), cada = 60, tot = totalesVacios(), DIA = 2400;
+  const S = m.S, A_ = m.arena, clima = tiempo(A.semilla + 1), cada = 20, tot = totalesVacios(), DIA = 2400;
   let t = 0;
   const correr = (ticks: number) => { for (const fin = t + ticks; t < fin; t += cada) { m.prepararPaso(); m.pasar(clima(t, cada)); m.plegar(tot); } };
   correr(2 * DIA);
@@ -254,6 +254,7 @@ function puntoE(A: ReturnType<typeof args>) {
   for (let i = m.inicio[0]!; i < m.inicio[1]! && quemadas.length < 6; i++) if (m.unidades(i, u).hoja > 1000) quemadas.push(i);
   const veg = () => quemadas.map((i) => m.vista(i, v).vegetation).reduce((s, x) => s + x, 0) / quemadas.length;
   const antes = veg();
+  m.prepararPaso();
   let unidades = 0; for (const i of quemadas) unidades += m.quemar(i, 0.9);
   const despues = veg();
   // Suelo frío: la misma hojarasca (5.000 unidades de hoja de fuera del mundo, como fuente declarada) en un suelo de
@@ -263,24 +264,30 @@ function puntoE(A: ReturnType<typeof args>) {
   const hojarasca = Float64Array.of(S.madera, 100_000, S.CH2, 10_000, S.proteina, 10_000, S.orgP, 5000, 0, 0);
   const at = 100_000 * 4 + 10_000 * 3 + 10_000 * 5 + 5000 * 6;
   for (const [l, T] of [[sT, m.temperatura(0, 0.6)], [sF, m.temperatura(1, 0.6)]] as const) { hojarasca[9] = Math.round(T * 0.025 * at); m.arena.fuente(l, hojarasca, m.libro); }
+  m.plegar(tot);
   const c0 = [orgC(sT), orgC(sF)];
   const agua = { aire: [] as number[], superficie: [] as number[] };
   const H2O = S.H2O, sup = () => { let s = 0; for (let i = 0; i < m.n; i++) { s += A_.cuantos(m.suelo[i]!, H2O); if (m.agua[i]! >= 0) s += A_.cuantos(m.agua[i]!, H2O); } return s; };
   const serie: string[] = [];
-  for (let dia = 1; dia <= 20; dia++) {
+  // Vida media del C orgánico añadido (ticks hasta la mitad), con la resolución del paso.
+  const media: [number, number] = [-1, -1];
+  for (let dia = 1; dia <= 12; dia++) {
     for (let k = 0; k < DIA / cada; k++) {
       correr(cada);
+      if (media[0] < 0 && orgC(sT) <= c0[0]! / 2) media[0] = t - 2 * DIA;
+      if (media[1] < 0 && orgC(sF) <= c0[1]! / 2) media[1] = t - 2 * DIA;
       if (dia === 1) { agua.aire.push(A_.cuantos(m.aire[0]!, H2O) + A_.cuantos(m.aire[1]!, H2O)); agua.superficie.push(sup()); }
     }
     if (dia % 4 === 0 || dia === 1) serie.push(`día ${dia}: vegetación quemada ${f3(veg())}; C orgánico templado ${(orgC(sT) / c0[0]!).toFixed(3)}, frío ${(orgC(sF) / c0[1]!).toFixed(3)} del añadido`);
   }
+  serie.push(`vida media del C orgánico añadido: templado ${media[0]} ticks, frío ${media[1]} ticks`);
   const rango = (xs: number[]) => `${Math.min(...xs)}–${Math.max(...xs)}`;
   console.log(`\n(e) Fenómenos (2 páginas de 16×16; la segunda a ${m.temperatura(1, 0.6).toFixed(0)} K frente a ${m.temperatura(0, 0.6).toFixed(0)} K):`);
   console.log(`  fuego: ${quemadas.length} teselas al 90 % (${unidades} unidades): vegetación ${f3(antes)} → ${f3(despues)}`);
   for (const x of serie) console.log(`    ${x}`);
   console.log(`  agua en un día: vapor del aire ${rango(agua.aire)} cuantos, agua de suelos y charcas ${rango(agua.superficie)} (sube de noche: rocío; baja de día: evaporación)`);
   console.log(`  libro exacto: ${exacto(m, tot)}`);
-  return { antes, despues, final: veg(), c0, cT: orgC(sT), cF: orgC(sF), agua: { aire: rango(agua.aire), superficie: rango(agua.superficie) }, serie };
+  return { antes, despues, final: veg(), c0, media, cT: orgC(sT), cF: orgC(sF), agua: { aire: rango(agua.aire), superficie: rango(agua.superficie) }, serie };
 }
 
 // ── d) Ciclos ──

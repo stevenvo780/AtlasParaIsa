@@ -89,8 +89,11 @@ export const T_DIA = 295, T_NOCHE = 288, DT_LLUVIA = 4;
 /** Geometría de la caja validada de la librería (tests/lib/caja-param.ts), por tesela. */
 const AIRE_COLUMNA = { N2: 7_800_000, O2: 2_100_000, CO2: 200_000 };
 const CAP_AIRE_TESELA = 100, CAP_SUELO = 10, G_SUELO = 1;
-/** Suelo de la caja a fertilidad 0,5 (sus nutrientes escalan con la fertilidad de la tesela). */
+/** Suelo de la caja a fertilidad 1 (sus nutrientes escalan con la fertilidad de la tesela); el mundo lo agranda por
+ * `ParamsMundo.suelo`. */
 const SUELO_MINERAL = { SiO2: 1_000_000, CaCO3: 100_000 }, NH3_FERTIL = 60_000, H3PO4_FERTIL = 20_000;
+/** P del suelo / P de la vegetación de referencia a su capacidad (en suelos reales, de 5 a 20). */
+const SUELO_POR_VEGETACION = 5;
 
 /** Fuego (como la caja): 60 ticks desde 1.100 K, con dos veces el O₂ estequiométrico (pedido de la química: O₂ ≥ 1×). */
 const T_IGNICION = 1100, TICKS_FUEGO = 60, O2_FUEGO = 2;
@@ -126,6 +129,8 @@ export interface ParamsMundo {
   crecimiento: Tasas;
   /** Fracción de las unidades que cae al suelo por tick. */
   caida: Tasas;
+  /** Cuántas cajas de suelo tiene una tesela: las que guardan SUELO_POR_VEGETACION veces el P de su vegetación. */
+  suelo: number;
   /** Conductancia charca–suelo (en cuantos por tick a diferencia de llenado 1): igualan su llenado en un día. */
   gCharca: number;
   /** Ticks en que la capa de aire sobre una tesela se renueva (evaporación y condensación). */
@@ -199,8 +204,11 @@ export function calibrar(q: Pick<ServicioQuimico, 'sustancia'>, S: BaseMundo): P
     fruto: caida.fruto * K * escalas.alimento / produce,
     tronco: caida.tronco * REFERENCIA.madera * escalas.madera / produce,
   };
+  // P de una tesela de referencia a su capacidad: una unidad de orgP por unidad de hoja y por unidad de fruto.
+  const pVegetacion = K * (escalas.vegetacion + escalas.alimento);
+  const suelo = SUELO_POR_VEGETACION * pVegetacion / (H3PO4_FERTIL * f);
   return {
-    escalas, crecimiento, caida,
+    escalas, crecimiento, caida, suelo,
     gCharca: 1 / (TICKS_PER_DAY * (1 / escalas.agua + 1 / escalas.humedad)),
     tauVapor: TICKS_PER_DAY,
     porque: {
@@ -213,6 +221,7 @@ export function calibrar(q: Pick<ServicioQuimico, 'sustancia'>, S: BaseMundo): P
       crecimiento: `equilibrio en la referencia (K ${K}, humedad ${m}, luz media ${LUZ_MEDIA}, captura ${cRef.toFixed(3)})`,
       gCharca: 'charca y suelo igualan su llenado (agua/escala) en un día',
       tauVapor: 'la capa de aire de una tesela se renueva en un día',
+      suelo: `cajas de suelo por tesela: ${SUELO_POR_VEGETACION}× el P de la vegetación de referencia (${pVegetacion.toFixed(0)}) a fertilidad ${f}`,
     },
   };
 }
@@ -251,7 +260,8 @@ export function plantillasMundo(q: ServicioQuimico, S: BaseMundo): PlantillasMun
       kappa: SIN, captura: 0, masaAdulta: 0, m0: 0, linaje: 0,
     });
     if (!p || entradas.some((id) => !p.sintesis.entradas.some((t) => t.id === id))) return null;
-    return { p, k: p.partes[0]!.nu / partes[0]!.nu };
+    // crearPlantilla ordena las partes a su manera: k sale de la misma sustancia.
+    return { p, k: p.partes.find((t) => t.id === partes[0]!.id)!.nu / partes[0]!.nu };
   };
   const variantes = (o: Organo): Variante[] => {
     const out: Variante[] = [];
@@ -442,7 +452,7 @@ export class MundoMaterial {
       if (calor > 0) pares.push(0, calor);
       if (pares.length) m.arena.fuente(l, Float64Array.from(pares), m.libro);
     };
-    const poro = CAP_SUELO / CAP_AIRE_TESELA;
+    const poro = CAP_SUELO / CAP_AIRE_TESELA, cajas = params.suelo;
     for (let p = 0; p < np; p++) {
       const T = T0(p), nT = m.inicio[p + 1]! - m.inicio[p]!;
       let humedad = 0;
@@ -450,8 +460,8 @@ export class MundoMaterial {
         const t = orden[i]!, c = m.celda[i]!, fert = t.fertility ?? 0.5;
         m.suelo[i] = m.arena.nuevo(Rol.Suelo, c, 0);
         llenar(m.suelo[i]!, [
-          [S.SiO2, SUELO_MINERAL.SiO2], [S.CaCO3, SUELO_MINERAL.CaCO3],
-          [S.NH3, Math.round(NH3_FERTIL * fert)], [S.H3PO4, Math.round(H3PO4_FERTIL * fert)],
+          [S.SiO2, Math.round(SUELO_MINERAL.SiO2 * cajas)], [S.CaCO3, Math.round(SUELO_MINERAL.CaCO3 * cajas)],
+          [S.NH3, Math.round(NH3_FERTIL * fert * cajas)], [S.H3PO4, Math.round(H3PO4_FERTIL * fert * cajas)],
           [S.H2O, Math.round(t.moisture * e.humedad)],
           [S.N2, Math.round(AIRE_COLUMNA.N2 * poro)], [S.O2, Math.round(AIRE_COLUMNA.O2 * poro)], [S.CO2, Math.round(AIRE_COLUMNA.CO2 * poro)],
         ], T);
@@ -523,7 +533,7 @@ export class MundoMaterial {
   /** Lo que el coordinador hace en F0 antes de un paso: reservas para lo que los hilos puedan crear. */
   prepararPaso(): void {
     this.memorias.lotes.prepararF0(256 * this.d.hilos, LOTES_POR_BLOQUE);
-    this.memorias.desborde.prepararF0(Math.max(4096, 2 * this.n));
+    this.memorias.desborde.prepararF0(4096 + 8 * this.n);
   }
 
   // ── Paso ──

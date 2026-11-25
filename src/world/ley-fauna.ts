@@ -21,7 +21,7 @@ import {
 import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
-  abortar, beber, concebir, crearCuerpo, crecer, extraer, gestar, herir, ingerir, lotesDe, masaDe, metabolizar, morir,
+  abortar, beber, concebir, crearCuerpo, crecer, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
   pagar, parir, pedidoComida, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
@@ -355,14 +355,13 @@ function medirPasto(c: CtxLeyMateria, e: Estado): void {
 
 // ── F3: elegir ────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Fértil: sin gestación, salud suficiente, masa de adulto y reserva para pagar la síntesis de una cría (m0 kg de tejido
- * a la densidad de energía del suyo, con rendimiento η). */
-function fertil(c: CtxLeyMateria, f: Fila, pl: Plantilla): boolean {
+/** J de reserva que pide una cría: m0 kg de tejido a la densidad de energía del suyo, con rendimiento η (el mismo coste
+ * que `natalidad.ts`). 0 si no puede criar ahora (gesta, le falta salud o no tiene masa de adulto). */
+function costeCria(c: CtxLeyMateria, f: Fila, pl: Plantilla): number {
   const cu = f.animal.cuerpo!;
-  if (cu.gestacion || f.vista.salud < SALUD_FERTIL || f.vista.masa < MADUREZ_MASA * pl.masaAdulta) return false;
+  if (cu.gestacion || f.vista.salud < SALUD_FERTIL || f.vista.masa < MADUREZ_MASA * pl.masaAdulta) return 0;
   const vt = c.materia.vista(cu.tejido);
-  const jPorKg = vt.masa > 0 ? vt.energia / vt.masa : 0;
-  return f.yo.reservaJ >= pl.m0 * jPorKg / ETA;
+  return vt.masa > 0 ? pl.m0 * (vt.energia / vt.masa) / ETA : 0;
 }
 
 function prepararYo(c: CtxLeyMateria, f: Fila): void {
@@ -373,7 +372,12 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   yo.habituacion = fa.habituacion; yo.sobresalto = sobresaltoActual(fa, c.tick);
   const vt = c.materia.vista(cu.tejido);
   yo.jPorKgCarne = vt.masa > 0 ? vt.digerible / vt.masa : 0;
-  f.fertil = fertil(c, f, plantillaDe(c, cu));
+  // Fértil: reserva para pagar la cría. Ese coste es ≈ 2,3 veces la reserva llena (M0·Q_tejido / (η·RESERVA_OBJETIVO_J_KG),
+  // la misma para toda la fauna), así que un adulto que puede criar sigue con hambre hasta reunirla, como la gestante de
+  // `natalidad.ts` (`provisionCrianza`): sin esto comía solo hasta la reserva llena y ninguno llegaba nunca a fértil.
+  const coste = costeCria(c, f, plantillaDe(c, cu));
+  f.fertil = coste > 0 && yo.reservaJ >= coste;
+  if (coste > 0 && !f.fertil) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / coste);
   yo.fertil = f.fertil;
 }
 
@@ -404,12 +408,12 @@ function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol): v
   if (!(libre > 0)) return;
   if (rol === Rol.Vida) {
     const vida = lotesDeCelda(c, celda, e.lotes).vida;
-    if (vida !== REF_NULA) ingerir(c, cu, vida, pedidoComida(c, cu, Math.min(libre, boca)));
+    if (vida !== REF_NULA) ingerirSelecto(c, cu, vida, Math.min(libre, boca));
     return;
   }
   const n = Math.min(c.materia.lotes(celda, rol, e.buf), e.buf.length);
   for (let i = 0; i < n && libre > 0 && boca > 0; i++) {
-    const kg = ingerir(c, cu, e.buf[i]!, pedidoComida(c, cu, Math.min(libre, boca)));
+    const kg = ingerirSelecto(c, cu, e.buf[i]!, Math.min(libre, boca));
     libre -= kg; boca -= kg;
   }
 }

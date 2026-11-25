@@ -69,7 +69,7 @@ function runProgram(host: TechnologyHost, actor: TechnologyActor, program: Techn
 // guardado antes del tick 1 y 1.200 ticks: dos corridas de lo mismo dan el mismo digesto físico (se quitan
 // de la forma hasheada las claves que con su valor histórico no actúan).
 test('Q5: reproducibilidad de digestoCanonico en 2 semillas (7, 42) × 1200 pasos con valores históricos', { timeout: 600_000 }, t => {
-  assert.deepEqual(HISTORICAL_PARAMS.tecnologia, { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false });
+  assert.deepEqual(HISTORICAL_PARAMS.tecnologia, { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false, obrasPorPropiedades: false });
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, HISTORICAL_PARAMS.tecnologia, 'Constitución II: DEFAULT_PARAMS nace en valores históricos');
 
   const correr = (seed: number, base: typeof HISTORICAL_PARAMS): string => {

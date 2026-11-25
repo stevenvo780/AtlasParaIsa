@@ -767,11 +767,12 @@ function inventariar(e: Estado): Inventario {
   return { atomos, energia, masa };
 }
 
-/** Σ de los lotes de este dueño por posición del libro. Si la arena lo sabe dar entero (`saldo`, pedido al contrato), es
- * el suyo; si no, el del inventario, que no ve los lotes que un organismo lleva a cuestas. */
+/** Σ de los lotes de este dueño por posición del libro. Con un solo dueño, si la arena lo sabe dar entero (`saldo`, pedido
+ * al contrato; el de `ArenaLotes` suma los lotes de todos los hilos), es el suyo; si no, el del inventario, que no ve los
+ * lotes que un organismo lleva a cuestas. */
 function saldoDe(e: Estado, inventario?: Inventario): bigint[] {
-  const arena = e.caja.c.materia as Partial<{ saldo(): bigint[] }>;
-  if (typeof arena.saldo === 'function') return arena.saldo();
+  const c = e.caja.c, arena = c.materia as Partial<{ saldo(): bigint[] }>;
+  if (typeof arena.saldo === 'function' && !c.params.v23.duenos) return arena.saldo();
   const inv = inventario ?? inventariar(e), out = Array<bigint>(NE + 1).fill(0n);
   for (let comp = 0; comp < EN_VUELO; comp++) {
     for (let k = 0; k < NE; k++) out[k]! += inv.atomos[comp]![k]!;

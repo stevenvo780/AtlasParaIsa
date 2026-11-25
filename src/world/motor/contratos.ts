@@ -172,9 +172,9 @@ export interface TerrenoDueno extends Terreno {
  * - Tomar: `DATO_TOMAR`; siempre se contesta con Concedido (con lo que hubo, quizá nada).
  * - Depositar, Dar, Concedido, Devuelto: llevan `materia` y `DATO_MATERIA` (dato null: Suelo, sin forma). Devuelto
  *   devuelve al emisor `de` una garantía rechazada por un receptor vivo.
- * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] es el aumento de vínculo del receptor hacia el emisor. `bytes` puede
- *   llevar `v8.serialize({ suceso: string, lugar: string, reunion: boolean })` para recordar el encuentro en el dueño
- *   receptor. Con aumento cero solo se registra el recuerdo.
+ * - Golpear: `DATO_GOLPEAR`. Vincular: dato[0] = cuánto sube el vínculo del receptor hacia el emisor; el resto de `dato`
+ *   y `bytes` los define `DATO_VINCULAR` en `world/society.ts` (efecto del acto social sobre el receptor; NaN = ausente).
+ *   Con aumento cero solo se registra el recuerdo.
  * - Ensenar, Migrante, Gesto, Global: `bytes` (v8.serialize). Activar: dato = [cx, cy] del chunk nuevo.
  * Enrutado con garantía: si `a` sigue vivo (`vivo === 1 && gen === genDe(a)`) pero ahora pertenece a otro dueño
  * (`frente.dueno[slotDe(a)] !== hilo`, por migración o rebalanceo), el intento se reenvía a su dueño actual (en F1 entra

@@ -14,7 +14,7 @@
  *   solape |C∩P| / máx(|C|, |P|) si llega a `SOLAPE_IDENTIDAD`. Sin tope de comunidades ni umbrales de salida.
  */
 import { deserialize, serialize } from 'node:v8';
-import { MORTALES_COMUNIDAD, SOLAPE_IDENTIDAD, TAU_VINCULO, THETA_VINCULO, VINCULO_MINIMO } from '../shared/naturaleza.js';
+import { MORTALES_COMUNIDAD, RADIO_CONVIVENCIA_CELDAS, SOLAPE_IDENTIDAD, TAU_VINCULO, THETA_VINCULO, VINCULO_MINIMO } from '../shared/naturaleza.js';
 import type { ChronicleEvent, CommunityView } from '../shared/types.js';
 import { TICKS_PER_DAY, type Person } from './mundo/tipos.js';
 import type { Aplicado, CtxF0, CtxLey, Ley } from './motor/acceso.js';
@@ -22,8 +22,8 @@ import { Clase, genDe, REF_NULA, slotDe, type Intento } from './motor/contratos.
 import { cercanos } from './motor/vecinos.js';
 import { afectar, aplicarEfectoSocial, colorDeComunidad, datoAEfecto, nombreDeComunidad } from './society.js';
 
-/** celdas: distancia a la que dos personas conviven (la misma a la que ya se comparte comida). */
-export const RADIO_CONVIVENCIA_CELDAS = 2;
+/** celdas: distancia de convivencia; vive en `shared/naturaleza.ts` (integrador) y se reexporta aquí. */
+export { RADIO_CONVIVENCIA_CELDAS };
 /** Fracción que queda de un vínculo tras un tick sin contacto: e^(−1/(τ·ticks por día)). Derivada, no constante. */
 export const RETENCION_TICK = Math.exp(-1 / (TAU_VINCULO * TICKS_PER_DAY));
 

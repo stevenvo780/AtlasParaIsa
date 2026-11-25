@@ -235,6 +235,8 @@ export const VINCULO_MINIMO = 0.01;
 export const MORTALES_COMUNIDAD = 3;
 /** Solape con una componente previa desde el que la comunidad conserva su identidad. */
 export const SOLAPE_IDENTIDAD = 0.5;
+/** celdas: distancia a la que dos personas conviven (la misma a la que ya se comparte comida). Carril s. */
+export const RADIO_CONVIVENCIA_CELDAS = 2;
 /** Días: τ_m de una receta = TAU_RECETA_BASE + TAU_RECETA_APRENDIZAJE·learningRate (heredable). */
 export const TAU_RECETA_BASE = 1;
 /** Días por unidad de learningRate en τ_m. */

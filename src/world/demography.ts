@@ -2,6 +2,7 @@ import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, D
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges } from '../shared/demography.js';
 import { ALLELE_COUNT, localRandom } from './genetics.js';
 import { DEFAULT_PARAMS } from './params.js';
+import { SALUD_FERTIL } from '../shared/naturaleza.js';
 
 /** Reexportado desde `shared/demography.ts`, donde vive junto a la geometría de la ley de
  * longevidad para que `params.ts` pueda validarla sin importar el motor. */
@@ -24,6 +25,16 @@ const emptyDamage = (): DemographicTransition['damage'] => ({ starvation: 0, deh
 export function initialDemography(age = 0): DemographicState {
   if (!Number.isFinite(age) || age < 0 || age > Number.MAX_SAFE_INTEGER) throw new RangeError('Edad demográfica inválida.');
   return { age, health: 1, vitality: 1, deathCause: null };
+}
+
+/** V23 (`v23.cuerpos`): la salud guardada nunca supera la del cuerpo de átomos (tejido completo sobre la masa adulta de
+ * su plantilla). Una herida, lo que se extrae del tejido o no haber crecido aún la bajan al momento; el desgaste de
+ * esta ley (hambre, sed, intemperie y vejez, leídas ya de las vistas del cuerpo) sigue acumulándose por debajo, y la
+ * curación escalar no puede subirla por encima de lo que el tejido haya vuelto a crecer. Un vivo conserva salud > 0
+ * (la muerte la decide `updateDemography`); un cuerpo sin tejido llega con hambre y sed 1 y esa ley lo mata. */
+export function acotarSalud(state: DemographicState, salud: number): void {
+  if (state.deathCause !== null || !(salud < state.health)) return;
+  state.health = salud > 0 ? salud : Number.MIN_VALUE;
 }
 
 /** Diploid model loci 4 (resilience) and 2 (activity), already inherited by genetics.ts.
@@ -85,9 +96,12 @@ function validate(actor: DemographicActor, environment: DemographicEnvironment, 
     || traits.maturityAge >= traits.senescenceStart || traits.senescenceStart >= traits.maximumAge) throw new RangeError('Estado, entorno o intervalo demográfico inválido.');
 }
 
+/** Con `v23.cuerpos` estos umbrales leen el cuerpo de átomos sin cambiar de número: `hunger` es lo que falta de la
+ * reserva (≤ 0,45 deja más de un día de basal), `thirst` lo que falta de agua libre, `energy` el O₂ de la reserva y
+ * `health` nunca supera tejido/plantilla (`acotarSalud`), así que SALUD_FERTIL exige además haber crecido. */
 function eligible(actor: DemographicActor, state: DemographicState): boolean {
   return state.deathCause === null && state.age >= actor.traits.maturityAge && state.age < actor.traits.senescenceStart
-    && state.health >= 0.55 && state.vitality >= 0.5 && actor.hunger <= 0.45 && actor.thirst <= 0.45 && actor.energy >= 0.6 && actor.fatigue <= 0.65;
+    && state.health >= SALUD_FERTIL && state.vitality >= 0.5 && actor.hunger <= 0.45 && actor.thirst <= 0.45 && actor.energy >= 0.6 && actor.fatigue <= 0.65;
 }
 
 /** Exact integral of quadratic age pressure over the interval, in simulation-day units. The wear

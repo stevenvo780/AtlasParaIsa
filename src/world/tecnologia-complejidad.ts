@@ -51,7 +51,7 @@ function normalizedThreshold(threshold?: number): number {
     : ACTIVE_CAPABILITY_THRESHOLD;
 }
 
-function realParentIds(recipe: TechnologyRecipe): string[] {
+function realParentIds(recipe: Pick<PerfilFuncional, 'id' | 'parents'>): string[] {
   if (!Array.isArray(recipe.parents) || recipe.parents.length === 0) return [];
   const seen = new Set<string>();
   const parents: string[] = [];
@@ -126,7 +126,33 @@ export function isGenuineFunctionalNovelty(
   existing: readonly TechnologyRecipe[],
   tolerance = DEFAULT_NOVELTY_TOLERANCE,
 ): boolean {
-  const active = activeCapabilities(candidate.capacities);
+  return novedadFuncional(CAPABILITIES, candidate, existing, tolerance, isCompositeRecipe);
+}
+
+/** Lo que el criterio de novedad necesita de una receta, sea la heredada (seis capacidades) o la de la V23, cuyas
+ * claves son los productos propiedad del lote × rasgo de su forma (`materia/proceso.ts`, `vectorFuncional`). */
+export interface PerfilFuncional {
+  id: string; signature: string; generation: number; parents: readonly string[];
+  capacities: Readonly<Record<string, number>>;
+}
+
+/**
+ * El criterio de `isGenuineFunctionalNovelty` sobre cualquier conjunto de claves, en el orden de `claves`: es el
+ * mismo para la técnica heredada y para la de lotes, que solo cambia de qué dimensiones mide.
+ */
+export function novedadFuncional<P extends PerfilFuncional>(
+  claves: readonly string[],
+  candidate: P,
+  existing: readonly P[],
+  tolerance: number,
+  compuesta: (perfil: P) => boolean,
+): boolean {
+  const valor = (perfil: PerfilFuncional, clave: string): number => {
+    const v = perfil.capacities?.[clave];
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(1, v) : 0;
+  };
+  const activas = (perfil: PerfilFuncional) => claves.filter(k => valor(perfil, k) >= ACTIVE_CAPABILITY_THRESHOLD);
+  const active = activas(candidate);
   if (active.length === 0) return false;
 
   const tol = typeof tolerance === 'number' && Number.isFinite(tolerance) && tolerance >= 0
@@ -137,35 +163,34 @@ export function isGenuineFunctionalNovelty(
 
   let hasSameClass = false;
   let maxSameClassCompositeGen = 0;
-  const bestInClass: Record<Capability, number> = {
-    cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0,
-  };
-  const existingById = new Map<string, TechnologyRecipe>();
+  const bestInClass = new Map<string, number>(active.map(k => [k, 0]));
+  const existingById = new Map<string, P>();
 
   for (const recipe of existing) {
     if (candidateSignature !== '' && recipe.signature === candidateSignature) return false;
     existingById.set(recipe.id, recipe);
-    if (functionalProfileKey(recipe.capacities) !== candidateProfile) continue;
+    const perfil = activas(recipe);
+    if ((perfil.length > 0 ? perfil.join('+') : 'inert') !== candidateProfile) continue;
     hasSameClass = true;
-    for (const capability of active) {
-      const value = capabilityValue(recipe.capacities, capability);
-      if (value > bestInClass[capability]) bestInClass[capability] = value;
+    for (const clave of active) {
+      const value = valor(recipe, clave);
+      if (value > bestInClass.get(clave)!) bestInClass.set(clave, value);
     }
-    if (isCompositeRecipe(recipe) && recipe.generation > maxSameClassCompositeGen) {
+    if (compuesta(recipe) && recipe.generation > maxSameClassCompositeGen) {
       maxSameClassCompositeGen = recipe.generation;
     }
   }
 
   if (!hasSameClass) return true;
 
-  for (const capability of active) {
-    const value = capabilityValue(candidate.capacities, capability);
-    const best = bestInClass[capability];
+  for (const clave of active) {
+    const value = valor(candidate, clave);
+    const best = bestInClass.get(clave)!;
     const improved = tol === 0 ? value > best + FLOAT_EPSILON : value >= best + tol - FLOAT_EPSILON;
     if (improved) return true;
   }
 
-  if (isCompositeRecipe(candidate) && candidate.generation > maxSameClassCompositeGen) {
+  if (compuesta(candidate) && candidate.generation > maxSameClassCompositeGen) {
     const parents = realParentIds(candidate);
     const coherent = parents.every(id => {
       const parent = existingById.get(id);

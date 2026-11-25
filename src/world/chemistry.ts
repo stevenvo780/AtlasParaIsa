@@ -26,6 +26,7 @@ import type {
 } from '../shared/chemistry.js';
 import type { MaterialBatch } from '../shared/technology.js';
 import { marcarTesela } from './soa/barrera-percepcion.js';
+import { ley } from './params.js';
 
 export type TemperatureTier = 0 | 1 | 2;
 
@@ -449,6 +450,8 @@ export function performChemistryExperiment(
   tile: { x: number; y: number; biome?: string; feature?: string; wood?: number; stone?: number; drinkingWater?: number },
   nearbyStructures: readonly ChemExperimentStructure[],
 ): ChemExperimentResult | null {
+  // V23: con `v23.tecnica` la química es la de los lotes (materia/proceso.ts); esta queda para el mundo apagado.
+  if (ley(world, 'tecnica')) return null;
   // Un mundo con `quimica.emergente` explícitamente apagado nunca gana estado; sin params, decide el llamador.
   if (!world.chemistry && world.params !== undefined && world.params.quimica?.emergente !== true) return null;
   const state = world.chemistry ?? (world.chemistry = defaultChemistryState());

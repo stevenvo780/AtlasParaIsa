@@ -8,11 +8,21 @@ import { appendTechnologyExecution as appendExecution, renumberTechnologyExecuti
 import { assertTechnologyWater, assertWaterExecution, containedWaterStock, freeWaterCarryQuanta, settleContainedWaterCapacity, waterEnvelope } from './technology-water.js';
 export { technologyStock } from './technology-execution.js';
 import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
-import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touchKnownRecipe } from './technology-memory.js';
+import { fuerzaReceta, nuevaTecnica, olvidarRecetas, pruneTechnologyCompetence, recetaRecordada, recordarReceta, rememberRecipe, tauRecetaTicks, technologyProjectPins, touchKnownRecipe, usarReceta } from './technology-memory.js';
 import { containerAffordance } from './material-affordances.js';
 import { firstTileAt } from './tile-index.js';
-import { boundParamsOf, HISTORICAL_PARAMS, type WorldParams } from './params.js';
-import { isGenuineFunctionalNovelty } from './tecnologia-complejidad.js';
+import { boundParamsOf, HISTORICAL_PARAMS, ley, type WorldParams } from './params.js';
+import { ACTIVE_CAPABILITY_THRESHOLD, isGenuineFunctionalNovelty, novedadFuncional, type PerfilFuncional } from './tecnologia-complejidad.js';
+import type { Person } from './mundo/tipos.js';
+import type { RecetaRecordada, TecnicaPersona } from '../shared/technology.js';
+import { formaDeCodigo } from '../shared/materia.js';
+import { ctxSi, type CtxLeyMateria } from './motor/acceso.js';
+import { REF_NULA, slotDe, TipoIntento } from './motor/contratos.js';
+import { cargaKg, masaDe, pagar } from './materia/cuerpo.js';
+import { fuegoEn, lotesDeCelda, temperaturaDe } from './materia/ley-mundo.js';
+import { CLAVES_FUNCIONALES, POTENCIA_TRABAJO, SEGUNDOS_TICK, avanzarProcesoCon, celdaPropia, codificarReceta, iniciarProceso, leerReceta,
+  objetosDeCelda, perfilDeVector, vectorFuncional, volumenLote } from './materia/proceso.js';
+import { Parte, Rol, type Cuerpo, type LoteRef, type Paso, type ProcesoMaterial } from './materia/tipos.js';
 import type { World } from './index.js';
 import { BROKEN_CONDITION, storedMaterialsNear, withdrawMaterials, structureDistance } from './inventions.js';
 import { filtrarCerca } from './indice-puntos.js';
@@ -635,6 +645,8 @@ function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: Te
 }
 export function technologyOpportunity(host: TechnologyHost, actor: TechnologyActor): { kind: 'research' | 'craft'; score: number; reason: string; recipeId?: string } | undefined {
   if (actor.energy < 0.3 || actor.fatigue > 0.72 || Math.max(actor.hunger ?? 0, actor.thirst ?? 0) > 0.78) return;
+  const v23 = ctxTecnica(host);
+  if (v23) return esPersonaV23(actor) ? oportunidadTecnica(v23, actor) : undefined;
   if (actor.technology.project) return { kind: actor.technology.project.kind, score: 0.86, reason: 'Continúa un proceso material que ya empezó y pagó.', recipeId: actor.technology.project.recipeId ?? undefined };
   const powers = toolCapacities(actor), known = knownTechnologyRecipes(host, actor, false).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id));
   // A justified chain can continue its paid work without the cadence used to
@@ -812,9 +824,20 @@ function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: Tech
   project.energyPaid += energy; host.technology.ledger.work++; host.technology.ledger.energy += energy;
   return project.progress >= project.requiredWork ? finishProject(host, actor, project, emit) : false;
 }
-export function researchTechnology(host: TechnologyHost, actor: TechnologyActor, emit?: Emit): boolean { return advanceProject(host, actor, 'research', undefined, emit); }
+export function researchTechnology(host: TechnologyHost, actor: TechnologyActor, emit?: Emit): boolean {
+  const v23 = ctxTecnica(host);
+  if (v23) return esPersonaV23(actor) && host.noveltyEnabled !== false && trabajarTecnica(v23, actor, 'research');
+  return advanceProject(host, actor, 'research', undefined, emit);
+}
 /** Explicitly abandoning a paid project preserves its spent work, without manufacturing or refunding matter. */
 export function cancelTechnologyProject(host: TechnologyHost, actor: TechnologyActor): boolean {
+  const v23 = ctxTecnica(host);
+  if (v23) {
+    const t = esPersonaV23(actor) ? actor.technology.tecnica : undefined;
+    if (!t?.proceso) return false;
+    interrumpir(actor as Person, t, host.tick, v23);
+    return true;
+  }
   const knowledge=actor.technology,project=knowledge.project;
   if(!project)return false;
   const opening=technologyStock(actor);
@@ -826,6 +849,14 @@ export function cancelTechnologyProject(host: TechnologyHost, actor: TechnologyA
   return true;
 }
 export function craftTechnology(host: TechnologyHost, actor: TechnologyActor, recipeId?: string, emit?: Emit): boolean {
+  const v23 = ctxTecnica(host);
+  if (v23) {
+    if (!esPersonaV23(actor)) return false;
+    const t = tecnicaDe(actor);
+    const id = recipeId !== undefined ? Number(recipeId)
+      : t.proceso?.tipo === 'craft' ? t.proceso.receta : [...t.recetas].sort((a, b) => b.usada - a.usada || a.id - b.id)[0]?.id;
+    return id !== undefined && Number.isSafeInteger(id) && trabajarTecnica(v23, actor, 'craft', id);
+  }
   const selected = recipeId ?? actor.technology.project?.recipeId ?? knownTechnologyRecipes(host, actor)
     .filter(r => planWithdrawal(host, actor, r.program))
     .sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0]?.id;
@@ -833,6 +864,17 @@ export function craftTechnology(host: TechnologyHost, actor: TechnologyActor, re
 }
 export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, learner: TechnologyActor, emit?: Emit, recipeId?: string): boolean {
   if (host.cooperationEnabled === false || host.learningEnabled === false || teacher === learner || teacher.id === learner.id || distance(teacher, learner) > 2 || teacher.energy < 0.05) return false;
+  const v23 = ctxTecnica(host);
+  if (v23) {
+    const aprendiz = learner as Person;
+    if (!esPersonaV23(teacher) || aprendiz.uid === undefined) return false;
+    const r = recetaParaEnsenar(v23, teacher, aprendiz, recipeId !== undefined ? Number(recipeId) : undefined);
+    if (!r || !ensenarTecnica(v23, teacher, aprendiz.uid, r.id, aprendiz)) return false;
+    v23.suceso({ kind: 'learning', actors: [teacher.id, learner.id], x: teacher.x, y: teacher.y, source: 'simulation',
+      text: `${teacher.name ?? teacher.id} mostró a ${learner.name ?? learner.id} cómo hacer un proceso que practica.`,
+      cause: 'Transmisión por demostración cercana: quien enseña paga el trabajo y su receta vuelve a estar fresca; quien aprende la recuerda hasta que la olvide.' });
+    return true;
+  }
   const recipe = knownTechnologyRecipes(host, teacher).filter(r => (!recipeId || r.id === recipeId) && !learner.technology.knownRecipes.includes(r.id)).sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0];
   if (!recipe) return false;
   if (!rememberRecipe(learner.technology, recipe.id, { capacity: technologyMemoryCapacity(host.technology), protectedIds: technologyProjectPins(learner.technology) }).remembered) return false;
@@ -1101,4 +1143,347 @@ export function assertTechnology(host: TechnologyHost): void {
   const totals = technologyCatalogueTotals(host);
   if (totals.manufactured !== state.ledger.crafted || totals.uses !== state.ledger.toolUses) fail();
   assertTechnologyCheckpoint(state, host.tick);
+}
+
+// ── V23 (`v23.tecnica`): técnica sobre lotes ─────────────────────────────────────────────────────────────
+// Una receta es una lista de `Paso` registrada en `c.globales.registro`; investigar y fabricar arrancan un proceso
+// (`materia/proceso.ts`) y lo avanzan un tick por llamada. Sin tope de recetas, de pasos, de insumos ni de objetos:
+// lo que se recuerda lo decide el olvido y lo que se lleva, la carga del cuerpo.
+
+/** kg/kg: carga a cuestas sobre la masa del cuerpo que una persona soporta (leyes-opus §3d). */
+export const CARGA_MASA = 0.4;
+/** L/L: volumen a cuestas sobre el del cuerpo (leyes-opus §3d). */
+export const CARGA_VOLUMEN = 0.3;
+/** kg/L: densidad media de un cuerpo (para su volumen). */
+export const DENSIDAD_CUERPO = 1;
+/** ticks: duración media de calentar o mojar en un paso propuesto al investigar (≈ 1 h). */
+export const DURACION_PASO = 100;
+/** Probabilidad de partir de una receta recordada al investigar, y de cruzarla con otra (búsqueda de programas de la V22). */
+export const PROB_VARIAR_CONOCIDA = 0.72;
+export const PROB_CRUZAR = 0.35;
+
+type PersonaTecnica = Person & { cuerpo: Cuerpo };
+const esPersonaV23 = (a: TechnologyActor): a is PersonaTecnica => !!(a as Person).cuerpo;
+
+/** El contexto de la técnica de lotes si la ley está encendida y el mundo pasó por el motor; si no, undefined. */
+function ctxTecnica(host: object): CtxLeyMateria | undefined {
+  if (!ley(host, 'tecnica')) return undefined;
+  const c = ctxSi(host as World) as Partial<CtxLeyMateria> | undefined;
+  return c?.materia && c.quimica ? c as CtxLeyMateria : undefined;
+}
+
+/** Estado técnico V23 de una persona. Lo crea `iniciar` para las que ya viven; para las que nacen después lo pone quien
+ * las crea (pedido a n), y si aún falta se crea aquí. */
+export function tecnicaDe(p: Person): TecnicaPersona { return p.technology.tecnica ??= nuevaTecnica(); }
+
+const tauDe = (p: Person) => tauRecetaTicks(p.genome?.learningRate ?? 0);
+const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+
+/** F0 de la época: crea el estado técnico de las personas propias que no lo tienen. */
+export function iniciarTecnica(c: CtxLeyMateria): void {
+  for (const p of c.mundo.people) if (p.cuerpo) tecnicaDe(p);
+}
+
+/** F6: olvido de las personas propias (fuerza ← fuerza·e^(−Δt/τ), fuera por debajo de OLVIDO_RECETA). */
+export function mantenerTecnica(c: CtxLeyMateria): void {
+  for (const p of c.mundo.people) {
+    const t = p.technology.tecnica;
+    if (t && t.recetas.length) olvidarRecetas(t, c.tick, tauDe(p));
+  }
+}
+
+/** F4: los pasos que solo esperan al mundo (calentar junto a un fuego, mojar) siguen aunque nadie trabaje en ellos;
+ * quien está investigando o fabricando ya avanzó el suyo por `researchTechnology`/`craftTechnology`. */
+export function avanzarTecnicaDelMundo(c: CtxLeyMateria): void {
+  for (const p of c.mundo.people) {
+    const t = p.technology.tecnica, pe = t?.proceso;
+    if (!t || !pe || t.avanzadoEn === c.tick || !esPersonaV23(p)) continue;
+    const paso = pe.proceso.pasos[pe.proceso.i];
+    if (!paso || paso.op === 'romper' || paso.op === 'unir') continue;
+    t.avanzadoEn = c.tick;
+    if (avanzarProcesoCon(c, pe.proceso as ProcesoMaterial, null, null, []) === 'hecho') terminarTecnica(c, p, t);
+  }
+}
+
+/** Lo que alguien tiene a mano para unir: lo que lleva, los montones de su celda y su suelo. */
+function insumosAMano(c: CtxLeyMateria, p: PersonaTecnica, celda: number): { insumo: number; forma: number; masa: number }[] {
+  const fuego = fuegoEn(c, celda), out: { insumo: number; forma: number; masa: number }[] = [];
+  const mirar = (l: LoteRef, conForma: boolean) => {
+    if (l < 0 || l === fuego || !c.materia.vivo(l) || !c.materia.propio(l)) return;
+    const v = c.materia.vista(l);
+    if (v.masa > 0 && v.principal && (v.fase === 0 || v.fase === 3)) out.push({ insumo: v.principal, forma: conForma ? v.forma : 0, masa: v.masa });
+  };
+  for (const l of p.carga ?? []) mirar(l, true);
+  for (const l of objetosDeCelda(c, celda)) mirar(l, true);
+  mirar(lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 }).suelo, false);
+  return out;
+}
+
+function pasoAlAzar(c: CtxLeyMateria, insumos: readonly { insumo: number; forma: number; masa: number }[], volumen: number,
+  celda: number): Paso {
+  const u = () => c.azar(), op = Math.floor(u() * 4);
+  if (op === 0 || volumen <= 0) {
+    const i = insumos[Math.floor(u() * insumos.length)]!;
+    return { op: 'unir', insumo: i.insumo, forma: i.forma, masa: i.masa * (1 - u()) };
+  }
+  if (op === 1) {
+    // Dimensiones alrededor del lado del cubo de lo que se junta, hasta un factor e^1,5 arriba o abajo.
+    const lado = Math.cbrt(volumen / 1000), dim = () => lado * Math.exp(3 * (u() - 0.5));
+    return { op: 'romper', forma: { largo: dim(), ancho: dim(), grueso: dim(), hueco: u() ** 2, filo: u() } };
+  }
+  const ticks = Math.max(1, Math.round(-DURACION_PASO * Math.log(1 - u())));
+  const fuego = fuegoEn(c, celda), Tamb = temperaturaDe(c, celda);
+  if (op === 2 && fuego >= 0 && u() < 0.5) return { op: 'calentar', hasta: { T: Tamb + (c.materia.vista(fuego).T - Tamb) * u(), ticks } };
+  return op === 2 ? { op: 'calentar', hasta: { ticks } } : { op: 'mojar', hasta: { ticks } };
+}
+
+/** Volumen (L) que tendría lo que juntan los pasos unir de una receta. */
+function volumenReceta(c: CtxLeyMateria, pasos: readonly Paso[]): number {
+  let v = 0;
+  for (const p of pasos) if (p.op === 'unir') {
+    const d = c.quimica.sustancia(p.insumo).prop.densidad;
+    if (d > 0) v += p.masa / d;
+  }
+  return v;
+}
+
+/** Perturba un número positivo por un factor e^U(−1, 1). */
+const perturbar = (c: CtxLeyMateria, x: number) => x * Math.exp(2 * c.azar() - 1);
+
+function variarPaso(c: CtxLeyMateria, p: Paso): Paso {
+  if (p.op === 'unir') return { ...p, masa: perturbar(c, p.masa) };
+  if (p.op === 'romper') {
+    const f = { ...p.forma }, k = Math.floor(c.azar() * 5);
+    if (k === 0) f.largo = perturbar(c, f.largo); else if (k === 1) f.ancho = perturbar(c, f.ancho);
+    else if (k === 2) f.grueso = perturbar(c, f.grueso); else if (k === 3) f.hueco = c.azar() ** 2; else f.filo = c.azar();
+    return { op: 'romper', forma: f };
+  }
+  const hasta = { ...p.hasta };
+  if (hasta.T !== undefined && c.azar() < 0.5) hasta.T = perturbar(c, hasta.T);
+  else hasta.ticks = Math.max(1, Math.round(perturbar(c, hasta.ticks ?? DURACION_PASO)));
+  return { op: p.op, hasta };
+}
+
+/**
+ * Receta candidata para investigar: variación de una recordada (añadir, cambiar, retocar o quitar un paso, o cruzarla con
+ * otra) o una nueva con lo que hay a mano. Siempre empieza uniendo: el proceso parte de un lote vacío.
+ */
+export function proponerReceta(c: CtxLeyMateria, p: PersonaTecnica, t: TecnicaPersona, celda: number):
+  { pasos: Paso[]; padres: number[]; generacion: number } | undefined {
+  const insumos = insumosAMano(c, p, celda);
+  if (!insumos.length) return;
+  const registro = c.globales.registro;
+  const conocidas = t.recetas.map(r => ({ r, pasos: leerReceta(registro, r.id) })).filter((k): k is { r: RecetaRecordada; pasos: Paso[] } => !!k.pasos?.length);
+  const elegir = <T>(xs: readonly T[]): T => xs[Math.floor(c.azar() * xs.length)]!;
+  let pasos: Paso[], padres: RecetaRecordada[] = [];
+  if (conocidas.length && c.azar() < PROB_VARIAR_CONOCIDA) {
+    const a = elegir(conocidas);
+    pasos = a.pasos.map(s => s); padres = [a.r];
+    if (conocidas.length > 1 && c.azar() < PROB_CRUZAR) {
+      const b = elegir(conocidas.filter(k => k !== a));
+      pasos = [...pasos.slice(0, 1 + Math.floor(c.azar() * pasos.length)), ...b.pasos.slice(Math.floor(c.azar() * b.pasos.length))];
+      padres.push(b.r);
+    }
+    const k = Math.floor(c.azar() * pasos.length), cambio = Math.floor(c.azar() * 4);
+    const nuevo = () => pasoAlAzar(c, insumos, volumenReceta(c, pasos), celda);
+    if (cambio === 0) pasos.splice(Math.floor(c.azar() * (pasos.length + 1)), 0, nuevo());
+    else if (cambio === 1) pasos[k] = nuevo();
+    else if (cambio === 2) pasos[k] = variarPaso(c, pasos[k]!);
+    else if (pasos.length > 1) pasos.splice(k, 1);
+  } else {
+    pasos = [pasoAlAzar(c, insumos, 0, celda)];
+    for (let n = Math.floor(c.azar() * 3); n >= 0; n--) pasos.push(pasoAlAzar(c, insumos, volumenReceta(c, pasos), celda));
+  }
+  if (pasos[0]?.op !== 'unir') { const i = elegir(insumos); pasos.unshift({ op: 'unir', insumo: i.insumo, forma: i.forma, masa: i.masa * (1 - c.azar()) }); }
+  return { pasos, padres: padres.map(r => r.id), generacion: 1 + Math.max(0, ...padres.map(r => r.generacion)) };
+}
+
+/** Empieza un proceso de investigación o fabricación en la celda de la persona, sobre un lote vacío nuevo. */
+function empezarProceso(c: CtxLeyMateria, p: PersonaTecnica, t: TecnicaPersona, tipo: 'research' | 'craft', recetaId?: number): boolean {
+  const celda = celdaPropia(c, p.x, p.y);
+  if (celda < 0) return false;
+  let pasos: Paso[] | null | undefined, padres: number[] = [], generacion = 1, receta = -1;
+  if (tipo === 'craft') {
+    const r = recetaId !== undefined ? recetaRecordada(t, recetaId) : undefined;
+    pasos = r ? leerReceta(c.globales.registro, r.id) : null;
+    if (r) { padres = [...r.padres]; generacion = r.generacion; receta = r.id; }
+  } else {
+    const propuesta = proponerReceta(c, p, t, celda);
+    if (propuesta) ({ pasos, padres, generacion } = propuesta);
+  }
+  if (!pasos?.length) return false;
+  const lote = c.materia.nuevo(Rol.Objeto, celda, 0);
+  const proceso = iniciarProceso(c, lote, pasos, Math.round(p.x), Math.round(p.y));
+  t.proceso = { tipo, receta, generacion, padres, proceso, ...(tipo === 'research' ? { original: pasos } : {}) };
+  return true;
+}
+
+/** El útil a cuestas que mejor rompe: el más duro, y con más filo a igual dureza. */
+function mejorUtil(c: CtxLeyMateria, p: PersonaTecnica): LoteRef | null {
+  let mejor: LoteRef | null = null, valor = 0;
+  for (const l of p.carga ?? []) {
+    if (!c.materia.propio(l)) continue;
+    const v = c.materia.vista(l);
+    if (!v.forma) continue;
+    const x = v.dureza * (1 + formaDeCodigo(v.forma).filo);
+    if (x > valor) { mejor = l; valor = x; }
+  }
+  return mejor;
+}
+
+/** Interrumpe el proceso en curso: el lote intermedio queda donde está (otro puede seguir con él o usarlo); si quedó
+ * vacío, se libera. */
+function interrumpir(p: Person, t: TecnicaPersona, tick: number, c?: CtxLeyMateria): void {
+  const lote = t.proceso?.proceso.lote;
+  if (c && lote !== undefined && c.materia.vivo(lote) && c.materia.propio(lote) && c.materia.vista(lote).masa <= 0
+    && c.materia.calor(lote) === 0) c.materia.liberar(lote);
+  t.proceso = null; t.intentos++; t.ultimoIntento = tick;
+  p.technology.attempts++; p.technology.lastAttempt = tick;
+}
+
+/** Un tick de trabajo de la persona en su proceso (lo arranca si no tiene). Devuelve si terminó con éxito. */
+function trabajarTecnica(c: CtxLeyMateria, p: PersonaTecnica, tipo: 'research' | 'craft', recetaId?: number): boolean {
+  const t = tecnicaDe(p);
+  if (t.avanzadoEn === c.tick) return false;
+  if (t.proceso) {
+    const pr = t.proceso.proceso;
+    const aqui = celdaPropia(c, p.x, p.y), alla = celdaPropia(c, pr.x, pr.y);
+    if (!c.materia.vivo(pr.lote) || aqui < 0 || aqui !== alla || t.proceso.tipo !== tipo
+      || (tipo === 'craft' && recetaId !== undefined && t.proceso.receta !== recetaId)) interrumpir(p, t, c.tick, c);
+  }
+  if (!t.proceso && !empezarProceso(c, p, t, tipo, recetaId)) { interrumpir(p, t, c.tick, c); return false; }
+  t.avanzadoEn = c.tick;
+  const pr = t.proceso!.proceso as ProcesoMaterial;
+  return avanzarProcesoCon(c, pr, p.cuerpo, mejorUtil(c, p), p.carga ?? []) === 'hecho' && terminarTecnica(c, p, t);
+}
+
+/** Si quien lo hizo está en la celda y cabe en su carga (masa y volumen), el lote pasa a ir a cuestas; si no, se queda
+ * en la celda como montón. */
+function llevarOdejar(c: CtxLeyMateria, p: PersonaTecnica, lote: LoteRef, celda: number): boolean {
+  const v = c.materia.vista(lote);
+  if (!p.carga || !(v.masa > 0) || celda < 0 || celdaPropia(c, p.x, p.y) !== celda) return false;
+  const masa = masaDe(c, p.cuerpo), carga = p.carga.filter(l => c.materia.propio(l));
+  const volumen = carga.reduce((s, l) => s + volumenLote(c, l), volumenLote(c, lote));
+  if (cargaKg(c, carga) + v.masa > CARGA_MASA * masa || volumen > CARGA_VOLUMEN * masa / DENSIDAD_CUERPO) return false;
+  const llevado = c.materia.nuevo(Rol.Objeto, -1, v.forma);
+  c.materia.moverParte(lote, llevado, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
+  if (c.materia.vista(lote).masa <= 0 && c.materia.calor(lote) === 0) c.materia.liberar(lote);
+  p.carga.push(llevado);
+  return true;
+}
+
+/** Perfil funcional de una receta recordada para `novedadFuncional`. */
+function perfilReceta(c: CtxLeyMateria, r: RecetaRecordada): PerfilFuncional {
+  const b = c.globales.registro.leer(r.id);
+  return { id: String(r.id), signature: b ? hex(b) : '', generation: r.generacion, parents: r.padres.map(String), capacities: perfilDeVector(r.vector) };
+}
+const compuesta = (r: PerfilFuncional) => r.generation >= 2 && r.parents.length >= 2;
+
+/** Cierra el proceso terminado: el producto va a cuestas o se queda; fabricar refresca la receta; investigar la gana
+ * solo si su producto es una novedad funcional (propiedades del lote × forma) frente a lo que sabe y a lo que ve. */
+function terminarTecnica(c: CtxLeyMateria, p: PersonaTecnica, t: TecnicaPersona): boolean {
+  const pe = t.proceso!, lote = pe.proceso.lote, v = c.materia.vista(lote), vector = vectorFuncional(v);
+  const celda = celdaPropia(c, pe.proceso.x, pe.proceso.y);
+  const vistos: PerfilFuncional[] = [];
+  if (celda >= 0) for (const l of objetosDeCelda(c, celda)) if (l !== lote && c.materia.vista(l).forma)
+    vistos.push({ id: `lote:${l}`, signature: '', generation: 0, parents: [], capacities: perfilDeVector(vectorFuncional(c.materia.vista(l))) });
+  if (v.masa > 0) llevarOdejar(c, p, lote, celda);
+  interrumpir(p, t, c.tick, c);
+  if (!(v.masa > 0)) return false;
+  if (pe.tipo === 'craft') {
+    recordarReceta(t, { id: pe.receta, usada: c.tick, generacion: pe.generacion, padres: pe.padres, vector });
+    return true;
+  }
+  const original = pe.original as Paso[] | undefined;
+  if (!original?.length) return false;
+  const bytes = codificarReceta(original);
+  const candidato: PerfilFuncional = { id: 'candidata', signature: hex(bytes), generation: pe.generacion,
+    parents: pe.padres.map(String), capacities: perfilDeVector(vector) };
+  const existentes = [...t.recetas.map(r => perfilReceta(c, r)), ...vistos];
+  if (!novedadFuncional(CLAVES_FUNCIONALES, candidato, existentes, c.params.tecnologia.mejoraLocal, compuesta)) return false;
+  const id = c.globales.registro.insertar(bytes);
+  recordarReceta(t, { id, usada: c.tick, generacion: pe.generacion, padres: pe.padres, vector });
+  for (const padre of pe.padres) usarReceta(t, padre, c.tick);
+  c.suceso({ kind: 'invention', actors: [p.id], x: p.x, y: p.y, source: 'simulation',
+    text: `${p.name} dio con un proceso nuevo: ${original.map(s => s.op).join(' → ')}.`,
+    cause: `Proceso sobre lotes de generación ${pe.generacion}; el producto (${v.masa.toFixed(2)} kg a ${Math.round(v.T)} K) hace algo que no hacía lo que sabía ni lo que veía.` });
+  return true;
+}
+
+/** ¿El vector `v` hace, al menos tan bien, todo lo que hace `r` (sus claves activas)? */
+const cubre = (v: readonly number[], r: readonly number[], tol: number) =>
+  r.every((x, i) => x < ACTIVE_CAPABILITY_THRESHOLD || (v[i] ?? 0) >= x - tol);
+
+/** La oportunidad técnica V23: seguir un proceso, fabricar una receta cuya función no lleva encima o investigar con la
+ * materia que tiene a mano. */
+export function oportunidadTecnica(c: CtxLeyMateria, p: PersonaTecnica):
+  { kind: 'research' | 'craft'; score: number; reason: string; recipeId?: string } | undefined {
+  const t = tecnicaDe(p);
+  if (t.proceso) return { kind: t.proceso.tipo, score: 0.86, reason: 'Sigue un proceso material que dejó a medias; el lote está donde lo dejó.',
+    recipeId: t.proceso.tipo === 'craft' ? String(t.proceso.receta) : undefined };
+  const llevado = (p.carga ?? []).filter(l => c.materia.propio(l)).map(l => vectorFuncional(c.materia.vista(l)));
+  const tol = c.params.tecnologia.mejoraLocal;
+  const falta = t.recetas.filter(r => !llevado.some(v => cubre(v, r.vector, tol))).sort((a, b) => b.usada - a.usada || a.id - b.id)[0];
+  if (falta) return { kind: 'craft', recipeId: String(falta.id), score: 0.4 + 0.3 * fuerzaReceta(falta, c.tick, tauDe(p)),
+    reason: 'Sabe hacer algo que no lleva encima; hacerlo cuesta trabajo y la materia que junte.' };
+  if (c.tick - t.ultimoIntento < c.params.tecnologia.enfriamiento) return;
+  const celda = celdaPropia(c, p.x, p.y);
+  if (celda < 0 || !insumosAMano(c, p, celda).length) return;
+  return { kind: 'research', score: 0.35 + (p.curiosity ?? 0.5) * 0.3 + (p.skills.technology ?? 0) * 0.08,
+    reason: 'Prueba a romper, juntar, calentar o mojar lo que tiene a mano; el intento cuesta trabajo y materia.' };
+}
+
+/** Bytes de una enseñanza (`Intento.bytes` de Ensenar): «T1E», receta (f64), generación (u32), padres y vector. */
+export function codificarEnsenanza(r: Pick<RecetaRecordada, 'id' | 'generacion' | 'padres' | 'vector'>): Uint8Array {
+  const b = new Uint8Array(4 + 8 + 4 + 4 + 8 * r.padres.length + 4 + 8 * r.vector.length), d = new DataView(b.buffer);
+  b.set([0x54, 0x31, 0x45, 0x01]);
+  let o = 4;
+  d.setFloat64(o, r.id, true); o += 8;
+  d.setUint32(o, r.generacion, true); o += 4;
+  d.setUint32(o, r.padres.length, true); o += 4;
+  for (const x of r.padres) { d.setFloat64(o, x, true); o += 8; }
+  d.setUint32(o, r.vector.length, true); o += 4;
+  for (const x of r.vector) { d.setFloat64(o, x, true); o += 8; }
+  return b;
+}
+export function decodificarEnsenanza(b: Uint8Array): Pick<RecetaRecordada, 'id' | 'generacion' | 'padres' | 'vector'> | null {
+  if (b.length < 24 || b[0] !== 0x54 || b[1] !== 0x31 || b[2] !== 0x45 || b[3] !== 0x01) return null;
+  const d = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let o = 4;
+  const id = d.getFloat64(o, true); o += 8;
+  const generacion = d.getUint32(o, true); o += 4;
+  const np = d.getUint32(o, true); o += 4;
+  if (o + 8 * np + 4 > b.length) return null;
+  const padres = Array.from({ length: np }, (_, k) => d.getFloat64(o + 8 * k, true)); o += 8 * np;
+  const nv = d.getUint32(o, true); o += 4;
+  if (o + 8 * nv !== b.length) return null;
+  const vector = Array.from({ length: nv }, (_, k) => d.getFloat64(o + 8 * k, true));
+  return Number.isSafeInteger(id) && id >= 0 ? { id, generacion, padres, vector } : null;
+}
+
+/** Aplicador de Ensenar en el dueño del aprendiz: recuerda la receta con fuerza 1. */
+export function aprenderReceta(c: CtxLeyMateria, p: Person, e: Pick<RecetaRecordada, 'id' | 'generacion' | 'padres' | 'vector'>, _de: number): boolean {
+  if (!p.cuerpo || !c.globales.registro.leer(e.id) || e.vector.length !== CLAVES_FUNCIONALES.length) return false;
+  recordarReceta(tecnicaDe(p), { id: e.id, usada: c.tick, generacion: e.generacion, padres: [...e.padres], vector: [...e.vector] });
+  return true;
+}
+
+/** La receta que `maestro` enseñaría a `aprendiz` (la más usada que no sepa ya; el aprendiz se lee de su propio estado
+ * si es de este dueño, y si no, se enseña igual: recordar la refresca). */
+export function recetaParaEnsenar(c: CtxLeyMateria, maestro: Person, aprendiz: Person | null, recetaId?: number): RecetaRecordada | undefined {
+  const sabe = aprendiz?.technology.tecnica;
+  return tecnicaDe(maestro).recetas.filter(r => (recetaId === undefined || r.id === recetaId) && !(sabe && recetaRecordada(sabe, r.id)))
+    .sort((a, b) => b.usada - a.usada || a.id - b.id)[0];
+}
+
+/** Enseñar = intento Ensenar al dueño del aprendiz; quien enseña paga un tick de trabajo y la receta vuelve a 1. */
+export function ensenarTecnica(c: CtxLeyMateria, maestro: Person, aprendizUid: number, recetaId?: number, aprendiz: Person | null = null): boolean {
+  if (!maestro.cuerpo) return false;
+  const r = recetaParaEnsenar(c, maestro, aprendiz, recetaId), ref = c.ref(aprendizUid);
+  if (!r || ref === REF_NULA) return false;
+  if (!(pagar(c, maestro.cuerpo, POTENCIA_TRABAJO * SEGUNDOS_TICK) > 0)) return false;
+  usarReceta(tecnicaDe(maestro), r.id, c.tick);
+  c.buzon.enviar(c.frente.dueno[slotDe(ref)]!, { tipo: TipoIntento.Ensenar, de: maestro.uid === undefined ? REF_NULA : c.ref(maestro.uid), a: ref,
+    celda: -1, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: null, bytes: codificarEnsenanza(r) });
+  return true;
 }

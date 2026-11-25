@@ -15,6 +15,20 @@ import { COLUMNAS_CEREBRO, GENOMA_ANCHO } from '../src/world/motor/contratos.js'
 import { materiaReal } from './lib/materia-real.js';
 import { filaInstantanea, laboratorio, reescribirInstantanea } from './lib/store.js';
 
+/** El mundo vivo declara `gestacion`, `cuerpo` y `carga` como `undefined` en cada persona (la misma forma de objeto para todas,
+ * `mundo/crear.ts`); lo guardado va como JSON y esas claves no viajan. Para comparar el mundo vivo con el recuperado, un `undefined`
+ * y una clave ausente son lo mismo. */
+function sinIndefinidos(x: unknown): unknown {
+  if (Array.isArray(x)) return x.map(sinIndefinidos);
+  if (x instanceof Map) return new Map([...x].map(([k, v]) => [k, sinIndefinidos(v)]));
+  if (x instanceof Set) return new Set([...x].map(sinIndefinidos));
+  if (x === null || typeof x !== 'object' || ArrayBuffer.isView(x) || x instanceof ArrayBuffer) return x;
+  const proto = Object.getPrototypeOf(x);
+  if (proto !== Object.prototype && proto !== null) return x;
+  return Object.fromEntries(Object.entries(x).filter(([, v]) => v !== undefined).map(([k, v]) => [k, sinIndefinidos(v)]));
+}
+const igualSinIndefinidos = (real: unknown, esperado: unknown): void => assert.deepEqual(sinIndefinidos(real), sinIndefinidos(esperado));
+
 const params = parseParams('v23.guardadoCompleto=true,persistencia.paginasSucias=true');
 
 async function prepararMateria(world: World): Promise<MateriaCheckpoint> {
@@ -68,13 +82,13 @@ test('guardado completo paginado: mundo, materia, clon y épocas tras reabrir', 
   const blob = store.db.prepare('SELECT body FROM snapshot_matter WHERE slot=0').get()!.body;
   assert.deepEqual(blob, codificarCheckpoint(materia));
   assert.throws(() => store.load(), /Store.cargarInstantanea/);
-  assert.deepEqual(store.cargarInstantanea(), { instantanea: { world, materia }, epoca: 6 });
+  igualSinIndefinidos(store.cargarInstantanea(), { instantanea: { world, materia }, epoca: 6 });
   store.close();
 
   const reopened = new Store(path);
   try {
     const siguiente = reopened.cargarInstantanea()!;
-    assert.deepEqual(siguiente, { instantanea: { world, materia }, epoca: 7 });
+    igualSinIndefinidos(siguiente, { instantanea: { world, materia }, epoca: 7 });
     assert.equal(paramsOf(siguiente.instantanea.world).v23.guardadoCompleto, true);
   } finally { reopened.close(); }
 });
@@ -165,8 +179,8 @@ test('la verificación y la recuperación explícita preservan la materia sin ab
 
   const recuperado = new Store(recuperadoPath), copia = new Store(copiaPath);
   try {
-    assert.deepEqual(recuperado.cargarInstantanea(), { instantanea: { world, materia }, epoca: 7 });
-    assert.deepEqual(copia.cargarInstantanea(), {
+    igualSinIndefinidos(recuperado.cargarInstantanea(), { instantanea: { world, materia }, epoca: 7 });
+    igualSinIndefinidos(copia.cargarInstantanea(), {
       instantanea: { world: nuevo, materia: { ...materia, tick: nuevo.tick } }, epoca: 7,
     });
     assert.equal(store.cargarInstantanea()!.epoca, 7);
@@ -226,7 +240,7 @@ test('SIGKILL entre las escrituras y COMMIT conserva el mundo y el binario anter
   const reopened = new Store(path);
   try {
     assert.deepEqual(filaInstantanea(reopened), previo);
-    assert.deepEqual(reopened.cargarInstantanea(), { instantanea: { world, materia }, epoca: 7 });
+    igualSinIndefinidos(reopened.cargarInstantanea(), { instantanea: { world, materia }, epoca: 7 });
     assert.equal(reopened.db.prepare('SELECT 1 FROM snapshots WHERE slot=1').get(), undefined);
   } finally { reopened.close(); }
 });

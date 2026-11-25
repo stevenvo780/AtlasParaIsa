@@ -108,29 +108,37 @@ test('el destinatario muerto deja la garantía en el Suelo de su última celda',
 
 test('Tomar recorta el pedido, conserva los cuatro κ y contesta aunque el lote caduque', () => {
   const { duenos, colas, frente, esp, kappaLeida } = escenario();
-  const [emisor, receptor] = duenos;
-  const origen = receptor.materia.nuevo(Rol.Vida, 256, 0), lote = emisor.materia.nuevo(Rol.Reserva, -1, 0);
-  receptor.materia.fuente(origen, Float64Array.of(esp, 2, 0, 60), receptor.c.libro);
-  const pedir = intento({ tipo: TipoIntento.Tomar, lote: origen, dato: Float64Array.of(Rol.Vida, Parte.Digerible, esp, 4, lote, 4, 3, 2, 1) });
-  colas[1].push(pedir, pedir);
-  assert.equal(aplicarCola(receptor.c, 'A'), 1);
-  assert.deepEqual(kappaLeida, [[4, 3, 2, 1]]);
-  assert.equal(colas[0].length, 1);
-  assert.equal(colas[0][0].tipo, TipoIntento.Concedido);
-  assert.equal(colas[0][0].nonce, pedir.nonce);
-  assert.equal(colas[0][0].a, pedir.de);
-  assert.deepEqual(colas[0][0].materia, Float64Array.of(esp, 2, 0, 60));
-  assert.equal(aplicarCola(emisor.c, 'B'), 1);
-  assert.equal(emisor.materia.cuantos(lote, esp), 2);
-  assert.equal(emisor.materia.calor(lote), 60);
-  assert.ok(emisor.c.libro.enVuelo.every((n, k) => n + receptor.c.libro.enVuelo[k] === 0));
+  // Este escenario no tiene mundo ni contexto de dueño: el `Tomar` de una persona no debe pasar por la ley de la fauna (que sí
+  // los necesita; su extracción se prueba en ola-f-fauna). Se la sustituye por una sin ganchos durante la prueba.
+  const leyOriginal = leyFauna.aplicar;
+  Object.assign(leyFauna, { aplicar: {} });
+  try {
+    const [emisor, receptor] = duenos;
+    const origen = receptor.materia.nuevo(Rol.Vida, 256, 0), lote = emisor.materia.nuevo(Rol.Reserva, -1, 0);
+    receptor.materia.fuente(origen, Float64Array.of(esp, 2, 0, 60), receptor.c.libro);
+    const pedir = intento({ tipo: TipoIntento.Tomar, lote: origen, dato: Float64Array.of(Rol.Vida, Parte.Digerible, esp, 4, lote, 4, 3, 2, 1) });
+    colas[1].push(pedir, pedir);
+    assert.equal(aplicarCola(receptor.c, 'A'), 1);
+    assert.deepEqual(kappaLeida, [[4, 3, 2, 1]]);
+    assert.equal(colas[0].length, 1);
+    assert.equal(colas[0][0].tipo, TipoIntento.Concedido);
+    assert.equal(colas[0][0].nonce, pedir.nonce);
+    assert.equal(colas[0][0].a, pedir.de);
+    assert.deepEqual(colas[0][0].materia, Float64Array.of(esp, 2, 0, 60));
+    assert.equal(aplicarCola(emisor.c, 'B'), 1);
+    assert.equal(emisor.materia.cuantos(lote, esp), 2);
+    assert.equal(emisor.materia.calor(lote), 60);
+    assert.ok(emisor.c.libro.enVuelo.every((n, k) => n + receptor.c.libro.enVuelo[k] === 0));
 
-  receptor.materia.liberar(origen);
-  frente.gen[1] = genDe(pedir.a) + 1;
-  colas[1].push({ ...pedir, nonce: 43, a: refDe(slotDe(pedir.a), frente.gen[1]) });
-  aplicarCola(receptor.c, 'A');
-  assert.equal(colas[0][0].tipo, TipoIntento.Concedido);
-  assert.equal(colas[0][0].materia?.length, 0);
+    receptor.materia.liberar(origen);
+    frente.gen[1] = genDe(pedir.a) + 1;
+    colas[1].push({ ...pedir, nonce: 43, a: refDe(slotDe(pedir.a), frente.gen[1]) });
+    aplicarCola(receptor.c, 'A');
+    assert.equal(colas[0][0].tipo, TipoIntento.Concedido);
+    assert.equal(colas[0][0].materia?.length, 0);
+  } finally {
+    Object.assign(leyFauna, { aplicar: leyOriginal });
+  }
 });
 
 test('un rechazo de la ley destino devuelve lo debitado y un Tomar rechazado vuelve vacío', () => {

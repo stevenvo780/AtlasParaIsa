@@ -14,6 +14,7 @@ import type { Tile } from '../src/shared/types.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { regionalClimateFactor } from '../src/world/clima.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { asegurarTeselasParecidas } from './hardware/ecologia-gpu.js';
 import { closeEcosystemWorkers, ecosystemGpuDiagnostics } from '../src/world/ecosystem.js';
 import { ResidentGpuBridge, gpuNvrtcAvailable, gpuNvrtcSkipReason } from '../src/world/gpu/puente.js';
 import { cloneWorld, createWorld, ecology, phaseAt, stepWorld, type World } from '../src/world/index.js';
@@ -124,6 +125,22 @@ function assertTilesExact(actual: readonly Tile[], expected: readonly Tile[], la
   assert.ok(compared > 0);
 }
 
+/** Como `assertTilesExact`, pero con la tolerancia absoluta de 1e-9 en cada campo numérico. Desde V23 la tarjeta compila con
+ * FMA (decisión del 24-nov: sin paridad de 0 ULP entre CPU y GPU) y difiere de la CPU en el último dígito; un clima por
+ * ranura mal mapeado difiere en magnitudes del orden de 1e-3 o más. Los campos no numéricos siguen siendo exactos. */
+function assertTilesClose(actual: readonly Tile[], expected: readonly Tile[], label: string): void {
+  assert.equal(actual.length, expected.length, `${label}: cantidad`);
+  for (let i = 0; i < expected.length; i++) {
+    const a = actual[i]!, e = expected[i]!;
+    assert.ok(Object.is(a.x, e.x) && Object.is(a.y, e.y), `${label}: orden ${i}`);
+    for (const key of FIELDS) {
+      const x = a[key], y = e[key];
+      const igual = typeof x === 'number' && typeof y === 'number' ? Object.is(x, y) || Math.abs(x - y) <= 1e-9 : Object.is(x, y);
+      if (!igual) assert.fail(`${label}: tesela ${i} (${e.x},${e.y}).${key}: ${String(x)} !== ${String(y)}`);
+    }
+  }
+}
+
 function normalizedDigest(world: World): string {
   const copy = cloneWorld(world);
   const params = structuredClone(paramsOf(copy));
@@ -141,7 +158,7 @@ test('V22 los parámetros de mundo abierto activan la estacionalidad regional (0
   assert.deepEqual([...new Set(SCHEDULE.map(s => s.weather))].sort(), ['clear', 'rain']);
 });
 
-test('V22 ecology() estacional: serie, CPU 4/28 hilos y GPU dual [0,1] coinciden a 0 ULP en 80 chunks', async t => {
+test('V22 ecology() estacional: serie, CPU 4/28 hilos y GPU dual [0,1] coinciden en 80 chunks (la CPU a 0 ULP, la GPU a 1e-9)', async t => {
   const base = gridWorld(10, 8);
   assert.equal(base.tiles.length, 20_480);
   // El forzamiento varía de verdad entre páginas en este mapa (si no, la prueba no distinguiría nada).
@@ -164,18 +181,18 @@ test('V22 ecology() estacional: serie, CPU 4/28 hilos y GPU dual [0,1] coinciden
     const actual = runSchedule(base, GPU01);
     assert.ok(ecosystemGpuDiagnostics(), 'la pasada debe haber ido a la GPU');
     assert.equal(ecosystemGpuDiagnostics()!.lastPass, 'ecologia');
-    assertTilesExact(actual.tiles, expected.tiles, GPU01.name);
+    assertTilesClose(actual.tiles, expected.tiles, GPU01.name);
   });
   // Amplitud 0 en paralelo sigue siendo el cuerpo de siempre, bit a bit.
-  await t.test('amplitud 0: CPU 4 hilos y GPU idénticas a la serie', async t2 => {
+  await t.test('amplitud 0: CPU 4 hilos idéntica a la serie y GPU a 1e-9', async t2 => {
     assertTilesExact(runSchedule(base, CPU4, 0).tiles, flat.tiles, 'hilos 4 / amplitud 0');
     await t2.test('GPU [0,1] amplitud 0', { skip: GPU_SKIP }, () => {
-      assertTilesExact(runSchedule(base, GPU01, 0).tiles, flat.tiles, 'gpu [0,1] / amplitud 0');
+      assertTilesClose(runSchedule(base, GPU01, 0).tiles, flat.tiles, 'gpu [0,1] / amplitud 0');
     });
   });
 });
 
-test('V22 GPU dual repartida (sharded 70/30): el clima por ranura se mapea global→local sin perder un bit', { skip: GPU_SKIP }, async () => {
+test('V22 GPU dual repartida (sharded 70/30): el clima por ranura se mapea global→local (a 1e-9, sin paridad de 0 ULP)', { skip: GPU_SKIP }, async () => {
   const base = gridWorld(10, 8), expected = cloneWorld(base);
   setParams(expected, armParams(SERIAL));
   const actual = cloneWorld(base);
@@ -208,10 +225,10 @@ test('V22 GPU dual repartida (sharded 70/30): el clima por ranura se mapea globa
       } catch (error) { store.abortParallel(); throw error; }
     }
   } finally { await bridge.close(); }
-  assertTilesExact(actual.tiles, expected.tiles, 'gpu [0,1] sharded 70/30');
+  assertTilesClose(actual.tiles, expected.tiles, 'gpu [0,1] sharded 70/30');
 });
 
-test('V22 stepWorld de mundo abierto (semilla 51926, 620 pasos, 62 ciclos ecológicos): mismo digesto en serie, 4 hilos y GPU [0,1]', async t => {
+test('V22 stepWorld de mundo abierto (semilla 51926, 620 pasos, 62 ciclos ecológicos): mismo digesto en serie y 4 hilos; la GPU [0,1] parecida celda a celda', async t => {
   const STEPS = 620;
   const run = (arm: Arm): World => {
     const world = createWorld(SEED, armParams(arm));
@@ -221,11 +238,16 @@ test('V22 stepWorld de mundo abierto (semilla 51926, 620 pasos, 62 ciclos ecoló
   const expected = run(SERIAL);
   assert.equal(paramsOf(expected).ecologia.amplitudEstacional, 0.25);
   const digest = normalizedDigest(expected), tiles = plainTiles(expected.tiles);
-  for (const arm of [CPU4, GPU01]) await t.test(arm.name, { skip: arm.gpu.length ? GPU_SKIP : false }, () => {
-    const actual = run(arm);
-    assertTilesExact(actual.tiles, expected.tiles, arm.name);
+  await t.test(CPU4.name, () => {
+    const actual = run(CPU4);
+    assertTilesExact(actual.tiles, expected.tiles, CPU4.name);
     assert.deepEqual(plainTiles(actual.tiles), tiles);
-    assert.equal(normalizedDigest(actual), digest, `${arm.name}: digesto canónico`);
+    assert.equal(normalizedDigest(actual), digest, `${CPU4.name}: digesto canónico`);
+  });
+  // Con la GPU el mundo de 620 pasos ya no es idéntico bit a bit: se exige el parecido estadístico de cada celda (|Δ| ≤ 1e-9
+  // en al menos el 99 % de ellas, medias a 1e-4), como en tests/hardware/ecologia-gpu.ts.
+  await t.test(GPU01.name, { skip: GPU_SKIP }, t2 => {
+    asegurarTeselasParecidas(t2, expected.tiles, run(GPU01).tiles);
   });
 });
 

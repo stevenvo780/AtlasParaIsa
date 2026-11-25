@@ -9,9 +9,8 @@ import { phaseAt, addEvent, remember } from '../mundo/crear.js';
 import { WHISPER_INTENT_LABEL } from '../actuar/gestos.js';
 import type { Tile, Action } from '../../shared/types.js';
 import { type BodyState, type BodyRates, assimilateFood, exertBody, hydrateBody, restBody } from '../body.js';
-import { REF_NULA, slotDe } from '../motor/contratos.js';
 import { CELDAS_VENTANA, DISTANCIA_VENTANA, LADO_VENTANA, percepcionDe } from './percepcion.js';
-import { CONSULTA, ORGANISMO, UMBRAL } from './planes.js';
+import { CONSULTA, UMBRAL } from './planes.js';
 import { type ResidentFastAccess, residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import { paramsOf } from '../params.js';
@@ -58,11 +57,13 @@ function planAffordable(person: Person, payload: number, steps: number, work: nu
 let chooseDepth = 0;
 
 /**
- * Decide la siguiente acción y objetivo de `person` (F3 de ARQ-motor). Lo regular de su ventana r = 7 (pasos BFS,
- * la mejor celda de cada consulta, la pareja, quien tiene hambre cerca y las utilidades del cerebro) llega ya
- * percibido en F2 (`percepcion.ts`) sobre el estado al empezar la fase de personas; aquí quedan los candidatos fríos,
- * que leen el estado privado, y la elección. Una mejor celda percibida que no cumple las condiciones propias de la
- * persona (esfuerzo asumible, fuente disputada, cisternas, lugares cercanos) se busca otra vez como siempre.
+ * Decide la siguiente acción y objetivo de `person` (F3 de ARQ-motor). Lo regular de su ventana r = 7 (pasos BFS, la
+ * mejor celda de cada consulta y las utilidades del cerebro) llega ya percibido en F2 (`percepcion.ts`) sobre el estado
+ * al empezar la fase de personas; aquí quedan los candidatos fríos, que leen el estado privado, y la elección.
+ * Lo percibido se acepta solo si sigue valiendo ahora: si alguien cambió su disco antes en este tick, la fila se percibe
+ * de nuevo sobre el estado vivo (`filaDe`), y una celda ganadora que no cumple la ley exacta o las condiciones propias
+ * de la persona (esfuerzo asumible, fuente disputada, cisternas, lugares cercanos) se busca otra vez como siempre.
+ * La pareja y quien tiene hambre salen de la lista viva de cercanos, como siempre.
  */
 export function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, slot?: number, tileInArg?: TileLookup, fastArg?: ResidentFastAccess | null): void {
   const depth = ++chooseDepth;
@@ -76,17 +77,16 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const params = paramsOf(world);
   // V19/L: un tramo de descanso se acredita con lo que el cuerpo recuperó DE VERDAD hasta esta nueva decisión.
   if (own && person.action === 'rest' && params.conducta.aprendizajeCausal && params.conducta.politicaPeso > 0 && world.adaptationEnabled) creditCausalOutcome(world, person, 'rest');
-  const { salida, fila, terreno, personas } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, fast, own);
+  const { salida, fila, terreno } = percepcionDe(world).filaDe(world.people, world.tick, person, slot, tileIn, fast, own);
   const ventana = salida.ventana, ventanaCelda = salida.ventanaCelda, base = fila * CELDAS_VENTANA;
+  const celdaPercibida = (consulta: number): number => salida.celda[fila * salida.q + consulta]!;
   const percibida = (consulta: number): Tile | undefined => {
-    const c = salida.celda[fila * salida.q + consulta]!;
+    const c = celdaPercibida(consulta);
     return c >= 0 ? terreno.teselas[c] : undefined;
   };
+  /** Celda del SoA residente de lo percibido en `consulta` (−1 sin SoA): para leer en vivo el campo que la ley mira. */
+  const soaPercibida = (consulta: number): number => fast ? terreno.soa[celdaPercibida(consulta)]! : -1;
   const pasosPercibidos = (consulta: number): number => salida.pasos[fila * salida.q + consulta]!;
-  const percibido = (organismo: number): Person | undefined => {
-    const ref = salida.organismo[fila * salida.v + organismo]!;
-    return ref === REF_NULA ? undefined : personas[slotDe(ref)];
-  };
   /** Pasos BFS hasta `point` dentro de la ventana (undefined fuera de ella, en agua o sin ruta), como `perceivedRoutes`. */
   const stepsTo = (point: Point): number | undefined => {
     const dx = point.x - person.x, dy = point.y - person.y;
@@ -135,10 +135,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     fatigue: steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4),
   });
   const nearbyPeople = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'choose', own ? choosePeople : undefined);
-  // S e I son las únicas protegidas: la percibida más cercana es la misma que la primera de `nearbyPeople`.
-  const parejaPercibida = person.role !== 'neighbor' ? percibido(ORGANISMO.pareja) : undefined;
-  const partner = parejaPercibida && parejaPercibida.role !== 'neighbor' && parejaPercibida !== person && distance(person, parejaPercibida) <= RADIUS
-    ? parejaPercibida : nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
+  const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
   // Ley DIV (`conducta.aptitud`): la especialización es para quien no tiene urgencias. Sólo actúa
   // en el contexto `ready` de `valueKey` (sed, hambre y cansancio ≤ 0,5); por encima, beber, comer
@@ -165,8 +162,11 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar. Con
   // `recelo` el comparador sigue siendo diferencia de una clave finita por celda (preorden total), así que la
   // fusión CONFL + perf elige exactamente la misma celda que el `filter().sort()[0]` de la rama CONFL.
+  // Lo percibido es la mejor celda de un filtro f32 algo más ancho que la ley (planes.ts): si cumple la ley y las
+  // condiciones propias, es también la mejor de las que las cumplen; si no, se busca como siempre.
   let food = percibida(CONSULTA.comida);
-  if (food && (disputada || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.comida), 0)))) {
+  if (food && (disputada || !(foodOf(food, soaPercibida(CONSULTA.comida)) > UMBRAL.comida)
+    || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.comida), 0)))) {
     food = undefined;
     let foodKey = 0;
     for (let i = 0; i < reachableTiles.length; i++) {
@@ -305,7 +305,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   // La consulta percibida solo ve el agua del suelo: con una cisterna cerca, o si su celda no sirve, se busca como siempre.
   let water = percibida(CONSULTA.agua);
   const cisterna = algunoCerca(world.structures, person, RADIUS + 2, structure => structure.components.includes('cistern'));
-  if (cisterna || (water && (disputada || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.agua), 0))))) {
+  if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)
+    || !(desperateSubsistence || planAffordable(person, payload, pasosPercibidos(CONSULTA.agua), 0))))) {
     water = undefined;
     let waterKey = 0;
     for (let i = 0; i < reachableTiles.length; i++) {
@@ -477,21 +478,21 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const resource = materialCercano(needWood, needStone, preferWood);
   const tripResource = materialCercano(tripWood, tripStone, tripPrefersWood);
   const workBias = person.traits.industriousness;
-  const lugarCerca = (tile: Tile) => algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5);
-  let buildable = percibida(CONSULTA.obra);
-  if (buildable && lugarCerca(buildable)) {
-    buildable = undefined;
-    let buildableKey = 0;
+  /** La tierra más cercana del disco que cumple `sirve` (la primera en orden de filas si empatan), como las búsquedas de siempre. */
+  const masCercana = (sirve: (tile: Tile, cell: number) => boolean): Tile | undefined => {
+    let mejor: Tile | undefined, clave = 0;
     for (let i = 0; i < nearbyTiles.length; i++) {
-      const tile = nearbyTiles[i]!;
-      const key = nearbyDist[i]!;
-      if (buildable && !(key < buildableKey)) continue;
-      const cell = fast ? nearbyCells[i]! : -1;
-      if (!isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadObra && vegetationOf(tile, cell) > UMBRAL.vegetacionObra && !lugarCerca(tile)) {
-        buildable = tile; buildableKey = key;
-      }
+      if (mejor && !(nearbyDist[i]! < clave)) continue;
+      if (sirve(nearbyTiles[i]!, fast ? nearbyCells[i]! : -1)) { mejor = nearbyTiles[i]; clave = nearbyDist[i]!; }
     }
-  }
+    return mejor;
+  };
+  const lugarCerca = (tile: Tile) => algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5);
+  // La tierra que se percibe es siempre suelo, pradera o techo: sin techo es suelo o pradera.
+  const obraValida = (tile: Tile, cell: number) => !isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadObra && vegetationOf(tile, cell) > UMBRAL.vegetacionObra;
+  let buildable = percibida(CONSULTA.obra);
+  if (buildable && (lugarCerca(buildable) || !obraValida(buildable, soaPercibida(CONSULTA.obra))))
+    buildable = masCercana((tile, cell) => obraValida(tile, cell) && !lugarCerca(tile));
   const gatherAt = modularWorks ? tripResource : resource;
   if (gatherAt && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: gatherAt, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
   // V20 modular: an active site or extension supplies its own target, so free ground is not required to
@@ -508,7 +509,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (technology) candidates.push({ action: technology.kind, target: person, score: technology.score, reason: technology.reason });
   const damaged = repairOpportunity(world,person);
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Reparar una instalación que percibe recupera una función útil; exige material y trabajo.'});
-  const farmland = person.materials.wood >= 1 ? percibida(CONSULTA.cultivo) : undefined;
+  const cultivoValido = (tile: Tile, cell: number) => !isShelterOf(tile, cell) && moistureOf(tile, cell) > UMBRAL.humedadCultivo && vegetationOf(tile, cell) < UMBRAL.vegetacionCultivo;
+  let farmland = person.materials.wood >= 1 ? percibida(CONSULTA.cultivo) : undefined;
+  if (farmland && !cultivoValido(farmland, soaPercibida(CONSULTA.cultivo))) farmland = masCercana(cultivoValido);
   if (farmland) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && foodOf(food, fast ? soaCell(fast, food.x, food.y, food) : -1) < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   let reunionCandidate: Candidate | undefined;
   if (partner) {
@@ -550,11 +553,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
   }
   const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);
+  // Con el hambre de ahora, como siempre: `share` vuelve a buscar receptor con ella al ejecutarse.
   let hungry: Person | undefined;
-  const hambrePercibida = percibido(ORGANISMO.hambriento);
-  const compartible = (other: Person) => distance(person, other) <= UMBRAL.radioCompartir && other.hunger > UMBRAL.hambreAjena;
-  if (hambrePercibida && hambrePercibida !== person && compartible(hambrePercibida)) hungry = hambrePercibida;
-  else for (const other of nearbyPeople) if (compartible(other) && (!hungry || other.hunger > hungry.hunger)) hungry = other;
+  for (const other of nearbyPeople) if (distance(person, other) <= UMBRAL.radioCompartir && other.hunger > UMBRAL.hambreAjena && (!hungry || other.hunger > hungry.hunger)) hungry = other;
   const learned = place ? person.habits.find(habit => habit.placeId === place.id && habit.strength >= 0.5) : undefined;
   if (place && hungry && availableToShare(world, person, hungry) && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
     action: 'share', target: hungry, score: 0.22 + person.generosity * (1 + person.culture.sharing * 0.5) + (learned ? learned.strength : 0),

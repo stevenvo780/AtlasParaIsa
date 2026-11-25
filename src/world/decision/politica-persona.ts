@@ -54,24 +54,33 @@ export function decideConCerebro(world: World, person: Person): boolean {
   return paramsOf(world).conducta.politicaPeso > 0 && world.tick >= person.decisionAt && person.hunger <= 0.75 && person.thirst <= 0.75;
 }
 
-/** F2: observación, pesos y plasticidad de cada slot del lote con plan `conCerebro`, en las columnas del cerebro. */
+const observacionF2 = new Float64Array(POLICY_INPUTS);
+
+/** F2: las columnas del cerebro antes de lanzar. Todo slot cuyo ocupante cambió se publica con sus pesos heredados
+ * aunque no decida en este tick (contrato: los pesos se escriben al nacer y no cambian; quien los espeje por `gen`
+ * los toma en cuanto la ve), y cada slot del lote con plan `conCerebro`, con su observación y su plasticidad de ahora. */
 export function prepararCerebros(world: World, vista: VistaMundo, lote: LotePercepcion, tileIn: (x: number, y: number) => Tile | undefined): void {
-  const fast = residentFastAccess(world.tiles), obs = new Float64Array(POLICY_INPUTS);
+  if (paramsOf(world).conducta.politicaPeso <= 0) return;
+  const { personas } = vista;
+  // Sin crearle la política a nadie: la de un fundador que aún no decidió es la misma que le dará `ensurePersonPolicy`.
+  for (let s = 0; s < personas.length; s++) if (!vista.pesosAlDia(s)) vista.escribirPesos(s, (personas[s]!.policy ?? founderPolicy(world.seed, personas[s]!.id)).weights);
+  const fast = residentFastAccess(world.tiles);
   for (let i = 0; i < lote.slots.length; i++) {
     if (lote.plan[i] !== PLAN.conCerebro) continue;
-    const person = world.people[lote.slots[i]!]!;
+    const slot = lote.slots[i]!, person = personas[slot]!;
     const { genome, plasticity } = ensurePersonPolicy(world, person);
-    localPolicyObservation(world, person, tileIn, fast, obs);
-    vista.cerebro(lote.slots[i]!, obs, genome.weights, plasticity.bias);
+    localPolicyObservation(world, person, tileIn, fast, observacionF2);
+    vista.escribirPesos(slot, genome.weights);
+    vista.escribirEstado(slot, observacionF2, plasticity.bias);
   }
 }
 
-/** Las utilidades del cerebro percibidas, por persona, como las lee `choose`. */
+/** Las utilidades del cerebro percibidas, por persona, como las lee `choose`: vistas de una sola copia en f64 por tick. */
 export function puntuacionesPercibidas(world: World, lote: LotePercepcion, salida: Percepcion): Map<string, Float64Array> {
-  const scores = new Map<string, Float64Array>();
-  for (let i = 0; i < lote.slots.length; i++) {
-    if (lote.plan[i] !== PLAN.conCerebro) continue;
-    scores.set(world.people[lote.slots[i]!]!.id, Float64Array.from(salida.utilidad.subarray(i * salida.a, i * salida.a + POLICY_ACTIONS.length)));
-  }
-  return scores;
+  const puntuaciones = new Map<string, Float64Array>(), n = lote.slots.length, a = salida.a;
+  if (a === 0) return puntuaciones;
+  const utilidades = Float64Array.from(salida.utilidad.subarray(0, n * a));
+  for (let i = 0; i < n; i++)
+    if (lote.plan[i] === PLAN.conCerebro) puntuaciones.set(world.people[lote.slots[i]!]!.id, utilidades.subarray(i * a, i * a + POLICY_ACTIONS.length));
+  return puntuaciones;
 }

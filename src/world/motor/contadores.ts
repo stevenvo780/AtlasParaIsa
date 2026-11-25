@@ -2,7 +2,7 @@ import { NE } from '../../shared/naturaleza.js';
 import { registrar, type Violacion } from '../invariantes.js';
 import type { Libro } from '../materia/tipos.js';
 import type { World } from '../mundo/tipos.js';
-import { ErrorFatalMotor } from '../paralelo/piscina.js';
+import { ErrorFatalMotor } from '../paralelo/barrera.js';
 import type { CtxDueno } from './contratos.js';
 
 export type TipoId = Parameters<CtxDueno['id']>[0];

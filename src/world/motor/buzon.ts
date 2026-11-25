@@ -1,5 +1,4 @@
-import { totalmem } from 'node:os';
-import { ErrorFatalMotor } from '../paralelo/piscina.js';
+import { ErrorFatalMotor } from '../paralelo/barrera.js';
 import { crecerSAB, crearSAB } from '../soa/arena.js';
 import type { Buzon, Cola, Hilo, Intento } from './contratos.js';
 import { TipoIntento } from './contratos.js';
@@ -8,7 +7,10 @@ export type FaseMotor = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 const FASE_LECTURA = { M: 1, A: 5, B: 1, F0: 0 } as const;
 const PALABRA = Float64Array.BYTES_PER_ELEMENT;
 const CABECERA = 9;
-const MAX_BYTES = Math.ceil(totalmem() / PALABRA) * PALABRA;
+/** Tope por cola si el anfitrión no da otro. Es reserva virtual, no memoria usada: 28 dueños × 3 colas
+ * caben de sobra en los 128 TiB de direcciones. Las leyes no preguntan a la máquina, así que el
+ * anfitrión que quiera el límite físico lo pasa al construir `Buzones`. */
+export const MAX_BYTES_COLA = 2 ** 36;
 
 function colaDe(fase: FaseMotor, tipo: Intento['tipo']): Cola {
   if (tipo === TipoIntento.Migrante) return 'M';
@@ -35,11 +37,11 @@ export interface MemoriaBuzones {
   readonly duenos: readonly Pick<Record<Cola, ColaCompartida>, 'M' | 'A' | 'B'>[];
 }
 
-function crearCola(): ColaCompartida {
+function crearCola(maxBytes: number): ColaCompartida {
   return {
     cursores: new BigUint64Array(new SharedArrayBuffer(2 * BigUint64Array.BYTES_PER_ELEMENT)),
-    datos: crearSAB(0, MAX_BYTES),
-    listos: new Uint8Array(crearSAB(0, MAX_BYTES / PALABRA)),
+    datos: crearSAB(0, maxBytes),
+    listos: new Uint8Array(crearSAB(0, maxBytes / PALABRA)),
   };
 }
 
@@ -51,12 +53,13 @@ function enviar(cola: ColaCompartida, i: Intento): void {
   const tam = palabras + Math.ceil(Math.max(0, b) / PALABRA);
   const inicio = Number(Atomics.add(cola.cursores, 0, BigInt(tam)));
   const fin = inicio + tam;
-  if (fin * PALABRA > MAX_BYTES) throw new ErrorFatalMotor('Buzón sin memoria para el paso.');
+  const maxBytes = cola.datos.maxByteLength;
+  if (fin * PALABRA > maxBytes) throw new ErrorFatalMotor('Buzón sin memoria para el paso.');
   if (fin * PALABRA > cola.datos.byteLength) {
-    crecerSAB(cola.datos, capacidad(fin * PALABRA, cola.datos.byteLength, MAX_BYTES));
+    crecerSAB(cola.datos, capacidad(fin * PALABRA, cola.datos.byteLength, maxBytes));
   }
   if (fin > cola.listos.length) {
-    crecerSAB(cola.listos.buffer as SharedArrayBuffer, capacidad(fin, cola.listos.length, MAX_BYTES / PALABRA));
+    crecerSAB(cola.listos.buffer as SharedArrayBuffer, capacidad(fin, cola.listos.length, maxBytes / PALABRA));
   }
   const fila = new Float64Array(cola.datos, inicio * PALABRA, palabras);
   fila[0] = i.tipo; fila[1] = i.de; fila[2] = i.a; fila[3] = i.celda; fila[4] = i.lote; fila[5] = i.nonce;
@@ -144,12 +147,14 @@ export class Buzones {
   private fase: FaseMotor = 0;
   private local: Record<Cola, Intento[]> = { F0: [], M: [], A: [], B: [] };
 
-  constructor(hilos: number) {
+  constructor(hilos: number, maxBytesCola = MAX_BYTES_COLA) {
     if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
+    if (!Number.isSafeInteger(maxBytesCola) || maxBytesCola < PALABRA) throw new RangeError(`Tope de cola inválido: ${maxBytesCola}.`);
+    const max = Math.floor(maxBytesCola / PALABRA) * PALABRA;
     this.memoria = hilos === 1 ? null : {
       fase: new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
-      f0: crearCola(),
-      duenos: Array.from({ length: hilos }, () => ({ M: crearCola(), A: crearCola(), B: crearCola() })),
+      f0: crearCola(max),
+      duenos: Array.from({ length: hilos }, () => ({ M: crearCola(max), A: crearCola(max), B: crearCola(max) })),
     };
   }
 

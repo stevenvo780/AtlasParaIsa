@@ -318,9 +318,6 @@ test('SAB reutilizados, caché de terreno y salidas sucias reescritas; ids repet
       const so = estado.salidas().so.slice(0, due.length * NSO);
       assert.ok(!so.includes(-7), 'cada fila de salida se escribió');
       if (referencia) assert.deepStrictEqual(so, referencia); else referencia = so;
-      const d = pool.diagnostics();
-      assert.equal(d.piscina!.regionOrder.flat().length, estado.regiones.length, 'cada región exactamente una vez');
-      assert.ok(d.piscina!.adversarialDelayCounts.some(n => n > 0), 'esperas adversariales reales');
     }
     assert.equal(estado.reasignaciones, reasignaciones, 'sin reasignar SAB en régimen estacionario');
     assert.equal(estado.reconstruccionesTerreno, 1, 'la disposición del terreno se reutiliza');

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { threadId, Worker } from 'node:worker_threads';
 import {
-  BARRIER_HEADER, WORKER_CELL, ERROR_CHARACTERS, PLAZO_BARRERA_MS, createBarrier,
+  BARRIER_HEADER, WORKER_CELL, ERROR_CHARACTERS, ErrorFatalMotor, PLAZO_BARRERA_MS, createBarrier,
   workerCell, waitForBarrier, readWorkerError, readSupervisorError, type SharedBarrier,
 } from './barrera.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
@@ -32,15 +32,6 @@ export interface DiagnosticoPiscina {
   fatal: boolean;
 }
 
-export class ErrorFatalMotor extends Error {
-  constructor(motivo: unknown) {
-    const mensaje = motivo instanceof Error ? motivo.message : String(motivo);
-    // recuperarPaso identifica una piscina caída por este prefijo.
-    super(`StaticWorkerPool abortado: ${mensaje}`, { cause: motivo });
-    this.name = 'ErrorFatalMotor';
-  }
-}
-
 export interface StaticWorkerPoolOptions extends ModuloCalculo {
   workers: number;
 }
@@ -65,6 +56,7 @@ export interface StaticWorkerDiagnostics {
   completedJobs: number[];
   supervisorThreadId: number;
   sourceLoader: boolean;
+  /** Ya no se observan ni el orden ni los retardos: quedan vacíos hasta que M2 y M3 retiren a quienes los leen. */
   regionOrder: (number | string)[][];
   adversarialDelaysMs: number[];
   adversarialDelayCounts: number[];

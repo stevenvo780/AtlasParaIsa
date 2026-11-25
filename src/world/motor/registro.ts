@@ -1,19 +1,19 @@
-import { totalmem } from 'node:os';
-import { PLAZO_BARRERA_MS } from '../paralelo/barrera.js';
-import { ErrorFatalMotor } from '../paralelo/piscina.js';
+import { conCerrojo, ErrorFatalMotor } from '../paralelo/barrera.js';
 import { crecerSAB, crearSAB } from '../soa/arena.js';
 import type { Registro } from './contratos.js';
 
 const BYTES = BigUint64Array.BYTES_PER_ELEMENT;
-const MAX_BYTES = Math.ceil(totalmem() / BYTES) * BYTES;
+/** Tope de reserva virtual si el anfitrión no da otro; las leyes no preguntan a la máquina. */
+export const MAX_BYTES_REGISTRO = 2 ** 36;
 const clave = (datos: Uint8Array) => Buffer.from(datos.buffer, datos.byteOffset, datos.byteLength).toString('base64');
 
 function preparar(memoria: MemoriaRegistro, fin: number, n: number): void {
   const bytesIndice = n * BYTES;
-  if (fin > MAX_BYTES || bytesIndice > MAX_BYTES) throw new ErrorFatalMotor('Registro sin memoria.');
+  const max = (vista: Uint8Array | BigUint64Array) => (vista.buffer as SharedArrayBuffer).maxByteLength;
+  if (fin > max(memoria.datos) || bytesIndice > max(memoria.fines)) throw new ErrorFatalMotor('Registro sin memoria.');
   const crecer = (vista: Uint8Array | BigUint64Array, bytes: number) => {
     if (bytes > vista.byteLength) crecerSAB(vista.buffer as SharedArrayBuffer,
-      Math.min(MAX_BYTES, Math.max(bytes, 512, 2 * vista.byteLength)));
+      Math.min(max(vista), Math.max(bytes, 512, 2 * vista.byteLength)));
   };
   try {
     crecer(memoria.datos, fin);
@@ -33,14 +33,14 @@ export class RegistroContenido implements Registro {
   private readonly indices = new Map<string, number>();
   private readonly locales: Uint8Array[] = [];
 
-  constructor(hilosOMemoria: number | MemoriaRegistro) {
+  constructor(hilosOMemoria: number | MemoriaRegistro, maxBytes = MAX_BYTES_REGISTRO) {
     if (typeof hilosOMemoria !== 'number') { this.memoria = hilosOMemoria; return; }
     if (!Number.isSafeInteger(hilosOMemoria) || hilosOMemoria < 1) throw new RangeError('Cantidad de hilos inválida.');
     this.memoria = hilosOMemoria === 1 ? null : {
       escritor: new Int32Array(new SharedArrayBuffer(4)),
       publicados: new BigUint64Array(new SharedArrayBuffer(BYTES)),
-      fines: new BigUint64Array(crearSAB(0, MAX_BYTES)),
-      datos: new Uint8Array(crearSAB(0, MAX_BYTES)),
+      fines: new BigUint64Array(crearSAB(0, Math.floor(maxBytes / BYTES) * BYTES)),
+      datos: new Uint8Array(crearSAB(0, maxBytes)),
     };
   }
 
@@ -78,19 +78,7 @@ export class RegistroContenido implements Registro {
   }
 
   private conEscritor<T>(f: () => T): T {
-    const m = this.memoria;
-    if (!m) return f();
-    const plazo = performance.now() + PLAZO_BARRERA_MS;
-    while (Atomics.compareExchange(m.escritor, 0, 0, 1) !== 0) {
-      const quedan = plazo - performance.now();
-      if (quedan <= 0) throw new ErrorFatalMotor('El escritor del registro no llegó al plazo.');
-      Atomics.wait(m.escritor, 0, 1, Math.min(quedan, 1000));
-    }
-    try { return f(); }
-    finally {
-      Atomics.store(m.escritor, 0, 0);
-      Atomics.notify(m.escritor, 0, 1);
-    }
+    return this.memoria ? conCerrojo(this.memoria.escritor, 0, 'el escritor del registro', f) : f();
   }
 
   insertar(canonico: Uint8Array): number {

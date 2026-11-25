@@ -345,12 +345,7 @@ test('T145/T153: salidas, intentos, stocks y agregados idénticos con 1/2/4/8/28
           assert.ok(d.ocupacionWorkers >= 0 && d.ocupacionWorkers <= 1, `${etiqueta}: ocupación ${d.ocupacionWorkers}`);
           if (hilos > 1) {
             assert.ok(d.piscina, `${etiqueta}: diagnóstico de la piscina`);
-            assert.equal(d.piscina.regionOrder.flat().length, estado.regiones.length, `${etiqueta}: cada región exactamente una vez`);
             assert.ok(d.piscina.completedJobs.every(n => n === d.despachos), `${etiqueta}: workers persistentes, un trabajo por despacho`);
-            // Con más de una región por cola hay esperas físicas reales entre regiones.
-            if (orden === 'adversarial' && estado.regiones.length > 2 * hilos) {
-              assert.ok(d.piscina.adversarialDelayCounts.some(n => n > 0), `${etiqueta}: esperas adversariales reales`);
-            }
           }
         }
       } finally { await pool.close(); }

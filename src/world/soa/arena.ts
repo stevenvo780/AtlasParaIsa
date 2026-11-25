@@ -1,6 +1,6 @@
 /// <reference lib="es2024.sharedmemory" />
 
-import { ErrorFatalMotor } from '../paralelo/piscina.js';
+import { conCerrojo, ErrorFatalMotor } from '../paralelo/barrera.js';
 
 export type Elements = Uint8Array | Uint16Array | Uint32Array | Int16Array | Int32Array | Float32Array | Float64Array;
 type Tipo = 'Uint8Array' | 'Uint16Array' | 'Uint32Array' | 'Int16Array' | 'Int32Array' | 'Float32Array' | 'Float64Array';
@@ -31,7 +31,6 @@ const CERROJO = 0, CAPACIDAD = 1, ALTA = 2, USADAS = 3, LIBRE = 4, GENERACION = 
 const OCUPADA = 0xffffffff;
 const MAX_RANURAS = OCUPADA - 1; // El enlace libre es ranura + 1 y reserva 0 y OCUPADA.
 const CRECIMIENTO = 1.25;
-const PLAZO_MS = 60_000;
 
 export function crearSAB(bytes: number, maxBytes: number): SharedArrayBuffer {
   return new SharedArrayBuffer(bytes, { maxByteLength: maxBytes });
@@ -188,19 +187,6 @@ export class PageArena {
   }
 
   private bajoCerrojo<T>(trabajo: () => T): T {
-    if (Atomics.compareExchange(this.control, CERROJO, 0, 1) !== 0) {
-      const vence = performance.now() + PLAZO_MS;
-      do {
-        const queda = vence - performance.now();
-        if (queda <= 0) throw new ErrorFatalMotor('Plazo agotado esperando el asignador de la arena.');
-        Atomics.wait(this.control, CERROJO, 1, queda);
-      } while (Atomics.compareExchange(this.control, CERROJO, 0, 1) !== 0);
-    }
-    try {
-      return trabajo();
-    } finally {
-      Atomics.store(this.control, CERROJO, 0);
-      Atomics.notify(this.control, CERROJO, 1);
-    }
+    return conCerrojo(this.control, CERROJO, 'el asignador de la arena', trabajo);
   }
 }

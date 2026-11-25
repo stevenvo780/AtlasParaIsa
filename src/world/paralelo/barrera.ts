@@ -7,6 +7,35 @@ export const WORKER_CELL = { threadId: 0, completed: 1, errorLength: 2, activoUs
 export const ERROR_CHARACTERS = 8192;
 export const PLAZO_BARRERA_MS = 60_000;
 
+/** Fallo permanente del paso (hilo muerto, plazo vencido, memoria compartida agotada): no se reintenta. */
+export class ErrorFatalMotor extends Error {
+  constructor(motivo: unknown) {
+    const mensaje = motivo instanceof Error ? motivo.message : String(motivo);
+    // recuperarPaso identifica una piscina caída por este prefijo.
+    super(`StaticWorkerPool abortado: ${mensaje}`, { cause: motivo });
+    this.name = 'ErrorFatalMotor';
+  }
+}
+
+/** Exclusión mutua sobre `control[indice]` (0 libre, 1 tomado). Esperar más que el plazo es fatal: quien la
+ * tenía murió con ella o quedó colgado. */
+export function conCerrojo<T>(control: Int32Array, indice: number, nombre: string, trabajo: () => T): T {
+  if (Atomics.compareExchange(control, indice, 0, 1) !== 0) {
+    const vence = performance.now() + PLAZO_BARRERA_MS;
+    do {
+      const queda = vence - performance.now();
+      if (queda <= 0) throw new ErrorFatalMotor(`Plazo agotado esperando ${nombre}.`);
+      Atomics.wait(control, indice, 1, Math.min(queda, 1000));
+    } while (Atomics.compareExchange(control, indice, 0, 1) !== 0);
+  }
+  try {
+    return trabajo();
+  } finally {
+    Atomics.store(control, indice, 0);
+    Atomics.notify(control, indice, 1);
+  }
+}
+
 export interface SharedBarrier {
   control: Int32Array<SharedArrayBuffer>;
   errors: Uint16Array<SharedArrayBuffer>;

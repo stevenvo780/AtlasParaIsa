@@ -4,8 +4,8 @@
 // hilos, la CPU, un reloj o el azar del proceso. Esos valores solo pueden vivir en el
 // despacho (`src/world/paralelo/`, `src/world/gpu/`), y allí solo como espera,
 // diagnóstico o reparto de trabajo: nunca deciden qué sale del mundo.
-// Lente 2 (orden de llegada): el reparto por regiones es estático y por contenido;
-// las colas de workers no roban trabajo y la partición no depende del orden de entrada.
+// Lente 2 (reparto): el reparto por regiones es estático, completo y sin robo. Desde V23
+// no hay paridad entre hilos que defender, así que las colas siguen el orden de entrada.
 // Lente 3 (cambio de mundo no declarado): los defaults siguen siendo las reglas 11 con
 // la Fase B en valores históricos, y el mundo por defecto es bit a bit el mismo con
 // 1 hilo, con 4 hilos o con el SoA de terreno.
@@ -96,14 +96,17 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
   const conOs = despacho.filter(ruta => sinComentarios(readFileSync(ruta, 'utf8')).includes("from 'node:os'"));
   assert.deepEqual(conOs, []);
   // Lista blanca estricta de relojes en el despacho, con su único uso legítimo:
-  // · piscina.ts — `performance.now` mide la espera adversarial y alimenta el
+  // · piscina.ts — `performance.now` mide tiempos activos y de barrera para el
   //   diagnóstico del despacho; no escribe ningún valor del mundo.
+  // · barrera.ts — `performance.now` acota la barrera y los cerrojos compartidos (60 s);
+  //   si vence, el paso es fatal y el servidor sale con 75.
   // · gpu/puente.ts — `Date.now` acota la espera al subproceso GPU (60 s) y el
   //   hook de aborto de la prueba (2 s); si vence, el paso lanza y no se confirma.
   // · gpu/autoprueba.ts — `process.hrtime` mide el presupuesto de 200 ms de la
   //   autoprueba de paridad; su resultado habilita o no un dispositivo, no una ley.
   const blanca: Readonly<Record<string, readonly string[]>> = {
     'paralelo/piscina.ts': ['performance.now'],
+    'paralelo/barrera.ts': ['performance.now'],
     'gpu/puente.ts': ['Date.now'],
     'gpu/autoprueba.ts': ['hrtime'],
   };
@@ -136,18 +139,10 @@ test('T171 lente 1/2: los kernels GPU compilan FP64 con --fmad=false y sin fast-
 test('T171 lente 2: la partición por regiones es estática, completa y sin robo', () => {
   const regiones: StaticRegion[] = Array.from({ length: 10 }, (_, id) => ({ id, begin: id * 4, end: id * 4 + 4 }));
   const desordenadas = [regiones[7]!, regiones[0]!, regiones[9]!, regiones[3]!, ...regiones.slice(4, 7), regiones[1]!, regiones[2]!, regiones[8]!];
-  for (const orden of ['natural', 'inverso', 'adversarial'] as const) {
-    const colas = partitionRegions(desordenadas, 3, orden);
-    assert.equal(colas.length, 3);
-    const vistos = colas.flatMap(cola => cola.map(region => region.id));
-    assert.deepEqual([...vistos].sort((a, b) => Number(a) - Number(b)), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'cada región se calcula exactamente una vez');
-    // La pertenencia a cada cola no depende del orden en que llegaron las regiones.
-    assert.deepEqual(partitionRegions(regiones, 3, orden), colas);
-  }
-  const natural = partitionRegions(regiones, 3, 'natural');
-  const inverso = partitionRegions(regiones, 3, 'inverso');
-  assert.deepEqual(inverso.map(cola => cola.map(r => r.id)), natural.map(cola => [...cola].reverse().map(r => r.id)),
-    'invertir solo recorre la misma cola al revés: no mueve regiones entre workers');
+  const colas = partitionRegions(desordenadas, 3);
+  assert.equal(colas.length, 3);
+  assert.deepEqual(colas.flat(), desordenadas, 'cada región se calcula exactamente una vez, en tramos contiguos de la entrada');
+  assert.deepEqual(partitionRegions(desordenadas, 3), colas, 'la misma entrada da siempre las mismas colas');
 });
 
 test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt-in en su valor histórico', () => {

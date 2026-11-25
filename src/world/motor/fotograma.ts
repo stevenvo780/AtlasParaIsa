@@ -30,12 +30,13 @@ export type VistaAnimalFotograma = Omit<AnimalView, 'reason' | 'action' | 'x' | 
 export type VistaPaginaFotograma = readonly Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[];
 export type VistaMundoFotograma = Omit<WorldView, 'version' | 'sequence' | 'tick' | 'day' | 'phase' | 'weather' | 'tiles' | 'people' | 'animals' | 'places' | 'events' | 'memories' | 'communities' | 'structures' | 'blueprints' | 'technology' | 'organization' | 'whispers'>;
 
-export type SucesoFotograma = Suceso
-  | { tipo: 'mundo'; id: ''; vista: VistaMundoFotograma }
-  | { tipo: 'cronicaVista'; id: ''; vista: readonly ChronicleEvent[] }
+export type SucesoVistaAdicional =
+  | { tipo: 'mundo'; id: string; vista: VistaMundoFotograma | null }
+  | { tipo: 'cronicaVista'; id: string; vista: readonly ChronicleEvent[] | null }
   | { tipo: 'persona'; id: string; vista: VistaPersonaFotograma | null }
   | { tipo: 'animal'; id: string; vista: VistaAnimalFotograma | null }
   | { tipo: 'pagina'; id: string; vista: VistaPaginaFotograma | null };
+export type SucesoFotograma = Suceso | SucesoVistaAdicional;
 
 /** F0 reúne los partes de los dueños; después de B4 presenta el lote desde el último fotograma entregado. */
 export interface FuenteFotograma {
@@ -141,6 +142,7 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
   const accion = w.u8('accion'), cuerpo = w.f32('cuerpo');
   const forma = c.frente.columnas.includes('forma') ? w.i32('forma') : undefined;
   const principal = c.frente.columnas.includes('principal') ? w.i32('principal') : undefined;
+  const fatiga = campoO.fatiga !== undefined && c.frente.columnas.includes('fatiga') ? w.f32('fatiga') : undefined;
   const genoma = campoO.escucha === undefined ? undefined : w.f32('genoma');
   let offset = r.organismos + desdeO * anchoOrganismo;
   for (const s of slots) {
@@ -157,6 +159,9 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
     binario.setFloat32(offset + campoO.masa, cuerpo[base + CAMPOS_CUERPO.masa], true);
     binario.setUint32(offset + campoO.forma, forma?.[s] ?? 0, true);
     binario.setUint32(offset + campoO.principal, principal?.[s] ?? 0, true);
+    if (campoO.fatiga !== undefined) binario.setFloat32(offset + campoO.fatiga, fatiga?.[s] ?? NaN, true);
+    if (campoO.carga !== undefined) binario.setFloat32(offset + campoO.carga, cuerpo[base + CAMPOS_CUERPO.carga], true);
+    if (campoO.T !== undefined) binario.setFloat32(offset + campoO.T, cuerpo[base + CAMPOS_CUERPO.T], true);
     if (genoma) {
       const locus = s * GENOMA_ANCHO + 2 * ESCUCHA_LOCUS;
       const escucha = clase[s] === Clase.Persona ? (genoma[locus] + genoma[locus + 1]) / 2 : 0;
@@ -206,7 +211,7 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
   while (hasta - leidos > capacidad) {
     const restante = vence - performance.now();
     if (restante <= 0) throw new ErrorFatalMotor('Plazo agotado esperando espacio para los sucesos de cinta.');
-    Atomics.wait(enlace.sucesosLeidos, 0, leidos, Math.min(restante, 1000));
+    Atomics.wait(enlace.sucesosLeidos, 0, leidos, restante);
     const actual = Atomics.load(enlace.sucesosLeidos, 0);
     if (actual !== leidos) vence = performance.now() + PLAZO_BARRERA_MS;
     leidos = actual;

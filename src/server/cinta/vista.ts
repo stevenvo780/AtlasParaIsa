@@ -7,7 +7,7 @@ import {
 import type { MatTesela } from '../../shared/materia.js';
 import { PROTOCOL_VERSION, type AnimalView, type ChronicleEvent, type PersonView, type Tile, type WorldView } from '../../shared/types.js';
 import { ACTIONS as ACCIONES_FAUNA } from '../../world/animals.js';
-import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoFotograma, type VistaAnimalFotograma, type VistaMundoFotograma,
+import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoFotograma, type SucesoVistaAdicional, type VistaAnimalFotograma, type VistaMundoFotograma,
   type VistaPaginaFotograma, type VistaPersonaFotograma } from '../../world/motor/fotograma.js';
 import { Clase } from '../../world/motor/contratos.js';
 import { phaseAt } from '../../world/mundo/crear.js';
@@ -21,7 +21,8 @@ const escalaU8 = 255;
 const q2 = (n: number): number => Math.round(n * 100) / 100;
 const importantes = new Set<ChronicleEvent['kind']>(['birth', 'death', 'community', 'settlement', 'discovery', 'invention']);
 
-type Lentas = { [K in keyof VistasLentas]: Map<string, VistasLentas[K]> };
+type TipoLento = Exclude<keyof VistasLentas, SucesoVistaAdicional['tipo']>;
+type Lentas = { [K in TipoLento]: Map<string, VistasLentas[K]> };
 const lentas = (): Lentas => ({
   lugar: new Map(), comunidad: new Map(), estructura: new Map(), plano: new Map(), recuerdo: new Map(),
   tecnologia: new Map(), organizacion: new Map(), clima: new Map(), susurro: new Map(),
@@ -61,7 +62,7 @@ function guardar<K, V>(mapa: Map<K, V>, id: K, vista: V | null): void {
   if (vista === null) mapa.delete(id);
   else mapa.set(id, vista);
 }
-function guardarVista<K extends keyof VistasLentas>(vistas: Lentas,
+function guardarVista<K extends TipoLento>(vistas: Lentas,
   s: { tipo: K; id: string; vista: VistasLentas[K] | null }): void {
   guardar(vistas[s.tipo], s.id, s.vista);
 }
@@ -74,7 +75,7 @@ function aplicarSucesos(e: CacheVista, sucesos: readonly SucesoFotograma[], t: n
       e.eventos.push(s.evento);
       if (e.eventos.length > VIEW_EVENTS) e.eventos.shift();
       break;
-    case 'cronicaVista': e.eventos = s.vista.slice(-VIEW_EVENTS); break;
+    case 'cronicaVista': e.eventos = s.vista?.slice(-VIEW_EVENTS) ?? []; break;
     case 'sustancia': {
       if (!e.catalogo.has(s.sustancia.id)) {
         e.catalogo.add(s.sustancia.id);
@@ -88,7 +89,7 @@ function aplicarSucesos(e: CacheVista, sucesos: readonly SucesoFotograma[], t: n
       guardar(campos, s.campo, s.valor);
       break;
     }
-    case 'mundo': e.mundo = s.vista; break;
+    case 'mundo': e.mundo = s.vista ?? undefined; break;
     case 'persona': guardar(e.personas, s.id, s.vista); break;
     case 'animal': guardar(e.animales, s.id, s.vista); break;
     case 'pagina': guardar(e.paginas, s.id, s.vista); break;
@@ -99,10 +100,13 @@ function aplicarSucesos(e: CacheVista, sucesos: readonly SucesoFotograma[], t: n
 
 function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animals: AnimalView[] } {
   const people: PersonView[] = [], animals: AnimalView[] = [];
+  const vistos = new Set<number>();
   const bin = new DataView(f.organismos.buffer, f.organismos.byteOffset, f.organismos.byteLength);
   for (let i = 0; i < f.n; i++) {
     const b = i * anchoOrganismo;
     const uid = bin.getFloat64(b + campoO.uid, true), clave = String(uid);
+    if (!Number.isSafeInteger(uid) || uid <= 0 || vistos.has(uid)) throw new Error(`Uid de fila inválido o repetido: ${uid}.`);
+    vistos.add(uid);
     const clase = bin.getUint8(b + campoO.clase), accion = bin.getUint8(b + campoO.accion);
     const textos = e.textos.get(uid), reason = textos?.get('reason');
     const telemetria = {
@@ -111,6 +115,12 @@ function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animal
       energy: q2(bin.getUint8(b + campoO.energia) / escalaU8), health: q2(bin.getUint8(b + campoO.salud) / escalaU8),
     };
     const masa = bin.getFloat32(b + campoO.masa, true), principal = bin.getUint32(b + campoO.principal, true);
+    const fatiga = campoO.fatiga === undefined ? NaN : bin.getFloat32(b + campoO.fatiga, true);
+    const cuerpo = {
+      masa, principal,
+      ...(campoO.carga === undefined ? {} : { carga: bin.getFloat32(b + campoO.carga, true) }),
+      ...(campoO.T === undefined ? {} : { T: bin.getFloat32(b + campoO.T, true) }),
+    };
     if (clase === Clase.Persona) {
       const base = e.personas.get(clave), action = ACCIONES_PERSONA_FOTOGRAMA[accion];
       const name = textos?.get('name'), color = textos?.get('color'), need = textos?.get('need');
@@ -118,24 +128,27 @@ function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animal
         throw new Error(`La fila de persona ${uid} no tiene vista, texto o acción válidos.`);
       }
       const specialty = textos?.get('specialty'), craftTint = textos?.get('craftTint'), craftFocus = textos?.get('craftFocus');
-      people.push({ ...base, ...telemetria, name, color, need, reason, action, fatigue: q2(base.fatigue),
+      people.push({ ...base, ...telemetria, name, color, need, reason, action, fatigue: q2(Number.isNaN(fatiga) ? base.fatigue : fatiga),
         recentMemory: textos?.get('recentMemory') ?? null,
         ...(specialty === undefined ? {} : { specialty }), ...(craftTint === undefined ? {} : { craftTint }),
         ...(craftFocus === undefined ? {} : { craftFocus }),
         ...(base.foodReserve === undefined ? {} : { foodReserve: q2(base.foodReserve) }),
         ...(base.vitality === undefined ? {} : { vitality: q2(base.vitality) }),
         ...(campoO.escucha === undefined ? {} : { escucha: bin.getUint8(b + campoO.escucha) / escalaU8 }),
-        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, masa, principal } } : {}),
+        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, ...cuerpo } } : {}),
       });
     } else if (clase === Clase.Animal) {
       const base = e.animales.get(clave), action = ACCIONES_FAUNA[accion];
       if (!base || reason === undefined || action === undefined) throw new Error(`La fila de fauna ${uid} no tiene vista, texto o acción válidos.`);
-      animals.push({ ...base, ...telemetria, reason, action, fatigue: q2(base.fatigue), age: Math.floor(base.age / 20) * 20,
+      animals.push({ ...base, ...telemetria, reason, action, fatigue: q2(Number.isNaN(fatiga) ? base.fatigue : fatiga), age: Math.floor(base.age / 20) * 20,
         ...(base.reproReserve === undefined ? {} : { reproReserve: q2(base.reproReserve) }),
-        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, masa, principal } } : {}),
+        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, ...cuerpo } } : {}),
       });
     } else throw new Error(`Clase de organismo inválida en la fila ${uid}.`);
   }
+  for (const uid of e.textos.keys()) if (!vistos.has(uid)) e.textos.delete(uid);
+  for (const id of e.personas.keys()) if (!vistos.has(Number(id))) e.personas.delete(id);
+  for (const id of e.animales.keys()) if (!vistos.has(Number(id))) e.animales.delete(id);
   return { people, animals };
 }
 

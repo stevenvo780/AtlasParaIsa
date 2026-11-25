@@ -211,3 +211,28 @@ test('si el anillo se llena, el escritor espera y publica los dos rangos contigu
   }));
   assert.equal(Atomics.load(link.creditos, 0), 2);
 });
+
+test('un lote mayor que el anillo falla con diagnóstico y no confirma ni publica', () => {
+  const link = enlace(8);
+  const datos = contextos().coordinador, c = datos as unknown as CtxF0;
+  setParams(c.mundo, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, fotograma: true } });
+  Atomics.store(link.creditos, 0, 1);
+  let sucesos: SucesoFotograma[] = [{ tipo: 'cronica', evento }];
+  let confirmados = 0;
+  enlazarFuenteFotograma(link, { corte: () => ({ serie, sucesos }), confirmar() { confirmados++; } });
+  const f = abrirFotograma(c, link, 1)!;
+  assert.throws(() => cerrarFotograma(c, link, f, true), /no cabe en el anillo/);
+  assert.equal(confirmados, 0);
+  assert.equal(Atomics.load(link.entregados, 0), 0n);
+  assert.equal(Atomics.load(link.sucesosEscritos, 0), 0n);
+  assert.equal(Atomics.load(link.creditos, 0), 1);
+
+  sucesos = [];
+  datos.tick++;
+  cerrarFotograma(c, link, abrirFotograma(c, link, 1)!, true);
+  assert.throws(() => leerFotograma(link, 0n, f => {
+    assert.equal(f.saltados, 1);
+    throw new Error('Falló el consumidor');
+  }), /Falló el consumidor/);
+  assert.equal(Atomics.load(link.creditos, 0), 1);
+});

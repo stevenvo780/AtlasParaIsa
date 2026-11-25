@@ -386,8 +386,12 @@ export class Dueno implements CtxF0 {
   /** Intentos que siguen en los buzones (solo quien tiene los buzones: el coordinador o el único dueño). */
   pendientes(): Intento[] { return this.#piezas.buzones?.pendientes() ?? []; }
 
-  /** Migrantes de la cola M (los aparta el buzón del dueño: ningún aplicador los ve). */
-  adoptarMigrantes(): void { this.buzon.vaciar('M', () => {}); }
+  /** Migrantes de la cola M (los aparta el buzón del dueño: ningún aplicador los ve). Y, si el aplicador de m5 no está
+   * encendido, las órdenes del coordinador de la cola B, que sin él nadie vaciaría (no hay más intentos en ella). */
+  adoptarMigrantes(): void {
+    this.buzon.vaciar('M', () => {});
+    if (!this.params.v23.intentos) this.buzon.vaciar('B', () => {});
+  }
 
   #armarMateria(): void {
     const dadas = this.#piezas.materia;

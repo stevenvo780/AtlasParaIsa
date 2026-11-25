@@ -88,7 +88,9 @@ export class FaunaSoA {
 
   private alta(animal: Animal): void {
     const uid = animal.uid ??= this.uids();
-    const ref = this.tabla.alta(0, Clase.Animal), slot = slotDe(ref);
+    // `slotDe` divide un double: `| 0` deja la misma ranura como entero pequeño, y así las claves del mapa y los
+    // índices de las columnas no hacen que V8 desoptimice cada escritura del frente.
+    const ref = this.tabla.alta(0, Clase.Animal), s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
     this.filas.set(animal, { slot, ref, uid });
     this.residentes.set(slot, animal);
   }

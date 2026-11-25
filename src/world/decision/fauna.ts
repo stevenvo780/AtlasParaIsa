@@ -1,14 +1,19 @@
 import type { AnimalAction, AnimalSpecies } from '../../shared/life.js';
 import {
-  MEMORY_TTL, RADIO_PAREJA, RAZON_PAREJA, RAZON_REPOSO_CRIA, SPECIES, hash, listoParaCriar, listoSalvoEnergia,
-  type Animal, type AnimalWorld,
+  MEMORY_TTL, RADIO_PAREJA, RAZON_PAREJA, RAZON_REPOSO_CRIA, SPECIES, hashCerrar, hashParcial, listoParaCriar, listoSalvoEnergia,
+  type Animal, type AnimalMemory, type AnimalWorld,
 } from '../animals.js';
 import { Clase, type Consulta, type ConsultaOrganismo, type Plan } from '../motor/contratos.js';
 import { primero, primerosDos } from '../orden.js';
 
 interface Point { x: number; y: number; }
 interface Resource extends Point { food: number; water: number; }
-export interface VisibleTile extends Resource { growth: number | undefined; novelty: number | undefined; }
+export interface VisibleTile extends Resource {
+  /** `growth ?? 0` de la celda: lo único que la decisión mira del crecimiento (el alimento ya lo incluye). */
+  brote: number; novelty: number | undefined;
+  /** Los animales en la celda al empezar la decisión (`ocupantes(x, y)`). */
+  ocupantes: readonly Animal[] | undefined;
+}
 
 export interface PercepcionFauna {
   visibles(animal: Animal, plan: PlanFauna): readonly VisibleTile[];
@@ -83,11 +88,28 @@ function coincide(plan: PlanFauna, otro: Animal, distancia: number, desde: numbe
   return false;
 }
 
-function mejorRecurso(consulta: Consulta, recursos: readonly Resource[], animal: Animal): Resource | undefined {
-  const campo = consulta.campos[0] === AGUA ? 'water' : 'food';
-  // El peso de distancia domina a los valores unitarios. Compararlos por separado conserva los desempates en f64.
-  return primero(recursos, (a, b) => (distancia(a, animal) - distancia(b, animal)) * consulta.pesoDist
-    || (a[campo] - b[campo]) * consulta.pesos[0]! || a.y - b.y || a.x - b.x, r => r[campo] > 0.001);
+/** `primero` de los recursos con el comparador de la consulta: distancia por `pesoDist`, luego el valor por su peso y
+ * luego la posición. El peso de distancia domina a los valores unitarios; compararlos por separado conserva los
+ * desempates en f64. Agua y alimento van por separado para leer el campo sin clave dinámica. */
+function mejorAgua(consulta: Consulta, recursos: readonly Resource[], ax: number, ay: number): Resource | undefined {
+  const pesoDist = consulta.pesoDist, peso = consulta.pesos[0]!;
+  let best: Resource | undefined, bd = 0;
+  for (const r of recursos) {
+    if (!(r.water > 0.001)) continue;
+    const d = Math.abs(r.x - ax) + Math.abs(r.y - ay);
+    if (!best || ((d - bd) * pesoDist || (r.water - best.water) * peso || r.y - best.y || r.x - best.x) < 0) { best = r; bd = d; }
+  }
+  return best;
+}
+function mejorAlimento(consulta: Consulta, recursos: readonly Resource[], ax: number, ay: number): Resource | undefined {
+  const pesoDist = consulta.pesoDist, peso = consulta.pesos[0]!;
+  let best: Resource | undefined, bd = 0;
+  for (const r of recursos) {
+    if (!(r.food > 0.001)) continue;
+    const d = Math.abs(r.x - ax) + Math.abs(r.y - ay);
+    if (!best || ((d - bd) * pesoDist || (r.food - best.food) * peso || r.y - best.y || r.x - best.x) < 0) { best = r; bd = d; }
+  }
+  return best;
 }
 
 /** Distancia de `p` al depredador más cercano. */
@@ -97,11 +119,14 @@ function safety(threats: readonly Animal[], p: Point): number {
   return min;
 }
 /** Atractivo de explorar la tesela: función pura de la tesela, calculada una vez (`t.novelty`) y no en cada comparación. */
-function novelty(animal: Animal, seed: number, tick: number, t: VisibleTile): number {
+/** `prefijo` es el estado del hash de `${animal.id}:` con la semilla, común a todas las celdas del animal. */
+function novelty(animal: Animal, prefijo: number, tick: number, t: VisibleTile): number {
   let value = t.novelty;
   if (value === undefined) {
-    const visit = animal.memory.find(m => m.visited && m.x === t.x && m.y === t.y);
-    value = (visit ? Math.min(1, (tick - visit.tick) / MEMORY_TTL) : 2) + hash(seed, `${animal.id}:${t.x},${t.y}:${Math.floor(tick / 60)}`) / 4294967296 * 0.2;
+    let visit: AnimalMemory | undefined;
+    for (const m of animal.memory) if (m.visited && m.x === t.x && m.y === t.y) { visit = m; break; }
+    value = (visit ? Math.min(1, (tick - visit.tick) / MEMORY_TTL) : 2)
+      + hashCerrar(hashParcial(prefijo, `${t.x},${t.y}:${Math.floor(tick / 60)}`)) / 4294967296 * 0.2;
     t.novelty = value;
   }
   return value;
@@ -109,10 +134,11 @@ function novelty(animal: Animal, seed: number, tick: number, t: VisibleTile): nu
 function parejaCercana(animal: Animal, state: PercepcionFauna, plan: PlanFauna): Animal | undefined {
   const consulta = plan.organismos[plan.pareja]!;
   let mate: Animal | undefined, best = Infinity;
+  const ax = animal.x, ay = animal.y;
   for (let dy = -consulta.radio; dy <= consulta.radio; dy++) {
     const span = consulta.radio - Math.abs(dy);
     for (let dx = -span; dx <= span; dx++) {
-      const here = state.ocupantes(animal.x + dx, animal.y + dy);
+      const here = state.ocupantes(ax + dx, ay + dy);
       if (!here) continue;
       const d = Math.abs(dx) + Math.abs(dy);
       if (d > best) continue;
@@ -127,45 +153,51 @@ function parejaCercana(animal: Animal, state: PercepcionFauna, plan: PlanFauna):
 }
 export function decidirFauna(animal: Animal, world: AnimalWorld, state: PercepcionFauna, plan: PlanFauna): void {
   const visible = state.visibles(animal, plan), threats: Animal[] = [];
-  let prey: Animal | undefined;
+  const ax = animal.x, ay = animal.y, id = animal.id, carnivoro = animal.genes.carnivory >= 0.6;
+  let prey: Animal | undefined, dPrey = 0;
   const [agua, alimento] = plan.celdas;
   for (const t of visible) {
-    const aqui = state.ocupantes(t.x, t.y);
+    const aqui = t.ocupantes;
     if (!aqui) continue;
     for (const other of aqui) {
-      if (other.id === animal.id || other.health <= 0) continue;
-      const d = distancia(other, animal);
+      if (other.id === id || other.health <= 0) continue;
+      const d = Math.abs(other.x - ax) + Math.abs(other.y - ay);
       if (other.genes.carnivory >= 0.6 && coincide(plan, other, d, 0, plan.presas)) threats.push(other);
-      if (animal.genes.carnivory >= 0.6 && coincide(plan, other, d, plan.presas, plan.pareja)
-        && (!prey || d < distancia(prey, animal) || d === distancia(prey, animal) && canonical(other, prey) < 0)) prey = other;
+      if (carnivoro && coincide(plan, other, d, plan.presas, plan.pareja)
+        && (!prey || d < dPrey || d === dPrey && canonical(other, prey) < 0)) { prey = other; dPrey = d; }
     }
   }
   const adjacent = state.adjacent;
   adjacent.length = 0;
-  for (const t of visible) if (distancia(t, animal) === 1) adjacent.push(t);
+  for (const t of visible) if (Math.abs(t.x - ax) + Math.abs(t.y - ay) === 1) adjacent.push(t);
   let action: AnimalAction = 'roam', target: Point = animal, reason = 'Explora celdas cercanas y evita recorridos que recuerda.';
   let preyId: string | null = null;
   // Los dos primeros del mismo orden estable, sin ordenar todo lo visible (orden.ts).
-  for (const tile of primerosDos(visible, (a, b) => (b.water + (b.growth ?? 0)) - (a.water + (a.growth ?? 0)) || distancia(a, animal) - distancia(b, animal) || a.y - b.y || a.x - b.x,
-    t => (t.growth ?? 0) > 0.05 || t.water > 0.005)) state.recordar(animal, tile, world.tick, distancia(tile, animal) === 0, tile.food, tile.water);
+  for (const tile of primerosDos(visible, (a, b) => (b.water + b.brote) - (a.water + a.brote)
+    || (Math.abs(a.x - ax) + Math.abs(a.y - ay)) - (Math.abs(b.x - ax) + Math.abs(b.y - ay)) || a.y - b.y || a.x - b.x,
+    t => t.brote > 0.05 || t.water > 0.005)) state.recordar(animal, tile, world.tick, Math.abs(tile.x - ax) + Math.abs(tile.y - ay) === 0, tile.food, tile.water);
   if (threats.length) {
     const escape = primero(adjacent, (a, b) => safety(threats, b) - safety(threats, a) || a.y - b.y || a.x - b.x);
     action = 'flee'; target = escape && safety(threats, escape) > safety(threats, animal) ? escape : animal;
     reason = 'Percibe un depredador cercano y se aleja físicamente de su alcance.';
   } else {
-    // Mismo orden: rombo visible, seguido de recuerdos válidos que no están en el rombo.
+    // Mismo orden: rombo visible, seguido de recuerdos válidos que no están en el rombo. Solo se reúnen, y solo se
+    // busca el agua o el alimento, cuando la sed o el hambre los van a mirar: son lecturas puras.
     const resources = state.resources;
-    resources.length = 0;
-    for (const t of visible) resources.push(t);
-    for (const m of animal.memory) {
-      if (world.tick - m.tick > MEMORY_TTL || !state.residente(m)) continue;
-      if (!state.visto(m.x - animal.x, m.y - animal.y)) resources.push(m);
+    const sed = animal.thirst > 0.42, hambre = animal.hunger > 0.38, pasta = hambre && !prey && animal.genes.carnivory < 0.6;
+    if (sed || pasta) {
+      resources.length = 0;
+      for (const t of visible) resources.push(t);
+      for (const m of animal.memory) {
+        if (world.tick - m.tick > MEMORY_TTL || !state.residente(m)) continue;
+        if (!state.visto(m.x - ax, m.y - ay)) resources.push(m);
+      }
     }
-    const water = mejorRecurso(agua!, resources, animal);
-    const food = mejorRecurso(alimento!, resources, animal);
-    if (animal.thirst > 0.42 && water) { action = 'drink'; target = water; reason = 'La sed orienta su camino hacia agua percibida o recordada.'; }
-    else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
-    else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
+    const water = sed ? mejorAgua(agua!, resources, ax, ay) : undefined;
+    const food = pasta && !water ? mejorAlimento(alimento!, resources, ax, ay) : undefined;
+    if (sed && water) { action = 'drink'; target = water; reason = 'La sed orienta su camino hacia agua percibida o recordada.'; }
+    else if (hambre && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
+    else if (pasta && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
     // Si solo le faltan fuerzas para criar, descansa. El hambre y la sed siguen subiendo durante la recuperación.
     else if (state.encuentro && listoSalvoEnergia(animal, state.reserva)) { action = 'rest'; reason = RAZON_REPOSO_CRIA; }
@@ -176,8 +208,8 @@ export function decidirFauna(animal: Animal, world: AnimalWorld, state: Percepci
       const mate = state.encuentro && listoParaCriar(animal, state.reserva) ? parejaCercana(animal, state, plan) : undefined;
       if (mate) { target = mate; reason = RAZON_PAREJA; }
       else {
-        const seed = world.seed, tick = world.tick;
-        target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
+        const prefijo = hashParcial(world.seed >>> 0, `${id}:`), tick = world.tick;
+        target = primero(adjacent, (a, b) => novelty(animal, prefijo, tick, b) - novelty(animal, prefijo, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
       }
     }
   }

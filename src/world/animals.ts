@@ -87,8 +87,14 @@ const point = (v: unknown): v is Point => !!v && typeof v === 'object' && coordi
 const unit = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 
 export function hash(seed: number, text: string): number {
-  let n = seed >>> 0;
+  return hashCerrar(hashParcial(seed >>> 0, text));
+}
+/** El estado del hash tras recorrer `text` desde `n` (`seed >>> 0` al empezar): un prefijo común se recorre una vez. */
+export function hashParcial(n: number, text: string): number {
   for (let i = 0; i < text.length; i++) n = Math.imul(n ^ text.charCodeAt(i), 16777619);
+  return n;
+}
+export function hashCerrar(n: number): number {
   n = Math.imul(n ^ (n >>> 16), 0x7feb352d);
   n = Math.imul(n ^ (n >>> 15), 0x846ca68b);
   return (n ^ (n >>> 16)) >>> 0;
@@ -124,39 +130,89 @@ export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[animal.
 
 /** V23 serial physical overlay, after the fauna decision. All sensing is local
  * (Manhattan ≤ 6); no person/structure data enters the fauna Plan.
- * Point buckets are built once per step rather than scanning the population per animal. */
-function settlementBuckets(points: readonly Point[]): Map<Cell, Point[]> {
-  const result = new Map<Cell, Point[]>();
-  for (const p of points) { const k = cell(p), here = result.get(k); if (here) here.push(p); else result.set(k, [p]); }
+ * Las personas y los hogares se agrupan una vez por paso en bloques de 16 × 16 celdas. Solo cuentan los puntos de
+ * coordenadas enteras: son los únicos cuya celda puede coincidir con la de un animal. */
+const BLOQUE = 16, BLOQUE_DESPLAZAMIENTO = 2 ** 20, BLOQUE_LADO = 2 ** 21;
+const bloqueXY = (bx: number, by: number): number => (bx + BLOQUE_DESPLAZAMIENTO) * BLOQUE_LADO + (by + BLOQUE_DESPLAZAMIENTO);
+function settlementBuckets(points: readonly Point[]): Map<number, Point[]> {
+  const result = new Map<number, Point[]>();
+  for (const p of points) {
+    if (!Number.isInteger(p.x) || !Number.isInteger(p.y)) continue;
+    const k = bloqueXY(Math.floor(p.x / BLOQUE), Math.floor(p.y / BLOQUE)), here = result.get(k);
+    if (here) here.push(p); else result.set(k, [p]);
+  }
   return result;
 }
-function settlementOverlay(animal: Animal, tick: number, state: LocalState, humans: Map<Cell, Point[]>, hearths: Map<Cell, Point[]>): void {
-  const m = animal.morphology!, threats: Point[] = [];
+/** Los puntos agrupados a distancia de Manhattan ≤ `radio` de (x, y), en cualquier orden: quien los usa solo toma
+ * la mínima distancia o si hay alguno. */
+function puntosCerca(bloques: Map<number, Point[]>, x: number, y: number, radio: number, fuera: Point[]): void {
+  if (!bloques.size) return;
+  const bx1 = Math.floor((x + radio) / BLOQUE), by0 = Math.floor((y - radio) / BLOQUE), by1 = Math.floor((y + radio) / BLOQUE);
+  for (let bx = Math.floor((x - radio) / BLOQUE); bx <= bx1; bx++) for (let by = by0; by <= by1; by++) {
+    const aqui = bloques.get(bloqueXY(bx, by));
+    if (aqui) for (const p of aqui) if (Math.abs(p.x - x) + Math.abs(p.y - y) <= radio) fuera.push(p);
+  }
+}
+/** Distancia de (x, y) a la amenaza más cercana. */
+function safetyAt(threats: readonly Point[], x: number, y: number): number {
+  let d = Infinity;
+  for (const t of threats) d = Math.min(d, Math.abs(x - t.x) + Math.abs(y - t.y));
+  return d;
+}
+function settlementOverlay(animal: Animal, tick: number, state: LocalState, humans: Map<number, Point[]>, hearths: Map<number, Point[]>): void {
+  // Un pez no tiene amenazas de poblado ni habituación: nada de lo que se percibe aquí le cambia.
+  if (animal.species === 'fish') return;
+  const m = animal.morphology!, threats = state.amenazas, cerca = state.cerca, celdas = state.celdas;
   const predator = animal.species === 'wolf' || animal.species === 'fox';
-  let nearSettlement = false;
   const alarm = animal.lastHunted !== undefined && tick - animal.lastHunted < 120;
   const fleeRadius = Math.max(alarm ? 3 : 0, 1 + m.caution * (1 - (animal.habituation ?? 0) * 0.78) * 5);
-  // This serial neighborhood is deliberately separate from the fauna Plan.
-  for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
-    const d = Math.abs(dx) + Math.abs(dy); if (d > 6) continue;
-    const x = animal.x + dx, y = animal.y + dy, k = cellXY(x, y);
-    const tile = state.tile(x, y);
-    if (d <= 5 && (humans.has(k) || tile?.terrain === 'shelter' || (tile?.cultivation ?? 0) > 0)) nearSettlement = true;
-    if (predator && d <= 3 && (hearths.has(k) || tile?.terrain === 'shelter')) threats.push({ x, y });
-    if (!predator && animal.species !== 'fish' && d <= fleeRadius) threats.push(...humans.get(k) ?? []);
-  }
-  if (isHerdAnimal(animal)) {
-    animal.habituation = clamp((animal.habituation ?? 0) + (nearSettlement && !alarm && m.caution < 0.65 ? 0.012 : -0.003));
+  threats.length = 0;
+  if (predator) {
+    // El fuego y el refugio humano a ≤ 3 celdas.
+    cerca.length = 0;
+    puntosCerca(hearths, animal.x, animal.y, 3, cerca);
+    for (const p of cerca) threats.push(p);
+    const ax = animal.x, ay = animal.y, fila = state.fila;
+    for (let dy = -3; dy <= 3; dy++) {
+      const span = 3 - Math.abs(dy), y = ay + dy;
+      celdas.fila(ax - span, ax + span, y, state, fila);
+      for (let dx = -span; dx <= span; dx++) {
+        const x = ax + dx, i = fila[dx + span]!;
+        if (celdas.poblado(i < 0 ? celdas.indice(x, y, state) : i, x, y, state) & REFUGIO_TESELA) threats.push({ x, y });
+      }
+    }
+  } else {
+    // Herbívoros de manada: las personas a ≤ min(6, radio de huida) son amenaza; el poblado a ≤ 5 celdas (personas,
+    // refugio o cultivo) solo cuenta para habituarse, y solo se busca cuando puede habituarse.
+    cerca.length = 0;
+    puntosCerca(humans, animal.x, animal.y, 6, cerca);
+    let nearSettlement = false;
+    for (const p of cerca) {
+      const d = Math.abs(p.x - animal.x) + Math.abs(p.y - animal.y);
+      if (d <= 5) nearSettlement = true;
+      if (d <= fleeRadius) threats.push(p);
+    }
+    const puedeHabituarse = !alarm && m.caution < 0.65;
+    if (puedeHabituarse && !nearSettlement) {
+      const ax = animal.x, ay = animal.y, fila = state.fila;
+      busca: for (let dy = -5; dy <= 5; dy++) {
+        const span = 5 - Math.abs(dy), y = ay + dy;
+        celdas.fila(ax - span, ax + span, y, state, fila);
+        for (let dx = -span; dx <= span; dx++) {
+          const x = ax + dx, i = fila[dx + span]!;
+          if (celdas.poblado(i < 0 ? celdas.indice(x, y, state) : i, x, y, state) & POBLADO) { nearSettlement = true; break busca; }
+        }
+      }
+    }
+    animal.habituation = clamp((animal.habituation ?? 0) + (nearSettlement && puedeHabituarse ? 0.012 : -0.003));
   }
   if (!threats.length) return;
-  let best = animal as Point, bestSafety = Infinity;
-  const safetyAt = (p: Point): number => { let d = Infinity; for (const t of threats) d = Math.min(d, distance(p, t)); return d; };
-  bestSafety = safetyAt(best);
+  let best = animal as Point, bestSafety = safetyAt(threats, best.x, best.y);
   for (const [dx, dy] of BREEDING_CELLS) {
-    const p = { x: animal.x + dx, y: animal.y + dy }, tile = state.tile(p.x, p.y);
+    const x = animal.x + dx, y = animal.y + dy, tile = state.tile(x, y);
     if (!tile || !habitat(animal, tile)) continue;
-    const safe = safetyAt(p);
-    if (safe > bestSafety) { best = p; bestSafety = safe; }
+    const safe = safetyAt(threats, x, y);
+    if (safe > bestSafety) { best = { x, y }; bestSafety = safe; }
   }
   animal.action = 'flee'; animal.target = { x: best.x, y: best.y }; animal.preyId = null; animal.work = 0;
   animal.reason = predator ? 'Evita el fuego y el refugio humano.' : 'Su cautela y habituación regulan la distancia a las personas.';
@@ -555,15 +611,16 @@ function remember(animal: Animal, tile: Point, tick: number, visited: boolean, f
   // `find` precedía al filtro de caducidad: la primera visita a la celda, incluso caducada, conserva
   // visited. Con coordenadas enteras, misma celda (`cell`) equivale a mismas coordenadas (`===`).
   let existingVisited = false, found = false, kept = 0;
-  for (const m of memory) {
+  for (let j = 0, n = memory.length; j < n; j++) {
+    const m = memory[j]!;
     if (m.x === x && m.y === y) { if (!found) { existingVisited = m.visited; found = true; } }
-    else if (tick - m.tick <= MEMORY_TTL) memory[kept++] = m;
+    else if (tick - m.tick <= MEMORY_TTL) { if (kept !== j) memory[kept] = m; kept++; }
   }
   // El recuerdo nuevo va al final; si no cabe, sale el más antiguo de los que quedan (el `shift` de antes).
   const drop = kept >= MAX_ANIMAL_MEMORY ? 1 : 0;
   for (let i = drop; i < kept; i++) memory[i - drop] = memory[i]!;
   memory[kept - drop] = { x, y, tick, food, water, visited: visited || existingVisited };
-  memory.length = kept - drop + 1;
+  if (memory.length !== kept - drop + 1) memory.length = kept - drop + 1;
 }
 /** `tile(x, y)` es el índice de terreno fijado al empezar el paso (el `Map` de claves `"x,y"` que se
  * construía aquí, ahora compartido con `tileAt` en tile-index.ts): misma tesela para las mismas
@@ -581,56 +638,253 @@ interface LocalState extends PercepcionFauna {
   seen: Int32Array; stamp: number;
   /** V19: leyes de fauna del paso (`paramsOf(world).fauna`), leídas una vez por `stepAnimals`. */
   contacto: boolean; reserva: boolean; fraccionReserva: number; encuentro: boolean;
+  /** `paramsOf(world).quimica.emergente`, leído una vez por paso. */
+  emergente: boolean;
+  /** Borradores de `settlementOverlay`, reutilizados entre animales. */
+  amenazas: Point[]; cerca: Point[];
+  celdas: CeldasFauna; fila: Int32Array;
+  /** Plan de cada animal activo y el orden por cercanía de la decisión (`ordenEspacial`). */
+  planes: PlanFauna[]; claves: Float64Array; orden: Int32Array;
 }
 /** La celda a (dx, dy) del animal está en lo que devolvió su última `localTiles`: lo mismo que buscar su
  * `cell` en `visible`, porque con coordenadas enteras dos celdas coinciden si coinciden sus desplazamientos. */
 const seenAt = (state: LocalState, dx: number, dy: number): boolean => Math.abs(dx) <= MAX_RADIUS && Math.abs(dy) <= MAX_RADIUS
   && state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] === state.stamp;
-function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): VisibleTile[] {
-  const radius = plan.radio, result = state.visible, reader = state.reader, fast = state.fast, stamp = ++state.stamp;
-  result.length = 0;
-  for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
-    if (Math.abs(dx) + Math.abs(dy) > radius) continue;
-    let x = animal.x + dx, y = animal.y + dy, growth: number | undefined, vegetation: number, water: number;
-    if (reader) {
-      const at = reader.cellAt(x, y);
-      if (at < 0) continue;
-      const terrain = reader.terrainCode(at);
-      if (!habitableParaPlan(plan, terrain === reader.TERRAIN_WATER, terrain === reader.TERRAIN_SHELTER)) continue;
-      growth = reader.growth(at); vegetation = reader.vegetation(at)!;
-      water = animal.species === 'fish' ? reader.moisture(at)!
-        : reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
-      // Las coordenadas implícitas no distinguen -0 de +0. Sólo en los ejes se leen las
-      // coordenadas originales para conservar también esos bits en target y memory.
-      if (x === 0 || y === 0) { const original = state.tile(x, y)!; x = original.x; y = original.y; }
-    } else {
-      const tile = state.tile(animal.x + dx, animal.y + dy);
-      if (!tile) continue;
-      const at = fast?.cellOf(tile) ?? -1;
-      if (at < 0) {
-        if (!habitableParaPlan(plan, tile.terrain === 'water', tile.terrain === 'shelter')) continue;
-        growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
-      } else {
-        const terrain = fast!.terrainCode(at);
-        if (!habitableParaPlan(plan, terrain === fast!.TERRAIN_WATER, terrain === fast!.TERRAIN_SHELTER)) continue;
-        growth = fast!.growth(at); vegetation = fast!.vegetation(at)!;
-        water = animal.species === 'fish' ? fast!.moisture(at)!
-          : fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
-      }
-      x = tile.x; y = tile.y;
+
+// Marcas de una celda en `CeldasFauna`.
+const VISIBLE = 1, AGUA = 2, REFUGIO = 4, CRECIMIENTO = 8, POBLADO_LEIDO = 16, POBLADO = 32, REFUGIO_TESELA = 64,
+  HUMEDAD_LEIDA = 128, AGUA_TIERRA_LEIDA = 256;
+const PAGINA = 256, REJILLA = 2 ** 24, PAGINA_DESPLAZAMIENTO = 2 ** 20, PAGINA_LADO = 2 ** 21;
+// Campos de una celda, contiguos (una línea de caché por celda): sello del paso, marcas, coordenadas de la tesela,
+// `growth ?? 0`, `growth ?? vegetation` y el agua de pez y de tierra.
+const C_SELLO = 0, C_MARCAS = 1, C_X = 2, C_Y = 3, C_BROTE = 4, C_ALIMENTO = 5, C_AGUA_PEZ = 6, C_AGUA_TIERRA = 7, ANCHO = 8;
+/**
+ * Lo que la fauna lee de cada celda desde la fisiología hasta el final del poblado de un paso, leído una vez por celda
+ * en vez de una vez por cada animal que la ve. En ese tramo nadie escribe teselas ni mueve animales (moverse, pastar y
+ * criar vienen después), así que cada lectura repetida da lo mismo que la primera. El agua y el poblado se leen la
+ * primera vez que alguien los pide. Las páginas (16 × 16 celdas, como los chunks) se reutilizan de un paso a otro; el
+ * sello del paso descarta lo leído antes.
+ */
+class CeldasFauna {
+  private readonly paginas = new Map<number, number>();
+  private usadas = 0;
+  generacion = 0;
+  private k1 = -1; private p1 = -1; private k2 = -1; private p2 = -1;
+  datos = new Float64Array(0);
+  /** La celda residente de la tesela (-1 sin SoA residente), para las lecturas que se hacen tarde. */
+  private residente = new Int32Array(0);
+  /** Los animales vivos de la celda al empezar la decisión: el arreglo de `occupants`, sellado al registrarlo. */
+  selloOcupantes = new Int32Array(0);
+  ocupantes: (Animal[] | undefined)[] = [];
+
+  empezar(): void {
+    // La página 0 es la de las celdas fuera de la rejilla, que se leen cada vez.
+    this.paginas.clear(); this.usadas = 1; this.generacion = (this.generacion + 1) | 0;
+    this.k1 = -1; this.p1 = -1; this.k2 = -1; this.p2 = -1;
+    if (!this.residente.length) this.crecer(16 * PAGINA);
+  }
+
+  marcas(i: number): number { return this.datos[i * ANCHO + C_MARCAS]!; }
+
+  /** El índice de la celda (x, y), leída si aún no lo estaba en este paso. Fuera de la rejilla de los chunks la
+   * celda se lee cada vez en la ranura 0, que nunca queda sellada. */
+  indice(x: number, y: number, state: LocalState): number {
+    if (x !== (x | 0) || y !== (y | 0) || x < -REJILLA || x >= REJILLA || y < -REJILLA || y >= REJILLA) {
+      this.leer(0, x, y, state); this.datos[C_SELLO] = this.generacion - 1;
+      this.ocupantes[0] = state.occupants.get(cellXY(this.datos[C_X]!, this.datos[C_Y]!)); this.selloOcupantes[0] = this.generacion;
+      return 0;
     }
-    // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
-    // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
-    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined };
-    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined;
-    result.push(t);
-    state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] = stamp;
+    const i = this.pagina(x, y) * PAGINA + (((y & 15) << 4) | (x & 15));
+    if (this.datos[i * ANCHO + C_SELLO] !== this.generacion) this.leer(i, x, y, state);
+    return i;
+  }
+
+  /** Los índices de las celdas (x0..x1, y), en orden, en `salida`: la página se busca una vez por chunk de la fila.
+   * Fuera de la rejilla deja -1, y quien lee la celda la pide entonces con `indice`. */
+  fila(x0: number, x1: number, y: number, state: LocalState, salida: Int32Array): void {
+    if (x0 !== (x0 | 0) || x1 !== (x1 | 0) || y !== (y | 0) || x0 < -REJILLA || x1 >= REJILLA || y < -REJILLA || y >= REJILLA) {
+      salida.fill(-1, 0, x1 - x0 + 1);
+      return;
+    }
+    const fila = (y & 15) << 4, generacion = this.generacion;
+    let base = 0;
+    for (let x = x0; x <= x1; x++) {
+      if (x === x0 || (x & 15) === 0) base = this.pagina(x, y) * PAGINA + fila;
+      const i = base + (x & 15);
+      if (this.datos[i * ANCHO + C_SELLO] !== generacion) this.leer(i, x, y, state);
+      salida[x - x0] = i;
+    }
+  }
+
+  /** Registra el arreglo de `occupants` de la celda de un animal vivo; fuera de la rejilla se busca al leer. */
+  ocupar(x: number, y: number, animales: Animal[]): void {
+    if (x !== (x | 0) || y !== (y | 0) || x < -REJILLA || x >= REJILLA || y < -REJILLA || y >= REJILLA) return;
+    const i = this.pagina(x, y) * PAGINA + (((y & 15) << 4) | (x & 15));
+    this.ocupantes[i] = animales; this.selloOcupantes[i] = this.generacion;
+  }
+
+  /** El agua que bebe un pez (la humedad) o un animal de tierra (la potable, nula en el océano), como `waterAt`. */
+  agua(i: number, pez: boolean, state: LocalState): number {
+    const b = i * ANCHO, datos = this.datos, marcas = datos[b + C_MARCAS]!;
+    if (pez ? marcas & HUMEDAD_LEIDA : marcas & AGUA_TIERRA_LEIDA) return datos[b + (pez ? C_AGUA_PEZ : C_AGUA_TIERRA)]!;
+    const reader = state.reader, fast = state.fast, at = this.residente[i]!;
+    if (pez) {
+      datos[b + C_AGUA_PEZ] = reader ? reader.moisture(at)! : at < 0 ? state.tile(datos[b + C_X]!, datos[b + C_Y]!)!.moisture : fast!.moisture(at)!;
+      datos[b + C_MARCAS] = marcas | HUMEDAD_LEIDA;
+      return datos[b + C_AGUA_PEZ]!;
+    }
+    if (reader) datos[b + C_AGUA_TIERRA] = reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
+    else if (at < 0) {
+      const tile = state.tile(datos[b + C_X]!, datos[b + C_Y]!)!;
+      datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0;
+    }
+    else datos[b + C_AGUA_TIERRA] = fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
+    datos[b + C_MARCAS] = marcas | AGUA_TIERRA_LEIDA;
+    return datos[b + C_AGUA_TIERRA]!;
+  }
+
+  /** Refugio o cultivo en la tesela, leídos en el objeto como hace el poblado, solo cuando alguien los pregunta. */
+  poblado(i: number, x: number, y: number, state: LocalState): number {
+    const b = i * ANCHO;
+    let marcas = this.datos[b + C_MARCAS]!;
+    if (!(marcas & POBLADO_LEIDO)) {
+      const tile = state.tile(x, y);
+      marcas |= POBLADO_LEIDO;
+      if (tile?.terrain === 'shelter') marcas |= REFUGIO_TESELA | POBLADO;
+      else if (tile && (tile.cultivation ?? 0) > 0) marcas |= POBLADO;
+      this.datos[b + C_MARCAS] = marcas;
+    }
+    return marcas;
+  }
+
+  private pagina(x: number, y: number): number {
+    const clave = ((x >> 4) + PAGINA_DESPLAZAMIENTO) * PAGINA_LADO + ((y >> 4) + PAGINA_DESPLAZAMIENTO);
+    if (clave === this.k1) return this.p1;
+    let pagina: number;
+    if (clave === this.k2) pagina = this.p2;
+    else pagina = this.paginas.get(clave) ?? this.nuevaPagina(clave);
+    this.k2 = this.k1; this.p2 = this.p1; this.k1 = clave; this.p1 = pagina;
+    return pagina;
+  }
+
+  private nuevaPagina(clave: number): number {
+    const pagina = this.usadas++;
+    if (this.usadas * PAGINA > this.residente.length) this.crecer(this.usadas * 2 * PAGINA);
+    this.paginas.set(clave, pagina);
+    return pagina;
+  }
+
+  private crecer(n: number): void {
+    const viejo = this.residente.length;
+    // Las celdas nuevas no deben parecer leídas ni ocupadas en la generación vigente.
+    const datos = new Float64Array(n * ANCHO); datos.set(this.datos);
+    for (let i = viejo; i < n; i++) datos[i * ANCHO + C_SELLO] = this.generacion - 1;
+    this.datos = datos;
+    const residente = new Int32Array(n); residente.set(this.residente); this.residente = residente;
+    const ocupados = new Int32Array(n); ocupados.set(this.selloOcupantes); ocupados.fill(this.generacion - 1, viejo);
+    this.selloOcupantes = ocupados;
+    for (let i = viejo; i < n; i++) this.ocupantes.push(undefined);
+  }
+
+  /** La clase de terreno, el crecimiento, el alimento y las coordenadas de la tesela, como los leía `localTiles`. */
+  private leer(i: number, x: number, y: number, state: LocalState): void {
+    const reader = state.reader, b = i * ANCHO, datos = this.datos;
+    let marcas = 0, tile: Tile | undefined, at = -1, growth: number | undefined, vegetation = 0;
+    if (reader) {
+      at = reader.cellAt(x, y);
+      if (at >= 0) {
+        const terrain = reader.terrainCode(at);
+        marcas = VISIBLE | (terrain === reader.TERRAIN_WATER ? AGUA : 0) | (terrain === reader.TERRAIN_SHELTER ? REFUGIO : 0);
+        growth = reader.growth(at);
+        if (growth === undefined) vegetation = reader.vegetation(at)!;
+        // Las coordenadas implícitas no distinguen -0 de +0. Sólo en los ejes se leen las
+        // coordenadas originales para conservar también esos bits en target y memory.
+        if (x === 0 || y === 0) { const original = state.tile(x, y); if (original) { x = original.x; y = original.y; } }
+      }
+    } else {
+      tile = state.tile(x, y);
+      if (tile) {
+        const fast = state.fast;
+        at = fast?.cellOf(tile) ?? -1;
+        if (at < 0) {
+          // Con la tesela a mano se leen también el poblado y el agua de quien puede estar en ella (un pez en el
+          // agua, un animal de tierra fuera); la otra agua se lee tarde si alguien la pide.
+          const terrain = tile.terrain;
+          marcas = VISIBLE | POBLADO_LEIDO | (terrain === 'water' ? AGUA : 0)
+            | (terrain === 'shelter' ? REFUGIO | REFUGIO_TESELA | POBLADO : (tile.cultivation ?? 0) > 0 ? POBLADO : 0);
+          growth = tile.growth;
+          if (growth === undefined) vegetation = tile.vegetation;
+          if (terrain === 'water') { datos[b + C_AGUA_PEZ] = tile.moisture; marcas |= HUMEDAD_LEIDA; }
+          else { datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0; marcas |= AGUA_TIERRA_LEIDA; }
+        } else {
+          const terrain = fast!.terrainCode(at);
+          marcas = VISIBLE | (terrain === fast!.TERRAIN_WATER ? AGUA : 0) | (terrain === fast!.TERRAIN_SHELTER ? REFUGIO : 0);
+          growth = fast!.growth(at);
+          if (growth === undefined) vegetation = fast!.vegetation(at)!;
+        }
+        // Fuera de los ejes las coordenadas de la consulta valen lo mismo que las de la tesela.
+        if (x === 0 || y === 0) { x = tile.x; y = tile.y; }
+      }
+    }
+    if (growth !== undefined) { marcas |= CRECIMIENTO; datos[b + C_BROTE] = growth; datos[b + C_ALIMENTO] = growth; }
+    else { datos[b + C_BROTE] = 0; datos[b + C_ALIMENTO] = vegetation; }
+    datos[b + C_SELLO] = this.generacion; datos[b + C_MARCAS] = marcas; datos[b + C_X] = x; datos[b + C_Y] = y;
+    this.residente[i] = at;
+  }
+}
+const celdasFauna = new CeldasFauna();
+
+/**
+ * Los índices de `animales` agrupados por chunk (16 × 16), para que la decisión y el poblado de animales vecinos lean
+ * seguidas las mismas celdas. Ninguna de las dos fases lee lo que la otra escribe en otro animal (cada una escribe solo
+ * la acción, el destino, la memoria y la habituación del suyo, y lee de los demás posición, especie, salud, genes y
+ * cuerpo), así que el orden no cambia nada. Con más de 2^21 animales la clave no cabe y se deja el orden canónico.
+ */
+function ordenEspacial(animales: readonly Animal[], state: LocalState): Iterable<number> {
+  const n = animales.length;
+  if (n > 2 ** 21) return animales.keys();
+  if (state.claves.length < n) state.claves = new Float64Array(Math.max(n, 2 * state.claves.length));
+  const claves = state.claves.subarray(0, n);
+  for (let i = 0; i < n; i++) {
+    const a = animales[i]!;
+    // Chunk en 16 + 16 bits (con vuelta: solo agrupa) por delante del índice.
+    claves[i] = ((((a.x >> 4) & 0xffff) << 16 | ((a.y >> 4) & 0xffff)) >>> 0) * 2 ** 21 + i;
+  }
+  claves.sort();
+  if (state.orden.length < n) state.orden = new Int32Array(state.claves.length);
+  const orden = state.orden.subarray(0, n);
+  for (let i = 0; i < n; i++) orden[i] = claves[i]! % 2 ** 21;
+  return orden;
+}
+function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): VisibleTile[] {
+  const radius = plan.radio, result = state.visible, stamp = ++state.stamp, celdas = state.celdas, fish = animal.species === 'fish';
+  result.length = 0;
+  // El rombo por filas, en el orden de siempre (dy y luego dx crecientes).
+  const ax = animal.x, ay = animal.y, fila = state.fila, generacion = celdas.generacion;
+  for (let dy = -radius; dy <= radius; dy++) {
+    const span = radius - Math.abs(dy);
+    celdas.fila(ax - span, ax + span, ay + dy, state, fila);
+    for (let dx = -span; dx <= span; dx++) {
+      let i = fila[dx + span]!;
+      if (i < 0) i = celdas.indice(ax + dx, ay + dy, state);
+      const datos = celdas.datos, b = i * ANCHO, marcas = datos[b + C_MARCAS]!;
+      if (!(marcas & VISIBLE) || !habitableParaPlan(plan, (marcas & AGUA) !== 0, (marcas & REFUGIO) !== 0)) continue;
+      // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
+      // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
+      const t = state.pool[result.length] ??= { x: 0, y: 0, brote: 0, food: 0, water: 0, novelty: undefined, ocupantes: undefined };
+      t.x = datos[b + C_X]!; t.y = datos[b + C_Y]!; t.brote = datos[b + C_BROTE]!; t.food = datos[b + C_ALIMENTO]!;
+      t.water = marcas & (fish ? HUMEDAD_LEIDA : AGUA_TIERRA_LEIDA) ? datos[b + (fish ? C_AGUA_PEZ : C_AGUA_TIERRA)]! : celdas.agua(i, fish, state);
+      t.novelty = undefined;
+      t.ocupantes = celdas.selloOcupantes[i] === generacion ? celdas.ocupantes[i] : undefined;
+      result.push(t);
+      state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] = stamp;
+    }
   }
   return result;
 }
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
-  const physicalInterval = paramsOf(world).quimica.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
+  const physicalInterval = state.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < physicalInterval || animal.energy < 0.06) return;
   const neighbors = state.neighbors, reader = state.reader, fast = state.fast;
   neighbors.length = 0;
@@ -669,8 +923,7 @@ function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalE
   emit?.({ kind: 'animal', actors: hunter ? [hunter, animal.id] : [animal.id], x: animal.x, y: animal.y,
     text: `${animal.species} ${animal.id} muere por ${cause}.`, cause, source: 'simulation' });
 }
-function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emit?: AnimalEmitter): void {
-  const emergent = paramsOf(world).quimica.emergente;
+function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emergent: boolean, emit?: AnimalEmitter): void {
   const morphology = emergent ? ensureMorphology(animal, world.seed) : undefined;
   const metabolism = (0.6 + animal.genes.metabolism * 0.8) * (morphology ? 0.9 + morphology.size * 0.3 : 1);
   advanceNeeds(animal, { hunger: 0.00042 * metabolism, thirst: 0.00048 * (1.3 - animal.genes.waterEfficiency * 0.6)
@@ -797,13 +1050,14 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(),
     visibles: (animal, plan) => localTiles(animal, state, plan),
     ocupantes: (x, y) => state.occupants.get(cellXY(x, y)),
-    residente: t => state.reader ? state.reader.cellAt(t.x, t.y) >= 0 : state.tile(t.x, t.y) !== undefined,
+    residente: t => (state.celdas.marcas(state.celdas.indice(t.x, t.y, state)) & VISIBLE) !== 0,
     visto: (dx, dy) => seenAt(state, dx, dy),
     recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
-    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false };
+    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, emergente: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE),
+    planes: [], claves: new Float64Array(0), orden: new Int32Array(0) };
   const { fauna: leyesFauna } = paramsOf(world);
-  const emergent = paramsOf(world).quimica.emergente;
+  const emergent = state.emergente = paramsOf(world).quimica.emergente;
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
   if (leyesFauna) {
     state.contacto = leyesFauna.contactoContinuo; state.reserva = leyesFauna.reservaReproductiva;
@@ -815,10 +1069,11 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
   // Vista residente validada (o ninguna) para todo el paso: la fauna no cambia la topología ni el SoA.
   const reader = state.reader = residentTileReader(world.tiles);
   state.fast = residentFastAccess(world.tiles);
+  state.celdas.empezar();
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
+    physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emergent, emit);
     if (emergent && animal.species !== 'fish') {
       const m = animal.morphology!, cold = tile.biome === 'mountain' || world.tick % 2400 >= 1800 || world.weather === 'rain';
       // Physical heat loss, paid by the body. Insulation protects in cold conditions,
@@ -829,17 +1084,22 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     }
     if (animal.health <= 0) continue;
     const p = cell(animal), here = state.occupants.get(p);
-    if (here) here.push(animal); else state.occupants.set(p, [animal]);
+    if (here) here.push(animal);
+    else { const nuevos = [animal]; state.occupants.set(p, nuevos); state.celdas.ocupar(animal.x, animal.y, nuevos); }
   }
   world.animals = world.animals.filter(a => a.health > 0);
   const active = world.animals;
-  for (const animal of active) decidirFauna(animal, world, state, planFauna(animal, columnaEspecie));
+  // Los planes se crean en orden canónico (su id es el orden de creación); la decisión y el poblado van por cercanía.
+  const planes = state.planes, orden = ordenEspacial(active, state);
+  planes.length = active.length;
+  for (let i = 0; i < active.length; i++) planes[i] = planFauna(active[i]!, columnaEspecie);
+  for (const i of orden) decidirFauna(active[i]!, world, state, planes[i]!);
   actividadFauna.set(world, { tick: world.tick, vivos: active.length, decisiones: decididosEn(active, world.tick) });
   if (emergent) {
     const humans = settlementBuckets(world.people ?? []);
     const structures = world.structures ?? [];
     const hearths = settlementBuckets(structures.filter(s => s.condition > 0.1 && s.components.includes('hearth')));
-    for (const animal of active) settlementOverlay(animal, world.tick, state, humans, hearths);
+    for (const i of orden) settlementOverlay(active[i]!, world.tick, state, humans, hearths);
   }
   // Las huidas preceden al contacto, con desempate por id dentro de cada grupo.
   for (const animal of active) if (animal.action === 'flee') move(animal, world, state);

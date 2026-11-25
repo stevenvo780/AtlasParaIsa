@@ -218,7 +218,8 @@ export class TablaOrganismosSoA implements TablaOrganismos {
   }
 
   private validarDueño(hilo: Hilo, slot: Slot): void {
-    if (!Number.isInteger(slot) || slot < 0 || slot >= this.altas || this.dueñoVigente(slot) !== hilo) {
+    // Una ranura que llega de `slotDe` es un double; como entero pequeño las lecturas de columna no desoptimizan.
+    if (!Number.isInteger(slot) || slot < 0 || slot >= this.altas || this.dueñoVigente(slot <= 0x3fffffff ? slot | 0 : slot) !== hilo) {
       throw new Error(`El hilo ${hilo} no es dueño de la fila ${slot}.`);
     }
   }

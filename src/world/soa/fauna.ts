@@ -3,10 +3,8 @@ import { CAMPOS_CUERPO, Clase, CUERPO_ANCHO, GENOMA_ANCHO, REF_NULA, slotDe, typ
 import { TablaOrganismosSoA } from './organismos.js';
 
 const ESPECIE = 'especie';
-const GENES = ['speed', 'perception', 'metabolism', 'carnivory', 'waterEfficiency', 'camouflage'] as const;
-const MORFOLOGIA = ['caution', 'size', 'coat', 'defense'] as const;
 
-interface Fila { readonly slot: number; readonly ref: Ref; readonly uid: number }
+interface Fila { readonly slot: number; readonly ref: Ref; readonly uid: number; readonly animal: Animal }
 
 /** El siguiente uid durable del mundo (`World.siguienteUid`): nunca se repite, tampoco tras guardar y cargar. */
 export type Uids = () => number;
@@ -21,7 +19,7 @@ const uidsLocales = (): Uids => { let siguiente = 1; return () => siguiente++; }
  */
 export class FaunaSoA {
   private readonly filas = new WeakMap<Animal, Fila>();
-  private readonly residentes = new Map<number, Animal>();
+  private readonly residentes = new Map<number, Fila>();
   readonly columnaEspecie: number;
 
   constructor(readonly tabla = new TablaOrganismosSoA(), private readonly uids: Uids = uidsLocales()) {
@@ -31,15 +29,15 @@ export class FaunaSoA {
 
   ref(animal: Animal): Ref { return this.filas.get(animal)?.ref ?? REF_NULA; }
 
-  animal(slot: number): Animal | undefined { return this.residentes.get(slot); }
+  animal(slot: number): Animal | undefined { return this.residentes.get(slot)?.animal; }
 
   sincronizar(animales: readonly Animal[]): void {
     if (this.residentes.size === animales.length && animales.every(animal => this.filas.has(animal))) return;
     const vigentes = new Set(animales);
-    for (const [slot, animal] of this.residentes) {
-      if (vigentes.has(animal)) continue;
-      this.tabla.baja(0, this.filas.get(animal)!.ref);
-      this.filas.delete(animal);
+    for (const [slot, fila] of this.residentes) {
+      if (vigentes.has(fila.animal)) continue;
+      this.tabla.baja(0, fila.ref);
+      this.filas.delete(fila.animal);
       this.residentes.delete(slot);
     }
     for (const animal of animales) if (!this.filas.has(animal)) this.alta(animal);
@@ -57,9 +55,12 @@ export class FaunaSoA {
     const uid = w.f64('uid'), x = w.f32('x'), y = w.f32('y'), chunk = w.i32('chunk'), objetivo = w.i32('objetivo');
     const cuerpo = w.f32('cuerpo'), genoma = w.f32('genoma'), accion = w.u8('accion'), especie = w.u8(ESPECIE);
     const decideEn = w.f64('decideEn'), pareja = w.f64('pareja');
-    for (const [slot, animal] of this.residentes) {
+    const hambre = CAMPOS_CUERPO.hambre, sed = CAMPOS_CUERPO.sed, energia = CAMPOS_CUERPO.energia, salud = CAMPOS_CUERPO.salud;
+    const masa = CAMPOS_CUERPO.masa;
+    for (const fila of this.residentes.values()) {
+      const slot = fila.slot, animal = fila.animal;
       w.fila(slot);
-      uid[slot] = this.filas.get(animal)!.uid;
+      uid[slot] = fila.uid;
       x[slot] = animal.x; y[slot] = animal.y;
       const actual = celda?.(animal.x, animal.y) ?? -1;
       chunk[slot] = actual < 0 ? -1 : chunkDe?.(actual) ?? -1;
@@ -69,15 +70,17 @@ export class FaunaSoA {
       decideEn[slot] = tick + 1;
       pareja[slot] = fertil?.(animal) ? 0 : -1;
       const base = slot * CUERPO_ANCHO;
-      cuerpo[base + CAMPOS_CUERPO.hambre] = animal.hunger;
-      cuerpo[base + CAMPOS_CUERPO.sed] = animal.thirst;
-      cuerpo[base + CAMPOS_CUERPO.energia] = animal.energy;
-      cuerpo[base + CAMPOS_CUERPO.salud] = animal.health;
-      cuerpo[base + CAMPOS_CUERPO.masa] = animalBiomass(animal);
-      let gen = slot * GENOMA_ANCHO;
-      for (const campo of GENES) genoma[gen++] = animal.genes[campo];
-      const morfologia = animal.morphology;
-      for (const campo of MORFOLOGIA) genoma[gen++] = morfologia ? morfologia[campo] : 0;
+      cuerpo[base + hambre] = animal.hunger;
+      cuerpo[base + sed] = animal.thirst;
+      cuerpo[base + energia] = animal.energy;
+      cuerpo[base + salud] = animal.health;
+      cuerpo[base + masa] = animalBiomass(animal);
+      // Genoma: los seis genes y la morfología (o ceros), campo a campo, sin claves dinámicas por animal.
+      const gen = slot * GENOMA_ANCHO, genes = animal.genes, morfologia = animal.morphology;
+      genoma[gen] = genes.speed; genoma[gen + 1] = genes.perception; genoma[gen + 2] = genes.metabolism;
+      genoma[gen + 3] = genes.carnivory; genoma[gen + 4] = genes.waterEfficiency; genoma[gen + 5] = genes.camouflage;
+      genoma[gen + 6] = morfologia ? morfologia.caution : 0; genoma[gen + 7] = morfologia ? morfologia.size : 0;
+      genoma[gen + 8] = morfologia ? morfologia.coat : 0; genoma[gen + 9] = morfologia ? morfologia.defense : 0;
     }
   }
 
@@ -88,8 +91,11 @@ export class FaunaSoA {
 
   private alta(animal: Animal): void {
     const uid = animal.uid ??= this.uids();
-    const ref = this.tabla.alta(0, Clase.Animal), slot = slotDe(ref);
-    this.filas.set(animal, { slot, ref, uid });
-    this.residentes.set(slot, animal);
+    // `slotDe` divide un double: `| 0` deja la misma ranura como entero pequeño, y así las claves del mapa y los
+    // índices de las columnas no hacen que V8 desoptimice cada escritura del frente.
+    const ref = this.tabla.alta(0, Clase.Animal), s = slotDe(ref), slot = s <= 0x3fffffff ? s | 0 : s;
+    const fila = { slot, ref, uid, animal };
+    this.filas.set(animal, fila);
+    this.residentes.set(slot, fila);
   }
 }

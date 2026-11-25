@@ -730,6 +730,13 @@ export const leyFauna: Ley = {
       const celda = c.terreno.celda(f.animal.x, f.animal.y);
       if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + huella(f.vista.masa));
     }
+    // Quien aún no tiene fila (un chunk que vuelve del archivo: el alta llega en F4) ya ocupa su celda: si no contara,
+    // otro podría entrar en ella este tick y la huella pasaría del área.
+    if (e.filas.size !== c.mundo.animals.length) for (const a of c.mundo.animals) {
+      if (!a.cuerpo || e.filas.has(a)) continue;
+      const celda = c.terreno.celda(a.x, a.y);
+      if (celda >= 0) e.ocupacion.set(celda, (e.ocupacion.get(celda) ?? 0) + huella(masaDe(c, a.cuerpo)));
+    }
     medirPasto(c, e);
     for (const f of e.filas.values()) percibir(c, e, f);
   },

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
@@ -15,31 +16,34 @@ import { dispositivosGpuApagados } from '../world/ecosystem-kernel.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
-import { paramsOf, type WorldParams } from '../world/params.js';
+import { ley, paramsOf, setParams, type WorldParams } from '../world/params.js';
+import { crearMotor } from '../world/motor/coordinador.js';
+import type { Instantanea, TelemetriaMotor } from '../world/motor/contratos.js';
+import { motorConfig } from './hardware-limits.js';
+import { deploymentParams } from './deployment-params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
 import { technologyJournalNearCapacity } from '../world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
-import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
+import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, PersonDetail, ServerMessage, Tile, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
-import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
+import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
-import { Worker } from 'node:worker_threads';
+
 import { cintaDeMundo } from './cinta/escritor.js';
 import { LectoresCinta, type PeticionCinta, type RespuestaCinta } from './cinta/lector-worker.js';
-import { CINTA, type ChunkReq, type Corte, type Hito, type Nivel } from '../shared/cinta.js';
-import { enlaceCinta } from '../shared/fotograma.js';
-import { crearEnlaceCortes, type TapeWorkerRequest } from './tape-worker.js';
+import { abrirMarcadores, leerMarcador } from './cinta/marcadores.js';
+import { CINTA, type ChunkReq, type CintaMeta, type Corte, type Hito, type Nivel } from '../shared/cinta.js';
 import { chronicleSerial } from '../world/chronicle-journal.js';
 import { captureReplayChange, type SnapshotReplayChange } from './snapshot.js';
 import type { Chunk } from '../world/terrain.js';
-import { createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, TURBO_MIRROR_MS } from './sim-worker.js';
+import { GrabadorCinta, createTileObserver, projectMirrorTile, projectMirrorWorld, projectTapeFrame, teselasParaEmision, TURBO_MIRROR_MS, vistaParaEmision } from './sim-worker.js';
 import { parseWhisperRequest, whisperView } from '../world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from './worldmap-service.js';
 import type { DivineWhisper, DivineWhisperRequest, WorldDirectoryResponse, WorldMapChunkSummary, WorldMapResponse } from '../shared/worldmap.js';
@@ -57,6 +61,7 @@ export interface AppOptions {
    * Una función se evalúa SOLO si no hay mundo que cargar (T100, fase 4b): así el
    * resolver de límites del host no se consulta en `load`, `previous` ni migración. */
   params?: WorldParams | (() => WorldParams);
+  deployment?: boolean;
   /** Instance-local monotonic clock; tests can measure work without patching global timers. */
   monotonicNow?: () => number;
   /** T136: permite alternar la compresión del `WebSocketServer` sin editar este fichero
@@ -84,6 +89,8 @@ export interface AppOptions {
   tape?: boolean;
   /** Bytes que puede ocupar la cinta (por defecto `CINTA.topeBytes`). */
   tapeTopeBytes?: number;
+  tapeSinCreditoMs?: number;
+  onEstadoCinta?: (error: string | null) => void;
   /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
   observerOnly?: boolean;
 }
@@ -110,11 +117,13 @@ export interface ReadOnlyBackend {
   person(id: string): Promise<Extract<ServerMessage, { type: 'persona' }>['persona']>;
   recipe(id: string): Promise<Extract<ServerMessage, { type: 'recipe' }>['recipe']>;
   regions(): unknown;
-  salud(): Salud;
+  salud(): SaludServidor;
+  motor?(): TelemetriaMotor | undefined;
   readonly ready: boolean;
   readonly runtime: RuntimeStats;
   readonly deltas: boolean;
   readonly failed: boolean;
+  readonly turbo?: boolean;
   readonly respaldo: unknown;
   /** Lectura de la cinta en sus hilos (nunca una RPC a la simulación). Ausente si la cinta está apagada. */
   cinta?: ServicioCinta;
@@ -125,9 +134,44 @@ export interface ReadOnlyBackend {
   whispers?(): WhispersResponse;
   whisper?(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper>;
 }
+export type SaludServidor = Salud & { epoca?: number; ultimoTickGuardado?: number };
+
+type Recibos = NonNullable<Parameters<Store['save']>[1]>;
+type StoreCompleto = Store & {
+  cargarInstantanea(): { instantanea: Instantanea; epoca: number } | null;
+  verificarGuardado?(): LoadedSnapshot | null;
+  guardar(i: Instantanea): void;
+  guardarConEntradas?(i: Instantanea, recibos: Recibos, sesiones: string[]): void;
+};
+
+function cargarGuardado(store: Store, deployment: boolean | undefined): (LoadedSnapshot & Omit<Instantanea, 'world'> & { epoca: number | null }) | null {
+  const completo = store as StoreCompleto;
+  const base = completo.verificarGuardado ? completo.verificarGuardado() : store.load();
+  if (!base) return null;
+  const params = paramsOf(base.world);
+  if (params.v23.guardadoCompleto !== paramsDelArranque(params, deployment).v23.guardadoCompleto) {
+    throw new Error('Cambiar v23.guardadoCompleto requiere un mundo nuevo.');
+  }
+  if (!params.v23.guardadoCompleto) return { ...base, materia: null, epoca: null };
+  const carga = completo.cargarInstantanea();
+  if (!carga) throw new Error('No se pudo recargar la instantánea completa.');
+  return { ...base, ...carga.instantanea, epoca: carga.epoca };
+}
+
+function paramsDelArranque(params: WorldParams, deployment: boolean | undefined): WorldParams {
+  return deployment ? deploymentParams(params) : params;
+}
+
+export function telemetriaEnJson(telemetria: TelemetriaMotor): Omit<TelemetriaMotor, 'ocupacion'> & { ocupacion: number[] } {
+  return { ...telemetria, ocupacion: Array.from(telemetria.ocupacion) };
+}
 export interface WhispersResponse { tick: number; whispers: DivineWhisper[] }
 /** La respuesta ya serializada (y comprimida si se pide) en un hilo lector: el HTTP solo la escribe. */
-export interface ServicioCinta { leer(peticion: PeticionCinta, gzip: boolean, senal?: AbortSignal): Promise<RespuestaCinta> }
+export interface ServicioCinta {
+  directorio?: string;
+  estado?(): CintaMeta['estado'];
+  leer(peticion: PeticionCinta, gzip: boolean, senal?: AbortSignal): Promise<RespuestaCinta>;
+}
 
 /**
  * V24 — Last known 4×4 palette summary of every chunk this process has seen: resident chunks refresh
@@ -378,6 +422,7 @@ function camaraDeConsulta(params: URLSearchParams, ancho = 'width', alto = 'heig
   catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
 }
 const RUTAS_CINTA = new Set(['/api/cinta/meta', '/api/cinta/chunk', '/api/tape/meta', '/api/tape/chunk']);
+const PERFIL_CINTA = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i;
 /** Consulta de `RutasCinta` (`shared/cinta.ts`) o del alias `/api/tape/*`, validada antes de ir a un lector. */
 function consultaCinta(url: URL): PeticionCinta {
   const q = url.searchParams, MAX = Number.MAX_SAFE_INTEGER;
@@ -482,9 +527,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     ? new Muestreador({ directorio: dirname(store.path), commit: options.commit }) : undefined;
   const sessions = gateway?.sessions ?? store;
   /** V21. `tickMs: 0` is the uncapped loop too; the tape follows turbo unless it is set explicitly. */
-  const turbo = !!options.turbo || options.tickMs === 0;
+  const turboSolicitado = !!options.turbo || options.tickMs === 0;
   const observerOnly = !!options.observerOnly;
-  const tapeRequested = options.tape ?? turbo;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const verifyPassword = passwordVerifier(options);
   const primaryUrl = new URL(options.origin);
@@ -510,11 +554,29 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const deseado = reproduccionManual ?? true;
     if (world.reproductionEnabled === deseado) return;
     world.reproductionEnabled = deseado;
-    cambiosPendientes.push(captureReplayChange(world, ['reproductionEnabled']));
+    if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['reproductionEnabled']));
   }
-  const loaded = gateway ? null : store.load();
+  const loaded = gateway ? null : cargarGuardado(store, options.deployment);
   const existingInstanceId = gateway ? undefined : readWorldInstance(store.db);
-  let world = gateway ? undefined! as World : loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
+  const paramsNuevos = !gateway && !loaded ? (typeof options.params === 'function' ? options.params() : options.params) : undefined;
+  const semillaNueva = paramsNuevos?.v23.fotograma || paramsNuevos?.v23.duenos || paramsNuevos?.v23.guardadoCompleto
+    ? randomBytes(4).readUInt32LE() : 51926;
+  let world = gateway ? undefined! as World : loaded?.world ?? createWorld(options.seed ?? semillaNueva, paramsNuevos);
+  if (loaded && options.deployment) {
+    const params = paramsDelArranque(paramsOf(world), options.deployment);
+    if (params.v23.duenos || params.v23.fotograma || params.v23.guardadoCompleto) setParams(world, params);
+  }
+  const usaMotor = !gateway && (ley(world, 'fotograma') || ley(world, 'duenos'));
+  const turbo = turboSolicitado || usaMotor;
+  const binario = !gateway && ley(world, 'fotograma');
+  const tapeRequested = options.tape ?? (binario || turboSolicitado);
+  const config = usaMotor ? motorConfig(options.seed) : undefined;
+  const conDuenos = usaMotor && config!.hilos !== 1;
+  let epoca = loaded?.epoca ?? 0;
+  let tickMotor = world?.tick ?? 0;
+  let lecturaMotor: World | undefined;
+  let ultimaLecturaMotor = -Infinity;
+  if (conDuenos && !ley(world, 'duenos')) throw new Error('CARTA_MOTOR_HILOS con varios dueños requiere v23.duenos.');
   // Arrancar desde un respaldo es un retroceso: la crónica que Isa lee no puede decir que
   // el mundo «retoma desde su último momento guardado», y el operador tiene que ver que el
   // eslabón vigente está podrido. El retroceso solo se puede medir en tiempo de servicio:
@@ -536,12 +598,54 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       cause: respaldo ? `Reinicio del servicio; se adoptó el respaldo ${respaldo.slot} de la cadena y se perdió ${perdido}.`
         : 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
     world.events = world.events.slice(-120);
-    cambiosPendientes.push(captureReplayChange(world, ['events']));
+    if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['events']));
   }
-  if (!gateway) { store.save(world, [], [], cambiosPendientes); cambiosPendientes.length = 0; }
+  const motor = config && crearMotor(world, config);
+  function mundoParaEmision(forzar = false): World {
+    if (!motor || !conDuenos) return world;
+    const ahora = performance.now();
+    if (!lecturaMotor || lecturaMotor.tick !== tickMotor && (forzar || ahora - ultimaLecturaMotor >= TURBO_MIRROR_MS)) {
+      lecturaMotor = motor.instantanea().world;
+      ultimaLecturaMotor = ahora;
+    }
+    return lecturaMotor;
+  }
+  let ultimoTickGuardado = world?.tick ?? 0;
+  let ultimoGuardadoEn: number | null = gateway ? null : loaded?.savedAt ?? null;
+  function guardarMundo(draft: World, recibos: Recibos = [], sesiones: string[] = [], cambios: readonly SnapshotReplayChange[] = []): Instantanea | undefined {
+    const instantanea = motor?.instantanea();
+    const duradero = instantanea?.world ?? draft;
+    if (ley(draft, 'guardadoCompleto')) {
+      const completo = store as StoreCompleto;
+      const carga = instantanea ?? { world: draft, materia: loaded?.materia ?? null };
+      if (sesiones.length || recibos.length) {
+        if (!completo.guardarConEntradas) throw new Error('El guardado completo aún no admite entradas con sesión.');
+        completo.guardarConEntradas(carga, recibos, sesiones);
+      } else completo.guardar(carga);
+    } else store.save(duradero, recibos, sesiones, cambios);
+    ultimoTickGuardado = duradero.tick;
+    ultimoGuardadoEn = Date.now();
+    return instantanea;
+  }
+  function adoptarGuardado(guardado: Instantanea | undefined): void {
+    if (!motor || !guardado) return;
+    // Los diarios y las colas de archivo se confirman sobre la instantánea que recibió Store.
+    motor.cargar(guardado, epoca);
+    world = guardado.world;
+    lecturaMotor = undefined;
+  }
+  if (!gateway) {
+    try {
+      if (motor && loaded) motor.cargar({ world, materia: loaded.materia }, epoca);
+      adoptarGuardado(guardarMundo(world, [], [], cambiosPendientes));
+      cambiosPendientes.length = 0;
+    } catch (error) {
+      void motor?.cerrar().catch(() => undefined);
+      throw error;
+    }
+  }
   let lastWorldSaveAt = monotonicNow();
   /** Salud operacional y recuperación (reloj real, no el inyectable de las cuentas de paso). */
-  let ultimoGuardadoEn: number | null = gateway ? null : Date.now();
   let ultimoPasoEn = relojReal();
   let recargas = 0;
   /** Tick que el paso no logra superar y cuántas veces ha fallado. Sobrevive a una recarga (que devuelve el mundo
@@ -607,23 +711,25 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = gateway ? gateway.runtime : { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: turbo ? 0 : 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0 };
-  function salud(): Salud {
+  function salud(): SaludServidor {
     if (gateway) return gateway.salud();
     const segundos = Math.max(0, (relojReal() - ultimoPasoEn) / 1000);
-    const gpu = estadoGpu(paramsOf(world).motor.gpu);
+    const gpuEstado = !failed && config?.gpu.length ? motor?.telemetria().gpuEstado : undefined;
+    const gpu = config ? config.gpu.map((dispositivo, i) => ({ dispositivo, estado: gpuEstado?.[i] ?? 'sin' }))
+      : estadoGpu(paramsOf(world).motor.gpu);
     const parado = failed || stopped || segundos > PASO_PARADO_S;
     const resumen = muestreador?.resumen();
     const diagnostico = resumen ? { duras24h: resumen.duras24h, blandas24h: resumen.blandas24h,
       ultimaViolacion: resumen.ultimaViolacion ?? null, errorBitacora: errorPublico(resumen.errorBitacora),
       registrosSinBitacora: resumen.registrosSinBitacora } : DIAGNOSTICO_VACIO;
     return { estado: parado ? 'parado' : diagnostico.duras24h > 0 || gpu.some(g => g.estado !== 'ok') ? 'degradado' : 'ok',
-      tick: world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
-      ultimoGuardado: ultimoGuardadoEn, gpu, recargas, diagnostico, operacion: null };
+      tick: motor ? tickMotor : world.tick, ticksPorSegundo: runtime.tickHz, segundosDesdeUltimoPaso: segundos,
+      ultimoGuardado: ultimoGuardadoEn, gpu, recargas, diagnostico, operacion: null, epoca, ultimoTickGuardado };
   }
   let muestreoFallido = false;
   /** El diagnóstico observa el paso ya confirmado: un fallo suyo no puede saltarse la difusión ni la telemetría. */
-  function muestrear(): void {
-    try { muestreador?.paso(world, runtime.stepMs); }
+  function muestrear(mundo = world): void {
+    try { muestreador?.paso(mundo, runtime.stepMs); }
     catch (error) {
       if (muestreoFallido) return;
       muestreoFallido = true;
@@ -635,9 +741,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try { return ejecutar(); } finally { options.onOperacion?.(null); }
   }
   const proyectar = (viewport?: Viewport) => {
-    const start = monotonicNow(), projected = projectWorld(world, viewport, context);
+    const start = monotonicNow(), fuente = mundoParaEmision(), projected = projectWorld(fuente, viewport, context);
     runtime.projectionMs = monotonicNow() - start;
-    return { ...projected, instanceId, regionesVivas: clavesVivasEn(world, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
+    return { ...projected, instanceId, regionesVivas: clavesVivasEn(fuente, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   const view = (viewport?: Viewport): WorldView => {
     if (gateway) return gateway.view(viewport);
@@ -664,41 +770,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
    * la misma cadencia, créditos y épocas; los lectores van en los suyos. Ni abrir un catálogo roto ni comprimir o
    * sincronizar un bloque ocurre en este hilo, y un fallo de la cinta nunca impide arrancar ni pausa el mundo. */
   const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:' ? cintaDeMundo(store.path) : undefined;
-  const descriptorCortes = crearEnlaceCortes(), enlaceCortes = enlaceCinta(descriptorCortes);
-  let hiloCinta: Worker | undefined, salidaCinta: Promise<void> | undefined, cerrandoCinta = false;
-  let errorCinta: string | undefined;
-  let observadorCinta = createTileObserver();
+  const grabador = directorioCinta ? new GrabadorCinta(directorioCinta, options.tapeTopeBytes, binario, error => {
+    if (options.onEstadoCinta) options.onEstadoCinta(error);
+    else if (error) console.warn(`La cinta dejó de grabar: ${error}.`);
+  }) : undefined;
+  let observadorCinta: ReturnType<typeof createTileObserver> | undefined;
   let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, serialCronica = 0;
-  let recargaCinta = false, baseNacimientos = 0, baseMuertes = 0;
+  let ultimoPuntoSerie = -1, baseNacimientos = 0, baseMuertes = 0;
   const hitosCinta: Hito[] = [];
-  const eventoGuardado = directorioCinta ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
-  function perderCinta(error: unknown) {
-    if (errorCinta) return;
-    // La cinta observa: deja de grabar, lo dice una vez y `/api/cinta/meta` lo muestra.
-    errorCinta = error instanceof Error ? error.message : String(error);
-    console.warn(`La cinta dejó de grabar: ${errorCinta}.`);
-    hitosCinta.length = 0;
-    void hiloCinta?.terminate();
-  }
-  if (directorioCinta) {
-    let moduleURL = new URL('./tape-worker.js', import.meta.url);
-    const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
-    if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
-    const hilo = hiloCinta = new Worker(`
-      const { workerData } = require('node:worker_threads');
-      (async () => {
-        if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
-        await import(workerData.moduleURL);
-      })().catch(error => { setImmediate(() => { throw error; }); });
-    `, { eval: true, execArgv: [], name: 'carta-tape', workerData: { role: 'carta-tape', moduleURL: moduleURL.href,
-      loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined, descriptor: descriptorCortes,
-      options: { directorio: directorioCinta, topeBytes: options.tapeTopeBytes } } });
-    hilo.on('error', perderCinta);
-    salidaCinta = new Promise(resolve => hilo.once('exit', code => {
-      if (!cerrandoCinta || code !== 0) perderCinta(new Error(`El hilo de la cinta terminó (código ${code}).`));
-      resolve();
-    }));
-  }
+  const eventoGuardado = directorioCinta && !binario ? store.db.prepare('SELECT body FROM events WHERE id=?') : undefined;
   /** EMA of steps per wall-clock second (V21 `simHz`), over the gaps between consecutive steps. */
   let simHz = 0, ultimoLatidoPaso: number | null = null;
   let ultimaDifusionTurbo = -Infinity;
@@ -706,21 +786,48 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const importancia = Number(['birth', 'death', 'community', 'settlement', 'discovery', 'invention'].includes(suceso.kind));
     return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
   }
-  function abrirCinta(hilo: Worker) {
-    epocaCinta++;
-    // Lo que quedó sin cortar pertenece a la época que se cierra; tras recargar, el mundo nuevo vuelve a contar.
-    hilo.postMessage({ type: 'abrir', apertura: { instanciaId: instanceId!, epoca: epocaCinta, tMundo: world.tick,
-      motivo: epocaCinta === 0 && respaldo ? 'restauracion' : 'reinicio' }, hitosPrevios: epocaCinta > 0 ? hitosCinta : [] } satisfies TapeWorkerRequest);
+  function prepararCinta(): void {
+    if (!grabador || failed || aMedioPaso) return;
+    grabador.comprobarCredito(options.tapeSinCreditoMs);
+    const arranque = grabador.iniciar();
+    if (!grabador.activo || !arranque && epocaCinta === epoca) return;
+    if (arranque?.recuperada) {
+      const nuevaEpoca = epoca + 1;
+      if (binario && motor) {
+        try {
+          const instantanea = motor.instantanea();
+          motor.cargar(instantanea, nuevaEpoca);
+          world = instantanea.world;
+          lecturaMotor = undefined;
+        } catch (error) { grabador.fallar(error); throw error; }
+      }
+      epoca = nuevaEpoca;
+    }
+    try {
+      const motivo = epocaCinta < 0 && respaldo ? 'restauracion' : 'reinicio';
+      grabador.abrir({ instanciaId: instanceId!, epoca, tMundo: motor ? tickMotor : world.tick, motivo },
+        epocaCinta < 0 || arranque ? [] : hitosCinta);
+    } catch (error) { grabador.fallar(error); return; }
+    epocaCinta = epoca;
+    if (binario && motor) {
+      if (arranque) {
+        try { motor.enlazar(arranque.descriptor); }
+        catch (error) { grabador.fallar(error); throw error; }
+      }
+      return;
+    }
+    const muestra = mundoParaEmision(true);
     hitosCinta.length = 0;
-    recargaCinta = false; ultimoCorte = -Infinity; observadorCinta = createTileObserver();
-    serialCronica = world.eventCounter; baseNacimientos = world.birthCounter; baseMuertes = world.demographyDynamics.deaths;
-    for (const suceso of world.events) if (suceso.tick === world.tick && (epocaCinta === 0 || chronicleSerial(suceso.id) === null)) {
+    ultimoCorte = -Infinity; ultimoPuntoSerie = -1; observadorCinta = createTileObserver();
+    serialCronica = muestra.eventCounter; baseNacimientos = muestra.birthCounter; baseMuertes = muestra.demographyDynamics.deaths;
+    Atomics.store(grabador.activo.pedirCompleto, 0, 1);
+    for (const suceso of muestra.events) if (suceso.tick === muestra.tick && (epocaCinta === 0 || chronicleSerial(suceso.id) === null)) {
       hitosCinta.push(hitoCinta(suceso));
     }
   }
-  function recogerCronica() {
-    const diario = world.chronicleJournal;
-    while (serialCronica < world.eventCounter) {
+  function recogerCronica(muestra: World) {
+    const diario = muestra.chronicleJournal;
+    while (serialCronica < muestra.eventCounter) {
       const serial = ++serialCronica;
       // En un paso que guardó, Store ya pasó los nuevos sucesos del diario al archivo.
       const suceso = diario?.pending[serial - diario.committedThrough - 1];
@@ -729,53 +836,78 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       hitosCinta.push(hitoCinta(suceso ?? JSON.parse(cuerpo as string) as ChronicleEvent));
     }
   }
-  /** Sin crédito no se corta (la cinta se atrasa, el mundo no espera), salvo el primero de cada época y el del cierre. */
-  function grabarCinta(forzar = false) {
-    if (!hiloCinta || errorCinta || failed || aMedioPaso) return;
+  function grabarCinta(forzar = false): void {
+    const enlace = grabador?.activo;
+    if (binario || !grabador || !enlace || failed || aMedioPaso || !observadorCinta) return;
+    const tick = motor ? tickMotor : world.tick;
+    const completo = ultimoCorte < 0;
+    const punto = ultimoPuntoSerie < 0 || tick > ultimoPuntoSerie && tick % CINTA.seriePaso === 0;
+    const corta = tick > ultimoCorte && (forzar || completo || Atomics.load(enlace.creditos, 0) > 0
+      && tick - ultimoCorte >= Atomics.load(enlace.cadencia, 0));
+    if (conDuenos && !punto && !corta) return;
     try {
-      if (epocaCinta < 0 || recargaCinta) abrirCinta(hiloCinta);
-      recogerCronica();
-      const completo = ultimoCorte < 0;
-      if (world.tick > ultimoCorte && (forzar || completo || Atomics.load(enlaceCortes.creditos, 0) > 0
-        && world.tick - ultimoCorte >= Atomics.load(enlaceCortes.cadencia, 0))) {
-        const { chunks, changed } = observadorCinta.scan(world);
+      const muestra = mundoParaEmision(true);
+      recogerCronica(muestra);
+      const serie = { poblacion: muestra.people.length, nacimientos: muestra.birthCounter - baseNacimientos,
+        muertes: muestra.demographyDynamics.deaths - baseMuertes, fauna: muestra.animals.length, estructuras: muestra.structures.length,
+        sustancias: muestra.chemistry?.formulas.length ?? 0, hz: simHz };
+      if (punto) {
+        grabador.enviar({ type: 'serie', epoca, punto: { t: tick, ...serie } });
+        ultimoPuntoSerie = tick;
+      }
+      if (corta) {
+        const { chunks, changed } = observadorCinta.scan(muestra);
         const tiles: Tile[] = [];
         if (completo) for (const chunk of chunks.values()) for (const tile of chunk) tiles.push(tile);
-        const corte: Corte = { seq: ++seqCinta, epoca: epocaCinta, t: world.tick, vista: projectTapeFrame(world, runtime, instanceId, tiles),
-          tilesCambiadas: completo ? 'todas' : changed, hitos: hitosCinta.splice(0), catalogo: [], hz: simHz,
-          serie: { poblacion: world.people.length, nacimientos: world.birthCounter - baseNacimientos,
-            muertes: world.demographyDynamics.deaths - baseMuertes, fauna: world.animals.length, estructuras: world.structures.length,
-            sustancias: world.chemistry?.formulas.length ?? 0, hz: simHz } };
-        Atomics.sub(enlaceCortes.creditos, 0, 1);
-        Atomics.add(enlaceCortes.entregados, 0, 1n);
-        hiloCinta.postMessage({ type: 'corte', corte } satisfies TapeWorkerRequest);
-        ultimoCorte = world.tick;
+        const corte: Corte = { seq: ++seqCinta, epoca, t: tick, vista: projectTapeFrame(muestra, runtime, instanceId, tiles),
+          tilesCambiadas: completo ? 'todas' : changed, hitos: hitosCinta.splice(0), catalogo: [], hz: simHz, serie };
+        Atomics.sub(enlace.creditos, 0, 1);
+        Atomics.add(enlace.entregados, 0, 1n);
+        grabador.enviar({ type: 'corte', corte });
+        Atomics.store(enlace.pedirCompleto, 0, 0);
+        ultimoCorte = tick;
       }
-    } catch (error) { perderCinta(error); }
+    } catch (error) { grabador.fallar(error); }
   }
-  /** Graba el último tick y espera a que el hilo vacíe lo que retiene y salga. */
   async function cerrarCinta() {
-    grabarCinta(true);
-    cerrandoCinta = true;
-    if (!errorCinta) hiloCinta?.postMessage({ type: 'close', id: 0 } satisfies TapeWorkerRequest);
-    await salidaCinta;
+    if (!grabador) return;
+    if (!binario && !aMedioPaso && !failed) {
+      await grabador.flush().catch(() => undefined);
+      grabarCinta(true);
+    }
+    await grabador.cerrar();
   }
+  prepararCinta();
   grabarCinta();
-  const lectores = directorioCinta ? new LectoresCinta({ directorio: directorioCinta, mundo: store.path,
+  const lectores = directorioCinta && !options.onEstadoCinta ? new LectoresCinta({ directorio: directorioCinta, mundo: store.path,
     topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly, turbo }) : undefined;
-  const cinta: ServicioCinta | undefined = gateway ? gateway.cinta : lectores && {
-    leer: (peticion, gzip, senal) => lectores.leer(peticion, { gzip, estado: errorCinta ? 'error' : 'ok', instancia: instanceId,
+  const cintaDirecta: ServicioCinta | undefined = lectores && {
+    directorio: directorioCinta!,
+    estado: () => grabador!.estado,
+    leer: (peticion, gzip, senal) => lectores.leer(peticion, { gzip, estado: grabador!.estado, instancia: instanceId,
       fondo: { seed: world.seed, cuencas: paramsOf(world).agua.cuencas } }, senal),
   };
+  const servicioCinta = () => gateway ? gateway.cinta : cintaDirecta;
   const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
     if (aMedioPaso) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no se puede consultar.');
-    return world;
+    return mundoParaEmision();
+  }
+  async function detallePersona(id: string): Promise<PersonDetail | null> {
+    if (gateway) return gateway.person(id);
+    const mundo = mundoConsultable();
+    if (!motor) return enriquecerPersona(mundo, id) ?? null;
+    const uid = mundo.people.find(persona => persona.id === id)?.uid;
+    if (uid === undefined) return null;
+    const epocaConsulta = epoca;
+    const persona = await motor.detalle(uid);
+    return epocaConsulta === epoca && persona ? enriquecerPersona(mundoConsultable(), id, persona) ?? null : null;
   }
   /** V24 direct mode (no gateway): minimap, directory and whispers read the live `world` between steps,
    * rebuilt at most once per simulated tick (the same object is served while the tick does not move). */
-  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache(), atlasObserver = createTileObserver();
+  const atlas = new MinimapAtlas(), atlasBuilder = new WorldMapCache();
+  let atlasObserver: ReturnType<typeof createTileObserver> | undefined;
   let mapaDirecto: { tick: number; version: number; value: WorldMapResponse } | undefined;
   let directorioDirecto: { tick: number; value: WorldDirectoryResponse } | undefined;
   let susurrosDirectos: { tick: number; count: number; value: WhispersResponse } | undefined;
@@ -783,7 +915,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const mundo = mundoConsultable();
     if (mapaDirecto?.tick !== mundo.tick) {
       // Every chunk the scan reports as changed is re-encoded now: a change is reported only once.
-      const { chunks, dirty } = atlasObserver.scan(mundo);
+      const observado = binario ? undefined : (atlasObserver ??= createTileObserver()).scan(mundo);
+      const chunks = observado?.chunks ?? teselasParaEmision(mundo);
+      const dirty = observado?.dirty ?? chunks.keys();
       for (const key of dirty) {
         const comma = key.indexOf(',');
         atlas.setActive(key, encodeChunkMinimapCells(chunks.get(key)!, Number(key.slice(0, comma)), Number(key.slice(comma + 1))));
@@ -802,7 +936,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   function directorioDirectoFn(): WorldDirectoryResponse {
     const mundo = mundoConsultable();
-    if (directorioDirecto?.tick !== mundo.tick) directorioDirecto = { tick: mundo.tick, value: buildWorldDirectory(projectMirrorWorld(mundo, undefined, context)) };
+    if (directorioDirecto?.tick !== mundo.tick) directorioDirecto = {
+      tick: mundo.tick, value: buildWorldDirectory(binario ? vistaParaEmision(mundo, context) : projectMirrorWorld(mundo, undefined, context)),
+    };
     return directorioDirecto.value;
   }
   function susurrosDirectosFn(): WhispersResponse {
@@ -822,6 +958,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (gateway) return gateway.whisper!(request, hash);
     if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
     if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa.');
+    comprobarGuardadoDeEntradas();
     if (pendingWhispers.length >= 16) throw new HttpError(429, 'Hay varios mensajes en camino. Espera un momento.');
     // What only the world knows (a living listener, a land destination) fails at once, not a step later.
     try { validateWhisper(mundoConsultable(), request); }
@@ -1028,6 +1165,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     catch (error) { if (error instanceof GestureConflict) throw new HttpError(409, error.message); throw error; }
     if (saved) return Promise.resolve(saved);
     if (failed || stopped) throw new HttpError(503, 'El mundo está en pausa. Este gesto sigue sin confirmación.');
+    comprobarGuardadoDeEntradas();
     const existing = pending.get(gesture.id);
     if (existing) {
       if (fingerprint(existing.gesture) !== fingerprint(gesture)) throw new HttpError(409, 'Ese identificador ya se usó para otro gesto.');
@@ -1040,6 +1178,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     pending.set(gesture.id, { gesture, hash, resolve, reject, promise });
     return promise;
   }
+  function comprobarGuardadoDeEntradas(): void {
+    if (ley(world, 'guardadoCompleto') && !(store as StoreCompleto).guardarConEntradas) {
+      throw new HttpError(503, 'El guardado completo todavía no puede confirmar esta entrada.');
+    }
+  }
   function stepOnce() {
     const desde = relojReal();
     if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
@@ -1047,8 +1190,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (options.beforeStep?.() === false) return;
     enPaso = true;
     try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
-    grabarCinta();
-    options.afterStep?.(simHz);
+    try {
+      prepararCinta();
+      grabarCinta();
+      options.afterStep?.(simHz);
+    } catch (error) {
+      if (!motor) throw error;
+      recuperarPaso(error, false, tickMotor);
+    }
   }
   function avanzar() {
     susurrosEnUltimoPaso = false;
@@ -1070,7 +1219,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const batch = [...pending.values()];
     const valid: Pending[] = [];
     /** Tick que este paso intenta alcanzar: el que cuenta `recuperarPaso` si falla. */
-    const tickObjetivo = world.tick + 1;
+    const tickObjetivo = (motor ? tickMotor : world.tick) + 1;
     // T104: sin clon, el paso corre sobre el mundo vigente y la atomicidad la sostiene esto.
     let punto: PuntoDeRestauracion | null = null;
     // PERF3: el paso corre sobre el mundo vigente sin nada con que deshacerlo. Mientras siga en
@@ -1103,11 +1252,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // V21: turbo and observer-only steps never copy the world (`clonPorPaso` off). A step with gestures
       // still keeps its undo (`SessionRevoked`) with a restoration point; one without runs in place.
       const sinClon = turbo || observerOnly;
-      const clonar = !sinClon && paramsOf(world).motor.clonPorPaso;
-      if (sinClon) { if (conEntradas) punto = puntoDeRestauracion(world); else sinReserva = true; }
+      const clonar = !motor && !sinClon && paramsOf(world).motor.clonPorPaso;
+      if (motor) sinReserva = true;
+      else if (sinClon) { if (conEntradas) punto = puntoDeRestauracion(world); else sinReserva = true; }
       else if (!clonar) punto = puntoDeRestauracion(world);
       else sinReserva = !conEntradas;
-      const draft = clonar && !sinReserva ? cloneWorld(world, context) : world;
+      const antesDeSusurros = whisperBatch.length && motor ? motor.instantanea() : null;
+      const draft = antesDeSusurros?.world ?? (clonar && !sinReserva ? cloneWorld(world, context) : world);
       runtime.cloneMs = monotonicNow() - cloneStarted;
       // V24: queued Mensajes Divinos enter the world at this step's tick, before it is simulated. The whole
       // `whispers` list is recorded as a replay change at that tick (`persistencia.paginasSucias`), so a
@@ -1121,7 +1272,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           rejectWhispers(new HttpError(400, error instanceof Error ? error.message : 'Mensaje divino no válido.'), other => other === item);
         }
       }
-      if (susurrosAplicados.length) cambios.push(captureReplayChange(draft, ['whispers']));
+      if (susurrosAplicados.length) {
+        if (antesDeSusurros) {
+          motor!.cargar(antesDeSusurros, epoca);
+          world = draft;
+        }
+        if (!ley(draft, 'guardadoCompleto')) cambios.push(captureReplayChange(draft, ['whispers']));
+      }
       const simulationStarted = monotonicNow();
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
       // Reloj propio, **no** `monotonicNow`: perfilar por fase es observabilidad de hardware
@@ -1139,7 +1296,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         ecologyExecution: { ...ejecucionPrevia,
           onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
       };
-      const results = stepWorld(draft, valid.map(item => item.gesture), contextoPaso, medicion);
+      const gestos = valid.map(item => item.gesture);
+      const pasoMotor = motor?.paso(gestos);
+      if (pasoMotor) tickMotor = pasoMotor.tick;
+      const results = pasoMotor?.resultados ?? stepWorld(draft, gestos, contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
@@ -1152,20 +1312,22 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // es lo que de verdad evita morir, no solo el tope más alto de esos módulos.
       // El gesto (`valid.length > 0`) sigue forzando el guardado en su propio paso,
       // sin tocar esa invariante.
-      const routineSaveDue = draft.tick % paramsOf(draft).persistencia.cadaTicks === 0
+      const tick = pasoMotor?.tick ?? draft.tick;
+      let guardado: Instantanea | undefined;
+      const routineSaveDue = tick % paramsOf(draft).persistencia.cadaTicks === 0
         && (!turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
       if (valid.length > 0 || susurrosAplicados.length > 0 || routineSaveDue
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
         guardando = true;
-        duranteOperacion('guardando', () => store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
+        guardado = duranteOperacion('guardando', () => guardarMundo(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
           [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios));
-        guardando = false; ultimoGuardadoEn = Date.now(); cambiosPendientes.length = 0;
+        guardando = false; cambiosPendientes.length = 0;
         lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
-      world = draft;
+      if (!motor) world = draft;
       // Desde aquí el paso es el mundo vigente (y, si tocaba guardar, ya es durable): un fallo en lo
       // que queda (métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
       // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
@@ -1182,11 +1344,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         item.resolve(whisper);
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
+      try { adoptarGuardado(guardado); }
+      catch (error) { recuperarPaso(error, false, tick); return; }
       runtime.stepMs = monotonicNow() - stepStarted;
-      muestrear();
+      if (!conDuenos) muestrear();
       runtime.p95StepMs = registrarPaso(runtime.stepMs);
-      if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
-      runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
+      if (!conDuenos && (tick % CADA_PASOS === 0 || !runtime.natalidad && !ley(world, 'natalidad'))) Object.assign(runtime, resumenVivo(world));
+      if (!conDuenos) runtime.activeTiles = world.tiles.length;
+      runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró
       // (siempre corrió así; instrumentarlo no adelanta ni retrasa el envío ni cambia su cadencia).
       // Reloj real, no `monotonicNow` — mismo motivo que `medicion` arriba.
@@ -1195,32 +1360,39 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // Turbo: a step every event-loop turn would project for every viewer at 100–300 Hz; viewers get
       // the live world at most every `TURBO_MIRROR_MS` (the DVR tape keeps every tick).
       const entradas = valid.length > 0 || susurrosEnUltimoPaso;
-      const difundir = turbo ? entradas || relojReal() - ultimaDifusionTurbo >= TURBO_MIRROR_MS : world.tick % 5 === 0 || entradas;
+      const difundir = turbo ? entradas || relojReal() - ultimaDifusionTurbo >= TURBO_MIRROR_MS : tick % 5 === 0 || entradas;
       if (difundir) {
         if (turbo) ultimaDifusionTurbo = relojReal();
         const broadcastStarted = performance.now();
+        if (conDuenos) {
+          const lectura = mundoParaEmision(true);
+          muestrear(lectura);
+          Object.assign(runtime, resumenVivo(lectura));
+          runtime.activeTiles = lectura.tiles.length;
+        }
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
       }
       // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
-      if (reservaVieja()) renovarReserva();
+      if (!motor && reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
       // T151: fracción real y ocupación. `fraccionSerial` conserva la lectura por diseño de
       // T107 (compatibilidad con perfil-fases/lab); la real vale 1 sin workers ni GPU y, con
       // tramo paralelo, es el tiempo fuera de ese tramo sobre el total de fases del paso.
-      const motor = paramsOf(world).motor, hayGpu = motor.gpu.length > 0, hayParalelo = motor.hilos > 1 || hayGpu;
+      const motorAnterior = paramsOf(world).motor;
+      const hayGpu = !motor && motorAnterior.gpu.length > 0, hayParalelo = !motor && (motorAnterior.hilos > 1 || hayGpu);
       const totalFases = FASE_NOMBRES.reduce((suma, nombre) => suma + fases[nombre], 0);
       // Solo un despacho real (o la pared GPU, sin diagnósticos de pool) actualiza el trío
       // paralelo/barrera/ocupación; entre ticks ecológicos se conserva el último despacho.
       const paraleloPasoMs = paraleloCapturadoMs > 0 ? paraleloCapturadoMs : hayGpu ? fases.ecologia + fases.kernel : 0;
       if (!hayParalelo) { runtime.fraccionSerialReal = 1; runtime.ocupacionWorkers = 0; runtime.tiempoParaleloMs = 0; runtime.tiempoBarreraMs = 0; }
       else {
-        runtime.fraccionSerialReal = calcularFraccionSerialReal(Math.max(0, totalFases - paraleloPasoMs), paraleloPasoMs, motor.hilos, motor.gpu.length);
+        runtime.fraccionSerialReal = calcularFraccionSerialReal(Math.max(0, totalFases - paraleloPasoMs), paraleloPasoMs, motorAnterior.hilos, motorAnterior.gpu.length);
         if (paraleloCapturadoMs > 0) { runtime.ocupacionWorkers = Math.max(0, Math.min(1, ocupacionPonderada / paraleloCapturadoMs)); runtime.tiempoParaleloMs = paraleloCapturadoMs; runtime.tiempoBarreraMs = barreraCapturadaMs; }
         else if (hayGpu && paraleloPasoMs > 0) { runtime.tiempoParaleloMs = paraleloPasoMs; runtime.tiempoBarreraMs = 0; }
       }
-      ultimoPasoEn = relojReal(); if (fallo && world.tick > fallo.tick) fallo = null;
+      ultimoPasoEn = relojReal(); if (fallo && tick > fallo.tick) fallo = null;
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -1228,6 +1400,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // Sin reserva no hay nada que restaurar: el mundo se queda a medio paso.
       let restaurado = !sinReserva;
       if (punto) { try { punto.restaurar(); } catch { restaurado = false; } }
+      if (motor && error instanceof SessionRevoked) {
+        restaurado = duranteOperacion('recargando', () => recargar('La sesión terminó antes de guardar.'));
+        if (!restaurado) return;
+      }
       if (restaurado && error instanceof SessionRevoked) {
         // La sesión se revocó entre aceptar el gesto y confirmarlo: el mundo no avanza con un
         // gesto aplicado y no guardado, así que este paso queda deshecho y se reintenta el siguiente.
@@ -1281,7 +1457,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function recuperarPaso(error: unknown, restaurado: boolean, tickObjetivo: number): void {
     const motivo = error instanceof Error ? error.message : String(error);
     if (fallo?.tick === tickObjetivo) fallo.intentos++; else fallo = { tick: tickObjetivo, intentos: 1 };
-    const piscinaCaida = motivo.includes('StaticWorkerPool');
+    const piscinaCaida = !motor && motivo.includes('StaticWorkerPool');
     if (fallo.intentos >= 3 || piscinaCaida) {
       console.error(piscinaCaida
         ? `El paso ${tickObjetivo} falló porque una piscina de cómputo cayó (${motivo}): salgo con 75 para que el servicio reinicie.`
@@ -1289,6 +1465,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       failed = true; aMedioPaso = !restaurado; salirFatal(75); return;
     }
     if (!restaurado && !duranteOperacion('recargando', () => recargar(motivo))) return;
+    if (motor && !restaurado) muestreador?.recuperacion(world, epoca, tickObjetivo);
     if (restaurado) {
       console.warn(`El paso ${tickObjetivo} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
     }
@@ -1301,16 +1478,17 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     broadcast();
   }
   function recargar(motivo: string): boolean {
-    let cargado: ReturnType<Store['load']> = null;
-    try { cargado = store.load(); } catch { cargado = null; }
+    let cargado: ReturnType<typeof cargarGuardado> = null;
+    try { cargado = cargarGuardado(store, options.deployment); } catch { cargado = null; }
     if (!cargado) {
       console.error(`El paso falló (${motivo}) y no hay un guardado legible desde el que recargar: salgo con 75.`);
       failed = true; aMedioPaso = true; salirFatal(75); return false;
     }
     // El arranque (main.ts, sim-worker.ts) envuelve las teselas con la propiedad residente cuando el motor es
     // paralelo; el mundo recién cargado no la trae y se le da igual que al descartado.
-    const conPropiedad = !!worldContext(world).tileOwnership;
-    world = cargado.world; recargas++; aMedioPaso = false;
+    const conPropiedad = !motor && !!worldContext(world).tileOwnership;
+    world = cargado.world;
+    if (options.deployment && (motor || ley(world, 'guardadoCompleto'))) setParams(world, paramsDelArranque(paramsOf(world), true));
     if (conPropiedad) {
       const tileOwnership = new ResidentTopologyOwner();
       world.tiles = tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)));
@@ -1318,7 +1496,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     }
     // Las cachés por tick describían el mundo descartado; la cinta abre una época, que bifurca lo ya grabado.
     mapaDirecto = undefined; directorioDirecto = undefined; susurrosDirectos = undefined;
-    recargaCinta = true;
     // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
     cambiosPendientes.length = 0;
     normalizarReproduccion();
@@ -1326,7 +1503,18 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
       cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
     world.events = world.events.slice(-120);
-    cambiosPendientes.push(captureReplayChange(world, ['events']));
+    if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['events']));
+    const nuevaEpoca = Math.max(epoca + 1, cargado.epoca ?? 0);
+    try { motor?.cargar({ world, materia: cargado.materia }, nuevaEpoca); }
+    catch (error) {
+      console.error('El motor no pudo cargar el último guardado.', error);
+      failed = true; aMedioPaso = true; salirFatal(75); return false;
+    }
+    epoca = nuevaEpoca;
+    lecturaMotor = undefined;
+    tickMotor = ultimoTickGuardado = world.tick;
+    ultimoGuardadoEn = cargado.savedAt;
+    recargas++; aMedioPaso = false;
     renovarReserva();
     console.warn(`El paso falló (${motivo}); el mundo se recargó desde su último guardado (paso ${world.tick}, recarga ${recargas}) y sigue.`);
     return true;
@@ -1355,9 +1543,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         armarGraciaCarga();
         // V21 flags travel only when set: a classic world answers exactly what it always did.
         return json(res, 200, { authenticated: !!hash && sessions.sessionValid(hash),
-          ...(observerOnly ? { observerOnly: true } : {}), ...(cinta ? { tapeEnabled: true } : {}), ...(turbo ? { turbo: true } : {}) });
+          ...(observerOnly ? { observerOnly: true } : {}), ...(servicioCinta() ? { tapeEnabled: true } : {}),
+          ...((gateway?.turbo ?? turbo) ? { turbo: true } : {}) });
       }
-      if (req.method === 'POST') checkOrigin(req, expectedOrigin);
+      if (req.method === 'POST' || req.method === 'PUT') checkOrigin(req, expectedOrigin);
       if (req.method === 'POST' && url.pathname === '/api/login') {
         rate(loginAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustedProxies), 6, 60_000);
         // Cortafuegos ante una avalancha real, no un segundo límite por-persona: con el cupo
@@ -1395,9 +1584,33 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           return res.end(cuerpo);
         }
         if (gateway && req.method === 'GET' && url.pathname === '/api/regiones') return json(res, 200, gateway.regions());
+        if (req.method === 'GET' && url.pathname === '/api/motor') {
+          const telemetria = gateway ? gateway.motor?.() : !failed && motor ? motor.telemetria() : undefined;
+          if (!telemetria) throw new HttpError(404, 'No hay telemetría del motor disponible.');
+          return json(res, 200, telemetriaEnJson(telemetria));
+        }
+        if (url.pathname === '/api/cinta/marcador' && (req.method === 'GET' || req.method === 'PUT')) {
+          const directorio = servicioCinta()?.directorio;
+          if (!directorio) throw new HttpError(404, 'Los marcadores de cinta no están disponibles.');
+          if (req.method === 'GET') {
+            const perfil = url.searchParams.get('perfil');
+            if (!perfil || !PERFIL_CINTA.test(perfil)) throw new HttpError(400, 'Perfil de cinta no válido.');
+            const marcadores = abrirMarcadores(directorio);
+            try { return json(res, 200, marcadores.leer(perfil)); } finally { marcadores.cerrar(); }
+          }
+          const crudo = await body(req);
+          let marcador: ReturnType<typeof leerMarcador>;
+          try { marcador = leerMarcador(crudo); }
+          catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Marcador no válido.'); }
+          if (!sessions.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
+          const marcadores = abrirMarcadores(directorio);
+          try { marcadores.guardar(marcador); } finally { marcadores.cerrar(); }
+          return json(res, 200, { ok: true });
+        }
         // Cinta: solo lectura, en los hilos lectores (nunca una RPC a la simulación). `/api/tape/*` es el alias del
         // reproductor actual hasta la ola 2.
         if (req.method === 'GET' && RUTAS_CINTA.has(url.pathname)) {
+          const cinta = servicioCinta();
           if (!cinta) throw new HttpError(404, 'La cinta no está activada en este mundo.');
           const peticion = consultaCinta(url);
           // Un cliente que se va (arrastrar el cabezal cancela el salto anterior) retira lo que aún espera hilo.
@@ -1405,7 +1618,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           res.once('close', () => cancelada.abort());
           let r: RespuestaCinta;
           try { r = await cinta.leer(peticion, aceptaGzip(req), cancelada.signal); }
-          catch { throw new HttpError(503, 'La cinta no se pudo leer ahora.'); }
+          catch {
+            if (peticion.tipo === 'meta' && cinta.estado?.() === 'error') {
+              return json(res, 200, { version: 3, estado: 'error', epoca: salud().epoca ?? 0, t0: 0, t1: 0, hz: 0,
+                bytes: 0, topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, niveles: [], bifurcaciones: [], lagunas: [], serie: [] } satisfies CintaMeta);
+            }
+            throw new HttpError(503, 'La cinta no se pudo leer ahora.');
+          }
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...(r.gzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}) });
           return res.end(r.cuerpo);
         }
@@ -1529,7 +1748,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
             if (parsed?.type === 'persona') {
               if (typeof parsed.id !== 'string' || !/^[A-Za-z0-9_:-]{1,50}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de habitante no válido.');
-              send(client, { type: 'persona', id: parsed.id, persona: gateway ? await gateway.person(parsed.id) : enriquecerPersona(mundoConsultable(), parsed.id) ?? null });
+              send(client, { type: 'persona', id: parsed.id, persona: await detallePersona(parsed.id) });
               return;
             }
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
@@ -1633,7 +1852,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
-    server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud,
+    server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud, detallePersona, mundoParaEmision,
+    get usaMotor() { return usaMotor; },
+    get turbo() { return turbo; },
+    get grabaCinta() { return !!grabador; },
+    get guardado() { return { epoca, ultimoTickGuardado, ultimoGuardado: ultimoGuardadoEn }; },
+    flushTape: () => grabador?.flush() ?? Promise.resolve({ enabled: false, frames: 0, latestTick: -1 }),
+    get telemetriaMotor() { return !failed && !aMedioPaso ? motor?.telemetria() : undefined; },
     /** V24: Mensajes Divinos waiting for their step (tests and benches), and whether the last step applied one. */
     get susurrosPendientes() { return pendingWhispers.length; },
     get susurrosEnUltimoPaso() { return susurrosEnUltimoPaso; },
@@ -1675,14 +1900,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
           try {
-            if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => store.save(world));
+            if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => guardarMundo(world));
           } finally {
             try {
               try { await cerrarCinta(); } finally { await lectores?.close(); }
             } finally {
               try { await muestreador?.vaciar(); }
               catch (error) { console.warn(`La bitácora de invariantes no se pudo escribir: ${error instanceof Error ? error.message : String(error)}`); }
-              finally { if (!gateway) await cerrarPiscinasDeComputo(); }
+              finally { if (!gateway) { try { await motor?.cerrar(); } finally { await cerrarPiscinasDeComputo(); } } }
             }
           }
         }

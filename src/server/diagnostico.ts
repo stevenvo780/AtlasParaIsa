@@ -187,6 +187,11 @@ export class Muestreador {
     return { chunkX: Math.floor(tile.x / CHUNK_SIZE), chunkY: Math.floor(tile.y / CHUNK_SIZE) };
   }
 
+  recuperacion(mundo: World, epoca: number, tickFallido: number): void {
+    this.registrar(mundo, [{ id: 'motor.recuperacion', gravedad: 'dura', tick: mundo.tick,
+      detalle: 'El motor volvió a la última instantánea verificable.', contexto: { epoca, tickFallido } }]);
+  }
+
   private registrar(mundo: World, violaciones: Violacion[], region?: RegionRef): void {
     const ahora = Date.now();
     const ultima = this.incidencias[this.incidencias.length - 1];

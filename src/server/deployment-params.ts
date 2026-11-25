@@ -1,4 +1,5 @@
 import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../world/params.js';
+import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
 
 /**
  * La configuración explícita del despliegue: el escalón MÁS ALTO de la precedencia de
@@ -25,4 +26,14 @@ export const PRODUCTION_PARAMS = 'persistencia.cadaTicks=100,persistencia.ventan
  */
 export function deploymentParams(base: WorldParams = DEFAULT_PARAMS, carta = process.env.CARTA_PARAMS): WorldParams {
   return parseParams(`${PRODUCTION_PARAMS}${carta ? `,${carta}` : ''}`, base);
+}
+
+export function paramsNuevosDeDespliegue(): WorldParams {
+  const carta = process.env.CARTA_PARAMS;
+  const arranque = deploymentParams(DEFAULT_PARAMS, carta);
+  const v23 = arranque.v23.duenos || arranque.v23.fotograma;
+  const sinDespachoHeredado = v23 ? { nvrtcAvailable: () => false, cpuThreads: () => 1 } : undefined;
+  const base = process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams(DEFAULT_PARAMS, sinDespachoHeredado)
+    : process.env.CARTA_FULL_HARDWARE === '1' && !v23 ? hostFullHardwareParams() : hostParams();
+  return deploymentParams(base, carta);
 }

@@ -11,6 +11,7 @@ test('el motor del proceso arranca con un dueño, sin GPU y con entropía', () =
 test('el motor acepta auto y conserva el orden de las tarjetas solicitadas', () => {
   const config = motorConfig(0, { CARTA_MOTOR_HILOS: 'auto', CARTA_MOTOR_GPU: '2, 0, 2' });
   assert.equal(config.hilos, 'auto');
+  assert.ok(config.auto && config.auto.maximo >= 1);
   assert.deepEqual(config.gpu, [2, 0]);
   assert.equal(config.semilla, 0);
   assert.equal(motorConfig(7, { CARTA_MOTOR_HILOS: '12' }).hilos, 12);

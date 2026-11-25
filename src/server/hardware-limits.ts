@@ -8,9 +8,14 @@ import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
 import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import type { MotorConfig } from '../world/motor/contratos.js';
+import { hilosAuto } from '../world/motor/rebalanceo.js';
+
+export type MotorConfigProceso = MotorConfig & {
+  auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };
+};
 
 /** Configuración del coordinador V23, independiente de los parámetros guardados. */
-export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env): MotorConfig {
+export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env): MotorConfigProceso {
   const hilos = env.CARTA_MOTOR_HILOS?.trim() || '1';
   if (hilos !== 'auto' && (!/^\d+$/.test(hilos) || !Number.isSafeInteger(Number(hilos)) || Number(hilos) < 1)) {
     throw new Error('CARTA_MOTOR_HILOS debe ser un entero positivo o auto.');
@@ -23,7 +28,9 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     }
     return indice;
   }) : [];
+  const maximo = hilos === 'auto' ? availableParallelism() : undefined;
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
+    ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 

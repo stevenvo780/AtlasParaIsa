@@ -3,9 +3,12 @@ import {
   type CanalGpu, type Col, type Dispositivo, type FrentePublico, type LotePercepcion, type Percepcion,
   type Percibidor, type Plan, type Terreno,
 } from '../motor/contratos.js';
-import { enviarOrden, recibirRespuesta } from './canal.js';
+import { CanalGpuOcupado, enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
 
 const RADIO = 7;
+const LADO = 2 * RADIO + 1, CENTRO = RADIO * LADO + RADIO;
+export const CELDAS_VENTANA_GPU = LADO * LADO;
+const CENTRO_FUERA = 253, SIN_RUTA_GPU = 254, FUERA_GPU = 255;
 const PESOS_RED = COLUMNAS_CEREBRO.politica;
 const PALABRAS_CABECERA = 16, PALABRAS_ACTOR = 9, PALABRAS_PLAN = 8;
 const PALABRAS_CELDA = 7, PALABRAS_ORGANISMO = 6;
@@ -130,7 +133,7 @@ function ventanasEn(x: number, y: number, terreno: Terreno, paginas: Int32Array)
   paginas.fill(-1);
   for (let dy = 0; dy <= Number(y + RADIO >= py + 16); dy++) {
     for (let dx = 0; dx <= Number(x + RADIO >= px + 16); dx++) {
-      const celda = terreno.celda(px + 16 * dx, py + 16 * dy);
+      const celda = terreno.celda(px + 16 * dx + (x - Math.floor(x)), py + 16 * dy + (y - Math.floor(y)));
       if (celda >= 0) paginas[dy * 2 + dx] = terreno.chunkDe(celda);
     }
   }
@@ -144,11 +147,48 @@ function tamanoResultado(n: number, q: number, v: number, a: number): number {
   return alinear(n * q * 10, 8) + n * (v * 8 + a * 4);
 }
 
-function vistaResultado({ n, q, v, a, tick, despacho }: PendienteGpu, buffer: ArrayBuffer): Percepcion {
+export interface PercepcionConVentanas extends Percepcion {
+  readonly ventana: Int16Array;
+  readonly ventanaCelda: Int32Array;
+}
+
+export function tieneVentanas(p: Percepcion): p is PercepcionConVentanas {
+  return 'ventana' in p && p.ventana instanceof Int16Array && 'ventanaCelda' in p && p.ventanaCelda instanceof Int32Array;
+}
+
+/** Una ventana por fila. CUDA envía rutas BFS y transitabilidad; las celdas se reponen por sus cuatro páginas. */
+function ventanasResultado(datos: Uint8Array, paginas: Int32Array): Pick<PercepcionConVentanas, 'ventana' | 'ventanaCelda'> {
+  const n = paginas.length / 5;
+  const ventana = new Int16Array(n * CELDAS_VENTANA_GPU), ventanaCelda = new Int32Array(ventana.length);
+  for (let i = 0; i < n; i++) {
+    const off = 5 * i, origen = paginas[off + 4];
+    for (let y = 0, k = 0; y < LADO; y++) for (let x = 0; x < LADO; x++, k++) {
+      const pos = i * CELDAS_VENTANA_GPU + k, ruta = datos[pos];
+      if (ruta >= CENTRO_FUERA && ruta !== SIN_RUTA_GPU) {
+        if ((ruta === CENTRO_FUERA) !== (k === CENTRO)) throw new Error('Centro de ventana GPU inválido.');
+        ventana[pos] = ruta === CENTRO_FUERA ? 0 : -2;
+        ventanaCelda[pos] = -1;
+        continue;
+      }
+      if ((ruta >= CELDAS_VENTANA_GPU && ruta !== SIN_RUTA_GPU) || (ruta === 0) !== (k === CENTRO))
+        throw new Error('Ruta de ventana GPU inválida.');
+      const px = (origen & 15) + x, py = (origen >>> 4) + y;
+      const pagina = paginas[off + 2 * (py >>> 4) + (px >>> 4)];
+      if (pagina < 0) throw new Error('Ruta GPU en una página ausente.');
+      ventana[pos] = ruta === SIN_RUTA_GPU ? -1 : ruta;
+      ventanaCelda[pos] = pagina * 256 + (py & 15) * 16 + (px & 15);
+    }
+  }
+  return { ventana, ventanaCelda };
+}
+
+function vistaResultado({ n, q, v, a, tick, despacho, paginasVentana }: PendienteGpu, buffer: ArrayBuffer): Percepcion {
   const nv = n * q, inicioOrganismos = alinear(nv * 10, 8);
-  return { q, v, a, tick, despacho, celda: new Int32Array(buffer, 0, nv), valor: new Float32Array(buffer, nv * 4, nv),
+  const p: Percepcion = { q, v, a, tick, despacho, celda: new Int32Array(buffer, 0, nv), valor: new Float32Array(buffer, nv * 4, nv),
     pasos: new Int16Array(buffer, nv * 8, nv), organismo: new Float64Array(buffer, inicioOrganismos, n * v),
     utilidad: new Float32Array(buffer, inicioOrganismos + n * v * 8, n * a) };
+  if (!paginasVentana) return p;
+  return { ...p, ...ventanasResultado(new Uint8Array(buffer, tamanoResultado(n, q, v, a)), paginasVentana) } satisfies PercepcionConVentanas;
 }
 
 // El formato es little endian y se escribe con vistas tipadas, que usan el orden de la máquina.
@@ -452,9 +492,33 @@ function obtenerCsr(terreno: Terreno): CsrCompartido {
 interface Parche { destino: number; offset: number; fuente: number; bytes: number }
 interface PendienteGpu {
   n: number; q: number; v: number; a: number; tick: number; despacho: number; salida: number; bajada: number;
+  paginasVentana?: Int32Array;
   confirmar: () => void;
+  liberar: () => void;
 }
 interface FilaCerebro { gen: number; dinamica: Float32Array }
+
+interface CampoPagina {
+  version: number; x: number; y: number; datos: Float64Array;
+}
+const columnasPorTerreno = new WeakMap<Terreno, Map<number, Map<number, CampoPagina>>>();
+
+function muestraCampo(terreno: Terreno, pagina: number, campo: number, columna: Col): Float64Array {
+  let paginas = columnasPorTerreno.get(terreno);
+  if (!paginas) { paginas = new Map(); columnasPorTerreno.set(terreno, paginas); }
+  let campos = paginas.get(pagina);
+  if (!campos) { campos = new Map(); paginas.set(pagina, campos); }
+  const version = terreno.versionPagina[pagina], x = terreno.paginaX[pagina], y = terreno.paginaY[pagina];
+  const anterior = campos.get(campo);
+  if (anterior?.version === version && anterior.x === x && anterior.y === y) return anterior.datos;
+  const offset = pagina * 256;
+  let iguales = anterior !== undefined;
+  for (let i = 0; iguales && i < 256; i++) iguales = Object.is(columna[offset + i], anterior!.datos[i]);
+  const datos = iguales ? anterior!.datos : new Float64Array(256);
+  if (!iguales) for (let i = 0; i < datos.length; i++) datos[i] = columna[offset + i];
+  campos.set(campo, { version, x, y, datos });
+  return datos;
+}
 
 function copiarDistinta(origen: Col, desde: number, destino: Float32Array, hasta: number, ancho: number): boolean {
   let cambio = false;
@@ -470,6 +534,7 @@ export class PercibidorGpu implements Percibidor {
   readonly dispositivo: Dispositivo;
   private readonly binario = new Empaquetador();
   private readonly paginas = new Map<number, number>();
+  private readonly columnasResidentes = new Map<number, readonly Float64Array[]>();
   private readonly cerebros = new Map<number, FilaCerebro>();
   private csr?: RevisionCsr;
   private campos = '';
@@ -477,7 +542,7 @@ export class PercibidorGpu implements Percibidor {
   private fallo?: ErrorDispositivo;
   private transferencia = { subidos: 0, bajados: 0, ms: 0 };
 
-  constructor(private readonly canal: CanalGpu, private frente: FrentePublico, private terreno: Terreno) {
+  constructor(private readonly canal: CanalGpu, private frente: FrentePublico, private terreno: Terreno, private readonly v23 = false) {
     this.dispositivo = `gpu${canal.dispositivo}`;
   }
 
@@ -485,7 +550,10 @@ export class PercibidorGpu implements Percibidor {
 
   fuentes(frente: FrentePublico, terreno: Terreno): void {
     if (this.pendiente) throw new Error('El lote GPU pendiente todavía usa sus fuentes');
-    if (terreno !== this.terreno || frente.tick < this.frente.tick) { this.paginas.clear(); this.csr = undefined; }
+    if (terreno !== this.terreno || frente.tick < this.frente.tick) {
+      this.paginas.clear(); this.columnasResidentes.clear(); this.csr = undefined;
+      if (frente.tick < this.frente.tick) columnasPorTerreno.delete(terreno);
+    }
     // Otro terreno es otro mundo (un clon, una carga): su tabla da las mismas gen a otros ocupantes de los mismos slots.
     if (terreno !== this.terreno || frente.tick < this.frente.tick) this.cerebros.clear();
     this.frente = frente; this.terreno = terreno;
@@ -498,47 +566,72 @@ export class PercibidorGpu implements Percibidor {
     const sesion = preparar(lote, planes, frente, terreno);
     const { campos, q, v, a } = sesion, n = lote.slots.length;
     const columnasTerreno = sesion.indicesCampos.join(',');
-    const bajada = tamanoResultado(n, q, v, a);
+    const bajada = tamanoResultado(n, q, v, a) + (this.v23 ? n * CELDAS_VENTANA_GPU : 0);
     if (n === 0) {
       this.transferencia = { subidos: 0, bajados: 0, ms: 0 };
-      this.pendiente = { n, q, v, a, tick: lote.tick, despacho: lote.despacho, salida: 0, bajada, confirmar: () => {} };
+      this.pendiente = { n, q, v, a, tick: lote.tick, despacho: lote.despacho, salida: 0, bajada,
+        paginasVentana: this.v23 ? new Int32Array() : undefined, confirmar: () => {}, liberar: () => {} };
       return;
     }
+    const liberar = reservarCanalGpu(this.canal);
+    if (!liberar) throw new CanalGpuOcupado(this.canal);
     const parches: Parche[] = [], paginasNuevas = new Map<number, number>();
-    const cerebro = lote.plan.some(i => sesion.planes[i].acciones > 0) ? cerebroDe(frente) : undefined;
-    if (columnasTerreno !== this.campos) this.paginas.clear();
-    b.reiniciar();
-    b.reservar(PALABRAS_CABECERA * 4);
-    const plan = empaquetarPlanes(b, sesion.planes);
-    const actores = b.reservar(n * PALABRAS_ACTOR * 4);
-    const parcheOrganismo = (offset: number, datos: Uint8Array) => {
-      parches.push({ destino: 2, offset, fuente: b.copiar(datos), bytes: datos.byteLength });
-    };
     try {
+      const cerebro = lote.plan.some(i => sesion.planes[i].acciones > 0) ? cerebroDe(frente) : undefined;
+      if (columnasTerreno !== this.campos) { this.paginas.clear(); this.columnasResidentes.clear(); }
+      b.reiniciar();
+      b.reservar(PALABRAS_CABECERA * 4);
+      const plan = empaquetarPlanes(b, sesion.planes), actores = b.reservar(n * PALABRAS_ACTOR * 4);
+      const parcheOrganismo = (offset: number, datos: Uint8Array) => {
+        parches.push({ destino: 2, offset, fuente: b.copiar(datos), bytes: datos.byteLength });
+      };
       const csr = v ? obtenerCsr(terreno).lote(frente, sesion.columnas, this.csr, parcheOrganismo) : undefined;
-      this.enviarLote(lote, sesion, terreno, frente, cerebro, plan, actores, csr, parches, paginasNuevas, columnasTerreno, bajada);
-    } catch (error) { throw this.marcarFallo(error); }
+      this.enviarLote(lote, sesion, terreno, frente, cerebro, plan, actores, csr, parches, paginasNuevas, columnasTerreno, bajada, liberar);
+    } catch (error) { liberar(); throw this.marcarFallo(error); }
   }
 
   private enviarLote(lote: LotePercepcion, sesion: SesionPercepcion, terreno: Terreno, frente: FrentePublico,
     cerebro: CerebroFrente | undefined, plan: number, actores: number, revisionCsr: RevisionCsr | undefined,
-    parches: Parche[], paginasNuevas: Map<number, number>, columnasTerreno: string, bajada: number): void {
+    parches: Parche[], paginasNuevas: Map<number, number>, columnasTerreno: string, bajada: number, liberar: () => void): void {
     const { binario: b } = this;
     const { campos, q, v, a } = sesion, n = lote.slots.length;
     const paginas = new Int32Array(4);
+    const paginasVentana = this.v23 ? new Int32Array(n * 5) : undefined;
+    const columnasNuevas = new Map<number, readonly Float64Array[]>();
     const bytesPagina = campos.length * 256 * 8;
     let terrenoBytes = 0, cerebroBytes = 0;
     for (let i = 0; i < n; i++) {
       const slot = lote.slots[i], x = frente.x[slot], y = frente.y[slot], p = sesion.planes[lote.plan[i]];
       const off = actores + i * PALABRAS_ACTOR * 4;
       b.u32(off, slot); b.u32(off + 4, lote.plan[i]); b.f32(off + 8, x); b.f32(off + 12, y);
-      if (p.celdas.length) ventanasEn(Math.floor(x), Math.floor(y), terreno, paginas);
+      if (this.v23) ventanasEn(x, y, terreno, paginas);
+      else if (p.celdas.length) ventanasEn(Math.floor(x), Math.floor(y), terreno, paginas);
       else paginas.fill(-1);
+      const origen = ((Math.floor(y) - RADIO) & 15) * 16 + ((Math.floor(x) - RADIO) & 15);
+      if (paginasVentana) {
+        paginasVentana.set(paginas, 5 * i);
+        paginasVentana[5 * i + 4] = origen;
+      }
       for (let j = 0; j < paginas.length; j++) {
         const pagina = paginas[j];
         b.u32(off + 16 + j * 4, pagina);
         if (pagina < 0 || !bytesPagina) continue;
         terrenoBytes = Math.max(terrenoBytes, (pagina + 1) * bytesPagina);
+        if (this.v23) {
+          if (columnasNuevas.has(pagina)) continue;
+          const anterior = this.columnasResidentes.get(pagina);
+          const columnas = campos.map((campo, k) => {
+            const datos = muestraCampo(terreno, pagina, sesion.indicesCampos[k]!, campo);
+            if (datos !== anterior?.[k]) {
+              const fuente = b.reservar(datos.byteLength, 8);
+              b.dobles.set(datos, fuente / 8);
+              parches.push({ destino: 0, offset: pagina * bytesPagina + k * datos.byteLength, fuente, bytes: datos.byteLength });
+            }
+            return datos;
+          });
+          columnasNuevas.set(pagina, columnas);
+          continue;
+        }
         const version = terreno.versionPagina[pagina];
         if (this.paginas.get(pagina) === version || paginasNuevas.has(pagina)) continue;
         const fuente = b.reservar(bytesPagina, 8), dobles = b.dobles;
@@ -553,7 +646,7 @@ export class PercibidorGpu implements Percibidor {
         cerebroBytes = Math.max(cerebroBytes, (slot + 1) * BYTES_CEREBRO);
         this.parcheCerebro(slot, frente.gen[slot], cerebro!, parches);
       }
-      b.u32(off + 32, 0);
+      b.u32(off + 32, origen);
     }
     const csr = revisionCsr?.csr, organismosBytes = csr?.bytes ?? 0;
     if (Math.max(terrenoBytes, cerebroBytes, organismosBytes) > 0xffffffff) {
@@ -565,17 +658,18 @@ export class PercibidorGpu implements Percibidor {
       b.palabras(ptrParches + i * 16, [p.destino, p.offset, p.fuente, p.bytes / 4]);
     }
     b.palabras(0, [n, q, v, a, actores, plan, csr?.indices ?? 0, csr?.n ?? 0, csr?.rejilla ?? 0, csr?.mascara ?? 0, csr?.anchoFila ?? 0, campos.length,
-      ptrParches, parches.length, terrenoBytes, cerebroBytes]);
+      ptrParches, parches.length, Number(this.v23), 0]);
     const subida = b.bytes, salida = alinear(subida, 8);
     if (this.canal.bytes < salida + bajada) this.canal.crecer(salida + bajada);
     this.canal.escribir(0, b.vistaActiva());
     const { tick, despacho } = lote;
     enviarOrden(this.canal, { kind: 'percibir', tick, despacho, n, subida, bajada, salida, terrenoBytes, cerebroBytes, organismosBytes, parches: parches.length });
     this.transferencia = { subidos: subida, bajados: bajada, ms: 0 };
-    this.pendiente = { n, q, v, a, tick, despacho, salida, bajada, confirmar: () => {
+    this.pendiente = { n, q, v, a, tick, despacho, salida, bajada, paginasVentana, liberar, confirmar: () => {
       this.campos = columnasTerreno;
       if (revisionCsr) this.csr = revisionCsr;
       for (const [pagina, version] of paginasNuevas) this.paginas.set(pagina, version);
+      for (const [pagina, columnas] of columnasNuevas) this.columnasResidentes.set(pagina, columnas);
     } };
   }
 
@@ -606,8 +700,8 @@ export class PercibidorGpu implements Percibidor {
     if (!p) throw this.fallo ?? new Error('No hay un lote GPU de percepción pendiente');
     this.pendiente = undefined;
     const buffer = new ArrayBuffer(p.bajada);
-    if (p.n !== 0) {
-      try {
+    try {
+      if (p.n !== 0) {
         const respuesta = recibirRespuesta<{ ok: boolean; ms: number; tick: number; despacho: number }>(this.canal, plazoMs);
         if (respuesta.ok !== true || !Number.isFinite(respuesta.ms) || respuesta.ms < 0) throw new Error('Respuesta de percepción GPU inválida');
         // El eco del contrato: una respuesta de otro despacho no se lee como la de este.
@@ -615,10 +709,12 @@ export class PercibidorGpu implements Percibidor {
           throw new Error(`Respuesta del despacho ${respuesta.despacho} (tick ${respuesta.tick}) en el ${p.despacho} (tick ${p.tick})`);
         if (p.bajada !== 0) this.canal.leer(p.salida, new Uint8Array(buffer));
         this.transferencia = { ...this.transferencia, ms: respuesta.ms };
-      } catch (error) { throw this.marcarFallo(error); }
+      }
+      const resultado = vistaResultado(p, buffer);
       p.confirmar();
-    }
-    return vistaResultado(p, buffer);
+      return resultado;
+    } catch (error) { throw this.marcarFallo(error); }
+    finally { p.liberar(); }
   }
 
   private marcarFallo(error: unknown): ErrorDispositivo {

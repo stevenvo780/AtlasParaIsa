@@ -15,9 +15,9 @@ constexpr u32 MASCARA_WARP = 0xffffffffu, NO_ENCONTRADO = 0xffffffffu;
 struct Cabecera {
     u32 n, q, v, a;
     u32 actores, planes, indices, organismosN, rejilla, rejillaMask, anchoFila, nCampos;
-    u32 parches, parchesN, terrenoBytes, cerebroBytes;
+    u32 parches, parchesN, ventanas, reservado;
 };
-struct Actor { u32 slot, plan; float x, y; int paginas[4]; u32 reservado; };
+struct Actor { u32 slot, plan; float x, y; int paginas[4]; u32 origen; };
 struct Plan { u32 transitable, transitablesN, celdas, celdasN, organismos, organismosN, acciones, w; };
 struct ConsultaCelda { u32 terminos, terminosN, filtros, filtrosN; float pesoDist, pesoPasos; u32 alcanzable; };
 struct ConsultaOrg { float radio; u32 clase, filtros, filtrosN, criterio, columna; };
@@ -90,7 +90,7 @@ __device__ inline bool mejorCelda(float valor, u32 local, float minimo, u32 eleg
 }
 
 __device__ void consultarCelda(const byte* lote, const ConsultaCelda& c, const double* terreno,
-    u32 nCampos, const int* celdas, const int* rutas, float fraccionX, float fraccionY, int carril,
+    u32 nCampos, const int* celdas, const int* rutas, bool ventanas, float fraccionX, float fraccionY, int carril,
     int* celda, float* valor, short* pasos) {
     const Termino* terminos = en<Termino>(lote, c.terminos);
     const Filtro* filtros = en<Filtro>(lote, c.filtros);
@@ -98,7 +98,8 @@ __device__ void consultarCelda(const byte* lote, const ConsultaCelda& c, const d
     u32 elegido = NO_ENCONTRADO;
     for (int i = carril; i < CELDAS; i += 32) {
         const int candidata = celdas[i], ruta = rutas[i];
-        if (candidata < 0 || (c.alcanzable && ruta < 0) || !filtrosCelda(filtros, c.filtrosN, terreno, nCampos, candidata)) continue;
+        if (candidata < 0 || (ruta < 0 && (c.alcanzable || (ventanas && c.pesoPasos != 0)))
+            || !filtrosCelda(filtros, c.filtrosN, terreno, nCampos, candidata)) continue;
         const float dx = i % LADO - RADIO - fraccionX, dy = i / LADO - RADIO - fraccionY;
         const float distancia = sqrtf(dx * dx + dy * dy);
         float suma = c.pesoDist * distancia + c.pesoPasos * (ruta < 0 ? 0 : ruta);
@@ -210,18 +211,21 @@ extern "C" __global__ __launch_bounds__(HILOS) void percibir(const byte* lote, b
     __shared__ int celdas[CELDAS], pasos[CELDAS];
     __shared__ float ocultas[OCULTAS];
 
-    if (plan.celdasN > 0) {
+    if (plan.celdasN > 0 || cab.ventanas) {
         if (hilo < CELDAS) {
             const int dx = hilo % LADO - RADIO, dy = hilo / LADO - RADIO;
             int celda = -1;
             if (dx * dx + dy * dy <= RADIO * RADIO) {
-                const int x = ((static_cast<long long>(floorf(actor.x)) - RADIO) & 15) + hilo % LADO;
-                const int y = ((static_cast<long long>(floorf(actor.y)) - RADIO) & 15) + hilo / LADO;
+                const int origenX = cab.ventanas ? actor.origen & 15 : (static_cast<long long>(floorf(actor.x)) - RADIO) & 15;
+                const int origenY = cab.ventanas ? actor.origen >> 4 : (static_cast<long long>(floorf(actor.y)) - RADIO) & 15;
+                const int x = origenX + hilo % LADO, y = origenY + hilo / LADO;
                 const int pagina = actor.paginas[(y >> 4) * 2 + (x >> 4)];
                 if (pagina >= 0) celda = pagina * 256 + (y & 15) * 16 + (x & 15);
             }
-            celdas[hilo] = celda;
-            pasos[hilo] = celda >= 0 && filtrosCelda(en<Filtro>(lote, plan.transitable), plan.transitablesN, campos, cab.nCampos, celda) ? -2 : -1;
+            const bool transitable = celda >= 0 && filtrosCelda(en<Filtro>(lote, plan.transitable),
+                plan.transitablesN, campos, cab.nCampos, celda);
+            celdas[hilo] = cab.ventanas && !transitable ? -1 : celda;
+            pasos[hilo] = transitable ? -2 : -1;
         }
         __syncthreads();
         if (warp == 0) bfs(pasos, carril);
@@ -237,13 +241,19 @@ extern "C" __global__ __launch_bounds__(HILOS) void percibir(const byte* lote, b
     double* salidaOrganismo = reinterpret_cast<double*>(resultado + offOrganismo) + static_cast<u64>(fila) * cab.v;
     float* salidaUtilidad = reinterpret_cast<float*>(resultado + offOrganismo + static_cast<u64>(cab.n) * cab.v * 8)
         + static_cast<u64>(fila) * cab.a;
+    if (cab.ventanas && hilo < CELDAS) {
+        byte* ventana = resultado + offOrganismo + static_cast<u64>(cab.n) * (cab.v * 8ULL + cab.a * 4ULL)
+            + static_cast<u64>(fila) * CELDAS;
+        // Se reserva un código para el centro intransitable, que igualmente es el origen del BFS.
+        ventana[hilo] = celdas[hilo] < 0 ? (hilo == CENTRO ? 253 : 255) : pasos[hilo] < 0 ? 254 : pasos[hilo];
+    }
 
     // Un warp por consulta. Los sobrantes mantienen las dimensiones del lote completo.
     for (u32 i = warp; i < cab.q + cab.v; i += WARPS) {
         if (i < cab.q) {
             if (i < plan.celdasN) {
                 consultarCelda(lote, en<ConsultaCelda>(lote, plan.celdas)[i], campos, cab.nCampos, celdas, pasos,
-                    fraccionX, fraccionY, carril, salidaCelda + i, salidaValor + i, salidaPasos + i);
+                    cab.ventanas, fraccionX, fraccionY, carril, salidaCelda + i, salidaValor + i, salidaPasos + i);
             } else if (carril == 0) {
                 salidaCelda[i] = -1;
                 salidaValor[i] = __int_as_float(0x7f800000);

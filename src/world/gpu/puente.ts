@@ -7,8 +7,9 @@ import {
   ErrorDispositivo, type Dispositivo, type FrentePublico, type LotePercepcion,
   type Percepcion, type Percibidor, type Plan, type Terreno,
 } from '../motor/contratos.js';
-import { CanalCompartido } from './canal.js';
-import { PercibidorGpu } from './percibir-gpu.js';
+import { CanalCompartido, CanalGpuOcupado } from './canal.js';
+import { crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from './materia-gpu.js';
+import { CELDAS_VENTANA_GPU, PercibidorGpu, tieneVentanas, type PercepcionConVentanas } from './percibir-gpu.js';
 
 interface TransferenciaPercepcion {
   subidos: number;
@@ -21,6 +22,7 @@ export interface LoteGpuMedido extends TransferenciaPercepcion {
 }
 interface TarjetaPercepcion {
   percibidor: Percibidor & { readonly ultimasTransferencias: TransferenciaPercepcion };
+  multiprocesadores?: number;
   cerrar(): void;
 }
 interface TramoPercepcion {
@@ -38,7 +40,7 @@ export class PuentePercepcion implements Percibidor {
   #ultimos: LoteGpuMedido[] = [];
   #cerrado = false;
 
-  constructor(private readonly cpu: Percibidor, private readonly tarjetas: readonly TarjetaPercepcion[]) {
+  constructor(private readonly cpu: Percibidor, private readonly tarjetas: readonly TarjetaPercepcion[], private readonly v23 = false) {
     // Arranque de la torre según el spike. Cada tarjeta corrige la estimación con sus propios lotes.
     this.#tasas = tarjetas.map(({ percibidor }, i) => percibidor.dispositivo === 'gpu0' ? 16
       : percibidor.dispositivo === 'gpu1' ? 1 : 1 / (i + 1));
@@ -56,11 +58,20 @@ export class PuentePercepcion implements Percibidor {
     for (const { tarjeta } of tramos) if (tarjeta !== undefined) this.#apagar(tarjeta);
   }
 
+  #reparto(actores: number): number[] {
+    const activas = this.#tasas.map((_, i) => i).filter(i => !this.#apagadas.has(i));
+    if (!this.v23 || activas.length < 2) return activas;
+    const rapida = activas.reduce((mejor, i) => this.#tasas[i]! > this.#tasas[mejor]! ? i : mejor);
+    const peso = activas.reduce((total, i) => total + this.#tasas[i]!, 0);
+    // Cada bloque percibe un actor. Si no llega una ola de bloques a la secundaria, se evita duplicar sus páginas.
+    return activas.filter(i => i === rapida || Math.round(actores * this.#tasas[i]! / peso) >= (this.tarjetas[i]!.multiprocesadores ?? 1));
+  }
+
   lanzar(lote: LotePercepcion, planes: readonly Plan[]): void {
     if (this.#cerrado || this.#pendiente) throw new Error('El puente está cerrado o tiene un lote pendiente.');
     if (lote.slots.length !== lote.plan.length) throw new RangeError('Planes y slots desalineados.');
     const actores = lote.slots.length;
-    const activas = this.#tasas.map((_, i) => i).filter(i => !this.#apagadas.has(i));
+    const activas = this.#reparto(actores);
     const pesoTotal = activas.reduce((total, i) => total + this.#tasas[i]!, 0);
     let desde = 0, peso = 0;
     const tramos: TramoPercepcion[] = [];
@@ -75,7 +86,7 @@ export class PuentePercepcion implements Percibidor {
           tramos.push({ desde, lote: tramo, tarjeta: i });
         } catch (error) {
           if (!(error instanceof ErrorDispositivo)) throw error;
-          this.#apagar(i);
+          if (!(error instanceof CanalGpuOcupado)) this.#apagar(i);
           tramos.push({ desde, lote: tramo });
         }
         desde = hasta;
@@ -102,6 +113,7 @@ export class PuentePercepcion implements Percibidor {
     const { tramos, planes, actores } = pendiente;
     this.#ultimos = [];
     let reunida: Percepcion | undefined;
+    let ventanas: Pick<PercepcionConVentanas, 'ventana' | 'ventanaCelda'> | undefined;
     for (const tramo of tramos) {
       const { desde, lote, tarjeta } = tramo;
       let percepcion: Percepcion | undefined;
@@ -133,13 +145,20 @@ export class PuentePercepcion implements Percibidor {
       const { q, v, a } = percepcion;
       reunida ??= { q, v, a, tick: percepcion.tick, despacho: percepcion.despacho, celda: new Int32Array(actores * q), pasos: new Int16Array(actores * q),
         valor: new Float32Array(actores * q), organismo: new Float64Array(actores * v), utilidad: new Float32Array(actores * a) };
-      reunida.celda.set(percepcion.celda, desde * q);
-      reunida.pasos.set(percepcion.pasos, desde * q);
-      reunida.valor.set(percepcion.valor, desde * q);
-      reunida.organismo.set(percepcion.organismo, desde * v);
-      reunida.utilidad.set(percepcion.utilidad, desde * a);
+      const filas = lote.slots.length;
+      reunida.celda.set(percepcion.celda.subarray(0, filas * q), desde * q);
+      reunida.pasos.set(percepcion.pasos.subarray(0, filas * q), desde * q);
+      reunida.valor.set(percepcion.valor.subarray(0, filas * q), desde * q);
+      reunida.organismo.set(percepcion.organismo.subarray(0, filas * v), desde * v);
+      reunida.utilidad.set(percepcion.utilidad.subarray(0, filas * a), desde * a);
+      if (this.v23 && tieneVentanas(percepcion) && (desde === 0 || ventanas)) {
+        ventanas ??= { ventana: new Int16Array(actores * CELDAS_VENTANA_GPU), ventanaCelda: new Int32Array(actores * CELDAS_VENTANA_GPU) };
+        const longitud = filas * CELDAS_VENTANA_GPU, inicio = desde * CELDAS_VENTANA_GPU;
+        ventanas.ventana.set(percepcion.ventana.subarray(0, longitud), inicio);
+        ventanas.ventanaCelda.set(percepcion.ventanaCelda.subarray(0, longitud), inicio);
+      } else ventanas = undefined;
     }
-    return reunida!;
+    return ventanas ? { ...reunida!, ...ventanas } satisfies PercepcionConVentanas : reunida!;
   }
 
   cerrar(): void {
@@ -153,42 +172,51 @@ export class PuentePercepcion implements Percibidor {
 const ARRANQUE_GPU_MS = 30_000;
 
 /** El coordinador actualiza las fuentes de su percibidor CPU junto con las de las tarjetas. */
-export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor) {
+export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor,
+  materiaGpu = false) {
   if (new Set(dispositivos).size !== dispositivos.length || dispositivos.some(d => !Number.isSafeInteger(d) || d < 0))
     throw new RangeError('Se requieren índices GPU no negativos y sin repetir.');
-  const tarjetas: { percibidor: PercibidorGpu; activa: boolean; cerrar: () => void }[] = [];
+  const tarjetas: { percibidor: PercibidorGpu; canal: CanalCompartido; paso?: PasoMateriaGpu;
+    multiprocesadores: number; activa: boolean; cerrar(): void }[] = [];
   const abrir = (dispositivo: number) => {
     try { return new CanalCompartido(dispositivo); }
     catch (error) { if (error instanceof ErrorDispositivo) return undefined; throw error; }
   };
   // Los servidores arrancan en paralelo y el arranque (contexto CUDA y NVRTC) no gasta el plazo de 2 s del primer B2.
-  const canales: (CanalCompartido | undefined)[] = [], canalesActivos: CanalCompartido[] = [];
+  const canales: (CanalCompartido | undefined)[] = [];
   try {
     if (process.env.COMPUTE_NVRTC) for (const dispositivo of dispositivos) canales.push(abrir(dispositivo));
     for (const canal of canales) {
       if (!canal) continue;
-      try { canal.iniciar(ARRANQUE_GPU_MS); }
+      try {
+        canal.iniciar(ARRANQUE_GPU_MS);
+        if (materiaGpu) prepararMateriaGpu(canal, ARRANQUE_GPU_MS);
+      }
       catch (error) { if (error instanceof ErrorDispositivo) continue; throw error; }
       tarjetas.push({
-        percibidor: new PercibidorGpu(canal, frente, terreno), activa: true,
-        cerrar() { this.activa = false; canal.cerrar(); },
+        percibidor: new PercibidorGpu(canal, frente, terreno, materiaGpu), canal,
+        paso: materiaGpu ? crearPasoMateriaGpu(canal) : undefined,
+        multiprocesadores: canal.multiprocesadores, activa: true,
+        cerrar() { this.activa = false; this.paso?.cerrar(); canal.cerrar(); },
       });
-      canalesActivos.push(canal);
     }
   } catch (error) {
     for (const canal of canales) canal?.cerrar();
     throw error;
   }
-  const puente = new PuentePercepcion(cpu, tarjetas);
+  const puente = new PuentePercepcion(cpu, tarjetas, materiaGpu);
   return {
     puente,
     /** Tarjetas que arrancaron y siguen activas. */
     get tarjetas(): number { return tarjetas.filter(t => t.activa).length; },
+    pasosMateria(): { dispositivo: number; paso: PasoMateriaGpu }[] {
+      return tarjetas.flatMap(t => t.activa && t.paso ? [{ dispositivo: t.canal.dispositivo, paso: t.paso }] : []);
+    },
     /** Procesos de los servidores CUDA de las tarjetas activas (para observarlos, o para pruebas de caída). */
     pids(): { dispositivo: number; pid: number }[] {
-      return tarjetas.flatMap((t, i) => {
-        const canal = canalesActivos[i], pid = canal?.pid;
-        return t.activa && canal && pid ? [{ dispositivo: canal.dispositivo, pid }] : [];
+      return tarjetas.flatMap(({ activa, canal }) => {
+        const pid = canal.pid;
+        return activa && pid ? [{ dispositivo: canal.dispositivo, pid }] : [];
       });
     },
     fuentes(siguiente: FrentePublico, suelo: Terreno): void {

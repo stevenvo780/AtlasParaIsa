@@ -633,6 +633,8 @@ interface LocalState extends PercepcionFauna {
   seen: Int32Array; stamp: number;
   /** V19: leyes de fauna del paso (`paramsOf(world).fauna`), leídas una vez por `stepAnimals`. */
   contacto: boolean; reserva: boolean; fraccionReserva: number; encuentro: boolean;
+  /** `paramsOf(world).quimica.emergente`, leído una vez por paso. */
+  emergente: boolean;
   /** Borradores de `settlementOverlay`, reutilizados entre animales. */
   amenazas: Point[]; cerca: Point[];
   celdas: CeldasFauna; fila: Int32Array;
@@ -644,30 +646,26 @@ const seenAt = (state: LocalState, dx: number, dy: number): boolean => Math.abs(
 
 // Marcas de una celda en `CeldasFauna`.
 const VISIBLE = 1, AGUA = 2, REFUGIO = 4, CRECIMIENTO = 8, POBLADO_LEIDO = 16, POBLADO = 32, REFUGIO_TESELA = 64,
-  VEGETACION_LEIDA = 128, HUMEDAD_LEIDA = 256, AGUA_TIERRA_LEIDA = 512;
+  HUMEDAD_LEIDA = 128, AGUA_TIERRA_LEIDA = 256;
 const PAGINA = 256, REJILLA = 2 ** 24, PAGINA_DESPLAZAMIENTO = 2 ** 20, PAGINA_LADO = 2 ** 21;
+// Campos de una celda, contiguos (una línea de caché por celda): sello del paso, marcas, coordenadas de la tesela,
+// `growth ?? 0`, `growth ?? vegetation` y el agua de pez y de tierra.
+const C_SELLO = 0, C_MARCAS = 1, C_X = 2, C_Y = 3, C_BROTE = 4, C_ALIMENTO = 5, C_AGUA_PEZ = 6, C_AGUA_TIERRA = 7, ANCHO = 8;
 /**
  * Lo que la fauna lee de cada celda desde la fisiología hasta el final del poblado de un paso, leído una vez por celda
  * en vez de una vez por cada animal que la ve. En ese tramo nadie escribe teselas ni mueve animales (moverse, pastar y
- * criar vienen después), así que cada lectura repetida da lo mismo que la primera. Cada campo se lee la primera vez
- * que alguien lo pide. Las páginas (16 × 16 celdas, como los chunks) se reutilizan de un paso a otro; el sello del paso
- * descarta lo leído antes.
+ * criar vienen después), así que cada lectura repetida da lo mismo que la primera. El agua y el poblado se leen la
+ * primera vez que alguien los pide. Las páginas (16 × 16 celdas, como los chunks) se reutilizan de un paso a otro; el
+ * sello del paso descarta lo leído antes.
  */
 class CeldasFauna {
   private readonly paginas = new Map<number, number>();
   private usadas = 0;
   generacion = 0;
   private k1 = -1; private p1 = -1; private k2 = -1; private p2 = -1;
-  sello = new Int32Array(0);
-  marcas = new Uint16Array(0);
-  /** La celda residente de la tesela (-1 sin SoA residente). */
+  datos = new Float64Array(0);
+  /** La celda residente de la tesela (-1 sin SoA residente) y la tesela, para las lecturas que se hacen tarde. */
   private residente = new Int32Array(0);
-  crecimiento = new Float64Array(0);
-  private vegetacion = new Float64Array(0);
-  private humedad = new Float64Array(0);
-  private aguaTierra = new Float64Array(0);
-  x = new Float64Array(0);
-  y = new Float64Array(0);
   private teselas: (Tile | undefined)[] = [];
   /** Los animales vivos de la celda al empezar la decisión: el arreglo de `occupants`, sellado al registrarlo. */
   selloOcupantes = new Int32Array(0);
@@ -677,19 +675,21 @@ class CeldasFauna {
     // La página 0 es la de las celdas fuera de la rejilla, que se leen cada vez.
     this.paginas.clear(); this.usadas = 1; this.generacion = (this.generacion + 1) | 0;
     this.k1 = -1; this.p1 = -1; this.k2 = -1; this.p2 = -1;
-    if (!this.sello.length) this.crecer(16 * PAGINA);
+    if (!this.residente.length) this.crecer(16 * PAGINA);
   }
+
+  marcas(i: number): number { return this.datos[i * ANCHO + C_MARCAS]!; }
 
   /** El índice de la celda (x, y), leída si aún no lo estaba en este paso. Fuera de la rejilla de los chunks la
    * celda se lee cada vez en la ranura 0, que nunca queda sellada. */
   indice(x: number, y: number, state: LocalState): number {
     if (x !== (x | 0) || y !== (y | 0) || x < -REJILLA || x >= REJILLA || y < -REJILLA || y >= REJILLA) {
-      this.leer(0, x, y, state); this.sello[0] = this.generacion - 1;
-      this.ocupantes[0] = state.occupants.get(cellXY(this.x[0]!, this.y[0]!)); this.selloOcupantes[0] = this.generacion;
+      this.leer(0, x, y, state); this.datos[C_SELLO] = this.generacion - 1;
+      this.ocupantes[0] = state.occupants.get(cellXY(this.datos[C_X]!, this.datos[C_Y]!)); this.selloOcupantes[0] = this.generacion;
       return 0;
     }
     const i = this.pagina(x, y) * PAGINA + (((y & 15) << 4) | (x & 15));
-    if (this.sello[i] !== this.generacion) this.leer(i, x, y, state);
+    if (this.datos[i * ANCHO + C_SELLO] !== this.generacion) this.leer(i, x, y, state);
     return i;
   }
 
@@ -705,7 +705,7 @@ class CeldasFauna {
     for (let x = x0; x <= x1; x++) {
       if (x === x0 || (x & 15) === 0) base = this.pagina(x, y) * PAGINA + fila;
       const i = base + (x & 15);
-      if (this.sello[i] !== generacion) this.leer(i, x, y, state);
+      if (this.datos[i * ANCHO + C_SELLO] !== generacion) this.leer(i, x, y, state);
       salida[x - x0] = i;
     }
   }
@@ -717,46 +717,33 @@ class CeldasFauna {
     this.ocupantes[i] = animales; this.selloOcupantes[i] = this.generacion;
   }
 
-  /** El crecimiento si la celda lo tiene; si no, la vegetación (`growth ?? vegetation`). */
-  alimento(i: number, state: LocalState): number {
-    let marcas = this.marcas[i]!;
-    if (marcas & CRECIMIENTO) return this.crecimiento[i]!;
-    if (!(marcas & VEGETACION_LEIDA)) {
-      const reader = state.reader, at = this.residente[i]!;
-      this.vegetacion[i] = reader ? reader.vegetation(at)! : at < 0 ? this.teselas[i]!.vegetation : state.fast!.vegetation(at)!;
-      this.marcas[i] = marcas |= VEGETACION_LEIDA;
-    }
-    return this.vegetacion[i]!;
-  }
-
   /** El agua que bebe un pez (la humedad) o un animal de tierra (la potable, nula en el océano), como `waterAt`. */
   agua(i: number, pez: boolean, state: LocalState): number {
-    const marcas = this.marcas[i]!, reader = state.reader, fast = state.fast, at = this.residente[i]!;
+    const b = i * ANCHO, datos = this.datos, marcas = datos[b + C_MARCAS]!;
+    if (pez ? marcas & HUMEDAD_LEIDA : marcas & AGUA_TIERRA_LEIDA) return datos[b + (pez ? C_AGUA_PEZ : C_AGUA_TIERRA)]!;
+    const reader = state.reader, fast = state.fast, at = this.residente[i]!;
     if (pez) {
-      if (!(marcas & HUMEDAD_LEIDA)) {
-        this.humedad[i] = reader ? reader.moisture(at)! : at < 0 ? this.teselas[i]!.moisture : fast!.moisture(at)!;
-        this.marcas[i] = marcas | HUMEDAD_LEIDA;
-      }
-      return this.humedad[i]!;
+      datos[b + C_AGUA_PEZ] = reader ? reader.moisture(at)! : at < 0 ? this.teselas[i]!.moisture : fast!.moisture(at)!;
+      datos[b + C_MARCAS] = marcas | HUMEDAD_LEIDA;
+      return datos[b + C_AGUA_PEZ]!;
     }
-    if (!(marcas & AGUA_TIERRA_LEIDA)) {
-      if (reader) this.aguaTierra[i] = reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
-      else if (at < 0) { const tile = this.teselas[i]!; this.aguaTierra[i] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0; }
-      else this.aguaTierra[i] = fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
-      this.marcas[i] = marcas | AGUA_TIERRA_LEIDA;
-    }
-    return this.aguaTierra[i]!;
+    if (reader) datos[b + C_AGUA_TIERRA] = reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
+    else if (at < 0) { const tile = this.teselas[i]!; datos[b + C_AGUA_TIERRA] = tile.biome === 'ocean' ? 0 : tile.drinkingWater ?? 0; }
+    else datos[b + C_AGUA_TIERRA] = fast!.biomeCode(at) === fast!.BIOME_OCEAN ? 0 : fast!.drinkingWater(at) ?? 0;
+    datos[b + C_MARCAS] = marcas | AGUA_TIERRA_LEIDA;
+    return datos[b + C_AGUA_TIERRA]!;
   }
 
   /** Refugio o cultivo en la tesela, leídos en el objeto como hace el poblado, solo cuando alguien los pregunta. */
   poblado(i: number, x: number, y: number, state: LocalState): number {
-    let marcas = this.marcas[i]!;
+    const b = i * ANCHO;
+    let marcas = this.datos[b + C_MARCAS]!;
     if (!(marcas & POBLADO_LEIDO)) {
       const tile = state.reader ? state.tile(x, y) : this.teselas[i];
       marcas |= POBLADO_LEIDO;
       if (tile?.terrain === 'shelter') marcas |= REFUGIO_TESELA | POBLADO;
       else if (tile && (tile.cultivation ?? 0) > 0) marcas |= POBLADO;
-      this.marcas[i] = marcas;
+      this.datos[b + C_MARCAS] = marcas;
     }
     return marcas;
   }
@@ -773,36 +760,34 @@ class CeldasFauna {
 
   private nuevaPagina(clave: number): number {
     const pagina = this.usadas++;
-    if (this.usadas * PAGINA > this.sello.length) this.crecer(this.usadas * 2 * PAGINA);
+    if (this.usadas * PAGINA > this.residente.length) this.crecer(this.usadas * 2 * PAGINA);
     this.paginas.set(clave, pagina);
     return pagina;
   }
 
   private crecer(n: number): void {
-    const viejo = this.sello.length;
-    const i32 = (a: Int32Array) => { const b = new Int32Array(n); b.set(a); return b; };
-    const f64 = (a: Float64Array) => { const b = new Float64Array(n); b.set(a); return b; };
+    const viejo = this.residente.length;
     // Las celdas nuevas no deben parecer leídas ni ocupadas en la generación vigente.
-    this.sello = i32(this.sello); this.sello.fill(this.generacion - 1, viejo);
-    this.selloOcupantes = i32(this.selloOcupantes); this.selloOcupantes.fill(this.generacion - 1, viejo);
-    const marcas = new Uint16Array(n); marcas.set(this.marcas); this.marcas = marcas;
-    this.residente = i32(this.residente);
-    this.crecimiento = f64(this.crecimiento); this.vegetacion = f64(this.vegetacion); this.humedad = f64(this.humedad);
-    this.aguaTierra = f64(this.aguaTierra); this.x = f64(this.x); this.y = f64(this.y);
+    const datos = new Float64Array(n * ANCHO); datos.set(this.datos);
+    for (let i = viejo; i < n; i++) datos[i * ANCHO + C_SELLO] = this.generacion - 1;
+    this.datos = datos;
+    const residente = new Int32Array(n); residente.set(this.residente); this.residente = residente;
+    const ocupados = new Int32Array(n); ocupados.set(this.selloOcupantes); ocupados.fill(this.generacion - 1, viejo);
+    this.selloOcupantes = ocupados;
     for (let i = viejo; i < n; i++) { this.ocupantes.push(undefined); this.teselas.push(undefined); }
   }
 
-  /** La clase de terreno, el crecimiento y las coordenadas de la tesela, como los leía `localTiles`. */
+  /** La clase de terreno, el crecimiento, el alimento y las coordenadas de la tesela, como los leía `localTiles`. */
   private leer(i: number, x: number, y: number, state: LocalState): void {
-    this.sello[i] = this.generacion;
-    const reader = state.reader;
-    let marcas = 0, tile: Tile | undefined, at = -1, growth: number | undefined;
+    const reader = state.reader, b = i * ANCHO, datos = this.datos;
+    let marcas = 0, tile: Tile | undefined, at = -1, growth: number | undefined, vegetation = 0;
     if (reader) {
       at = reader.cellAt(x, y);
       if (at >= 0) {
         const terrain = reader.terrainCode(at);
         marcas = VISIBLE | (terrain === reader.TERRAIN_WATER ? AGUA : 0) | (terrain === reader.TERRAIN_SHELTER ? REFUGIO : 0);
         growth = reader.growth(at);
+        if (growth === undefined) vegetation = reader.vegetation(at)!;
         // Las coordenadas implícitas no distinguen -0 de +0. Sólo en los ejes se leen las
         // coordenadas originales para conservar también esos bits en target y memory.
         if (x === 0 || y === 0) { const original = state.tile(x, y); if (original) { x = original.x; y = original.y; } }
@@ -816,18 +801,21 @@ class CeldasFauna {
           const terrain = tile.terrain;
           marcas = VISIBLE | (terrain === 'water' ? AGUA : 0) | (terrain === 'shelter' ? REFUGIO : 0);
           growth = tile.growth;
+          if (growth === undefined) vegetation = tile.vegetation;
         } else {
           const terrain = fast!.terrainCode(at);
           marcas = VISIBLE | (terrain === fast!.TERRAIN_WATER ? AGUA : 0) | (terrain === fast!.TERRAIN_SHELTER ? REFUGIO : 0);
           growth = fast!.growth(at);
+          if (growth === undefined) vegetation = fast!.vegetation(at)!;
         }
         // Fuera de los ejes las coordenadas de la consulta valen lo mismo que las de la tesela.
         if (x === 0 || y === 0) { x = tile.x; y = tile.y; }
       }
     }
-    if (growth !== undefined) { marcas |= CRECIMIENTO; this.crecimiento[i] = growth; }
-    this.marcas[i] = marcas; this.residente[i] = at; this.teselas[i] = tile;
-    this.x[i] = x; this.y[i] = y;
+    if (growth !== undefined) { marcas |= CRECIMIENTO; datos[b + C_BROTE] = growth; datos[b + C_ALIMENTO] = growth; }
+    else { datos[b + C_BROTE] = 0; datos[b + C_ALIMENTO] = vegetation; }
+    datos[b + C_SELLO] = this.generacion; datos[b + C_MARCAS] = marcas; datos[b + C_X] = x; datos[b + C_Y] = y;
+    this.residente[i] = at; this.teselas[i] = tile;
   }
 }
 const celdasFauna = new CeldasFauna();
@@ -843,13 +831,14 @@ function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): Visible
     for (let dx = -span; dx <= span; dx++) {
       let i = fila[dx + span]!;
       if (i < 0) i = celdas.indice(ax + dx, ay + dy, state);
-      const marcas = celdas.marcas[i]!;
+      const datos = celdas.datos, b = i * ANCHO, marcas = datos[b + C_MARCAS]!;
       if (!(marcas & VISIBLE) || !habitableParaPlan(plan, (marcas & AGUA) !== 0, (marcas & REFUGIO) !== 0)) continue;
       // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
       // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
       const t = state.pool[result.length] ??= { x: 0, y: 0, brote: 0, food: 0, water: 0, novelty: undefined, ocupantes: undefined };
-      t.x = celdas.x[i]!; t.y = celdas.y[i]!; t.brote = marcas & CRECIMIENTO ? celdas.crecimiento[i]! : 0;
-      t.food = celdas.alimento(i, state); t.water = celdas.agua(i, fish, state); t.novelty = undefined;
+      t.x = datos[b + C_X]!; t.y = datos[b + C_Y]!; t.brote = datos[b + C_BROTE]!; t.food = datos[b + C_ALIMENTO]!;
+      t.water = marcas & (fish ? HUMEDAD_LEIDA : AGUA_TIERRA_LEIDA) ? datos[b + (fish ? C_AGUA_PEZ : C_AGUA_TIERRA)]! : celdas.agua(i, fish, state);
+      t.novelty = undefined;
       t.ocupantes = celdas.selloOcupantes[i] === generacion ? celdas.ocupantes[i] : undefined;
       result.push(t);
       state.seen[(dy + MAX_RADIUS) * SEEN_SIDE + dx + MAX_RADIUS] = stamp;
@@ -859,7 +848,7 @@ function localTiles(animal: Animal, state: LocalState, plan: PlanFauna): Visible
 }
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
-  const physicalInterval = paramsOf(world).quimica.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
+  const physicalInterval = state.emergente ? interval + Math.round((animal.morphology?.size ?? 0.5) * 2) : interval;
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < physicalInterval || animal.energy < 0.06) return;
   const neighbors = state.neighbors, reader = state.reader, fast = state.fast;
   neighbors.length = 0;
@@ -898,8 +887,7 @@ function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalE
   emit?.({ kind: 'animal', actors: hunter ? [hunter, animal.id] : [animal.id], x: animal.x, y: animal.y,
     text: `${animal.species} ${animal.id} muere por ${cause}.`, cause, source: 'simulation' });
 }
-function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emit?: AnimalEmitter): void {
-  const emergent = paramsOf(world).quimica.emergente;
+function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emergent: boolean, emit?: AnimalEmitter): void {
   const morphology = emergent ? ensureMorphology(animal, world.seed) : undefined;
   const metabolism = (0.6 + animal.genes.metabolism * 0.8) * (morphology ? 0.9 + morphology.size * 0.3 : 1);
   advanceNeeds(animal, { hunger: 0.00042 * metabolism, thirst: 0.00048 * (1.3 - animal.genes.waterEfficiency * 0.6)
@@ -1026,13 +1014,13 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(),
     visibles: (animal, plan) => localTiles(animal, state, plan),
     ocupantes: (x, y) => state.occupants.get(cellXY(x, y)),
-    residente: t => (state.celdas.marcas[state.celdas.indice(t.x, t.y, state)]! & VISIBLE) !== 0,
+    residente: t => (state.celdas.marcas(state.celdas.indice(t.x, t.y, state)) & VISIBLE) !== 0,
     visto: (dx, dy) => seenAt(state, dx, dy),
     recordar: remember,
     reader: undefined, fast: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [], steps: [], seen: new Int32Array(SEEN_SIDE * SEEN_SIDE), stamp: 0,
-    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE) };
+    contacto: false, reserva: false, fraccionReserva: 0, encuentro: false, emergente: false, amenazas: [], cerca: [], celdas: celdasFauna, fila: new Int32Array(SEEN_SIDE) };
   const { fauna: leyesFauna } = paramsOf(world);
-  const emergent = paramsOf(world).quimica.emergente;
+  const emergent = state.emergente = paramsOf(world).quimica.emergente;
   // Con los params históricos (o ausentes) los tres quedan apagados: la aritmética y el RNG son los de V18.
   if (leyesFauna) {
     state.contacto = leyesFauna.contactoContinuo; state.reserva = leyesFauna.reservaReproductiva;
@@ -1048,7 +1036,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emit);
+    physiology(animal, desertIn(tile, reader, state.fast, reader ? reader.cellAt(animal.x, animal.y) : -1), world, emergent, emit);
     if (emergent && animal.species !== 'fish') {
       const m = animal.morphology!, cold = tile.biome === 'mountain' || world.tick % 2400 >= 1800 || world.weather === 'rain';
       // Physical heat loss, paid by the body. Insulation protects in cold conditions,

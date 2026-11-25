@@ -69,16 +69,17 @@ test('(b) las edades sembradas siguen la población estacionaria de la ley (χ²
 
 /** Registro sintético: tasas conocidas por habitante y día, con o sin un transitorio sin nacimientos el primer día. */
 function registroSintetico(semilla: number, n: number, dias: number, b: number, m: number, sinNacimientosDia1: boolean): Registro {
-  const azar = mulberry32(semilla), individuos: Individuo[] = [];
+  const azar = mulberry32(semilla), individuos: Individuo[] = [], celda = new Map<Individuo, string>();
   const nuevo = (desde: number, origen: Individuo['origen']): Individuo => {
-    const i: Individuo = { id: `p${individuos.length}`, origen, x0: Math.floor(azar() * 48), y0: Math.floor(azar() * 32), desde, hasta: null, causa: null, hijos: [], parejas: [] };
+    const i: Individuo = { id: `p${individuos.length}`, origen, desde, hasta: null, causa: null, hijos: [], parejas: [] };
+    celda.set(i, `${Math.floor(azar() * 6)},${Math.floor(azar() * 4)}`);
     individuos.push(i); return i;
   };
   let vivos = Array.from({ length: n }, () => nuevo(0, 'inicial'));
   const paso = 120, fin = dias * DIA, bloques = Array.from({ length: dias }, () => new Map<string, number[]>());
   // Cada persona se queda en su celda: el bloque donde ocurre todo es el suyo.
   const anotar = (i: Individuo, t: number, campo: number, cuanto = 1) => {
-    const mapa = bloques[Math.ceil(t / DIA) - 1]!, k = `${Math.floor(i.x0 / 8)},${Math.floor(i.y0 / 8)}`;
+    const mapa = bloques[Math.ceil(t / DIA) - 1]!, k = celda.get(i)!;
     if (!mapa.has(k)) mapa.set(k, new Array(7).fill(0));
     mapa.get(k)![campo]! += cuanto;
   };

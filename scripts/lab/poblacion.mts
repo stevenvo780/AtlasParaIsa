@@ -299,7 +299,7 @@ export function cargarPunto(ruta: string): { mundo: World; archivo: Map<string, 
 // ── Medir ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface Individuo {
-  id: string; origen: 'inicial' | 'nacido'; x0: number; y0: number; desde: number; hasta: number | null; causa: DemographicDeathCause | null;
+  id: string; origen: 'inicial' | 'nacido'; desde: number; hasta: number | null; causa: DemographicDeathCause | null;
   /** Ticks de los nacimientos de sus hijos y de las parejas nuevas que formó (un par de confianza mutua no visto antes):
    * cada evento vale ½ a cada uno de sus dos miembros. */
   hijos: number[]; parejas: number[];
@@ -404,7 +404,7 @@ export function medir(mundo: World, o: OpcionesMedida): Registro {
     const v = comprobar(mundo);
     violaciones.duras += v.filter(x => x.gravedad === 'dura').length; violaciones.blandas += v.filter(x => x.gravedad === 'blanda').length; violaciones.comprobaciones++;
   };
-  const alta = (p: Person, origen: Individuo['origen']) => individuos.set(p.id, { id: p.id, origen, x0: p.x, y0: p.y, desde: mundo.tick, hasta: null, causa: null, hijos: [], parejas: [] });
+  const alta = (p: Person, origen: Individuo['origen']) => individuos.set(p.id, { id: p.id, origen, desde: mundo.tick, hasta: null, causa: null, hijos: [], parejas: [] });
   for (const p of mortales(mundo)) alta(p, 'inicial');
   let vivos = new Map(mortales(mundo).map(p => [p.id, p])), legado = mundo.retiredLegacy.length;
   let bloques = new Map<string, number[]>();

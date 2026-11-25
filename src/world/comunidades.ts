@@ -372,9 +372,12 @@ function comunidadesGlobales(c: CtxF0): void {
   const registros: RegistroPersona[] = [];
   for (const bytes of lotes) for (const r of decodificarRegistros(bytes)) registros.push(r);
   const mundo = c.mundo;
+  // Salta los números que el mundo ya usó. Se compara con el contador de ANTES de pedir: con un dueño, `c.id`
+  // incrementa `mundo.communityCounter` en sitio y comparar con el actual no terminaría nunca.
   const nuevoNumero = () => {
+    const usado = mundo.communityCounter;
     let n = c.id('comunidad');
-    while (n <= mundo.communityCounter) n = c.id('comunidad');
+    while (n <= usado) n = c.id('comunidad');
     mundo.communityCounter = n;
     return n;
   };

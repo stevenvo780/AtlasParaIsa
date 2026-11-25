@@ -133,10 +133,14 @@ test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad d
   assert.ok(abierto.oficios > base.oficios, `entropía de oficios ${abierto.oficios} <= ${base.oficios}`);
 });
 
+/** V23: sin los topes de fauna (M2a, 1aae52f) la semilla 51926 ya no disputa en 2400 pasos ni con el umbral abierto
+ * (0 conflictos y 0 turnos, medido en 744da87); las pruebas de disputa usan la 61001, como conflicto-legible. */
+const SEMILLA_DISPUTAS = 61001;
+
 test('(iii) abrir el umbral de disputa produce disputas donde antes había cero', { timeout: 600000 }, t => {
-  const { conflictos, turnos } = disputas(replica(t, 2400, 'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3'));
-  // Medido: 1 conflicto y 0 turnos en 2400 pasos, frente a 0 y 0 con los defaults. La
-  // cooperación sube de 58 a 63 (la disputa también consume el intento de quien cede).
+  const { conflictos, turnos } = disputas(replicaDetallada(t, 2400, 'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3', SEMILLA_DISPUTAS).world);
+  // Medido en la semilla 61001: 0 conflictos y 1 turno en 2400 pasos, frente a 0 y 0 con los defaults. La
+  // cooperación sube de 57 a 58.
   assert.ok(conflictos + turnos > 0, `sigue en cero: conflictos=${conflictos}, turnos=${turnos}`);
 });
 
@@ -154,15 +158,16 @@ test('(viii) abrir el embudo de natalidad hace nacer a alguien en la semilla 7 s
   // ~9 fértiles de 14 mortales, pero sólo 6 tienen comunidad y ninguno encuentra pareja.
   // Medido con el radio real de la ley, mirando los 7200 pasos y no sólo las comprobaciones:
   // el par fértil, no consanguíneo y con vínculo mutuo ≥ 0,3 MÁS CERCANO de toda la corrida
-  // está a 18,38 celdas. Por eso `radioPareja=6` (ni 12) abre nada y hace falta 20.
+  // está a 18,38 celdas. Por eso `radioPareja=6` (ni 12) abre nada y hacía falta 20. V23: sin los topes de fauna
+  // (M2a, 1aae52f) la semilla 7 tampoco pare en 3 días con 20 ni con 24, y con 28 pare 3 veces (medido en 744da87).
   const hoy = replicaDetallada(t, 3 * DIA, undefined, 7);
   assert.equal(hoy.world.birthCounter, 0, 'con las leyes históricas la semilla 7 no pare a nadie en 3 días');
   assert.equal(replicaDetallada(t, 3 * DIA,
     'poblacion.exigeComunidad=false,poblacion.radioPareja=6,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7).world.birthCounter,
-    0, 'con radioPareja=6 la semilla 7 SIGUE sin parir: el cerrojo no eran 3 celdas, eran 18');
+    0, 'con radioPareja=6 la semilla 7 SIGUE sin parir: el cerrojo no eran 3 celdas');
 
   const abierto = replicaDetallada(t, 3 * DIA,
-    'poblacion.exigeComunidad=false,poblacion.radioPareja=20,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7);
+    'poblacion.exigeComunidad=false,poblacion.radioPareja=28,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7);
   assert.ok(abierto.world.birthCounter > 0, `sigue sin nacer nadie: ${JSON.stringify(abierto.nacimientos)}`);
   assert.equal(abierto.world.birthCounter, abierto.nacimientos.length);
   assert.ok(techoPorVentana(abierto.nacimientos) <= DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
@@ -183,10 +188,12 @@ test('(x) comprobacionContinua no reescribe un evento ya archivado al meter al r
 
 test('(ix) comprobacionContinua sola cambia el muestreo, no el calendario máximo', { timeout: 900000 }, t => {
   const continua = replicaDetallada(t, DIA, 'poblacion.comprobacionContinua=true');
-  // Techo del calendario en 2400 pasos: 2400/120 × 2 = 40. Hoy la semilla 51926 pare 6.
+  // Techo del calendario en 2400 pasos: 2400/120 × 2 = 40. V23: sin topes de fauna, la semilla 51926 pare 6 con la
+  // comprobación periódica y 5 con la continua (744da87; hasta 98e750c la continua daba al menos 6): muestrear cada paso cambia la
+  // trayectoria y no asegura más nacimientos, así que se exigen los techos y que siga habiendo nacimientos.
   assert.ok(continua.world.birthCounter <= DIA / DEFAULT_PARAMS.poblacion.intervaloComprobacionTicks * DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
     `${continua.world.birthCounter} nacimientos superan el techo de 40`);
-  assert.ok(continua.world.birthCounter >= 6, `muestrear cada paso no puede parir menos que hoy: ${continua.world.birthCounter} < 6`);
+  assert.ok(continua.world.birthCounter > 0, 'con la comprobación continua sigue naciendo alguien');
   assert.ok(techoPorVentana(continua.nacimientos) <= DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
     `alguna ventana de 120 pasos supera el techo: ${JSON.stringify(continua.nacimientos)}`);
 });
@@ -198,18 +205,16 @@ function disputas(world: World): { conflictos: number; turnos: number; cooperaci
 }
 
 test('(vii) abrir también la coincidencia de destino y la espera sigue produciendo más disputas que los defaults', { timeout: 900000 }, t => {
-  const defecto = disputas(replica(t, 2400));
-  const abierto = disputas(replica(t, 2400,
-    'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.disputaDestino=1.5,social.disputaEspera=60'));
-  assert.deepEqual(defecto, { conflictos: 0, turnos: 0, cooperaciones: 58 }, 'con los params históricos la disputa sigue sin ocurrir jamás');
+  const defecto = disputas(replicaDetallada(t, 2400, undefined, SEMILLA_DISPUTAS).world);
+  const abierto = disputas(replicaDetallada(t, 2400,
+    'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.disputaDestino=1.5,social.disputaEspera=60', SEMILLA_DISPUTAS).world);
+  assert.deepEqual(defecto, { conflictos: 0, turnos: 0, cooperaciones: 57 }, 'con los params históricos la disputa sigue sin ocurrir jamás');
   assert.ok(abierto.conflictos + abierto.turnos > defecto.conflictos + defecto.turnos,
     `abierto=${JSON.stringify(abierto)} no supera a defecto=${JSON.stringify(defecto)}`);
-  // Medido: 1 conflicto, 0 turnos y 63 cooperaciones, EXACTAMENTE lo mismo que con
-  // `disputaNecesidad/Escasez/Radio` solos (test iii) — y con el mismo estado físico
-  // (digesto sin params `5dc8528c…` en los dos). En esta trayectoria la coincidencia de
-  // destino y la espera de 180 ticks no eran el cerrojo: la única disputa que ocurre ya
-  // cumplía < 0,5 y ≥ 180, y aflojarlas a 1,5 y 60 no abre ninguna más.
-  assert.deepEqual(abierto, { conflictos: 1, turnos: 0, cooperaciones: 63 });
+  // Medido en la semilla 61001: 0 conflictos, 1 turno y 58 cooperaciones, EXACTAMENTE lo mismo que con
+  // `disputaNecesidad/Escasez/Radio` solos (test iii). En esta trayectoria la coincidencia de destino y la
+  // espera de 180 ticks no son el cerrojo: aflojarlas a 1,5 y 60 no abre ninguna disputa más.
+  assert.deepEqual(abierto, { conflictos: 0, turnos: 1, cooperaciones: 58 });
 });
 
 const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],

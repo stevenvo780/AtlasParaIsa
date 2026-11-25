@@ -11,7 +11,7 @@ import { escalon } from '../src/shared/interruptores.js';
 import type { Ley } from '../src/world/motor/acceso.js';
 import { enlazarCtx } from '../src/world/motor/acceso.js';
 import { cargarPunto, argumentosCorrida, confianzaMutuaMinima, paramsDeCorrida } from '../scripts/lab/poblacion.mjs';
-import { argumentosEncender, paramsDeEncender } from '../scripts/lab/encender.mjs';
+import { argumentosEncender, paramsDeEncender, vistasMedias } from '../scripts/lab/encender.mjs';
 import { juzgarCinta, juzgarRecuperacion, leerSalud, planDeCaidas, FASES, argumentosCaidas } from '../scripts/lab/caidas.mjs';
 
 const conInterruptores = (m: World, hasta: Parameters<typeof escalon>[0]): World => {
@@ -100,6 +100,14 @@ test('encender: argumentos y escalón de interruptores en un mundo de un hilo', 
   assert.ok(p.v23.materia && p.v23.cuerpos && p.v23.natalidad && !p.v23.fauna && !p.v23.duenos);
   assert.equal(p.motor.hilos, 1); assert.deepEqual(p.motor.gpu, []);
   assert.deepEqual(paramsDeEncender({ regimen: 'defecto' }).v23, DEFAULT_PARAMS.v23);
+});
+
+test('encender: las vistas medias cuentan solo las teselas terrestres residentes', () => {
+  const tierra = { x: 0, y: 0, terrain: 'soil' as const, fertility: 0.5, vegetation: 0.25, food: 0.5, moisture: 0 };
+  const agua = { ...tierra, x: 1, terrain: 'water' as const, fertility: 1, vegetation: 1, food: 1, moisture: 1 };
+  const prado = { x: 2, y: 0, terrain: 'meadow' as const, vegetation: 0.5, food: 0, moisture: 0.75 };
+  assert.deepEqual(vistasMedias([tierra, agua, prado]), { teselas: 2, fertilidad: 0.25, vegetacion: 0.375, alimento: 0.25, humedad: 0.375 });
+  assert.deepEqual(vistasMedias([agua]), { teselas: 0, fertilidad: null, vegetacion: null, alimento: null, humedad: null });
 });
 
 test('poblacion: --hasta, la regla de pareja detrás de su función y el punto del panel', () => {

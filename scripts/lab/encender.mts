@@ -12,7 +12,7 @@
  *
  * Salida: una línea JSON por suceso, en stdout y (si se pide) en `--salida`:
  *   {tipo:'inicio'}  semilla, interruptores, hilos, comprobadores disponibles.
- *   {tipo:'dia'}     población, nacimientos, muertes por causa, fauna y, con materia, el balance de `conservacion`.
+ *   {tipo:'dia'}     población, natalidad, muertes por causa, fauna, vistas medias terrestres y balance material.
  *   {tipo:'violacion'} tick, ley, invariante y entorno (la primera dura, salvo `--continuar`).
  *   {tipo:'fin'}     estado: completo | violacion | extinta | tope.
  * Código de salida: 0 completo, 2 violación dura, 1 error.
@@ -101,6 +101,21 @@ function leyDe(v: Violacion, carriles: ReadonlyMap<string, string>): string {
   return typeof declarada === 'string' ? declarada : carriles.get(v.id) ?? 'desconocida';
 }
 
+/** Vistas al cierre del día de las teselas terrestres que siguen residentes. */
+export function vistasMedias(tiles: Readonly<World['tiles']>) {
+  let teselas = 0, fertilidad = 0, vegetacion = 0, alimento = 0, humedad = 0;
+  for (const tile of tiles) {
+    if (tile.terrain === 'water') continue;
+    teselas++;
+    fertilidad += tile.fertility ?? 0;
+    vegetacion += tile.vegetation;
+    alimento += tile.food;
+    humedad += tile.moisture;
+  }
+  return { teselas, fertilidad: teselas ? fertilidad / teselas : null, vegetacion: teselas ? vegetacion / teselas : null,
+    alimento: teselas ? alimento / teselas : null, humedad: teselas ? humedad / teselas : null };
+}
+
 export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<string, unknown>) => void): Promise<number> {
   const params = paramsDeEncender(o);
   const mundo = createWorld(o.semilla, params);
@@ -147,26 +162,47 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
 
   let nacidosAntes = mundo.totals.births ?? 0, muertesAntes = mundo.demographyDynamics.deaths;
   let causasAntes = { ...mundo.demographyDynamics.causes };
+  let faunaAntes = { ...mundo.animalDynamics };
   if (revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick }); return 2; }
   for (let dia = 1; dia <= o.dias; dia++) {
+    const causasFauna: Record<string, number> = {};
     for (let t = 0; t < TICKS_PER_DAY; t++) {
+      const muertesFaunaAntes = mundo.animalDynamics.deaths;
       stepWorld(mundo);
+      if (params.v23.fauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
+        for (let i = mundo.events.length - 1; i >= 0; i--) {
+          const evento = mundo.events[i]!;
+          if (evento.tick < mundo.tick) break;
+          if (evento.kind === 'animal' && evento.text.startsWith('Muere un animal de ')) {
+            causasFauna[evento.cause] = (causasFauna[evento.cause] ?? 0) + 1;
+          }
+        }
+      }
       const toca = o.cada === undefined || mundo.tick % o.cada === 0;
       if (toca && revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick, violaciones, duras }); return 2; }
     }
     if (o.cada !== undefined && mundo.tick % o.cada !== 0 && revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick, violaciones, duras }); return 2; }
     archivar();
     const dinamica = mundo.demographyDynamics;
+    const fauna = { ...mundo.animalDynamics };
     const mortales = mundo.people.filter(p => p.role === 'neighbor').length;
     const nacimientos = mundo.totals.births ?? 0;
     escribirFila({
       tipo: 'dia', dia, tick: mundo.tick, poblacion: mortales, personas: mundo.people.length,
       nacimientos, nacidosDia: nacimientos - nacidosAntes, muertes: dinamica.deaths, muertesDia: dinamica.deaths - muertesAntes,
       muertesPorCausa: { ...dinamica.causes }, muertesPorCausaDia: Object.fromEntries(Object.entries(dinamica.causes).map(([k, v]) => [k, v - (causasAntes[k as keyof typeof causasAntes] ?? 0)])),
-      fauna: mundo.animals.length, faunaDinamica: { ...mundo.animalDynamics }, comunidades: mundo.communities.length, estructuras: mundo.structures.length,
+      fauna: mundo.animals.length, faunaDinamica: fauna,
+      faunaDinamicaDia: {
+        births: fauna.births - faunaAntes.births, deaths: fauna.deaths - faunaAntes.deaths,
+        predations: fauna.predations - faunaAntes.predations, humanHunts: fauna.humanHunts - faunaAntes.humanHunts,
+        waterConsumed: fauna.waterConsumed - faunaAntes.waterConsumed, plantConsumed: fauna.plantConsumed - faunaAntes.plantConsumed,
+      },
+      faunaMuertesPorCausaDia: causasFauna, vistasMedias: vistasMedias(mundo.tiles),
+      comunidades: mundo.communities.length, estructuras: mundo.structures.length,
       totales: { ...mundo.totals }, conservacion: balanceConservacion(mundo), violaciones, duras,
     });
     nacidosAntes = nacimientos; muertesAntes = dinamica.deaths; causasAntes = { ...dinamica.causes };
+    faunaAntes = fauna;
     if (mortales === 0) { escribirFila({ tipo: 'fin', estado: 'extinta', dia, violaciones, duras }); return duras ? 2 : 0; }
     if (o.topeMortales && mortales >= o.topeMortales) { escribirFila({ tipo: 'fin', estado: 'tope', dia, violaciones, duras }); return duras ? 2 : 0; }
   }
@@ -181,7 +217,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     (async () => {
       const o = argumentosEncender(process.argv.slice(2));
       if (o.salida) writeFileSync(o.salida, '');
-      process.title = 'carta-isa';
+      process.title = 'atlas-encender';
       const codigo = await encender(o, fila => {
         const linea = `${JSON.stringify(fila)}\n`;
         process.stdout.write(linea);

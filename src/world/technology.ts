@@ -1150,17 +1150,8 @@ export function assertTechnology(host: TechnologyHost): void {
 // (`materia/proceso.ts`) y lo avanzan un tick por llamada. Sin tope de recetas, de pasos, de insumos ni de objetos:
 // lo que se recuerda lo decide el olvido y lo que se lleva, la carga del cuerpo.
 
-/** kg/kg: carga a cuestas sobre la masa del cuerpo que una persona soporta (leyes-opus §3d). */
-export const CARGA_MASA = 0.4;
-/** L/L: volumen a cuestas sobre el del cuerpo (leyes-opus §3d). */
-export const CARGA_VOLUMEN = 0.3;
-/** kg/L: densidad media de un cuerpo (para su volumen). */
-export const DENSIDAD_CUERPO = 1;
-/** ticks: duración media de calentar o mojar en un paso propuesto al investigar (≈ 1 h). */
-export const DURACION_PASO = 100;
-/** Probabilidad de partir de una receta recordada al investigar, y de cruzarla con otra (búsqueda de programas de la V22). */
-export const PROB_VARIAR_CONOCIDA = 0.72;
-export const PROB_CRUZAR = 0.35;
+import { CARGA_MASA, CARGA_VOLUMEN, DENSIDAD_CUERPO, DURACION_PASO, PROB_VARIAR_CONOCIDA, PROB_CRUZAR } from '../shared/naturaleza.js';
+export { CARGA_MASA, CARGA_VOLUMEN, DENSIDAD_CUERPO, DURACION_PASO, PROB_VARIAR_CONOCIDA, PROB_CRUZAR };
 
 type PersonaTecnica = Person & { cuerpo: Cuerpo };
 const esPersonaV23 = (a: TechnologyActor): a is PersonaTecnica => !!(a as Person).cuerpo;

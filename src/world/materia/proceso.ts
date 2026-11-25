@@ -14,7 +14,6 @@ import type { LoteVisible } from '../../shared/vistas-v23.js';
 import type { Tile, WorldView } from '../../shared/types.js';
 import type { Violacion } from '../invariantes.js';
 import type { Person } from '../mundo/tipos.js';
-import { TICKS_PER_DAY } from '../mundo/tipos.js';
 import type { Aplicado, CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { DATO_GOLPEAR, genDe, slotDe, type Intento, type Registro } from '../motor/contratos.js';
 import { pagar } from './cuerpo.js';
@@ -25,22 +24,10 @@ import { desprender, reparto, romper } from './romper.js';
 import { Parte, Rol, type Cuerpo, type LoteRef, type Paso, type ProcesoMaterial, type VistaLote } from './tipos.js';
 import { aprenderReceta, avanzarTecnicaDelMundo, decodificarEnsenanza, iniciarTecnica, mantenerTecnica } from '../technology.js';
 
-// ── Constantes físicas (el integrador las reunirá en shared/naturaleza.ts) ──────────────────────────────────
+// ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
+import { POTENCIA_TRABAJO, SEGUNDOS_TICK, TRABAJO_UNIR, G_FUEGO, G_AGUA, TAU_MOJAR, J_ENCENDER } from '../../shared/naturaleza.js';
+export { POTENCIA_TRABAJO, SEGUNDOS_TICK, TRABAJO_UNIR, G_FUEGO, G_AGUA, TAU_MOJAR, J_ENCENDER };
 
-/** W: potencia de trabajo sostenido de una persona (trabajo mecánico pagado con `pagar`). */
-export const POTENCIA_TRABAJO = 75;
-/** s por tick (TICKS_PER_DAY ticks por día). */
-export const SEGUNDOS_TICK = 86400 / TICKS_PER_DAY;
-/** J/kg: trabajo de juntar y apretar un kg de materia en el lote que se trabaja (levantar, amasar). */
-export const TRABAJO_UNIR = 100;
-/** J/(K·tick): conductancia entre un fuego y el lote que se le pone al lado (h ≈ 100 W/(m²·K) de llama, A ≈ 0,05 m²). */
-export const G_FUEGO = 100 * 0.05 * SEGUNDOS_TICK;
-/** J/(K·tick): conductancia entre el agua y el lote sumergido (h ≈ 500 W/(m²·K), A ≈ 0,05 m²). */
-export const G_AGUA = 500 * 0.05 * SEGUNDOS_TICK;
-/** ticks: constante de tiempo con que un lote poroso se empapa (≈ 30 min). */
-export const TAU_MOJAR = 50;
-/** J: calor de ignición que pone quien enciende un fuego a mano (≈ 30 W de fricción durante un minuto). */
-export const J_ENCENDER = 2000;
 /** mg/kg y L/m³. */
 const MG_POR_KG = 1e6, L_POR_M3 = 1000;
 

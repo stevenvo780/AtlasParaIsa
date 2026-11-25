@@ -1,3 +1,4 @@
+import { DEMOGRAPHY_TICKS_PER_DAY } from './demography.js';
 // ENMIENDA 1 (2026-11-24, «ciclos cerrados»; integrador Claude Opus 5.5 en sprint/v23l-materia, pedidos 3, 6 y 7 de Q
 // y los de L): ninguna barrera por debajo de dH; las constantes que eligió Q viven aquí con su intervalo; FRACTURA.
 // ENMIENDA 2 (2026-11-24, «ciclos cerrados, validados»; integrador Claude Opus 5.5): KAPPA_SUELO_HH (familia H–H propia),
@@ -351,3 +352,34 @@ export const PASO_CARNIVORIA = 1 / 32;
 /** kg/(tick·kg^0,75) que unas manos sacan al ordeñar o esquilar: la misma escala que comer (`TASA_INGESTA` de la fauna)
  * por seis, porque se saca de un animal que no se resiste. */
 export const TASA_EXTRACCION = 5e-4;
+
+// ── Carril t1: la técnica sobre lotes (`world/materia/proceso.ts` y `world/technology.ts` las reexportan) ─────
+
+// materia/proceso.ts
+/** W: potencia de trabajo sostenido de una persona (trabajo mecánico pagado con `pagar`). */
+export const POTENCIA_TRABAJO = 75;
+/** s por tick (DEMOGRAPHY_TICKS_PER_DAY = TICKS_PER_DAY ticks por día). */
+export const SEGUNDOS_TICK = 86400 / DEMOGRAPHY_TICKS_PER_DAY;
+/** J/kg: trabajo de juntar y apretar un kg de materia en el lote que se trabaja (levantar, amasar). */
+export const TRABAJO_UNIR = 100;
+/** J/(K·tick): conductancia entre un fuego y el lote que se le pone al lado (h ≈ 100 W/(m²·K) de llama, A ≈ 0,05 m²). */
+export const G_FUEGO = 100 * 0.05 * SEGUNDOS_TICK;
+/** J/(K·tick): conductancia entre el agua y el lote sumergido (h ≈ 500 W/(m²·K), A ≈ 0,05 m²). */
+export const G_AGUA = 500 * 0.05 * SEGUNDOS_TICK;
+/** ticks: constante de tiempo con que un lote poroso se empapa (≈ 30 min). */
+export const TAU_MOJAR = 50;
+/** J: calor de ignición que pone quien enciende un fuego a mano (≈ 30 W de fricción durante un minuto). */
+export const J_ENCENDER = 2000;
+
+// technology.ts
+/** kg/kg: carga a cuestas sobre la masa del cuerpo que una persona soporta (leyes-opus §3d). */
+export const CARGA_MASA = 0.4;
+/** L/L: volumen a cuestas sobre el del cuerpo (leyes-opus §3d). */
+export const CARGA_VOLUMEN = 0.3;
+/** kg/L: densidad media de un cuerpo (para su volumen). */
+export const DENSIDAD_CUERPO = 1;
+/** ticks: duración media de calentar o mojar en un paso propuesto al investigar (≈ 1 h). */
+export const DURACION_PASO = 100;
+/** Probabilidad de partir de una receta recordada al investigar, y de cruzarla con otra (búsqueda de programas de la V22). */
+export const PROB_VARIAR_CONOCIDA = 0.72;
+export const PROB_CRUZAR = 0.35;

@@ -43,7 +43,7 @@ import './notebook.css';
 const root = document.querySelector<HTMLDivElement>('#app')!;
 let world: WorldView | null = null;
 let connection: Connection | null = null;
-/** V21: reproductor DVR de la cinta (`/api/tape/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
+/** V21: reproductor DVR de la cinta (`/api/cinta/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
 let dvr: DvrPlayer | null = null;
 let dvrBar: DvrBarController | null = null;
 let dvrRaf = 0;
@@ -189,7 +189,7 @@ function enterWorld(flags: SessionFlags = {}): void {
 }
 
 /* ------------------------------------------------------------------ */
-/* V21 — cinta DVR: el mundo se reproduce desde `/api/tape/*` a 60 fps  */
+/* V21 — cinta DVR: el mundo se reproduce desde `/api/cinta/*` a 60 fps  */
 /* ------------------------------------------------------------------ */
 /** Con la cinta, el HUD pesado se rehace a ≈ 6 Hz (y en cada salto); el paisaje recibe todos los fotogramas. */
 function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {

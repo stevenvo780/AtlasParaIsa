@@ -8,7 +8,8 @@
  *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10] [--reparto modulo|coste]   µs por tesela y tick
  *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] [--mapa 1] [--grupo vida|cinetica|intercambio] --salida dir
  *             vistas tras cada día pedido, por K (con --grupo, solo ese grupo de procesos cada K ticks y el resto cada tick)
- *   errores   dir                                                          tabla de error frente a K = 1 (y ruido de semilla)
+ *   errores   dir [--ref f]                                                tabla de error frente a K = 1 (y ruido de semilla); con
+ *             --ref, frente a esa corrida (p. ej. la K = 1 de otro integrador) y todas las de dir son filas
  *   arder     [--k 1,10,60,120]                                           un lote de fuego 120 ticks con pasos de K ticks
  */
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
@@ -358,10 +359,13 @@ interface Foto { vistas: number[]; cuentas: string[]; inventario: Record<string,
 
 function errores(): void {
   const dir = argv[1]!;
-  const corr = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) as { K: number; semilla: number; grupo: string; segundos: number; fotos: Record<string, Foto> });
-  const ref = corr.find((c) => c.K === 1 && c.semilla === 1 && !c.grupo);
+  type Corrida = { K: number; semilla: number; grupo: string; segundos: number; fotos: Record<string, Foto> };
+  const leer = (f: string) => JSON.parse(readFileSync(f, 'utf8')) as Corrida;
+  const corr = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => leer(`${dir}/${f}`));
+  const fichero = opt('ref', '');
+  const ref = fichero ? leer(fichero) : corr.find((c) => c.K === 1 && c.semilla === 1 && !c.grupo);
   if (!ref) throw new Error('Falta la corrida K = 1 de la semilla 1.');
-  const filas = corr.filter((c) => c !== ref && (c.semilla === 1 || c.K === 1))
+  const filas = corr.filter((c) => c !== ref && (fichero !== '' || c.semilla === 1 || c.K === 1))
     .sort((a, b) => (a.grupo || '').localeCompare(b.grupo || '') || a.K - b.K || a.semilla - b.semilla);
   const media = (v: number[], k: number) => { let s = 0, n = 0; for (let i = k; i < v.length; i += 6) { s += v[i]!; n++; } return s / n; };
   const rms = (a: number[], b: number[], k: number) => { let s = 0, n = 0; for (let i = k; i < a.length; i += 6) { s += (a[i]! - b[i]!) ** 2; n++; } return Math.sqrt(s / n); };

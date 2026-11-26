@@ -550,7 +550,7 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
       && c.materia.vista(g.embrion).masa <= margenKg(c, e, f, f.celda)) { abortar(c, cu); contarHuella(e, f, f.celda, masaDe(c, cu)); }
   }
   // El mantenimiento ya se pagó. Si el tejido adulto sintetiza primero, puede acaparar toda la proteína del tubo.
-  crecer(c, cu, 1);
+  crecer(c, cu, 1, false);
   fa.miedo = d.miedo; fa.habituacion = d.habituacion; fa.huyeDe = d.huyeDe; fa.persigue = d.presaUid; fa.pareja = d.pareja;
   // Contacto con la presa (posiciones del frente): muerde y no se mueve este tick.
   if (d.accion === 'hunt' && d.presa !== REF_NULA) {

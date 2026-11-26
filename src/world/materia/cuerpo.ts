@@ -605,15 +605,18 @@ function reponer(c: CtxLeyMateria, cuerpo: Cuerpo, p: Plantilla, dt: number): vo
 }
 
 /** Crecimiento del tejido hacia la masa adulta de la plantilla durante `dt` ticks (`copiar` desde reserva y digestivo).
- * Devuelve los kg de tejido ganados. Curar una herida es esto mismo: el tejido vuelve hacia su masa adulta. */
-export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
-  const p = plantillaDe(c, cuerpo), d = datosDe(c, p), antes = masaLote(c, cuerpo.tejido);
+ * Devuelve los kg de tejido ganados si se solicita la medida. Curar una herida también recupera masa de tejido. */
+export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number, medir?: true): number;
+export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number, medir: false): void;
+export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number, medir = true): number | void {
+  const p = plantillaDe(c, cuerpo), d = datosDe(c, p), antes = medir ? masaLote(c, cuerpo.tejido) : 0;
   reponer(c, cuerpo, p, dt);
   const tiene = masaLote(c, cuerpo.tejido) / (d.masaMg * MG), falta = p.masaAdulta / (d.masaMg * MG) - tiene;
   if (falta > 0) {
     const sintetizarTejido = p === humanas.get(c.globales.registro) ? sintetizarTejidoHumano : sintetizar;
     sintetizarTejido(c, cuerpo, p, cuerpo.tejido, Math.min(falta, G_SINTESIS * tiene * dt));
   }
+  if (!medir) return;
   return masaLote(c, cuerpo.tejido) - antes;
 }
 
@@ -1037,7 +1040,7 @@ function F4(c: CtxLey): void {
       carga!.splice(i, 1);
     }
     metabolizar(m, persona.cuerpo, celda, 1);
-    crecer(m, persona.cuerpo, 1);
+    crecer(m, persona.cuerpo, 1, false);
     vistaNecesidades(m, persona.cuerpo, NECESIDADES);
     // Un cuerpo sin una sola unidad de tejido completa no sostiene nada: lo que falta, falta entero.
     if (!(NECESIDADES.salud > 0)) {

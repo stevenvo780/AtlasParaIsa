@@ -1,14 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
+import type { StructureView } from '../src/shared/life.js';
 import { beberConCuerpo } from '../src/world/actuar/recursos.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { aguaMaterialDisponible, waterAvailable } from '../src/world/inventions.js';
 import { metabolizar, vistaCuerpo } from '../src/world/materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe } from '../src/world/materia/ley-mundo.js';
+import type { EstadoObra } from '../src/world/materia/piezas.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
-import { ctxMateriaDe, refDeOrganismo } from '../src/world/motor/acceso.js';
+import { ctxMateriaDe, enlazarCtx, refDeOrganismo } from '../src/world/motor/acceso.js';
 import { slotDe } from '../src/world/motor/contratos.js';
+import { paramsOf, setParams } from '../src/world/params.js';
+
+test('la consulta de agua suma la cisterna de la vista con el inventario material del dueño', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'obra' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo);
+  const persona = mundo.people.find(p => p.role === 'neighbor');
+  assert.ok(persona);
+  const punto = { x: persona.x, y: persona.y };
+  const celda = c.terreno.celda(punto.x, punto.y);
+  const deposito = c.materia.nuevo(Rol.Objeto, celda, 0);
+  c.materia.fuente(deposito, Float64Array.of(sustanciasDe(c).H2O, 100_000), c.libro);
+  const obraMaterial: EstadoObra = { piezas: [], agua: deposito, comida: -1, pendiente: null, terminada: true };
+  const cisterna: StructureView & { obraMaterial: EstadoObra } = { ...punto, id: 'cisterna-de-prueba', name: 'Cisterna de prueba',
+    blueprintId: mundo.blueprints[0]!.id, cells: [punto], components: ['cistern'], condition: 1, water: 0, food: 0, uses: 0,
+    builtAt: mundo.tick, builderId: null, obraMaterial };
+  const vista = { ...mundo, structures: [cisterna] };
+  setParams(vista, paramsOf(mundo));
+  enlazarCtx(vista, c);
+  const ambiente = aguaMaterialDisponible(mundo, c, punto, false, celda);
+  const stock = c.materia.vista(deposito).masa;
+  assert.ok(stock > 0);
+  assert.equal(waterAvailable(mundo, punto), ambiente);
+  assert.equal(waterAvailable(vista, punto), ambiente + stock);
+  assert.equal(aguaMaterialDisponible(vista, c, punto, true, celda), ambiente + stock);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
 
 test('sin agua material no hay sorbo ni alivio de sed en una charca', () => {
   function beberDeLaCharca(agotada: boolean) {

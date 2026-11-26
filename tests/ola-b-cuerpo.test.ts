@@ -139,6 +139,27 @@ test('una cría crece con lo que come y un adulto no pasa de su masa adulta', ()
   assert.ok(exacto());
 });
 
+test('el tejido humano crece y gesta con alimento que sobra del mantenimiento', () => {
+  const { CH2, H2O, proteina, orgP } = m.S;
+  const cria = fundarCuerpo(c, humana.id, 3, 0.4, 1);
+  const madre = fundarCuerpo(c, humana.id, 60, 0.4, 1);
+  concebir(c, madre, { otro: 9, genoma: [], inicio: c.tick });
+  for (const cuerpo of [cria, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 2000, orgP, 1000, H2O, 10000), m.libro);
+  }
+  assert.equal(crecer(c, cria, 120), 0);
+  assert.equal(gestar(c, madre, 120), 0);
+  for (const cuerpo of [cria, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(CH2, 10000), m.libro);
+  }
+  const antesCria = reservaJ(c, cria), antesMadre = reservaJ(c, madre);
+  assert.ok(crecer(c, cria, 120) > 0);
+  assert.ok(gestar(c, madre, 120) > 0);
+  assert.equal(reservaJ(c, cria), antesCria);
+  assert.equal(reservaJ(c, madre), antesMadre);
+  assert.ok(exacto());
+});
+
 test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => {
   const madre = crearCuerpo(c, humana.id, 60);
   const masaUnidad = humana.partes.reduce((mg, p) => mg + p.nu * c.quimica.sustancia(p.id).masa, 0) * 1e-6;

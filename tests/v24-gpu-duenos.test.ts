@@ -97,7 +97,7 @@ test('tres ranuras del grupo despachan y una recarga descarta los clientes de la
   assert.deepEqual(broker.medidas().detalle?.aceptadas, [1, 1, 2]);
 });
 
-test('un vencimiento antes de enviar protege ambas GPU y el dueño recupera su ranura', { timeout: 10_000 }, async t => {
+test('vencer en cola o tras reclamar el envío permite que ambos dueños recuperen sus ranuras', { timeout: 10_000 }, async t => {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-cola-gpu-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const marca = join(dir, 'orden');
@@ -140,9 +140,8 @@ test('un vencimiento antes de enviar protege ambas GPU y el dueño recupera su r
     assert.equal(salida.tick, lote.tick);
     assert.equal(percepcion.respaldos, 1);
     plazoInmediato.mock.restore();
+    assert.throws(() => primero.esperar(0), /venció durante el tránsito/);
   } finally { writeFileSync(marca + '.libre', ''); }
-  assert.equal(primero.esperar(100).despacho, lote.despacho);
-  primero.confirmar(true);
   // Un nuevo paquete de otro dueño sirve de corte después del descarte en la misma cola.
   const tercero = new PercibidorBroker(percepcion.vista, epoca, 28);
   t.after(() => tercero.cerrar());
@@ -156,11 +155,15 @@ test('un vencimiento antes de enviar protege ambas GPU y el dueño recupera su r
     retrasado.confirmar(true);
     if (broker.medidas().detalle?.aceptadas[1] === 0) await esperar(1);
   }
+  primero.lanzar({ ...lote, despacho: 2 }, planes);
+  assert.equal(primero.esperar(100).despacho, 2);
+  primero.confirmar(true);
   const medida = broker.medidas();
   assert.equal(medida.lista, true);
-  assert.equal(medida.peticiones, 3, 'el despacho abandonado no llegó al servidor');
+  assert.equal(medida.peticiones, 4, 'el único despacho que no llegó al servidor venció en cola');
   assert.deepEqual(medida.detalle?.aceptadas, [1, 1, 1]);
   assert.equal(medida.detalle?.cpuColaVencida, 1);
+  assert.equal(medida.detalle?.cpuTransitoVencido, 1);
   assert.equal(medida.detalle?.erroresCanal, 0);
   assert.ok(medida.detalle!.cpuOcupada >= 1 && medida.detalle!.colaMicros! > 0);
   await esperar(0);
@@ -268,6 +271,29 @@ test('el dueño descarta una respuesta lista si ya alcanzó el plazo de tránsit
   assert.deepEqual(broker.medidas().completadas, [1, 0]);
   assert.throws(() => cliente.esperar(100), /no confirmó el despacho/);
   assert.deepEqual(broker.medidas().detalle?.aceptadas, [0, 0]);
+});
+
+test('el dueño de un grupo puede despachar de nuevo tras leer tarde una respuesta válida', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(false, [8, 17, 28]);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, lote } = mundoParaPercibir();
+  const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(18), 28);
+  t.after(() => cliente.cerrar());
+  cliente.lanzar(lote, planes);
+  await esperar(70);
+  assert.deepEqual(broker.medidas().completadas, [0, 0, 1], 'el corredor recibió el eco correcto');
+  assert.throws(() => cliente.esperar(100), /venció durante el tránsito/);
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [0, 0, 0]);
+  cliente.lanzar({ ...lote, despacho: 2 }, planes);
+  assert.equal(cliente.esperar(100).despacho, 2);
+  cliente.confirmar(true);
+  const { lista, detalle } = broker.medidas();
+  assert.equal(lista, true);
+  assert.deepEqual(detalle?.aceptadas, [0, 0, 1]);
+  assert.equal(detalle?.cpuColaVencida, 0);
+  assert.equal(detalle?.cpuTransitoVencido, 1);
+  assert.equal(detalle?.erroresCanal, 0);
 });
 
 test('el coste del corredor selecciona CPU o GPU por tamaño y distingue un canal viejo', { timeout: 10_000 }, async t => {

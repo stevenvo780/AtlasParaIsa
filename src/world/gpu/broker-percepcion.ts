@@ -11,7 +11,7 @@ const RANURA = { permiso: 0, senal: 1, validacion: 2, completadas: 3, celdas: 4 
 const CONTROL_LARGO = { epoca: 0, finActivo: 1, servicio: 2, celdas: 3 };
 const MEDIDA = { lotes: 0, cpuArranque: 1, cpuOcupada: 2, cpuSinCanal: 3, errores: 4,
   subida: 5, bajada: 6, cudaMicros: 7, recorridoMicros: 8, cpuPorCoste: 9, rechazada: 10,
-  preparacionMicros: 11, colaMicros: 12, cpuColaVencida: 13, ranuras: 14 };
+  preparacionMicros: 11, colaMicros: 12, cpuColaVencida: 13, cpuTransitoVencido: 14, ranuras: 15 };
 const MEDIDA_RANURA = { completadas: 0, aceptadas: 1, celdas: 2 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
 export type DuenosBroker = readonly (number | null)[];
@@ -169,7 +169,8 @@ export class BrokerPercepcionGpu {
       aceptadas: duenosPorRanura.map((_, r) => leer(celdaMedida(r, MEDIDA_RANURA.aceptadas))), rechazadas: leer(MEDIDA.rechazada),
       cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
       ...(porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
-      ...(agrupado && { colaMicros: leer(MEDIDA.colaMicros), cpuColaVencida: leer(MEDIDA.cpuColaVencida) }),
+      ...(agrupado && { colaMicros: leer(MEDIDA.colaMicros), cpuColaVencida: leer(MEDIDA.cpuColaVencida),
+        cpuTransitoVencido: leer(MEDIDA.cpuTransitoVencido) }),
       erroresCanal: leer(MEDIDA.errores), subidaConfirmadaBytes: leer(MEDIDA.subida), bajadaConfirmadaBytes: leer(MEDIDA.bajada),
       cudaConfirmadaMicros: leer(MEDIDA.cudaMicros), recorridoConfirmadoMicros: leer(MEDIDA.recorridoMicros),
       preparacionMicros: leer(MEDIDA.preparacionMicros) };
@@ -306,10 +307,12 @@ class CanalPercepcionBroker implements CanalGpu {
     if (antes !== ESTADO.lista || restante(fin) <= 0 || !vigente) {
       if (TRAZAR) trazar('sin-respuesta', this.dispositivo, { ...identidad, estado: antes,
         lista: Atomics.load(control, CONTROL.listo), restanteMs: restante(fin), desdeEnvioMs: -restante(peticion.enviada) });
-      if (agrupado && vigente && (antes === ESTADO.enCola || antes === ESTADO.descartada)) {
-        // El broker pudo leer el paquete para la subida. No se reutiliza su memoria aunque no se haya enviado la orden.
+      if (agrupado && vigente && antes !== ESTADO.fallo) {
+        // Reclamar el envío no prueba que la orden llegó al servidor. El corredor decide si el canal falló.
+        // F2 recalcula en CPU este tick. El próximo despacho parte de otro búfer y reconstruye sus espejos.
+        const fase = antes === ESTADO.enCola || antes === ESTADO.descartada ? 'cola' : 'transito';
         this.#datos = new Uint8Array(new SharedArrayBuffer(0));
-        throw new DespachoGpuDescartado(this);
+        throw new DespachoGpuDescartado(this, fase);
       }
       throw new ErrorDispositivo(`gpu${this.dispositivo}`, 'El corredor no confirmó el despacho de este dueño y generación.');
     }
@@ -325,7 +328,11 @@ class CanalPercepcionBroker implements CanalGpu {
   anotarError(error: unknown): void {
     if (!(error instanceof ErrorDispositivo)) return;
     this.#validarEnEpoca(false);
-    if (this.epoca.medida) Atomics.add(this.epoca.medida, error instanceof DespachoGpuDescartado ? MEDIDA.cpuColaVencida : MEDIDA.errores, 1n);
+    if (!this.epoca.medida) return;
+    const contador = error instanceof DespachoGpuDescartado
+      ? (error.fase === 'cola' ? MEDIDA.cpuColaVencida : MEDIDA.cpuTransitoVencido)
+      : MEDIDA.errores;
+    Atomics.add(this.epoca.medida, contador, 1n);
   }
   anotarValidacion(aceptada: boolean): void {
     if (this.#validarEnEpoca(aceptada) && this.epoca.medida)
@@ -523,7 +530,7 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
             }
           } else {
             Atomics.compareExchange(estado, 0, ESTADO.enCola, ESTADO.descartada);
-            Atomics.compareExchange(estado, 0, ESTADO.enServidor, ESTADO.fallo);
+            Atomics.compareExchange(estado, 0, ESTADO.enServidor, pertenece() ? ESTADO.cancelada : ESTADO.fallo);
           }
           despertar(control, ranura);
         }

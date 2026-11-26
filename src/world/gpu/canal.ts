@@ -343,9 +343,11 @@ export class CanalGpuOcupado extends ErrorDispositivo {
   constructor(canal: CanalGpu) { super(`gpu${canal.dispositivo}`, 'El canal GPU ya tiene un despacho pendiente.'); }
 }
 
-/** El dueño recalcula en CPU ese tick. El servidor no recibió la orden y el canal sigue válido. */
+/** El dueño recalcula en CPU ese tick. El corredor sigue a cargo de detectar un fallo del canal. */
 export class DespachoGpuDescartado extends ErrorDispositivo {
-  constructor(canal: CanalGpu) { super(`gpu${canal.dispositivo}`, 'El despacho GPU venció antes de enviarse al servidor.'); }
+  constructor(canal: CanalGpu, readonly fase: 'cola' | 'transito') {
+    super(`gpu${canal.dispositivo}`, fase === 'cola' ? 'El despacho GPU venció en cola.' : 'El despacho GPU venció durante el tránsito.');
+  }
 }
 
 /** Los clientes de una tarjeta comparten el tramo de /dev/shm desde el byte 0. */

@@ -477,6 +477,8 @@ export interface TelemetriaBrokerGpu {
   cpuPorCoste?: number;
   /** Despachos del grupo que vencieron en el dueño o el corredor antes de llegar al servidor. */
   cpuColaVencida?: number;
+  /** Despachos agrupados que vencieron desde que el corredor reclamó el envío, incluida la lectura tardía. */
+  cpuTransitoVencido?: number;
   /** Espera acumulada desde publicar hasta tomar el paquete o abandonar su espera. */
   colaMicros?: number;
   erroresCanal: number;

@@ -21,6 +21,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-motor-perfil-paso.test.ts tests/v24-rutas-locales.test.ts tests/fauna-rejilla.test.ts \
   tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
   tests/v24-materia-tramos-store.test.ts tests/v24-vmat-tramos.test.ts tests/v24-snapshot-matter-parts.test.ts \
+  tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \
   tests/v24-cinta-pavimento.test.ts tests/v23-motor-fotograma-retirada.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \

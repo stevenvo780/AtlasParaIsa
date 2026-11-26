@@ -211,7 +211,7 @@ class CanalPercepcionBroker implements CanalGpu {
     // Si vence el plazo, el corredor aún podría escribir sus bytes. El dueño pierde este búfer para siempre.
     const antes = Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.cancelada);
     this.#pendiente = undefined;
-    if (antes !== ESTADO.lista || Atomics.load(control, CONTROL.generacion) !== identidad.generacion
+    if (antes !== ESTADO.lista || restante(fin) <= 0 || Atomics.load(control, CONTROL.generacion) !== identidad.generacion
       || Atomics.load(control, CONTROL.listo) !== 1) {
       if (TRAZAR) trazar('sin-respuesta', this.dispositivo, { ...identidad, estado: antes,
         lista: Atomics.load(control, CONTROL.listo), restanteMs: restante(fin), desdeEnvioMs: -restante(peticion.enviada) });

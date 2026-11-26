@@ -102,6 +102,20 @@ test('los 50 ms de tránsito empiezan después de preparar la tanda', { timeout:
   assert.deepEqual(detalle.aceptadas, [1, 0]);
 });
 
+test('el dueño descarta una respuesta lista si ya alcanzó el plazo de tránsito', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(false);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, lote } = mundoParaPercibir();
+  const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(18), 0);
+  t.after(() => cliente.cerrar());
+  cliente.lanzar(lote, planes);
+  await esperar(70);
+  assert.deepEqual(broker.medidas().completadas, [1, 0]);
+  assert.throws(() => cliente.esperar(100), /no confirmó el despacho/);
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [0, 0]);
+});
+
 test('el coste del corredor selecciona CPU o GPU por tamaño y distingue un canal viejo', { timeout: 10_000 }, async t => {
   const broker = corredorMedido(true);
   t.after(() => broker.cerrar());

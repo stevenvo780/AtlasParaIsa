@@ -928,7 +928,8 @@ class MotorDuenos implements Motor {
     try {
       this.#barreraLegado(token, restituir ? TRAMO.restituirLegado : TRAMO.confirmarLegado);
       this.#custodiaLegado!.resolver(token, restituir);
-      capa.revocar();
+      if (restituir) capa.desvincular();
+      else capa.revocar();
       this.#capaLegado = undefined;
     } catch (error) { throw this.#fallo(error); }
   }

@@ -1610,6 +1610,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     console.error(`El guardado del paso ${tick} falló: ${motivo}`);
     failed = true;
     aMedioPaso = parcial;
+    lecturaMotor = undefined;
     for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
     pending.clear();
     rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));

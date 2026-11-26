@@ -86,9 +86,14 @@ export class CapaLegadoCorte {
   };
 
   revocar(): void {
+    this.#registros = undefined;
+    this.desvincular();
+  }
+
+  /** Las vistas anteriores al rechazo conservan la foto que observaron. */
+  desvincular(): void {
     const mundo = this.#mundo;
     this.#mundo = undefined;
-    this.#registros = undefined;
     if (mundo && worldContext(mundo).loadLegacy === this.#leer) bindWorldContext(mundo, { loadLegacy: this.#anterior });
   }
 }

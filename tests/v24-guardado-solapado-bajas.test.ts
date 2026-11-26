@@ -13,6 +13,7 @@ import { createWorld } from '../src/world/mundo/crear.js';
 import type { Person, World } from '../src/world/mundo/tipos.js';
 import { assertWorld } from '../src/world/mundo/validar.js';
 import { parseParams, type WorldParams } from '../src/world/params.js';
+import { worldContext } from '../src/world/spatial.js';
 import { filaInstantanea, laboratorio } from './lib/store.js';
 
 const semilla = 7;
@@ -234,12 +235,20 @@ test('el rechazo después de solapar bajas conserva el archivo anterior y pausa 
     }
     const acuse = app.esperarGuardado();
     assert.ok(acuse);
-    comprobarBajas(app.mundoParaEmision(true), tickFinal);
+    const vistaRetenida = app.mundoParaEmision(true);
+    comprobarBajas(vistaRetenida, tickFinal);
+    const lector = worldContext(vistaRetenida).loadLegacy;
+    const prefijo = victimas.slice(0, 2).map(({ id }) => lector?.(id, tickFinal));
+    assert.ok(prefijo.every(Boolean));
     comprobarArchivo(store, 0);
     bloqueo.exec('COMMIT');
     await acuse;
     assert.equal(app.failed, true);
     assert.equal(app.guardado.ultimoTickGuardado, 0);
+    assert.deepEqual(victimas.slice(0, 2).map(({ id }) => lector?.(id, tickFinal)), prefijo);
+    const vistaTrasRestituir = app.mundoParaEmision();
+    assert.notEqual(vistaTrasRestituir, vistaRetenida);
+    assert.deepEqual(vistaTrasRestituir.retiredLegacy.map(({ id }) => id).sort(), victimas.map(({ id }) => id).sort());
     await app.close();
     assert.deepEqual(filaInstantanea(store), anterior);
     comprobarArchivo(store, 0);

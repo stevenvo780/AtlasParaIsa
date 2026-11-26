@@ -134,6 +134,19 @@ try {
       await pagina.locator('#map-loading').waitFor({ state: 'hidden', timeout: 10_000 });
       const rango = pagina.locator('[data-dvr-range]');
       await expect(rango).toBeVisible({ timeout: 12_000 });
+      let accesoTactilCompleto;
+      if (tactil) {
+        const menu = pagina.getByRole('navigation', { name: 'Cuaderno del mundo' });
+        accesoTactilCompleto = await menu.evaluate(nav => {
+          const borde = nav.getBoundingClientRect();
+          const botones = [...nav.querySelectorAll('button')];
+          return botones.length === 6 && nav.scrollWidth <= nav.clientWidth && botones.every(boton => {
+            const caja = boton.getBoundingClientRect();
+            return caja.width >= 44 && caja.height >= 44 && caja.left >= borde.left && caja.right <= borde.right;
+          });
+        });
+        assert.equal(accesoTactilCompleto, true, `Todos los accesos del cuaderno deben caber en ${ancho} px`);
+      }
       await pagina.screenshot({ path: join(salida, `${nombre}-mundo.png`) });
       const play = pagina.locator('[data-dvr-play]');
       if (await play.getAttribute('aria-pressed') === 'true') await play.click();
@@ -174,7 +187,7 @@ try {
       await expect(historia).toHaveAttribute('aria-selected', 'true');
       assert.equal(await pagina.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.deepEqual(errores, []);
-      vistas.push({ nombre, ancho, alto, controlesConHistoria: true, cintaSeparaControles });
+      vistas.push({ nombre, ancho, alto, controlesConHistoria: true, cintaSeparaControles, accesoTactilCompleto });
     } finally { await contexto.close(); }
   }
   await navegador.close();

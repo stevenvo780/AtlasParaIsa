@@ -17,6 +17,7 @@ import { COLUMNAS_CEREBRO, REF_NULA, slotDe, type LotePercepcion, type Plan } fr
 import { organismosDe } from '../src/world/soa/organismos-mundo.js';
 import { PercibidorCpu, percepcionDe, registrarPercibidores, type PercepcionCpu, type PercibidorCompartido, type VistaMundo } from '../src/world/decision/percepcion.js';
 import { cerrarPercibidores, cpuDelProceso, percibidorDelProceso, PercibidorPiscina, PercibidorTarjetas } from '../src/world/decision/despacho.js';
+import { PercibidorGpu } from '../src/world/gpu/percibir-gpu.js';
 import type { LoteGpuMedido } from '../src/world/gpu/puente.js';
 
 const ABIERTO = parseParams({ motor: { ...hostOpenWorldParams().motor, hilos: 1, gpu: [] } }, hostOpenWorldParams());
@@ -179,40 +180,45 @@ test('V24 CUDA real: la percepción residente usa las ventanas del despacho en e
   }
 });
 
-test('M3 CUDA real: matar el servidor de una tarjeta a media fase no pierde el tick', { skip: sinGpu }, () => {
+test('M3 CUDA real: matar el servidor de una tarjeta a media fase no pierde el tick', { skip: sinGpu }, t => {
   const world = createWorld(51926, conMotor(ABIERTO, { hilos: 8, gpu: [0, 1] })), percepcion = percepcionDe(world);
   const tarjetas = new PercibidorTarjetas([0, 1], cpuDelProceso(8));
   percepcion.percibidor = tarjetas;
   try {
     for (let i = 0; i < 100; i++) stepWorld(world);
     assert.equal(tarjetas.tarjetas, 2);
-    const lanzar = tarjetas.lanzar.bind(tarjetas);
-    let victima: string | undefined;
-    tarjetas.lanzar = (lote, planes) => {
-      // En el primer lote con alguien que decidir, la tarjeta que percibió más filas del anterior. Parada antes de la
-      // orden, no puede contestar antes de morir.
-      const ultima = [...tarjetas.ultimosLotes].filter(l => l.dispositivo !== 'cpu').sort((a, b) => b.actores - a.actores)[0];
-      const servidor = ultima && tarjetas.pids().find(p => `gpu${p.dispositivo}` === ultima.dispositivo);
-      const matar = !victima && lote.slots.length > 0 && servidor;
-      if (matar) process.kill(servidor.pid, 'SIGSTOP');
-      lanzar(lote, planes);
-      if (matar) { process.kill(servidor.pid, 'SIGKILL'); victima = ultima.dispositivo; }
-    };
-    // Desde la caída, cada tick se completa; en el primero en que la tarjeta caída tenía filas (lo normal: el mismo), su
-    // tramo se percibe en CPU dentro del tick y la tarjeta queda apagada para el resto del proceso.
+    const corte: { victima?: Pick<LotePercepcion, 'tick' | 'despacho'> & { dispositivo: string; actores: number };
+      lotes?: readonly LoteGpuMedido[] } = {};
+    const lanzar = PercibidorGpu.prototype.lanzar;
+    t.mock.method(PercibidorGpu.prototype, 'lanzar', function (this: PercibidorGpu, lote: LotePercepcion, planes: readonly Plan[]) {
+      // El puente ya asignó estas filas a esta tarjeta. Detenerla antes del envío impide que responda antes de morir.
+      const servidor = !corte.victima && lote.slots.length > 0 && tarjetas.pids().find(p => `gpu${p.dispositivo}` === this.dispositivo);
+      if (!servidor) return lanzar.call(this, lote, planes);
+      process.kill(servidor.pid, 'SIGSTOP');
+      try {
+        lanzar.call(this, lote, planes);
+        corte.victima = { dispositivo: this.dispositivo, tick: lote.tick, despacho: lote.despacho, actores: lote.slots.length };
+      } finally { process.kill(servidor.pid, 'SIGKILL'); }
+    });
+    const esperar = tarjetas.esperar.bind(tarjetas);
+    t.mock.method(tarjetas, 'esperar', (plazoMs: number) => {
+      const resultado = esperar(plazoMs), victima = corte.victima;
+      if (victima && resultado.tick === victima.tick && resultado.despacho === victima.despacho) corte.lotes = tarjetas.ultimosLotes;
+      return resultado;
+    });
     const antes = tarjetas.tramosEnCpu;
-    let lotes: readonly LoteGpuMedido[] = [];
-    for (let i = 0; i < 600 && (!victima || tarjetas.tarjetas === 2); i++) {
+    for (let i = 0; i < 600 && !corte.victima; i++) {
       const tick = world.tick;
       stepWorld(world);
       assert.equal(world.tick, tick + 1, 'el tick se completó');
-      if (victima && !lotes.length) lotes = tarjetas.ultimosLotes;
     }
-    assert.ok(victima, 'algún lote tuvo a alguien que decidir');
-    assert.equal(tarjetas.tarjetas, 1, `la tarjeta caída (${victima}) queda apagada`);
+    const { victima, lotes } = corte;
+    assert.ok(victima && lotes, 'se envió y se reunió el despacho de la tarjeta caída');
+    assert.equal(world.tick, victima.tick, 'el despacho se reunió en el mismo tick');
+    assert.equal(tarjetas.tarjetas, 1, `la tarjeta caída (${victima.dispositivo}) queda apagada`);
     assert.ok(tarjetas.tramosEnCpu > antes, 'su tramo se percibió en CPU');
-    assert.ok(lotes.some(l => l.dispositivo === 'cpu' && l.actores > 0) && !lotes.some(l => l.dispositivo === victima),
-      `en el tick de la caída: ${JSON.stringify(lotes)}`);
+    assert.deepEqual(lotes.filter(l => l.dispositivo === 'cpu').map(l => l.actores), [victima.actores]);
+    assert.ok(!lotes.some(l => l.dispositivo === victima.dispositivo), `en el despacho de la caída: ${JSON.stringify(lotes)}`);
     for (let i = 0; i < 100; i++) stepWorld(world);
     assert.equal(percepcion.respaldos, 0);
     assert.deepEqual(comprobarInvariantes(world), []);

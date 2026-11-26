@@ -59,6 +59,7 @@ export const ESQUEMA_CELDA: readonly CampoVisible[] = [
   { nombre: 'mat0', tipo: 'u32' }, { nombre: 'mat1', tipo: 'u32' }, { nombre: 'mat2', tipo: 'u32' },
   { nombre: 'fr0', tipo: 'u8', escala: 255 }, { nombre: 'fr1', tipo: 'u8', escala: 255 }, { nombre: 'fr2', tipo: 'u8', escala: 255 },
   { nombre: 'T', tipo: 'f32' },
+  { nombre: 'paved', tipo: 'f32' }, // calidad material calculada por el dueño; NaN si la ley no se aplica
 ];
 
 /** Serie de cada fotograma. Población, fauna y estructuras son del momento; nacimientos y muertes, acumulados desde que

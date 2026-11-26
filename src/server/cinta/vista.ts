@@ -163,13 +163,19 @@ function teselas(e: CacheVista, f: Fotograma): Tile[] {
       const b = (p * PAGE_CELLS + i) * anchoCelda;
       const x = px * PAGE_SIDE + i % PAGE_SIDE, y = py * PAGE_SIDE + Math.floor(i / PAGE_SIDE);
       const T = bin.getFloat32(b + campoC.T, true);
-      if (Number.isNaN(T)) { tiles.push({ ...pagina[i], x, y }); continue; }
+      const paved = bin.getFloat32(b + campoC.paved, true);
+      const base = { ...pagina[i], x, y };
+      if (!Number.isNaN(paved)) {
+        if (paved > 0) base.paved = paved;
+        else delete base.paved;
+      }
+      if (Number.isNaN(T)) { tiles.push(base); continue; }
       const mat: MatTesela = [];
       for (let j = 0; j < 3; j++) {
         const id = bin.getUint32(b + campoC[`mat${j}`], true);
         if (id !== 0) mat.push([id, bin.getUint8(b + campoC[`fr${j}`]) / escalaU8]);
       }
-      tiles.push({ ...pagina[i], x, y, mat, T });
+      tiles.push({ ...base, mat, T });
     }
   }
   return tiles;

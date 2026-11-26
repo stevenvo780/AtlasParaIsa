@@ -108,6 +108,10 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
   #archive-cuts{width:auto}
   .game-shell.has-archive-cuts .game-drawer{bottom:var(--tope-cortes);max-height:max(80px,calc(100dvh - var(--tope-cortes) - 68px))}
   .game-shell.has-archive-cuts :is(.camera-controls,#heat-legend){bottom:var(--tope-cortes)}
+  .game-shell.has-archive-cuts .world-coordinates{display:none}
+  #archive-cuts .archive-cuts-choices p{font-size:11px;line-height:1.2}
+  #archive-cuts .archive-cuts-heading{margin-bottom:3px}
+  #archive-cuts .archive-cuts-status{margin-top:2px}
 }
 /* V21 — observador puro: ninguna orden ni gesto; todo lo demás sigue vivo. */
 .game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette){display:none!important}

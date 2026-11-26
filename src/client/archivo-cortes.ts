@@ -110,7 +110,7 @@ export function mountArchiveCuts(container: HTMLElement, onCut: (view: WorldView
       const data = await read('/api/cortes', session.signal);
       if (session.signal.aborted) return;
       if (!validArchivo(data)) throw new Error('Archivo de cortes ilegible.');
-      heading.textContent = `Saltar entre cortes · casilla (${data.foco.x}, ${data.foco.y})`;
+      heading.textContent = `Casilla observada (${data.foco.x}, ${data.foco.y}) · el pavimento ${data.cortes[1].pavimento > data.cortes[0].pavimento ? 'aumentó' : data.cortes[1].pavimento < data.cortes[0].pavimento ? 'disminuyó' : 'no cambió'} entre cortes`;
       choices.innerHTML = data.cortes.map((corte, i) => {
         const label = i === 0 ? 'Anterior' : 'Posterior';
         return `<div><button type="button" class="dvr-speed" data-cut-tick="${corte.tick}" aria-pressed="false" aria-describedby="cut-evidence-${corte.tick}">${label} · paso ${number(corte.tick)}</button>

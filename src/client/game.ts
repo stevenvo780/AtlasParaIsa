@@ -785,6 +785,7 @@ function receiveArchiveCut(next: WorldView, foco: { x: number; y: number }): voi
   activePersonId = next.people.find(p => p.role === 'S')?.id ?? next.people[0]?.id ?? 's';
   following = false; control = 'inspect';
   landscape?.setHome(null);
+  landscape?.setArchiveFocus(foco.x, foco.y);
   landscape?.focusTile(foco.x, foco.y);
   selected = { kind: 'tile', ...foco };
   landscape?.select(selected);

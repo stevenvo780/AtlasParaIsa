@@ -733,6 +733,7 @@ export class Landscape {
   // en el inicializador de campo) porque ahí ya existe `options`.
   private readonly modo: Modo;
   private readonly cutArchive: boolean;
+  private archiveFocus: { x: number; y: number } | null = null;
   private lastFrameAt = 0;
 
   private pointers = new Map<number, PointerState>();
@@ -1018,6 +1019,9 @@ export class Landscape {
   focusTile(x: number, y: number): void {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.follow(null); this.focus(x, y);
+  }
+  setArchiveFocus(x: number, y: number): void {
+    if (this.cutArchive && Number.isSafeInteger(x) && Number.isSafeInteger(y)) this.archiveFocus = { x, y };
   }
   getViewportBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
     const halfW = this.cssW / this.cam.zoom / 2, halfH = this.cssH / this.cam.zoom / 2;
@@ -3882,6 +3886,16 @@ export class Landscape {
           this.drawChip(s.x, s.y + 15, `${nombreDeFauna(animal.view)} · ${animalActions[animal.view.action]}`, P.ink, P.rule, 'meta');
         }
       }
+    }
+    if (this.archiveFocus) {
+      // El contorno corresponde exactamente a una tesela, no a una longitud de camino.
+      const a = this.worldToScreen(this.archiveFocus.x, this.archiveFocus.y);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#193329'; ctx.lineWidth = 5;
+      ctx.strokeRect(a.x, a.y, this.cam.zoom, this.cam.zoom);
+      ctx.strokeStyle = '#f6df78'; ctx.lineWidth = 2;
+      ctx.strokeRect(a.x, a.y, this.cam.zoom, this.cam.zoom);
+      this.drawChip(a.x + this.cam.zoom / 2, a.y - 12, 'Casilla observada', P.ink, P.amber, 'meta');
     }
     this.drawLoading();
     ctx.restore();

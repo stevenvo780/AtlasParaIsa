@@ -252,12 +252,40 @@ export interface SimWorkerOptions {
   tapeSinCreditoMs?: number;
   /** V21: inhabitants act autonomously; direct NPC orders are rejected. */
   observerOnly?: boolean;
+  /** Ruta de fallback: publica espejos completos en cada cadencia aunque no haya demanda demostrable (`CARTA_ESPEJO_SIEMPRE=1`). */
+  espejoSiempre?: boolean;
 }
 export interface SessionMirror { hash: string; expires: number; validity: SharedArrayBuffer; }
 export type MirrorPageField = 'people' | 'places' | 'animals' | 'structures' | 'blueprints' | 'communities'
   | 'technology.items' | 'technology.recipes' | 'technology.knowledge' | 'pendingChunks';
+export interface TrazaObservador {
+  /** Llamadas reales a `motor.vista()` hechas por `mundoParaEmision` en este proceso. */
+  vistasMotor: number;
+  /** Pulsos ligeros (`salud`, `motor`, `runtime`) emitidos sin reunir el mundo. */
+  pulsos: number;
+  /** Espejos completos (`MirrorUpdate`) enviados a la pasarela. */
+  espejos: number;
+  /** Cadencias de espejo omitidas por falta de demanda demostrable (sin `motor.vista()`). */
+  espejosSinDemanda: number;
+  /** Cadencias de espejo aplazadas por contrapresión (ya había un espejo en vuelo). */
+  espejosEnVueloOmitidos: number;
+  /** Espejos actualmente en vuelo sin acuse `espejoAplicado` de la pasarela. */
+  enVuelo: number;
+}
+export interface PulsoWorker {
+  type: 'pulso';
+  salud: SaludServidor;
+  saludMedidaEn: number;
+  motor?: TelemetriaMotor;
+  runtime: RuntimeStats;
+  respaldo: unknown;
+  turbo?: boolean;
+  grabaCinta?: boolean;
+  traza: TrazaObservador;
+}
 export interface MirrorUpdate {
   type: 'mirror';
+  seq: number;
   view: WorldView;
   salud: SaludServidor;
   motor?: TelemetriaMotor;
@@ -280,7 +308,11 @@ export interface MirrorUpdate {
   publishMs: number;
   /** V24: 4×4 minimap palette summary of every chunk page in this post (`/api/worldmap`). */
   minimap?: { key: string; cells: string }[];
+  traza: TrazaObservador;
 }
+export type SimControl =
+  | { type: 'espejoAplicado'; seq: number }
+  | { type: 'demanda'; visoresWs: number; suscriptoresEspejo: number; solicitarEspejo?: boolean };
 export type SimRpc = { type: 'rpc'; id: number; method: string; args: unknown[] };
 export type SimReply = { type: 'reply'; id: number; value?: unknown; error?: { status: number; message: string } };
 /** La caducidad usa el reloj monotónico común del proceso, las fechas visibles usan tiempo civil. */
@@ -671,11 +703,55 @@ async function runSimulation(options: SimWorkerOptions) {
     .map(row => { const validity = new SharedArrayBuffer(4); const flag = new Int32Array(validity); flag[0] = 1; sessionFlags.set(row.hash, flag); return { ...row, validity }; });
   let observer: ReturnType<typeof createTileObserver> | undefined;
   const turbo = !!options.turbo || options.tickMs === 0;
+  const espejoSiempre = options.espejoSiempre ?? process.env.CARTA_ESPEJO_SIEMPRE === '1';
   let recargaPendiente = false;
   let postedRetired = new WeakSet<Chunk>();
   let lastPostAt = -Infinity;
+  let lastPulseAt = -Infinity;
+  let lastMirrorTick = -1;
+  let seqEspejo = 0;
+  let espejosEnVuelo = 0;
+  let visoresWs = 0;
+  let suscriptoresEspejo = 0;
+  let demandaPuntual = false;
+  let espejoAplazadoPorVuelo = false;
+  let pulsosEmitidos = 0;
+  let espejosEmitidos = 0;
+  let espejosSinDemanda = 0;
+  let espejosEnVueloOmitidos = 0;
   let previousPaused = false;
   let instanceId: string | undefined;
+  const trazaActual = (): TrazaObservador => ({
+    vistasMotor: app?.vistasMotor ?? 0,
+    pulsos: pulsosEmitidos,
+    espejos: espejosEmitidos,
+    espejosSinDemanda,
+    espejosEnVueloOmitidos,
+    enVuelo: espejosEnVuelo,
+  });
+  const tieneDemanda = (): boolean => espejoSiempre || visoresWs > 0 || suscriptoresEspejo > 0 || demandaPuntual;
+  function emitirPulso(now: number) {
+    const live = app!;
+    lastPulseAt = now;
+    pulsosEmitidos++;
+    port.postMessage({
+      type: 'pulso',
+      salud: live.salud(),
+      saludMedidaEn: performance.now(),
+      motor: live.telemetriaMotor,
+      runtime: live.runtime,
+      respaldo: live.respaldo,
+      turbo: live.turbo,
+      grabaCinta: live.grabaCinta,
+      traza: trazaActual(),
+    } satisfies PulsoWorker);
+  }
+  function atenderDemandaSiLista() {
+    if (closing || !app || app.failed || espejosEnVuelo > 0 || !tieneDemanda()) return;
+    if (app.salud().tick <= lastMirrorTick) return;
+    const now = performance.now();
+    if (!app.turbo || demandaPuntual || espejoAplazadoPorVuelo || now - lastPostAt >= TURBO_MIRROR_MS) publish(false);
+  }
   function publish(forcePost = false) {
     const live = app!;
     if (live.failed) {
@@ -683,7 +759,33 @@ async function runSimulation(options: SimWorkerOptions) {
       return;
     }
     const now = performance.now();
-    if (!forcePost && !recargaPendiente && live.turbo && now - lastPostAt < TURBO_MIRROR_MS) return;
+    const forzado = forcePost || recargaPendiente;
+    const enCadencia = !live.turbo || now - lastPostAt >= TURBO_MIRROR_MS;
+    if (!forzado) {
+      const pulsoDebido = !live.turbo || now - lastPulseAt >= TURBO_MIRROR_MS;
+      if (!enCadencia && !demandaPuntual && !espejoAplazadoPorVuelo) {
+        if (pulsoDebido) emitirPulso(now);
+        return;
+      }
+      if (!tieneDemanda()) {
+        // Sin demanda demostrable: evita reunir el mundo y mantiene vivos el reloj y la salud vía pulso ligero.
+        espejoAplazadoPorVuelo = false;
+        lastPostAt = now;
+        espejosSinDemanda++;
+        if (pulsoDebido) emitirPulso(now);
+        return;
+      }
+      if (espejosEnVuelo > 0) {
+        // Contrapresión: máximo un espejo rutinario en vuelo; la salud y el reloj siguen llegando por pulso ligero.
+        espejoAplazadoPorVuelo = true;
+        lastPostAt = now;
+        espejosEnVueloOmitidos++;
+        if (pulsoDebido) emitirPulso(now);
+        return;
+      }
+    }
+    demandaPuntual = false;
+    espejoAplazadoPorVuelo = false;
     const world = live.mundoParaEmision(true);
     instanceId ??= readWorldInstance(store.db)!;
     if (recargaPendiente) {
@@ -692,6 +794,11 @@ async function runSimulation(options: SimWorkerOptions) {
       recargaPendiente = false;
     }
     lastPostAt = now;
+    lastPulseAt = now;
+    lastMirrorTick = world.tick;
+    const seq = ++seqEspejo;
+    espejosEmitidos++;
+    espejosEnVuelo++;
     const updates: MirrorUpdate['chunks'] = [];
     const minimap: NonNullable<MirrorUpdate['minimap']> = [];
     const transfers: ArrayBuffer[] = [];
@@ -735,9 +842,9 @@ async function runSimulation(options: SimWorkerOptions) {
       // Resident tile proxies must never be passed to structuredClone/v8.serialize.
       packPages('pendingChunks', [{ ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) }], 1);
     }
-    const update: MirrorUpdate = { type: 'mirror', view, motor: live.telemetriaMotor, turbo: live.turbo, grabaCinta: live.grabaCinta, salud: live.salud(), saludMedidaEn: performance.now(), seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
+    const update: MirrorUpdate = { type: 'mirror', seq, view, motor: live.telemetriaMotor, turbo: live.turbo, grabaCinta: live.grabaCinta, salud: live.salud(), saludMedidaEn: performance.now(), seed: world.seed, cuencas: paramsOf(world).agua.cuencas,
       activeKeys: Object.keys(world.chunks), activeChunks: world.chunks, chunks: updates, pendingChunks: [], pendingKeys: world.retiredChunks.map(chunk => chunk.key), pages,
-      deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap };
+      deltas: paramsOf(world).red.deltas, failed: false, respaldo: live.respaldo, publishMs: 0, minimap, traza: trazaActual() };
     // Terrain preparation stays OFF the HTTP thread. Chunk buffers move, rather than cloning
     // hundreds of thousands of Tile objects on every postMessage.
     const started = performance.now();
@@ -777,14 +884,26 @@ async function runSimulation(options: SimWorkerOptions) {
     }
     informarAvance();
     publish(true);
-    port.on('message', (message: SimRpc) => { void handle(message); });
+    port.on('message', (message: SimRpc | SimControl) => { void handle(message); });
     publicarOperacion(null);
     port.postMessage({ type: 'ready', sessions: initialSessions });
   } catch (error) {
     try { await app?.close(); } finally { store.close(); }
     throw error;
   }
-  async function handle(message: SimRpc) {
+  async function handle(message: SimRpc | SimControl) {
+    if (message.type === 'espejoAplicado') {
+      espejosEnVuelo = Math.max(0, espejosEnVuelo - 1);
+      atenderDemandaSiLista();
+      return;
+    }
+    if (message.type === 'demanda') {
+      visoresWs = Math.max(0, message.visoresWs);
+      suscriptoresEspejo = Math.max(0, message.suscriptoresEspejo);
+      if (message.solicitarEspejo) demandaPuntual = true;
+      atenderDemandaSiLista();
+      return;
+    }
     if (message.type !== 'rpc') return;
     const { id, method, args } = message;
     try {

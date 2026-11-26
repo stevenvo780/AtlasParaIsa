@@ -15,11 +15,15 @@ import { clavesVivasEn } from './regiones-vivas.js';
 import { cintaDeMundo } from './cinta/escritor.js';
 import { LectoresCinta } from './cinta/lector-worker.js';
 import { CINTA } from '../shared/cinta.js';
-import { projectMirrorTile, type MirrorUpdate, type OperacionWorker, type SessionMirror, type SimReply, type SimRpc, type SimWorkerOptions } from './sim-worker.js';
+import { projectMirrorTile, TURBO_MIRROR_MS, type MirrorUpdate, type OperacionWorker, type PulsoWorker, type SessionMirror, type SimControl, type SimReply, type SimRpc, type SimWorkerOptions, type TrazaObservador } from './sim-worker.js';
 import type { RuntimeStats, Tile, Viewport, WorldView } from '../shared/types.js';
+import type { TelemetriaMotor } from '../world/motor/contratos.js';
 import type { World } from '../world/index.js';
 
-export interface WorkerGatewayOptions extends GatewayAppOptions, SimWorkerOptions {}
+export interface WorkerGatewayOptions extends GatewayAppOptions, SimWorkerOptions {
+  /** Solo pruebas: demora asíncrona dentro de `applyMirror` para verificar contrapresión de 1 espejo en vuelo. */
+  testMirrorApplyDelayMs?: number;
+}
 type Session = { expires: number; flag: Int32Array };
 type TilePage = { data: Uint8Array; tiles?: Tile[] };
 
@@ -60,6 +64,13 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   } };
   let simulationPaused = false;
   let lastPublishMs = 0;
+  let ultimoMotor: TelemetriaMotor | undefined;
+  let ultimoRuntime: RuntimeStats | undefined;
+  let ultimoRespaldo: unknown;
+  let ultimaTraza: TrazaObservador = { vistasMotor: 0, pulsos: 0, espejos: 0, espejosSinDemanda: 0, espejosEnVueloOmitidos: 0, enVuelo: 0 };
+  let visoresWs = 0;
+  let suscriptoresEspejo = 0;
+  let ultimaDemandaHttp = -Infinity;
   let closing = false, started = !options.manual, isReady = false;
   let nextId = 0;
   const calls = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -75,12 +86,33 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   let worldmapCache: { mirror: MirrorUpdate; version: number; value: WorldMapResponse } | undefined;
   let directoryCache: { mirror: MirrorUpdate; value: WorldDirectoryResponse } | undefined;
   let whispersCache: { mirror: MirrorUpdate; value: WhispersResponse } | undefined;
+  function enviarControl(mensaje: SimControl) {
+    if (workerExited || closing || fatal) return;
+    try { worker.postMessage(mensaje); } catch { /* el worker ya se cerró */ }
+  }
+  function sincronizarDemanda(solicitarEspejo: boolean) {
+    enviarControl({ type: 'demanda', visoresWs, suscriptoresEspejo, ...(solicitarEspejo ? { solicitarEspejo: true } : {}) });
+  }
+  function marcarDemandaHttp() {
+    if (!isReady || !started || closing || fatal || workerExited) return;
+    const ahora = performance.now();
+    if (ahora - ultimaDemandaHttp < TURBO_MIRROR_MS) return;
+    ultimaDemandaHttp = ahora;
+    sincronizarDemanda(true);
+  }
+  events.on('newListener', (nombre: string | symbol) => {
+    if (nombre === 'mirror') { suscriptoresEspejo++; sincronizarDemanda(true); }
+  });
+  events.on('removeListener', (nombre: string | symbol) => {
+    if (nombre === 'mirror') { suscriptoresEspejo = Math.max(0, suscriptoresEspejo - 1); sincronizarDemanda(false); }
+  });
   function loadedMirror(): MirrorUpdate {
     if (!mirror) throw new HttpError(503, 'El mundo todavía está cargando.');
     return mirror;
   }
   function worldmap(): WorldMapResponse {
     const current = loadedMirror();
+    marcarDemandaHttp();
     // Chunks archived before this process started are discovered terrain too: read once, in bounded turns.
     if (archive) atlas.fillFromArchive(archive, current.view.tick);
     if (worldmapCache?.mirror === current && worldmapCache.version === atlas.version) return worldmapCache.value;
@@ -94,11 +126,13 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   /** The mirror carries the FULL population (it is never clipped to a camera): the directory is global. */
   function directory(): WorldDirectoryResponse {
     const current = loadedMirror();
+    marcarDemandaHttp();
     if (directoryCache?.mirror !== current) directoryCache = { mirror: current, value: buildWorldDirectory(current.view) };
     return directoryCache.value;
   }
   function whispers(): WhispersResponse {
     const current = loadedMirror();
+    marcarDemandaHttp();
     if (whispersCache?.mirror !== current)
       whispersCache = { mirror: current, value: { tick: current.view.tick, whispers: (current.view.whispers ?? []).map(w => ({ ...w })) } };
     return whispersCache.value;
@@ -161,6 +195,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   }
   function view(viewport?: Viewport): WorldView {
     if (!mirror) throw new HttpError(503, 'El mundo todavía está cargando.');
+    marcarDemandaHttp();
     const v = normalizeViewport(viewport), source = mirror.view;
     const tiles: Tile[] = [], chunks = new Map<string, Chunk>();
     const places = new Map(source.places.map(p => [p.id, p]));
@@ -226,9 +261,14 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     },
     person: id => rpc('personDetail', id),
     recipe: id => rpc('recipeDetail', id),
-    regions: () => ({ tick: mirror?.view.tick ?? 0, regionesVivas: Object.keys(activeKeys) }),
-    motor: () => !simulationPaused && !fatal ? mirror?.motor : undefined,
+    regions: () => { marcarDemandaHttp(); return { tick: mirror?.view.tick ?? 0, regionesVivas: Object.keys(activeKeys) }; },
+    motor: () => !simulationPaused && !fatal ? ultimoMotor ?? mirror?.motor : undefined,
     worldmap, directory, whispers,
+    onClientesWs(activos: number) {
+      const previo = visoresWs;
+      visoresWs = Math.max(0, activos);
+      sincronizarDemanda(previo === 0 && visoresWs > 0);
+    },
     whisper: async (request: DivineWhisperRequest, hash: string): Promise<DivineWhisper> => {
       if (!valid(hash)) throw new HttpError(401, 'La sesión terminó.');
       // The worker checks the session again when the step applies the message and inside its save
@@ -243,11 +283,11 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       return saludDelEspejo(medicion, avance, !!fatal || simulationPaused || closing, performance.now());
     },
     get ready() { return isReady && !closing; },
-    get runtime() { return mirror?.view.performance ?? {} as RuntimeStats; },
+    get runtime() { return ultimoRuntime ?? mirror?.view.performance ?? {} as RuntimeStats; },
     get deltas() { return mirror?.deltas ?? false; },
     get turbo() { return mirror?.turbo ?? turbo; },
     get failed() { return !!fatal || simulationPaused || !mirror || mirror.failed; },
-    get respaldo() { return mirror?.respaldo; },
+    get respaldo() { return ultimoRespaldo ?? mirror?.respaldo; },
     // Hasta el primer espejo no se sabe de qué instancia es el mundo: la cinta de otra no se sirve ni un momento.
     get cinta(): ReadOnlyBackend['cinta'] {
       if (!mirror?.grabaCinta || !lectores) return undefined;
@@ -274,7 +314,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
         turbo, tape: options.tape, tapeDirectory: options.tapeDirectory ? directorio : undefined,
         tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
         turboSaveIntervalMs: options.turboSaveIntervalMs,
-        observerOnly: options.observerOnly } satisfies SimWorkerOptions } });
+        observerOnly: options.observerOnly,
+        espejoSiempre: options.espejoSiempre } satisfies SimWorkerOptions } });
   let workerExited = false;
   const exited = new Promise<void>(resolve => worker.once('exit', code => {
     workerExited = true;
@@ -283,38 +324,43 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   }));
   worker.on('error', fail);
   async function applyMirror(update: MirrorUpdate) {
-    // Yield between bounded pages: even a full census refresh must not monopolize HTTP.
-    for (const page of update.pages) {
-      if (closing) return;
-      const values = deserialize(page.data) as unknown[];
-      let destination: unknown[];
-      if (page.field === 'pendingChunks') destination = update.pendingChunks;
-      else if (page.field.startsWith('technology.')) {
-        const field = page.field.slice('technology.'.length) as 'items' | 'recipes' | 'knowledge';
-        destination = update.view.technology![field]!;
-      } else destination = update.view[page.field as 'people']!;
-      for (const value of values) destination.push(value);
-      await new Promise<void>(resolve => setImmediate(resolve));
+    try {
+      if (options.testMirrorApplyDelayMs) await new Promise<void>(resolve => setTimeout(resolve, options.testMirrorApplyDelayMs));
+      // Yield between bounded pages: even a full census refresh must not monopolize HTTP.
+      for (const page of update.pages) {
+        if (closing) return;
+        const values = deserialize(page.data) as unknown[];
+        let destination: unknown[];
+        if (page.field === 'pendingChunks') destination = update.pendingChunks;
+        else if (page.field.startsWith('technology.')) {
+          const field = page.field.slice('technology.'.length) as 'items' | 'recipes' | 'knowledge';
+          destination = update.view.technology![field]!;
+        } else destination = update.view[page.field as 'people']!;
+        for (const value of values) destination.push(value);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      const next = Object.create(null) as Record<string, true>;
+      for (const key of update.activeKeys) next[key] = true;
+      for (const key of pages.keys()) if (!next[key]) pages.delete(key);
+      for (const page of update.chunks) pages.set(page.key, { data: page.data });
+      // Retired chunks cross once; the keys say which of the earlier ones are still pending an archive.
+      const pending = new Map<string, Chunk>();
+      for (const key of update.pendingKeys) { const chunk = pendingChunks.get(key); if (chunk) pending.set(key, chunk); }
+      for (const chunk of update.pendingChunks) pending.set(chunk.key, chunk);
+      pendingChunks = pending;
+      for (const entry of update.minimap ?? []) atlas.setActive(entry.key, entry.cells);
+      atlas.retainActive(update.activeKeys);
+      for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
+      activeKeys = update.activeChunks; mirror = update;
+      if (update.grabaCinta) lectores ??= new LectoresCinta({ directorio, mundo: options.worldPath,
+        topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly: !!options.observerOnly, turbo: update.turbo ?? turbo });
+      if (isReady && !closing) transport.broadcast();
+      events.emit('mirror', update.view.tick);
+    } finally {
+      enviarControl({ type: 'espejoAplicado', seq: update.seq });
     }
-    const next = Object.create(null) as Record<string, true>;
-    for (const key of update.activeKeys) next[key] = true;
-    for (const key of pages.keys()) if (!next[key]) pages.delete(key);
-    for (const page of update.chunks) pages.set(page.key, { data: page.data });
-    // Retired chunks cross once; the keys say which of the earlier ones are still pending an archive.
-    const pending = new Map<string, Chunk>();
-    for (const key of update.pendingKeys) { const chunk = pendingChunks.get(key); if (chunk) pending.set(key, chunk); }
-    for (const chunk of update.pendingChunks) pending.set(chunk.key, chunk);
-    pendingChunks = pending;
-    for (const entry of update.minimap ?? []) atlas.setActive(entry.key, entry.cells);
-    atlas.retainActive(update.activeKeys);
-    for (const chunk of update.pendingChunks) atlas.addKnown(chunk);
-    activeKeys = update.activeChunks; mirror = update;
-    if (update.grabaCinta) lectores ??= new LectoresCinta({ directorio, mundo: options.worldPath,
-      topeBytes: options.tapeTopeBytes ?? CINTA.topeBytes, observerOnly: !!options.observerOnly, turbo: update.turbo ?? turbo });
-    if (isReady && !closing) transport.broadcast();
-    events.emit('mirror', update.view.tick);
   }
-  worker.on('message', (message: MirrorUpdate | SimReply | { type: string; [key: string]: unknown }) => {
+  worker.on('message', (message: MirrorUpdate | PulsoWorker | SimReply | { type: string; [key: string]: unknown }) => {
     try {
       if (message.type === 'reply') {
         const reply = message as SimReply, call = calls.get(reply.id);
@@ -322,10 +368,22 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
         calls.delete(reply.id);
         if (reply.error) call.reject(new HttpError(reply.error.status, reply.error.message));
         else call.resolve(reply.value);
+      } else if (message.type === 'pulso') {
+        const pulse = message as PulsoWorker;
+        medicion = { salud: pulse.salud, saludMedidaEn: pulse.saludMedidaEn };
+        ultimoMotor = pulse.motor;
+        ultimoRuntime = pulse.runtime;
+        ultimoRespaldo = pulse.respaldo;
+        ultimaTraza = pulse.traza;
+        events.emit('pulso', pulse.salud.tick);
       } else if (message.type === 'mirror') {
         const update = message as MirrorUpdate;
         // La salud no espera a que se reconstruya la proyección, que puede ocupar muchas vueltas.
         medicion = { salud: update.salud, saludMedidaEn: update.saludMedidaEn };
+        ultimoMotor = update.motor;
+        ultimoRuntime = update.view.performance;
+        ultimoRespaldo = update.respaldo;
+        ultimaTraza = update.traza;
         applying = applying.then(() => applyMirror(update));
         void applying.catch(fail);
       } else if (message.type === 'operacion') {
@@ -339,6 +397,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
             }
             archive = new Store(options.worldPath, { readOnly: true });
             isReady = true;
+            if (visoresWs > 0 || suscriptoresEspejo > 0) sincronizarDemanda(false);
             readyResolve();
             if (started) void rpc('start').catch(fail);
           } else { isReady = true; readyResolve(); }
@@ -369,6 +428,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
     get workerThreadId() { return worker.threadId; },
     get workerExited() { return workerExited; },
     get publishMs() { return lastPublishMs; },
+    /** Contadores de la ruta de observador (pulso ligero, espejos y contrapresión). */
+    get observador(): TrazaObservador { return { ...ultimaTraza }; },
     worldmap, directory, whispers,
     whisper: (request: DivineWhisperRequest, hash: string) => backend.whisper!(request, hash),
     /** V21: the worker writes its buffered tape frames now (tests, and readers that need the newest tick). */

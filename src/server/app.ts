@@ -139,6 +139,8 @@ export interface ReadOnlyBackend {
   directory?(): WorldDirectoryResponse;
   whispers?(): WhispersResponse;
   whisper?(request: DivineWhisperRequest, hash: string): Promise<DivineWhisper>;
+  /** Avisa a la pasarela cuántos clientes WS vivos hay conectados (demanda demostrable de espejo). */
+  onClientesWs?(activos: number): void;
 }
 export type SaludServidor = Salud & { epoca?: number; ultimoTickGuardado?: number };
 
@@ -603,11 +605,13 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['events']));
   }
   const motor = config && crearMotor(world, config);
+  let vistasGlobalesMotor = 0;
   function mundoParaEmision(forzar = false): World {
     if (!motor || !conDuenos) return world;
     const ahora = performance.now();
     if (!lecturaMotor || lecturaMotor.tick !== tickMotor && (forzar || ahora - ultimaLecturaMotor >= TURBO_MIRROR_MS)) {
       lecturaMotor = motor.vista();
+      vistasGlobalesMotor++;
       ultimaLecturaMotor = ahora;
     }
     return lecturaMotor;
@@ -1376,10 +1380,17 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (turbo) ultimaDifusionTurbo = relojReal();
         const broadcastStarted = performance.now();
         if (conDuenos) {
-          const lectura = mundoParaEmision(true);
-          muestrear(lectura);
-          Object.assign(runtime, resumenVivo(lectura));
-          runtime.activeTiles = lectura.tiles.length;
+          if (clients.size > 0) {
+            const lectura = mundoParaEmision(true);
+            muestrear(lectura);
+            Object.assign(runtime, resumenVivo(lectura));
+            runtime.activeTiles = lectura.tiles.length;
+          } else {
+            // Sin clientes WS directos (incluido dentro de sim-worker): evita reunir todo el mundo cada 250 ms.
+            if (lecturaMotor?.tick === tickMotor) muestrear(lecturaMotor);
+            if (ley(world, 'natalidad')) Object.assign(runtime, resumenVivo(world));
+            runtime.activeTiles = (motor?.reparto()?.paginas.length ?? 0) * 256;
+          }
         }
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
@@ -1722,9 +1733,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0, lastSentAt: Date.now(),
           ...(solicitud.viewport ? { viewport: solicitud.viewport } : {}),
           flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null, ultimoEnlaceMs: null, comprimir: compresion !== 'nunca', rapidos: 0, lentos: 0 } : null, delta: null });
+        gateway?.onClientesWs?.(clients.size);
         client.on('error', () => client.terminate());
         client.on('pong', () => { const info = clients.get(client); if (info) info.alive = true; });
-        client.on('close', () => clients.delete(client));
+        client.on('close', () => { clients.delete(client); gateway?.onClientesWs?.(clients.size); });
         client.on('message', async (data, binary) => {
           try {
             const info = clients.get(client)!;
@@ -1881,6 +1893,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     flushTape: () => grabador?.flush() ?? Promise.resolve({ enabled: false, frames: 0, latestTick: -1 }),
     get telemetriaMotor() { return !failed && !aMedioPaso ? motor?.telemetria() : undefined; },
     get repartoMotor() { return motor?.reparto(); },
+    /** Llamadas reales a `motor.vista()` hechas por `mundoParaEmision` en este proceso. */
+    get vistasMotor() { return vistasGlobalesMotor; },
     /** V24: Mensajes Divinos waiting for their step (tests and benches), and whether the last step applied one. */
     get susurrosPendientes() { return pendingWhispers.length; },
     get susurrosEnUltimoPaso() { return susurrosEnUltimoPaso; },

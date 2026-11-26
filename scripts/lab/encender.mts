@@ -4,6 +4,7 @@
  *
  *   tsx scripts/lab/encender.mts --semilla 51926 --hasta materia --dias 3 [--params p.json | "a.b=1,c.d=2"] [--regimen abierto|defecto]
  *        [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
+ *        [--n N] [--ticks N] [--perfil] [--digesto]
  *
  *  --hasta X     enciende los interruptores hasta X incluido, en el orden de `ORDEN_ENCENDIDO` (`escalon()`); se aplica
  *                ENCIMA de `--params`. Sin él, rigen los interruptores de `--params` (todos apagados por defecto).
@@ -17,27 +18,31 @@
  *   {tipo:'fin'}     estado: completo | violacion | extinta | tope.
  * Código de salida: 0 completo, 2 violación dura, 1 error.
  *
- * No calibra ni mide rendimiento: es el instrumento con que se enciende, una a una, cada ley de la V23.
+ * --n siembra mortales con `poblacion.mts` en la zona 0,0,48,32. --ticks permite un último día parcial.
+ * --perfil resume el coste de `stepWorld`. --digesto incluye el estado final residente, archivado y material.
  */
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deserialize, serialize } from 'node:v8';
-import { createWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
-import { bindWorldContext } from '../../src/world/spatial.js';
+import { createWorld, stepWorld, TICKS_PER_DAY, worldContext, type FaseMedicion, type World } from '../../src/world/index.js';
 import { parseParams, paramsOf, DEFAULT_PARAMS, type WorldParams } from '../../src/world/params.js';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
 import { comprobarLeyes, crearComprobador, listaInvariantes, type Violacion } from '../../src/world/invariantes.js';
 import { LEYES } from '../../src/world/motor/leyes.js';
 import { ctxSi } from '../../src/world/motor/acceso.js';
+import { duenoSi } from '../../src/world/motor/contexto.js';
 import { conservacion } from '../../src/world/materia/ley-mundo.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
 import { escalon, INTERRUPTORES, ORDEN_ENCENDIDO, type Interruptor, type InterruptoresV23 } from '../../src/shared/interruptores.js';
-import type { Chunk } from '../../src/world/terrain.js';
+import { archivoDeChunks, poblar } from './poblacion.mjs';
 
 export interface OpcionesEncender {
   semilla: number; hasta?: Interruptor; params?: string; dias: number; regimen: 'abierto' | 'defecto';
   /** Cada cuántos ticks se comprueba todo; `undefined` = cada tick con la cadencia propia de cada invariante. */
   cada?: number; topeMortales?: number; continuar: boolean; salida?: string; comprobar: boolean;
+  n?: number; ticks?: number; perfil?: boolean; digesto?: boolean;
 }
 
 const entero = (texto: string, nombre: string, minimo = 1): number => {
@@ -52,6 +57,8 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
     const bandera = args[i]!;
     if (bandera === '--continuar') { o.continuar = true; continue; }
     if (bandera === '--sin-comprobar') { o.comprobar = false; continue; }
+    if (bandera === '--perfil') { o.perfil = true; continue; }
+    if (bandera === '--digesto') { o.digesto = true; continue; }
     const valor = args[++i];
     if (valor === undefined) throw new Error(`Falta valor para ${bandera}`);
     switch (bandera) {
@@ -61,6 +68,8 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
         o.hasta = valor as Interruptor; break;
       case '--params': o.params = valor; break;
       case '--dias': o.dias = entero(valor, bandera); break;
+      case '--ticks': o.ticks = entero(valor, bandera); break;
+      case '--n': o.n = entero(valor, bandera); break;
       case '--regimen': if (valor !== 'abierto' && valor !== 'defecto') throw new Error('Régimen inválido'); o.regimen = valor; break;
       case '--cada': o.cada = entero(valor, bandera); break;
       case '--tope-mortales': o.topeMortales = entero(valor, bandera); break;
@@ -119,13 +128,13 @@ export function vistasMedias(tiles: Readonly<World['tiles']>) {
 export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<string, unknown>) => void): Promise<number> {
   const params = paramsDeEncender(o);
   const mundo = createWorld(o.semilla, params);
-  const archivo = new Map<string, Buffer>();
-  bindWorldContext(mundo, { loadChunk: clave => { const g = archivo.get(clave); return g ? deserialize(g) as Chunk : null; } });
-  const archivar = (): void => {
-    const vistos = new Set<string>();
-    for (const chunk of mundo.retiredChunks) if (!vistos.has(chunk.key)) { vistos.add(chunk.key); archivo.set(chunk.key, serialize(chunk)); }
-    mundo.retiredChunks = [];
-  };
+  if (o.n !== undefined) poblar(mundo, { n: o.n, zona: { x: 0, y: 0, ancho: 48, alto: 32 }, siembra: o.semilla });
+  const { archivo, archivar } = archivoDeChunks(mundo);
+  const contexto = worldContext(mundo);
+  const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
+  const medicion: FaseMedicion | undefined = o.perfil ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
+  const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
+  let msPared = 0, msCpu = 0;
   const carriles = new Map(listaInvariantes().map(i => [i.id, i.carril]));
   const comprobador = o.comprobar ? crearComprobador({ cadencia: o.cada === undefined }) : null;
   const leyesEncendidas = LEYES.filter(l => params.v23[l.interruptor]);
@@ -138,6 +147,18 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
     cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY });
 
   let violaciones = 0, duras = 0, avisoSinContexto = false;
+  const fin = (estado: string, dia?: number): number => {
+    const medido = mundo.tick;
+    const maxRssMiB = process.resourceUsage().maxRSS / 1024;
+    const porTick = (fases: Record<string, number>) => Object.fromEntries(Object.entries(fases).map(([fase, ms]) => [fase, ms / medido]));
+    const perfil = medicion && medido > 0 ? {
+      msCpuPorTick: msCpu / medido, msParedPorTick: msPared / medido, ticksPorSegundo: medido * 1000 / msPared,
+      cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases), maxRssMiB,
+    } : undefined;
+    const digesto = o.digesto ? digestoCompleto(mundo, archivo) : undefined;
+    escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto });
+    return duras ? 2 : 0;
+  };
   const registrar = (lista: Violacion[]): boolean => {
     let dura = false;
     for (const v of lista) {
@@ -163,12 +184,17 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
   let nacidosAntes = mundo.totals.births ?? 0, muertesAntes = mundo.demographyDynamics.deaths;
   let causasAntes = { ...mundo.demographyDynamics.causes };
   let faunaAntes = { ...mundo.animalDynamics };
-  if (revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick }); return 2; }
-  for (let dia = 1; dia <= o.dias; dia++) {
+  if (revisar() && !o.continuar) return fin('violacion');
+  for (let dia = 1; mundo.tick < ticks; dia++) {
     const causasFauna: Record<string, number> = {};
-    for (let t = 0; t < TICKS_PER_DAY; t++) {
+    for (let t = 0; t < TICKS_PER_DAY && mundo.tick < ticks; t++) {
       const muertesFaunaAntes = mundo.animalDynamics.deaths;
-      stepWorld(mundo);
+      if (medicion) {
+        const pared = performance.now(), cpu = cpuMs();
+        stepWorld(mundo, [], contexto, medicion);
+        msCpu += cpuMs() - cpu;
+        msPared += performance.now() - pared;
+      } else stepWorld(mundo);
       if (params.v23.fauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
         for (let i = mundo.events.length - 1; i >= 0; i--) {
           const evento = mundo.events[i]!;
@@ -179,9 +205,9 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
         }
       }
       const toca = o.cada === undefined || mundo.tick % o.cada === 0;
-      if (toca && revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick, violaciones, duras }); return 2; }
+      if (toca && revisar() && !o.continuar) return fin('violacion');
     }
-    if (o.cada !== undefined && mundo.tick % o.cada !== 0 && revisar() && !o.continuar) { escribirFila({ tipo: 'fin', estado: 'violacion', tick: mundo.tick, violaciones, duras }); return 2; }
+    if (o.cada !== undefined && mundo.tick % o.cada !== 0 && revisar() && !o.continuar) return fin('violacion');
     archivar();
     const dinamica = mundo.demographyDynamics;
     const fauna = { ...mundo.animalDynamics };
@@ -203,11 +229,21 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
     });
     nacidosAntes = nacimientos; muertesAntes = dinamica.deaths; causasAntes = { ...dinamica.causes };
     faunaAntes = fauna;
-    if (mortales === 0) { escribirFila({ tipo: 'fin', estado: 'extinta', dia, violaciones, duras }); return duras ? 2 : 0; }
-    if (o.topeMortales && mortales >= o.topeMortales) { escribirFila({ tipo: 'fin', estado: 'tope', dia, violaciones, duras }); return duras ? 2 : 0; }
+    if (mortales === 0) return fin('extinta', dia);
+    if (o.topeMortales && mortales >= o.topeMortales) return fin('tope', dia);
   }
-  escribirFila({ tipo: 'fin', estado: duras ? 'violacion' : 'completo', tick: mundo.tick, violaciones, duras });
-  return duras ? 2 : 0;
+  return fin(duras ? 'violacion' : 'completo');
+}
+
+function digestoCompleto(mundo: World, archivo: ReadonlyMap<string, Buffer>): string {
+  const dueno = duenoSi(mundo);
+  const materia = dueno?.instantaneaMateria(dueno.pendientes());
+  const hash = createHash('sha256').update(digestoCanonico(mundo));
+  hash.update(serialize([mundo.siguienteUid, mundo.people.map(p => p.uid), mundo.animals.map(a => a.uid), materia]));
+  for (const [clave, datos] of [...archivo].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+    hash.update(serialize([clave, deserialize(datos)]));
+  }
+  return hash.digest('hex');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

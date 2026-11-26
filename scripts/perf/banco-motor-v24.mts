@@ -28,6 +28,9 @@
  * Cada brazo carga una copia desechable y conserva sus parámetros salvo hilos y GPU.
  * `rebalanceo:false` en una escena ignora el coste de pared al reasignar páginas.
  * Con varios dueños, `"repartoInicial":"poblacion"` en un brazo pondera el reparto inicial por población.
+ * `"afinidad":[0,1,2,3]` aplica una máscara de CPU Linux al proceso del brazo y a sus hilos.
+ * Indica CPU lógicas en orden ascendente y dentro de la máscara del lanzador. El banco registra
+ * la máscara efectiva. Los dueños pueden moverse dentro de ella.
  * Las huellas de cierre permiten detectar divergencias entre brazos y repeticiones.
  *
  * El primer brazo es la referencia. Cada bloque comparte el mismo estado y alterna el
@@ -75,6 +78,7 @@ type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolea
 interface Brazo {
   id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste'; duenosPercepcionGpu?: number[];
   repartoInicial?: 'poblacion';
+  afinidad?: number[];
 }
 interface ArranqueDispositivo { dispositivo: number; disponible: boolean }
 interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[]; perfilPaso?: boolean }
@@ -104,9 +108,19 @@ export function validacionConfiguracion(config: Config): Brazo[] {
     (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length > 0)),
   'Indica al menos dos brazos CPU o CUDA [0], [1] o [0,1] con un mapeo de dueños válido');
   assert.ok(brazos.every(repartoInicialValido), 'El reparto inicial por población exige más de un dueño');
+  const afinidadLanzador = brazos.some(b => b.afinidad !== undefined) ? cpusDeAfinidad(afinidadActual()) : undefined;
+  if (afinidadLanzador) {
+    const permitidas = new Set(afinidadLanzador);
+    for (const { id, hilos, afinidad } of brazos) {
+      if (afinidad === undefined) continue;
+      assert.ok(Array.isArray(afinidad) && afinidad.length >= hilos && afinidad.every((cpu, i) =>
+        Number.isSafeInteger(cpu) && permitidas.has(cpu) && (i === 0 || cpu > afinidad[i - 1]!)),
+      `Afinidad inválida en ${id}`);
+    }
+  }
   assert.equal(new Set(brazos.map(b => b.id)).size, brazos.length, 'IDs de brazos repetidos');
   assert.equal(new Set(brazos.map(b => JSON.stringify([b.hilos, b.gpu, b.rutaGpu,
-    resolverDuenosPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu), b.repartoInicial]))).size, brazos.length,
+    resolverDuenosPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu), b.repartoInicial, b.afinidad ?? afinidadLanzador]))).size, brazos.length,
     'Configuraciones de brazos repetidas');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
   assert.ok(config.perfilPaso === undefined || typeof config.perfilPaso === 'boolean', 'perfilPaso debe ser booleano');
@@ -131,8 +145,22 @@ export function validacionConfiguracion(config: Config): Brazo[] {
   return brazos;
 }
 
+function afinidadActual() {
+  return /^Cpus_allowed_list:\s*(.+)$/m.exec(readFileSync('/proc/thread-self/status', 'utf8'))?.[1];
+}
+
+function cpusDeAfinidad(afinidad: string | undefined): number[] {
+  assert.ok(afinidad && /^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/.test(afinidad), 'Máscara de CPU Linux inválida');
+  return afinidad.split(',').flatMap(tramo => {
+    const [desde, hasta] = tramo.split('-');
+    const primera = Number(desde);
+    const ultima = Number(hasta ?? desde);
+    return Array.from({ length: ultima - primera + 1 }, (_, i) => primera + i);
+  });
+}
+
 function planificador() {
-  const afinidad = /^Cpus_allowed_list:\s*(.+)$/m.exec(readFileSync('/proc/thread-self/status', 'utf8'))?.[1];
+  const afinidad = afinidadActual();
   const stat = readFileSync('/proc/thread-self/stat', 'utf8');
   const campos = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
   return { afinidad, cpus: availableParallelism(), nice: Number(campos[16]), politica: Number(campos[38]) };
@@ -276,8 +304,9 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
 }
 
 async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolean) {
-  const { hilos, gpu, duenosPercepcionGpu, repartoInicial } = brazo;
+  const { hilos, gpu, duenosPercepcionGpu, repartoInicial, afinidad } = brazo;
   assert.ok(repartoInicialValido(brazo), 'El reparto inicial por población exige más de un dueño');
+  if (afinidad) assert.deepEqual(cpusDeAfinidad(afinidadActual()), afinidad, 'Afinidad efectiva distinta de la solicitada');
   const indiceUidCompartido = hilos > 1 && process.env.CARTA_INDICE_UID === '1';
   const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
   assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined, 'Mapeo CUDA inválido para el brazo');
@@ -436,12 +465,14 @@ function medirBloques(rutaConfig: string, salida: string) {
     const corridas = [];
     let origen: { digesto: string; tick: number; fixture?: Preparada['fixture'] } | undefined;
     for (const brazo of orden) {
-      const { hilos, gpu, duenosPercepcionGpu, repartoInicial = 'uniforme' } = brazo;
+      const { hilos, gpu, duenosPercepcionGpu, repartoInicial = 'uniforme', afinidad } = brazo;
       const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
       const nombre = `${escena.id}.r${repeticion + 1}.${brazo.id}.jsonl`;
       const ruta = join(salida, nombre);
       const e = 'fixture' in escena ? { ...escena, fixture: { ...escena.fixture, sqlite: resolve(dirname(rutaConfig), escena.fixture.sqlite) } } : escena;
-      const hijo = spawnSync(process.execPath, ['--import', 'tsx', script, '--medir', JSON.stringify(e), JSON.stringify(brazo), ruta, perfilPaso ? '1' : '0'],
+      const nodeArgs = ['--import', 'tsx', script, '--medir', JSON.stringify(e), JSON.stringify(brazo), ruta, perfilPaso ? '1' : '0'];
+      const hijo = spawnSync(afinidad ? 'taskset' : process.execPath,
+        afinidad ? ['--cpu-list', afinidad.join(','), process.execPath, ...nodeArgs] : nodeArgs,
         { cwd: repo, env: { ...process.env, CARTA_PERCEPCION_DUENOS: gpu.length ? '1' : '0',
           CARTA_PERCEPCION_COSTE_DUENOS: brazo.rutaGpu === 'porCoste' ? '1' : '0' }, stdio: ['ignore', 'inherit', 'inherit'] });
       if (hijo.error) throw hijo.error;
@@ -452,6 +483,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.equal(inicio.perfilPaso, perfilPaso, `Modo de perfil distinto en ${nombre}`);
       assert.deepEqual(inicio.escena, e, `Escena distinta en ${nombre}`);
       assert.deepEqual(inicio.brazo, brazo, `Brazo distinto en ${nombre}`);
+      if (afinidad) assert.deepEqual(cpusDeAfinidad(inicio.planificador?.afinidad), afinidad, `Afinidad distinta en ${nombre}`);
       assert.equal(inicio.repartoInicial, repartoInicial, `Reparto inicial distinto en ${nombre}`);
       assert.deepEqual(inicio.motor.gpu, gpu, `Dispositivo distinto en ${nombre}`);
       assert.deepEqual(inicio.duenosPorRanura, duenosPorRanura, `Mapeo CUDA distinto en ${nombre}`);
@@ -469,7 +501,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(fuente, origen, `Estado inicial diferente en ${nombre}`);
       const verificaciones = filas.filter(fila => fila.tipo === 'integridad').map(({ tick, costeVerificacionMs }) =>
         ({ tick, ...costeVerificacionMs }));
-      const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, duenosPorRanura, repartoInicial,
+      const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, duenosPorRanura, repartoInicial, afinidad,
         rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, preparacionMs: inicio.preparacionMs, verificaciones, ...fin };
       if (fin?.estado === 'sin-arranque-gpu') {
         const arranque = filas.find(fila => fila.tipo === 'arranqueGpu');

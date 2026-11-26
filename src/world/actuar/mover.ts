@@ -26,14 +26,122 @@ export function roadEffortFactor(tile: { traffic?: number; paved?: number } | un
   return 1 - Math.min(0.55, Math.max(0, tile?.traffic ?? 0) * 0.45 + Math.max(0, tile?.paved ?? 0) * 0.15);
 }
 
+const ROUTE_RADIUS = 24;
+const ROUTE_MAX_NODES = 2048;
+const ROUTE_SIDE = 2 * ROUTE_RADIUS + 1;
+const ROUTE_CELLS = ROUTE_SIDE * ROUTE_SIDE;
+const ROUTE_CENTER = ROUTE_RADIUS * (ROUTE_SIDE + 1);
+const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
+const ROUTE_NEIGHBORS = [1, ROUTE_SIDE, -1, -ROUTE_SIDE];
+
+const routeQueue = new Uint16Array(ROUTE_CELLS);
+const routeFirstSteps = new Uint16Array(ROUTE_CELLS);
+const routeVisited = new Uint16Array(ROUTE_CELLS);
+let routeGeneration = 0;
+let routeInUse = false;
+
+type Walkable = (x: number, y: number, fromStart: boolean) => boolean;
+
+function routeCoordinate(n: number): boolean {
+  return Number.isSafeInteger(n) && Math.abs(n) <= Number.MAX_SAFE_INTEGER - ROUTE_RADIUS - 1 && !Object.is(n, -0);
+}
+
+/** El índice está acotado al cuadrado local. Cada celda descubierta guarda el primer paso de su ruta. */
+function gridFirstStep(start: Point, person: Person, world: World, coast: boolean, walkable: Walkable): Point | null {
+  if (++routeGeneration > 0xffff) { routeVisited.fill(0); routeGeneration = 1; }
+  const generation = routeGeneration;
+  routeQueue[0] = ROUTE_CENTER;
+  routeVisited[ROUTE_CENTER] = generation;
+  const point = { ...start };
+  let best = ROUTE_CENTER, bestDist = distance(start, person.target), end = 1;
+  for (let head = 0; head < end && head < ROUTE_MAX_NODES; head++) {
+    const cell = routeQueue[head]!;
+    const dx = cell % ROUTE_SIDE - ROUTE_RADIUS, dy = Math.floor(cell / ROUTE_SIDE) - ROUTE_RADIUS;
+    const x = point.x = start.x + dx, y = point.y = start.y + dy;
+    const currentDist = distance(point, person.target);
+    if (currentDist < bestDist) { best = cell; bestDist = currentDist; }
+    if (currentDist < 0.5) { best = cell; break; }
+    for (let direction = 0; direction < DX.length; direction++) {
+      const stepX = DX[direction]!, stepY = DY[direction]!;
+      if (Math.abs(dx + stepX) > ROUTE_RADIUS || Math.abs(dy + stepY) > ROUTE_RADIUS) continue;
+      if (!walkable(x + stepX, y + stepY, cell === ROUTE_CENTER)) continue;
+      const next = cell + ROUTE_NEIGHBORS[direction]!;
+      if (routeVisited[next] === generation) continue;
+      routeVisited[next] = generation;
+      routeFirstSteps[next] = cell === ROUTE_CENTER ? next : routeFirstSteps[cell]!;
+      routeQueue[end++] = next;
+    }
+  }
+  if (coast && end > 1) {
+    point.x = start.x + (best % ROUTE_SIDE - ROUTE_RADIUS);
+    point.y = start.y + (Math.floor(best / ROUTE_SIDE) - ROUTE_RADIUS);
+    if (distance(start, person.target) - distance(point, person.target) < 1.5) {
+      const side = Math.floor(world.tick / 360) % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
+      const angle = Math.atan2(person.target.y - start.y, person.target.x - start.x) + side;
+      const tx = Math.cos(angle), ty = Math.sin(angle);
+      let bestDot = -Infinity;
+      for (let i = 1; i < end; i++) {
+        const cell = routeQueue[i]!;
+        const dot = (cell % ROUTE_SIDE - ROUTE_RADIUS) * tx + (Math.floor(cell / ROUTE_SIDE) - ROUTE_RADIUS) * ty;
+        if (dot > bestDot) { bestDot = dot; best = cell; }
+      }
+    }
+  }
+  if (best === ROUTE_CENTER) return null;
+  const step = routeFirstSteps[best]!;
+  return { x: start.x + (step % ROUTE_SIDE - ROUTE_RADIUS), y: start.y + (Math.floor(step / ROUTE_SIDE) - ROUTE_RADIUS) };
+}
+
+/** Conserva el recorrido por coordenadas cuando el origen no se puede representar por desplazamientos enteros exactos. */
+function coordinateFirstStep(start: Point, person: Person, world: World, coast: boolean, walkable: Walkable): Point | null {
+  const routeKey = (x: number, y: number) => cellIntKey(x, y) ?? `${x},${y}`;
+  const queue: Point[] = [start], previous = new Map<number | string, Point | null>([[routeKey(start.x, start.y), null]]);
+  let best = start, bestDist = distance(start, person.target);
+  for (let head = 0; head < queue.length && head < ROUTE_MAX_NODES; head++) {
+    const current = queue[head]!, currentDist = distance(current, person.target);
+    if (currentDist < bestDist) { best = current; bestDist = currentDist; }
+    if (currentDist < 0.5) { best = current; break; }
+    for (let direction = 0; direction < DX.length; direction++) {
+      const x = direction === 0 ? current.x + 1 : direction === 2 ? current.x - 1 : current.x;
+      const y = direction === 1 ? current.y + 1 : direction === 3 ? current.y - 1 : current.y;
+      if (Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) > ROUTE_RADIUS) continue;
+      if (!walkable(x, y, current === start)) continue;
+      const nextKey = routeKey(x, y);
+      if (previous.has(nextKey)) continue;
+      const next = { x, y };
+      previous.set(nextKey, current);
+      queue.push(next);
+    }
+  }
+  if (coast && queue.length > 1 && distance(start, person.target) - distance(best, person.target) < 1.5) {
+    const side = Math.floor(world.tick / 360) % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
+    const angle = Math.atan2(person.target.y - start.y, person.target.x - start.x) + side;
+    const tx = Math.cos(angle), ty = Math.sin(angle);
+    let bestDot = -Infinity;
+    for (let i = 1; i < queue.length; i++) {
+      const node = queue[i]!;
+      const dot = (node.x - start.x) * tx + (node.y - start.y) * ty;
+      if (dot > bestDot) { bestDot = dot; best = node; }
+    }
+  }
+  if (best === start) return null;
+  while (previous.get(routeKey(best.x, best.y)) !== start) best = previous.get(routeKey(best.x, best.y))!;
+  return best;
+}
+
+function firstStep(start: Point, person: Person, world: World, coast: boolean, walkable: Walkable): Point | null {
+  if (routeInUse || !routeCoordinate(start.x) || !routeCoordinate(start.y)) return coordinateFirstStep(start, person, world, coast, walkable);
+  routeInUse = true;
+  try { return gridFirstStep(start, person, world, coast, walkable); }
+  finally { routeInUse = false; }
+}
+
 
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
 export function move(world: World, person: Person, tileInArg?: TileLookup, readerArg?: ResidentTileReader | null): void {
   if (distance(person, person.target) < 0.5) return;
   const key = (p: Point) => `${p.x},${p.y}`;
   const start = { x: person.x, y: person.y };
-  let nextStep: Point | null = null;
-  let blocked = false;
   const physicalRoads = paramsOf(world).terreno.caminosFisicos;
   const obraCamino = physicalRoads && ley(world, 'obra') ? ctxMateriaDe(world) : undefined;
   const roadTieScore = (dist: number, tile: Tile | undefined): number => {
@@ -57,61 +165,20 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
   const allowCoastalDetour = paramsOf(world).social.vinculoEncuentro > 0
     && person.action === 'approach' && !person.command && distance(start, person.target) > 12;
   const tileIn = tileInArg ?? tileLookup(world.tiles);
-  if ((!blocked && nextStep === null) || allowCoastalDetour) {
-    const routeKey = (x: number, y: number) => cellIntKey(x, y) ?? `${x},${y}`;
-    const reader = readerArg === undefined ? residentTileReader(world.tiles) : readerArg ?? undefined;
-    const queue: Point[] = [start], previous = new Map<number | string, Point | null>([[routeKey(start.x, start.y), null]]);
-    let best = start, bestDist = distance(start, person.target), head = 0;
-    // Bounded local BFS takes one physical step toward even a distant order.
-    while (head < queue.length && head < 2048) {
-      const current = queue[head++]!, dCurrent = distance(current, person.target);
-      if (dCurrent < bestDist) { best = current; bestDist = dCurrent; }
-      if (dCurrent < 0.5) { best = current; break; }
-      for (let direction = 0; direction < 4; direction++) {
-        const x = direction === 0 ? current.x + 1 : direction === 2 ? current.x - 1 : current.x;
-        const y = direction === 1 ? current.y + 1 : direction === 3 ? current.y - 1 : current.y;
-        if (Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) > 24) continue;
-        if (reader) {
-          const cell = reader.cellAt(x, y);
-          if (cell < 0 || reader.terrainCode(cell) === reader.TERRAIN_WATER) continue;
-        } else {
-          const tile = tileIn(x, y);
-          if (!tile || tile.terrain === 'water') continue;
-          if (physicalRoads && current === start) considerRoad(x, y, tile);
-        }
-        if (physicalRoads && reader && current === start) considerRoad(x, y, tileIn(x, y));
-        const nextKey = routeKey(x, y);
-        if (previous.has(nextKey)) continue;
-        const next = { x, y };
-        previous.set(nextKey, current); queue.push(next);
-      }
+  const reader = readerArg === undefined ? residentTileReader(world.tiles) : readerArg ?? undefined;
+  const walkable: Walkable = (x, y, fromStart) => {
+    if (reader) {
+      const cell = reader.cellAt(x, y);
+      if (cell < 0 || reader.terrainCode(cell) === reader.TERRAIN_WATER) return false;
+      if (physicalRoads && fromStart) considerRoad(x, y, tileIn(x, y));
+    } else {
+      const tile = tileIn(x, y);
+      if (!tile || tile.terrain === 'water') return false;
+      if (physicalRoads && fromStart) considerRoad(x, y, tile);
     }
-    if (allowCoastalDetour && queue.length > 1 && distance(start, person.target) - distance(best, person.target) < 1.5) {
-      const side = Math.floor(world.tick / 360) % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
-      const angle = Math.atan2(person.target.y - start.y, person.target.x - start.x) + side;
-      const tx = Math.cos(angle), ty = Math.sin(angle);
-      let bestDetour = start, bestDot = -Infinity;
-      for (let idx = 1; idx < queue.length; idx++) {
-        const node = queue[idx]!;
-        const dot = (node.x - start.x) * tx + (node.y - start.y) * ty;
-        if (dot > bestDot) { bestDot = dot; bestDetour = node; }
-      }
-      if (bestDetour !== start) best = bestDetour;
-    }
-    if (best === start) blocked = true;
-    else {
-      while (previous.get(routeKey(best.x, best.y)) !== start) best = previous.get(routeKey(best.x, best.y))!;
-      nextStep = best;
-      blocked = false;
-    }
-  } else if (physicalRoads && nextStep && distance(nextStep, person.target) < startDistance) {
-    // The worker already chose a route. Only its four-cell local stencil is consulted here;
-    // no route search, halo extension, or world scan is introduced by the road preference.
-    considerRoad(start.x + 1, start.y, tileIn(start.x + 1, start.y));
-    considerRoad(start.x, start.y + 1, tileIn(start.x, start.y + 1));
-    considerRoad(start.x - 1, start.y, tileIn(start.x - 1, start.y));
-    considerRoad(start.x, start.y - 1, tileIn(start.x, start.y - 1));
-  }
+    return true;
+  };
+  let nextStep = firstStep(start, person, world, allowCoastalDetour, walkable);
   // Keep route-selected detours around water/obstacles; roads only break local progress ties.
   if (physicalRoads && roadStep && nextStep && !allowCoastalDetour) {
     const baselineDistance = distance(nextStep, person.target);
@@ -121,7 +188,7 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
       if (roadScore < baselineScore) nextStep = roadStep;
     }
   }
-  if (blocked || !nextStep) {
+  if (!nextStep) {
     person.heading += 1.3; person.decisionAt = world.tick + 1;
     if (world.tick - person.lastOutcome >= 30) outcome(world, person, person.action, -0.15, false);
     person.reason = 'El terreno bloquea el paso; busca una ruta local posible.';

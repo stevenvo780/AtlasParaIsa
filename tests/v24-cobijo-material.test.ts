@@ -13,10 +13,12 @@ import { transferEstate } from '../src/world/demografia/morir.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { createWorld, stepWorld, tileAt } from '../src/world/index.js';
 import { advancePopulation, CANAL_EXPOSICION, type MuestraExposicion } from '../src/world/lineage.js';
-import { celdaObra, colocarPieza, trasladarLoteObra, type EstadoObra } from '../src/world/materia/piezas.js';
+import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
+import { celdaObra, colocarPieza, estadoObra, trasladarLoteObra, type EstadoObra } from '../src/world/materia/piezas.js';
 import type { ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
+import { duenoSi } from '../src/world/motor/contexto.js';
 import { paramsOf, parseParams } from '../src/world/params.js';
 import { personaMovida } from '../src/world/rejilla.js';
 import { chunkKey } from '../src/world/terrain.js';
@@ -135,6 +137,39 @@ test('la sonda observa el daño posacción y el techo material sin alterar el ba
   assert.ok(cubierta.dano.exposure < expuesta.dano.exposure);
   assert.equal(expuesta.causaTerminal, null);
   assert.equal(expuesta.golpeSorteoSenescencia, 0);
+});
+
+test('en seco el techo queda sin evaluar y la sonda conserva el checkpoint material', () => {
+  const sonda = channel(CANAL_EXPOSICION);
+  function brazo(medir: boolean) {
+    const { mundo, persona } = escena('intacta');
+    mundo.weather = 'clear';
+    const lote = estadoObra(mundo.structures.at(-1)!)!.piezas[0]!.lote;
+    const { materia } = ctxMateriaDe(mundo), vista = materia.vista;
+    let lecturasDelTecho = 0;
+    materia.vista = function (ref) {
+      if (ref === lote) lecturasDelTecho++;
+      return vista.call(this, ref);
+    };
+    const muestras: MuestraExposicion[] = [], observar = (valor: unknown) => { muestras.push(valor as MuestraExposicion); };
+    if (medir) sonda.subscribe(observar);
+    try { advancePopulation(mundo, { emit: () => { throw new Error('La escena corta debe conservar a sus habitantes.'); } }); }
+    finally { if (medir) sonda.unsubscribe(observar); materia.vista = vista; }
+    assert.equal(lecturasDelTecho, 0);
+    const muestra = muestras.find(m => m.id === persona.id);
+    if (medir) {
+      assert.ok(muestra);
+      assert.equal(muestra.lluvia, false);
+      assert.equal(muestra.techo, null);
+      assert.equal(muestra.tipoTecho, 'no-evaluado');
+      assert.equal(muestra.dano.exposure, 0);
+    } else assert.equal(muestras.length, 0);
+    const dueno = duenoSi(mundo)!;
+    const checkpoint = dueno.instantaneaMateria(dueno.pendientes());
+    assert.ok(checkpoint);
+    return { digesto: digestoCanonico(mundo), checkpoint: codificarCheckpoint(checkpoint) };
+  }
+  assert.deepEqual(brazo(true), brazo(false));
 });
 
 test('la sonda distingue una lesión terminal por lluvia de la tirada terminal de vejez', () => {

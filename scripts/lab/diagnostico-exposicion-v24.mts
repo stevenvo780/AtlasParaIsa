@@ -3,6 +3,8 @@
  * Los días se numeran como en el panel. Un día parcial cuenta solo las transiciones dentro de la ventana.
  * La dosis integra fracciones de intemperie por paso. El daño evitado estima la diferencia en ese mismo
  * cuerpo y paso; otra trayectoria a lo largo de varios días requiere su propia corrida.
+ * Los conteos de techo proceden de la evaluación bajo lluvia. Los pasos secos quedan como no evaluados.
+ * La prenda solo cuenta cuando añadió protección. Un techo completo puede cubrir todo su aporte posible.
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -23,13 +25,13 @@ import { worldContext } from '../../src/world/spatial.js';
 import { balanceConservacion } from './encender.mjs';
 
 function acumular() {
-  return { pasos: 0, pasosConCuerpoMaterial: 0, pasosLluvia: 0, pasosTechoMaterial: 0, pasosTechoLegado: 0,
-    pasosLluviaConTecho: 0, pasosLluviaConPrenda: 0, dosisExterior: 0, dosisResidual: 0,
+  return { pasos: 0, pasosConCuerpoMaterial: 0, pasosLluvia: 0, pasosTechoMaterial: 0, pasosTechoLegado: 0, pasosTechoSinEvaluar: 0,
+    pasosLluviaConTecho: 0, pasosLluviaConAportePrenda: 0, dosisExterior: 0, dosisResidual: 0,
     dano: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 },
     exposicionSinTechoNiPrenda: 0, exposicionSoloTecho: 0, danoEvitadoTecho: 0, danoEvitadoPrenda: 0,
     desgasteEdad: 0, golpeSorteoSenescencia: 0, riesgoSenescenciaMax: 0, reparacion: 0, variacionSalud: 0,
     saludMin: 1, vitalidadMin: 1, hambreMax: 0, sedMax: 0, reservaMinJ: null as number | null, aguaMinKg: null as number | null,
-    muertes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, muertesEvitadas: 0 };
+    muertes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, muertesEvitadasPorPisoSI: 0 };
 }
 
 type Acumulado = ReturnType<typeof acumular>;
@@ -37,13 +39,14 @@ function agregar(a: Acumulado, m: MuestraExposicion): void {
   a.pasos++;
   if (m.lluvia) {
     a.pasosLluvia++;
-    a.pasosLluviaConTecho += Number(m.techo > 0);
-    a.pasosLluviaConPrenda += Number(m.prenda > 0);
+    a.pasosLluviaConTecho += Number(m.techo !== null && m.techo > 0);
+    a.pasosLluviaConAportePrenda += Number(m.aportePrenda > 0);
     a.dosisExterior++;
     a.dosisResidual += 1 - m.abrigoEfectivo;
   }
   a.pasosTechoMaterial += Number(m.tipoTecho === 'material');
   a.pasosTechoLegado += Number(m.tipoTecho === 'legado');
+  a.pasosTechoSinEvaluar += Number(m.tipoTecho === 'no-evaluado');
   a.dano.starvation += m.dano.starvation;
   a.dano.dehydration += m.dano.dehydration;
   a.dano.exposure += m.dano.exposure;
@@ -67,7 +70,7 @@ function agregar(a: Acumulado, m: MuestraExposicion): void {
     a.aguaMinKg = Math.min(a.aguaMinKg ?? Infinity, m.cuerpo.aguaReservaKg);
   }
   if (m.causaTerminal) a.muertes[m.causaTerminal]++;
-  a.muertesEvitadas += Number(m.muerteEvitada !== null);
+  a.muertesEvitadasPorPisoSI += Number(m.muerteEvitadaPorPisoSI !== null);
 }
 
 interface Individuo { primero: MuestraExposicion; ultimo: MuestraExposicion; valores: Acumulado }
@@ -86,6 +89,7 @@ for (const raiz of [resolve(repo, 'data'), resolve(principal, 'data'), resolve(p
 assert.ok(statSync(original).isFile() && !['-wal', '-shm', '-journal'].some(sufijo => existsSync(original + sufijo)),
   'El fixture debe ser un SQLite sellado sin archivos laterales');
 const temporal = mkdtempSync(join(tmpdir(), 'atlas-exposicion-v24-')), diagnostico = channel(CANAL_EXPOSICION);
+const raizFriaHeredada = process.env.CARTA_MATERIA_FRIA_DIR;
 let store: Store | undefined, motor: Motor | undefined;
 let suscrito = false;
 const dias = new Map<number, Dia>();
@@ -101,6 +105,7 @@ const observar = (valor: unknown): void => {
 };
 
 try {
+  if (raizFriaHeredada) process.env.CARTA_MATERIA_FRIA_DIR = temporal;
   const copia = join(temporal, 'world.sqlite');
   copyFileSync(original, copia, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
   const huella = createHash('sha256');
@@ -116,9 +121,10 @@ try {
   const inicial = balanceConservacion(world);
   assert.ok(inicial?.ok, 'Balance material inicial inválido');
   const muertesIniciales = { ...world.demographyDynamics.causes };
-  anotar({ tipo: 'inicio', version: 1, commit: git('rev-parse', 'HEAD'), semilla: world.seed, fixtureSha256: huella.digest('hex'),
+  anotar({ tipo: 'inicio', version: 2, commit: git('rev-parse', 'HEAD'), semilla: world.seed, fixtureSha256: huella.digest('hex'),
     desdeExclusivo: desde, hastaInclusivo: hasta,
-    pasosPorDia: TICKS_PER_DAY, hilos: 1, fase: 'demografia-posaccion', leyes: params.v23, conservacion: inicial });
+    pasosPorDia: TICKS_PER_DAY, hilos: 1, fase: 'demografia-posaccion', materiaFriaTemporal: Boolean(raizFriaHeredada),
+    leyes: params.v23, conservacion: inicial });
   diagnostico.subscribe(observar);
   suscrito = true;
   for (let tick = desde + 1; tick <= hasta; tick++) assert.equal(motor.paso([]).tick, tick);
@@ -141,5 +147,11 @@ try {
 } finally {
   if (suscrito) diagnostico.unsubscribe(observar);
   try { await motor?.cerrar(); }
-  finally { store?.close(); rmSync(temporal, { recursive: true, force: true }); }
+  finally {
+    try { store?.close(); }
+    finally {
+      if (raizFriaHeredada) process.env.CARTA_MATERIA_FRIA_DIR = raizFriaHeredada;
+      rmSync(temporal, { recursive: true, force: true });
+    }
+  }
 }

@@ -20,14 +20,15 @@ const canalExposicion = channel(CANAL_EXPOSICION);
 
 export interface MuestraExposicion {
   semilla: number; tick: number; id: string; uid?: number; rol: Person['role']; x: number; y: number;
-  lluvia: boolean; tipoTecho: 'material' | 'legado' | 'ninguno'; techo: number; prenda: number; abrigoEfectivo: number;
+  lluvia: boolean; tipoTecho: 'material' | 'legado' | 'ninguno' | 'no-evaluado'; techo: number | null;
+  aportePrenda: number; abrigoEfectivo: number;
   hambre: number; sed: number; energia: number; fatiga: number; resiliencia: number; edadInicioVejez: number; edadMaxima: number;
   cuerpo: { masaKg: number; aguaReservaKg: number; reservaJ: number; gestacion: boolean } | null;
   antes: Readonly<DemographicState>; despues: Readonly<DemographicState>;
   dano: Readonly<DemographicTransition['damage']>; reparacion: number; desgasteEdad: number;
   exposicionSinTechoNiPrenda: number; exposicionSoloTecho: number;
   riesgoSenescencia: number; golpeSorteoSenescencia: number;
-  causaTerminal: DemographicDeathCause | null; muerteEvitada: DemographicDeathCause | null;
+  causaTerminal: DemographicDeathCause | null; muerteEvitadaPorPisoSI: DemographicDeathCause | null;
 }
 
 function muestraCuerpo(c: CtxLeyMateria | undefined, cuerpo: Person['cuerpo']): MuestraExposicion['cuerpo'] {
@@ -339,17 +340,18 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
       const dano = transition.damage;
       soloTecho ??= effectiveShelter > shelter ? exposureDamage(bodyInput, envBase, 1) : dano.exposure;
       const exposicionSinTechoNiPrenda = exposure && shelter > 0 ? exposureDamage(bodyInput, { ...envBase, shelter: 0 }, 1) : soloTecho;
-      const techo = obra && !exposure ? bodilyShelter(world, person) : shelter;
+      // Solo reutilizar el techo de la exposición. Consultar piezas en seco puede abrir reacciones químicas.
+      const techo = exposure ? shelter : null;
       const resultadoTerminal = transition.death ?? transition.preventedDeath;
       muestras.push({ semilla: world.seed, tick: world.tick, id: person.id, uid: person.uid, rol: person.role, x: person.x, y: person.y,
-        lluvia: exposure === 1, tipoTecho: techo > 0 ? (obra ? 'material' : 'legado') : 'ninguno', techo,
-        prenda: effectiveShelter - shelter, abrigoEfectivo: effectiveShelter,
+        lluvia: exposure === 1, tipoTecho: techo === null ? 'no-evaluado' : techo > 0 ? (obra ? 'material' : 'legado') : 'ninguno', techo,
+        aportePrenda: effectiveShelter - shelter, abrigoEfectivo: exposure ? effectiveShelter : 0,
         hambre: bodyInput.hunger, sed: bodyInput.thirst, energia: bodyInput.energy, fatiga: bodyInput.fatigue,
         resiliencia: traits.resilience, edadInicioVejez: traits.senescenceStart, edadMaxima: traits.maximumAge,
         cuerpo: muestraCuerpo(contextoMaterial, person.cuerpo), antes: { ...bodyInput.state }, despues: { ...transition.state }, dano: { ...dano },
         reparacion: detalle.reparacion, desgasteEdad: detalle.desgasteEdad, exposicionSinTechoNiPrenda, exposicionSoloTecho: soloTecho,
         riesgoSenescencia: transition.senescenceRisk, golpeSorteoSenescencia: resultadoTerminal === 'senescence' ? detalle.saludAntesSorteo : 0,
-        causaTerminal: transition.death, muerteEvitada: transition.preventedDeath });
+        causaTerminal: transition.death, muerteEvitadaPorPisoSI: transition.preventedDeath });
     }
     return { person, transition, traits };
   });

@@ -715,6 +715,64 @@ if (isMainThread) test('aparcar la composición recicla memoria y conserva refer
   assert.equal(arena.cuantos(nuevo, sustancias[0]!.id), 0);
 });
 
+if (isMainThread) test('la carga fría instala identidades sin ocupar composición ni leer disco para el saldo', () => {
+  const lotes = new PageArena(LOTES_POR_BLOQUE), contenido = new PageArena(LOTES_POR_BLOQUE);
+  const paginas = new PageArena(1), desborde = new PageArena(64);
+  const lotesGuardados = [
+    { ref: refDe(0, 7), celda: 5, rol: Rol.Pieza, forma: 10, dueno: 0,
+      pares: Float64Array.from([0, 1200, ...sustancias.flatMap(({ id }) => [id, 7 + id])]) },
+    { ref: refDe(2, 1), celda: 5, rol: Rol.Pieza, forma: 23, dueno: 0, pares: Float64Array.of(sustancias[0]!.id, 77) },
+    { ref: refDe(4, 3), celda: 5, rol: Rol.Suelo, forma: 0, dueno: 0, pares: Float64Array.of(sustancias[1]!.id, 31, 0, 100) },
+  ];
+  const libres = [refDe(1, 4), refDe(3, genDe(Number.MAX_SAFE_INTEGER))];
+  const porRanura = [lotesGuardados[0]!, libres[0]!, lotesGuardados[1]!, libres[1]!, lotesGuardados[2]!];
+  const archivo = new Map<LoteRef, Float64Array>(lotesGuardados.map(l => [l.ref, l.pares]));
+  let lecturas = 0;
+  const arena = new ArenaLotes({
+    lotes, contenido, paginas, desborde, quimica, hilo: 0, agua: 1, digerible: () => 0,
+    terreno: { chunkDe: celda => celda >> 8, duenoChunk: Int16Array.of(0) },
+    leerFrio(ref, celda) { assert.equal(celda, 5); lecturas++; return archivo.get(ref)!; },
+  });
+  lotes.prepararF0(porRanura.length, LOTES_POR_BLOQUE);
+  paginas.prepararF0(1);
+  paginas.reserve();
+  arena.cargarPorRanura(porRanura.length, i => porRanura[i], () => true);
+  assert.equal(contenido.capacity, 0);
+  assert.equal(contenido.used, 0);
+  assert.equal(desborde.used, 0);
+  assert.equal(lecturas, 0);
+  for (const l of lotesGuardados) assert.ok(arena.estaAparcado(l.ref) && arena.vivo(l.ref) && arena.propio(l.ref));
+  const enCelda = new Float64Array(2);
+  assert.equal(arena.lotes(5, Rol.Pieza, enCelda), 2);
+  assert.deepEqual([...enCelda], [lotesGuardados[1]!.ref, lotesGuardados[0]!.ref]);
+  assert.deepEqual([...arena.libres()], libres);
+
+  const caliente = arenaDe(memoriaDe(1, 16), 0);
+  caliente.cargar(lotesGuardados, libres);
+  const esperado = caliente.saldo();
+  assert.deepEqual(arena.saldo(), esperado);
+  assert.deepEqual(arena.saldoPropio(), esperado);
+  assert.equal(lecturas, 0);
+  assert.deepEqual(codificarPaginas(7, () => arena.muestras(), () => arena.libres()),
+    codificarPaginas(7, () => caliente.muestras(), () => caliente.libres()));
+  assert.ok(lecturas > 0);
+
+  const antes = lecturas;
+  contenido.prepararF0(2, LOTES_POR_BLOQUE);
+  desborde.prepararF0(16);
+  arena.reponer(lotesGuardados[0]!.ref);
+  assert.ok(!arena.estaAparcado(lotesGuardados[0]!.ref));
+  assert.equal(contenido.used, 1);
+  assert.equal(arena.nuevo(Rol.Agua, 5, 0), caliente.nuevo(Rol.Agua, 5, 0));
+  assert.deepEqual(arena.saldo(), esperado);
+  assert.equal(lecturas, antes + 1, 'solo la reposición consultó la composición fría');
+  archivo.set(lotesGuardados[0]!.ref, arena.muestra(lotesGuardados[0]!.ref).pares);
+  arena.aparcar(lotesGuardados[0]!.ref);
+  assert.equal(contenido.used, 1);
+  assert.deepEqual(arena.saldoPropio(), esperado);
+  assert.equal(lecturas, antes + 2, 'el aparcado valida el archivo, el saldo no lo vuelve a leer');
+});
+
 if (isMainThread) test('el punto de control detecta la corrupción de cualquier bit', () => {
   const arena = arenaDe(memoriaDe(1, 8), 0), libro = libroVacio();
   const suelo = arena.nuevo(Rol.Suelo, 3, 7);

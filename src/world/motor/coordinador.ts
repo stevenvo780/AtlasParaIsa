@@ -124,15 +124,21 @@ class MotorUnico implements Motor {
 
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] } {
     const inicio = performance.now(), fases = this.#medicion.fases = {} as Partial<Record<FaseNombre, number>>;
+    // El paso por intentos separa preparación, acciones y aplicación como el motor repartido.
+    // En modos mixtos o históricos el paquete «personas» conserva su medición de siempre.
+    this.#medicion.v23 = paramsOf(this.#mundo).v23.intentos ? {} : undefined;
     const resultados = stepWorld(this.#mundo, [...gestos], undefined, this.#medicion);
+    const v23 = this.#medicion.v23;
     const ms = performance.now() - inicio, t = this.#t, d = duenoSi(this.#mundo), de = (n: FaseNombre): number => fases[n] ?? 0;
     t.tick = this.#mundo.tick;
     t.hz = ema(t.hz, 1000 / Math.max(ms, 1e-3), ALFA_TELEMETRIA);
     t.diasPorMinuto = t.hz * 60 / TICKS_PER_DAY;
-    t.faseMs.F0 = ema(t.faseMs.F0, de('maintainRegions'), ALFA_TELEMETRIA);
-    t.faseMs.eco = ema(t.faseMs.eco, de('ecologia') + de('kernel') + de('fauna'), ALFA_TELEMETRIA);
-    t.faseMs.actuar = ema(t.faseMs.actuar, de('personas'), ALFA_TELEMETRIA);
-    t.faseMs.aplicar = ema(t.faseMs.aplicar, de('encuentros') + de('demografia') + de('comunidades') + de('reproduccion'), ALFA_TELEMETRIA);
+    t.faseMs.F0 = ema(t.faseMs.F0, v23?.F0 ?? de('maintainRegions'), ALFA_TELEMETRIA);
+    t.faseMs.eco = ema(t.faseMs.eco, v23?.eco ?? (de('ecologia') + de('kernel') + de('fauna')), ALFA_TELEMETRIA);
+    t.faseMs.percibir = v23 ? ema(t.faseMs.percibir, (v23.F1 ?? 0) + (v23.F2 ?? 0), ALFA_TELEMETRIA) : 0;
+    t.faseMs.actuar = ema(t.faseMs.actuar, v23?.['F3-F4'] ?? de('personas'), ALFA_TELEMETRIA);
+    t.faseMs.aplicar = ema(t.faseMs.aplicar, v23 ? (v23.F5 ?? 0) + (v23.F6 ?? 0)
+      : de('encuentros') + de('demografia') + de('comunidades') + de('reproduccion'), ALFA_TELEMETRIA);
     t.ocupacion[0] = 1;
     if (d) { t.intentos = d.cuentas[0]!; t.rechazados = d.cuentas[1]!; t.migraciones = d.cuentas[2]!; t.fotogramasSaltados = d.fotogramasPerdidos; }
     return { tick: this.#mundo.tick, resultados };

@@ -38,10 +38,11 @@ import { sustituido } from '../motor/leyes.js';
  * milisegundos por fase de este paso. Sin instrumentación (`medicion` ausente) el coste es un
  * único `if`; con ella, dos lecturas de reloj por fase.
  */
-type FaseV23 = 'epoca' | 'F0' | 'F1' | 'eco' | 'F2-F4' | 'F5' | 'F6';
+type FaseV23 = 'epoca' | 'F0' | 'F1' | 'eco' | 'F2' | 'F3-F4' | 'F5' | 'F6';
 export interface FaseMedicion {
   clock: () => number;
   fases: Partial<Record<FaseNombre, number>>;
+  /** Ventanas consecutivas del conductor con leyes, independientes de los subpasos de `fases`. */
   v23?: Partial<Record<FaseV23, number>>;
 }
 
@@ -163,13 +164,15 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
     if (queda('estructuras')) stepStructures(world, event => addEvent(world, event));
   });
   cerrarFase?.('eco');
-  // F2–F4: preparar, elegir y actuar.
+  // F2: preparar la frontera y las percepciones.
   d.fase(2); d.gancho('F2');
+  cerrarFase?.('F2');
+  // F3–F4: elegir y actuar. En modos mixtos el paquete heredado de personas también incluye su percepción.
   d.fase(3); d.gancho('F3');
   d.fase(4); d.gancho('F4');
   if (queda('personas')) pasoPersonas(world, medicion);
   if (queda('susurros') && world.whispers?.length) advanceWhispers(world);
-  cerrarFase?.('F2-F4');
+  cerrarFase?.('F3-F4');
   // F5: lo que cruza organismos.
   d.fase(5);
   d.aplicar('A');

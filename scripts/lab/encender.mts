@@ -159,7 +159,10 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   const { archivo, archivar } = archivoDeChunks(origen);
   const contexto = worldContext(origen);
   const panel = o.panelCorto ? { pasosMedidos: 0, pasoMaximoMs: 0, pasosSobre30s: 0, comprobacionesRegiones: 0,
-    reunionMaximaMs: 0, comprobacionMaximaMs: 0, archivoMaximoMs: 0 } : undefined;
+    reunionMaximaMs: 0, comprobacionMaximaMs: 0, archivoMaximoMs: 0,
+    tiemposMs: { paso: 0, reunion: 0, comprobacion: 0, archivo: 0 } } : undefined;
+  const inicioPanel = panel ? performance.now() : 0;
+  const tiemposPanel = () => panel && { ...panel.tiemposMs, pared: performance.now() - inicioPanel };
   const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
   const medicion: FaseMedicion | undefined = o.perfil && !motor ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
   const paso = (): number => {
@@ -177,7 +180,11 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
     // La vista reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
     enlazarCtx(mundo, dueno);
-    if (panel) panel.reunionMaximaMs = Math.max(panel.reunionMaximaMs, performance.now() - inicio);
+    if (panel) {
+      const ms = performance.now() - inicio;
+      panel.tiemposMs.reunion += ms;
+      panel.reunionMaximaMs = Math.max(panel.reunionMaximaMs, ms);
+    }
   };
   const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
   const cada = o.cada ?? (panel ? 120 : undefined);
@@ -216,7 +223,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     } : undefined;
     const digesto = o.digesto ? digestoCompleto(mundo, archivo, motor?.instantanea().materia) : undefined;
     escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto,
-      ...(panel && { puertaCorta: { ...panel, rssPicoKiB } }) });
+      ...(panel && { puertaCorta: { ...panel, tiemposMs: tiemposPanel(), rssPicoKiB } }) });
     return duras ? 2 : 0;
   };
   const registrar = (lista: Violacion[]): boolean => {
@@ -248,7 +255,11 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       escribirFila({ tipo: 'aviso', tick: mundo.tick, texto: 'Hay leyes encendidas pero el mundo no tiene contexto de dueño (ctxSi): no corren sus comprobar ni I-C/I-R/I-B.' });
     }
     const dura = registrar([...invariantes, ...deLeyes]);
-    if (panel) panel.comprobacionMaximaMs = Math.max(panel.comprobacionMaximaMs, performance.now() - inicio);
+    if (panel) {
+      const ms = performance.now() - inicio;
+      panel.tiemposMs.comprobacion += ms;
+      panel.comprobacionMaximaMs = Math.max(panel.comprobacionMaximaMs, ms);
+    }
     return dura;
   };
 
@@ -270,6 +281,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
         if (o.perfil) { msCpu += cpuMs() - cpu; msPared += ms; }
         if (panel) {
           panel.pasosMedidos++;
+          panel.tiemposMs.paso += ms;
           panel.pasoMaximoMs = Math.max(panel.pasoMaximoMs, ms);
           if (ms > 30_000) panel.pasosSobre30s++;
         }
@@ -297,7 +309,11 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     if (!panel && cada !== undefined && tick % cada !== 0 && revisar() && !o.continuar) return fin('violacion');
     const inicioArchivo = panel ? performance.now() : 0;
     archivar();
-    if (panel) panel.archivoMaximoMs = Math.max(panel.archivoMaximoMs, performance.now() - inicioArchivo);
+    if (panel) {
+      const ms = performance.now() - inicioArchivo;
+      panel.tiemposMs.archivo += ms;
+      panel.archivoMaximoMs = Math.max(panel.archivoMaximoMs, ms);
+    }
     const dinamica = mundo.demographyDynamics;
     const fauna = { ...mundo.animalDynamics };
     const vecinos = mundo.people.filter(p => p.role === 'neighbor');
@@ -305,7 +321,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     const nacimientos = mundo.totals.births ?? 0;
     escribirFila({
       tipo: 'dia', dia, tick: mundo.tick, poblacion: mortales, personas: mundo.people.length,
-      ...(panel && { fundadoresMortalesVivos: vecinos.filter(p => fundadores.has(p.id)).length, regionesArchivadas: archivo.size }),
+      ...(panel && { fundadoresMortalesVivos: vecinos.filter(p => fundadores.has(p.id)).length, regionesArchivadas: archivo.size, tiemposMs: tiemposPanel() }),
       nacimientos, nacidosDia: nacimientos - nacidosAntes, muertes: dinamica.deaths, muertesDia: dinamica.deaths - muertesAntes,
       muertesPorCausa: { ...dinamica.causes }, muertesPorCausaDia: Object.fromEntries(Object.entries(dinamica.causes).map(([k, v]) => [k, v - (causasAntes[k as keyof typeof causasAntes] ?? 0)])),
       fauna: mundo.animals.length, faunaDinamica: fauna,

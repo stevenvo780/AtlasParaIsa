@@ -118,10 +118,19 @@ test('encender: el panel corto comprueba una vez por corte, incluso en el cierre
       const o = argumentosEncender(['--panel-corto', '--regimen', 'defecto', '--cada', '2', '--ticks', String(ticks)]);
       assert.equal(await encender(o, fila => filas.push(fila)), 0);
       assert.deepEqual(cortes.map(corte => corte.tick), comprobados);
-      assert.equal(filas.find(fila => fila.tipo === 'dia')?.fundadoresMortalesVivos, 14);
-      const fin = filas.at(-1)?.puertaCorta as { comprobacionesRegiones: number; pasosMedidos: number };
+      const dia = filas.find(fila => fila.tipo === 'dia');
+      assert.equal(dia?.fundadoresMortalesVivos, 14);
+      type Tiempos = { paso: number; reunion: number; comprobacion: number; archivo: number; pared: number };
+      const fin = filas.at(-1)?.puertaCorta as { comprobacionesRegiones: number; pasosMedidos: number; tiemposMs: Tiempos };
       assert.equal(fin.comprobacionesRegiones, cortes.reduce((total, corte) => total + corte.regiones, 0));
       assert.equal(fin.pasosMedidos, ticks);
+      const { pared, paso, reunion, comprobacion, archivo } = fin.tiemposMs;
+      assert.ok(paso > 0 && comprobacion > 0 && archivo >= 0);
+      assert.equal(reunion, 0);
+      assert.ok(pared >= paso + reunion + comprobacion + archivo);
+      const tiemposDia = dia?.tiemposMs as Tiempos;
+      assert.deepEqual({ ...tiemposDia, pared }, fin.tiemposMs);
+      assert.ok(tiemposDia.pared <= pared);
     }
   } finally { retirar(); }
 });

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { clientDelta, codificarBloque, decodificarBloque } from '../src/server/cinta/formato.js';
-import { estadoVista, fotogramaAVista } from '../src/server/cinta/vista.js';
-import { fotogramaDe, regionesRanura, RANURA_I32 } from '../src/shared/fotograma.js';
+import { estadoVista, fotogramaAVista, leerFotograma } from '../src/server/cinta/vista.js';
+import { fuenteFotograma } from '../src/server/cinta/fuente.js';
+import { CONTROL_ENLACE_BYTES, enlaceCinta, fotogramaDe, regionesRanura, RANURA_I32 } from '../src/shared/fotograma.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { codigoForma } from '../src/shared/materia.js';
 import { applyClientTapeDelta } from '../src/shared/tape-delta.js';
@@ -12,10 +13,12 @@ import { sustanciasDe } from '../src/world/materia/ley-mundo.js';
 import { calidadEmpedrado, celdaObra, lotesEnObra, trasladarLoteObra } from '../src/world/materia/piezas.js';
 import { Rol } from '../src/world/materia/tipos.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
+import { duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno, REF_NULA } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { escribirFotograma } from '../src/world/motor/fotograma.js';
-import { parseParams } from '../src/world/params.js';
+import { parseParams, setParams } from '../src/world/params.js';
+import { crearSAB } from '../src/world/soa/arena.js';
 import { PAGE_CELLS } from '../src/world/soa/region.js';
 
 test('la cinta conserva una piedra material y su retirada en L0', async t => {
@@ -59,4 +62,47 @@ test('la cinta conserva una piedra material y su retirada en L0', async t => {
   assert.ok(bloque.baseFrame.tiles.find(p => p.x === tile.x && p.y === tile.y)?.paved! > 0);
   const recibido = applyClientTapeDelta(bloque.baseFrame, bloque.deltas[0]!).frame;
   assert.equal(recibido.tiles.find(p => p.x === tile.x && p.y === tile.y)?.paved, undefined);
+});
+
+test('una página de dueño 1 conserva el pavimento de una instantánea material', async t => {
+  const mundo = createWorld(42, parseParams({ v23: escalon('obra') }));
+  Object.assign(mundo.people[2]!, { x: 33, y: 13 });
+  const primero = crearMotor(mundo, unSoloDueno(42));
+  t.after(() => primero.cerrar());
+  primero.cargar({ world: mundo, materia: null }, 0);
+  const c = ctxMateriaDe(mundo), tile = tileAt(mundo, { x: 33, y: 13 })!;
+  tile.terrain = 'meadow';
+  const forma = codigoForma({ largo: 1, ancho: 1, grueso: 0.2, hueco: 0, filo: 0 });
+  const piedra = c.materia.nuevo(Rol.Objeto, REF_NULA, forma);
+  c.materia.fuente(piedra, Float64Array.of(sustanciasDe(c).SiO2, 500_000, 0, 2_000_000), c.libro);
+  mundo.people[2]!.carga!.push(piedra);
+  assert.ok(empedrar(c, mundo.people[2]!, tile));
+  const guardado = primero.instantanea();
+  setParams(guardado.world, parseParams({ v23: { ...escalon('duenos'), fotograma: true } }));
+  const segundo = crearMotor(guardado.world, { ...unSoloDueno(42), hilos: 2 });
+  t.after(() => segundo.cerrar());
+  segundo.cargar(guardado, 0);
+  const d = duenoSi(guardado.world)!;
+  const chunk = d.terreno.chunkDe(d.terreno.celda(33, 13));
+  assert.equal(d.terreno.duenoChunk[chunk], 1);
+  const descriptor = { control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES), ranuras: [crearSAB(0, 16 * 1024 * 1024)], versiones: crearSAB(0, 65536), sucesos: new SharedArrayBuffer(8 * 1024 * 1024) };
+  const enlace = enlaceCinta(descriptor);
+  const runtime = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: 0, processRssMiB: 0, tickHz: 0, fraccionSerial: 0, fases: { maintainRegions: 0, ecologia: 0, kernel: 0, fauna: 0, personas: 0, encuentros: 0, demografia: 0, comunidades: 0, reproduccion: 0, checkpoint: 0, muestreo: 0, save: 0, broadcast: 0 } };
+  segundo.enlazar(descriptor, fuenteFotograma(guardado.world, 0, 'test', runtime, () => 0, () => undefined));
+  Atomics.store(enlace.creditos, 0, 1);
+  Atomics.store(enlace.cadencia, 0, 1);
+  Atomics.store(enlace.pedirCompleto, 0, 1);
+  segundo.paso([]);
+  if (Atomics.load(enlace.entregados, 0) === 0n) segundo.paso([]);
+  let verificado = false;
+  leerFotograma(enlace, 0n, (frame, sucesos) => {
+    let indice = -1;
+    for (let i = 0; i < frame.paginas.length / 2; i++) if (frame.paginas[i * 2] === 2 && frame.paginas[i * 2 + 1] === 0) indice = i;
+    assert.ok(indice >= 0);
+    assert.equal(frame.reparto![indice], 1);
+    const vista = fotogramaAVista(estadoVista(0), frame, sucesos, 1).vista;
+    assert.ok(vista.tiles.find(p => p.x === 33 && p.y === 13)?.paved! > 0);
+    verificado = true;
+  });
+  assert.ok(verificado);
 });

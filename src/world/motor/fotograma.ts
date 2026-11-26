@@ -193,8 +193,7 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
       const i = celda - primera;
       const hayPiezas = obra && pieza && obra.materia.lotes(celda, Rol.Pieza, pieza) > 0;
       const tile = hayPiezas && buscarTesela?.(t.paginaX[chunk]! * PAGE_SIDE + i % PAGE_SIDE, t.paginaY[chunk]! * PAGE_SIDE + Math.floor(i / PAGE_SIDE));
-      if (hayPiezas && !tile) throw new Error('Falta la tesela de una pieza visible en el fotograma.');
-      binario.setFloat32(offset + campoC.paved, obra ? tile ? calidadEmpedrado(obra, tile) : 0 : NaN, true);
+      binario.setFloat32(offset + campoC.paved, !obra ? NaN : hayPiezas && !tile ? -1 : tile ? calidadEmpedrado(obra, tile) : 0, true);
     }
   }
   return true;

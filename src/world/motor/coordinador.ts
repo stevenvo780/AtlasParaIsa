@@ -755,7 +755,7 @@ class MotorDuenos implements Motor {
     const gpus = this.#brokersGpu.map(broker => broker?.medidas());
     const unica = gpus.length === 1 ? gpus[0]?.detalle : undefined;
     return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice(), ...(gpus.length > 0 && {
-      gpuEstado: gpus.map(gpu => gpu?.lista && gpu.completadas.some(n => n > 0) ? 'ok' : 'cpu'),
+      gpuEstado: gpus.map(gpu => gpu?.lista && gpu.aceptaEnEpoca ? 'ok' : 'cpu'),
       gpuMs: gpus.map(gpu => gpu?.ms ?? 0), gpuBytes: gpus.map(gpu => gpu?.bytes ?? 0),
       gpuBrokers: gpus.map((gpu, i) => ({ dispositivo: this.#config.gpu[i]!, lista: gpu?.lista ?? false, detalle: gpu?.detalle })),
       ...(unica && { gpuBroker: unica }),

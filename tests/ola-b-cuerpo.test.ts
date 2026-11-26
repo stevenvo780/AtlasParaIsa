@@ -10,7 +10,7 @@ import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
   KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, apetitoDeTejido, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
-  costeGestacionJ, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
+  costeGestacionJ, energiaAlimento, evaluadorAlimento, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
   plantillaDe, plantillaHumana, plantillaPorId, provecho, reservaJ, soltar, tasasBasales, vistaCuerpo,
 } from '../src/world/materia/cuerpo.js';
 import { Rol, type LoteRef, type VistaCuerpo } from '../src/world/materia/tipos.js';
@@ -123,6 +123,28 @@ test('comer elige lo que el cuerpo aprovecha, lo absorbe y excreta el resto al s
   for (let t = 0; t < 300; t++) metabolizar(c, cuerpo, CELDA, 1);
   assert.ok(reservaJ(c, cuerpo) > antes, 'la reserva sube con lo absorbido');
   assert.ok(m.atomos(suelo) > sueloAntes, 'lo no absorbido llega al suelo');
+  assert.ok(exacto());
+});
+
+test('una elección reutiliza el provecho por especie y vuelve a leer la cantidad viva de cada lote', t => {
+  const cuerpo = crearCuerpo(c, humana.id, 60);
+  const primero = m.lote({ madera: 20_000, proteina: 6_000, H2O: 40_000 }, T_AIRE, Rol.Vida);
+  const segundo = m.lote({ CH2: 20_000, NH3: 7_000, madera: 90_000 }, T_AIRE, Rol.Cadaver);
+  const reaccion = t.mock.method(m.quimica, 'reaccion');
+  const comidas = [[primero, Infinity], [segundo, 0.07], [primero, 0.021], [segundo, Infinity]] as const;
+  const referencia = comidas.map(([lote, kg]) => energiaAlimento(c, cuerpo, lote, kg));
+  const orden = reaccion.mock.calls.map(llamada => llamada.arguments);
+  const primeras = [...new Map(orden.map(args => [args.join(','), args])).values()];
+  assert.ok(primeras.length > 1 && primeras.length < orden.length);
+  reaccion.mock.resetCalls();
+
+  const evaluar = evaluadorAlimento(c, cuerpo);
+  assert.deepEqual(comidas.map(([lote, kg]) => evaluar(lote, kg)), referencia);
+  assert.deepEqual(reaccion.mock.calls.map(llamada => llamada.arguments), primeras);
+  m.arena.fuente(primero, Float64Array.of(m.S.proteina, 10_000), m.libro);
+  const actual = evaluar(primero, Infinity);
+  assert.ok(actual > referencia[0]!);
+  assert.equal(actual, energiaAlimento(c, cuerpo, primero, Infinity));
   assert.ok(exacto());
 });
 

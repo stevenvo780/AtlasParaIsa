@@ -48,6 +48,7 @@ Reportar habitantes persistidos, residentes y activos durante la misma ventana. 
 - Las vistas privadas de terreno se asignan por página activa y se descartan al retirarla o cederla. Los vecinos siguen consultando las columnas compartidas. La carga de 3.000 identificadores históricos consumió 5,36 MiB de buffers en la representación anterior y 0,23 MiB en la nueva en una sonda aislada. El estado de la arena material sigue en RAM.
 - Las teselas materiales contiguas se consultan mediante el desplazamiento dentro de su página. Solo las páginas activas con huecos mantienen un índice. Los rangos abandonados se reutilizan al cambiar de página o dueño. El retiro habitual conserva el estado material necesario para reabrir la región y contabilizar sus reservas.
 - El checkpoint material mide y escribe en dos pasadas para evitar retener la composición de todas las páginas en el heap. La carga indexada restaura lotes por ranura mediante posiciones compactas. El formato y el orden se conservan. En las decisiones de comida y bebida, el dueño reutiliza las celdas de la ventana de percepción cuando su terreno coincide con el de la arena, y lee cantidades vigentes tras comprobar propiedad.
+- Una elección reutiliza el provecho de cada sustancia para la carga, las teselas y los depósitos que evalúa. Cada candidato lee las cantidades vigentes, y la primera consulta química de cada sustancia conserva el orden de la búsqueda.
 
 ### Materia fría
 

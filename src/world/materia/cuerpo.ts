@@ -653,11 +653,30 @@ export function provecho(c: CtxLeyMateria, p: Plantilla, id: SustanciaId): numbe
 
 /** Energía comestible y masa de la ración prevista, usando la misma selección que la boca. */
 export function energiaAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, lote: LoteRef, kg: number): number {
-  const p = plantillaDe(c, cuerpo), n = leer(c.materia, lote, true);
+  return energiaDeLote(c, plantillaDe(c, cuerpo), lote, kg);
+}
+
+export type EvaluarAlimento = (lote: LoteRef, kg: number) => number;
+type EspecieAlimento = { sustancia: Readonly<Sustancia>; fraccion: number };
+
+/** Solo para una elección síncrona. La primera consulta a Q de cada especie conserva su lugar y sus efectos.
+ * No se publica una barrera química entre candidatos, y la composición de cada lote se relee en cada consulta. */
+export function evaluadorAlimento(c: CtxLeyMateria, cuerpo: Cuerpo): EvaluarAlimento {
+  let plantilla: Plantilla | undefined;
+  let especies: Map<SustanciaId, EspecieAlimento> | undefined;
+  return (lote, kg) => energiaDeLote(c, plantilla ??= plantillaDe(c, cuerpo), lote, kg, especies ??= new Map());
+}
+
+function energiaDeLote(c: CtxLeyMateria, p: Plantilla, lote: LoteRef, kg: number,
+  especies?: Map<SustanciaId, EspecieAlimento>): number {
+  const n = leer(c.materia, lote, true);
   let energia = 0, masa = 0;
   for (let i = 0; i < n; i++) {
-    const id = IDS[i]!, sustancia = c.quimica.sustancia(id);
-    const cuantos = CUANTOS[i]! * provecho(c, p, id);
+    const id = IDS[i]!, guardada = especies?.get(id);
+    const sustancia = guardada?.sustancia ?? c.quimica.sustancia(id);
+    const fraccion = guardada?.fraccion ?? provecho(c, p, id);
+    if (!guardada) especies?.set(id, { sustancia, fraccion });
+    const cuantos = CUANTOS[i]! * fraccion;
     masa += cuantos * sustancia.masa * MG;
     energia += cuantos * sustancia.prop.qOxidacion;
   }

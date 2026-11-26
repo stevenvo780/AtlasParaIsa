@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { gunzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
@@ -568,10 +568,33 @@ test('A4: respaldo.sh soporta backup/vacuum y SQLITE_TMPDIR, rechaza método inv
     } finally { copy.close(); }
   }
 
-  // Verificar la unidad systemd versionada.
+  // El SQLite real recibe un temporal de esta ejecución bajo DEST cuando la unidad no fija uno.
+  const sqlite = spawnSync('sh', ['-c', 'command -v sqlite3'], { encoding: 'utf8' });
+  assert.equal(sqlite.status, 0, sqlite.stderr);
+  const bin = join(dir, 'bin'), traza = join(dir, 'sqlite-temporal.log'), dest = join(dir, 'dest-default');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'sqlite3'), '#!/bin/bash\nset -eu\ntest -d "$SQLITE_TMPDIR"\nprintf "%s\\n" "$SQLITE_TMPDIR" >> "$ATLAS_PRUEBA_TRAZA"\nexec "$ATLAS_PRUEBA_SQLITE" "$@"\n',
+    { mode: 0o700 });
+  const porDefecto = spawnSync('bash', [script], {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DB: dbPath, DEST: dest, SQLITE_TMPDIR: '',
+      RESPALDO_METODO: 'backup', RESPALDO_TIMEOUT_SEGUNDOS: '15',
+      ATLAS_PRUEBA_SQLITE: sqlite.stdout.trim(), ATLAS_PRUEBA_TRAZA: traza },
+    encoding: 'utf8', timeout: 20_000,
+  });
+  assert.equal(porDefecto.status, 0, porDefecto.stderr);
+  const temporales = [...new Set(readFileSync(traza, 'utf8').trim().split('\n'))];
+  assert.equal(temporales.length, 1);
+  const temporal = temporales[0]!;
+  assert.equal(basename(temporal), 'sqlite-tmp');
+  assert.match(basename(dirname(temporal)), /^\.respaldo-/);
+  assert.equal(dirname(dirname(temporal)), dest);
+  assert.equal(existsSync(temporal), false);
+  assert.equal(readdirSync(dest).filter(f => f.endsWith('.sqlite.gz')).length, 1);
+
   const unit = readFileSync(resolve('scripts/systemd/torre/atlas-respaldo-publico.service'), 'utf8');
-  assert.match(unit, /TMPDIR=\/datos\/workspaces\/personal\/AtlasParaIsa-anexo\/publicaciones\/tmp/);
-  assert.match(unit, /SQLITE_TMPDIR=\/datos\/workspaces\/personal\/AtlasParaIsa-anexo\/publicaciones\/tmp/);
+  assert.match(unit, /^EnvironmentFile=%h\/\.config\/atlas-para-isa\/publicacion-v23\.env$/m);
+  assert.match(unit, /\$\$CARTA_RELEASE_DIR\/scripts\/respaldo\.sh/);
+  assert.match(unit, /^Environment=RETENCION=24 RESPALDO_METODO=backup$/m);
   assert.match(unit, /MemoryHigh=3G/);
   assert.match(unit, /IOSchedulingClass=idle/);
   assert.match(unit, /Nice=15/);

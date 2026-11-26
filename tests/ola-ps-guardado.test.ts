@@ -81,18 +81,21 @@ test('guardado completo paginado: mundo, materia, clon y épocas tras reabrir', 
 });
 
 for (const snapshotInlineTileLimit of [0, SNAPSHOT_INLINE_TILE_LIMIT]) {
-  test(`guardado completo sin materia conserva el signo de heading (límite de teselas ${snapshotInlineTileLimit})`, t => {
+  test(`guardado completo sin materia conserva el cero con signo en personas y teselas (límite ${snapshotInlineTileLimit})`, t => {
     const { store } = laboratorio(t, 'ps-json-', { snapshotInlineTileLimit });
     const world = createWorld(7, params);
-    const tile = world.tiles[0]!;
-    tile.elevation = -0;
+    world.tiles[0]!.elevation = -0;
+    world.tiles[1]!.elevation = 0;
     world.people[0]!.heading = -0;
+    world.people[1]!.heading = 0;
     store.guardar({ world, materia: null });
     const loaded = store.cargarInstantanea()!;
     assert.equal(loaded.instantanea.materia, null);
     assert.equal(loaded.epoca, 1);
-    assert.equal(loaded.instantanea.world.people[0]!.heading, -0);
-    assert.equal(loaded.instantanea.world.tiles[0]!.elevation, 0);
+    assert.ok(Object.is(loaded.instantanea.world.people[0]!.heading, -0));
+    assert.ok(Object.is(loaded.instantanea.world.people[1]!.heading, 0));
+    assert.ok(Object.is(loaded.instantanea.world.tiles[0]!.elevation, -0));
+    assert.ok(Object.is(loaded.instantanea.world.tiles[1]!.elevation, 0));
   });
 }
 

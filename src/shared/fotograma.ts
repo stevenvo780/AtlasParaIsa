@@ -130,10 +130,13 @@ export type Suceso = { tipo: 'cronica'; evento: ChronicleEvent } | { tipo: 'sust
  * - `sucesos`: anillo de bytes de tamaño fijo (≤ 256 MiB: el único freno físico; no crece, porque las posiciones son
  *   módulo su longitud) con registros [u32 len LE][len bytes de v8.serialize(Suceso)],
  *   envueltos byte a byte módulo `sucesos.byteLength` (también la cabecera u32 si cae en el borde).
+ *   En el transporte por puerto el anillo es nulo y los cursores miden los bloques transferidos.
  */
 export interface DescriptorEnlace {
   control: SharedArrayBuffer; ranuras: readonly SharedArrayBuffer[]; sucesos: SharedArrayBuffer | null;
   versiones?: SharedArrayBuffer;
+  /** Presupuesto de sucesos por puerto, contabilizado por los mismos cursores absolutos. */
+  sucesosDirectosBytes?: number;
 }
 
 /** Int32 [créditos, pedirCompleto, cadencia, —] y BigInt64 desde el byte 16 [entregados, sucesosEscritos, sucesosLeidos]. */
@@ -159,9 +162,10 @@ export interface EnlaceCinta {
   readonly ranuras: readonly SharedArrayBuffer[];
   readonly versiones?: Float64Array;
   readonly sucesos: Uint8Array | null;
+  readonly sucesosDirectosBytes?: number;
   readonly creditos: Int32Array; readonly pedirCompleto: Int32Array; readonly cadencia: Int32Array;
-  /** Palabra libre del control (bytes 12–15). Si el lote de sucesos de un fotograma no cabe en el anillo, el motor no
-   * publica ni avanza `sucesosEscritos`: pone `saturado[0] = 1`, cuenta el salto y devuelve el crédito, sin esperar.
+  /** Palabra del control (bytes 12–15). Si el transporte no puede avanzar, el motor no publica ni avanza
+   * `sucesosEscritos`: pone `saturado[0] = 1`, cuenta el salto y devuelve el crédito, sin esperar.
    * El supervisor (srv) la lee antes del siguiente paso, retira el enlace y abre otra época; el catálogo anota la laguna. */
   readonly saturado: Int32Array;
   readonly entregados: BigInt64Array; readonly sucesosEscritos: BigInt64Array; readonly sucesosLeidos: BigInt64Array;
@@ -172,6 +176,7 @@ export function enlaceCinta(d: DescriptorEnlace): EnlaceCinta {
   const i64 = (i: number) => new BigInt64Array(d.control, 16 + 8 * i, 1);
   return {
     ranuras: d.ranuras, sucesos: d.sucesos && new Uint8Array(d.sucesos),
+    ...(d.sucesosDirectosBytes === undefined ? {} : { sucesosDirectosBytes: d.sucesosDirectosBytes }),
     versiones: d.versiones && new Float64Array(d.versiones),
     creditos: i32(0), pedirCompleto: i32(1), cadencia: i32(2), saturado: i32(3),
     entregados: i64(0), sucesosEscritos: i64(1), sucesosLeidos: i64(2),

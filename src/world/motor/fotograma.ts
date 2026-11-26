@@ -1,4 +1,5 @@
 import { serialize } from 'node:v8';
+import { isMarkedAsUntransferable } from 'node:worker_threads';
 import {
   disposicion, ESQUEMA_CELDA, ESQUEMA_ORGANISMO, fotogramaDe, RANURA_F64, RANURA_I32, regionesRanura, SERIE_CAMPOS,
   type CampoSerie, type EnlaceCinta, type Suceso,
@@ -66,6 +67,22 @@ export interface FuenteFotograma {
 const fuentes = new WeakMap<EnlaceCinta, FuenteFotograma>();
 export function enlazarFuenteFotograma(enlace: EnlaceCinta, fuente: FuenteFotograma): void {
   fuentes.set(enlace, fuente);
+}
+
+export interface SucesosFotogramaDirectos {
+  type: 'sucesos-directos';
+  secuencia: bigint;
+  epoca: number;
+  tick: number;
+  desde: number;
+  hasta: number;
+  bloques: readonly Uint8Array[];
+}
+
+type EnvioSucesosDirectos = (lote: SucesosFotogramaDirectos, transferibles: ArrayBuffer[]) => void;
+const enviosDirectos = new WeakMap<SharedArrayBuffer, EnvioSucesosDirectos>();
+export function enlazarSucesosDirectos(control: SharedArrayBuffer, enviar: EnvioSucesosDirectos): void {
+  enviosDirectos.set(control, enviar);
 }
 
 /** Estado del fotograma en curso, que el coordinador abre en F0 y los dueños rellenan en F6. */
@@ -215,14 +232,21 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
   return true;
 }
 
-function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[], bloques: readonly Uint8Array[] = []): [number, number] | null {
+function serializarSuceso(s: SucesoFotograma): Buffer {
+  if (s.tipo !== 'persona' || !s.vista) return serialize(s);
+  // La ficha a petición puede compartir tipo estructural con la vista pública de cinta.
+  const { experiences: _experiencias, trust: _confianza, ...vista } = s.vista as VistaPersonaFotograma & Pick<PersonView, 'experiences' | 'trust'>;
+  return serialize({ ...s, vista });
+}
+
+function saturarSucesos(enlace: EnlaceCinta): null {
+  Atomics.store(enlace.saturado, 0, 1);
+  return null;
+}
+
+function escribirSucesosAnillo(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[], bloques: readonly Uint8Array[] = []): [number, number] | null {
   const desde = Atomics.load(enlace.sucesosEscritos, 0);
-  const registros = sucesos.map(s => {
-    if (s.tipo !== 'persona' || !s.vista) return serialize(s);
-    // La ficha a petición puede compartir tipo estructural con la vista pública de cinta.
-    const { experiences: _experiencias, trust: _confianza, ...vista } = s.vista as VistaPersonaFotograma & Pick<PersonView, 'experiences' | 'trust'>;
-    return serialize({ ...s, vista });
-  });
+  const registros = sucesos.map(serializarSuceso);
   let bytes = registros.reduce((n, body) => n + 4 + body.length, 0);
   for (const bloque of bloques) bytes += bloque.byteLength;
   if (!bytes) return [Number(desde), Number(desde)];
@@ -230,8 +254,7 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
   const hasta = desde + BigInt(bytes);
   if (!anillo || !Number.isSafeInteger(Number(hasta))
     || hasta - Atomics.load(enlace.sucesosLeidos, 0) > BigInt(anillo.length)) {
-    Atomics.store(enlace.saturado, 0, 1);
-    return null;
+    return saturarSucesos(enlace);
   }
   const capacidad = BigInt(anillo.length);
 
@@ -250,6 +273,78 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
   }
   for (const bloque of bloques) if (bloque.byteLength > 0) copiar(bloque);
   return [Number(desde), Number(hasta)];
+}
+
+function enviarSucesosDirectos(enlace: EnlaceCinta, limite: number, f: FotogramaEnCurso,
+  sucesos: readonly SucesoFotograma[], bloques: readonly Uint8Array[] = []): [number, number] | null {
+  const control = enlace.entregados.buffer;
+  const enviar = control instanceof SharedArrayBuffer ? enviosDirectos.get(control) : undefined;
+  if (!enviar || enlace.sucesos !== null || !Number.isSafeInteger(limite) || limite <= 0) return saturarSucesos(enlace);
+
+  const desde = Atomics.load(enlace.sucesosEscritos, 0);
+  const apariciones = new Map<ArrayBufferLike, number>();
+  try {
+    let bytes = 0;
+    for (const bloque of bloques) {
+      const buffer = bloque.buffer;
+      if (buffer instanceof ArrayBuffer && 'detached' in buffer && buffer.detached) return saturarSucesos(enlace);
+      if (!bloque.byteLength) continue;
+      bytes += bloque.byteLength;
+      if (bytes > limite) return saturarSucesos(enlace);
+      apariciones.set(buffer, (apariciones.get(buffer) ?? 0) + 1);
+    }
+    const registros: Buffer[] = [];
+    let bytesGlobales = 0;
+    for (const suceso of sucesos) {
+      const registro = serializarSuceso(suceso);
+      bytesGlobales += 4 + registro.byteLength;
+      if (registro.byteLength > 0xffffffff || bytes + bytesGlobales > limite) return saturarSucesos(enlace);
+      registros.push(registro);
+    }
+    const hasta = desde + BigInt(bytes + bytesGlobales);
+    const leidos = Atomics.load(enlace.sucesosLeidos, 0);
+    const secuencia = Atomics.load(enlace.entregados, 0);
+    if (leidos < 0n) return null;
+    if (leidos > desde || desde - leidos > BigInt(limite) || secuencia < 0n || !Number.isSafeInteger(Number(hasta))) {
+      return saturarSucesos(enlace);
+    }
+    if (hasta - leidos > BigInt(limite)) return null;
+
+    const salida: Uint8Array[] = [];
+    const transferibles: ArrayBuffer[] = [];
+    if (bytesGlobales) {
+      const buffer = new ArrayBuffer(bytesGlobales);
+      const bloque = new Uint8Array(buffer), cabecera = new DataView(buffer);
+      let posicion = 0;
+      for (const registro of registros) {
+        cabecera.setUint32(posicion, registro.byteLength, true);
+        posicion += 4;
+        bloque.set(registro, posicion);
+        posicion += registro.byteLength;
+      }
+      salida.push(bloque);
+      transferibles.push(buffer);
+    }
+    for (const bloque of bloques) {
+      if (!bloque.byteLength) continue;
+      const buffer = bloque.buffer;
+      if (buffer instanceof ArrayBuffer && bloque.byteOffset === 0 && bloque.byteLength === buffer.byteLength
+        && apariciones.get(buffer) === 1 && !isMarkedAsUntransferable(buffer)) {
+        salida.push(bloque);
+        transferibles.push(buffer);
+      } else {
+        const copia = new Uint8Array(bloque);
+        salida.push(copia);
+        transferibles.push(copia.buffer);
+      }
+    }
+    if (Atomics.load(enlace.sucesosLeidos, 0) < 0n) return null;
+    const inicio = Number(desde), fin = Number(hasta);
+    enviar({ type: 'sucesos-directos', secuencia, epoca: f.epoca, tick: f.tick, desde: inicio, hasta: fin, bloques: salida }, transferibles);
+    return [inicio, fin];
+  } catch {
+    return saturarSucesos(enlace);
+  }
 }
 
 /** Tras B4: aborta sin avanzar los cursores o publica sucesos, serie y fotograma en ese orden. */
@@ -274,7 +369,10 @@ export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCur
       if (celda < 0) throw new Error('La página escrita dejó de estar residente antes de cerrar el fotograma.');
       chunks.push(t.chunkDe(celda));
     }
-    const rango = escribirSucesos(enlace, sucesos, bloques);
+    const limite = enlace.sucesosDirectosBytes;
+    const rango = limite === undefined
+      ? escribirSucesosAnillo(enlace, sucesos, bloques)
+      : enviarSucesosDirectos(enlace, limite, f, sucesos, bloques);
     if (!rango) return false;
     const [desde, hasta] = rango;
     for (const chunk of chunks) e.versiones[chunk] = t.versionVisible[chunk] + 1;

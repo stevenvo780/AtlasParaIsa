@@ -13,6 +13,10 @@ test('el enlace binario arranca con un crédito por ranura y un anillo separado'
   assert.ok(binario.sucesos?.byteLength);
   assert.equal(binario.entregados[0], 0n);
   assert.equal(binario.sucesosLeidos[0], 0n);
+  const porPuerto = enlaceCinta(descriptorCinta(true, 1024));
+  assert.equal(porPuerto.creditos[0], porPuerto.ranuras.length);
+  assert.equal(porPuerto.sucesos, null);
+  assert.equal(porPuerto.sucesosDirectosBytes, 1024);
   const clasico = enlaceCinta(descriptorCinta(false));
   assert.equal(clasico.ranuras.length, 0);
   assert.equal(clasico.sucesos, null);

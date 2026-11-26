@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { deserialize, serialize } from 'node:v8';
 import { fuenteFotograma } from '../src/server/cinta/fuente.js';
 import { estadoVista, fotogramaAVista, leerFotograma } from '../src/server/cinta/vista.js';
 import type { Corte } from '../src/shared/cinta.js';
-import { CONTROL_ENLACE_BYTES, enlaceCinta, RANURA_F64, regionesRanura, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
+import { CONTROL_ENLACE_BYTES, enlaceCinta, RANURA_F64, regionesRanura, type DescriptorEnlace, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { RuntimeStats } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
@@ -13,7 +13,8 @@ import { ORDEN, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { EmisorFotoDueno, type ParteFotoDueno } from '../src/world/motor/fotograma-dueno.js';
-import type { FotogramaEnCurso, SalidaFuenteFotograma, SucesoEnlaceCinta } from '../src/world/motor/fotograma.js';
+import { enlazarSucesosDirectos, type FotogramaEnCurso, type SalidaFuenteFotograma, type SucesoEnlaceCinta,
+  type SucesosFotogramaDirectos } from '../src/world/motor/fotograma.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import { crearSAB, crecerSAB } from '../src/world/soa/arena.js';
@@ -128,12 +129,22 @@ test('emisionFotogramaDuenos está desactivada por defecto', async t => {
   assert.equal(motor.trazaFotogramaDuenos?.reunionesEvitadas, 0);
 });
 
-test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre los mismos fotogramas', async t => {
+function cotejarEmision(t: TestContext, directos: boolean): void {
   const params = parseParams({ v23: { ...escalon('duenos'), fotograma: true } });
   const mundo = createWorld(17, params);
   const motor = crearMotor(mundo, { ...unSoloDueno(17), hilos: 2, emisionFotogramaDuenos: true });
   t.after(() => motor.cerrar());
-  const descriptor = crearDescriptor();
+  const descriptor: DescriptorEnlace = crearDescriptor(directos ? 0 : undefined);
+  const lotes = new Map<bigint, SucesosFotogramaDirectos>();
+  if (directos) {
+    descriptor.sucesos = null;
+    descriptor.sucesosDirectosBytes = 16 * 1024 * 1024;
+    enlazarSucesosDirectos(descriptor.control, (lote, transferibles) => {
+      lotes.set(lote.secuencia, structuredClone(lote, { transfer: transferibles }));
+      if (lote.secuencia === 0n) assert.ok(transferibles.length >= 2);
+      assert.ok(transferibles.every(bytes => bytes.byteLength === 0));
+    });
+  }
   const enlace = enlaceCinta(descriptor);
   const fuenteDuenos = fuenteFotograma(mundo, 0, 'paridad', RUNTIME, () => 12, () => undefined);
   const fuenteRef = fuenteFotograma(mundo, 0, 'paridad', RUNTIME, () => 12, () => undefined);
@@ -182,8 +193,9 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
 
       assertCortesEquivalentes(corteDuenos, corteRef);
       comparados++;
-    });
+    }, lotes.get(leidosAntes));
     assert.ok(ok);
+    assert.equal(lotes.delete(leidosAntes), directos);
   }
 
   assert.equal(comparados, 6);
@@ -193,7 +205,10 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
   assert.equal(traza.fallbacksLimite, 0);
   assert.equal(traza.fallbacksCompat, 0);
   assert.equal(traza.abortos, 0);
-});
+}
+
+test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre los mismos fotogramas', t => cotejarEmision(t, false));
+test('la emisión por dueños transfiere los bloques y conserva el Corte exacto', t => cotejarEmision(t, true));
 
 test('la muestra de estadísticas caras se confirma y se comparte entre dueños y reunido', t => {
   const mundo = createWorld(61, {

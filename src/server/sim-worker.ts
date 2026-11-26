@@ -220,12 +220,14 @@ import { ResidentTopologyOwner, residentBackingArray, residentTileRevision, resi
 import { residentSnapshotGate } from '../world/soa/terreno.js';
 import { deploymentParams, paramsNuevosDeDespliegue } from './deployment-params.js';
 import { resumenDespacho } from './resumen-vivo.js';
+import { hostMemory } from './hardware-limits.js';
 import { readWorldInstance } from './world-instance.js';
 import { projectAnimal } from '../world/animals.js';
 import { crearEnlaceCortes, type TapeWorkerMessage, type TapeWorkerRequest, type TapeWorkerReply } from './tape-worker.js';
 import { enlaceCinta, regionesRanura, type DescriptorEnlace } from '../shared/fotograma.js';
 import type { Apertura, Hito } from '../shared/cinta.js';
 import { registrar } from '../world/invariantes.js';
+import { enlazarSucesosDirectos } from '../world/motor/fotograma.js';
 import type { AppOptions, SaludServidor } from './app.js';
 import type { OperacionSalud } from '../shared/salud.js';
 import type { TelemetriaMotor } from '../world/motor/contratos.js';
@@ -499,12 +501,13 @@ registrar({ id: 'cinta.serie-demografia', carril: 'C1a', gravedad: 'dura', alcan
 
 const REINTENTO_CINTA_MS = 1000;
 const ANILLO_SUCESOS_BYTES = 256 * 1024 * 1024;
+const DIVISOR_RAM_SUCESOS_DIRECTOS = 24;
 const CINTA_SIN_CREDITO_MS = 300_000;
 
 type EstadoGrabacion = Pick<TapeWorkerReply, 'frames' | 'latestTick'>;
 type HiloCinta = { worker: Worker; enlace: ReturnType<typeof enlaceCinta>; descriptor: DescriptorEnlace; salida: Promise<void> };
 
-export function descriptorCinta(binario: boolean) {
+export function descriptorCinta(binario: boolean, sucesosDirectosBytes?: number): DescriptorEnlace {
   const base = crearEnlaceCortes();
   if (!binario) return base;
   const control = enlaceCinta(base);
@@ -512,7 +515,9 @@ export function descriptorCinta(binario: boolean) {
   const maxByteLength = Math.max(cabecera, totalmem());
   const ranuras = Array.from({ length: Atomics.load(control.creditos, 0) },
     () => new SharedArrayBuffer(cabecera, { maxByteLength }));
-  return { control: base.control, ranuras, sucesos: new SharedArrayBuffer(ANILLO_SUCESOS_BYTES),
+  return { control: base.control, ranuras,
+    ...(sucesosDirectosBytes === undefined ? { sucesos: new SharedArrayBuffer(ANILLO_SUCESOS_BYTES) }
+      : { sucesos: null, sucesosDirectosBytes }),
     versiones: new SharedArrayBuffer(0, { maxByteLength }) };
 }
 
@@ -540,7 +545,11 @@ export class GrabadorCinta {
   iniciar() {
     if (this.cerrando || this.hilo || this.esperaSalida || performance.now() < this.reintentoEn) return;
     try {
-      const descriptor = descriptorCinta(this.binario);
+      const directos = this.binario && process.env.CARTA_CINTA_SUCESOS_DIRECTOS === '1';
+      const memoria = directos ? hostMemory() : undefined;
+      const presupuesto = memoria === undefined ? undefined
+        : Math.max(1, Math.floor(Math.min(memoria.fisicaBytes, memoria.cgroupBytes ?? Infinity) / DIVISOR_RAM_SUCESOS_DIRECTOS));
+      const descriptor = descriptorCinta(this.binario, presupuesto);
       let moduleURL = new URL('./tape-worker.js', import.meta.url);
       const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
       if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./tape-worker.ts', import.meta.url);
@@ -556,6 +565,7 @@ export class GrabadorCinta {
         descriptor, options: { directorio: this.directorio, topeBytes: this.topeBytes },
       } });
       const enlace = enlaceCinta(descriptor);
+      if (directos) enlazarSucesosDirectos(descriptor.control, (lote, transferibles) => worker.postMessage(lote, transferibles));
       const salida = new Promise<void>(resolve => worker.once('exit', code => {
         if (this.hilo?.worker === worker) {
           if (!this.cerrando || code !== 0 || this.llamadas.size) this.fallar(new Error(`El hilo de la cinta terminó (código ${code}).`));
@@ -600,7 +610,8 @@ export class GrabadorCinta {
   comprobarCredito(plazo = CINTA_SIN_CREDITO_MS): void {
     if (!this.hilo) return;
     if (Atomics.load(this.hilo.enlace.saturado, 0)) {
-      this.fallar(new Error('El anillo de sucesos de cinta se saturó.'));
+      const via = this.hilo.enlace.sucesosDirectosBytes === undefined ? 'El anillo' : 'El puerto';
+      this.fallar(new Error(`${via} de sucesos de cinta se saturó.`));
       return;
     }
     const entregados = Atomics.load(this.hilo.enlace.entregados, 0);

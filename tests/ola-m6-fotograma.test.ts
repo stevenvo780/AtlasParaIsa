@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { serialize } from 'node:v8';
 import { estadoVista, fotogramaAVista, leerFotograma } from '../src/server/cinta/vista.js';
-import { CONTROL_ENLACE_BYTES, disposicion, enlaceCinta, ESQUEMA_CELDA, type EnlaceCinta } from '../src/shared/fotograma.js';
+import { CONTROL_ENLACE_BYTES, disposicion, enlaceCinta, ESQUEMA_CELDA, type EnlaceCinta, type Suceso } from '../src/shared/fotograma.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 import type { CtxF0 } from '../src/world/motor/acceso.js';
 import { CAMPOS_CUERPO, Clase, CUERPO_ANCHO } from '../src/world/motor/contratos.js';
 import {
-  abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type SucesoFotograma,
-  type VistaPaginaFotograma,
+  abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type SucesoEnlaceCinta, type SucesoFotograma,
+  type SucesosFotogramaDirectos, type VistaPaginaFotograma,
 } from '../src/world/motor/fotograma.js';
 import { DEFAULT_PARAMS, setParams } from '../src/world/params.js';
 import { crearSAB } from '../src/world/soa/arena.js';
@@ -268,4 +268,49 @@ test('un lote mayor que el anillo falla con diagnóstico y no confirma ni public
     throw new Error('Falló el consumidor');
   }), /Falló el consumidor/);
   assert.equal(Atomics.load(reemplazo.creditos, 0), 1);
+});
+
+test('los bloques directos conservan los sucesos del anillo y el crédito hasta consumir un sobre válido', () => {
+  const anillo = enlace(8192);
+  const c = contextos().coordinador as unknown as CtxF0;
+  setParams(c.mundo, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, fotograma: true } });
+  Atomics.store(anillo.creditos, 0, 1);
+  const cronica: SucesoFotograma = { tipo: 'cronica', evento };
+  function registro(suceso: SucesoEnlaceCinta): Buffer {
+    const cuerpo = serialize(suceso), cabecera = Buffer.alloc(4);
+    cabecera.writeUInt32LE(cuerpo.byteLength);
+    return Buffer.concat([cabecera, cuerpo]);
+  }
+  const bloqueCronica = registro(cronica);
+  const bloqueTextos = Buffer.concat([
+    registro({ tipo: 'textosPersona', uid: uidPersona, textos: { name: 'Ada', reason: 'Descansa' } }),
+    registro({ tipo: 'texto', uid: uidAnimal, campo: 'reason', valor: 'come' }),
+  ]);
+  enlazarFuenteFotograma(anillo, { corte: () => ({ serie, sucesos: [cronica], bloques: [bloqueTextos] }), confirmar() {} });
+  assert.ok(cerrarFotograma(c, anillo, abrirFotograma(c, anillo, 1)!, true));
+  let esperados: readonly Suceso[] = [];
+  assert.ok(leerFotograma(anillo, 0n, (_, sucesos) => { esperados = sucesos; }));
+
+  const directo = enlaceCinta({ control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES), ranuras: anillo.ranuras,
+    sucesos: null, sucesosDirectosBytes: 8192 });
+  const escritos = Atomics.load(anillo.sucesosEscritos, 0);
+  Atomics.store(directo.sucesosEscritos, 0, escritos);
+  Atomics.store(directo.entregados, 0, 1n);
+  const lote: SucesosFotogramaDirectos = { type: 'sucesos-directos', secuencia: 0n, epoca: 1, tick: c.tick,
+    desde: 0, hasta: Number(escritos), bloques: [bloqueCronica, bloqueTextos] };
+  const sinConsumo = () => assert.fail('el lector llamó al consumidor antes de validar el sobre');
+  assert.equal(leerFotograma(directo, 0n, sinConsumo), false);
+  assert.throws(() => leerFotograma(directo, 0n, sinConsumo, { ...lote, secuencia: 1n }), /sobre/i);
+  assert.throws(() => leerFotograma(directo, 0n, sinConsumo, { ...lote, bloques: [bloqueCronica] }), /bytes/i);
+  assert.throws(() => leerFotograma(directo, 0n, sinConsumo, { ...lote,
+    bloques: [bloqueCronica.subarray(0, 3), bloqueCronica.subarray(3), bloqueTextos] }), /cabecera.*truncada/i);
+  assert.equal(Atomics.load(directo.sucesosLeidos, 0), 0n);
+  assert.equal(Atomics.load(directo.creditos, 0), 0);
+  assert.ok(leerFotograma(directo, 0n, (_, sucesos) => {
+    assert.deepEqual(sucesos, esperados);
+    assert.equal(Atomics.load(directo.sucesosLeidos, 0), 0n);
+    assert.equal(Atomics.load(directo.creditos, 0), 0);
+  }, lote));
+  assert.equal(Atomics.load(directo.sucesosLeidos, 0), escritos);
+  assert.equal(Atomics.load(directo.creditos, 0), 1);
 });

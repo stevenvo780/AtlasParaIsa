@@ -7,7 +7,7 @@ import {
 import type { MatTesela } from '../../shared/materia.js';
 import { PROTOCOL_VERSION, type AnimalView, type ChronicleEvent, type PersonView, type Tile, type WorldView } from '../../shared/types.js';
 import { ACTIONS as ACCIONES_FAUNA } from '../../world/animals.js';
-import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoEnlaceCinta, type SucesoFotograma, type SucesoVistaAdicional,
+import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoEnlaceCinta, type SucesoFotograma, type SucesosFotogramaDirectos, type SucesoVistaAdicional,
   type VistaAnimalFotograma, type VistaMundoFotograma, type VistaPaginaFotograma, type VistaPersonaFotograma,
 } from '../../world/motor/fotograma.js';
 import { Clase } from '../../world/motor/contratos.js';
@@ -212,15 +212,30 @@ export function fotogramaAVista(estado: EstadoVista, f: Fotograma, sucesos: read
   return { seq, epoca: f.epoca, t: f.tick, vista, tilesCambiadas, hitos, catalogo, serie, hz: serie.hz };
 }
 
-function leerSucesos(enlace: EnlaceCinta, f: Fotograma): SucesoFotograma[] {
-  const [desde, hasta] = f.sucesos;
+function validarRangoSucesos(enlace: EnlaceCinta, [desde, hasta]: Fotograma['sucesos']): void {
   if (!Number.isSafeInteger(desde) || desde < 0 || !Number.isSafeInteger(hasta) || hasta < desde
     || BigInt(desde) !== Atomics.load(enlace.sucesosLeidos, 0) || BigInt(hasta) > Atomics.load(enlace.sucesosEscritos, 0)) {
     throw new Error('Rango de sucesos de cinta inválido o leído fuera de orden.');
   }
+}
+
+function agregarSuceso(sucesos: SucesoFotograma[], datos: Uint8Array): void {
+  const suceso: SucesoEnlaceCinta = deserialize(datos);
+  if (!suceso || typeof suceso !== 'object' || typeof suceso.tipo !== 'string') {
+    throw new Error('Registro de sucesos inválido.');
+  }
+  if (suceso.tipo === 'textosPersona') {
+    for (const [campo, valor] of Object.entries(suceso.textos)) {
+      sucesos.push({ tipo: 'texto', uid: suceso.uid, campo, valor });
+    }
+  } else {
+    sucesos.push(suceso);
+  }
+}
+
+function leerSucesosAnillo(anillo: Uint8Array | null, [desde, hasta]: Fotograma['sucesos']): SucesoFotograma[] {
   const sucesos: SucesoFotograma[] = [];
   if (desde === hasta) return sucesos;
-  const anillo = enlace.sucesos;
   if (!anillo || hasta - desde > anillo.length) throw new Error('El rango de sucesos no cabe en el anillo de cinta.');
 
   let cursor = desde;
@@ -236,29 +251,70 @@ function leerSucesos(enlace: EnlaceCinta, f: Fotograma): SucesoFotograma[] {
   while (cursor < hasta) {
     const bytes = leer(4).readUInt32LE();
     if (!bytes) throw new Error('Registro de sucesos vacío.');
-    const suceso: SucesoEnlaceCinta = deserialize(leer(bytes));
-    if (suceso.tipo === 'textosPersona') {
-      for (const [campo, valor] of Object.entries(suceso.textos)) {
-        sucesos.push({ tipo: 'texto', uid: suceso.uid, campo, valor });
-      }
-    } else {
-      sucesos.push(suceso);
-    }
+    agregarSuceso(sucesos, leer(bytes));
   }
   return sucesos;
 }
 
+function leerSucesosDirectos(f: Fotograma, leidos: bigint, lote: SucesosFotogramaDirectos, capacidad: number): SucesoFotograma[] {
+  const [desde, hasta] = f.sucesos;
+  if (!lote || lote.type !== 'sucesos-directos' || lote.secuencia !== leidos || lote.epoca !== f.epoca || lote.tick !== f.tick
+    || lote.desde !== desde || lote.hasta !== hasta || !Array.isArray(lote.bloques)) {
+    throw new Error('El sobre de sucesos directos no corresponde al fotograma de cinta.');
+  }
+  const esperados = hasta - desde;
+  if (esperados > capacidad) throw new Error('El rango de sucesos directos excede el límite de cinta.');
+  const sucesos: SucesoFotograma[] = [];
+  let total = 0;
+  for (const bloque of lote.bloques) {
+    if (!(bloque instanceof Uint8Array) || !(bloque.buffer instanceof ArrayBuffer)) {
+      throw new Error('Bloque de sucesos directos inválido.');
+    }
+    total += bloque.byteLength;
+    if (total > esperados) throw new Error('Los bytes de sucesos directos no coinciden con el rango de cinta.');
+    const datos = Buffer.from(bloque.buffer, bloque.byteOffset, bloque.byteLength);
+    let cursor = 0;
+    while (cursor < datos.length) {
+      if (datos.length - cursor < 4) throw new Error('Cabecera de sucesos directos truncada.');
+      const bytes = datos.readUInt32LE(cursor);
+      cursor += 4;
+      if (!bytes || bytes > datos.length - cursor) throw new Error('Registro de sucesos directos vacío o truncado.');
+      try {
+        agregarSuceso(sucesos, datos.subarray(cursor, cursor + bytes));
+      } catch (cause) {
+        throw new Error('Registro V8 de sucesos directos inválido.', { cause });
+      }
+      cursor += bytes;
+    }
+  }
+  if (total !== esperados) throw new Error('Los bytes de sucesos directos no coinciden con el rango de cinta.');
+  return sucesos;
+}
+
+function marcarSucesosLeidos(enlace: EnlaceCinta, hasta: number): void {
+  Atomics.store(enlace.sucesosLeidos, 0, BigInt(hasta));
+  Atomics.notify(enlace.sucesosLeidos, 0);
+}
+
 /** Lee los sucesos antes de prestar las vistas de la ranura a la cinta. */
-export function leerFotograma(enlace: EnlaceCinta, leidos: bigint, usar: (f: Fotograma, sucesos: readonly Suceso[]) => void): boolean {
+export function leerFotograma(enlace: EnlaceCinta, leidos: bigint,
+  usar: (f: Fotograma, sucesos: readonly Suceso[]) => void, directos?: SucesosFotogramaDirectos): boolean {
   if (leidos >= Atomics.load(enlace.entregados, 0)) return false;
   if (leidos < 0n || !enlace.ranuras.length) throw new Error('No hay ranura válida para el fotograma entregado.');
+  const capacidadDirecta = enlace.sucesosDirectosBytes;
+  if (capacidadDirecta !== undefined && directos === undefined) return false;
   const f = fotogramaDe(enlace.ranuras[Number(leidos % BigInt(enlace.ranuras.length))]);
-  const sucesos = leerSucesos(enlace, f);
-  Atomics.store(enlace.sucesosLeidos, 0, BigInt(f.sucesos[1]));
-  Atomics.notify(enlace.sucesosLeidos, 0);
+  validarRangoSucesos(enlace, f.sucesos);
+  const sucesos = capacidadDirecta === undefined || directos === undefined
+    ? leerSucesosAnillo(enlace.sucesos, f.sucesos)
+    : leerSucesosDirectos(f, leidos, directos, capacidadDirecta);
+  const hasta = f.sucesos[1];
+  if (capacidadDirecta === undefined) marcarSucesosLeidos(enlace, hasta);
   try {
-    usar(f, sucesos as readonly Suceso[]);
+    usar(f, sucesos);
   } finally {
+    // El sobre directo sigue ocupando su presupuesto hasta soltar la ranura.
+    if (capacidadDirecta !== undefined) marcarSucesosLeidos(enlace, hasta);
     Atomics.add(enlace.creditos, 0, 1);
   }
   return true;

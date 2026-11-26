@@ -4,6 +4,7 @@ import { CONTROL_ENLACE_BYTES, RANURA_F64, enlaceCinta, type DescriptorEnlace, t
 import type { WorldView } from '../shared/types.js';
 import { EscritorCinta, PASO_MAXIMO, type OpcionesEscritor } from './cinta/escritor.js';
 import { estadoVista, fotogramaAVista, leerFotograma, type EstadoVista } from './cinta/vista.js';
+import type { SucesosFotogramaDirectos } from '../world/motor/fotograma.js';
 
 /** V24: the costly, slow-moving summaries of a view (each walks every tile or a whole catalogue). A turbo
  * frame between two live mirror posts may leave them out: this writer carries the previous frame's values,
@@ -54,7 +55,7 @@ export function ajustarCadencia(enlace: EnlaceCinta, leidos: bigint, ahora: numb
 
 export type TapeWorkerRequest = { type: 'abrir'; apertura: Apertura; hitosPrevios: readonly Hito[] } | { type: 'corte'; corte: Corte }
   | { type: 'serie'; epoca: number; punto: SeriePunto }
-  | { type: 'flush' | 'close'; id: number };
+  | { type: 'flush' | 'close'; id: number } | SucesosFotogramaDirectos;
 export type TapeWorkerReply = { type: 'reply'; id: number; frames: number; latestTick: number; error?: string };
 export type TapeWorkerStatus = { type: 'estado'; estado: 'ok'; epoca: number }
   | { type: 'estado'; estado: 'error'; motivo: string; reiniciarEnlace: boolean };
@@ -65,6 +66,8 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
   const opciones = workerData.options as OpcionesEscritor;
   const enlace = enlaceCinta(workerData.descriptor as DescriptorEnlace);
   const cabeceras = enlace.ranuras.map(r => new Float64Array(r, 0, RANURA_F64.sucesosHasta + 1));
+  const directos = enlace.sucesosDirectosBytes !== undefined;
+  const lotes = new Map<bigint, SucesosFotogramaDirectos>();
   let escritor: EscritorCinta | undefined;
   let apertura: Apertura | undefined;
   let vista: EstadoVista | undefined;
@@ -78,6 +81,7 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
   let desahogo: NodeJS.Immediate | undefined;
 
   function fallar(error: unknown): void {
+    if (enlaceRoto) lotes.clear();
     try { escritor?.close(false); } catch { /* conserva el fallo original de la cinta */ }
     escritor = undefined;
     vista = undefined;
@@ -99,6 +103,8 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
       const i = Number(leidos % BigInt(cabeceras.length));
       // El mensaje de apertura y el SAB usan canales distintos: una base nueva puede llegar primero al SAB.
       if (escritor && cabeceras[i]![RANURA_F64.epoca]! > actual.epoca) break;
+      const lote = directos ? lotes.get(leidos) : undefined;
+      if (directos && !lote) break; // La publicación de la ranura puede preceder al mensaje.
       ultimoAtraso = ajustarCadencia(enlace, leidos, performance.now(), ultimoAtraso);
       try {
         const disponible = leerFotograma(enlace, leidos, (f, sucesos) => ejecutar(() => {
@@ -112,14 +118,15 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
           }
           escritor.registrar(corte, false);
           previoBinario = corte.t;
-        }));
+        }), lote);
         if (!disponible) break;
       } catch (error) {
-        // Si falla el protocolo del anillo, el productor necesita un enlace nuevo, incluso si el escritor se reabre.
+        // Un error de protocolo requiere un enlace nuevo incluso si el escritor se reabre.
         enlaceRoto = true;
         fallar(error);
         break;
       }
+      if (directos) lotes.delete(leidos);
       leidos++;
       avance = true;
     }
@@ -138,7 +145,15 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
   }), FLUSH_MS);
 
   port.on('message', (message: TapeWorkerRequest) => ejecutar(() => {
-    if (message.type === 'abrir') {
+    if (message.type === 'sucesos-directos') {
+      if (enlaceRoto) return;
+      if (!directos || lotes.size >= cabeceras.length || message.secuencia !== leidos + BigInt(lotes.size)) {
+        enlaceRoto = true;
+        throw new Error('Sucesos de cinta por puerto fuera de orden o sin crédito.');
+      }
+      lotes.set(message.secuencia, message);
+      leerRanuras();
+    } else if (message.type === 'abrir') {
       if (enlaceRoto) throw new Error('La cinta binaria necesita un enlace nuevo.');
       if (cabeceras.length && escritor) leerRanuras();
       if (enlaceRoto) return;

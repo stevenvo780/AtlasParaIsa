@@ -72,10 +72,9 @@ test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte
 
   const vencido = motor.corteGuardadoSellado?.();
   assert.ok(vencido);
-  motor.paso([]);
-  assert.throws(() => directa.guardarCorteSellado(vencido, [], []), /paso anterior/);
   const tickGuardado = guardado.world.tick;
   motor.cargar(guardado, 0);
+  assert.throws(() => directa.guardarCorteSellado(vencido, [], []), /paso anterior/);
   const siguiente = motor.paso([]);
   assert.equal(siguiente.tick, tickGuardado + 1);
 });

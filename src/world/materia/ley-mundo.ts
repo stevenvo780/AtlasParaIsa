@@ -232,7 +232,10 @@ function activar(e: Estado, chunk: ChunkId, cedido = false): boolean {
   const c = e.caja.c, m = e.m, tiles = teselasDe(c, chunk);
   if (!tiles.length) { e.pendientes.add(chunk); return false; }
   let adoptada = false;
-  if (m.tiene(chunk) && !m.despertar(chunk, tiles, cedido)) m.olvidar(chunk);
+  if (m.tiene(chunk) && !m.despertar(chunk, tiles, cedido)) {
+    limpiarTeselas(e, chunk);
+    m.olvidar(chunk);
+  }
   if (!m.tiene(chunk)) {
     adoptada = m.adoptar(chunk, tiles);
     if (!adoptada) {
@@ -277,9 +280,13 @@ function alRetirar(c: CtxLey, chunk: ChunkId): void {
   if (!m.tiene(chunk)) return;
   if (m.activa[chunk] === 1) escribirVistas(e, chunk, 0);
   m.dormir(chunk);
-  for (let i = m.inicio[chunk]!; i < m.fin[chunk]!; i++) { e.teselas[i] = undefined; e.mat[i] = undefined; }
+  limpiarTeselas(e, chunk);
   e.aire.delete(chunk);
   e.aireVista = null;
+}
+
+function limpiarTeselas(e: Estado, p: ChunkId): void {
+  for (let i = e.m.inicio[p]!; i < e.m.fin[p]!; i++) { e.teselas[i] = undefined; e.mat[i] = undefined; }
 }
 
 // ── El tick ──────────────────────────────────────────────────────────────────────────────────────────────

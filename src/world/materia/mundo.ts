@@ -584,7 +584,7 @@ export class MundoMaterial {
   readonly libro: Libro;
   readonly cuentas: Float64Array;
   readonly hilo: number;
-  /** Teselas y páginas dadas de alta (con el motor, `np` es la cota de los chunks vistos y crecen las dos). */
+  /** Teselas y páginas dadas de alta. En el motor, son las cotas de sus respectivos índices. */
   n: number;
   np: number;
   suelo: Float64Array;
@@ -625,6 +625,8 @@ export class MundoMaterial {
   private indicesLab = new Int32Array(0);
   /** Las páginas que empiezan en la celda 0 y no tienen huecos se indexan directamente. */
   private readonly indicesActivos = new Map<number, Int32Array>();
+  /** Rangos privados abandonados, por cantidad de teselas. No son las ranuras de los lotes. */
+  private readonly rangosLibres = new Map<number, number[]>();
   private semilla = 0;
   private hojas = 0;
   private fN = 0;
@@ -843,24 +845,25 @@ export class MundoMaterial {
   /** ¿Tiene este mundo la página p con sus lotes (activa o dormida)? */
   tiene(p: number): boolean { return p >= 0 && p < this.np && this.fin[p]! > this.inicio[p]! && this.aire[p]! >= 0; }
 
-  /** Abre sitio para las teselas de la página p al final de las tablas y devuelve su primer índice. */
+  /** Reserva un rango para las teselas de la página p y devuelve su primer índice. */
   private abrir(p: number, tiles: readonly Tile[]): number {
-    const i0 = this.n;
-    this.reservar(i0 + tiles.length, p + 1);
-    this.n = i0 + tiles.length; this.np = Math.max(this.np, p + 1);
+    const libres = this.rangosLibres.get(tiles.length);
+    const i0 = libres?.pop() ?? this.n, fin = i0 + tiles.length;
+    this.reservar(fin, p + 1);
+    this.n = Math.max(this.n, fin); this.np = Math.max(this.np, p + 1);
     for (let j = 0; j < tiles.length; j++) {
       const t = tiles[j]!;
       this.celda[i0 + j] = p * 256 + local(t); this.x[i0 + j] = t.x; this.y[i0 + j] = t.y;
     }
-    this.inicio[p] = i0; this.fin[p] = this.n;
-    this.indexar(i0, this.n);
+    this.inicio[p] = i0; this.fin[p] = fin;
+    this.indexar(i0, fin);
     return i0;
   }
 
   /**
    * Da de alta la página p con los lotes de sus teselas, sacados de los escalares de `tiles` (ordenadas por celda local),
    * su aire y sus dos depósitos: es la fuente declarada «chunk nuevo». `luz` fija la temperatura inicial. Con el motor las
-   * teselas van al final de las tablas; el laboratorio da el índice `en`.
+   * teselas toman un rango privado; el laboratorio da el índice `en`.
    */
   materializar(p: number, tiles: readonly Tile[], luz: number, en = -1): void {
     const i0 = en >= 0 ? en : this.abrir(p, tiles), nT = tiles.length, S = this.S, e = this.params.escalas, f = this.params.fisica;
@@ -967,7 +970,14 @@ export class MundoMaterial {
   /** Olvida la página p (sus lotes no se tocan): su ranura de chunk pasó a otro sitio del mundo o a otro dueño. */
   olvidar(p: number): void {
     if (p >= this.np) return;
-    if (this.lab) for (let i = this.inicio[p]!; i < this.fin[p]!; i++) this.indicesLab[this.celda[i]!] = 0;
+    const inicio = this.inicio[p]!, fin = this.fin[p]!;
+    if (this.lab) {
+      for (let i = inicio; i < fin; i++) this.indicesLab[this.celda[i]!] = 0;
+    } else if (inicio < fin) {
+      const longitud = fin - inicio, libres = this.rangosLibres.get(longitud);
+      if (libres) libres.push(inicio);
+      else this.rangosLibres.set(longitud, [inicio]);
+    }
     this.dormir(p);
     this.inicio[p] = 0; this.fin[p] = 0; this.aire[p] = -1; this.mar[p] = -1; this.cielo[p] = -1;
   }

@@ -444,6 +444,9 @@ export class Store {
   }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
+  get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number } {
+    return this.snapshotParts.faunaCorteStats;
+  }
   get context(): WorldContext {
     return { loadChunk: (key, atTick, v23) => this.loadChunk(key, atTick, v23),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),

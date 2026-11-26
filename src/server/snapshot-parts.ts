@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
+import { faunaCorteDe, type TramoFaunaCorte } from '../world/motor/fauna-corte.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
@@ -164,6 +165,7 @@ export class SnapshotParts {
   private writtenDigest: string | null = null;
   private pagesReused = 0;
   private pagesEncoded = 0;
+  private readonly faunaStats = { compared: 0, accepted: 0, rejected: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
     private readonly packedPeople = false) {
@@ -175,6 +177,10 @@ export class SnapshotParts {
    * codificadas (serializar + sha256 + cotejo SQL) por el camino completo. */
   get pageStats(): { reused: number; encoded: number } {
     return { reused: this.pagesReused, encoded: this.pagesEncoded };
+  }
+  /** Filas remotas intentadas durante la escritura. Un bloque mal formado se rechaza antes del cotejo. */
+  get faunaCorteStats(): { compared: number; accepted: number; rejected: number } {
+    return { ...this.faunaStats };
   }
   /** Solo tras el COMMIT de la transacción en la que `write`/`collect` construyeron lo pendiente. */
   confirmPendingPages(): void {
@@ -361,7 +367,8 @@ export class SnapshotParts {
       for (const field of ORGANISM_FIELDS) {
         const manifest = encoding === ENCODING_V3 && field === 'people'
           ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage)
-          : this.writeOrganisms(prepared.organisms[field], writeOrganismPage);
+          : this.writeOrganisms(prepared.organisms[field], writeOrganismPage,
+            field === 'animals' ? faunaCorteDe(prepared.organisms.animals) : undefined);
         for (const page of manifest.pages) digests.push(page.digest);
         body += `,"${field}":${JSON.stringify(manifest)}`;
       }
@@ -377,7 +384,35 @@ export class SnapshotParts {
     return { body, digest, bytes: bytes + size, pages: digests };
   }
 
-  private writeOrganisms(organisms: readonly unknown[], writePage: (index: number, body: string, count: number) => Page): Pages {
+  private *faunaCorteRows(tramos: readonly TramoFaunaCorte[], count: number): Generator<{ index: number; row: string }, void> {
+    // UTF-8 estricto y sin quitar el BOM: la igualdad del texto implica igualdad de bytes.
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    let next = 0;
+    for (const { desde, bloques } of tramos) {
+      let offset = Number.isSafeInteger(desde) && desde >= 0 ? desde : NaN;
+      for (const { filas, cuerpo } of bloques) {
+        const index = offset, validCount = Number.isSafeInteger(filas) && filas > 0;
+        offset = validCount ? offset + filas : NaN;
+        if (!Number.isSafeInteger(offset) || index < next || offset > count || !(cuerpo instanceof Uint8Array)) {
+          this.faunaStats.rejected += validCount ? filas : 1;
+          continue;
+        }
+        next = offset;
+        let text: string;
+        try { text = decoder.decode(cuerpo); }
+        catch { this.faunaStats.rejected += filas; continue; }
+        const rows = text.split('\n', filas + 1);
+        if (rows.length !== filas || rows.some(row => row.length === 0)) {
+          this.faunaStats.rejected += filas;
+          continue;
+        }
+        for (let i = 0; i < filas; i++) yield { index: index + i, row: rows[i]! };
+      }
+    }
+  }
+
+  private writeOrganisms(organisms: readonly unknown[], writePage: (index: number, body: string, count: number) => Page,
+    faunaCorte?: readonly TramoFaunaCorte[]): Pages {
     const pages: Page[] = [], rows: string[] = [];
     let bytes = 2; // Opening and closing brackets.
     const flush = () => {
@@ -387,11 +422,21 @@ export class SnapshotParts {
       this.onProgress?.();
     };
     const count = organisms.length;
+    const remote = faunaCorte && this.faunaCorteRows(faunaCorte, count);
+    let candidate = remote?.next().value;
     for (let i = 0; i < count; i++) {
       const organism = organisms[i];
       if (!object(organism)) failure('organism row');
-      const row = stringifyExact(organism);
+      let row = stringifyExact(organism);
       if (typeof row !== 'string' || !row.startsWith('{')) failure('organism row');
+      if (candidate?.index === i) {
+        this.faunaStats.compared++;
+        if (candidate.row === row) {
+          this.faunaStats.accepted++;
+          row = candidate.row;
+        } else this.faunaStats.rejected++;
+        candidate = remote!.next().value;
+      }
       const size = Buffer.byteLength(row);
       if (rows.length && bytes + size + 1 > this.organismPageBytes) flush();
       bytes += size + Number(rows.length > 0);

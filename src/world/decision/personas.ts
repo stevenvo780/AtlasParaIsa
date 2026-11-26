@@ -469,9 +469,17 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   let huntPlan: { tile: Tile; victim: Animal; work: number } | undefined;
   let herdPlan: Animal | undefined;
   huntForecast: {
-    let huntCount = 0;
+    const emergente = params.quimica.emergente;
+    // Con `v23.fauna` el cuidado pasa por la ley moderna (`extraerDeAnimal`); con química y `v23.fauna`
+    // apagada solo puede entrar `herdPlan` si la persona es elegible y el animal está a distancia <= 2.
+    const quiereCuidar = emergente && !ley(world, 'fauna') && (person.hunger > 0.15 || !(person.compounds?.length));
+    let huntCount = 0, cercanasPorVer = 0;
     const huntOrder = reachableTiles.length <= chooseHuntOrder.length && own ? chooseHuntOrder : new Int16Array(reachableTiles.length);
-    for (let i = 0; i < reachableTiles.length; i++) if ((reachableTiles[i]!.fauna ?? 0) >= 1) huntOrder[huntCount++] = i;
+    for (let i = 0; i < reachableTiles.length; i++) {
+      if (!((reachableTiles[i]!.fauna ?? 0) >= 1)) continue;
+      huntOrder[huntCount++] = i;
+      if (quiereCuidar && reachableDist[i]! <= 2) cercanasPorVer++;
+    }
     for (let i = 1; i < huntCount; i++) {
       const idx = huntOrder[i]!, key = disputada ? reachableDist[idx]! + recelo(reachableTiles[idx]!) : reachableDist[idx]!;
       let j = i;
@@ -484,36 +492,36 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       }
       huntOrder[j] = idx;
     }
+    const baseWork = Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25));
     for (let h = 0; h < huntCount; h++) {
-      const tile = reachableTiles[huntOrder[h]!]!;
+      const ri = huntOrder[h]!, tile = reachableTiles[ri]!;
+      const puedeCuidarTile = quiereCuidar && reachableDist[ri]! <= 2;
+      // Sin `disputada` el orden ya crece en distancia (`cercanasPorVer === 0` al salir del radio 2);
+      // con `disputada` puede quedar alguna celda <= 2 detrás y solo se saltan las lejanas intermedias.
+      if (huntPlan && !puedeCuidarTile) continue;
       let victim: Animal | undefined;
       const enCelda = animalesVivosEnCelda(world, tile.x, tile.y);
-      if (enCelda) {
-          // La rejilla devuelve el orden de slot; el menor id con desempate por slot es la
-          // víctima del `filter(...).sort(...)` de siempre, sin ordenar la celda entera.
-        for (const animal of enCelda) {
-          if (params.quimica.emergente && canTend(animal, person, world.tick) && (!herdPlan || animal.id < herdPlan.id)) herdPlan = animal;
-          if (params.quimica.emergente && !huntable(animal, person.hunger)) continue;
-          if (!victim || animal.id < victim.id) victim = animal;
-        }
-      } else {
-        for (const animal of world.animals) {
-          if (animal.x !== tile.x || animal.y !== tile.y || !(animal.health > 0)) continue;
-          if (params.quimica.emergente && canTend(animal, person, world.tick) && (!herdPlan || animal.id < herdPlan.id)) herdPlan = animal;
-          if (params.quimica.emergente && !huntable(animal, person.hunger)) continue;
-          if (!victim || animal.id < victim.id) victim = animal;
-        }
+      const animales = enCelda ?? world.animals;
+      // La rejilla devuelve el orden de slot; el menor id con desempate por slot es la
+      // víctima del `filter(...).sort(...)` de siempre, sin ordenar la celda entera.
+      for (let i = 0; i < animales.length; i++) {
+        const animal = animales[i]!;
+        if (!enCelda && (animal.x !== tile.x || animal.y !== tile.y || !(animal.health > 0))) continue;
+        if (puedeCuidarTile && (!herdPlan || animal.id < herdPlan.id) && canTend(animal, person, world.tick)) herdPlan = animal;
+        if (huntPlan || (emergente && !huntable(animal, person.hunger))) continue;
+        if (!victim || animal.id < victim.id) victim = animal;
       }
-      const work = Math.max(0, (params.quimica.emergente && victim ? huntWorkDuration(person, victim) : Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25)))
-        - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
-      if (victim && !huntPlan && puedePagar(reachableSteps[huntOrder[h]!]!, work)) {
-        huntPlan = { tile, victim, work };
-        if (!params.quimica.emergente) break huntForecast;
+      if (!huntPlan && victim) {
+        const work = Math.max(0, (emergente ? huntWorkDuration(person, victim) : baseWork)
+          - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
+        if (puedePagar(reachableSteps[ri]!, work)) huntPlan = { tile, victim, work };
       }
+      if (puedeCuidarTile) cercanasPorVer--;
+      if (huntPlan && cercanasPorVer === 0) break huntForecast;
     }
   }
   const prey = huntPlan?.tile;
-  if (herdPlan && !ley(world, 'fauna') && (person.hunger > 0.15 || !(person.compounds?.length))) candidates.push({ action: 'forage', target: herdPlan,
+  if (herdPlan) candidates.push({ action: 'forage', target: herdPlan,
     score: Math.max(0, person.hunger - 0.1) * 2 + 0.35, reason: 'Percibe un animal habituado; recoge alimento y fibra sin matarlo, pagando tiempo y biomasa.' });
   if (cuerpo && food && basal > 0 && comidaCargada < basal * TICKS_PER_DAY && foodOf(food, soaCell(fast, food.x, food.y, food)) >= MIN_FORAGE_STOCK
     && puedePagar(stepsTo(food)!, forageDuration(person))) candidates.push({ action: 'forage', target: food,

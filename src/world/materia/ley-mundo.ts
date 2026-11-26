@@ -481,22 +481,18 @@ export function lanzarQuimicaSuelos(m: MundoMaterial, paso: PasoMateriaGpu, pagi
 
 // ── Vistas ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Los escalares de siempre van de 0 a 1 (madera y piedra, en sus unidades): la vista satura ahí, la materia no. */
+/** Fracciones de la vista escalar. Madera y piedra se expresan en kg. */
 const unidad = (x: number): number => x > 1 ? 1 : x > 0 ? x : 0;
-/** Fondo de escala de las vistas de madera (kg) y de piedra (kg) de una tesela: el intervalo que admite el guardado
- * (mundo/validar.ts) y el que pinta el cliente. Un tronco que crece por encima sigue en su lote; la vista no lo enseña. */
-const VISTA_MADERA_MAX = 12, VISTA_PIEDRA_MAX = 8;
-const hasta = (x: number, max: number): number => x > max ? max : x > 0 ? x : 0;
-
 /** Vuelca en la tesela las vistas de sus lotes. Un campo opcional que la tesela no tiene y vale 0 no se le añade. */
 function escribirTesela(e: Estado, i: number, t: Tile): void {
   const v = e.m.vista(i, e.v);
   t.food = unidad(v.food); t.moisture = unidad(v.moisture); t.vegetation = unidad(v.vegetation);
   if (t.drinkingWater !== undefined || v.drinkingWater > 0) t.drinkingWater = unidad(v.drinkingWater);
-  if (t.wood !== undefined || v.wood > 0) t.wood = hasta(v.wood, VISTA_MADERA_MAX);
-  if (t.stone !== undefined || v.stone > 0) t.stone = hasta(v.stone, VISTA_PIEDRA_MAX);
-  if (v.stone > VISTA_PIEDRA_MAX || t.rocaLatente !== undefined)
-    t.rocaLatente = v.stone > VISTA_PIEDRA_MAX ? e.m.latente[i] : undefined;
+  if (t.wood !== undefined || v.wood > 0) t.wood = v.wood;
+  if (t.stone !== undefined || v.stone > 0) t.stone = v.stone;
+  const latente = e.m.latente[i]!;
+  if (t.rocaLatente !== undefined || Math.round(v.stone * e.m.params.escalas.piedra) !== latente)
+    t.rocaLatente = latente;
   if (t.growth !== undefined || v.vegetation > 0) t.growth = unidad(v.vegetation);
   const fertilidad = unidad(e.m.fertilidad(i));
   if (t.fertility !== undefined || fertilidad > 0) t.fertility = fertilidad;

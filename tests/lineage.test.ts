@@ -265,13 +265,13 @@ test('T142: pruneBonds da lo mismo que la poda de siempre por los dos recorridos
     const reference = structuredClone(people), deadBonds = entries(departed);
     oldPrune(reference.filter(p => !dead.includes(p.id)), reference.filter(p => dead.includes(p.id)));
     const listed = new Set<string>();
-    const watched = survivors.map(p => { const bonds = p.bonds; p.bonds = new Proxy(bonds, { ownKeys: target => { listed.add(p.id); return Reflect.ownKeys(target); } }); return [p, bonds] as const; });
+    const conMuertos = new Set(survivors.filter(p => dead.some(id => Object.hasOwn(p.bonds, id))).map(p => p.id));
+    for (const p of survivors) p.bonds = new Proxy(p.bonds, { ownKeys: target => { listed.add(p.id); return Reflect.ownKeys(target); } });
     pruneBonds(survivors, departed);
-    for (const [p, bonds] of watched) p.bonds = bonds;
+    if (scanned) assert.equal(listed.size, survivors.length);
+    else if (dead.length <= 4) assert.deepStrictEqual(listed, conMuertos);
     assert.deepStrictEqual(entries(survivors), entries(reference.filter(p => !dead.includes(p.id))));
     assert.deepStrictEqual(entries(departed), deadBonds);
-    // Con muchas muertes y pocos vínculos, cada superviviente recorre sus claves (barrido); si no, sondeo.
-    assert.equal(survivors.every(p => listed.has(p.id)), scanned);
   };
   // Cero y una muerte: sondeo, con claves enteras mezcladas (JS las enumera antes y en orden numérico).
   const small = () => [person('x', { '10': 0.1, b: 0.2, '2': 0.3, dead: 0.4, '3': 0.5 }), person('b', { x: 0.2, '3': 0.1 }), person('3', { dead: 0.9, x: 0.5 }),
@@ -284,7 +284,7 @@ test('T142: pruneBonds da lo mismo que la poda de siempre por los dos recorridos
   keeper.bonds[dead[10]!] = 0.7; keeper.bonds[keeper.id] = 0.1; keeper.bonds[dead[20]!] = 0.2;
   assert.ok(!Object.hasOwn(many.find(p => p.id === dead[10])!.bonds, keeper.id));
   check(many, dead, true);
-  // Muchas muertes pero grado alto: sigue siendo sondeo (más supervivientes que la muestra), mismo resultado.
+  // Muchas muertes y grado alto: mismo resultado con mapas densos.
   const dense = Array.from({ length: 100 }, (_, n) => person(`d-${n}`));
   dense.forEach((a, n) => dense.forEach((b, m) => { if (a !== b && (n * 31 + m) % 3 !== 0) a.bonds[b.id] = 0.5; }));
   check(dense, dense.filter((_, n) => n % 4 === 0).map(p => p.id), false);

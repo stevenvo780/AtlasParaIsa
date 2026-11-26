@@ -922,7 +922,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     else person.huntingPreyId = undefined;
   }
   person.action = selected.action;
-  if (selected.action !== 'drink') delete person.technology.waterPreparation;
+  if (selected.action !== 'drink' && person.technology.waterPreparation !== undefined) person.technology.waterPreparation = undefined;
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
   person.target = { x: selected.target.x, y: selected.target.y };
   const policyDriven = politicaAutonomia > 0 && !selected.directed && (selected.policyDelta ?? 0) > 0.12

@@ -244,7 +244,7 @@ function settlementOverlay(animal: Animal, tick: number, state: LocalState, huma
 }
 
 /** Exactly one identity per saved stock unit. Neither traversal order nor the world's weather RNG is consumed. */
-export function materializeAnimals(seed: number, tiles: Tile[], tick: number): Animal[] {
+export function materializeAnimals(seed: number, tiles: Tile[], tick: number, faunaV23 = false): Animal[] {
   const animals: Animal[] = [];
   const positions = new Set<string>();
   const raw = residentBackingArray(tiles);
@@ -261,7 +261,9 @@ export function materializeAnimals(seed: number, tiles: Tile[], tick: number): A
         hunger: 0.24 + (hash(seed, `${id}:hunger`) % 18) / 100, thirst: 0.2, energy: 0.8, fatigue: 0.12, health: 1,
         generation: 0, parents: [], genes: genes(seed, id, tile.species!), age: MATURITY, bornAt: tick - MATURITY,
         lastBirth: tick - MATURITY, lastBirthAge: 0, lastDecision: tick - 12, lastMove: tick - 12,
-        target: { x: tile.x, y: tile.y }, memory: [], work: 0, preyId: null });
+        target: { x: tile.x, y: tile.y }, memory: [], work: 0, preyId: null,
+        ...(faunaV23 ? { cuerpo: undefined, fauna: undefined, uid: undefined, morphology: undefined, habituation: undefined,
+          tends: undefined, lastTended: undefined, lastHunted: undefined } : {}) });
     }
   }
   animals.sort(canonical);

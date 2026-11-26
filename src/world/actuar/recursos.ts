@@ -22,7 +22,10 @@ import { ley } from '../params.js';
 import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { REF_NULA } from '../motor/contratos.js';
 import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
-import { MASA_ADULTA_HUMANA, apetitoDeTejido, beber, beberEnCelda, comerEnCelda, energiaAlimento, ingerirSelecto, masaDe, soltar, trasladarAlimento } from '../materia/cuerpo.js';
+import {
+  MASA_ADULTA_HUMANA, apetitoDeTejido, beber, beberEnCelda, cargaKg, comerEnCelda, energiaAlimento,
+  ingerirSelecto, masaDe, soltar, trasladarAlimento,
+} from '../materia/cuerpo.js';
 import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
 import { madurezDe } from '../cohesion.js';
 
@@ -83,13 +86,20 @@ export function drink(world: World, person: Person, current: Tile, currentCell: 
 
 
 export function gatherResources(world: World, person: Person, tile: Tile): boolean {
-  if (person.cuerpo && ley(world, 'cuerpos') && ley(world, 'obra')) return recogerACuestas(world, person, person.cuerpo, tile);
+  const cuerpo = ley(world, 'cuerpos') ? person.cuerpo : undefined;
+  if (cuerpo && ley(world, 'obra')) return recogerACuestas(world, person, cuerpo, tile);
+  let espacio: number | undefined;
+  if (cuerpo) {
+    const c = ctxMateriaDe(world);
+    espacio = (masaDe(c, cuerpo) * Math.min(CARGA_MASA, CARGA_VOLUMEN) - cargaKg(c, person.carga ?? [])) / KG_POR_UNIDAD_MATERIAL
+      - person.materials.wood - person.materials.stone;
+  }
   let success = false;
   const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
   for (const material of [preferred, preferred === 'wood' ? 'stone' : 'wood'] as const) {
     const available = tile[material] ?? 0;
-    if (available < 1 || person.materials[material] >= (material === 'wood' ? 12 : 8)) continue;
-    const capacity=(material==='wood'?12:8)-person.materials[material];
+    const capacity = espacio ?? (material === 'wood' ? 12 : 8) - person.materials[material];
+    if (available < 1 || capacity <= 0) continue;
     const baseline=Math.min(1,capacity,available);
     const receipt=capacity>1&&available>1 ? useTool(world,person,material==='wood'?'cutting':'abrasion') : undefined;
     const chemBonus = paramsOf(world).quimica.emergente ? compoundToolBonus(person.compounds, material === 'wood' ? 'cutting' : 'abrasion') : 0;
@@ -130,7 +140,7 @@ export function forageFood(world: World, person: Person, tile: Tile): boolean {
 import type { TotalV23 } from '../totales-v23.js';
 
 // Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí.
-import { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG } from '../../shared/naturaleza.js';
+import { BOCADO_KG, CARGA_MASA, CARGA_VOLUMEN, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG } from '../../shared/naturaleza.js';
 export { BOCADO_KG, EXPONENTE_BOCADO, FORRAJEO_KG, KG_POR_UNIDAD_MATERIAL, SORBO_KG };
 
 /** Contadores de `world.totals` que lee el laboratorio (kg acumulados en la vida del mundo). */

@@ -107,8 +107,10 @@ export function defaultTechnologyState(): TechnologyState {
     ledger: { imported: empty(), estateLoss: empty(), work: 0, energy: 0, fuelMass: 0, attempts: 0, failures: 0, crafted: 0, toolUses: 0, shared: 0, recycled: 0 },
     budgets: { maxRecipes: 256, maxSteps: 12, maxInputs: 4, maxItems: 16, maxHistory: 256, maxGeneration: 32, maxMassPerInput: 4000 } };
 }
-export function initialTechnologyKnowledge(): TechnologyKnowledge {
-  return { knownRecipes: [], items: [], residue: empty(), attempts: 0, lastAttempt: -120, project: null, learnedFrom: [], competence: {} };
+export function initialTechnologyKnowledge(v23?: Pick<WorldParams['v23'], 'tecnica' | 'intentos'>): TechnologyKnowledge {
+  return { knownRecipes: [], items: [], residue: empty(), attempts: 0, lastAttempt: -120, project: null, learnedFrom: [], competence: {},
+    ...(v23?.tecnica || v23?.intentos ? { waterPreparation: undefined } : {}),
+    ...(v23?.tecnica ? { tecnica: nuevaTecnica() } : {}) };
 }
 /** Keep local instructions and practice bounded, including after stock leaves an actor. */
 export function maintainTechnologyMemory(host: TechnologyHost, actor: TechnologyActor): void {
@@ -310,7 +312,7 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   if (plan.waterTile) { plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000); marcarTesela(plan.waterTile); }
   for (const item of actor.technology.items) {
     const amount = plan.itemMasses.get(item.id) ?? 0;
-    if (amount && actor.technology.waterPreparation?.itemId === item.id) delete actor.technology.waterPreparation;
+    if (amount && actor.technology.waterPreparation?.itemId === item.id) actor.technology.waterPreparation = undefined;
     if (amount) settleContainedWaterCapacity(host, item, true);
     subtract(item.composition, plan.itemCompositions.get(item.id) ?? empty()); item.mass -= amount;
   }
@@ -354,7 +356,7 @@ function spendToolMaterial(actor: TechnologyActor, best: { item: MaterialBatch; 
 export function useTool(host: TechnologyHost, actor: TechnologyActor, capability: Capability, demand = 1): ToolReceipt | undefined {
   if (!CAPABILITIES.includes(capability) || !Number.isFinite(demand) || demand <= 0) return;
   const best = bestTool(actor, capability); if (!best) return;
-  if (actor.technology.waterPreparation?.itemId === best.item.id) delete actor.technology.waterPreparation;
+  if (actor.technology.waterPreparation?.itemId === best.item.id) actor.technology.waterPreparation = undefined;
   const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), { wear, debris, power } = spendToolMaterial(actor, best, demand);
   const waterLost = settleContainedWaterCapacity(host, best.item, best.item.mass === 0);
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
@@ -948,7 +950,7 @@ function fixedTechnologyAssets(host: TechnologyHost): NonNullable<StructureView[
  * Local transfers move the existing objects; unclaimed material exits the technology model
  * at that location and is explicitly accounted as loss, never invented ecological food. */
 export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyActor, recipients: TechnologyActor[] = []): { transfers: { to: string; items: string[]; mass: number }[]; lost: Composition; executionIds: string[] } {
-  delete actor.technology.waterPreparation;
+  if (actor.technology.waterPreparation !== undefined) actor.technology.waterPreparation = undefined;
   const result = { transfers: [] as { to: string; items: string[]; mass: number }[], lost: empty(), executionIds: [] as string[] };
   const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && isHostMember(host.people, p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
   for (const recipient of nearby) {

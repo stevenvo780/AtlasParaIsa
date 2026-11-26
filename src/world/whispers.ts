@@ -133,17 +133,18 @@ export function enqueueWhisper(
     const n = Number(w.id.slice(prefix.length));
     if (Number.isSafeInteger(n) && n >= sequence) sequence = n + 1;
   }
-  const created: DivineWhisper = {
+  const created: WhisperRecord = {
     id: `w-${tick}-${sequence}`,
     createdTick: tick,
     createdDay: day,
     personId: req.personId ?? null,
-    ...(personName ? { personName } : {}),
+    personName: personName || undefined,
     intent: req.intent,
     x: req.x,
     y: req.y,
     note: req.note ?? '',
     status: 'latent',
+    heardTick: undefined, resolvedTick: undefined, bestDistance: undefined, stalledChecks: undefined,
   };
   whispers.push(created);
   while (whispers.length > MAX_RETAINED_WHISPERS) whispers.shift();
@@ -178,7 +179,7 @@ export function riesgoDeOlvido(escucha: number): number {
 
 function resolve(w: WhisperRecord, status: 'fulfilled' | 'faded', tick: number) {
   w.status = status; w.resolvedTick = tick;
-  delete w.bestDistance; delete w.stalledChecks;
+  w.bestDistance = undefined; w.stalledChecks = undefined;
 }
 
 /**

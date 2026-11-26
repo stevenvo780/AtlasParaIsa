@@ -143,14 +143,14 @@ export function clavesDeHalo(x: number, y: number, out: string[] = []): string[]
  * envía a su dueño; `activate` hace lo mismo y además lo inserta. */
 export function tomarChunk(world: World, key: string, cx: number, cy: number, context: WorldContext = worldContext(world)): Chunk {
   const pending = pendingIndex(world.retiredChunks, key);
-  const cuencas = paramsOf(world).agua.cuencas;
+  const { agua: { cuencas }, v23 } = paramsOf(world);
   const lru = chunkLruFor(world);
   let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : lru.get(key);
   lru.delete(key);
   if (!archived && context.loadChunk) archived = context.loadChunk(key, world.tick) ?? undefined;
   const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
-  const tiles = chunk.tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
-  return { ...chunk, tiles, animals: chunk.animals ?? materializeAnimals(world.seed, tiles, world.tick),
+  const tiles = chunk.tiles.map(tile => initializeEcosystem(world.seed, v23.fauna ? { ...tile, species: tile.species } : tile, cuencas));
+  return { ...chunk, tiles, animals: chunk.animals ?? materializeAnimals(world.seed, tiles, world.tick, v23.fauna),
     structures: chunk.structures ?? legacyStructures(chunk.tiles, world.tick) };
 }
 
@@ -168,7 +168,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   // T035 ronda de arreglo (hallazgo crítico #2): `agua.cuencas` del MUNDO real, no el default
   // global de `generateChunk`/`initializeEcosystem` — este es el único sitio de producción que
   // materializa teselas nuevas en una partida.
-  const cuencas = paramsOf(world).agua.cuencas;
+  const { agua: { cuencas }, v23 } = paramsOf(world);
   // Both pending snapshots and host readers may share immutable archived objects.
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
   // Una vez reanimado el chunk vuelve a mutar en vivo: su copia dormida en la LRU deja de ser válida.
@@ -187,14 +187,14 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   const state = regions.get(world.chunks);
   if (state) { state.order.set(key, state.next++); state.added.push(key); }
   const initialized=tiles.map(tile => {
-    const initialized = initializeEcosystem(world.seed, tile, cuencas);
+    const initialized = initializeEcosystem(world.seed, v23.fauna ? { ...tile, species: tile.species } : tile, cuencas);
     return context.tileOwnership?.tile(initialized) ?? initialized;
   });
   const from = world.tiles.length;
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
   faunaCacheAppended(world.tiles, from);
-  world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
+  world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick, v23.fauna)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
   observadores.get(world)?.activado(key, cx, cy);

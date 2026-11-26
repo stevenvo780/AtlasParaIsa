@@ -116,7 +116,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   const varianzaFundadores = (params ?? DEFAULT_PARAMS).genes.varianzaFundadores;
   const politicaActiva = (params ?? DEFAULT_PARAMS).conducta.politicaPeso > 0;
   // Con v23.intentos, S e I llevan la memoria del encuentro desde el principio (m5; forma estable, regla h).
-  const intentosActivos = (params ?? DEFAULT_PARAMS).v23.intentos;
+  const v23 = (params ?? DEFAULT_PARAMS).v23;
   for (let n = 0; n < names.length; n++) {
     const place = world.places[Math.floor(n / 6) % world.places.length]!;
     const x = place.x + n % 3 - 1;
@@ -136,8 +136,11 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       heading: n * 2.399963229728653, command: null, work: 0, lastOutcome: 0, intentContext: 'ready', controlMode: 'auto',
       thirst: 0.15, genome: founderGenome(world.seed, id, traits, varianzaFundadores), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
       ...(politicaActiva ? { policy: founderPolicy(world.seed, id), policyPlasticity: initialPolicyPlasticity() } : {}),
-      ...(intentosActivos && n < 2 ? { partnerMemory: undefined } : {}),
-      technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
+      ...(v23.intentos && n < 2 ? { partnerMemory: undefined } : {}),
+      ...(v23.cohesion ? { home: undefined } : {}),
+      ...(v23.natalidad && !v23.cuerpos ? { gestacion: undefined } : {}),
+      ...(v23.cuerpos ? { cuerpo: undefined, carga: [] } : {}),
+      technology: initialTechnologyKnowledge(v23), demography: initialDemography(4800),
     });
   }
   for (const person of world.people) {

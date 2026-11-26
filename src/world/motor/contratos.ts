@@ -408,6 +408,8 @@ export interface Motor {
   reparto(): import('../../shared/vistas-v23.js').RepartoVisible | undefined;
   /** Muestreo de laboratorio a demanda, entre pasos, sin reunir ni copiar el mundo. */
   muestraCarga(): MuestraCargaMotor | undefined;
+  /** Tiempos sin suavizar del último paso confirmado, disponibles con `medirPaso`. */
+  muestraPerfilPaso(): PerfilPasoMotor | undefined;
   cerrar(): Promise<void>;
 }
 
@@ -434,6 +436,27 @@ export interface MuestraCargaMotor {
   claseDesconocida: number;
   /** Tiempos totales por dueño del último tick, sin EMA. Los conteos corresponden al frente al cierre de ese tick. */
   fasesPorDuenoMs: { F1: number; eco: number; F2: number; F3F4: number; F5F6: number; total: number }[] | null;
+}
+
+export interface PerfilTramoMotor {
+  readonly tramo: 'percibir' | 'actuar' | 'aplicar' | 'publicar';
+  readonly paredMs: number;
+  /** Tiempo desde que el coordinador termina su propio trabajo hasta que concluye la barrera. Se solapa con otros dueños. */
+  readonly esperaCoordinadorMs: number;
+}
+
+export interface PerfilPasoMotor {
+  readonly tick: number;
+  readonly epoca: number;
+  readonly paredMs: number;
+  readonly F0Ms: number;
+  /** En CPU1 el conductor incluye el cierre en F6 y no tiene barreras de piscina. */
+  readonly cierreMs: number | null;
+  readonly tramos: readonly PerfilTramoMotor[];
+  /** En orden de dueño. CPU1 mide juntas F3 y F4. Todos los valores son tiempo de pared, incluidos bloqueos del dueño. */
+  readonly fasesPorDuenoMs: readonly Readonly<{
+    F1: number; eco: number; F2: number; F3F4: number; F3: number | null; F4: number | null; F5: number; F6: number;
+  }>[];
 }
 
 /** Implementan: M4a y M7. Consumen: V1 (panel «Motor»), 0C (diagnóstico), M8 (banco). */
@@ -482,6 +505,8 @@ export interface MotorConfig {
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)
   medirBrokerGpu?: boolean;              // contadores acumulados opcionales del banco de percepción distribuida
+  /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */
+  medirPaso?: boolean;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de
    * dueños), con el máximo que fija el proceso; el reloj nunca altera las leyes. Lo suministra srv (`motorConfig`). */
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };

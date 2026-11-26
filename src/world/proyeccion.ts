@@ -38,11 +38,19 @@ export const VIEW_EVENTS = 40, VIEW_MEMORIES = 100;
  * An absent datum stays absent; rounding never invents a zero. */
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 const viewNumber = <T extends number | undefined>(value: T): T => (typeof value === 'number' ? r3(value) : value) as T;
+/** El empedrado pequeño viaja con tres cifras significativas y la calzada se dibuja a partir de 0,5. */
+export function projectPaving(paved: number | undefined): number | undefined {
+  if (typeof paved !== 'number' || paved === 0) return undefined;
+  if (paved > 0 && paved < 0.001) return Number(paved.toPrecision(3));
+  const rounded = r3(paved);
+  return paved < 0.5 && rounded === 0.5 ? paved : rounded;
+}
 /** T036(h): las cantidades (existencias, huellas, fauna) no viajan cuando valen 0; el cliente las lee
  * con `?? 0`. Las magnitudes del terreno viajan siempre, porque ahí un cero es un dato. Se asignan
  * directamente (sin objetos ni spreads intermedios por tesela). */
 function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast?: ResidentFastAccess): Tile {
   const cell = fast ? fast.cellOf(t as Tile) : -1;
+  const paved = projectPaving(t.paved);
   if (cell >= 0 && fast) {
     const tc = fast.terrainArr[cell]!, bc = fast.biomeArr[cell]!, fc = fast.featureArr[cell]!;
     const mo = fast.moistureArr[cell]!, fo = fast.foodArr[cell]!, ve = fast.vegetationArr[cell]!;
@@ -65,7 +73,7 @@ function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast
     if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
     const cu = fast.cultivationArr[cell]!; if (cu === cu && cu !== 0) out.cultivation = r3(cu);
     const tr = fast.trafficArr[cell]!; if (tr === tr && tr !== 0) out.traffic = r3(tr);
-    if (typeof t.paved === 'number' && t.paved !== 0) out.paved = r3(t.paved);
+    if (paved !== undefined) out.paved = paved;
     const dw = fast.drinkingWaterArr[cell]!; if (dw === dw && dw !== 0) out.drinkingWater = r3(dw);
     if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
     const li = fast.lifeArr[cell]!; if (li === li && li !== 0) out.life = r3(li);
@@ -77,7 +85,7 @@ function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast
   if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
   if (typeof t.cultivation === 'number' && t.cultivation !== 0) out.cultivation = r3(t.cultivation);
   if (typeof t.traffic === 'number' && t.traffic !== 0) out.traffic = r3(t.traffic);
-  if (typeof t.paved === 'number' && t.paved !== 0) out.paved = r3(t.paved);
+  if (paved !== undefined) out.paved = paved;
   if (typeof t.drinkingWater === 'number' && t.drinkingWater !== 0) out.drinkingWater = r3(t.drinkingWater);
   if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
   if (typeof t.life === 'number' && t.life !== 0) out.life = r3(t.life);

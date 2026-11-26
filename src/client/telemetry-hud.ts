@@ -4,6 +4,7 @@ import { esc, number, percentage } from './ui-catalog.js';
 import { censoDe } from './censo-view.js';
 import type { WorldDirectoryResponse } from '../shared/worldmap.js';
 import type { EstadoSalud, LuzSalud } from './panel-motor.js';
+import { DIRT_TRAFFIC, PAVED_LEVEL } from './road-geology-art.js';
 import { ELEMENTS, geologyAt, type ChemOperator, type ChemistrySummaryView, type CompoundLot, type ElementSymbol, type ElementVector, type ThermalPhase } from '../shared/chemistry.js';
 
 export type HudNav = 'people' | 'life' | 'communities' | 'animals' | 'land' | 'technology' | 'performance';
@@ -226,17 +227,29 @@ export function swatch(color: string | undefined): string { return `<i class="ch
 export type RoadState = 'none' | 'trail' | 'paved';
 export function roadState(tile: { traffic?: number; paved?: number; terrain?: string }): RoadState {
   if (tile.terrain === 'water') return 'none';
-  if (count(tile.paved) >= .5) return 'paved';
-  return count(tile.traffic) >= .25 ? 'trail' : 'none';
+  if (count(tile.paved) >= PAVED_LEVEL) return 'paved';
+  return count(tile.traffic) >= DIRT_TRAFFIC ? 'trail' : 'none';
 }
 /** Alivio de esfuerzo al pisar la casilla. Refleja `roadEffortFactor` del servidor V20: 1 − min(0,55; tráfico·0,45 + empedrado·0,15). */
 export function roadEffortRelief(tile: { traffic?: number; paved?: number }): number {
   return Math.min(.55, Math.max(0, Math.min(1, count(tile.traffic))) * .45 + Math.max(0, Math.min(1, count(tile.paved))) * .15);
 }
 const roadLabels: Record<RoadState, string> = { none: 'Sin sendero', trail: 'Sendero pisado', paved: 'Calzada empedrada' };
+function pavingFact(paved: number | undefined): string {
+  let label = 'Pavimento', value = 'No informado';
+  if (finite(paved)) {
+    if (paved > 0 && paved < PAVED_LEVEL) {
+      label = 'Empedrado incipiente';
+      const rounded = Number(paved.toPrecision(3));
+      const index = rounded < PAVED_LEVEL ? rounded : Number(paved.toPrecision(6));
+      value = index < PAVED_LEVEL ? String(index).replace('.', ',') : '<0,5';
+    } else value = number(paved, 3);
+  }
+  return `<span data-tile-paved title="El mapa dibuja una calzada a partir de 0,5.">${label} · índice 0–1<strong>${esc(value)}</strong></span>`;
+}
 export function roadSection(tile: { traffic?: number; paved?: number; terrain?: string }): string {
   const state = roadState(tile), relief = roadEffortRelief(tile);
-  return `<div class="telemetry-facts" data-tile-road="${state}"><span>Camino<strong>${esc(roadLabels[state])}</strong></span><span>Alivio de esfuerzo<strong>${esc(percentage(relief))}</strong></span>${tile.paved !== undefined ? `<span>Empedrado<strong>${esc(percentage(tile.paved))}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${esc(number(tile.traffic, 2))}</strong></span>` : ''}</div>`;
+  return `<div class="telemetry-facts" data-tile-road="${state}"><span>Camino<strong>${esc(roadLabels[state])}</strong></span><span>Alivio de esfuerzo<strong>${esc(percentage(relief))}</strong></span>${pavingFact(tile.paved)}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${esc(number(tile.traffic, 2))}</strong></span>` : ''}</div>`;
 }
 
 /** Insignias compactas de cada elemento; la veta que aflora en el mapa (Fe ≥ 24 %, Ca ≥ 28 %, S ≥ 22 %) se marca. */

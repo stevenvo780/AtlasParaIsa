@@ -1,4 +1,4 @@
-import { progresoConstruccion, projectChemistry } from '../world/proyeccion.js';
+import { progresoConstruccion, projectChemistry, projectPaving } from '../world/proyeccion.js';
 import { publicGeologyKey } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
@@ -89,15 +89,16 @@ function refreshSoaTile(previous: Tile, fast: ResidentFastAccess, cell: number):
  * directamente (sin objetos ni spreads intermedios por tesela). */
 export function projectMirrorTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast?: ResidentFastAccess): Tile {
   const cell = fast ? fast.cellOf(t as Tile) : -1;
+  const paved = projectPaving(t.paved);
   if (cell >= 0 && fast) return projectSoaTile(fast, cell, t.x, t.y, viewNumber(t.elevation), t.species,
-    nonZero(t.stone), nonZero(t.variety), nonZero(t.paved), nonZero(t.fauna));
+    nonZero(t.stone), nonZero(t.variety), paved, nonZero(t.fauna));
   const out: Tile = { x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species };
   if (typeof t.wood === 'number' && t.wood !== 0) out.wood = r3(t.wood);
   if (typeof t.stone === 'number' && t.stone !== 0) out.stone = r3(t.stone);
   if (typeof t.variety === 'number' && t.variety !== 0) out.variety = r3(t.variety);
   if (typeof t.cultivation === 'number' && t.cultivation !== 0) out.cultivation = r3(t.cultivation);
   if (typeof t.traffic === 'number' && t.traffic !== 0) out.traffic = r3(t.traffic);
-  if (typeof t.paved === 'number' && t.paved !== 0) out.paved = r3(t.paved);
+  if (paved !== undefined) out.paved = paved;
   if (typeof t.drinkingWater === 'number' && t.drinkingWater !== 0) out.drinkingWater = r3(t.drinkingWater);
   if (typeof t.fauna === 'number' && t.fauna !== 0) out.fauna = r3(t.fauna);
   if (typeof t.life === 'number' && t.life !== 0) out.life = r3(t.life);

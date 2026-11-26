@@ -345,6 +345,20 @@ test('renderTileTelemetry: camino, alivio de esfuerzo y geología local desde la
   assert.equal(elementBadges(geologyAt(7, 3, 4, 'mountain', 'rock')).match(/<span class="element-badge/g)!.length, 6);
 });
 
+test('renderTileTelemetry: informa el empedrado incipiente sin dibujar una calzada', () => {
+  for (const [real, index] of [[0.0000991224, '0,0000991'], [0.0001257473, '0,000126'], [0.4999, '0,4999']] as const) {
+    const camino = tile({ traffic: 0.823, paved: Math.fround(real) });
+    const html = renderTileTelemetry(camino);
+    assert.match(html, /data-tile-road="trail"/);
+    assert.ok(html.includes(`Empedrado incipiente · índice 0–1<strong>${index}</strong>`));
+    assert.equal(roadKind(camino), 'dirt');
+  }
+  assert.ok(renderTileTelemetry(tile()).includes('índice 0–1<strong>No informado</strong>'));
+  assert.ok(renderTileTelemetry(tile({ paved: 0 })).includes('índice 0–1<strong>0</strong>'));
+  assert.match(renderTileTelemetry(tile({ paved: 0.5 })), /data-tile-road="paved".*Calzada empedrada/);
+  assert.equal(roadKind(tile({ paved: 0.5 })), 'paved');
+});
+
 test('Ahora de la persona muestra los compuestos que lleva', () => {
   const person = { id: 'p', name: 'P', role: 'neighbor', x: 0, y: 0, color: '#abc', action: 'build', reason: '', energy: .6, hunger: .2, fatigue: .1, need: 'Agua', recentMemory: null,
     compounds: [lot('x', 'fired', '#8a3b2c', 1.25)] } as unknown as PersonView;

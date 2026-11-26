@@ -4,12 +4,12 @@ import type { Tile } from '../src/shared/types.js';
 import { publicGeologyKey, type ChemicalFormulaView, type CompoundLot } from '../src/shared/chemistry.js';
 import {
   cloneWorld, closePolicyGpuBatchers,
-  createWorld, projectWorld, roadEffortFactor, stepWorld, tileAt, type World,
+  createWorld, normalizeViewport, projectWorld, roadEffortFactor, stepWorld, tileAt, type World,
 } from '../src/world/index.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import { closeEcosystemWorkers, initializeEcosystem, stepEcosystem, stepLocalEcology } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { projectMirrorTile, projectMirrorWorld } from '../src/server/sim-worker.js';
+import { projectMirrorTile, projectMirrorWorld, teselasParaEmision } from '../src/server/sim-worker.js';
 import { decodeSnapshotTileRows, encodeSnapshotTileRows } from '../src/server/snapshot.js';
 import { ResidentTopologyOwner } from '../src/world/soa/topologia.js';
 import { residentFastAccess, TileStore } from '../src/world/soa/terreno.js';
@@ -203,8 +203,14 @@ const lot: CompoundLot = { id: 'lot1', formulaId: 'f1', composition, properties,
 
 for (const soa of [false, true]) test(`world/mirror projection, V20 statistics and snapshot paving round-trip (${soa ? 'resident SoA' : 'objects'})`, () => {
   const world = createWorld(42);
-  const [a, b, c] = world.tiles;
-  a!.paved = 0.87654; b!.paved = 0; c!.paved = 0.49;
+  const roads = [0.87654, 0, 0.49, undefined, 0.0000991224, 0.0001257473, 0.4999];
+  const projectedRoads = [0.877, undefined, 0.49, undefined, 0.0000991, 0.000126, 0.4999];
+  const camera = normalizeViewport();
+  const inCamera = () => world.tiles.filter(t => t.x >= camera.x && t.x < camera.x + camera.width
+    && t.y >= camera.y && t.y < camera.y + camera.height).slice(0, roads.length);
+  const tiles = inCamera();
+  assert.equal(tiles.length, roads.length);
+  for (const [i, tile] of tiles.entries()) if (roads[i] !== undefined) tile.paved = roads[i];
   world.people[2]!.compounds = [structuredClone(lot)];
   world.chemistry = { formulas: [structuredClone(formula)], privateLedger: 'must not cross the wire' } as unknown as typeof world.chemistry;
   const structure = { ...world.structures[0]!, cells: [{ x: 1, y: 1 }, { x: 2, y: 1 }],
@@ -219,9 +225,10 @@ for (const soa of [false, true]) test(`world/mirror projection, V20 statistics a
   }
   try {
     const fast = residentFastAccess(world.tiles);
-    for (const t of world.tiles.slice(0, 4)) {
+    const residentTiles = inCamera();
+    for (const [i, t] of residentTiles.entries()) {
       const mirrored = projectMirrorTile(t, fast);
-      assert.equal(mirrored.paved, t.paved ? Math.round(t.paved * 1000) / 1000 : undefined);
+      assert.equal(mirrored.paved, projectedRoads[i]);
       if (!t.paved) assert.ok(!Object.hasOwn(mirrored, 'paved'));
     }
     const view = projectWorld(world), mirror = projectMirrorWorld(world);
@@ -243,10 +250,17 @@ for (const soa of [false, true]) test(`world/mirror projection, V20 statistics a
       v.chemistry!.formulas[0]!.composition.Si = 999;
       assert.equal((world.chemistry as { formulas: ChemicalFormulaView[] }).formulas[0]!.composition.Si, 10);
     }
-    for (const t of view.tiles) if (t.x === a!.x && t.y === a!.y) assert.equal(t.paved, 0.877);
-    const rows = JSON.parse(JSON.stringify(encodeSnapshotTileRows(world.tiles.slice(0, 4)))) as unknown[];
+    for (const projectedTiles of [view.tiles, [...teselasParaEmision(world).values()].flat()]) {
+      for (const [i, tile] of residentTiles.entries()) {
+        const projected = projectedTiles.find(t => t.x === tile.x && t.y === tile.y);
+        assert.ok(projected);
+        assert.equal(projected.paved, projectedRoads[i]);
+        assert.equal(Object.hasOwn(projected, 'paved'), projectedRoads[i] !== undefined);
+      }
+    }
+    const rows = JSON.parse(JSON.stringify(encodeSnapshotTileRows(residentTiles))) as unknown[];
     const restored = decodeSnapshotTileRows(rows);
-    assert.deepEqual(restored.map(t => t.paved), [0.87654, 0, 0.49, undefined]);
+    assert.deepEqual(restored.map(t => t.paved), roads);
     assert.ok(!Object.hasOwn(restored[3]!, 'paved'));
   } finally { store?.releaseParallelObjects(); }
 });

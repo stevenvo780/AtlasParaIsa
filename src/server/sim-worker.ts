@@ -527,6 +527,7 @@ export class GrabadorCinta {
   private reintentoEn = -Infinity;
   private sinCreditoDesde?: number;
   private ultimoEntregado = 0n;
+  private ultimosSucesosLeidos = 0n;
   private siguiente = 0;
   private cerrando = false;
   private enError = false;
@@ -615,9 +616,20 @@ export class GrabadorCinta {
       return;
     }
     const entregados = Atomics.load(this.hilo.enlace.entregados, 0);
-    const huboAvance = entregados !== this.ultimoEntregado;
+    let huboAvance = entregados !== this.ultimoEntregado;
+    let pendientesPorPuerto = false;
     this.ultimoEntregado = entregados;
-    if (huboAvance || Atomics.load(this.hilo.enlace.creditos, 0) > 0) { this.sinCreditoDesde = undefined; return; }
+    if (this.hilo.enlace.sucesosDirectosBytes !== undefined) {
+      const escritos = Atomics.load(this.hilo.enlace.sucesosEscritos, 0);
+      const leidos = Atomics.load(this.hilo.enlace.sucesosLeidos, 0);
+      pendientesPorPuerto = escritos > leidos;
+      huboAvance ||= leidos !== this.ultimosSucesosLeidos;
+      this.ultimosSucesosLeidos = leidos;
+    }
+    if (huboAvance || !pendientesPorPuerto && Atomics.load(this.hilo.enlace.creditos, 0) > 0) {
+      this.sinCreditoDesde = undefined;
+      return;
+    }
     const ahora = performance.now();
     if (ahora - (this.sinCreditoDesde ??= ahora) >= plazo) {
       this.fallar(new Error(`La cinta no devolvió ningún corte en ${Math.ceil(plazo / 1000)} s.`));
@@ -630,10 +642,11 @@ export class GrabadorCinta {
     this.hilo = undefined;
     this.sinCreditoDesde = undefined;
     this.ultimoEntregado = 0n;
+    this.ultimosSucesosLeidos = 0n;
     this.reintentoEn = performance.now() + REINTENTO_CINTA_MS;
     if (hilo) {
-      Atomics.store(hilo.enlace.creditos, 0, 0);
       Atomics.store(hilo.enlace.sucesosLeidos, 0, -1n);
+      Atomics.store(hilo.enlace.creditos, 0, 0);
       this.esperaSalida = hilo.salida;
       void hilo.worker.terminate().catch(() => undefined);
       void hilo.salida.then(() => {

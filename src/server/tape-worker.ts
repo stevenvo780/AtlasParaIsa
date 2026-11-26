@@ -81,7 +81,12 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
   let desahogo: NodeJS.Immediate | undefined;
 
   function fallar(error: unknown): void {
-    if (enlaceRoto) lotes.clear();
+    if (enlaceRoto) return;
+    enlaceRoto = true;
+    lotes.clear();
+    Atomics.store(enlace.sucesosLeidos, 0, -1n);
+    Atomics.store(enlace.creditos, 0, 0);
+    Atomics.notify(enlace.sucesosLeidos, 0);
     try { escritor?.close(false); } catch { /* conserva el fallo original de la cinta */ }
     escritor = undefined;
     vista = undefined;
@@ -119,10 +124,9 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
           escritor.registrar(corte, false);
           previoBinario = corte.t;
         }), lote);
-        if (!disponible) break;
+        if (!disponible || enlaceRoto) break;
       } catch (error) {
         // Un error de protocolo requiere un enlace nuevo incluso si el escritor se reabre.
-        enlaceRoto = true;
         fallar(error);
         break;
       }
@@ -145,16 +149,14 @@ if (!isMainThread && workerData?.role === 'carta-tape') {
   }), FLUSH_MS);
 
   port.on('message', (message: TapeWorkerRequest) => ejecutar(() => {
+    if (enlaceRoto && message.type !== 'flush' && message.type !== 'close') return;
     if (message.type === 'sucesos-directos') {
-      if (enlaceRoto) return;
       if (!directos || lotes.size >= cabeceras.length || message.secuencia !== leidos + BigInt(lotes.size)) {
-        enlaceRoto = true;
         throw new Error('Sucesos de cinta por puerto fuera de orden o sin crédito.');
       }
       lotes.set(message.secuencia, message);
       leerRanuras();
     } else if (message.type === 'abrir') {
-      if (enlaceRoto) throw new Error('La cinta binaria necesita un enlace nuevo.');
       if (cabeceras.length && escritor) leerRanuras();
       if (enlaceRoto) return;
       apertura = message.apertura;

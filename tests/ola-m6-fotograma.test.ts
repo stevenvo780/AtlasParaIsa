@@ -291,11 +291,15 @@ test('los bloques directos conservan los sucesos del anillo y el crédito hasta 
   let esperados: readonly Suceso[] = [];
   assert.ok(leerFotograma(anillo, 0n, (_, sucesos) => { esperados = sucesos; }));
 
-  const directo = enlaceCinta({ control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES), ranuras: anillo.ranuras,
-    sucesos: null, sucesosDirectosBytes: 8192 });
   const escritos = Atomics.load(anillo.sucesosEscritos, 0);
-  Atomics.store(directo.sucesosEscritos, 0, escritos);
-  Atomics.store(directo.entregados, 0, 1n);
+  function enlaceDirecto(): EnlaceCinta {
+    const link = enlaceCinta({ control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES), ranuras: anillo.ranuras,
+      sucesos: null, sucesosDirectosBytes: 8192 });
+    Atomics.store(link.sucesosEscritos, 0, escritos);
+    Atomics.store(link.entregados, 0, 1n);
+    return link;
+  }
+  const directo = enlaceDirecto();
   const lote: SucesosFotogramaDirectos = { type: 'sucesos-directos', secuencia: 0n, epoca: 1, tick: c.tick,
     desde: 0, hasta: Number(escritos), bloques: [bloqueCronica, bloqueTextos] };
   const sinConsumo = () => assert.fail('el lector llamó al consumidor antes de validar el sobre');
@@ -313,4 +317,9 @@ test('los bloques directos conservan los sucesos del anillo y el crédito hasta 
   }, lote));
   assert.equal(Atomics.load(directo.sucesosLeidos, 0), escritos);
   assert.equal(Atomics.load(directo.creditos, 0), 1);
+
+  const abandonado = enlaceDirecto();
+  leerFotograma(abandonado, 0n, () => { Atomics.store(abandonado.sucesosLeidos, 0, -1n); }, lote);
+  assert.equal(Atomics.load(abandonado.sucesosLeidos, 0), -1n);
+  assert.equal(Atomics.load(abandonado.creditos, 0), 0);
 });

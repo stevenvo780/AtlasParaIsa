@@ -291,9 +291,13 @@ function leerSucesosDirectos(f: Fotograma, leidos: bigint, lote: SucesosFotogram
   return sucesos;
 }
 
-function marcarSucesosLeidos(enlace: EnlaceCinta, hasta: number): void {
-  Atomics.store(enlace.sucesosLeidos, 0, BigInt(hasta));
+function marcarSucesosLeidos(enlace: EnlaceCinta, desde: number, hasta: number): boolean {
+  const esperado = BigInt(desde);
+  const previo = Atomics.compareExchange(enlace.sucesosLeidos, 0, esperado, BigInt(hasta));
+  if (previo < 0n) return false;
+  if (previo !== esperado) throw new Error('El cursor de sucesos de cinta cambió durante la lectura.');
   Atomics.notify(enlace.sucesosLeidos, 0);
+  return true;
 }
 
 /** Lee los sucesos antes de prestar las vistas de la ranura a la cinta. */
@@ -308,14 +312,18 @@ export function leerFotograma(enlace: EnlaceCinta, leidos: bigint,
   const sucesos = capacidadDirecta === undefined || directos === undefined
     ? leerSucesosAnillo(enlace.sucesos, f.sucesos)
     : leerSucesosDirectos(f, leidos, directos, capacidadDirecta);
-  const hasta = f.sucesos[1];
-  if (capacidadDirecta === undefined) marcarSucesosLeidos(enlace, hasta);
+  const [desde, hasta] = f.sucesos;
+  if (capacidadDirecta === undefined && !marcarSucesosLeidos(enlace, desde, hasta)) return false;
   try {
     usar(f, sucesos);
   } finally {
     // El sobre directo sigue ocupando su presupuesto hasta soltar la ranura.
-    if (capacidadDirecta !== undefined) marcarSucesosLeidos(enlace, hasta);
-    Atomics.add(enlace.creditos, 0, 1);
+    if (capacidadDirecta !== undefined) marcarSucesosLeidos(enlace, desde, hasta);
+    if (Atomics.load(enlace.sucesosLeidos, 0) >= 0n) {
+      Atomics.add(enlace.creditos, 0, 1);
+      // El supervisor puede abandonar el enlace entre la comprobación y la devolución.
+      if (Atomics.load(enlace.sucesosLeidos, 0) < 0n) Atomics.store(enlace.creditos, 0, 0);
+    }
   }
   return true;
 }

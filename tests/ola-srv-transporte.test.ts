@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { telemetriaEnJson, type SaludServidor } from '../src/server/app.js';
 import { saludDelEspejo } from '../src/server/gateway.js';
-import { descriptorCinta } from '../src/server/sim-worker.js';
+import { descriptorCinta, GrabadorCinta } from '../src/server/sim-worker.js';
 import { enlaceCinta } from '../src/shared/fotograma.js';
 import type { TelemetriaMotor } from '../src/world/motor/contratos.js';
 
@@ -20,6 +23,30 @@ test('el enlace binario arranca con un crédito por ranura y un anillo separado'
   const clasico = enlaceCinta(descriptorCinta(false));
   assert.equal(clasico.ranuras.length, 0);
   assert.equal(clasico.sucesos, null);
+});
+
+test('el vigilante detecta un puerto sin avance de bytes aunque queden ranuras', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-cinta-sin-credito-'));
+  const anterior = process.env.CARTA_CINTA_SUCESOS_DIRECTOS;
+  const avisos: (string | null)[] = [];
+  const grabador = new GrabadorCinta(dir, undefined, true, error => avisos.push(error), () => undefined);
+  t.after(async () => { try { await grabador.cerrar(); } finally { rmSync(dir, { recursive: true, force: true }); } });
+  process.env.CARTA_CINTA_SUCESOS_DIRECTOS = '1';
+  try { assert.ok(grabador.iniciar()); }
+  finally {
+    if (anterior === undefined) delete process.env.CARTA_CINTA_SUCESOS_DIRECTOS;
+    else process.env.CARTA_CINTA_SUCESOS_DIRECTOS = anterior;
+  }
+  const enlace = grabador.activo!;
+  Atomics.store(enlace.sucesosEscritos, 0, 16n);
+  Atomics.store(enlace.sucesosLeidos, 0, 8n);
+  assert.ok(Atomics.load(enlace.creditos, 0) > 0);
+  grabador.comprobarCredito(0);
+  assert.equal(grabador.estado, 'ok');
+  grabador.comprobarCredito(0);
+  assert.equal(grabador.estado, 'error');
+  assert.match(avisos[0] ?? '', /no devolvió ningún corte/);
+  assert.equal(Atomics.load(enlace.sucesosLeidos, 0), -1n);
 });
 
 test('la ocupación se convierte en una lista JSON independiente del buffer del motor', () => {

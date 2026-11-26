@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { setTimeout as esperar } from 'node:timers/promises';
 import test from 'node:test';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
@@ -711,6 +712,41 @@ if (isMainThread) test('el índice VMAT conserva el orden de ranuras y de reutil
     assert.throws(() => indexarPaginas(1, corrupto), /Ranura de materia duplicada|Ranuras de materia no consecutivas/);
   }
   assert.throws(() => indexarPaginas(1, bytes.subarray(0, bytes.length - 1)), /truncado/);
+});
+
+if (isMainThread) test('el escritor VMAT en dos pasadas conserva los bytes canónicos y rechaza fuentes inconsistentes', () => {
+  const max = Number.MAX_SAFE_INTEGER, u32 = 0xffff_ffff;
+  const lotes = [
+    { ref: refDe(2, 7), celda: max, rol: Rol.Suelo, forma: u32, dueno: u32, pares: Float64Array.of(u32, max, 0, 17, 1, 0) },
+    { ref: refDe(0, 4), celda: 256, rol: Rol.Aire, forma: 0, dueno: 1, pares: Float64Array.of(1, 12) },
+    { ref: refDe(3, 1), celda: max - 1, rol: Rol.Vida, forma: 0, dueno: 0, pares: Float64Array.of(2, 3, 4, 5) },
+    { ref: refDe(5, 9), celda: REF_NULA, rol: Rol.Objeto, forma: 91, dueno: 1, pares: new Float64Array(0) },
+  ];
+  const libres = [refDe(4, genDe(max)), refDe(1, 17)];
+  let pasadasLotes = 0, pasadasLibres = 0;
+  const bytes = codificarPaginas(max, () => { pasadasLotes++; return lotes; }, () => { pasadasLibres++; return libres; });
+  assert.equal(pasadasLotes, 2);
+  assert.equal(pasadasLibres, 2);
+  assert.equal(bytes.byteLength, 332);
+  assert.equal(bytes.buffer.byteLength, bytes.byteLength);
+  // Digest capturado del escritor original en 9cb82e2 con esta misma entrada.
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), '03eb9f28dc9d0899dcd750a12faed5af5a1971eab702839ad66ddd7e3c1d47bb');
+  assert.deepEqual(decodificarPaginas(max, bytes), { lotes: [lotes[0], lotes[2], lotes[1], lotes[3]], libres });
+
+  const duplicado = { ...lotes[2]!, celda: max, rol: Rol.Suelo };
+  assert.throws(() => codificarPaginas(max, () => [lotes[0]!, lotes[1]!, duplicado, lotes[3]!], libres), /Lote exclusivo duplicado/);
+  assert.throws(() => codificarPaginas(max, lotes, () => [lotes[0]!.ref, libres[1]!]), /Ranura de materia duplicada/);
+  assert.throws(() => codificarPaginas(max, lotes, () => [refDe(9, 0), libres[1]!]), /Ranuras de materia no consecutivas/);
+  let primera = true;
+  assert.throws(() => codificarPaginas(max, () => {
+    if (primera) { primera = false; return lotes; }
+    return lotes.slice(1);
+  }, libres), /Los lotes cambiaron/);
+  primera = true;
+  assert.throws(() => codificarPaginas(max, lotes, () => {
+    if (primera) { primera = false; return libres; }
+    return [...libres, refDe(6, 1)];
+  }), /Las ranuras retiradas cambiaron/);
 });
 
 if (isMainThread) test('el registro comprueba el balance global a los 2.400 ticks, incluso con asientos sin plegar', async () => {

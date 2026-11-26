@@ -337,6 +337,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
   assert.ok(repartoInicialValido(brazo), 'El reparto inicial por población exige más de un dueño');
   if (afinidad) assert.deepEqual(cpusDeAfinidad(afinidadActual()), afinidad, 'Afinidad efectiva distinta de la solicitada');
   const indiceUidCompartido = hilos > 1 && process.env.CARTA_INDICE_UID === '1';
+  const instantaneaTransferible = hilos > 1 && process.env.CARTA_CORTE_TRANSFERIBLE === '1';
+  const materiaFisicaSeparada = hilos > 1 && process.env.CARTA_MATERIA_FISICA_SEPARADA === '1';
   const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu);
   assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined && gruposPercepcionGpu === undefined,
     'Mapeo CUDA inválido para el brazo');
@@ -367,6 +369,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const materiaInicial = carga?.instantanea.materia;
     const intentosRestaurados = materiaInicial ? decodificarEnVuelo(materiaInicial.enVuelo).filter(i => i.nonce !== 0).length : 0;
     const inicio = { tipo: 'inicio', escena: e, brazo, hilos, duenosPorRanura, perfilPaso, indiceUidCompartido,
+      instantaneaTransferible, materiaFisicaSeparada,
       repartoInicial: repartoInicial ?? 'uniforme', preparacionMs: { prepararMundoMs, validarMundoMs, digestoMundoMs },
       commit: git('rev-parse', 'HEAD'), node: process.version,
       digestoInicial, ...siembra, fixture, intentosRestaurados, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
@@ -376,7 +379,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const conNvrtc = !!biblioteca && existsSync(biblioteca);
     if (!gpu.length || conNvrtc) {
       motor = crearMotor(mundo, { hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
-        medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso, indiceUidCompartido, repartoInicial });
+        medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso, indiceUidCompartido, instantaneaTransferible,
+        materiaFisicaSeparada, repartoInicial });
       if (carga) motor.cargar(carga.instantanea, carga.epoca);
     }
     if (gpu.length) {

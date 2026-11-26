@@ -1944,8 +1944,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
             if (parsed?.type === 'recipe' || (parsed as { type?: string })?.type === 'receta') {
               if (typeof parsed.id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de procedimiento no válido.');
-              send(client, { type: 'recipe', id: parsed.id, recipe: gateway ? await gateway.recipe(parsed.id)
-                : leerDuranteGuardado(() => technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null) });
+              const id = parsed.id;
+              send(client, { type: 'recipe', id, recipe: gateway ? await gateway.recipe(id)
+                : leerDuranteGuardado(() => technologyRecipeDetail(mundoConsultable(), id) ?? null) });
               return;
             }
             if (parsed?.type === 'suscripcion') {

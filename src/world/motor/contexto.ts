@@ -870,8 +870,50 @@ export class Dueno implements CtxF0 {
   }
   avisarCoordinador(dato: number[], carga: unknown): void { this.#interno.enviar(0, intento(TipoIntento.Global, dato, serialize(carga))); }
 
-  /** Los chunks de este dueño como migrantes, sin sacarlos (reparto inicial desde el coordinador). */
-  repartirChunk(chunk: ChunkId): MigranteChunk | null { return this.#desprender(chunk, true); }
+  /** Reparto al abrir una época: clasifica una vez cada colección y entrega los chunks en el orden de entrada. */
+  repartirChunksIniciales(chunks: Int32Array, duenos: Int16Array): void {
+    const m = this.mundo, terreno = this.terrenoPercibido;
+    const remotos = new Map<ChunkId, { destino: Hilo; migrante: MigranteChunk }>();
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!, destino = duenos[i]!;
+      if (destino === this.hilo || remotos.has(chunk)) continue;
+      const key = this.#activos.get(chunk), meta = key === undefined ? undefined : m.chunks[key];
+      if (key === undefined || !meta) continue;
+      remotos.set(chunk, { destino, migrante: {
+        tipo: 'chunk', chunk, key, meta, tiles: [], structures: [], animals: [], personas: [], inicial: true,
+      } });
+    }
+    if (remotos.size === 0) return;
+
+    function separar<T extends { x: number; y: number }>(lista: T[], trasladar: (migrante: MigranteChunk, elemento: T) => void): T[] {
+      let locales: T[] | undefined;
+      for (let i = 0; i < lista.length; i++) {
+        const elemento = lista[i]!;
+        // Replica el criterio del desprendimiento de un chunk, incluso en coordenadas fraccionarias negativas.
+        const remoto = remotos.get(terreno.paginaDe(elemento.x >> 4, elemento.y >> 4));
+        if (remoto) {
+          locales ??= lista.slice(0, i);
+          trasladar(remoto.migrante, elemento);
+        } else locales?.push(elemento);
+      }
+      return locales ?? lista;
+    }
+
+    const previas = m.tiles;
+    m.tiles = separar(previas, (mig, tile) => mig.tiles.push(tile));
+    faunaCacheFiltered(previas, m.tiles);
+    m.structures = separar(m.structures, (mig, estructura) => mig.structures.push(estructura));
+    m.animals = separar(m.animals, (mig, animal) => mig.animals.push(animal));
+    m.people = separar(m.people, (mig, persona) => mig.personas.push({ persona, ref: this.organismos.personas.ref(persona) }));
+    for (const { destino, migrante } of remotos.values()) {
+      delete m.chunks[migrante.key];
+      this.#activos.delete(migrante.chunk);
+      // Una tesela residente puede ser un proxy. Aplana solo la página que se está enviando.
+      this.enviarMigrante(destino, { ...migrante, tiles: migrante.tiles.map(tile => ({ ...tile })) });
+    }
+    this.#chunks = undefined;
+  }
+
   /** Registra como propio un chunk cuyo contenido ya está en este heap (el coordinador al abrir la época). */
   tenerChunk(chunk: ChunkId, key: string): void { this.#activos.set(chunk, key); this.#chunks = undefined; }
 

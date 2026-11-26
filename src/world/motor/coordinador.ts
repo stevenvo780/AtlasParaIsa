@@ -371,10 +371,7 @@ class MotorDuenos implements Motor {
     d.reservarMateria(materia ? 0 : claves.length);
     const cabecera = serialize(cabeceraDe(m));
     this.#cabecera = deserialize(cabecera) as World;
-    for (let i = 0; i < claves.length; i++) if (duenos[i] !== 0) {
-      const migrante = d.repartirChunk(chunks[i]!);
-      if (migrante) d.enviarMigrante(duenos[i]!, migrante);
-    }
+    d.repartirChunksIniciales(chunks, duenos);
     const tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
     for (let i = 0; i < claves.length; i++) if (duenos[i] === 0) terreno.sincronizarPagina(chunks[i]!, tileIn, fast);
 

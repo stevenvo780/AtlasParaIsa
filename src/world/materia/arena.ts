@@ -103,6 +103,11 @@ class Lista {
   }
 }
 
+class LecturaVista {
+  readonly pares = new Lista();
+  readonly sustancias: Readonly<Sustancia>[] = [];
+}
+
 function leerPares(pares: Float64Array, m: Lista): Lista {
   if (pares.length % 2 !== 0) throw new Error('Pares de materia incompletos.');
   m.vaciar();
@@ -180,6 +185,8 @@ export class ArenaLotes implements ArenaMateria {
   private readonly la = new Lista();
   private readonly lb = new Lista();
   private readonly lp = new Lista();
+  private readonly lecturaVista = new LecturaVista();
+  private vistaEnUso = false;
   private readonly nuevasA: number[] = [];
   private readonly nuevasB: number[] = [];
   private porCuanto = new Float64Array(64);
@@ -838,23 +845,41 @@ export class ArenaLotes implements ArenaMateria {
   }
 
   vista(l: LoteRef): VistaLote {
+    // La química puede consultar la arena mientras se calcula lo digerible.
+    if (this.vistaEnUso) return this.leerVista(l, new LecturaVista());
+    this.vistaEnUso = true;
+    try { return this.leerVista(l, this.lecturaVista); }
+    finally { this.vistaEnUso = false; }
+  }
+
+  private leerVista(l: LoteRef, lectura: LecturaVista): VistaLote {
     const s = this.vivoSlot(l);
     const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
     const forma = b.forma[i], fisica = formaDeCodigo(forma);
-    const m = this.contenido(s, this.la), partes: { esp: Readonly<Sustancia>; q: number }[] = [];
-    for (let k = 0; k < m.n; k++) if (m.id[k] !== 0) partes.push({ esp: this.sustancia(m.id[k]!), q: m.q[k]! });
-    const atomos = partes.reduce((total, { esp, q }) => total + q * esp.atomos.reduce((a, b) => a + b, 0), 0);
-    const T = atomos ? m.get(0) / (CAPACIDAD_ATOMO * atomos) : 0;
+    const mezcla = this.contenido(s, lectura.pares), sustancias = lectura.sustancias;
+    const especies = mezcla.n - Number(mezcla.n > 0 && mezcla.id[mezcla.n - 1] === 0);
+    for (let k = 0; k < especies; k++) sustancias[k] = this.sustancia(mezcla.id[k]!);
+    let atomos = 0;
+    for (let k = 0; k < especies; k++) {
+      const elementos = sustancias[k]!.atomos;
+      let porCuanto = 0;
+      for (let e = 0; e < elementos.length; e++) porCuanto += elementos[e]!;
+      atomos += mezcla.q[k]! * porCuanto;
+    }
+    const T = atomos ? (especies < mezcla.n ? mezcla.q[especies]! : 0) / (CAPACIDAD_ATOMO * atomos) : 0;
     let masa = 0, energia = 0, digerible = 0, agua = 0, principal = 0, masaPrincipal = 0;
     let volumen = 0, rigido = 0, dura = 0, tenaz = 0, permeable = 0, conductancia = 0;
-    const color = [0, 0, 0];
-    const fases = [0, 0, 0];
-    for (const { esp, q } of partes) {
+    let rojo = 0, verde = 0, azul = 0;
+    let solido = 0, liquido = 0, gas = 0;
+    for (let k = 0; k < especies; k++) {
+      const esp = sustancias[k]!, q = mezcla.q[k]!;
       const { prop, id } = esp;
       const m = q * esp.masa / 1e6;
       const fase = T < prop.tFusion ? 0 : T < prop.tEbullicion ? 1 : 2;
       const v = fase === 2 ? q * R * T / 101.325 : m / prop.densidad;
-      fases[fase] += v;
+      if (fase === 0) solido += v;
+      else if (fase === 1) liquido += v;
+      else gas += v;
       volumen += v;
       masa += m;
       energia += q * prop.qOxidacion;
@@ -868,13 +893,16 @@ export class ArenaLotes implements ArenaMateria {
       tenaz += v * prop.tenacidad;
       permeable += fase === 2 ? v : 0;
       conductancia += fase === 0 ? v : 0;
-      for (let i = 0; i < color.length; i++) color[i] += m * (prop.color >> ((2 - i) * 8) & 255);
+      rojo += m * (prop.color >> 16 & 255);
+      verde += m * (prop.color >> 8 & 255);
+      azul += m * (prop.color & 255);
     }
-    const fase = fases.filter(v => v > 0).length > 1 ? 3 : Math.max(0, fases.findIndex(v => v > 0)) as 0 | 1 | 2;
+    const mezcladas = Number(solido > 0) + Number(liquido > 0) + Number(gas > 0);
+    const fase = mezcladas > 1 ? 3 : gas > 0 ? 2 : liquido > 0 ? 1 : 0;
     return { masa, T, fase, dureza: rigido && rigido >= PERCOLACION * volumen ? dura / rigido : 0,
       tenacidad: volumen ? tenaz / volumen : 0, sellado: volumen && forma ? (1 - fisica.hueco) * (1 - permeable / volumen) : 0,
       aislamiento: volumen ? 1 - conductancia / volumen : 0, energia, digerible, agua, forma, principal,
-      color: masa ? color.reduce((rgb, c) => rgb * 256 + Math.round(c / masa), 0) : 0 };
+      color: masa ? (Math.round(rojo / masa) * 256 + Math.round(verde / masa)) * 256 + Math.round(azul / masa) : 0 };
   }
 
   private muestraDeRanura(s: number): LoteGuardado {

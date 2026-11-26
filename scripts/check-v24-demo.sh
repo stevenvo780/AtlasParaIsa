@@ -29,7 +29,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-snapshot-packed-people.test.ts tests/v24-snapshot-packed-store.test.ts \
   tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \
-  tests/technology-store-review.test.ts tests/technology.test.ts \
+  tests/technology-store-review.test.ts tests/technology.test.ts tests/v24-store-sello.test.ts \
   tests/v24-cinta-pavimento.test.ts tests/v24-cinta-fuente.test.ts tests/v24-cinta-enlace-inicial.test.ts \
   tests/v20-roads.test.ts tests/v20-visuals.test.ts \
   tests/v23-motor-fotograma-retirada.test.ts \

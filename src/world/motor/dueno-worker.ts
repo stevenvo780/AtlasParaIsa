@@ -51,6 +51,7 @@ export interface DatosDueno {
   libros: Libro[];
   lotes: ArenaCompartida | null;
   desborde: ArenaCompartida | null;
+  contenido?: ArenaCompartida;
   /** Identidad de sustancias compartida durante la época (null sin `v23.materia`). */
   sustancias: MemoriaRegistro | null;
   control: SharedArrayBuffer;
@@ -106,6 +107,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
     registro: new RegistroContenido(datos.registro), azar, control: new Float64Array(datos.control), enlace: datos.enlace,
     materia: datos.sustancias && datos.lotes && datos.desborde ? {
       lotes: PageArena.conectar(datos.lotes), desborde: PageArena.conectar(datos.desborde),
+      ...(datos.contenido && { contenido: PageArena.conectar(datos.contenido) }),
       quimica: crearServicioQuimico({ modo: 'inmediato', registroSustancias: new RegistroContenido(datos.sustancias) }),
     } : null,
   };

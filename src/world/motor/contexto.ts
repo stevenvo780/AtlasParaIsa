@@ -50,7 +50,7 @@ import {
 import { abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type FotogramaEnCurso, type FuenteFotograma } from './fotograma.js';
 import { leyesActivas } from './leyes.js';
 import { RegistroContenido } from './registro.js';
-import { crearArenasMateria } from './reserva-materia.js';
+import { crearArenasMateria, type ArenasMateria } from './reserva-materia.js';
 
 // ── Constantes ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ export interface PiezasDueno {
   azar: () => number;
   control: Float64Array | null;
   /** Memoria de la materia ya creada (varios dueños) o null para que el dueño la cree al encender `v23.materia`. */
-  materia: { lotes: PageArena; desborde: PageArena; quimica: ServicioQuimicoImpl } | null;
+  materia: (ArenasMateria & { quimica: ServicioQuimicoImpl }) | null;
   reservaLotesMateria?: number;
   enlace: DescriptorEnlace | null;
 }
@@ -427,11 +427,12 @@ export class Dueno implements CtxF0 {
     this.#lotes = lotes; this.#desborde = desborde;
     const raizFria = process.env.CARTA_MATERIA_FRIA_DIR;
     const archivo = this.#archivoFrio = raizFria && this.hilos === 1 && this.params.v23.guardadoCompleto
-      ? new ArchivoMateriaFria(raizFria, lotes.maxCapacity, desborde) : undefined;
+      ? new ArchivoMateriaFria(raizFria, dadas?.contenido ?? lotes.maxCapacity, desborde) : undefined;
+    const contenido = this.#contenido = archivo?.contenido ?? dadas?.contenido;
     this.quimica = quimica;
     this.materia = new ArenaLotes({
-      lotes, desborde, paginas: terreno.paginasMateria, terreno, quimica, hilo: this.hilo, agua: base.H2O,
-      ...(archivo && { contenido: archivo.contenido, leerFrio: (ref, celda) => archivo.leer(ref, celda) }),
+      lotes, desborde, contenido, paginas: terreno.paginasMateria, terreno, quimica, hilo: this.hilo, agua: base.H2O,
+      ...(archivo && { leerFrio: (ref, celda) => archivo.leer(ref, celda) }),
       // Lo digerible con κ a la temperatura del cuerpo, solo exotérmicas: la fracción que se oxida en un día de tránsito
       // (la misma regla que `MundoMaterial` da a su arena).
       digerible: (s: Readonly<Sustancia>, kappa: Kappa) => {
@@ -444,6 +445,7 @@ export class Dueno implements CtxF0 {
   }
   #lotes: PageArena | undefined;
   #desborde: PageArena | undefined;
+  #contenido: PageArena | undefined;
   #archivoFrio?: ArchivoMateriaFria;
 
   muestraMemoriaMateria() {
@@ -452,8 +454,8 @@ export class Dueno implements CtxF0 {
     return {
       lotesVivos: this.#lotes.used, capacidadLotes: this.#lotes.capacity,
       limiteLotes: this.#lotes.maxCapacity, limiteDesborde: this.#desborde.maxCapacity,
-      limiteLotesFisicos: this.#archivoFrio?.contenido.maxCapacity,
-      bytesArena: this.#lotes.bytes + this.#desborde.bytes + (estadoFrio?.bytesFisicos ?? 0), estadoFrio,
+      limiteLotesFisicos: this.#contenido?.maxCapacity,
+      bytesArena: this.#lotes.bytes + this.#desborde.bytes + (this.#contenido?.bytes ?? 0), estadoFrio,
     };
   }
   cerrarMateriaFria(): void {
@@ -475,7 +477,7 @@ export class Dueno implements CtxF0 {
     const porChunk = chunksNuevos * LOTES_POR_CHUNK_NUEVO;
     const libres = porChunk + Math.max(LOTES_POR_CHUNK_NUEVO, this.#lotes.used);
     this.#lotes.prepararF0(libres, LOTES_POR_BLOQUE);
-    const contenido = this.#archivoFrio?.contenido;
+    const contenido = this.#contenido;
     const libresFisicos = contenido ? porChunk + Math.max(LOTES_POR_CHUNK_NUEVO, contenido.used) : libres;
     contenido?.prepararF0(libresFisicos, LOTES_POR_BLOQUE);
     this.#desborde.prepararF0(Math.max(libresFisicos, this.#desborde.used));
@@ -538,9 +540,17 @@ export class Dueno implements CtxF0 {
     }
     this.#chunks = undefined;
     for (const [chunk] of nuevos) {
-      this.#archivoFrio?.calentar(this.materia as ArenaLotes, chunk);
+      this.reponerMateriaParaCeder(chunk);
       for (const ley of this.leyes) ley.alActivar?.(this, chunk);
     }
+  }
+
+  /** En barrera, antes de cambiar el dueño o exponer una página reactivada a las leyes. */
+  reponerMateriaParaCeder(chunk: ChunkId): void {
+    const archivo = this.#archivoFrio;
+    if (!archivo?.tiene(chunk)) return;
+    if (this.terreno.duenoChunk[chunk] !== this.hilo) throw new Error('La reposición de materia fría exige el dueño anterior.');
+    archivo.calentar(this.materia as ArenaLotes, chunk);
   }
 
   #enfriarPagina(chunk: ChunkId, cx: number, cy: number): void {

@@ -67,6 +67,12 @@ El guardado mide las composiciones frías por página sin abrir sus archivos. De
 
 ### Capacidad del guardado y de la arena
 
+En el servidor de laboratorio, `CARTA_MOTOR_GPU_GRUPOS` acepta la lista JSON de grupos de dueños, en el orden de `CARTA_MOTOR_GPU`. La torre ensayó `[[0,1,2,3,4,6],[5,7]]` con ocho dueños y dispositivos `0,1`. Se habilita el corredor y la selección por coste con `CARTA_PERCEPCION_DUENOS=1` y `CARTA_PERCEPCION_COSTE_DUENOS=1`. La configuración se valida al arrancar y el motor conserva el plazo y la recuperación en CPU.
+
+`CARTA_GUARDADO_VIVO=1` prueba la confirmación de un guardado completo en los mismos dueños. SQLite confirma primero el punto durable. La opción conserva los buzones y garantías de la piscina viva y aplica los diarios y bajas confirmados. Ante un corte que no puede confirmarse, el servidor carga el guardado. Un fallo tras empezar a confirmar exige reabrir el punto durable sin repetir sus recibos. Los casos focales acreditan este contrato en dos y tres dueños. Queda medir la pausa y el pico de memoria del servidor a escala.
+
+`CARTA_MATERIA_FISICA_SEPARADA=1` deja probar la arena física compartida con varios dueños. El lote conserva su referencia al mover su composición y al ceder una página. La expulsión distribuida a NVMe requiere además resolver en barrera las garantías pendientes que podrían necesitar la página. El piloto que archiva composición sigue siendo de un dueño.
+
 `CARTA_CORTE_TRANSFERIBLE=1` permite probar en el servidor la transferencia de partes del guardado entre dueños. El motor mueve el bloque serializado por V8 y coteja dueño, solicitud, época y tick antes de reunirlo. La ruta habitual usa F0. En una reapertura sellada con 4.096 vecinos, ambos transportes conservaron las mismas filas, UID, VMAT y saldo. El uso de la cola F0 al reunir pasó de 12,65 MB a cero y su capacidad compartida retenida de 14,23 MB a 73 kB. Hace falta medir el pico de RAM y la pausa del servidor bajo carga.
 
 El guardado anterior paginaba las teselas y serializaba juntas las personas. Tres guardados maduros midieron aproximadamente 9.700–10.800 caracteres por persona. Con ese promedio, el límite de cadena del Node de la torre se habría alcanzado hacia 50.000–55.000 personas. El guardado completo ahora forma páginas de personas y fauna desde cada objeto, con un objetivo de 4 MiB por página y páginas individuales para registros que lo superen. Los lectores actuales aceptan guardados anteriores y validan orden, digestos y recuperación.

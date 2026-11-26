@@ -528,6 +528,8 @@ export interface MotorConfig {
   medirBrokerGpu?: boolean;              // contadores acumulados opcionales del banco de percepción distribuida
   /** Capacidad virtual de la arena material de esta época. El anfitrión la dimensiona fuera del estado del mundo. */
   reservaLotesMateria?: number;
+  /** Laboratorio: espacio físico único compartido. El aparcado distribuido requiere su propio protocolo de barrera. */
+  materiaFisicaSeparada?: boolean;
   /** Laboratorio: comparte la búsqueda de uid entre los dueños del motor. */
   indiceUidCompartido?: boolean;
   /** Laboratorio: transfiere las partes de la instantánea fuera de la cola F0. */

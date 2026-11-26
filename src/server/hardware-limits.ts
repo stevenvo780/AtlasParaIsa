@@ -59,6 +59,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
     ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
     ...(confirmarGuardadoVivo ? { confirmarGuardadoVivo: true } : {}),
+    ...(env.CARTA_MATERIA_FISICA_SEPARADA === '1' ? { materiaFisicaSeparada: true } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 

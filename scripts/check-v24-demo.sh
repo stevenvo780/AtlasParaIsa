@@ -24,6 +24,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-apertura-lineal.test.ts tests/v24-vecinos-localidad.test.ts tests/digesto-validacion.test.ts \
   tests/v24-motor-corte-transferible.test.ts tests/v24-motor-cronica.test.ts tests/v24-motor-confirmar-guardado.test.ts \
   tests/v24-materia-tramos-store.test.ts tests/v24-vmat-tramos.test.ts tests/v24-snapshot-matter-parts.test.ts \
+  tests/v24-materia-fisica-compartida.test.ts \
   tests/v24-snapshot-packed-people.test.ts tests/v24-snapshot-packed-store.test.ts \
   tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \

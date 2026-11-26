@@ -401,7 +401,7 @@ class MotorDuenos implements Motor {
     const registroSustancias = conMateria ? new RegistroContenido(hilos) : null;
     const opcionesQuimica = { modo: 'inmediato', registroSustancias: registroSustancias ?? undefined } as const;
     const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, opcionesQuimica) : crearServicioQuimico(opcionesQuimica);
-    const arenas = conMateria ? crearArenasMateria(this.#config.reservaLotesMateria) : null;
+    const arenas = conMateria ? crearArenasMateria(this.#config.reservaLotesMateria, this.#config.materiaFisicaSeparada) : null;
     const d = this.#d = new Dueno(m, {
       hilo: 0, hilos, buzones, buzon: buzones.dueno(0, azar), libros, contadores, registro, azar, control, enlace: this.#enlace,
       materia: quimica && arenas ? { ...arenas, quimica } : null,
@@ -435,6 +435,7 @@ class MotorDuenos implements Motor {
     const datos: DatosDueno = {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: arenas?.lotes.compartir() ?? null, desborde: arenas?.desborde.compartir() ?? null,
+      contenido: arenas?.contenido?.compartir(),
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca,
       brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
@@ -629,8 +630,9 @@ class MotorDuenos implements Motor {
     const paginas = [...this.#paginas.values()];
     const dueno = duenoDeVecino(px, py, paginas.map(p => p.px), paginas.map(p => p.py), paginas.map(p => terreno.duenoChunk[p.chunk]!), pide);
     const key = chunkKey(px * 16, py * 16);
-    const { tiles, animals, structures, ...meta } = tomarChunk(m, key, px, py);
     const previa = terreno.paginaDe(px, py);
+    if (previa >= 0) d.reponerMateriaParaCeder(previa);
+    const { tiles, animals, structures, ...meta } = tomarChunk(m, key, px, py);
     const chunk = previa >= 0 ? previa : terreno.asegurarPagina(px, py, dueno);
     if (previa >= 0) terreno.asignar(chunk, dueno);
     for (const lugar of meta.places) if (!m.places.some(p => p.id === lugar.id)) m.places.push(lugar);

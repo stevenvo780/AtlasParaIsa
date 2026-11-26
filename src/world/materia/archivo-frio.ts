@@ -19,11 +19,11 @@ export class ArchivoMateriaFria {
   #errorLimpieza?: string;
   #lecturasArchivo = 0;
 
-  constructor(private readonly raiz: string, maxRanuras: number, private readonly desborde: PageArena) {
+  constructor(private readonly raiz: string, reserva: number | PageArena, private readonly desborde: PageArena) {
     if (!isAbsolute(raiz) || !statSync(raiz, { throwIfNoEntry: false })?.isDirectory()) {
       throw new Error('CARTA_MATERIA_FRIA_DIR debe identificar un directorio absoluto existente.');
     }
-    this.contenido = new PageArena(maxRanuras);
+    this.contenido = typeof reserva === 'number' ? new PageArena(reserva) : reserva;
   }
 
   tiene(pagina: number): boolean { return this.#paginas.has(pagina); }

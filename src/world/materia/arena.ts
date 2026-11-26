@@ -15,9 +15,9 @@ interface OpcionesArena {
   lotes: MemoriaMateria;
   desborde: MemoriaMateria;
   paginas: MemoriaMateria;
-  /** Solo para un dueño. El coordinador reserva los bloques físicos en F0. */
+  /** La composición física separada comparte un único espacio de ranuras por época. El coordinador lo amplía en F0. */
   contenido?: MemoriaMateria;
-  /** Composición ya confirmada del lote, en el orden de `muestra`. */
+  /** De dueño 0. Composición ya confirmada, en el orden de `muestra`. */
   leerFrio?: (ref: LoteRef, celda: number) => Float64Array;
   terreno: Pick<Terreno, 'chunkDe' | 'duenoChunk'>;
   quimica: Pick<ServicioQuimico, 'sustancia'>;
@@ -157,7 +157,7 @@ export class ArenaLotes implements ArenaMateria {
   private readonly anchoContenido: number;
   /** Puntero a ranura física. Cero en un lote vivo indica que está aparcado. */
   private readonly fisicas: Uint32Array | null;
-  /** Saldo de los lotes aparcados. En el modo frío todos tienen el mismo dueño. */
+  /** Saldo de los lotes aparcados, que permanecen bajo el dueño 0. */
   private readonly saldoFrio: bigint[] | null;
   private readonly bloques: ReturnType<typeof columnasIdentidad>[] = [];
   private readonly contenidos: ReturnType<typeof columnasContenido>[] = [];
@@ -190,10 +190,10 @@ export class ArenaLotes implements ArenaMateria {
   constructor(private readonly op: OpcionesArena) {
     const { lotes, paginas, desborde, contenido, leerFrio } = op;
     natural(op.hilo, 'Hilo', UINT32_MAX);
-    if (contenido && (op.hilo !== 0 || contenido === lotes || contenido === desborde || contenido === paginas)) {
-      throw new Error('La composición separada requiere una arena física independiente y un solo dueño.');
+    if (contenido && (contenido === lotes || contenido === desborde || contenido === paginas)) {
+      throw new Error('La composición separada requiere una arena física independiente.');
     }
-    if (leerFrio && !contenido) throw new Error('La materia fría requiere una arena física independiente.');
+    if (leerFrio && (!contenido || op.hilo !== 0)) throw new Error('El lector frío requiere una arena física y el dueño 0.');
     // M1 reserva bloques completos en F0. Al crecer el SAB las columnas anteriores mantienen su desplazamiento.
     this.anchoIdentidad = contenido ? BYTES_IDENTIDAD : BYTES_POR_LOTE;
     this.anchoContenido = contenido ? BYTES_CONTENIDO : BYTES_POR_LOTE;

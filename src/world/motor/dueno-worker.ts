@@ -14,6 +14,7 @@ import { deserialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
+import { PercibidorBroker, type EpocaBrokerPercepcion } from '../gpu/broker-percepcion.js';
 import { transferEstate } from '../demografia/morir.js';
 import { advancePopulation } from '../lineage.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
@@ -57,6 +58,7 @@ export interface DatosDueno {
   cabecera: Uint8Array;
   params: WorldParams;
   epoca: number;
+  brokerGpu?: EpocaBrokerPercepcion;
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
 }
@@ -73,13 +75,15 @@ export function azarDeHilo(semilla: number | null, hilo: Hilo): () => number {
   };
 }
 
-/** Liga a `mundo` (la parte de un dueño) la tabla, el terreno y la percepción compartidos, vistos con su hilo. La
- * percepción de un dueño corre en su propio hilo: no usa la piscina ni las tarjetas del proceso. */
-export function ligarCompartido(mundo: World, tabla: TablaOrganismosSoA, terreno: TerrenoPercepcion, contadores: Contadores): void {
+/** Cada dueño prepara su captura F2 y conserva el percibidor CPU para cuando el corredor no admite el lote. */
+export function ligarCompartido(mundo: World, tabla: TablaOrganismosSoA, terreno: TerrenoPercepcion, contadores: Contadores,
+  brokerGpu?: EpocaBrokerPercepcion, hilo = 0): PercibidorBroker | undefined {
   registrarOrganismos(mundo, new OrganismosMundo(tabla.verificar, () => contadores.id('uid'), tabla));
   const percepcion = new PercepcionDelPaso(mundo, terreno);
-  percepcion.percibidor = new PercibidorCpu(percepcion.vista);
+  const remoto = brokerGpu && new PercibidorBroker(percepcion.vista, brokerGpu, hilo);
+  percepcion.percibidor = remoto ?? new PercibidorCpu(percepcion.vista);
   registrarPercepcion(mundo, percepcion);
+  return remoto;
 }
 
 /** Cuerpo de cálculo de la `Piscina`: el dueño `hilo` (≥ 1) sobre su parte del mundo. */
@@ -87,7 +91,8 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
   const mundo = deserialize(datos.cabecera) as World;
   setParams(mundo, datos.params);
   const azar = azarDeHilo(datos.semilla, hilo), contadores = new Contadores(datos.contadores);
-  ligarCompartido(mundo, TablaOrganismosSoA.conectar(datos.tabla, hilo), TerrenoPercepcion.conectarDueno(datos.terreno, hilo), contadores);
+  ligarCompartido(mundo, TablaOrganismosSoA.conectar(datos.tabla, hilo), TerrenoPercepcion.conectarDueno(datos.terreno, hilo), contadores,
+    datos.brokerGpu, hilo);
   const piezas: PiezasDueno = {
     hilo, hilos: datos.hilos, buzones: null, buzon: conectarBuzon(datos.buzones, hilo, azar), libros: datos.libros, contadores,
     registro: new RegistroContenido(datos.registro), azar, control: new Float64Array(datos.control), enlace: datos.enlace,

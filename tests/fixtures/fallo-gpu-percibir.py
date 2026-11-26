@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import struct
 import sys
+import time
 
 
 def emitir(dato):
@@ -46,6 +47,19 @@ def main():
             subida, bajada, salida = (orden[k] for k in ('subida', 'bajada', 'salida'))
             assert 0 < subida <= salida <= salida + bajada <= len(zona)
             assert bajada > 0 and any(zona[:subida])
+            if fase.startswith('broker'):
+                if fase == 'broker-expira':
+                    time.sleep(0.1)
+                ventanas = orden['n'] * 225
+                inicio = salida + bajada - ventanas
+                zona[inicio:salida + bajada] = b'\xff' * ventanas
+                for fila in range(orden['n']):
+                    zona[inicio + fila * 225 + 112] = 253
+                eco = {k: orden[k] for k in ('generacion', 'epoca', 'dueno', 'tick', 'despacho')}
+                if fase == 'broker-rancio':
+                    eco['generacion'] -= 1
+                emitir({'ok': True, 'ms': 1, **eco})
+                continue
             matar('entrada-leida')
             zona[salida:salida + min(bajada, 4)] = b'\xba' * min(bajada, 4)
             matar('salida-parcial')

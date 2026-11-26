@@ -221,8 +221,11 @@ test('una cinta que no devuelve crédito se da por perdida sin detener el motor'
   bloquearCinta();
   await pedir('start');
   const lleno = await esperar('barrera', () => cintaBloqueada() && Atomics.load(creditos, 0) === 0);
+  const vencimiento = new AbortController();
   const aviso = await Promise.race([esperar('log', m => m.value.cinta === 'detenida'),
-    setTimeout(60_000).then(() => assert.fail('La simulación no dio por perdida la cinta detenida.'))]);
+    setTimeout(60_000, undefined, { signal: vencimiento.signal })
+      .then(() => assert.fail('La simulación no dio por perdida la cinta detenida.'))])
+    .finally(() => vencimiento.abort());
   assert.match(aviso.value.motivo ?? '', /no devolvió ningún corte en 2 s/);
   const posterior = await esperar('barrera', m => m.tick >= lleno.tick + 50);
   assert.ok(posterior.tick > lleno.tick);

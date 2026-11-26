@@ -189,7 +189,7 @@ export class SnapshotParts {
     const record = snapshotRecord(world, params, null);
     const organisms = nativo ? { people: world.people, animals: world.animals } : undefined;
     if (organisms) for (const field of ORGANISM_FIELDS) record[field] = null;
-    const metadata = stringifyExact(record, nativo);
+    const metadata = stringifyExact(record);
     // UTF-8 ocupa como mucho 3 bytes por unidad UTF-16: por debajo de un tercio del tope el cuerpo
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
     if (!nativo && metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES)

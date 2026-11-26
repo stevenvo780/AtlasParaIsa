@@ -49,6 +49,24 @@ test('snapshot preserves signed zero in tile, person and community values', () =
   assert.ok(Object.is(restored.communities[0]!.x, -0));
 });
 
+test('complete save preserves the sign of a community center rounded from below zero', t => {
+  const world = createWorld(51926, parseParams('v23.guardadoCompleto=true,persistencia.ventanaEventosTicks=-0'));
+  const person = world.people[0]!;
+  person.communityId = 'community-1';
+  world.communityCounter = 1;
+  world.communities = [{ id: person.communityId, name: 'Synthetic', x: person.x, y: Math.round(-0.25),
+    color: '#ffffff', members: [person.id], culture: { ...person.culture }, formedAt: 0, cooperation: 0, disputes: 0 }];
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const decoded = restore(encodeSnapshot(world, paramsOf(world)));
+  assert.ok(Object.is(decoded.communities[0]!.y, -0));
+  assert.deepEqual(paramsOf(decoded), paramsOf(world));
+  store.guardar({ world, materia: null });
+  const loaded = store.cargarGuardadoCompleto()!.instantanea.world;
+  assert.ok(Object.is(loaded.communities[0]!.y, -0));
+  assert.equal(digestoCanonico(loaded), digestoCanonico(world));
+});
+
 test('ordinary compact bytes declare parameters and limits profile; historical bytes stay compatible', () => {
   // Reglas 10, etapa 1: los escritores históricos (reglas < 9) omitían el campo cuando los params eran
   // los suyos por defecto, que son `HISTORICAL_PARAMS`; un mundo viejo con los defaults NUEVOS sí los

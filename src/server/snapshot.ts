@@ -153,12 +153,11 @@ export function snapshotRecord(world: World, params: WorldParams, tiles: unknown
   assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, params.v23, world.tiles.length);
   const current = world.version >= PARAMETER_LIMITS_RULES_VERSION;
   const serializedParams = current ? params : { ...params, limites: Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, params.limites[key]])) };
-  const body = stringifyExact(serializedParams, params.v23.guardadoCompleto);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: SNAPSHOT_TILE_ENCODING };
   // Current snapshots declare the mode even with defaults; old encoders retain
   // their historical omission convention.
   delete encoded.params; delete encoded.paramsEncoding;
-  if (current || body !== LEGACY_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = serializedParams; }
+  if (current || stringifyExact(serializedParams) !== LEGACY_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = serializedParams; }
   if (current) encoded.limitsProfile = { version: 2, aplicacion: params.limites.aplicacion,
     ...Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, limits[key]])) };
   return encoded;
@@ -167,7 +166,6 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
   const encoded = snapshotRecord(world, params, undefined);
   const nativo = params.v23.guardadoCompleto;
   encoded.tiles = encodeSnapshotTileRows(world.tiles, 0, world.tiles.length, nativo);
-  if (nativo) return stringifyExact(encoded, true);
   // Tile scalars were checked above. Keep their native serializer fast instead
   // of running a JS replacer for every scalar a second time. Metadata still uses
   // the exact scalar writer. Property order and ordinary bytes remain unchanged.

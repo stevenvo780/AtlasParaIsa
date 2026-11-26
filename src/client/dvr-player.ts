@@ -116,7 +116,31 @@ export interface DvrPlayerOptions {
   metaPollMs?: number;
   /** Una grabación cerrada se abre pausada en su primer fotograma. */
   abrirEnInicio?: boolean;
+  escenaArchivo?: EscenaArchivo;
   viewportCoalesceMs?: number;
+}
+
+export interface EscenaArchivo {
+  tick: number;
+  x: number;
+  y: number;
+  tramo?: { desde: number; hasta: number };
+}
+
+/** El enlace del archivo usa coordenadas de tesela. Un tramo, si se indica, contiene el fotograma de apertura. */
+export function leerEscenaArchivo(query: URLSearchParams): EscenaArchivo | undefined {
+  const entero = (clave: string, minimo = 0, maximo = Number.MAX_SAFE_INTEGER): number | undefined => {
+    const texto = query.get(clave);
+    if (!texto || !/^-?\d+$/.test(texto)) return undefined;
+    const n = Number(texto);
+    return Number.isSafeInteger(n) && n >= minimo && n <= maximo ? n : undefined;
+  };
+  const tick = entero('t'), x = entero('x', -9_999_950, 9_999_949), y = entero('y', -9_999_950, 9_999_949);
+  if (tick === undefined || x === undefined || y === undefined) return undefined;
+  if (!query.has('desde') && !query.has('hasta')) return { tick, x, y };
+  const desde = entero('desde'), hasta = entero('hasta');
+  if (desde === undefined || hasta === undefined || desde >= hasta || tick < desde || tick > hasta) return undefined;
+  return { tick, x, y, tramo: { desde, hasta } };
 }
 
 const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
@@ -168,6 +192,7 @@ export class DvrPlayer {
   bifurcaciones: Bifurcacion[] = [];
   lagunas: Laguna[] = [];
   tramo: { desde: number; hasta: number } | null = null;
+  escenaInicial?: EscenaArchivo;
   loading = false;
   error: string | null = null;
 
@@ -427,6 +452,19 @@ export class DvrPlayer {
   private async arrancar(): Promise<void> {
     if (this.options.abrirEnInicio) {
       this.playing = false;
+      const escena = this.escenaDisponible();
+      this.escenaInicial = escena;
+      if (escena) {
+        const ventanaOriginal = this.viewport;
+        const { camaraMaxAncho, camaraMaxAlto } = DVR_LIMITS;
+        this.viewport = normalizeViewport({ x: escena.x - camaraMaxAncho / 2, y: escena.y - camaraMaxAlto / 2,
+          width: camaraMaxAncho, height: camaraMaxAlto });
+        const generacionEscena = this.generacion + 1;
+        if (await this.jump(escena.tick, 'start', 1)) return;
+        if (this.generacion !== generacionEscena) return; // El reproductor se cerró o el usuario eligió otro fotograma.
+        this.viewport = ventanaOriginal;
+        this.escenaInicial = undefined;
+      }
       await this.jump(this.minTick, 'start', 1);
       return;
     }
@@ -445,6 +483,16 @@ export class DvrPlayer {
       }
     }
     await this.jump(this.liveTick(), 'start', 1);
+  }
+
+  private escenaDisponible(): EscenaArchivo | undefined {
+    const escena = this.options.escenaArchivo, nivel = this.niveles.find(n => n.nivel === 0);
+    if (!escena || !nivel || !Number.isSafeInteger(nivel.paso) || nivel.paso <= 0) return undefined;
+    const desde = escena.tramo?.desde ?? escena.tick, hasta = escena.tramo?.hasta ?? escena.tick;
+    if (desde < Math.max(this.minTick, nivel.t0) || hasta > Math.min(this.maxTick, nivel.t1)
+      || [desde, escena.tick, hasta].some(tick => (tick - nivel.t0) % nivel.paso !== 0)
+      || this.lagunas.some(l => (l.nivel === undefined || l.nivel === 0) && l.t0 < hasta && l.t1 > desde)) return undefined;
+    return escena;
   }
 
   private guardarMarcador(alSalir: boolean): void {
@@ -707,6 +755,9 @@ export class DvrPlayer {
     let frame: WorldView | null = null;
     try { for (let i = 0; i <= aterriza; i++) frame = this.decode(list[i]!).frame; }
     catch (error) { this.error = describe(error); this.frames = []; this.notify(); return false; }
+    const escena = reason === 'start' ? this.escenaInicial : undefined;
+    if (escena && (list[aterriza]!.nivel !== 0 || frame?.tick !== escena.tick
+      || !frame.tiles.some(tesela => tesela.x === escena.x && tesela.y === escena.y))) return false;
     this.frames = list.slice(aterriza + 1, aterriza + 1 + DVR_LIMITS.maxFrames);
     this.emit(frame!, reason, 0, 'salto', list[aterriza]!, undefined);
     this.msReproduciendo = 0;

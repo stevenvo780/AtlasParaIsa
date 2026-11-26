@@ -18,7 +18,11 @@ export interface DvrBarHandlers {
   jumpLive(): void;
   reproducirTramo?(desde: number, hasta: number): void;
 }
-export interface DvrBarController { update(state: DvrBarState): void; destroy(): void; }
+export interface DvrBarController {
+  update(state: DvrBarState): void;
+  seleccionarTramo(tramo: { desde: number; hasta: number }): void;
+  destroy(): void;
+}
 
 /** Puntos máximos que se dibujan de la serie (el servidor ya la decima a ≤ 400; esto es solo un seguro). */
 const SPARK_POINTS = 160;
@@ -227,6 +231,10 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
   container.addEventListener('pointerleave', onLeave);
 
   return {
+    seleccionarTramo({ desde, hasta }): void {
+      inicio = desde; fin = hasta;
+      actualizarTramo();
+    },
     update(state: DvrBarState): void {
       last = state;
       const min = int(state.minTick), max = Math.max(min, int(state.maxTick));

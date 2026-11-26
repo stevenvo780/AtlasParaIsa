@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { applyClientTapeDelta, type TapeClientDelta } from '../src/shared/tape-delta.js';
 import { CINTA, type Bifurcacion, type ChunkReq, type ChunkResp, type CintaMeta, type Laguna, type Marcador, type Nivel } from '../src/shared/cinta.js';
 import { PROTOCOL_VERSION, type Tile, type WorldView } from '../src/shared/types.js';
-import { DVR_LIMITS, DvrPlayer, PerfilCinta, normalizeViewport, type DvrChunkRequest, type DvrFrameInfo, type DvrMarca, type DvrState } from '../src/client/dvr-player.js';
+import { DVR_LIMITS, DvrPlayer, PerfilCinta, leerEscenaArchivo, normalizeViewport, type DvrChunkRequest, type DvrFrameInfo, type DvrMarca, type DvrState, type EscenaArchivo } from '../src/client/dvr-player.js';
 
 const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
@@ -90,7 +90,7 @@ function cintaSintetica(config: ConfigCinta) {
   return { meta, chunk, coberturas };
 }
 
-interface OpcionesHarness extends ConfigCinta { marcadores?: PerfilCinta; metaPollMs?: number; abrirEnInicio?: boolean }
+interface OpcionesHarness extends ConfigCinta { marcadores?: PerfilCinta; metaPollMs?: number; abrirEnInicio?: boolean; escenaArchivo?: EscenaArchivo }
 
 function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
   const cinta = cintaSintetica(config);
@@ -100,7 +100,7 @@ function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
   let hold = false, metaCalls = 0, falla = false;
   const player = new DvrPlayer({
     metaPollMs: config.metaPollMs ?? 0, viewportCoalesceMs: 10, ...(config.marcadores ? { marcadores: config.marcadores } : {}),
-    abrirEnInicio: config.abrirEnInicio,
+    abrirEnInicio: config.abrirEnInicio, escenaArchivo: config.escenaArchivo,
     fetchMeta: async () => { metaCalls++; return cinta.meta(); },
     fetchChunk: async request => {
       requests.push(request);
@@ -143,6 +143,66 @@ test('una grabación abre pausada al inicio y su botón final muestra el último
   assert.equal(h.player.playing, false);
   assert.equal(h.metaCalls, 1);
   h.player.stop();
+});
+
+test('enlace de escena de archivo: exige enteros y valida el intervalo opcional', () => {
+  assert.deepEqual(leerEscenaArchivo(new URLSearchParams('?t=72391&x=63&y=23&desde=72371&hasta=72451&modo=observador')),
+    { tick: 72391, x: 63, y: 23, tramo: { desde: 72371, hasta: 72451 } });
+  assert.deepEqual(leerEscenaArchivo(new URLSearchParams('?t=0&x=-2&y=0')), { tick: 0, x: -2, y: 0 });
+  for (const query of ['modo=observador', 't=1&x=&y=1', 't=1&x=10000000&y=0', 't=2.5&x=1&y=1',
+    't=9007199254740992&x=0&y=0', 't=1&x=1&y=1&desde=0', 't=8&x=1&y=1&desde=1&hasta=6']) {
+    assert.equal(leerEscenaArchivo(new URLSearchParams(query)), undefined, query);
+  }
+});
+
+test('enlace de escena de archivo: el primer trozo usa foco y tick exactos, abre pausado y permite seguir navegando', async () => {
+  const escenaArchivo = { tick: 152, x: 5, y: 4, tramo: { desde: 144, hasta: 160 } };
+  const h = harness({ coberturas: [{ nivel: 0, t0: 80, t1: 480 }], abrirEnInicio: true, escenaArchivo });
+  assert.equal(await h.player.start(), true);
+  assert.deepEqual(h.emitted.map(e => e.tick), [152]);
+  const { t, x, y, w, h: alto } = h.requests[0]!;
+  assert.deepEqual([t, x, y, w, alto], [152, -43, -28, 96, 64]);
+  assert.deepEqual(h.player.escenaInicial, escenaArchivo);
+  assert.equal(h.player.playing, false);
+  await h.run(1000);
+  assert.equal(h.player.currentTick, 152);
+
+  await h.player.reproducirTramo(144, 160);
+  await h.run(1000, 1000);
+  assert.equal(h.player.currentTick, 160);
+  assert.equal(h.player.playing, false);
+  await h.player.seek(220);
+  assert.equal(h.player.currentTick, 220);
+  h.player.stop();
+});
+
+test('enlace de escena de archivo: vuelve a t0 si el foco no se puede reconstruir', async () => {
+  const config = { coberturas: [{ nivel: 0 as const, t0: 80, t1: 480 }], abrirEnInicio: true };
+  for (const [escenaArchivo, pedidos] of [
+    [{ tick: 154, x: 5, y: 4 }, [80]],
+    [{ tick: 152, x: 200, y: 4 }, [152, 80]],
+    [{ tick: 152, x: 5, y: 4, tramo: { desde: 148, hasta: 484 } }, [80]],
+  ] as const) {
+    const h = harness({ ...config, escenaArchivo });
+    assert.equal(await h.player.start(), true);
+    assert.deepEqual(h.requests.map(r => r.t), pedidos);
+    assert.equal(h.requests.at(-1)!.x, undefined);
+    assert.deepEqual(h.emitted.map(e => e.tick), [80]);
+    assert.equal(h.player.escenaInicial, undefined);
+    assert.equal(h.player.playing, false);
+    h.player.stop();
+  }
+  const escenaArchivo = { tick: 152, x: 5, y: 4, tramo: { desde: 144, hasta: 160 } };
+  const conHueco = harness({ ...config, escenaArchivo, lagunas: [{ t0: 144, t1: 148, nivel: 0 }] });
+  await conHueco.player.start();
+  assert.equal(conHueco.player.currentTick, 80);
+  conHueco.player.stop();
+  const vivo = harness({ ...config, abrirEnInicio: false, escenaArchivo });
+  await vivo.player.start();
+  assert.equal(vivo.requests[0]?.x, undefined);
+  assert.equal(vivo.player.currentTick, 448);
+  assert.equal(vivo.player.playing, true);
+  vivo.player.stop();
 });
 
 test('un tramo entre muestras solo muestra fotogramas dentro de los dos límites', async () => {

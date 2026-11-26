@@ -13,7 +13,7 @@ import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
 import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
-import { DvrPlayer, PerfilCinta, crearRedCinta, type DvrFrameInfo, type DvrState } from './dvr-player.js';
+import { DvrPlayer, PerfilCinta, crearRedCinta, leerEscenaArchivo, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
 import { anotarCiclo, cicloVacio, leerMateria, renderPanelMateria } from './panel-materia.js';
@@ -232,7 +232,8 @@ function startTape(): void {
   const red = crearRedCinta({ alSesionTerminada: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });
   const player = new DvrPlayer({
     fetchMeta: red.fetchMeta, fetchChunk: red.fetchChunk,
-    ...(archivo ? { metaPollMs: 0, abrirEnInicio: true } : { marcadores: new PerfilCinta({ red: red.marcadores }) }),
+    ...(archivo ? { metaPollMs: 0, abrirEnInicio: true, escenaArchivo: leerEscenaArchivo(new URLSearchParams(location.search)) }
+      : { marcadores: new PerfilCinta({ red: red.marcadores }) }),
     onAviso: texto => message(texto), onMarca: marca => message(marca.texto),
     onFrame: receiveTapeFrame,
     onStateChange: state => { dvrEstado = state; dvrBar?.update({ ...state, archivo }); },
@@ -245,6 +246,7 @@ function startTape(): void {
       dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); return;
     }
     landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
+    if (player.escenaInicial?.tramo) dvrBar?.seleccionarTramo(player.escenaInicial.tramo);
     container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
     const ajustarAltura = () => el('game').style.setProperty('--alto-cinta', `${container.offsetHeight}px`);
     ajustarAltura();
@@ -760,7 +762,17 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
       try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
       lastVisit = readVisit(next);
     }
-    const p = next.people.find(p => p.role === 'S') ?? next.people[0]; if (p) { activePersonId = p.id; selected = { kind: 'person', id: p.id }; landscape?.select(selected); }
+    const p = next.people.find(p => p.role === 'S') ?? next.people[0];
+    if (p) activePersonId = p.id;
+    const escena = dvr?.escenaInicial;
+    if (escena) {
+      selected = { kind: 'tile', x: escena.x, y: escena.y };
+      landscape?.select(selected);
+      focusTile(escena.x, escena.y);
+    } else if (p) {
+      selected = { kind: 'person', id: p.id };
+      landscape?.select(selected);
+    }
     if (!mobile()) drawer('inspector', true);
     if (lastVisit !== null) returnCard(next, lastVisit);
   }

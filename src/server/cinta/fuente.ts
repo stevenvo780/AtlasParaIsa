@@ -1,6 +1,6 @@
 import { serialize } from 'node:v8';
 import { publicGeologyKey } from '../../shared/chemistry.js';
-import type { CampoSerie, Suceso, VistaMundoFotograma, VistasLentas } from '../../shared/fotograma.js';
+import type { CampoSerie, Suceso, VistaMundoFotograma, VistaPaginaFotograma, VistasLentas } from '../../shared/fotograma.js';
 import type { ChronicleEvent, RuntimeStats, Tile, WorldView } from '../../shared/types.js';
 import { chronicleSerial } from '../../world/chronicle-journal.js';
 import { ctxSi, type CtxF0, type CtxLeyMateria } from '../../world/motor/acceso.js';
@@ -8,7 +8,7 @@ import { Clase, REF_NULA } from '../../world/motor/contratos.js';
 import type { FuenteFotograma, SucesoFotograma } from '../../world/motor/fotograma.js';
 import {
   CAMPOS_TEXTO_OPCIONALES, estadisticasCarasDesdeTerreno,
-  type EstadisticasCarasCinta, type LoteFotoDuenos,
+  type CruceFaunaSaliente, type EstadisticasCarasCinta, type LoteFotoDuenos,
 } from '../../world/motor/fotograma-dueno.js';
 import { fundir } from '../../world/motor/reunir.js';
 import type { ServicioQuimicoAuditable } from '../../world/materia/servicio.js';
@@ -227,6 +227,25 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       const partes = lote.partes;
       const resumenes = partes.map(p => p.resumen!);
 
+      // Cruces de fauna admitidos en F6: comprobar antes de construir sucesos que toda página destino en `f.paginas`
+      // fue diferida por su dueño (`paginasPendientesCruce`); si alguna llegó sin diferir, fallback fail-closed.
+      const paginasEnFotograma = new Set<string>();
+      for (let p = 0; p < paginas.length; p += 2) paginasEnFotograma.add(`${paginas[p]},${paginas[p + 1]}`);
+      const pendientesCruce = new Map<string, Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[]>();
+      for (const parte of partes) {
+        for (const pend of parte.paginasPendientesCruce) pendientesCruce.set(pend.key, pend.celdas);
+      }
+      const entrantesPorPagina = new Map<string, CruceFaunaSaliente[]>();
+      for (const parte of partes) {
+        for (const cruce of parte.crucesFaunaSalientes) {
+          if (!paginasEnFotograma.has(cruce.key)) continue;
+          if (!pendientesCruce.has(cruce.key)) return null;
+          let lista = entrantesPorPagina.get(cruce.key);
+          if (!lista) entrantesPorPagina.set(cruce.key, lista = []);
+          lista.push(cruce);
+        }
+      }
+
       // Identidades vivas del frente ya publicado (para organización y filtrado de miembros de comunidades).
       const idsVivos = new Set<string>();
       const inventarioPorId = new Map<string, { x: number; y: number; technology: TechnologyOrganizationActor['technology'] }>();
@@ -415,6 +434,18 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       for (let p = 0; p < paginas.length; p += 2) paginasSiguientes.add(`${paginas[p]},${paginas[p + 1]}`);
       if (!f.completo) {
         for (const id of paginasEnCinta) if (!paginasSiguientes.has(id)) sucesos.push({ tipo: 'pagina', id, vista: null });
+      }
+      // Páginas destino de cruces F6 de fauna: aplicar conteo y especie visual mínima de llegadas salientes y emitir.
+      for (const [key, celdas] of pendientesCruce) {
+        const entrantes = entrantesPorPagina.get(key);
+        if (entrantes) {
+          for (const cruce of entrantes) {
+            const celda = celdas[cruce.indice]!;
+            celda.fauna = (celda.fauna ?? 0) + 1;
+            celda.species = celda.species === undefined || cruce.especie < celda.species ? cruce.especie : celda.species;
+          }
+        }
+        sucesos.push({ tipo: 'pagina', id: key, vista: celdas as VistaPaginaFotograma });
       }
 
       // Seguimiento de estructuras vivas en cinta (para fallback sin pérdidas).

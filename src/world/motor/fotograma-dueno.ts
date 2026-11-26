@@ -21,7 +21,7 @@ import type { LegacyRecord } from '../../shared/demography.js';
 import type {
   VistaAnimalFotograma, VistaPaginaFotograma, VistaPersonaFotograma,
 } from '../../shared/fotograma.js';
-import type { BlueprintView, StructureView } from '../../shared/life.js';
+import type { AnimalSpecies, BlueprintView, StructureView } from '../../shared/life.js';
 import type { TechnologyKnowledge } from '../../shared/technology.js';
 import type { MemoryView, PersonView, PlaceView, Tile } from '../../shared/types.js';
 import type { DivineWhisper } from '../../shared/worldmap.js';
@@ -166,6 +166,19 @@ export interface ResumenFotoDueno {
   }[];
 }
 
+/** Animal propio cuya posición tras F6 `aplicar('C')` cayó en un chunk ajeno (para sincronizar destino sin reunir). */
+export interface CruceFaunaSaliente {
+  readonly key: string;
+  readonly indice: number;
+  readonly especie: AnimalSpecies;
+}
+
+/** Página sucia con cruce de fauna entrante admitido en F5: el coordinador le aplica las llegadas F6 antes de emitirla. */
+export interface PaginaPendienteCruce {
+  readonly key: string;
+  readonly celdas: Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[];
+}
+
 export interface ParteFotoDueno {
   readonly hilo: Hilo;
   readonly tick: number;
@@ -178,6 +191,8 @@ export interface ParteFotoDueno {
   readonly paginasEscritas: readonly string[];
   readonly estructurasAltasIds: readonly string[];
   readonly estructurasBajasIds: readonly string[];
+  readonly crucesFaunaSalientes: readonly CruceFaunaSaliente[];
+  readonly paginasPendientesCruce: readonly PaginaPendienteCruce[];
   readonly resumen: ResumenFotoDueno | null;
 }
 
@@ -443,6 +458,7 @@ export class EmisorFotoDueno {
     genEntregado: number,
     resync: number,
     conCaras: boolean,
+    crucesFaunaEntrantes: ReadonlySet<ChunkId> = new Set(),
   ): ParteFotoDueno {
     this.reconciliar(c.tick, f.epoca, genEntregado, resync, true);
     const m = c.mundo, t = c.terreno, w = c.escritura;
@@ -478,7 +494,8 @@ export class EmisorFotoDueno {
       return {
         hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: true, trasFallback: this.#trasFallback,
         bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
-        paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [], resumen: null,
+        paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
+        crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
       };
     }
 
@@ -593,29 +610,88 @@ export class EmisorFotoDueno {
 
     // 4. Páginas escritas en `f.paginas` por este dueño (conservando en `#confirmado.paginas` las no sucias;
     //    la baja `pagina: null` la decide el coordinador según `mundo.chunks` / claves activas).
-    //    Tras fallback (`reemplazaConfirmado`), no arrastramos firmas previas al fallback para evitar falsos aciertos.
+    //    Con `v23.fauna`, `aplicar('C')` en F6 pudo mover fauna tras el `syncFauna` de F5: recalculamos conteo y
+    //    especie visual mínima desde las posiciones exactas publicadas (`animalesVivos`), difiriendo al coordinador
+    //    solo las páginas sucias que admitieron un cruce entrante en F5.
+    const conFaunaV23 = paramsOf(m).v23.fauna;
+    const faunaLocal = conFaunaV23 ? new Map<number, { count: number; species: AnimalSpecies }>() : undefined;
+    const crucesFaunaSalientes: CruceFaunaSaliente[] = [];
+    const paginasPendientesCruce: PaginaPendienteCruce[] = [];
+    if (conFaunaV23 && faunaLocal && !presupuesto.desbordado) {
+      for (const a of animalesVivos) {
+        const celda = t.celda(a.x, a.y);
+        if (celda < 0) {
+          // Posición fuera de celdas residentes: fail-closed al camino reunido.
+          return {
+            hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: true, trasFallback,
+            bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
+            paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
+            crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
+          };
+        }
+        const ch = t.chunkDe(celda);
+        if (c.retiraChunk(ch)) continue;
+        const indice = celda & 255;
+        const especie = especieVisual(a.species);
+        if (t.duenoChunk[ch] === c.hilo) {
+          const prev = faunaLocal.get(celda);
+          if (prev) {
+            prev.count++;
+            if (especie < prev.species) prev.species = especie;
+          } else {
+            faunaLocal.set(celda, { count: 1, species: especie });
+          }
+        } else {
+          crucesFaunaSalientes.push({ key: `${t.paginaX[ch]},${t.paginaY[ch]}`, indice, especie });
+        }
+      }
+      if (crucesFaunaSalientes.length > 0) {
+        const bytesCruces = serialize(crucesFaunaSalientes).byteLength;
+        if (presupuesto.usados + bytesCruces > presupuesto.limite) presupuesto.desbordado = true;
+        else presupuesto.usados += bytesCruces;
+      }
+    }
+
     if (!presupuesto.desbordado && chunksEscritos.length > 0) {
       const tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
       for (const chunk of chunksEscritos) {
         const px = t.paginaX[chunk]!, py = t.paginaY[chunk]!, key = `${px},${py}`;
         paginasEscritas.push(key);
         const celdas: Omit<Tile, 'x' | 'y' | 'mat' | 'T'>[] = [];
-        for (let y = py * PAGE_SIDE; y < (py + 1) * PAGE_SIDE; y++) {
-          for (let x = px * PAGE_SIDE; x < (px + 1) * PAGE_SIDE; x++) {
+        const baseCelda = chunk << 8;
+        for (let y = py * PAGE_SIDE, indice = 0; y < (py + 1) * PAGE_SIDE; y++) {
+          for (let x = px * PAGE_SIDE; x < (px + 1) * PAGE_SIDE; x++, indice++) {
             const tile = tileIn(x, y);
             if (!tile) throw new Error(`Falta la tesela ${x},${y} de la página del fotograma.`);
             const { x: _x, y: _y, mat: _mat, T: _T, ...celda } = projectTile(tile, fast);
+            if (faunaLocal) {
+              const fCelda = faunaLocal.get(baseCelda + indice);
+              if (fCelda) { celda.fauna = fCelda.count; celda.species = fCelda.species; }
+              else { delete celda.fauna; celda.species = undefined; }
+            }
             celdas.push(celda);
           }
         }
-        const suceso: SucesoFotograma = { tipo: 'pagina', id: key, vista: celdas as VistaPaginaFotograma };
-        const bytes = serialize(suceso);
-        const firma = firmaDeBytes(bytes);
-        const previa = emitirTodo ? undefined : this.#confirmado.paginas.get(key);
-        if (emitirTodo || !igualFirma(previa, firma)) {
-          if (!altas.agregarBytes(bytes)) break;
+        if (conFaunaV23 && crucesFaunaEntrantes.has(chunk)) {
+          const bytesPendiente = 4 + serialize({ tipo: 'pagina', id: key, vista: celdas } as SucesoFotograma).byteLength;
+          if (presupuesto.usados + bytesPendiente > presupuesto.limite) {
+            presupuesto.desbordado = true;
+            break;
+          }
+          presupuesto.usados += bytesPendiente;
+          paginasPendientesCruce.push({ key, celdas });
+          // El coordinador emite la página ya parcheada con los cruces entrantes; invalidamos la firma local.
+          tentativo.paginas.set(key, null);
+        } else {
+          const suceso: SucesoFotograma = { tipo: 'pagina', id: key, vista: celdas as VistaPaginaFotograma };
+          const bytes = serialize(suceso);
+          const firma = firmaDeBytes(bytes);
+          const previa = emitirTodo ? undefined : this.#confirmado.paginas.get(key);
+          if (emitirTodo || !igualFirma(previa, firma)) {
+            if (!altas.agregarBytes(bytes)) break;
+          }
+          tentativo.paginas.set(key, firma);
         }
-        tentativo.paginas.set(key, firma);
       }
     }
 
@@ -624,7 +700,8 @@ export class EmisorFotoDueno {
       return {
         hilo: c.hilo, tick: c.tick, desbordado: true, compatFallback: false, trasFallback,
         bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
-        paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [], resumen: null,
+        paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
+        crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
       };
     }
 
@@ -634,9 +711,10 @@ export class EmisorFotoDueno {
     this.#tentativo = tentativo;
     return {
       hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: false, trasFallback,
-      bytes: bajasBytes.byteLength + altasBytes.byteLength,
+      bytes: presupuesto.usados,
       bajasBytes, altasBytes,
       paginasEscritas, estructurasAltasIds, estructurasBajasIds,
+      crucesFaunaSalientes, paginasPendientesCruce,
       resumen,
     };
   }

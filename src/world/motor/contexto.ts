@@ -211,6 +211,7 @@ export class Dueno implements CtxF0 {
   #fotoValida = true;
   #emisorFoto: EmisorFotoDueno | null = null;
   #parteFotoLocal: ParteFotoDueno | null = null;
+  readonly #crucesFaunaEntrantes = new Set<ChunkId>();
   #pendientes: [ChunkId, string][] = [];
   #vaciar: ChunkId[] = [];
 
@@ -223,6 +224,9 @@ export class Dueno implements CtxF0 {
     this.globales = { lugares: new Map(), comunidades: new Map(), registro: piezas.registro, version: 0 };
     this.buzon = {
       enviar: (destino, i) => {
+        if (i.tipo === TipoIntento.Admitido && i.celda >= 0 && this.#emisorFoto) {
+          this.#crucesFaunaEntrantes.add(this.terrenoPercibido.chunkDe(i.celda));
+        }
         this.#contar(i.tipo === TipoIntento.Migrante ? CTL_DUENO.migraciones : i.tipo === TipoIntento.Devuelto ? CTL_DUENO.rechazados : CTL_DUENO.intentos);
         this.#interno.enviar(destino, i);
       },
@@ -733,6 +737,7 @@ export class Dueno implements CtxF0 {
   /** F0, tras las regiones y los gestos: lo global del coordinador y `Ley.F0`. */
   F0(): void {
     const m = this.mundo;
+    this.#crucesFaunaEntrantes.clear();
     this.#refrescarGlobales();
     this.#directorioPropio();
     if (m.tick % MEMORIA_DIRECTORIO_TICKS === 0) this.#podarDirectorio();
@@ -766,6 +771,7 @@ export class Dueno implements CtxF0 {
 
   /** F1 de un dueño que no es el único: lo que F0 hace para el coordinador y que cada heap necesita. */
   abrirTick(): void {
+    this.#crucesFaunaEntrantes.clear();
     this.#directorioPropio();
     if (this.mundo.tick % MEMORIA_DIRECTORIO_TICKS === 0) this.#podarDirectorio();
     if (this.materia) (this.materia as ArenaLotes).barrera();
@@ -828,7 +834,9 @@ export class Dueno implements CtxF0 {
       (px, py) => this.terrenoPercibido.paginaDe(px, py),
       control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!,
       control[CTL.fotoCaras] === 1,
+      this.#crucesFaunaEntrantes,
     );
+    this.#crucesFaunaEntrantes.clear();
     if (this.hilo === 0) this.#parteFotoLocal = parte;
     else this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.foto, this.hilo], serialize(parte)));
   }

@@ -7,6 +7,8 @@ import type { Corte } from '../src/shared/cinta.js';
 import { CONTROL_ENLACE_BYTES, enlaceCinta, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { RuntimeStats } from '../src/shared/types.js';
+import { syncFauna } from '../src/world/animals.js';
+import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { ORDEN, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
@@ -612,4 +614,234 @@ test('límite de transferencia activa fallback reunido y recupera emisión por d
     assert.ok(corte.vista.people.length > 0);
   }));
   assert.equal(motor2.trazaFotogramaDuenos!.emitidos, 2);
+});
+
+test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, destino y keyframe sin reunir', async t => {
+  const params = parseParams({ v23: { ...escalon('duenos'), fotograma: true } });
+  const mundo = createWorld(17, params);
+
+  // Localizamos una frontera real de tierra transitable entre dueño 0 y dueño 1 según el reparto inicial.
+  const claves = Object.keys(mundo.chunks);
+  const pxArr = Int32Array.from(claves, k => mundo.chunks[k]!.cx);
+  const pyArr = Int32Array.from(claves, k => mundo.chunks[k]!.cy);
+  const reparto = repartirPorTramos(pxArr, pyArr, 2);
+  const duenoDeChunk = new Map<string, number>();
+  claves.forEach((k, i) => duenoDeChunk.set(k, reparto[i]!));
+  const teselaPorPos = new Map(mundo.tiles.map(tile => [`${tile.x},${tile.y}`, tile]));
+  const frontera: { ox: number; oy: number; dx: number; dy: number }[] = [];
+  for (const tile of mundo.tiles) {
+    if (tile.terrain === 'water') continue;
+    const h0 = duenoDeChunk.get(chunkKey(tile.x, tile.y));
+    if (h0 !== 0) continue;
+    for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const vecina = teselaPorPos.get(`${tile.x + ddx},${tile.y + ddy}`);
+      if (!vecina || vecina.terrain === 'water') continue;
+      if (duenoDeChunk.get(chunkKey(vecina.x, vecina.y)) === 1) {
+        frontera.push({ ox: tile.x, oy: tile.y, dx: vecina.x, dy: vecina.y });
+      }
+    }
+  }
+  assert.ok(frontera.length >= 4, 'debe existir una frontera transitable entre dueño 0 y dueño 1');
+
+  // Colocamos animales terrestres reales a ambos lados de la frontera para provocar cruces F4->F5(Admitido)->F6(aplicarAdmitido)
+  // incluyendo destinos con ocupación previa y mezcla de especies.
+  const especiesFrontera = ['deer', 'hare', 'boar', 'fox', 'wolf'] as const;
+  const crearAnimalFrontera = (id: string, species: (typeof especiesFrontera)[number], x: number, y: number, tx: number, ty: number) => ({
+    id, species, x, y, action: 'roam' as const, reason: 'Explora su hábitat con percepción local.',
+    hunger: 0.25, thirst: 0.2, energy: 0.9, fatigue: 0.1, health: 1,
+    generation: 0, parents: [] as string[],
+    genes: { speed: 0.95, perception: 0.8, metabolism: 0.45, carnivory: species === 'wolf' ? 0.75 : 0.1, waterEfficiency: 0.6, camouflage: 0.4 },
+    age: 120, bornAt: -120, lastBirth: -120, lastBirthAge: 0, lastDecision: -12, lastMove: -12,
+    target: { x: tx, y: ty }, memory: [], work: 0, preyId: null,
+  });
+  for (let i = 0; i < Math.min(12, frontera.length); i++) {
+    const par = frontera[i]!;
+    mundo.animals.push(crearAnimalFrontera(`animal-frontera-a-${i}`, especiesFrontera[i % especiesFrontera.length]!, par.ox, par.oy, par.dx, par.dy));
+    if (i < 4) {
+      mundo.animals.push(crearAnimalFrontera(`animal-frontera-b-${i}`, especiesFrontera[(i + 2) % especiesFrontera.length]!, par.dx, par.dy, par.ox, par.oy));
+    }
+  }
+  syncFauna(mundo.tiles, mundo.animals);
+
+  const motor = crearMotor(mundo, { ...unSoloDueno(17), hilos: 2, emisionFotogramaDuenos: true });
+  t.after(() => motor.cerrar());
+  const descriptor = crearDescriptor(32 * 1024 * 1024);
+  const enlace = enlaceCinta(descriptor);
+  const fuenteDuenos = fuenteFotograma(mundo, 0, 'cruce-f6', RUNTIME, () => 10, () => undefined);
+  const fuenteRef = fuenteFotograma(mundo, 0, 'cruce-f6', RUNTIME, () => 10, () => undefined);
+  const estadoDuenos = estadoVista(0);
+  const estadoRef = estadoVista(0);
+
+  let ultimoCruce: { hilo: number; destinoKey: string; indice: number; especie: string }[] = [];
+  let seq = 0;
+  let crucesEnKeyframe = 0;
+  let crucesEnDeltaConAmbasPaginas = 0;
+
+  motor.enlazar(descriptor, {
+    corte: (c, f, paginas, reunido) => fuenteDuenos.corte(c, f, paginas, reunido),
+    cortePorDuenos: (c, f, paginas, lote) => {
+      ultimoCruce = [];
+      for (const parte of lote.partes) {
+        for (const cruce of parte.crucesFaunaSalientes) {
+          ultimoCruce.push({ hilo: parte.hilo, destinoKey: cruce.key, indice: cruce.indice, especie: cruce.especie });
+        }
+      }
+      const salida = fuenteDuenos.cortePorDuenos!(c, f, paginas, lote);
+      assert.ok(salida, 'un cruce F6 admitido por Admitido no debe caer a fallback reunido');
+      return salida;
+    },
+    confirmar: f => fuenteDuenos.confirmar(f),
+  });
+
+  Atomics.store(enlace.creditos, 0, 1);
+  Atomics.store(enlace.cadencia, 0, 1);
+
+  let posPrevias = new Map<string, { x: number; y: number }>(
+    motor.instantanea().world.animals.map(a => [a.id, { x: a.x, y: a.y }]),
+  );
+
+  const chunksFrontera = new Set<number>();
+
+  for (let paso = 1; paso <= 120 && (crucesEnKeyframe === 0 || crucesEnDeltaConAmbasPaginas === 0); paso++) {
+    // Alternamos keyframe y delta hasta capturar ambos escenarios con cruces F6 reales.
+    const pedirKey = crucesEnKeyframe === 0 ? paso % 2 === 1 : false;
+    if (pedirKey) Atomics.store(enlace.pedirCompleto, 0, 1);
+    else if (crucesEnKeyframe > 0 && enlace.versiones) {
+      // Aseguramos que tanto origen como destino fronterizos entren en `f.paginas` del delta sin alterar la simulación.
+      for (const ch of chunksFrontera) enlace.versiones[ch] = 0;
+    }
+    motor.paso([]);
+    const leidosAntes = BigInt(seq);
+    assert.equal(Atomics.load(enlace.entregados, 0), leidosAntes + 1n);
+
+    // `#fuenteReunida()` llama `#reunirMundo()` sin `recordSample`; igualamos `history` del oráculo al coordinador.
+    const reunido = motor.instantanea().world;
+    reunido.history = mundo.history.map(s => ({ ...s }));
+    const d = duenoSi(mundo)!;
+    if (chunksFrontera.size === 0) {
+      for (const par of frontera) {
+        const cO = d.terrenoPercibido.paginaDe(par.ox >> 4, par.oy >> 4);
+        const cD = d.terrenoPercibido.paginaDe(par.dx >> 4, par.dy >> 4);
+        if (cO >= 0) chunksFrontera.add(cO);
+        if (cD >= 0) chunksFrontera.add(cD);
+      }
+    }
+
+    const ok = leerFotograma(enlace, leidosAntes, (frame: Fotograma, sucesosDuenos: readonly Suceso[]) => {
+      seq++;
+      const corteDuenos = fotogramaAVista(estadoDuenos, frame, sucesosDuenos, seq);
+      const fCurso = {
+        ranura: descriptor.ranuras[Number(leidosAntes % BigInt(descriptor.ranuras.length))]!,
+        completo: frame.completo,
+        tick: frame.tick,
+        epoca: frame.epoca,
+        versiones: enlace.versiones!,
+      };
+      const refSalida = fuenteRef.corte(d, fCurso, frame.paginas, reunido);
+      const refSucesos = [...refSalida.sucesos, ...decodificarBloques(refSalida.bloques)];
+      const corteRef = fotogramaAVista(estadoRef, frame, refSucesos, seq);
+      fuenteRef.confirmar(fCurso);
+
+      // Paridad exacta de todo el Corte en cada tick (incluidos origen y destino de cualquier cruce F6).
+      assertCortesEquivalentes(corteDuenos, corteRef, frame.completo);
+
+      if (ultimoCruce.length > 0) {
+        const paginasEnFrame = new Set<string>();
+        for (let p = 0; p < frame.paginas.length; p += 2) paginasEnFrame.add(`${frame.paginas[p]},${frame.paginas[p + 1]}`);
+        const teselasActuales = frame.completo ? corteDuenos.vista.tiles : (Array.isArray(corteDuenos.tilesCambiadas) ? corteDuenos.tilesCambiadas : []);
+        const teselasRef = frame.completo ? corteRef.vista.tiles : (Array.isArray(corteRef.tilesCambiadas) ? corteRef.tilesCambiadas : []);
+        assert.deepEqual(teselasActuales, teselasRef);
+
+        // Comprobación explícita de teselas de origen y destino de cada animal que cruzó en F6.
+        let vioOrigenYDestino = false;
+        for (const a of reunido.animals) {
+          const prev = posPrevias.get(a.id);
+          if (!prev || (prev.x === a.x && prev.y === a.y)) continue;
+          const kOrig = chunkKey(prev.x, prev.y), kDest = chunkKey(a.x, a.y);
+          if (kOrig === kDest || duenoDeChunk.get(kOrig) === duenoDeChunk.get(kDest)) continue;
+          if (!paginasEnFrame.has(kOrig) || !paginasEnFrame.has(kDest)) continue;
+          const tOrig = teselasActuales.find(tile => tile.x === prev.x && tile.y === prev.y);
+          const tOrigRef = teselasRef.find(tile => tile.x === prev.x && tile.y === prev.y);
+          const tDest = teselasActuales.find(tile => tile.x === a.x && tile.y === a.y);
+          const tDestRef = teselasRef.find(tile => tile.x === a.x && tile.y === a.y);
+          assert.ok(tOrig && tOrigRef && tDest && tDestRef, `faltan teselas origen/destino (${prev.x},${prev.y})->(${a.x},${a.y})`);
+          assert.equal(tOrig.fauna, tOrigRef.fauna);
+          assert.equal(tOrig.species, tOrigRef.species);
+          assert.equal(tDest.fauna, tDestRef.fauna);
+          assert.equal(tDest.species, tDestRef.species);
+          assert.ok((tDest.fauna ?? 0) >= 1);
+          vioOrigenYDestino = true;
+        }
+        if (vioOrigenYDestino) {
+          if (frame.completo) crucesEnKeyframe++;
+          else crucesEnDeltaConAmbasPaginas++;
+        }
+      }
+    });
+    assert.ok(ok);
+    posPrevias = new Map(reunido.animals.map(a => [a.id, { x: a.x, y: a.y }]));
+  }
+
+  assert.ok(crucesEnKeyframe >= 1, `se esperaba al menos un cruce F6 real en keyframe con origen y destino (vistos=${crucesEnKeyframe})`);
+  assert.ok(crucesEnDeltaConAmbasPaginas >= 1, `se esperaba al menos un cruce F6 real en delta con origen y destino (vistos=${crucesEnDeltaConAmbasPaginas})`);
+  const traza = motor.trazaFotogramaDuenos!;
+  assert.equal(traza.fallbacksCompat, 0);
+  assert.equal(traza.fallbacksLimite, 0);
+  assert.equal(traza.reunionesEvitadas, seq);
+});
+
+test('cruce F6 reduce especie visual mínima en destino mixto y cae a fallback si falta página diferida', () => {
+  const mundo = createWorld(19, parseParams({ v23: { ...escalon('duenos'), fotograma: true } }));
+  const motor = crearMotor(mundo, unSoloDueno(19));
+  const descriptor = crearDescriptor();
+  const enlace = enlaceCinta(descriptor);
+  motor.enlazar(descriptor);
+  motor.cargar({ world: mundo, materia: null }, 0);
+  const d = duenoSi(mundo)!;
+  const fuente = fuenteFotograma(mundo, 0, 'mixto', RUNTIME, () => 10, () => undefined);
+  const emisor = new EmisorFotoDueno(mundo);
+  const ranura = descriptor.ranuras[0]!;
+  const claves = Object.keys(mundo.chunks);
+  const chunks = Array.from(d.chunks);
+  const paginasTodas = Int32Array.from(chunks.flatMap(c => [d.terreno.paginaX[c]!, d.terreno.paginaY[c]!]));
+
+  // Elegimos un chunk destino y una celda con especie 'wolf' en base local; llega un 'deer' desde otro dueño.
+  const chunkDest = chunks[0]!;
+  const claveDest = `${d.terreno.paginaX[chunkDest]},${d.terreno.paginaY[chunkDest]}`;
+  const f1 = { ranura, completo: true, tick: 1, epoca: 0, versiones: enlace.versiones! };
+  const parteBase = emisor.emitir(
+    d, f1, chunks, d.organismos, (px, py) => d.terrenoPercibido.paginaDe(px, py),
+    0, 0, true, new Set([chunkDest]),
+  );
+  assert.equal(parteBase.paginasPendientesCruce.length, 1);
+  assert.equal(parteBase.paginasPendientesCruce[0]!.key, claveDest);
+  // Preparamos celda 0 de destino con 1 'wolf' para probar suma + especie lexicográfica mínima ('deer' < 'wolf').
+  parteBase.paginasPendientesCruce[0]!.celdas[0]!.fauna = 1;
+  parteBase.paginasPendientesCruce[0]!.celdas[0]!.species = 'wolf';
+  const parteConCruce = {
+    ...parteBase,
+    crucesFaunaSalientes: [{ key: claveDest, indice: 0, especie: 'deer' as const }],
+  };
+  const salida = fuente.cortePorDuenos!(d, f1, paginasTodas, {
+    hilos: 1, cabecera: mundo, partes: [parteConCruce], clavesActivas: new Set(claves),
+    chunksActivos: chunks, conCaras: true, limiteBytesTotal: 64 * 1024 * 1024, bajasConfirmadas: [],
+  });
+  assert.ok(salida);
+  const pagEmitida = salida.sucesos.find(s => s.tipo === 'pagina' && s.id === claveDest);
+  assert.ok(pagEmitida && pagEmitida.tipo === 'pagina' && pagEmitida.vista);
+  assert.equal(pagEmitida.vista[0]!.fauna, 2);
+  assert.equal(pagEmitida.vista[0]!.species, 'deer');
+
+  // Fail-closed: si llega un cruce hacia una página presente en `f.paginas` que NO fue diferida, devuelve `null` (fallback).
+  const parteSinDiferir = {
+    ...parteBase,
+    paginasPendientesCruce: [],
+    crucesFaunaSalientes: [{ key: claveDest, indice: 0, especie: 'deer' as const }],
+  };
+  const salidaFallback = fuente.cortePorDuenos!(d, f1, paginasTodas, {
+    hilos: 1, cabecera: mundo, partes: [parteSinDiferir], clavesActivas: new Set(claves),
+    chunksActivos: chunks, conCaras: true, limiteBytesTotal: 64 * 1024 * 1024, bajasConfirmadas: [],
+  });
+  assert.equal(salidaFallback, null, 'si una página destino en f.paginas no se difirió, debe caer a fallback');
+  void motor.cerrar();
 });

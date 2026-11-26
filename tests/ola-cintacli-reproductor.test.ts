@@ -90,7 +90,7 @@ function cintaSintetica(config: ConfigCinta) {
   return { meta, chunk, coberturas };
 }
 
-interface OpcionesHarness extends ConfigCinta { marcadores?: PerfilCinta; metaPollMs?: number }
+interface OpcionesHarness extends ConfigCinta { marcadores?: PerfilCinta; metaPollMs?: number; abrirEnInicio?: boolean }
 
 function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
   const cinta = cintaSintetica(config);
@@ -100,6 +100,7 @@ function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
   let hold = false, metaCalls = 0, falla = false;
   const player = new DvrPlayer({
     metaPollMs: config.metaPollMs ?? 0, viewportCoalesceMs: 10, ...(config.marcadores ? { marcadores: config.marcadores } : {}),
+    abrirEnInicio: config.abrirEnInicio,
     fetchMeta: async () => { metaCalls++; return cinta.meta(); },
     fetchChunk: async request => {
       requests.push(request);
@@ -131,6 +132,18 @@ function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
 /* ------------------------------------------------------------------ */
 /* Arranque, nivel y escala                                           */
 /* ------------------------------------------------------------------ */
+
+test('una grabación abre pausada al inicio y su botón final muestra el último fotograma exacto', async () => {
+  const h = harness({ coberturas: [{ nivel: 0, t0: 80, t1: 480 }], abrirEnInicio: true });
+  assert.equal(await h.player.start(), true);
+  assert.equal(h.player.currentTick, 80);
+  assert.equal(h.player.playing, false);
+  await h.player.jumpToLiveEdge();
+  assert.equal(h.player.currentTick, 480);
+  assert.equal(h.player.playing, false);
+  assert.equal(h.metaCalls, 1);
+  h.player.stop();
+});
 
 test('start: sin marcador cae en el presente, pide nivel auto y aterriza en el último fotograma ≤ t', async () => {
   const h = harness();

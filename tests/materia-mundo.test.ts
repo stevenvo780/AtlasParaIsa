@@ -63,17 +63,19 @@ test('el guardado completo admite madera y piedra por encima de la escala de sus
   const c = ctxSi(mundo) as CtxLeyMateria;
   const tesela = mundo.tiles.find(tile => tile.terrain !== 'water')!;
   const celda = c.terreno.celda(tesela.x, tesela.y);
+  const maderaAntes = tesela.wood ?? 0, piedraAntes = tesela.stone ?? 0;
   assert.equal(aportarEscalar(c, celda, 'madera', 20), 20);
   assert.equal(aportarEscalar(c, celda, 'piedra', 20), 20);
-  assert.equal(tesela.wood, 12);
-  assert.equal(tesela.stone, 8);
+  assert.ok(Math.abs(tesela.wood! - maderaAntes - 20) < 1e-9);
+  assert.ok(Math.abs(tesela.stone! - piedraAntes - 20) < 1e-9);
+  assert.ok(tesela.wood! > 12 && tesela.stone! > 8);
 
   store.guardar(motor.instantanea());
   const guardado = store.cargarInstantanea()!;
   assert.ok(guardado.instantanea.materia);
   const vista = guardado.instantanea.world.tiles.find(tile => tile.x === tesela.x && tile.y === tesela.y)!;
-  assert.equal(vista.wood, 12);
-  assert.equal(vista.stone, 8);
+  assert.equal(vista.wood, tesela.wood);
+  assert.equal(vista.stone, tesela.stone);
 
   motor.cargar(guardado.instantanea, guardado.epoca);
   const restaurado = ctxSi(guardado.instantanea.world) as CtxLeyMateria;

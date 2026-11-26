@@ -31,6 +31,19 @@ En el candidato compilado, `ATLAS_DEMO_OBSERVACION_SEGUNDOS=7200 node scripts/la
 
 Las responsabilidades de CPU, VRAM, RAM y discos están en [HARDWARE.md](HARDWARE.md). El material de la carta y los recuerdos autorizados solo los cambia Steven.
 
+## Una grabación que puede verse sin el motor
+
+El exportador toma una cinta de laboratorio y copia el intervalo disponible en nivel completo. Conserva los fotogramas y el índice en un directorio separado. Al abrir la grabación, el reproductor espera en el primer fotograma. Con **Elegir tramo** se marcan inicio y final sobre la línea de tiempo. **Ver tramo** usa la velocidad seleccionada y se detiene al terminar. La cámara lee las teselas grabadas.
+
+En la copia de trabajo del candidato, tras compilar el cliente, estos comandos preparan y sirven el intervalo por la interfaz local de la máquina.
+
+```bash
+node --import tsx scripts/lab/exportar-demo.mts CINTA_DE_LABORATORIO TICK_INICIO TICK_FINAL DIRECTORIO_NUEVO
+node --import tsx scripts/lab/servir-demo.mts DIRECTORIO_NUEVO 3130
+```
+
+El servidor del reproductor sirve archivos estáticos y el tramo sellado. El navegador no abre una conexión con el motor ni inicia un mundo desde un guardado.
+
 ## Primer corte medido
 
 En `4deaee1`, las pruebas de laboratorio acreditaron bebida y alivio de sed con débito material, preferencia de ruta por piedra instalada y refugio bajo una cubierta que pierde su efecto al desgastarse o desmontarse. Las 11 pruebas focales y la compilación pasaron. Un recorrido autenticado en Chromium abrió Historia, pausó la cinta, buscó un corte anterior y volvió al presente con la ficha abierta en 1440 × 900 y 390 × 844.

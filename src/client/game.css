@@ -114,9 +114,9 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .dvr-hover:not(:empty){grid-column:1/-1;overflow:visible;overflow-wrap:anywhere}
 /* La ficha deja sitio a la cinta para leer una historia y controlar su reproducción a la vez. */
 .game-shell.has-dvr:has(.game-drawer:not([hidden]):not(.inspector-drawer)) .dvr-bar{display:none}
-.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .inspector-drawer{bottom:335px;max-height:min(60dvh,calc(100dvh - 500px))}
+.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .inspector-drawer{bottom:calc(98px + var(--alto-cinta,237px));max-height:min(60dvh,calc(100dvh - 220px - var(--alto-cinta,237px)))}
 .dvr-speeds .dvr-speed{flex:1}
-.game-shell.has-dvr .world-coordinates{bottom:222px}.game-shell.has-dvr .camera-controls{bottom:232px}.game-shell.has-dvr .heat-legend{bottom:232px}
+.game-shell.has-dvr .world-coordinates,.game-shell.has-dvr .camera-controls,.game-shell.has-dvr .heat-legend{bottom:calc(98px + var(--alto-cinta,134px))}
 }
 @media(prefers-reduced-motion:reduce){.dvr-bar,.dvr-bar *{transition:none!important}}
 
@@ -298,4 +298,4 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .materia-ciclo{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
 @media(max-width:760px){.cuerpo-fila{grid-template-columns:minmax(0,1fr) 96px 56px;font-size:11px}.stats-tabs{overflow-x:auto}}
 
-.dvr-tramo{grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:11px;color:#d9cfae}.dvr-tramo button{min-height:32px;padding:4px 8px;color:inherit;background:#0004;border:1px solid #ffffff40;border-radius:6px}.dvr-tramo button:disabled{opacity:.45}.dvr-tramo button:focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}@media(max-width:760px){.dvr-tramo{grid-row:4}.dvr-tramo button{min-height:40px}}
+.dvr-tramo{grid-column:1/-1;font-size:11px;color:#e9e1be}.dvr-tramo>summary{width:fit-content;min-height:32px;padding:8px;cursor:pointer}.dvr-tramo-controles{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.dvr-tramo button{min-height:32px;padding:4px 8px;color:inherit;background:#0004;border:1px solid #ffffff40;border-radius:6px}.dvr-tramo button:disabled{opacity:.45}.dvr-tramo :is(summary,button):focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}@media(max-width:760px){.dvr-tramo{grid-row:4}.dvr-tramo>summary,.dvr-tramo button{min-height:40px}}

@@ -114,6 +114,8 @@ export interface DvrPlayerOptions {
   marcadores?: PerfilCinta;
   /** 0 desactiva el sondeo automático (las pruebas llaman a `pollMeta()`). */
   metaPollMs?: number;
+  /** Una grabación cerrada se abre pausada en su primer fotograma. */
+  abrirEnInicio?: boolean;
   viewportCoalesceMs?: number;
 }
 
@@ -205,7 +207,7 @@ export class DvrPlayer {
 
   get bufferedAhead(): number { return this.frames.length; }
   get aheadOfPlayhead(): number { return Math.max(0, this.maxTick - this.currentTick); }
-  get atLiveEdge(): boolean { return this.aheadOfPlayhead <= DVR_LIMITS.liveEdgeTicks; }
+  get atLiveEdge(): boolean { return this.aheadOfPlayhead <= (this.options.abrirEnInicio ? 0 : DVR_LIMITS.liveEdgeTicks); }
   /** Último tick cargado (emitido o en cola): el cabezal no puede pasar de aquí. */
   get maxLoadedTick(): number { return this.frames.length ? this.frames[this.frames.length - 1]!.tick : this.currentTick; }
   /** Duración visual de un fotograma a la velocidad actual. */
@@ -286,9 +288,10 @@ export class DvrPlayer {
       if (!this.frames.length) this.credito = Math.min(this.credito, 1);
       const batch: QueuedFrame[] = [];
       let cambio = false;
+      let fueraDelTramo = false;
       while (this.frames.length) {
         const next = this.frames[0]!;
-        if (this.tramo && next.tick > this.tramo.hasta) { this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify(); break; }
+        if (this.tramo && next.tick > this.tramo.hasta) { fueraDelTramo = true; break; }
         const previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
         const otroNivel = previo !== null && next.nivel !== previo;
         if (otroNivel) { if (!batch.length) { batch.push(this.frames.shift()!); cambio = true; this.credito = Math.max(0, this.credito - 1); } break; }
@@ -298,9 +301,11 @@ export class DvrPlayer {
       // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega. Los deltas intermedios sí se aplican
       // (cada uno parte del anterior) pero su fotograma no se emite; sus teselas cambiadas se acumulan en el entregado.
       if (batch.length && !this.deliver(batch, 'play', batch.length - 1, cambio)) return;
-      if (this.tramo && this.playing && (this.currentTick >= this.tramo.hasta ||
+      if (this.tramo && (fueraDelTramo || this.currentTick >= this.tramo.hasta ||
           (!this.frames.length && this.currentTick >= this.maxTick))) {
-        this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify();
+        this.tramo = null; this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify();
+      } else if (this.options.abrirEnInicio && this.currentTick >= this.maxTick) {
+        this.playing = false; this.credito = 0; this.notify();
       }
       this.msReproduciendo += dt;
       if (this.msReproduciendo >= DVR_LIMITS.marcadorCadaMs) { this.msReproduciendo = 0; this.guardarMarcador(false); }
@@ -345,6 +350,7 @@ export class DvrPlayer {
   /** Salta a `tick` (acotado a la cinta y fuera de las lagunas), descarta lo cargado y emite el fotograma en cuanto llega. */
   async seek(tick: number): Promise<void> {
     if (!this.enabled || !Number.isFinite(tick)) return;
+    this.tramo = null;
     await this.jump(tick, 'seek', Math.sign(tick - this.currentTick) || 1);
   }
 
@@ -365,10 +371,12 @@ export class DvrPlayer {
     const inicio = clamp(Math.floor(desde), this.minTick, this.maxTick);
     const fin = clamp(Math.floor(hasta), this.minTick, this.maxTick);
     if (fin <= inicio) { this.options.onAviso?.('El final debe estar después del inicio.'); return; }
-    this.tramo = { desde: inicio, hasta: fin };
+    const tramo = { desde: inicio, hasta: fin };
+    this.tramo = tramo;
     this.playing = false;
     const ok = await this.jump(inicio, 'seek', 1);
-    if (!ok || !this.tramo) { this.tramo = null; this.notify(); return; }
+    if (this.tramo !== tramo) return; // Otro salto o tramo sustituyó a este mientras llegaba el corte.
+    if (!ok) { this.tramo = null; this.notify(); return; }
     if (this.currentTick > fin) { this.tramo = null; this.options.onAviso?.('No hay cinta en ese tramo.'); this.notify(); return; }
     this.playing = true; this.lastNow = null; this.notify();
   }
@@ -376,7 +384,7 @@ export class DvrPlayer {
   /** Vuelve al presente (con colchón) y reproduce. */
   jumpToLiveEdge(): Promise<void> {
     this.tramo = null;
-    this.playing = true;
+    this.playing = !this.options.abrirEnInicio;
     if (!this.enabled) { this.notify(); return Promise.resolve(); }
     this.epocaVista = null;
     return this.jump(this.liveTick(), 'seek', 1).then(() => undefined);
@@ -407,6 +415,11 @@ export class DvrPlayer {
   /* ---------------------------------------------------------------- */
 
   private async arrancar(): Promise<void> {
+    if (this.options.abrirEnInicio) {
+      this.playing = false;
+      await this.jump(this.minTick, 'start', 1);
+      return;
+    }
     let marcador: Marcador | null = null;
     try { marcador = await this.options.marcadores?.ultimo() ?? null; } catch { marcador = null; }
     if (marcador && this.maxTick >= marcador.t) {
@@ -481,7 +494,7 @@ export class DvrPlayer {
   }
 
   private hasFrames(): boolean { return this.niveles.length > 0 && this.maxTick >= this.minTick; }
-  private liveTick(): number { return Math.max(this.minTick, this.maxTick - DVR_LIMITS.liveMargin); }
+  private liveTick(): number { return this.options.abrirEnInicio ? this.maxTick : Math.max(this.minTick, this.maxTick - DVR_LIMITS.liveMargin); }
   private chunkCount(): number { return this.speed >= DVR_LIMITS.fastSpeed ? DVR_LIMITS.fastChunkCount : DVR_LIMITS.chunkCount; }
   /** Colchón mínimo por delante antes de pedir más: ≥ 45 fotogramas y, a velocidad alta, ≈ 1,5 s de reproducción. */
   private prefetchThreshold(): number { return Math.max(DVR_LIMITS.prefetchBelow, Math.ceil(CINTA.fpsNormal * this.speed * 1.5)); }

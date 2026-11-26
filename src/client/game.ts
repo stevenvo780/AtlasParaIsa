@@ -49,11 +49,12 @@ let connection: Connection | null = null;
 /** V21: reproductor DVR de la cinta (`/api/cinta/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
 let dvr: DvrPlayer | null = null;
 let dvrBar: DvrBarController | null = null;
+let dvrResize: ResizeObserver | null = null;
 let dvrRaf = 0;
 let lastTapeHudAt = 0;
 /** V21: el servidor sólo deja observar (sin órdenes ni gestos): la UI de dirección e intervención no existe. */
 let observerOnly = false;
-interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean }
+interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean; archiveMode?: boolean }
 let landscape: Landscape | null = null;
 /** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
 // V24: 640 trozos de 16×16 (≈ 164 k teselas): alejar al zoom mínimo (≈ 480×270 teselas a 1080p) cabe sin expulsar lo visible.
@@ -188,16 +189,19 @@ function enterWorld(flags: SessionFlags = {}): void {
   // El perfil de Ajustes decide el modo de dibujo (Ligero = observador); ya no hay otro conmutador que lo deje atrapado.
   graphicsSettings = startupSettings();
   const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (statsTab === 'communities') renderStats(); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  if (!flags.archiveMode) connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (statsTab === 'communities') renderStats(); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
-  if (modo === 'observador') connection.suscribir(5000);
+  if (modo === 'observador') connection?.suscribir(5000);
   startClientUi(); wire(); wireClientUi();
-  observerOnly = !!flags.observerOnly; applyObserverOnly(document, observerOnly);
-  if (flags.tapeEnabled) startTape(); // la cinta manda el mundo; el socket sigue para gestos, recetas y fichas
-  connection.start();
+  observerOnly = !!(flags.observerOnly || flags.archiveMode); applyObserverOnly(document, observerOnly);
+  if (flags.archiveMode) {
+    for (const control of ['logout-button', 'world-minimap', 'whisper-toggle', 'salud-chip', 'salud-indicador']) el(control).hidden = true;
+  }
+  if (flags.tapeEnabled || flags.archiveMode) startTape();
+  connection?.start();
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +221,7 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
 
 function startTape(): void {
   const container = document.getElementById('dvr-bar'); if (!container) return;
+  const archivo = !!sessionFlags.archiveMode;
   connection?.setTapeMode(true);
   dvrBar = mountDvrBar(container, {
     togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
@@ -225,19 +230,25 @@ function startTape(): void {
   });
   const red = crearRedCinta({ alSesionTerminada: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });
   const player = new DvrPlayer({
-    fetchMeta: red.fetchMeta, fetchChunk: red.fetchChunk, marcadores: new PerfilCinta({ red: red.marcadores }),
+    fetchMeta: red.fetchMeta, fetchChunk: red.fetchChunk,
+    ...(archivo ? { metaPollMs: 0, abrirEnInicio: true } : { marcadores: new PerfilCinta({ red: red.marcadores }) }),
     onAviso: texto => message(texto), onMarca: marca => message(marca.texto),
     onFrame: receiveTapeFrame,
-    onStateChange: state => { dvrEstado = state; dvrBar?.update(state); },
+    onStateChange: state => { dvrEstado = state; dvrBar?.update({ ...state, archivo }); },
   });
   dvr = player;
   void player.start().then(active => {
     if (dvr !== player) return; // se salió del mundo mientras cargaba
     if (!active) { // cinta apagada o sin respuesta: de vuelta al modo vivo clásico por WebSocket
+      if (archivo) el('map-loading').textContent = 'La grabación no está disponible.';
       dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); return;
     }
     landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
     container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
+    const ajustarAltura = () => el('game').style.setProperty('--alto-cinta', `${container.offsetHeight}px`);
+    ajustarAltura();
+    dvrResize = new ResizeObserver(ajustarAltura);
+    dvrResize.observe(container);
     const loop = (now: number): void => { player.advance(now); dvrRaf = requestAnimationFrame(loop); };
     dvrRaf = requestAnimationFrame(loop);
   });
@@ -245,6 +256,7 @@ function startTape(): void {
 
 function stopTape(): void {
   cancelAnimationFrame(dvrRaf); dvrRaf = 0;
+  dvrResize?.disconnect(); dvrResize = null;
   dvr?.stop(); dvr = null; dvrBar?.destroy(); dvrBar = null;
   landscape?.setDvrMode(false);
   document.getElementById('game')?.classList.remove('has-dvr');
@@ -501,23 +513,25 @@ function startClientUi(): void {
   el('settings-body').innerHTML = renderGraphicsSettingsHtml(graphicsSettings);
   landscape?.setGraphicsSettings(graphicsSettings); soundscape.setVolume(graphicsSettings.soundVolume);
   minimap = mountMinimap(el<HTMLCanvasElement>('minimap-canvas'), focusTile);
-  uiSession = new AbortController();
-  void refreshMap();
-  void refreshSalud();
-  void refreshMotor();
-  uiTimers.push(setInterval(() => {
-    if (document.hidden) return;
+  if (!sessionFlags.archiveMode) {
+    uiSession = new AbortController();
     void refreshMap();
     void refreshSalud();
-    if (!motorAbierto()) void refreshMotor();
-  }, 3000));
-  // Con el panel «Motor» abierto la telemetría se lee cada segundo; cerrado, basta con la luz del indicador.
-  uiTimers.push(setInterval(() => { if (!document.hidden && motorAbierto()) void refreshMotor(); }, 1000));
-  uiTimers.push(setInterval(() => {
-    if (document.hidden) return;
-    if (!el('population-drawer').hidden || !el('whisper-drawer').hidden || (!el('stats-drawer').hidden && statsTab === 'communities')) void refreshDirectory();
-    if (!el('whisper-drawer').hidden) void refreshWhispers();
-  }, 2500));
+    void refreshMotor();
+    uiTimers.push(setInterval(() => {
+      if (document.hidden) return;
+      void refreshMap();
+      void refreshSalud();
+      if (!motorAbierto()) void refreshMotor();
+    }, 3000));
+    // Con el panel «Motor» abierto la telemetría se lee cada segundo; cerrado, basta con la luz del indicador.
+    uiTimers.push(setInterval(() => { if (!document.hidden && motorAbierto()) void refreshMotor(); }, 1000));
+    uiTimers.push(setInterval(() => {
+      if (document.hidden) return;
+      if (!el('population-drawer').hidden || !el('whisper-drawer').hidden || (!el('stats-drawer').hidden && statsTab === 'communities')) void refreshDirectory();
+      if (!el('whisper-drawer').hidden) void refreshWhispers();
+    }, 2500));
+  }
   let previous = '';
   const frame = (): void => {
     uiRaf = requestAnimationFrame(frame); // primero: un fallo de dibujo o de audio no detiene el bucle
@@ -922,7 +936,15 @@ function renderControls(): void {
   el('game').classList.toggle('direct-mode', control === 'direct');
 }
 function renderStatus(): void {
-  if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; const tape = !!dvr?.enabled && !!world; el('connection-label').textContent = paused ? 'En pausa' : tape ? (dvr!.atLiveEdge ? 'En vivo · cinta' : 'Cinta') : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String((tape || status === 'live') && !paused);
+  if (!document.getElementById('connection-label')) return;
+  if (sessionFlags.archiveMode) {
+    el('connection-label').textContent = 'Grabación';
+    el('connection-notice').hidden = world !== null;
+    el('connection-notice').textContent = 'Cargando la grabación…';
+    renderControls(); if (!el('stats-drawer').hidden) renderStats();
+    return;
+  }
+  const paused = !!world?.paused; const tape = !!dvr?.enabled && !!world; el('connection-label').textContent = paused ? 'En pausa' : tape ? (dvr!.atLiveEdge ? 'En vivo · cinta' : 'Cinta') : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String((tape || status === 'live') && !paused);
   el('connection-notice').hidden = (status === 'live' || tape) && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
   renderRhythm(); renderControls(); if (!el('stats-drawer').hidden) renderStats();
 }
@@ -1128,5 +1150,5 @@ document.addEventListener('visibilitychange', () => {
     if (!el('whisper-drawer').hidden) void refreshWhispers();
   }
 });
-async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean } & SessionFlags; if (response.ok && session.authenticated) enterWorld({ tapeEnabled: session.tapeEnabled, observerOnly: session.observerOnly }); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
+async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean } & SessionFlags; if (response.ok && session.authenticated) enterWorld(session); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
 void boot();

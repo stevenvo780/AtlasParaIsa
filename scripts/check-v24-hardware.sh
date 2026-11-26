@@ -27,6 +27,6 @@ node --import tsx --test --test-timeout=30000 --test-name-pattern='la cinta exte
 
 if [[ $# -eq 1 ]]; then
   node --import tsx --test --test-timeout=45000 \
-    --test-name-pattern='V24 CUDA real|G CUDA real|G recibe|G una página|G conserva|CUDA real: F2 distribuida' \
+    --test-name-pattern='V24 CUDA real|G CUDA real|G recibe|G una página|G conserva|CUDA real: F2 distribuida|la recarga conserva mundo y época' \
     tests/v23-motor-despacho.test.ts tests/ola-g-percepcion.test.ts tests/v24-gpu-duenos.test.ts
 fi

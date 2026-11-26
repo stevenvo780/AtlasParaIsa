@@ -9,7 +9,6 @@ import { crearMotor } from '../src/world/motor/coordinador.js';
 import { fundarCuerpo, plantillaHumana } from '../src/world/materia/cuerpo.js';
 import { parseParams } from '../src/world/params.js';
 import { cooperationOpportunity } from '../src/world/society.js';
-import { enqueueWhisper, stepWhispers, WHISPER_LIFETIME_TICKS } from '../src/world/whispers.js';
 
 function motorDe(world: World) {
   return crearMotor(world, { hilos: 1, gpu: [], decisionGpu: 'siempre', verificar: false, semilla: world.seed });
@@ -56,7 +55,7 @@ test('una extracción del modo mixto conserva cada lote cuando la técnica nueva
   assert.ok(Math.abs(p.compounds.reduce((n, l) => n + l.mass, 0) - 0.7) < 1e-12);
 });
 
-test('fundadores y mensajes reservan sus campos opcionales desde la construcción', () => {
+test('personas y animales reservan sus campos opcionales desde la construcción', () => {
   const world = createWorld(7, parseParams({ v23: escalon('intentos') }));
   for (const p of world.people) {
     assert.ok(Object.hasOwn(p, 'cuerpo'));
@@ -69,11 +68,4 @@ test('fundadores y mensajes reservan sus campos opcionales desde la construcció
     assert.ok(Object.hasOwn(a, 'cuerpo'));
     assert.ok(Object.hasOwn(a, 'fauna'));
   }
-
-  const susurros: NonNullable<World['whispers']> = [];
-  const w = enqueueWhisper(susurros, { intent: 'travel', x: 10, y: 10 }, 0, 1);
-  assert.ok(Object.hasOwn(w, 'bestDistance'));
-  stepWhispers(susurros, [], WHISPER_LIFETIME_TICKS + 1, 7);
-  assert.equal(w.status, 'faded');
-  assert.ok(Object.hasOwn(w, 'bestDistance'));
 });

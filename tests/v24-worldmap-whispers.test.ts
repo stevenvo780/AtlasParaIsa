@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activeWhisperForPerson, enqueueWhisper, FULFIL_DEADLINE_TICKS, MAX_ACTIVE_WHISPERS, parseWhisperRequest, STALL_CHECKS, stepWhispers, WHISPER_LIFETIME_TICKS } from '../src/world/whispers.js';
+import { activeWhisperForPerson, enqueueWhisper, FULFIL_DEADLINE_TICKS, MAX_ACTIVE_WHISPERS, parseWhisperRequest, STALL_CHECKS, stepWhispers, WHISPER_LIFETIME_TICKS, type WhisperRecord } from '../src/world/whispers.js';
 import { buildWorldDirectory, encodeChunkMinimapCells, WorldMapCache } from '../src/server/worldmap-service.js';
 import type { Tile } from '../src/shared/types.js';
 import type { DivineWhisper } from '../src/shared/worldmap.js';
@@ -22,6 +22,8 @@ test('Divine Whispers: heard after a deterministic, unpredictable delay; then fu
   const whispers: DivineWhisper[] = [];
   const w = enqueueWhisper(whispers, req, 100, 1, 'Brisa');
   assert.equal(w.status, 'latent');
+  assert.equal(w.personName, 'Brisa');
+  assert.deepEqual(w, JSON.parse(JSON.stringify(w)));
   const brisa = [oyente('p1', 0, 0, 1, { action: 'rest', target: { x: 0, y: 0 } })];
   // Never heard at the very step it is left: a whisper is not an order.
   assert.equal(stepWhispers(whispers, brisa, 100, 51926).heard.length, 0);
@@ -32,12 +34,17 @@ test('Divine Whispers: heard after a deterministic, unpredictable delay; then fu
   assert.ok(heardTick !== undefined, 'heard before it fades');
   assert.equal(w.status, 'heard');
   assert.equal(activeWhisperForPerson(whispers, 'p1')?.id, w.id);
+  const restored = JSON.parse(JSON.stringify(whispers)) as WhisperRecord[];
+  assert.ok(restored[0]!.bestDistance! > 0);
+  assert.equal(restored[0]!.stalledChecks, 0);
 
   // Arriving near the destination fulfills it.
   brisa[0]!.x = 29; brisa[0]!.y = 12;
   const done = stepWhispers(whispers, brisa, heardTick! + 40, 51926);
   assert.equal(done.fulfilled.length, 1);
   assert.equal(w.status, 'fulfilled');
+  assert.deepEqual(w, JSON.parse(JSON.stringify(w)));
+  assert.deepEqual(stepWhispers(restored, brisa, heardTick + 40, 51926), done);
   assert.equal(activeWhisperForPerson(whispers, 'p1'), undefined);
 });
 
@@ -64,6 +71,7 @@ test('Divine Whispers: fade only on death, unreachable destination or a long dea
   let w = enqueueWhisper(whispers, { personId: 'p1', intent: 'travel', x: 20, y: 0 }, 0, 1, 'Brisa');
   let out = stepWhispers(whispers, [], 30, 1);
   assert.equal(w.status, 'faded'); assert.equal(out.faded[0]!.reason, 'gone');
+  assert.deepEqual(w, JSON.parse(JSON.stringify(w)));
   // Destination discovered to be water.
   whispers = [];
   w = enqueueWhisper(whispers, { personId: 'p1', intent: 'travel', x: 20, y: 0 }, 0, 1, 'Brisa');
@@ -93,7 +101,9 @@ test('Divine Whispers: fade only on death, unreachable destination or a long dea
   assert.equal(w.status, 'faded'); assert.equal(out.faded[0]!.reason, 'deadline');
   // A regional whisper nobody passes near fades after its lifetime.
   whispers = [];
-  w = enqueueWhisper(whispers, { intent: 'explore', x: 500, y: 500 }, 0, 1);
+  w = enqueueWhisper(whispers, { intent: 'explore', x: 500, y: 500 }, 0, 1, '');
+  assert.equal(Object.hasOwn(w, 'personName'), false);
+  assert.deepEqual(w, JSON.parse(JSON.stringify(w)));
   stepWhispers(whispers, [at(0, 0)], WHISPER_LIFETIME_TICKS, 1);
   assert.equal(w.status, 'faded');
 });

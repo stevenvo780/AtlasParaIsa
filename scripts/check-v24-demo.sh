@@ -29,6 +29,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \
   tests/v24-cinta-pavimento.test.ts tests/v20-roads.test.ts tests/v20-visuals.test.ts \
   tests/v23-motor-fotograma-retirada.test.ts \
+  tests/v24-worldmap-whispers.test.ts tests/v23-topes-reguladores.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
   tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
   tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/ola-b-cuerpo.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \

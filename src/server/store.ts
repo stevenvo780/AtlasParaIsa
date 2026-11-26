@@ -65,7 +65,7 @@ interface AdjuntoAgenda {
   materiaDigest: string | null;
 }
 type MatterForWrite = Uint8Array | PreparedMatterParts | null;
-interface MatterManifestRow { slot: SnapshotSlot; world_digest: string; body: Uint8Array; }
+interface MatterManifestRow { slot: SnapshotSlot; world_digest: string; snapshot_digest: string | null; body: Uint8Array; }
 type LoadedSnapshotBruto = LoadedSnapshot & { agendaBruta?: unknown };
 interface InstantaneaCargada {
   instantanea: Instantanea;
@@ -338,6 +338,7 @@ export class Store {
    * sesiones probada como propia en `sessionWrite`); cualquier escritura ajena, DDL o escritura propia no
    * contabilizada lo desajusta y el guardado siguiente recodifica todas las páginas. */
   private snapshotPagesStamp: ChronicleStamp | null = null;
+  private loadedMatterStamp: ChronicleStamp | null = null;
   private readonly onProgress: StoreOptions['onProgress'];
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
@@ -760,7 +761,8 @@ export class Store {
 
   cargarGuardadoCompleto(): (InstantaneaCargada & { metadatos: Omit<LoadedSnapshot, 'world'> }) | null {
     if (this.readOnly || this.db.isTransaction) throw new Error('Store.cargarInstantanea requiere una transacción propia de escritura.');
-    return this.loadTransaction(rawTransaction => {
+    let matterStamp: ChronicleStamp | null = null;
+    const carga = this.loadTransaction(rawTransaction => {
       const anterior = this.readCompleteEpoch();
       if (anterior === null) return null;
       const loaded = this.loadVerified(rawTransaction, true);
@@ -773,8 +775,13 @@ export class Store {
       if (!Number.isSafeInteger(epoca)) throw new SnapshotSemanticError('La época de carga excede el rango de enteros exactos.');
       this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
       if (this.readCompleteEpoch() !== epoca) throw new SnapshotSemanticError('La época cambió antes del commit.');
+      // Reservar la época es la única escritura después de leer materia. Solo sin triggers
+      // esa lectura prueba también el estado tras la reserva y evita repetirla al primer guardado.
+      if (loaded.slot === 0 && !this.chronicleHasTriggers()) matterStamp = this.chronicleStamp();
       return { instantanea: { world, materia }, epoca, metadatos, ...(corteAgenda && { corteAgenda }) };
     }, true);
+    this.loadedMatterStamp = matterStamp;
+    return carga;
   }
 
   /** Verifica una copia en solo lectura sin abrir una época del motor. */
@@ -807,14 +814,32 @@ export class Store {
 
   private retainedMatterManifests(): MatterManifestRow[] {
     // Haría falta leer los VMAT legados enteros si se filtrara en JavaScript.
-    return this.db.prepare(`SELECT slot, world_digest, body FROM main.snapshot_matter
-      WHERE slot IN (0,1,2) AND substr(body,1,4)=X'564d5054' ORDER BY slot`).all() as unknown as MatterManifestRow[];
+    return this.db.prepare(`SELECT m.slot, m.world_digest, s.digest AS snapshot_digest, m.body
+      FROM main.snapshot_matter m LEFT JOIN main.snapshots s ON s.slot=m.slot
+      WHERE m.slot IN (0,1,2) AND substr(m.body,1,4)=X'564d5054' ORDER BY m.slot`).all() as unknown as MatterManifestRow[];
   }
 
-  private collectMatterParts(): void {
+  private collectMatterParts(strict: boolean): void {
+    const installed = SnapshotMatterParts.installed(this.db);
+    if (!installed && !strict) return;
+    // Si la firma de un respaldo se perdió, el filtro de manifiestos no puede decidir
+    // cuáles eran sus referencias. No se borra nada en un guardado ordinario.
+    if (this.db.prepare(`SELECT 1 FROM main.snapshot_matter WHERE slot IN (1,2) AND body IS NOT NULL
+      AND coalesce(substr(body,1,4) NOT IN (X'564d4154', X'564d5054'),1) LIMIT 1`).get()) {
+      if (strict) throw new SnapshotPhysicalError('Formato desconocido de materia de respaldo.');
+      return;
+    }
     const manifests = this.retainedMatterManifests();
-    if (SnapshotMatterParts.installed(this.db)) this.snapshotMatterParts.collect(manifests.map(row => row.body));
-    else if (manifests.length) throw new SnapshotPhysicalError('Falta la tabla de partes de materia.');
+    if (!installed) {
+      if (manifests.length) throw new SnapshotPhysicalError('Falta la tabla de partes de materia.');
+      return;
+    }
+    try { this.snapshotMatterParts.collect(manifests.map(row => row.body)); }
+    catch (error) {
+      // collect enumera todos los manifiestos antes del primer DELETE. Los errores SQL
+      // y la comprobación estricta siguen abortando la transacción.
+      if (strict || !(error instanceof SnapshotPhysicalError)) throw error;
+    }
   }
 
   private expectedMatterBackups(rotates: boolean, deep: boolean): Map<SnapshotSlot, MatterManifestRow> {
@@ -832,6 +857,8 @@ export class Store {
 
   private verifyMatterBackups(expected: Map<SnapshotSlot, MatterManifestRow>): void {
     for (const row of this.retainedMatterManifests()) {
+      if (row.snapshot_digest !== row.world_digest)
+        throw new SnapshotPhysicalError('El manifiesto de materia no corresponde al mundo de su slot.');
       if (row.slot !== 0) {
         const before = expected.get(row.slot);
         if (!before || row.world_digest !== before.world_digest || Buffer.compare(row.body, before.body) !== 0)
@@ -843,23 +870,21 @@ export class Store {
     if (expected.size) throw new SnapshotPhysicalError('Falta el manifiesto de materia de un respaldo antes del commit.');
   }
 
-  /** En una base cambiada desde el último guardado, un manifiesto ilegible no reemplaza un respaldo válido. */
-  private completeMatterCanRotate(): boolean {
-    const row = this.db.prepare(`
-      SELECT m.slot AS matterSlot,
-        m.body IS NULL OR substr(m.body,1,4) IN (X'564d4154', X'564d5054') AS known,
-        CASE WHEN substr(m.body,1,4)=X'564d5054' THEN m.body END AS manifest
-      FROM main.snapshots s LEFT JOIN main.snapshot_matter m ON m.slot=s.slot AND m.world_digest=s.digest
-      WHERE s.slot=0
-    `).get() as { matterSlot: number | null; known: number; manifest: Uint8Array | null } | undefined;
-    if (!row) return true;
-    if (row.matterSlot === null || !row.known) return false;
-    try { this.snapshotMatterParts.verify(row.manifest); }
-    catch (error) {
-      if (!(error instanceof SnapshotPhysicalError)) throw error;
+  /** Sin un sello vigente, comprueba la pareja mundo/materia antes de sobrescribir respaldos. */
+  private completeMatterCanRotate(world: World, epoca: number): boolean {
+    try {
+      const agenda = separarAgenda(world);
+      if (agenda === undefined && this.requiereAgenda()) return false;
+      const { bytes, digest } = this.readCompleteMatter(0);
+      const materia = this.decodeCompleteMatter(bytes, world.tick);
+      this.decodeCompleteAgenda(agenda, digest, materia, world.tick, epoca);
+      return true;
+    } catch (error) {
+      // Los decodificadores VMAT y químicos de v1 informan errores de datos sin clase propia.
+      if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError) &&
+          (!(error instanceof Error) || error.constructor !== Error || 'code' in error)) throw error;
       return false;
     }
-    return true;
   }
 
   private decodeCompleteMatter(bytes: Uint8Array | null, tick: number): Instantanea['materia'] {
@@ -1031,11 +1056,14 @@ export class Store {
    * no ha cargado nada (no consta el estado de la cadena) y solo la primera vez: después
    * lo sabe por el guardado que acaba de confirmar. Un slot 0 ausente no tiene nada que
    * propagar, así que la rotación —que copiaría cero filas— no hace daño. */
-  private readSlot0(): boolean {
+  private readSlot0(completeEpoch: number | null = null): boolean {
     const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
     if (!row) return this.slot0Readable = true;
     if (checksum(row.body) !== row.digest) return this.slot0Readable = false;
-    try { this.readSnapshot(row.body); }
+    try {
+      const world = this.readSnapshot(row.body) as World;
+      if (completeEpoch !== null && !this.completeMatterCanRotate(world, completeEpoch)) return this.slot0Readable = false;
+    }
     catch (error) {
       if (!(error instanceof SnapshotPhysicalError)) throw error;
       return this.slot0Readable = false;
@@ -1894,10 +1922,12 @@ export class Store {
       // toda `technology_definitions` (12+ min y >120 GB leídos en un mundo V14 real de 705 hab.).
       this.technologyArchive.beginHostTransaction();
       chronicleTriggers = this.chronicleHasTriggers();
-      const matterStillVerified = epoca !== null && !chronicleTriggers && stampTicket !== undefined
+      const matterStillVerified = epoca !== null && !chronicleTriggers
+        && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))
         && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
-      const rotatesBackups = (this.slot0Readable ?? this.readSlot0())
-        && (epoca === null || matterStillVerified || this.completeMatterCanRotate());
+      const rotatesBackups = epoca === null || matterStillVerified
+        ? this.slot0Readable ?? this.readSlot0()
+        : this.slot0Readable !== false && this.readSlot0(epoca);
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
       const expectedMatterBackups = complete && chronicleTriggers ? this.expectedMatterBackups(rotatesBackups, deep) : null;
@@ -1987,7 +2017,7 @@ export class Store {
       const collectionTicket = chronicleTriggers ? undefined : stampTicket;
       if (complete) {
         this.snapshotParts.collect(collectionTicket);
-        this.collectMatterParts();
+        this.collectMatterParts(chronicleTriggers);
       }
       else this.collectSnapshots(collectionTicket);
       });
@@ -2394,7 +2424,7 @@ export class Store {
       recovered.revoke();
       if (complete) {
         recovered.snapshotParts.collect();
-        recovered.collectMatterParts();
+        recovered.collectMatterParts(true);
       }
       else recovered.collectSnapshots();
       if (recovered.chronicleHasTriggers()) recovered.snapshotParts.verifyRetained();

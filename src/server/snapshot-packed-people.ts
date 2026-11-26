@@ -28,7 +28,14 @@ export interface PackedPersonRow {
 }
 
 export type PackedPersonWeights = Pick<PackedPersonRow, 'weights'>;
-const binaryWeights = new WeakMap<PackedPersonWeights, { body: Buffer; offset: number }>();
+type StoredBinaryWeights =
+  | { readonly body: Buffer; readonly offset: number }
+  | { readonly copiar: (destino: Buffer, offset: number) => void };
+const binaryWeights = new WeakMap<PackedPersonWeights, StoredBinaryWeights>();
+const policyBasePesos = new WeakMap<object, {
+  readonly validar: (uid: unknown) => boolean;
+  readonly copiar: (destino: Buffer, offset: number) => void;
+}>();
 const binaryJson = new WeakMap<PackedPersonRow, { body: Buffer; start: number; end: number }>();
 const capturedJsonProperty: PropertyDescriptor = {
   enumerable: true,
@@ -53,6 +60,33 @@ export function retainPackedPersonWeights(row: PackedPersonRow): PackedPersonWei
   return retained;
 }
 
+/** Asocia una copia directa desde una base F64 publicada en SAB sin materializar buffers ni arrays intermedios. */
+export function conservarPesosDesdeBase(row: PackedPersonRow, copiar: (destino: Buffer, offset: number) => void): void {
+  binaryWeights.set(row, { copiar });
+}
+
+/** Marca una política diferida respaldada por la base F64 publicada (uso exclusivo del persistidor). */
+export function marcarPoliticaBasePesos(
+  policy: object,
+  validar: (uid: unknown) => boolean,
+  copiar: (destino: Buffer, offset: number) => void,
+): void {
+  policyBasePesos.set(policy, { validar, copiar });
+}
+
+export function olvidarPoliticaBasePesos(policy: object): void {
+  policyBasePesos.delete(policy);
+}
+
+/** Comprueba que una política diferida sigue ligada a una base publicada vigente con el mismo UID. */
+export function esPoliticaBasePesosValida(policy: unknown, uid: unknown): boolean {
+  if (typeof policy !== 'object' || policy === null || Array.isArray(policy) || types.isProxy(policy)) return false;
+  const entrada = policyBasePesos.get(policy);
+  if (!entrada) return false;
+  const claves = Reflect.ownKeys(policy);
+  return claves.length === 1 && claves[0] === 'weights' && entrada.validar(uid);
+}
+
 /** Copy a prepared row's F64LE weights. The original bytes stay private to the codec. */
 export function copyPackedPersonWeights(row: PackedPersonWeights, destino: Buffer, offset: number): boolean {
   const stored = binaryWeights.get(row), weights = row.weights;
@@ -60,7 +94,8 @@ export function copyPackedPersonWeights(row: PackedPersonWeights, destino: Buffe
   if (!Number.isSafeInteger(offset) || offset < 0 || offset + WPF1_WEIGHT_BYTES > destino.byteLength)
     failure('weight byte range');
   if (stored) {
-    stored.body.copy(destino, offset, stored.offset, stored.offset + WPF1_WEIGHT_BYTES);
+    if ('copiar' in stored) stored.copiar(destino, offset);
+    else stored.body.copy(destino, offset, stored.offset, stored.offset + WPF1_WEIGHT_BYTES);
     return true;
   }
   if (weights?.length !== WPF1_WEIGHT_COUNT) failure('weight count');
@@ -120,6 +155,24 @@ export function prepareInlinePerson(record: Record<string, unknown>): PackedPers
 }
 
 export function preparePackedPerson(record: Record<string, unknown>): PackedPersonRow {
+  const policyProp = plainRecord(record) ? Object.getOwnPropertyDescriptor(record, 'policy') : undefined;
+  const policyObj = policyProp?.enumerable && Object.hasOwn(policyProp, 'value') ? policyProp.value : undefined;
+  const baseEntrada = typeof policyObj === 'object' && policyObj !== null ? policyBasePesos.get(policyObj) : undefined;
+  if (baseEntrada && Object.getOwnPropertySymbols(record).length === 0
+    && esPoliticaBasePesosValida(policyObj, record.uid)) {
+    let tieneGetter = false;
+    for (const key in record) if (lookupGetter.call(record, key) !== undefined) { tieneGetter = true; break; }
+    if (!tieneGetter) {
+      const prepared = Object.getPrototypeOf(record) === null
+        ? { __proto__: null, ...record, policy: EMPTY_POLICY }
+        : { ...record, policy: EMPTY_POLICY };
+      const json = stringifyExact(prepared);
+      if (typeof json !== 'string' || !json.startsWith('{')) failure('row');
+      const row: PackedPersonRow = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
+      binaryWeights.set(row, { copiar: baseEntrada.copiar });
+      return row;
+    }
+  }
   const weights = packableWeights(record);
   if (!weights || Object.getOwnPropertySymbols(record).length !== 0) return jsonRow(record);
   // Spread keeps the position of the existing policy key. Keep accessor-bearing
@@ -180,7 +233,8 @@ export function conservarFilasWpf1(cuerpo: Uint8Array, anchoMascara: number, pes
     marcada(indice: number): boolean {
       return (body[indice >>> 3]! & (1 << (indice & 7))) !== 0;
     },
-    fila(inicioLinea: number, longitudLinea: number, longitudJson: number, conAusencias: boolean, offsetPesos?: number) {
+    fila(inicioLinea: number, longitudLinea: number, longitudJson: number, conAusencias: boolean, offsetPesos?: number,
+      copiarDesdeBase?: (destino: Buffer, offset: number) => void) {
       const salto = ascii ? inicioLinea + longitudLinea : body.indexOf(0x0a, inicioLinea);
       const finLinea = salto === -1 ? body.length : salto;
       const start = inicioLinea + Number(conAusencias);
@@ -189,9 +243,11 @@ export function conservarFilasWpf1(cuerpo: Uint8Array, anchoMascara: number, pes
       if (inicioLinea < anchoMascara || end < start + 2 || end > finLinea
         || body[start] !== 0x7b || body[end - 1] !== 0x7d || (conAusencias && body[end] !== 0x2c))
         throw new Error('Rango JSON de persona directa inválido.');
-      const bytes = end - start + (offsetPesos === undefined ? 0 : WPF1_WEIGHT_BYTES);
+      const conPesos = offsetPesos !== undefined || copiarDesdeBase !== undefined;
+      const bytes = end - start + (conPesos ? WPF1_WEIGHT_BYTES : 0);
       const fila: PackedPersonRow = Object.freeze(Object.defineProperty({ json: '', bytes }, 'json', capturedJsonProperty));
       const pesos = offsetPesos === undefined ? undefined : capturarPesos!(fila, offsetPesos);
+      if (copiarDesdeBase !== undefined) binaryWeights.set(fila, { copiar: copiarDesdeBase });
       binaryJson.set(fila, { body, start, end });
       return { fila, pesos, siguienteLinea: finLinea < body.length ? finLinea + 1 : finLinea };
     },

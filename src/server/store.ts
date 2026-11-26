@@ -26,6 +26,7 @@ import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, c
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
 import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
+import { construirBasePesosDesdePaginasWgp1, type PublicadorBasePesos } from '../world/motor/base-pesos-corte.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { consumirCorteGuardado, type CorteGuardadoSellado } from '../world/motor/corte-sellado.js';
 import { estadoAdmiteSolape } from '../world/motor/corte-transferido.js';
@@ -404,6 +405,7 @@ export class Store {
   private pruebaCabezaOfrecida?: PruebaCabezaOfrecida;
   private primerCorteIntentado = false;
   private cabezaInicialReutilizada = false;
+  private ultimoDigestConfirmado?: string;
   private readonly onProgress: StoreOptions['onProgress'];
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
@@ -924,6 +926,32 @@ export class Store {
     const ancla = this.anclaCabeza;
     this.anclaCabeza = undefined;
     this.pruebaCabezaOfrecida = ancla && prueba && !this.primerCorteIntentado ? { ancla, prueba } : undefined;
+  }
+
+  get ultimoDigestGuardado(): string | undefined {
+    return this.ultimoDigestConfirmado;
+  }
+
+  /** Construye una base F64 compartida desde las páginas WGP1 durables del slot 0 recién confirmado. */
+  construirBasePesosDurable(
+    instancia: string,
+    epocaEsperada: number,
+    secuencia: number,
+    digestEsperado?: string,
+  ): PublicadorBasePesos | undefined {
+    if (this.readOnly || this.schemaVersion < 5 || !this.snapshotSplitPeopleWeights || this.db.isTransaction) return undefined;
+    const paginas = this.leerPruebaCabeza(() => {
+      const epocaActual = this.readCompleteEpoch();
+      if (epocaActual === null || epocaActual !== epocaEsperada) return undefined;
+      const row = this.db.prepare('SELECT body, digest FROM main.snapshots WHERE slot=0').get() as
+        { body?: unknown; digest?: unknown } | undefined;
+      if (!row || typeof row.body !== 'string' || !hexDigest(row.digest) || checksum(row.body) !== row.digest)
+        return undefined;
+      if (digestEsperado !== undefined && row.digest !== digestEsperado) return undefined;
+      return this.snapshotParts.leerPaginasPoliticaDurables(row.body);
+    });
+    if (!paginas) return undefined;
+    return construirBasePesosDesdePaginasWgp1(paginas, { instancia, epoca: epocaEsperada, secuencia });
   }
 
   private leerPruebaCabeza<T>(leer: () => T | undefined): T | undefined {
@@ -2475,6 +2503,7 @@ export class Store {
       cerrarFase?.('sqlFinalYGc');
       this.db.exec('COMMIT');
       this.saves++;
+      this.ultimoDigestConfirmado = bodyDigest;
       this.pruebaCabezaLeida = undefined;
       this.cabezaCompletaEscritaSinAgenda = certificada;
       if (cabezaAdmitida) this.cabezaInicialReutilizada = true;

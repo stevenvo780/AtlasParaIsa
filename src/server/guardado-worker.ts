@@ -1,9 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readlinkSync } from 'node:fs';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
+import { abrirLectorBasePesos, type DescriptorBasePesosCorte, type PublicadorBasePesos } from '../world/motor/base-pesos-corte.js';
 import { materializarCorteTransferido, type AcuseCorteTransferido, type CapturaCorteTransferido, type CorteTransferido,
   type IdentidadCorteTransferido } from '../world/motor/corte-transferido.js';
+import { RechazoBasePesosError, type BasePesosActiva } from '../world/motor/personas-corte.js';
 import { Store, type FaseGuardado, type PruebaCabezaGuardada, type StoreOptions } from './store.js';
 
 type OpcionesDisco = Pick<StoreOptions, 'snapshotPackedPeople' | 'snapshotCompressedPeople' | 'snapshotSplitPeopleWeights'>;
@@ -27,12 +30,28 @@ export interface PerfilPersistidor extends AfinidadPersistidor {
   fases?: FasesPersistidor;
   /** Disponible cuando se habilita la prueba de la cabeza inicial. */
   cabezaInicialReutilizada?: boolean;
+  /** Diagnóstico del uso de la base F64 compartida cuando `basePesosCorte` está activa. */
+  personasRef?: number;
+  personasFull?: number;
+  bytesPesos?: number;
+  basePesosPublicada?: boolean;
 }
 
 export type GuardadoConfirmado = AcuseCorteTransferido & {
   readonly cronica: ChronicleJournal;
   readonly perfilPersistidor: PerfilPersistidor;
+  /** Descriptor clonable de la base F64 publicada en SAB tras confirmar el COMMIT. */
+  readonly basePesos?: DescriptorBasePesosCorte;
 };
+
+/** El escritor rechazó el corte porque alguna referencia F64 ya no corresponde a la base publicada vigente. */
+export class RechazoBasePesosGuardadoError extends Error {
+  readonly baseRechazada = true;
+  constructor(message: string) {
+    super(message);
+    this.name = 'RechazoBasePesosGuardadoError';
+  }
+}
 
 /** El hilo perdió el acuse después de recibir el corte. El disco debe decidir desde dónde reanudar. */
 class GuardadoIndeterminado extends Error {
@@ -48,6 +67,8 @@ export interface OpcionesPersistidor extends OpcionesDisco {
   cpuPersistidor?: number;
   perfilarFases?: boolean;
   probarCabeza?: () => PruebaCabezaGuardada | undefined;
+  /** Laboratorio: publica una base F64 compartida en SAB desde WGP1 tras cada COMMIT (apagada por defecto). */
+  basePesosCorte?: boolean;
 }
 
 interface OpcionesHilo extends Omit<OpcionesPersistidor, 'path' | 'onProgress' | 'probarCabeza'> {
@@ -55,11 +76,11 @@ interface OpcionesHilo extends Omit<OpcionesPersistidor, 'path' | 'onProgress' |
 }
 
 type OrdenGuardar = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean; pruebaCabeza?: PruebaCabezaGuardada };
-type OrdenGuardado = OrdenGuardar | { tipo: 'cerrar' };
+type OrdenGuardado = OrdenGuardar | { tipo: 'revocarBase' } | { tipo: 'cerrar' };
 type RespuestaGuardado = { tipo: 'listo'; solicitaPruebaCabeza?: boolean }
   | { tipo: 'avance' | 'cerrado' }
   | { tipo: 'confirmado'; guardado: GuardadoConfirmado }
-  | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; mensaje: string };
+  | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; mensaje: string; baseRechazada?: boolean };
 
 function identidadDe({ solicitud, epoca, tick, eventCounter }: IdentidadCorteTransferido): IdentidadCorteTransferido {
   return { solicitud, epoca, tick, eventCounter };
@@ -140,7 +161,9 @@ export class PersistidorGuardado {
             this.tomarPendiente(mensaje.guardado).resolver(mensaje.guardado);
             return;
           case 'rechazado':
-            this.tomarPendiente(mensaje.identidad).rechazar(new Error(mensaje.mensaje));
+            this.tomarPendiente(mensaje.identidad).rechazar(
+              mensaje.baseRechazada ? new RechazoBasePesosGuardadoError(mensaje.mensaje) : new Error(mensaje.mensaje),
+            );
             return;
           default:
             throw new Error('El hilo de guardado envió una respuesta desconocida.');
@@ -180,6 +203,19 @@ export class PersistidorGuardado {
       pendiente.rechazar(error);
     });
     return fin;
+  }
+
+  /** Revoca la base F64 publicada en el escritor (p. ej. al cambiar de época o escribir fuera del hilo). */
+  revocarBasePesos(): void {
+    if (this.fallo || this.cierre || this.cierrePedido) return;
+    if (this.listo) {
+      this.hilo.postMessage({ tipo: 'revocarBase' } satisfies OrdenGuardado);
+      return;
+    }
+    void this.ready.then(() => {
+      if (this.fallo || this.cierre || this.cierrePedido) return;
+      this.hilo.postMessage({ tipo: 'revocarBase' } satisfies OrdenGuardado);
+    }).catch(() => undefined);
   }
 
   cerrar(): Promise<void> {
@@ -281,7 +317,25 @@ function medirFasesGuardado(fases: FasesPersistidor): (fase: FaseGuardado) => vo
   };
 }
 
-function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false, probarCabeza, ...options }: OpcionesHilo): void {
+interface EstadoBasePesos {
+  readonly instancia: string;
+  secuencia: number;
+  activa?: {
+    readonly publicador: PublicadorBasePesos;
+    readonly activa: BasePesosActiva;
+  };
+}
+
+function revocarEstadoBase(estado: EstadoBasePesos): void {
+  const previa = estado.activa;
+  estado.activa = undefined;
+  previa?.publicador.revocar();
+}
+
+function abrirPersistidor(
+  path: string,
+  { cpuPersistidor, perfilarFases = false, probarCabeza, basePesosCorte = false, ...options }: OpcionesHilo,
+): void {
   const puerto = parentPort!;
   const responder = (mensaje: RespuestaGuardado) => puerto.postMessage(mensaje);
   const afinidad = fijarAfinidad(cpuPersistidor);
@@ -292,11 +346,16 @@ function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false,
     ultimoAvance = ahora;
     responder({ tipo: 'avance' });
   } });
+  const estadoBase: EstadoBasePesos = { instancia: randomUUID(), secuencia: 0 };
   let solicitaPruebaCabeza = probarCabeza && store.anclarPruebaCabeza();
   puerto.on('messageerror', error => { throw error; });
   puerto.on('message', (orden: OrdenGuardado) => {
     switch (orden.tipo) {
+      case 'revocarBase':
+        revocarEstadoBase(estadoBase);
+        return;
       case 'cerrar':
+        revocarEstadoBase(estadoBase);
         store.close();
         responder({ tipo: 'cerrado' });
         puerto.close();
@@ -305,7 +364,7 @@ function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false,
         ultimoAvance = -Infinity;
         const primerCorteConAncla = solicitaPruebaCabeza;
         solicitaPruebaCabeza = false;
-        responder(guardar(store, orden, afinidad, perfilarFases, probarCabeza, primerCorteConAncla));
+        responder(guardar(store, orden, afinidad, perfilarFases, probarCabeza, primerCorteConAncla, basePesosCorte, estadoBase));
         return;
       }
       default:
@@ -316,13 +375,18 @@ function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false,
 }
 
 function guardar(store: Store, { corte, solapado, pruebaCabeza }: OrdenGuardar, afinidad: AfinidadPersistidor,
-  perfilarFases: boolean, probarCabeza: boolean, primerCorteConAncla: boolean): RespuestaGuardado {
+  perfilarFases: boolean, probarCabeza: boolean, primerCorteConAncla: boolean,
+  basePesosCorte: boolean, estadoBase: EstadoBasePesos): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
+    if (estadoBase.activa && estadoBase.activa.activa.contexto.epoca !== corte.epoca) {
+      revocarEstadoBase(estadoBase);
+    }
     if (primerCorteConAncla) store.ofrecerPruebaCabeza(pruebaCabeza);
-    const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado));
-    const { sello, tecnologiaRemotaEquivalente, bajas } = materializado.valor;
+    const baseActiva = basePesosCorte ? estadoBase.activa?.activa : undefined;
+    const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado, baseActiva));
+    const { sello, tecnologiaRemotaEquivalente, bajas, diagnosticoPersonasCorte } = materializado.valor;
     const fases: FasesPersistidor | undefined = perfilarFases ? {} : undefined;
     const guardado = medirTramo(() => {
       const cerrarFase = fases && medirFasesGuardado(fases);
@@ -331,17 +395,64 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza }: OrdenGuardar, 
     });
     const { world } = guardado.valor;
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
+    let basePesos: DescriptorBasePesosCorte | undefined;
+    if (basePesosCorte && store.ultimoDigestGuardado !== undefined) {
+      try {
+        const siguienteSecuencia = estadoBase.secuencia + 1;
+        const nuevoPublicador = store.construirBasePesosDurable(
+          estadoBase.instancia, corte.epoca, siguienteSecuencia, store.ultimoDigestGuardado,
+        );
+        if (nuevoPublicador) {
+          const descriptor = nuevoPublicador.publicarTrasAcuse({
+            ...nuevoPublicador.identidad,
+            confirmado: true,
+          });
+          const lector = abrirLectorBasePesos(descriptor);
+          estadoBase.secuencia = siguienteSecuencia;
+          const anterior = estadoBase.activa;
+          estadoBase.activa = {
+            publicador: nuevoPublicador,
+            activa: {
+              lector,
+              contexto: {
+                instancia: descriptor.instancia,
+                epoca: descriptor.epoca,
+                secuencia: descriptor.secuencia,
+                publicacion: descriptor.publicacion,
+              },
+            },
+          };
+          anterior?.publicador.revocar();
+          basePesos = descriptor;
+        } else {
+          revocarEstadoBase(estadoBase);
+        }
+      } catch {
+        // El COMMIT ya es durable: un fallo al construir la base compartida no revierte el guardado.
+        revocarEstadoBase(estadoBase);
+      }
+    }
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,
       historia: world.history, tecnologia: world.technology, tecnologiaRemotaEquivalente, bajas,
+      ...(basePesos && { basePesos }),
       perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo, ...(fases && { fases }),
-        ...(probarCabeza && { cabezaInicialReutilizada: primerCorteConAncla && store.reutilizoCabezaInicial }) },
+        ...(probarCabeza && { cabezaInicialReutilizada: primerCorteConAncla && store.reutilizoCabezaInicial }),
+        ...(basePesosCorte && {
+          personasRef: diagnosticoPersonasCorte?.personasRef ?? 0,
+          personasFull: diagnosticoPersonasCorte?.personasFull ?? 0,
+          bytesPesos: diagnosticoPersonasCorte?.bytesPesos ?? 0,
+          basePesosPublicada: basePesos !== undefined,
+        }) },
     } };
   } catch (error) {
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;
     if (primerCorteConAncla) store.ofrecerPruebaCabeza(undefined);
+    const baseRechazada = error instanceof RechazoBasePesosError;
+    if (baseRechazada) revocarEstadoBase(estadoBase);
     return { tipo: 'rechazado', identidad,
-      mensaje: error instanceof Error ? error.message : 'No se pudo guardar el corte.' };
+      mensaje: error instanceof Error ? error.message : 'No se pudo guardar el corte.',
+      ...(baseRechazada && { baseRechazada: true }) };
   }
 }
 

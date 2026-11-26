@@ -17,7 +17,7 @@ import { crearCorteGuardado } from './corte-sellado.js';
 import { faunaCorteDe, faunaVerificadaDe, vincularFaunaCorte, vincularFaunaVerificada,
   type TramoFaunaCorte, type TramoFaunaVerificada } from './fauna-corte.js';
 import { decodificarCorteRemoto, transferiblesCorteRemoto, type CorteRemotoBinario } from './mensajes-corte.js';
-import { personasVerificadasDe, vincularPersonasVerificadas, type TramoPersonasVerificadas } from './personas-corte.js';
+import { personasVerificadasDe, vincularPersonasVerificadas, type BasePesosActiva, type TramoPersonasVerificadas } from './personas-corte.js';
 import { baseReunionDe, reunir, sinCheckpointTecnologia, type BaseReunion, type ParteMundo } from './reunir.js';
 import { teselasVerificadasDe, vincularTeselasVerificadas, type TramoTeselasVerificadas } from './teselas-corte.js';
 
@@ -139,7 +139,12 @@ export function prepararCorteTransferido(datos: Omit<DatosLocales, 'params' | 'c
 }
 
 /** El persistidor conserva las capacidades de su propio Store y las filas verificadas por el decodificador. */
-export function materializarCorteTransferido(corte: CorteTransferido, contexto: WorldContext, solapado = false) {
+export function materializarCorteTransferido(
+  corte: CorteTransferido,
+  contexto: WorldContext,
+  solapado = false,
+  basePesos?: BasePesosActiva,
+) {
   const { solicitud, epoca, tick, eventCounter, local, remoto, migrantes, materia, opciones, comprobarTecnologia, legadoLocal } = corte;
   if (solicitud !== remoto.solicitud || epoca !== remoto.epoca || tick !== remoto.tick
     || !remoto.sobres.length || remoto.sobres.length !== remoto.duenosRemotos
@@ -151,7 +156,7 @@ export function materializarCorteTransferido(corte: CorteTransferido, contexto: 
   if (solapado && (!Array.isArray(legadoLocal) || !remoto.sobres.every(sobre => Array.isArray(sobre.legadoSolape)))
     || legadoLocal !== undefined && !isDeepStrictEqual(legadoLocal, coordinador.retiredLegacy))
     throw new Error('La custodia de legado no coincide con el corte de guardado.');
-  const { partes } = decodificarCorteRemoto(remoto);
+  const { partes, diagnosticoPersonasCorte } = decodificarCorteRemoto(remoto, basePesos);
   const tecnologiaRemotaEquivalente = comprobarTecnologia && partes.every(parte =>
     isDeepStrictEqual(sinCheckpointTecnologia(parte.technology), cabecera.technology));
   setParams(coordinador, params);
@@ -159,7 +164,13 @@ export function materializarCorteTransferido(corte: CorteTransferido, contexto: 
   const { world, bajas } = reunirCorte(coordinador, cabecera, partes, siguientes, migrantes, bajasPrevias, opciones, true);
   recordSample(world);
   const instantanea = { world, materia };
-  return { sello: crearCorteGuardado(() => instantanea), instantanea, bajas, tecnologiaRemotaEquivalente };
+  return {
+    sello: crearCorteGuardado(() => instantanea),
+    instantanea,
+    bajas,
+    tecnologiaRemotaEquivalente,
+    diagnosticoPersonasCorte,
+  };
 }
 
 /**

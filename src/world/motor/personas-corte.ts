@@ -1,15 +1,44 @@
 import { types } from 'node:util';
-import { conservarFilasWpf1, preparePackedPerson, type PackedPersonRow, WPF1_WEIGHT_BYTES } from '../../server/snapshot-packed-people.js';
+import {
+  conservarFilasWpf1, marcarPoliticaBasePesos, olvidarPoliticaBasePesos, preparePackedPerson,
+  type PackedPersonRow, WPF1_WEIGHT_BYTES,
+} from '../../server/snapshot-packed-people.js';
 import { clavesJsonUnicas } from '../../shared/json-keys.js';
 import type { Person } from '../mundo/tipos.js';
+import {
+  aceptarRefPesos, evaluarCandidatoRefPesos, type ContextoBasePesos, type IdentidadBasePesos,
+  type LectorBasePesosCorte, type MotivoRechazoRefPesos,
+} from './base-pesos-corte.js';
 import type { ParteMundo } from './reunir.js';
+
+export interface BasePesosActiva {
+  readonly lector: LectorBasePesosCorte;
+  readonly contexto: ContextoBasePesos;
+}
+
+export interface ReferenciasBloquePersonasCorte {
+  readonly identidad: IdentidadBasePesos;
+  /** Pares (filaEnBloque, indiceEnBase) en su propio ArrayBuffer transferible. */
+  readonly pares: Uint32Array;
+}
 
 export interface BloquePersonasCorte {
   readonly filas: number;
   /** Máscara WPF1 (bit menos significativo primero), seguida de una fila JSON por línea. */
   readonly cuerpo: Uint8Array;
-  /** Pesos WPF1 F64LE de las filas marcadas, en el mismo orden. */
+  /** Pesos WPF1 F64LE de las filas marcadas enviadas como FULL, en el mismo orden. */
   readonly pesos: Uint8Array;
+  /** Referencias a la base F64 publicada para las filas marcadas que omitieron sus 1696 B. */
+  readonly refs?: ReferenciasBloquePersonasCorte;
+}
+
+export class RechazoBasePesosError extends Error {
+  readonly motivo: MotivoRechazoRefPesos;
+  constructor(motivo: MotivoRechazoRefPesos, detalle?: string) {
+    super(detalle ?? `Referencia de base F64 rechazada (${motivo}).`);
+    this.name = 'RechazoBasePesosError';
+    this.motivo = motivo;
+  }
 }
 
 export interface TramoPersonasVerificadas {
@@ -123,36 +152,52 @@ function comparteConElResto(parte: ParteMundo, personas: WeakSet<object>): boole
   return false;
 }
 
-function empaquetar(filas: readonly { texto: string; fila: PackedPersonRow }[], bytesTexto: number, bytesPesos: number): BloquePersonasCorte {
+function empaquetar(
+  filas: readonly { texto: string; fila: PackedPersonRow; indiceBase?: number }[],
+  bytesTexto: number,
+  bytesPesos: number,
+  cantidadRefs: number,
+  identidadBase?: IdentidadBasePesos,
+): BloquePersonasCorte {
   const bytesMascara = Math.ceil(filas.length / 8);
   const cuerpo = new Uint8Array(bytesMascara + bytesTexto), pesos = new Uint8Array(bytesPesos);
   utf8.encodeInto(filas.map(({ texto }) => texto).join('\n'), cuerpo.subarray(bytesMascara));
   const datos = new DataView(pesos.buffer);
-  let offset = 0;
+  const pares = cantidadRefs > 0 ? new Uint32Array(cantidadRefs * 2) : undefined;
+  let offset = 0, cursorRef = 0;
   for (let i = 0; i < filas.length; i++) {
-    const weights = filas[i]!.fila.weights;
+    const entrada = filas[i]!;
+    const weights = entrada.fila.weights;
     if (!weights) continue;
     cuerpo[i >>> 3]! |= 1 << (i & 7);
+    if (entrada.indiceBase !== undefined && pares) {
+      pares[cursorRef++] = i;
+      pares[cursorRef++] = entrada.indiceBase;
+      continue;
+    }
     for (const peso of weights) {
       datos.setFloat64(offset, peso, true);
       offset += Float64Array.BYTES_PER_ELEMENT;
     }
   }
-  return { filas: filas.length, cuerpo, pesos };
+  return pares && identidadBase
+    ? { filas: filas.length, cuerpo, pesos, refs: { identidad: { ...identidadBase }, pares } }
+    : { filas: filas.length, cuerpo, pesos };
 }
 
-export function prepararPersonasDirectas(parte: ParteMundo): BloquePersonasCorte[] | undefined {
+export function prepararPersonasDirectas(parte: ParteMundo, basePesos?: BasePesosActiva): BloquePersonasCorte[] | undefined {
   if (types.isProxy(parte) || !registro(parte) || Object.getPrototypeOf(parte) !== Object.prototype) return undefined;
   const people: unknown = datoPropio(parte, 'people')?.value;
   if (types.isProxy(people) || !Array.isArray(people) || Object.getPrototypeOf(people) !== Array.prototype
     || Reflect.ownKeys(people).length !== people.length + 1) return undefined;
   try {
     const vistos = new WeakSet<object>([people]);
-    const bloques: BloquePersonasCorte[] = [], filas: { texto: string; fila: PackedPersonRow }[] = [];
-    let bytesTexto = 0, bytesPesos = 0;
+    const bloques: BloquePersonasCorte[] = [], filas: { texto: string; fila: PackedPersonRow; indiceBase?: number }[] = [];
+    const identidadBase = basePesos?.lector.estaPublicada() ? basePesos.lector.identidad : undefined;
+    let bytesTexto = 0, bytesPesos = 0, cantidadRefs = 0;
     const volcar = (): void => {
-      bloques.push(empaquetar(filas, bytesTexto, bytesPesos));
-      filas.length = bytesTexto = bytesPesos = 0;
+      bloques.push(empaquetar(filas, bytesTexto, bytesPesos, cantidadRefs, identidadBase));
+      filas.length = bytesTexto = bytesPesos = cantidadRefs = 0;
     };
     for (let i = 0; i < people.length; i++) {
       const persona: unknown = datoPropio(people, i)?.value;
@@ -164,14 +209,22 @@ export function prepararPersonasDirectas(parte: ParteMundo): BloquePersonasCorte
       const texto = estado.ausencias.length ? `[${fila.json},\t${JSON.stringify(estado.ausencias)}]` : fila.json;
       const cuantosTexto = texto === fila.json
         ? fila.bytes - (fila.weights ? WPF1_WEIGHT_BYTES : 0) : Buffer.byteLength(texto);
-      const cuantosPesos = fila.weights ? WPF1_WEIGHT_BYTES : 0;
-      if (1 + cuantosTexto + cuantosPesos > BYTES_POR_BLOQUE) return undefined;
+      let indiceBase: number | undefined;
+      if (fila.weights && basePesos && identidadBase) {
+        const decision = evaluarCandidatoRefPesos(basePesos.lector, basePesos.contexto, persona.uid, fila.weights);
+        if (decision.modo === 'REF') indiceBase = decision.referencia.indice;
+      }
+      const cuantosPesos = fila.weights && indiceBase === undefined ? WPF1_WEIGHT_BYTES : 0;
+      const cuantosRefsBytes = indiceBase === undefined ? 0 : 8;
+      if (1 + cuantosTexto + cuantosPesos + cuantosRefsBytes > BYTES_POR_BLOQUE) return undefined;
       if (filas.length === FILAS_POR_BLOQUE
-        || Math.ceil((filas.length + 1) / 8) + bytesTexto + bytesPesos + Number(filas.length > 0) + cuantosTexto + cuantosPesos > BYTES_POR_BLOQUE)
+        || Math.ceil((filas.length + 1) / 8) + bytesTexto + bytesPesos + cantidadRefs * 8
+          + Number(filas.length > 0) + cuantosTexto + cuantosPesos + cuantosRefsBytes > BYTES_POR_BLOQUE)
         volcar();
       bytesTexto += cuantosTexto + Number(filas.length > 0);
       bytesPesos += cuantosPesos;
-      filas.push({ texto, fila });
+      if (indiceBase !== undefined) cantidadRefs++;
+      filas.push({ texto, fila, indiceBase });
     }
     if (comparteConElResto(parte, vistos)) return undefined;
     if (filas.length) volcar();
@@ -246,19 +299,32 @@ function bufferEntero(datos: unknown): datos is Uint8Array & { buffer: ArrayBuff
     && datos.byteOffset === 0 && datos.byteLength === datos.buffer.byteLength;
 }
 
+function paresEnteros(datos: unknown): datos is Uint32Array & { buffer: ArrayBuffer } {
+  return types.isUint32Array(datos) && datos.buffer instanceof ArrayBuffer
+    && datos.byteOffset === 0 && datos.byteLength === datos.buffer.byteLength && (datos.length & 1) === 0;
+}
+
 /** El puerto puede ceder los buffers completos. Cada buffer que el llamador conserva se copia. */
 export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[], cantidad: number,
-  { transferirCuerpo = false, transferirPesos = false }: { transferirCuerpo?: boolean; transferirPesos?: boolean } = {}): Person[] {
+  { transferirCuerpo = false, transferirPesos = false, basePesos, diagnostico }: {
+    transferirCuerpo?: boolean;
+    transferirPesos?: boolean;
+    basePesos?: BasePesosActiva;
+    diagnostico?: { personasRef: number; personasFull: number };
+  } = {}): Person[] {
   if (!Number.isSafeInteger(cantidad) || cantidad < 0 || cantidad > 0xffff_ffff || !Array.isArray(bloques))
     throw new Error('Rango de personas directas inválido.');
   const personas: Person[] = [], tramos: TramoPersonasVerificadas[] = [], buffers = new WeakSet<ArrayBuffer>();
   for (const bloque of bloques) {
+    const refs = bloque?.refs;
+    const bytesRefs = refs ? (paresEnteros(refs.pares) ? refs.pares.byteLength : -1) : 0;
     if (!Number.isSafeInteger(bloque?.filas) || bloque.filas <= 0 || bloque.filas > FILAS_POR_BLOQUE
       || bloque.filas > cantidad - personas.length || !bufferEntero(bloque.cuerpo) || !bufferEntero(bloque.pesos)
-      || bloque.cuerpo.byteLength + bloque.pesos.byteLength > BYTES_POR_BLOQUE)
+      || bytesRefs < 0 || (refs && bytesRefs === 0)
+      || bloque.cuerpo.byteLength + bloque.pesos.byteLength + bytesRefs > BYTES_POR_BLOQUE)
       throw new Error('Bloque de personas directas inválido.');
     const { filas, cuerpo, pesos } = bloque;
-    for (const bytes of [cuerpo, pesos]) {
+    for (const bytes of [cuerpo, pesos, ...(refs ? [refs.pares] : [])]) {
       if (buffers.has(bytes.buffer)) throw new Error('Buffer repetido en personas directas.');
       if (!bytes.byteLength) continue;
       buffers.add(bytes.buffer);
@@ -270,13 +336,26 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
     for (let i = 0; i < anchoMascara; i++) {
       for (let bits = cuerpo[i]!; bits; bits &= bits - 1) marcadas++;
     }
-    if (pesos.byteLength !== marcadas * WPF1_WEIGHT_BYTES) throw new Error('Longitud de pesos de personas directas inválida.');
+    const cantidadRefs = refs ? refs.pares.length >>> 1 : 0;
+    if (cantidadRefs > marcadas) throw new Error('Referencias de pesos exceden las filas marcadas.');
+    if (pesos.byteLength !== (marcadas - cantidadRefs) * WPF1_WEIGHT_BYTES)
+      throw new Error('Longitud de pesos de personas directas inválida.');
+    if (refs) {
+      if (!basePesos) throw new RechazoBasePesosError('sin_base', 'El bloque usa referencias F64 sin una base publicada.');
+      let filaAnterior = -1;
+      for (let r = 0; r < refs.pares.length; r += 2) {
+        const filaRef = refs.pares[r]!;
+        if (filaRef >= filas || filaRef <= filaAnterior || (cuerpo[filaRef >>> 3]! & (1 << (filaRef & 7))) === 0)
+          throw new Error('Índice de fila de referencia F64 inválido.');
+        filaAnterior = filaRef;
+      }
+    }
     const capturada = conservarFilasWpf1(cuerpo, anchoMascara, pesos, { transferirCuerpo, transferirPesos });
     const { texto } = capturada;
     const lineas = texto.split('\n', filas + 1);
     if (lineas.length !== filas) throw new Error('Cantidad de personas directas inválida.');
     const desde = personas.length, preparadas: PackedPersonRow[] = [];
-    let inicioLinea = anchoMascara, offset = 0;
+    let inicioLinea = anchoMascara, offset = 0, cursorRef = 0;
     for (let i = 0; i < filas; i++) {
       const linea = lineas[i]!, separador = linea.startsWith('[{') ? linea.indexOf(',\t') : -1;
       const conAusencias = linea.startsWith('[{') && linea.endsWith(']]') && separador !== -1;
@@ -294,11 +373,62 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
           throw new Error('Marcador de pesos de persona directa inválido.');
         policy = candidata;
       }
+      const esRef = policy !== undefined && refs !== undefined && cursorRef < refs.pares.length && refs.pares[cursorRef] === i;
+      if (esRef) {
+        const indiceEnBase = refs!.pares[cursorRef + 1]!;
+        cursorRef += 2;
+        const lector = basePesos!.lector;
+        const uidEsperado = persona.uid;
+        const aceptacion = aceptarRefPesos(lector, basePesos!.contexto, uidEsperado, {
+          ...refs!.identidad, uid: uidEsperado, indice: indiceEnBase,
+        });
+        if (!aceptacion.aceptada) throw new RechazoBasePesosError(aceptacion.motivo);
+        const indiceAceptado = aceptacion.indice;
+        const copiarDesdeBase = (destino: Buffer, offsetDestino: number): void => {
+          try { lector.copiarPesosEn(indiceAceptado, destino, offsetDestino); }
+          catch (error) {
+            if (!lector.estaPublicada()) throw new RechazoBasePesosError('base_revocada');
+            throw error;
+          }
+        };
+        const { fila, siguienteLinea } = capturada.fila(
+          inicioLinea, linea.length, json.length, conAusencias, undefined, copiarDesdeBase,
+        );
+        const politicaObjetivo = policy!;
+        Object.defineProperty(politicaObjetivo, 'weights', {
+          enumerable: true,
+          configurable: true,
+          get() {
+            olvidarPoliticaBasePesos(politicaObjetivo);
+            let valores: number[];
+            try { valores = lector.materializarPesosEn(indiceAceptado); }
+            catch (error) {
+              if (!lector.estaPublicada()) throw new RechazoBasePesosError('base_revocada');
+              throw error;
+            }
+            Object.defineProperty(politicaObjetivo, 'weights', {
+              value: valores, writable: true, enumerable: true, configurable: true,
+            });
+            return valores;
+          },
+        });
+        marcarPoliticaBasePesos(
+          politicaObjetivo,
+          uid => lector.estaPublicada() && lector.uidEn(indiceAceptado) === uid,
+          copiarDesdeBase,
+        );
+        if (diagnostico) diagnostico.personasRef++;
+        preparadas.push(fila);
+        inicioLinea = siguienteLinea;
+        personas.push(persona as unknown as Person);
+        continue;
+      }
       const { fila, pesos: valores, siguienteLinea } = capturada.fila(
         inicioLinea, linea.length, json.length, conAusencias, policy ? offset : undefined);
       if (policy) {
         offset += WPF1_WEIGHT_BYTES;
         policy.weights = valores;
+        if (diagnostico) diagnostico.personasFull++;
       }
       preparadas.push(fila);
       inicioLinea = siguienteLinea;

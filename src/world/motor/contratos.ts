@@ -413,6 +413,7 @@ export interface Motor {
   cancelarCorteSolapado?(): void;
   /** Aplica al corte identificado la misma confirmación viva que el guardado local. */
   confirmarCorteTransferido?(acuse: import('./corte-transferido.js').AcuseCorteTransferido): boolean;
+  publicarBasePesosCorte?(descriptor: import('./base-pesos-corte.js').DescriptorBasePesosCorte | undefined): void;
   /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.
    * Devuelve `false` solo ante un rechazo comprobado antes de mutar estado vivo (el anfitrión puede recurrir a `cargar`).
    * Si la mutación viva falla a medias tras el COMMIT, la piscina queda fatal y lanza (exige recarga desde disco). */
@@ -556,6 +557,8 @@ export interface MotorConfig {
   teselasCorteDirectas?: boolean;
   /** Laboratorio: prepara en los dueños remotos las filas que guardará WPF1. */
   personasCorteDirectas?: boolean;
+  /** Laboratorio: reutiliza una base F64 publicada en SAB tras acuse durable para omitir pesos repetidos en personas directas (apagada por defecto). */
+  basePesosCorte?: boolean;
   /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */

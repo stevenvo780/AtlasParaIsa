@@ -40,6 +40,7 @@ import { archivarChunk, bindWorldContext, tomarChunk, validCoordinate, worldCont
 import { recordSample, ESTADISTICAS_CARAS_CADA_TICKS } from '../statistics.js';
 import { chunkKey } from '../terrain.js';
 import { tileLookup } from '../tile-index.js';
+import { abrirLectorBasePesos, type DescriptorBasePesosCorte } from './base-pesos-corte.js';
 import { duenoDeVecino, pesosInicialesPorPoblacion, repartirPorTramos } from './bloques.js';
 import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
@@ -538,6 +539,7 @@ class MotorDuenos implements Motor {
       destinatariosGarantias: destinatariosDeGarantias(garantias),
       emisionFotogramaDuenos: this.#config.emisionFotogramaDuenos, limiteBytesFotoDueno,
       solapeGuardado: this.#config.solapeGuardado,
+      basePesosCorte: this.#config.basePesosCorte,
     };
     const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {
@@ -861,7 +863,8 @@ class MotorDuenos implements Motor {
         && diario !== undefined && diario.committedThrough + diario.pending.length === eventCounter && bajasPrevias.length === 0
         && estadoAdmiteSolape(coordinador)
         && isDeepStrictEqual(sinCheckpointTecnologia(coordinador.technology), this.#tecnologiaDurable);
-      const solicitud = this.#barreraCorte(opciones, comprobarSolape)!;
+      const usarBasePesos = this.#config.basePesosCorte === true && opciones.prepararPersonas;
+      const solicitud = this.#barreraCorte(opciones, comprobarSolape, usarBasePesos)!;
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();
       // Recoger los avisos de la barrera puede añadir un retiro al archivo local.
@@ -889,8 +892,27 @@ class MotorDuenos implements Motor {
     };
   }
 
-  #barreraCorte({ prepararFauna, prepararTeselas, prepararPersonas }: OpcionesReunionCorte, comprobarSolape = false): bigint | undefined {
-    const solicitud = this.#canalesCorte?.pedir(prepararFauna, prepararTeselas, prepararPersonas, comprobarSolape);
+  publicarBasePesosCorte(descriptor: DescriptorBasePesosCorte | undefined): void {
+    if (this.#fatal || !this.#piscina || !this.#canalesCorte) return;
+    if (descriptor === undefined) {
+      this.#canalesCorte.publicarBasePesos(undefined);
+      return;
+    }
+    if (!this.#config.basePesosCorte || descriptor.epoca !== this.#epoca) return;
+    try {
+      if (!abrirLectorBasePesos(descriptor).estaPublicada()) {
+        this.#canalesCorte.publicarBasePesos(undefined);
+        return;
+      }
+      this.#canalesCorte.publicarBasePesos(descriptor);
+    } catch {
+      this.#canalesCorte.publicarBasePesos(undefined);
+    }
+  }
+
+  #barreraCorte({ prepararFauna, prepararTeselas, prepararPersonas }: OpcionesReunionCorte,
+    comprobarSolape = false, usarBasePesos = false): bigint | undefined {
+    const solicitud = this.#canalesCorte?.pedir(prepararFauna, prepararTeselas, prepararPersonas, comprobarSolape, usarBasePesos);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();

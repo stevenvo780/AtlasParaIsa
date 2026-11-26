@@ -58,6 +58,14 @@ test('la preparación durable de personas remotas requiere un formato binario de
   assert.equal(motorConfig(7, { ...config, CARTA_SNAPSHOT_PESOS_SEPARADOS: '1' }).personasCorteDirectas, true);
 });
 
+test('la base F64 compartida queda apagada por defecto y requiere personas directas y pesos separados', () => {
+  const base = { CARTA_MOTOR_HILOS: '8', CARTA_CORTE_TRANSFERIBLE: '1', CARTA_PERSONAS_CORTE_DIRECTAS: '1' };
+  assert.equal(motorConfig(7, { ...base, CARTA_SNAPSHOT_PESOS_SEPARADOS: '1' }).basePesosCorte, undefined);
+  assert.equal(motorConfig(7, { ...base, CARTA_BASE_PESOS_CORTE: '1' }).basePesosCorte, undefined);
+  assert.equal(motorConfig(7, { ...base, CARTA_SNAPSHOT_PACKED_PEOPLE: '1', CARTA_BASE_PESOS_CORTE: '1' }).basePesosCorte, undefined);
+  assert.equal(motorConfig(7, { ...base, CARTA_SNAPSHOT_PESOS_SEPARADOS: '1', CARTA_BASE_PESOS_CORTE: '1' }).basePesosCorte, true);
+});
+
 test('el motor rechaza un despacho inválido antes de arrancar', () => {
   for (const hilos of ['0', '-1', '1.5', '1e2', '9007199254740992']) {
     assert.throws(() => motorConfig(7, { CARTA_MOTOR_HILOS: hilos }), /CARTA_MOTOR_HILOS/);

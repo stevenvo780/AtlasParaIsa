@@ -14,6 +14,7 @@ import { chunkKey } from '../terrain.js';
 import { assertGenome } from '../genetics.js';
 import type { Culture } from '../society.js';
 import { assertPolicyGenome, assertPolicyPlasticity } from '../politica.js';
+import { esPoliticaBasePesosValida } from '../../server/snapshot-packed-people.js';
 import type { WorldSample } from '../../shared/types.js';
 import { assertTechnology } from '../technology.js';
 import { resolveTechnologyRecipe } from '../technology-catalogue.js';
@@ -221,7 +222,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     if (p.compounds !== undefined) assertCompoundLots(p.compounds);
     if (p.policy !== undefined) {
       if (expectedVersion < 12) fail();
-      assertPolicyGenome(p.policy);
+      if (!esPoliticaBasePesosValida(p.policy, p.uid)) assertPolicyGenome(p.policy);
     }
     if (p.policyPlasticity !== undefined) {
       if (expectedVersion < 12) fail();

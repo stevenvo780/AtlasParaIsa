@@ -37,7 +37,8 @@ import { AVISO, CTL, CTL_DUENO, Dueno, celdaDueno, type PiezasDueno } from './co
 import type { Hilo } from './contratos.js';
 import { estadoAdmiteSolape } from './corte-transferido.js';
 import { CustodiaLegado, type TokenLegadoCorte } from './custodia-legado.js';
-import { enviarParteCorte, enviarParteFoto, leerCustodiaLegado, type SolicitudCorte } from './mensajes-corte.js';
+import { enviarParteCorte, enviarParteFoto, leerCustodiaLegado, recibirBasePesosEnDueno, type SolicitudCorte } from './mensajes-corte.js';
+import type { BasePesosActiva } from './personas-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 import { sinCheckpointTecnologia } from './reunir.js';
 
@@ -71,6 +72,8 @@ export interface DatosDueno {
   epoca: number;
   solicitudCorte?: SolicitudCorte;
   solapeGuardado?: boolean;
+  /** Laboratorio: habilitar referencias contra la base F64 compartida publicada tras COMMIT. */
+  basePesosCorte?: boolean;
   brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
@@ -136,8 +139,12 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
   const legadoSolape = custodia ? (token: TokenLegadoCorte) =>
     estadoAdmiteSolape(mundo) && isDeepStrictEqual(sinCheckpointTecnologia(mundo.technology), tecnologiaBase)
       ? custodia.capturar(token) : undefined : undefined;
+  let basePesos: BasePesosActiva | undefined;
   const publicarCorte = puertoCorte && solicitud
-    ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo, legadoSolape) : undefined;
+    ? () => {
+      if (datos.basePesosCorte) basePesos = recibirBasePesosEnDueno(puertoCorte, basePesos, dueno.epoca);
+      enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo, legadoSolape, basePesos);
+    } : undefined;
   return tramo => {
     if (tramo === TRAMO.separarLegado || tramo === TRAMO.confirmarLegado || tramo === TRAMO.restituirLegado) {
       if (!custodia || !solicitud) throw new Error('El dueño no tiene custodia de legado.');

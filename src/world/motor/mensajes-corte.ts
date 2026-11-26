@@ -3,17 +3,19 @@ import { deserialize, serialize } from 'node:v8';
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import type { LegacyRecord } from '../../shared/demography.js';
 import type { World } from '../mundo/tipos.js';
+import { abrirLectorBasePesos, type DescriptorBasePesosCorte } from './base-pesos-corte.js';
 import type { TokenLegadoCorte } from './custodia-legado.js';
 import { prepararFaunaCorte, prepararFaunaDirecta, recibirFaunaDirecta, validarFaunaCorte, vincularFaunaCorte,
   type BloqueFaunaCorte } from './fauna-corte.js';
 import type { ParteFotoDueno } from './fotograma-dueno.js';
-import { prepararPersonasDirectas, recibirPersonasDirectas, type BloquePersonasCorte } from './personas-corte.js';
+import { prepararPersonasDirectas, recibirPersonasDirectas, RechazoBasePesosError,
+  type BasePesosActiva, type BloquePersonasCorte } from './personas-corte.js';
 import { parteCorteDe, type ParteMundo } from './reunir.js';
 import { prepararTeselasDirectas, recibirTeselasDirectas, type BloqueTeselasCorte } from './teselas-corte.js';
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
 const SOLICITUD = 0, PREPARAR_FAUNA = 1, PREPARAR_TESELAS = 2, PREPARAR_PERSONAS = 3, COMPROBAR_SOLAPE = 4;
-const CUSTODIA_SOLICITUD = 5, CUSTODIA_EPOCA = 6, CUSTODIA_TICK = 7;
+const CUSTODIA_SOLICITUD = 5, CUSTODIA_EPOCA = 6, CUSTODIA_TICK = 7, USAR_BASE_PESOS = 8;
 const SIN_FAUNA = 0n, FAUNA_SOMBRA = 1n, FAUNA_DIRECTA = 2n;
 
 interface ParteCorte {
@@ -48,10 +50,15 @@ interface DiagnosticoTeselasCorte {
   bytesV8: number; v8Ms: number; bytesTuplas: number; tuplasMs: number; duenosTuplas: number; duenosV8: number;
 }
 
-interface DiagnosticoPersonasCorte {
+export interface DiagnosticoPersonasCorte {
   bytesV8: number; v8Ms: number; bytesFilas: number; filasMs: number; duenosFilas: number; duenosV8: number;
-  bytesCuerpo: number; bytesPesos: number;
+  bytesCuerpo: number; bytesPesos: number; bytesRefs: number; personasRef: number; personasFull: number;
   preparacionMaxMs: number; preparacionSumaMs: number;
+}
+
+interface MensajeBasePesos {
+  tipo: 'basePesos';
+  descriptor: DescriptorBasePesosCorte | undefined;
 }
 
 interface FotoTransferida {
@@ -65,9 +72,15 @@ function ocupaSuBuffer(bytes: unknown): bytes is Uint8Array<ArrayBuffer> {
     && bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength;
 }
 
+function vistaOcupaSuBuffer(vista: unknown): vista is (Uint8Array<ArrayBuffer> | Uint32Array<ArrayBuffer>) {
+  return (vista instanceof Uint8Array || vista instanceof Uint32Array)
+    && vista.buffer instanceof ArrayBuffer
+    && vista.byteOffset === 0 && vista.byteLength === vista.buffer.byteLength;
+}
+
 function agregarTransferibles(parte: ParteCorte, transferibles: Set<ArrayBuffer>): void {
-  const agregar = (bytes: Uint8Array): void => {
-    if (!ocupaSuBuffer(bytes)) throw new Error('Cada bloque del corte debe ocupar su propio ArrayBuffer.');
+  const agregar = (bytes: Uint8Array | Uint32Array): void => {
+    if (!vistaOcupaSuBuffer(bytes)) throw new Error('Cada bloque del corte debe ocupar su propio ArrayBuffer.');
     if (bytes.byteLength === 0) return;
     if (transferibles.has(bytes.buffer)) throw new Error('Buffer repetido en el corte.');
     transferibles.add(bytes.buffer);
@@ -76,7 +89,12 @@ function agregarTransferibles(parte: ParteCorte, transferibles: Set<ArrayBuffer>
   for (const bloques of [parte.fauna, parte.teselas, parte.personas]) {
     if (bloques) for (const { cuerpo } of bloques) agregar(cuerpo);
   }
-  if (parte.personas) for (const { pesos } of parte.personas) agregar(pesos);
+  if (parte.personas) {
+    for (const bloque of parte.personas) {
+      agregar(bloque.pesos);
+      if (bloque.refs) agregar(bloque.refs.pares);
+    }
+  }
 }
 
 /** Esta lista permite mover los bloques a otro hilo antes de consumir el corte. */
@@ -126,17 +144,59 @@ export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: Parte
   puerto.postMessage(entrega, [...bloques]);
 }
 
+/** Drena los avisos de base F64 enviados por el coordinador en la dirección de confianza del puerto. */
+export function recibirBasePesosEnDueno(
+  puerto: MessagePort,
+  actual: BasePesosActiva | undefined,
+  epoca: number,
+): BasePesosActiva | undefined {
+  let vigente = actual;
+  for (let entrega = receiveMessageOnPort(puerto); entrega !== undefined; entrega = receiveMessageOnPort(puerto)) {
+    const mensaje = entrega.message as Partial<MensajeBasePesos> | undefined;
+    if (mensaje?.tipo !== 'basePesos') continue;
+    const descriptor = mensaje.descriptor;
+    if (descriptor === undefined) {
+      vigente = undefined;
+      continue;
+    }
+    try {
+      if (descriptor.epoca !== epoca) {
+        vigente = undefined;
+        continue;
+      }
+      const lector = abrirLectorBasePesos(descriptor);
+      vigente = lector.estaPublicada()
+        ? {
+          lector,
+          contexto: {
+            instancia: descriptor.instancia,
+            epoca: descriptor.epoca,
+            secuencia: descriptor.secuencia,
+            publicacion: descriptor.publicacion,
+          },
+        }
+        : undefined;
+    } catch {
+      vigente = undefined;
+    }
+  }
+  if (vigente && (vigente.contexto.epoca !== epoca || !vigente.lector.estaPublicada())) return undefined;
+  return vigente;
+}
+
 /** Se transfiere el bloque de V8 tal cual. Un runtime que no lo pueda mover falla antes de construir el corte. */
 export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World,
-  legadoSolape?: (token: TokenLegadoCorte) => readonly LegacyRecord[] | undefined): void {
+  legadoSolape?: (token: TokenLegadoCorte) => readonly LegacyRecord[] | undefined,
+  basePesos?: BasePesosActiva): void {
   const contenido = parteCorteDe(mundo);
   const modo = Atomics.load(solicitud, PREPARAR_FAUNA);
   const fauna = modo === FAUNA_DIRECTA ? prepararFaunaDirecta(contenido) : undefined;
   const pideTeselas = Atomics.load(solicitud, PREPARAR_TESELAS) === 1n;
   const teselas = pideTeselas ? prepararTeselasDirectas(contenido) : undefined;
   const pidePersonas = Atomics.load(solicitud, PREPARAR_PERSONAS) === 1n;
+  const usaBasePesos = pidePersonas && Atomics.load(solicitud, USAR_BASE_PESOS) === 1n;
   const inicioPersonas = pidePersonas ? performance.now() : 0;
-  const personas = pidePersonas ? prepararPersonasDirectas(contenido) : undefined;
+  const personas = pidePersonas ? prepararPersonasDirectas(contenido, usaBasePesos ? basePesos : undefined) : undefined;
   const preparacionPersonasMs = pidePersonas ? performance.now() - inicioPersonas : undefined;
   const reducido = fauna || teselas || personas
     ? { ...contenido, ...(fauna && { animals: [] }), ...(teselas && { tiles: [] }), ...(personas && { people: [] }) } : contenido;
@@ -165,7 +225,7 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
 }
 
 /** Consume el corte retirado y libera cada sobre al decodificarlo. Los pesos verificados conservan sus buffers. */
-export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
+export function decodificarCorteRemoto(corte: CorteRemotoBinario, basePesos?: BasePesosActiva): {
   partes: ParteMundo[];
   diagnosticoTeselasCorte: DiagnosticoTeselasCorte | undefined;
   diagnosticoPersonasCorte: DiagnosticoPersonasCorte | undefined;
@@ -176,7 +236,8 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
     ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
   const datosPersonas: DiagnosticoPersonasCorte | undefined = corte.personasDirectas
     ? { bytesV8: 0, v8Ms: 0, bytesFilas: 0, filasMs: 0, duenosFilas: 0, duenosV8: 0,
-      bytesCuerpo: 0, bytesPesos: 0, preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
+      bytesCuerpo: 0, bytesPesos: 0, bytesRefs: 0, personasRef: 0, personasFull: 0,
+      preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
   const decodificar = (parte: ParteCorte | undefined, dueno: number): ParteMundo => {
     comprobarIdentidad(parte, corte, dueno);
     const inicioV8 = datos || datosPersonas ? performance.now() : 0;
@@ -224,21 +285,24 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
           if (!sustituidas || typeof sustituidas !== 'object' || contenido.people.length !== 0
             || Object.keys(contenido.people).length !== 0 || !Array.isArray(parte.personas))
             throw new Error('Sobre de personas directas incoherente.');
-          let bytesCuerpo = 0, bytesPesos = 0;
+          let bytesCuerpo = 0, bytesPesos = 0, bytesRefs = 0;
           for (const bloque of parte.personas) {
             bytesCuerpo += bloque.cuerpo.byteLength;
             bytesPesos += bloque.pesos.byteLength;
+            if (bloque.refs) bytesRefs += bloque.refs.pares.byteLength;
           }
           const inicioFilas = performance.now();
           contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad,
-            { transferirCuerpo: true, transferirPesos: true });
+            { transferirCuerpo: true, transferirPesos: true, basePesos, diagnostico: datosPersonas });
           datosPersonas.filasMs += performance.now() - inicioFilas;
           datosPersonas.bytesCuerpo += bytesCuerpo;
           datosPersonas.bytesPesos += bytesPesos;
-          datosPersonas.bytesFilas += bytesCuerpo + bytesPesos;
+          datosPersonas.bytesRefs += bytesRefs;
+          datosPersonas.bytesFilas += bytesCuerpo + bytesPesos + bytesRefs;
           datosPersonas.duenosFilas++;
         }
       } catch (error) {
+        if (error instanceof RechazoBasePesosError) throw error;
         throw new Error(`Personas directas inválidas para el dueño ${dueno}.`, { cause: error });
       }
     } else if (Object.hasOwn(parte, 'personasSustituidas') || Object.hasOwn(parte, 'personas')) {
@@ -283,7 +347,7 @@ export function leerCustodiaLegado(memoria: SolicitudCorte): TokenLegadoCorte {
 
 /** Un canal por dueño remoto, nuevo en cada apertura. Solo se elige F0 antes de abrir la piscina. */
 export class CanalesCorte {
-  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(8 * BigUint64Array.BYTES_PER_ELEMENT));
+  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(9 * BigUint64Array.BYTES_PER_ELEMENT));
   private readonly entradas: MessagePort[] = [];
   readonly puertosRemotos: MessagePort[] = [];
   private ultimaRecepcionTeselas?: DiagnosticoTeselasCorte;
@@ -315,12 +379,20 @@ export class CanalesCorte {
     }
   }
 
-  pedir(prepararFauna: boolean | 'directa' = false, prepararTeselas = false, prepararPersonas = false, comprobarSolape = false): bigint {
+  pedir(prepararFauna: boolean | 'directa' = false, prepararTeselas = false, prepararPersonas = false,
+    comprobarSolape = false, usarBasePesos = false): bigint {
     Atomics.store(this.solicitud, PREPARAR_FAUNA, prepararFauna === 'directa' ? FAUNA_DIRECTA : prepararFauna ? FAUNA_SOMBRA : SIN_FAUNA);
     Atomics.store(this.solicitud, PREPARAR_TESELAS, prepararTeselas ? 1n : 0n);
     Atomics.store(this.solicitud, PREPARAR_PERSONAS, prepararPersonas ? 1n : 0n);
     Atomics.store(this.solicitud, COMPROBAR_SOLAPE, comprobarSolape ? 1n : 0n);
+    Atomics.store(this.solicitud, USAR_BASE_PESOS, usarBasePesos ? 1n : 0n);
     return BigInt.asUintN(64, Atomics.add(this.solicitud, SOLICITUD, 1n) + 1n);
+  }
+
+  /** Publica o retira el descriptor de la base F64 compartida hacia los dueños remotos por el canal de confianza. */
+  publicarBasePesos(descriptor: DescriptorBasePesosCorte | undefined): void {
+    const mensaje: MensajeBasePesos = { tipo: 'basePesos', descriptor };
+    for (const puerto of this.entradas) puerto.postMessage(mensaje);
   }
 
   fijarCustodiaLegado(token: TokenLegadoCorte): void {

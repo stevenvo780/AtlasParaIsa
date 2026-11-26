@@ -29,7 +29,7 @@ import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, PersonDetai
 import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
-import { PersistidorGuardado, type GuardadoConfirmado } from './guardado-worker.js';
+import { PersistidorGuardado, RechazoBasePesosGuardadoError, type GuardadoConfirmado } from './guardado-worker.js';
 import type { CapturaCorteTransferido } from '../world/motor/corte-transferido.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
@@ -580,14 +580,20 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     ? cintaDeMundo(store.path, options.tapeDirectory) : undefined;
   const baseConfig = usaMotor ? motorConfig(options.seed) : undefined;
   const confirmarGuardadoVivo = options.confirmarGuardadoVivo ?? baseConfig?.confirmarGuardadoVivo ?? false;
+  const basePesosCorte = !gateway && options.guardadoEnHilo
+    ? (options.guardadoEnHilo.basePesosCorte ?? baseConfig?.basePesosCorte ?? false) : false;
   const maxTicksSolapados = options.guardadoEnHilo?.maxTicksSolapados ?? 0;
   if (!Number.isSafeInteger(maxTicksSolapados) || maxTicksSolapados < 0)
     throw new Error('El adelanto de guardado debe ser una cantidad entera no negativa de ticks.');
-  const config = baseConfig ? { ...baseConfig, confirmarGuardadoVivo, solapeGuardado: maxTicksSolapados > 0 } : undefined;
+  const config = baseConfig
+    ? { ...baseConfig, confirmarGuardadoVivo, solapeGuardado: maxTicksSolapados > 0, basePesosCorte } : undefined;
   const conDuenos = usaMotor && config!.hilos !== 1;
   if (!gateway && options.guardadoEnHilo && (!conDuenos || !confirmarGuardadoVivo || !config?.instantaneaTransferible
     || !ley(world, 'guardadoCompleto') || store.path === ':memory:')) {
     throw new Error('El guardado en hilo requiere guardado completo en disco, dueños y corte transferible con confirmación viva.');
+  }
+  if (basePesosCorte && (!config?.personasCorteDirectas || !options.guardadoEnHilo?.snapshotSplitPeopleWeights)) {
+    throw new Error('La base F64 compartida requiere personas directas en el corte y pesos de política separados.');
   }
   let epoca = loaded?.epoca ?? 0;
   let tickMotor = world?.tick ?? 0;
@@ -660,6 +666,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     const duradero = instantanea?.world ?? draft;
     ultimoTickGuardado = ultimoCorteSinSolape = duradero.tick;
     ultimoGuardadoEn = Date.now();
+    if (basePesosCorte) {
+      persistidor?.revocarBasePesos();
+      motor?.publicarBasePesosCorte?.(undefined);
+    }
     return instantanea;
   }
   function adoptarGuardado(guardado: Instantanea | undefined): void {
@@ -675,10 +685,16 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   function adoptarGuardadoEnHilo(acuse: GuardadoConfirmado): void {
     lecturaMotor = undefined;
-    if (motor?.confirmarCorteTransferido?.(acuse)) return;
+    if (motor?.confirmarCorteTransferido?.(acuse)) {
+      if (basePesosCorte) {
+        motor.publicarBasePesosCorte?.(acuse.basePesos?.epoca === epoca ? acuse.basePesos : undefined);
+      }
+      return;
+    }
     if (acuse.tick !== tickMotor) throw new Error('El motor no pudo confirmar el prefijo durable del corte anterior.');
     // El motor sigue en el tick del corte. Si el acuse no se puede instalar en vivo,
     // se reconstruye la época desde el mismo COMMIT, como en el guardado local.
+    if (basePesosCorte) persistidor?.revocarBasePesos();
     const carga = cargarGuardado(store, options.deployment);
     if (!motor || !carga || carga.slot !== 0 || carga.world.tick !== acuse.tick || carga.epoca === null
       || carga.materia && carga.materia.epoca !== acuse.epoca) {
@@ -711,6 +727,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         return undefined;
       }, (error: unknown) => {
         guardadoEnVuelo = undefined;
+        if (basePesosCorte && error instanceof RechazoBasePesosGuardadoError) {
+          motor?.publicarBasePesosCorte?.(undefined);
+        }
         let parcial = !!vuelo.recuperacion;
         if (!parcial) {
           try { motor?.cancelarCorteSolapado?.(); }
@@ -1483,11 +1502,20 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             const captura = motor?.capturarCorteTransferido?.(habilitarSolape);
             if (captura) {
               const { maxTicksSolapados: _adelanto, reusarCabezaInicial, ...opcionesPersistidor } = options.guardadoEnHilo;
-              persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, path: store.path,
-                ...(reusarCabezaInicial && { probarCabeza: () => store.exportarPruebaCabeza() }) });
+              persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, ...(basePesosCorte && { basePesosCorte: true }),
+                path: store.path, ...(reusarCabezaInicial && { probarCabeza: () => store.exportarPruebaCabeza() }) });
               if (captura.admiteSolape) { iniciarGuardadoSolapado(captura); solapado = true; }
               else {
-                acuse = yield persistidor.guardar(captura);
+                try {
+                  acuse = yield persistidor.guardar(captura);
+                } catch (error) {
+                  if (basePesosCorte && error instanceof RechazoBasePesosGuardadoError) {
+                    motor?.publicarBasePesosCorte?.(undefined);
+                    const reintento = motor?.capturarCorteTransferido?.(false);
+                    if (!reintento) throw error;
+                    acuse = yield persistidor.guardar(reintento, false);
+                  } else throw error;
+                }
                 if (!acuse) throw new Error('Falta el acuse del escritor de guardado.');
                 anotarGuardadoEnHilo(acuse);
               }
@@ -1695,6 +1723,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     world.events = world.events.slice(-120);
     if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['events']));
     const nuevaEpoca = Math.max(epoca + 1, cargado.epoca ?? 0);
+    if (basePesosCorte) persistidor?.revocarBasePesos();
     try { motor?.cargar({ world, materia: cargado.materia }, nuevaEpoca); }
     catch (error) {
       console.error(`El motor no pudo cargar el último guardado tras el fallo del paso (${motivo}).`, error);

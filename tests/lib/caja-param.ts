@@ -153,7 +153,7 @@ export async function cajaParam(op: OpcionesCaja = {}): Promise<ResultadoCajaPar
     const canales = new Map<string, Map<Ecuacion, number>>();
     const A: ArenaMateria = {
       nuevo: (r, c, f) => real.nuevo(r, c, f), liberar: (l) => real.liberar(l), vivo: (l) => real.vivo(l), propio: (l) => real.propio(l),
-      adoptar: (l) => real.adoptar(l), lotes: (c, r, d) => real.lotes(c, r, d), especies: (l, ids) => real.especies(l, ids),
+      adoptar: (l) => real.adoptar(l), lotes: (c, r, d) => real.lotes(c, r, d), especies: (l, ids, cantidades) => real.especies(l, ids, cantidades),
       cuantos: (l, id) => real.cuantos(l, id), calor: (l) => real.calor(l), vista: (l) => real.vista(l), formar: (l, f) => real.formar(l, f),
       mover: (t) => real.mover(t), moverParte: (de, a, p) => real.moverParte(de, a, p), moverCalor: (de, a, j) => real.moverCalor(de, a, j),
       aplicar: (l, e, veces) => {

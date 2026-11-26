@@ -99,11 +99,15 @@ function conMateria(c: CtxLey): CtxLeyMateria {
 
 // ── Lotes: sumas sobre lo que contienen ──────────────────────────────────────────────────────────────────
 
-let IDS = new Uint32Array(32);
-/** Lee en `IDS` las sustancias de un lote y devuelve cuántas son. Vale hasta la siguiente llamada. */
-function leer(a: ArenaMateria, l: LoteRef): number {
-  let n = a.especies(l, IDS);
-  if (n > IDS.length) n = a.especies(l, IDS = new Uint32Array(2 * n));
+let IDS = new Uint32Array(32), CUANTOS = new Float64Array(IDS.length);
+/** Las sustancias y sus cantidades valen hasta la siguiente lectura. */
+function leer(a: ArenaMateria, l: LoteRef, cantidades = false): number {
+  let n = a.especies(l, IDS, cantidades ? CUANTOS : undefined);
+  if (n > IDS.length) {
+    IDS = new Uint32Array(2 * n);
+    CUANTOS = new Float64Array(IDS.length);
+    n = a.especies(l, IDS, cantidades ? CUANTOS : undefined);
+  }
   return n;
 }
 /** Copia ordenada por id: lo que ocurre no depende de la ranura, y el bucle puede mover materia. */
@@ -115,22 +119,22 @@ function atomosDeSustancia(s: Readonly<Sustancia>): number {
   return n;
 }
 function atomosDe(c: CtxLeyMateria, l: LoteRef): number {
-  const a = c.materia, q = c.quimica, n = leer(a, l);
+  const q = c.quimica, n = leer(c.materia, l, true);
   let total = 0;
-  for (let i = 0; i < n; i++) total += a.cuantos(l, IDS[i]!) * atomosDeSustancia(q.sustancia(IDS[i]!));
+  for (let i = 0; i < n; i++) total += CUANTOS[i]! * atomosDeSustancia(q.sustancia(IDS[i]!));
   return total;
 }
 /** Masa de un lote en kg. */
 export function masaLote(c: CtxLeyMateria, l: LoteRef): number {
-  const a = c.materia, q = c.quimica, n = leer(a, l);
+  const q = c.quimica, n = leer(c.materia, l, true);
   let mg = 0;
-  for (let i = 0; i < n; i++) mg += a.cuantos(l, IDS[i]!) * q.sustancia(IDS[i]!).masa;
+  for (let i = 0; i < n; i++) mg += CUANTOS[i]! * q.sustancia(IDS[i]!).masa;
   return mg * MG;
 }
 function cuantosTotales(a: ArenaMateria, l: LoteRef): number {
-  const n = leer(a, l);
+  const n = leer(a, l, true);
   let total = 0;
-  for (let i = 0; i < n; i++) total += a.cuantos(l, IDS[i]!);
+  for (let i = 0; i < n; i++) total += CUANTOS[i]!;
   return total;
 }
 function temperaturaLote(c: CtxLeyMateria, l: LoteRef): number {
@@ -311,9 +315,9 @@ export function masaDe(c: CtxLeyMateria, cuerpo: Cuerpo): number {
 
 /** J que libera la oxidación completa de la reserva: lo que el cuerpo puede pagar. */
 export function reservaJ(c: CtxLeyMateria, cuerpo: Cuerpo): number {
-  const a = c.materia, q = c.quimica, n = leer(a, cuerpo.reserva);
+  const q = c.quimica, n = leer(c.materia, cuerpo.reserva, true);
   let j = 0;
-  for (let i = 0; i < n; i++) j += a.cuantos(cuerpo.reserva, IDS[i]!) * q.sustancia(IDS[i]!).prop.qOxidacion;
+  for (let i = 0; i < n; i++) j += CUANTOS[i]! * q.sustancia(IDS[i]!).prop.qOxidacion;
   return j;
 }
 
@@ -598,11 +602,11 @@ export function provecho(c: CtxLeyMateria, p: Plantilla, id: SustanciaId): numbe
 
 /** Energía comestible y masa de la ración prevista, usando la misma selección que la boca. */
 export function energiaAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, lote: LoteRef, kg: number): number {
-  const a = c.materia, p = plantillaDe(c, cuerpo), n = leer(a, lote);
+  const p = plantillaDe(c, cuerpo), n = leer(c.materia, lote, true);
   let energia = 0, masa = 0;
   for (let i = 0; i < n; i++) {
     const id = IDS[i]!, sustancia = c.quimica.sustancia(id);
-    const cuantos = a.cuantos(lote, id) * provecho(c, p, id);
+    const cuantos = CUANTOS[i]! * provecho(c, p, id);
     masa += cuantos * sustancia.masa * MG;
     energia += cuantos * sustancia.prop.qOxidacion;
   }

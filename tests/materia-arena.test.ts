@@ -478,6 +478,20 @@ if (isMainThread) test('desborde y moverParte conservan composición y calor par
   arena.liberar(origen);
 });
 
+if (isMainThread) test('especies lee cantidades en orden incluso en el desborde y con un destino corto', () => {
+  const arena = arenaDe(memoriaDe(1, 16), 0), lote = arena.nuevo(Rol.Tejido, -1, 0);
+  const orden = sustancias.map(({ id }) => id).reverse();
+  arena.fuente(lote, Float64Array.from([0, 42, ...orden.flatMap(id => [id, 3 * id])]), libroVacio());
+  const ids = new Uint32Array(orden.length), cantidades = new Float64Array(orden.length);
+  assert.equal(arena.especies(lote, ids, cantidades.subarray(0, 9)), orden.length);
+  assert.deepEqual(Array.from(ids.slice(0, 9)), orden.slice(0, 9));
+  assert.equal(ids[9], 0);
+  assert.deepEqual(Array.from(cantidades.slice(0, 9)), orden.slice(0, 9).map(id => 3 * id));
+  assert.equal(arena.especies(lote, ids, cantidades), orden.length);
+  assert.deepEqual(Array.from(ids), orden);
+  assert.deepEqual(Array.from(cantidades), orden.map(id => arena.cuantos(lote, id)));
+});
+
 if (isMainThread) test('el sumidero recorta a existencias y asienta solo lo que salió', () => {
   const arena = arenaDe(memoriaDe(1, 8), 0), libro = libroVacio();
   const lote = arena.nuevo(Rol.Aire, 17, 0);

@@ -170,7 +170,6 @@ export class Dueno implements CtxF0 {
   #firma = '';
   #escritura: { frente: FrentePublico; w: FrenteEscritura } | undefined;
   #propio: { terreno: TerrenoPercepcion; w: TerrenoDueno } | undefined;
-  #indice: { frente: FrentePublico; refs: Map<number, Ref> } | undefined;
   #globalesDe = -1;
   readonly #idPorUid = new Map<number, string>();
   readonly #uidPorId = new Map<string, number>();
@@ -233,15 +232,7 @@ export class Dueno implements CtxF0 {
   /** Chunks de este dueño con su contenido en este heap (los retirados conservan página, pero no cuentan). */
   get chunks(): Int32Array { return this.#chunks ??= Int32Array.from(this.#activos.keys()); }
 
-  readonly ref = (uid: number): Ref => {
-    const frente = this.frente;
-    if (this.#indice?.frente !== frente) {
-      const refs = new Map<number, Ref>(), { uid: uids, vivo, gen, alta } = frente;
-      for (let s = 0; s < alta; s++) if (vivo[s]) refs.set(uids[s]!, gen[s]! * 4294967296 + s);
-      this.#indice = { frente, refs };
-    }
-    return this.#indice.refs.get(uid) ?? REF_NULA;
-  };
+  readonly ref = (uid: number): Ref => this.organismos.tabla.refPublicada(uid);
 
   azar(): number { return this.#piezas.azar(); }
 
@@ -367,7 +358,7 @@ export class Dueno implements CtxF0 {
     this.#firma = firma;
     if (this.hilos === 1) {
       const columnas = leyes.flatMap(l => l.columnas ?? []), declaradas = this.frente.columnas;
-      if (columnas.some(([nombre]) => !declaradas.includes(nombre))) { olvidarPercepcion(m); olvidarOrganismos(m); this.#escritura = this.#indice = undefined; }
+      if (columnas.some(([nombre]) => !declaradas.includes(nombre))) { olvidarPercepcion(m); olvidarOrganismos(m); this.#escritura = undefined; }
       for (const [nombre, tipo, ancho] of columnas) this.organismos.tabla.columna(nombre, tipo, ancho);
       observarRegiones(m, leyes.length || this.params.v23.fotograma ? { activado: (key, cx, cy) => this.#activado(key, cx, cy), retirar: (_k, cx, cy) => this.#retirar(cx, cy) } : undefined);
       const terreno = this.terrenoPercibido, tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);

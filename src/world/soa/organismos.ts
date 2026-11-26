@@ -1,10 +1,11 @@
 import { crc32 } from 'node:zlib';
 import { conCerrojo, ErrorFatalMotor } from '../paralelo/barrera.js';
 import {
-  COLUMNAS_FIJAS, genDe, refDe, slotDe,
+  COLUMNAS_FIJAS, REF_NULA, genDe, refDe, slotDe,
   type Clase, type Col, type FrenteEscritura, type FrentePublico, type Hilo, type Ref, type Slot,
   type TablaOrganismos, type TipoColumna,
 } from '../motor/contratos.js';
+import { IndiceUid, MAX_FILAS_INDICE_UID } from './indice-uid.js';
 
 const MAX_GENERACION = 2 ** 21 - 1;
 const RANURAS_REF = 2 ** 32;
@@ -60,6 +61,7 @@ export interface TablaCompartida {
   control: SharedArrayBuffer;
   libres: SharedArrayBuffer;
   bajas: SharedArrayBuffer;
+  indiceUid?: SharedArrayBuffer;
   sellos: SharedArrayBuffer | null;
   verificar: boolean;
 }
@@ -83,6 +85,11 @@ function armarFrente(col: (nombre: string) => Col, columnas: readonly string[], 
     x: col('x'), y: col('y'), chunk: col('chunk'), accion: col('accion'), objetivo: col('objetivo'),
     decideEn: col('decideEn'), cuerpo: col('cuerpo'), rasgos: col('rasgos'), genoma: col('genoma'), pareja: col('pareja'),
   });
+}
+
+function igualesHasta(a: Col, b: Col, filas: number): boolean {
+  const bytes = filas * a.BYTES_PER_ELEMENT;
+  return Buffer.from(a.buffer, a.byteOffset, bytes).equals(Buffer.from(b.buffer, b.byteOffset, bytes));
 }
 
 /** El frente publicado ahora mismo, leído desde otro hilo: `leer()` arma el del lado y el tick del estado compartido. */
@@ -125,6 +132,8 @@ export class TablaOrganismosSoA implements TablaOrganismos {
   private readonly ctl: Int32Array | null = null;
   private readonly pilaLibres: Int32Array | null = null;
   private readonly colaBajas: Int32Array | null = null;
+  private readonly indiceUid?: IndiceUid;
+  private refsLocales?: { frente: FrentePublico; refs: Map<number, Ref> };
   private readonly reserva: number;
   /** Hilo de esta copia de la tabla: 0 en el coordinador (y con un solo dueño), el del worker en las conectadas. */
   readonly hilo: Hilo;
@@ -140,6 +149,7 @@ export class TablaOrganismosSoA implements TablaOrganismos {
       this.ctl = new Int32Array(compartida.control);
       this.pilaLibres = new Int32Array(compartida.libres);
       this.colaBajas = new Int32Array(compartida.bajas);
+      if (compartida.indiceUid) this.indiceUid = new IndiceUid(compartida.indiceUid);
       if (compartida.sellos) this.escritoPor = new Int32Array(compartida.sellos);
       compartida.frente.columnas.forEach((c, i) => {
         const { ancho, unLado } = compartida.formas[i]!;
@@ -152,6 +162,8 @@ export class TablaOrganismosSoA implements TablaOrganismos {
         this.ctl = new Int32Array(new SharedArrayBuffer(C_CELDAS * Int32Array.BYTES_PER_ELEMENT));
         this.pilaLibres = new Int32Array(pilaCompartida(reservaFilas));
         this.colaBajas = new Int32Array(pilaCompartida(reservaFilas));
+        if (Number.isSafeInteger(reservaFilas) && reservaFilas > 0 && reservaFilas <= MAX_FILAS_INDICE_UID)
+          this.indiceUid = new IndiceUid(reservaFilas);
         if (this.verificar) this.escritoPor = new Int32Array(pilaCompartida(reservaFilas));
       }
       for (const [nombre, tipo, ancho] of COLUMNAS_FIJAS) this.declarar(nombre, tipo, ancho);
@@ -197,6 +209,21 @@ export class TablaOrganismosSoA implements TablaOrganismos {
 
   lectura(): FrentePublico { return this.actual; }
 
+  /** Identidad viva del frente publicado, aunque el dueño ya haya empezado a escribir el siguiente. */
+  refPublicada(uid: number): Ref {
+    const frente = this.actual;
+    if (this.indiceUid) {
+      const slot = this.indiceUid.ranuraDe(uid, frente.uid);
+      return slot < 0 ? REF_NULA : refDe(slot, frente.gen[slot]!);
+    }
+    if (this.refsLocales?.frente !== frente) {
+      const refs = new Map<number, Ref>(), { uid: uids, vivo, gen, alta } = frente;
+      for (let slot = 0; slot < alta; slot++) if (vivo[slot]) refs.set(uids[slot]!, refDe(slot, gen[slot]!));
+      this.refsLocales = { frente, refs };
+    }
+    return this.refsLocales.refs.get(uid) ?? REF_NULA;
+  }
+
   /** Para repartirla entre dueños (solo si se creó con `reservaFilas`). */
   compartirTabla(): TablaCompartida {
     if (!this.ctl || this.conectada) throw new Error('Solo el coordinador comparte una tabla de varios dueños.');
@@ -204,7 +231,7 @@ export class TablaOrganismosSoA implements TablaOrganismos {
     return {
       frente: this.compartir(), formas: [...this.campos.values()].map(({ ancho, unLado }) => ({ ancho, unLado })),
       control: this.ctl.buffer as SharedArrayBuffer, libres: this.pilaLibres!.buffer as SharedArrayBuffer,
-      bajas: this.colaBajas!.buffer as SharedArrayBuffer,
+      bajas: this.colaBajas!.buffer as SharedArrayBuffer, indiceUid: this.indiceUid?.memoria,
       sellos: this.verificar ? this.escritoPor.buffer as SharedArrayBuffer : null, verificar: this.verificar,
     };
   }
@@ -348,6 +375,13 @@ export class TablaOrganismosSoA implements TablaOrganismos {
         if (vivo[slot] && this.escritoPor[slot] !== this.dueñoVigente(slot)) {
           throw new Error(`El dueño no selló la fila ${slot} al publicar el frente.`);
         }
+      }
+    }
+    if (this.indiceUid) {
+      // Los dueños están detenidos en la barrera. El índice describe el lado que se publica a continuación.
+      const previo = this.lecturaActual, vivo = this.vector('vivo', this.siguiente, 'u8'), uid = this.vector('uid', this.siguiente, 'f64');
+      if (altas !== previo.alta || !igualesHasta(previo.vivo, vivo, altas) || !igualesHasta(previo.uid, uid, altas)) {
+        this.indiceUid.reconstruir(vivo, uid, altas);
       }
     }
     this.iniciado = true;

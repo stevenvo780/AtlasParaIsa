@@ -20,6 +20,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v21-dvr-client.test.ts tests/ola-cintacli-reproductor.test.ts tests/v24-motor-perfil-cpu1.test.ts \
   tests/v24-motor-perfil-paso.test.ts tests/v24-rutas-locales.test.ts tests/fauna-rejilla.test.ts \
   tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
+  tests/v24-indice-uid.test.ts tests/v24-indice-frente.test.ts \
   tests/v24-materia-tramos-store.test.ts tests/v24-vmat-tramos.test.ts tests/v24-snapshot-matter-parts.test.ts \
   tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \

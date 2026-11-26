@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { encodePackedPeoplePage, preparePackedPerson } from '../src/server/snapshot-packed-people.js';
+import { encodeDetachedPackedPeoplePage, encodePackedPeoplePage, preparePackedPerson } from '../src/server/snapshot-packed-people.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { materializeAnimals } from '../src/world/animals.js';
 import { CanalesCorte, decodificarCorteRemoto, enviarParteCorte, transferiblesCorteRemoto } from '../src/world/motor/mensajes-corte.js';
@@ -21,6 +21,7 @@ test('el corte retirado transfiere sus buffers y conserva las filas verificadas 
       mundo.people = mundo.people.slice(2 * i, 2 * i + 2).reverse();
       mundo.people[0]!.policy!.weights[0] = -0;
       mundo.people[0]!.policy!.weights[1] = Number.MIN_VALUE;
+      mundo.people[0]!.reason = 'Señal 🌿 entre piedras\n\t\ud800';
       delete mundo.people[1]!.policy;
       mundo.tiles = [{ x: i, y: 0, terrain: 'meadow', moisture: 0.7, vegetation: 0.1, food: 0, fauna: 1, species: 'hare' }];
       mundo.animals = materializeAnimals(semilla, mundo.tiles, tick);
@@ -41,10 +42,18 @@ test('el corte retirado transfiere sus buffers y conserva las filas verificadas 
     assert.equal(transfer.length, cuerpos.length);
     const movido = structuredClone(retirado, { transfer });
     assert.ok(cuerpos.every(cuerpo => cuerpo.buffer.byteLength === 0));
+    const personasRecibidas = movido.sobres.flatMap(sobre => sobre.personas ?? []);
+    const bytesCuerpo = personasRecibidas.reduce((total, bloque) => total + bloque.cuerpo.byteLength, 0);
+    const bytesPesos = personasRecibidas.reduce((total, bloque) => total + bloque.pesos.byteLength, 0);
 
     // El coordinador puede pedir el siguiente corte con otro modo mientras el receptor decodifica el anterior.
     canales.pedir();
-    const { partes } = decodificarCorteRemoto(movido);
+    const { partes, diagnosticoPersonasCorte } = decodificarCorteRemoto(movido);
+    assert.ok(diagnosticoPersonasCorte && bytesCuerpo > 0 && bytesPesos > 0);
+    assert.equal(diagnosticoPersonasCorte.bytesCuerpo, bytesCuerpo);
+    assert.equal(diagnosticoPersonasCorte.bytesPesos, bytesPesos);
+    assert.equal(diagnosticoPersonasCorte.bytesFilas, bytesCuerpo + bytesPesos);
+    assert.ok(personasRecibidas.every(({ cuerpo, pesos }) => cuerpo.buffer.byteLength === 0 && pesos.buffer.byteLength === 0));
     assert.deepEqual(partes, mundos.map(parteCorteDe));
     for (const parte of partes) {
       assert.ok(Object.is(parte.people[0]!.policy!.weights[0], -0));
@@ -53,6 +62,7 @@ test('el corte retirado transfiere sus buffers y conserva las filas verificadas 
       const filas = verificadas.tramos.flatMap(tramo => tramo.filas);
       const canonicas = parte.people.map(persona => preparePackedPerson(persona as typeof persona & Record<string, unknown>));
       assert.deepEqual(encodePackedPeoplePage(filas), encodePackedPeoplePage(canonicas));
+      assert.deepEqual(encodeDetachedPackedPeoplePage(filas), encodeDetachedPackedPeoplePage(canonicas));
     }
   } finally { canales.cerrar(); }
 });

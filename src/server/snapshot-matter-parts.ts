@@ -101,14 +101,12 @@ export class SnapshotMatterParts {
   write(preparado: PreparedMatterParts): Uint8Array {
     exigirTransaccion(this.db);
     const insertar = this.db.prepare('INSERT INTO main.snapshot_matter_parts VALUES (?,?) ON CONFLICT(digest) DO NOTHING');
-    const leer = this.db.prepare('SELECT body FROM main.snapshot_matter_parts WHERE digest=?');
+    // Compara el cuerpo retenido en SQLite para evitar reconstruir otro Buffer en JS.
+    const igual = this.db.prepare('SELECT body = ? AS igual FROM main.snapshot_matter_parts WHERE digest=?');
     for (const { body, bytes, digest } of preparado.partes) {
       if (body.byteLength !== bytes || checksum(body) !== digest) return error('Una parte de materia preparada cambió antes de escribir.');
-      if (insertar.run(digest, body).changes === 0) {
-        const encontrada = leer.get(digest)?.body;
-        if (!(encontrada instanceof Uint8Array) || Buffer.compare(encontrada, body) !== 0)
-          return error('La parte de materia retenida no coincide con su SHA-256.');
-      }
+      if (insertar.run(digest, body).changes === 0 && igual.get(body, digest)?.igual !== 1)
+        return error('La parte de materia retenida no coincide con su SHA-256.');
     }
     return codificarManifiesto(preparado);
   }

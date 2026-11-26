@@ -4,7 +4,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
 import { materializarCorteTransferido, type AcuseCorteTransferido, type CapturaCorteTransferido, type CorteTransferido,
   type IdentidadCorteTransferido } from '../world/motor/corte-transferido.js';
-import { Store, type StoreOptions } from './store.js';
+import { Store, type FaseGuardado, type StoreOptions } from './store.js';
 
 type OpcionesDisco = Pick<StoreOptions, 'snapshotPackedPeople' | 'snapshotCompressedPeople' | 'snapshotSplitPeopleWeights'>;
 
@@ -12,6 +12,8 @@ interface TiempoPersistidor {
   paredMs: number;
   cpuMs: number | null;
 }
+
+type FasesPersistidor = Partial<Record<FaseGuardado, TiempoPersistidor>>;
 
 interface AfinidadPersistidor {
   afinidad: string | null;
@@ -21,6 +23,8 @@ interface AfinidadPersistidor {
 export interface PerfilPersistidor extends AfinidadPersistidor {
   materializar: TiempoPersistidor;
   guardar: TiempoPersistidor;
+  /** Intervalos consecutivos dentro de guardar, disponibles si se solicita el desglose. */
+  fases?: FasesPersistidor;
 }
 
 export type GuardadoConfirmado = AcuseCorteTransferido & {
@@ -40,6 +44,7 @@ export interface OpcionesPersistidor extends OpcionesDisco {
   path: string;
   onProgress?: () => void;
   cpuPersistidor?: number;
+  perfilarFases?: boolean;
 }
 
 type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean } | { tipo: 'cerrar' };
@@ -238,7 +243,23 @@ function medirTramo<T>(ejecutar: () => T): { valor: T; tiempo: TiempoPersistidor
   return { valor, tiempo: { paredMs, cpuMs: gasto ? (gasto.user + gasto.system) / 1000 : null } };
 }
 
-function abrirPersistidor(path: string, { cpuPersistidor, ...options }: Omit<OpcionesPersistidor, 'path' | 'onProgress'>): void {
+function medirFasesGuardado(fases: FasesPersistidor): (fase: FaseGuardado) => void {
+  let paredAnterior = performance.now();
+  let cpuAnterior = cpuDelHilo();
+  return fase => {
+    const pared = performance.now();
+    const cpu = cpuDelHilo();
+    fases[fase] = {
+      paredMs: pared - paredAnterior,
+      cpuMs: cpu && cpuAnterior ? (cpu.user - cpuAnterior.user + cpu.system - cpuAnterior.system) / 1000 : null,
+    };
+    paredAnterior = pared;
+    cpuAnterior = cpu;
+  };
+}
+
+function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false, ...options }:
+  Omit<OpcionesPersistidor, 'path' | 'onProgress'>): void {
   const puerto = parentPort!;
   const responder = (mensaje: RespuestaGuardado) => puerto.postMessage(mensaje);
   const afinidad = fijarAfinidad(cpuPersistidor);
@@ -259,7 +280,7 @@ function abrirPersistidor(path: string, { cpuPersistidor, ...options }: Omit<Opc
         return;
       case 'guardar':
         ultimoAvance = -Infinity;
-        responder(guardar(store, orden.corte, orden.solapado, afinidad));
+        responder(guardar(store, orden.corte, orden.solapado, afinidad, perfilarFases));
         return;
       default:
         throw new Error('Orden desconocida en el hilo de guardado.');
@@ -268,19 +289,25 @@ function abrirPersistidor(path: string, { cpuPersistidor, ...options }: Omit<Opc
   responder({ tipo: 'listo' });
 }
 
-function guardar(store: Store, corte: CorteTransferido, solapado: boolean, afinidad: AfinidadPersistidor): RespuestaGuardado {
+function guardar(store: Store, corte: CorteTransferido, solapado: boolean, afinidad: AfinidadPersistidor,
+  perfilarFases: boolean): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
     const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado));
     const { sello, tecnologiaRemotaEquivalente, bajas } = materializado.valor;
-    const guardado = medirTramo(() => solapado ? store.guardarCorteSolapado(sello, corte.epoca) : store.guardarCorteSellado(sello, [], []));
+    const fases: FasesPersistidor | undefined = perfilarFases ? {} : undefined;
+    const guardado = medirTramo(() => {
+      const cerrarFase = fases && medirFasesGuardado(fases);
+      return solapado ? store.guardarCorteSolapado(sello, corte.epoca, cerrarFase)
+        : store.guardarCorteSellado(sello, [], [], undefined, cerrarFase);
+    });
     const { world } = guardado.valor;
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,
       historia: world.history, tecnologia: world.technology, tecnologiaRemotaEquivalente, bajas,
-      perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo },
+      perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo, ...(fases && { fases }) },
     } };
   } catch (error) {
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;

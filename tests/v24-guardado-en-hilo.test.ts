@@ -74,7 +74,7 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
   const app = createApp({
     store, origin: 'http://127.0.0.1:3000', password: 'guardado-en-hilo-v24', seed: semilla,
     tape: false, manual: true, confirmarGuardadoVivo: true,
-    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true,
+    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, perfilarFases: true,
       ...(cpuPersistidor === undefined ? {} : { cpuPersistidor }) },
   });
   try {
@@ -125,7 +125,13 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
       assert.equal(acuse.tick, index + 1);
       const perfil = acuse.perfilPersistidor;
       assert.ok(perfil);
-      for (const fase of [perfil.materializar, perfil.guardar]) {
+      const fases = perfil.fases;
+      assert.ok(fases);
+      for (const nombre of ['verificarCorte', 'prepararVmat', 'prepararMundoTecnologia', 'prepararSnapshot', 'abrirTransaccion',
+        'verificarCabeza', 'escribirArchivos', 'rotarRespaldos', 'empaquetarYEscribirSnapshot', 'sqlFinalYGc', 'commit', 'poscommit']) {
+        assert.ok(Object.hasOwn(fases, nombre), `Falta la medición de ${nombre}`);
+      }
+      for (const fase of [perfil.materializar, perfil.guardar, ...Object.values(fases)]) {
         assert.ok(Number.isFinite(fase.paredMs) && fase.paredMs >= 0);
         if (typeof process.threadCpuUsage === 'function') assert.notEqual(fase.cpuMs, null);
         if (fase.cpuMs !== null) assert.ok(Number.isFinite(fase.cpuMs) && fase.cpuMs >= 0);

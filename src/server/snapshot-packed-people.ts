@@ -16,6 +16,7 @@ const ZSTD_MAGIC = 0xfd2f_b528, MAX_ZSTD_WINDOW_LOG = 22;
 const ZSTD_COMPRESSION = { params: { [zstd.ZSTD_c_compressionLevel]: 1 } };
 const ZSTD_WINDOW = { [zstd.ZSTD_d_windowLogMax]: MAX_ZSTD_WINDOW_LOG };
 const EMPTY_POLICY = { weights: [] };
+const utf8Strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const lookupGetter: (this: object, key: PropertyKey) => unknown =
   Object.getOwnPropertyDescriptor(Object.prototype, '__lookupGetter__')!.value;
 
@@ -28,6 +29,14 @@ export interface PackedPersonRow {
 
 export type PackedPersonWeights = Pick<PackedPersonRow, 'weights'>;
 const binaryWeights = new WeakMap<PackedPersonWeights, { body: Buffer; offset: number }>();
+const binaryJson = new WeakMap<PackedPersonRow, { body: Buffer; start: number; end: number }>();
+const capturedJsonProperty: PropertyDescriptor = {
+  enumerable: true,
+  get(this: PackedPersonRow): string {
+    const { body, start, end } = binaryJson.get(this)!;
+    return body.toString('utf8', start, end);
+  },
+};
 
 function failure(reason: string, cause?: unknown): never {
   throw new SnapshotSemanticError(`Invalid WPF1 people page ${reason}. Explicit recovery required.`, { cause });
@@ -122,18 +131,19 @@ export function preparePackedPerson(record: Record<string, unknown>): PackedPers
   return jsonRow(prepared, weights);
 }
 
-/** Captura el cuerpo en bloque. Las filas preparadas retienen sus bytes privados y la persona recibe su array mutable. */
-export function conservarPesosWpf1(cuerpo: Uint8Array, transferir = false):
-  (json: string, offset: number) => { fila: PackedPersonRow; pesos: number[] } {
-  let body: Buffer;
-  if (transferir) {
-    const buffer = cuerpo.buffer;
-    if (!(buffer instanceof ArrayBuffer) || cuerpo.byteOffset !== 0 || cuerpo.byteLength !== buffer.byteLength)
-      throw new Error('El bloque de pesos directos debe ocupar su propio ArrayBuffer.');
-    body = Buffer.from(structuredClone(buffer, { transfer: [buffer] }));
-  } else body = Buffer.from(cuerpo);
+function reservarBytes(cuerpo: Uint8Array, transferir: boolean, bloque: string): Buffer {
+  if (!transferir) return Buffer.from(new Uint8Array(cuerpo).buffer);
+  const buffer = cuerpo.buffer;
+  if (!(buffer instanceof ArrayBuffer) || cuerpo.byteOffset !== 0 || cuerpo.byteLength !== buffer.byteLength)
+    throw new Error(`El bloque de ${bloque} debe ocupar su propio ArrayBuffer.`);
+  return Buffer.from(structuredClone(buffer, { transfer: [buffer] }));
+}
+
+function capturarPesosWpf1(cuerpo: Uint8Array, transferir: boolean):
+  (fila: PackedPersonRow, offset: number) => number[] {
+  const body = reservarBytes(cuerpo, transferir, 'pesos directos');
   const data = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  return (json, offset) => {
+  return (fila, offset) => {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset % WPF1_WEIGHT_BYTES !== 0
       || offset + WPF1_WEIGHT_BYTES > data.byteLength) throw new Error('Rango de pesos de persona directa inválido.');
     const pesos = new Array<number>(WPF1_WEIGHT_COUNT);
@@ -142,9 +152,49 @@ export function conservarPesosWpf1(cuerpo: Uint8Array, transferir = false):
       if (!isPackedPersonWeight(peso)) throw new Error('Peso de persona directa inválido.');
       pesos[i] = peso;
     }
-    const fila: PackedPersonRow = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
     binaryWeights.set(fila, { body, offset });
+    return pesos;
+  };
+}
+
+/** La fila retiene los bytes privados y la persona recibe su array mutable. */
+export function conservarPesosWpf1(cuerpo: Uint8Array, transferir = false):
+  (json: string, offset: number) => { fila: PackedPersonRow; pesos: number[] } {
+  const capturar = capturarPesosWpf1(cuerpo, transferir);
+  return (json, offset) => {
+    const fila: PackedPersonRow = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
+    const pesos = capturar(fila, offset);
     return { fila, pesos };
+  };
+}
+
+/** El receptor verifica el texto decodificado. Las filas solo conservan el rango JSON del bloque privado. */
+export function conservarFilasWpf1(cuerpo: Uint8Array, anchoMascara: number, pesos: Uint8Array,
+  { transferirCuerpo, transferirPesos }: { transferirCuerpo: boolean; transferirPesos: boolean }) {
+  const body = reservarBytes(cuerpo, transferirCuerpo, 'personas directas');
+  const texto = utf8Strict.decode(body.subarray(anchoMascara));
+  const ascii = texto.length === body.length - anchoMascara;
+  const capturarPesos = pesos.byteLength ? capturarPesosWpf1(pesos, transferirPesos) : undefined;
+  return {
+    texto,
+    marcada(indice: number): boolean {
+      return (body[indice >>> 3]! & (1 << (indice & 7))) !== 0;
+    },
+    fila(inicioLinea: number, longitudLinea: number, longitudJson: number, conAusencias: boolean, offsetPesos?: number) {
+      const salto = ascii ? inicioLinea + longitudLinea : body.indexOf(0x0a, inicioLinea);
+      const finLinea = salto === -1 ? body.length : salto;
+      const start = inicioLinea + Number(conAusencias);
+      // El envoltorio termina el JSON con coma y tabulador ASCII tras la llave.
+      const end = ascii ? start + longitudJson : conAusencias ? body.indexOf(0x09, start) - 1 : finLinea;
+      if (inicioLinea < anchoMascara || end < start + 2 || end > finLinea
+        || body[start] !== 0x7b || body[end - 1] !== 0x7d || (conAusencias && body[end] !== 0x2c))
+        throw new Error('Rango JSON de persona directa inválido.');
+      const bytes = end - start + (offsetPesos === undefined ? 0 : WPF1_WEIGHT_BYTES);
+      const fila: PackedPersonRow = Object.freeze(Object.defineProperty({ json: '', bytes }, 'json', capturedJsonProperty));
+      const pesos = offsetPesos === undefined ? undefined : capturarPesos!(fila, offsetPesos);
+      binaryJson.set(fila, { body, start, end });
+      return { fila, pesos, siguienteLinea: finLinea < body.length ? finLinea + 1 : finLinea };
+    },
   };
 }
 
@@ -185,9 +235,11 @@ function encodePeoplePage(rows: readonly PackedPersonRow[], detached: boolean): 
   for (const row of rows) {
     const packed = hasPackedPersonWeights(row);
     const jsonBytes = row.bytes - (packed ? WPF1_WEIGHT_BYTES : 0);
-    if (typeof row.json !== 'string' || !row.json.startsWith('{') || !row.json.endsWith('}')
-      || jsonBytes !== Buffer.byteLength(row.json))
-      failure('row byte count');
+    const stored = binaryJson.get(row);
+    if (stored) {
+      if (jsonBytes !== stored.end - stored.start) failure('row byte count');
+    } else if (typeof row.json !== 'string' || !row.json.startsWith('{') || !row.json.endsWith('}')
+      || jsonBytes !== Buffer.byteLength(row.json)) failure('row byte count');
     if (row.weights !== undefined && row.weights.length !== WPF1_WEIGHT_COUNT) failure('weight count');
     if (packed) packedCount++;
     sumJsonBytes += jsonBytes;
@@ -210,7 +262,8 @@ function encodePeoplePage(rows: readonly PackedPersonRow[], detached: boolean): 
     const row = rows[i]!;
     const packed = detached ? hasPackedPersonWeights(row) : copyPackedPersonWeights(row, body, binary);
     const bytes = row.bytes - (packed ? WPF1_WEIGHT_BYTES : 0);
-    json += body.write(row.json, json, bytes, 'utf8');
+    const stored = binaryJson.get(row);
+    json += stored ? stored.body.copy(body, json, stored.start, stored.end) : body.write(row.json, json, bytes, 'utf8');
     if (packed) {
       body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
       if (!detached) binary += WPF1_WEIGHT_BYTES;

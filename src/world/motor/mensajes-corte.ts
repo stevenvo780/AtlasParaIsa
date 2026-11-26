@@ -50,6 +50,7 @@ interface DiagnosticoTeselasCorte {
 
 interface DiagnosticoPersonasCorte {
   bytesV8: number; v8Ms: number; bytesFilas: number; filasMs: number; duenosFilas: number; duenosV8: number;
+  bytesCuerpo: number; bytesPesos: number;
   preparacionMaxMs: number; preparacionSumaMs: number;
 }
 
@@ -175,7 +176,7 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
     ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
   const datosPersonas: DiagnosticoPersonasCorte | undefined = corte.personasDirectas
     ? { bytesV8: 0, v8Ms: 0, bytesFilas: 0, filasMs: 0, duenosFilas: 0, duenosV8: 0,
-      preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
+      bytesCuerpo: 0, bytesPesos: 0, preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
   const decodificar = (parte: ParteCorte | undefined, dueno: number): ParteMundo => {
     comprobarIdentidad(parte, corte, dueno);
     const inicioV8 = datos || datosPersonas ? performance.now() : 0;
@@ -223,11 +224,18 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
           if (!sustituidas || typeof sustituidas !== 'object' || contenido.people.length !== 0
             || Object.keys(contenido.people).length !== 0 || !Array.isArray(parte.personas))
             throw new Error('Sobre de personas directas incoherente.');
-          const bytesFilas = parte.personas.reduce((n, bloque) => n + bloque.cuerpo.byteLength + bloque.pesos.byteLength, 0);
+          let bytesCuerpo = 0, bytesPesos = 0;
+          for (const bloque of parte.personas) {
+            bytesCuerpo += bloque.cuerpo.byteLength;
+            bytesPesos += bloque.pesos.byteLength;
+          }
           const inicioFilas = performance.now();
-          contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad, { transferirPesos: true });
+          contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad,
+            { transferirCuerpo: true, transferirPesos: true });
           datosPersonas.filasMs += performance.now() - inicioFilas;
-          datosPersonas.bytesFilas += bytesFilas;
+          datosPersonas.bytesCuerpo += bytesCuerpo;
+          datosPersonas.bytesPesos += bytesPesos;
+          datosPersonas.bytesFilas += bytesCuerpo + bytesPesos;
           datosPersonas.duenosFilas++;
         }
       } catch (error) {

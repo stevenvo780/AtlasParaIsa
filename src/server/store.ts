@@ -71,6 +71,12 @@ interface AdjuntoAgenda {
   materiaDigest: string | null;
 }
 type MatterForWrite = Uint8Array | PreparedMatterParts | null;
+export type FaseGuardado =
+  | 'verificarCorte' | 'prepararVmat' | 'prepararMundoTecnologia' | 'prepararSnapshot'
+  | 'abrirTransaccion' | 'verificarCabeza' | 'escribirArchivos' | 'rotarRespaldos'
+  | 'empaquetarYEscribirSnapshot' | 'sqlFinalYGc' | 'commit' | 'poscommit';
+/** Telemetría síncrona del persistidor. Cada marca cierra la fase que acaba de ejecutarse. */
+type CerrarFaseGuardado = (fase: FaseGuardado) => void;
 interface MatterManifestRow { slot: SnapshotSlot; world_digest: string; snapshot_digest: string | null; body: Uint8Array; }
 type LoadedSnapshotBruto = LoadedSnapshot & { agendaBruta?: unknown };
 interface InstantaneaCargada {
@@ -1911,9 +1917,9 @@ export class Store {
   }
 
   guardarCorteSellado(sello: CorteGuardadoSellado, inputs: { gesture: Gesture; result: GestureResult }[],
-    sesiones: string[], corteAgenda?: CorteAgendaTerritorial): Instantanea {
+    sesiones: string[], corteAgenda?: CorteAgendaTerritorial, cerrarFase?: CerrarFaseGuardado): Instantanea {
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
-    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas);
+    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas, undefined, cerrarFase);
     return instantanea;
   }
 
@@ -1926,37 +1932,41 @@ export class Store {
       && this.db.prepare('PRAGMA main.journal_mode').get()?.journal_mode === 'wal';
   }
 
-  guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number): Instantanea {
+  guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number, cerrarFase?: CerrarFaseGuardado): Instantanea {
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
     if (!Number.isSafeInteger(epocaCorte) || epocaCorte < 0 || instantanea.materia && instantanea.materia.epoca !== epocaCorte)
       throw new SnapshotSemanticError('La materia no corresponde a la época del corte solapado.');
-    this.guardarCompleto(instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte);
+    this.guardarCompleto(instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
     return instantanea;
   }
 
   private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
-    teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number): void {
+    teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number,
+    cerrarFase?: CerrarFaseGuardado): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
+    cerrarFase?.('verificarCorte');
     let guardado: MatterForWrite = null;
     if (materia !== null) {
       const bytes = materia.paginas.byteLength + materia.enVuelo.byteLength + materia.sustancias.byteLength + materia.registro.byteLength;
       guardado = bytes > this.snapshotMatterPartBytes
         ? SnapshotMatterParts.prepare(materia, this.snapshotMatterPartBytes) : codificarCheckpoint(materia);
     }
+    cerrarFase?.('prepararVmat');
     const adjunto = corteAgenda === undefined ? undefined : {
       corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
-    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas, epocaSolapada);
+    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas,
+      epocaSolapada, cerrarFase);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
     faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas,
-    personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number): void {
+    personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number, cerrarFase?: CerrarFaseGuardado): void {
     const complete = matter !== undefined;
     const solapado = epocaSolapada !== undefined;
     if (solapado && !estadoAdmiteSolape(world)) throw new SnapshotSemanticError('El corte solapado contiene cambios en los archivos.');
@@ -2025,6 +2035,7 @@ export class Store {
     if (memoBefore && beforeMemoEpoch && memoBefore.epoch === beforeMemoEpoch && memoBefore.recipes.size > 0 && this.schemaVersion >= 4) {
       memoBefore.horizon ??= this.technologyArchive.latestTick();
     }
+    cerrarFase?.('prepararMundoTecnologia');
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
     let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle,
       technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) },
@@ -2035,6 +2046,7 @@ export class Store {
     let committedChain: TechnologyChain | null = null;
     let technologyPruned: TechnologyPrune | null = null;
     let statsCompacted = 0;
+    cerrarFase?.('prepararSnapshot');
     this.db.exec('BEGIN IMMEDIATE');
     // Authorization and commit share a transaction with respect to external revocation.
     // Revocada antes de escribir nada: se deshace una transacción sin cambios, que no mueve ningún sello,
@@ -2071,6 +2083,7 @@ export class Store {
       // Otra conexión puede confirmar entre el snapshot de lectura y BEGIN IMMEDIATE. Si cambió
       // el archivo, revalidar los vínculos del candidato sobre la versión que vamos a escribir.
       if (validatedInReadSnapshot && !sameChronicleStamp(chronicleStamp, this.chronicleStamp())) validateBeforeWrite();
+      cerrarFase?.('abrirTransaccion');
       const matterStillVerified = epoca !== null && !chronicleTriggers
         && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))
         && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
@@ -2081,6 +2094,9 @@ export class Store {
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
       const expectedMatterBackups = complete && chronicleTriggers ? this.expectedMatterBackups(rotatesBackups, deep) : null;
+      cerrarFase?.('verificarCabeza');
+      // La crónica y la tecnología también pueden consultar la cabeza si les
+      // falta una prueba. Esa lectura se mide junto al trabajo de los archivos.
       const replayFloor = replayRetained ? this.replayFloor(world.tick) : null;
       if (replayRetained && configuredWindow > 0) {
         window = replayFloor === null ? 0 : Math.max(configuredWindow, world.tick - replayFloor + 1);
@@ -2123,6 +2139,7 @@ export class Store {
         }
       }
       if (prunes) this.pruneChronicle(world, committedChronicle, window);
+      cerrarFase?.('escribirArchivos');
       // El slot 1 sigue heredando la instantánea del guardado ANTERIOR en cada
       // guardado: cuesta ~13 ms de 630 a día 5 y es la profundidad de recuperación
       // que `previous()` promete (un guardado, no diez). Espaciarlo no compensa.
@@ -2137,6 +2154,9 @@ export class Store {
           if (deep) this.db.exec('INSERT OR REPLACE INTO main.snapshot_matter SELECT 2,world_digest,body FROM main.snapshot_matter WHERE slot=0');
         }
       }
+      cerrarFase?.('rotarRespaldos');
+      // SnapshotParts.write intercala la codificación de páginas (incluidos WPG5 y pesos)
+      // con su hash, comprobación e inserción SQLite. Se miden juntos.
       written = prepared ? this.snapshotParts.write(prepared, chronicleTriggers ? undefined : pageReuseTicket) : undefined;
       this.onProgress?.();
       if (replay) {
@@ -2152,6 +2172,9 @@ export class Store {
         bodyDigest = written!.digest;
         if (!complete) this.lastSnapshotBytes = written!.bytes;
       }
+      cerrarFase?.('empaquetarYEscribirSnapshot');
+      // El cierre transaccional publica los manifiestos y recolecta huérfanos.
+      // Si hay partes de materia, también vuelve a cotejar su SHA al insertarlas.
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
       if (complete) {
         if (matterParts) {
@@ -2196,8 +2219,10 @@ export class Store {
       }
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
+      cerrarFase?.('sqlFinalYGc');
       this.db.exec('COMMIT');
       this.saves++;
+      cerrarFase?.('commit');
       if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
       // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.
@@ -2268,6 +2293,7 @@ export class Store {
       this.snapshotPagesStamp = null;
       this.snapshotParts.invalidatePageCache();
     }
+    cerrarFase?.('poscommit');
   }
   result(gesture: Gesture): GestureResult | null {
     const row = this.db.prepare('SELECT fingerprint,result FROM inputs WHERE id=?').get(gesture.id) as { fingerprint: string; result: string } | undefined;

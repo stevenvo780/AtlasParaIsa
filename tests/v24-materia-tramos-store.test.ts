@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { paramsDeEncender } from '../scripts/lab/encender.mjs';
 import { SnapshotMatterParts } from '../src/server/snapshot-matter-parts.js';
@@ -16,6 +17,21 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 const blob = (store: Store, slot = 0): Uint8Array =>
   (store.db.prepare('SELECT body FROM main.snapshot_matter WHERE slot=?').get(slot) as { body: Uint8Array }).body;
 const firma = (bytes: Uint8Array): string => Buffer.from(bytes.subarray(0, 4)).toString('ascii');
+
+test('la parte retenida exige igualdad exacta aunque conserve su clave SHA-256', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    SnapshotMatterParts.install(db);
+    const body = Buffer.alloc(16, 23), digest = sha(body);
+    const preparado = { digest, longitud: body.length, partes: [{ digest, bytes: body.length, body }] };
+    const partes = new SnapshotMatterParts(db);
+    const manifiesto = partes.write(preparado);
+    assert.deepEqual(partes.write(preparado), manifiesto);
+    db.prepare('UPDATE snapshot_matter_parts SET body = zeroblob(?) WHERE digest = ?').run(body.length, digest);
+    assert.throws(() => partes.write(preparado), /retenida no coincide/);
+  } finally { db.close(); }
+});
 
 test('Store rota, verifica y recupera VMAT legado y en partes junto con la agenda', async t => {
   const { store: anterior, path, directory } = laboratorio(t, 'vmat-store-partes-');

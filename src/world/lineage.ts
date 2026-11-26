@@ -5,10 +5,11 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
 import { ALLELE_COUNT, assertGenome, type Genome } from './genetics.js';
 import { demographicTraits, exposureDamage, updateDemography } from './demography.js';
-import { paramsOf } from './params.js';
+import { ley, paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
 import { consumeInsulationTools, portableInsulationPower, toolEffectsEnabled } from './technology.js';
+import { bodilyShelter } from './decision/sentidos.js';
 
 export const RECENT_LEGACY_COUNT = 32;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
@@ -259,7 +260,8 @@ export function pruneBonds(survivors: readonly Person[], departed: readonly Pers
 export function advancePopulation(world: World, callbacks: PopulationCallbacks): void {
   const archived = new Set([...world.legacy, ...world.retiredLegacy].map(record => record.id));
   if (world.people.some(person => archived.has(person.id))) throw new Error('Una identidad fallecida reapareció entre los habitantes vivos.');
-  const structuresByCell = world.shelterBenefitEnabled ? new Map<string, StructureView[]>() : null;
+  const obra = world.shelterBenefitEnabled && ley(world, 'obra');
+  const structuresByCell = world.shelterBenefitEnabled && !obra ? new Map<string, StructureView[]>() : null;
   if (structuresByCell) for (const structure of world.structures) {
     if (!(structure.condition > BROKEN_CONDITION && structure.components.includes('roof'))) continue;
     const key = `${structure.x},${structure.y}`, bucket = structuresByCell.get(key);
@@ -270,9 +272,9 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   // La ley del cuerpo es la del mundo durante todo el paso (nada en este bucle la cambia).
   const cuerpo = paramsOf(world).cuerpo, exposure = world.weather === 'rain' ? 1 : 0, wearTick = world.tick % 10 === 0;
   const transitions = world.people.map(person => {
-    const tile = tileAt(world, person);
-    const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0,
-      ...(structuresByCell!.get(`${person.x},${person.y}`) ?? []).map(structure => structure.condition)) : 0;
+    const tile = obra ? undefined : tileAt(world, person);
+    const shelter = obra ? (exposure ? bodilyShelter(world, person) : 0) : structuresByCell && tile?.terrain === 'shelter' ? Math.max(0,
+      ...(structuresByCell.get(`${person.x},${person.y}`) ?? []).map(structure => structure.condition)) : 0;
     const traits = demographicTraits(person.genome, cuerpo);
     const bodyInput = { id: person.id, state: person.demography, traits,
       hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };

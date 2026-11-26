@@ -9,6 +9,9 @@ import { BROKEN_CONDITION, foodAvailable, waterAvailable, facilityRestQuality, R
 import { ley, paramsOf } from '../params.js';
 import { ctxSi, type CtxLeyMateria } from '../motor/acceso.js';
 import { tasasBasales } from '../materia/cuerpo.js';
+import { celdaObra, estadoObra, prestacionesDePiezas } from '../materia/piezas.js';
+import type { VistaLote } from '../materia/tipos.js';
+import { CHUNK_SIZE } from '../terrain.js';
 import { updateDemography, demographicTraits } from '../demography.js';
 import { type BodyState, hydrateBody, exertBody, type BodyRates, restBody } from '../body.js';
 import { SED_POR_UNIDAD, HAMBRE_POR_PASO, SED_POR_PASO } from '../ecologia-constantes.js';
@@ -82,11 +85,28 @@ export function foodStock(tile: Tile | undefined, cell: number, fast?: ResidentF
 }
 
 
-/** Exact physical roof predicate used by population damage, independent of display labels. */
 const bodilyRoofs: StructureView[] = [];
 
+function cobijoMaterial(world: World, point: Point): number {
+  if (!world.structures.length) return 0;
+  const c = ctxSi(world) as CtxLeyMateria | undefined;
+  if (!c?.materia || celdaObra(c, point) < 0) return 0;
+  let cobijo = 0;
+  for (const s of filtrarCerca(world.structures, point, CHUNK_SIZE, s => estadoObra(s) !== undefined, bodilyRoofs)) {
+    const vistas: VistaLote[] = [];
+    for (const pieza of estadoObra(s)!.piezas) {
+      if (pieza.x === point.x && pieza.y === point.y && c.materia.propio(pieza.lote)) vistas.push(c.materia.vista(pieza.lote));
+    }
+    // Una pieza sobre otra celda de la planta no detiene la lluvia aquí.
+    if (vistas.length) cobijo = Math.max(cobijo, prestacionesDePiezas(vistas, 1).cobijo);
+  }
+  return cobijo;
+}
+
+/** Fracción de intemperie detenida por el techo en la celda del cuerpo. */
 export function bodilyShelter(world: World, point: Point, lookup?: TileLookup, fast?: ResidentFastAccess): number {
   if (!world.shelterBenefitEnabled) return 0;
+  if (ley(world, 'obra')) return cobijoMaterial(world, point);
   const tileIn = lookup ?? tileLookup(world.tiles);
   const tile = tileIn(point.x, point.y);
   if (!shelterTerrain(tile, soaCell(fast, point.x, point.y, tile), fast)) return 0;

@@ -29,7 +29,6 @@ import { TICKS_PER_DAY, type Person, type World } from '../mundo/tipos.js';
 import { paramsOf } from '../params.js';
 import { ErrorFatalMotor } from '../paralelo/barrera.js';
 import { Piscina } from '../paralelo/piscina.js';
-import { PageArena } from '../soa/arena.js';
 import { olvidarOrganismos } from '../soa/organismos-mundo.js';
 import { RESERVA_FILAS_DUENOS, TablaOrganismosSoA } from '../soa/organismos.js';
 import { residentFastAccess } from '../soa/terreno.js';
@@ -41,7 +40,7 @@ import { duenoDeVecino, repartirPorTramos } from './bloques.js';
 import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  AVISO, CTL, CTL_DUENO, Dueno, ORDEN, RESERVA_DESBORDE, RESERVA_LOTES, celdaDueno, duenoDe, duenoSi,
+  AVISO, CTL, CTL_DUENO, Dueno, ORDEN, celdaDueno, duenoDe, duenoSi,
   type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
@@ -50,6 +49,7 @@ import { leyesActivas } from './leyes.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
 import { cabeceraDe, reunir } from './reunir.js';
+import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
 
 // ── Constantes del motor (política del proceso, no leyes del mundo) ──────────────────────────────────────
 
@@ -107,7 +107,8 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
   // 'auto' toma los hilos que el proceso puede usar; elegir entre T y ¾T por Hz medido es de m7 (`hilosAuto`).
   const hilos = config.hilos === 'auto' ? (paramsOf(mundo).v23.duenos ? availableParallelism() : 1) : config.hilos;
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
-  if (hilos === 1) return new MotorUnico(mundo, config.medirPaso === true);
+  if (config.reservaLotesMateria !== undefined) validarReservaLotesMateria(config.reservaLotesMateria);
+  if (hilos === 1) return new MotorUnico(mundo, config);
   if (!paramsOf(mundo).v23.duenos) throw new Error('Un motor de varios dueños exige v23.duenos (y con él todas las leyes de la V23).');
   return new MotorDuenos(mundo, config, hilos);
 }
@@ -123,9 +124,14 @@ class MotorUnico implements Motor {
   readonly #t = telemetriaVacia(1);
   readonly #medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
   readonly #medirPaso: boolean;
+  readonly #reservaLotesMateria: number | undefined;
   #perfilPaso: PerfilPasoMotor | undefined;
 
-  constructor(mundo: World, medirPaso: boolean) { this.#mundo = mundo; this.#medirPaso = medirPaso; }
+  constructor(mundo: World, config: MotorConfig) {
+    this.#mundo = mundo;
+    this.#medirPaso = config.medirPaso === true;
+    this.#reservaLotesMateria = config.reservaLotesMateria;
+  }
 
   vista(): World { return this.#mundo; }
 
@@ -133,7 +139,10 @@ class MotorUnico implements Motor {
     const inicio = performance.now(), fases = this.#medicion.fases = {} as Partial<Record<FaseNombre, number>>;
     // El paso por intentos separa preparación, acciones y aplicación como el motor repartido.
     // En modos mixtos o históricos el paquete «personas» conserva su medición de siempre.
-    this.#medicion.v23 = paramsOf(this.#mundo).v23.intentos ? {} : undefined;
+    const interruptores = paramsOf(this.#mundo).v23;
+    if (interruptores.materia && this.#reservaLotesMateria !== undefined)
+      duenoDe(this.#mundo, undefined, this.#reservaLotesMateria);
+    this.#medicion.v23 = interruptores.intentos ? {} : undefined;
     const resultados = stepWorld(this.#mundo, [...gestos], undefined, this.#medicion);
     const v23 = this.#medicion.v23;
     const ms = performance.now() - inicio, t = this.#t, d = duenoSi(this.#mundo), de = (n: FaseNombre): number => fases[n] ?? 0;
@@ -169,7 +178,7 @@ class MotorUnico implements Motor {
     this.#perfilPaso = undefined;
     const activo = leyesActivas(paramsOf(i.world).v23).length > 0 || this.#enlace !== null;
     if (!activo && !i.materia) return;
-    const d = duenoDe(i.world, i.materia?.sustancias);
+    const d = duenoDe(i.world, i.materia?.sustancias, this.#reservaLotesMateria);
     d.epoca = epoca;
     d.enlazar(this.#enlace, this.#fuente);
     try { d.abrirEpoca(i.materia); }
@@ -179,7 +188,7 @@ class MotorUnico implements Motor {
   enlazar(cinta: DescriptorEnlace, fuente?: FuenteFotograma): void {
     this.#enlace = cinta;
     this.#fuente = fuente;
-    const d = duenoDe(this.#mundo);
+    const d = duenoDe(this.#mundo, undefined, this.#reservaLotesMateria);
     d.epoca = this.#epoca;
     d.enlazar(cinta, fuente);
   }
@@ -326,10 +335,10 @@ class MotorDuenos implements Motor {
     const registroSustancias = conMateria ? new RegistroContenido(hilos) : null;
     const opcionesQuimica = { modo: 'inmediato', registroSustancias: registroSustancias ?? undefined } as const;
     const quimica = !conMateria ? null : materia ? cargarSustancias(materia.sustancias, opcionesQuimica) : crearServicioQuimico(opcionesQuimica);
-    const lotes = conMateria ? new PageArena(RESERVA_LOTES) : null, desborde = conMateria ? new PageArena(RESERVA_DESBORDE) : null;
+    const arenas = conMateria ? crearArenasMateria(this.#config.reservaLotesMateria) : null;
     const d = this.#d = new Dueno(m, {
       hilo: 0, hilos, buzones, buzon: buzones.dueno(0, azar), libros, contadores, registro, azar, control, enlace: this.#enlace,
-      materia: quimica && lotes && desborde ? { lotes, desborde, quimica } : null,
+      materia: quimica && arenas ? { ...arenas, quimica } : null,
     });
     if (this.#fuente) d.enlazar(this.#enlace, this.#fuenteReunida());
     d.epoca = this.#epoca;
@@ -359,7 +368,7 @@ class MotorDuenos implements Motor {
 
     const datos: DatosDueno = {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
-      registro: registro.memoria!, libros, lotes: lotes?.compartir() ?? null, desborde: desborde?.compartir() ?? null,
+      registro: registro.memoria!, libros, lotes: arenas?.lotes.compartir() ?? null, desborde: arenas?.desborde.compartir() ?? null,
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
     };

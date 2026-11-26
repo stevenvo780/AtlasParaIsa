@@ -1,20 +1,24 @@
 import { execFileSync } from 'node:child_process';
+import { constants as bufferConstants } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
+import { LOTES_POR_BLOQUE } from '../world/materia/arena.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
 import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import type { MotorConfig } from '../world/motor/contratos.js';
 import { hilosAuto } from '../world/motor/rebalanceo.js';
+import { DESBORDES_POR_LOTE, RESERVA_LOTES_HISTORICA, RESERVA_LOTES_MAXIMA } from '../world/motor/reserva-materia.js';
 
 export type MotorConfigProceso = MotorConfig & {
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };
 };
 
 /** Configuración del coordinador V23, independiente de los parámetros guardados. */
-export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env): MotorConfigProceso {
+export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env,
+  memoria?: Pick<HostMemory, 'fisicaBytes' | 'cgroupBytes'>): MotorConfigProceso {
   const hilos = env.CARTA_MOTOR_HILOS?.trim() || '1';
   if (hilos !== 'auto' && (!/^\d+$/.test(hilos) || !Number.isSafeInteger(Number(hilos)) || Number(hilos) < 1)) {
     throw new Error('CARTA_MOTOR_HILOS debe ser un entero positivo o auto.');
@@ -28,8 +32,10 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     return indice;
   }) : [];
   const maximo = hilos === 'auto' ? availableParallelism() : undefined;
+  const reservaLotesMateria = reservaMateriaHost(memoria ?? hostMemory());
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
+    ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 
@@ -98,6 +104,22 @@ export function cgroupMemory(mount = '/sys/fs/cgroup', self = '/proc/self/cgroup
 
 export function hostMemory(): HostMemory {
   return { fisicaBytes: totalmem(), heapBytes: getHeapStatistics().heap_size_limit, cgroupBytes: cgroupMemory() };
+}
+
+/** Presupuesto de esta arena (1/8 de la RAM efectiva) para coexistir con el heap, las copias GPU y
+ * la caché de archivos. La reserva se fija por época y solo compromete bytes cuando crece en F0. */
+export function reservaMateriaHost(memory: Pick<HostMemory, 'fisicaBytes' | 'cgroupBytes'>, arquitectura = process.arch,
+  maxBytesColumna = bufferConstants.MAX_LENGTH): number {
+  if (arquitectura !== 'x64' && arquitectura !== 'arm64') return RESERVA_LOTES_HISTORICA;
+  const efectiva = Math.min(positive(memory.fisicaBytes), positive(memory.cgroupBytes));
+  if (!Number.isFinite(efectiva) || !Number.isSafeInteger(maxBytesColumna) || maxBytesColumna <= 0)
+    return RESERVA_LOTES_HISTORICA;
+  // Las columnas usan SAB fuera del heap. Hasta 148 B por lote (identidad y contenido frío) más desborde.
+  const bytesPorLote = 148 + DESBORDES_POR_LOTE * 20;
+  // La mayor columna es materia.lotes en caliente, con 120 B por ranura.
+  const maximo = Math.min(efectiva / (8 * bytesPorLote), maxBytesColumna / 120, RESERVA_LOTES_MAXIMA);
+  const alineado = Math.floor(maximo / LOTES_POR_BLOQUE) * LOTES_POR_BLOQUE;
+  return Math.max(RESERVA_LOTES_HISTORICA, alineado);
 }
 
 /**

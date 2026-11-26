@@ -83,6 +83,7 @@ export class PageArena {
   }
 
   get capacity(): number { return Atomics.load(this.control, CAPACIDAD) >>> 0; }
+  get maxCapacity(): number { return this.maxRanuras; }
   get used(): number { return Atomics.load(this.control, USADAS) >>> 0; }
   get slots(): number { return Atomics.load(this.control, ALTA) >>> 0; }
   get generation(): number { return Atomics.load(this.control, GENERACION); }

@@ -507,6 +507,8 @@ export interface MotorConfig {
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)
   medirBrokerGpu?: boolean;              // contadores acumulados opcionales del banco de percepción distribuida
+  /** Capacidad virtual de la arena material de esta época. El anfitrión la dimensiona fuera del estado del mundo. */
+  reservaLotesMateria?: number;
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */
   medirPaso?: boolean;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de

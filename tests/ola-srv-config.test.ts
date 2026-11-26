@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { motorConfig } from '../src/server/hardware-limits.js';
 
 test('el motor del proceso arranca con un dueño, sin GPU y con entropía', () => {
-  assert.deepEqual(motorConfig(undefined, {}), {
+  assert.deepEqual(motorConfig(undefined, {}, { fisicaBytes: 8 * 1024 ** 3 }), {
     hilos: 1, gpu: [], decisionGpu: 'siempre', verificar: false, semilla: null,
   });
 });

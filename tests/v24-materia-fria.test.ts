@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { reservaMateriaHost } from '../src/server/hardware-limits.js';
 import { Store } from '../src/server/store.js';
 import { syncFauna } from '../src/world/animals.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -15,6 +16,7 @@ import { ctxMateriaDe } from '../src/world/motor/acceso.js';
 import { duenoSi } from '../src/world/motor/contexto.js';
 import { REF_NULA, TipoIntento, unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
+import { DESBORDES_POR_LOTE } from '../src/world/motor/reserva-materia.js';
 import { parseParams, setParams } from '../src/world/params.js';
 
 test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', async t => {
@@ -166,12 +168,16 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
     assert.equal(duenoSi(sinLector)!.muestraMemoriaMateria()?.estadoFrio?.paginasFrias, 0);
     vmatArranque = codificarCheckpoint(caliente.instantanea().materia!);
   } finally { await caliente.cerrar(); }
-  const recarga = crearMotor(guardada.instantanea.world, unSoloDueno(7));
+  const limiteLotes = reservaMateriaHost({ fisicaBytes: 125 * 1024 ** 3 });
+  const recarga = crearMotor(guardada.instantanea.world, { ...unSoloDueno(7), reservaLotesMateria: limiteLotes });
   try {
     recarga.cargar(guardada.instantanea, guardada.epoca);
     const dueno = duenoSi(recarga.vista())!;
     assert.deepEqual(dueno.balanceMateria().hallado, frío.dormido.saldo);
     const memoria = dueno.muestraMemoriaMateria()!;
+    assert.equal(memoria.limiteLotes, limiteLotes);
+    assert.equal(memoria.limiteLotesFisicos, memoria.limiteLotes);
+    assert.equal(memoria.limiteDesborde, DESBORDES_POR_LOTE * memoria.limiteLotes);
     assert.ok(memoria.estadoFrio!.paginasFrias > 0);
     assert.equal(memoria.lotesVivos - memoria.estadoFrio!.lotesFisicos, memoria.estadoFrio!.lotesFrios);
     const primerCorte = recarga.instantanea();

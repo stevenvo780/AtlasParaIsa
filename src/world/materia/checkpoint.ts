@@ -3,7 +3,7 @@ import { crc32 } from 'node:zlib';
 import { NE } from '../../shared/naturaleza.js';
 import { REF_NULA, TipoIntento, slotDe, type Hilo, type Intento } from '../motor/contratos.js';
 import { balancePares, comprobarConservacion } from './libro.js';
-import { Rol, type LoteRef, type MateriaCheckpoint, type Sustancia } from './tipos.js';
+import { Rol, type BytesMateria, type LoteRef, type MateriaCheckpoint, type Sustancia, type TramosMateria } from './tipos.js';
 
 export interface LoteGuardado {
   ref: LoteRef;
@@ -85,37 +85,118 @@ class Escritor {
   terminar(): Uint8Array { return this.bytes.subarray(0, this.pos); }
 }
 
-class Lector {
-  private readonly vista: DataView;
-  private pos = 0;
+const SIN_BYTES = new Uint8Array();
+const tramosDe = (bytes: BytesMateria): readonly Uint8Array[] => bytes instanceof Uint8Array ? [bytes] : bytes.tramos;
 
-  constructor(private readonly bytes: Uint8Array) {
-    this.vista = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+function agrupar(tramos: Uint8Array[], longitud: number): BytesMateria {
+  if (tramos.length <= 1) return tramos[0] ?? SIN_BYTES;
+  return { tramos, byteLength: longitud, length: longitud };
+}
+
+function contiguo(bytes: BytesMateria): Uint8Array {
+  if (bytes instanceof Uint8Array) return bytes;
+  const salida = new Uint8Array(bytes.length);
+  let pos = 0;
+  for (const tramo of bytes.tramos) {
+    salida.set(tramo, pos);
+    pos += tramo.length;
+  }
+  return salida;
+}
+
+class Lector {
+  private vista: DataView;
+  private readonly segmentos?: { inicios: number[]; vistas: DataView[]; cruce: Uint8Array; vistaCruce: DataView };
+  private tramo = 0;
+  private pos = 0;
+  private fin: number;
+
+  constructor(private readonly bytes: BytesMateria) {
+    if (!bytes) throw new Error('Falta un bloque del punto de control de materia.');
+    this.fin = bytes.length;
+    if (bytes instanceof Uint8Array) {
+      this.vista = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return;
+    }
+    if (!Array.isArray(bytes.tramos) || !bytes.tramos.length)
+      throw new Error('Falta un bloque del punto de control de materia.');
+    const inicios = [0], vistas: DataView[] = [];
+    let longitud = 0;
+    for (const tramo of bytes.tramos) {
+      if (!(tramo instanceof Uint8Array) || tramo.length === 0) throw new Error('Tramo de materia inválido.');
+      longitud = entero(longitud + tramo.length);
+      inicios.push(longitud);
+      vistas.push(new DataView(tramo.buffer, tramo.byteOffset, tramo.byteLength));
+    }
+    if (longitud !== bytes.length || longitud !== bytes.byteLength) throw new Error('Longitud de tramos de materia incorrecta.');
+    const cruce = new Uint8Array(BYTES_ENTERO);
+    this.segmentos = { inicios, vistas, cruce, vistaCruce: new DataView(cruce.buffer) };
+    this.vista = vistas[0]!;
   }
 
-  private leer(n: number): number {
-    if (n > this.bytes.length - this.pos) throw new Error('Punto de control truncado.');
+  private reservar(n: number): number {
+    if (n > this.fin - this.pos) throw new Error('Punto de control truncado.');
     const inicio = this.pos;
     this.pos += n;
     return inicio;
   }
 
-  u8(): number { return this.vista.getUint8(this.leer(1)); }
-  u32(): number { return this.vista.getUint32(this.leer(4), true); }
-  f64(): number { return this.vista.getFloat64(this.leer(8), true); }
+  private localizar(pos: number, inicios: readonly number[]): number {
+    let tramo = this.tramo;
+    if (inicios[tramo]! <= pos && pos < inicios[tramo + 1]!) return tramo;
+    if (inicios[tramo + 1]! <= pos && pos < inicios[tramo + 2]!) return this.tramo = tramo + 1;
+    let fin = inicios.length - 1;
+    tramo = 0;
+    while (fin - tramo > 1) {
+      const medio = tramo + Math.floor((fin - tramo) / 2);
+      if (inicios[medio]! <= pos) tramo = medio;
+      else fin = medio;
+    }
+    return this.tramo = tramo;
+  }
+
+  /** El camino contiguo conserva las lecturas directas; sólo un escalar partido usa scratch. */
+  private leer(n: number): number {
+    const inicio = this.reservar(n), segmentos = this.segmentos;
+    if (!segmentos) return inicio;
+    const i = this.localizar(inicio, segmentos.inicios);
+    const offset = inicio - segmentos.inicios[i]!;
+    if (inicio + n <= segmentos.inicios[i + 1]!) {
+      this.vista = segmentos.vistas[i]!;
+      return offset;
+    }
+    let copiados = 0;
+    for (const tramo of this.porciones(inicio, n)) {
+      segmentos.cruce.set(tramo, copiados);
+      copiados += tramo.length;
+    }
+    this.vista = segmentos.vistaCruce;
+    return 0;
+  }
+
+  u8(): number { const offset = this.leer(1); return this.vista.getUint8(offset); }
+  u32(): number { const offset = this.leer(4); return this.vista.getUint32(offset, true); }
+  f64(): number { const offset = this.leer(8); return this.vista.getFloat64(offset, true); }
   entero(min = 0): number { return entero(this.f64(), min); }
   get posicion(): number { return this.pos; }
   irA(posicion: number): void { this.pos = posicion; }
+  limitar(fin: number): void { this.fin = fin; }
 
   bloque(): Uint8Array | null {
+    const bytes = this.bloqueSegmentado();
+    return bytes === null ? null : contiguo(bytes);
+  }
+
+  bloqueSegmentado(): BytesMateria | null {
     const longitud = this.entero(-1);
-    return longitud === -1 ? null : this.subarray(longitud);
+    return longitud === -1 ? null : this.rango(this.reservar(longitud), longitud);
   }
 
   cuenta(): bigint {
     const longitud = this.entero(-Number.MAX_SAFE_INTEGER);
     if (longitud === 0) return 0n;
-    const bytes = this.subarray(Math.abs(longitud));
+    const n = Math.abs(longitud);
+    const bytes = contiguo(this.rango(this.reservar(n), n));
     if (bytes.at(-1) === 0) throw new Error('Total binario inválido en el punto de control.');
     const magnitud = BigInt(`0x${Buffer.from(bytes).reverse().toString('hex')}`);
     return longitud < 0 ? -magnitud : magnitud;
@@ -131,16 +212,30 @@ class Lector {
   }
 
   comprobarLongitud(cantidad: number, bytesPorElemento: number): void {
-    if (cantidad > (this.bytes.length - this.pos) / bytesPorElemento) throw new Error('Punto de control truncado.');
+    if (cantidad > (this.fin - this.pos) / bytesPorElemento) throw new Error('Punto de control truncado.');
   }
 
   terminar(): void {
-    if (this.pos !== this.bytes.length) throw new Error('Sobran bytes en el punto de control.');
+    if (this.pos !== this.fin) throw new Error('Sobran bytes en el punto de control.');
   }
 
-  private subarray(longitud: number): Uint8Array {
-    const inicio = this.leer(longitud);
-    return this.bytes.subarray(inicio, inicio + longitud);
+  rango(inicio: number, longitud: number): BytesMateria {
+    if (this.bytes instanceof Uint8Array) return this.bytes.subarray(inicio, inicio + longitud);
+    if (longitud === 0) return SIN_BYTES;
+    const { inicios } = this.segmentos!;
+    const i = this.localizar(inicio, inicios), offset = inicio - inicios[i]!;
+    if (inicio + longitud <= inicios[i + 1]!) return this.bytes.tramos[i]!.subarray(offset, offset + longitud);
+    return agrupar([...this.porciones(inicio, longitud)], longitud);
+  }
+
+  private *porciones(inicio: number, longitud: number): IterableIterator<Uint8Array> {
+    const { inicios } = this.segmentos!, { tramos } = this.bytes as TramosMateria;
+    const fin = inicio + longitud;
+    for (let i = this.localizar(inicio, inicios); inicio < fin; i++) {
+      const hasta = Math.min(fin, inicios[i + 1]!);
+      yield tramos[i]!.subarray(inicio - inicios[i]!, hasta - inicios[i]!);
+      inicio = hasta;
+    }
   }
 }
 
@@ -320,7 +415,7 @@ function leerLote(entrada: Lector, ref: LoteRef, celda: number): LoteGuardado {
 }
 
 function leerPaginas(
-  epoca: number, bytes: Uint8Array, lote: (lote: LoteGuardado, especies: number) => void, libre: (ref: LoteRef) => void,
+  epoca: number, bytes: BytesMateria, lote: (lote: LoteGuardado, especies: number) => void, libre: (ref: LoteRef) => void,
   indexar = false,
 ): RanurasPaginas {
   const entrada = new Lector(bytes);
@@ -358,7 +453,7 @@ function leerPaginas(
   return ranuras;
 }
 
-export function decodificarPaginas(epoca: number, bytes: Uint8Array): { lotes: LoteGuardado[]; libres: LoteRef[] } {
+export function decodificarPaginas(epoca: number, bytes: BytesMateria): { lotes: LoteGuardado[]; libres: LoteRef[] } {
   const lotes: LoteGuardado[] = [];
   const libres: LoteRef[] = [];
   leerPaginas(epoca, bytes, lote => lotes.push(lote), ref => libres.push(ref));
@@ -367,7 +462,7 @@ export function decodificarPaginas(epoca: number, bytes: Uint8Array): { lotes: L
 
 /** Valida las páginas en el orden del archivo. Después se puede leer cada lote o referencia retirada por ranura. */
 export function indexarPaginas(
-  epoca: number, bytes: Uint8Array, observarLote: (lote: LoteGuardado, especies: number) => void = () => {},
+  epoca: number, bytes: BytesMateria, observarLote: (lote: LoteGuardado, especies: number) => void = () => {},
 ): { ranuras: number; leer(ranura: number): LoteGuardado | LoteRef | undefined } {
   const posiciones = leerPaginas(epoca, bytes, observarLote, () => {}, true);
   const entrada = new Lector(bytes);
@@ -441,8 +536,10 @@ export function decodificarEnVuelo(bytes: Uint8Array): Intento[] {
 function prepararCheckpoint(checkpoint: MateriaCheckpoint): { cuerpo: Uint8Array[]; longitud: number } {
   const epoca = entero(checkpoint.epoca);
   const tick = entero(checkpoint.tick);
-  const bloques = [checkpoint.sustancias, checkpoint.registro, checkpoint.paginas, checkpoint.enVuelo];
-  if (bloques.some(bytes => !(bytes instanceof Uint8Array))) throw new Error('Falta un bloque del punto de control de materia.');
+  const { sustancias, registro, paginas, enVuelo } = checkpoint;
+  if ([sustancias, registro, enVuelo].some(bytes => !(bytes instanceof Uint8Array)))
+    throw new Error('Falta un bloque del punto de control de materia.');
+  const bloques = [sustancias, registro, paginas, enVuelo];
   const cuentas = new Escritor();
   for (const cuenta of [checkpoint.inicial, checkpoint.fuentes, checkpoint.sumideros]) {
     if (cuenta.length !== NE + 1) throw new Error('Ancho de cuenta incorrecto en el punto de control.');
@@ -464,7 +561,8 @@ function prepararCheckpoint(checkpoint: MateriaCheckpoint): { cuerpo: Uint8Array
   let longitud = prefijos.length + libro.length + BYTES_CRC;
   let pos = inicioLongitudes;
   for (const bytes of bloques) {
-    cuerpo.push(prefijos.subarray(pos, pos + BYTES_ENTERO), bytes);
+    cuerpo.push(prefijos.subarray(pos, pos + BYTES_ENTERO));
+    for (const tramo of tramosDe(bytes)) cuerpo.push(tramo);
     pos += BYTES_ENTERO;
     longitud += bytes.length;
   }
@@ -522,18 +620,50 @@ export function saldoEnVuelo(enVuelo: Uint8Array, sustancia: (id: number) => Rea
   return saldo;
 }
 
-export function decodificarCheckpoint(bytes: Uint8Array, sustancia: (id: number, registroQuimico: Uint8Array) => Readonly<Sustancia>): MateriaCheckpoint {
+type ResolverSustancia = (id: number, registroQuimico: Uint8Array) => Readonly<Sustancia>;
+
+export function decodificarCheckpoint(bytes: Uint8Array, sustancia: ResolverSustancia): MateriaCheckpoint<Uint8Array> {
+  return decodificarFuente(bytes, sustancia);
+}
+
+/** Agota la fuente antes de decodificar. Retiene vistas inmutables de los tramos de páginas, sin unirlas.
+ * Cada tramo entregado debe tener bytes estables, en particular el productor no puede reciclar su búfer. */
+export function decodificarCheckpointEnTramos(tramos: Iterable<Uint8Array>, sustancia: ResolverSustancia): MateriaCheckpoint {
+  const vistas: Uint8Array[] = [];
+  let longitud = 0;
+  for (const tramo of tramos) {
+    if (!(tramo instanceof Uint8Array)) throw new Error('Tramo de materia inválido.');
+    if (tramo.length === 0) continue;
+    longitud = entero(longitud + tramo.length);
+    vistas.push(tramo);
+  }
+  return decodificarFuente(agrupar(vistas, longitud), sustancia);
+}
+
+function decodificarFuente(bytes: Uint8Array, sustancia: ResolverSustancia): MateriaCheckpoint<Uint8Array>;
+function decodificarFuente(bytes: BytesMateria, sustancia: ResolverSustancia): MateriaCheckpoint;
+function decodificarFuente(bytes: BytesMateria, sustancia: ResolverSustancia): MateriaCheckpoint {
   const fin = bytes.length - BYTES_CRC;
   if (fin < 0) throw new Error('Punto de control truncado.');
-  const cuerpo = bytes.subarray(0, fin);
-  const entrada = new Lector(cuerpo);
+  const entrada = new Lector(bytes);
+  entrada.irA(fin);
+  const sello = entrada.u32();
+  entrada.irA(0);
+  entrada.limitar(fin);
   if (entrada.u32() !== FIRMA || entrada.u32() !== VERSION) throw new Error('Formato de punto de control de materia desconocido.');
-  if (crc32(cuerpo) !== new DataView(bytes.buffer, bytes.byteOffset + fin, BYTES_CRC).getUint32(0, true)) {
+  let crc = 0, restantes = fin;
+  for (const tramo of tramosDe(bytes)) {
+    if (restantes === 0) break;
+    crc = crc32(restantes >= tramo.length ? tramo : tramo.subarray(0, restantes), crc);
+    restantes -= Math.min(restantes, tramo.length);
+  }
+  if (crc !== sello) {
     throw new Error('Punto de control de materia corrupto o truncado: no cuadra su CRC32.');
   }
   const epoca = entrada.entero();
   const tick = entrada.entero();
-  const [sustancias, registro, paginas, enVuelo] = Array.from({ length: 4 }, () => entrada.bloque());
+  const sustancias = entrada.bloque(), registro = entrada.bloque();
+  const paginas = entrada.bloqueSegmentado(), enVuelo = entrada.bloque();
   if (!sustancias || !registro || !paginas || !enVuelo) throw new Error('Falta un bloque del punto de control de materia.');
   const [inicial, fuentes, sumideros] = Array.from({ length: 3 }, () => Array.from({ length: NE + 1 }, () => entrada.cuenta()));
   entrada.terminar();

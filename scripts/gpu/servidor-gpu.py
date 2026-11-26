@@ -12,6 +12,14 @@ from time import perf_counter
 
 from materia_kernel import MateriaKernel
 
+TRAZAR = os.environ.get('CARTA_PERCEPCION_TRAZA') == '1'
+
+
+def trazar(fase, orden, **tiempos):
+    if TRAZAR and 'dueno' in orden:
+        campos = {k: orden[k] for k in ('dueno', 'tick', 'despacho')}
+        print('[percepcion-gpu]', json.dumps({'fase': fase, **campos, **tiempos}), file=sys.stderr, flush=True)
+
 
 def enlace(lib, nombre, *tipos):
     funcion = getattr(lib, nombre)
@@ -123,6 +131,8 @@ class Dispositivo:
         direccion = C.addressof(C.c_ubyte.from_buffer(mm))
         if kind == 'materia':
             return self.materia.ejecutar(orden, direccion, inicio)
+        if TRAZAR:
+            trazar('cuda-entrada', orden)
         lote = self.buffer('lote', subida)
         resultado = self.buffer('resultado', bajada)
         dueno = orden.get('dueno')
@@ -135,15 +145,23 @@ class Dispositivo:
         terreno = self.buffer('terreno' if dueno is None else ('terreno', dueno), orden['terrenoBytes'], conservar=True)
         cerebro = self.buffer('cerebro' if dueno is None else ('cerebro', dueno), orden['cerebroBytes'], conservar=True)
         ocupantes = self.buffer('ocupantes' if dueno is None else ('ocupantes', dueno), orden['organismosBytes'], conservar=True)
+        reservado = (perf_counter() - inicio) * 1000 if TRAZAR else 0
         inicio = perf_counter()
         self.subir(lote, direccion, subida)
+        subido = perf_counter() if TRAZAR else 0
         self.kernel(self.actualizar, orden['parches'], lote, terreno, cerebro, ocupantes)
         self.kernel(self.percibir, orden['n'], lote, resultado, terreno, cerebro, ocupantes)
+        lanzado = perf_counter() if TRAZAR else 0
+        if TRAZAR:
+            trazar('cuda-lanzada', orden, reservaMs=reservado, subidaMs=(subido - inicio) * 1000, lanzarMs=(lanzado - subido) * 1000)
         if bajada:
             self.bajar(direccion + salida, resultado, bajada)
         else:
             self.sync()
-        return {'ms': (perf_counter() - inicio) * 1000}
+        fin = perf_counter()
+        if TRAZAR:
+            trazar('cuda-salida', orden, kernelYBajadaMs=(fin - lanzado) * 1000)
+        return {'ms': (fin - inicio) * 1000}
 
     def cerrar(self):
         try:

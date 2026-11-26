@@ -67,7 +67,7 @@ test('el banco distingue GPU degradada de desvíos esperados a CPU', () => {
   const brazoGpu = { id: 'adaptativo', hilos: 2, gpu: [0], rutaGpu: 'porCoste' as const };
   const medido: TelemetriaBrokerGpu = { lotes: 1, completadas: [1, 0], aceptadas: [1, 0], rechazadas: 0, cpuArranque: 0,
     cpuOcupada: 0, cpuSinCanal: 0, cpuPorCoste: 0, erroresCanal: 0, subidaConfirmadaBytes: 1, bajadaConfirmadaBytes: 1,
-    cudaConfirmadaMicros: 1, recorridoConfirmadoMicros: 1 };
+    cudaConfirmadaMicros: 1, recorridoConfirmadoMicros: 1, preparacionMicros: 0 };
   const gpu = (lista: boolean, cambios: Partial<TelemetriaBrokerGpu> = {}) =>
     [{ dispositivo: 0, lista, detalle: { ...medido, ...cambios } }];
   assert.equal(acreditarGpu(brazoGpu, gpu(true, { cpuOcupada: 1, cpuPorCoste: 1 })).estado, 'completo');

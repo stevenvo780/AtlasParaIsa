@@ -75,6 +75,33 @@ test('dos dueños despachan por un corredor y una generación nueva descarta la 
   await cierre;
 });
 
+test('los 50 ms de tránsito empiezan después de preparar la tanda', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(false);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, lote } = mundoParaPercibir();
+  const terreno = percepcion.vista.terreno;
+  const leerCelda = terreno.celda.bind(terreno);
+  const pausa = new Int32Array(new SharedArrayBuffer(4));
+  let primeraLectura = true;
+  t.mock.method(terreno, 'celda', (x: number, y: number) => {
+    if (primeraLectura) {
+      primeraLectura = false;
+      Atomics.wait(pausa, 0, 0, 65);
+    }
+    return leerCelda(x, y);
+  });
+  const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(18), 0);
+  t.after(() => cliente.cerrar());
+  cliente.lanzar(lote, planes);
+  assert.equal(cliente.esperar(100).despacho, lote.despacho);
+  cliente.confirmar(true);
+  const detalle = broker.medidas().detalle!;
+  assert.ok(detalle.preparacionMicros >= 60_000);
+  assert.ok(detalle.recorridoConfirmadoMicros > detalle.preparacionMicros);
+  assert.deepEqual(detalle.aceptadas, [1, 0]);
+});
+
 test('el coste del corredor selecciona CPU o GPU por tamaño y distingue un canal viejo', { timeout: 10_000 }, async t => {
   const broker = corredorMedido(true);
   t.after(() => broker.cerrar());

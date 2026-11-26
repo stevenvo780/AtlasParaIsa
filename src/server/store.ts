@@ -196,6 +196,7 @@ export type PruebaCabezaGuardada = IdentidadCabeza & {
 };
 type AnclaCabeza = IdentidadCabeza & { stamp: ChronicleStamp };
 type PruebaCabezaOfrecida = { ancla: AnclaCabeza; prueba: PruebaCabezaGuardada };
+type PruebasGuardado = { inicial: PruebaCabezaOfrecida | undefined; certificarNueva: boolean };
 
 function archivoCabeza(path: string): ArchivoCabeza | undefined {
   try {
@@ -398,6 +399,7 @@ export class Store {
   private readonly archivoOriginal: ArchivoCabeza | undefined;
   private pruebaCabezaLeida?: { prueba: PruebaCabezaGuardada; stamp: ChronicleStamp };
   private cabezaCompletaEscritaSinAgenda = false;
+  private certificarSiguienteCabeza = false;
   private anclaCabeza?: AnclaCabeza;
   private pruebaCabezaOfrecida?: PruebaCabezaOfrecida;
   private primerCorteIntentado = false;
@@ -966,11 +968,19 @@ export class Store {
       catalogo: { totals: { ...catalogo.totals }, functions: [...catalogo.functions] }, cotas: { ...cotas } };
   }
 
-  private tomarPruebaCabeza(): PruebaCabezaOfrecida | undefined {
-    const ofrecida = this.pruebaCabezaOfrecida;
+  /** El arranque puede certificar la cabeza que escriba su primer intento. */
+  solicitarPruebaSiguienteGuardado(): void {
+    this.certificarSiguienteCabeza = true;
+  }
+
+  private tomarPruebasGuardado(): PruebasGuardado {
+    const inicial = this.pruebaCabezaOfrecida;
     this.ofrecerPruebaCabeza(undefined);
     this.primerCorteIntentado = true;
-    return ofrecida;
+    const certificarNueva = this.certificarSiguienteCabeza;
+    this.certificarSiguienteCabeza = false;
+    if (certificarNueva) this.cabezaCompletaEscritaSinAgenda = false;
+    return { inicial, certificarNueva };
   }
 
   private admitirPruebaCabeza(ofrecida: PruebaCabezaOfrecida, world: World, antesDelBegin: ChronicleStamp): boolean {
@@ -1556,7 +1566,7 @@ export class Store {
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence.
    * Devuelve la cabeza de la cadena de digestos a través de lo verificado. */
-  private assertTechnologyCoverage(world: World): TechnologyChain {
+  private assertTechnologyCoverage(world: World, cadenaConfirmada?: TechnologyChain): TechnologyChain {
     const state = world.technology, journal = state.journal!;
     if (this.schemaVersion < 4) {
       if (journal.committedThrough !== journal.startsAfter) technologyFailure('coverage has no backing schema');
@@ -1564,7 +1574,7 @@ export class Store {
     }
     const origin = this.technologyArchive.getHistoryOrigin();
     if (!origin || origin.startsAfter !== journal.startsAfter) technologyFailure('history origin disagrees with snapshot');
-    return this.assertTechnologyReceipts(world, journal.startsAfter, journal.committedThrough);
+    return this.assertTechnologyReceipts(world, journal.startsAfter, journal.committedThrough, true, cadenaConfirmada);
   }
 
   /** Frontera de poda del archivo de recibos (metadato del anfitrión, como `chronicle-pruned-v1`). */
@@ -1633,7 +1643,8 @@ export class Store {
    * recalcule) o reordenada, o una frontera falsificada, dejan de cerrar. `verifyHead = false` sólo lo usa la
    * recuperación de una instantánea anterior al diario, cuya copia ya perdió las filas posteriores a la cabeza.
    */
-  private assertTechnologyReceipts(world: World, startsAfter: number, through: number, verifyHead = true): TechnologyChain {
+  private assertTechnologyReceipts(world: World, startsAfter: number, through: number,
+    verifyHead = true, cadenaConfirmada?: TechnologyChain): TechnologyChain {
     const state = world.technology;
     const boundary = this.prunedTechnology(), head = verifyHead ? this.technologyChainRecord() : null;
     if (boundary && boundary.startsAfter !== startsAfter) technologyFailure('prune boundary disagrees with history origin');
@@ -1654,6 +1665,15 @@ export class Store {
       { tick: number } | undefined;
     if (boundary && firstRetained && firstRetained.tick <= boundary.tick)
       technologyFailure('prune boundary tick overlaps the first retained execution');
+    if (cadenaConfirmada) {
+      // flushTechnology probó el prefijo bajo este mismo BEGIN y añadió los
+      // pendientes al digesto. La poda conserva esa raíz. Aquí se cotejan los
+      // hitos que quedaron en disco y el anillo de la cabeza recién escrita.
+      if (head?.version !== 2 || cadenaConfirmada.startsAfter !== startsAfter || cadenaConfirmada.through !== through
+        || cadenaConfirmada.digest !== head.digest) technologyFailure('execution chain disagrees with the written snapshot');
+      this.assertTechnologyRing(world);
+      return cadenaConfirmada;
+    }
     this.assertRingOutsidePrune(world, startsAfter, from);
     let serial = from, digest = boundary ? boundary.digest : TECHNOLOGY_CHAIN_EMPTY;
     let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
@@ -1928,6 +1948,18 @@ export class Store {
     if (latest && latest.serial > state.executionCounter) technologyFailure('execution identity exceeds snapshot counter');
   }
 
+  private probarTecnologiaCabezaEscrita(world: World, cadena: TechnologyChain, digest: string): boolean {
+    try {
+      if (this.identificarCabeza()?.digest !== digest) return false;
+      const stamp = this.chronicleStamp();
+      assertTechnologyJournal(world.technology, world.tick);
+      assertTechnologyCatalogueState(world);
+      this.assertTechnologyCache(world);
+      this.assertTechnologyCoverage(world, cadena);
+      return sameChronicleStamp(stamp, this.chronicleStamp());
+    } catch { return false; }
+  }
+
   private rememberTechnology(world: World, chain: TechnologyChain, stamp?: ChronicleStamp): void {
     const state = world.technology, journal = state.journal!;
     if (chain.startsAfter !== journal.startsAfter || chain.through !== journal.committedThrough)
@@ -2083,7 +2115,7 @@ export class Store {
 
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = [],
     changes: readonly SnapshotReplayChange[] = []): void {
-    this.tomarPruebaCabeza();
+    this.tomarPruebasGuardado();
     if (ley(world, 'guardadoCompleto')) throw new Error('El mundo usa guardado completo. Guárdalo con Store.guardar.');
     this.saveSnapshot(world, inputs, requiredSessions, changes);
   }
@@ -2094,14 +2126,14 @@ export class Store {
 
   guardarConEntradas(instantanea: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial): void {
-    this.guardarCompleto(this.tomarPruebaCabeza(), instantanea, inputs, sesiones, corteAgenda);
+    this.guardarCompleto(this.tomarPruebasGuardado(), instantanea, inputs, sesiones, corteAgenda);
   }
 
   guardarCorteSellado(sello: CorteGuardadoSellado, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, cerrarFase?: CerrarFaseGuardado): Instantanea {
-    const pruebaInicial = this.tomarPruebaCabeza();
+    const pruebas = this.tomarPruebasGuardado();
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
-    this.guardarCompleto(pruebaInicial, instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas, undefined, cerrarFase);
+    this.guardarCompleto(pruebas, instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas, undefined, cerrarFase);
     return instantanea;
   }
 
@@ -2115,15 +2147,15 @@ export class Store {
   }
 
   guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number, cerrarFase?: CerrarFaseGuardado): Instantanea {
-    const pruebaInicial = this.tomarPruebaCabeza();
+    const pruebas = this.tomarPruebasGuardado();
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
     if (!Number.isSafeInteger(epocaCorte) || epocaCorte < 0 || instantanea.materia && instantanea.materia.epoca !== epocaCorte)
       throw new SnapshotSemanticError('La materia no corresponde a la época del corte solapado.');
-    this.guardarCompleto(pruebaInicial, instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
+    this.guardarCompleto(pruebas, instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
     return instantanea;
   }
 
-  private guardarCompleto(pruebaInicial: PruebaCabezaOfrecida | undefined,
+  private guardarCompleto(pruebas: PruebasGuardado,
     { world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
     teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number,
@@ -2149,14 +2181,15 @@ export class Store {
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
     this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas,
-      epocaSolapada, cerrarFase, pruebaInicial);
+      epocaSolapada, cerrarFase, pruebas);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
     faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas,
     personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number, cerrarFase?: CerrarFaseGuardado,
-    pruebaInicial?: PruebaCabezaOfrecida): void {
+    pruebas?: PruebasGuardado): void {
+    const pruebaInicial = pruebas?.inicial;
     const complete = matter !== undefined;
     const solapado = epocaSolapada !== undefined;
     if (solapado && !estadoAdmiteSolape(world)) throw new SnapshotSemanticError('El corte solapado contiene cambios en los archivos.');
@@ -2227,9 +2260,10 @@ export class Store {
     }
     cerrarFase?.('prepararMundoTecnologia');
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
-    let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle,
-      technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) },
-    paramsOf(world), this.snapshotInlineTileLimit, faunaVerificada, teselasVerificadas, personasVerificadas);
+    const cabezaPreparada = replayEnabled ? undefined : { ...world, retiredChunks: [], retiredLegacy: [], chronicleJournal: committedChronicle,
+      technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) };
+    let prepared = cabezaPreparada && this.snapshotParts.prepare(cabezaPreparada, paramsOf(world),
+      this.snapshotInlineTileLimit, faunaVerificada, teselasVerificadas, personasVerificadas);
     let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
     let written: WrittenSnapshot | undefined;
@@ -2414,6 +2448,8 @@ export class Store {
       }
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
+      const certificada = !!pruebas?.certificarNueva && complete && !agenda && !chronicleTriggers
+        && cabezaPreparada !== undefined && this.probarTecnologiaCabezaEscrita(cabezaPreparada, technologyChain, bodyDigest);
       // El sello describe los bytes que acabamos de verificar bajo el candado.
       try { selloConfirmado = this.chronicleStamp(); }
       catch { /* El guardado puede confirmarse sin cachés. */ }
@@ -2421,7 +2457,7 @@ export class Store {
       this.db.exec('COMMIT');
       this.saves++;
       this.pruebaCabezaLeida = undefined;
-      this.cabezaCompletaEscritaSinAgenda = complete && !agenda && !chronicleTriggers;
+      this.cabezaCompletaEscritaSinAgenda = certificada;
       if (cabezaAdmitida) this.cabezaInicialReutilizada = true;
       cerrarFase?.('commit');
       if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);

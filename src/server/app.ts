@@ -741,6 +741,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         if (arranque) motor.enlazar(arranque.descriptor);
       }
       motor?.cargar({ world, materia: loaded?.materia ?? null }, epoca);
+      if (options.guardadoEnHilo?.reusarCabezaInicial) store.solicitarPruebaSiguienteGuardado();
       adoptarGuardado(guardarMundo(world, [], [], cambiosPendientes));
       cambiosPendientes.length = 0;
       return existingInstanceId ?? store.ensureWorldInstance();

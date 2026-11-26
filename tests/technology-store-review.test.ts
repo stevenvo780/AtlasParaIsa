@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { assertWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
+import { parseParams } from '../src/world/params.js';
 import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import type { Gesture } from '../src/shared/types.js';
-import { filaInstantanea, sha256 } from './lib/store.js';
+import { filaInstantanea, laboratorio, sha256 } from './lib/store.js';
 import { PROGRAMA_FILO, proyectoInvestigacion } from './lib/escenas.js';
 import { igualesSinUndefined } from './lib/comparar.js';
 
@@ -43,6 +44,25 @@ function paidResearch(world: World) {
   assert.equal(recipe.inventorId, actor.id); assert.equal(world.technology.history.at(-1)!.recipeId, recipe.id);
   return { actor, recipe };
 }
+
+test('la cabeza recién escrita se certifica solo si su anillo tecnológico coincide con el archivo', t => {
+  const { store } = laboratorio(t, 'atlas-prueba-cabeza-anillo-');
+  const world = createWorld(51926, parseParams('v23.guardadoCompleto=true'));
+  const guardar = () => store.guardar({ world, materia: null });
+  guardar();
+  paidResearch(world);
+  store.solicitarPruebaSiguienteGuardado();
+  guardar();
+  assert.equal(store.exportarPruebaCabeza()?.materiaVerificada, false);
+
+  const recibo = world.technology.history.at(-1)!;
+  assert.equal(world.technology.journal!.pending.length, 0);
+  recibo.benefit += 1;
+  assert.doesNotThrow(() => assertWorld(world));
+  store.solicitarPruebaSiguienteGuardado();
+  assert.doesNotThrow(guardar, 'rechazar el resumen no cambia el resultado del guardado local');
+  assert.equal(store.exportarPruebaCabeza(), undefined);
+});
 
 test('a paid new recipe with a forged author cannot overwrite the snapshot or acknowledge either pending queue', t => {
   const lab = fixture(t), baseline = lab.store.load()!.world;

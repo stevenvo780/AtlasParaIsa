@@ -121,12 +121,12 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
 
 /** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
  * del mundo, como el tick de un dueño (`stepWorld`), por si una ley usa una consulta espacial de las de siempre. */
-export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, destinatariosGarantias: ReadonlySet<number>,
+export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false, destinatariosGarantias?: ReadonlySet<number>,
   perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
   conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, destinatariosGarantias, perfilActuar, publicarCorte));
 }
 
-function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, destinatariosGarantias: ReadonlySet<number>,
+function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, destinatariosGarantias?: ReadonlySet<number>,
   perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
   const m = d.mundo, celda = (campo: number): number => celdaDueno(d.hilo, campo), inicio = performance.now();
   switch (tramo) {

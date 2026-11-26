@@ -401,6 +401,10 @@ export interface Motor {
   /** Mundo reunido en barrera para proyectar el paso completo. */
   vista(): World;
   instantanea(): Instantanea;
+  /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.
+   * Devuelve `false` solo ante un rechazo comprobado antes de mutar estado vivo (el anfitrión puede recurrir a `cargar`).
+   * Si la mutación viva falla a medias tras el COMMIT, la piscina queda fatal y lanza (exige recarga desde disco). */
+  confirmarGuardado(guardado: Instantanea): boolean;
   cargar(i: Instantanea, epoca: number): void; // reparte tras Store.cargarInstantanea() o una recuperación y abre la época: su primer fotograma es completo
   /** Desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito (protocolo en shared/fotograma.ts). */
   enlazar(cinta: DescriptorEnlace, fuente?: import('./fotograma.js').FuenteFotograma): void;
@@ -532,6 +536,8 @@ export interface MotorConfig {
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */
   medirPaso?: boolean;
+  /** Laboratorio: confirma guardados rutinarios sobre los dueños vivos sin recrear piscina ni arenas (apagada por defecto). */
+  confirmarGuardadoVivo?: boolean;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de
    * dueños), con el máximo que fija el proceso; el reloj nunca altera las leyes. Lo suministra srv (`motorConfig`). */
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };

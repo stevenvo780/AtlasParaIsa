@@ -73,7 +73,7 @@ export const ORDEN = { gesto: 0, replica: 1, ceder: 2, detalle: 3, directorio: 4
 export const AVISO = { lugar: 0, comunidad: 1, resultado: 2, tick: 3, parte: 4, detalle: 5, chunk: 6 } as const;
 
 /** Celdas del control compartido del motor (Float64 sobre SAB). Las de cada dueño empiezan en `CTL.porDueno`. */
-export const CTL = { tick: 0, epoca: 1, fotoRanura: 2, fotoCompleto: 3, fotoInvalido: 4, lluvia: 5, porDueno: 8 } as const;
+export const CTL = { tick: 0, epoca: 1, fotoRanura: 2, fotoCompleto: 3, fotoInvalido: 4, lluvia: 5, falloConfirmar: 6, porDueno: 8 } as const;
 export const CTL_DUENO = { msF1: 0, msEco: 1, msPercibir: 2, msActuar: 3, msAplicar: 4, msTick: 5, intentos: 6, rechazados: 7, migraciones: 8, recibidos: 9, celdas: 10 } as const;
 export const celdaDueno = (hilo: Hilo, campo: number): number => CTL.porDueno + hilo * CTL_DUENO.celdas + campo;
 

@@ -10,11 +10,13 @@
  * los workers ya en marcha, cierra la piscina y abre otra.
  */
 import { availableParallelism } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import type { FuenteFotograma } from './fotograma.js';
 import type { RepartoVisible } from '../../shared/vistas-v23.js';
 import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
+import type { LegacyRecord } from '../../shared/demography.js';
 import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
@@ -30,11 +32,11 @@ import { stepWorld, type FaseMedicion } from '../mundo/paso.js';
 import { TICKS_PER_DAY, type Person, type World } from '../mundo/tipos.js';
 import { paramsOf } from '../params.js';
 import { ErrorFatalMotor } from '../paralelo/barrera.js';
-import { Piscina } from '../paralelo/piscina.js';
+import { Piscina, type DiagnosticoPiscina } from '../paralelo/piscina.js';
 import { olvidarOrganismos } from '../soa/organismos-mundo.js';
 import { RESERVA_FILAS_DUENOS, TablaOrganismosSoA } from '../soa/organismos.js';
 import { residentFastAccess } from '../soa/terreno.js';
-import { archivarChunk, tomarChunk, validCoordinate } from '../spatial.js';
+import { archivarChunk, bindWorldContext, tomarChunk, validCoordinate, worldContext } from '../spatial.js';
 import { recordSample } from '../statistics.js';
 import { chunkKey } from '../terrain.js';
 import { tileLookup } from '../tile-index.js';
@@ -51,8 +53,40 @@ import { leyesActivas } from './leyes.js';
 import { CanalesCorte } from './mensajes-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
-import { cabeceraDe, reunir } from './reunir.js';
+import { cabeceraDe, fundir, reunir } from './reunir.js';
 import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
+
+function sinCheckpointTecnologia(tech: World['technology'] | undefined): unknown {
+  if (!tech) return tech;
+  const { checkpoint: _checkpoint, ...resto } = tech;
+  return resto;
+}
+
+/** Comprueba por igualdad estructural profunda (jamás por contadores ni longitudes) que las partes remotas
+ * no divergieron de su tecnología inicial y que `fundir` reproducirá exactamente la tecnología confirmada. */
+export function tecnologiaEquivalenteParaConfirmar(
+  cabecera: World['technology'] | undefined,
+  tecnologiaInicialRemota: unknown,
+  partesRemotas: readonly (World['technology'] | undefined)[],
+  confirmada: World['technology'] | undefined,
+): boolean {
+  for (const parte of partesRemotas) {
+    if (!isDeepStrictEqual(sinCheckpointTecnologia(parte), tecnologiaInicialRemota)) return false;
+  }
+  const candidata = sinCheckpointTecnologia(confirmada);
+  const fusionada = sinCheckpointTecnologia(fundir(sinCheckpointTecnologia(cabecera), [
+    candidata,
+    ...Array.from({ length: partesRemotas.length }, () => tecnologiaInicialRemota),
+  ]) as World['technology'] | undefined);
+  return isDeepStrictEqual(fusionada, candidata);
+}
+
+let falloConfirmarGuardadoPrueba: number | null = null;
+/** Solo pruebas: inyecta un fallo de una sola vez al confirmar guardado (`h > 0`: worker `h` tras vaciar `retiredLegacy`;
+ * `0`: coordinador tras completar la barrera de workers). */
+export function inyectarFalloConfirmarGuardadoParaPrueba(hilo: number | null): void {
+  falloConfirmarGuardadoPrueba = hilo;
+}
 
 // ── Constantes del motor (política del proceso, no leyes del mundo) ──────────────────────────────────────
 
@@ -178,6 +212,10 @@ class MotorUnico implements Motor {
     return { world: this.#mundo, materia: d ? d.instantaneaMateria(d.pendientes()) : null };
   }
 
+  confirmarGuardado(guardado: Instantanea): boolean {
+    return guardado.world === this.#mundo;
+  }
+
   cargar(i: Instantanea, epoca: number): void {
     cerrarMateriaGpu(this.#mundo);
     if (i.world !== this.#mundo) duenoSi(this.#mundo)?.cerrarMateriaFria();
@@ -269,6 +307,15 @@ class MotorDuenos implements Motor {
   #terreno!: TerrenoPercepcion;
   #tabla!: TablaOrganismosSoA;
   #cabecera!: World;
+  #tecnologiaInicial: unknown;
+  #ultimaInstantanea: {
+    world: WeakRef<World>;
+    tick: number;
+    eventCounter: number;
+    tecnologiaRemotaEquivalente: boolean;
+    bajasTick: LegacyRecord[];
+  } | null = null;
+  #bajasConfirmadas: { tick: number; bajas: LegacyRecord[] } | null = null;
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
   #cesiones: [ChunkId, Hilo][] = [];
@@ -308,6 +355,8 @@ class MotorDuenos implements Motor {
     void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
     this.#perfilPaso = undefined;
+    this.#ultimaInstantanea = null;
+    this.#bajasConfirmadas = null;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
     this.#activacionesPendientes = 0;
@@ -377,6 +426,8 @@ class MotorDuenos implements Motor {
     d.reservarMateria(materia ? 0 : claves.length);
     const cabecera = serialize(cabeceraDe(m));
     this.#cabecera = deserialize(cabecera) as World;
+    this.#tecnologiaInicial = this.#config.confirmarGuardadoVivo
+      ? sinCheckpointTecnologia(structuredClone(this.#cabecera.technology)) : undefined;
     d.repartirChunksIniciales(chunks, duenos);
     const tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
     for (let i = 0; i < claves.length; i++) if (duenos[i] === 0) terreno.sincronizarPagina(chunks[i]!, tileIn, fast);
@@ -420,6 +471,8 @@ class MotorDuenos implements Motor {
     const perfilActuar = this.#perfilActuar, tramos: PerfilTramoMotor[] | undefined = perfilActuar && [];
     const inicio = performance.now();
     try {
+      this.#ultimaInstantanea = null;
+      this.#bajasConfirmadas = null;
       m.tick++;
       control[CTL.tick] = m.tick;
       // F0: serie y corto. Todos los dueños están detenidos en la barrera.
@@ -433,6 +486,8 @@ class MotorDuenos implements Motor {
       const resultados = this.#gestos(gestos);
       m.invitations = m.invitations.filter(invitacion => invitacion.until > m.tick);
       m.reminders = m.reminders.filter(aviso => aviso.until > m.tick);
+      this.#cabecera.invitations = this.#cabecera.invitations.filter(invitacion => invitacion.until > m.tick);
+      this.#cabecera.reminders = this.#cabecera.reminders.filter(aviso => aviso.until > m.tick);
       if (this.#altas.length) {
         const altas = this.#altas.splice(0);
         d.anotarAjenas(altas);
@@ -643,13 +698,76 @@ class MotorDuenos implements Motor {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
-      const { world, pendientes } = this.#reunirMundo();
+      const paraConfirmar = this.#config.confirmarGuardadoVivo === true;
+      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar);
       recordSample(world);
-      return { world, materia: this.#d.instantaneaMateria(pendientes) };
+      const materia = this.#d.instantaneaMateria(pendientes);
+      if (paraConfirmar) this.#ultimaInstantanea = {
+        world: new WeakRef(world), tick: this.#mundo.tick, eventCounter: this.#mundo.eventCounter,
+        tecnologiaRemotaEquivalente, bajasTick: bajas.map(b => structuredClone(b)),
+      };
+      return { world, materia };
     } catch (error) { throw this.#fallo(error); }
   }
 
-  #reunirMundo(): { world: World; pendientes: Intento[] } {
+  confirmarGuardado(guardado: Instantanea): boolean {
+    if (this.#fatal) throw this.#fatal;
+    if (!this.#config.confirmarGuardadoVivo || !this.#piscina) return false;
+    const meta = this.#ultimaInstantanea;
+    this.#ultimaInstantanea = null;
+    const m = this.#mundo, w = guardado.world;
+    // Fase 1 (solo lectura y copias previas): cualquier `false` rechaza antes de tocar estado vivo.
+    if (!meta || meta.world.deref() !== w || meta.tick !== m.tick || meta.eventCounter !== m.eventCounter) return false;
+    if (!meta.tecnologiaRemotaEquivalente) return false;
+    // Con cooperación apagada, la próxima fase de comunidades no actualiza el padrón vivo.
+    if (!m.cooperationEnabled && meta.bajasTick.length) return false;
+    if (w.retiredChunks.length !== 0 || w.retiredLegacy.length !== 0) return false;
+    const cronica = w.chronicleJournal;
+    if (!cronica || cronica.pending.length !== 0 || cronica.committedThrough !== m.eventCounter) return false;
+    const tech = w.technology;
+    if (!tech?.journal || tech.journal.pending.length !== 0) return false;
+    if (!tech.catalogue || tech.catalogue.pending.length !== 0) return false;
+    const candidataTech = structuredClone(tech);
+    const partesBase = Array.from({ length: this.#hilos - 1 }, () => this.#tecnologiaInicial as World['technology'] | undefined);
+    if (!tecnologiaEquivalenteParaConfirmar(this.#cabecera.technology, this.#tecnologiaInicial, partesBase, candidataTech)) return false;
+
+    const diarioConfirmado = structuredClone(cronica);
+    const historiaConfirmada = structuredClone(w.history);
+    const tecnologiaConfirmada = { ...candidataTech, checkpoint: undefined };
+    const contextoGuardado = worldContext(w);
+
+    // Fase 2 (mutación viva tras COMMIT): nunca toca buzones ni garantías en vuelo.
+    // Si falla a medias en un worker o en el coordinador tras mutar workers, la piscina queda fatal y lanza.
+    try {
+      const falloPrueba = falloConfirmarGuardadoPrueba;
+      if (falloPrueba !== null) {
+        falloConfirmarGuardadoPrueba = null;
+        if (falloPrueba > 0) this.#control[CTL.falloConfirmar] = falloPrueba;
+      }
+      this.#buzones.fijarFase(0);
+      this.#piscina.ejecutar(TRAMO.confirmarGuardado);
+      if (falloPrueba === 0) throw new Error('Fallo inyectado al confirmar guardado en el coordinador tras mutar workers.');
+      m.chronicleJournal = diarioConfirmado;
+      m.history = historiaConfirmada;
+      m.retiredChunks = [];
+      m.retiredLegacy = [];
+      m.technology = tecnologiaConfirmada;
+      if (contextoGuardado.loadChunk || contextoGuardado.loadLegacy || contextoGuardado.catalogueReader) {
+        bindWorldContext(m, { ...worldContext(m), ...contextoGuardado });
+      }
+      this.#bajasConfirmadas = meta.bajasTick.length ? { tick: meta.tick, bajas: meta.bajasTick } : null;
+      return true;
+    } catch (error) {
+      throw this.#fallo(error);
+    }
+  }
+
+  /** Diagnóstico de la piscina viva (p. ej. `threadIds` y `fatal` para comprobar persistencia de dueños). */
+  get diagnosticoPiscina(): DiagnosticoPiscina | undefined {
+    return this.#piscina?.diagnostico();
+  }
+
+  #reunirMundo(paraConfirmar = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
     const canales = this.#canalesCorte, solicitud = canales?.pedir();
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
@@ -660,6 +778,8 @@ class MotorDuenos implements Motor {
       return parte;
     });
     this.#partesMundo.clear();
+    const tecnologiaRemotaEquivalente = paraConfirmar && partes.every(parte =>
+      isDeepStrictEqual(sinCheckpointTecnologia(parte.technology), this.#tecnologiaInicial));
     const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
     const pendientes = this.#d.pendientes();
     for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
@@ -676,8 +796,12 @@ class MotorDuenos implements Motor {
         if (mig.animal) world.animals.push(mig.animal.animal);
       }
     }
-    // El padrón de F0 todavía puede contener las bajas que se confirmaron en F5.
-    const bajas = world.retiredLegacy.filter(persona => persona.diedAt === world.tick);
+    // El padrón de F0 todavía puede contener las bajas que se confirmaron en F5 (incluidas las ya archivadas en este mismo tick).
+    const bajasNuevas = world.retiredLegacy.filter(persona => persona.diedAt === world.tick);
+    const bajasPrevias = this.#bajasConfirmadas?.tick === world.tick ? this.#bajasConfirmadas.bajas : [];
+    const bajas = bajasPrevias.length
+      ? [...bajasPrevias, ...bajasNuevas.filter(p => !bajasPrevias.some(prev => prev.id === p.id))]
+      : bajasNuevas;
     if (bajas.length) {
       pruneBonds(world.people, bajas);
       const ids = new Set(bajas.map(persona => persona.id));
@@ -689,7 +813,7 @@ class MotorDuenos implements Motor {
       });
     }
     if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
-    return { world, pendientes };
+    return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 
   cargar(i: Instantanea, epoca: number): void {

@@ -97,6 +97,8 @@ export interface AppOptions {
   onEstadoCinta?: (error: string | null) => void;
   /** V21: observer-only mode. Inhabitants act autonomously: direct NPC orders are rejected (410). */
   observerOnly?: boolean;
+  /** Laboratorio: confirma guardados rutinarios en los dueños vivos cuando la época no cambia (apagada por defecto). */
+  confirmarGuardadoVivo?: boolean;
 }
 /** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
 export const PASO_PARADO_S = 60;
@@ -557,6 +559,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const semillaNueva = paramsNuevos?.v23.fotograma || paramsNuevos?.v23.duenos || paramsNuevos?.v23.guardadoCompleto
     ? randomBytes(4).readUInt32LE() : 51926;
   let world = gateway ? undefined! as World : loaded?.world ?? createWorld(options.seed ?? semillaNueva, paramsNuevos);
+  if (!gateway && !loaded) bindWorldContext(world, store.context);
   if (loaded && options.deployment) {
     const params = paramsDelArranque(paramsOf(world), options.deployment);
     if (params.v23.duenos || params.v23.fotograma || params.v23.guardadoCompleto) setParams(world, params);
@@ -567,7 +570,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const tapeRequested = options.tape ?? (binario || turboSolicitado);
   const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:'
     ? cintaDeMundo(store.path, options.tapeDirectory) : undefined;
-  const config = usaMotor ? motorConfig(options.seed) : undefined;
+  const baseConfig = usaMotor ? motorConfig(options.seed) : undefined;
+  const confirmarGuardadoVivo = options.confirmarGuardadoVivo ?? baseConfig?.confirmarGuardadoVivo ?? false;
+  const config = baseConfig ? { ...baseConfig, confirmarGuardadoVivo } : undefined;
   const conDuenos = usaMotor && config!.hilos !== 1;
   let epoca = loaded?.epoca ?? 0;
   let tickMotor = world?.tick ?? 0;
@@ -622,6 +627,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function adoptarGuardado(guardado: Instantanea | undefined): void {
     if (!motor || !guardado || guardado.world === world) return;
     // Los diarios y las colas de archivo se confirman sobre la instantánea que recibió Store.
+    if (confirmarGuardadoVivo && motor.confirmarGuardado(guardado)) {
+      lecturaMotor = undefined;
+      return;
+    }
     motor.cargar(guardado, epoca);
     world = guardado.world;
     lecturaMotor = undefined;
@@ -1467,7 +1476,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         : `Tres fallos seguidos intentando superar el paso ${tickObjetivo} (último: ${motivo}): salgo con 75 para que el servicio reinicie.`);
       failed = true; aMedioPaso = !restaurado; salirFatal(75); return;
     }
-    if (!restaurado && !duranteOperacion('recargando', () => recargar(motivo))) return;
+    if (!restaurado && !duranteOperacion('recargando', () => recargar(motivo, tickObjetivo))) return;
     if (motor && !restaurado) muestreador?.recuperacion(world, epoca, tickObjetivo);
     if (restaurado) {
       console.warn(`El paso ${tickObjetivo} falló (${motivo}); quedó deshecho y el mundo sigue desde el paso ${world.tick}.`);
@@ -1480,7 +1489,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     rejectWhispers(new HttpError(401, 'La sesión terminó antes de guardar el mensaje.'), item => !sessions.sessionValid(item.hash));
     broadcast();
   }
-  function recargar(motivo: string): boolean {
+  function recargar(motivo: string, tickObjetivo?: number): boolean {
     let cargado: ReturnType<typeof cargarGuardado> = null;
     try { cargado = cargarGuardado(store, options.deployment); } catch { cargado = null; }
     if (!cargado) {
@@ -1502,9 +1511,14 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     // Lo que quedó por registrar describía el mundo descartado; lo del mundo recargado se anota de nuevo.
     cambiosPendientes.length = 0;
     normalizarReproduccion();
+    const sinPerdida = tickObjetivo !== undefined && world.tick === tickObjetivo;
     world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
-      text: 'Un paso falló y el mundo retomó desde su último momento guardado.',
-      cause: 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
+      text: sinPerdida
+        ? 'La confirmación viva tras el guardado falló y el mundo reabrió el último momento guardado.'
+        : 'Un paso falló y el mundo retomó desde su último momento guardado.',
+      cause: sinPerdida
+        ? 'Recuperación automática sobre el último guardado confirmado; sin pérdida de pasos.'
+        : 'Recuperación automática; se perdió lo simulado desde ese guardado.', source: 'simulation' });
     world.events = world.events.slice(-120);
     if (!ley(world, 'guardadoCompleto')) cambiosPendientes.push(captureReplayChange(world, ['events']));
     const nuevaEpoca = Math.max(epoca + 1, cargado.epoca ?? 0);

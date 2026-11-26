@@ -38,7 +38,7 @@ import { enviarParteCorte, type SolicitudCorte } from './mensajes-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
-export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7 } as const;
+export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7, confirmarGuardado: 8 } as const;
 
 /** Lo que cada worker recibe al nacer (por `workerData`: los SAB se comparten, lo demás se copia). */
 export interface DatosDueno {
@@ -200,6 +200,16 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
       // El coordinador reúne todas las partes tras esta barrera, por el canal elegido al abrir.
       if (publicarCorte) publicarCorte();
       else if (d.hilo !== 0) d.avisarCoordinador([AVISO.parte, d.hilo], m);
+      break;
+    case TRAMO.confirmarGuardado:
+      // Guardado rutinario en dueños vivos: limpia las bajas ya archivadas sin tocar buzones ni garantías en vuelo.
+      if (d.hilo !== 0) {
+        m.retiredLegacy.length = 0;
+        if (control[CTL.falloConfirmar] === d.hilo) {
+          control[CTL.falloConfirmar] = 0;
+          throw new Error(`Fallo inyectado al confirmar guardado en el dueño ${d.hilo}.`);
+        }
+      }
       break;
     case TRAMO.cerrar:
       cerrarMateriaGpu(m);

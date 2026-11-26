@@ -52,11 +52,13 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
   const gruposPercepcionGpu = gruposGpuDelProceso(env, hilos === 'auto' ? hilos : Number(hilos), gpu);
   const maximo = hilos === 'auto' ? availableParallelism() : undefined;
   const reservaLotesMateria = reservaMateriaHost(memoria ?? hostMemory());
+  const confirmarGuardadoVivo = env.CARTA_GUARDADO_VIVO === '1';
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
     ...(gruposPercepcionGpu === undefined ? {} : { gruposPercepcionGpu }),
     ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
     ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
+    ...(confirmarGuardadoVivo ? { confirmarGuardadoVivo: true } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 

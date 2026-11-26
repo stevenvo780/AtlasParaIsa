@@ -86,7 +86,7 @@ export function dvrEngineLabel(state: Pick<DvrBarState, 'simHz'>): string { retu
 
 /** «a 4 d 6 h del presente», o «en el presente» dentro del margen del borde. */
 export function desfaseLabel(state: Pick<DvrBarState, 'aheadOfPlayhead' | 'atLiveEdge'>): string {
-  return state.atLiveEdge ? 'en el presente' : `a ${duracionDeTicks(state.aheadOfPlayhead)} del presente`;
+  return state.atLiveEdge ? 'en el presente' : `${duracionDeTicks(state.aheadOfPlayhead)} de mundo hasta el presente`;
 }
 
 /** Posición horizontal (0–100) de un tick dentro de la cinta. */

@@ -33,7 +33,7 @@ test('renderDvrBar: transporte, velocidades, serie de fondo, insignia de escala,
   assert.match(html, /<input type="range" class="dvr-range" data-dvr-range min="0" max="14400" step="1" value="4800"/);
   assert.match(html, /Día 3 · 00:00/);
   assert.match(html, /data-dvr-escala[^>]*>Resumen diario · 1 s = 12 d de mundo</);
-  assert.match(html, /a 4 d del presente/);
+  assert.match(html, /4 d de mundo hasta el presente/);
   assert.match(html, /⚡ 120 Hz/);
   assert.match(html, /<button type="button" class="dvr-live" data-dvr-live aria-pressed="false"[^>]*>● Presente<\/button>/);
   assert.doesNotMatch(html, /Borde vivo|NaN|undefined|Infinity/);
@@ -86,7 +86,7 @@ test('helpers de la barra: tiempo, motor, desfase y punto más cercano', () => {
   assert.equal(dvrTimeLabel(state), 'Día 3 · 00:00');
   assert.equal(dvrTimeLabel(state, 3600), 'Día 2 · 12:00');
   assert.equal(dvrEngineLabel(state), '⚡ 120 Hz');
-  assert.equal(desfaseLabel({ aheadOfPlayhead: 4 * 2400 + 600, atLiveEdge: false }), 'a 4 d 6 h del presente');
+  assert.equal(desfaseLabel({ aheadOfPlayhead: 4 * 2400 + 600, atLiveEdge: false }), '4 d 6 h de mundo hasta el presente');
   assert.equal(duracionDeTicks(2400 * 4 + 600), '4 d 6 h');
   assert.equal(desfaseLabel({ aheadOfPlayhead: 5, atLiveEdge: true }), 'en el presente');
   assert.equal(nearestSeriePoint(state.serie, 9000)!.t, 9600);

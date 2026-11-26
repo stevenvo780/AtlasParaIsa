@@ -33,6 +33,18 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
 - `--orden natural|inverso|adversarial` (opcional): aplica `params.motor.orden` validado por `parseParams`.
   Aceptado tanto en `replica.ts` como en `barrido.ts`.
 
+## Panel corto de publicación
+
+El [panel de validación](../../docs/VALIDACION.md#panel-corto-antes-de-publicar) ejecuta las doce réplicas en un árbol limpio del SHA candidato. Se puede dar un grupo de CPU por carril. Los grupos de la torre por defecto son `8,9 10,11 12,13 14,15`. Cada réplica abre su propio mundo y directorio de datos.
+
+```bash
+sha=$(git rev-parse HEAD)
+bash scripts/lab/panel-corto.sh "$sha" /ruta/nueva/panel-corto
+bash scripts/lab/panel-corto.sh --smoke "$sha" /ruta/nueva/smoke-panel-corto 14,15
+```
+
+`manifest.json` deja el SHA, perfil, réplica y afinidad de cada corrida. Cada carpeta conserva su JSONL, errores y código de salida. `resumen.json` reúne M1–M6. El smoke comprueba la instrumentación con 24 pasos y carece de veredicto de publicación. El perfil de laboratorio mide pasos del motor en CPU. Los tiempos con persistencia y cinta se miden en el banco del servidor.
+
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
 `docs/REVISION-2026-09-19.md` (P3) documenta que las leyes de tecnología dependen de si el mundo

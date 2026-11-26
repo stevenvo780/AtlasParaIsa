@@ -23,6 +23,18 @@ export interface PasoMateriaGpu {
   cerrar(): void;
 }
 
+/** El plazo de transporte comienza tras el envío. Solo el dueño aplica la propuesta recibida. */
+export function lanzarMateriaGpuConPlazo(paso: PasoMateriaGpu, c: CtxPaso, lotes: ArrayLike<LoteRef>,
+  kappas: ArrayLike<number>, dt: number, tick: number, plazoMs: number) {
+  paso.lanzar(c, lotes, kappas, dt, tick);
+  const vence = performance.now() + plazoMs;
+  return () => {
+    const propuesta = paso.esperar(Math.max(0, vence - performance.now()));
+    aplicarVecesGpu(c, lotes, kappas, propuesta, dt);
+    return { tripletas: propuesta.tripletas.length / 3 - (propuesta.lotesCpu ?? 0), ms: propuesta.ms };
+  };
+}
+
 /** Relee cada fila con el nivel inicial, antes de mutar ningún lote. Solo el dueño aplica las ecuaciones. */
 export function aplicarVecesGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, r: VecesGpu, dt: number): number {
   if (r.desde.length !== lotes.length + 1 || r.desde[0] !== 0 || r.desde[lotes.length] !== r.tripletas.length

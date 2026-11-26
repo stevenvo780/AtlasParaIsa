@@ -11,7 +11,6 @@
  * retirar), cuándo da su paso cada una (cadencia escalonada), con qué forzamiento (luz, tiempo y estación), por dónde
  * va la química de los suelos (tarjeta o CPU), los fuegos, las vistas y el libro.
  */
-import { channel } from 'node:diagnostics_channel';
 import { ELEMENTOS, KAPPA_SUELO, KAPPA_SUELO_HH, NE } from '../../shared/naturaleza.js';
 import type { MatTesela, SustanciaId, SustanciaVista } from '../../shared/materia.js';
 import type { Tile, WorldView } from '../../shared/types.js';
@@ -19,13 +18,14 @@ import type { AireVisible, LoteVisible, MateriaMundoVisible } from '../../shared
 import type { Violacion } from '../invariantes.js';
 import type { CtxF0, CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { ErrorDispositivo, REF_NULA, TipoIntento, type ChunkId } from '../motor/contratos.js';
+import { iniciarPerfilPasoMateria } from '../motor/perfil-materia.js';
 import { INTERVALO_TIEMPO_TICKS } from '../ecologia-constantes.js';
 import { regionalClimateFactor, sortearTiempo } from '../clima.js';
 import { asentarHuella, enlazarMateria, rasgoPorMadera, rasgoPorPiedra, type PuenteMaterial } from '../ecosystem.js';
 import { marcarTesela } from '../soa/barrera-percepcion.js';
 import { tileLookup } from '../tile-index.js';
 import { CanalCompartido } from '../gpu/canal.js';
-import { aplicarVecesGpu, crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
+import { crearPasoMateriaGpu, lanzarMateriaGpuConPlazo, prepararMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
 import type { TotalesMateria } from './libro.js';
 import { CUENTA, MundoMaterial, NOMBRE_CUENTA, N_CUENTAS, luzDe, luzMedia, type BaseMundo, type Forzamiento } from './mundo.js';
 import { Rol, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
@@ -49,7 +49,6 @@ const PLAZO_GPU_MS = 50;
 const ARRANQUE_GPU_MS = 30_000;
 /** Ticks que w espera antes de volver a abrir la tarjeta tras un fallo. */
 const REINTENTO_GPU_TICKS = 600;
-const perfilPaso = channel('atlas:materia:paso');
 /** Ticks entre dos inventarios para el panel «Materia» (recorre todos los lotes del dueño). */
 const PANEL_TICKS = 600;
 /** Lo que el asiento de fuentes del hilo puede valer antes de materializar otra página (J o mmol de átomos): el libro
@@ -378,7 +377,7 @@ function eco(c: CtxLey): void {
     tocan.push(p);
   }
   if (tocan.length) {
-    const inicio = perfilPaso.hasSubscribers ? performance.now() : 0;
+    const cerrarPerfil = iniciarPerfilPasoMateria();
     for (const p of tocan) m.pasarAntes(p, e.forzamientos[p]!);
     const fallosAntes = e.gpu.fallos;
     const { paginasCpu, charcasHechas } = quimicaSuelos(e, tocan);
@@ -389,7 +388,7 @@ function eco(c: CtxLey): void {
       escribirVistas(e, p, f.dt);
       anotarAire(e, p);
     }
-    if (inicio) perfilPaso.publish({ ms: performance.now() - inicio, paginas: tocan.length, paginasCpu, fallos: e.gpu.fallos - fallosAntes });
+    cerrarPerfil?.(tocan.length, paginasCpu, e.gpu.fallos - fallosAntes);
   }
   m.volcarCuentas(e.cuentas);
   asentar(e);
@@ -522,13 +521,7 @@ export function lanzarQuimicaSuelos(m: MundoMaterial, paso: PasoMateriaGpu, pagi
     lotes[k] = m.suelo[i]!;
     kappas.set(CATALISIS_SUELO, 4 * k);
   }
-  paso.lanzar(m.ctx, lotes, kappas, dt, tick);
-  const vence = performance.now() + PLAZO_GPU_MS;
-  return () => {
-    const propuesta = paso.esperar(Math.max(0, vence - performance.now()));
-    aplicarVecesGpu(m.ctx, lotes, kappas, propuesta, dt);
-    return { tripletas: propuesta.tripletas.length / 3 - (propuesta.lotesCpu ?? 0), ms: propuesta.ms };
-  };
+  return lanzarMateriaGpuConPlazo(paso, m.ctx, lotes, kappas, dt, tick, PLAZO_GPU_MS);
 }
 
 // ── Vistas ───────────────────────────────────────────────────────────────────────────────────────────────

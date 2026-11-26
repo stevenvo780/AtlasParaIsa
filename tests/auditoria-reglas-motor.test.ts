@@ -86,12 +86,16 @@ test('T171 lente 1: las leyes no leen hardware, relojes ni azar del proceso', ()
   //  · decision/percepcion.ts — contadores de tiempo del lote (diagnóstico).
   //  · motor/coordinador.ts — `motor.hilos='auto'` pregunta cuántos hilos hay; mide cada fase para el reparto.
   //  · motor/dueno-worker.ts y motor/fotograma.ts — medida del tramo de cada dueño y plazo de la barrera.
+  //  · motor/mensajes-corte.ts — diagnóstico de la codificación y lectura de los sobres de guardado.
+  //  · motor/perfil-materia.ts — publicación opcional de la duración del paso material.
   const permitidos: Readonly<Record<string, readonly string[]>> = {
     'decision/despacho.ts': ['Date.now', 'performance.now'],
     'decision/percepcion.ts': ['performance.now'],
     'motor/coordinador.ts': ['availableParallelism', 'performance.now'],
     'motor/dueno-worker.ts': ['performance.now'],
     'motor/fotograma.ts': ['performance.now'],
+    'motor/mensajes-corte.ts': ['performance.now'],
+    'motor/perfil-materia.ts': ['performance.now'],
   };
   const permitidosDe = (ruta: string): readonly string[] => permitidos[ruta.slice(WORLD_DIR.length)] ?? [];
   const leyes = ficherosTs(WORLD_DIR).filter(ruta => !ruta.startsWith(despacho) && !ruta.startsWith(gpu));
@@ -122,6 +126,8 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
   //   repartir el lote siguiente: decide qué dispositivo percibe, no qué percibe.
   // · gpu/canal.ts — `performance.now` da el plazo de cada respuesta del servidor y
   //   la espera activa de 1 ms antes de bloquear.
+  // · gpu/broker-percepcion.ts — plazos monotónicos, colas y coste observado para elegir el dispositivo.
+  // · gpu/materia-gpu.ts — plazo de transporte del suelo y diagnóstico de la preparación, espera y lectura.
   // · gpu/autoprueba.ts — `process.hrtime` mide el presupuesto de 200 ms de la
   //   autoprueba de paridad; su resultado habilita o no un dispositivo, no una ley.
   const blanca: Readonly<Record<string, readonly string[]>> = {
@@ -129,15 +135,13 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
     'paralelo/barrera.ts': ['performance.now'],
     'gpu/puente.ts': ['Date.now', 'performance.now'],
     'gpu/canal.ts': ['performance.now'],
+    'gpu/broker-percepcion.ts': ['performance.now', 'hrtime'],
+    'gpu/materia-gpu.ts': ['performance.now'],
     'gpu/autoprueba.ts': ['hrtime'],
   };
-  for (const ruta of despacho) {
-    const relativo = ruta.slice(WORLD_DIR.length);
-    const codigo = sinComentarios(readFileSync(ruta, 'utf8'));
-    for (const token of ['Date.now', 'performance.now', 'hrtime'] as const) {
-      if (codigo.includes(token)) assert.ok((blanca[relativo] ?? []).includes(token), `${relativo}: reloj «${token}» fuera de la lista blanca`);
-    }
-  }
+  const relojes = despacho.flatMap(ruta => violaciones(ruta,
+    ['Date.now', 'performance.now', 'hrtime'].filter(token => !blanca[ruta.slice(WORLD_DIR.length)]?.includes(token))));
+  assert.deepEqual(relojes, []);
 });
 
 test('T171 lente 1/2: los kernels GPU compilan sin fast-math', () => {

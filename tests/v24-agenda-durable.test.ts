@@ -88,7 +88,7 @@ test('confirma y recupera junta la agenda de un mundo material paginado', async 
   } finally { anterior.close(); }
 });
 
-test('el formato en línea conserva lecturas sin adjunto y el fallback de un slot anterior', t => {
+test('sólo la recuperación explícita permite volver a un slot anterior a la agenda', t => {
   const { directory, store } = laboratorio(t, 'agenda-inline-', { snapshotInlineTileLimit: SNAPSHOT_INLINE_TILE_LIMIT });
   const world = createWorld(51926, parseParams('v23.guardadoCompleto=true'));
   store.guardar({ world, materia: null });
@@ -112,18 +112,17 @@ test('el formato en línea conserva lecturas sin adjunto y el fallback de un slo
   reescribirInstantanea(store, fila.body);
   assert.deepEqual(store.cargarInstantanea()!.corteAgenda, corte);
 
+  store.db.prepare('UPDATE snapshots SET digest=? WHERE slot=0').run('0'.repeat(64));
+  assert.throws(() => store.cargarGuardadoCompleto(), /Falta el corte territorial.*slot 1/);
+  assert.throws(() => store.verificarGuardado(), /Falta el corte territorial.*slot 1/);
+
   const ruta = join(directory, 'antes-de-activar.sqlite');
   assert.equal(store.previous(ruta), 1);
   const sinAgenda = new Store(ruta);
   try {
     const recuperado = sinAgenda.cargarInstantanea()!;
+    assert.equal(recuperado.instantanea.world.tick, world.tick);
     assert.equal(Object.hasOwn(recuperado, 'corteAgenda'), false);
     sinAgenda.guardar(recuperado.instantanea);
   } finally { sinAgenda.close(); }
-
-  store.db.prepare('UPDATE snapshots SET digest=? WHERE slot=0').run('0'.repeat(64));
-  const recuperado = store.cargarGuardadoCompleto()!;
-  assert.equal(recuperado.metadatos.slot, 1);
-  assert.equal(recuperado.instantanea.world.tick, world.tick);
-  assert.equal(Object.hasOwn(recuperado, 'corteAgenda'), false);
 });

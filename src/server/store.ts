@@ -903,8 +903,8 @@ export class Store {
     const declaredChronicle = decoded.chronicleJournal !== undefined;
     const agendaBruta = separarAgenda(decoded);
     if (!complete && agendaBruta !== undefined) throw new SnapshotSemanticError('La agenda territorial requiere guardado completo.');
-    if (complete && slot === 0 && agendaBruta === undefined && this.requiereAgenda())
-      throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
+    if (complete && agendaBruta === undefined && this.requiereAgenda())
+      throw new SnapshotSemanticError(`Falta el corte territorial en el guardado seleccionado (slot ${slot}).`);
     const world = this.migrateSnapshot(decoded, complete);
     this.onProgress?.();
     if (slot > 0) this.assertNothingNewerThan(world);

@@ -1,7 +1,8 @@
+import { deserialize } from 'node:v8';
 import type { StructureView } from '../../shared/life.js';
 import { ClaseSustancia, formaDeCodigo } from '../../shared/materia.js';
 import { ELEMENTOS, TABLA } from '../../shared/naturaleza.js';
-import type { Tile, WorldView } from '../../shared/types.js';
+import type { PlaceView, Tile, WorldView } from '../../shared/types.js';
 import type { LoteVisible } from '../../shared/vistas-v23.js';
 import { INTERVALO_ECOLOGIA_TICKS } from '../ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from '../indice-puntos.js';
@@ -390,6 +391,16 @@ function proyectarObra(c: CtxLeyMateria, vista: WorldView): void {
 
 export const leyObra: Ley = {
   id: 't2', interruptor: 'obra', sustituye: ['estructuras'],
+  F0: c => {
+    const pedidos = c.peticiones('lugar');
+    if (!pedidos.length) return;
+    const lugares = new Map(c.mundo.places.map(l => [l.id, l]));
+    for (const bytes of pedidos) {
+      const lugar = deserialize(bytes) as PlaceView;
+      if (!lugares.has(lugar.id)) lugares.set(lugar.id, lugar);
+    }
+    c.publicarLugares([...lugares.values()]);
+  },
   iniciar: c => { for (const chunk of c.chunks) cargarEmpedrados(c as CtxLeyMateria, chunk); },
   alActivar: (c, chunk) => cargarEmpedrados(c as CtxLeyMateria, chunk),
   alRetirar: (c, chunk) => { indiceCaminos(c).delete(chunk); },

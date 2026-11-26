@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { setTimeout as esperar } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 const [copia, salida, ...otros] = process.argv.slice(2);
-assert.ok(copia && salida && otros.length === 0, 'Uso: node observar-demo.mjs WORKTREE_COMPILADO DIRECTORIO_NUEVO');
+assert.ok(copia && salida && otros.length === 0, 'Uso: node scripts/lab/demo-observacion.mjs WORKTREE_COMPILADO DIRECTORIO_NUEVO');
+const segundos = process.env.ATLAS_DEMO_OBSERVACION_SEGUNDOS;
+const duracionMs = segundos === undefined ? 0 : Number(segundos) * 1000;
+assert.ok(segundos === undefined || (/^[1-9]\d*$/.test(segundos) && Number.isSafeInteger(duracionMs)),
+  'ATLAS_DEMO_OBSERVACION_SEGUNDOS debe ser un entero positivo');
+const dosHorasMs = 120 * 60 * 1000;
 const raiz = resolve(copia);
 const { chromium, expect } = createRequire(join(raiz, 'package.json'))('@playwright/test');
 const { createWorkerGateway } = await import(pathToFileURL(join(raiz, 'dist/server/server/gateway.js')));
@@ -26,12 +32,14 @@ await once(sonda, 'listening');
 const { port } = sonda.address();
 await new Promise(ok => sonda.close(ok));
 const origen = `http://127.0.0.1:${port}`;
-const mundo = mkdtempSync('/tmp/atlas-v24-demo-');
+const mundo = mkdtempSync(duracionMs ? join(resolve(salida), 'mundo-sostenida-') : '/tmp/atlas-v24-demo-');
 const acceso = 'AtlasLab-' + randomBytes(16).toString('hex');
 const crearPasarela = () => createWorkerGateway({ worldPath: join(mundo, 'world.sqlite'), manual: true, deployment: true,
   password: acceso, origin: origen, turbo: true, tape: true, observerOnly: true,
   staticDir: join(raiz, 'dist/client'), seed: 51926 });
-let app = crearPasarela();
+const detener = new AbortController();
+const interrumpir = () => detener.abort(new Error('Observación interrumpida.'));
+let app;
 async function abrir() {
   app.server.listen(port, '127.0.0.1');
   await once(app.server, 'listening');
@@ -49,8 +57,57 @@ async function clienteCinta() {
     return respuesta.json();
   };
 }
+let inicioVentana;
+async function medirSalud(fase, registrar = true) {
+  const muestra = { fase, fecha: new Date().toISOString(), transcurridosMs: Math.round(performance.now() - inicioVentana) };
+  try {
+    const signal = AbortSignal.any([detener.signal, AbortSignal.timeout(5000)]);
+    const respuesta = await fetch(`${origen}/health`, { signal });
+    muestra.http = respuesta.status;
+    const { estado, tick, ultimoTickGuardado, ultimoGuardado, segundosDesdeUltimoPaso, ticksPorSegundo, recargas, epoca,
+      operacion, diagnostico } = await respuesta.json();
+    Object.assign(muestra, { estado, tick, ultimoTickGuardado, ultimoGuardado, segundosDesdeUltimoPaso,
+      ticksPorSegundo, recargas, epoca, operacion, diagnostico });
+    assert.equal(muestra.http, 200, `HTTP de salud en ${fase}`);
+    assert.ok(estado === 'ok' || estado === 'degradado', `Simulación parada en ${fase}`);
+    assert.ok(Number.isSafeInteger(tick) && tick > 0, `Falta un tick válido en ${fase}`);
+    assert.ok(Number.isSafeInteger(ultimoTickGuardado) && ultimoTickGuardado > 0 && Number.isFinite(ultimoGuardado),
+      `Falta un guardado válido en ${fase}`);
+    return muestra;
+  } catch (error) {
+    muestra.error = error.message;
+    throw error;
+  } finally {
+    if (registrar || muestra.error) appendFileSync(join(salida, 'salud.ndjson'), JSON.stringify(muestra) + '\n', { mode: 0o600 });
+  }
+}
+async function observarSostenida() {
+  inicioVentana = performance.now();
+  const inicio = await medirSalud('inicio');
+  const desde = performance.now();
+  const intervaloMs = Math.min(30_000, Math.max(1000, duracionMs / 4));
+  let fin = inicio, muestras = 1;
+  do {
+    await esperar(intervaloMs, undefined, { signal: detener.signal });
+    const actual = await medirSalud('turbo');
+    assert.ok(actual.tick > fin.tick, `El tick no avanzó entre ${fin.tick} y ${actual.tick}`);
+    assert.ok(actual.ultimoTickGuardado >= fin.ultimoTickGuardado, 'El último tick guardado retrocedió');
+    fin = actual;
+    muestras++;
+  } while (performance.now() - desde < duracionMs);
+  const duracionObservadaMs = Math.floor(performance.now() - desde);
+  const ticksGuardados = fin.ultimoTickGuardado - inicio.ultimoTickGuardado;
+  if (duracionMs >= dosHorasMs) assert.ok(ticksGuardados > 0, 'El guardado no avanzó durante la observación');
+  return { inicio, fin, muestras, duracionSolicitadaMs: duracionMs, duracionObservadaMs,
+    cumple120Minutos: duracionMs >= dosHorasMs && duracionObservadaMs >= dosHorasMs, ticksGuardados };
+}
 let navegador;
+if (duracionMs) {
+  process.on('SIGINT', interrumpir);
+  process.on('SIGTERM', interrumpir);
+}
 try {
+  app = crearPasarela();
   await abrir();
   app.start();
   navegador = await chromium.launch({ executablePath: chromium.executablePath(), headless: true, args: ['--disable-gpu'] });
@@ -92,8 +149,11 @@ try {
       vistas.push({ nombre, ancho, alto, controlesConHistoria: true });
     } finally { await contexto.close(); }
   }
+  await navegador.close();
+  navegador = undefined;
   await expect.poll(() => app.salud().ultimoTickGuardado, { timeout: 10_000 }).toBeGreaterThan(0);
-  const respuesta = await fetch(`${origen}/health`);
+  const observacion = duracionMs ? await observarSostenida() : undefined;
+  const respuesta = await fetch(`${origen}/health`, { signal: AbortSignal.timeout(5000) });
   const salud = await respuesta.json();
   assert.ok(respuesta.ok && salud.tick > 0 && salud.ultimoTickGuardado > 0);
   await app.flushTape();
@@ -106,19 +166,36 @@ try {
   const huella = corte => createHash('sha256').update(JSON.stringify(corte.baseFrame)).digest('hex');
   const anterior = await leerAntes(consulta);
   assert.ok(anterior.baseFrame);
+  const sha256 = huella(anterior);
   await app.close();
   app = crearPasarela();
   await abrir();
   const leerDespues = await clienteCinta();
   const recuperado = await leerDespues(consulta);
   assert.ok(recuperado.baseFrame);
-  assert.equal(huella(recuperado), huella(anterior));
+  assert.equal(huella(recuperado), sha256);
+  let reanudacion;
+  if (observacion) {
+    const reabierta = await medirSalud('reabierta');
+    assert.ok(reabierta.tick >= salud.tick && reabierta.ultimoTickGuardado === reabierta.tick,
+      'La pasarela debe reabrir el mundo desde el último guardado y conservar el avance observado');
+    app.start();
+    await expect.poll(async () => (await medirSalud('reanudada', false)).tick, { timeout: 15_000 }).toBeGreaterThan(reabierta.tick);
+    reanudacion = { reabierta, reanudada: await medirSalud('reanudada') };
+  }
   const evidencia = { tick: salud.tick, ultimoTickGuardado: salud.ultimoTickGuardado, vistas,
-    recargaCinta: { tick: recuperado.baseFrame.tick, epoca: recuperado.epoca, huellaExacta: true } };
+    recargaCinta: { tick: recuperado.baseFrame.tick, epoca: recuperado.epoca, sha256, huellaExacta: true },
+    ...(observacion && { sostenida: { ...observacion, reanudacion } }) };
   writeFileSync(join(salida, 'observacion.json'), JSON.stringify(evidencia, null, 2) + '\n', { mode: 0o600 });
   console.log(JSON.stringify(evidencia));
 } finally {
-  await navegador?.close();
-  await app.close();
-  rmSync(mundo, { recursive: true, force: true });
+  try { await navegador?.close(); }
+  finally {
+    try { await app?.close(); }
+    finally {
+      rmSync(mundo, { recursive: true, force: true });
+      process.off('SIGINT', interrumpir);
+      process.off('SIGTERM', interrumpir);
+    }
+  }
 }

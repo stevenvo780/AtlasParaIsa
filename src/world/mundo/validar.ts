@@ -123,7 +123,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   const v23 = paramsOf(w).v23;
   const limits = limitsOf(w, expectedVersion);
   const populationCap = ley(w, 'natalidad') ? Infinity : Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
-  if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick);
+  if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick, v23.tecnica);
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };

@@ -951,10 +951,10 @@ export function assertCompoundLots(lots: unknown): void {
   });
 }
 
-export function assertChemistryState(state: unknown, tick: number): void {
+export function assertChemistryState(state: unknown, tick: number, tecnicaV23 = false): void {
   if (!isRecord(state)) throw new TypeError('chemistry: estado ausente');
   const { formulas, formulaCounter, lotCounter, byOperator, maxTemperatureTier } = state;
-  if (!Array.isArray(formulas) || formulas.length > MAX_FORMULAS) throw new RangeError('chemistry.formulas: arreglo inválido o sobre el tope');
+  if (!Array.isArray(formulas) || !tecnicaV23 && formulas.length > MAX_FORMULAS) throw new RangeError('chemistry.formulas: arreglo inválido o sobre el tope');
   if (!nonNegativeInteger(formulaCounter) || formulaCounter < formulas.length) throw new RangeError('chemistry.formulaCounter inválido');
   if (!nonNegativeInteger(lotCounter)) throw new RangeError('chemistry.lotCounter inválido');
   if (!isRecord(byOperator) || Object.keys(byOperator).length !== OPERATORS.length || !OPERATORS.every(op => nonNegativeInteger(byOperator[op]))) {

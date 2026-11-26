@@ -183,7 +183,7 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
   d.fase(6);
   medirFase(medicion, 'checkpoint', () => {
     if (queda('memoriaTecnica') && catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
-    advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
+    advanceTechnologyCheckpoint(world.technology, world.people, world.tick, v);
   });
   d.publicarFilas();
   d.gancho('F6');

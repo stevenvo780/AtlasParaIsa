@@ -138,7 +138,10 @@ parar_v22() {
 construir() {
   "${git_repo[@]}" worktree add --detach "$release" "$sha"
   cp -a --reflink=auto -- "$repo/node_modules/." "$release/node_modules"
-  (cd -- "$release" && npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null npm_config_offline=true npm run build)
+  : > "$expediente/npm-user.conf"
+  : > "$expediente/npm-global.conf"
+  (cd -- "$release" && npm_config_userconfig="$expediente/npm-user.conf" \
+    npm_config_globalconfig="$expediente/npm-global.conf" npm_config_offline=true npm run build)
   [[ -f $release/dist/client/index.html && -f $release/dist/server/server/main.js ]] || fallar 'faltan los entrypoints del build'
 }
 

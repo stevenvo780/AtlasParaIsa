@@ -19,6 +19,7 @@ import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../s
 import type { LegacyRecord } from '../../shared/demography.js';
 import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
+import { digestCronicaHasta, type ChronicleJournal } from '../chronicle-journal.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { BrokerPercepcionGpu, resolverDuenosPercepcionGpu,
@@ -48,7 +49,7 @@ import {
 } from './contexto.js';
 import { Clase, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { crearCorteGuardado, type CorteGuardadoSellado } from './corte-sellado.js';
-import { migrantesDelCorte, prepararCorteTransferido, reunirCorte, type AcuseCorteTransferido, type CapturaCorteTransferido,
+import { estadoAdmiteSolape, migrantesDelCorte, prepararCorteTransferido, reunirCorte, type AcuseCorteTransferido, type CapturaCorteTransferido,
   type IdentidadCorteTransferido, type OpcionesReunionCorte } from './corte-transferido.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import {
@@ -390,6 +391,7 @@ class MotorDuenos implements Motor {
   #tabla!: TablaOrganismosSoA;
   #cabecera!: World;
   #tecnologiaInicial: ParteMundo['technology'] | undefined;
+  #tecnologiaDurable: ParteMundo['technology'] | undefined;
   #ultimaInstantanea: {
     world: WeakRef<World>;
     tick: number;
@@ -397,7 +399,7 @@ class MotorDuenos implements Motor {
     tecnologiaRemotaEquivalente: boolean;
     bajasTick: LegacyRecord[];
   } | null = null;
-  #ultimoCorteTransferido: IdentidadCorteTransferido | null = null;
+  #ultimoCorteTransferido: (IdentidadCorteTransferido & { prefijoCronica?: ChronicleJournal }) | null = null;
   #bajasConfirmadas: { tick: number; bajas: LegacyRecord[] } | null = null;
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
@@ -440,6 +442,7 @@ class MotorDuenos implements Motor {
     this.#perfilPaso = undefined;
     this.#ultimaInstantanea = null;
     this.#ultimoCorteTransferido = null;
+    this.#tecnologiaDurable = undefined;
     this.#bajasConfirmadas = null;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
@@ -529,6 +532,7 @@ class MotorDuenos implements Motor {
       brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
       destinatariosGarantias: destinatariosDeGarantias(garantias),
       emisionFotogramaDuenos: this.#config.emisionFotogramaDuenos, limiteBytesFotoDueno,
+      solapeGuardado: this.#config.solapeGuardado,
     };
     const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {
@@ -567,7 +571,7 @@ class MotorDuenos implements Motor {
     const inicio = performance.now();
     try {
       this.#ultimaInstantanea = null;
-      this.#ultimoCorteTransferido = null;
+      if (!this.#ultimoCorteTransferido?.prefijoCronica) this.#ultimoCorteTransferido = null;
       this.#bajasConfirmadas = null;
       m.tick++;
       control[CTL.tick] = m.tick;
@@ -836,7 +840,7 @@ class MotorDuenos implements Motor {
     });
   }
 
-  capturarCorteTransferido(): CapturaCorteTransferido | undefined {
+  capturarCorteTransferido(permitirSolape = false): CapturaCorteTransferido | undefined {
     if (this.#fatal) throw this.#fatal;
     const canales = this.#canalesCorte;
     const coordinador = this.#mundo;
@@ -844,14 +848,23 @@ class MotorDuenos implements Motor {
     const opciones = this.#opcionesCorteGuardado();
     try {
       const epoca = this.#epoca, { tick, eventCounter } = coordinador;
-      const solicitud = this.#barreraCorte(opciones)!;
+      const comprobarTecnologia = this.#config.confirmarGuardadoVivo === true;
+      const diario = coordinador.chronicleJournal;
+      const bajasPrevias = this.#bajasConfirmadas?.tick === tick ? this.#bajasConfirmadas.bajas : [];
+      const comprobarSolape = permitirSolape && comprobarTecnologia && this.#tecnologiaDurable !== undefined
+        && diario !== undefined && diario.committedThrough + diario.pending.length === eventCounter && bajasPrevias.length === 0
+        && estadoAdmiteSolape(coordinador)
+        && isDeepStrictEqual(sinCheckpointTecnologia(coordinador.technology), this.#tecnologiaDurable);
+      const solicitud = this.#barreraCorte(opciones, comprobarSolape)!;
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();
-      const comprobarTecnologia = this.#config.confirmarGuardadoVivo === true;
+      // Recoger los avisos de la barrera puede añadir un retiro al archivo local.
+      const prefijoCronica = comprobarSolape && diario && estadoAdmiteSolape(coordinador)
+        && remoto.sobres.every(sobre => sobre.admiteSolape === true) ? { ...diario, pending: diario.pending.slice() } : undefined;
       const captura = prepararCorteTransferido({ coordinador, cabecera: this.#cabecera, siguientes: this.#contadores.siguientes(),
         remoto, migrantes: migrantesDelCorte(pendientes), materia: this.#d.instantaneaMateria(pendientes),
-        bajasPrevias: this.#bajasConfirmadas?.tick === tick ? this.#bajasConfirmadas.bajas : [], opciones, comprobarTecnologia });
-      this.#ultimoCorteTransferido = comprobarTecnologia ? { solicitud, epoca, tick, eventCounter } : null;
+        bajasPrevias, opciones, comprobarTecnologia, admiteSolape: prefijoCronica !== undefined });
+      this.#ultimoCorteTransferido = comprobarTecnologia ? { solicitud, epoca, tick, eventCounter, prefijoCronica } : null;
       return captura;
     } catch (error) { throw this.#fallo(error); }
   }
@@ -864,8 +877,8 @@ class MotorDuenos implements Motor {
     };
   }
 
-  #barreraCorte({ prepararFauna, prepararTeselas, prepararPersonas }: OpcionesReunionCorte): bigint | undefined {
-    const solicitud = this.#canalesCorte?.pedir(prepararFauna, prepararTeselas, prepararPersonas);
+  #barreraCorte({ prepararFauna, prepararTeselas, prepararPersonas }: OpcionesReunionCorte, comprobarSolape = false): bigint | undefined {
+    const solicitud = this.#canalesCorte?.pedir(prepararFauna, prepararTeselas, prepararPersonas, comprobarSolape);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
@@ -907,10 +920,42 @@ class MotorDuenos implements Motor {
     const meta = this.#ultimoCorteTransferido, m = this.#mundo;
     const { solicitud, epoca, tick, eventCounter, tecnologiaRemotaEquivalente, cronica, historia, tecnologia, bajas } = acuse;
     if (!meta || meta.solicitud !== solicitud || meta.epoca !== epoca || meta.tick !== tick || meta.eventCounter !== eventCounter
-      || this.#epoca !== epoca || m.tick !== tick || m.eventCounter !== eventCounter) return false;
+      || this.#epoca !== epoca || m.tick < tick || m.eventCounter < eventCounter) return false;
     this.#ultimoCorteTransferido = null;
     if (!tecnologiaRemotaEquivalente) return false;
+    if (m.tick > tick) return !!meta.prefijoCronica && this.#confirmarPrefijo(acuse, meta.prefijoCronica);
+    if (m.eventCounter !== eventCounter) return false;
     return this.#confirmarDiarios(cronica, historia, tecnologia, bajas);
+  }
+
+  /** El corte admitido tenía las colas retiradas vacías y la misma tecnología que el durable anterior. */
+  #confirmarPrefijo(acuse: AcuseCorteTransferido, prefijo: ChronicleJournal): boolean {
+    const m = this.#mundo;
+    const vivo = m.chronicleJournal;
+    const { tick, eventCounter, cronica, historia, tecnologia, bajas } = acuse;
+    if (bajas.length || !isDeepStrictEqual(sinCheckpointTecnologia(tecnologia), this.#tecnologiaDurable)) return false;
+    if (!vivo || !cronica || cronica.version !== prefijo.version || vivo.version !== prefijo.version
+      || cronica.startsAfter !== prefijo.startsAfter || vivo.startsAfter !== prefijo.startsAfter
+      || vivo.committedThrough !== prefijo.committedThrough || vivo.committedDigest !== prefijo.committedDigest
+      || cronica.committedThrough !== eventCounter || cronica.pending.length !== 0
+      || prefijo.committedThrough + prefijo.pending.length !== eventCounter
+      || vivo.committedThrough + vivo.pending.length !== m.eventCounter
+      || prefijo.pending.some((evento, i) => evento !== vivo.pending[i])
+      || digestCronicaHasta(prefijo.committedDigest, prefijo.pending) !== cronica.committedDigest) return false;
+
+    // La muestra del tick del corte pertenece a la historia, detrás de las anteriores y antes del sufijo vivo.
+    const muestra = historia.at(-1);
+    let historiaViva = m.history;
+    if (muestra?.tick === tick && !historiaViva.some(entrada => entrada.tick === tick)) {
+      const posterior = historiaViva.findIndex(entrada => entrada.tick > tick);
+      historiaViva = historiaViva.slice();
+      historiaViva.splice(posterior === -1 ? historiaViva.length : posterior, 0, structuredClone(muestra));
+      historiaViva = historiaViva.slice(-96);
+    }
+    m.chronicleJournal = { ...vivo, committedThrough: eventCounter, committedDigest: cronica.committedDigest,
+      pending: vivo.pending.slice(prefijo.pending.length) };
+    m.history = historiaViva;
+    return true;
   }
 
   #confirmarDiarios(cronica: World['chronicleJournal'], historia: World['history'], tech: World['technology'],
@@ -928,6 +973,7 @@ class MotorDuenos implements Motor {
     const diarioConfirmado = structuredClone(cronica);
     const historiaConfirmada = structuredClone(historia);
     const tecnologiaConfirmada = { ...candidataTech, checkpoint: undefined };
+    const tecnologiaDurable = this.#config.solapeGuardado ? structuredClone(sinCheckpointTecnologia(tecnologiaConfirmada)) : undefined;
     const bajasConfirmadas = bajas.length ? { tick: m.tick, bajas: structuredClone(bajas) } : null;
 
     // Fase 2 (mutación viva tras COMMIT): nunca toca buzones ni garantías en vuelo.
@@ -946,6 +992,7 @@ class MotorDuenos implements Motor {
       m.retiredChunks = [];
       m.retiredLegacy = [];
       m.technology = tecnologiaConfirmada;
+      this.#tecnologiaDurable = tecnologiaDurable;
       const contexto = { ...worldContext(m), ...contextoGuardado };
       if (contexto.loadChunk || contexto.loadLegacy || contexto.catalogueReader) {
         bindWorldContext(m, contexto);

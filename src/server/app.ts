@@ -30,6 +30,7 @@ import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
 import { PersistidorGuardado, type GuardadoConfirmado } from './guardado-worker.js';
+import type { CapturaCorteTransferido } from '../world/motor/corte-transferido.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { readWorldInstance } from './world-instance.js';
@@ -101,7 +102,7 @@ export interface AppOptions {
   /** Laboratorio: confirma guardados rutinarios en los dueños vivos cuando la época no cambia (apagada por defecto). */
   confirmarGuardadoVivo?: boolean;
   /** Laboratorio: reconstruye y escribe el corte rutinario en un hilo de persistencia. */
-  guardadoEnHilo?: Omit<ConstructorParameters<typeof PersistidorGuardado>[0], 'path'>;
+  guardadoEnHilo?: Omit<ConstructorParameters<typeof PersistidorGuardado>[0], 'path'> & { maxTicksSolapados?: number };
 }
 /** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
 export const PASO_PARADO_S = 60;
@@ -577,7 +578,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     ? cintaDeMundo(store.path, options.tapeDirectory) : undefined;
   const baseConfig = usaMotor ? motorConfig(options.seed) : undefined;
   const confirmarGuardadoVivo = options.confirmarGuardadoVivo ?? baseConfig?.confirmarGuardadoVivo ?? false;
-  const config = baseConfig ? { ...baseConfig, confirmarGuardadoVivo } : undefined;
+  const maxTicksSolapados = options.guardadoEnHilo?.maxTicksSolapados ?? 0;
+  if (!Number.isSafeInteger(maxTicksSolapados) || maxTicksSolapados < 0)
+    throw new Error('El adelanto de guardado debe ser una cantidad entera no negativa de ticks.');
+  const config = baseConfig ? { ...baseConfig, confirmarGuardadoVivo, solapeGuardado: maxTicksSolapados > 0 } : undefined;
   const conDuenos = usaMotor && config!.hilos !== 1;
   if (!gateway && options.guardadoEnHilo && (!conDuenos || !confirmarGuardadoVivo || !config?.instantaneaTransferible
     || !ley(world, 'guardadoCompleto') || store.path === ':memory:')) {
@@ -617,16 +621,26 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (!motor || !conDuenos) return world;
     const ahora = performance.now();
     if (!lecturaMotor || lecturaMotor.tick !== tickMotor && (forzar || ahora - ultimaLecturaMotor >= TURBO_MIRROR_MS)) {
-      lecturaMotor = motor.vista();
+      lecturaMotor = leerDuranteGuardado(() => motor.vista());
       vistasGlobalesMotor++;
       ultimaLecturaMotor = ahora;
     }
     return lecturaMotor;
   }
   let ultimoTickGuardado = world?.tick ?? 0;
+  let ultimoCorteSinSolape = ultimoTickGuardado;
   let ultimoGuardadoEn: number | null = gateway ? null : loaded?.savedAt ?? null;
   let persistidor: PersistidorGuardado | undefined;
   let pasoEnCurso: Promise<void> | undefined;
+  let guardadoEnVuelo: {
+    tick: number;
+    fin: Promise<undefined>;
+    recuperacion?: { error: unknown; tick: number };
+  } | undefined;
+  function esperarGuardado() { return pasoEnCurso ?? guardadoEnVuelo?.fin; }
+  function leerDuranteGuardado<T>(leer: () => T): T {
+    return guardadoEnVuelo ? store.leerPasoSolapado(leer) : leer();
+  }
   function guardarMundo(draft: World, recibos: Recibos = [], sesiones: string[] = [], cambios: readonly SnapshotReplayChange[] = []): Instantanea | undefined {
     const completo = ley(draft, 'guardadoCompleto');
     const sello = completo ? motor?.corteGuardadoSellado?.() : undefined;
@@ -638,7 +652,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       else store.save(instantanea?.world ?? draft, recibos, sesiones, cambios);
     }
     const duradero = instantanea?.world ?? draft;
-    ultimoTickGuardado = duradero.tick;
+    ultimoTickGuardado = ultimoCorteSinSolape = duradero.tick;
     ultimoGuardadoEn = Date.now();
     return instantanea;
   }
@@ -656,6 +670,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   function adoptarGuardadoEnHilo(acuse: GuardadoConfirmado): void {
     lecturaMotor = undefined;
     if (motor?.confirmarCorteTransferido?.(acuse)) return;
+    if (acuse.tick !== tickMotor) throw new Error('El motor no pudo confirmar el prefijo durable del corte anterior.');
     // El motor sigue en el tick del corte. Si el acuse no se puede instalar en vivo,
     // se reconstruye la época desde el mismo COMMIT, como en el guardado local.
     const carga = cargarGuardado(store, options.deployment);
@@ -666,6 +681,36 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     motor.cargar({ world: carga.world, materia: carga.materia }, carga.epoca);
     epoca = carga.epoca;
     world = carga.world;
+  }
+  function anotarGuardadoEnHilo(acuse: GuardadoConfirmado, solapado = false): void {
+    ultimoTickGuardado = acuse.tick;
+    if (!solapado) ultimoCorteSinSolape = acuse.tick;
+    ultimoGuardadoEn = acuse.guardadoEn;
+    store.lastSnapshotBytes = acuse.snapshotBytes;
+    lastWorldSaveAt = monotonicNow();
+  }
+  function iniciarGuardadoSolapado(captura: CapturaCorteTransferido): void {
+    const tick = captura.corte.tick;
+    const respuesta = persistidor!.guardar(captura, true);
+    const vuelo: NonNullable<typeof guardadoEnVuelo> = {
+      tick,
+      fin: respuesta.then(acuse => {
+        guardadoEnVuelo = undefined;
+        anotarGuardadoEnHilo(acuse, true);
+        if (vuelo.recuperacion) recuperarPaso(vuelo.recuperacion.error, false, vuelo.recuperacion.tick);
+        else {
+          try { adoptarGuardadoEnHilo(acuse); }
+          catch (error) { recuperarPaso(error, false, tickMotor); }
+        }
+        return undefined;
+      }, (error: unknown) => {
+        guardadoEnVuelo = undefined;
+        pausarPorGuardado(error, tick, !!vuelo.recuperacion);
+        acabarPaso();
+        return undefined;
+      }).finally(() => { options.onOperacion?.(null); }),
+    };
+    guardadoEnVuelo = vuelo;
   }
   let stopped = false;
   /** El hilo `carta-tape` abre el catálogo, comprime y sincroniza los bloques fuera de la simulación. */
@@ -843,7 +888,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     return { tipo: 'suceso', t: suceso.tick, importancia, suceso };
   }
   function prepararCinta(): void {
-    if (!grabador || failed || aMedioPaso) return;
+    // Reabrir la cinta puede enlazar otra época. El escritor debe haber soltado el corte anterior.
+    if (!grabador || failed || aMedioPaso || guardadoEnVuelo) return;
     grabador.comprobarCredito(options.tapeSinCreditoMs);
     const arranque = grabador.iniciar();
     if (!grabador.activo || !arranque && epocaCinta === epoca) return;
@@ -1236,6 +1282,17 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (pasoEnCurso) return pasoEnCurso;
     const desde = relojReal();
     if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
+    const vuelo = guardadoEnVuelo;
+    if (vuelo && (vuelo.recuperacion || pending.size > 0 || pendingWhispers.length > 0
+      || tickMotor - vuelo.tick >= maxTicksSolapados
+      || (tickMotor + 1) % paramsOf(world).persistencia.cadaTicks === 0)) {
+      const barrera: Promise<void> = vuelo.fin.then(() => {
+        pasoEnCurso = undefined;
+        if (!stopped && !failed) return stepOnce();
+      });
+      pasoEnCurso = barrera;
+      return barrera;
+    }
     // A saturated recorder yields this event-loop turn without advancing or dropping a tick.
     if (options.beforeStep?.() === false) return;
     const avance = avanzar();
@@ -1243,30 +1300,33 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     let tramo;
     try { tramo = avance.next(); } finally { enPaso = false; anotarOcupado(desde); }
     if (tramo.done) { acabarPaso(); return; }
-    pasoEnCurso = tramo.value.then(
-      acuse => reanudar(() => avance.next(acuse)),
-      error => reanudar(() => avance.throw(error)),
-    ).finally(() => { pasoEnCurso = undefined; });
+    pasoEnCurso = seguirTrasPausa(tramo.value).finally(() => { pasoEnCurso = undefined; });
     return pasoEnCurso;
 
-    function reanudar(continuar: () => void): void {
+    function seguirTrasPausa(pausa: Promise<GuardadoConfirmado | undefined>): Promise<void> {
+      return pausa.then(acuse => reanudar(() => avance.next(acuse)), error => reanudar(() => avance.throw(error)));
+    }
+    function reanudar(continuar: () => ReturnType<typeof avance.next>): void | Promise<void> {
       const desde = relojReal();
       enPaso = true;
-      try { continuar(); } finally { enPaso = false; anotarOcupado(desde); }
+      let tramo;
+      try { tramo = continuar(); } finally { enPaso = false; anotarOcupado(desde); }
+      if (!tramo.done) return seguirTrasPausa(tramo.value);
       acabarPaso();
     }
   }
   function acabarPaso() {
+    if (guardadoEnVuelo?.recuperacion) return;
     try {
       prepararCinta();
-      grabarCinta();
+      leerDuranteGuardado(grabarCinta);
       options.afterStep?.(simHz);
     } catch (error) {
       if (!motor) throw error;
       recuperarPaso(error, false, tickMotor);
     }
   }
-  function* avanzar(): Generator<Promise<GuardadoConfirmado>, void, GuardadoConfirmado> {
+  function* avanzar(): Generator<Promise<GuardadoConfirmado | undefined>, void, GuardadoConfirmado | undefined> {
     susurrosEnUltimoPaso = false;
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
@@ -1364,7 +1424,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
       };
       const gestos = valid.map(item => item.gesture);
-      const pasoMotor = motor?.paso(gestos);
+      const pasoMotor = motor && (guardadoEnVuelo ? store.leerPasoSolapado(() => motor.paso(gestos)) : motor.paso(gestos));
       if (pasoMotor) tickMotor = pasoMotor.tick;
       const results = pasoMotor?.resultados ?? stepWorld(draft, gestos, contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;
@@ -1388,26 +1448,39 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       const presionDiarios = !guardarEntradas && (technologyJournalNearCapacity(draft.technology)
         || chronicleJournalNearCapacity(draft) || technologyCatalogueNearCapacity(draft.technology));
       if (guardarEntradas || routineSaveDue || presionDiarios) {
+        if (guardadoEnVuelo) {
+          // La presión descubierta dentro del paso exige instalar el prefijo anterior antes de escribir.
+          const epocaDelPaso = epoca;
+          yield guardadoEnVuelo.fin;
+          if (failed || epoca !== epocaDelPaso) return;
+        }
         const saveStarted = monotonicNow();
         guardando = true;
+        let solapado = false;
         if (options.guardadoEnHilo && !guardarEntradas && !presionDiarios) {
           options.onOperacion?.('guardando');
           try {
-            const captura = motor?.capturarCorteTransferido?.();
+            const ventana = paramsOf(draft).persistencia.ventanaEventosTicks;
+            const requiereMantenimiento = ventana > 0 && tick - ultimoCorteSinSolape >= ventana;
+            const habilitarSolape = maxTicksSolapados > 0 && !requiereMantenimiento && store.admiteGuardadoSolapado();
+            const captura = motor?.capturarCorteTransferido?.(habilitarSolape);
             if (captura) {
-              persistidor ??= new PersistidorGuardado({ ...options.guardadoEnHilo, path: store.path });
-              acuse = yield persistidor.guardar(captura);
-              ultimoTickGuardado = acuse.tick;
-              ultimoGuardadoEn = acuse.guardadoEn;
-              store.lastSnapshotBytes = acuse.snapshotBytes;
+              const { maxTicksSolapados: _adelanto, ...opcionesPersistidor } = options.guardadoEnHilo;
+              persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, path: store.path });
+              if (captura.admiteSolape) { iniciarGuardadoSolapado(captura); solapado = true; }
+              else {
+                acuse = yield persistidor.guardar(captura);
+                if (!acuse) throw new Error('Falta el acuse del escritor de guardado.');
+                anotarGuardadoEnHilo(acuse);
+              }
             }
-          } finally { options.onOperacion?.(null); }
+          } finally { if (!solapado) options.onOperacion?.(null); }
         }
-        if (!acuse) guardado = duranteOperacion('guardando', () => guardarMundo(draft,
+        if (!acuse && !solapado) guardado = duranteOperacion('guardando', () => guardarMundo(draft,
           valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
           [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios));
         guardando = false; cambiosPendientes.length = 0;
-        lastWorldSaveAt = monotonicNow();
+        if (!acuse && !solapado) lastWorldSaveAt = monotonicNow();
         runtime.saveMs = monotonicNow() - saveStarted;
       }
       if (!motor) world = draft;
@@ -1512,28 +1585,24 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         return;
       }
       if (guardando) {
-        console.error(`El guardado del paso ${tickObjetivo} falló: ${motivo}`);
-        // Simular sin poder guardar perdería mundo y confirmaría lo que no es durable: se conserva
-        // la pausa protectora. `/health` dice `parado` y el vigilante externo reinicia el servicio
-        // sobre el último guardado; esa es la recuperación de un fallo de persistencia.
-        failed = true;
-        // Un mundo a medio paso (sin reserva, o con un punto que no se pudo restaurar) no es un estado
-        // del mundo: desde aquí nada lo proyecta ni lo consulta (`view`, `persona`, `recipe`). Guardar ya
-        // no puede: `avanzar` no pasa de `failed` y el cierre no guarda.
-        aMedioPaso = !restaurado;
-        for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
-        pending.clear();
-        rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));
-        // Do not log snapshots, inputs, or personal content on failure.
-        for (const socket of clients.keys()) {
-          send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
-          const previous = clients.get(socket)?.lastView;
-          // Terminal: no habrá más difusiones, así que no espera al acuse del `state` en vuelo.
-          if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
-        }
+        pausarPorGuardado(error, tickObjetivo, !restaurado);
         return;
       }
       recuperarPaso(error, restaurado, tickObjetivo);
+    }
+  }
+  function pausarPorGuardado(error: unknown, tick: number, parcial: boolean): void {
+    const motivo = error instanceof Error ? error.message : String(error);
+    console.error(`El guardado del paso ${tick} falló: ${motivo}`);
+    failed = true;
+    aMedioPaso = parcial;
+    for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
+    pending.clear();
+    rejectWhispers(new HttpError(503, 'No se pudo guardar; el mensaje no fue confirmado.'));
+    for (const socket of clients.keys()) {
+      send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
+      const previous = clients.get(socket)?.lastView;
+      if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
     }
   }
   /**
@@ -1546,6 +1615,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
    * piscina de cómputo: su fallo es permanente y solo un proceso nuevo las vuelve a crear.
    */
   function recuperarPaso(error: unknown, restaurado: boolean, tickObjetivo: number): void {
+    if (guardadoEnVuelo) {
+      // La recuperación abre una época y puede escribir en SQLite. Primero debe resolver el dueño de la escritura actual.
+      guardadoEnVuelo.recuperacion ??= { error, tick: tickObjetivo };
+      aMedioPaso ||= !restaurado;
+      return;
+    }
     const motivo = error instanceof Error ? error.message : String(error);
     if (fallo?.tick === tickObjetivo) fallo.intentos++; else fallo = { tick: tickObjetivo, intentos: 1 };
     const piscinaCaida = !motor && motivo.includes('StaticWorkerPool');
@@ -1609,6 +1684,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     epoca = nuevaEpoca;
     lecturaMotor = undefined;
     tickMotor = ultimoTickGuardado = world.tick;
+    ultimoCorteSinSolape = Math.min(ultimoCorteSinSolape, tickMotor);
     ultimoGuardadoEn = cargado.savedAt;
     recargas++; aMedioPaso = false;
     renovarReserva();
@@ -1652,7 +1728,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         rate(loginGlobal, '*', 600, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
-        if (pasoEnCurso) await pasoEnCurso;
+        const vuelo = esperarGuardado(); if (vuelo) await vuelo;
         const oldHash = sessionHash(req); if (oldHash) sessions.revoke(oldHash);
         const token = makeToken(); sessions.addSession(hashToken(token), Date.now() + 14 * 86400_000);
         res.setHeader('Set-Cookie', cookie(token, !!options.secure));
@@ -1662,7 +1738,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (url.pathname.startsWith('/api/')) {
         const hash = authorized(req);
         if (req.method === 'POST' && url.pathname === '/api/logout') {
-          if (pasoEnCurso) await pasoEnCurso;
+          const vuelo = esperarGuardado(); if (vuelo) await vuelo;
           sessions.revoke(hash); res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
           for (const [socket, client] of clients) if (client.hash === hash) socket.close(4001, 'La sesión terminó.');
           return json(res, 200, { ok: true });
@@ -1957,7 +2033,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud, detallePersona, mundoParaEmision,
-    esperarGuardado() { return pasoEnCurso; },
+    esperarGuardado,
+    get guardadoEnBarrera() { return pasoEnCurso !== undefined; },
     get usaMotor() { return usaMotor; },
     get turbo() { return turbo; },
     get grabaCinta() { return !!grabador; },
@@ -2009,7 +2086,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         } finally {
           try {
             if (!gateway) {
-              try { await pasoEnCurso; } finally { await persistidor?.cerrar(); }
+              try { await esperarGuardado(); } finally { await persistidor?.cerrar(); }
               if (!failed && !aMedioPaso) duranteOperacion('guardando', () => guardarMundo(world));
             }
           } finally {

@@ -775,7 +775,7 @@ async function runSimulation(options: SimWorkerOptions) {
     } satisfies PulsoWorker);
   }
   function atenderDemandaSiLista() {
-    if (closing || !app || app.failed || app.esperarGuardado() || espejosEnVuelo > 0 || !tieneDemanda()) return;
+    if (closing || !app || app.failed || app.guardadoEnBarrera || espejosEnVuelo > 0 || !tieneDemanda()) return;
     if (app.salud().tick <= lastMirrorTick) return;
     const now = performance.now();
     if (!app.turbo || demandaPuntual || espejoAplazadoPorVuelo || now - lastPostAt >= TURBO_MIRROR_MS) publish(false);
@@ -884,7 +884,8 @@ async function runSimulation(options: SimWorkerOptions) {
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
       deployment: options.deployment, tape: options.tape, tapeDirectory: options.tapeDirectory,
       tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
-      guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1' ? opcionesStore : undefined,
+      guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1' ? { ...opcionesStore,
+        maxTicksSolapados: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0') } : undefined,
       onEstadoCinta: error => {
         port.postMessage({ type: 'cinta', error });
         if (error) port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error } });

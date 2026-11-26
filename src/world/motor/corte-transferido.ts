@@ -54,6 +54,7 @@ export interface CorteTransferido extends IdentidadCorteTransferido {
 export interface CapturaCorteTransferido {
   readonly corte: CorteTransferido;
   readonly transferibles: ArrayBuffer[];
+  readonly admiteSolape: boolean;
 }
 
 /** Recibo del persistidor tras COMMIT, limitado a lo necesario para confirmar el estado vivo. */
@@ -65,6 +66,14 @@ export interface AcuseCorteTransferido extends IdentidadCorteTransferido {
   readonly tecnologia: World['technology'];
   readonly tecnologiaRemotaEquivalente: boolean;
   readonly bajas: LegacyRecord[];
+}
+
+/** Este carril solo solapa cortes sin cambios de catálogo/diario técnico ni archivos por escribir. */
+export function estadoAdmiteSolape(mundo: Pick<World, 'technology' | 'retiredLegacy' | 'retiredChunks'>): boolean {
+  const tech = mundo.technology;
+  return mundo.retiredLegacy.length === 0 && mundo.retiredChunks.length === 0
+    && tech.journal !== undefined && tech.journal.pending.length === 0 && tech.executionCounter === tech.journal.committedThrough
+    && tech.catalogue !== undefined && tech.catalogue.pending.length === 0 && tech.recipeCounter === tech.catalogue.committedThrough;
 }
 
 export function migrantesDelCorte(pendientes: readonly Intento[]): Uint8Array[] {
@@ -92,8 +101,9 @@ export function prepararCorteTransferido(datos: Omit<DatosLocales, 'params' | 'c
   materia: MateriaCheckpoint | null;
   opciones: OpcionesReunionCorte;
   comprobarTecnologia: boolean;
+  admiteSolape: boolean;
 }): CapturaCorteTransferido {
-  const { coordinador, cabecera, siguientes, bajasPrevias, remoto, migrantes, materia, opciones, comprobarTecnologia } = datos;
+  const { coordinador, cabecera, siguientes, bajasPrevias, remoto, migrantes, materia, opciones, comprobarTecnologia, admiteSolape } = datos;
   const { eventCounter, tick } = coordinador;
   const tiles = teselasClonables(coordinador.tiles);
   const retiredChunks = coordinador.retiredChunks.map(chunk => {
@@ -123,7 +133,7 @@ export function prepararCorteTransferido(datos: Omit<DatosLocales, 'params' | 'c
     inicial: [...materia.inicial], fuentes: [...materia.fuentes], sumideros: [...materia.sumideros] };
   const corte: CorteTransferido = { solicitud: remoto.solicitud, epoca: remoto.epoca, tick, eventCounter,
     local, remoto, migrantes, materia: copiaMateria, opciones, comprobarTecnologia };
-  return { corte, transferibles: [...transferibles] };
+  return { corte, transferibles: [...transferibles], admiteSolape };
 }
 
 /** El persistidor conserva las capacidades de su propio Store y las filas verificadas por el decodificador. */

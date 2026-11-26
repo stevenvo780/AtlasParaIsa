@@ -28,6 +28,7 @@ import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../worl
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { consumirCorteGuardado, type CorteGuardadoSellado } from '../world/motor/corte-sellado.js';
+import { estadoAdmiteSolape } from '../world/motor/corte-transferido.js';
 import type { TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
 import type { PersonasCorteVerificadas } from '../world/motor/personas-corte.js';
 import type { TeselasCorteVerificadas } from '../world/motor/teselas-corte.js';
@@ -539,11 +540,18 @@ export class Store {
     }
     return memo;
   }
-  /** Only this synchronous validation owns the read snapshot and its temporary
+  /** Mantiene una única vista WAL durante el paso o la proyección síncrona que lee archivos. */
+  leerPasoSolapado<T>(leer: () => T): T {
+    if (this.db.isTransaction && this.technologyReads === null)
+      throw new Error('La lectura del paso solapado requiere una transacción de lectura propia.');
+    return this.withTechnologyReads(undefined, leer);
+  }
+
+  /** Only this synchronous read owns the snapshot and its temporary
    * resolution memory. Neither caller-owned transactions nor subsequent saves
    * can reuse it. Every miss keeps the archive's complete validation path. */
-  private withTechnologyReads(world: World, validate: () => void): void {
-    if (this.db.isTransaction || this.schemaVersion < 4) { validate(); return; }
+  private withTechnologyReads<T>(world: World | undefined, read: () => T): T {
+    if (this.db.isTransaction || this.schemaVersion < 4) return read();
     this.db.exec('BEGIN');
     try {
       this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
@@ -551,12 +559,13 @@ export class Store {
       const currentEpoch = `${before.dataVersion}:${before.totalChanges}:${before.schemaCookie}:${before.tempSchemaCookie}`;
       const warmMemo = this.archivedRecipes && this.archivedRecipes.epoch === currentEpoch ? this.archivedRecipes : null;
       this.technologyArchive.beginHostTransaction();
-      this.technologyReads = { limit: Math.max(ARCHIVED_RECIPE_MEMO_LIMIT, world.technology.recipes.length), recipes: new Map(), warmMemo };
-      validate();
+      this.technologyReads = { limit: Math.max(ARCHIVED_RECIPE_MEMO_LIMIT, world?.technology.recipes.length ?? 0), recipes: new Map(), warmMemo };
+      const result = read();
       if (!this.db.isTransaction || !sameChronicleStamp(before, this.chronicleStamp()))
         technologyFailure('database changed during technology validation');
       this.db.exec('COMMIT');
       this.technologyArchive.acknowledgeHostCommit();
+      return result;
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
@@ -1849,9 +1858,25 @@ export class Store {
     return instantanea;
   }
 
+  /** Preadmisión del anfitrión. El escritor repite la prueba bajo el candado de escritura. */
+  admiteGuardadoSolapado(): boolean {
+    return !this.readOnly && this.path !== ':memory:' && this.schemaVersion >= 5
+      && !this.chronicleHasTriggers() && this.readCompleteEpoch() !== null && !this.requiereAgenda()
+      && this.technologyChainRecord()?.version === 2
+      && this.db.prepare('PRAGMA main.journal_mode').get()?.journal_mode === 'wal';
+  }
+
+  guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number): Instantanea {
+    const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
+    if (!Number.isSafeInteger(epocaCorte) || epocaCorte < 0 || instantanea.materia && instantanea.materia.epoca !== epocaCorte)
+      throw new SnapshotSemanticError('La materia no corresponde a la época del corte solapado.');
+    this.guardarCompleto(instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte);
+    return instantanea;
+  }
+
   private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
-    teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas): void {
+    teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
@@ -1865,14 +1890,16 @@ export class Store {
       corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
-    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas);
+    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas, epocaSolapada);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
     faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas,
-    personasVerificadas?: PersonasCorteVerificadas): void {
+    personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number): void {
     const complete = matter !== undefined;
+    const solapado = epocaSolapada !== undefined;
+    if (solapado && !estadoAdmiteSolape(world)) throw new SnapshotSemanticError('El corte solapado contiene cambios en los archivos.');
     const matterParts = matter && !(matter instanceof Uint8Array) ? matter : null;
     let matterBody = matter instanceof Uint8Array ? matter : null;
     if (Object.hasOwn(world, CAMPO_AGENDA)) throw new SnapshotSemanticError('Campo reservado para el corte durable de la agenda territorial.');
@@ -1928,7 +1955,8 @@ export class Store {
     // head. Bound pruning by every retained anchor, even after flag rollback.
     const replayRetained = !complete
       && (replayEnabled || !!this.db.prepare('SELECT 1 FROM main.metadata WHERE key GLOB ? LIMIT 1').get(REPLAY_KEY + '*'));
-    const configuredWindow = paramsOf(world).persistencia.ventanaEventosTicks;
+    // Un lector que sigue avanzando puede necesitar un archivo de antes del COMMIT.
+    const configuredWindow = solapado ? 0 : paramsOf(world).persistencia.ventanaEventosTicks;
     let window = configuredWindow;
     let prunes = window > 0 && world.tick - this.lastPruneTick >= window;
     const changedRecipeIds = new Set((world.technology.catalogue?.pending ?? world.technology.recipes).map(recipe => recipe.id));
@@ -1961,6 +1989,10 @@ export class Store {
     let chronicleTriggers = false;
     try {
       const epoca = this.readCompleteEpoch();
+      chronicleTriggers = this.chronicleHasTriggers();
+      if (epocaSolapada !== undefined && (epoca === null || epocaSolapada < epoca || !this.admiteGuardadoSolapado()
+        || !estadoAdmiteSolape(world) || this.technologyArchive.getHistoryOrigin()?.startsAfter !== world.technology.journal?.startsAfter))
+        throw new SnapshotSemanticError('El archivo cambió o perdió las condiciones del guardado solapado.');
       if (complete && !agenda && this.requiereAgenda())
         throw new SnapshotSemanticError('Este mundo requiere guardar su corte de agenda territorial.');
       if (agenda && epoca !== null && agenda.corte.epoca !== epoca)
@@ -1979,7 +2011,6 @@ export class Store {
       // Otra conexión puede confirmar entre el snapshot de lectura y BEGIN IMMEDIATE. Si cambió
       // el archivo, revalidar los vínculos del candidato sobre la versión que vamos a escribir.
       if (validatedInReadSnapshot && !sameChronicleStamp(chronicleStamp, this.chronicleStamp())) validateBeforeWrite();
-      chronicleTriggers = this.chronicleHasTriggers();
       const matterStillVerified = epoca !== null && !chronicleTriggers
         && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))
         && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
@@ -1999,11 +2030,18 @@ export class Store {
         if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
       }
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
+      const cambiosAntesDeTecnologia = solapado ? this.totalChanges() : undefined;
       const technologyChain = this.flushTechnology(world);
+      if (solapado) {
+        const head = this.technologyChainRecord();
+        if (this.totalChanges() !== cambiosAntesDeTecnologia || head?.version !== 2
+          || head.startsAfter !== technologyChain.startsAfter || head.through !== technologyChain.through || head.digest !== technologyChain.digest)
+          throw new SnapshotSemanticError('El corte solapado alteró la frontera del archivo tecnológico.');
+      }
       technologyPruned = this.pruneTechnology(world, window, rotatesBackups, deep);
       statsCompacted = this.compactTechnologyStats(world, window, rotatesBackups, deep);
       this.technologyArchive.observeHostWrites(() => {
-      if (this.schemaVersion >= 4) this.writeTechnologyMetadata(technologyChain, technologyPruned);
+      if (this.schemaVersion >= 4 && !solapado) this.writeTechnologyMetadata(technologyChain, technologyPruned);
       this.flushChronicle(world);
       const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
       for (const record of world.retiredLegacy) {

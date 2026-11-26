@@ -11,6 +11,7 @@
  * Con dueños están encendidas todas las leyes. La demografía base sigue evaluando edad, daño y muerte en cada heap.
  */
 import { deserialize } from 'node:v8';
+import { isDeepStrictEqual } from 'node:util';
 import type { MessagePort } from 'node:worker_threads';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { conRejillaFauna } from '../animals.js';
@@ -34,8 +35,10 @@ import { conectarBuzon, type MemoriaBuzones } from './buzon.js';
 import { Contadores } from './contadores.js';
 import { AVISO, CTL, CTL_DUENO, Dueno, celdaDueno, type PiezasDueno } from './contexto.js';
 import type { Hilo } from './contratos.js';
+import { estadoAdmiteSolape } from './corte-transferido.js';
 import { enviarParteCorte, enviarParteFoto, type SolicitudCorte } from './mensajes-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
+import { sinCheckpointTecnologia } from './reunir.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
 export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7, confirmarGuardado: 8 } as const;
@@ -63,6 +66,7 @@ export interface DatosDueno {
   params: WorldParams;
   epoca: number;
   solicitudCorte?: SolicitudCorte;
+  solapeGuardado?: boolean;
   brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
@@ -103,6 +107,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
   const solicitud = datos.solicitudCorte;
   if ((solicitud === undefined) !== (puertoCorte === undefined)) throw new Error('Canal de corte incompleto al abrir el dueño.');
   const mundo = deserialize(datos.cabecera) as World;
+  const tecnologiaBase = datos.solapeGuardado && solicitud ? structuredClone(sinCheckpointTecnologia(mundo.technology)) : undefined;
   setParams(mundo, datos.params);
   const azar = azarDeHilo(datos.semilla, hilo), contadores = new Contadores(datos.contadores);
   ligarCompartido(mundo, TablaOrganismosSoA.conectar(datos.tabla, hilo), TerrenoPercepcion.conectarDueno(datos.terreno, hilo), contadores,
@@ -123,7 +128,10 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;
   const control = piezas.control!;
-  const publicarCorte = puertoCorte && solicitud ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo) : undefined;
+  const admiteSolape = tecnologiaBase ? () => estadoAdmiteSolape(mundo)
+    && isDeepStrictEqual(sinCheckpointTecnologia(mundo.technology), tecnologiaBase) : undefined;
+  const publicarCorte = puertoCorte && solicitud
+    ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo, admiteSolape) : undefined;
   return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.destinatariosGarantias, datos.perfilActuar, publicarCorte);
 }
 

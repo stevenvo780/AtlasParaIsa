@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ChronicleEvent } from '../shared/types.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
@@ -118,4 +119,10 @@ export function chronicleForCommit(world: ChronicleHost, digest: string): Chroni
   assertChronicleJournal(world);
   return { version: 1, startsAfter: world.chronicleJournal!.startsAfter,
     committedThrough: world.eventCounter, committedDigest: digest, pending: [] };
+}
+
+/** Avanza el sello durable sobre un prefijo exacto, en el orden del diario. */
+export function digestCronicaHasta(digest: string, prefijo: readonly ChronicleEvent[]): string {
+  for (const event of prefijo) digest = createHash('sha256').update(`${digest}\n${JSON.stringify(event)}`).digest('hex');
+  return digest;
 }

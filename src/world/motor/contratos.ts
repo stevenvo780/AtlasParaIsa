@@ -406,7 +406,7 @@ export interface Motor {
   /** Solo cuando el motor puede entregar la captura sin compartirla antes de Store. */
   corteGuardadoSellado?(): import('./corte-sellado.js').CorteGuardadoSellado | undefined;
   /** Captura binaria fuera del paso para un persistidor en otro hilo. */
-  capturarCorteTransferido?(): import('./corte-transferido.js').CapturaCorteTransferido | undefined;
+  capturarCorteTransferido?(permitirSolape?: boolean): import('./corte-transferido.js').CapturaCorteTransferido | undefined;
   /** Aplica al corte identificado la misma confirmación viva que el guardado local. */
   confirmarCorteTransferido?(acuse: import('./corte-transferido.js').AcuseCorteTransferido): boolean;
   /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.
@@ -558,6 +558,8 @@ export interface MotorConfig {
   medirPaso?: boolean;
   /** Laboratorio: confirma guardados rutinarios sobre los dueños vivos sin recrear piscina ni arenas (apagada por defecto). */
   confirmarGuardadoVivo?: boolean;
+  /** Laboratorio: conserva la frontera durable para confirmar un corte después de avanzar otros ticks. */
+  solapeGuardado?: boolean;
   /** Laboratorio: emite vistas lentas del fotograma binario desde cada dueño en F6 sin reunir el mundo completo (apagada por defecto). */
   emisionFotogramaDuenos?: boolean;
   /** Laboratorio: tope de bytes pre-serializados por dueño y fotograma antes de caer al fallback reunido. */

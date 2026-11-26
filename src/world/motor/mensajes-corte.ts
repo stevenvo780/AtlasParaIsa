@@ -9,7 +9,7 @@ import { parteCorteDe, type ParteMundo } from './reunir.js';
 import { prepararTeselasDirectas, recibirTeselasDirectas, type BloqueTeselasCorte } from './teselas-corte.js';
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
-const SOLICITUD = 0, PREPARAR_FAUNA = 1, PREPARAR_TESELAS = 2, PREPARAR_PERSONAS = 3;
+const SOLICITUD = 0, PREPARAR_FAUNA = 1, PREPARAR_TESELAS = 2, PREPARAR_PERSONAS = 3, COMPROBAR_SOLAPE = 4;
 const SIN_FAUNA = 0n, FAUNA_SOMBRA = 1n, FAUNA_DIRECTA = 2n;
 
 interface ParteCorte {
@@ -25,6 +25,7 @@ interface ParteCorte {
   personas?: readonly BloquePersonasCorte[];
   personasSustituidas?: { cantidad: number } | null;
   preparacionPersonasMs?: number;
+  admiteSolape?: boolean;
 }
 
 /** Sobres ordenados por dueño que ya salieron de los puertos de una solicitud. */
@@ -121,7 +122,8 @@ export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: Parte
 }
 
 /** Se transfiere el bloque de V8 tal cual. Un runtime que no lo pueda mover falla antes de construir el corte. */
-export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World): void {
+export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World,
+  admiteSolape?: () => boolean): void {
   const contenido = parteCorteDe(mundo);
   const modo = Atomics.load(solicitud, PREPARAR_FAUNA);
   const fauna = modo === FAUNA_DIRECTA ? prepararFaunaDirecta(contenido) : undefined;
@@ -137,6 +139,7 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
   if (!(buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength)
     throw new Error('V8 no entregó un bloque de corte transferible entero.');
   const parte: ParteCorte = { solicitud: Atomics.load(solicitud, SOLICITUD), epoca, tick: mundo.tick, dueno, bytes };
+  if (Atomics.load(solicitud, COMPROBAR_SOLAPE) === 1n) parte.admiteSolape = admiteSolape?.() ?? false;
   if (modo === FAUNA_DIRECTA) parte.faunaSustituida = fauna ? { cantidad: fauna.reduce((n, bloque) => n + bloque.filas, 0) } : null;
   if (fauna) parte.fauna = fauna;
   if (modo === FAUNA_SOMBRA) parte.fauna = prepararFaunaCorte(contenido.animals);
@@ -257,7 +260,7 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
 
 /** Un canal por dueño remoto, nuevo en cada apertura. Solo se elige F0 antes de abrir la piscina. */
 export class CanalesCorte {
-  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(4 * BigUint64Array.BYTES_PER_ELEMENT));
+  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(5 * BigUint64Array.BYTES_PER_ELEMENT));
   private readonly entradas: MessagePort[] = [];
   readonly puertosRemotos: MessagePort[] = [];
   private ultimaRecepcionTeselas?: DiagnosticoTeselasCorte;
@@ -289,10 +292,11 @@ export class CanalesCorte {
     }
   }
 
-  pedir(prepararFauna: boolean | 'directa' = false, prepararTeselas = false, prepararPersonas = false): bigint {
+  pedir(prepararFauna: boolean | 'directa' = false, prepararTeselas = false, prepararPersonas = false, comprobarSolape = false): bigint {
     Atomics.store(this.solicitud, PREPARAR_FAUNA, prepararFauna === 'directa' ? FAUNA_DIRECTA : prepararFauna ? FAUNA_SOMBRA : SIN_FAUNA);
     Atomics.store(this.solicitud, PREPARAR_TESELAS, prepararTeselas ? 1n : 0n);
     Atomics.store(this.solicitud, PREPARAR_PERSONAS, prepararPersonas ? 1n : 0n);
+    Atomics.store(this.solicitud, COMPROBAR_SOLAPE, comprobarSolape ? 1n : 0n);
     return BigInt.asUintN(64, Atomics.add(this.solicitud, SOLICITUD, 1n) + 1n);
   }
 

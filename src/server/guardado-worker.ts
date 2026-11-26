@@ -22,7 +22,7 @@ export interface OpcionesPersistidor extends OpcionesDisco {
   onProgress?: () => void;
 }
 
-type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido } | { tipo: 'cerrar' };
+type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean } | { tipo: 'cerrar' };
 type RespuestaGuardado = { tipo: 'listo' | 'avance' | 'cerrado' }
   | { tipo: 'confirmado'; guardado: GuardadoConfirmado }
   | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; mensaje: string };
@@ -112,9 +112,10 @@ export class PersistidorGuardado {
     });
   }
 
-  guardar(captura: CapturaCorteTransferido): Promise<GuardadoConfirmado> {
+  guardar(captura: CapturaCorteTransferido, solapado = false): Promise<GuardadoConfirmado> {
     if (this.fallo) return Promise.reject(this.fallo);
     if (this.cierre || this.pendiente) return Promise.reject(new Error('El persistidor está cerrando o ya tiene un corte.'));
+    if (solapado && !captura.admiteSolape) return Promise.reject(new Error('El corte no admite solapamiento.'));
     const { corte, transferibles } = captura;
     let resolver!: Pendiente['resolver'];
     let rechazar!: Pendiente['rechazar'];
@@ -123,7 +124,7 @@ export class PersistidorGuardado {
     this.pendiente = pendiente;
     void this.ready.then(() => {
       if (this.pendiente !== pendiente) return;
-      this.hilo.postMessage({ tipo: 'guardar', corte } satisfies OrdenGuardado, transferibles);
+      this.hilo.postMessage({ tipo: 'guardar', corte, solapado } satisfies OrdenGuardado, transferibles);
       pendiente.enviado = true;
     }).catch(error => {
       if (this.pendiente !== pendiente) return;
@@ -190,7 +191,7 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
         return;
       case 'guardar':
         ultimoAvance = -Infinity;
-        responder(guardar(store, orden.corte));
+        responder(guardar(store, orden.corte, orden.solapado));
         return;
       default:
         throw new Error('Orden desconocida en el hilo de guardado.');
@@ -199,12 +200,12 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
   responder({ tipo: 'listo' });
 }
 
-function guardar(store: Store, corte: CorteTransferido): RespuestaGuardado {
+function guardar(store: Store, corte: CorteTransferido, solapado: boolean): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
     const { sello, tecnologiaRemotaEquivalente, bajas } = materializarCorteTransferido(corte, store.context);
-    const { world } = store.guardarCorteSellado(sello, [], []);
+    const { world } = solapado ? store.guardarCorteSolapado(sello, corte.epoca) : store.guardarCorteSellado(sello, [], []);
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,

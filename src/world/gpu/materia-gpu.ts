@@ -1,3 +1,4 @@
+import { channel } from 'node:diagnostics_channel';
 import { ClaseSustancia, type SustanciaId } from '../../shared/materia.js';
 import { CAPACIDAD_ATOMO, EPSILON_G, NU, R, S_GAS } from '../../shared/naturaleza.js';
 import { medir, PASES_ENCADENADOS, type CtxPaso } from '../materia/paso.js';
@@ -8,10 +9,11 @@ import { CanalGpuOcupado, enviarOrden, recibirRespuesta, reservarCanalGpu } from
 // kPa y mg/kg, respectivamente. Son las mismas conversiones que usa paso.ts.
 const ATMOSFERA = 101.325, MG_POR_KG = 1e6;
 const U32 = 2 ** 32, I32_MAX = 2 ** 31 - 1;
+const perfilGpu = channel('atlas:materia:gpu'), perfilCuda = channel('atlas:materia:cuda');
 
 /** `desde` lleva n + 1 offsets en elementos de `tripletas` (no en bytes), incluido el final.
  * Las tripletas (a, b, veces) están en orden de aplicación. W relee la reacción con el nivel inicial del lote. */
-export interface VecesGpu { desde: Int32Array; tripletas: Float64Array }
+export interface VecesGpu { desde: Int32Array; tripletas: Float64Array; ms?: number }
 
 export interface PasoMateriaGpu {
   lanzar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, dt: number, tick: number): void;
@@ -49,17 +51,25 @@ export function aplicarVecesGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: A
 
 interface EspecieGpu { id: SustanciaId; atomos: number; ebullicion: number; condensado: number; molecula: boolean }
 interface CanalLote { a: number; b: number; fila: number }
+interface PlantillaLote {
+  especies: readonly number[];
+  origen: Int32Array;
+  canales: Uint32Array;
+}
 interface LoteGpu {
   calor: number; nivel: number; kappa: Kappa; semilla: number;
-  especies: readonly { indice: number; cuantos: number }[];
-  canales: readonly CanalLote[];
+  cantidades: Float64Array;
+  plantilla: PlantillaLote;
 }
+
+const PLANTILLA_VACIA: PlantillaLote = { especies: [], origen: new Int32Array(), canales: new Uint32Array() };
 
 function preparar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, dt: number) {
   if (!Number.isFinite(dt) || dt < 0 || kappas.length !== lotes.length * FAMILIAS_CATALITICAS)
     throw new RangeError('Ventana o catálisis del lote GPU inválida.');
   const especies: EspecieGpu[] = [], porId = new Map<SustanciaId, number>();
   const reacciones: Reaccion[] = [], consultadas = new Map<string, number>();
+  const plantillas = new Map<string, PlantillaLote>();
   let ids = new Uint32Array(16);
   const especie = (id: SustanciaId): number => {
     const anterior = porId.get(id);
@@ -70,28 +80,8 @@ function preparar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<numbe
     porId.set(id, indice);
     return indice;
   };
-  const preparados: LoteGpu[] = [];
-  for (let l = 0; l < lotes.length; l++) {
-    const ref = lotes[l]!, inicio = l * FAMILIAS_CATALITICAS;
-    const kappa: Kappa = [kappas[inicio]!, kappas[inicio + 1]!, kappas[inicio + 2]!, kappas[inicio + 3]!];
-    if (kappa.some(k => !Number.isFinite(k) || k < 0)) throw new RangeError('Catálisis GPU inválida.');
-    if (!c.arena.propio(ref)) {
-      if (c.arena.vivo(ref)) throw new Error(`Paso material GPU: el lote ${ref} es de otro dueño.`);
-      preparados.push({ calor: 0, nivel: 0, kappa, semilla: 0, especies: [], canales: [] });
-      continue;
-    }
-    const n = c.arena.especies(ref, ids);
-    if (n > ids.length) { ids = new Uint32Array(2 * n); c.arena.especies(ref, ids); }
-    const cantidades = new Map<SustanciaId, number>();
-    let atomos = 0;
-    for (const id of ids.subarray(0, n).sort()) {
-      const cuantos = c.arena.cuantos(ref, id);
-      cantidades.set(id, cuantos);
-      atomos += cuantos * especies[especie(id)]!.atomos;
-    }
-    const calor = c.arena.calor(ref), T = atomos > 0 ? calor / (CAPACIDAD_ATOMO * atomos) : 0;
-    const nivel = nivelDeLote(T, kappa);
-    const candidatos = new Set(cantidades.keys());
+  function construirPlantilla(composicion: Uint32Array, nivel: number): PlantillaLote {
+    const candidatos = new Set(composicion);
     let nuevos = new Set(candidatos);
     const canales: CanalLote[] = [], vistos = new Set<string>();
     const consultar = (x: number, y: number, salidas: Set<SustanciaId>): void => {
@@ -130,9 +120,40 @@ function preparar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<numbe
     const orden = [...candidatos].sort((a, b) => a - b);
     const locales = new Map(orden.map((id, i) => [id, i]));
     canales.sort((x, y) => x.a - y.a || x.b - y.b);
-    preparados.push({ calor, nivel, kappa, semilla: canales.length ? Math.floor(c.azar() * U32) : 0,
-      especies: orden.map(id => ({ indice: especie(id), cuantos: cantidades.get(id) ?? 0 })),
-      canales: canales.map(({ a, b, fila }) => ({ a: locales.get(a)!, b: b === 0 ? -1 : locales.get(b)!, fila })) });
+    const tabla = new Uint32Array(3 * canales.length);
+    for (const [i, { a, b, fila }] of canales.entries()) {
+      tabla[3 * i] = locales.get(a)!;
+      tabla[3 * i + 1] = b === 0 ? -1 : locales.get(b)!;
+      tabla[3 * i + 2] = fila;
+    }
+    return { especies: orden.map(especie), origen: Int32Array.from(orden, id => composicion.indexOf(id)), canales: tabla };
+  }
+  const preparados: LoteGpu[] = [];
+  for (let l = 0; l < lotes.length; l++) {
+    const ref = lotes[l]!, inicio = l * FAMILIAS_CATALITICAS;
+    const kappa: Kappa = [kappas[inicio]!, kappas[inicio + 1]!, kappas[inicio + 2]!, kappas[inicio + 3]!];
+    if (kappa.some(k => !Number.isFinite(k) || k < 0)) throw new RangeError('Catálisis GPU inválida.');
+    if (!c.arena.propio(ref)) {
+      if (c.arena.vivo(ref)) throw new Error(`Paso material GPU: el lote ${ref} es de otro dueño.`);
+      preparados.push({ calor: 0, nivel: 0, kappa, semilla: 0, cantidades: new Float64Array(), plantilla: PLANTILLA_VACIA });
+      continue;
+    }
+    const n = c.arena.especies(ref, ids);
+    if (n > ids.length) { ids = new Uint32Array(2 * n); c.arena.especies(ref, ids); }
+    const composicion = ids.subarray(0, n).sort(), cantidades = new Float64Array(n);
+    let atomos = 0;
+    for (let i = 0; i < n; i++) {
+      const id = composicion[i]!, cuantos = c.arena.cuantos(ref, id);
+      cantidades[i] = cuantos;
+      atomos += cuantos * especies[especie(id)]!.atomos;
+    }
+    const calor = c.arena.calor(ref), T = atomos > 0 ? calor / (CAPACIDAD_ATOMO * atomos) : 0;
+    const nivel = nivelDeLote(T, kappa);
+    // Cada despacho vuelve a consultar Q: una reacción encolada puede publicarse en la siguiente barrera.
+    const clave = `${nivel}:${composicion.join(',')}`;
+    let plantilla = plantillas.get(clave);
+    if (!plantilla) plantillas.set(clave, plantilla = construirPlantilla(composicion, nivel));
+    preparados.push({ calor, nivel, kappa, semilla: plantilla.canales.length ? Math.floor(c.azar() * U32) : 0, cantidades, plantilla });
   }
   return { especies, porId, reacciones, lotes: preparados };
 }
@@ -141,8 +162,8 @@ function preparar(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<numbe
 export function empaquetarMateriaGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kappas: ArrayLike<number>, dt: number) {
   const datos = preparar(c, lotes, kappas, dt);
   const n = datos.lotes.length;
-  const nCanales = datos.lotes.reduce((s, l) => s + l.canales.length, 0);
-  const nComposicion = datos.lotes.reduce((s, l) => s + l.especies.length, 0);
+  const nCanales = datos.lotes.reduce((s, l) => s + l.plantilla.canales.length / 3, 0);
+  const nComposicion = datos.lotes.reduce((s, l) => s + l.plantilla.especies.length, 0);
   const nTerminos = datos.reacciones.reduce((s, r) => s + r.entradas.length + r.salidas.length, 0);
   const tamCab = 72, tamLote = 64, tamEspecie = 32, tamReaccion = 48, tamTermino = 8, tamComposicion = 16, tamCanal = 12;
   const lotesOff = tamCab, especiesOff = lotesOff + n * tamLote;
@@ -154,22 +175,24 @@ export function empaquetarMateriaGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kapp
   const maxTripletas = (1 + PASES_ENCADENADOS) * nCanales;
   if (bytes >= U32 || maxTripletas * 3 > I32_MAX) throw new RangeError('Lote material fuera del formato GPU.');
 
-  const binario = new ArrayBuffer(bytes), d = new DataView(binario);
-  const u = (off: number, valores: readonly number[]) => valores.forEach((v, i) => d.setUint32(off + 4 * i, v, true));
-  const f = (off: number, valores: readonly number[]) => valores.forEach((v, i) => d.setFloat64(off + 8 * i, v, true));
+  const binario = new ArrayBuffer(bytes);
+  const enteros = new Uint32Array(binario), reales = new Float64Array(binario, 0, Math.floor(bytes / 8));
+  const u = (off: number, valores: ArrayLike<number>) => enteros.set(valores, off / 4);
+  const f = (off: number, valores: readonly number[]) => reales.set(valores, off / 8);
   f(0, [dt, R, CAPACIDAD_ATOMO, NU, S_GAS, EPSILON_G, ATMOSFERA]);
   u(56, [especiesOff, reaccionesOff, terminosOff, PASES_ENCADENADOS]);
   let composicion = composicionOff, canales = canalesOff;
   datos.lotes.forEach((l, i) => {
     const base = lotesOff + i * tamLote;
+    const { especies, origen, canales: tabla } = l.plantilla;
     f(base, [l.calor, ...l.kappa]);
-    u(base + 40, [composicion, l.especies.length, canales, l.canales.length, l.nivel, l.semilla]);
-    for (const s of l.especies) {
-      f(composicion, [s.cuantos]); u(composicion + 8, [s.indice]); composicion += tamComposicion;
+    u(base + 40, [composicion, especies.length, canales, tabla.length / 3, l.nivel, l.semilla]);
+    for (let j = 0; j < especies.length; j++, composicion += tamComposicion) {
+      reales[composicion / 8] = l.cantidades[origen[j]!] ?? 0;
+      enteros[(composicion + 8) / 4] = especies[j]!;
     }
-    for (const c of l.canales) {
-      u(canales, [c.a, c.b, c.fila]); canales += tamCanal;
-    }
+    u(canales, tabla);
+    canales += tabla.byteLength;
   });
   datos.especies.forEach((s, i) => {
     const base = especiesOff + i * tamEspecie;
@@ -185,7 +208,7 @@ export function empaquetarMateriaGpu(c: CtxPaso, lotes: ArrayLike<LoteRef>, kapp
     }
   });
   return { binario, maxTripletas, nEspecies: nComposicion, nCanales,
-    limites: Int32Array.from(datos.lotes, l => l.canales.length * (1 + PASES_ENCADENADOS)) };
+    limites: Int32Array.from(datos.lotes, l => l.plantilla.canales.length / 3 * (1 + PASES_ENCADENADOS)) };
 }
 
 /** Compila el módulo fuera del plazo del primer paso ante un arranque con materiaGpu. */
@@ -195,9 +218,10 @@ export function prepararMateriaGpu(canal: CanalGpu, plazoMs: number): void {
   if (!liberar) throw new CanalGpuOcupado(canal);
   try {
     if (!canal.bytes) canal.crecer(1);
-    enviarOrden(canal, { kind: 'prepararMateria', tick: 0, despacho: 0, subida: 0, bajada: 0, salida: 0 });
-    const r = recibirRespuesta<{ ok: boolean; tick: number; despacho: number }>(canal, plazoMs);
+    enviarOrden(canal, { kind: 'prepararMateria', tick: 0, despacho: 0, subida: 0, bajada: 0, salida: 0, perfil: perfilCuda.hasSubscribers });
+    const r = recibirRespuesta<{ ok: boolean; tick: number; despacho: number; msNvrtc?: number; msModulo?: number }>(canal, plazoMs);
     if (!r.ok || r.tick !== 0 || r.despacho !== 0) throw new Error('Eco de preparación material GPU inválido.');
+    if (perfilCuda.hasSubscribers) perfilCuda.publish({ dispositivo: canal.dispositivo, msNvrtc: r.msNvrtc, msModulo: r.msModulo });
   } catch (error) {
     try { canal.cerrar(); } catch { /* Se conserva la causa original. */ }
     throw error instanceof ErrorDispositivo ? error : new ErrorDispositivo(dispositivo,
@@ -206,7 +230,8 @@ export function prepararMateriaGpu(canal: CanalGpu, plazoMs: number): void {
 }
 
 export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
-  let pendiente: { tick: number; despacho: number; salida: number; maxTripletas: number; limites: Int32Array; liberar(): void } | undefined;
+  let pendiente: { tick: number; despacho: number; salida: number; maxTripletas: number; limites: Int32Array;
+    msPreparar: number; msEnviar: number; liberar(): void } | undefined;
   let despacho = 0, fallo: ErrorDispositivo | undefined, cerrado = false;
   const dispositivo = `gpu${canal.dispositivo}` as const;
   const marcarFallo = (error: unknown): ErrorDispositivo => {
@@ -220,7 +245,9 @@ export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
       if (fallo) throw fallo;
       if (cerrado || pendiente) throw new Error('El paso material GPU está cerrado o tiene un lote pendiente.');
       if (!Number.isSafeInteger(tick) || tick < 0) throw new RangeError('Tick material GPU inválido.');
+      const inicio = perfilGpu.hasSubscribers ? performance.now() : 0;
       const { binario, maxTripletas, nEspecies, nCanales, limites } = empaquetarMateriaGpu(c, lotes, kappas, dt);
+      const preparado = inicio ? performance.now() : 0;
       const n = limites.length, cabecera = Math.ceil((n + 1) / 2) * 8, subida = binario.byteLength;
       const salida = Math.ceil(subida / 8) * 8, bajada = cabecera + maxTripletas * 24;
       const liberar = maxTripletas ? reservarCanalGpu(canal) : () => {};
@@ -230,9 +257,10 @@ export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
           if (canal.bytes < salida + bajada) canal.crecer(salida + bajada);
           canal.escribir(0, new Uint8Array(binario));
           enviarOrden(canal, { kind: 'materia', tick, despacho: ++despacho, n, subida, salida, bajada, cabecera,
-            nEspecies, nCanales, maxTripletas });
+            nEspecies, nCanales, maxTripletas, perfil: perfilGpu.hasSubscribers });
         }
-        pendiente = { tick, despacho, salida, maxTripletas, limites, liberar };
+        pendiente = { tick, despacho, salida, maxTripletas, limites, liberar,
+          msPreparar: preparado - inicio, msEnviar: preparado ? performance.now() - preparado : 0 };
       } catch (error) { liberar(); throw marcarFallo(error); }
     },
     esperar(plazoMs) {
@@ -241,9 +269,14 @@ export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
       if (!p) throw fallo ?? new Error('No hay un lote material GPU pendiente.');
       pendiente = undefined;
       const desde = new Int32Array(p.limites.length + 1);
+      const inicio = perfilGpu.hasSubscribers ? performance.now() : 0;
+      const perf = { dispositivo: canal.dispositivo, tick: p.tick, msPreparar: p.msPreparar, msEnviar: p.msEnviar };
       try {
         if (!p.maxTripletas) return { desde, tripletas: new Float64Array() };
-        const r = recibirRespuesta<{ ok: boolean; tick: number; despacho: number; tripletas: number }>(canal, plazoMs);
+        const r = recibirRespuesta<{ ok: boolean; tick: number; despacho: number; tripletas: number; ms?: number;
+          msH2D?: number; msKernel?: number; msD2H?: number; msLanzar?: number; msSincronizar?: number;
+          bytesH2D?: number; bytesD2H?: number }>(canal, plazoMs);
+        const recibido = inicio ? performance.now() : 0;
         if (r.ok !== true || r.tick !== p.tick || r.despacho !== p.despacho || !Number.isSafeInteger(r.tripletas)
             || r.tripletas < 0 || r.tripletas > p.maxTripletas) throw new Error('Eco o longitud inválida del paso material GPU.');
         canal.leer(p.salida, desde);
@@ -260,8 +293,16 @@ export function crearPasoMateriaGpu(canal: CanalGpu): PasoMateriaGpu {
           if (!Number.isInteger(a) || a <= 0 || a >= U32 || !Number.isInteger(b) || b < 0 || b >= U32
               || !Number.isSafeInteger(veces) || veces <= 0) throw new Error('Tripleta material GPU inválida.');
         }
-        return { desde, tripletas };
-      } catch (error) { throw marcarFallo(error); }
+        if (inicio) {
+          const { ms: msServidor, msH2D, msKernel, msD2H, msLanzar, msSincronizar, bytesH2D, bytesD2H } = r;
+          perfilGpu.publish({ ...perf, msEsperar: recibido - inicio, msLeer: performance.now() - recibido,
+            msServidor, msH2D, msKernel, msD2H, msLanzar, msSincronizar, bytesH2D, bytesD2H, tripletas: r.tripletas });
+        }
+        return { desde, tripletas, ms: r.ms };
+      } catch (error) {
+        if (inicio) perfilGpu.publish({ ...perf, msEsperar: performance.now() - inicio, msLeer: 0, fallo: String(error) });
+        throw marcarFallo(error);
+      }
       finally { p.liberar(); }
     },
     cerrar() {

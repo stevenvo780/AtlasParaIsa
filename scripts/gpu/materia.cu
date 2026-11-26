@@ -539,11 +539,13 @@ extern "C" __global__ void offsets_materia(const u32* cuentas, u32 n, u32* desde
     if (n % 2 == 0) desde[n + 1] = 0;
 }
 
-extern "C" __global__ void compactar_materia(const byte* binario, const Tripleta* temporal, const u32* desde,
-    Tripleta* salida) {
-    const u32 i = blockIdx.x, inicio = desde[i] / 3, cuenta = desde[i + 1] / 3 - inicio;
+extern "C" __global__ void compactar_materia(const byte* binario, u32 n, const Tripleta* temporal, const u32* desde,
+    Tripleta* salida, u32 maxTripletas) {
+    const u32 i = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+    if (i >= n || desde[n] > 3 * maxTripletas || desde[n] % 3) return;
+    const u32 inicio = desde[i] / 3, cuenta = desde[i + 1] / 3 - inicio;
     const Cabecera& cab = *en<Cabecera>(binario, 0);
     const Lote* lotes = en<Lote>(binario, sizeof(Cabecera));
     const u64 k = (lotes[i].canales - lotes[0].canales) / sizeof(Canal) * static_cast<u64>(cab.pases + 1);
-    for (u32 j = threadIdx.x; j < cuenta; j += blockDim.x) salida[inicio + j] = temporal[k + j];
+    for (u32 j = threadIdx.x % warpSize; j < cuenta; j += warpSize) salida[inicio + j] = temporal[k + j];
 }

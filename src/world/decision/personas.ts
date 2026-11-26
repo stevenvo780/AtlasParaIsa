@@ -36,7 +36,8 @@ import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } f
 import { basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
 import { ctxMateriaDe } from '../motor/acceso.js';
 import { lotesDeCelda } from '../materia/ley-mundo.js';
-import { KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
+import { estadoObra, KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
+import { CHUNK_SIZE } from '../terrain.js';
 
 
 const chooseNearby: Tile[] = [], chooseNearbyCells: number[] = [], chooseReachable: Tile[] = [], chooseReachableCells: number[] = [];
@@ -517,15 +518,30 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'tools' ? 'intercambiar un objeto útil por materia disponible' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} con ${help.person.name}.` });
   let shelter: Tile | undefined, shelterBestScore = 0;
   if (world.shelterBenefitEnabled) {
-    for (let i = 0; i < nearbyTiles.length; i++) {
-      const tile = nearbyTiles[i]!;
-      if (!isShelterOf(tile, fast ? nearbyCells[i]! : -1)) continue;
-      const steps = nearbySteps[i]!;
-      if (steps < 0) continue;
+    const considerarCobijo = (tile: Tile, steps: number): void => {
       const sh = bodilyShelter(world, tile, tileIn, fast);
-      if (!(sh > 0)) continue;
+      if (!(sh > 0)) return;
       const sc = sh * (TICKS_PER_DAY - steps * 6);
       if (!shelter || sc > shelterBestScore) { shelter = tile; shelterBestScore = sc; }
+    };
+    if (obra && world.structures.length) {
+      const vistas = new Set<Tile>();
+      for (const s of filtrarCerca(world.structures, person, CHUNK_SIZE + RADIUS, s => Boolean(estadoObra(s)?.piezas.length))) {
+        // El ancla puede quedar fuera de la ventana aunque una pieza del techo esté dentro.
+        for (const pieza of estadoObra(s)!.piezas) {
+          const steps = stepsTo(pieza);
+          if (steps === undefined || !puedePagar(steps)) continue;
+          const tile = tileIn(pieza.x, pieza.y);
+          if (!tile || vistas.has(tile)) continue;
+          vistas.add(tile);
+          considerarCobijo(tile, steps);
+        }
+      }
+    } else if (!obra) {
+      for (let i = 0; i < nearbyTiles.length; i++) {
+        const tile = nearbyTiles[i]!, steps = nearbySteps[i]!;
+        if (steps >= 0 && isShelterOf(tile, fast ? nearbyCells[i]! : -1)) considerarCobijo(tile, steps);
+      }
     }
   }
   // Ask the actual bodily law whether rest can restore readiness. Unit quality
@@ -673,7 +689,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const exposed = world.weather === 'rain' && world.shelterBenefitEnabled;
   const outdoorDamage = exposed ? bodilyDamage(world, person, body, 0) : damage;
   let coverGather: Candidate | undefined, gatherWork = 0, gatherSteps = 0;
-  if (exposed && !shelter && construction && buildable && stepsTo(buildable) !== undefined && cost.wood <= 12 && cost.stone <= 8) {
+  if (!obra && exposed && !shelter && construction && buildable && stepsTo(buildable) !== undefined && cost.wood <= 12 && cost.stone <= 8) {
     const missing = { wood: Math.max(0, Math.ceil(cost.wood - person.materials.wood)), stone: Math.max(0, Math.ceil(cost.stone - person.materials.stone)) };
     // The existing gather action chooses its preferred material first. Only
     // motivate a first collection that actually pays part of the missing bill.
@@ -711,11 +727,11 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       ? bodilyShelter(world, candidate.target, tileIn, fast) : protection, work = 0, travel = steps;
     // Accompany stops within 1.5 cells: another person's roof is not the follower's roof.
     if (candidate.action === 'accompany' && steps > 0) cover = 0;
-    if (exposed && candidate.action === 'repair' && damaged?.components.includes('roof')) {
+    if (!obra && exposed && candidate.action === 'repair' && damaged?.components.includes('roof')) {
       work = Math.max(0, 30 - (person.action === 'repair' && distance(person.target, damaged) === 0 ? person.work : 0));
       if (planAffordable(person, payload, steps, work)) cover = Math.min(1, damaged.condition + .4);
     }
-    if (exposed && !shelter && candidate.action === 'build' && construction) {
+    if (!obra && exposed && !shelter && candidate.action === 'build' && construction) {
       work = Math.max(0, cost.work - (person.action === 'build' && distance(person.target, candidate.target) === 0 ? person.work : 0));
       if (planAffordable(person, payload, steps, work)) cover = 1;
     }
@@ -750,7 +766,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     }
     const relief = avoidedDamageScore(person, outdoorDamage, bodilyDamage(world, person, forecast, cover), travel * 6 + work);
     candidate.score += relief;
-    if (exposed && cover > 0 && relief > 0) candidate.reason += candidate.action === 'repair' || candidate.action === 'build' || candidate === coverGather
+    if (exposed && cover > 0 && relief > 0) candidate.reason += !obra && (candidate.action === 'repair' || candidate.action === 'build' || candidate === coverGather)
       ? ' Completar el trabajo pagado puede reducir el daño que le causa la lluvia.'
       : ' El techo funcional que percibe reduce el daño corporal de la lluvia.';
   }

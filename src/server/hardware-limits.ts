@@ -36,6 +36,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
     ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
+    ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 

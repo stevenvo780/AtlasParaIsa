@@ -17,6 +17,15 @@ test('el motor acepta auto y conserva el orden de las tarjetas solicitadas', () 
   assert.equal(motorConfig(7, { CARTA_MOTOR_HILOS: '12' }).hilos, 12);
 });
 
+test('la transferencia del corte debe solicitarse al arrancar el servidor', () => {
+  const configuracion = { CARTA_MOTOR_HILOS: '2', CARTA_MOTOR_GPU: '' };
+  const habilitada = motorConfig(7, { ...configuracion, CARTA_CORTE_TRANSFERIBLE: '1' });
+  assert.equal(habilitada.instantaneaTransferible, true);
+  assert.equal(habilitada.hilos, 2);
+  assert.deepEqual(habilitada.gpu, []);
+  assert.equal(motorConfig(7, { ...configuracion, CARTA_CORTE_TRANSFERIBLE: '0' }).instantaneaTransferible, undefined);
+});
+
 test('el motor rechaza un despacho inválido antes de arrancar', () => {
   for (const hilos of ['0', '-1', '1.5', '1e2', '9007199254740992']) {
     assert.throws(() => motorConfig(7, { CARTA_MOTOR_HILOS: hilos }), /CARTA_MOTOR_HILOS/);

@@ -44,11 +44,12 @@ interface FotoTransferida {
 
 export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: ParteFotoDueno): void {
   const bloques = new Set<ArrayBuffer>();
-  for (const bytes of [parte.bajasBytes, parte.altasBytes]) {
-    if (bytes.byteLength === 0) continue;
-    if (!(bytes.buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== bytes.buffer.byteLength)
-      throw new Error('El bloque de fotograma debe ocupar su propio ArrayBuffer.');
-    bloques.add(bytes.buffer);
+  for (const grupo of [parte.bajasBloques, parte.altasBloques]) {
+    for (const bytes of grupo) {
+      if (!(bytes.buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== bytes.buffer.byteLength)
+        throw new Error('El bloque de fotograma debe ocupar su propio ArrayBuffer.');
+      bloques.add(bytes.buffer);
+    }
   }
   const entrega: FotoTransferida = { tipo: 'foto', epoca, parte };
   puerto.postMessage(entrega, [...bloques]);
@@ -242,8 +243,10 @@ export class CanalesCorte {
       let repetida = false;
       while (receiveMessageOnPort(puerto) !== undefined) repetida = true;
       if (repetida || entrega?.tipo !== 'foto' || entrega.epoca !== epoca || entrega.parte?.tick !== tick
-        || entrega.parte.hilo !== i + 1 || !(entrega.parte.bajasBytes instanceof Uint8Array)
-        || !(entrega.parte.altasBytes instanceof Uint8Array)) continue;
+        || entrega.parte.hilo !== i + 1 || !Array.isArray(entrega.parte.bajasBloques)
+        || !Array.isArray(entrega.parte.altasBloques)
+        || !entrega.parte.bajasBloques.every(b => b instanceof Uint8Array)
+        || !entrega.parte.altasBloques.every(b => b instanceof Uint8Array)) continue;
       partes.push(entrega.parte);
     }
     return partes;

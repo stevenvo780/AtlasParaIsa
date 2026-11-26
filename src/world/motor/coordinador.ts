@@ -289,6 +289,22 @@ class MotorDuenos implements Motor {
   readonly #partesFoto = new Map<Hilo, ParteFotoDueno>();
   #ultimaCarasFoto = -1;
   readonly #trazaFotoDuenos: TrazaFotogramaDuenos = trazaFotogramaDuenosVacia();
+  #limiteTotalFoto(): number {
+    const configurado = this.#config.limiteBytesFotoTotal;
+    const presupuesto = this.#enlace?.sucesosDirectosBytes;
+    if (presupuesto === undefined) return Math.max(1, configurado ?? LIMITE_BYTES_FOTO_TOTAL_DEFECTO);
+    // La mitad restante deja sitio a los sucesos globales y a fotogramas en vuelo.
+    const disponible = Math.max(1, Math.floor(presupuesto / 2));
+    return Math.max(1, Math.min(configurado ?? disponible, disponible));
+  }
+
+  #limiteDuenoFoto(hilos: number): number | undefined {
+    const configurado = this.#config.limiteBytesFotoDueno;
+    if (this.#enlace?.sucesosDirectosBytes === undefined) return configurado;
+    const cuota = Math.max(1, Math.floor(this.#limiteTotalFoto() / hilos));
+    return Math.min(configurado ?? cuota, cuota);
+  }
+
   #fuenteReunida(): FuenteFotograma | undefined {
     const fuente = this.#fuente;
     if (!fuente) return undefined;
@@ -301,7 +317,7 @@ class MotorDuenos implements Motor {
         bytesEnCurso = 0;
         conCarasEnCurso = false;
         if (this.#config.emisionFotogramaDuenos && fuente.cortePorDuenos) {
-          const limiteTotal = Math.max(1, this.#config.limiteBytesFotoTotal ?? LIMITE_BYTES_FOTO_TOTAL_DEFECTO);
+          const limiteTotal = this.#limiteTotalFoto();
           const partes: ParteFotoDueno[] = [];
           let faltante = false, desbordado = false, compatFallback = false, totalBytes = 0;
           for (let h = 0; h < this.#hilos; h++) {
@@ -498,7 +514,8 @@ class MotorDuenos implements Motor {
     this.#cabecera = deserialize(cabecera) as World;
     this.#tecnologiaInicial = this.#config.confirmarGuardadoVivo
       ? sinCheckpointTecnologia(structuredClone(this.#cabecera.technology)) : undefined;
-    if (this.#config.emisionFotogramaDuenos) d.activarEmisionFoto(this.#cabecera, this.#config.limiteBytesFotoDueno);
+    const limiteBytesFotoDueno = this.#limiteDuenoFoto(hilos);
+    if (this.#config.emisionFotogramaDuenos) d.activarEmisionFoto(this.#cabecera, limiteBytesFotoDueno);
     d.repartirChunksIniciales(chunks, duenos);
     const tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
     for (let i = 0; i < claves.length; i++) if (duenos[i] === 0) terreno.sincronizarPagina(chunks[i]!, tileIn, fast);
@@ -511,7 +528,7 @@ class MotorDuenos implements Motor {
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca,
       brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
       destinatariosGarantias: destinatariosDeGarantias(garantias),
-      emisionFotogramaDuenos: this.#config.emisionFotogramaDuenos, limiteBytesFotoDueno: this.#config.limiteBytesFotoDueno,
+      emisionFotogramaDuenos: this.#config.emisionFotogramaDuenos, limiteBytesFotoDueno,
     };
     const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {

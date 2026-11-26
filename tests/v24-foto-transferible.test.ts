@@ -12,7 +12,7 @@ import { crearSAB } from '../src/world/soa/arena.js';
 
 function paquete(hilo: number, tick: number): ParteFotoDueno {
   return { hilo, tick, desbordado: false, compatFallback: false, trasFallback: false,
-    bytes: 3, bajasBytes: Uint8Array.of(0, 1), altasBytes: Uint8Array.of(42),
+    bytes: 4, bajasBloques: [Uint8Array.of(0, 1)], altasBloques: [Uint8Array.of(42), Uint8Array.of(43)],
     paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
     crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null };
 }
@@ -24,8 +24,7 @@ test('el puerto mueve los bloques completos y drena duplicados y partes de otro 
   try {
     const parte = paquete(2, 15);
     enviarParteFoto(dos!, 3, parte);
-    assert.equal(parte.bajasBytes.buffer.byteLength, 0);
-    assert.equal(parte.altasBytes.buffer.byteLength, 0);
+    assert.ok([...parte.bajasBloques, ...parte.altasBloques].every(bloque => bloque.buffer.byteLength === 0));
     enviarParteFoto(uno!, 3, paquete(1, 14));
     assert.deepEqual(canales.recibirFotos(3, 15), [paquete(2, 15)]);
 
@@ -52,7 +51,7 @@ test('los dueños reciben la foto por puerto antes de pedir otro corte por el mi
       corte: () => assert.fail('Un fotograma válido y dentro de cupo se arma con las partes de los dueños.'),
       cortePorDuenos: (_c, f, _paginas, lote) => {
         assert.deepEqual(lote.partes.map(parte => [parte.hilo, parte.tick]), [[0, f.tick], [1, f.tick]]);
-        return { serie, sucesos: [], bloques: lote.partes.map(parte => parte.altasBytes) };
+        return { serie, sucesos: [], bloques: lote.partes.flatMap(parte => parte.altasBloques) };
       },
       confirmar: () => {},
     });
@@ -63,7 +62,7 @@ test('los dueños reciben la foto por puerto antes de pedir otro corte por el mi
     assert.equal(recibir.mock.callCount(), 1);
     const partes = recibir.mock.calls[0]!.result!;
     assert.equal(partes.length, 1, 'debe llegar una parte del único dueño remoto');
-    assert.ok(partes[0]!.altasBytes.byteLength > 0);
+    assert.ok(partes[0]!.altasBloques.length > 0);
     assert.equal(motor.trazaFotogramaDuenos?.reunionesEvitadas, 1, JSON.stringify(motor.trazaFotogramaDuenos));
     assert.equal(motor.instantanea().world.tick, 2);
   } finally { await motor.cerrar(); }

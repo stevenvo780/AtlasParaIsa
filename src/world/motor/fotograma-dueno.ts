@@ -53,7 +53,9 @@ const CAMPOS_TEXTO_OBLIGATORIOS = ['name', 'color', 'reason', 'need'] as const;
 const WORKING_ACTIONS: ReadonlySet<string> = new Set(['gather', 'farm', 'build', 'hunt', 'invent', 'repair', 'research', 'craft', 'forage']);
 const PROJECT_ACTIONS: ReadonlySet<string> = new Set(['research', 'craft']);
 const SKILLED_ACTIONS: ReadonlySet<string> = new Set(['farm', 'hunt']);
-const VACIO = new Uint8Array(0);
+const BLOQUES_VACIOS: readonly Uint8Array[] = Object.freeze([]);
+const CAPACIDAD_INICIAL_BLOQUE = 8 * 1024;
+const CAPACIDAD_OBJETIVO_BLOQUE = 1024 * 1024;
 const CHUNK_OFFSET = 2 ** 21;
 const CHUNK_STRIDE = 2 ** 22;
 const TIERRA = 1;
@@ -186,8 +188,8 @@ export interface ParteFotoDueno {
   readonly compatFallback: boolean;
   readonly trasFallback: boolean;
   readonly bytes: number;
-  readonly bajasBytes: Uint8Array;
-  readonly altasBytes: Uint8Array;
+  readonly bajasBloques: readonly Uint8Array[];
+  readonly altasBloques: readonly Uint8Array[];
   readonly paginasEscritas: readonly string[];
   readonly estructurasAltasIds: readonly string[];
   readonly estructurasBajasIds: readonly string[];
@@ -253,26 +255,33 @@ interface PresupuestoEmpaquetado {
 }
 
 class EmpaquetadorSucesos {
-  readonly #trozos: Uint8Array[] = [];
-  #bytes = 0;
+  readonly #bloques: Uint8Array[] = [];
+  #actual: { bytes: Uint8Array; cabecera: DataView } | null = null;
+  #usadosBloque = 0;
+  #capacidadSiguiente = CAPACIDAD_INICIAL_BLOQUE;
 
   constructor(readonly presupuesto: PresupuestoEmpaquetado) {}
-
-  get bytes(): number { return this.#bytes; }
 
   agregarBytes(cuerpo: Uint8Array): boolean {
     if (this.presupuesto.desbordado) return false;
     const total = 4 + cuerpo.byteLength;
-    if (this.presupuesto.usados + total > this.presupuesto.limite) {
+    if (cuerpo.byteLength > 0xffffffff || this.presupuesto.usados + total > this.presupuesto.limite) {
       this.presupuesto.desbordado = true;
-      this.#trozos.length = 0;
-      this.#bytes = 0;
       return false;
     }
-    const cabecera = Buffer.allocUnsafe(4);
-    cabecera.writeUInt32LE(cuerpo.byteLength, 0);
-    this.#trozos.push(cabecera, cuerpo);
-    this.#bytes += total;
+    let bloque = this.#actual;
+    if (!bloque || this.#usadosBloque + total > bloque.bytes.byteLength) {
+      this.#cerrarBloque();
+      const capacidad = Math.min(this.presupuesto.limite - this.presupuesto.usados, Math.max(total, this.#capacidadSiguiente));
+      const buffer = new ArrayBuffer(capacidad);
+      bloque = this.#actual = { bytes: new Uint8Array(buffer), cabecera: new DataView(buffer) };
+      if (capacidad <= CAPACIDAD_OBJETIVO_BLOQUE) {
+        this.#capacidadSiguiente = Math.min(capacidad * 2, CAPACIDAD_OBJETIVO_BLOQUE);
+      }
+    }
+    bloque.cabecera.setUint32(this.#usadosBloque, cuerpo.byteLength, true);
+    bloque.bytes.set(cuerpo, this.#usadosBloque + 4);
+    this.#usadosBloque += total;
     this.presupuesto.usados += total;
     return true;
   }
@@ -282,15 +291,19 @@ class EmpaquetadorSucesos {
     return this.agregarBytes(serialize(suceso));
   }
 
-  sellar(): Uint8Array {
-    if (!this.#bytes) return VACIO;
-    const salida = new Uint8Array(this.#bytes);
-    let offset = 0;
-    for (const trozo of this.#trozos) {
-      salida.set(trozo, offset);
-      offset += trozo.byteLength;
-    }
-    return salida;
+  #cerrarBloque(): void {
+    if (!this.#actual) return;
+    const { bytes } = this.#actual;
+    // La vista debe cubrir el buffer entero para cederlo sin copiar en el transporte.
+    const usados = this.#usadosBloque;
+    this.#bloques.push(usados === bytes.byteLength ? bytes : bytes.slice(0, usados));
+    this.#actual = null;
+    this.#usadosBloque = 0;
+  }
+
+  sellar(): readonly Uint8Array[] {
+    this.#cerrarBloque();
+    return this.#bloques;
   }
 }
 
@@ -493,7 +506,7 @@ export class EmisorFotoDueno {
       // No creamos tentativo: el coordinador caerá a `#reunirMundo()` y avanzará `resync` si confirma.
       return {
         hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: true, trasFallback: this.#trasFallback,
-        bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
+        bytes: 0, bajasBloques: BLOQUES_VACIOS, altasBloques: BLOQUES_VACIOS,
         paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
         crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
       };
@@ -625,7 +638,7 @@ export class EmisorFotoDueno {
           // Posición fuera de celdas residentes: fail-closed al camino reunido.
           return {
             hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: true, trasFallback,
-            bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
+            bytes: 0, bajasBloques: BLOQUES_VACIOS, altasBloques: BLOQUES_VACIOS,
             paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
             crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
           };
@@ -700,20 +713,20 @@ export class EmisorFotoDueno {
       // Límite de transferencia rebasado: no tocamos `#confirmado` ni guardamos `#tentativo`.
       return {
         hilo: c.hilo, tick: c.tick, desbordado: true, compatFallback: false, trasFallback,
-        bytes: 0, bajasBytes: VACIO, altasBytes: VACIO,
+        bytes: 0, bajasBloques: BLOQUES_VACIOS, altasBloques: BLOQUES_VACIOS,
         paginasEscritas: [], estructurasAltasIds: [], estructurasBajasIds: [],
         crucesFaunaSalientes: [], paginasPendientesCruce: [], resumen: null,
       };
     }
 
-    const bajasBytes = bajas.sellar();
-    const altasBytes = altas.sellar();
+    const bajasBloques = bajas.sellar();
+    const altasBloques = altas.sellar();
     const resumen = this.#resumenDueno(c, personasVivas, animalesVivos, estructurasVivas, retiraPos, conCaras);
     this.#tentativo = tentativo;
     return {
       hilo: c.hilo, tick: c.tick, desbordado: false, compatFallback: false, trasFallback,
       bytes: presupuesto.usados,
-      bajasBytes, altasBytes,
+      bajasBloques, altasBloques,
       paginasEscritas, estructurasAltasIds, estructurasBajasIds,
       crucesFaunaSalientes, paginasPendientesCruce,
       resumen,

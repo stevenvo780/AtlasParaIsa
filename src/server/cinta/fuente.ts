@@ -474,8 +474,8 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
 
       // Bloques pre-serializados por dueño en orden determinista 0..H-1 (bajas antes que altas).
       const bloques: Uint8Array[] = [];
-      for (const p of partes) if (p.bajasBytes.byteLength > 0) bloques.push(p.bajasBytes);
-      for (const p of partes) if (p.altasBytes.byteLength > 0) bloques.push(p.altasBytes);
+      for (const p of partes) for (const bloque of p.bajasBloques) bloques.push(bloque);
+      for (const p of partes) for (const bloque of p.altasBloques) bloques.push(bloque);
 
       return { sucesos, bloques, serie };
     },

@@ -47,6 +47,7 @@ function decodificarBloques<T extends SucesoEnlaceCinta = Suceso>(bloques: reado
     while (offset < bloque.byteLength) {
       const len = view.getUint32(offset, true);
       offset += 4;
+      assert.ok(len > 0 && offset + len <= bloque.byteLength, 'todo registro cabe en su bloque');
       salida.push(deserialize(bloque.subarray(offset, offset + len)) as T);
       offset += len;
     }
@@ -158,6 +159,7 @@ function cotejarEmision(t: TestContext, directos: boolean): void {
     necesitaCaras: fuenteDuenos.necesitaCaras,
     corte: (c, f, paginas, reunido) => fuenteDuenos.corte(c, f, paginas, reunido),
     cortePorDuenos: (c, f, paginas, lote) => {
+      if (directos) assert.equal(lote.limiteBytesTotal, 8 * 1024 * 1024);
       const salida = fuenteDuenos.cortePorDuenos!(c, f, paginas, lote);
       assert.ok(salida, 'la emisión por dueños no debe caer a fallback en el caso limpio');
       return salida;
@@ -323,7 +325,8 @@ test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y
   motor.cargar({ world: mundo, materia: null }, 0);
   const d = duenoSi(mundo)!;
   const persona = mundo.people[0]!;
-  persona.recentMemory = 'Raíz 🌱';
+  const recuerdo = 'Raíz 🌱'.repeat(4096);
+  persona.recentMemory = recuerdo;
   persona.activity = { rest: 3 };
   persona.compounds = [{
     id: 'lot-prueba', formulaId: 'f-prueba', composition: { C: 0, Si: 1, Ca: 0, Fe: 0, S: 0, H: 0 },
@@ -351,7 +354,7 @@ test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y
   function leer(parte: ParteFotoDueno): readonly Suceso[] {
     const desde = Number(Atomics.load(enlace.sucesosEscritos, 0));
     let hasta = desde;
-    for (const bloque of [parte.bajasBytes, parte.altasBytes]) {
+    for (const bloque of [...parte.bajasBloques, ...parte.altasBloques]) {
       const posicion = hasta % anillo.byteLength;
       const primera = Math.min(bloque.byteLength, anillo.byteLength - posicion);
       anillo.set(bloque.subarray(0, primera), posicion);
@@ -369,7 +372,8 @@ test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y
   }
 
   const completo = emitir(true, 0);
-  const wire = decodificarBloques<SucesoEnlaceCinta>([completo.altasBytes]);
+  assert.ok(completo.altasBloques.length > 1);
+  const wire = decodificarBloques<SucesoEnlaceCinta>(completo.altasBloques);
   const agrupados = wire.filter(s => s.tipo === 'textosPersona');
   assert.equal(agrupados.length, mundo.people.length);
   assert.ok(wire.some(s => s.tipo === 'texto' && s.campo === 'reason' && s.uid !== uid));
@@ -378,7 +382,7 @@ test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y
   assert.ok(ficha >= 0);
   const esperados = [
     texto('name', persona.name), texto('color', persona.color), texto('reason', persona.reason), texto('need', persona.need),
-    texto('recentMemory', 'Raíz 🌱'), texto('specialty', 'recuperación'), texto('craftTint', '#7a5c44'), texto('craftFocus', 'cutting'),
+    texto('recentMemory', recuerdo), texto('specialty', 'recuperación'), texto('craftTint', '#7a5c44'), texto('craftFocus', 'cutting'),
   ];
   assert.deepEqual(sucesos.slice(ficha + 1, ficha + 1 + esperados.length), esperados);
   assert.deepEqual(delUid(sucesos).map(s => serialize(s)), esperados.map(s => serialize(s)));
@@ -392,8 +396,8 @@ test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y
   persona.need = '';
   const abortado = emitir(false, 1);
   const reintento = emitir(false, 1);
-  assert.deepEqual(reintento.bajasBytes, abortado.bajasBytes);
-  const altasTexto = (parte: ParteFotoDueno) => decodificarBloques<SucesoEnlaceCinta>([parte.altasBytes])
+  assert.deepEqual(reintento.bajasBloques, abortado.bajasBloques);
+  const altasTexto = (parte: ParteFotoDueno) => decodificarBloques<SucesoEnlaceCinta>(parte.altasBloques)
     .filter(s => s.tipo === 'textosPersona');
   assert.deepEqual(altasTexto(reintento), altasTexto(abortado));
   assert.deepEqual(delUid(leer(reintento)), [
@@ -612,7 +616,7 @@ test('cesión de chunk (destino >= 0) transfiere estado confirmado sin emitir ba
   const fM3 = { ranura: ranuraM, completo: false, tick: 3, epoca: 0, versiones: enlM.versiones! };
   const pM3 = emisorB.emitir(dM, fM3, [], dM.organismos, (px, py) => dM.terrenoPercibido.paginaDe(px, py), 1, 0, false);
   assert.ok(pM3.estructurasBajasIds.includes(estCedidaId), 'B debe emitir baja de estructura heredada por cesión tras aborto');
-  assert.ok(decodificarBloques([pM3.bajasBytes]).some(s => s.tipo === 'estructura' && s.id === estCedidaId && s.vista === null));
+  assert.ok(decodificarBloques(pM3.bajasBloques).some(s => s.tipo === 'estructura' && s.id === estCedidaId && s.vista === null));
 });
 
 test('una cesión con activos instalados conserva su masa en la proyección de tecnología', async t => {
@@ -699,7 +703,7 @@ test('aborto de fotograma completo conserva el estado confirmado anterior y rein
   const f3Incremental = { ranura: ranuraA, completo: false, tick: 3, epoca: 0, versiones: enlA.versiones! };
   const p3 = emisor.emitir(dA, f3Incremental, [], dA.organismos, (px, py) => dA.terrenoPercibido.paginaDe(px, py), 1, 0, false);
   assert.ok(p3.estructurasBajasIds.includes(estructuraId), 'confirmado anterior debe sobrevivir al aborto de un f.completo');
-  const bajasP3 = decodificarBloques([p3.bajasBytes]);
+  const bajasP3 = decodificarBloques(p3.bajasBloques);
   assert.ok(bajasP3.some(s => s.tipo === 'estructura' && s.id === estructuraId && s.vista === null));
 
   // Parte B: prueba de extremo a extremo con 2 dueños y saturación de anillo al pedir f.completo.

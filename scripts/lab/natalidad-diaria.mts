@@ -13,7 +13,7 @@ import { closeKin } from '../../src/world/family.js';
 import { entorno, masaLote, plantillaDe } from '../../src/world/materia/cuerpo.js';
 import { ctxMateriaDe } from '../../src/world/motor/acceso.js';
 import { balanceDeMundo, causaNoAporta, causaNoCria, estadoCria, type Balance } from '../../src/world/natalidad.js';
-import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../../src/world/params.js';
+import { DEFAULT_PARAMS, paramsOf, parseParams, type WorldParams } from '../../src/world/params.js';
 import { archivoDeChunks, cargarPunto } from './poblacion.mjs';
 
 type CausaAbortiva = 'reserva' | 'agua' | 'nutrientes' | 'materia' | 'sin-evidencia';
@@ -249,21 +249,21 @@ const { values } = parseArgs({ options: {
   regimen: { type: 'string', default: 'defecto' },
 } });
 if (values.regimen !== 'defecto' && values.regimen !== 'abierto') throw new Error('--regimen admite defecto o abierto.');
-const punto = values.desde ? cargarPunto(values.desde) : undefined;
-const base = punto ? paramsOf(punto.mundo) : values.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS;
-let params = values.params ? parseParams(JSON.parse(readFileSync(values.params, 'utf8')), base) : base;
-const hasta = (values.hasta ?? (punto ? undefined : 'intentos')) as Interruptor | undefined;
-if (hasta) {
-  if (!INTERRUPTORES.includes(hasta)) throw new Error(`--hasta: ${hasta} no es un interruptor V23.`);
-  params = parseParams({ v23: { ...escalon(hasta), cadenciaMateria: params.v23.cadenciaMateria } }, params);
+function ajustarParams(base: WorldParams): WorldParams {
+  let params = values.params ? parseParams(JSON.parse(readFileSync(values.params, 'utf8')), base) : base;
+  const hasta = (values.hasta ?? (values.desde ? undefined : 'intentos')) as Interruptor | undefined;
+  if (hasta) {
+    if (!INTERRUPTORES.includes(hasta)) throw new Error(`--hasta: ${hasta} no es un interruptor V23.`);
+    params = parseParams({ v23: { ...escalon(hasta), cadenciaMateria: params.v23.cadenciaMateria } }, params);
+  }
+  if (!params.v23.natalidad) throw new Error('El censo requiere la ley de natalidad V23.');
+  return parseParams({ motor: { ...params.motor, hilos: 1, gpu: [] } }, params);
 }
-if (!params.v23.natalidad) throw new Error('El censo requiere la ley de natalidad V23.');
+const punto = values.desde ? cargarPunto(values.desde, ajustarParams) : undefined;
 const semilla = entero(values.semilla ?? '7', 'semilla', 0);
 if (punto && values.semilla !== undefined && punto.mundo.seed !== semilla) {
   throw new Error('La semilla pedida y la del punto guardado no coinciden.');
 }
-params = parseParams({ motor: { ...params.motor, hilos: 1, gpu: [] } }, params);
-const mundo = punto?.mundo ?? createWorld(semilla, params);
-setParams(mundo, params);
+const mundo = punto?.mundo ?? createWorld(semilla, ajustarParams(values.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS));
 medir(mundo, punto?.archivo, values.ticks ? entero(values.ticks, 'ticks') : entero(values.dias, 'dias') * DIA,
   values['tope-mortales'] ? entero(values['tope-mortales'], 'tope-mortales') : undefined);

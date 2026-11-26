@@ -357,9 +357,11 @@ async function replica(trabajo: Trabajo): Promise<void> {
     if (punto.version !== RULES_VERSION) throw new Error(`El punto guarda reglas v${punto.version} y el árbol corre v${RULES_VERSION}: no se migra`);
     if (punto.dia >= trabajo.dias) throw new Error(`El punto está en el día ${punto.dia}: --dias debe ser mayor`);
     if (punto.params.v23?.materia && !punto.materia) throw new Error(`El punto ${ruta} omite los lotes y el Registro de materia. Vuelve a guardarlo con --guardar-dia.`);
-    if (punto.materia && punto.materia.tick !== punto.mundo.tick) throw new Error(`El punto ${ruta} guarda materia de otro tick.`);
   }
   const params = await resolverParams(trabajo, punto?.params);
+  if (punto?.materia && (!params.v23?.materia || punto.materia.tick !== punto.mundo.tick)) {
+    throw new Error('El punto de materia requiere el mismo tick del mundo y v23.materia activa.');
+  }
   const contexto: typeof import('../../src/world/motor/contexto.js') | undefined = punto?.materia || (trabajo.guardarEn && params.v23?.materia)
     ? await importar(trabajo.raiz, 'world/motor/contexto.ts') : undefined;
   if (trabajo.paramsHash && sha(estable(params)) !== trabajo.paramsHash) throw new Error('Los parámetros resueltos en el proceso no coinciden con los de la clave de caché');

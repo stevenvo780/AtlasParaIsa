@@ -89,8 +89,8 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   coordinador.tick = 12;
   const primero = abrirFotograma(c, link, 1)!;
   assert.equal(Atomics.load(link.creditos, 0), 0);
-  assert.ok(escribirFotograma(c, structuredClone(primero)));
-  assert.ok(escribirFotograma(segundo, structuredClone(primero)));
+  assert.ok(escribirFotograma(c, structuredClone(primero), [0]));
+  assert.ok(escribirFotograma(segundo, structuredClone(primero), [1]));
   assert.equal(leerFotograma(link, 0n, () => assert.fail()), false);
   cerrarFotograma(c, link, primero, true);
   assert.equal(abrirFotograma(c, link, 1), null);
@@ -125,7 +125,7 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   const vivo = campos.vivo, dueno = campos.dueno;
   campos.vivo = new Uint8Array(5).fill(1);
   campos.dueno = new Int32Array(5);
-  assert.equal(escribirFotograma(c, abortado), false);
+  assert.equal(escribirFotograma(c, abortado, [0, 1, 2, 3, 4]), false);
   cerrarFotograma(c, link, abortado, true);
   campos.vivo = vivo;
   campos.dueno = dueno;
@@ -137,8 +137,8 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   terreno.duenoChunk[0] = 1;
   otro.chunks = Int32Array.of(0);
   const delta = abrirFotograma(c, link, 1)!;
-  assert.ok(escribirFotograma(c, delta));
-  assert.ok(escribirFotograma(segundo, delta));
+  assert.ok(escribirFotograma(c, delta, [0]));
+  assert.ok(escribirFotograma(segundo, delta, [1]));
   cerrarFotograma(c, link, delta, true);
   leerFotograma(link, 1n, (f, s) => {
     assert.equal(f.saltados, 1);
@@ -152,8 +152,8 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   coordinador.tick = 18;
   terreno.duenoChunk[0] = 0;
   const sinCambio = abrirFotograma(c, link, 1)!;
-  assert.ok(escribirFotograma(c, sinCambio));
-  assert.ok(escribirFotograma(segundo, sinCambio));
+  assert.ok(escribirFotograma(c, sinCambio, [0]));
+  assert.ok(escribirFotograma(segundo, sinCambio, [1]));
   cerrarFotograma(c, link, sinCambio, true);
   leerFotograma(link, 2n, (f, s) => {
     assert.deepEqual([...f.paginas], []);
@@ -169,8 +169,8 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
   coordinador.tick = 22;
   pendientes = metadatos.filter(s => s.tipo !== 'texto' || s.campo !== 'recentMemory');
   const completo = abrirFotograma(c, link, 1)!;
-  assert.ok(escribirFotograma(c, completo));
-  assert.ok(escribirFotograma(segundo, completo));
+  assert.ok(escribirFotograma(c, completo, [0]));
+  assert.ok(escribirFotograma(segundo, completo, [1]));
   cerrarFotograma(c, link, completo, true);
   leerFotograma(link, 3n, (f, s) => {
     // Una celda material sintética comprueba la lectura sin ejecutar la ley W.
@@ -184,6 +184,37 @@ test('los créditos, la cadencia, las páginas sucias y los sucesos sobreviven a
     assert.equal(corte.vista.people[0].recentMemory, null);
     assert.ok(Array.isArray(corte.tilesCambiadas));
   });
+});
+
+test('una fila cedida en F6 se graba una vez y el destino la graba tras adoptarla', () => {
+  const link = enlace(8192);
+  const { campos, coordinador, otro } = contextos();
+  const origen = coordinador as unknown as CtxF0, destino = otro as unknown as CtxF0;
+  const vista = estadoVista(1);
+  setParams(origen.mundo, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, fotograma: true } });
+  Atomics.store(link.creditos, 0, 1);
+  enlazarFuenteFotograma(link, { corte: () => ({ serie, sucesos: metadatos }), confirmar() {} });
+
+  const antes = abrirFotograma(origen, link, 1)!;
+  assert.ok(escribirFotograma(origen, antes, [0]));
+  // La cesión cambia el frente escrito, pero el destino todavía no tiene a la persona en su heap.
+  campos.dueno[0] = 1;
+  assert.ok(escribirFotograma(destino, antes, [1]));
+  assert.ok(cerrarFotograma(origen, link, antes, true));
+  assert.ok(leerFotograma(link, 0n, (f, sucesos) => {
+    assert.equal(f.n, 2);
+    assert.deepEqual(fotogramaAVista(vista, f, sucesos, 1).vista.people.map(p => p.id), ['vecina']);
+  }));
+
+  coordinador.tick++;
+  const despues = abrirFotograma(origen, link, 1)!;
+  assert.ok(escribirFotograma(origen, despues, []));
+  assert.ok(escribirFotograma(destino, despues, [0, 1]));
+  assert.ok(cerrarFotograma(origen, link, despues, true));
+  assert.ok(leerFotograma(link, 1n, (f, sucesos) => {
+    assert.equal(f.n, 2);
+    assert.deepEqual(fotogramaAVista(vista, f, sucesos, 2).vista.people.map(p => p.id), ['vecina']);
+  }));
 });
 
 test('si el anillo se llena, el motor entrega el crédito sin esperar ni adelantar el cursor', t => {

@@ -585,11 +585,21 @@ export class Dueno implements CtxF0 {
   escribirFoto(): void {
     if (!this.#foto) return;
     if (this.hilos === 1) this.publicarTerreno();
-    const cupo = escribirFotograma(this, this.#foto);
+    const cupo = escribirFotograma(this, this.#foto, this.#filasFotograma());
     if (cupo) return;
     this.#fotoValida = false;
     const control = this.#piezas.control;
     if (control) control[CTL.fotoInvalido] = 1;
+  }
+
+  *#filasFotograma(): Iterable<number> {
+    // El frente escrito puede incluir una cesión de otro hilo en este mismo F6. Solo se graba desde el heap que aún tiene el organismo.
+    const { personas, fauna } = this.organismos;
+    yield* personas.ranuras;
+    for (const animal of this.mundo.animals) {
+      const ref = fauna.ref(animal);
+      if (ref !== REF_NULA) yield slotDe(ref);
+    }
   }
 
   /** Tras la última barrera (coordinador): publica o aborta el fotograma, y lo visible del tick deja de estar pendiente

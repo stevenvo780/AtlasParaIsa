@@ -107,25 +107,15 @@ export function abrirFotograma(c: CtxF0, enlace: EnlaceCinta, epoca: number): Fo
   return e.enCurso;
 }
 
-/** El coordinador puede dar a cada dueño su lista final de slots tras F5. */
-const filasLocales = new WeakMap<CtxLey, () => Iterable<number>>();
-export function enlazarFilasFotograma(c: CtxLey, filas: () => Iterable<number>): void {
-  filasLocales.set(c, filas);
-}
-
-function* indices(n: number): Iterable<number> {
-  for (let i = 0; i < n; i++) yield i;
-}
-
 /** F6: reserva un bloque por dueño y lee sus columnas del frente que se está cerrando. */
-export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso): boolean {
+export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: Iterable<number>): boolean {
   const versiones = f.versiones;
   const i32 = new Int32Array(f.ranura, 0, 8);
   const capO = i32[RANURA_I32.capOrganismos], capP = i32[RANURA_I32.capPaginas];
   const r = regionesRanura(capO, capP), binario = new DataView(f.ranura);
   const w = c.escritura, vivo = w.u8('vivo'), dueno = w.i32('dueno');
   const slots: number[] = [];
-  for (const s of filasLocales.get(c)?.() ?? indices(vivo.length)) {
+  for (const s of filasLocales) {
     if (dueno[s] === c.hilo && vivo[s] === 1) slots.push(s);
   }
 

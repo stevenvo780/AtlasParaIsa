@@ -1,4 +1,4 @@
-import { projectChemistry } from '../world/proyeccion.js';
+import { progresoConstruccion, projectChemistry } from '../world/proyeccion.js';
 import { publicGeologyKey } from '../shared/chemistry.js';
 import { PROTOCOL_VERSION, type PersonDetail, type PersonView, type Tile, type Viewport, type WorldView } from '../shared/types.js';
 import type { TechnologyState } from '../shared/technology.js';
@@ -7,7 +7,6 @@ import { bindWorldContext, projectTerrain, worldContext } from '../world/spatial
 import { paramsOf } from '../world/params.js';
 import { demographicTraits } from '../world/demography.js';
 import { escuchaDe } from '../world/genetics.js';
-import { constructionCost } from '../world/inventions.js';
 import { worldStatistics } from '../world/statistics.js';
 import { residentFastAccess, type ResidentFastAccess } from '../world/soa/terreno.js';
 import { projectTechnology } from '../world/technology.js';
@@ -164,7 +163,7 @@ function projectMirror(world: World, context: WorldContext, options: MirrorProje
       need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, escucha: escuchaDe(p.genome), skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       target: { x:p.target.x,y:p.target.y }, foodReserve:quantize ? q2opt(p.inventory) : p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || WORKING_ACTIONS.has(p.action) && distance(p,p.target)<0.5,
       workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
-        : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
+        : PROJECT_ACTIONS.has(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : p.action === 'build' ? progresoConstruccion(world, p) : clamp(p.work / (p.action==='invent'?60:p.action==='repair'?30:SKILLED_ACTIONS.has(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:quantize ? q2opt(p.demography.health) : p.demography.health,vitality:quantize ? q2opt(p.demography.vitality) : p.demography.vitality,continuityProtected:p.role!=='neighbor',
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture },

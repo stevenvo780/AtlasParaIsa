@@ -10,10 +10,10 @@ import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.m
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
 import { concebir, gestar, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
-import { Parte } from '../src/world/materia/tipos.js';
+import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
 import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
-import { DATO_GOLPEAR } from '../src/world/motor/contratos.js';
+import { DATO_GOLPEAR, DATO_MATERIA, REF_NULA, TipoIntento, type Intento } from '../src/world/motor/contratos.js';
 
 const azarFijo = (): (() => number) => { let s = 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 
@@ -133,6 +133,40 @@ test('F5 aplica un golpe local con intentos apagados y la muerte conserva la mat
   const masa = Math.round(masaDe(c, otra.cuerpo) * 10) / 10;
   matarAnimal(c, otra, 'senescencia');
   assert.ok(mundo.events.some(e => e.kind === 'animal' && e.actors.includes(otra.id) && e.text.includes(`${masa} kg`)));
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('un golpe sobre una presa que cruzó de dueño deja su carne en tránsito', t => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [presa] = mundo.animals, [cazador] = mundo.people;
+  assert.ok(presa?.uid && cazador?.uid);
+  const inicio = c.terreno.chunkDe(c.terreno.celda(presa.x, presa.y));
+  const destino = mundo.tiles.find(tile => c.terreno.chunkDe(c.terreno.celda(tile.x, tile.y)) !== inicio);
+  assert.ok(destino);
+  const celda = c.terreno.celda(destino.x, destino.y), chunk = c.terreno.chunkDe(celda);
+  assert.ok(celda >= 0);
+  const cadaver = c.materia.nuevo(Rol.Cadaver, celda, 0);
+  const envios: { dueno: number; intento: Intento }[] = [];
+  t.mock.method(c.buzon, 'enviar', (dueno: number, intento: Intento) => { envios.push({ dueno, intento }); });
+  const golpe = new Float64Array(5);
+  golpe[DATO_GOLPEAR.trabajo] = 1e10;
+  golpe[DATO_GOLPEAR.dureza] = 1;
+  // F4 cambió la posición de la presa. Su fila sigue en el dueño de origen hasta F6.
+  presa.x = destino.x; presa.y = destino.y;
+  c.terreno.duenoChunk[chunk] = 1;
+  try {
+    assert.equal(leyFauna.aplicar!.Golpear!(c, { tipo: TipoIntento.Golpear, de: c.ref(cazador.uid), a: c.ref(presa.uid),
+      celda: REF_NULA, lote: REF_NULA, nonce: c.id('nonce'), materia: null, dato: golpe, bytes: null }), 'hecho');
+    assert.equal(c.materia.vista(cadaver).masa, 0);
+    assert.equal(envios.length, 1);
+    const { dueno, intento } = envios[0]!;
+    assert.equal(dueno, 1);
+    assert.equal(intento.tipo, TipoIntento.Depositar);
+    assert.equal(intento.celda, celda);
+    assert.equal(intento.dato?.[DATO_MATERIA.rol], Rol.Cadaver);
+    assert.ok(intento.materia?.length);
+  } finally { c.terreno.duenoChunk[chunk] = c.hilo; }
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

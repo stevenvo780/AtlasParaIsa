@@ -675,7 +675,7 @@ function paresDe(acumulado: Map<number, number>): Float64Array {
 }
 
 /** Manda una garantía ya debitada al lote de `rol` de una celda de otro dueño. */
-function depositar(c: CtxLeyMateria, celda: number, rol: Rol, forma: number, materia: Float64Array): void {
+export function depositar(c: CtxLeyMateria, celda: number, rol: Rol, forma: number, materia: Float64Array): void {
   if (materia.length === 0) return;
   const dueno = c.terreno.duenoChunk[c.terreno.chunkDe(celda)]!;
   c.buzon.enviar(Math.max(0, dueno), {

@@ -21,7 +21,7 @@ import {
 import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
-  abortar, beber, concebir, crearCuerpo, crecer, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
+  abortar, beber, concebir, crearCuerpo, crecer, depositar, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
   pagar, parir, pedidoComida, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
@@ -695,8 +695,11 @@ function aplicarGolpear(cl: CtxLey, i: Intento): Aplicado {
     arrancado = c.materia.vista(carne).masa;
     // La carne arrancada cae a su celda como un trozo de cadáver.
     if (celda >= 0) {
-      const trozo = c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0 ? e.buf[0]! : c.materia.nuevo(Rol.Cadaver, celda, 0);
-      c.materia.moverParte(carne, trozo, { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null });
+      const todo = { parte: Parte.Todo, esp: 0, cuantos: 0, kappa: null };
+      if (propia(c, celda)) {
+        const trozo = c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0 ? e.buf[0]! : c.materia.nuevo(Rol.Cadaver, celda, 0);
+        c.materia.moverParte(carne, trozo, todo);
+      } else depositar(c, celda, Rol.Cadaver, 0, Float64Array.from(c.materia.garantizar(carne, todo, c.libro)));
       c.materia.liberar(carne);
     }
   }

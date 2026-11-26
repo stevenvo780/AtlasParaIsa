@@ -113,23 +113,25 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
   const i32 = new Int32Array(f.ranura, 0, 8);
   const capO = i32[RANURA_I32.capOrganismos], capP = i32[RANURA_I32.capPaginas];
   const r = regionesRanura(capO, capP), binario = new DataView(f.ranura);
-  const w = c.escritura, vivo = w.u8('vivo'), dueno = w.i32('dueno');
+  const w = c.escritura, vivo = w.u8('vivo'), dueno = w.i32('dueno'), clase = w.u8('clase'), paginaDe = w.i32('chunk');
   const slots: number[] = [];
   for (const s of filasLocales) {
-    if (dueno[s] === c.hilo && vivo[s] === 1) slots.push(s);
+    if (dueno[s] !== c.hilo || vivo[s] !== 1) continue;
+    if (clase[s] === Clase.Animal && c.retiraChunk(paginaDe[s]!)) continue;
+    slots.push(s);
   }
 
   const t = c.terreno;
   const chunks: number[] = [];
   for (const chunk of c.chunks) {
-    if (t.duenoChunk[chunk] !== c.hilo) continue;
+    if (t.duenoChunk[chunk] !== c.hilo || c.retiraChunk(chunk)) continue;
     if (f.completo || versiones[chunk] !== t.versionVisible[chunk] + 1) chunks.push(chunk);
   }
   const desdeO = Atomics.add(i32, RANURA_I32.n, slots.length);
   const desdeP = Atomics.add(i32, RANURA_I32.paginas, chunks.length);
   if (desdeO + slots.length > capO || desdeP + chunks.length > capP) return false;
 
-  const uid = w.f64('uid'), clase = w.u8('clase'), x = w.f32('x'), y = w.f32('y');
+  const uid = w.f64('uid'), x = w.f32('x'), y = w.f32('y');
   const accion = w.u8('accion'), cuerpo = w.f32('cuerpo');
   const forma = c.frente.columnas.includes('forma') ? w.i32('forma') : undefined;
   const principal = c.frente.columnas.includes('principal') ? w.i32('principal') : undefined;

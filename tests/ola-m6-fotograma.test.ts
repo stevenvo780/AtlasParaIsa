@@ -29,6 +29,7 @@ function contextos() {
   cuerpo[CAMPOS_CUERPO.masa] = 32.25;
   const campos = {
     vivo: Uint8Array.of(1, 1), dueno: Int32Array.of(0, 1), clase: Uint8Array.of(Clase.Persona, Clase.Animal),
+    chunk: Int32Array.of(0, -1),
     uid: Float64Array.of(2 ** 40 + 1, 2 ** 40 + 2), x: Float32Array.of(8, -3), y: Float32Array.of(-9, 11),
     accion: Uint8Array.of(5, 1), cuerpo, principal: Int32Array.of(12, 0),
   };
@@ -39,7 +40,7 @@ function contextos() {
     duenoChunk: Int16Array.of(0), versionVisible: Uint32Array.of(1),
     celda: (x: number, y: number) => x === -16 && y === 32 ? 0 : -1, chunkDe: () => 0,
   };
-  const comun = { mundo: {}, tick: 10, frente: { alta: 2, columnas: ['principal'] }, terreno, escritura };
+  const comun = { mundo: {}, tick: 10, frente: { alta: 2, columnas: ['principal'] }, terreno, escritura, retiraChunk: () => false };
   return { campos, terreno, coordinador: { ...comun, hilo: 0, chunks: Int32Array.of(0) },
     otro: { ...comun, hilo: 1, chunks: new Int32Array(0) } };
 }

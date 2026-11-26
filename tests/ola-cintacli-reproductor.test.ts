@@ -216,6 +216,24 @@ test('enlace de escena de archivo: usa el fotograma real tras un cambio de fase 
   } finally { h.player.stop(); }
 });
 
+test('enlace de escena de archivo: el último salto conserva su ventana al reemplazar la apertura', async () => {
+  const h = harness({ coberturas: [{ nivel: 0, t0: 80, t1: 96 }], abrirEnInicio: true,
+    escenaArchivo: { tick: 84, x: 5, y: 4, tramo: { desde: 80, hasta: 88 } } });
+  h.holdResponses(true);
+  const inicio = h.player.start();
+  await flush();
+  try {
+    h.holdResponses(false);
+    await h.player.jumpToLiveEdge();
+    h.release();
+    assert.equal(await inicio, true);
+    assert.deepEqual(h.emitted.map(frame => frame.tick), [96]);
+    assert.equal(h.requests[0]?.x, -43);
+    assert.equal(h.requests[1]?.x, undefined);
+    assert.equal(h.player.escenaInicial, undefined);
+  } finally { h.release(); h.player.stop(); }
+});
+
 test('un tramo entre muestras solo muestra fotogramas dentro de los dos límites', async () => {
   const h = harness({ coberturas: [{ nivel: 0, t0: 0, t1: 80 }], abrirEnInicio: true });
   await h.player.start();

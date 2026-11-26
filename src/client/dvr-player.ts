@@ -400,7 +400,7 @@ export class DvrPlayer {
     const tramo = { desde: inicio, hasta: fin };
     this.tramo = tramo;
     this.playing = false;
-    const ok = await this.jump(inicio, 'seek', 1, tramo);
+    const ok = await this.jump(inicio, 'seek', 1, { tramo });
     if (this.tramo !== tramo) return; // Otro salto o tramo sustituyó a este mientras llegaba el corte.
     if (!ok) { this.tramo = null; this.notify(); return; }
     this.playing = true; this.lastNow = null; this.notify();
@@ -422,7 +422,7 @@ export class DvrPlayer {
         this.applyMeta(meta);
       } catch { if (gen !== this.generacion) return; }
     }
-    await this.jump(this.liveTick(), 'seek', 1, undefined, !this.options.abrirEnInicio);
+    await this.jump(this.liveTick(), 'seek', 1, { alPresente: !this.options.abrirEnInicio });
   }
 
   /** La cámara cambió: se fusiona ~200 ms y se refresca el trozo en `currentTick` sin perder la posición. */
@@ -453,17 +453,10 @@ export class DvrPlayer {
     if (this.options.abrirEnInicio) {
       this.playing = false;
       const escena = this.escenaDisponible();
-      this.escenaInicial = escena;
       if (escena) {
-        const ventanaOriginal = this.viewport;
-        const { camaraMaxAncho, camaraMaxAlto } = DVR_LIMITS;
-        this.viewport = normalizeViewport({ x: escena.x - camaraMaxAncho / 2, y: escena.y - camaraMaxAlto / 2,
-          width: camaraMaxAncho, height: camaraMaxAlto });
         const generacionEscena = this.generacion + 1;
-        if (await this.jump(escena.tick, 'start', 1)) return;
+        if (await this.jump(escena.tick, 'start', 1, { escena })) return;
         if (this.generacion !== generacionEscena) return; // El reproductor se cerró o el usuario eligió otro fotograma.
-        this.viewport = ventanaOriginal;
-        this.escenaInicial = undefined;
       }
       await this.jump(this.minTick, 'start', 1);
       return;
@@ -676,10 +669,10 @@ export class DvrPlayer {
 
   private notify(): void { this.options.onStateChange?.(this.snapshot()); }
 
-  private async fetchChunk(t: number, n: number, gen: number, nivel: Nivel | 'auto' = this.nivelPedido): Promise<ChunkResp | null> {
+  private async fetchChunk(t: number, n: number, gen: number, nivel: Nivel | 'auto' = this.nivelPedido,
+    v = this.viewport): Promise<ChunkResp | null> {
     const aborter = new AbortController();
     this.aborter = aborter; this.inFlight = true; this.loading = true;
-    const v = this.viewport;
     try {
       const chunk = await this.options.fetchChunk({
         t, n, nivel, ...(this.epocaVista !== null ? { epoca: this.epocaVista } : {}),
@@ -728,13 +721,17 @@ export class DvrPlayer {
    * de la base del trozo (el fotograma clave ≤ t) y, si hay deltas hasta `t`, se aplican de una vez para aterrizar en
    * el último fotograma ≤ t en vez de reproducir el tramo desde el fotograma clave. Devuelve si pintó algo.
    */
-  private async jump(t: number, reason: DvrFrameReason, direccion: number, tramo?: Readonly<{ desde: number; hasta: number }>, alPresente = false): Promise<boolean> {
+  private async jump(t: number, reason: DvrFrameReason, direccion: number,
+    { tramo, alPresente, escena }: { tramo?: Readonly<{ desde: number; hasta: number }>; alPresente?: boolean; escena?: EscenaArchivo } = {}): Promise<boolean> {
     const target = this.fueraDeLaguna(clamp(Math.floor(t), this.minTick, Math.max(this.minTick, this.maxTick)), direccion);
     const gen = ++this.generacion;
     this.aborter?.abort(); this.cargando = null;
     this.frames = []; this.jumping = true; this.refreshPending = false; this.credito = 0; this.agotado = null;
     this.notify();
-    const chunk = await this.fetchChunk(target, this.chunkCount(), gen);
+    const { camaraMaxAncho, camaraMaxAlto } = DVR_LIMITS;
+    const ventana = escena ? normalizeViewport({ x: escena.x - camaraMaxAncho / 2, y: escena.y - camaraMaxAlto / 2,
+      width: camaraMaxAncho, height: camaraMaxAlto }) : this.viewport;
+    const chunk = await this.fetchChunk(target, this.chunkCount(), gen, this.nivelPedido, ventana);
     if (gen !== this.generacion) return false; // otro salto lo reemplazó
     this.jumping = false;
     if (!chunk) { this.notify(); return false; }
@@ -755,9 +752,12 @@ export class DvrPlayer {
     let frame: WorldView | null = null;
     try { for (let i = 0; i <= aterriza; i++) frame = this.decode(list[i]!).frame; }
     catch (error) { this.error = describe(error); this.frames = []; this.notify(); return false; }
-    const escena = reason === 'start' ? this.escenaInicial : undefined;
-    if (escena && (list[aterriza]!.nivel !== 0 || frame?.tick !== escena.tick
-      || !frame.tiles.some(tesela => tesela.x === escena.x && tesela.y === escena.y))) return false;
+    if (escena) {
+      if (list[aterriza]!.nivel !== 0 || frame?.tick !== escena.tick
+        || !frame.tiles.some(tesela => tesela.x === escena.x && tesela.y === escena.y)) return false;
+      this.viewport = ventana;
+      this.escenaInicial = escena;
+    }
     this.frames = list.slice(aterriza + 1, aterriza + 1 + DVR_LIMITS.maxFrames);
     this.emit(frame!, reason, 0, 'salto', list[aterriza]!, undefined);
     this.msReproduciendo = 0;

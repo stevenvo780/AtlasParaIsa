@@ -2,7 +2,7 @@ import { ROUTE_CELLS, needRatesScratch, type Candidate, ventajaComparativa, copy
 import { type Person, type World, RADIUS, TICKS_PER_DAY } from '../mundo/tipos.js';
 import { type Point, type TileLookup, distance, clamp } from '../mundo/geometria.js';
 import { creditCausalOutcome, ensurePersonPolicy, localPolicyObservation } from './politica-persona.js';
-import { BOCADO_KG, MIN_FORAGE_STOCK, FORAGE_AMOUNT, SORBO_KG, celdaEsPropia, comidaEnCelda, escalaBocado } from '../actuar/recursos.js';
+import { BOCADO_KG, MIN_FORAGE_STOCK, FORAGE_AMOUNT, SORBO_KG, comidaEnCelda, escalaBocado } from '../actuar/recursos.js';
 import { forageDuration } from '../actuar/trabajo.js';
 import { canTend, huntable, huntWorkDuration } from '../actuar/caza.js';
 import { phaseAt, addEvent, remember } from '../mundo/crear.js';
@@ -19,7 +19,7 @@ import { candidatoCortejo, candidatoCuidar, deseoCria, provisionCrianza } from '
 import { containedWaterQuanta, canHandleContainedWater } from '../technology-water.js';
 import { vecinos } from '../rejilla.js';
 import { settlementOpportunity, cooperationOpportunity, updateCulturalNormsOnOutcome } from '../society.js';
-import { comidaEnObra, foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
+import { aguaMaterialDisponible, comidaEnObra, foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
 import { HAMBRE_POR_UNIDAD } from '../ecologia-constantes.js';
 import { familyOpportunity, observedForagersByCell, earlierForagerExhausts, reproductiveReadiness, closeKin, availableToShare } from '../family.js';
 import { filtrarCerca, algunoCerca, primeroCerca } from '../indice-puntos.js';
@@ -35,7 +35,6 @@ import { escuchaDe } from '../genetics.js';
 import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
 import { apetitoDeTejido, basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
 import { ctxMateriaDe } from '../motor/acceso.js';
-import { lotesDeCelda } from '../materia/ley-mundo.js';
 import { estadoObra, KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
 import { CHUNK_SIZE } from '../terrain.js';
 
@@ -47,6 +46,7 @@ const chooseHuntOrder = new Int16Array(256);
 const chooseNearbySteps = new Int16Array(ROUTE_CELLS), chooseNearbyDist = new Float64Array(ROUTE_CELLS);
 
 const chooseReachableSteps = new Int16Array(ROUTE_CELLS), chooseReachableDist = new Float64Array(ROUTE_CELLS);
+const chooseReachableMaterialCells = new Int32Array(ROUTE_CELLS);
 
 const choosePeople: Person[] = [];
 
@@ -110,6 +110,10 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   };
   const reachableTiles = own ? chooseReachable : [];
   const reachableCells = own ? chooseReachableCells : [];
+  const cuerpo = ley(world, 'cuerpos') ? person.cuerpo : undefined;
+  const materia = cuerpo ? ctxMateriaDe(world) : undefined;
+  // El identificador de la ventana se puede reutilizar en la arena del mismo terreno.
+  const materialCells = materia?.terreno === terreno ? (own ? chooseReachableMaterialCells : new Int32Array(ROUTE_CELLS)) : undefined;
   // Las teselas de tierra del disco, en el orden de filas de la ventana, con sus pasos (-1: sin ruta) y distancias.
   const nearbySteps = own ? chooseNearbySteps : new Int16Array(ROUTE_CELLS), nearbyDist = own ? chooseNearbyDist : new Float64Array(ROUTE_CELLS);
   const reachableSteps = own ? chooseReachableSteps : new Int16Array(ROUTE_CELLS), reachableDist = own ? chooseReachableDist : new Float64Array(ROUTE_CELLS);
@@ -124,11 +128,13 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     const st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? pagina.soa[o]! : -1;
     const i = nearbyTiles.length;
     nearbyTiles.push(t); nearbyCells.push(cell); nearbySteps[i] = st; nearbyDist[i] = d;
-    if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }
+    if (st >= 0) {
+      const ri = reachableTiles.length;
+      reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d;
+      if (materialCells) materialCells[ri] = c;
+    }
   }
   const payload = containedWaterQuanta(person) / 1000;
-  const cuerpo = ley(world, 'cuerpos') ? person.cuerpo : undefined;
-  const materia = cuerpo ? ctxMateriaDe(world) : undefined;
   const apetito = cuerpo && materia ? Math.max(person.hunger, apetitoDeTejido(materia, cuerpo)) : person.hunger;
   const obra = ley(world, 'obra');
   const tramo = 30;
@@ -141,13 +147,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const puedePagar = (pasos: number, trabajo = 0) => cuerpo
     ? reserva >= pasos * (pasoJ + 6 * basal) + trabajo * (TRABAJO_J_TICK + basal)
     : planAffordable(person, payload, pasos, trabajo);
-  const aguaLibre = (p: Point): number => {
-    if (!materia || obra) return waterAvailable(world, p);
-    const celda = materia.terreno.celda(p.x, p.y);
-    if (!celdaEsPropia(materia, celda)) return 0;
-    const lote = lotesDeCelda(materia, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 }).agua;
-    return lote >= 0 ? materia.materia.vista(lote).agua * KG_POR_CUANTO_AGUA : 0;
-  };
+  const aguaLibre = (p: Point, celda?: number): number => materia
+    ? aguaMaterialDisponible(materia, p, obra, celda)
+    : waterAvailable(world, p);
   let comidaCargada = 0, aguaCargada = 0;
   if (cuerpo && materia) for (const lote of carga) {
     if (!materia.materia.propio(lote)) continue;
@@ -218,7 +220,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
-      const j = comidaEnCelda(materia, cuerpo, tile, kg)
+      const j = comidaEnCelda(materia, cuerpo, tile, kg, materialCells?.[i])
         + (pasos === 0 ? comidaCargada : 0)
         + (obra ? comidaEnObra(materia, cuerpo, tile, kg) : 0);
       const valor = Math.min(j, prevista) / (tramo + pasos * 6 + recelo(tile) * 6);
@@ -380,7 +382,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   }
   // La consulta percibida solo ve el agua del suelo: con una cisterna cerca, o si su celda no sirve, se busca como siempre.
   let water = percibida(CONSULTA.agua);
-  const cisterna = algunoCerca(world.structures, person, RADIUS + 2, structure => structure.components.includes('cistern'));
+  const cisterna = !cuerpo && algunoCerca(world.structures, person, RADIUS + 2, structure => structure.components.includes('cistern'));
   if (cuerpo) {
     water = undefined;
     let mejor = 0;
@@ -388,7 +390,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
-      const valor = Math.min(sorbo, aguaLibre(tile) + (pasos === 0 ? aguaCargada : 0)) / (tramo + pasos * 6 + recelo(tile) * 6);
+      const valor = Math.min(sorbo, aguaLibre(tile, materialCells?.[i]) + (pasos === 0 ? aguaCargada : 0)) / (tramo + pasos * 6 + recelo(tile) * 6);
       if (valor > mejor) { water = tile; mejor = valor; }
     }
   } else if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)

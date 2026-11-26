@@ -478,6 +478,8 @@ export interface TelemetriaBrokerGpu {
   bajadaConfirmadaBytes: number;
   cudaConfirmadaMicros: number;
   recorridoConfirmadoMicros: number;
+  /** Tiempo de pared del dueño desde la reserva hasta publicar, incluidos intentos sin respuesta. */
+  preparacionMicros: number;
 }
 
 export interface TelemetriaDispositivoBrokerGpu {

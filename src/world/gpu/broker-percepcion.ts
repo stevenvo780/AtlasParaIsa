@@ -9,13 +9,18 @@ import { PercibidorGpu } from './percibir-gpu.js';
 const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7,
   senal0: 8, validacion0: 10, celdas: 12 };
 const MEDIDA = { lotes: 0, dueno0: 1, dueno1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
-  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14, celdas: 15 };
+  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14,
+  preparacionMicros: 15, celdas: 16 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
 const SOLO_CPU = [[]];
 const ESTADO = { esperando: 0, lista: 1, fallo: 2, cancelada: 3 };
 const LIMITE_MS = 50;
-const LIMITE_NANOS = BigInt(LIMITE_MS) * 1_000_000n;
+const PLAZO_TRANSITO_NANOS = BigInt(LIMITE_MS) * 1_000_000n;
 const restante = (fin: bigint): number => Number(fin - process.hrtime.bigint()) / 1e6;
+const TRAZAR = process.env.CARTA_PERCEPCION_TRAZA === '1';
+const trazar = (fase: string, gpu: number, datos: object) => {
+  if (TRAZAR) console.error('[percepcion-gpu]', JSON.stringify({ fase, gpu, ...datos }));
+};
 const turno = (generacion: number, dueno: number): number => (generacion << 2) | (dueno + 1);
 function despertar(control: Int32Array<SharedArrayBuffer>, dueno: number): void {
   const senal = CONTROL.senal0 + dueno;
@@ -31,7 +36,7 @@ function desactivar(control: Int32Array<SharedArrayBuffer>): void {
 interface Identidad { generacion: number; epoca: number; dueno: number; tick: number; despacho: number }
 interface Orden { kind: 'percibir'; subida: number; salida: number; bajada: number; tick: number; despacho: number }
 interface Peticion {
-  identidad: Identidad; orden: Orden; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
+  identidad: Identidad; orden: Orden; inicio: bigint; enviada: bigint; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
   estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>;
 }
 interface PuertoBroker { dispositivo: number; canal: string; control: Int32Array<SharedArrayBuffer>; medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean }
@@ -105,7 +110,8 @@ export class BrokerPercepcionGpu {
       cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
       ...(this.#puertos.porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
       erroresCanal: leer(MEDIDA.errores), subidaConfirmadaBytes: leer(MEDIDA.subida), bajadaConfirmadaBytes: leer(MEDIDA.bajada),
-      cudaConfirmadaMicros: leer(MEDIDA.cudaMicros), recorridoConfirmadoMicros: leer(MEDIDA.recorridoMicros) };
+      cudaConfirmadaMicros: leer(MEDIDA.cudaMicros), recorridoConfirmadoMicros: leer(MEDIDA.recorridoMicros),
+      preparacionMicros: leer(MEDIDA.preparacionMicros) };
   }
 
   cerrar(): Promise<void> {
@@ -157,7 +163,7 @@ class CanalPercepcionBroker implements CanalGpu {
       this.anotarRuta('cpuSinCanal');
       return false;
     }
-    this.#reserva = process.hrtime.bigint() + LIMITE_NANOS;
+    this.#reserva = process.hrtime.bigint();
     return true;
   }
 
@@ -175,14 +181,19 @@ class CanalPercepcionBroker implements CanalGpu {
     const orden = JSON.parse(Buffer.from(datos).toString()) as Orden;
     const { epoca, generacion } = this.epoca;
     const respuesta = new SharedArrayBuffer(16);
+    // El dueño ya acabó de empaquetar. Los 50 ms cubren buzón, copias y respuesta del servidor.
+    const enviada = process.hrtime.bigint(), inicio = this.#reserva;
     const peticion: Peticion = {
       identidad: { generacion, epoca, dueno: this.dueno, tick: orden.tick, despacho: orden.despacho },
-      orden, fin: this.#reserva, datos: this.#datos,
+      orden, inicio, enviada, fin: enviada + PLAZO_TRANSITO_NANOS, datos: this.#datos,
       estado: new Int32Array(respuesta, 0, 1), tiempo: new Float64Array(respuesta, 8, 1),
     };
     this.#puerto.postMessage(peticion);
     this.#pendiente = peticion;
     this.#reserva = undefined;
+    if (this.epoca.medida) Atomics.add(this.epoca.medida, MEDIDA.preparacionMicros, (enviada - inicio) / 1000n);
+    if (TRAZAR) trazar('enviada', this.dispositivo, { ...peticion.identidad, subida: orden.subida, bajada: orden.bajada,
+      preparacionMs: Number(enviada - inicio) / 1e6 });
   }
   recibir(plazoMs: number): Uint8Array {
     if (Number.isNaN(plazoMs) || plazoMs < 0) throw new RangeError('Plazo del corredor GPU inválido.');
@@ -202,6 +213,8 @@ class CanalPercepcionBroker implements CanalGpu {
     this.#pendiente = undefined;
     if (antes !== ESTADO.lista || Atomics.load(control, CONTROL.generacion) !== identidad.generacion
       || Atomics.load(control, CONTROL.listo) !== 1) {
+      if (TRAZAR) trazar('sin-respuesta', this.dispositivo, { ...identidad, estado: antes,
+        lista: Atomics.load(control, CONTROL.listo), restanteMs: restante(fin), desdeEnvioMs: -restante(peticion.enviada) });
       throw new ErrorDispositivo(`gpu${this.dispositivo}`, 'El corredor no confirmó el despacho de este dueño y generación.');
     }
     const medida = this.epoca.medida;
@@ -210,25 +223,31 @@ class CanalPercepcionBroker implements CanalGpu {
       Atomics.add(medida, MEDIDA.subida, BigInt(peticion.orden.subida));
       Atomics.add(medida, MEDIDA.bajada, BigInt(peticion.orden.bajada));
       Atomics.add(medida, MEDIDA.cudaMicros, BigInt(Math.round(tiempo[0]! * 1000)));
-      Atomics.add(medida, MEDIDA.recorridoMicros, (process.hrtime.bigint() - fin + LIMITE_NANOS) / 1000n);
+      Atomics.add(medida, MEDIDA.recorridoMicros, (process.hrtime.bigint() - peticion.inicio) / 1000n);
     }
     return Buffer.from(JSON.stringify({ ok: true, ...identidad, ms: tiempo[0] }));
   }
   anotarError(error: unknown): void {
-    if (this.epoca.medida && error instanceof ErrorDispositivo) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
+    if (!(error instanceof ErrorDispositivo)) return;
+    this.#validarEnEpoca(false);
+    if (this.epoca.medida) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
   }
   anotarValidacion(aceptada: boolean): void {
-    const { control, generacion, medida } = this.epoca;
-    if (Atomics.load(control, CONTROL.generacion) !== generacion) return;
+    if (this.#validarEnEpoca(aceptada) && this.epoca.medida)
+      Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
+  }
+  #validarEnEpoca(aceptada: boolean): boolean {
+    const { control, generacion } = this.epoca;
+    if (Atomics.load(control, CONTROL.generacion) !== generacion) return false;
     const posicion = CONTROL.validacion0 + this.dueno;
     // El signo representa la última validación. Un cliente que cierra tarde no pisa otra generación.
     let anterior = Atomics.load(control, posicion);
     while (Math.abs(anterior) <= generacion) {
       const leida = Atomics.compareExchange(control, posicion, anterior, aceptada ? generacion : -generacion);
-      if (leida === anterior) break;
+      if (leida === anterior) return true;
       anterior = leida;
     }
-    if (medida) Atomics.add(medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
+    return false;
   }
   cerrar(): void {
     if (this.#cerrado) return;
@@ -327,19 +346,42 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
       const entrada = new BroadcastChannel(`${canal}:${dueno}`);
       entradas.push(entrada);
       entrada.onmessage = ({ data }) => {
-        const { identidad: id, orden, fin, estado, datos, tiempo } = data as Peticion;
+        const { identidad: id, orden, enviada, fin, estado, datos, tiempo } = data as Peticion;
         const permiso = turno(id.generacion, dueno);
         const pertenece = () => id.dueno === dueno && Atomics.load(control, CONTROL.generacion) === id.generacion
           && Atomics.load(control, CONTROL.listo) === 1;
+        const vigente = () => pertenece() && Atomics.load(control, CONTROL.ocupado) === permiso
+          && Atomics.load(estado, 0) === ESTADO.esperando && restante(fin) > 0;
+        let fase = 'admisión';
+        const tiempos: Record<string, number> | undefined = TRAZAR ? { colaMs: -restante(enviada) } : undefined;
+        let marca = TRAZAR ? performance.now() : 0;
+        const medir = (siguiente: string) => {
+          if (tiempos) {
+            const ahora = performance.now();
+            tiempos[fase] = ahora - marca;
+            marca = ahora;
+          }
+          fase = siguiente;
+        };
         let ms: number | undefined;
         try {
-          if (!pertenece() || Atomics.load(control, CONTROL.ocupado) !== permiso
-            || Atomics.load(estado, 0) !== ESTADO.esperando || restante(fin) <= 0) return;
+          if (!vigente()) {
+            if (TRAZAR) trazar('descartada', dispositivo, { ...id, etapa: fase, estado: Atomics.load(estado, 0), restanteMs: restante(fin), ...tiempos });
+            return;
+          }
           Atomics.add(control, CONTROL.peticiones, 1);
+          medir('copiarSubidaMs');
           if (datos.length > gpu!.bytes) gpu!.crecer(datos.length);
           gpu!.escribir(0, datos.subarray(0, orden.subida));
+          medir('enviarOrdenMs');
+          if (!vigente()) {
+            if (TRAZAR) trazar('descartada', dispositivo, { ...id, etapa: fase, estado: Atomics.load(estado, 0), restanteMs: restante(fin), ...tiempos });
+            return;
+          }
           enviarOrden(gpu!, { ...orden, ...id });
+          medir('esperarRespuestaMs');
           const respuesta = recibirRespuesta<Identidad & { ok: boolean; ms: number }>(gpu!, Math.max(0, restante(fin)));
+          medir('copiarBajadaMs');
           if (!respuesta.ok || !Number.isFinite(respuesta.ms) || respuesta.ms < 0
             || respuesta.generacion !== id.generacion || respuesta.epoca !== id.epoca || respuesta.dueno !== id.dueno
             || respuesta.tick !== id.tick || respuesta.despacho !== id.despacho) {
@@ -350,9 +392,16 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
             tiempo[0] = respuesta.ms;
             ms = respuesta.ms;
           }
-        } catch {
+        } catch (error) {
+          if (TRAZAR) trazar('fallo-corredor', dispositivo, { ...id, etapa: fase, restanteMs: restante(fin), ...tiempos,
+            razon: error instanceof Error && error.message.startsWith('Venció el plazo') ? 'plazo' :
+              error instanceof Error && error.message.includes('eco de otro despacho') ? 'identidad' : 'canal' });
           cerrar();
         } finally {
+          if (TRAZAR && ms !== undefined) {
+            medir('fin');
+            trazar('respuesta', dispositivo, { ...id, cudaMs: ms, restanteMs: restante(fin), ...tiempos });
+          }
           Atomics.compareExchange(control, CONTROL.ocupado, permiso, 0);
           if (ms !== undefined && pertenece() && restante(fin) > 0
             && Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.lista) === ESTADO.esperando) {

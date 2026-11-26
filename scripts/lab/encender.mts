@@ -1,13 +1,14 @@
 /**
- * scripts/lab/encender.mts — enciende un escalón de la V23 en un mundo de UN hilo y con semilla, y lo
+ * scripts/lab/encender.mts — enciende un escalón de la V23 en un mundo con semilla y lo
  * vigila tick a tick: para en la primera violación dura de un invariante o de un `Ley.comprobar` e imprime tick, ley y entorno.
  *
  *   tsx scripts/lab/encender.mts --semilla 51926 --hasta materia --dias 3 [--params p.json | "a.b=1,c.d=2"] [--regimen abierto|defecto]
- *        [--gpu 0[,1]] [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
+ *        [--hilos N] [--gpu 0[,1]] [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
  *        [--n N] [--ticks N] [--perfil] [--digesto]
  *
  *  --hasta X     enciende los interruptores hasta X incluido, en el orden de `ORDEN_ENCENDIDO` (`escalon()`); se aplica
  *                ENCIMA de `--params`. Sin él, rigen los interruptores de `--params` (todos apagados por defecto).
+ *  --hilos N     usa N dueños. Si N > 1, añade duenos sobre el escalón y exige que intentos ya esté encendido.
  *  --gpu         añade materiaGpu sobre el escalón y usa las tarjetas indicadas. Por defecto corre en CPU.
  *  --cada N      comprueba los invariantes y las leyes cada N ticks. Sin él, cada tick, cada invariante con su propia cadencia.
  *  --continuar   no para en la primera violación dura: las anota todas (para ver su alcance, no para estabilizar).
@@ -20,7 +21,7 @@
  * Código de salida: 0 completo, 2 violación dura, 1 error.
  *
  * --n siembra mortales con `poblacion.mts` en la zona 0,0,48,32. --ticks permite un último día parcial.
- * --perfil resume el coste de `stepWorld`. --digesto incluye el estado final residente, archivado y material.
+ * --perfil resume el coste del paso. --digesto incluye el estado final residente, archivado y material.
  */
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -32,8 +33,10 @@ import { parseParams, paramsOf, DEFAULT_PARAMS, type WorldParams } from '../../s
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
 import { comprobarLeyes, crearComprobador, listaInvariantes, type Violacion } from '../../src/world/invariantes.js';
 import { LEYES } from '../../src/world/motor/leyes.js';
-import { ctxSi } from '../../src/world/motor/acceso.js';
+import { ctxSi, enlazarCtx } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
+import { crearMotor } from '../../src/world/motor/coordinador.js';
+import type { Instantanea, Motor } from '../../src/world/motor/contratos.js';
 import { cerrarMateriaGpu, conservacion, diagnosticoMateriaGpu } from '../../src/world/materia/ley-mundo.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { escalon, INTERRUPTORES, ORDEN_ENCENDIDO, type Interruptor, type InterruptoresV23 } from '../../src/shared/interruptores.js';
@@ -43,7 +46,7 @@ export interface OpcionesEncender {
   semilla: number; hasta?: Interruptor; params?: string; dias: number; regimen: 'abierto' | 'defecto';
   /** Cada cuántos ticks se comprueba todo; `undefined` = cada tick con la cadencia propia de cada invariante. */
   cada?: number; topeMortales?: number; continuar: boolean; salida?: string; comprobar: boolean; gpu?: number[];
-  n?: number; ticks?: number; perfil?: boolean; digesto?: boolean;
+  n?: number; ticks?: number; perfil?: boolean; digesto?: boolean; hilos?: number;
 }
 
 const entero = (texto: string, nombre: string, minimo = 1): number => {
@@ -71,6 +74,7 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
       case '--dias': o.dias = entero(valor, bandera); break;
       case '--ticks': o.ticks = entero(valor, bandera); break;
       case '--n': o.n = entero(valor, bandera); break;
+      case '--hilos': o.hilos = entero(valor, bandera); break;
       case '--gpu':
         if (!/^\d+(,\d+)*$/.test(valor)) throw new Error('--gpu espera índices separados por comas');
         o.gpu = [...new Set(valor.split(',').map(id => entero(id, bandera, 0)))]; break;
@@ -84,17 +88,18 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
   return o;
 }
 
-/** Los params del mundo de referencia: régimen, `--params`, el escalón de `--hasta` y un solo dueño. */
-export function paramsDeEncender(o: Pick<OpcionesEncender, 'regimen' | 'params' | 'hasta' | 'gpu'>): WorldParams {
+/** Los params del mundo de referencia, con un dueño y CPU por defecto. */
+export function paramsDeEncender(o: Pick<OpcionesEncender, 'regimen' | 'params' | 'hasta' | 'hilos' | 'gpu'>): WorldParams {
   let params: WorldParams = o.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS;
   if (o.params) {
     const texto = existsSync(o.params) ? readFileSync(o.params, 'utf8') : o.params;
     params = parseParams(texto.trimStart().startsWith('{') ? JSON.parse(texto) : texto, params);
   }
   if (o.hasta) params = parseParams({ v23: escalon(o.hasta) }, params);
-  const gpu = o.gpu ?? [];
-  return parseParams({ motor: { ...params.motor, hilos: 1, gpu },
-    ...(gpu.length ? { v23: { ...params.v23, materiaGpu: true } } : {}) }, params);
+  const hilos = o.hilos ?? 1, gpu = o.gpu ?? [];
+  return parseParams({ motor: { hilos, gpu }, v23: {
+    duenos: hilos > 1 || params.v23.duenos, materiaGpu: gpu.length > 0 || params.v23.materiaGpu,
+  } }, params);
 }
 
 const interruptoresEncendidos = (v: Readonly<InterruptoresV23>): Interruptor[] => INTERRUPTORES.filter(k => v[k]);
@@ -134,17 +139,30 @@ export function vistasMedias(tiles: Readonly<World['tiles']>) {
 export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<string, unknown>) => void): Promise<number> {
   const params = paramsDeEncender(o);
   const mundo = createWorld(o.semilla, params);
-  try { return correr(o, mundo, escribirFila); }
-  finally { cerrarMateriaGpu(mundo); }
+  if (o.n !== undefined) poblar(mundo, { n: o.n, zona: { x: 0, y: 0, ancho: 48, alto: 32 }, siembra: o.semilla });
+  const { hilos, gpu } = params.motor;
+  const motor = hilos > 1 ? crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: o.comprobar, semilla: o.semilla }) : undefined;
+  try { return correr(o, mundo, motor, escribirFila); }
+  finally {
+    if (motor) await motor.cerrar();
+    else cerrarMateriaGpu(mundo);
+  }
 }
 
-function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<string, unknown>) => void): number {
-  const params = paramsOf(mundo);
-  if (o.n !== undefined) poblar(mundo, { n: o.n, zona: { x: 0, y: 0, ancho: 48, alto: 32 }, siembra: o.semilla });
-  const { archivo, archivar } = archivoDeChunks(mundo);
-  const contexto = worldContext(mundo);
+function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, escribirFila: (fila: Record<string, unknown>) => void): number {
+  let mundo = origen;
+  let materia: Instantanea['materia'] | undefined;
+  const params = paramsOf(origen);
+  // El coordinador recibe los chunks retirados de todos los dueños y vuelve a activarlos desde este archivo.
+  const { archivo, archivar } = archivoDeChunks(origen);
+  const contexto = worldContext(origen);
   const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
-  const medicion: FaseMedicion | undefined = o.perfil ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
+  const medicion: FaseMedicion | undefined = o.perfil && !motor ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
+  const paso = (): void => {
+    if (motor) motor.paso([]);
+    else if (medicion) stepWorld(origen, [], contexto, medicion);
+    else stepWorld(origen);
+  };
   const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
   let msPared = 0, msCpu = 0;
   const carriles = new Map(listaInvariantes().map(i => [i.id, i.carril]));
@@ -156,18 +174,18 @@ function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<s
     mortales: mundo.people.filter(p => p.role === 'neighbor').length, fauna: mundo.animals.length, ...extra,
   });
   escribirFila({ tipo: 'inicio', ...entorno(), leyes: leyesEncendidas.map(l => l.id), invariantes: [...carriles.keys()], comprobar: o.comprobar,
-    cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY, gpu: params.motor.gpu });
+    cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY, hilos: motor?.telemetria().hilos ?? 1, gpu: params.motor.gpu });
 
   let violaciones = 0, duras = 0, avisoSinContexto = false;
   const fin = (estado: string, dia?: number): number => {
     const medido = mundo.tick;
     const maxRssMiB = process.resourceUsage().maxRSS / 1024;
     const porTick = (fases: Record<string, number>) => Object.fromEntries(Object.entries(fases).map(([fase, ms]) => [fase, ms / medido]));
-    const perfil = medicion && medido > 0 ? {
+    const perfil = o.perfil && medido > 0 ? {
       msCpuPorTick: msCpu / medido, msParedPorTick: msPared / medido, ticksPorSegundo: medido * 1000 / msPared,
-      cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases), maxRssMiB,
+      ...(medicion ? { cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases) } : {}), maxRssMiB,
     } : undefined;
-    const digesto = o.digesto ? digestoCompleto(mundo, archivo) : undefined;
+    const digesto = o.digesto ? digestoCompleto(mundo, archivo, materia) : undefined;
     escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto });
     return duras ? 2 : 0;
   };
@@ -185,8 +203,14 @@ function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<s
     if (!o.comprobar) return false;
     // El comprobador por corrida suma a los invariantes los de historia (Δpoblación, acumulados, nacimientos).
     const invariantes = comprobador!(mundo);
-    const deLeyes = comprobarLeyes(mundo, leyesEncendidas);
-    if (!avisoSinContexto && leyesEncendidas.length && !ctxSi(mundo)) {
+    // Los ganchos locales requieren el contexto del dueño, no el mundo reunido.
+    const deLeyes = comprobarLeyes(origen, leyesEncendidas);
+    const balance = motor && duenoSi(origen)?.balanceIntentos();
+    if (balance && balance.enviados !== balance.recibidos + balance.pendientes) {
+      invariantes.push({ id: 'motor-buzones', gravedad: 'dura', tick: mundo.tick,
+        detalle: 'Los intentos enviados no cuadran con los recibidos y los pendientes.', contexto: balance });
+    }
+    if (!motor && !avisoSinContexto && leyesEncendidas.length && !ctxSi(mundo)) {
       avisoSinContexto = true;
       escribirFila({ tipo: 'aviso', tick: mundo.tick, texto: 'Hay leyes encendidas pero el mundo no tiene contexto de dueño (ctxSi): no corren sus comprobar ni I-C/I-R/I-B.' });
     }
@@ -201,12 +225,21 @@ function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<s
     const causasFauna: Record<string, number> = {};
     for (let t = 0; t < TICKS_PER_DAY && mundo.tick < ticks; t++) {
       const muertesFaunaAntes = mundo.animalDynamics.deaths;
-      if (medicion) {
+      if (o.perfil) {
         const pared = performance.now(), cpu = cpuMs();
-        stepWorld(mundo, [], contexto, medicion);
+        paso();
         msCpu += cpuMs() - cpu;
         msPared += performance.now() - pared;
-      } else stepWorld(mundo);
+      } else paso();
+      if (motor) {
+        const corte = motor.instantanea();
+        mundo = corte.world;
+        if (o.digesto) materia = corte.materia;
+        const dueno = duenoSi(origen);
+        if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
+        // La instantánea reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
+        enlazarCtx(mundo, dueno);
+      }
       if (params.v23.fauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
         for (let i = mundo.events.length - 1; i >= 0; i--) {
           const evento = mundo.events[i]!;
@@ -248,9 +281,9 @@ function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<s
   return fin(duras ? 'violacion' : 'completo');
 }
 
-function digestoCompleto(mundo: World, archivo: ReadonlyMap<string, Buffer>): string {
+function digestoCompleto(mundo: World, archivo: ReadonlyMap<string, Buffer>, reunida?: Instantanea['materia']): string {
   const dueno = duenoSi(mundo);
-  const materia = dueno?.instantaneaMateria(dueno.pendientes());
+  const materia = reunida === undefined ? dueno?.instantaneaMateria(dueno.pendientes()) : reunida;
   const hash = createHash('sha256').update(digestoCanonico(mundo));
   hash.update(serialize([mundo.siguienteUid, mundo.people.map(p => p.uid), mundo.animals.map(a => a.uid), materia]));
   for (const [clave, datos] of [...archivo].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {

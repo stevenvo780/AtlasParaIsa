@@ -1,11 +1,11 @@
 [Unit]
-Description=Respaldo de los niveles L1 a L4 de la cinta
+Description=Respaldo de los niveles L1 a L4 de la cinta V23 (torre)
 ConditionPathIsMountPoint=/mnt/Data2
+After=atlas-respaldo-publico.service
 
 [Service]
 Type=oneshot
-Environment=CARTA_CINTA_RESPALDO=/mnt/Data2/respaldos-atlas-cinta
-EnvironmentFile=%h/.config/atlas-para-isa/respaldo-cinta.env
-ExecStart=/usr/bin/bash -c 'exec /usr/bin/bash "$$CARTA_CINTA_WORKTREE/scripts/respaldo-cinta.sh"'
+EnvironmentFile=%h/.config/atlas-para-isa/publicacion-v23.env
+ExecStart=/usr/bin/bash -c 'exec /usr/bin/bash "$$CARTA_RELEASE_DIR/scripts/respaldo-cinta.sh" "$$CARTA_DATA_DIR/cinta" "$$CARTA_CINTA_RESPALDO"'
 IOSchedulingClass=idle
 Nice=15

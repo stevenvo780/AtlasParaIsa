@@ -1,5 +1,5 @@
 [Unit]
-Description=Respaldo horario de la cinta
+Description=Respaldo horario de la cinta V23 (torre)
 
 [Timer]
 OnCalendar=hourly

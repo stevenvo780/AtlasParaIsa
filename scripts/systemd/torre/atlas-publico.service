@@ -1,14 +1,21 @@
 [Unit]
-Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech + LAN/VPN) en la torre
-ConditionPathExists=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v21-20261124/access.scrypt
+Description=Una Carta Para Isa — servidor público V23 (atlas.humanizar.tech + LAN/VPN) en la torre
 After=network-online.target tailscaled.service
 Wants=network-online.target
+
 [Service]
 Type=simple
-ExecStart=/datos/workspaces/personal/AtlasParaIsa/scripts/systemd/torre/publico.sh
+Environment=HOST=100.64.0.1 PORT=3000 CARTA_ORIGIN=https://atlas.humanizar.tech
+Environment=CARTA_EXTRA_ORIGINS=https://100.64.0.1:3443,https://192.168.78.211:3443
+Environment=CARTA_PROXY_IP=100.64.0.11,100.64.0.1
+EnvironmentFile=%h/.config/atlas-para-isa/publicacion-v23.env
+ExecStart=/usr/bin/bash -c 'exec "$$CARTA_RELEASE_DIR/scripts/systemd/torre/publico.sh"'
 Restart=always
 RestartSec=5
 TimeoutStopSec=60
 KillSignal=SIGINT
+CPUWeight=10000
+IOWeight=10000
+
 [Install]
 WantedBy=default.target

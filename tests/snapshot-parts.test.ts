@@ -503,6 +503,17 @@ test('piezas: manifest mayor que el tope con checksum válido falla cerrado al r
   assert.deepEqual(todasLasTablas(reopened), before);
 });
 
+test('piezas: el guardado completo conserva metadatos mayores que la cota heredada', t => {
+  const lab = laboratory(t);
+  const params = parseParams({ v23: { guardadoCompleto: true } });
+  const extras = 'é'.repeat(SNAPSHOT_METADATA_BYTES / 2);
+  const world = Object.assign(createWorld(42, params), { transportFixture: extras });
+  lab.store.guardar({ world, materia: null });
+  assert.ok(lab.store.lastSnapshotBytes > SNAPSHOT_METADATA_BYTES);
+  const loaded = lab.reopen().cargarInstantanea()!.instantanea.world as typeof world;
+  assert.ok(loaded.transportFixture === extras);
+});
+
 test('piezas: lastSnapshotBytes cuenta manifest y páginas lógicas incluso al reutilizarlas', t => {
   const lab = laboratory(t), world = createWorld(42);
   for (let iteration = 0; iteration < 3; iteration++) {

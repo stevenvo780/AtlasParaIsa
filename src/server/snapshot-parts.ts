@@ -14,10 +14,7 @@ import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/te
 // Transport bounds, independent of world laws and available host hardware.
 export const SNAPSHOT_INLINE_TILE_LIMIT = 32768;
 export const SNAPSHOT_PAGE_TILES = 4096;
-/** Tope de la parte de la instantánea que no son teselas (personas, recuerdos, sucesos…). Era 8 MiB y el mundo público
- * lo superó con 583 habitantes (2026-09-23): el guardado falló y el mundo quedó en pausa. El límite real lo pone V8,
- * que no crea cadenas de más de ~512 MiB al serializar; se deja la mitad como defensa contra filas corruptas, no como
- * techo de población (FR-013: el límite lo pone el hardware). */
+/** Cota del manifiesto heredado. El guardado completo crece hasta los límites de cadena de V8 y fila de SQLite. */
 export const SNAPSHOT_METADATA_BYTES = 256 * 1024 * 1024;
 const PAGE_BYTES = 4 * 1024 * 1024;
 const ENCODING = 'snapshot-parts-v1';
@@ -164,7 +161,8 @@ export class SnapshotParts {
     const metadata = stringifyExact(snapshotRecord(world, params, null), nativo);
     // UTF-8 ocupa como mucho 3 bytes por unidad UTF-16: por debajo de un tercio del tope el cuerpo
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
-    if (metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
+    if (!nativo && metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES)
+      failure('metadata exceeds transport size');
     return { metadata, tiles: world.tiles, nativo };
   }
 
@@ -302,7 +300,7 @@ export class SnapshotParts {
     const manifestTiles: Manifest['tiles'] = { count: tiles.length, pages };
     const body = `{"snapshotEncoding":${JSON.stringify(ENCODING)},"world":${prepared.metadata},"tiles":${JSON.stringify(manifestTiles)}}`;
     const size = Buffer.byteLength(body), digest = checksum(body), digests = pages.map(page => page.digest);
-    if (size > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
+    if (!prepared.nativo && size > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
     this.references.set(digest, digests);
     this.writtenDigest = digest;
     this.unconfirmedPages = certified
@@ -322,21 +320,25 @@ export class SnapshotParts {
 
   private manifest(value: Record<string, unknown>, body: string, validateParams = true): Manifest {
     if (this.schemaVersion < 5) failure('encoding requires schema 5');
-    if (Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
-    assertUniqueKeys(body);
     if (!keys(value, ['snapshotEncoding', 'world', 'tiles']) || value.snapshotEncoding !== ENCODING
       || !object(value.world) || !object(value.tiles)) failure('manifest encoding');
     const world = value.world as Record<string, unknown>, tiles = value.tiles as Record<string, unknown>;
     if (!Object.hasOwn(world, 'tiles') || world.tiles !== null || Object.hasOwn(world, 'snapshotEncoding')
       || world.tileEncoding !== SNAPSHOT_TILE_ENCODING) failure('metadata tile encoding');
-    let limits: Readonly<WorldLimits>;
+    const puedeExcederTope = body.length * 3 > SNAPSHOT_METADATA_BYTES;
     let params: WorldParams | null;
-    try { params = validateParams ? readSnapshotParams(world) : null; limits = readSnapshotLimits(world, params); }
-    catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
+    let limits: Readonly<WorldLimits>;
+    try {
+      params = validateParams || puedeExcederTope ? readSnapshotParams(world) : null;
+      limits = readSnapshotLimits(world, validateParams ? params : null);
+    } catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
+    if (puedeExcederTope && !params?.v23.guardadoCompleto && Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES)
+      failure('manifest exceeds transport size');
+    assertUniqueKeys(body);
     if (!keys(tiles, ['count', 'pages']) || !Number.isSafeInteger(tiles.count) || (tiles.count as number) < 1
       || !Array.isArray(tiles.pages)
       || tiles.pages.length !== Math.ceil((tiles.count as number) / SNAPSHOT_PAGE_TILES)) failure('tile count');
-    try { if (params) assertSnapshotCounts(world, limits, params.v23, tiles.count as number); }
+    try { if (validateParams && params) assertSnapshotCounts(world, limits, params.v23, tiles.count as number); }
     catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
     let count = 0;
     for (const [index, page] of (tiles.pages as unknown[]).entries()) {

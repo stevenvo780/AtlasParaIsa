@@ -87,7 +87,7 @@ test('la fauna nueva guarda diez animales de un linaje abierto en la misma tesel
   assert.equal(tile.fauna, 10);
   store.guardar({ world, materia: null });
   const loaded = store.cargarInstantanea()!.instantanea.world;
-  assert.deepEqual(loaded.animals, world.animals);
+  assert.deepEqual(loaded.animals, JSON.parse(JSON.stringify(world.animals)));
   assert.equal(loaded.tiles.find(t => t.x === base.x && t.y === base.y)?.fauna, 10);
   assert.equal(projectAnimal(loaded.animals[0]!, 0).species, tile.species);
 
@@ -99,4 +99,18 @@ test('la fauna nueva guarda diez animales de un linaje abierto en la misma tesel
   setParams(world, parseParams({ v23: { fauna: false } }, params));
   assert.throws(() => assertWorld(world), /Colección de fauna inválida/);
   assert.throws(() => encodeSnapshot(world, paramsOf(world)), /collection limit/);
+});
+
+test('la natalidad activa conserva un censo histórico alto e inventario escalar devuelto por gestación', () => {
+  const params = parseParams({ v23: { natalidad: true } });
+  const world = createWorld(7, params);
+  world.history.push({ tick: 0, population: 1_000_001, energy: 0.5, hunger: 0.5, fatigue: 0.5, thirst: 0.5,
+    discoveries: 0, settlements: 0, cooperation: 0, births: 0 });
+  world.people[2]!.inventory = 0.26;
+  assertWorld(world);
+
+  setParams(world, parseParams({ v23: { natalidad: false } }, params));
+  assert.throws(() => assertWorld(world), /Estado del mundo inválido/);
+  world.people[2]!.inventory = 0.25;
+  assert.throws(() => assertWorld(world), /Estado procedural inválido/);
 });

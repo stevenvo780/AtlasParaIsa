@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Panel integrado de referencia. Ejecutar en la copia de trabajo del candidato.
+# Sin opciones, el panel de ocho semillas y 30 días no cambia.
+# Optativo: --puerta fijar|correr|evaluar (scripts/lab/panel-demo/puerta.mts).
 set -euo pipefail
+if [[ ${1-} == --puerta || ${1-} == --help || ${1-} == -h ]]; then
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.."
+  exec node --import tsx scripts/lab/panel-demo/puerta.mts "$@"
+fi
 if [[ $# -lt 1 || $# -gt 2 || ( $# -eq 2 && ! $2 =~ ^[1-9][0-9]*$ ) ]]; then
   printf 'Uso: bash scripts/lab/panel-demo.sh DIRECTORIO_NUEVO [CONCURRENCIA]\n' >&2
+  printf '      bash scripts/lab/panel-demo.sh --puerta fijar|correr|evaluar …\n' >&2
   exit 2
 fi
 salida=$(realpath -m -- "$1")

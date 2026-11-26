@@ -9,7 +9,7 @@ import { DATO_GOLPEAR, REF_NULA, type Intento, type Registro } from '../src/worl
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
-  KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
+  KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, apetitoDeTejido, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
   costeGestacionJ, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
   plantillaDe, plantillaHumana, plantillaPorId, provecho, reservaJ, soltar, tasasBasales, vistaCuerpo,
 } from '../src/world/materia/cuerpo.js';
@@ -185,6 +185,16 @@ test('la gestante conserva proteína de la comida para incorporarla al embrión'
   assert.ok(proteinaDisponible > m.arena.cuantos(adulto.digestivo, proteina));
   assert.ok(gestar(c, madre, 120) > 0);
   assert.ok(m.arena.cuantos(madre.digestivo, proteina) < proteinaDisponible);
+  assert.ok(exacto());
+});
+
+test('la saciedad de combustible no oculta la falta de nutrientes para crecer', () => {
+  const cria = crearCuerpo(c, humana.id, 3), adulto = crearCuerpo(c, humana.id, 60);
+  assert.ok(vistaCuerpo(c, cria, vista()).hambre < 0.001);
+  assert.equal(apetitoDeTejido(c, cria), 1);
+  assert.equal(apetitoDeTejido(c, adulto), 0);
+  m.arena.fuente(cria.digestivo, Float64Array.of(m.S.proteina, 10000, m.S.orgP, 2000), m.libro);
+  assert.equal(apetitoDeTejido(c, cria), 0);
   assert.ok(exacto());
 });
 

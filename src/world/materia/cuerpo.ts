@@ -604,6 +604,26 @@ export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
 
 // ── Comer y beber ────────────────────────────────────────────────────────────────────────────────────────
 
+/** Fracción del nutriente estructural que falta para el tejido que puede formarse durante un tránsito del tubo. */
+export function apetitoDeTejido(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const p = plantillaDe(c, cuerpo);
+  if (p !== humanas.get(c.globales.registro)) return 0;
+  const masa = masaLote(c, cuerpo.tejido), a = c.materia;
+  const crecerKg = Math.max(0, Math.min(p.masaAdulta - masa, G_SINTESIS * masa * TRANSITO_TICKS));
+  const g = cuerpo.gestacion;
+  const gestarKg = g ? Math.max(0, Math.min(p.m0 - masaLote(c, g.embrion), G_SINTESIS * p.m0 * TRANSITO_TICKS)) : 0;
+  const unidades = Math.floor((crecerKg + gestarKg) / (datosDe(c, p).masaMg * MG));
+  if (unidades <= 0) return 0;
+  const { proteina, orgP } = entorno.sustancias(c);
+  let carencia = 0;
+  for (const { id, nu } of p.sintesis.entradas) {
+    if (id !== proteina && id !== orgP) continue;
+    const hay = a.cuantos(cuerpo.digestivo, id) + a.cuantos(cuerpo.reserva, id);
+    carencia = Math.max(carencia, 1 - hay / (unidades * nu));
+  }
+  return carencia;
+}
+
 /** Lo que este cuerpo pide para comer `kg` de un lote: parte Digerible con su κ. */
 export function pedidoComida(c: CtxLeyMateria, cuerpo: Cuerpo, kg: number): Pedido {
   const p = plantillaDe(c, cuerpo), d = datosDe(c, p);

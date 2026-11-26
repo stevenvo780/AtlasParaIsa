@@ -22,7 +22,7 @@ import { ley } from '../params.js';
 import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { REF_NULA } from '../motor/contratos.js';
 import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
-import { MASA_ADULTA_HUMANA, beber, beberEnCelda, comerEnCelda, energiaAlimento, ingerirSelecto, masaDe, soltar, trasladarAlimento } from '../materia/cuerpo.js';
+import { MASA_ADULTA_HUMANA, apetitoDeTejido, beber, beberEnCelda, comerEnCelda, energiaAlimento, ingerirSelecto, masaDe, soltar, trasladarAlimento } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
 import { madurezDe } from '../cohesion.js';
 
@@ -241,7 +241,8 @@ export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
   if (comido < bocado) { const r = comerDeCarga(c, person, cuerpo, bocado - comido, celda); comido += r.kg; fauna += r.fauna; }
   contar(world, TOTAL_DIETA_KG, comido); contar(world, TOTAL_DIETA_FAUNA_KG, fauna);
   if (comido > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', comido / bocado);
-  if (person.hunger < 0.12 || (!(comido > 0) && distance(person, person.target) < 0.5)) person.decisionAt = world.tick + 1;
+  if ((person.hunger < 0.12 && apetitoDeTejido(c, cuerpo) < 0.12)
+    || (!(comido > 0) && distance(person, person.target) < 0.5)) person.decisionAt = world.tick + 1;
   return comido;
 }
 

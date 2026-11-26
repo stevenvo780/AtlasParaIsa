@@ -33,7 +33,7 @@ import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '
 import { activeWhisperForPerson } from '../whispers.js';
 import { escuchaDe } from '../genetics.js';
 import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
-import { basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
+import { apetitoDeTejido, basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
 import { ctxMateriaDe } from '../motor/acceso.js';
 import { lotesDeCelda } from '../materia/ley-mundo.js';
 import { estadoObra, KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
@@ -122,6 +122,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const payload = containedWaterQuanta(person) / 1000;
   const cuerpo = ley(world, 'cuerpos') ? person.cuerpo : undefined;
   const materia = cuerpo ? ctxMateriaDe(world) : undefined;
+  const apetito = cuerpo && materia ? Math.max(person.hunger, apetitoDeTejido(materia, cuerpo)) : person.hunger;
   const obra = ley(world, 'obra');
   const tramo = 30;
   const carga = person.carga ?? [];
@@ -206,7 +207,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (cuerpo && materia) {
     food = undefined;
     let mejor = 0;
-    const kg = BOCADO_KG * escala * tramo, prevista = Math.max(basal * tramo, person.hunger * RESERVA_OBJETIVO_J_KG * masa);
+    const kg = BOCADO_KG * escala * tramo, prevista = Math.max(basal * tramo, apetito * RESERVA_OBJETIVO_J_KG * masa);
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
@@ -227,7 +228,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       if (!food || key < foodKey) { food = tile; foodKey = key; }
     }
   }
-  if (food || (!cuerpo && (person.inventory > 0.01 || foodAvailable(world,person)>0))) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
+  if (food || (!cuerpo && (person.inventory > 0.01 || foodAvailable(world,person)>0))) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, apetito - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0),
+    reason: apetito > person.hunger ? 'Busca los nutrientes que le faltan para formar tejido.' : 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = copyBody(person, own ? chooseBody : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 });
   const forecastBody = own ? chooseForecast : { hunger: 0, thirst: 0, fatigue: 0, energy: 0 };
   const protection = bodilyShelter(world, person, tileIn, fast), damage = bodilyDamage(world, person, body, protection), meal = cuerpo ? 0 : immediateMeal(world, person, tileIn, fast);

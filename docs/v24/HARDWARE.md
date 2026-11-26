@@ -125,3 +125,9 @@ Ambos brazos cerraron el saldo, el reparto y los censos del paso 13. Sus SHA pos
 ### Tiempo de verificación
 
 La huella canónica agrupa hasta 1.024 números ordinarios por tanda, tras leer cada posición. El formato conserva los huecos, el signo de cero y los rechazos de números no finitos. En un par de lecturas del mismo SQLite de 63.980 personas, el cálculo del SHA-256 pasó de 8,98 a 8,23 s, con la misma huella. El pico de RSS de cada proceso ocurrió durante su carga. Una caché de orden de campos se descartó porque no redujo el coste de forma reproducible y sí elevó el pico de memoria.
+
+### Afinidad y coste de publicar el frente
+
+Tres aperturas del mismo SQLite de 128.000 midieron los ticks 17–24 con balance exacto y cero violaciones. En la torre con carga de laboratorio, ocho dueños en la L3 de 96 MiB tardaron 4,09 s por paso en promedio y 5,95 s en el mayor de los ocho pasos. Ocho repartidos entre ambas L3 tardaron 6,21 y 8,39 s. Doce repartidos tardaron 4,73 y 6,33 s. El plazo global interrumpió el brazo de doce después del tick 23 y se repitió ese brazo por separado. Son ventanas cortas que incluyen la planificación del sistema y el tráfico compartido.
+
+Con ocho dueños en la L3 grande, la mediana del dueño más lento fue de 1,20 s en actuación, 1,18 s en aplicación y 0,23 s en percepción. Una sonda aparte midió la publicación completa de la tabla compartida con 138.914 ranuras asignadas. Copiar 32,37 MB y publicar llevó 3,67 ms en promedio y representó como máximo el 0,142 % del paso. En esta escena, las mejoras de actuación y aplicación tienen mayor margen sobre la latencia total que optimizar la copia del frente.

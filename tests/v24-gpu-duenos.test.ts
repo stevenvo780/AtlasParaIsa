@@ -24,8 +24,19 @@ function mundoParaPercibir() {
   return { percepcion, lote, mundo, tiles };
 }
 
+function corredorMedido(porCoste: boolean) {
+  const anterior = process.env.CARTA_PERCEPCION_COSTE_DUENOS;
+  process.env.CARTA_PERCEPCION_COSTE_DUENOS = porCoste ? '1' : '0';
+  try {
+    return new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: 'broker', CARTA_GPU_PRUEBA_MARCA: '' } }, !porCoste);
+  } finally {
+    if (anterior === undefined) delete process.env.CARTA_PERCEPCION_COSTE_DUENOS;
+    else process.env.CARTA_PERCEPCION_COSTE_DUENOS = anterior;
+  }
+}
+
 test('dos dueños despachan por un corredor y una generación nueva descarta la anterior', { timeout: 10_000 }, async t => {
-  const broker = new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: 'broker', CARTA_GPU_PRUEBA_MARCA: '' } });
+  const broker = corredorMedido(false);
   t.after(() => broker.cerrar());
   assert.equal(await broker.listo, true);
   const epoca = broker.abrirEpoca(18);
@@ -38,6 +49,7 @@ test('dos dueños despachan por un corredor y una generación nueva descarta la 
   }
   assert.deepEqual(broker.medidas().completadas, [1, 1]);
   assert.equal(broker.medidas().peticiones, 2);
+  assert.ok(!Object.hasOwn(broker.medidas().detalle!, 'cpuPorCoste'), 'la telemetría fija conserva su esquema');
   const nueva = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(19), 0);
   t.after(() => nueva.cerrar());
   clientes[0]!.lanzar(lote, planes);
@@ -50,6 +62,62 @@ test('dos dueños despachan por un corredor y una generación nueva descarta la 
   const cierre = broker.cerrar();
   assert.throws(() => nueva.esperar(100), /no confirmó el despacho/);
   await cierre;
+});
+
+test('el coste del corredor selecciona CPU o GPU por tamaño y distingue un canal viejo', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(true);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, lote } = mundoParaPercibir();
+  let ahora = 0, despacho = 0;
+  const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(18), 0, () => ahora);
+  t.after(() => cliente.cerrar());
+  const loteGrande = { ...lote, slots: new Int32Array(16).fill(lote.slots[0]!), plan: new Uint16Array(16) };
+  function ejecutar(grande = false) {
+    const peticiones = broker.medidas().peticiones;
+    cliente.lanzar({ ...(grande ? loteGrande : lote), despacho: ++despacho }, planes);
+    assert.equal(cliente.esperar(100).despacho, despacho);
+    const gpu = broker.medidas().peticiones > peticiones;
+    ahora += gpu === grande ? 0.5 : 2;
+    cliente.confirmar(true);
+    return gpu;
+  }
+  const calibracion = [false, true, false, true];
+  assert.deepEqual(Array.from({ length: 8 }, () => ejecutar()), [...calibracion, false, false, false, false]);
+  assert.deepEqual(Array.from({ length: 8 }, () => ejecutar(true)), [...calibracion, true, true, true, true]);
+  assert.equal(ejecutar(), false);
+  assert.deepEqual(broker.medidas().detalle?.completadas, [8, 0]);
+  assert.equal(broker.medidas().detalle?.cpuPorCoste, 9);
+  assert.equal(broker.medidas().detalle?.cpuSinCanal, 0);
+  broker.abrirEpoca(19);
+  assert.equal(ejecutar(true), false);
+  assert.equal(broker.medidas().detalle?.cpuPorCoste, 9);
+  assert.equal(broker.medidas().detalle?.cpuSinCanal, 1);
+});
+
+test('el coste del corredor descarta respuestas GPU incoherentes en la ruta real de F2', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(true);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, mundo, tiles } = mundoParaPercibir();
+  const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(18), 0);
+  t.after(() => cliente.cerrar());
+  const confirmar = t.mock.method(cliente, 'confirmar');
+  percepcion.percibidor = cliente;
+  const lote = { tick: 0, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.sinCerebro) };
+  function ejecutar() {
+    const salida = percepcion.percibir(mundo.people, lote.tick, lote, tiles, undefined, () => {});
+    assert.equal(salida.tick, lote.tick);
+    percepcion.cerrar();
+  }
+  for (let i = 0; i < 6; i++) ejecutar();
+  assert.equal(percepcion.respaldos, 1);
+  assert.deepEqual(confirmar.mock.calls.map(c => c.arguments[0]), [true, false, true, true, true, true]);
+  assert.deepEqual(broker.medidas().detalle?.completadas, [1, 0], 'el corredor sí recibió una respuesta con el eco correcto');
+  assert.equal(broker.medidas().detalle?.cpuPorCoste, 5, 'pospone otra sonda de la ruta observada como inválida');
+  for (let i = 0; i < 60; i++) ejecutar();
+  assert.deepEqual(broker.medidas().detalle?.completadas, [2, 0], 'la calibración vuelve a sondear pasado el intervalo');
+  assert.equal(percepcion.respaldos, 2);
 });
 
 for (const fallo of ['broker-rancio', 'broker-expira']) {

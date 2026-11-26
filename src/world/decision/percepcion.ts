@@ -516,7 +516,9 @@ export class PercepcionDelPaso {
       // Lo que viene de una tarjeta se comprueba contra las ventanas; los hilos de la piscina ejecutan este mismo código.
       if ((!('ventana' in p) || percibidor.dispositivo !== 'cpu') && !coherente(vista, despacho, this.planes, salida))
         throw new ErrorDispositivo(percibidor.dispositivo, 'salida que no casa con el lote');
+      percibidor.confirmar?.(true);
     } catch (error) {
+      percibidor.confirmar?.(false);
       if (!(error instanceof ErrorDispositivo) || percibidor === this.#cpu) throw error;
       this.#respaldos++;
       this.#cpu.lanzar(despacho, this.planes);
@@ -554,8 +556,10 @@ export class PercepcionDelPaso {
         throw new ErrorDispositivo(percibidor.dispositivo, `salida del despacho ${salida.despacho} en el ${despacho.despacho}`);
       if ((!('ventana' in p) || percibidor.dispositivo !== 'cpu') && !coherente(vista, despacho, planes, salida))
         throw new ErrorDispositivo(percibidor.dispositivo, 'salida que no casa con el lote');
+      percibidor.confirmar?.(true);
       return salida;
     } catch (error) {
+      percibidor.confirmar?.(false);
       if (!(error instanceof ErrorDispositivo) || percibidor === this.#cpu) throw error;
       this.#respaldos++;
       this.#cpu.lanzar(despacho, planes);

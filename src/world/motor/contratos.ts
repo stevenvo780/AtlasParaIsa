@@ -350,6 +350,8 @@ export interface Percibidor {
   readonly dispositivo: Dispositivo;
   lanzar(l: LotePercepcion, planes: readonly Plan[]): void;
   esperar(plazoMs: number): Percepcion;  // ErrorDispositivo si vence el plazo, falla o el eco no casa
+  /** Recibe el veredicto del dueño una vez validada la respuesta, para medir solo resultados aceptados. */
+  confirmar?(aceptada: boolean): void;
 }
 
 /** Plazo vencido o tarjeta caída: quien lo captura recalcula ese lote en CPU en el mismo tick (la GPU nunca es autoridad).
@@ -442,6 +444,8 @@ export interface TelemetriaBrokerGpu {
   cpuArranque: number;
   cpuOcupada: number;
   cpuSinCanal: number;
+  /** CPU elegida con el corredor disponible, incluidas las sondas de calibración del modo adaptativo. */
+  cpuPorCoste?: number;
   erroresCanal: number;
   /** Solo bytes de despachos confirmados. El tiempo CUDA incluye las copias del servidor. */
   subidaConfirmadaBytes: number;

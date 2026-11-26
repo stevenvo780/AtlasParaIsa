@@ -119,8 +119,8 @@ function deltaGpu(fin: TelemetriaBrokerGpu, inicio?: TelemetriaBrokerGpu): Telem
   const campos = Object.keys(contadores) as (keyof typeof contadores)[];
   const delta = { ...fin, completadas: [completadas[0] - (inicio?.completadas[0] ?? 0),
     completadas[1] - (inicio?.completadas[1] ?? 0)] } satisfies TelemetriaBrokerGpu;
-  for (const campo of campos) delta[campo] -= inicio?.[campo] ?? 0;
-  assert.ok(campos.every(campo => entero(delta[campo], 0)) && delta.completadas.every(n => entero(n, 0)), 'Contadores CUDA incoherentes');
+  for (const campo of campos) delta[campo] = contadores[campo]! - (inicio?.[campo] ?? 0);
+  assert.ok(campos.every(campo => entero(delta[campo] ?? NaN, 0)) && delta.completadas.every(n => entero(n, 0)), 'Contadores CUDA incoherentes');
   return delta;
 }
 

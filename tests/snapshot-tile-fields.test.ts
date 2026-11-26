@@ -19,6 +19,18 @@ test('the hand-written tile tuple follows SNAPSHOT_TILE_FIELDS and names every T
   assert.deepEqual(decodeSnapshotTileRows([row!]), [tile]);
 });
 
+test('la proyección nativa conserva el signo de una tesela en JSON', () => {
+  const signed = { ...tile, traffic: -0 };
+  const ordinary = { ...tile, traffic: 0 };
+  const plainBody = JSON.stringify([SNAPSHOT_TILE_FIELDS.map(field => signed[field])]);
+  assert.equal(decodeSnapshotTileRows(JSON.parse(plainBody))[0]!.traffic, 0);
+  assert.equal(JSON.stringify(encodeSnapshotTileRows([ordinary], 0, 1, true)), plainBody);
+
+  const exactBody = JSON.stringify(encodeSnapshotTileRows([signed], 0, 1, true));
+  assert.equal(exactBody, JSON.stringify(encodeSnapshotTileRows([signed])));
+  assert.ok(Object.is(decodeSnapshotTileRows(JSON.parse(exactBody))[0]!.traffic, -0));
+});
+
 test('una página archivada admite tuplas con y sin la reserva de roca latente', () => {
   const { rocaLatente, ...normal } = { ...tile, x: 1, y: 0 };
   const chunk: Chunk = { key: '0,0', cx: 0, cy: 0, discovered: true, lastTick: 0, places: [],

@@ -10,8 +10,9 @@ export const ANCHO_TESELA = SNAPSHOT_TILE_FIELDS.length - 1;
 export const rocaValida = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
 /** Codifica `count` teselas desde `offset` sin copiar el tramo (el guardado por páginas ya no paga un
- * `slice` —otra pasada de traps sobre el array Proxy residente— por página). Sin tramo, el array entero. */
-export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset, nativo = false): unknown[][] {
+ * `slice` —otra pasada de traps sobre el array Proxy residente— por página). Sin tramo, el array entero.
+ * El cuarto argumento se conserva para los llamadores que pasan el modo de guardado. */
+export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset, _nativo = false): unknown[][] {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
   const rows: unknown[][] = new Array(count);
@@ -46,7 +47,7 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count
         if (!Number.isFinite(value)) {
           if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
           if (i >= 6) throw new Error('Invalid optional tile value. Snapshot was not written.');
-        } else if (!nativo && value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
+        } else if (value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
       } else if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
       else if (i >= 6 && value === null) throw new Error('Invalid optional tile value. Snapshot was not written.');
     }

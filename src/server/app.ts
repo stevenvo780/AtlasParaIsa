@@ -31,7 +31,7 @@ import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
-import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
+import { readWorldInstance } from './world-instance.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
@@ -659,7 +659,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       motor?.cargar({ world, materia: loaded?.materia ?? null }, epoca);
       adoptarGuardado(guardarMundo(world, [], [], cambiosPendientes));
       cambiosPendientes.length = 0;
-      return existingInstanceId ?? ensureWorldInstance(store.db);
+      return existingInstanceId ?? store.ensureWorldInstance();
     } catch (error) {
       stopped = true;
       void grabador?.cerrar().catch(() => undefined);

@@ -31,6 +31,7 @@ import { codificarCheckpoint } from '../world/materia/checkpoint.js';
 import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts, type PreparedMatterParts } from './snapshot-matter-parts.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
 import { AgendaTerritorial, type CorteAgendaTerritorial } from '../world/territorio/agenda.js';
+import { writeWorldInstance } from './world-instance.js';
 
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
  * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
@@ -339,8 +340,8 @@ export class Store {
   private replayCache: { digest: string; world: World; stamp: ChronicleStamp } | null = null;
   private readonly replayFloors = new Map<string, number>();
   /** Sello de base tomado tras el último COMMIT exitoso de `save()` en ESTE proceso: es la mitad durable
-   * del vale de reutilización de páginas limpias (v18). Solo avanza tras COMMIT (o tras una escritura de
-   * sesiones probada como propia en `sessionWrite`); cualquier escritura ajena, DDL o escritura propia no
+   * del vale de reutilización de páginas limpias (v18). Solo avanza tras COMMIT (o tras una escritura
+   * auxiliar probada como propia en `auxiliaryWrite`); cualquier escritura ajena, DDL o escritura propia no
    * contabilizada lo desajusta y el guardado siguiente recodifica todas las páginas. */
   private snapshotPagesStamp: ChronicleStamp | null = null;
   private loadedMatterStamp: ChronicleStamp | null = null;
@@ -2133,30 +2134,33 @@ export class Store {
     if (row.fingerprint !== fingerprint(gesture)) throw new GestureConflict('Ese identificador ya se usó para otro gesto.');
     return JSON.parse(row.result) as GestureResult;
   }
+  /** Da de alta la procedencia después de confirmar el primer guardado. */
+  ensureWorldInstance(): string {
+    if (this.db.isTransaction) throw new Error('Store.ensureWorldInstance requires its own transaction.');
+    return this.auxiliaryWrite(() => writeWorldInstance(this.db)).instanceId;
+  }
   addSession(hash: string, expires: number) {
-    this.sessionWrite(() => Number(this.db.prepare('DELETE FROM sessions WHERE expires <= ?').run(Date.now()).changes)
-      + Number(this.db.prepare('INSERT INTO sessions VALUES (?,?)').run(hash, expires).changes));
+    this.auxiliaryWrite(() => ({
+      changes: Number(this.db.prepare('DELETE FROM sessions WHERE expires <= ?').run(Date.now()).changes)
+        + Number(this.db.prepare('INSERT INTO sessions VALUES (?,?)').run(hash, expires).changes),
+    }));
   }
   /**
-   * Escribir sesiones sin tirar las pruebas del archivo (sprint noche-arch 2026-09-23). `addSession` y `revoke`
-   * escriben por la MISMA conexión: mueven `total_changes()`, el sello con el que `save()` decide si reutilizar
-   * la verificación de la carga, y cada inicio de sesión de Isa hacía que el guardado siguiente reverificara el
-   * archivo de recibos entero (42–120 s en el mundo público). Aquí la escritura va en su propia transacción y,
-   * si el sello avanzó EXACTAMENTE lo que cambiaron estas sentencias —sin disparadores, sin otra conexión en
-   * medio (`data_version`) y sin cambio de esquema—, las pruebas avanzan con él, como ya hace
-   * `observeHostWrites` con las escrituras del guardado. Sólo toca `sessions`, que ninguna prueba cubre.
-   * Dentro de una transacción ajena (recuperación) escribe tal cual y las pruebas caen solas por sello.
+   * Las escrituras sobre sesiones y la clave de procedencia mueven `total_changes()`.
+   * Las pruebas vigentes avanzan si el sello refleja exactamente esa escritura local, con ambos esquemas
+   * estables y sin disparadores ni cambios de otra conexión. Durante la recuperación,
+   * la revocación de sesiones participa en la transacción anfitriona sin retocar las pruebas.
    */
-  private sessionWrite(write: () => number): void {
-    if (this.db.isTransaction) { write(); return; }
+  private auxiliaryWrite<T extends { changes: number }>(write: () => T): T {
+    if (this.db.isTransaction) return write();
     const before = this.chronicleStamp();
     const beforeMemoEpoch = this.archivedRecipes ? this.technologyArchive.readEpoch() : null;
     this.db.exec('BEGIN IMMEDIATE');
-    let changes = 0, triggers = true;
+    let result: T, triggers: boolean;
     try {
       triggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
-      this.technologyArchive.observeHostWrites(() => { changes = write(); });
+      result = this.technologyArchive.observeHostWrites(write);
       this.db.exec('COMMIT');
       this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
@@ -2167,28 +2171,29 @@ export class Store {
     }
     const after = this.chronicleStamp();
     const own = !triggers && after.dataVersion === before.dataVersion && after.schemaCookie === before.schemaCookie
-      && after.tempSchemaCookie === before.tempSchemaCookie && after.totalChanges === before.totalChanges + changes;
+      && after.tempSchemaCookie === before.tempSchemaCookie && after.totalChanges === before.totalChanges + result.changes;
     const technology = this.verifiedTechnology;
     if (own && technology && technology.dataVersion === before.dataVersion && technology.totalChanges === before.totalChanges
       && technology.schemaCookie === before.schemaCookie) technology.totalChanges = after.totalChanges;
     const chronicle = this.verifiedChronicle;
     if (own && chronicle && sameChronicleStamp(chronicle.stamp, before)) chronicle.stamp = after;
-    // La escritura solo tocó `sessions` (probado arriba, sin triggers): el sello v18 avanza con ella igual
-    // que las pruebas de crónica/tecnología, en vez de condenar el siguiente guardado a recodificar todo.
     if (own && this.snapshotPagesStamp && sameChronicleStamp(this.snapshotPagesStamp, before)) this.snapshotPagesStamp = after;
     if (own && this.archivedRecipes && beforeMemoEpoch && this.archivedRecipes.epoch === beforeMemoEpoch) {
       const afterEpoch = this.technologyArchive.readEpoch();
       if (afterEpoch !== null) this.archivedRecipes.epoch = afterEpoch;
       else this.archivedRecipes = null;
     }
+    return result;
   }
   sessionValid(hash: string): boolean {
     const row = this.db.prepare('SELECT expires FROM sessions WHERE hash=?').get(hash) as { expires: number } | undefined;
     return !!row && row.expires > Date.now();
   }
   revoke(hash?: string) {
-    this.sessionWrite(() => Number((hash ? this.db.prepare('DELETE FROM sessions WHERE hash=?').run(hash)
-      : this.db.prepare('DELETE FROM sessions').run()).changes));
+    this.auxiliaryWrite(() => ({
+      changes: Number((hash ? this.db.prepare('DELETE FROM sessions WHERE hash=?').run(hash)
+        : this.db.prepare('DELETE FROM sessions').run()).changes),
+    }));
   }
   backup(destination: string) {
     if (existsSync(destination)) throw new Error('Backup destination exists; choose a new path.');

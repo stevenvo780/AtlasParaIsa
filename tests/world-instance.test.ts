@@ -1,14 +1,25 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
-import { ensureWorldInstance } from '../src/server/world-instance.js';
+import { parseParams } from '../src/world/params.js';
+import { ensureWorldInstance, readWorldInstance } from '../src/server/world-instance.js';
 import { validWorldInstanceId } from '../src/shared/world-instance.js';
 import { readWorldVisit, saveWorldVisit } from '../src/client/visit-memory.js';
+import { laboratorio } from './lib/store.js';
+
+const completeParams = parseParams('v23.guardadoCompleto=true,persistencia.cadaTicks=1');
+
+function countHeadVerification(t: TestContext, store: Store): () => number {
+  const inspected = store as unknown as { readSlot0(epoch?: number): boolean };
+  const method = t.mock.method(inspected, 'readSlot0');
+  return () => method.mock.callCount();
+}
 
 function memory() {
   const values = new Map<string, string>();
@@ -69,6 +80,49 @@ test('app startup with malformed identity preserves the previous checkpoint and 
     assert.deepEqual(rows(), before, 'startup must not rotate tick0 out of the recovery slot before refusing tick1');
   } finally { store.close(); }
 });
+
+test('first periodic complete save reuses the startup proof after registering the world identity', async t => {
+  const { store } = laboratorio(t, 'instance-startup-', { snapshotInlineTileLimit: 0 });
+  store.guardar({ world: createWorld(42, completeParams), materia: null });
+  assert.equal(readWorldInstance(store.db), null);
+  const app = createApp({ store, password: 'synthetic-identity-test-only', origin: 'http://127.0.0.1:3000', manual: true });
+  try {
+    const identity = readWorldInstance(store.db);
+    assert.ok(validWorldInstanceId(identity));
+    const count = countHeadVerification(t, store);
+    app.stepOnce();
+    assert.equal(app.guardado.ultimoTickGuardado, 1);
+    assert.equal(count(), 0);
+    assert.equal(readWorldInstance(store.db), identity);
+  } finally { await app.close(); }
+});
+
+for (const cambio of ['disparador temporal', 'escritura externa', 'esquema temporal'] as const) {
+  test(`el alta conserva la relectura de la cabeza tras: ${cambio}`, t => {
+    const { store, path } = laboratorio(t, 'instance-head-proof-', { snapshotInlineTileLimit: 0 });
+    const corte = { world: createWorld(42, completeParams), materia: null };
+    if (cambio === 'disparador temporal') {
+      store.db.exec(`CREATE TEMP TRIGGER dañar_cabeza AFTER INSERT ON main.metadata
+        WHEN NEW.key='world-instance-id' BEGIN UPDATE snapshots SET digest='dañado' WHERE slot=0; END;`);
+    }
+    store.guardar(corte);
+    const prior = store.db.prepare('SELECT digest FROM main.snapshots WHERE slot=0').get()!.digest;
+    if (cambio === 'escritura externa') {
+      const other = new DatabaseSync(path);
+      try { other.exec("UPDATE main.snapshots SET digest='dañado' WHERE slot=0"); }
+      finally { other.close(); }
+    }
+    if (cambio === 'esquema temporal') store.db.exec('CREATE TEMP TABLE cambio_de_esquema(flag INTEGER)');
+    assert.ok(validWorldInstanceId(store.ensureWorldInstance()));
+
+    const count = countHeadVerification(t, store);
+    if (cambio === 'esquema temporal') store.guardar(corte);
+    else assert.throws(() => store.guardar(corte), /baseline snapshot checksum mismatch/);
+    assert.equal(count(), 1);
+    const backup = store.db.prepare('SELECT digest FROM main.snapshots WHERE slot=1').get();
+    assert.equal(backup?.digest, cambio === 'esquema temporal' ? prior : undefined);
+  });
+}
 
 test('visit provenance separates fresh worlds and retains restarts, without attributing legacy or future bookmarks', () => {
   const storage = memory();

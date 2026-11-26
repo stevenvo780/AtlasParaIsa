@@ -7,6 +7,7 @@ import { fetchJson, modoDeAjustes, validDirectory, validMap, validWhisperResult,
 import { renderMundoDeepStats } from './mundo-dashboard.js';
 import type { WorldMapResponse, WorldDirectoryResponse, DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
 import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
+import { validWorldInstanceId } from '../shared/world-instance.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
@@ -23,7 +24,8 @@ import { EvidenceTimeline, evidenceAtTick, personLink, recentEvidence } from './
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
-import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCounters, saveWorldVisit, type HitoGuardado } from './visit-memory.js';
+import { readHitos, readStoredWorldVisit, readVisitCounters, saveHitos, saveVisitCounters, saveWorldVisit,
+  type HitoGuardado, type VisitCounters } from './visit-memory.js';
 import { enClaro } from './textos.js';
 import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, type Modo } from './modo.js';
@@ -65,7 +67,7 @@ let control: 'inspect' | 'direct' = 'inspect';
 let following = false;
 let status: ConnectionStatus = 'connecting';
 let pending = false;
-let lastVisit: number | null = null;
+let visita: { instanceId: string; anterior: number | null; tick: number; contadores: VisitCounters | null } | null = null;
 /** M5: los episodios que este navegador recibió en esta visita (sin duplicados, acotados) y los hitos
  * guardados en visitas anteriores de este mismo mundo (localStorage, como mucho 80). */
 const cronica = new CronicaBuffer();
@@ -139,14 +141,33 @@ const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
 function saveVisit(): void {
   if (!world || sessionFlags.archiveMode) return;
   try {
-    saveWorldVisit(localStorage, world);
-    const counters = contadoresDe(world); if (counters) saveVisitCounters(localStorage, world, counters);
+    if (visita && visita.instanceId === world.instanceId && (visita.anterior === null || visita.tick >= visita.anterior)) {
+      saveWorldVisit(localStorage, visita);
+      if (visita.contadores) saveVisitCounters(localStorage, visita, visita.contadores);
+    }
     const vistos = new Map(hitosGuardados.map(h => [h.id, h]));
     for (const event of cronica.todos()) if (esHito(event)) vistos.set(event.id, { id: event.id, tick: event.tick, kind: event.kind, text: event.text });
     saveHitos(localStorage, world, [...vistos.values()].sort((a, b) => a.tick - b.tick));
   } catch { /* Optional. */ }
 }
-function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
+function registrarVisitaPresente(current: WorldView): void {
+  const { instanceId, tick } = current;
+  if (sessionFlags.archiveMode || !validWorldInstanceId(instanceId)) return;
+  if (visita?.instanceId !== instanceId) {
+    let anterior: number | null = null;
+    try { anterior = readStoredWorldVisit(localStorage, instanceId); } catch { /* Browser storage is optional. */ }
+    visita = { instanceId, anterior, tick, contadores: contadoresDe(current) };
+  } else if (tick < visita.tick) return;
+  else {
+    visita.tick = tick;
+    visita.contadores = contadoresDe(current);
+  }
+  if (visita.anterior !== null && tick > visita.anterior) {
+    const anterior = visita.anterior;
+    visita.anterior = null;
+    returnCard(current, anterior);
+  }
+}
 function stopSound(): void { soundEnabled = false; soundBusy = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
 function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; capasV23Firma = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
@@ -183,7 +204,7 @@ function startupSettings(): GraphicsSettings {
 function enterWorld(flags: SessionFlags = {}): void {
   clean();
   sessionFlags = flags;
-  lastVisit = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
+  visita = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
@@ -218,6 +239,7 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
   else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
+  if (info.presente) registrarVisitaPresente(frame);
 }
 
 function startTape(): void {
@@ -760,7 +782,6 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   if (first) {
     if (!sessionFlags.archiveMode) {
       try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
-      lastVisit = readVisit(next);
     }
     const p = next.people.find(p => p.role === 'S') ?? next.people[0];
     if (p) activePersonId = p.id;
@@ -774,8 +795,8 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
       landscape?.select(selected);
     }
     if (!mobile()) drawer('inspector', true);
-    if (lastVisit !== null) returnCard(next, lastVisit);
   }
+  if (!dvr) registrarVisitaPresente(next);
   if (!el('whisper-drawer').hidden) { renderWhisperPeople(); renderWhispers(); }
   if (!el('population-drawer').hidden) renderPopulation();
   renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();

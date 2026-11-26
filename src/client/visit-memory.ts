@@ -7,14 +7,21 @@ const validTick = (value: unknown): value is number => typeof value === 'number'
 /** One bounded bookmark. Legacy ticks have no provenance and cannot be assigned
  * to a new world, even when its seed, URL and protocol match the old world. */
 export function readWorldVisit(storage: VisitStorage, world: WorldInstanceView): number | null {
-  if (!validWorldInstanceId(world.instanceId) || !validTick(world.tick)) return null;
+  if (!validTick(world.tick)) return null;
+  const tick = readStoredWorldVisit(storage, world.instanceId);
+  return tick !== null && tick <= world.tick ? tick : null;
+}
+
+/** Lee la referencia que se comparará al llegar a un nuevo fotograma del presente. */
+export function readStoredWorldVisit(storage: VisitStorage, instanceId: WorldInstanceView['instanceId']): number | null {
+  if (!validWorldInstanceId(instanceId)) return null;
   try {
     const raw = storage.getItem(KEY);
     if (raw === null || raw.length > 256) return null;
     const visit: unknown = JSON.parse(raw);
     if (!visit || typeof visit !== 'object' || Array.isArray(visit)) return null;
     const value = visit as Record<string, unknown>;
-    return value.version === 1 && value.instanceId === world.instanceId && validTick(value.tick) && value.tick <= world.tick
+    return value.version === 1 && value.instanceId === instanceId && validTick(value.tick)
       ? value.tick : null;
   } catch { return null; }
 }

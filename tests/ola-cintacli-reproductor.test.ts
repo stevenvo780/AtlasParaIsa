@@ -133,6 +133,28 @@ function harness(config: OpcionesHarness = { coberturas: MULTINIVEL }) {
 /* Arranque, nivel y escala                                           */
 /* ------------------------------------------------------------------ */
 
+test('la cinta avisa del presente con el fotograma de la época vigente', async () => {
+  const cinta = cintaSintetica({ coberturas: MULTINIVEL, epoca: 2 });
+  let epocaServida = 1;
+  const emitidos: DvrFrameInfo[] = [];
+  const player = new DvrPlayer({
+    metaPollMs: 0,
+    fetchMeta: async () => cinta.meta(),
+    fetchChunk: async peticion => ({ ...cinta.chunk(peticion), epoca: epocaServida }),
+    onFrame: (_frame, info) => { emitidos.push(info); },
+  });
+  try {
+    await player.start();
+    assert.equal(player.atLiveEdge, true);
+    assert.equal(emitidos.at(-1)!.presente, false, 'el colchón puede caer antes del punto de reinicio');
+    epocaServida = 2;
+    await player.jumpToLiveEdge();
+    assert.equal(emitidos.at(-1)!.presente, true);
+    await player.seek(98_400);
+    assert.equal(emitidos.at(-1)!.presente, false);
+  } finally { player.stop(); }
+});
+
 test('una grabación abre pausada al inicio y su botón final muestra el último fotograma exacto', async () => {
   const h = harness({ coberturas: [{ nivel: 0, t0: 80, t1: 480 }], abrirEnInicio: true });
   assert.equal(await h.player.start(), true);

@@ -10,7 +10,7 @@ import { createWorld, stepWorld } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { ensureWorldInstance, readWorldInstance } from '../src/server/world-instance.js';
 import { validWorldInstanceId } from '../src/shared/world-instance.js';
-import { readWorldVisit, saveWorldVisit } from '../src/client/visit-memory.js';
+import { readStoredWorldVisit, readWorldVisit, saveWorldVisit } from '../src/client/visit-memory.js';
 import { laboratorio } from './lib/store.js';
 
 const completeParams = parseParams('v23.guardadoCompleto=true,persistencia.cadaTicks=1');
@@ -134,6 +134,8 @@ test('visit provenance separates fresh worlds and retains restarts, without attr
   assert.equal(readWorldVisit(storage, { ...a, tick: 400 }), 300);
   assert.equal(readWorldVisit(storage, b), null);
   assert.equal(readWorldVisit(storage, { ...a, tick: 200 }), null);
+  assert.equal(readStoredWorldVisit(storage, a.instanceId), 300, 'la referencia se puede conservar hasta llegar al presente');
+  assert.equal(readStoredWorldVisit(storage, b.instanceId), null);
   assert.equal(readWorldVisit(storage, { tick: 400 }), null);
   saveWorldVisit(storage, { ...b, tick: 0 });
   assert.equal(readWorldVisit(storage, b), 0);

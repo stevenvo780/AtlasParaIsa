@@ -54,6 +54,8 @@ export const DVR_LIMITS = {
 export type DvrFrameReason = 'start' | 'play' | 'seek' | 'step' | 'refresh';
 export interface DvrFrameInfo {
   reason: DvrFrameReason;
+  /** El fotograma pertenece a la época vigente y está junto al borde de la cinta viva. */
+  presente: boolean;
   /** Duración visual de un fotograma a la velocidad actual (ms): alimenta el reloj de `Landscape`. */
   tickIntervalMs: number;
   /** Fotogramas intermedios que el cabezal cruzó en este mismo paso y no se emitieron (velocidades altas). */
@@ -655,7 +657,8 @@ export class DvrPlayer {
       for (const b of this.bifurcaciones) if (previo < b.desde && frame.tick >= b.desde) this.options.onMarca?.({ tipo: 'bifurcacion', bifurcacion: b, texto: textoBifurcacion(b) });
     }
     this.actualizarCabezal();
-    this.options.onFrame(frame, { reason, tickIntervalMs: this.tickIntervalMs, skipped, discontinuity, nivel: entry.nivel, paso: entry.paso, cambioDeNivel: cambio, ...(changedTiles ? { changedTiles } : {}) });
+    const presente = !this.options.abrirEnInicio && this.epocaVista === null && entry.epoca === this.epoca && this.atLiveEdge;
+    this.options.onFrame(frame, { reason, presente, tickIntervalMs: this.tickIntervalMs, skipped, discontinuity, nivel: entry.nivel, paso: entry.paso, cambioDeNivel: cambio, ...(changedTiles ? { changedTiles } : {}) });
     this.notify();
   }
 

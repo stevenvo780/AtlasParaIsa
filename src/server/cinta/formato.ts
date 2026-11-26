@@ -51,10 +51,16 @@ const margenDe = (nombre: typeof listasClave[number]): number => Number(nombre =
 const errorFormato = (detalle: string): Error => new Error(`${detalle} CNT2 inválido.`);
 
 type Posicion = { x: number; y: number; cells?: StructureView['cells']; footprint?: StructureView['footprint'] };
-interface Domicilio { sector: number; pos: Posicion }
+interface Domicilio extends Posicion { sector: number }
+const camposPosicion = ['x', 'y', 'cells', 'footprint'] as const;
 interface FilasSector { indices: number[]; valores: unknown[] }
 type ParteCodificada = Omit<Parte, 'offset'>;
 interface MarcoCodificado { tick: number; campos: number; partes: ParteCodificada[] }
+type EntradaMarco = { base: WorldView } | { delta: TapeClientDelta };
+
+function domicilio(sector: number, { x, y, cells, footprint }: Posicion): Domicilio {
+  return { sector, x, y, cells, footprint };
+}
 
 /** Cota acumulada del índice. Un parche parcial conserva su sector de origen y no añade sectores. */
 export function cotaIndiceBloque(base: WorldView): (delta: TapeClientDelta) => boolean {
@@ -91,8 +97,7 @@ export function cotaIndiceBloque(base: WorldView): (delta: TapeClientDelta) => b
  * Los ticks viven en el índice, separados del JSON. Cada entidad conserva su sector de entrada al bloque:
  * se amplía la cobertura de ese sector cuando se mueve para que una cámara nueva pueda leer también su base.
  */
-function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[], guardar: (datos: Buffer) => void) {
-  const original = base.tick;
+function codificadorDeBloque(nivel: Nivel, original: number, guardar: (datos: Buffer) => void) {
   if (!nivelValido(nivel) || !tickValido(original)) throw errorFormato('Nivel o tick inicial');
   const sectores: Rectangulo[] = [];
   const porOrigen = [new Map<number, Map<number, number>>(), new Map<number, Map<number, number>>()];
@@ -110,7 +115,7 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
     fila.set(sx, i);
     return i;
   };
-  const extender = ({ sector: i, pos }: Domicilio) => {
+  const extender = ({ sector: i, x, y, cells, footprint }: Domicilio) => {
     const r = sectores[i - 1];
     if (!r) return;
     const agregar = (x: number, y: number) => {
@@ -119,15 +124,17 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
       r.x0 = Math.min(r.x0, sx); r.y0 = Math.min(r.y0, sy);
       r.x1 = Math.max(r.x1, sx); r.y1 = Math.max(r.y1, sy);
     };
-    agregar(pos.x, pos.y);
-    for (const c of pos.cells ?? []) agregar(c.x, c.y);
-    if (pos.footprint) agregar(pos.x + pos.footprint.width - 1, pos.y + pos.footprint.height - 1);
+    agregar(x, y);
+    for (const c of cells ?? []) agregar(c.x, c.y);
+    if (footprint) agregar(x + footprint.width - 1, y + footprint.height - 1);
   };
 
   const marcos: MarcoCodificado[] = [];
-  for (let i = 0; i <= deltas.length; i++) {
-    const delta = deltas[i - 1], frame = delta ?? base;
-    if (!tickValido(frame.tick) || (i && frame.tick <= marcos.at(-1)!.tick)) throw new Error('Ticks fuera de orden en CNT2.');
+  let estado: 'abierto' | 'cerrado' | 'fallido' = 'abierto';
+  function codificar(entrada: EntradaMarco): void {
+    const frame = 'base' in entrada ? entrada.base : entrada.delta;
+    const previo = marcos.at(-1);
+    if (!tickValido(frame.tick) || (previo && frame.tick <= previo.tick)) throw new Error('Ticks fuera de orden en CNT2.');
     const { tick, ...cabecera } = frame;
     const global = cabecera as Record<string, unknown>;
     delete global.seed;
@@ -146,7 +153,8 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
       });
     };
 
-    if (!delta) {
+    if ('base' in entrada) {
+      const { base } = entrada;
       listasClave.forEach((nombre, campo) => {
         const valores = base[nombre];
         if (!valores) return;
@@ -154,7 +162,7 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
         agregar(campo, valores as readonly (Posicion & { id?: string })[], fila => {
           const i = sector(fila.x, fila.y, margenDe(nombre));
           if (fila.id !== undefined && campo) {
-            const d = { sector: i, pos: fila };
+            const d = domicilio(i, fila);
             domicilios[campo - 1]!.set(fila.id, d);
             if (fila.cells || fila.footprint) extender(d);
           }
@@ -162,6 +170,7 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
         });
       });
     } else {
+      const { delta } = entrada;
       if (delta.tilesPatch) {
         delete global.tilesPatch;
         agregar(0, delta.tilesPatch, (t: Tile) => sector(t.x, t.y));
@@ -189,14 +198,15 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
           if ('_p' in u) {
             if (!d) throw errorFormato('Origen del parche');
             if ('x' in u || 'y' in u || 'cells' in u || 'footprint' in u || u._u?.length) {
-              const { x, y, cells, footprint } = d.pos;
-              const pos = { x, y, cells, footprint, ...u };
-              for (const k of u._u ?? []) delete (pos as Record<string, unknown>)[k];
-              d.pos = pos;
+              const pos = d as unknown as Record<string, unknown>;
+              for (const k of camposPosicion) {
+                if (u._u?.includes(k)) delete pos[k];
+                else if (Object.hasOwn(u, k)) pos[k] = u[k];
+              }
               extender(d);
             }
           } else {
-            d = { sector: d?.sector ?? sector(u.x, u.y, margenDe(nombre)), pos: u };
+            d = domicilio(d?.sector ?? sector(u.x, u.y, margenDe(nombre)), u);
             mapa.set(u.id, d);
             extender(d);
           }
@@ -229,6 +239,25 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
     marcos.push({ tick, campos, partes });
   }
 
+  return {
+    agregarMarco(entrada: EntradaMarco): void {
+      if (estado !== 'abierto') throw errorFormato('Estado del codificador');
+      // Una entrega puede fallar después de enviar algunas partes del fotograma.
+      estado = 'fallido';
+      codificar(entrada);
+      estado = 'abierto';
+    },
+    finalizar() {
+      if (estado === 'fallido') throw errorFormato('Estado del codificador');
+      estado = 'cerrado';
+      for (const mapa of domicilios) mapa.clear();
+      for (const mapa of porOrigen) mapa.clear();
+      return prepararIndiceBloque(nivel, original, sectores, marcos);
+    },
+  };
+}
+
+function prepararIndiceBloque(nivel: Nivel, original: number, sectores: Rectangulo[], marcos: MarcoCodificado[]) {
   const bytesIndice = 4 + ENTRADA_SECTOR * sectores.length + marcos.reduce((n, m) => n + CABECERA_FOTOGRAMA + ENTRADA_PARTE * m.partes.length, 0);
   if (bytesIndice > MAX_INDICE) throw errorFormato('Tamaño de índice');
   const indice = Buffer.allocUnsafe(CABECERA + bytesIndice);
@@ -271,15 +300,36 @@ function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly Ta
   return { indiceEn, bytes };
 }
 
+function iniciarBloque(nivel: Nivel, base: WorldView, guardar: (datos: Buffer) => void) {
+  const { agregarMarco, finalizar } = codificadorDeBloque(nivel, base.tick, guardar);
+  agregarMarco({ base });
+  return { agregar: (delta: TapeClientDelta) => agregarMarco({ delta }), finalizar };
+}
+
+/** Emite cada fotograma por sectores y conserva solo el estado necesario para armar el índice al cerrar. */
+export function crearCodificadorBloque(nivel: Nivel, base: WorldView, guardar: (datos: Buffer) => void) {
+  const { agregar, finalizar } = iniciarBloque(nivel, base, guardar);
+  return {
+    agregar,
+    cerrar(): { indice: Buffer; bytes: number } {
+      const { indiceEn, bytes } = finalizar();
+      return { indice: indiceEn(), bytes };
+    },
+  };
+}
+
 /** Entrega cada parte al codificarla. El índice devuelto precede a las partes en el archivo. */
 export function codificarBloquePorPartes(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[], guardar: (datos: Buffer) => void): { indice: Buffer; bytes: number } {
-  const { indiceEn, bytes } = prepararIndiceBloque(nivel, base, deltas, guardar);
-  return { indice: indiceEn(), bytes };
+  const codificador = crearCodificadorBloque(nivel, base, guardar);
+  for (const delta of deltas) codificador.agregar(delta);
+  return codificador.cerrar();
 }
 
 export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[]): (t0?: number) => Buffer {
   const partes: Buffer[] = [];
-  const { indiceEn, bytes } = prepararIndiceBloque(nivel, base, deltas, datos => { partes.push(datos); });
+  const { agregar, finalizar } = iniciarBloque(nivel, base, datos => { partes.push(datos); });
+  for (const delta of deltas) agregar(delta);
+  const { indiceEn, bytes } = finalizar();
   return t0 => Buffer.concat([indiceEn(t0), ...partes], bytes);
 }
 

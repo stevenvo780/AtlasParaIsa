@@ -23,6 +23,13 @@ function directorio(t: TestContext) {
   return join(temporal, 'cinta');
 }
 
+function cuerposEnDisco(path: string): number {
+  return readdirSync('/proc/self/fd').filter(fd => {
+    try { return readlinkSync(`/proc/self/fd/${fd}`).startsWith(join(path, '.cnt2-')); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return false; }
+  }).length;
+}
+
 const sustancia: SustanciaVista = { id: 1, clase: ClaseSustancia.Molecula, atomos: [1], enlaces: [], masa: 1,
   prop: { r: 0, dMedia: 0, tFusion: 0, tEbullicion: 0, qOxidacion: 0, dureza: 0, tenacidad: 0,
     flexibilidad: 0, polaridad: 0, densidad: 0, color: 0 } };
@@ -134,21 +141,31 @@ test('I2/I7: una serie confirmada por delante de un bloque volcado a disco deja 
   } });
   escritor.abrir({ instanciaId: 'a', epoca: 0, tMundo: 0, motivo: 'reinicio' });
   escritor.registrar(corte(1, 0, 0, true));
+  assert.equal(cuerposEnDisco(path), NIVELES.length);
   escritor.flush();
+  assert.equal(cuerposEnDisco(path), 0);
   escritor.registrarSerie(0, { t: 200, ...corte(2, 0, 200).serie });
   escritor.registrar(corte(2, 0, 200));
+  assert.equal(cuerposEnDisco(path), 2); // Solo L0 y L1 han alcanzado su siguiente tick.
   fallar = true;
+  assert.throws(() => escritor.flush(), /Corte de prueba/);
+  assert.equal(cuerposEnDisco(path), 0);
   assert.throws(() => escritor.flush(), /Corte de prueba/);
   escritor.close(false);
   assert.equal(readdirSync(path).some(nombre => nombre.endsWith('.tmp')), false);
 
-  escritor = new EscritorCinta({ directorio: path });
-  try { escritor.abrir({ instanciaId: 'a', epoca: 1, tMundo: 200, motivo: 'reinicio' }); }
-  finally { escritor.close(); }
+  escritor = new EscritorCinta({ directorio: path, memoriaCuerpoBloqueBytes: 0 });
+  try {
+    escritor.abrir({ instanciaId: 'a', epoca: 1, tMundo: 200, motivo: 'reinicio' });
+    escritor.registrar(corte(1, 1, 200, true));
+    assert.equal(cuerposEnDisco(path), NIVELES.length);
+  } finally { escritor.close(false); }
+  assert.equal(cuerposEnDisco(path), 0);
   const db = new DatabaseSync(join(path, INDICE_CINTA), { readOnly: true });
   try {
     assert.equal(db.prepare('SELECT max(t) AS t FROM serie WHERE epoca=0').get()?.t, 200);
     assert.equal(db.prepare('SELECT max(t1) AS t FROM bloques WHERE epoca=0 AND nivel=0').get()?.t, 0);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM bloques WHERE epoca=1').get()?.n, 0);
     assert.deepEqual(db.prepare('SELECT t0,t1 FROM lagunas WHERE epoca=1').all().map(r => Object.values(r)), [[0, 200]]);
   } finally { db.close(); }
 });
@@ -156,20 +173,32 @@ test('I2/I7: una serie confirmada por delante de un bloque volcado a disco deja 
 test('el cuerpo temporal devuelve espacio y conserva sus bytes si no caben las dos copias', t => {
   const path = directorio(t);
   mkdirSync(path);
-  const abierto = () => readdirSync('/proc/self/fd').some(fd => {
-    try { return readlinkSync(`/proc/self/fd/${fd}`).startsWith(join(path, '.cnt2-')); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return false; }
-  });
   const cuerpo = new CuerpoBloqueCinta(path, 1, 0);
   try {
     cuerpo.agregar(Buffer.from('a'));
     cuerpo.agregar(Buffer.from('bc'));
-    assert.equal(abierto(), true);
+    assert.equal(cuerposEnDisco(path), 1);
     cuerpo.prepararDestino(Number.MAX_SAFE_INTEGER);
-    assert.equal(abierto(), false);
+    assert.equal(cuerposEnDisco(path), 0);
     const leer = cuerpo.lector(Buffer.from('hdr'), 6);
     assert.equal(leer(1, 4).toString(), 'drab');
     assert.equal(leer(3, 3).toString(), 'abc');
+  } finally { cuerpo.cerrar(); }
+});
+
+test('el cuerpo en RAM sirve vistas dentro de un sector y reúne solo los rangos cruzados', t => {
+  const cuerpo = new CuerpoBloqueCinta(directorio(t), 100, 0);
+  const ultima = Buffer.alloc(3, 'xyz');
+  try {
+    cuerpo.agregar(Buffer.from('a'));
+    cuerpo.agregar(Buffer.from('bc'));
+    cuerpo.agregar(ultima);
+    const leer = cuerpo.lector(Buffer.from('hdr'), 9);
+    const interior = leer(7, 2);
+    assert.equal(interior.toString(), 'yz');
+    assert.equal(interior.buffer, ultima.buffer);
+    assert.equal(interior.byteOffset, ultima.byteOffset + 1);
+    assert.equal(leer(1, 5).toString(), 'drabc');
   } finally { cuerpo.cerrar(); }
 });
 

@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { LeerBytes } from './formato.js';
 
+const VENTANA_TEMPORAL = 1024 ** 2;
+
 function abrirTemporal(directorio: string): number {
   const ruta = join(directorio, `.cnt2-${randomUUID()}.tmp`);
   const fd = openSync(ruta, 'wx+', 0o600);
@@ -57,7 +59,8 @@ export class CuerpoBloqueCinta {
         this.partes.length = 0;
       }
     }
-    if (this.fd !== null && total > this.topeTemporal!) this.volverARam();
+    // Otros niveles pueden haber abierto temporales desde el cálculo del tope.
+    if (this.fd !== null && (total > this.topeTemporal! || datos.length + total > this.disponible())) this.volverARam();
     if (this.fd === null) this.partes.push(datos);
     else escribir(this.fd, datos, this.bytes);
     this.bytes = total;
@@ -65,10 +68,14 @@ export class CuerpoBloqueCinta {
 
   private volverARam(): void {
     if (this.fd === null) return;
-    const cuerpo = Buffer.allocUnsafe(this.bytes);
-    leer(this.fd, cuerpo, 0, 0);
+    const partes: Buffer[] = [];
+    for (let offset = 0; offset < this.bytes; offset += VENTANA_TEMPORAL) {
+      const parte = Buffer.allocUnsafe(Math.min(VENTANA_TEMPORAL, this.bytes - offset));
+      leer(this.fd, parte, 0, offset);
+      partes.push(parte);
+    }
     this.cerrar();
-    this.partes.push(cuerpo);
+    for (const parte of partes) this.partes.push(parte);
   }
 
   prepararDestino(bytes: number): void {
@@ -80,9 +87,28 @@ export class CuerpoBloqueCinta {
     if (bytes !== indice.length + this.bytes) throw new Error('Longitud del bloque de cinta incoherente.');
     const fd = this.fd;
     if (fd === null) {
-      const bloque = Buffer.concat([indice, ...this.partes], bytes);
+      const partes = [indice, ...this.partes];
       this.partes.length = 0;
-      return (offset, n) => bloque.subarray(offset, offset + n);
+      const fines: number[] = [];
+      let fin = 0;
+      for (const parte of partes) fines.push(fin += parte.length);
+      let ventana = Buffer.alloc(0);
+      return (offset, n) => {
+        if (n === 0) return indice.subarray(0, 0);
+        let inicio = 0, fin = fines.length;
+        while (inicio < fin) {
+          const medio = Math.floor((inicio + fin) / 2);
+          if (fines[medio]! <= offset) inicio = medio + 1;
+          else fin = medio;
+        }
+        const local = offset - (fines[inicio - 1] ?? 0);
+        if (offset + n <= fines[inicio]!) return partes[inicio]!.subarray(local, local + n);
+        if (ventana.length < n) ventana = Buffer.allocUnsafe(n);
+        const buffer = ventana.subarray(0, n);
+        let copiados = partes[inicio]!.copy(buffer, 0, local);
+        while (copiados < n) copiados += partes[++inicio]!.copy(buffer, copiados);
+        return buffer;
+      };
     }
     // El catálogo consume cada lectura del cuerpo antes de pedir la siguiente.
     let ventana = Buffer.alloc(0);

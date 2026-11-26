@@ -3,10 +3,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as igual } from 'node:util';
 import { CINTA, type Apertura, type Corte, type EntradaCatalogo, type Hito, type Nivel, type SeriePunto } from '../../shared/cinta.js';
-import type { TapeClientDelta } from '../../shared/tape-delta.js';
 import type { PersonView, Tile, WorldView } from '../../shared/types.js';
 import { CatalogoCinta, MAX_SEGMENTO, NIVELES, sincronizarDirectorio, type PuntoEscritura } from './catalogo.js';
-import { clientDelta, codificarBloquePorPartes, cotaIndiceBloque } from './formato.js';
+import { clientDelta, crearCodificadorBloque, cotaIndiceBloque } from './formato.js';
 import { CuerpoBloqueCinta } from './bloque-temporal.js';
 import { podar, RESERVA_DISCO } from './poda.js';
 import { reducir, reducirTesela } from './reducir.js';
@@ -32,9 +31,10 @@ export function cintaDeMundo(worldPath: string, directorio?: string): string {
 }
 
 interface BloquePendiente {
-  base: WorldView;
+  cuerpo: CuerpoBloqueCinta;
+  codificador: ReturnType<typeof crearCodificadorBloque>;
   previo: WorldView;
-  deltas: TapeClientDelta[];
+  fotogramas: number;
   cabe: ReturnType<typeof cotaIndiceBloque>;
 }
 export interface OpcionesEscritor {
@@ -66,6 +66,7 @@ export class EscritorCinta {
   private tMundo = 0;
   private ultimoTick = -1;
   private ultimaSecuencia = -1;
+  private fallo: { causa: unknown } | undefined;
 
   constructor(private readonly opciones: OpcionesEscritor) {
     this.tope = opciones.topeBytes ?? CINTA.topeBytes;
@@ -141,11 +142,17 @@ export class EscritorCinta {
   }
 
   registrar(corte: Corte, serieAutomatica = true): void {
+    this.comprobarActivo();
     const completo = corte.tilesCambiadas === 'todas';
     if (this.entradaEpoca === undefined || corte.epoca !== this.entradaEpoca
       || !Number.isSafeInteger(corte.seq) || corte.seq <= this.ultimaSecuencia || !Number.isSafeInteger(corte.t)
       || corte.t < this.tMundo || corte.t <= this.ultimoTick || corte.vista.tick !== corte.t
       || completo !== (this.ultimoTick < 0) || corte.serie.hz !== corte.hz) throw new Error('Corte fuera de época, secuencia o tick.');
+    try { this.registrarCorte(corte, completo, serieAutomatica); }
+    catch (error) { this.abortar(error); }
+  }
+
+  private registrarCorte(corte: Corte, completo: boolean, serieAutomatica: boolean): void {
     const anterior = this.ultimoTick < 0 ? this.tMundo : this.ultimoTick;
     const declarada = corte.hitos.some(h => h.tipo === 'laguna' && h.laguna.t0 === anterior && h.laguna.t1 === corte.t);
     if (declarada || corte.t - anterior > (this.ultimoTick < 0 ? 0 : PASO_MAXIMO)) {
@@ -181,19 +188,29 @@ export class EscritorCinta {
         const delta = clientDelta(bloque.previo, vista);
         if (parche.length) delta.tilesPatch = parche;
         if (bloque.cabe(delta)) {
-          bloque.deltas.push(delta);
+          bloque.codificador.agregar(delta);
           bloque.previo = vista;
-          if (bloque.deltas.length + 1 >= FOTOGRAMAS_BLOQUE) this.escribir(nivel);
+          bloque.fotogramas++;
+          if (bloque.fotogramas >= FOTOGRAMAS_BLOQUE) this.escribir(nivel);
           continue;
         }
         this.escribir(nivel);
       }
       const base = { ...vista, tiles: this.teselasDe(nivel) };
-      this.bloques[nivel] = { base, previo: vista, deltas: [], cabe: cotaIndiceBloque(base) };
+      const cabe = cotaIndiceBloque(base);
+      const cuerpo = new CuerpoBloqueCinta(this.catalogo.directorio, this.memoriaCuerpoBloque, RESERVA_DISCO + this.margen);
+      try {
+        const codificador = crearCodificadorBloque(nivel, base, parte => cuerpo.agregar(parte));
+        this.bloques[nivel] = { cuerpo, codificador, previo: vista, cabe, fotogramas: 1 };
+      } catch (error) {
+        try { cuerpo.cerrar(); } catch { /* conserva el fallo de codificación */ }
+        throw error;
+      }
     }
   }
 
   registrarSerie(epoca: number, punto: SeriePunto): void {
+    this.comprobarActivo();
     if (epoca !== this.entradaEpoca || !Number.isSafeInteger(punto.t) || punto.t < this.tMundo || punto.t < this.proximaSerie) {
       throw new Error('Punto de serie fuera de época o cadencia.');
     }
@@ -205,18 +222,15 @@ export class EscritorCinta {
     const bloque = this.bloques[nivel];
     if (!bloque) return;
     this.confirmarFlujos();
-    const cuerpo = new CuerpoBloqueCinta(this.catalogo.directorio, this.memoriaCuerpoBloque, RESERVA_DISCO + this.margen);
-    try {
-      const { indice, bytes } = codificarBloquePorPartes(nivel, bloque.base, bloque.deltas, parte => cuerpo.agregar(parte));
-      const ultimo = this.catalogo.segmentos().filter(s => s.nivel === nivel).at(-1);
-      const segmento = ultimo?.epoca === this.epoca && ultimo.bytes + bytes <= MAX_SEGMENTO ? ultimo : undefined;
-      cuerpo.prepararDestino(bytes);
-      podar(this.catalogo, this.tope, nivel, bytes, { margen: this.margen });
-      this.catalogo.escribirBloqueLeido(this.epoca, cuerpo.lector(indice, bytes), bytes, segmento);
-      this.bloques[nivel] = undefined;
-    } finally {
-      cuerpo.cerrar();
-    }
+    const { cuerpo, codificador } = bloque;
+    const { indice, bytes } = codificador.cerrar();
+    const ultimo = this.catalogo.segmentos().filter(s => s.nivel === nivel).at(-1);
+    const segmento = ultimo?.epoca === this.epoca && ultimo.bytes + bytes <= MAX_SEGMENTO ? ultimo : undefined;
+    cuerpo.prepararDestino(bytes);
+    podar(this.catalogo, this.tope, nivel, bytes, { margen: this.margen });
+    this.catalogo.escribirBloqueLeido(this.epoca, cuerpo.lector(indice, bytes), bytes, segmento);
+    this.bloques[nivel] = undefined;
+    cuerpo.cerrar();
   }
 
   private confirmarFlujos(): void {
@@ -230,8 +244,30 @@ export class EscritorCinta {
   }
 
   flush(): void {
-    this.confirmarFlujos();
-    for (const nivel of NIVELES) this.escribir(nivel);
+    this.comprobarActivo();
+    try {
+      this.confirmarFlujos();
+      for (const nivel of NIVELES) this.escribir(nivel);
+    } catch (error) { this.abortar(error); }
+  }
+
+  private comprobarActivo(): void {
+    if (this.fallo) throw this.fallo.causa;
+  }
+
+  private descartarBloques(): void {
+    const errores: unknown[] = [];
+    for (const bloque of this.bloques.splice(0)) {
+      try { bloque?.cuerpo.cerrar(); }
+      catch (error) { errores.push(error); }
+    }
+    if (errores.length) throw errores[0];
+  }
+
+  private abortar(error: unknown): never {
+    this.fallo = { causa: error };
+    try { this.descartarBloques(); } catch { /* conserva el fallo que interrumpió el grabador */ }
+    throw error;
   }
 
   estado(): { frames: number; latestTick: number } {
@@ -241,6 +277,13 @@ export class EscritorCinta {
   }
 
   close(confirmar = true): void {
-    try { if (confirmar) this.flush(); } finally { this.catalogo.db.close(); }
+    try {
+      if (confirmar) this.flush();
+      else this.descartarBloques();
+    } catch (error) {
+      try { this.catalogo.db.close(); } catch { /* conserva el fallo del cierre del grabador */ }
+      throw error;
+    }
+    this.catalogo.db.close();
   }
 }

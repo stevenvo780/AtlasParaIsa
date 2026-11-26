@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32 } from 'node:zlib';
-import { clientDelta, codificarBloque, codificarBloquePorPartes, cotaIndiceBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
+import { clientDelta, codificarBloque, codificarBloquePorPartes, cotaIndiceBloque, crearCodificadorBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
 import { projectTapeFrame } from '../src/server/sim-worker.js';
 import { applyClientTapeDelta, indexTiles } from '../src/shared/tape-delta.js';
 import type { PersonView, RuntimeStats, Tile, WorldView } from '../src/shared/types.js';
@@ -99,6 +99,44 @@ const vacia = (tick: number): WorldView => ({
 const lector = (datos: Buffer) => (o: number, n: number) => datos.subarray(o, o + n);
 const persona = (id: string, x: number, y: number): PersonView => ({ id, name: id, role: 'neighbor', x, y, color: '#fff',
   action: 'rest', reason: 'r', energy: 1, hunger: 0, fatigue: 0, need: 'n', recentMemory: null });
+
+test('CNT2 emite al recibir cada fotograma y conserva la base visible tras el cruce de sectores', () => {
+  const refugio: NonNullable<WorldView['structures']>[number] = {
+    id: 'refugio', x: 63, y: 0, name: 'Refugio', blueprintId: 'techo', components: [],
+    footprint: { width: 2, height: 1 }, cells: [{ x: 63, y: 0 }, { x: 64, y: 0 }],
+    condition: 1, water: 0, food: 0, uses: 0, builtAt: 0, builderId: null,
+  };
+  const base = { ...vacia(0), people: [persona('p', 1, 0)], structures: [refugio], tiles: [tesela(0)] };
+  const medio = { ...base, tick: 4, people: [{ ...base.people[0]!, x: 130, reason: 'cruce' }],
+    structures: [{ ...refugio, x: 65, cells: undefined, footprint: undefined }] };
+  const fin = { ...medio, tick: 8, people: [{ ...medio.people[0]!, x: 260 }],
+    structures: [{ ...medio.structures[0]!, x: 258 }], tiles: [tesela(260)] };
+  const deltas = [clientDelta(base, medio), clientDelta(medio, fin)];
+  const partes: Buffer[] = [];
+  const codificador = crearCodificadorBloque(0, base, parte => { partes.push(parte); });
+  assert.ok(partes.length > 0);
+  for (const delta of deltas) {
+    const antes = partes.length;
+    codificador.agregar(delta);
+    assert.ok(partes.length > antes);
+  }
+  const cantidad = partes.length;
+  const { indice, bytes } = codificador.cerrar();
+  assert.equal(partes.length, cantidad);
+  assert.deepEqual(codificador.cerrar(), { indice, bytes });
+  assert.throws(() => codificador.agregar(deltas[1]!), /Estado del codificador/);
+  const datos = Buffer.concat([indice, ...partes], bytes);
+  assert.deepEqual(datos, codificarBloque(0, base, deltas));
+  const leido = leerIndiceBloque(lector(datos), bytes);
+  const sectores = sectoresVisibles(leido, { x: 256, y: 0, width: 16, height: 1 });
+  const clave = JSON.parse(leerMarcoJson(leido, 0, lector(datos), sectores)) as WorldView;
+  assert.deepEqual(clave.people, base.people);
+  assert.deepEqual(clave.structures, base.structures);
+  const intermedio = applyClientTapeDelta(clave, JSON.parse(leerMarcoJson(leido, 1, lector(datos), sectores))).frame;
+  const ultimo = applyClientTapeDelta(intermedio, JSON.parse(leerMarcoJson(leido, 2, lector(datos), sectores))).frame;
+  assert.deepEqual(ultimo.people, fin.people);
+  assert.deepEqual(ultimo.structures, alCable(fin).structures);
+});
 
 test('CNT2: cada bit del bloque está cubierto por una suma de comprobación, también en el salto que solo lee partes', () => {
   const base: WorldView = { ...vacia(0), pauseReason: 'comprimible '.repeat(600),

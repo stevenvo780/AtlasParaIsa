@@ -27,6 +27,18 @@ interface ParteCorte {
   preparacionPersonasMs?: number;
 }
 
+/** Sobres ordenados por dueño que ya salieron de los puertos de una solicitud. */
+export interface CorteRemotoBinario {
+  readonly solicitud: bigint;
+  readonly epoca: number;
+  readonly tick: number;
+  readonly modoFauna: bigint;
+  readonly teselasDirectas: boolean;
+  readonly personasDirectas: boolean;
+  readonly duenosRemotos: number;
+  readonly sobres: ParteCorte[];
+}
+
 interface DiagnosticoTeselasCorte {
   bytesV8: number; v8Ms: number; bytesTuplas: number; tuplasMs: number; duenosTuplas: number; duenosV8: number;
 }
@@ -40,6 +52,59 @@ interface FotoTransferida {
   tipo: 'foto';
   epoca: number;
   parte: ParteFotoDueno;
+}
+
+function ocupaSuBuffer(bytes: unknown): bytes is Uint8Array<ArrayBuffer> {
+  return bytes instanceof Uint8Array && bytes.buffer instanceof ArrayBuffer
+    && bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength;
+}
+
+function agregarTransferibles(parte: ParteCorte, transferibles: Set<ArrayBuffer>): void {
+  const agregar = (bytes: Uint8Array): void => {
+    if (!ocupaSuBuffer(bytes)) throw new Error('Cada bloque del corte debe ocupar su propio ArrayBuffer.');
+    if (bytes.byteLength === 0) return;
+    if (transferibles.has(bytes.buffer)) throw new Error('Buffer repetido en el corte.');
+    transferibles.add(bytes.buffer);
+  };
+  agregar(parte.bytes);
+  for (const bloques of [parte.fauna, parte.teselas, parte.personas]) {
+    if (bloques) for (const { cuerpo } of bloques) agregar(cuerpo);
+  }
+  if (parte.personas) for (const { pesos } of parte.personas) agregar(pesos);
+}
+
+/** Esta lista permite mover los bloques a otro hilo antes de consumir el corte. */
+export function transferiblesCorteRemoto(corte: CorteRemotoBinario): ArrayBuffer[] {
+  const transferibles = new Set<ArrayBuffer>();
+  for (const sobre of corte.sobres) agregarTransferibles(sobre, transferibles);
+  return [...transferibles];
+}
+
+function comprobarIdentidad(parte: ParteCorte | undefined, corte: CorteRemotoBinario, dueno: number): asserts parte is ParteCorte {
+  if (!parte || parte.dueno !== dueno || parte.solicitud !== corte.solicitud || parte.epoca !== corte.epoca || parte.tick !== corte.tick
+    || !ocupaSuBuffer(parte.bytes) || parte.bytes.byteLength === 0)
+    throw new Error(`Instantánea incompleta o incoherente para el dueño ${dueno}.`);
+}
+
+const MARCAS_DIRECTAS = {
+  fauna: { clave: 'faunaSustituida', error: 'Fauna directa inválida' },
+  teselas: { clave: 'teselasSustituidas', error: 'Teselas directas inválidas' },
+  personas: { clave: 'personasSustituidas', error: 'Personas directas inválidas' },
+} as const;
+
+function comprobarMarca(parte: ParteCorte, campo: keyof typeof MARCAS_DIRECTAS, directa: boolean, sombra = false): void {
+  const { clave, error } = MARCAS_DIRECTAS[campo];
+  const hayBloques = Object.hasOwn(parte, campo);
+  if (!directa) {
+    if (Object.hasOwn(parte, clave) || hayBloques && !sombra)
+      throw new Error(`Modo de ${campo} incoherente para el dueño ${parte.dueno}.`);
+    return;
+  }
+  const marca = parte[clave];
+  if (marca === null && !hayBloques) return;
+  if (marca && typeof marca === 'object' && Number.isSafeInteger(marca.cantidad)
+    && marca.cantidad >= 0 && marca.cantidad <= 0xffff_ffff && Array.isArray(parte[campo])) return;
+  throw new Error(`${error} para el dueño ${parte.dueno}.`);
 }
 
 export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: ParteFotoDueno): void {
@@ -72,7 +137,6 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
   if (!(buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength)
     throw new Error('V8 no entregó un bloque de corte transferible entero.');
   const parte: ParteCorte = { solicitud: Atomics.load(solicitud, SOLICITUD), epoca, tick: mundo.tick, dueno, bytes };
-  const transferibles = [buffer];
   if (modo === FAUNA_DIRECTA) parte.faunaSustituida = fauna ? { cantidad: fauna.reduce((n, bloque) => n + bloque.filas, 0) } : null;
   if (fauna) parte.fauna = fauna;
   if (modo === FAUNA_SOMBRA) parte.fauna = prepararFaunaCorte(contenido.animals);
@@ -83,19 +147,112 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
     parte.preparacionPersonasMs = preparacionPersonasMs;
   }
   if (personas) parte.personas = personas;
-  const transferir = (cuerpo: Uint8Array): void => {
-    if (cuerpo.byteLength === 0) return;
-    if (!(cuerpo.buffer instanceof ArrayBuffer) || cuerpo.byteOffset !== 0 || cuerpo.byteLength !== cuerpo.buffer.byteLength)
-      throw new Error('Cada bloque del corte debe ocupar su propio ArrayBuffer.');
-    transferibles.push(cuerpo.buffer);
+  const transferibles = new Set<ArrayBuffer>();
+  agregarTransferibles(parte, transferibles);
+  puerto.postMessage(parte, [...transferibles]);
+  for (const bloque of transferibles) if (bloque.byteLength !== 0) throw new Error('Un bloque de corte no se desprendió al enviarlo.');
+}
+
+/** Consume el corte retirado y libera cada sobre al decodificarlo. Los pesos verificados conservan sus buffers. */
+export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
+  partes: ParteMundo[];
+  diagnosticoTeselasCorte: DiagnosticoTeselasCorte | undefined;
+  diagnosticoPersonasCorte: DiagnosticoPersonasCorte | undefined;
+} {
+  if (corte.sobres.length !== corte.duenosRemotos) throw new Error('El corte remoto está incompleto o ya fue consumido.');
+  const { modoFauna: modo, tick } = corte;
+  const datos: DiagnosticoTeselasCorte | undefined = corte.teselasDirectas
+    ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
+  const datosPersonas: DiagnosticoPersonasCorte | undefined = corte.personasDirectas
+    ? { bytesV8: 0, v8Ms: 0, bytesFilas: 0, filasMs: 0, duenosFilas: 0, duenosV8: 0,
+      preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
+  const decodificar = (parte: ParteCorte | undefined, dueno: number): ParteMundo => {
+    comprobarIdentidad(parte, corte, dueno);
+    const inicioV8 = datos || datosPersonas ? performance.now() : 0;
+    const contenido = deserialize(parte.bytes) as ParteMundo;
+    const v8Ms = datos || datosPersonas ? performance.now() - inicioV8 : 0;
+    if (contenido.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
+    if (datos) {
+      datos.bytesV8 += parte.bytes.byteLength;
+      datos.v8Ms += v8Ms;
+      const sustituidas = parte.teselasSustituidas;
+      try {
+        if (!Array.isArray(contenido.tiles)) throw new Error('Falta el array de teselas en V8.');
+        if (sustituidas === null && !Object.hasOwn(parte, 'teselas')) datos.duenosV8++;
+        else {
+          if (!sustituidas || typeof sustituidas !== 'object' || contenido.tiles.length !== 0
+            || Object.keys(contenido.tiles).length !== 0 || !Array.isArray(parte.teselas))
+            throw new Error('Sobre de teselas directas incoherente.');
+          const inicioTuplas = performance.now();
+          contenido.tiles = recibirTeselasDirectas(parte.teselas, sustituidas.cantidad);
+          datos.tuplasMs += performance.now() - inicioTuplas;
+          datos.bytesTuplas += parte.teselas.reduce((n, bloque) => n + bloque.cuerpo.byteLength, 0);
+          datos.duenosTuplas++;
+        }
+      } catch (error) {
+        throw new Error(`Teselas directas inválidas para el dueño ${dueno}.`, { cause: error });
+      }
+    } else if (Object.hasOwn(parte, 'teselasSustituidas') || Object.hasOwn(parte, 'teselas')) {
+      throw new Error(`Modo de teselas incoherente para el dueño ${dueno}.`);
+    }
+    if (datosPersonas) {
+      datosPersonas.bytesV8 += parte.bytes.byteLength;
+      datosPersonas.v8Ms += v8Ms;
+      const preparacionMs = parte.preparacionPersonasMs;
+      if (typeof preparacionMs === 'number' && Number.isFinite(preparacionMs) && preparacionMs >= 0) {
+        datosPersonas.preparacionMaxMs = Math.max(datosPersonas.preparacionMaxMs, preparacionMs);
+        datosPersonas.preparacionSumaMs += preparacionMs;
+      }
+      const sustituidas = parte.personasSustituidas;
+      try {
+        if (!Array.isArray(contenido.people)) throw new Error('Falta el array de personas en V8.');
+        if (sustituidas === null && !Object.hasOwn(parte, 'personas')) datosPersonas.duenosV8++;
+        else {
+          if (!sustituidas || typeof sustituidas !== 'object' || contenido.people.length !== 0
+            || Object.keys(contenido.people).length !== 0 || !Array.isArray(parte.personas))
+            throw new Error('Sobre de personas directas incoherente.');
+          const bytesFilas = parte.personas.reduce((n, bloque) => n + bloque.cuerpo.byteLength + bloque.pesos.byteLength, 0);
+          const inicioFilas = performance.now();
+          contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad, { transferirPesos: true });
+          datosPersonas.filasMs += performance.now() - inicioFilas;
+          datosPersonas.bytesFilas += bytesFilas;
+          datosPersonas.duenosFilas++;
+        }
+      } catch (error) {
+        throw new Error(`Personas directas inválidas para el dueño ${dueno}.`, { cause: error });
+      }
+    } else if (Object.hasOwn(parte, 'personasSustituidas') || Object.hasOwn(parte, 'personas')) {
+      throw new Error(`Modo de personas incoherente para el dueño ${dueno}.`);
+    }
+    if (modo === FAUNA_DIRECTA) {
+      const sustituida = parte.faunaSustituida;
+      try {
+        if (!Array.isArray(contenido.animals)) throw new Error('Falta el array de fauna en V8.');
+        if (sustituida === null && !Object.hasOwn(parte, 'fauna')) return contenido;
+        if (!sustituida || typeof sustituida !== 'object' || contenido.animals.length !== 0
+          || Object.keys(contenido.animals).length !== 0 || !Array.isArray(parte.fauna))
+          throw new Error('Sobre de fauna directa incoherente.');
+        contenido.animals = recibirFaunaDirecta(parte.fauna, sustituida.cantidad);
+        return contenido;
+      } catch (error) {
+        throw new Error(`Fauna directa inválida para el dueño ${dueno}.`, { cause: error });
+      }
+    }
+    if (Object.hasOwn(parte, 'faunaSustituida')) throw new Error(`Modo de fauna incoherente para el dueño ${dueno}.`);
+    // Si falta la optimización, el guardado conserva las filas canónicas de este dueño.
+    const bloques = modo === FAUNA_SOMBRA ? parte.fauna : undefined;
+    if (Array.isArray(bloques) && bloques.length && Array.isArray(contenido.animals)
+      && validarFaunaCorte(bloques, contenido.animals.length)) {
+      vincularFaunaCorte(contenido.animals, [{ desde: 0, bloques }]);
+    }
+    return contenido;
   };
-  for (const bloques of [parte.fauna, parte.teselas, parte.personas]) {
-    if (!bloques) continue;
-    for (const { cuerpo } of bloques) transferir(cuerpo);
-  }
-  if (personas) for (const { pesos } of personas) transferir(pesos);
-  puerto.postMessage(parte, transferibles);
-  if (transferibles.some(bloque => bloque.byteLength !== 0)) throw new Error('Un bloque de corte no se desprendió al enviarlo.');
+  const partes: ParteMundo[] = [];
+  const sobres = corte.sobres.reverse();
+  try {
+    while (sobres.length) partes.push(decodificar(sobres.pop(), partes.length + 1));
+  } finally { sobres.length = 0; }
+  return { partes, diagnosticoTeselasCorte: datos, diagnosticoPersonasCorte: datosPersonas };
 }
 
 /** Un canal por dueño remoto, nuevo en cada apertura. Solo se elige F0 antes de abrir la piscina. */
@@ -139,101 +296,40 @@ export class CanalesCorte {
     return BigInt.asUintN(64, Atomics.add(this.solicitud, SOLICITUD, 1n) + 1n);
   }
 
-  /** La barrera de reunir ya terminó. Una respuesta llega antes de que su dueño indique que terminó. */
-  recibir(solicitud: bigint, epoca: number, tick: number): ParteMundo[] {
-    const modo = Atomics.load(this.solicitud, PREPARAR_FAUNA);
-    const pideTeselas = Atomics.load(this.solicitud, PREPARAR_TESELAS) === 1n;
-    const pidePersonas = Atomics.load(this.solicitud, PREPARAR_PERSONAS) === 1n;
-    const datos = this.ultimaRecepcionTeselas = pideTeselas
-      ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
-    const datosPersonas = this.ultimaRecepcionPersonas = pidePersonas
-      ? { bytesV8: 0, v8Ms: 0, bytesFilas: 0, filasMs: 0, duenosFilas: 0, duenosV8: 0,
-        preparacionMaxMs: 0, preparacionSumaMs: 0 } : undefined;
-    return this.entradas.map((puerto, i) => {
+  /** Los dueños ya pasaron la barrera de reunión. Retira un sobre por puerto. */
+  retirarCorte(solicitud: bigint, epoca: number, tick: number): CorteRemotoBinario {
+    if (solicitud !== Atomics.load(this.solicitud, SOLICITUD)) throw new Error('La solicitud del corte ya no está vigente.');
+    const sobres: ParteCorte[] = [];
+    const corte: CorteRemotoBinario = {
+      solicitud, epoca, tick, sobres, duenosRemotos: this.entradas.length,
+      modoFauna: Atomics.load(this.solicitud, PREPARAR_FAUNA),
+      teselasDirectas: Atomics.load(this.solicitud, PREPARAR_TESELAS) === 1n,
+      personasDirectas: Atomics.load(this.solicitud, PREPARAR_PERSONAS) === 1n,
+    };
+    for (const [i, puerto] of this.entradas.entries()) {
       const dueno = i + 1;
       const parte = receiveMessageOnPort(puerto)?.message as ParteCorte | undefined;
-      if (!parte || parte.dueno !== dueno || parte.solicitud !== solicitud || parte.epoca !== epoca || parte.tick !== tick
-        || !(parte.bytes instanceof Uint8Array) || parte.bytes.byteLength === 0 || receiveMessageOnPort(puerto) !== undefined)
+      if (receiveMessageOnPort(puerto) !== undefined)
         throw new Error(`Instantánea incompleta o incoherente para el dueño ${dueno}.`);
-      const inicioV8 = datos || datosPersonas ? performance.now() : 0;
-      const contenido = deserialize(parte.bytes) as ParteMundo;
-      const v8Ms = datos || datosPersonas ? performance.now() - inicioV8 : 0;
-      if (contenido.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
-      if (datos) {
-        datos.bytesV8 += parte.bytes.byteLength;
-        datos.v8Ms += v8Ms;
-        const sustituidas = parte.teselasSustituidas;
-        try {
-          if (!Array.isArray(contenido.tiles)) throw new Error('Falta el array de teselas en V8.');
-          if (sustituidas === null && !Object.hasOwn(parte, 'teselas')) datos.duenosV8++;
-          else {
-            if (!sustituidas || typeof sustituidas !== 'object' || contenido.tiles.length !== 0
-              || Object.keys(contenido.tiles).length !== 0 || !Array.isArray(parte.teselas))
-              throw new Error('Sobre de teselas directas incoherente.');
-            const inicioTuplas = performance.now();
-            contenido.tiles = recibirTeselasDirectas(parte.teselas, sustituidas.cantidad);
-            datos.tuplasMs += performance.now() - inicioTuplas;
-            datos.bytesTuplas += parte.teselas.reduce((n, bloque) => n + bloque.cuerpo.byteLength, 0);
-            datos.duenosTuplas++;
-          }
-        } catch (error) {
-          throw new Error(`Teselas directas inválidas para el dueño ${dueno}.`, { cause: error });
-        }
-      } else if (Object.hasOwn(parte, 'teselasSustituidas') || Object.hasOwn(parte, 'teselas')) {
-        throw new Error(`Modo de teselas incoherente para el dueño ${dueno}.`);
-      }
-      if (datosPersonas) {
-        datosPersonas.bytesV8 += parte.bytes.byteLength;
-        datosPersonas.v8Ms += v8Ms;
-        const preparacionMs = parte.preparacionPersonasMs;
-        if (typeof preparacionMs === 'number' && Number.isFinite(preparacionMs) && preparacionMs >= 0) {
-          datosPersonas.preparacionMaxMs = Math.max(datosPersonas.preparacionMaxMs, preparacionMs);
-          datosPersonas.preparacionSumaMs += preparacionMs;
-        }
-        const sustituidas = parte.personasSustituidas;
-        try {
-          if (!Array.isArray(contenido.people)) throw new Error('Falta el array de personas en V8.');
-          if (sustituidas === null && !Object.hasOwn(parte, 'personas')) datosPersonas.duenosV8++;
-          else {
-            if (!sustituidas || typeof sustituidas !== 'object' || contenido.people.length !== 0
-              || Object.keys(contenido.people).length !== 0 || !Array.isArray(parte.personas))
-              throw new Error('Sobre de personas directas incoherente.');
-            const bytesFilas = parte.personas.reduce((n, bloque) => n + bloque.cuerpo.byteLength + bloque.pesos.byteLength, 0);
-            const inicioFilas = performance.now();
-            contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad, { transferirPesos: true });
-            datosPersonas.filasMs += performance.now() - inicioFilas;
-            datosPersonas.bytesFilas += bytesFilas;
-            datosPersonas.duenosFilas++;
-          }
-        } catch (error) {
-          throw new Error(`Personas directas inválidas para el dueño ${dueno}.`, { cause: error });
-        }
-      } else if (Object.hasOwn(parte, 'personasSustituidas') || Object.hasOwn(parte, 'personas')) {
-        throw new Error(`Modo de personas incoherente para el dueño ${dueno}.`);
-      }
-      if (modo === FAUNA_DIRECTA) {
-        const sustituida = parte.faunaSustituida;
-        try {
-          if (!Array.isArray(contenido.animals)) throw new Error('Falta el array de fauna en V8.');
-          if (sustituida === null && !Object.hasOwn(parte, 'fauna')) return contenido;
-          if (!sustituida || typeof sustituida !== 'object' || contenido.animals.length !== 0
-            || Object.keys(contenido.animals).length !== 0 || !Array.isArray(parte.fauna))
-            throw new Error('Sobre de fauna directa incoherente.');
-          contenido.animals = recibirFaunaDirecta(parte.fauna, sustituida.cantidad);
-          return contenido;
-        } catch (error) {
-          throw new Error(`Fauna directa inválida para el dueño ${dueno}.`, { cause: error });
-        }
-      }
-      if (Object.hasOwn(parte, 'faunaSustituida')) throw new Error(`Modo de fauna incoherente para el dueño ${dueno}.`);
-      // Si falta la optimización, el guardado conserva las filas canónicas de este dueño.
-      const bloques = modo === FAUNA_SOMBRA ? parte.fauna : undefined;
-      if (Array.isArray(bloques) && bloques.length && Array.isArray(contenido.animals)
-        && validarFaunaCorte(bloques, contenido.animals.length)) {
-        vincularFaunaCorte(contenido.animals, [{ desde: 0, bloques }]);
-      }
-      return contenido;
-    });
+      comprobarIdentidad(parte, corte, dueno);
+      const sombra = corte.modoFauna === FAUNA_SOMBRA;
+      comprobarMarca(parte, 'fauna', corte.modoFauna === FAUNA_DIRECTA, sombra);
+      comprobarMarca(parte, 'teselas', corte.teselasDirectas);
+      comprobarMarca(parte, 'personas', corte.personasDirectas);
+      // Las filas de sombra son opcionales: si son inválidas se conserva el V8 canónico.
+      if (sombra && (!Array.isArray(parte.fauna) || !parte.fauna.every(b => ocupaSuBuffer(b?.cuerpo)))) delete parte.fauna;
+      sobres.push(parte);
+    }
+    return corte;
+  }
+
+  recibir(solicitud: bigint, epoca: number, tick: number): ParteMundo[] {
+    this.ultimaRecepcionTeselas = undefined;
+    this.ultimaRecepcionPersonas = undefined;
+    const resultado = decodificarCorteRemoto(this.retirarCorte(solicitud, epoca, tick));
+    this.ultimaRecepcionTeselas = resultado.diagnosticoTeselasCorte;
+    this.ultimaRecepcionPersonas = resultado.diagnosticoPersonasCorte;
+    return resultado.partes;
   }
 
   /** F6 ya terminó y el coordinador aún no puede pedir otro corte. Un dueño sin parte provoca el camino reunido. */

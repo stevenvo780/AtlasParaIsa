@@ -98,6 +98,7 @@ export interface DvrState {
   serie: SeriePunto[]; bifurcaciones: Bifurcacion[]; lagunas: Laguna[];
   bufferedAhead: number; aheadOfPlayhead: number; atLiveEdge: boolean; loading: boolean;
   error: string | null;
+  tramo: { desde: number; hasta: number } | null;
 }
 
 export interface DvrPlayerOptions {
@@ -164,6 +165,7 @@ export class DvrPlayer {
   serie: SeriePunto[] = [];
   bifurcaciones: Bifurcacion[] = [];
   lagunas: Laguna[] = [];
+  tramo: { desde: number; hasta: number } | null = null;
   loading = false;
   error: string | null = null;
 
@@ -217,7 +219,7 @@ export class DvrPlayer {
       nivel: this.nivel, paso: this.paso, nivelPedido: this.nivelPedido, niveles: this.niveles,
       serie: this.serie, bifurcaciones: this.bifurcaciones, lagunas: this.lagunas,
       bufferedAhead: this.bufferedAhead, aheadOfPlayhead: this.aheadOfPlayhead, atLiveEdge: this.atLiveEdge,
-      loading: this.loading, error: this.error,
+      loading: this.loading, error: this.error, tramo: this.tramo,
     };
   }
 
@@ -285,7 +287,9 @@ export class DvrPlayer {
       const batch: QueuedFrame[] = [];
       let cambio = false;
       while (this.frames.length) {
-        const next = this.frames[0]!, previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
+        const next = this.frames[0]!;
+        if (this.tramo && next.tick > this.tramo.hasta) { this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify(); break; }
+        const previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
         const otroNivel = previo !== null && next.nivel !== previo;
         if (otroNivel) { if (!batch.length) { batch.push(this.frames.shift()!); cambio = true; this.credito = Math.max(0, this.credito - 1); } break; }
         if (this.credito < 1) break;
@@ -294,6 +298,10 @@ export class DvrPlayer {
       // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega. Los deltas intermedios sí se aplican
       // (cada uno parte del anterior) pero su fotograma no se emite; sus teselas cambiadas se acumulan en el entregado.
       if (batch.length && !this.deliver(batch, 'play', batch.length - 1, cambio)) return;
+      if (this.tramo && this.playing && (this.currentTick >= this.tramo.hasta ||
+          (!this.frames.length && this.currentTick >= this.maxTick))) {
+        this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify();
+      }
       this.msReproduciendo += dt;
       if (this.msReproduciendo >= DVR_LIMITS.marcadorCadaMs) { this.msReproduciendo = 0; this.guardarMarcador(false); }
       this.actualizarCabezal();
@@ -351,8 +359,23 @@ export class DvrPlayer {
     return run;
   }
 
+  /** Reproduce hasta el último fotograma disponible dentro del intervalo elegido. */
+  async reproducirTramo(desde: number, hasta: number): Promise<void> {
+    if (!this.enabled || !Number.isFinite(desde) || !Number.isFinite(hasta)) return;
+    const inicio = clamp(Math.floor(desde), this.minTick, this.maxTick);
+    const fin = clamp(Math.floor(hasta), this.minTick, this.maxTick);
+    if (fin <= inicio) { this.options.onAviso?.('El final debe estar después del inicio.'); return; }
+    this.tramo = { desde: inicio, hasta: fin };
+    this.playing = false;
+    const ok = await this.jump(inicio, 'seek', 1);
+    if (!ok || !this.tramo) { this.tramo = null; this.notify(); return; }
+    if (this.currentTick > fin) { this.tramo = null; this.options.onAviso?.('No hay cinta en ese tramo.'); this.notify(); return; }
+    this.playing = true; this.lastNow = null; this.notify();
+  }
+
   /** Vuelve al presente (con colchón) y reproduce. */
   jumpToLiveEdge(): Promise<void> {
+    this.tramo = null;
     this.playing = true;
     if (!this.enabled) { this.notify(); return Promise.resolve(); }
     this.epocaVista = null;
@@ -480,6 +503,10 @@ export class DvrPlayer {
     this.bifurcaciones = Array.isArray(meta.bifurcaciones) ? meta.bifurcaciones : [];
     this.lagunas = Array.isArray(meta.lagunas) ? meta.lagunas : [];
     this.serie = Array.isArray(meta.serie) ? meta.serie : [];
+    if (this.tramo && (this.tramo.desde < this.minTick || this.tramo.hasta > this.maxTick)) {
+      this.tramo = null; this.playing = false;
+      this.options.onAviso?.('El tramo ya no está completo en la cinta.');
+    }
   }
 
   private applyChunkBounds(chunk: ChunkResp): void {

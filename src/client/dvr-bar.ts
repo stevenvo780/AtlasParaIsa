@@ -16,6 +16,7 @@ export interface DvrBarHandlers {
   setSpeed(speed: Velocidad): void;
   seek(tick: number): void;
   jumpLive(): void;
+  reproducirTramo?(desde: number, hasta: number): void;
 }
 export interface DvrBarController { update(state: DvrBarState): void; destroy(): void; }
 
@@ -139,6 +140,7 @@ export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null =
     + `<input type="range" class="dvr-range" data-dvr-range min="${min}" max="${max}" step="1" value="${tick}" aria-label="Línea de tiempo del mundo" aria-valuetext="${time}">`
     + `<div class="dvr-readout"><span class="dvr-time" data-dvr-time>${time}</span><span class="dvr-desfase" data-dvr-desfase>${esc(desfaseLabel(state))}</span><span class="dvr-hover" data-dvr-hover>${esc(dvrHoverLabel(hoverPoint))}</span></div>`
     + `<div class="dvr-estado" data-dvr-estado role="status">${state.estado === 'error' ? ESTADO_ERROR : ''}</div></div>`
+    + `<div class="dvr-tramo" role="group" aria-label="Elegir tramo"><button type="button" data-tramo-inicio>Marcar inicio</button><button type="button" data-tramo-fin>Marcar final</button><button type="button" data-tramo-play disabled>Ver tramo</button><span data-tramo-label role="status">Elige inicio y final en la línea de tiempo</span></div>`
     + `<div class="dvr-engine"><span class="dvr-badge dvr-escala" data-dvr-escala title="Qué tanto mundo pasa por cada segundo de reproducción">${esc(escala)}</span>`
     + `<span class="dvr-badge" data-dvr-engine title="Velocidad del motor (ticks por segundo)">${esc(dvrEngineLabel(state))}</span>`
     + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="Volver al presente (0)">● Presente</button></div></div>`;
@@ -148,6 +150,7 @@ export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null =
 export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): DvrBarController {
   let serieKey = '', scrubbing = false, last: DvrBarState | null = null;
   let scrubTimer: ReturnType<typeof setTimeout> | undefined;
+  let inicio: number | null = null, fin: number | null = null;
   const query = <T extends Element>(selector: string): T | null => container.querySelector<T>(selector);
   const setText = (selector: string, text: string): void => { const node = query(selector); if (node && node.textContent !== text) node.textContent = text; };
 
@@ -155,13 +158,21 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     const target = event.target as Element | null;
     const button = target?.closest?.('button') as HTMLButtonElement | null;
     if (!button || !container.contains(button)) return;
-    if (button.hasAttribute('data-dvr-play')) handlers.togglePlay();
+    if (button.hasAttribute('data-tramo-inicio') && last) { inicio = last.currentTick; actualizarTramo(); }
+    else if (button.hasAttribute('data-tramo-fin') && last) { fin = last.currentTick; actualizarTramo(); }
+    else if (button.hasAttribute('data-tramo-play') && inicio !== null && fin !== null) handlers.reproducirTramo?.(inicio, fin);
+    else if (button.hasAttribute('data-dvr-play')) handlers.togglePlay();
     else if (button.hasAttribute('data-dvr-live')) handlers.jumpLive();
     else if (button.hasAttribute('data-dvr-step')) handlers.step(button.getAttribute('data-dvr-step') === '-1' ? -1 : 1);
     else if (button.hasAttribute('data-dvr-speed')) {
       const speed = Number(button.getAttribute('data-dvr-speed')) as Velocidad;
       if (VELOCIDADES.includes(speed)) handlers.setSpeed(speed);
     }
+  };
+  const actualizarTramo = (): void => {
+    const play = query<HTMLButtonElement>('[data-tramo-play]');
+    if (play) play.disabled = inicio === null || fin === null || fin <= inicio || !last || inicio < last.minTick || fin > last.maxTick;
+    setText('[data-tramo-label]', `${inicio === null ? 'Inicio sin marcar' : `Inicio: ${dvrTimeLabel({ currentTick: inicio })}`} · ${fin === null ? 'final sin marcar' : `Final: ${dvrTimeLabel({ currentTick: fin })}`}`);
   };
   const rangeValue = (event: Event): number => Number((event.target as HTMLInputElement).value);
   const onInput = (event: Event): void => {
@@ -236,6 +247,7 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
       setText('[data-dvr-escala]', escalaLabel(state.nivel, state.speed));
       setText('[data-dvr-engine]', dvrEngineLabel(state));
       if (pintada) ajustarControles(state);
+      if (inicio !== null || fin !== null) actualizarTramo();
     },
     destroy(): void {
       clearTimeout(scrubTimer);

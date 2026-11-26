@@ -8,14 +8,14 @@ import { crear, type DatosFallos } from './lib/motor-hilos.js';
 const MODULO = new URL('./lib/motor-hilos.ts', import.meta.url);
 const HILOS = 8;
 
-function piscinaDe(modo: DatosFallos['modo']) {
+function piscinaDe(modo: DatosFallos['modo'], plazoFaseMs?: number) {
   const datos: DatosFallos = { prueba: 'fallos', modo, contador: new Int32Array(new SharedArrayBuffer(4)) };
-  return { datos, piscina: new Piscina({ hilos: HILOS, datos, crear, moduleURL: MODULO, exportName: 'crear' }) };
+  return { datos, piscina: new Piscina({ hilos: HILOS, datos, plazoFaseMs, crear, moduleURL: MODULO, exportName: 'crear' }) };
 }
 
 /** El fallo es fatal, no se reintenta, y tras el cierre ningún hilo sigue escribiendo. */
-async function comprobarFatal(modo: DatosFallos['modo'], motivo: RegExp, plazoMs: number): Promise<number> {
-  const { datos, piscina } = piscinaDe(modo);
+async function comprobarFatal(modo: DatosFallos['modo'], motivo: RegExp, plazoMs: number, plazoFaseMs?: number): Promise<number> {
+  const { datos, piscina } = piscinaDe(modo, plazoFaseMs);
   try {
     for (let i = 0; i < 3; i++) piscina.ejecutar(0);
     const inicio = performance.now();
@@ -73,8 +73,9 @@ test('un error del coordinador detiene a los hilos que seguían escribiendo', { 
   await comprobarFatal('coordinador', /fallo de prueba en el coordinador/, PLAZO_BARRERA_MS / 2);
 });
 
-test(`un hilo colgado vence la barrera a los ${PLAZO_BARRERA_MS / 1000} s y queda fatal`, { timeout: 300_000 }, async () => {
-  const ms = await comprobarFatal('cuelga', /Barrera vencida/, 4 * PLAZO_BARRERA_MS);
-  assert.ok(ms >= PLAZO_BARRERA_MS - 50, `no vence antes del plazo: ${ms.toFixed(0)} ms`);
-  console.log(`# barrera vencida en ${(ms / 1000).toFixed(1)} s`);
+test('un hilo colgado vence el plazo real de su fase y queda fatal', { timeout: 30_000 }, async () => {
+  const plazoFaseMs = 350;
+  assert.equal(PLAZO_BARRERA_MS, 60_000);
+  const ms = await comprobarFatal('cuelga', /Barrera vencida tras 0\.35 s/, 5_000, plazoFaseMs);
+  assert.ok(ms >= plazoFaseMs - 50, `no vence antes del plazo: ${ms.toFixed(0)} ms`);
 });

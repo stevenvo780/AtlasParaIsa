@@ -18,6 +18,8 @@ export interface OpcionesPiscina<Datos> extends ModuloCalculo {
   /** Cuenta al coordinador (dueño 0) entre los hilos de cálculo. */
   hilos: number;
   datos: Datos;
+  /** Plazo sin avance durante una fase. El arranque de los hilos conserva su propio plazo. */
+  plazoFaseMs?: number;
   /** El export indicado en moduleURL tiene esta misma firma. Cada hilo conserva su función entre fases. */
   crear(hilo: number, datos: Datos): EjecutarFase;
 }
@@ -213,6 +215,7 @@ class HilosPersistentes {
   readonly #barrier: SharedBarrier;
   readonly #supervisor: Worker;
   readonly #exit: Promise<void>;
+  readonly #plazoFaseMs: number;
   readonly sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
   #cerrada = false;
   #ejecutando = false;
@@ -224,9 +227,11 @@ class HilosPersistentes {
   esperaBarreraMs = 0;
   tiempoLocalMs = 0;
 
-  constructor(opciones: StaticWorkerPoolOptions, compartida?: { datos: unknown }) {
+  constructor(opciones: StaticWorkerPoolOptions, compartida?: { datos: unknown; plazoFaseMs?: number }) {
     if (!Number.isSafeInteger(opciones.workers) || opciones.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
     if (!opciones.exportName) throw new TypeError('exportName no puede estar vacío.');
+    this.#plazoFaseMs = compartida?.plazoFaseMs ?? PLAZO_BARRERA_MS;
+    if (!Number.isFinite(this.#plazoFaseMs) || this.#plazoFaseMs <= 0) throw new RangeError('plazoFaseMs debe ser positivo y finito.');
     this.workers = opciones.workers;
     this.#barrier = createBarrier(this.workers);
     let moduleURL = new URL(opciones.moduleURL).href;
@@ -278,9 +283,9 @@ class HilosPersistentes {
     throw this.#fallo;
   }
 
-  #esperar(terminado: () => boolean): void {
-    if (!waitForBarrier(this.#barrier.control, () => this.fatal || this.#cerrada || terminado())) {
-      this.#abortar(new Error(`Barrera vencida tras ${PLAZO_BARRERA_MS / 1000} s sin avance.`));
+  #esperar(terminado: () => boolean, plazoMs = PLAZO_BARRERA_MS): void {
+    if (!waitForBarrier(this.#barrier.control, () => this.fatal || this.#cerrada || terminado(), plazoMs)) {
+      this.#abortar(new Error(`Barrera vencida tras ${plazoMs / 1000} s sin avance.`));
     }
     if (this.fatal || this.#cerrada) this.#abortar();
   }
@@ -308,7 +313,7 @@ class HilosPersistentes {
         this.despachos++;
       }
       const inicioEspera = performance.now();
-      this.#esperar(() => Atomics.load(control, BARRIER_HEADER.pending) === 0);
+      this.#esperar(() => Atomics.load(control, BARRIER_HEADER.pending) === 0, this.#plazoFaseMs);
       this.esperaBarreraMs = Math.max(0, performance.now() - inicioEspera);
       this.tiempoTotalMs = Math.max(0, performance.now() - inicio);
       if (typeof despacho !== 'number') {
@@ -357,14 +362,14 @@ export class Piscina<Datos = unknown> {
   #tiempoLocalMs = 0;
 
   constructor(opciones: OpcionesPiscina<Datos>) {
-    const { hilos, crear, datos } = opciones;
+    const { hilos, crear, datos, plazoFaseMs } = opciones;
     if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError('hilos debe ser un entero positivo.');
     this.#hilos = hilos;
     try {
       const ejecutar = crear(0, datos);
       if (typeof ejecutar !== 'function') throw new TypeError('La fábrica de cálculo debe devolver una función.');
       this.#local = fase => ejecutarSincrono(ejecutar, fase);
-      this.#equipo = hilos === 1 ? null : new HilosPersistentes({ ...opciones, workers: hilos - 1 }, { datos });
+      this.#equipo = hilos === 1 ? null : new HilosPersistentes({ ...opciones, workers: hilos - 1 }, { datos, plazoFaseMs });
     } catch (error) {
       throw error instanceof ErrorFatalMotor ? error : new ErrorFatalMotor(error);
     }

@@ -42,7 +42,7 @@ test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte
   motor.paso([]);
   const d = duenoSi(mundo)!;
   assert.ok(mundo.animals.length > 0);
-  const elegido = mundo.animals[0]!, terreno = d.terreno;
+  const elegido = mundo.animals[0]!, terreno = d.terrenoPercibido;
   const chunk = terreno.chunkDe(terreno.celda(elegido.x, elegido.y));
   assert.equal(terreno.duenoChunk[chunk], 0);
   const clave = `${terreno.paginaX[chunk]},${terreno.paginaY[chunk]}`;

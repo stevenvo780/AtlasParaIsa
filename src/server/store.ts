@@ -536,7 +536,7 @@ export class Store {
   }
   /** Validate the old complete representation before adopting bounded local memory.
    * An existing catalogue is never repaired or pruned to make corrupted input load. */
-  private prepareTechnology(world: World, committedThrough = 0): void {
+  private prepareTechnology(world: World, committedThrough = 0, validate: (world: World) => void = assertTechnology): void {
     this.withTechnologyReads(world, () => {
       bindWorldContext(world, this.context);
       if (this.schemaVersion >= 4 && world.technology.catalogue === undefined) {
@@ -545,7 +545,7 @@ export class Store {
         for (const actor of world.people) maintainTechnologyMemory(world, actor);
       }
       assertTechnologyCatalogueState(world);
-      assertTechnology(world);
+      validate(world);
     });
   }
   private replayParent(digest: string): string {
@@ -1836,12 +1836,6 @@ export class Store {
     const chronicleStamp = this.chronicleStamp();
     enableChronicleJournal(world); assertChronicleJournal(world);
     const committedChronicle = chronicleForCommit(world, this.chronicleDigest(world));
-    this.prepareTechnology(world);
-    enableTechnologyJournal(world.technology);
-    assertTechnologyJournal(world.technology, world.tick);
-    // La autoría de una definición se juzga antes que la validez general: su
-    // motivo es evidencia más precisa que «estado procedural inválido».
-    for (const recipe of world.technology.catalogue?.pending ?? world.technology.recipes) this.assertTechnologyAuthor(world, recipe);
     // Escribir exige la misma ley de frontera que leer: nunca se archiva un estado
     // que `load()` rechazaría. La revisión COMPLETA recorre el mundo entero (tiles,
     // gente, recetas) y a día 5 era el 43 % del guardado: se ejecuta cada
@@ -1854,8 +1848,20 @@ export class Store {
     // conserva el guardado anterior y el slot 2 uno de cada cien, de modo que
     // `previous()` sigue siendo la salida si la revisión completa falla tarde.
     const deepValidation = complete || deepValidationDue(this.saves, this.verifiedByLoad);
-    if (deepValidation) assertWorld(world, world.version, this.context);
-    else bindWorldContext(world, this.context);
+    const validateBeforeWrite = () => {
+      enableTechnologyJournal(world.technology);
+      assertTechnologyJournal(world.technology, world.tick);
+      // Dar el diagnóstico de autoría antes de la revisión general del mundo.
+      for (const recipe of world.technology.catalogue?.pending ?? world.technology.recipes) this.assertTechnologyAuthor(world, recipe);
+      if (deepValidation) assertWorld(world, world.version, this.context);
+    };
+    if (deepValidation && world.version >= 5 && world.technology.journal !== undefined) {
+      // assertWorld ya comprueba la tecnología. Resuelve sus referencias a recetas sobre una sola lectura SQLite.
+      this.prepareTechnology(world, 0, validateBeforeWrite);
+    } else {
+      this.prepareTechnology(world);
+      validateBeforeWrite();
+    }
     this.onProgress?.();
     // Vale v18 de páginas limpias: solo si el sello COMPLETO (incluido `total_changes` de esta conexión)
     // sigue siendo el del último COMMIT de este Store y no toca la revisión completa. Los triggers se

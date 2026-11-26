@@ -173,7 +173,7 @@ const ARRANQUE_GPU_MS = 30_000;
 
 /** El coordinador actualiza las fuentes de su percibidor CPU junto con las de las tarjetas. */
 export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor,
-  materiaGpu = false) {
+  materiaGpu = false, ventanasGpu = materiaGpu) {
   if (new Set(dispositivos).size !== dispositivos.length || dispositivos.some(d => !Number.isSafeInteger(d) || d < 0))
     throw new RangeError('Se requieren índices GPU no negativos y sin repetir.');
   const tarjetas: { percibidor: PercibidorGpu; canal: CanalCompartido; paso?: PasoMateriaGpu;
@@ -194,7 +194,7 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
       }
       catch (error) { if (error instanceof ErrorDispositivo) continue; throw error; }
       tarjetas.push({
-        percibidor: new PercibidorGpu(canal, frente, terreno, materiaGpu), canal,
+        percibidor: new PercibidorGpu(canal, frente, terreno, ventanasGpu), canal,
         paso: materiaGpu ? crearPasoMateriaGpu(canal) : undefined,
         multiprocesadores: canal.multiprocesadores, activa: true,
         cerrar() { this.activa = false; this.paso?.cerrar(); canal.cerrar(); },
@@ -204,7 +204,7 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
     for (const canal of canales) canal?.cerrar();
     throw error;
   }
-  const puente = new PuentePercepcion(cpu, tarjetas, materiaGpu);
+  const puente = new PuentePercepcion(cpu, tarjetas, ventanasGpu);
   return {
     puente,
     /** Tarjetas que arrancaron y siguen activas. */

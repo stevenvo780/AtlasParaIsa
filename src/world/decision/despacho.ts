@@ -1,8 +1,8 @@
 /**
  * Quién percibe el lote de F2 en este proceso: la piscina de M1 (todos los hilos del motor reclaman tandas de filas
  * del lote) y las tarjetas de M3 (el puente reparte el lote entre ellas; el tramo de una tarjeta que cae o vence se
- * recalcula en la piscina en el mismo tick). Mientras las tarjetas perciben, la piscina calcula las ventanas de todo el
- * lote, que su contrato no trae.
+ * recalcula en la piscina en el mismo tick). El camino residente trae las ventanas de cada tarjeta. El camino clásico
+ * las calcula en la piscina mientras las tarjetas perciben.
  *
  * Los percibidores son del proceso, no del mundo: un mundo clonado, cargado o de otra prueba percibe con los mismos
  * hilos y las mismas tarjetas, que reciben su vista en `fuentes`. Importar este módulo registra la elección en
@@ -16,6 +16,7 @@ import { BroadcastChannel, receiveMessageOnPort, type MessagePort } from 'node:w
 import type { LotePercepcion, Percibidor, Plan } from '../motor/contratos.js';
 import { Piscina } from '../paralelo/piscina.js';
 import { crearPuentePercepcion, gpuNvrtcAvailable, type LoteGpuMedido } from '../gpu/puente.js';
+import { tieneVentanas } from '../gpu/percibir-gpu.js';
 import type { WorldParams } from '../params.js';
 import {
   conVentanas, percibirLote, registrarPercibidores, reservarPercepcion, sellar, ventanasLote, VistaMundo,
@@ -220,8 +221,8 @@ type CpuDelProceso = PercibidorPiscina | PercibidorLocal;
 
 /**
  * Las tarjetas de `motor.gpu` con el CPU del proceso detrás: el puente de M3 les reparte el lote por su ritmo medido;
- * mientras perciben, el CPU calcula las ventanas; si una tarjeta cae, vence o devuelve otra cosa, su tramo se percibe
- * en el CPU en el mismo tick y la tarjeta se apaga para el resto del proceso.
+ * el camino residente reúne las ventanas junto con las propuestas. Si una tarjeta cae, vence o devuelve otra cosa,
+ * su tramo se percibe en el CPU en el mismo tick y la tarjeta se apaga para el resto del proceso.
  */
 export class PercibidorTarjetas implements PercibidorCompartido {
   readonly dispositivo;
@@ -235,7 +236,9 @@ export class PercibidorTarjetas implements PercibidorCompartido {
   #salida: PercepcionCpu | undefined;
   #vacio = false;
 
-  constructor(readonly gpu: readonly number[], readonly cpu: CpuDelProceso) { this.dispositivo = `gpu${gpu[0] ?? 0}` as const; }
+  constructor(readonly gpu: readonly number[], readonly cpu: CpuDelProceso, readonly ventanasGpu = false) {
+    this.dispositivo = `gpu${gpu[0] ?? 0}` as const;
+  }
 
   /** Tarjetas que siguen activas y sus servidores CUDA. */
   get tarjetas(): number { return this.#puente?.tarjetas ?? 0; }
@@ -245,7 +248,7 @@ export class PercibidorTarjetas implements PercibidorCompartido {
     this.cpu.fuentes(vista);
     this.#vista = vista;
     // Las tarjetas arrancan con el primer mundo (contexto CUDA y NVRTC, fuera del plazo del tick).
-    this.#puente ??= crearPuentePercepcion(this.gpu, vista.frente, vista.terreno, this.cpu);
+    this.#puente ??= crearPuentePercepcion(this.gpu, vista.frente, vista.terreno, this.cpu, false, this.ventanasGpu);
     this.#puente.fuentes(vista.frente, vista.terreno);
   }
 
@@ -260,10 +263,11 @@ export class PercibidorTarjetas implements PercibidorCompartido {
   esperar(plazoMs: number): PercepcionCpu {
     if (this.#vacio) return this.cpu.esperar();
     const lote = this.#lote!, planes = this.#planes!;
-    const ventanas = this.cpu.ventanas(lote, planes);
+    const ventanas = this.ventanasGpu ? undefined : this.cpu.ventanas(lote, planes);
     const p = this.#puente!.puente.esperar(plazoMs);
     this.ultimosLotes = this.#puente!.puente.ultimosLotes;
     this.tramosEnCpu += this.ultimosLotes.filter(l => l.dispositivo === 'cpu' && l.actores > 0).length;
+    if (this.ventanasGpu && tieneVentanas(p)) return p;
     return this.#salida = conVentanas(this.#vista!, lote, planes, p, this.#salida, ventanas);
   }
 
@@ -285,9 +289,10 @@ export function cpuDelProceso(hilos: number): CpuDelProceso {
 /** El percibidor del proceso para `motor`: tarjetas si las hay y hay NVRTC, si no la piscina, si no el hilo que simula. */
 export function percibidorDelProceso(motor: WorldParams['motor']): Percibidor | PercibidorCompartido | undefined {
   if (motor.gpu.length > 0 && gpuNvrtcAvailable()) {
-    const clave = `${motor.gpu.join(',')}/${motor.hilos}`;
+    const ventanasGpu = process.env.CARTA_PERCEPCION_RESIDENTE === '1';
+    const clave = `${motor.gpu.join(',')}/${motor.hilos}/${ventanasGpu}`;
     let t = tarjetas.get(clave);
-    if (!t) { t = new PercibidorTarjetas(motor.gpu, cpuDelProceso(motor.hilos)); tarjetas.set(clave, t); }
+    if (!t) { t = new PercibidorTarjetas(motor.gpu, cpuDelProceso(motor.hilos), ventanasGpu); tarjetas.set(clave, t); }
     return t;
   }
   return motor.hilos > 1 ? cpuDelProceso(motor.hilos) : undefined;

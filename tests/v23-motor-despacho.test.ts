@@ -151,6 +151,34 @@ test('M3 CUDA real: con las tarjetas, las filas del mundo casan con las de CPU p
   } finally { comparador.tarjetas.cerrar(); }
 });
 
+test('V24 CUDA real: la percepción residente usa las ventanas del despacho en el mismo tick', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC',
+}, async t => {
+  const anterior = process.env.CARTA_PERCEPCION_RESIDENTE;
+  process.env.CARTA_PERCEPCION_RESIDENTE = '1';
+  const cpu = cpuDelProceso(1);
+  const ventanasCpu = t.mock.method(cpu, 'ventanas');
+  try {
+    const world = createWorld(51926, conMotor(ABIERTO, { hilos: 1, gpu: [0] }));
+    const percepcion = percepcionDe(world);
+    const tarjetas = percepcion.percibidor;
+    assert.ok(tarjetas instanceof PercibidorTarjetas && tarjetas.ventanasGpu);
+    let filasGpu = 0;
+    for (let i = 0; i < 8; i++) {
+      stepWorld(world);
+      filasGpu += tarjetas.ultimosLotes.filter(l => l.dispositivo === 'gpu0').reduce((total, l) => total + l.actores, 0);
+    }
+    assert.ok(filasGpu > 0);
+    assert.equal(world.tick, 8);
+    assert.equal(percepcion.respaldos, 0);
+    assert.equal(ventanasCpu.mock.callCount(), 0);
+  } finally {
+    if (anterior === undefined) delete process.env.CARTA_PERCEPCION_RESIDENTE;
+    else process.env.CARTA_PERCEPCION_RESIDENTE = anterior;
+    await cerrarPercibidores();
+  }
+});
+
 test('M3 CUDA real: matar el servidor de una tarjeta a media fase no pierde el tick', { skip: sinGpu }, () => {
   const world = createWorld(51926, conMotor(ABIERTO, { hilos: 8, gpu: [0, 1] })), percepcion = percepcionDe(world);
   const tarjetas = new PercibidorTarjetas([0, 1], cpuDelProceso(8));

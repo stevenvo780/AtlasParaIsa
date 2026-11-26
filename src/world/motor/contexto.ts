@@ -23,6 +23,7 @@ import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE } from '../materia/arena.js';
 import { ArchivoMateriaFria } from '../materia/archivo-frio.js';
 import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
+import { lotesDe } from '../materia/cuerpo.js';
 import { olvidarEstadoMateria, sueloYVidaDormidos } from '../materia/ley-mundo.js';
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
@@ -389,7 +390,7 @@ export class Dueno implements CtxF0 {
   }
 
   /** Vuelve a poner en vuelo los intentos con garantía de un punto de control: el aplicador de este dueño los resuelve
-   * en su F1 (o los reenvía a quien toque). Los `Ref` de antes de cargar ya no viven: la garantía acaba en su celda. */
+   * en su F1 (o los reenvía a quien toque). `cargarMateria` ya convirtió las direcciones de la época anterior. */
   reponer(intentos: readonly Intento[]): void { for (const i of intentos) this.#interno.enviar(this.hilo, i); }
 
   /** Intentos que siguen en los buzones (solo quien tiene los buzones: el coordinador o el único dueño). */
@@ -968,8 +969,9 @@ export class Dueno implements CtxF0 {
     const celdaGuardada = (lote: LoteGuardado): number =>
       lote.rol === Rol.Objeto && carga.has(lote.ref) ? REF_NULA : lote.celda;
     const enVuelo = decodificarEnVuelo(cp.enVuelo);
+    const sinCelda = enVuelo.filter(i => i.celda < 0 && i.materia?.length);
     const archivo = this.#archivoFrio;
-    const arranque = archivo && this.#prepararArranqueFrio(archivo, enVuelo);
+    const arranque = sinCelda.length === 0 && archivo ? this.#prepararArranqueFrio(archivo, enVuelo) : undefined;
     let desborde = 0, vivos = 0;
     const paginasLocales = new Map<number, number>();
     const indice = indexarPaginas(cp.epoca, cp.paginas, (lote, especies) => {
@@ -983,6 +985,21 @@ export class Dueno implements CtxF0 {
       desborde += extra;
       vivos++;
     });
+    if (sinCelda.length > 0) {
+      // Con guardados sin coordenadas, validar la dirección completa antes de tocar arena, registro o libro.
+      const ligados = new Set<LoteRef>();
+      for (const i of sinCelda) {
+        const lote = i.lote < 0 ? undefined : indice.leer(slotDe(i.lote));
+        if (lote === undefined || typeof lote === 'number' || lote.ref !== i.lote) continue;
+        i.celda = celdaGuardada(lote);
+        if (i.celda < 0) ligados.add(i.lote);
+      }
+      const celdas = ligados.size > 0 ? this.#celdasDePortadores(ligados) : undefined;
+      for (const i of sinCelda) {
+        if (i.celda < 0) i.celda = celdas?.get(i.lote) ?? REF_NULA;
+        if (i.celda < 0) throw new Error(`Garantía guardada ${i.nonce} sin celda ni destino material demostrable.`);
+      }
+    }
     if (arranque) {
       const frio = arranque.terminar();
       this.#lotes!.prepararF0(indice.ranuras, LOTES_POR_BLOQUE);
@@ -1008,11 +1025,36 @@ export class Dueno implements CtxF0 {
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };
     const q = this.quimica, saldo = saldoEnVuelo(cp.enVuelo, id => q.sustancia(id));
     this.#piezas.libros[0]!.enVuelo.set(saldo.map(Number));
-    return enVuelo.map(i => ({ ...i, celda: celdaLocal(terreno, i.celda) }));
+    return enVuelo.map(i => {
+      const celda = celdaLocal(terreno, i.celda);
+      // Las filas de organismos se reasignan al cargar. La misma ranura y generación puede ser otro actor.
+      if (i.a !== REF_NULA) return {
+        ...i, tipo: TipoIntento.Depositar, de: REF_NULA, a: REF_NULA, lote: REF_NULA, celda, dato: null, bytes: null,
+      };
+      return { ...i, de: REF_NULA, celda };
+    });
+  }
+
+  #celdasDePortadores(ligados: ReadonlySet<LoteRef>): Map<LoteRef, number> {
+    const terreno = this.terrenoPercibido, celdas = new Map<LoteRef, number>(), componentes: LoteRef[] = [];
+    const anotar = (organismo: Person | Animal, carga: readonly LoteRef[]): void => {
+      const { x, y, cuerpo } = organismo;
+      const pagina = terreno.paginaDe(x >> 4, y >> 4);
+      const celda = pagina < 0 ? REF_NULA : celdaMundo(terreno, pagina * 256 + (y & 15) * 16 + (x & 15));
+      componentes.length = 0;
+      if (cuerpo) lotesDe(cuerpo, componentes);
+      for (const l of carga) componentes.push(l);
+      for (const l of componentes) {
+        if (ligados.has(l)) celdas.set(l, celdas.has(l) ? REF_NULA : celda);
+      }
+    };
+    for (const p of this.mundo.people) if (p.demography.deathCause === null) anotar(p, p.carga ?? []);
+    for (const a of this.mundo.animals) anotar(a, []);
+    return celdas;
   }
 
   #prepararArranqueFrio(archivo: ArchivoMateriaFria, garantias: readonly Intento[]) {
-    // Una garantía sin coordenadas puede resolver su destino a través de un organismo durante F1.
+    // Con mensajes sin coordenadas se conserva la apertura caliente.
     if (garantias.some(i => i.celda < 0)) return undefined;
     const m = this.mundo, contexto = worldContext(m);
     const retiradas = new Map<string, Chunk>();

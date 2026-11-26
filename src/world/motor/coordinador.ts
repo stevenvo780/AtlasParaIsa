@@ -499,9 +499,10 @@ class MotorDuenos implements Motor {
   #cronica(): void {
     const m = this.#mundo, d = this.#d, sucesos: ChronicleEvent[] = [];
     for (const parte of this.#partesTick.splice(0)) {
-      sucesos.push(...parte.sucesos);
-      d.visiblesTick.push(...parte.visibles);
-      this.#altas.push(...parte.altas);
+      for (const suceso of parte.sucesos) sucesos.push(suceso);
+      for (const visible of parte.visibles) d.visiblesTick.push(visible);
+      // Al cargar, un dueño puede comunicar más identificadores que los argumentos que admite V8.
+      for (const alta of parte.altas) this.#altas.push(alta);
     }
     sucesos.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
     for (const { id, tick: _tick, ...suceso } of sucesos) if (addEvent(m, suceso).id !== id) this.cronicaDesfasada++;

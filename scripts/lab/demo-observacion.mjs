@@ -135,13 +135,15 @@ try {
       const rango = pagina.locator('[data-dvr-range]');
       await expect(rango).toBeVisible({ timeout: 12_000 });
       await pagina.screenshot({ path: join(salida, `${nombre}-mundo.png`) });
+      const play = pagina.locator('[data-dvr-play]');
+      if (await play.getAttribute('aria-pressed') === 'true') await play.click();
+      await expect(play).toHaveAttribute('aria-pressed', 'false');
       await pagina.locator('#population-toggle').click();
       await pagina.locator('#population-list .population-person').nth(2).click();
       const historia = pagina.locator('#inspector-tab-story');
       await historia.click();
       await expect(historia).toHaveAttribute('aria-selected', 'true');
       await expect(rango).toBeVisible();
-      const play = pagina.locator('[data-dvr-play]');
       const activo = await play.getAttribute('aria-pressed');
       await play.click();
       await expect(play).toHaveAttribute('aria-pressed', String(activo !== 'true'));

@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { BroadcastChannel, isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { PercibidorCpu, type VistaMundo } from '../decision/percepcion.js';
-import { ErrorDispositivo, type CanalGpu, type LotePercepcion, type Percibidor, type Plan } from '../motor/contratos.js';
+import { ErrorDispositivo, type CanalGpu, type LotePercepcion, type Percibidor, type Plan, type TelemetriaBrokerGpu } from '../motor/contratos.js';
 import { CanalCompartido, enviarOrden, recibirRespuesta, type OpcionesCanalGpu } from './canal.js';
 import { PercibidorGpu } from './percibir-gpu.js';
 
 const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7, senal0: 8, celdas: 10 };
+const MEDIDA = { lotes: 0, dueno0: 1, dueno1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
+  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, celdas: 11 };
 const ESTADO = { esperando: 0, lista: 1, fallo: 2, cancelada: 3 };
 const LIMITE_MS = 50;
+const LIMITE_NANOS = BigInt(LIMITE_MS) * 1_000_000n;
 const restante = (fin: bigint): number => Number(fin - process.hrtime.bigint()) / 1e6;
 const turno = (generacion: number, dueno: number): number => (generacion << 2) | (dueno + 1);
 function despertar(control: Int32Array<SharedArrayBuffer>, dueno: number): void {
@@ -27,7 +30,7 @@ interface Peticion {
   identidad: Identidad; orden: Orden; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
   estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>;
 }
-interface PuertoBroker { canal: string; control: Int32Array<SharedArrayBuffer> }
+interface PuertoBroker { canal: string; control: Int32Array<SharedArrayBuffer>; medida?: BigInt64Array<SharedArrayBuffer> }
 export interface EpocaBrokerPercepcion extends PuertoBroker { generacion: number; epoca: number }
 
 export class BrokerPercepcionGpu {
@@ -38,7 +41,8 @@ export class BrokerPercepcionGpu {
   #cerrando = false;
   readonly listo: Promise<boolean>;
 
-  constructor(opciones?: OpcionesCanalGpu) {
+  constructor(opciones?: OpcionesCanalGpu, medir = false) {
+    if (medir) this.#puertos.medida = new BigInt64Array(new SharedArrayBuffer(MEDIDA.celdas * BigInt64Array.BYTES_PER_ELEMENT));
     this.#worker = new Worker(`
       const { workerData } = require('node:worker_threads');
       (async () => {
@@ -75,7 +79,17 @@ export class BrokerPercepcionGpu {
     return { lista: Atomics.load(c, CONTROL.listo) === 1,
       bytes: Atomics.load(c, CONTROL.bytes), ms: Atomics.load(c, CONTROL.micros) / 1000,
       completadas: [Atomics.load(c, CONTROL.dueno0), Atomics.load(c, CONTROL.dueno1)],
-      peticiones: Atomics.load(c, CONTROL.peticiones) };
+      peticiones: Atomics.load(c, CONTROL.peticiones), detalle: this.#detalle() };
+  }
+
+  #detalle(): TelemetriaBrokerGpu | undefined {
+    const m = this.#puertos.medida;
+    if (!m) return undefined;
+    const leer = (i: number) => Number(Atomics.load(m, i));
+    return { lotes: leer(MEDIDA.lotes), completadas: [leer(MEDIDA.dueno0), leer(MEDIDA.dueno1)],
+      cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
+      erroresCanal: leer(MEDIDA.errores), subidaConfirmadaBytes: leer(MEDIDA.subida), bajadaConfirmadaBytes: leer(MEDIDA.bajada),
+      cudaConfirmadaMicros: leer(MEDIDA.cudaMicros), recorridoConfirmadoMicros: leer(MEDIDA.recorridoMicros) };
   }
 
   cerrar(): Promise<void> {
@@ -104,14 +118,23 @@ class CanalPercepcionBroker implements CanalGpu {
 
   get bytes(): number { return this.#datos.length; }
   admitir(): boolean {
-    const { control, generacion } = this.epoca;
-    if (this.#cerrado || Atomics.load(control, CONTROL.listo) !== 1 || Atomics.load(control, CONTROL.generacion) !== generacion
-      || Atomics.compareExchange(control, CONTROL.ocupado, 0, turno(generacion, this.dueno)) !== 0) return false;
-    if (Atomics.load(control, CONTROL.generacion) !== generacion) {
-      Atomics.compareExchange(control, CONTROL.ocupado, turno(generacion, this.dueno), 0);
+    const { control, generacion, medida } = this.epoca;
+    if (medida) Atomics.add(medida, MEDIDA.lotes, 1n);
+    const listo = Atomics.load(control, CONTROL.listo);
+    if (this.#cerrado || listo !== 1 || Atomics.load(control, CONTROL.generacion) !== generacion) {
+      if (medida) Atomics.add(medida, listo === 0 && !this.#cerrado ? MEDIDA.cpuArranque : MEDIDA.cpuSinCanal, 1n);
       return false;
     }
-    this.#reserva = process.hrtime.bigint() + BigInt(LIMITE_MS) * 1_000_000n;
+    if (Atomics.compareExchange(control, CONTROL.ocupado, 0, turno(generacion, this.dueno)) !== 0) {
+      if (medida) Atomics.add(medida, MEDIDA.cpuOcupada, 1n);
+      return false;
+    }
+    if (Atomics.load(control, CONTROL.generacion) !== generacion) {
+      Atomics.compareExchange(control, CONTROL.ocupado, turno(generacion, this.dueno), 0);
+      if (medida) Atomics.add(medida, MEDIDA.cpuSinCanal, 1n);
+      return false;
+    }
+    this.#reserva = process.hrtime.bigint() + LIMITE_NANOS;
     return true;
   }
 
@@ -158,7 +181,18 @@ class CanalPercepcionBroker implements CanalGpu {
       || Atomics.load(control, CONTROL.listo) !== 1) {
       throw new ErrorDispositivo('gpu0', 'El corredor no confirmó el despacho de este dueño y generación.');
     }
+    const medida = this.epoca.medida;
+    if (medida) {
+      Atomics.add(medida, MEDIDA.dueno0 + this.dueno, 1n);
+      Atomics.add(medida, MEDIDA.subida, BigInt(peticion.orden.subida));
+      Atomics.add(medida, MEDIDA.bajada, BigInt(peticion.orden.bajada));
+      Atomics.add(medida, MEDIDA.cudaMicros, BigInt(Math.round(tiempo[0]! * 1000)));
+      Atomics.add(medida, MEDIDA.recorridoMicros, (process.hrtime.bigint() - fin + LIMITE_NANOS) / 1000n);
+    }
     return Buffer.from(JSON.stringify({ ok: true, ...identidad, ms: tiempo[0] }));
+  }
+  anotarError(error: unknown): void {
+    if (this.epoca.medida && error instanceof ErrorDispositivo) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
   }
   cerrar(): void {
     if (this.#cerrado) return;
@@ -190,10 +224,12 @@ export class PercibidorBroker implements Percibidor {
     try {
       this.#gpu.fuentes(this.vista.frente, this.vista.terreno);
       this.#gpu.lanzar(lote, planes);
-    } catch (error) { this.#canal.cerrar(); throw error; }
+    } catch (error) { this.#canal.anotarError(error); this.#canal.cerrar(); throw error; }
   }
   esperar(plazoMs: number) {
-    return this.#usaGpu ? this.#gpu.esperar(plazoMs) : this.#cpu.esperar();
+    if (!this.#usaGpu) return this.#cpu.esperar();
+    try { return this.#gpu.esperar(plazoMs); }
+    catch (error) { this.#canal.anotarError(error); throw error; }
   }
   cerrar(): void { this.#canal.cerrar(); }
 }

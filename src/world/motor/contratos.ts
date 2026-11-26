@@ -401,6 +401,8 @@ export interface Motor {
   enlazar(cinta: DescriptorEnlace, fuente?: import('./fotograma.js').FuenteFotograma): void;
   detalle(uid: number): Promise<Person | null>; // inspector: lo serializa el dueño en el F1 siguiente
   telemetria(): TelemetriaMotor;
+  /** Preparación solicitada por el banco fuera de la ventana de medición. */
+  prepararBrokerGpu?(): Promise<boolean>;
   reparto(): import('../../shared/vistas-v23.js').RepartoVisible | undefined;
   /** Muestreo de laboratorio a demanda, entre pasos, sin reunir ni copiar el mundo. */
   muestraCarga(): MuestraCargaMotor | undefined;
@@ -433,11 +435,27 @@ export interface MuestraCargaMotor {
 }
 
 /** Implementan: M4a y M7. Consumen: V1 (panel «Motor»), 0C (diagnóstico), M8 (banco). */
+export interface TelemetriaBrokerGpu {
+  /** Lotes no vacíos, confirmaciones del canal y desvíos admitidos por el percibidor. */
+  lotes: number;
+  completadas: [number, number];
+  cpuArranque: number;
+  cpuOcupada: number;
+  cpuSinCanal: number;
+  erroresCanal: number;
+  /** Solo bytes de despachos confirmados. El tiempo CUDA incluye las copias del servidor. */
+  subidaConfirmadaBytes: number;
+  bajadaConfirmadaBytes: number;
+  cudaConfirmadaMicros: number;
+  recorridoConfirmadoMicros: number;
+}
+
 export interface TelemetriaMotor {
   tick: number; hz: number; diasPorMinuto: number; hilos: number; desequilibrio: number;
   faseMs: Record<'F0' | 'eco' | 'percibir' | 'actuar' | 'aplicar', number>; esperaBarreraMs: number;
   ocupacion: Float32Array;                 // por hilo, en [0, 1]
   gpuMs: number[]; gpuBytes: number[]; gpuEstado: ('ok' | 'cpu' | 'sin')[]; // por tarjeta de MotorConfig.gpu
+  gpuBroker?: TelemetriaBrokerGpu;
   intentos: number; rechazados: number; migraciones: number; fotogramasSaltados: number;
 }
 
@@ -449,6 +467,7 @@ export interface MotorConfig {
   decisionGpu: 'siempre';                // §1.2: si hay tarjeta, la percepción va a ella aunque no compense
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)
+  medirBrokerGpu?: boolean;              // contadores acumulados opcionales del banco de percepción distribuida
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de
    * dueños), con el máximo que fija el proceso; el reloj nunca altera las leyes. Lo suministra srv (`motorConfig`). */
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };

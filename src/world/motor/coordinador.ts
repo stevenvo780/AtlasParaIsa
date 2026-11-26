@@ -279,7 +279,7 @@ class MotorDuenos implements Motor {
     terreno.usarDuenos();
     const usarBroker = this.#brokerConfigurado && !materiaGpu;
     if (usarBroker && !this.#brokerGpu) {
-      try { this.#brokerGpu = new BrokerPercepcionGpu(); }
+      try { this.#brokerGpu = new BrokerPercepcionGpu(undefined, this.#config.medirBrokerGpu); }
       catch { /* Crear un corredor es opcional: los dueños ya tienen la ruta CPU. */ }
     }
     const brokerGpu = usarBroker ? this.#brokerGpu?.abrirEpoca(this.#epoca) : undefined;
@@ -692,11 +692,18 @@ class MotorDuenos implements Motor {
     t.intentos = suma(CTL_DUENO.intentos); t.rechazados = suma(CTL_DUENO.rechazados); t.migraciones = suma(CTL_DUENO.migraciones);
   }
 
+  prepararBrokerGpu(): Promise<boolean> {
+    if (!this.#brokerConfigurado) return Promise.resolve(false);
+    if (!this.#piscina) this.#arrancar(null);
+    return this.#brokerGpu?.listo ?? Promise.resolve(false);
+  }
+
   telemetria(): TelemetriaMotor {
     const gpu = this.#brokerGpu?.medidas();
     return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice(), ...(gpu && {
       gpuEstado: [gpu.lista && gpu.completadas.some(n => n > 0) ? 'ok' : 'cpu'],
       gpuMs: [gpu.ms], gpuBytes: [gpu.bytes],
+      ...(gpu.detalle && { gpuBroker: gpu.detalle }),
     }) };
   }
 

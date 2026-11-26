@@ -7,6 +7,8 @@ import {
 } from '../src/world/animals.js';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { celdaDueno, duenoDe } from '../src/world/motor/contexto.js';
+import { faseDueno, TRAMO } from '../src/world/motor/dueno-worker.js';
 
 /** Generador determinista para la suite (nada de azar real). */
 function lcg(seed: number): (n: number) => number {
@@ -85,6 +87,33 @@ test('la víctima de caza por rejilla es la del filter+sort: menor id, desempate
     }
     assert.fail('la manada debe tener una celda con al menos dos animales vivos');
   });
+});
+
+test('el tramo de dueños usa el índice de fauna durante F3 y lo cierra antes de F4', t => {
+  const w = createWorld(42), a = w.animals.find(x => x.health > 0);
+  assert.ok(a);
+  const primera = { ...a, id: 'a' }, segunda = { ...a, id: 'a' };
+  w.animals = [primera, { ...a, id: '0', health: 0 }, segunda, { ...a, id: 'z' }];
+  const d = duenoDe(w), fases: string[] = [];
+  t.mock.method(d, 'gancho', (fase: string) => {
+    fases.push(fase);
+    if (fase === 'F3') {
+      const conIndice = animalesVivosEnCelda(w, a.x, a.y);
+      const sinIndice = sinRejillaFaunaParaPruebas(w, () => {
+        assert.equal(animalesVivosEnCelda(w, a.x, a.y), undefined);
+        return lineal(w, a.x, a.y);
+      });
+      assert.ok(conIndice);
+      assert.equal(conIndice.length, sinIndice.length);
+      assert.ok(conIndice.every((animal, i) => animal === sinIndice[i]));
+      assert.strictEqual(conIndice.reduce((menor, animal) => animal.id < menor.id ? animal : menor), primera);
+    } else {
+      assert.equal(animalesVivosEnCelda(w, a.x, a.y), undefined);
+    }
+  });
+  faseDueno(d, TRAMO.actuar, new Float64Array(celdaDueno(1, 0)));
+  assert.deepEqual(fases, ['F3', 'F4']);
+  assert.equal(animalesVivosEnCelda(w, a.x, a.y), undefined);
 });
 
 test('paridad con muchos animales: rejilla y recorrido lineal dan el mismo digesto', { timeout: 600_000 }, () => {

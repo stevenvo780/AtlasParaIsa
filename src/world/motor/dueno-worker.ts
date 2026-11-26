@@ -12,6 +12,7 @@
  */
 import { deserialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
+import { conRejillaFauna } from '../animals.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { PercibidorBroker, type EpocaBrokerPercepcion } from '../gpu/broker-percepcion.js';
@@ -150,7 +151,8 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
       break;
     }
     case TRAMO.actuar: {
-      d.gancho('F3');
+      // En F3 la fauna aún no se ha movido. F4 escribe sus coordenadas directamente.
+      conRejillaFauna(m, () => d.gancho('F3'));
       d.gancho('F4');
       const ms = performance.now() - inicio;
       control[celda(CTL_DUENO.msActuar)] = ms;

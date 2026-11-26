@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
 import { setImmediate as siguienteVuelta } from 'node:timers/promises';
 import { createApp } from '../src/server/app.js';
+import { PersistidorGuardado } from '../src/server/guardado-worker.js';
 import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
@@ -16,7 +17,7 @@ const maxTicksSolapados = 3;
 const sesion = 'sesion-guardado-solapado';
 const textoMarca = 'Suceso de prueba del guardado solapado';
 
-function escenario(t: TestContext, cadaTicks: number) {
+function escenario(t: TestContext, cadaTicks: number, basePesosCorte = false) {
   const entorno = {
     CARTA_MOTOR_HILOS: '2', CARTA_CORTE_TRANSFERIBLE: '1', CARTA_FAUNA_CORTE_DIRECTA: '1',
     CARTA_TESELAS_CORTE_DIRECTAS: '1', CARTA_PERSONAS_CORTE_DIRECTAS: '1', CARTA_SNAPSHOT_PESOS_SEPARADOS: '1',
@@ -60,7 +61,7 @@ function escenario(t: TestContext, cadaTicks: number) {
   const app = createApp({
     store, origin: 'http://127.0.0.1:3000', password: 'guardado-solapado-v24', seed: semilla,
     tape: false, manual: true, confirmarGuardadoVivo: true,
-    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, maxTicksSolapados },
+    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, maxTicksSolapados, basePesosCorte },
     onFatalExit: codigo => assert.fail(`Salida fatal inesperada (${codigo}).`),
   });
   const { x, y } = destinos[0]!;
@@ -77,6 +78,28 @@ function abrirCabeza(path: string) {
     return carga.world;
   } finally { lector.close(); }
 }
+
+test('un corte solapable conserva pesos FULL aunque el corte anterior publique una base F64', async t => {
+  const persistir = t.mock.method(PersistidorGuardado.prototype, 'guardar');
+  const cadaTicks = 4;
+  const { app, path } = escenario(t, cadaTicks, true);
+  try {
+    for (let i = 1; i <= 2 * cadaTicks; i++) {
+      await app.stepOnce();
+      await app.esperarGuardado();
+    }
+    assert.equal(persistir.mock.callCount(), 2);
+    const [primero, segundo] = persistir.mock.calls;
+    const anterior = await primero!.result;
+    const confirmado = await segundo!.result;
+    assert.ok(anterior?.basePesos, 'hay una base F64 durable antes del segundo corte');
+    assert.equal(segundo!.arguments[1], true, 'el segundo corte admite que el motor avance mientras se guarda');
+    assert.equal(confirmado?.perfilPersistidor.personasRef, 0);
+    assert.ok((confirmado?.perfilPersistidor.personasFull ?? 0) > 0);
+    assert.equal(abrirCabeza(path).tick, 2 * cadaTicks);
+    assert.equal(app.failed, false);
+  } finally { await app.close(); }
+});
 
 for (const { motivo, cadaTicks, posteriores } of [
   { motivo: 'una entrada', cadaTicks: 4, posteriores: 2 },

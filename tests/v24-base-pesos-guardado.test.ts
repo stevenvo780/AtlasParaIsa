@@ -90,11 +90,12 @@ test('base F64 compartida en guardado real: dos cortes, REF tras COMMIT y reaper
   store.guardar({ world: inicial, materia: null });
 
   const persistir = t.mock.method(PersistidorGuardado.prototype, 'guardar');
-  const app = createApp({
+  const abrirApp = () => createApp({
     store, origin: 'http://127.0.0.1:3000', password: 'base-pesos-guardado-v24', seed: semilla,
     tape: false, manual: true, confirmarGuardadoVivo: true,
     guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, basePesosCorte: true },
   });
+  const app = abrirApp();
   try {
     const mundo = app.world;
     const dueno = duenoSi(mundo);
@@ -171,6 +172,22 @@ test('base F64 compartida en guardado real: dos cortes, REF tras COMMIT y reaper
       });
     } finally { reabierto.close(); }
   } finally { await app.close(); }
+
+  const anterior = (await persistir.mock.calls[1]!.result)?.basePesos;
+  assert.ok(anterior);
+  assert.equal(abrirLectorBasePesos(anterior).estaPublicada(), false);
+  const reiniciada = abrirApp();
+  try {
+    assert.equal(reiniciada.guardado.ultimoTickGuardado, 2);
+    await reiniciada.stepOnce();
+    await reiniciada.esperarGuardado();
+    const primero = await persistir.mock.calls[2]!.result;
+    assert.ok(primero?.basePesos);
+    assert.equal(primero.perfilPersistidor.personasRef, 0);
+    assert.equal(primero.basePesos.secuencia, 1);
+    assert.notEqual(primero.basePesos.instancia, anterior.instancia);
+    assert.equal(reiniciada.guardado.ultimoTickGuardado, 3);
+  } finally { await reiniciada.close(); }
 });
 
 test('ref caducada tras emisión: el persistidor rechaza sin corromper SQLite y la app recupera con FULL', async t => {
@@ -299,7 +316,9 @@ test('migración entre dueños remotos y cambio +0→-0: el migrante intacto usa
   store.guardar({ world: baseMundo, materia: null });
   const carga1 = store.cargarGuardadoCompleto();
   assert.ok(carga1);
-  const publicador = store.construirBasePesosDurable('inst-mig', carga1.epoca, 1);
+  const digestGuardado = store.ultimoDigestGuardado;
+  assert.ok(digestGuardado);
+  const publicador = store.construirBasePesosDurable('inst-mig', carga1.epoca, 1, digestGuardado);
   assert.ok(publicador);
   const descriptor = publicador.publicarTrasAcuse({ ...publicador.identidad, confirmado: true });
   const baseActiva: BasePesosActiva = {

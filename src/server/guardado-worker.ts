@@ -384,7 +384,7 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza }: OrdenGuardar, 
       revocarEstadoBase(estadoBase);
     }
     if (primerCorteConAncla) store.ofrecerPruebaCabeza(pruebaCabeza);
-    const baseActiva = basePesosCorte ? estadoBase.activa?.activa : undefined;
+    const baseActiva = basePesosCorte && !solapado ? estadoBase.activa?.activa : undefined;
     const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado, baseActiva));
     const { sello, tecnologiaRemotaEquivalente, bajas, diagnosticoPersonasCorte } = materializado.valor;
     const fases: FasesPersistidor | undefined = perfilarFases ? {} : undefined;

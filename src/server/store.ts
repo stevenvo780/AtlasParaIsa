@@ -937,7 +937,7 @@ export class Store {
     instancia: string,
     epocaEsperada: number,
     secuencia: number,
-    digestEsperado?: string,
+    digestEsperado: string,
   ): PublicadorBasePesos | undefined {
     if (this.readOnly || this.schemaVersion < 5 || !this.snapshotSplitPeopleWeights || this.db.isTransaction) return undefined;
     const paginas = this.leerPruebaCabeza(() => {
@@ -947,7 +947,7 @@ export class Store {
         { body?: unknown; digest?: unknown } | undefined;
       if (!row || typeof row.body !== 'string' || !hexDigest(row.digest) || checksum(row.body) !== row.digest)
         return undefined;
-      if (digestEsperado !== undefined && row.digest !== digestEsperado) return undefined;
+      if (row.digest !== digestEsperado) return undefined;
       return this.snapshotParts.leerPaginasPoliticaDurables(row.body);
     });
     if (!paginas) return undefined;

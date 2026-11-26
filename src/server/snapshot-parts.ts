@@ -5,7 +5,7 @@ import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import { clavesJsonUnicas } from '../shared/json-keys.js';
 import type { Person, World } from '../world/index.js';
-import type { PaginaWgp1Entrada } from '../world/motor/base-pesos-corte.js';
+import { COTAS_BASE_PESOS_DEFECTO, type PaginaWgp1Entrada } from '../world/motor/base-pesos-corte.js';
 import { faunaCorteDe, type TramoFaunaCorte, type TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
 import type { PersonasCorteVerificadas } from '../world/motor/personas-corte.js';
 import type { TeselasCorteVerificadas } from '../world/motor/teselas-corte.js';
@@ -739,8 +739,11 @@ export class SnapshotParts {
     if (!object(value) || value.snapshotEncoding !== ENCODING_V5) return undefined;
     const manifest = this.manifest(value, body, false);
     if (manifest.snapshotEncoding !== ENCODING_V5) return undefined;
+    const { count, pages } = manifest.policies;
+    if (count > COTAS_BASE_PESOS_DEFECTO.maxFilas || count * WPF1_WEIGHT_BYTES > COTAS_BASE_PESOS_DEFECTO.maxBytesPesos)
+      return undefined;
     const paginas: PaginaWgp1Entrada[] = [];
-    for (const page of manifest.policies.pages) {
+    for (const page of pages) {
       const bytes = this.pageBody(page, true) as Uint8Array;
       paginas.push({ body: bytes, count: page.count });
       this.onProgress?.();

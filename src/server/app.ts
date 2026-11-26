@@ -1511,8 +1511,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
                 } catch (error) {
                   if (basePesosCorte && error instanceof RechazoBasePesosGuardadoError) {
                     motor?.publicarBasePesosCorte?.(undefined);
-                    const reintento = motor?.capturarCorteTransferido?.(false);
-                    if (!reintento) throw error;
+                    const reintento = motor?.capturarCorteTransferido?.(false, true);
+                    if (!reintento || reintento.corte.tick !== captura.corte.tick || reintento.corte.epoca !== captura.corte.epoca
+                      || reintento.corte.eventCounter !== captura.corte.eventCounter) throw error;
                     acuse = yield persistidor.guardar(reintento, false);
                   } else throw error;
                 }

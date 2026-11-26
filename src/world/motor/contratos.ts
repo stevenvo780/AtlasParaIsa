@@ -406,7 +406,8 @@ export interface Motor {
   /** Solo cuando el motor puede entregar la captura sin compartirla antes de Store. */
   corteGuardadoSellado?(): import('./corte-sellado.js').CorteGuardadoSellado | undefined;
   /** Captura binaria fuera del paso para un persistidor en otro hilo. */
-  capturarCorteTransferido?(permitirSolape?: boolean): import('./corte-transferido.js').CapturaCorteTransferido | undefined;
+  capturarCorteTransferido?(permitirSolape?: boolean, forzarPesosCompletos?: boolean):
+    import('./corte-transferido.js').CapturaCorteTransferido | undefined;
   /** Da al primer paso posterior al corte la misma cola de legado que vería después de un COMMIT síncrono. */
   prepararPasoSolapado?(): void;
   /** Restituye las bajas de un corte solapado rechazado mientras los dueños sigan sanos. */

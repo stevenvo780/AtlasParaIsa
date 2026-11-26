@@ -847,7 +847,7 @@ class MotorDuenos implements Motor {
     });
   }
 
-  capturarCorteTransferido(permitirSolape = false): CapturaCorteTransferido | undefined {
+  capturarCorteTransferido(permitirSolape = false, forzarPesosCompletos = false): CapturaCorteTransferido | undefined {
     if (this.#fatal) throw this.#fatal;
     if (this.#capaLegado) throw new Error('Debe resolverse el corte con custodia de legado antes de capturar otro.');
     const canales = this.#canalesCorte;
@@ -863,7 +863,10 @@ class MotorDuenos implements Motor {
         && diario !== undefined && diario.committedThrough + diario.pending.length === eventCounter && bajasPrevias.length === 0
         && estadoAdmiteSolape(coordinador)
         && isDeepStrictEqual(sinCheckpointTecnologia(coordinador.technology), this.#tecnologiaDurable);
-      const usarBasePesos = this.#config.basePesosCorte === true && opciones.prepararPersonas;
+      // Con solape el motor puede haber avanzado cuando el escritor rechace una referencia.
+      // Solo el guardado serial puede volver a capturar el mismo tick con pesos completos.
+      const usarBasePesos = this.#config.basePesosCorte === true && opciones.prepararPersonas
+        && !comprobarSolape && !forzarPesosCompletos;
       const solicitud = this.#barreraCorte(opciones, comprobarSolape, usarBasePesos)!;
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();

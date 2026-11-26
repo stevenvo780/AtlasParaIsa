@@ -286,9 +286,10 @@ export function fundarCuerpo(c: CtxLeyMateria, plantilla: number, masaKg: number
 /** La plantilla de un cuerpo (leída del `Registro`). */
 export function plantillaDe(c: CtxLeyMateria, cuerpo: Cuerpo): Plantilla { return plantillaPorId(c, cuerpo.plantilla); }
 
-/** Rellena `out` con las vistas del cuerpo: lo que `choose` y la columna `cuerpo` del frente leen. `carga` queda en 0:
- * el cuerpo no sabe qué lleva su organismo (la pone quien tiene la lista, con `cargaKg`). */
-export function vistaCuerpo(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaCuerpo): VistaCuerpo {
+type VistaNecesidades = Pick<VistaCuerpo, 'hambre' | 'sed' | 'energia' | 'salud'>;
+
+/** Rellena las necesidades y la salud de tejido. Devuelve los kg de tejido para la vista completa. */
+function vistaNecesidades(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaNecesidades): number {
   const a = c.materia, S = entorno.sustancias(c), p = plantillaDe(c, cuerpo), d = datosDe(c, p);
   const tejido = masaLote(c, cuerpo.tejido);
   // Los objetivos crecen con el tejido; sin tejido no hay objetivo y todo lo que falta, falta entero.
@@ -302,6 +303,13 @@ export function vistaCuerpo(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaCuerpo):
   const lleno = CAPACIDAD_GAS_KG * FRACCION_O2_REFERENCIA * tejido;
   out.energia = !hay ? 0 : d.jPorO2 > 0 ? clamp01(Math.min(o2J, j) / (lleno * d.jPorO2)) : clamp01(a.cuantos(cuerpo.reserva, S.O2) / lleno);
   out.salud = clamp01(unidades(a, cuerpo.tejido, p) * d.masaMg * MG / p.masaAdulta);
+  return tejido;
+}
+
+/** Rellena `out` con las vistas del cuerpo: lo que `choose` y la columna `cuerpo` del frente leen. `carga` queda en 0:
+ * el cuerpo no sabe qué lleva su organismo (la pone quien tiene la lista, con `cargaKg`). */
+export function vistaCuerpo(c: CtxLeyMateria, cuerpo: Cuerpo, out: VistaCuerpo): VistaCuerpo {
+  const tejido = vistaNecesidades(c, cuerpo, out);
   out.masa = tejido + masaLote(c, cuerpo.reserva) + masaLote(c, cuerpo.digestivo);
   out.carga = 0;
   out.T = temperaturaLote(c, cuerpo.tejido);
@@ -927,6 +935,7 @@ export function cargaKg(c: CtxLeyMateria, carga: readonly LoteRef[]): number {
 // ── La ley ───────────────────────────────────────────────────────────────────────────────────────────────
 
 const VISTA: VistaCuerpo = { hambre: 0, sed: 0, energia: 0, salud: 0, masa: 0, carga: 0, T: 0 };
+const NECESIDADES: VistaNecesidades = { hambre: 0, sed: 0, energia: 0, salud: 0 };
 const esPersona = (o: Person | Animal): o is Person => 'demography' in o;
 const vive = (persona: Person): boolean => persona.demography.deathCause === null;
 
@@ -979,13 +988,13 @@ function F4(c: CtxLey): void {
     }
     metabolizar(m, persona.cuerpo, celda, 1);
     crecer(m, persona.cuerpo, 1);
-    vistaCuerpo(m, persona.cuerpo, VISTA);
+    vistaNecesidades(m, persona.cuerpo, NECESIDADES);
     // Un cuerpo sin una sola unidad de tejido completa no sostiene nada: lo que falta, falta entero.
-    if (!(VISTA.salud > 0)) {
-      VISTA.hambre = 1; VISTA.sed = 1; VISTA.energia = 0;
+    if (!(NECESIDADES.salud > 0)) {
+      NECESIDADES.hambre = 1; NECESIDADES.sed = 1; NECESIDADES.energia = 0;
       acotarSalud(persona.demography, 0);
     }
-    necesidadesDeVista(persona, VISTA);
+    necesidadesDeVista(persona, NECESIDADES);
   }
 }
 

@@ -5,15 +5,16 @@
  */
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
+import { initialDemography } from '../src/world/demography.js';
 import { DATO_GOLPEAR, REF_NULA, type Intento, type Registro } from '../src/world/motor/contratos.js';
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
   KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, apetitoDeTejido, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
-  costeGestacionJ, energiaAlimento, evaluadorAlimento, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
+  costeGestacionJ, energiaAlimento, evaluadorAlimento, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, leyCuerpos, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
   plantillaDe, plantillaHumana, plantillaPorId, provecho, reservaJ, soltar, tasasBasales, vistaCuerpo,
 } from '../src/world/materia/cuerpo.js';
-import { Rol, type LoteRef, type VistaCuerpo } from '../src/world/materia/tipos.js';
+import { Parte, Rol, type LoteRef, type VistaCuerpo } from '../src/world/materia/tipos.js';
 import { materiaReal, azarSembrado } from './lib/materia-real.js';
 
 class RegistroPrueba implements Registro {
@@ -158,6 +159,31 @@ test('una cría crece con lo que come y un adulto no pasa de su masa adulta', ()
   const adulto = crearCuerpo(c, humana.id, 60);
   ingerirSelecto(c, adulto, vida, 0.4);
   assert.ok(crecer(c, adulto, 10) < 0.01);
+  assert.ok(exacto());
+});
+
+test('F4 refleja las necesidades de adulto y cría y reconoce el tejido incompleto', () => {
+  const adulto = crearCuerpo(c, humana.id, 60), cria = fundarCuerpo(c, humana.id, 3, 0, 0);
+  const incompleto = crearCuerpo(c, humana.id, 60), esp = m.S.orgP;
+  m.arena.moverParte(incompleto.tejido, suelo, {
+    parte: Parte.Exacta, esp, cuantos: m.arena.cuantos(incompleto.tejido, esp), kappa: null,
+  });
+  ingerirSelecto(c, adulto, vida, 0.3);
+  const people = [adulto, cria, incompleto].map(cuerpo => ({
+    cuerpo, x: 0, y: 0, demography: initialDemography(), hunger: 0, thirst: 0, energy: 1, fatigue: 0.25,
+  }));
+  leyCuerpos.F4!({ ...c, mundo: { people }, terreno: { ...c.terreno, celda: () => CELDA } } as unknown as CtxLeyMateria);
+  for (const persona of people.slice(0, 2)) {
+    const { hambre, sed, energia, salud } = vistaCuerpo(c, persona.cuerpo, vista());
+    assert.ok(salud > 0);
+    assert.deepEqual([persona.hunger, persona.thirst, persona.energy, persona.fatigue], [hambre, sed, energia, 0.25]);
+    assert.equal(persona.demography.health, 1);
+  }
+  const persona = people[2]!;
+  const resto = vistaCuerpo(c, incompleto, vista());
+  assert.ok(resto.salud === 0 && resto.masa > 0 && resto.hambre < 1);
+  assert.deepEqual([persona.hunger, persona.thirst, persona.energy, persona.fatigue], [1, 1, 0, 0.25]);
+  assert.equal(persona.demography.health, Number.MIN_VALUE);
   assert.ok(exacto());
 });
 

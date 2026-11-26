@@ -1434,11 +1434,22 @@ export function foodAvailable(world: World, person: Point): number {
   return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0);
 }
 
+const RADIO_DEPOSITO = { comida: 1.5, agua: 0.5 } as const;
+
+/** Criba de depósitos para las consultas a celdas del disco de una sola decisión. Un sí deja la comprobación
+ * de distancia a la planta, dueño, generación y stock a cada lectura normal. */
+export function hayDepositoObraEnDisco(world: World, centro: Point, radioDisco: number, tipo: DepositoObra): boolean {
+  // Con el mismo índice de anclas, el disco ampliado contiene las casillas que visitaría obraCercana
+  // desde cualquier destino. Una referencia basta: no se consulta la arena al descartar el disco.
+  return algunoCerca(world.structures, centro, CHUNK_SIZE + radioDisco + RADIO_DEPOSITO[tipo],
+    s => (estadoObra(s)?.[tipo] ?? -1) >= 0);
+}
+
 export function comidaEnObra(c: CtxLeyMateria, cuerpo: NonNullable<Person['cuerpo']>, punto: Point, kg: number,
   evaluar: EvaluarAlimento = (l, kg) => energiaAlimento(c, cuerpo, l, kg)): number {
   if (c.mundo.structures.length === 0) return 0;
   let energia = 0;
-  for (const s of obraCercana(c.mundo, punto, 1.5)) {
+  for (const s of obraCercana(c.mundo, punto, RADIO_DEPOSITO.comida)) {
     const lote = loteDepositoObra(c, s, 'comida');
     if (lote >= 0 && prestacionesObra(c, s).volumen > 0) energia += evaluar(lote, kg);
   }
@@ -1469,7 +1480,7 @@ export function aguaMaterialDisponible(world: World, c: CtxLeyMateria, point: Po
   const { agua } = lotesDeCelda(c, celda, lotesAguaDisponible);
   const total = agua >= 0 ? c.materia.vista(agua).agua * KG_POR_CUANTO_AGUA : 0;
   if (!obra || world.structures.length === 0) return total;
-  return obraCercana(world, point, 0.5).reduce((suma, s) => suma + stockObra(c, s, 'agua'), total);
+  return obraCercana(world, point, RADIO_DEPOSITO.agua).reduce((suma, s) => suma + stockObra(c, s, 'agua'), total);
 }
 
 /** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */

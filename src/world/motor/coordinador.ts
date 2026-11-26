@@ -825,11 +825,9 @@ class MotorDuenos implements Motor {
 
   corteGuardadoSellado(): CorteGuardadoSellado | undefined {
     const piscina = this.#piscina;
-    const prepararTeselas = this.#config.teselasCorteDirectas === true;
-    const prepararPersonas = this.#config.personasCorteDirectas === true;
+    const { prepararFauna, prepararTeselas, prepararPersonas } = this.#opcionesCorteGuardado();
     if ((!this.#config.faunaCorteDirecta && !prepararTeselas && !prepararPersonas) || !piscina || !this.#canalesCorte
       || !paramsOf(this.#mundo).v23.guardadoCompleto) return undefined;
-    const prepararFauna = this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true;
     const { tick, eventCounter } = this.#mundo, epoca = this.#epoca;
     return crearCorteGuardado(() => {
       if (this.#piscina !== piscina || this.#epoca !== epoca || this.#mundo.tick !== tick || this.#mundo.eventCounter !== eventCounter)
@@ -840,20 +838,13 @@ class MotorDuenos implements Motor {
 
   capturarCorteTransferido(): CapturaCorteTransferido | undefined {
     if (this.#fatal) throw this.#fatal;
-    const piscina = this.#piscina, canales = this.#canalesCorte;
+    const canales = this.#canalesCorte;
     const coordinador = this.#mundo;
-    if (!piscina || !canales || !paramsOf(coordinador).v23.guardadoCompleto) return undefined;
-    const opciones: OpcionesReunionCorte = {
-      prepararFauna: this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true,
-      prepararTeselas: this.#config.teselasCorteDirectas === true,
-      prepararPersonas: this.#config.personasCorteDirectas === true,
-    };
+    if (!this.#piscina || !canales || !paramsOf(coordinador).v23.guardadoCompleto) return undefined;
+    const opciones = this.#opcionesCorteGuardado();
     try {
       const epoca = this.#epoca, { tick, eventCounter } = coordinador;
-      const solicitud = canales.pedir(opciones.prepararFauna, opciones.prepararTeselas, opciones.prepararPersonas);
-      this.#buzones.fijarFase(0);
-      piscina.ejecutar(TRAMO.reunir);
-      this.#recoger();
+      const solicitud = this.#barreraCorte(opciones)!;
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();
       const comprobarTecnologia = this.#config.confirmarGuardadoVivo === true;
@@ -863,6 +854,22 @@ class MotorDuenos implements Motor {
       this.#ultimoCorteTransferido = comprobarTecnologia ? { solicitud, epoca, tick, eventCounter } : null;
       return captura;
     } catch (error) { throw this.#fallo(error); }
+  }
+
+  #opcionesCorteGuardado(): OpcionesReunionCorte {
+    return {
+      prepararFauna: this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true,
+      prepararTeselas: this.#config.teselasCorteDirectas === true,
+      prepararPersonas: this.#config.personasCorteDirectas === true,
+    };
+  }
+
+  #barreraCorte({ prepararFauna, prepararTeselas, prepararPersonas }: OpcionesReunionCorte): bigint | undefined {
+    const solicitud = this.#canalesCorte?.pedir(prepararFauna, prepararTeselas, prepararPersonas);
+    this.#buzones.fijarFase(0);
+    this.#piscina!.ejecutar(TRAMO.reunir);
+    this.#recoger();
+    return solicitud;
   }
 
   #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false, prepararPersonas = false): Instantanea {
@@ -966,10 +973,8 @@ class MotorDuenos implements Motor {
 
   #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false, prepararTeselas = false,
     prepararPersonas = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
-    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna, prepararTeselas, prepararPersonas);
-    this.#buzones.fijarFase(0);
-    this.#piscina!.ejecutar(TRAMO.reunir);
-    this.#recoger();
+    const canales = this.#canalesCorte, opciones = { prepararFauna, prepararTeselas, prepararPersonas };
+    const solicitud = this.#barreraCorte(opciones);
     const partes: ParteMundo[] = canales ? canales.recibir(solicitud!, this.#epoca, this.#mundo.tick) : Array.from({ length: this.#hilos - 1 }, (_, i) => {
       const parte = this.#partesMundo.get(i + 1);
       if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
@@ -981,7 +986,7 @@ class MotorDuenos implements Motor {
     const pendientes = this.#d.pendientes();
     const bajasPrevias = this.#bajasConfirmadas?.tick === this.#mundo.tick ? this.#bajasConfirmadas.bajas : [];
     const { world, bajas } = reunirCorte(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes(),
-      migrantesDelCorte(pendientes), bajasPrevias, { prepararFauna, prepararTeselas, prepararPersonas });
+      migrantesDelCorte(pendientes), bajasPrevias, opciones);
     return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 

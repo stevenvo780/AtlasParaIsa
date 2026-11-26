@@ -3,20 +3,14 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
 import { materializarCorteTransferido, type AcuseCorteTransferido, type CapturaCorteTransferido, type CorteTransferido,
   type IdentidadCorteTransferido } from '../world/motor/corte-transferido.js';
-import { SessionRevoked, Store, type StoreOptions } from './store.js';
+import { Store, type StoreOptions } from './store.js';
 
-export interface SesionGuardado {
-  hash: string;
-  validity?: SharedArrayBuffer;
-}
-
-type Recibos = Parameters<Store['guardarCorteSellado']>[1];
 type OpcionesDisco = Pick<StoreOptions, 'snapshotPackedPeople' | 'snapshotCompressedPeople' | 'snapshotSplitPeopleWeights'>;
 
 export type GuardadoConfirmado = AcuseCorteTransferido & { readonly cronica: ChronicleJournal };
 
 /** El hilo perdió el acuse después de recibir el corte. El disco debe decidir desde dónde reanudar. */
-export class GuardadoIndeterminado extends Error {
+class GuardadoIndeterminado extends Error {
   constructor(cause: Error) {
     super('El hilo de guardado no pudo confirmar el resultado del corte.', { cause });
     this.name = 'GuardadoIndeterminado';
@@ -28,11 +22,10 @@ export interface OpcionesPersistidor extends OpcionesDisco {
   onProgress?: () => void;
 }
 
-type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido; recibos: Recibos; sesiones: readonly SesionGuardado[] }
-  | { tipo: 'cerrar' };
+type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido } | { tipo: 'cerrar' };
 type RespuestaGuardado = { tipo: 'listo' | 'avance' | 'cerrado' }
   | { tipo: 'confirmado'; guardado: GuardadoConfirmado }
-  | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; revocada: boolean; mensaje: string };
+  | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; mensaje: string };
 
 function identidadDe({ solicitud, epoca, tick, eventCounter }: IdentidadCorteTransferido): IdentidadCorteTransferido {
   return { solicitud, epoca, tick, eventCounter };
@@ -51,7 +44,7 @@ interface Pendiente {
 }
 
 export class PersistidorGuardado {
-  readonly ready: Promise<void>;
+  private readonly ready: Promise<void>;
   private readonly hilo: Worker;
   private readonly salida: Promise<void>;
   private listo = false;
@@ -108,8 +101,7 @@ export class PersistidorGuardado {
             this.tomarPendiente(mensaje.guardado).resolver(mensaje.guardado);
             return;
           case 'rechazado':
-            this.tomarPendiente(mensaje.identidad).rechazar(mensaje.revocada
-              ? new SessionRevoked(mensaje.mensaje) : new Error(mensaje.mensaje));
+            this.tomarPendiente(mensaje.identidad).rechazar(new Error(mensaje.mensaje));
             return;
           default:
             throw new Error('El hilo de guardado envió una respuesta desconocida.');
@@ -120,7 +112,7 @@ export class PersistidorGuardado {
     });
   }
 
-  guardar(captura: CapturaCorteTransferido, recibos: Recibos, sesiones: readonly SesionGuardado[]): Promise<GuardadoConfirmado> {
+  guardar(captura: CapturaCorteTransferido): Promise<GuardadoConfirmado> {
     if (this.fallo) return Promise.reject(this.fallo);
     if (this.cierre || this.pendiente) return Promise.reject(new Error('El persistidor está cerrando o ya tiene un corte.'));
     const { corte, transferibles } = captura;
@@ -131,7 +123,7 @@ export class PersistidorGuardado {
     this.pendiente = pendiente;
     void this.ready.then(() => {
       if (this.pendiente !== pendiente) return;
-      this.hilo.postMessage({ tipo: 'guardar', corte, recibos, sesiones } satisfies OrdenGuardado, transferibles);
+      this.hilo.postMessage({ tipo: 'guardar', corte } satisfies OrdenGuardado, transferibles);
       pendiente.enviado = true;
     }).catch(error => {
       if (this.pendiente !== pendiente) return;
@@ -188,12 +180,6 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
     ultimoAvance = ahora;
     responder({ tipo: 'avance' });
   } });
-  const sessionValid = store.sessionValid.bind(store);
-  const validez = new Map<string, Int32Array>();
-  store.sessionValid = hash => {
-    const bandera = validez.get(hash);
-    return (!bandera || Atomics.load(bandera, 0) === 1) && sessionValid(hash);
-  };
   puerto.on('messageerror', error => { throw error; });
   puerto.on('message', (orden: OrdenGuardado) => {
     switch (orden.tipo) {
@@ -204,7 +190,7 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
         return;
       case 'guardar':
         ultimoAvance = -Infinity;
-        responder(guardar(store, orden, validez));
+        responder(guardar(store, orden.corte));
         return;
       default:
         throw new Error('Orden desconocida en el hilo de guardado.');
@@ -213,19 +199,12 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
   responder({ tipo: 'listo' });
 }
 
-function guardar(store: Store, orden: Extract<OrdenGuardado, { tipo: 'guardar' }>, validez: Map<string, Int32Array>): RespuestaGuardado {
-  const { corte, recibos, sesiones } = orden;
+function guardar(store: Store, corte: CorteTransferido): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
-    for (const { hash, validity } of sesiones) {
-      if (validity === undefined) continue;
-      if (!(validity instanceof SharedArrayBuffer) || validity.byteLength !== Int32Array.BYTES_PER_ELEMENT)
-        throw new Error('Bandera de sesión inválida en el corte.');
-      validez.set(hash, new Int32Array(validity));
-    }
     const { sello, tecnologiaRemotaEquivalente, bajas } = materializarCorteTransferido(corte, store.context);
-    const { world } = store.guardarCorteSellado(sello, recibos, sesiones.map(({ hash }) => hash));
+    const { world } = store.guardarCorteSellado(sello, [], []);
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,
@@ -233,9 +212,9 @@ function guardar(store: Store, orden: Extract<OrdenGuardado, { tipo: 'guardar' }
     } };
   } catch (error) {
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;
-    return { tipo: 'rechazado', identidad, revocada: error instanceof SessionRevoked,
+    return { tipo: 'rechazado', identidad,
       mensaje: error instanceof Error ? error.message : 'No se pudo guardar el corte.' };
-  } finally { validez.clear(); }
+  }
 }
 
 if (!isMainThread && workerData?.role === 'carta-guardado') abrirPersistidor(workerData.path, workerData.options);

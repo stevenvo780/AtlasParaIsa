@@ -1396,7 +1396,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             const captura = motor?.capturarCorteTransferido?.();
             if (captura) {
               persistidor ??= new PersistidorGuardado({ ...options.guardadoEnHilo, path: store.path });
-              acuse = yield persistidor.guardar(captura, [], []);
+              acuse = yield persistidor.guardar(captura);
               ultimoTickGuardado = acuse.tick;
               ultimoGuardadoEn = acuse.guardadoEn;
               store.lastSnapshotBytes = acuse.snapshotBytes;

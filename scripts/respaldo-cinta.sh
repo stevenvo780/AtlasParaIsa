@@ -10,9 +10,9 @@ if [[ ${1-} == --verificar ]]; then
   exec node --import tsx scripts/perf/cinta-verificar.mts --verificar "$directorio"
 fi
 [[ $# -le 2 ]] || { echo 'Uso: respaldo-cinta.sh [origen] [destino]' >&2; exit 1; }
-origen=${1:-${CARTA_CINTA_ORIGEN:-}}
+origen=${1:-${CARTA_CINTA_ORIGEN:-${CARTA_CINTA_DIR:-}}}
 destino=${2:-${CARTA_CINTA_RESPALDO:-}}
-: "${origen:?Falta CARTA_CINTA_ORIGEN}"
+: "${origen:?Falta el origen de la cinta (CARTA_CINTA_DIR o CARTA_CINTA_ORIGEN)}"
 : "${destino:?Falta CARTA_CINTA_RESPALDO}"
 origen=$(realpath -e -- "$origen")
 destino=$(realpath -m -- "$destino")

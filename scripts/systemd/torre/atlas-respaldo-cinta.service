@@ -6,6 +6,6 @@ After=atlas-respaldo-publico.service
 [Service]
 Type=oneshot
 EnvironmentFile=%h/.config/atlas-para-isa/publicacion-v23.env
-ExecStart=/usr/bin/bash -c 'exec /usr/bin/bash "$$CARTA_RELEASE_DIR/scripts/respaldo-cinta.sh" "$$CARTA_DATA_DIR/cinta" "$$CARTA_CINTA_RESPALDO"'
+ExecStart=/usr/bin/bash -c 'exec /usr/bin/bash "$$CARTA_RELEASE_DIR/scripts/respaldo-cinta.sh" "$${CARTA_CINTA_DIR:-$$CARTA_DATA_DIR/cinta}" "$$CARTA_CINTA_RESPALDO"'
 IOSchedulingClass=idle
 Nice=15

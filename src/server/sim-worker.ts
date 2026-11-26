@@ -245,6 +245,7 @@ export interface SimWorkerOptions {
   turboSaveIntervalMs?: number;
   /** Graba la cinta multirresolución. Por defecto se activa en turbo. */
   tape?: boolean;
+  tapeDirectory?: AppOptions['tapeDirectory'];
   tapeTopeBytes?: number;
   /** Tiempo sin que la cinta devuelva un crédito tras el cual se la da por perdida (por defecto, 5 min). */
   tapeSinCreditoMs?: number;
@@ -743,7 +744,8 @@ async function runSimulation(options: SimWorkerOptions) {
   try {
     app = createApp({ store, commit: options.commit, password: 'worker-private-unused-credential', origin: 'http://127.0.0.1',
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
-      deployment: options.deployment, tape: options.tape, tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
+      deployment: options.deployment, tape: options.tape, tapeDirectory: options.tapeDirectory,
+      tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
       onEstadoCinta: error => {
         port.postMessage({ type: 'cinta', error });
         if (error) port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error } });

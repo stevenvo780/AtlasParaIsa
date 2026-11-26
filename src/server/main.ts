@@ -33,11 +33,13 @@ function enteroPositivo(name: string): number | undefined {
 // ritmo normal; `CARTA_OBSERVER_ONLY=1` quita las órdenes directas a los habitantes. `CARTA_TAPE_TOPE_BYTES` fija
 // cuánto disco puede ocupar la cinta (por defecto `CINTA.topeBytes`).
 const tapeTopeBytes = enteroPositivo('CARTA_TAPE_TOPE_BYTES');
+const tapeDirectory = process.env.CARTA_CINTA_DIR || undefined;
 const v21 = {
   ...(process.env.CARTA_TURBO === '1' ? { turbo: true, tape: true, tickMs: 0 } : {}),
   ...(process.env.CARTA_TAPE === '1' ? { tape: true } : {}),
   ...(process.env.CARTA_OBSERVER_ONLY === '1' ? { observerOnly: true } : {}),
   ...(tapeTopeBytes === undefined ? {} : { tapeTopeBytes }),
+  ...(tapeDirectory === undefined ? {} : { tapeDirectory }),
 };
 const dataPath = resolve(process.env.CARTA_DATA_DIR ?? 'data');
 function commitEnEjecucion(): string | undefined {

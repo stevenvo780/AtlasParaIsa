@@ -17,6 +17,7 @@ import { CELDAS_VENTANA, FUERA, LADO_VENTANA, PercepcionDelPaso, PercibidorCpu, 
   type PercepcionCpu } from '../src/world/decision/percepcion.js';
 import { TerrenoPercepcion } from '../src/world/decision/terreno-percepcion.js';
 import { OrganismosMundo, organismosDe } from '../src/world/soa/organismos-mundo.js';
+import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
 import { marcarTesela } from '../src/world/soa/barrera-percepcion.js';
 import { CONSULTA, PLAN, UMBRAL, f32Abajo, f32Arriba, planesPersonas } from '../src/world/decision/planes.js';
 import { decideConCerebro, ensurePersonPolicy, localPolicyObservation, prepararCerebros, puntuacionesPercibidas } from '../src/world/decision/politica-persona.js';
@@ -633,6 +634,62 @@ test('los pesos de un ocupante nuevo se publican con su gen aunque no decida con
   assert.ok(vista.pesosAlDia(s0));
   assert.deepEqual(pesos(s0), Array.from(founderPolicy(world.seed, 'recien-llegada').weights));
   assert.equal(nueva.policy, undefined);
+});
+
+test('F2 conserva los pesos estables y revisa una edición exacta sin cambiar la generación', () => {
+  const world = crear(51926, ABIERTO), tileIn = tileLookup(world.tiles), vista = vistaNueva(world);
+  const persona = world.people[0]!;
+  const policy = persona.policy ??= founderPolicy(world.seed, persona.id);
+  policy.weights[0] = 0;
+  vista.capturar(world.people, world.tick, [], tileIn, undefined);
+  const slot = vista.slot(persona), generacion = vista.frente.gen[slot];
+  const lote = { tick: world.tick, despacho: 1, slots: Int32Array.of(slot), plan: Uint16Array.of(PLAN.conCerebro) };
+  prepararCerebros(world, vista, lote, tileIn);
+  const revision = vista.frente.col('revisionPolitica') as Int32Array;
+  const pesos = vista.frente.col('politica') as Float64Array;
+  const offset = slot * COLUMNAS_CEREBRO.politica;
+  const inicial = revision[slot]!;
+  assert.equal(inicial, 1);
+  assert.ok(Object.is(pesos[offset], 0));
+  assert.deepEqual([...vista.ranurasSinPesos], []);
+
+  persona.policyPlasticity!.bias[0] = 0.25;
+  prepararCerebros(world, vista, { ...lote, despacho: 2 }, tileIn);
+  assert.equal(revision[slot], inicial);
+  assert.equal((vista.frente.col('sesgo') as Float64Array)[slot * COLUMNAS_CEREBRO.sesgo], 0.25);
+
+  policy.weights[0] = -0;
+  prepararCerebros(world, vista, { ...lote, despacho: 3 }, tileIn);
+  assert.equal(vista.frente.gen[slot], generacion);
+  assert.equal(revision[slot], inicial + 1);
+  assert.ok(Object.is(pesos[offset], -0));
+});
+
+test('F2 publica una sola revisión al adoptar una persona en otro dueño de la misma tabla', () => {
+  const world = crear(51926, ABIERTO), tileIn = tileLookup(world.tiles);
+  const persona = world.people[0]!;
+  const tabla = new TablaOrganismosSoA(false, { reservaFilas: 4096 });
+  const origen = new OrganismosMundo(false, () => 1, tabla);
+  const destino = new OrganismosMundo(false, () => 2, TablaOrganismosSoA.conectar(tabla.compartirTabla(), 1));
+  const a = VistaMundo.de(origen, new TerrenoPercepcion(false));
+  const b = VistaMundo.de(destino, new TerrenoPercepcion(false));
+  const lote = { tick: world.tick, despacho: 1, slots: new Int32Array(0), plan: new Uint16Array(0) };
+  origen.publicar(world.tick, undefined, [persona]);
+  prepararCerebros(world, a, lote, tileIn);
+  const slot = a.slot(persona), gen = a.frente.gen[slot];
+  const anterior = (a.frente.col('revisionPolitica') as Int32Array)[slot]!;
+
+  const ref = origen.personas.soltar(persona);
+  tabla.ceder(0, ref, 1);
+  destino.personas.adoptar(structuredClone(persona), ref);
+  tabla.publicar(world.tick + 1);
+  prepararCerebros(world, b, { ...lote, tick: world.tick + 1, despacho: 2 }, tileIn);
+  const revision = b.frente.col('revisionPolitica') as Int32Array;
+  assert.equal(b.frente.gen[slot], gen);
+  assert.equal(revision[slot], anterior + 1);
+  assert.equal((a.frente.col('revisionPolitica') as Int32Array)[slot], anterior + 1);
+  prepararCerebros(world, b, { ...lote, tick: world.tick + 1, despacho: 3 }, tileIn);
+  assert.equal(revision[slot], anterior + 1);
 });
 
 test('F2 con revalidación da el mismo mundo que percibir siempre en el estado vivo', () => {

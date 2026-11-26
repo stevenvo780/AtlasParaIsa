@@ -57,14 +57,12 @@ export function decideConCerebro(world: World, person: Person): boolean {
 const observacionF2 = new Float64Array(POLICY_INPUTS);
 
 /** F2: las columnas del cerebro antes de lanzar. Toda ranura cuyo ocupante cambió se publica con sus pesos heredados
- * aunque no decida en este tick (contrato: los pesos se escriben para toda ranura cuya `gen` cambió; quien los espeje por
- * `gen` los toma en cuanto la ve), y cada ranura del despacho con plan `conCerebro`, con su observación y su plasticidad
- * de ahora. */
+ * aunque no decida en este tick. Las decisiones con cerebro refrescan observación y plasticidad, y publican una
+ * revisión nueva solo cuando cambian los pesos. */
 export function prepararCerebros(world: World, vista: VistaMundo, despacho: LotePercepcion, tileIn: (x: number, y: number) => Tile | undefined): void {
   if (paramsOf(world).conducta.politicaPeso <= 0) return;
   // Sin crearle la política a nadie: la de un fundador que aún no decidió es la misma que le dará `ensurePersonPolicy`.
-  for (const s of vista.ranurasPersonas) {
-    if (vista.pesosAlDia(s)) continue;
+  for (const s of vista.ranurasSinPesos) {
     const persona = vista.persona(s)!;
     vista.escribirPesos(s, (persona.policy ?? founderPolicy(world.seed, persona.id)).weights);
   }
@@ -74,7 +72,7 @@ export function prepararCerebros(world: World, vista: VistaMundo, despacho: Lote
     const slot = despacho.slots[i]!, person = vista.persona(slot)!;
     const { genome, plasticity } = ensurePersonPolicy(world, person);
     localPolicyObservation(world, person, tileIn, fast, observacionF2);
-    vista.escribirPesos(slot, genome.weights);
+    vista.actualizarPesos(slot, genome.weights);
     vista.escribirEstado(slot, observacionF2, plasticity.bias);
   }
 }

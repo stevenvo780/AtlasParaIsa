@@ -394,11 +394,26 @@ export class VistaMundo implements Lectura {
     this.terreno.fijarCaptura();
   }
   /** ¿Tiene la ranura escritos los pesos de su ocupante de ahora? */
-  pesosAlDia(slot: number): boolean { return this.organismos!.personas.pesosGen[slot] === this.frente.gen[slot]; }
+  get ranurasSinPesos(): IterableIterator<number> { return this.organismos!.personas.ranurasSinPesos; }
+  pesosAlDia(slot: number): boolean { return this.organismos!.personas.pesosAlDia(slot, this.frente.gen[slot]!); }
   /** Pesos heredados del ocupante de la ranura. Las columnas del cerebro no tienen doble búfer: se escriben en el frente. */
   escribirPesos(slot: number, pesos: ArrayLike<number>): void {
     (this.frente.col('politica') as Float64Array).set(pesos, slot * COLUMNAS_CEREBRO.politica);
-    this.organismos!.personas.pesosGen[slot] = this.frente.gen[slot]!;
+    const revision = this.frente.col('revisionPolitica') as Int32Array;
+    revision[slot] = revision[slot]! + 1;
+    this.organismos!.personas.marcarPesosPublicados(slot, this.frente.gen[slot]!);
+  }
+  /** Conserva los pesos publicados si se mantienen los valores exactos, incluido el signo del cero. */
+  actualizarPesos(slot: number, pesos: ArrayLike<number>): void {
+    const ancho = COLUMNAS_CEREBRO.politica;
+    if (this.pesosAlDia(slot) && pesos.length === ancho) {
+      const publicados = this.frente.col('politica') as Float64Array;
+      const desde = slot * ancho;
+      let i = 0;
+      while (i < ancho && Object.is(publicados[desde + i], pesos[i])) i++;
+      if (i === ancho) return;
+    }
+    this.escribirPesos(slot, pesos);
   }
   /** Observación y plasticidad de la ranura para este despacho. */
   escribirEstado(slot: number, observacion: ArrayLike<number>, sesgo: ArrayLike<number>): void {

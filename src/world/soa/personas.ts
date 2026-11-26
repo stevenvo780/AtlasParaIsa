@@ -25,19 +25,49 @@ export const COLUMNAS_CEREBRO_FRENTE = [
 export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
   private readonly filas = new WeakMap<P, Fila>();
   private readonly residentes = new Map<number, P>();
-  pesosGen = new Int32Array(0);
+  private pendientesPesos?: Set<number>;
+  private pesosGen = new Int32Array(0);
 
   /** `hilo`: el dueño que escribe estas filas (0 con un solo dueño). */
   constructor(readonly tabla: TablaOrganismosSoA, private readonly uids: Uids, private readonly hilo = 0) {
     for (const [nombre, ancho] of COLUMNAS_CEREBRO_FRENTE) tabla.columna(nombre, TIPO_CEREBRO, ancho, true);
+    tabla.columna('revisionPolitica', 'i32', 1, true);
   }
 
   slot(persona: P): number { const fila = this.filas.get(persona); return fila ? slotDe(fila.ref) : -1; }
   ref(persona: P): Ref { return this.filas.get(persona)?.ref ?? REF_NULA; }
   persona(slot: number): P | undefined { return this.residentes.get(slot); }
   get ranuras(): IterableIterator<number> { return this.residentes.keys(); }
+  get ranurasSinPesos(): IterableIterator<number> {
+    // La primera petición llega al activar la política. Los mundos sin ella no mantienen la cola.
+    if (!this.pendientesPesos) {
+      const { gen } = this.tabla.lectura();
+      this.pendientesPesos = new Set();
+      for (const slot of this.residentes.keys()) {
+        if (!this.pesosAlDia(slot, gen[slot]!)) this.pendientesPesos.add(slot);
+      }
+    }
+    return this.pendientesPesos.values();
+  }
   /** Las personas de este dueño por ranura (`CtxDueno.personas`). */
   get mapa(): ReadonlyMap<number, P> { return this.residentes; }
+
+  pesosAlDia(slot: number, gen: number): boolean { return this.pesosGen[slot] === gen; }
+
+  marcarPesosPublicados(slot: number, gen: number): void {
+    this.pesosGen[slot] = gen;
+    this.pendientesPesos?.delete(slot);
+  }
+
+  private prepararPublicacionPesos(slot: number): void {
+    if (slot >= this.pesosGen.length) {
+      const pesos = new Int32Array(Math.max(16, 2 * slot));
+      pesos.set(this.pesosGen);
+      this.pesosGen = pesos;
+    }
+    this.pesosGen[slot] = 0;
+    this.pendientesPesos?.add(slot);
+  }
 
   /** Alta de una persona en el momento (una cría, en F4–F5): su fila existe desde ya y `sincronizar` no la repite. */
   registrar(persona: P): Ref {
@@ -47,11 +77,7 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
     const ref = this.tabla.alta(this.hilo, Clase.Persona), slot = slotDe(ref);
     this.filas.set(persona, { ref, uid });
     this.residentes.set(slot, persona);
-    if (slot >= this.pesosGen.length) {
-      const pesos = new Int32Array(Math.max(16, 2 * slot));
-      pesos.set(this.pesosGen);
-      this.pesosGen = pesos;
-    }
+    this.prepararPublicacionPesos(slot);
     return ref;
   }
 
@@ -62,6 +88,7 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
     this.tabla.baja(this.hilo, ref);
     this.filas.delete(persona);
     this.residentes.delete(slot);
+    this.pendientesPesos?.delete(slot);
     return true;
   }
 
@@ -70,7 +97,9 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
     const fila = this.filas.get(persona);
     if (!fila) return REF_NULA;
     this.filas.delete(persona);
-    this.residentes.delete(slotDe(fila.ref));
+    const slot = slotDe(fila.ref);
+    this.residentes.delete(slot);
+    this.pendientesPesos?.delete(slot);
     return fila.ref;
   }
 
@@ -79,12 +108,7 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
     const slot = slotDe(ref);
     this.filas.set(persona, { ref, uid: persona.uid ??= this.uids() });
     this.residentes.set(slot, persona);
-    if (slot >= this.pesosGen.length) {
-      const pesos = new Int32Array(Math.max(16, 2 * slot));
-      pesos.set(this.pesosGen);
-      this.pesosGen = pesos;
-    }
-    this.pesosGen[slot] = 0;
+    this.prepararPublicacionPesos(slot);
   }
 
   /** Altas y bajas para que la tabla lleve exactamente a `personas`. Devuelve si hubo alguna. */
@@ -96,6 +120,7 @@ export class PersonasSoA<P extends PersonaFrente = PersonaFrente> {
       this.tabla.baja(this.hilo, this.filas.get(persona)!.ref);
       this.filas.delete(persona);
       this.residentes.delete(slot);
+      this.pendientesPesos?.delete(slot);
     }
     for (const persona of personas) this.registrar(persona);
     return true;

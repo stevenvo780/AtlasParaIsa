@@ -35,7 +35,7 @@ interface SesionPercepcion {
   columnas: readonly Componente[];
   q: number; v: number; a: number;
 }
-interface CerebroFrente { observacion: Col; politica: Col; sesgo: Col; rasgos: Col }
+interface CerebroFrente { observacion: Col; politica: Col; sesgo: Col; rasgos: Col; revisionPolitica?: Col }
 function columna(frente: FrentePublico, nombre: string): Col {
   const fija = COLUMNAS_FIJAS.find(c => c[0] === nombre);
   return fija ? frente[fija[0]] : frente.col(nombre);
@@ -124,7 +124,9 @@ function preparar(lote: LotePercepcion, planes: readonly Plan[], frente: FrenteP
 }
 
 function cerebroDe(frente: FrentePublico): CerebroFrente {
-  return { observacion: frente.col('observacion'), politica: frente.col('politica'), sesgo: frente.col('sesgo'), rasgos: frente.rasgos };
+  const revisionPolitica = frente.columnas.includes('revisionPolitica') ? frente.col('revisionPolitica') : undefined;
+  return { observacion: frente.col('observacion'), politica: frente.col('politica'), sesgo: frente.col('sesgo'),
+    rasgos: frente.rasgos, revisionPolitica };
 }
 
 function ventanasEn(x: number, y: number, terreno: Terreno, paginas: Int32Array): void {
@@ -496,7 +498,7 @@ interface PendienteGpu {
   confirmar: () => void;
   liberar: () => void;
 }
-interface FilaCerebro { gen: number; dinamica: Float32Array }
+interface FilaCerebro { gen: number; revisionPolitica: number | undefined; dinamica: Float32Array }
 
 interface CampoPagina {
   version: number; x: number; y: number; datos: Float64Array;
@@ -675,21 +677,21 @@ export class PercibidorGpu implements Percibidor {
 
   private parcheCerebro(slot: number, gen: number, cerebro: CerebroFrente, parches: Parche[]): void {
     const anterior = this.cerebros.get(slot);
-    const nueva = anterior?.gen !== gen;
+    const revisionPolitica = cerebro.revisionPolitica?.[slot];
+    const cambianPesos = !anterior || anterior.gen !== gen || anterior.revisionPolitica !== revisionPolitica;
     const dinamica = anterior?.dinamica ?? new Float32Array(ANCHO_DINAMICA);
     const { entradas, acciones } = CEREBRO;
     const observacion = copiarDistinta(cerebro.observacion, slot * entradas, dinamica, 0, entradas);
     const sesgo = copiarDistinta(cerebro.sesgo, slot * acciones, dinamica, entradas, acciones);
     const rasgos = copiarDistinta(cerebro.rasgos, slot * RASGOS_ANCHO, dinamica, entradas + acciones, RASGOS_ANCHO);
-    const modificada = nueva || observacion || sesgo || rasgos;
-    if (!modificada) return;
-    const inicio = nueva ? 0 : PESOS_RED * 4;
+    if (!cambianPesos && !observacion && !sesgo && !rasgos) return;
+    const inicio = cambianPesos ? 0 : PESOS_RED * 4;
     const bytes = BYTES_CEREBRO - inicio, fuente = this.binario.reservar(bytes, 8);
     const flotantes = this.binario.flotantes;
     let pos = fuente >>> 2;
-    if (nueva) {
+    if (cambianPesos) {
       for (let k = 0, desde = slot * PESOS_RED; k < PESOS_RED; k++) flotantes[pos++] = cerebro.politica[desde + k];
-      this.cerebros.set(slot, { gen, dinamica });
+      this.cerebros.set(slot, { gen, revisionPolitica, dinamica });
     }
     flotantes.set(dinamica, pos);
     parches.push({ destino: 1, offset: slot * BYTES_CEREBRO + inicio, fuente, bytes });

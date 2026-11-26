@@ -77,7 +77,7 @@ test('una persona que recibe la ranura de otro organismo no hereda su uid, su ge
       assert.equal(frente.uid[s], persona.uid);
       assert.notEqual(persona.uid, previo.uid);
       assert.ok(frente.gen[s]! > previo.gen, 'la ranura cambió de gen');
-      if (personas.pesosGen[s] !== frente.gen[s]) continue;
+      if (!personas.pesosAlDia(s, frente.gen[s]!)) continue;
       conPesos++;
       const propios = (persona.policy ?? founderPolicy(world.seed, persona.id)).weights;
       for (let k = 0; k < COLUMNAS_CEREBRO.politica; k++) assert.equal(politica[s * COLUMNAS_CEREBRO.politica + k], propios[k], `peso ${k}`);

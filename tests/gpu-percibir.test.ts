@@ -13,7 +13,7 @@ import { comprobarInvariantes } from '../src/world/invariantes.js';
 import type { World } from '../src/world/mundo/tipos.js';
 import {
   CEREBRO, Clase, ErrorDispositivo, RASGOS_ANCHO, REF_NULA, genDe, refDe, slotDe,
-  type Dispositivo, type LotePercepcion, type Percibidor, type Percepcion, type Plan,
+  type CanalGpu, type Dispositivo, type LotePercepcion, type Percibidor, type Percepcion, type Plan,
 } from '../src/world/motor/contratos.js';
 import { evaluatePolicySingle, POLICY_ACTIONS, POLICY_WEIGHTS } from '../src/world/politica.js';
 import { crearFixtureGpu, type OpcionesFixture } from './fixtures/gpu-percibir.js';
@@ -378,6 +378,64 @@ const ESCENARIOS: readonly [string, OpcionesFixture][] = [
   ['mitad de la fauna en el agua', { grande: true, semilla: 13, peces: true }],
 ];
 
+test('M3 GPU reenvía pesos al cambiar su revisión con la misma generación', () => {
+  const fixture = crearFixtureGpu(), frente = fixture.frente;
+  const revisiones = new Int32Array(frente.alta);
+  const fuente = { ...frente, columnas: [...frente.columnas, 'revisionPolitica'],
+    col: (nombre: string) => nombre === 'revisionPolitica' ? revisiones : frente.col(nombre) };
+  const actores = fixture.lote();
+  const slot = actores.slots[actores.plan.indexOf(0)]!, gen = frente.gen[slot];
+  const lote: LotePercepcion = { tick: frente.tick, despacho: 1, slots: Int32Array.of(slot), plan: Uint16Array.of(0) };
+  const planes: Plan[] = [{ id: 0, transitable: new Float32Array(), celdas: [], organismos: [], acciones: CEREBRO.acciones, w: null }];
+  const subidas: { offset: number; bytes: number; primero: number }[] = [];
+  let capacidad = 0;
+  let respuesta: Uint8Array;
+  const canal: CanalGpu = {
+    dispositivo: 0,
+    get bytes() { return capacidad; },
+    crecer(bytes) { capacidad = bytes; },
+    escribir(_desde, datos) {
+      const carga = new DataView(datos.buffer, datos.byteOffset, datos.byteLength);
+      const tabla = carga.getUint32(12 * 4, true), cantidad = carga.getUint32(13 * 4, true);
+      subidas.length = 0;
+      for (let i = 0; i < cantidad; i++) {
+        const entrada = tabla + i * 16;
+        if (carga.getUint32(entrada, true) !== 1) continue;
+        subidas.push({ offset: carga.getUint32(entrada + 4, true), bytes: carga.getUint32(entrada + 12, true) * 4,
+          primero: carga.getFloat32(carga.getUint32(entrada + 8, true), true) });
+      }
+    },
+    leer(_desde, destino) { new Uint8Array(destino.buffer, destino.byteOffset, destino.byteLength).fill(0); },
+    enviar(orden) {
+      const { tick, despacho } = JSON.parse(Buffer.from(orden).toString());
+      respuesta = Buffer.from(JSON.stringify({ ok: true, ms: 0, tick, despacho }));
+    },
+    recibir: () => respuesta,
+    cerrar() {},
+  };
+  const gpu = new PercibidorGpu(canal, fuente, fixture.terreno);
+  const pesos = frente.col('politica') as Float64Array, desde = slot * POLICY_WEIGHTS;
+  const bytesPesos = POLICY_WEIGHTS * 4, bytesDinamicos = (CEREBRO.entradas + CEREBRO.acciones + RASGOS_ANCHO) * 4;
+  const bytesFila = bytesPesos + bytesDinamicos, offset = slot * bytesFila;
+
+  percibir(gpu, lote, planes);
+  assert.deepEqual(subidas, [{ offset, bytes: bytesFila, primero: Math.fround(pesos[desde]!) }]);
+
+  pesos[desde] = 0.25;
+  revisiones[slot] = 1;
+  percibir(gpu, { ...lote, despacho: 2 }, planes);
+  assert.equal(frente.gen[slot], gen);
+  assert.deepEqual(subidas, [{ offset, bytes: bytesFila, primero: 0.25 }]);
+
+  const observaciones = frente.col('observacion') as Float64Array;
+  observaciones[slot * CEREBRO.entradas] = 0.75;
+  percibir(gpu, { ...lote, despacho: 3 }, planes);
+  assert.deepEqual(subidas, [{ offset: offset + bytesPesos, bytes: bytesDinamicos, primero: 0.75 }]);
+
+  percibir(gpu, { ...lote, despacho: 4 }, planes);
+  assert.deepEqual(subidas, []);
+});
+
 test('M3 CUDA real: GPU y CPU coinciden por estadística en varios mundos y en las dos tarjetas', {
   skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC y dos tarjetas CUDA',
 }, async t => {
@@ -415,6 +473,11 @@ test('M3 CUDA real: los espejos incrementales de las dos tarjetas siguen al fren
 }, t => {
   const fixture = crearFixtureGpu({ grande: true, semilla: 41, borde: true });
   const { terreno, planes } = fixture;
+  const revisiones = new Int32Array(fixture.frente.alta);
+  const conRevisiones = (frente: Fixture['frente']): Fixture['frente'] => ({
+    ...frente, columnas: [...frente.columnas, 'revisionPolitica'],
+    col: nombre => nombre === 'revisionPolitica' ? revisiones : frente.col(nombre),
+  });
   const canales = [0, 1].map(dispositivo => new CanalCompartido(dispositivo));
   const cpu = new PercibidorCpu(fixture.frente, terreno);
   try {
@@ -426,10 +489,17 @@ test('M3 CUDA real: los espejos incrementales de las dos tarjetas siguen al fren
     try {
       for (let tick = 0; tick < 6; tick++) {
         // Tras el primer lote completo, cada tick sube solo las páginas, filas y cerebros cambiados.
-        const frente = tick ? fixture.siguiente() : fixture.frente;
+        const frente = conRevisiones(tick ? fixture.siguiente() : fixture.frente);
+        const lote = fixture.lote();
+        if (tick === 3) {
+          const slot = lote.slots[lote.plan.indexOf(0)]!;
+          const pesos = frente.col('politica') as Float64Array;
+          const sesgoPrimeraAccion = (slot + 1) * POLICY_WEIGHTS - CEREBRO.acciones;
+          pesos[sesgoPrimeraAccion] = pesos[sesgoPrimeraAccion]! >= 0 ? -1 : 1;
+          revisiones[slot]!++;
+        }
         for (const { percibidor } of tarjetas) percibidor.fuentes(frente, terreno);
         cpu.fuentes(frente, terreno);
-        const lote = fixture.lote();
         const gpu = percibir(puente, lote, planes);
         assert.deepEqual(puente.ultimosLotes.map(l => l.dispositivo).sort(), ['gpu0', 'gpu1']);
         const esperado = percibir(cpu, lote, planes);

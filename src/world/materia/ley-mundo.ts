@@ -83,15 +83,21 @@ interface TarjetaMateria {
   ms: number;
 }
 
+interface CadenciaPaginas {
+  chunks: Int32Array;
+  periodo: number;
+  porFase: Map<number, ChunkId[]>;
+}
+
 interface Estado {
   /** El contexto vigente (se pone al día en cada gancho): lo leen los cierres que el mundo material llama. */
   caja: { c: CtxLeyMateria };
   m: MundoMaterial;
   /** `Tile` de cada tesela del mundo material (por su índice), mientras su página está despierta. */
   teselas: (Tile | undefined)[];
-  /** Por página: tick de su último paso y sal de su desfase. */
+  /** Por página: tick de su último paso. */
   ultimo: Int32Array;
-  sal: Uint32Array;
+  cadencia?: CadenciaPaginas;
   /** Chunks residentes que aún no pudieron materializarse (sin teselas todavía, o sin sitio en el libro del hilo). */
   pendientes: Set<ChunkId>;
   asientoPagina: number;
@@ -152,7 +158,7 @@ function crear(c0: CtxLeyMateria): Estado {
     },
   });
   const e: Estado = {
-    caja, m, teselas: [], ultimo: new Int32Array(0), sal: new Uint32Array(0), pendientes: new Set(), asientoPagina: 0,
+    caja, m, teselas: [], ultimo: new Int32Array(0), pendientes: new Set(), asientoPagina: 0,
     fuegos: new Map(), cuentas: Array<bigint>(N_CUENTAS).fill(0n),
     libro: { ancla: null, neto: Array<bigint>(NE + 1).fill(0n), vistoF: new Float64Array(NE + 1), vistoS: new Float64Array(NE + 1) },
     gpu: { tarjetas: [], fallo: '', fallos: 0, tandas: 0, tripletas: 0 },
@@ -197,7 +203,6 @@ function puenteDe(e: Estado): PuenteMaterial {
 }
 
 const crecerI32 = (a: Int32Array, n: number): Int32Array => { if (a.length >= n) return a; const b = new Int32Array(Math.max(n, 2 * a.length, 16)); b.set(a); return b; };
-const crecerU32 = (a: Uint32Array, n: number): Uint32Array => { if (a.length >= n) return a; const b = new Uint32Array(Math.max(n, 2 * a.length, 16)); b.set(a); return b; };
 
 // ── Páginas: activar y retirar ───────────────────────────────────────────────────────────────────────────
 
@@ -238,9 +243,8 @@ function activar(e: Estado, chunk: ChunkId, cedido = false): boolean {
     }
   }
   e.pendientes.delete(chunk);
-  e.ultimo = crecerI32(e.ultimo, chunk + 1); e.sal = crecerU32(e.sal, chunk + 1);
+  e.ultimo = crecerI32(e.ultimo, chunk + 1);
   e.ultimo[chunk] = c.tick;
-  e.sal[chunk] = (Math.imul(c.terreno.paginaX[chunk]!, 0x9e3779b1) ^ Math.imul(c.terreno.paginaY[chunk]!, 0x85ebca77)) >>> 0;
   const i0 = m.inicio[chunk]!;
   for (let j = 0; j < tiles.length; j++) { e.teselas[i0 + j] = tiles[j]; e.matTick[i0 + j] = -1; }
   if (adoptada || cedido) buscarFuegos(e, chunk, cedido);
@@ -302,6 +306,35 @@ function ventana(e: Estado, tick: number, dt: number): Forzamiento {
   return f;
 }
 
+const SIN_PAGINAS: readonly ChunkId[] = [];
+
+function salDePagina(terreno: CtxLey['terreno'], p: ChunkId): number {
+  return (Math.imul(terreno.paginaX[p]!, 0x9e3779b1) ^ Math.imul(terreno.paginaY[p]!, 0x85ebca77)) >>> 0;
+}
+
+function paginasVencidas(e: Estado, c: CtxLey, periodo: number): Int32Array | readonly ChunkId[] {
+  const chunks = c.chunks, tick = c.tick;
+  if (periodo === 1) return chunks;
+  // Conserva el cálculo anterior si la suma del tick y la sal puede perder precisión.
+  if (tick > Number.MAX_SAFE_INTEGER - (periodo - 1)) {
+    const terreno = c.terreno;
+    return chunks.filter(p => (tick + salDePagina(terreno, p) % periodo) % periodo === 0);
+  }
+  let indice = e.cadencia;
+  // El dueño sustituye el arreglo cuando cambia el conjunto o el orden de sus páginas.
+  if (indice?.chunks !== chunks || indice.periodo !== periodo) {
+    const porFase = new Map<number, ChunkId[]>(), terreno = c.terreno;
+    for (const p of chunks) {
+      const fase = (periodo - salDePagina(terreno, p) % periodo) % periodo;
+      const paginas = porFase.get(fase);
+      if (paginas) paginas.push(p);
+      else porFase.set(fase, [p]);
+    }
+    e.cadencia = indice = { chunks, periodo, porFase };
+  }
+  return indice.porFase.get(tick % periodo) ?? SIN_PAGINAS;
+}
+
 /**
  * Fase eco: el paso material de las páginas a las que les toca. Cada página da su paso cada K = `v23.cadenciaMateria`
  * ticks con dt = K, escalonadas por una sal de sus coordenadas (1/K de ellas en cada tick). Los fuegos arden todos los
@@ -316,8 +349,8 @@ function eco(c: CtxLey): void {
   arderFuegos(e);
   const tocan = e.tocan, clima = c.params.ecologia, estacional = clima.amplitudEstacional > 0;
   tocan.length = 0;
-  for (const p of c.chunks) {
-    if (!m.tiene(p) || m.activa[p] !== 1 || (tick + e.sal[p]! % K) % K !== 0) continue;
+  for (const p of paginasVencidas(e, c, K)) {
+    if (!m.tiene(p) || m.activa[p] !== 1) continue;
     let f = ventana(e, tick, Math.min(K, Math.max(1, tick - e.ultimo[p]!)));
     if (estacional) {
       const k = regionalClimateFactor(c.mundo.seed, tick, c.terreno.paginaX[p]! * 16 + 8, c.terreno.paginaY[p]! * 16 + 8,

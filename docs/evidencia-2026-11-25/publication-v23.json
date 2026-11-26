@@ -1,0 +1,394 @@
+{
+  "capturedAt": "2026-11-26T02:02:29.482Z",
+  "status": "prepared-not-deployed",
+  "commit": "1c3f5facaf2f63bd9fca84c51909be3f0e2c5127",
+  "launcherCommit": "9625209433607694552812962eea4ffdabd0b7ed",
+  "engineCommit": "6262a9726cfc1663bb5a5d51aacec8abdaf2c575",
+  "initialEngineCommit": "448dcc907171859d662d9de87a08ddbfb141f9fd",
+  "scope": "Ensayo local en la torre, sobre un mundo nuevo temporal y una sola semilla de arranque aleatoria. Sin corte del servicio público.",
+  "rulesVersion": 14,
+  "protocolVersion": 10,
+  "configuration": {
+    "singleOwner": true,
+    "gpu": [],
+    "worldDirectoryTemplate": "AtlasParaIsa-anexo/mundos/v23-AAAAMMDD",
+    "switches": {
+      "guardadoCompleto": true,
+      "fotograma": true,
+      "cohesion": true,
+      "natalidad": true,
+      "comunidades": true,
+      "materia": true,
+      "cuerpos": true,
+      "fauna": true,
+      "tecnica": true,
+      "obra": true,
+      "intentos": true,
+      "duenos": false,
+      "rebalanceo": false,
+      "materiaGpu": false,
+      "cadenciaMateria": 60
+    },
+    "turbo": true,
+    "observerOnly": true,
+    "saveEveryTicks": 200,
+    "tapeTopeBytes": 50000000000,
+    "tapeDiskReserveBytes": 4294967296,
+    "backupWorldCopies": 24,
+    "backupTapeLevels": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "deployCheck": {
+    "revision": "1c3f5facaf2f63bd9fca84c51909be3f0e2c5127",
+    "status": "passed",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true,
+    "smokeGates": {
+      "builtEntrypoint": true,
+      "credentialCli": true,
+      "privateHttp": true,
+      "autonomousAdvance": true,
+      "sigkillRestart": true,
+      "committedGestureSurvives": true,
+      "idempotentRetry": true,
+      "persistedSession": true,
+      "revocationCli": true,
+      "gracefulExit": true
+    }
+  },
+  "deployCheckProcedure": {
+    "revision": "6404736449fe4a6495b5e0bcf9a1f6f85ea56c4f",
+    "status": "passed",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true,
+    "smokeGates": {
+      "builtEntrypoint": true,
+      "credentialCli": true,
+      "privateHttp": true,
+      "autonomousAdvance": true,
+      "sigkillRestart": true,
+      "committedGestureSurvives": true,
+      "idempotentRetry": true,
+      "persistedSession": true,
+      "revocationCli": true,
+      "gracefulExit": true
+    }
+  },
+  "deployCheckLauncher": {
+    "revision": "9625209433607694552812962eea4ffdabd0b7ed",
+    "status": "passed",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true,
+    "smokeGates": {
+      "builtEntrypoint": true,
+      "credentialCli": true,
+      "privateHttp": true,
+      "autonomousAdvance": true,
+      "sigkillRestart": true,
+      "committedGestureSurvives": true,
+      "idempotentRetry": true,
+      "persistedSession": true,
+      "revocationCli": true,
+      "gracefulExit": true
+    }
+  },
+  "deployCheckInitial": {
+    "revision": "448dcc907171859d662d9de87a08ddbfb141f9fd",
+    "status": "passed",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true,
+    "smokeGates": {
+      "builtEntrypoint": true,
+      "credentialCli": true,
+      "privateHttp": true,
+      "autonomousAdvance": true,
+      "sigkillRestart": true,
+      "committedGestureSurvives": true,
+      "idempotentRetry": true,
+      "persistedSession": true,
+      "revocationCli": true,
+      "gracefulExit": true
+    }
+  },
+  "tests": {
+    "typecheckExitCode": 0,
+    "serverTypecheckExitCode": 0,
+    "worktreeBuildExitCode": 0,
+    "focused": {
+      "passed": 30,
+      "failed": 0,
+      "skipped": 1
+    },
+    "focusedSkipped": "Poda de volumen de 10 GB, optativa por ATLAS_V23_CINTA_VOLUMEN.",
+    "validationRegression": {
+      "pass": 9,
+      "fail": 0,
+      "skipped": 2
+    },
+    "systemdVerifyExitCode": 0,
+    "publishSimulationExitCode": 0,
+    "publishSimulationWithOperationalCommandsBlocked": true,
+    "publishSimulationPlannedSteps": 11
+  },
+  "initialTrialFailure": {
+    "seed": 669687356,
+    "observedHealthStatus": 503,
+    "rejectedSaveTick": 4400,
+    "lastDurableTick": 4200,
+    "error": "Estado procedural inválido.",
+    "replayFromTick": 4200,
+    "rejectedState": {
+      "tick": 4400,
+      "action": "gather",
+      "work": 9.740740740740748,
+      "cuerpo": true
+    },
+    "cause": "El guardado exigía p.work entero incluso cuando la ley material pagó una fracción del trabajo.",
+    "afterFixDurableSlots": [
+      {
+        "slot": 0,
+        "tick": 4425,
+        "materiaBytes": 3466908
+      },
+      {
+        "slot": 1,
+        "tick": 4400,
+        "materiaBytes": 3466672
+      }
+    ],
+    "afterFixPersistedWorkAt4400": 9.740740740740748
+  },
+  "trial": {
+    "beginAt": "2026-11-26T01:47:03.404Z",
+    "loopbackPort": 40733,
+    "seconds": 900.014974942,
+    "initial": {
+      "tick": 280,
+      "ultimoTickGuardado": 200,
+      "epoca": 0,
+      "recuperaciones": 0,
+      "diagnostico": {
+        "duras24h": 0,
+        "blandas24h": 0,
+        "ultimaViolacion": null,
+        "errorBitacora": null,
+        "registrosSinBitacora": 0
+      }
+    },
+    "final": {
+      "tick": 9350,
+      "ultimoTickGuardado": 9200,
+      "epoca": 0,
+      "recuperaciones": 0,
+      "diagnostico": {
+        "duras24h": 0,
+        "blandas24h": 0,
+        "ultimaViolacion": null,
+        "errorBitacora": null,
+        "registrosSinBitacora": 0
+      }
+    },
+    "first": {
+      "rssKiB": 360804,
+      "peakRssKiB": 360804,
+      "cintaBytes": {
+        "logical": 1689734,
+        "allocated": 1703936
+      }
+    },
+    "last": {
+      "rssKiB": 1472712,
+      "peakRssKiB": 1530804,
+      "cintaBytes": {
+        "logical": 758462775,
+        "allocated": 758497280
+      }
+    },
+    "ticksPerSecond": 10.077610098192535,
+    "tapeBytesPerHour": 3027123008.231694,
+    "hoursToCap": 16.266766360698576,
+    "page": {
+      "tick": 369,
+      "tiles": 1120,
+      "canvas": {
+        "ancho": 1440,
+        "alto": 900
+      },
+      "staticAssets": [
+        {
+          "path": "/assets/index-Dv4kU4Or.js",
+          "status": 200,
+          "mime": "text/javascript; charset=utf-8",
+          "bytes": 461021
+        },
+        {
+          "path": "/assets/index-Cj6eaGiU.css",
+          "status": 200,
+          "mime": "text/css; charset=utf-8",
+          "bytes": 86648
+        }
+      ],
+      "pageErrors": 0
+    },
+    "reopened": {
+      "tick": 9360,
+      "tiles": 1120,
+      "canvas": {
+        "ancho": 1440,
+        "alto": 900
+      },
+      "staticAssets": [
+        {
+          "path": "/assets/index-Dv4kU4Or.js",
+          "status": 200,
+          "mime": "text/javascript; charset=utf-8",
+          "bytes": 461021
+        },
+        {
+          "path": "/assets/index-Cj6eaGiU.css",
+          "status": 200,
+          "mime": "text/css; charset=utf-8",
+          "bytes": 86648
+        }
+      ],
+      "pageErrors": 0
+    },
+    "sameWorld": true,
+    "sameSession": true,
+    "motor": {
+      "hilos": 1,
+      "gpuEstado": [],
+      "intentos": 22734,
+      "rechazados": 2,
+      "fotogramasSaltados": 1
+    },
+    "tapeBefore": {
+      "epoca": 0,
+      "desde": 1,
+      "hasta": 9345,
+      "bytesCatalogo": 758462775,
+      "fotogramasL0": 2336,
+      "tickCorte": 9345,
+      "teselasCorte": 1120,
+      "lagunas": [
+        {
+          "t0": 0,
+          "t1": 1
+        },
+        {
+          "t0": 2085,
+          "t1": 2093
+        }
+      ]
+    },
+    "tapeAfter": {
+      "epoca": 1,
+      "desde": 1,
+      "hasta": 9357,
+      "bytesCatalogo": 760587413,
+      "fotogramasL0": 2339,
+      "tickCorte": 9357,
+      "teselasCorte": 1120,
+      "lagunas": [
+        {
+          "t0": 0,
+          "t1": 1
+        },
+        {
+          "t0": 2085,
+          "t1": 2093
+        },
+        {
+          "t0": 9349,
+          "t1": 9352
+        },
+        {
+          "t0": 9352,
+          "t1": 9353
+        }
+      ]
+    },
+    "saved": {
+      "tick": 9352,
+      "semilla": 4173692390,
+      "epoch": 0,
+      "matterBytes": 11943143,
+      "switches": {
+        "cohesion": true,
+        "natalidad": true,
+        "comunidades": true,
+        "materia": true,
+        "cuerpos": true,
+        "fauna": true,
+        "tecnica": true,
+        "obra": true,
+        "intentos": true,
+        "duenos": false,
+        "rebalanceo": false,
+        "materiaGpu": false,
+        "fotograma": true,
+        "guardadoCompleto": true,
+        "cadenciaMateria": 60
+      }
+    },
+    "restart": {
+      "tick": 9353,
+      "ultimoTickGuardado": 9352,
+      "epoca": 1,
+      "recuperaciones": 0,
+      "diagnostico": {
+        "duras24h": 0,
+        "blandas24h": 0,
+        "ultimaViolacion": null,
+        "errorBitacora": null,
+        "registrosSinBitacora": 0
+      }
+    },
+    "startupCheckSeconds": 5.388998699999997,
+    "savedAgain": {
+      "tick": 9363,
+      "semilla": 4173692390,
+      "epoch": 1,
+      "matterBytes": 11932928,
+      "switches": {
+        "cohesion": true,
+        "natalidad": true,
+        "comunidades": true,
+        "materia": true,
+        "cuerpos": true,
+        "fauna": true,
+        "tecnica": true,
+        "obra": true,
+        "intentos": true,
+        "duenos": false,
+        "rebalanceo": false,
+        "materiaGpu": false,
+        "fotograma": true,
+        "guardadoCompleto": true,
+        "cadenciaMateria": 60
+      }
+    },
+    "serverNotableLog": [],
+    "launchLoadAverage": [
+      31.37,
+      31.43,
+      28.68
+    ],
+    "sampling": "Dos muestras de salud y disco separadas al menos 900 s. VmRSS y VmHWM del proceso completo en /proc. Cinta: bloques asignados de todos los ficheros de cinta/, incluido el catálogo y su WAL.",
+    "projection": "Horas restantes al final de la muestra, si se mantuviera el crecimiento lineal. La poda por nivel y la reserva de disco pueden actuar antes.",
+    "limitReached": false
+  },
+  "publicVerification": "Pendiente de la publicación autorizada. Repetir las puertas sobre el SHA integrado antes de cortar."
+}

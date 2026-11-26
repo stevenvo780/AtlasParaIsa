@@ -10,7 +10,7 @@ import { BrokerPercepcionGpu, PercibidorBroker } from '../src/world/gpu/broker-p
 import type { Plan } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
-import { parseParams } from '../src/world/params.js';
+import { paramsOf, parseParams } from '../src/world/params.js';
 import { tileLookup } from '../src/world/tile-index.js';
 
 const script = fileURLToPath(new URL('./fixtures/fallo-gpu-percibir.py', import.meta.url));
@@ -93,5 +93,36 @@ test('CUDA real: F2 distribuida usa el corredor desde el motor de dos dueños', 
     if (anterior === undefined) delete process.env.CARTA_PERCEPCION_DUENOS;
     else process.env.CARTA_PERCEPCION_DUENOS = anterior;
     await motor.cerrar();
+  }
+});
+
+test('la recarga conserva mundo y época si intenta cambiar el uso de CUDA en cualquier sentido', {
+  timeout: 15_000, skip: !process.env.COMPUTE_NVRTC && 'Se requiere GPU0 y COMPUTE_NVRTC',
+}, async t => {
+  const anterior = process.env.CARTA_PERCEPCION_DUENOS;
+  process.env.CARTA_PERCEPCION_DUENOS = '1';
+  t.after(() => {
+    if (anterior === undefined) delete process.env.CARTA_PERCEPCION_DUENOS;
+    else process.env.CARTA_PERCEPCION_DUENOS = anterior;
+  });
+  const base = hostOpenWorldParams();
+  const crearMundo = (seed: number, materiaGpu: boolean) => createWorld(seed, parseParams({
+    v23: { ...escalon('duenos'), materiaGpu }, motor: { ...base.motor, hilos: 2, gpu: [0] },
+  }, base));
+  for (const materiaGpu of [false, true]) {
+    const semilla = 2321171583;
+    const motor = crearMotor(crearMundo(semilla, false), { hilos: 2, gpu: [0], decisionGpu: 'siempre', verificar: true, semilla });
+    try {
+      motor.cargar({ world: crearMundo(semilla, materiaGpu), materia: null }, 2);
+      const opuesto = crearMundo(semilla + 1, !materiaGpu);
+      assert.throws(() => motor.cargar({ world: opuesto, materia: null }, 3), /requiere cerrar y crear un motor nuevo/);
+      assert.equal(motor.muestraCarga()?.epoca, 2);
+      const { world } = motor.instantanea();
+      assert.equal(world.seed, semilla);
+      assert.equal(paramsOf(world).v23.materiaGpu, materiaGpu);
+      motor.cargar({ world: crearMundo(semilla + 2, materiaGpu), materia: null }, 4);
+      assert.equal(motor.muestraCarga()?.epoca, 4);
+      assert.equal(motor.instantanea().world.seed, semilla + 2);
+    } finally { await motor.cerrar(); }
   }
 });

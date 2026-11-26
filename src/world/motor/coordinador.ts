@@ -210,6 +210,8 @@ class MotorDuenos implements Motor {
     };
   }
   #piscina: Piscina<DatosDueno> | null = null;
+  readonly #brokerConfigurado: boolean;
+  #materiaGpuDeArranque?: boolean;
   #brokerGpu?: BrokerPercepcionGpu;
   #clienteGpu?: PercibidorBroker;
   #fatal: ErrorFatalMotor | undefined;
@@ -237,13 +239,25 @@ class MotorDuenos implements Motor {
 
   constructor(mundo: World, config: MotorConfig, hilos: number) {
     this.#mundo = mundo; this.#config = config; this.#hilos = hilos;
+    this.#brokerConfigurado = process.env.CARTA_PERCEPCION_DUENOS === '1' && !!process.env.COMPUTE_NVRTC
+      && hilos === 2 && config.gpu.length === 1 && config.gpu[0] === 0;
     this.#t = telemetriaVacia(hilos);
   }
 
   // ── Época: memoria compartida, reparto y workers ───────────────────────────────────────────────────────
 
+  #validarModoGpu(materiaGpu: boolean): void {
+    // Cargar es síncrono y los contextos CUDA anteriores se cierran de forma asíncrona.
+    if (this.#materiaGpuDeArranque !== undefined && materiaGpu !== this.#materiaGpuDeArranque) {
+      throw new Error('Cambiar entre percepción CUDA compartida y química CUDA requiere cerrar y crear un motor nuevo.');
+    }
+  }
+
   #arrancar(materia: MateriaCheckpoint | null): void {
     const m = this.#mundo, hilos = this.#hilos, params = paramsOf(m), verificar = this.#config.verificar || params.motor.depuracion;
+    const materiaGpu = params.v23.materiaGpu;
+    this.#validarModoGpu(materiaGpu);
+    if (this.#brokerConfigurado) this.#materiaGpuDeArranque ??= materiaGpu;
     void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
@@ -263,8 +277,7 @@ class MotorDuenos implements Motor {
     contadores.fijarCronica(m.eventCounter + 1);
     const terreno = this.#terreno = new TerrenoPercepcion(verificar);
     terreno.usarDuenos();
-    const usarBroker = process.env.CARTA_PERCEPCION_DUENOS === '1' && !!process.env.COMPUTE_NVRTC
-      && hilos === 2 && this.#config.gpu.length === 1 && this.#config.gpu[0] === 0 && !params.v23.materiaGpu;
+    const usarBroker = this.#brokerConfigurado && !materiaGpu;
     if (usarBroker && !this.#brokerGpu) {
       try { this.#brokerGpu = new BrokerPercepcionGpu(); }
       catch { /* Crear un corredor es opcional: los dueños ya tienen la ruta CPU. */ }
@@ -587,6 +600,7 @@ class MotorDuenos implements Motor {
   }
 
   cargar(i: Instantanea, epoca: number): void {
+    this.#validarModoGpu(paramsOf(i.world).v23.materiaGpu);
     this.#mundo = i.world;
     this.#epoca = epoca;
     this.#arrancar(i.materia);

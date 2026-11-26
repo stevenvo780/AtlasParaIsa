@@ -233,8 +233,9 @@ export interface ArenaMateria {
   /** Lotes de `rol` en `celda` (Suelo, Agua y Vida: uno por tesela; Aire: el de su página). Los escribe en `destino` y
    * devuelve cuántos hay; si son más que destino.length, solo escribe los que caben. */
   lotes(celda: number, rol: Rol, destino: Float64Array): number;
-  /** Sustancias presentes (las 8 ranuras y el desborde), como `lotes`. */
-  especies(l: LoteRef, ids: Uint32Array): number;
+  /** Sustancias presentes (las 8 ranuras y el desborde), con sus cantidades si se piden. Devuelve cuántas hay y
+   * escribe solo las que quepan en ambos destinos, en orden de ranura. */
+  especies(l: LoteRef, ids: Uint32Array, cantidades?: Float64Array): number;
   cuantos(l: LoteRef, id: SustanciaId): number;
   calor(l: LoteRef): number;   // J
   vista(l: LoteRef): VistaLote;

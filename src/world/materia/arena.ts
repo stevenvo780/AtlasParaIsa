@@ -341,17 +341,29 @@ export class ArenaLotes implements ArenaMateria {
     if (calor !== 0) m.poner(0, calor);
     return m;
   }
-  especies(l: LoteRef, ids: Uint32Array): number {
+  especies(l: LoteRef, ids: Uint32Array, cantidades?: Float64Array): number {
     const s = this.vivoSlot(l), b = this.bloque(s), i = s % LOTES_POR_BLOQUE, inicio = i * RANURAS;
+    const limite = cantidades ? Math.min(ids.length, cantidades.length) : ids.length;
     let n = 0;
     for (let j = inicio; j < inicio + RANURAS; j++) {
       const id = b.esp[j]!;
-      if (id !== 0) { if (n < ids.length) ids[n] = id; n++; }
+      if (id === 0) continue;
+      if (n < limite) {
+        ids[n] = id;
+        if (cantidades) cantidades[n] = b.cant[j]!;
+      }
+      n++;
     }
-    let restantes = this.op.desborde.slots;
-    for (let p = Atomics.load(b.exceso, i); p && restantes-- > 0; p = Atomics.load(this.extraSig, p - 1)) {
+    let p = Atomics.load(b.exceso, i);
+    if (!p) return n;
+    for (let restantes = this.op.desborde.slots; p && restantes-- > 0; p = Atomics.load(this.extraSig, p - 1)) {
       const id = this.extraEsp[p - 1]!;
-      if (id !== 0) { if (n < ids.length) ids[n] = id; n++; }
+      if (id === 0) continue;
+      if (n < limite) {
+        ids[n] = id;
+        if (cantidades) cantidades[n] = this.extraCant[p - 1]!;
+      }
+      n++;
     }
     return n;
   }

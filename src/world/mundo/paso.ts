@@ -38,7 +38,12 @@ import { sustituido } from '../motor/leyes.js';
  * milisegundos por fase de este paso. Sin instrumentación (`medicion` ausente) el coste es un
  * único `if`; con ella, dos lecturas de reloj por fase.
  */
-export interface FaseMedicion { clock: () => number; fases: Partial<Record<FaseNombre, number>>; }
+type FaseV23 = 'epoca' | 'F0' | 'F1' | 'eco' | 'F2-F4' | 'F5' | 'F6';
+export interface FaseMedicion {
+  clock: () => number;
+  fases: Partial<Record<FaseNombre, number>>;
+  v23?: Partial<Record<FaseV23, number>>;
+}
 
 function medirFase<T>(medicion: FaseMedicion | undefined, nombre: FaseNombre, fn: () => T): T {
   if (!medicion) return fn();
@@ -46,6 +51,15 @@ function medirFase<T>(medicion: FaseMedicion | undefined, nombre: FaseNombre, fn
   const value = fn();
   medicion.fases[nombre] = (medicion.fases[nombre] ?? 0) + (medicion.clock() - start);
   return value;
+}
+
+function medirFasesV23(clock: () => number, fases: NonNullable<FaseMedicion['v23']>): (fase: FaseV23) => void {
+  let inicio = clock();
+  return fase => {
+    const fin = clock();
+    fases[fase] = (fases[fase] ?? 0) + (fin - inicio);
+    inicio = fin;
+  };
 }
 
 /**
@@ -123,7 +137,9 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
  * Con varios dueños este mismo orden lo sigue cada worker sobre su parte (`motor/dueno-worker.ts`), sin pasos heredados.
  */
 function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
+  const cerrarFase = medicion?.v23 && medirFasesV23(medicion.clock, medicion.v23);
   d.abrirEpoca();
+  cerrarFase?.('epoca');
   const v = paramsOf(world).v23, queda = (paso: Parameters<typeof sustituido>[1]): boolean => !sustituido(v, paso);
   // F0: regiones (con alActivar y alRetirar), gestos, caducidades y lo global.
   d.fase(0);
@@ -132,10 +148,12 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   d.F0();
+  cerrarFase?.('F0');
   // F1: migrantes y respuestas del tick anterior.
   d.fase(1);
   d.aplicar('M'); d.aplicar('B');
   d.gancho('F1');
+  cerrarFase?.('F1');
   // eco: el entorno, antes de que nadie perciba.
   if (queda('ecologia')) pasoEcologia(world, context, medicion);
   if (queda('kernel')) pasoKernel(world, context, medicion);
@@ -144,12 +162,14 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
     if (queda('fauna')) stepAnimals(world, event => addEvent(world, event));
     if (queda('estructuras')) stepStructures(world, event => addEvent(world, event));
   });
+  cerrarFase?.('eco');
   // F2–F4: preparar, elegir y actuar.
   d.fase(2); d.gancho('F2');
   d.fase(3); d.gancho('F3');
   d.fase(4); d.gancho('F4');
   if (queda('personas')) pasoPersonas(world, medicion);
   if (queda('susurros') && world.whispers?.length) advanceWhispers(world);
+  cerrarFase?.('F2-F4');
   // F5: lo que cruza organismos.
   d.fase(5);
   d.aplicar('A');
@@ -158,6 +178,7 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
   if (queda('comunidades')) medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
   if (queda('reproduccion')) medirFase(medicion, 'reproduccion', () => reproduce(world));
   d.gancho('F5');
+  cerrarFase?.('F5');
   // F6: publicar.
   d.fase(6);
   medirFase(medicion, 'checkpoint', () => {
@@ -170,6 +191,7 @@ function tickConLeyes(d: Dueno, world: World, inputs: Gesture[], context: WorldC
   d.publicarFrente();
   d.cerrarFoto();
   medirFase(medicion, 'muestreo', () => recordSample(world));
+  cerrarFase?.('F6');
   return results;
 }
 

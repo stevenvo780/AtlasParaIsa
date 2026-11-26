@@ -43,8 +43,8 @@ test('los dueños reciben la foto por puerto antes de pedir otro corte por el mi
   const descriptor = { control: new SharedArrayBuffer(CONTROL_ENLACE_BYTES),
     ranuras: [crearSAB(0, 16 * 1024 * 1024)], versiones: crearSAB(0, 65536), sucesos: new SharedArrayBuffer(16 * 1024 * 1024) };
   const enlace = enlaceCinta(descriptor);
-  const mundo = createWorld(7, parseParams({ v23: { ...escalon('duenos'), fotograma: true } }));
-  const motor = crearMotor(mundo, { ...unSoloDueno(7), hilos: 2, verificar: false,
+  const mundo = createWorld(17, parseParams({ v23: { ...escalon('duenos'), fotograma: true } }));
+  const motor = crearMotor(mundo, { ...unSoloDueno(17), hilos: 2,
     instantaneaTransferible: true, emisionFotogramaDuenos: true });
   const serie = Object.fromEntries(SERIE_CAMPOS.map(campo => [campo, 0])) as Record<CampoSerie, number>;
   try {
@@ -57,11 +57,14 @@ test('los dueños reciben la foto por puerto antes de pedir otro corte por el mi
       confirmar: () => {},
     });
     motor.cargar({ world: mundo, materia: null }, 3);
+    motor.paso([]); // El primer paso da de alta las filas de fauna heredada.
     Atomics.store(enlace.creditos, 0, 1);
     motor.paso([]);
     assert.equal(recibir.mock.callCount(), 1);
-    assert.ok(recibir.mock.calls[0]!.result![0]!.altasBytes.byteLength > 0);
-    assert.equal(motor.trazaFotogramaDuenos?.reunionesEvitadas, 1);
-    assert.equal(motor.instantanea().world.tick, 1);
+    const partes = recibir.mock.calls[0]!.result!;
+    assert.equal(partes.length, 1, 'debe llegar una parte del único dueño remoto');
+    assert.ok(partes[0]!.altasBytes.byteLength > 0);
+    assert.equal(motor.trazaFotogramaDuenos?.reunionesEvitadas, 1, JSON.stringify(motor.trazaFotogramaDuenos));
+    assert.equal(motor.instantanea().world.tick, 2);
   } finally { await motor.cerrar(); }
 });

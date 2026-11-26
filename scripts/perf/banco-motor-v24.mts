@@ -18,8 +18,8 @@
  *
  * El primer número de hilos es la referencia. Cada bloque comparte el mismo estado y alterna el
  * orden de ejecución. `resumen.json` aparece al pasar todas las comprobaciones. Cada JSONL
- * conserva los tiempos brutos. El libro se comprueba al salir del calentamiento y al final,
- * fuera de la medición. `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
+ * conserva los tiempos brutos. El libro y la carga por chunk se comprueban al salir del
+ * calentamiento y al final, fuera de la medición. `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
  * páginas del motor y `chunksArchivados` cuenta copias retenidas en RAM durante la corrida,
  * incluidas las de chunks que se hayan reactivado. En fixtures, el archivo SQLite previo
  * sigue accesible desde la copia. El banco no abre servidor, cinta ni GPU.
@@ -210,6 +210,9 @@ async function medir(e: Escena, hilos: number, salida: string) {
         migraciones: t.migraciones, intentos: t.intentos, rssMiB: process.memoryUsage.rss() / 2 ** 20 });
       if (paso % 120 === 0 || tick === inicio.intervalos.fin) archivar();
       if (paso === e.calentar || tick === inicio.intervalos.fin) {
+        const cargaChunk = motor.muestraCarga();
+        assert.ok(cargaChunk && cargaChunk.tick === tick, 'Falta la carga del frente confirmado');
+        anotar({ tipo: 'cargaChunk', ...cargaChunk });
         const { world, materia }: Instantanea = motor.instantanea();
         const d = duenoSi(mundo);
         const quimica = d?.quimica;

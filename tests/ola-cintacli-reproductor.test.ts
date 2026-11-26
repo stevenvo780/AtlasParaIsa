@@ -553,6 +553,55 @@ test('jumpToLiveEdge: vuelve a maxTick − liveMargin y reproduce', async () => 
   h.player.stop();
 });
 
+test('Presente actualiza la meta y aterriza en el último fotograma de la respuesta si la cinta crece', async () => {
+  const cinta = cintaSintetica({ coberturas: [{ nivel: 0, t0: 0, t1: 400 }], bloque: 100 });
+  const pedidos: DvrChunkRequest[] = [];
+  let crecer = false;
+  const player = new DvrPlayer({ metaPollMs: 0, fetchMeta: async () => cinta.meta(), fetchChunk: async req => {
+    pedidos.push(req);
+    if (crecer) { cinta.coberturas[0]!.t1 = 520; crecer = false; }
+    return cinta.chunk(req);
+  }, onFrame: () => undefined });
+  await player.start();
+  await player.seek(20);
+  cinta.coberturas[0]!.t1 = 480;
+  crecer = true;
+  await player.jumpToLiveEdge();
+  assert.equal(pedidos.at(-1)!.t, 450);
+  assert.equal(player.currentTick, 520);
+  assert.equal(player.atLiveEdge, true);
+  player.stop();
+});
+
+test('una búsqueda histórica posterior invalida la meta pendiente de Presente', async () => {
+  const cinta = cintaSintetica({ coberturas: [{ nivel: 0, t0: 0, t1: 400 }], bloque: 100 });
+  let liberar: (() => void) | undefined, esperar = false;
+  const player = new DvrPlayer({ metaPollMs: 0, fetchMeta: async () => {
+    if (esperar) await new Promise<void>(resolve => { liberar = resolve; });
+    return cinta.meta();
+  }, fetchChunk: async req => cinta.chunk(req), onFrame: () => undefined });
+  await player.start();
+  esperar = true;
+  const presente = player.jumpToLiveEdge();
+  await player.seek(40);
+  liberar!();
+  await presente;
+  assert.equal(player.currentTick, 40);
+  player.stop();
+});
+
+test('una cámara pendiente no devuelve al corte anterior tras pedir Presente', async () => {
+  const h = harness({ coberturas: [{ nivel: 0, t0: 0, t1: 480 }], bloque: 100 });
+  await h.player.start();
+  await h.player.seek(40);
+  h.player.setViewport({ x: 4, y: 3, width: 20, height: 10 });
+  await h.player.jumpToLiveEdge();
+  await h.player.flushViewport();
+  assert.equal(h.player.currentTick, 480);
+  assert.equal(h.player.atLiveEdge, true);
+  h.player.stop();
+});
+
 test('setViewport: se fusiona, pide x/y/w/h y refresca el trozo en currentTick sin discontinuidad', async () => {
   const h = harness();
   await h.player.start(); await h.player.seek(100_000);

@@ -144,3 +144,11 @@ Un par con el mismo SQLite y ocho dueños en la L3 grande midió seis pasos tras
 En una siembra de 16.000 habitantes con ocho dueños, seis pasos de calentamiento y doce medidos, la 5070 Ti confirmó 72 resultados aceptados por F2 y la 2060 confirmó 24. Cada dueño recibió doce resultados válidos. En la ventana agrupada no se registraron vencimientos ni fallos de canal. La media del paso pasó de 351 a 322 ms frente a CPU y el p95 de 417 a 358 ms. Los dos cierres conservaron el saldo exacto y registraron cero violaciones.
 
 En la misma escena, la asignación anterior de un dueño por tarjeta registró degradación de la 2060. El banco lo identifica en su veredicto de actividad. Los tiempos corresponden a una ventana por brazo en esta torre. La asignación agrupada sigue disponible como opción de laboratorio.
+
+En un corte reabierto de 64.000 habitantes, ocho dueños conservaron el saldo exacto y llegaron a 63.964 mortales activos. Con el mismo reparto agrupado, F2 aceptó las 64 tandas de los ocho pasos medidos. La media del paso pasó de 1,80 a 1,70 s y el p95 de 2,77 a 2,40 s. El p95 de percepción del dueño crítico pasó de 269 a 202 ms. La cantidad final de fauna y las huellas cambiaron entre trayectorias.
+
+### Corte durable de 256.000 habitantes
+
+`0f56262` sembró 256.000 vecinos en 896×560 y avanzó seis pasos con ocho dueños en la L3 grande. En los cuatro medidos, la mediana fue 4,34 s y el máximo 4,75 s. Al tick 6 guardó 255.963 personas, 21.995 animales y 2.002 páginas en un SQLite de 1,54 GB. Otro proceso verificó el archivo, el orden, los UID, 54.264.156 pesos Float64 y 229,7 MB de materia. Reabrió y avanzó al tick 7 con los ocho dueños activos y saldo exacto. El pico del grupo de control fue 22,74 GiB y su contador de fallos por falta de memoria quedó en cero.
+
+Los cuatro pasos medidos sumaron 17,6 s. Verificar huellas ocupó 69,3 s entre escritor y lector. Store escribió en 29,4 s y leyó en 22,4 s. La ventana corta mide capacidad de cálculo y recuperación con una población sembrada. La aceptación de crecimiento natural usa sus propias semillas y horizontes.

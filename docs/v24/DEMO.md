@@ -52,6 +52,10 @@ Una continuación del guardado del día 30 de la semilla 7 produjo el tramo 72.1
 
 El registro de 600 pasos conserva sus huecos iniciales. La exportación comienza en el último tramo continuo. El navegador muestra día 31 porque la trayectoria continúa desde el cierre del día 30.
 
+La colección portátil reúne este capítulo y «Cuando llega la lluvia» en una entrada de laboratorio. Comparte los archivos del cliente y mantiene una cinta por capítulo. Dos pestañas comprobaron que el reloj de una grabación conserva su posición mientras avanza la otra.
+
+El pavimento material puede tener valores positivos antes de alcanzar el umbral gráfico de la calzada. La ficha muestra el valor pequeño como empedrado incipiente y distingue entre un cero registrado y un dato ausente. La cinta histórica del primer empedrado conserva el incremento del contador. La coordenada del material depende de los campos que haya guardado su fotograma.
+
 ## Primer corte medido
 
 En `4deaee1`, las pruebas de laboratorio acreditaron bebida y alivio de sed con débito material, preferencia de ruta por piedra instalada y refugio bajo una cubierta que pierde su efecto al desgastarse o desmontarse. Las 11 pruebas focales y la compilación pasaron. Un recorrido autenticado en Chromium abrió Historia, pausó la cinta, buscó un corte anterior y volvió al presente con la ficha abierta en 1440 × 900 y 390 × 844.

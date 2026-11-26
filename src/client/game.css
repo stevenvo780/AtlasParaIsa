@@ -99,7 +99,8 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 @media(min-width:1101px){.dvr-engine{grid-column:4;grid-row:1}}
 @media(max-width:1100px) and (min-width:761px){.dvr-transport{grid-template-columns:auto 1fr auto;}.dvr-engine{grid-column:3;grid-row:1}.dvr-scrubber{grid-column:1/-1;grid-row:2}.dvr-badge:not(.dvr-escala){display:none}.dvr-escala{max-width:170px}}
 @media(max-width:760px){
-.dvr-bar{left:8px;right:8px;bottom:88px;width:auto;transform:none;padding:7px 9px}
+.game-shell.has-dvr{--base-cinta:88px}
+.dvr-bar{left:8px;right:8px;bottom:var(--base-cinta,88px);width:auto;transform:none;padding:7px 9px}
 .dvr-transport{grid-template-columns:auto minmax(0,1fr);gap:6px 8px}
 .dvr-controls{grid-column:1;grid-row:1}.dvr-engine{grid-column:2;grid-row:1}.dvr-speeds{grid-column:1/-1;grid-row:3;flex-wrap:wrap}.dvr-scrubber{grid-column:1/-1;grid-row:2}
 .dvr-button,.dvr-speed,.dvr-live{min-height:40px}.dvr-badge:not(.dvr-escala){display:none}
@@ -115,9 +116,27 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .dvr-hover:not(:empty){grid-column:1/-1;overflow:visible;overflow-wrap:anywhere}
 /* La ficha deja sitio a la cinta para leer una historia y controlar su reproducción a la vez. */
 .game-shell.has-dvr:has(.game-drawer:not([hidden]):not(.inspector-drawer)) .dvr-bar{display:none}
-.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .inspector-drawer{bottom:calc(98px + var(--alto-cinta,237px));max-height:min(60dvh,calc(100dvh - 220px - var(--alto-cinta,237px)))}
+.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) {
+  display: grid;
+  grid-template: minmax(0, 1fr) auto var(--base-cinta) / minmax(0, 1fr);
+}
+.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .dvr-bar {
+  position: relative;
+  inset: auto;
+  grid-row: 2;
+  margin-inline: 8px;
+}
+.game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .inspector-drawer {
+  position: relative;
+  inset: auto;
+  grid-row: 1;
+  align-self: end;
+  height: min(60dvh, max(0px, calc(100% - 132px)));
+  max-height: none;
+  margin: 0 10px 10px;
+}
 .dvr-speeds .dvr-speed{flex:1}
-.game-shell.has-dvr .world-coordinates,.game-shell.has-dvr .camera-controls,.game-shell.has-dvr .heat-legend{bottom:calc(98px + var(--alto-cinta,134px))}
+.game-shell.has-dvr .world-coordinates,.game-shell.has-dvr .camera-controls,.game-shell.has-dvr .heat-legend{bottom:calc(var(--base-cinta) + 10px + var(--alto-cinta,134px))}
 }
 @media(prefers-reduced-motion:reduce){.dvr-bar,.dvr-bar *{transition:none!important}}
 

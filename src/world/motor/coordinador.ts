@@ -15,7 +15,7 @@ import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import type { FuenteFotograma } from './fotograma.js';
 import type { RepartoVisible } from '../../shared/vistas-v23.js';
-import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
+import type { ChronicleEvent, FaseNombre, Gesture, GestureResult, Tile } from '../../shared/types.js';
 import type { LegacyRecord } from '../../shared/demography.js';
 import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
@@ -61,6 +61,7 @@ import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './
 import { RegistroContenido } from './registro.js';
 import { cabeceraDe, fundir, reunir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
 import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
+import { teselasVerificadasDe, vincularTeselasVerificadas, type TramoTeselasVerificadas } from './teselas-corte.js';
 
 /** Comprueba por igualdad estructural profunda (jamás por contadores ni longitudes) que las partes remotas
  * no divergieron de su tecnología inicial y que `fundir` reproducirá exactamente la tecnología confirmada. */
@@ -805,21 +806,24 @@ class MotorDuenos implements Motor {
 
   corteGuardadoSellado(): CorteGuardadoSellado | undefined {
     const piscina = this.#piscina;
-    if (!this.#config.faunaCorteDirecta || !piscina || !this.#canalesCorte || !paramsOf(this.#mundo).v23.guardadoCompleto) return undefined;
+    const prepararTeselas = this.#config.teselasCorteDirectas === true;
+    if ((!this.#config.faunaCorteDirecta && !prepararTeselas) || !piscina || !this.#canalesCorte
+      || !paramsOf(this.#mundo).v23.guardadoCompleto) return undefined;
+    const prepararFauna = this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true;
     const { tick, eventCounter } = this.#mundo, epoca = this.#epoca;
     return crearCorteGuardado(() => {
       if (this.#piscina !== piscina || this.#epoca !== epoca || this.#mundo.tick !== tick || this.#mundo.eventCounter !== eventCounter)
         throw new Error('El corte sellado pertenece a un paso anterior.');
-      return this.#tomarInstantanea('directa');
+      return this.#tomarInstantanea(prepararFauna, prepararTeselas);
     });
   }
 
-  #tomarInstantanea(prepararFauna: boolean | 'directa'): Instantanea {
+  #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false): Instantanea {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
       const paraConfirmar = this.#config.confirmarGuardadoVivo === true;
-      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna);
+      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna, prepararTeselas);
       recordSample(world);
       const materia = this.#d.instantaneaMateria(pendientes);
       if (paraConfirmar) this.#ultimaInstantanea = {
@@ -896,8 +900,8 @@ class MotorDuenos implements Motor {
     return { ...this.#trazaFotoDuenos, migrantesTransferidos };
   }
 
-  #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
-    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna);
+  #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false, prepararTeselas = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
+    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna, prepararTeselas);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
@@ -956,7 +960,19 @@ class MotorDuenos implements Motor {
         return comunidad.members.length > 0;
       });
     }
-    if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
+    if (prepararTeselas) {
+      const tramos: TramoTeselasVerificadas[] = [];
+      let desde = this.#mundo.tiles.length;
+      // Reunir conserva el orden de los dueños y añade al final todos los migrantes en vuelo.
+      for (const parte of partes) {
+        for (const tramo of teselasVerificadasDe(parte.tiles)?.tramos ?? [])
+          tramos.push({ desde: desde + tramo.desde, filas: tramo.filas });
+        desde += parte.tiles.length;
+      }
+      const modificadas = new Set<Tile>();
+      if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals, (_x, _y, tile) => modificadas.add(tile));
+      if (tramos.length) vincularTeselasVerificadas(world.tiles, { tramos, modificadas });
+    } else if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
     return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 

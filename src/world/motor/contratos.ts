@@ -544,6 +544,8 @@ export interface MotorConfig {
   faunaCortePreparada?: boolean;
   /** Laboratorio: elimina la duplicación de fauna remota en V8 y en las filas durables. */
   faunaCorteDirecta?: boolean;
+  /** Laboratorio: transfiere las teselas remotas como filas del formato durable del guardado. */
+  teselasCorteDirectas?: boolean;
   /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */

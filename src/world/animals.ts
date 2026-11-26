@@ -359,7 +359,7 @@ export function faunaCacheFiltered(prevTiles: Tile[], nextTiles: Tile[]): void {
  * P2: only tiles with fauna the previous call or this one are written; a cache keyed on the tiles array remembers which
  * (rebuilt, reading ground-truth `fauna`, whenever that array is replaced or grows — same trigger as the terrain index).
  * The optional observer is called once for each tile whose count or representative species changed. */
-export function syncFauna(tiles: Tile[], animals: Animal[], alCambiar?: (x: number, y: number) => void): void {
+export function syncFauna(tiles: Tile[], animals: Animal[], alCambiar?: (x: number, y: number, tile: Tile) => void): void {
   const counts = new Map<Cell, { count: number; species: AnimalSpecies; x: number; y: number }>();
   for (const animal of animals) {
     const p = cell(animal);
@@ -394,7 +394,7 @@ export function syncFauna(tiles: Tile[], animals: Animal[], alCambiar?: (x: numb
     const nextSpecies = count?.species;
     const cambiaEspecie = tile.species !== nextSpecies;
     if (cambiaEspecie) tile.species = nextSpecies;
-    if (cambiaFauna || cambiaEspecie) alCambiar?.(at.x, at.y);
+    if (cambiaFauna || cambiaEspecie) alCambiar?.(at.x, at.y, tile);
   };
   // Cada celda una sola vez: primero las ocupadas antes y luego las nuevas, el orden del antiguo
   // `new Set([...occupied, ...counts.keys()])` (cada celda escribe una tesela distinta).

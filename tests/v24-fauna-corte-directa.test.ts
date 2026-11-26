@@ -11,6 +11,7 @@ import { ORDEN, duenoSi, type Migrante } from '../src/world/motor/contexto.js';
 import { TipoIntento, unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { recibirFaunaDirecta } from '../src/world/motor/fauna-corte.js';
+import { CanalesCorte } from '../src/world/motor/mensajes-corte.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
 import { filaInstantanea } from './lib/store.js';
@@ -20,7 +21,7 @@ test('la recepción directa rechaza una clave repetida aunque venga escapada', (
   assert.throws(() => recibirFaunaDirecta([{ filas: 1, cuerpo }], 1), /claves repetidas/);
 });
 
-test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte a byte', async t => {
+for (const modo of ['fauna', 'teselas'] as const) test(`el corte sellado conserva ${modo} de dos dueños y una cesión en vuelo byte a byte`, async t => {
   const mundo = createWorld(42, parseParams({ v23: { ...escalon('duenos'), guardadoCompleto: true } }));
   const paginas = Object.values(mundo.chunks);
   const reparto = repartirPorTramos(paginas.map(p => p.cx), paginas.map(p => p.cy), 2);
@@ -33,7 +34,7 @@ test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte
   animalRemoto.target = { x: parcelaRemota.x, y: parcelaRemota.y };
   syncFauna(mundo.tiles, mundo.animals);
   const motor = crearMotor(mundo, { ...unSoloDueno(42), hilos: 2,
-    instantaneaTransferible: true, faunaCorteDirecta: true });
+    instantaneaTransferible: true, faunaCorteDirecta: modo === 'fauna', teselasCorteDirectas: modo === 'teselas' });
   const anterior = new Store(':memory:', { snapshotPackedPeople: true });
   const directa = new Store(':memory:', { snapshotPackedPeople: true });
   t.after(async () => { await motor.cerrar(); anterior.close(); directa.close(); });
@@ -53,13 +54,34 @@ test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte
     .map(i => deserialize(i.bytes!) as Migrante).find(m => m.tipo === 'chunk' && m.key === clave);
   assert.ok(migrante?.tipo === 'chunk' && migrante.animals.length > 0);
 
+  if (modo === 'teselas') {
+    // Una posición canónica cambia durante la reunión. Las filas previas de ambas celdas quedarían obsoletas.
+    const recibir = CanalesCorte.prototype.recibir;
+    t.mock.method(CanalesCorte.prototype, 'recibir', function (this: CanalesCorte, ...args: Parameters<typeof recibir>) {
+      const partes = recibir.apply(this, args);
+      const parte = partes[0]!;
+      const animal = parte.animals.find(a => a.species !== 'fish');
+      assert.ok(animal);
+      const destino = parte.tiles.find(tile => tile.terrain !== 'water' && !tile.fauna
+        && (tile.x >> 4) === (animal.x >> 4) && (tile.y >> 4) === (animal.y >> 4));
+      assert.ok(destino);
+      animal.x = destino.x;
+      animal.y = destino.y;
+      return partes;
+    });
+  }
   anterior.guardar(motor.instantanea());
   const sello = motor.corteGuardadoSellado?.();
   assert.ok(sello);
   const guardado = directa.guardarCorteSellado(sello, [], []);
   assert.deepEqual(filaInstantanea(directa), filaInstantanea(anterior));
-  assert.ok(directa.snapshotFaunaCorteStats.reused > 0);
-  assert.equal(directa.snapshotFaunaCorteStats.compared, 0);
+  if (modo === 'fauna') {
+    assert.ok(directa.snapshotFaunaCorteStats.reused > 0);
+    assert.equal(directa.snapshotFaunaCorteStats.compared, 0);
+  } else {
+    assert.ok(directa.snapshotTeselasCorteStats.reused > 0);
+    assert.ok(directa.snapshotTeselasCorteStats.recoded > 0);
+  }
   const almacen = (store: Store) => store.db.prepare('SELECT digest, body FROM snapshot_parts ORDER BY digest').all();
   assert.deepEqual(almacen(directa), almacen(anterior));
   for (const a of migrante.animals) assert.ok(guardado.world.animals.some(fila => fila.uid === a.uid));

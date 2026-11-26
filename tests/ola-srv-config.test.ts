@@ -44,6 +44,12 @@ test('la emisión del fotograma por dueño debe solicitarse al arrancar el servi
   assert.equal(motorConfig(7, config).emisionFotogramaDuenos, undefined);
 });
 
+test('la preparación durable de teselas remotas se activa expresamente', () => {
+  const config = { CARTA_MOTOR_HILOS: '8', CARTA_CORTE_TRANSFERIBLE: '1' };
+  assert.equal(motorConfig(7, config).teselasCorteDirectas, undefined);
+  assert.equal(motorConfig(7, { ...config, CARTA_TESELAS_CORTE_DIRECTAS: '1' }).teselasCorteDirectas, true);
+});
+
 test('el motor rechaza un despacho inválido antes de arrancar', () => {
   for (const hilos of ['0', '-1', '1.5', '1e2', '9007199254740992']) {
     assert.throws(() => motorConfig(7, { CARTA_MOTOR_HILOS: hilos }), /CARTA_MOTOR_HILOS/);

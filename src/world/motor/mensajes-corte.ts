@@ -5,9 +5,10 @@ import { prepararFaunaCorte, prepararFaunaDirecta, recibirFaunaDirecta, validarF
   type BloqueFaunaCorte } from './fauna-corte.js';
 import type { ParteFotoDueno } from './fotograma-dueno.js';
 import { parteCorteDe, type ParteMundo } from './reunir.js';
+import { prepararTeselasDirectas, recibirTeselasDirectas, type BloqueTeselasCorte } from './teselas-corte.js';
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
-const SOLICITUD = 0, PREPARAR_FAUNA = 1;
+const SOLICITUD = 0, PREPARAR_FAUNA = 1, PREPARAR_TESELAS = 2;
 const SIN_FAUNA = 0n, FAUNA_SOMBRA = 1n, FAUNA_DIRECTA = 2n;
 
 interface ParteCorte {
@@ -18,6 +19,12 @@ interface ParteCorte {
   bytes: Uint8Array;
   fauna?: readonly BloqueFaunaCorte[];
   faunaSustituida?: { cantidad: number } | null;
+  teselas?: readonly BloqueTeselasCorte[];
+  teselasSustituidas?: { cantidad: number } | null;
+}
+
+interface DiagnosticoTeselasCorte {
+  bytesV8: number; v8Ms: number; bytesTuplas: number; tuplasMs: number; duenosTuplas: number; duenosV8: number;
 }
 
 interface FotoTransferida {
@@ -42,19 +49,25 @@ export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: Parte
 export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World): void {
   const contenido = parteCorteDe(mundo);
   const modo = Atomics.load(solicitud, PREPARAR_FAUNA);
-  const directa = modo === FAUNA_DIRECTA ? prepararFaunaDirecta(contenido) : undefined;
-  const bytes = serialize(directa ? { ...contenido, animals: [] } : contenido), buffer = bytes.buffer;
+  const fauna = modo === FAUNA_DIRECTA ? prepararFaunaDirecta(contenido) : undefined;
+  const pideTeselas = Atomics.load(solicitud, PREPARAR_TESELAS) === 1n;
+  const teselas = pideTeselas ? prepararTeselasDirectas(contenido) : undefined;
+  const reducido = fauna || teselas ? { ...contenido, ...(fauna && { animals: [] }), ...(teselas && { tiles: [] }) } : contenido;
+  const bytes = serialize(reducido), buffer = bytes.buffer;
   if (!(buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength)
     throw new Error('V8 no entregó un bloque de corte transferible entero.');
   const parte: ParteCorte = { solicitud: Atomics.load(solicitud, SOLICITUD), epoca, tick: mundo.tick, dueno, bytes };
   const transferibles = [buffer];
-  if (modo === FAUNA_DIRECTA) parte.faunaSustituida = directa ? { cantidad: directa.reduce((n, bloque) => n + bloque.filas, 0) } : null;
-  if (directa) parte.fauna = directa;
+  if (modo === FAUNA_DIRECTA) parte.faunaSustituida = fauna ? { cantidad: fauna.reduce((n, bloque) => n + bloque.filas, 0) } : null;
+  if (fauna) parte.fauna = fauna;
   if (modo === FAUNA_SOMBRA) parte.fauna = prepararFaunaCorte(contenido.animals);
-  if (parte.fauna) {
-    for (const { cuerpo } of parte.fauna) {
+  if (pideTeselas) parte.teselasSustituidas = teselas ? { cantidad: teselas.reduce((n, bloque) => n + bloque.filas, 0) } : null;
+  if (teselas) parte.teselas = teselas;
+  for (const bloques of [parte.fauna, parte.teselas]) {
+    if (!bloques) continue;
+    for (const { cuerpo } of bloques) {
       if (!(cuerpo.buffer instanceof ArrayBuffer) || cuerpo.byteOffset !== 0 || cuerpo.byteLength !== cuerpo.buffer.byteLength)
-        throw new Error('El bloque de fauna debe ocupar su propio ArrayBuffer.');
+        throw new Error('Cada bloque del corte debe ocupar su propio ArrayBuffer.');
       transferibles.push(cuerpo.buffer);
     }
   }
@@ -64,9 +77,14 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
 
 /** Un canal por dueño remoto, nuevo en cada apertura. Solo se elige F0 antes de abrir la piscina. */
 export class CanalesCorte {
-  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(2 * BigUint64Array.BYTES_PER_ELEMENT));
+  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(3 * BigUint64Array.BYTES_PER_ELEMENT));
   private readonly entradas: MessagePort[] = [];
   readonly puertosRemotos: MessagePort[] = [];
+  private ultimaRecepcionTeselas?: DiagnosticoTeselasCorte;
+
+  get diagnosticoTeselasCorte(): Readonly<DiagnosticoTeselasCorte> | undefined {
+    return this.ultimaRecepcionTeselas;
+  }
 
   private constructor() {}
 
@@ -86,22 +104,50 @@ export class CanalesCorte {
     }
   }
 
-  pedir(prepararFauna: boolean | 'directa' = false): bigint {
+  pedir(prepararFauna: boolean | 'directa' = false, prepararTeselas = false): bigint {
     Atomics.store(this.solicitud, PREPARAR_FAUNA, prepararFauna === 'directa' ? FAUNA_DIRECTA : prepararFauna ? FAUNA_SOMBRA : SIN_FAUNA);
+    Atomics.store(this.solicitud, PREPARAR_TESELAS, prepararTeselas ? 1n : 0n);
     return BigInt.asUintN(64, Atomics.add(this.solicitud, SOLICITUD, 1n) + 1n);
   }
 
   /** La barrera de reunir ya terminó. Una respuesta llega antes de que su dueño indique que terminó. */
   recibir(solicitud: bigint, epoca: number, tick: number): ParteMundo[] {
     const modo = Atomics.load(this.solicitud, PREPARAR_FAUNA);
+    const pideTeselas = Atomics.load(this.solicitud, PREPARAR_TESELAS) === 1n;
+    const datos = this.ultimaRecepcionTeselas = pideTeselas
+      ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
     return this.entradas.map((puerto, i) => {
       const dueno = i + 1;
       const parte = receiveMessageOnPort(puerto)?.message as ParteCorte | undefined;
       if (!parte || parte.dueno !== dueno || parte.solicitud !== solicitud || parte.epoca !== epoca || parte.tick !== tick
         || !(parte.bytes instanceof Uint8Array) || parte.bytes.byteLength === 0 || receiveMessageOnPort(puerto) !== undefined)
         throw new Error(`Instantánea incompleta o incoherente para el dueño ${dueno}.`);
+      const inicioV8 = datos ? performance.now() : 0;
       const contenido = deserialize(parte.bytes) as ParteMundo;
       if (contenido.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
+      if (datos) {
+        datos.bytesV8 += parte.bytes.byteLength;
+        datos.v8Ms += performance.now() - inicioV8;
+        const sustituidas = parte.teselasSustituidas;
+        try {
+          if (!Array.isArray(contenido.tiles)) throw new Error('Falta el array de teselas en V8.');
+          if (sustituidas === null && !Object.hasOwn(parte, 'teselas')) datos.duenosV8++;
+          else {
+            if (!sustituidas || typeof sustituidas !== 'object' || contenido.tiles.length !== 0
+              || Object.keys(contenido.tiles).length !== 0 || !Array.isArray(parte.teselas))
+              throw new Error('Sobre de teselas directas incoherente.');
+            const inicioTuplas = performance.now();
+            contenido.tiles = recibirTeselasDirectas(parte.teselas, sustituidas.cantidad);
+            datos.tuplasMs += performance.now() - inicioTuplas;
+            datos.bytesTuplas += parte.teselas.reduce((n, bloque) => n + bloque.cuerpo.byteLength, 0);
+            datos.duenosTuplas++;
+          }
+        } catch (error) {
+          throw new Error(`Teselas directas inválidas para el dueño ${dueno}.`, { cause: error });
+        }
+      } else if (Object.hasOwn(parte, 'teselasSustituidas') || Object.hasOwn(parte, 'teselas')) {
+        throw new Error(`Modo de teselas incoherente para el dueño ${dueno}.`);
+      }
       if (modo === FAUNA_DIRECTA) {
         const sustituida = parte.faunaSustituida;
         try {

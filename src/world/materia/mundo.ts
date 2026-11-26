@@ -622,7 +622,9 @@ export class MundoMaterial {
   private readonly gasesLibres: SustanciaId[];
   private readonly humos: SustanciaId[];
   private ids = new Uint32Array(64);
-  private indices = new Int32Array(0);
+  private indicesLab = new Int32Array(0);
+  /** Las páginas que empiezan en la celda 0 y no tienen huecos se indexan directamente. */
+  private readonly indicesActivos = new Map<number, Int32Array>();
   private semilla = 0;
   private hojas = 0;
   private fN = 0;
@@ -812,13 +814,30 @@ export class MundoMaterial {
 
   /** Pone al día el índice celda → tesela de las teselas [desde, hasta). */
   private indexar(desde: number, hasta: number): void {
-    this.indices = agrandar(this.indices, 256 * this.np);
-    for (let i = desde; i < hasta; i++) this.indices[this.celda[i]!] = i + 1;
+    if (this.lab) {
+      this.indicesLab = agrandar(this.indicesLab, 256 * this.np);
+      for (let i = desde; i < hasta; i++) this.indicesLab[this.celda[i]!] = i + 1;
+      return;
+    }
+    if (desde >= hasta) return;
+    const p = this.paginaDe(desde), base = p * 256;
+    let i = desde;
+    while (i < hasta && this.celda[i] === base + i - desde) i++;
+    if (i === hasta) { this.indicesActivos.delete(p); return; }
+    const indice = new Int32Array(256);
+    for (let j = desde; j < hasta; j++) indice[this.celda[j]! & 255] = j + 1;
+    this.indicesActivos.set(p, indice);
   }
 
-  /** Una página dormida conserva el índice para reactivarse, aunque otro dueño esté usando sus lotes. */
+  /** La tesela de una celda material activa en este dueño, o −1 si no hay ninguna. */
   indiceDe(celda: number): number {
-    return celda >= 0 && celda < this.indices.length && this.activa[celda >> 8] === 1 ? this.indices[celda]! - 1 : -1;
+    const p = celda >> 8;
+    if (celda < 0 || this.activa[p] !== 1) return -1;
+    if (this.lab) return (this.indicesLab[celda] ?? 0) - 1;
+    const local = celda & 255, indice = this.indicesActivos.get(p);
+    if (indice) return indice[local]! - 1;
+    const i = this.inicio[p]! + local;
+    return i < this.fin[p]! && this.celda[i] === celda ? i : -1;
   }
 
   /** ¿Tiene este mundo la página p con sus lotes (activa o dormida)? */
@@ -922,7 +941,11 @@ export class MundoMaterial {
   }
 
   /** La página deja de dar pasos; sus lotes siguen en la arena y en el libro. */
-  dormir(p: number): void { if (p < this.np) this.activa[p] = 0; }
+  dormir(p: number): void {
+    if (p >= this.np) return;
+    this.activa[p] = 0;
+    this.indicesActivos.delete(p);
+  }
 
   /** Vuelve a dar pasos una página dormida. Si otro dueño la cedió, la roca latente vigente llega con sus teselas. */
   despertar(p: number, tiles: readonly Tile[], cedido: boolean): boolean {
@@ -936,6 +959,7 @@ export class MundoMaterial {
       const escala = this.params.escalas.piedra;
       for (let j = 0; j < tiles.length; j++) this.latente[i0 + j] = rocaLatenteDe(tiles[j]!, escala);
     }
+    if (!this.lab && this.activa[p] !== 1) this.indexar(i0, this.fin[p]!);
     this.activa[p] = 1;
     return true;
   }
@@ -943,8 +967,9 @@ export class MundoMaterial {
   /** Olvida la página p (sus lotes no se tocan): su ranura de chunk pasó a otro sitio del mundo o a otro dueño. */
   olvidar(p: number): void {
     if (p >= this.np) return;
-    for (let i = this.inicio[p]!; i < this.fin[p]!; i++) this.indices[this.celda[i]!] = 0;
-    this.activa[p] = 0; this.inicio[p] = 0; this.fin[p] = 0; this.aire[p] = -1; this.mar[p] = -1; this.cielo[p] = -1;
+    if (this.lab) for (let i = this.inicio[p]!; i < this.fin[p]!; i++) this.indicesLab[this.celda[i]!] = 0;
+    this.dormir(p);
+    this.inicio[p] = 0; this.fin[p] = 0; this.aire[p] = -1; this.mar[p] = -1; this.cielo[p] = -1;
   }
 
   // ── Forzamiento y utilidades ──

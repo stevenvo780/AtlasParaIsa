@@ -82,6 +82,41 @@ test('el guardado completo admite madera y piedra por encima de la escala de sus
   assert.equal(extraerEscalar(restaurado, celdaRestaurada, 'piedra', 20), 20);
 });
 
+test('las teselas se indexan al activar páginas con huecos y al recibirlas de otro dueño', async t => {
+  const mundo = createWorld(7, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true } });
+  const motor = crearMotor(mundo, unSoloDueno(7));
+  t.after(() => motor.cerrar());
+  motor.cargar({ world: mundo, materia: null }, 0);
+  const c = ctxSi(mundo) as CtxLeyMateria, p = c.chunks[0]!;
+  const x = c.terreno.paginaX[p]! * 16, y = c.terreno.paginaY[p]! * 16;
+  const tiles = mundo.tiles.filter(t => t.x >= x && t.x < x + 16 && t.y >= y && t.y < y + 16)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  assert.equal(tiles.length, 256);
+  const m = MundoMaterial.sobre({
+    arena: c.materia, quimica: c.quimica, libro: c.libro, hilo: c.hilo,
+    azar: () => c.azar(), vecina: () => -1, exportar: () => {},
+  });
+  const parcial = [tiles[255]!, tiles[0]!, tiles[31]!];
+  const base = p * 256;
+  assert.ok(m.adoptar(p, parcial));
+  assert.equal(m.indiceDe(base + 255), m.inicio[p]);
+  assert.equal(m.indiceDe(base), m.inicio[p]! + 1);
+  assert.equal(m.indiceDe(base + 31), m.inicio[p]! + 2);
+  assert.equal(m.indiceDe(base + 33), -1);
+  m.dormir(p);
+  assert.equal(m.indiceDe(base), -1);
+  const cedidas = parcial.map((tile, index) => ({ ...tile, rocaLatente: 100 + index }));
+  assert.ok(m.despertar(p, cedidas, true));
+  assert.equal(m.latente[m.indiceDe(base + 255)], 100);
+  assert.equal(m.latente[m.indiceDe(base + 31)], 102);
+  assert.equal(m.indiceDe(base + 33), -1);
+  m.olvidar(p);
+  assert.equal(m.indiceDe(base + 31), -1);
+  assert.ok(m.adoptar(p, tiles));
+  assert.equal(m.indiceDe(base + 31), m.inicio[p]! + 31);
+  assert.equal(m.indiceDe(base + 255), m.inicio[p]! + 255);
+});
+
 test('los traslados de agua al mundo escalar se ajustan al presupuesto en cuantos enteros', async (t) => {
   const mundo = createWorld(7, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true } });
   const motor = crearMotor(mundo, unSoloDueno(7));

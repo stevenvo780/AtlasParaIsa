@@ -44,7 +44,7 @@ import {
   AVISO, CTL, CTL_DUENO, Dueno, ORDEN, RESERVA_DESBORDE, RESERVA_LOTES, celdaDueno, duenoDe, duenoSi,
   type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
-import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type TelemetriaMotor } from './contratos.js';
+import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import { leyesActivas } from './leyes.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
@@ -71,6 +71,11 @@ const telemetriaVacia = (hilos: number): TelemetriaMotor => ({
   faseMs: { F0: 0, eco: 0, percibir: 0, actuar: 0, aplicar: 0 }, esperaBarreraMs: 0, ocupacion: new Float32Array(hilos),
   gpuMs: [], gpuBytes: [], gpuEstado: [], intentos: 0, rechazados: 0, migraciones: 0, fotogramasSaltados: 0,
 });
+
+function medirTramo(piscina: Piscina<DatosDueno>, tramo: PerfilTramoMotor['tramo']): PerfilTramoMotor {
+  const { tiempoTotalMs, esperaBarreraMs } = piscina.diagnostico();
+  return { tramo, paredMs: tiempoTotalMs, esperaCoordinadorMs: esperaBarreraMs };
+}
 
 function cargaChunk(chunk: ChunkId, px: number, py: number, dueno: Hilo): CargaChunk {
   return { chunk, px, py, dueno, personas: 0, fauna: 0, personasVencen: 0, faunaVence: 0 };
@@ -102,7 +107,7 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
   // 'auto' toma los hilos que el proceso puede usar; elegir entre T y ¾T por Hz medido es de m7 (`hilosAuto`).
   const hilos = config.hilos === 'auto' ? (paramsOf(mundo).v23.duenos ? availableParallelism() : 1) : config.hilos;
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
-  if (hilos === 1) return new MotorUnico(mundo);
+  if (hilos === 1) return new MotorUnico(mundo, config.medirPaso === true);
   if (!paramsOf(mundo).v23.duenos) throw new Error('Un motor de varios dueños exige v23.duenos (y con él todas las leyes de la V23).');
   return new MotorDuenos(mundo, config, hilos);
 }
@@ -117,8 +122,10 @@ class MotorUnico implements Motor {
   #epoca = 0;
   readonly #t = telemetriaVacia(1);
   readonly #medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
+  readonly #medirPaso: boolean;
+  #perfilPaso: PerfilPasoMotor | undefined;
 
-  constructor(mundo: World) { this.#mundo = mundo; }
+  constructor(mundo: World, medirPaso: boolean) { this.#mundo = mundo; this.#medirPaso = medirPaso; }
 
   vista(): World { return this.#mundo; }
 
@@ -141,6 +148,11 @@ class MotorUnico implements Motor {
       : de('encuentros') + de('demografia') + de('comunidades') + de('reproduccion'), ALFA_TELEMETRIA);
     t.ocupacion[0] = 1;
     if (d) { t.intentos = d.cuentas[0]!; t.rechazados = d.cuentas[1]!; t.migraciones = d.cuentas[2]!; t.fotogramasSaltados = d.fotogramasPerdidos; }
+    if (this.#medirPaso && v23?.F0 !== undefined) this.#perfilPaso = {
+      tick: t.tick, epoca: this.#epoca, paredMs: ms, F0Ms: v23.F0, cierreMs: null, tramos: [],
+      fasesPorDuenoMs: [{ F1: v23.F1!, eco: v23.eco!, F2: v23.F2!, F3F4: v23['F3-F4']!, F3: null, F4: null,
+        F5: v23.F5!, F6: v23.F6! }],
+    };
     return { tick: this.#mundo.tick, resultados };
   }
 
@@ -153,6 +165,7 @@ class MotorUnico implements Motor {
     cerrarMateriaGpu(this.#mundo);
     this.#mundo = i.world;
     this.#epoca = epoca;
+    this.#perfilPaso = undefined;
     const activo = leyesActivas(paramsOf(i.world).v23).length > 0 || this.#enlace !== null;
     if (!activo && !i.materia) return;
     const d = duenoDe(i.world, i.materia?.sustancias);
@@ -176,6 +189,10 @@ class MotorUnico implements Motor {
 
   telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
 
+  muestraPerfilPaso(): PerfilPasoMotor | undefined {
+    if (this.#perfilPaso?.tick === this.#mundo.tick) return this.#perfilPaso;
+  }
+
   reparto(): RepartoVisible | undefined {
     const d = duenoSi(this.#mundo);
     if (!d) return;
@@ -192,6 +209,7 @@ class MotorUnico implements Motor {
   }
 
   cerrar(): Promise<void> {
+    this.#perfilPaso = undefined;
     cerrarMateriaGpu(this.#mundo);
     return Promise.resolve();
   }
@@ -226,6 +244,8 @@ class MotorDuenos implements Motor {
   #buzones!: Buzones;
   #contadores!: Contadores;
   #control!: Float64Array;
+  #perfilActuar: Float64Array<SharedArrayBuffer> | undefined;
+  #perfilPaso: PerfilPasoMotor | undefined;
   #terreno!: TerrenoPercepcion;
   #tabla!: TablaOrganismosSoA;
   #cabecera!: World;
@@ -266,6 +286,7 @@ class MotorDuenos implements Motor {
     if (this.#brokerConfigurado) this.#materiaGpuDeArranque ??= materiaGpu;
     void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
+    this.#perfilPaso = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
     this.#activacionesPendientes = 0;
@@ -294,6 +315,8 @@ class MotorDuenos implements Motor {
     for (const ley of leyesActivas(params.v23)) for (const [nombre, tipo, ancho] of ley.columnas ?? []) tabla.columna(nombre, tipo, ancho);
     const buzones = this.#buzones = new Buzones(hilos), libros = crearLibros(hilos), registro = new RegistroContenido(hilos);
     const control = this.#control = new Float64Array(new SharedArrayBuffer((CTL.porDueno + hilos * CTL_DUENO.celdas) * Float64Array.BYTES_PER_ELEMENT));
+    const perfilActuar = this.#perfilActuar = this.#config.medirPaso
+      ? new Float64Array(new SharedArrayBuffer(hilos * Float64Array.BYTES_PER_ELEMENT)) : undefined;
     control[CTL.tick] = m.tick; control[CTL.epoca] = this.#epoca; control[CTL.fotoRanura] = -1;
     const azar = azarDeHilo(this.#config.semilla, 0);
     const conMateria = params.v23.materia;
@@ -335,12 +358,12 @@ class MotorDuenos implements Motor {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: lotes?.compartir() ?? null, desborde: desborde?.compartir() ?? null,
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
-      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, brokersGpuPorDueno, conMateriaCargada: materia !== null,
+      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
     };
     try {
       const piscina = this.#piscina = new Piscina<DatosDueno>({
         hilos, datos, moduleURL: new URL('./dueno-worker.js', import.meta.url), exportName: crearDueno.name,
-        crear: (hilo, dd) => hilo === 0 ? tramo => faseDueno(d, tramo, control, dd.conMateriaCargada) : crearDueno(hilo, dd),
+        crear: (hilo, dd) => hilo === 0 ? tramo => faseDueno(d, tramo, control, dd.conMateriaCargada, dd.perfilActuar) : crearDueno(hilo, dd),
       });
       buzones.fijarFase(1);
       piscina.ejecutar(TRAMO.cargar);
@@ -360,6 +383,7 @@ class MotorDuenos implements Motor {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) this.#arrancar(null);
     const m = this.#mundo, d = this.#d, buzones = this.#buzones, control = this.#control, piscina = this.#piscina!;
+    const perfilActuar = this.#perfilActuar, tramos: PerfilTramoMotor[] | undefined = perfilActuar && [];
     const inicio = performance.now();
     try {
       m.tick++;
@@ -388,10 +412,16 @@ class MotorDuenos implements Motor {
       control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
+      tramos?.push(medirTramo(piscina, 'percibir'));
       this.#activacionesPendientes = 0;
       buzones.fijarFase(3); piscina.ejecutar(TRAMO.actuar);
+      tramos?.push(medirTramo(piscina, 'actuar'));
       buzones.fijarFase(5); piscina.ejecutar(TRAMO.aplicar);
+      tramos?.push(medirTramo(piscina, 'aplicar'));
+      const f5 = tramos && Array.from({ length: this.#hilos }, (_, h) => control[celdaDueno(h, CTL_DUENO.msAplicar)]!);
       buzones.fijarFase(6); piscina.ejecutar(TRAMO.publicar);
+      tramos?.push(medirTramo(piscina, 'publicar'));
+      const desdeCierre = tramos && performance.now();
       this.#tabla.publicar(m.tick);
       // Cierre en serie: lo que los dueños mandaron al coordinador en el tick (la crónica en orden, altas, resultados).
       this.#recoger();
@@ -399,7 +429,17 @@ class MotorDuenos implements Motor {
       if (d.cerrarFoto()) this.#t.fotogramasSaltados++;
       resultados.push(...this.#resultados.splice(0));
       resultados.sort((a, b) => a.order - b.order);
-      this.#medir(performance.now() - inicio, f0 - inicio);
+      const fin = performance.now();
+      this.#medir(fin - inicio, f0 - inicio);
+      if (tramos && perfilActuar && f5 && desdeCierre !== undefined) this.#perfilPaso = {
+        tick: m.tick, epoca: this.#epoca, paredMs: fin - inicio, F0Ms: f0 - inicio, cierreMs: fin - desdeCierre, tramos,
+        fasesPorDuenoMs: f5.map((F5, h) => {
+          const F3F4 = control[celdaDueno(h, CTL_DUENO.msActuar)]!, F3 = perfilActuar[h]!;
+          return { F1: control[celdaDueno(h, CTL_DUENO.msF1)]!, eco: control[celdaDueno(h, CTL_DUENO.msEco)]!,
+            F2: control[celdaDueno(h, CTL_DUENO.msPercibir)]!, F3F4, F3, F4: F3F4 - F3, F5,
+            F6: control[celdaDueno(h, CTL_DUENO.msAplicar)]! - F5 };
+        }),
+      };
       return { tick: m.tick, resultados };
     } catch (error) { throw this.#fallo(error); }
   }
@@ -635,6 +675,11 @@ class MotorDuenos implements Motor {
         .map(({ px, py, chunk }) => [px, py, this.#terreno.duenoChunk[chunk]!]),
       msPorHilo: Array.from({ length: this.#hilos }, (_, h) => this.#control[celdaDueno(h, CTL_DUENO.msTick)]!),
     };
+  }
+
+  muestraPerfilPaso(): PerfilPasoMotor | undefined {
+    const perfil = this.#perfilPaso;
+    if (this.#piscina && !this.#fatal && perfil?.tick === this.#d.frente.tick && perfil.epoca === this.#epoca) return perfil;
   }
 
   muestraCarga(): MuestraCargaMotor | undefined {

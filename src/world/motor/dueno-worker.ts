@@ -62,6 +62,8 @@ export interface DatosDueno {
   brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
+  /** Solo en el perfil de laboratorio. Una duración por dueño entre el inicio de actuación y F4. */
+  perfilActuar?: Float64Array<SharedArrayBuffer>;
 }
 
 /** Azar del hilo: mulberry32 sembrado de (semilla, hilo), o de entropía real si no hay semilla. */
@@ -105,16 +107,16 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;
   const control = piezas.control!;
-  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada);
+  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.perfilActuar);
 }
 
 /** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
  * del mundo, como el tick de un dueño (`stepWorld`), por si una ley usa una consulta espacial de las de siempre. */
-export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false): void {
-  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada));
+export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false, perfilActuar?: Float64Array<SharedArrayBuffer>): void {
+  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, perfilActuar));
 }
 
-function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean): void {
+function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, perfilActuar?: Float64Array<SharedArrayBuffer>): void {
   const m = d.mundo, celda = (campo: number): number => celdaDueno(d.hilo, campo), inicio = performance.now();
   switch (tramo) {
     case TRAMO.cargar:
@@ -153,6 +155,7 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
     case TRAMO.actuar: {
       // En F3 la fauna aún no se ha movido. F4 escribe sus coordenadas directamente.
       conRejillaFauna(m, () => d.gancho('F3'));
+      if (perfilActuar) perfilActuar[d.hilo] = performance.now() - inicio;
       d.gancho('F4');
       const ms = performance.now() - inicio;
       control[celda(CTL_DUENO.msActuar)] = ms;

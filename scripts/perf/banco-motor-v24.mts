@@ -5,7 +5,7 @@
  *
  * Configuración de ejemplo (en el banco de escala, elige ventanas más largas):
  * {
- *   "hilos": [1, 2], "repeticiones": 1,
+ *   "hilos": [1, 2], "repeticiones": 1, "perfilPaso": true,
  *   "escenas": [{"id":"smoke", "semilla":7, "siembra":7, "n":20,
  *                "zona":"0,0,48,32", "calentar":1, "medir":3}]
  * }
@@ -14,6 +14,7 @@
  *  {"id":"gpu0-cpu2","hilos":2,"gpu":[0]},{"id":"gpu1-cpu2","hilos":2,"gpu":[1]},
  *  {"id":"dual-cpu2","hilos":2,"gpu":[0,1]}]
  * Con una GPU, ambos dueños comparten el corredor. Con dos, cada dueño usa la GPU de su índice.
+ * Las siembras con CUDA requieren al menos un tick de calentamiento para abrir todos los motores antes de medir.
  * `"rutaGpu":"porCoste"` añade un brazo adaptativo. Cada GPU del brazo fijo debe entregar
  * resultados aceptados por F2 durante la ventana. El adaptativo puede elegir CPU si F2
  * aceptó resultados de esa GPU durante la calibración.
@@ -27,15 +28,17 @@
  * Las huellas de cierre permiten detectar divergencias entre brazos y repeticiones.
  *
  * El primer brazo es la referencia. Cada bloque comparte el mismo estado y alterna el
- * orden de ejecución. `resumen.json` identifica los brazos completos, sin arranque o sin
- * actividad acreditada. Las aceleraciones requieren un brazo y una referencia completos. Cada JSONL
- * conserva los tiempos brutos. El libro y la carga por chunk se comprueban al salir del
+ * orden de ejecución. `resumen.json` distingue el arranque, la actividad y la degradación de cada brazo CUDA.
+ * Las aceleraciones requieren un brazo y una referencia completos. Cada JSONL conserva los tiempos brutos.
+ * `perfilPaso` añade fases crudas y esperas del coordinador. Sus lecturas forman parte del tiempo medido.
+ * El libro y la carga por chunk se comprueban al salir del
  * calentamiento y al final, fuera de la medición. `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
  * páginas del motor y `chunksArchivados` cuenta copias retenidas en RAM durante la corrida,
  * incluidas las de chunks que se hayan reactivado. En fixtures, el archivo SQLite previo
  * sigue accesible desde la copia. La medición se limita al motor, incluido el corredor cuando
  * se solicita. Cada GPU registra confirmaciones del canal, sus bytes y tiempo, resultados
  * aceptados por F2, rechazos y desvíos a CPU. El tiempo CUDA incluye copias y ejecución en el servidor.
+ * `cpuProcesoMs` y `maxRssMiB` corresponden al proceso Node y sus hilos.
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -57,7 +60,7 @@ import { comprobarLeyes, crearComprobador } from '../../src/world/invariantes.js
 import { codificarCheckpoint, decodificarCheckpoint } from '../../src/world/materia/checkpoint.js';
 import { enlazarCtx } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
-import type { Instantanea, Motor, TelemetriaBrokerGpu, TelemetriaDispositivoBrokerGpu, TelemetriaMotor } from '../../src/world/motor/contratos.js';
+import type { Instantanea, Motor, PerfilPasoMotor, TelemetriaBrokerGpu, TelemetriaDispositivoBrokerGpu, TelemetriaMotor } from '../../src/world/motor/contratos.js';
 import { crearMotor } from '../../src/world/motor/coordinador.js';
 import { paramsOf, setParams } from '../../src/world/params.js';
 import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
@@ -66,7 +69,7 @@ type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolea
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
 interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste' }
 interface ArranqueDispositivo { dispositivo: number; disponible: boolean }
-interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[] }
+interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[]; perfilPaso?: boolean }
 interface Integridad {
   tick: number; mortalesVivos: number; faunaResidente: number; paginasActivas: number; chunksArchivados: number;
   digestoMundo: string; digestoMateria: string;
@@ -93,6 +96,8 @@ function validacionConfiguracion(config: Config): Brazo[] {
   assert.equal(new Set(brazos.map(b => `${b.hilos}:${b.gpu.join(',')}:${b.rutaGpu ?? ''}`)).size, brazos.length,
     'Configuraciones de brazos repetidas');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
+  assert.ok(config.perfilPaso === undefined || typeof config.perfilPaso === 'boolean', 'perfilPaso debe ser booleano');
+  const conCuda = brazos.some(brazo => brazo.gpu.length > 0);
   assert.ok(Array.isArray(config.escenas) && config.escenas.length > 0, 'Faltan escenas');
   for (const e of config.escenas) {
     assert.ok(e && typeof e.id === 'string' && esId.test(e.id), 'ID de escena inválido');
@@ -105,6 +110,7 @@ function validacionConfiguracion(config: Config): Brazo[] {
       assert.ok(entero(e.semilla, 0) && entero(e.siembra, 0) && entero(e.n, 1), `Siembra inválida en ${e.id}`);
       assert.ok(typeof e.zona === 'string', `Falta la zona de ${e.id}`);
       zona(e.zona);
+      if (conCuda) assert.ok(entero(e.calentar, 1), `La siembra ${e.id} requiere calentamiento para comparar CUDA`);
     }
     assert.ok(entero(e.calentar, 0) && entero(e.medir, 1) && entero(e.calentar + e.medir, 1), `Ventana inválida en ${e.id}`);
   }
@@ -124,6 +130,23 @@ function tiempos(muestras: readonly number[]) {
   const orden = [...muestras].sort((a, b) => a - b);
   const pct = (p: number) => orden[Math.ceil(p * orden.length) - 1]!;
   return { media: orden.reduce((suma, ms) => suma + ms, 0) / orden.length, p50: pct(.5), p95: pct(.95), p99: pct(.99) };
+}
+
+function resumenPerfilPaso(perfiles: readonly PerfilPasoMotor[]) {
+  const primero = perfiles[0]!;
+  const fase = (leer: (perfil: PerfilPasoMotor) => number | null) => {
+    const muestras = perfiles.map(leer);
+    return muestras.every(ms => ms !== null) ? tiempos(muestras) : null;
+  };
+  const fasesDueno = ['F1', 'eco', 'F2', 'F3F4', 'F3', 'F4', 'F5', 'F6'] as const;
+  return {
+    paredMs: fase(p => p.paredMs), F0Ms: fase(p => p.F0Ms), cierreMs: fase(p => p.cierreMs),
+    tramos: primero.tramos.map(({ tramo }, i) => ({ tramo,
+      paredMs: fase(p => p.tramos[i]!.paredMs), esperaCoordinadorMs: fase(p => p.tramos[i]!.esperaCoordinadorMs),
+    })),
+    fasesPorDuenoMs: primero.fasesPorDuenoMs.map((_, dueno) =>
+      Object.fromEntries(fasesDueno.map(nombre => [nombre, fase(p => p.fasesPorDuenoMs[dueno]![nombre])]))),
+  };
 }
 
 function deltaGpu(fin: TelemetriaBrokerGpu, inicio?: TelemetriaBrokerGpu): TelemetriaBrokerGpu {
@@ -147,19 +170,22 @@ function deltaBrokersGpu(fin: TelemetriaDispositivoBrokerGpu[] = [], inicio: Tel
   }));
 }
 
-function sinAcreditarGpu(brazo: Brazo, ventana: TelemetriaDispositivoBrokerGpu[] = [], calentamiento: TelemetriaDispositivoBrokerGpu[] = []) {
+export function acreditarGpu(brazo: Brazo, ventana: TelemetriaDispositivoBrokerGpu[] = [], calentamiento: TelemetriaDispositivoBrokerGpu[] = []) {
   assert.deepEqual(ventana.map(d => d.dispositivo), brazo.gpu, 'Telemetría CUDA de otros dispositivos');
   const adaptativo = brazo.rutaGpu === 'porCoste';
   const acepto = (d?: TelemetriaBrokerGpu): boolean =>
     !!d && d.aceptadas.some(n => n > 0) && d.subidaConfirmadaBytes > 0 && d.bajadaConfirmadaBytes > 0;
-  return ventana.filter(({ detalle, dispositivo }, i) => {
+  const sinGpu: number[] = [], gpuDegradadas: number[] = [];
+  ventana.forEach(({ detalle, dispositivo, lista }, i) => {
     const antes = calentamiento.find(tarjeta => tarjeta.dispositivo === dispositivo)?.detalle;
     assert.ok(detalle && (detalle.cpuPorCoste !== undefined) === adaptativo, `Faltan contadores de GPU${dispositivo}`);
     if (brazo.gpu.length === 2) {
       assert.ok(!detalle.completadas[1 - i] && !antes?.completadas[1 - i], `GPU${dispositivo} sirvió otro dueño`);
     }
-    return !acepto(detalle) && !(adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes));
-  }).map(tarjeta => tarjeta.dispositivo);
+    if (!lista || detalle.erroresCanal > 0 || detalle.cpuSinCanal > 0) gpuDegradadas.push(dispositivo);
+    if (!acepto(detalle) && !(adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes))) sinGpu.push(dispositivo);
+  });
+  return { estado: gpuDegradadas.length ? 'gpu-degradada' : sinGpu.length ? 'sin-actividad-gpu' : 'completo', sinGpu, gpuDegradadas };
 }
 
 interface Preparada {
@@ -215,7 +241,7 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
   } catch (error) { cerrar(); throw error; }
 }
 
-async function medir(e: Escena, brazo: Brazo, salida: string) {
+async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolean) {
   const { hilos, gpu } = brazo;
   const { mundo, siembra, fixture, carga, cerrar } = await preparar(e, dirname(salida));
   let fd: number | undefined;
@@ -238,14 +264,15 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
     const descriptor = fd = openSync(salida, 'wx', 0o600);
     const anotar = (fila: object) => writeSync(descriptor, JSON.stringify(fila) + '\n');
     const pared: number[] = [], cpuProceso: number[] = [], barrera: number[] = [];
-    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, commit: git('rev-parse', 'HEAD'), node: process.version,
+    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, perfilPaso, commit: git('rev-parse', 'HEAD'), node: process.version,
       digestoInicial, ...siembra, fixture, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
       interruptores: params.v23, motor: params.motor, carga: loadavg(), planificador: planificador() };
     anotar(inicio);
     const biblioteca = process.env.COMPUTE_NVRTC;
     const conNvrtc = !!biblioteca && existsSync(biblioteca);
     if (!gpu.length || conNvrtc) {
-      motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed, medirBrokerGpu: gpu.length > 0 });
+      motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
+        medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso });
       if (carga) motor.cargar(carga.instantanea, carga.epoca);
     }
     if (gpu.length) {
@@ -288,6 +315,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       }
       const medido = paso > e.calentar;
       const barreraEmaMs = hilos > 1 ? t.esperaBarreraMs : null;
+      const perfil = perfilPaso ? motor.muestraPerfilPaso() : undefined;
+      if (perfilPaso) assert.ok(perfil?.tick === tick && perfil.epoca === (carga?.epoca ?? 0), 'Perfil de otro tick o época');
       const gpuTick = t.gpuBrokers && deltaBrokersGpu(t.gpuBrokers, anteriorGpu);
       anteriorGpu = t.gpuBrokers;
       if (paso === e.calentar) inicialGpu = anteriorGpu;
@@ -299,6 +328,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       anotar({ tipo: 'tick', tick, medido, paredMs, cpuMs, barreraEmaMs, fasesEmaMs: t.faseMs,
         paginasActivas: reparto.paginas.length, duenoMaxMs: hilos > 1 ? Math.max(...reparto.msPorHilo) : null,
         migraciones: t.migraciones, intentos: t.intentos, rssMiB: process.memoryUsage.rss() / 2 ** 20,
+        ...(perfil && { perfilPaso: perfil }),
         ...(gpu.length && { gpuEstado: t.gpuEstado, gpuBrokers: gpuTick }) });
       if (paso % 120 === 0 || tick === inicio.intervalos.fin) archivar();
       if (paso === e.calentar || tick === inicio.intervalos.fin) {
@@ -326,10 +356,10 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
     }
     assert.ok(integridad?.tick === inicio.intervalos.fin && conPaginas.size > 0, 'Falta evidencia de cierre');
     const gpuVentana = anteriorGpu && deltaBrokersGpu(anteriorGpu, inicialGpu);
-    const sinGpu = sinAcreditarGpu(brazo, gpuVentana, inicialGpu);
+    const { estado, sinGpu, gpuDegradadas } = acreditarGpu(brazo, gpuVentana, inicialGpu);
     const latencia = tiempos(pared);
-    anotar({ tipo: 'fin', estado: sinGpu.length ? 'sin-actividad-gpu' : 'completo', muestras: pared.length,
-      ...(sinGpu.length && { sinGpu }), carga: loadavg(), planificador: planificador(),
+    anotar({ tipo: 'fin', estado, muestras: pared.length, ...(sinGpu.length && { sinGpu }),
+      ...(gpuDegradadas.length && { gpuDegradadas }), carga: loadavg(), planificador: planificador(),
       paredMs: latencia, cpuProcesoMs: tiempos(cpuProceso), barreraEmaMs: barrera.length ? tiempos(barrera) : null,
       hz: 1000 / latencia.media, maxRssMiB: process.resourceUsage().maxRSS / 1024,
       duenosConPaginas: [...conPaginas].sort((a, b) => a - b), ...integridad,
@@ -348,6 +378,7 @@ function medirBloques(rutaConfig: string, salida: string) {
   const contenido = readFileSync(rutaConfig);
   const config = JSON.parse(contenido.toString('utf8')) as Config;
   const brazos = validacionConfiguracion(config);
+  const perfilPaso = config.perfilPaso === true;
   const commit = git('rev-parse', 'HEAD');
   const diferencia = git('diff', '--binary', 'HEAD', '--', 'src', 'scripts', 'package.json', 'package-lock.json');
   const script = fileURLToPath(import.meta.url);
@@ -363,7 +394,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       const nombre = `${escena.id}.r${repeticion + 1}.${brazo.id}.jsonl`;
       const ruta = join(salida, nombre);
       const e = 'fixture' in escena ? { ...escena, fixture: { ...escena.fixture, sqlite: resolve(dirname(rutaConfig), escena.fixture.sqlite) } } : escena;
-      const hijo = spawnSync(process.execPath, ['--import', 'tsx', script, '--medir', JSON.stringify(e), JSON.stringify(brazo), ruta],
+      const hijo = spawnSync(process.execPath, ['--import', 'tsx', script, '--medir', JSON.stringify(e), JSON.stringify(brazo), ruta, perfilPaso ? '1' : '0'],
         { cwd: repo, env: { ...process.env, CARTA_PERCEPCION_DUENOS: gpu.length ? '1' : '0',
           CARTA_PERCEPCION_COSTE_DUENOS: brazo.rutaGpu === 'porCoste' ? '1' : '0' }, stdio: ['ignore', 'inherit', 'inherit'] });
       if (hijo.error) throw hijo.error;
@@ -371,6 +402,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       const filas = readFileSync(ruta, 'utf8').trimEnd().split('\n').map(linea => JSON.parse(linea));
       const [inicio] = filas, fin = filas.at(-1);
       assert.ok(inicio?.tipo === 'inicio' && inicio.commit === commit && inicio.hilos === hilos, `Cabecera inválida en ${nombre}`);
+      assert.equal(inicio.perfilPaso, perfilPaso, `Modo de perfil distinto en ${nombre}`);
       assert.deepEqual(inicio.escena, e, `Escena distinta en ${nombre}`);
       assert.deepEqual(inicio.brazo, brazo, `Brazo distinto en ${nombre}`);
       assert.deepEqual(inicio.motor.gpu, gpu, `Dispositivo distinto en ${nombre}`);
@@ -404,10 +436,11 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(fin.paredMs, tiempos(medidas.map(fila => fila.paredMs)), `Percentiles inconsistentes en ${nombre}`);
       assert.match(fin.digestoMundo, esSha256, `Falta la huella final del mundo en ${nombre}`);
       assert.match(fin.digestoMateria, esSha256, `Falta la huella final de materia en ${nombre}`);
-      const sinGpu = sinAcreditarGpu(brazo, fin.gpuBrokers, fin.gpuBrokersCalentamiento);
-      assert.equal(fin.estado, sinGpu.length ? 'sin-actividad-gpu' : 'completo');
+      const { estado, sinGpu, gpuDegradadas } = acreditarGpu(brazo, fin.gpuBrokers, fin.gpuBrokersCalentamiento);
+      assert.equal(fin.estado, estado);
       assert.deepEqual(fin.sinGpu ?? [], sinGpu);
-      corridas.push(corrida);
+      assert.deepEqual(fin.gpuDegradadas ?? [], gpuDegradadas);
+      corridas.push(perfilPaso ? { ...corrida, perfilPaso: resumenPerfilPaso(medidas.map(fila => fila.perfilPaso)) } : corrida);
     }
     const referencia = corridas.find(corrida => corrida.brazo === brazos[0]!.id && corrida.estado === 'completo');
     bloques.push({ escena: escena.id, repeticion: repeticion + 1, digestoInicial: origen!.digesto, tickInicial: origen!.tick,
@@ -422,16 +455,18 @@ function medirBloques(rutaConfig: string, salida: string) {
   assert.equal(git('diff', '--binary', 'HEAD', '--', 'src', 'scripts', 'package.json', 'package-lock.json'), diferencia,
     'Cambió el código durante la medición');
   assert.equal(sha256(readFileSync(script)), instrumentoSha256, 'Cambió el instrumento durante la medición');
-  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 2, commit, configSha256: sha256(contenido),
+  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 3, commit, perfilPaso, configSha256: sha256(contenido),
     instrumentoSha256, diffSha256: sha256(Buffer.from(diferencia)), arbolLimpio: git('status', '--porcelain', '--', 'src', 'scripts',
       'package.json', 'package-lock.json') === '', config, bloques }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 }
 
-const args = process.argv.slice(2);
-if (args[0] === '--medir') {
-  assert.equal(args.length, 4);
-  await medir(JSON.parse(args[1]!), JSON.parse(args[2]!), args[3]!);
-} else {
-  assert.equal(args.length, 2, 'Uso: node --import tsx scripts/perf/banco-motor-v24.mts ESCENAS.json DIRECTORIO_NUEVO');
-  medirBloques(resolve(args[0]!), resolve(args[1]!));
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
+  const args = process.argv.slice(2);
+  if (args[0] === '--medir') {
+    assert.ok(args.length === 5 && (args[4] === '0' || args[4] === '1'));
+    await medir(JSON.parse(args[1]!), JSON.parse(args[2]!), args[3]!, args[4] === '1');
+  } else {
+    assert.equal(args.length, 2, 'Uso: node --import tsx scripts/perf/banco-motor-v24.mts ESCENAS.json DIRECTORIO_NUEVO');
+    medirBloques(resolve(args[0]!), resolve(args[1]!));
+  }
 }

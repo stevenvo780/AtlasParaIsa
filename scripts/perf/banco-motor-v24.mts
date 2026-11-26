@@ -21,6 +21,8 @@
  * `"fixture":{"sqlite":"copia.sqlite","sha256":"<64 hex>"}`. La ruta relativa se resuelve
  * desde ESCENAS.json. El guardado debe contener materia, la cabeza vigente y la ley de dueños.
  * Cada brazo carga una copia desechable y conserva sus parámetros salvo hilos y GPU.
+ * `rebalanceo:false` en una escena ignora el coste de pared al reasignar páginas.
+ * Las huellas de cierre permiten detectar divergencias entre brazos y repeticiones.
  *
  * El primer brazo es la referencia. Cada bloque comparte el mismo estado y alterna el
  * orden de ejecución. `resumen.json` aparece al pasar todas las comprobaciones. Cada JSONL
@@ -56,19 +58,20 @@ import { crearMotor } from '../../src/world/motor/coordinador.js';
 import { paramsOf, setParams } from '../../src/world/params.js';
 import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
 
-type Escena = { id: string; calentar: number; medir: number } & (
+type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolean } & (
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
 interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste' }
 interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[] }
 interface Integridad {
   tick: number; mortalesVivos: number; faunaResidente: number; paginasActivas: number; chunksArchivados: number;
+  digestoMundo: string; digestoMateria: string;
   conservacion: true; violaciones: ReturnType<typeof comprobarLeyes>;
 }
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const git = (...args: string[]): string => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
 const entero = (n: number, minimo: number): boolean => Number.isSafeInteger(n) && n >= minimo;
-const sha256 = (contenido: Buffer): string => createHash('sha256').update(contenido).digest('hex');
+const sha256 = (contenido: Uint8Array): string => createHash('sha256').update(contenido).digest('hex');
 const esSha256 = /^[a-f0-9]{64}$/;
 const esId = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -90,6 +93,7 @@ function validacionConfiguracion(config: Config): Brazo[] {
   assert.ok(Array.isArray(config.escenas) && config.escenas.length > 0, 'Faltan escenas');
   for (const e of config.escenas) {
     assert.ok(e && typeof e.id === 'string' && esId.test(e.id), 'ID de escena inválido');
+    assert.ok(e.rebalanceo === undefined || typeof e.rebalanceo === 'boolean', `Rebalanceo inválido en ${e.id}`);
     if ('fixture' in e) {
       assert.ok(typeof e.fixture?.sqlite === 'string' && e.fixture.sqlite.length > 0 &&
         typeof e.fixture.sha256 === 'string' && esSha256.test(e.fixture.sha256) &&
@@ -202,7 +206,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
   try {
     assertWorld(mundo, RULES_VERSION, worldContext(mundo));
     const digestoInicial = digestoCanonico(mundo);
-    const base = paramsOf(mundo), params = { ...base, motor: { ...base.motor, hilos, gpu } };
+    const base = paramsOf(mundo), params = { ...base, motor: { ...base.motor, hilos, gpu },
+      v23: { ...base.v23, rebalanceo: e.rebalanceo ?? base.v23.rebalanceo } };
     if (gpu.length) assert.ok(!params.v23.materiaGpu, 'El corredor de percepción exige materia en CPU');
     setParams(mundo, params);
     const cargarGuardado = worldContext(mundo).loadChunk;
@@ -276,13 +281,15 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
         const { enviados, recibidos, pendientes } = d.balanceIntentos();
         assert.equal(enviados, recibidos + pendientes, 'Saldo de intentos');
         assertWorld(world, RULES_VERSION, worldContext(mundo));
-        decodificarCheckpoint(codificarCheckpoint(materia), id => quimica.sustancia(id));
+        const codificado = codificarCheckpoint(materia);
+        decodificarCheckpoint(codificado, id => quimica.sustancia(id));
         if (world !== mundo) enlazarCtx(world, d);
         const violaciones: Integridad['violaciones'] = [...revisar(world), ...comprobarLeyes(mundo, d.leyes)];
         assert.equal(violaciones.length, 0, JSON.stringify(violaciones));
         integridad = { tick, mortalesVivos: world.people.filter(p => p.role === 'neighbor').length,
           faunaResidente: world.animals.length, paginasActivas: reparto.paginas.length,
-          chunksArchivados: archivo.size, conservacion: true, violaciones };
+          chunksArchivados: archivo.size, digestoMundo: digestoCanonico(world), digestoMateria: sha256(codificado),
+          conservacion: true, violaciones };
         anotar({ tipo: 'integridad', ...integridad });
       }
     }
@@ -335,6 +342,8 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(inicio.escena, e, `Escena distinta en ${nombre}`);
       assert.deepEqual(inicio.brazo, brazo, `Brazo distinto en ${nombre}`);
       assert.deepEqual(inicio.motor.gpu, gpu, `Dispositivo distinto en ${nombre}`);
+      if (escena.rebalanceo !== undefined) assert.equal(inicio.interruptores.rebalanceo, escena.rebalanceo,
+        `Rebalanceo distinto en ${nombre}`);
       assert.match(inicio.digestoInicial, esSha256, `Huella inicial inválida en ${nombre}`);
       const tickInicial = inicio.intervalos?.inicio;
       assert.ok(entero(tickInicial, 0) && inicio.intervalos.fin === tickInicial + escena.calentar + escena.medir,
@@ -351,6 +360,8 @@ function medirBloques(rutaConfig: string, salida: string) {
         Array.isArray(fin.violaciones) && fin.violaciones.length === 0, `Cierre inválido en ${nombre}`);
       assert.ok(medidas.every((fila, i) => fila.tick === tickInicial + escena.calentar + i + 1), `Ventana incompleta en ${nombre}`);
       assert.deepEqual(fin.paredMs, tiempos(medidas.map(fila => fila.paredMs)), `Percentiles inconsistentes en ${nombre}`);
+      assert.match(fin.digestoMundo, esSha256, `Falta la huella final del mundo en ${nombre}`);
+      assert.match(fin.digestoMateria, esSha256, `Falta la huella final de materia en ${nombre}`);
       acreditarGpu(brazo, fin.gpuBroker, fin.gpuBrokerCalentamiento);
       corridas.push({ brazo: brazo.id, hilos, gpu, rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin });
     }

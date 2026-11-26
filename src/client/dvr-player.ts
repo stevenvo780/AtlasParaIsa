@@ -357,6 +357,7 @@ export class DvrPlayer {
   /** Un fotograma atrás (-1) o adelante (+1). Pausa si estaba reproduciendo. */
   step(delta: -1 | 1): Promise<void> {
     if (!this.enabled || !this.started) return Promise.resolve();
+    this.tramo = null;
     if (this.playing) { this.playing = false; this.notify(); }
     if (delta > 0) return this.adelantar();
     // Varios clics seguidos se encadenan: cada uno parte del fotograma en que dejó el anterior.
@@ -374,10 +375,9 @@ export class DvrPlayer {
     const tramo = { desde: inicio, hasta: fin };
     this.tramo = tramo;
     this.playing = false;
-    const ok = await this.jump(inicio, 'seek', 1);
+    const ok = await this.jump(inicio, 'seek', 1, tramo);
     if (this.tramo !== tramo) return; // Otro salto o tramo sustituyó a este mientras llegaba el corte.
     if (!ok) { this.tramo = null; this.notify(); return; }
-    if (this.currentTick > fin) { this.tramo = null; this.options.onAviso?.('No hay cinta en ese tramo.'); this.notify(); return; }
     this.playing = true; this.lastNow = null; this.notify();
   }
 
@@ -670,7 +670,7 @@ export class DvrPlayer {
    * de la base del trozo (el fotograma clave ≤ t) y, si hay deltas hasta `t`, se aplican de una vez para aterrizar en
    * el último fotograma ≤ t en vez de reproducir el tramo desde el fotograma clave. Devuelve si pintó algo.
    */
-  private async jump(t: number, reason: DvrFrameReason, direccion: number): Promise<boolean> {
+  private async jump(t: number, reason: DvrFrameReason, direccion: number, tramo?: Readonly<{ desde: number; hasta: number }>): Promise<boolean> {
     const target = this.fueraDeLaguna(clamp(Math.floor(t), this.minTick, Math.max(this.minTick, this.maxTick)), direccion);
     const gen = ++this.generacion;
     this.aborter?.abort(); this.cargando = null;
@@ -687,7 +687,12 @@ export class DvrPlayer {
       this.notify(); return false;
     }
     let aterriza = 0;
-    while (aterriza + 1 < list.length && list[aterriza + 1]!.tick <= target) aterriza++;
+    if (tramo) {
+      aterriza = list.findIndex(entry => entry.tick >= target);
+      if (aterriza < 0 || list[aterriza]!.tick > tramo.hasta) {
+        this.options.onAviso?.('No hay cinta en ese tramo.'); this.notify(); return false;
+      }
+    } else while (aterriza + 1 < list.length && list[aterriza + 1]!.tick <= target) aterriza++;
     let frame: WorldView | null = null;
     try { for (let i = 0; i <= aterriza; i++) frame = this.decode(list[i]!).frame; }
     catch (error) { this.error = describe(error); this.frames = []; this.notify(); return false; }

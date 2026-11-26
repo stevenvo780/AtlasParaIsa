@@ -145,6 +145,21 @@ test('una grabación abre pausada al inicio y su botón final muestra el último
   h.player.stop();
 });
 
+test('un tramo entre muestras solo muestra fotogramas dentro de los dos límites', async () => {
+  const h = harness({ coberturas: [{ nivel: 0, t0: 0, t1: 80 }], abrirEnInicio: true });
+  await h.player.start();
+  h.emitted.length = 0;
+  await h.player.reproducirTramo(17, 23);
+  await h.run(1000);
+  assert.deepEqual(h.emitted.map(e => e.tick), [20]);
+  assert.equal(h.player.playing, false);
+  h.emitted.length = 0;
+  await h.player.reproducirTramo(21, 23);
+  assert.deepEqual(h.emitted, []);
+  assert.equal(h.player.playing, false);
+  h.player.stop();
+});
+
 test('start: sin marcador cae en el presente, pide nivel auto y aterriza en el último fotograma ≤ t', async () => {
   const h = harness();
   assert.equal(await h.player.start(), true);

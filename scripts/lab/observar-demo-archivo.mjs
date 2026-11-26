@@ -34,9 +34,19 @@ try {
       await pagina.locator('#population-list .population-person').nth(2).click();
       await pagina.locator('#inspector-tab-story').click();
       await pagina.locator('.dvr-tramo summary').click();
+      const transporte = pagina.locator('.dvr-transport');
+      await rango.press('PageUp');
+      await expect.poll(async () => Number(await rango.inputValue())).toBeGreaterThan(meta.t0);
+      await expect(transporte).not.toHaveAttribute('data-loading', 'true');
+      const inicio = Number(await rango.inputValue());
       await pagina.getByRole('button', { name: 'Marcar inicio' }).click();
       await pagina.getByRole('button', { name: 'Último fotograma' }).click();
       await expect(rango).toHaveValue(String(meta.t1));
+      await rango.press('PageDown');
+      await expect.poll(async () => Number(await rango.inputValue())).toBeLessThan(meta.t1);
+      await expect(transporte).not.toHaveAttribute('data-loading', 'true');
+      const fin = Number(await rango.inputValue());
+      assert.ok(inicio < fin);
       await pagina.getByRole('button', { name: 'Marcar final' }).click();
       if (width < 500) {
         await expect.poll(() => pagina.evaluate(() =>
@@ -48,13 +58,18 @@ try {
       await pagina.getByRole('button', { name: 'Ver tramo' }).click();
       const reproduciendo = pagina.locator('[data-dvr-play]');
       await expect(reproduciendo).toHaveAttribute('aria-pressed', 'true');
-      await expect(rango).toHaveValue(String(meta.t1), { timeout: 20_000 });
+      const comienzo = Number(await rango.inputValue());
+      assert.ok(comienzo >= inicio && comienzo < fin);
+      await expect(rango).toHaveValue(String(fin), { timeout: 20_000 });
       await expect(reproduciendo).toHaveAttribute('aria-pressed', 'false');
+      await pagina.evaluate(() => localStorage.setItem('carta:last-visit-v2', 'visita-previa'));
+      assert.equal(await pagina.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await pagina.goto(new URL('/api/session', url).href);
+      assert.equal(await pagina.evaluate(() => localStorage.getItem('carta:last-visit-v2')), 'visita-previa');
       assert.deepEqual(sockets, []);
       assert.deepEqual(errores, []);
       assert.deepEqual([...rutas].sort(), ['GET /api/cinta/chunk', 'GET /api/cinta/meta', 'GET /api/session']);
-      assert.equal(await pagina.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-      comprobadas.push({ nombre, width, height, inicio: meta.t0, fin: meta.t1, pausaEnFin: true, peticiones: [...rutas].sort() });
+      comprobadas.push({ nombre, width, height, inicioGrabacion: meta.t0, finGrabacion: meta.t1, inicio, fin, pausaEnFin: true, peticiones: [...rutas].sort() });
     } finally { await context.close(); }
   }
 } finally { await browser.close(); }

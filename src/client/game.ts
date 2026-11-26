@@ -137,7 +137,7 @@ const DIRECTORY_ROWS = 300;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
 function saveVisit(): void {
-  if (!world) return;
+  if (!world || sessionFlags.archiveMode) return;
   try {
     saveWorldVisit(localStorage, world);
     const counters = contadoresDe(world); if (counters) saveVisitCounters(localStorage, world, counters);
@@ -181,8 +181,9 @@ function startupSettings(): GraphicsSettings {
 }
 
 function enterWorld(flags: SessionFlags = {}): void {
+  clean();
   sessionFlags = flags;
-  clean(); lastVisit = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
+  lastVisit = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
@@ -755,8 +756,10 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   const firmaCapas = [...capasV23Disponibles(next)].join(); if (firmaCapas !== capasV23Firma) { capasV23Firma = firmaCapas; renderLayers(); }
   acumularCronica(next.events);
   if (first) {
-    try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
-    lastVisit = readVisit(next);
+    if (!sessionFlags.archiveMode) {
+      try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
+      lastVisit = readVisit(next);
+    }
     const p = next.people.find(p => p.role === 'S') ?? next.people[0]; if (p) { activePersonId = p.id; selected = { kind: 'person', id: p.id }; landscape?.select(selected); }
     if (!mobile()) drawer('inspector', true);
     if (lastVisit !== null) returnCard(next, lastVisit);

@@ -24,7 +24,7 @@ export function progresoConstruccion(world: World, persona: Person): number {
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
 
-function specialty(person: Person): string {
+export function specialty(person: Person): string {
   const names: Record<string, string> = { explore: 'exploración', eat: 'recolección de alimento', forage: 'cosecha y provisión', drink: 'búsqueda de agua', hunt: 'caza', rest: 'recuperación', share: 'cuidado', gather: 'materiales', farm: 'cultivo', build: 'construcción', cooperate: 'cooperación' };
   const practiced = Object.entries(person.activity).filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
   return practiced.length ? practiced.map(([action]) => names[action] ?? action).join(' · ') : 'Descubriendo sus aptitudes';
@@ -48,7 +48,7 @@ export function projectPaving(paved: number | undefined): number | undefined {
 /** T036(h): las cantidades (existencias, huellas, fauna) no viajan cuando valen 0; el cliente las lee
  * con `?? 0`. Las magnitudes del terreno viajan siempre, porque ahí un cero es un dato. Se asignan
  * directamente (sin objetos ni spreads intermedios por tesela). */
-function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast?: ResidentFastAccess): Tile {
+export function projectTile(t: ReturnType<typeof projectTerrain>['tiles'][number], fast?: ResidentFastAccess): Tile {
   const cell = fast ? fast.cellOf(t as Tile) : -1;
   const paved = projectPaving(t.paved);
   if (cell >= 0 && fast) {

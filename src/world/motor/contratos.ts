@@ -417,6 +417,8 @@ export interface Motor {
   muestraCarga(): MuestraCargaMotor | undefined;
   /** Tiempos sin suavizar del último paso confirmado, disponibles con `medirPaso`. */
   muestraPerfilPaso(): PerfilPasoMotor | undefined;
+  /** Laboratorio: contadores de la emisión de vistas lentas de fotograma por dueño (solo `MotorDuenos`). */
+  readonly trazaFotogramaDuenos?: Readonly<import('./fotograma-dueno.js').TrazaFotogramaDuenos>;
   cerrar(): Promise<void>;
 }
 
@@ -540,6 +542,12 @@ export interface MotorConfig {
   medirPaso?: boolean;
   /** Laboratorio: confirma guardados rutinarios sobre los dueños vivos sin recrear piscina ni arenas (apagada por defecto). */
   confirmarGuardadoVivo?: boolean;
+  /** Laboratorio: emite vistas lentas del fotograma binario desde cada dueño en F6 sin reunir el mundo completo (apagada por defecto). */
+  emisionFotogramaDuenos?: boolean;
+  /** Laboratorio: tope de bytes pre-serializados por dueño y fotograma antes de caer al fallback reunido. */
+  limiteBytesFotoDueno?: number;
+  /** Laboratorio: tope combinado de bytes de dueños por fotograma antes de caer al fallback reunido. */
+  limiteBytesFotoTotal?: number;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de
    * dueños), con el máximo que fija el proceso; el reloj nunca altera las leyes. Lo suministra srv (`motorConfig`). */
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };

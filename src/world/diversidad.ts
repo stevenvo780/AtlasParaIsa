@@ -203,6 +203,74 @@ function meanCosineDistance(vectors: Float64Array, n: number, dim: number): numb
  * ambas. Calculada en O(P · d) mediante identidad exacta de norma L2 (ver
  * `meanCosineDistance`). 0 ó 1 habitante → {0,0,0}, sin excepción.
  */
+/** Contribución aditiva de un subconjunto de habitantes a `indiceDiversidad` (para reducir entre dueños). */
+export interface ParcialDiversidad {
+  readonly total: number;
+  readonly nonZero: number;
+  readonly zero: number;
+  readonly sumNormSq: number;
+  readonly sumVec: Float64Array;
+  readonly counts: Int32Array;
+  readonly order: readonly number[];
+}
+
+/** Calcula la contribución aditiva de `people` a `indiceDiversidad`, en el mismo orden FP64 que el recorrido global. */
+export function parcialDiversidad(people: readonly Person[]): ParcialDiversidad {
+  const sumVec = new Float64Array(CONDUCTA_DIMENSIONS);
+  const counts = new Int32Array(ACTIONS.length + 1), order: number[] = [];
+  const vector = new Float64Array(CONDUCTA_DIMENSIONS);
+  let nonZero = 0, zero = 0, sumNormSq = 0;
+  for (let p = 0; p < people.length; p++) {
+    vector.fill(0);
+    const dominant = fillConducta(people[p]!, vector, 0);
+    const label = dominant >= 0 ? dominant : ACTIONS.length;
+    if (counts[label]!++ === 0) order.push(label);
+    let normSq = 0;
+    for (let k = 0; k < CONDUCTA_DIMENSIONS; k++) { const x = vector[k]!; normSq += x * x; }
+    if (normSq === 0) { zero++; continue; }
+    nonZero++;
+    const invNorm = 1 / Math.sqrt(normSq);
+    let unitNormSq = 0;
+    for (let k = 0; k < CONDUCTA_DIMENSIONS; k++) {
+      const u = vector[k]! * invNorm;
+      sumVec[k]! += u;
+      unitNormSq += u * u;
+    }
+    sumNormSq += unitNormSq;
+  }
+  return { total: people.length, nonZero, zero, sumNormSq, sumVec, counts, order };
+}
+
+/** Reduce los parciales de varios dueños (en orden determinista 0..H-1) al mismo índice que `indiceDiversidad`. */
+export function reducirDiversidad(parciales: readonly ParcialDiversidad[]): { conducta: number; oficios: number; total: number } {
+  let n = 0, nonZero = 0, zero = 0, sumNormSq = 0;
+  const sumVec = new Float64Array(CONDUCTA_DIMENSIONS);
+  const counts = new Int32Array(ACTIONS.length + 1), order: number[] = [];
+  for (const parte of parciales) {
+    n += parte.total;
+    nonZero += parte.nonZero;
+    zero += parte.zero;
+    sumNormSq += parte.sumNormSq;
+    for (let k = 0; k < CONDUCTA_DIMENSIONS; k++) sumVec[k]! += parte.sumVec[k]!;
+    for (const label of parte.order) {
+      if (counts[label]! === 0) order.push(label);
+      counts[label]! += parte.counts[label]!;
+    }
+  }
+  if (n < 2) return { conducta: 0, oficios: 0, total: 0 };
+  let sumSq = 0;
+  for (let k = 0; k < CONDUCTA_DIMENSIONS; k++) { const s = sumVec[k]!; sumSq += s * s; }
+  const pairs = (n * (n - 1)) / 2;
+  const nonZeroDist = nonZero >= 2 ? Math.max(0, (nonZero * sumNormSq - sumSq) / 2) : 0;
+  const conducta = Math.max(0, Math.min(1, (zero * nonZero + nonZeroDist) / pairs));
+  let entropy = 0;
+  if (order.length > 1) {
+    for (const label of order) { const share = counts[label]! / n; entropy -= share * Math.log(share); }
+    entropy = Math.min(1, entropy / Math.log(OFICIOS_CATEGORIAS));
+  }
+  return { conducta, oficios: entropy, total: (conducta + entropy) / 2 };
+}
+
 export function indiceDiversidad(world: World): { conducta: number; oficios: number; total: number } {
   const people = world.people;
   if (people.length < 2) return { conducta: 0, oficios: 0, total: 0 };

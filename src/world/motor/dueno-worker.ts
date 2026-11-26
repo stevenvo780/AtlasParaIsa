@@ -69,6 +69,10 @@ export interface DatosDueno {
   destinatariosGarantias: ReadonlySet<number>;
   /** Solo en el perfil de laboratorio. Una duración por dueño entre el inicio de actuación y F4. */
   perfilActuar?: Float64Array<SharedArrayBuffer>;
+  /** Laboratorio: emitir vistas lentas de fotograma desde cada dueño en F6. */
+  emisionFotogramaDuenos?: boolean;
+  /** Laboratorio: tope de bytes pre-serializados por dueño y fotograma. */
+  limiteBytesFotoDueno?: number;
 }
 
 /** Azar del hilo: mulberry32 sembrado de (semilla, hilo), o de entropía real si no hay semilla. */
@@ -111,6 +115,9 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
       ...(datos.contenido && { contenido: PageArena.conectar(datos.contenido) }),
       quimica: crearServicioQuimico({ modo: 'inmediato', registroSustancias: new RegistroContenido(datos.sustancias) }),
     } : null,
+    emisionFotogramaDuenos: datos.emisionFotogramaDuenos,
+    limiteBytesFotoDueno: datos.limiteBytesFotoDueno,
+    cabeceraFoto: datos.emisionFotogramaDuenos ? mundo : undefined,
   };
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;

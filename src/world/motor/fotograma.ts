@@ -39,12 +39,21 @@ export type SucesoVistaAdicional =
   | { tipo: 'pagina'; id: string; vista: VistaPaginaFotograma | null };
 export type SucesoFotograma = Suceso | SucesoVistaAdicional;
 
+import type { LoteFotoDuenos } from './fotograma-dueno.js';
+
+/** Resultado de una fuente de sucesos y serie para un fotograma binario. */
+export interface SalidaFuenteFotograma {
+  sucesos: readonly SucesoFotograma[];
+  /** Bloques ya empaquetados con formato del anillo (`[u32 len LE][v8.serialize(suceso)]`) por los dueños. */
+  bloques?: readonly Uint8Array[];
+  serie: Readonly<Record<CampoSerie, number>>;
+}
+
 /** F0 reúne los partes de los dueños; después de B4 presenta el lote desde el último fotograma entregado. */
 export interface FuenteFotograma {
-  corte(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, mundo?: World): {
-    sucesos: readonly SucesoFotograma[];
-    serie: Readonly<Record<CampoSerie, number>>;
-  };
+  corte(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, mundo?: World): SalidaFuenteFotograma;
+  /** Opcional (opt-in): arma el corte desde partes de dueños sin reunir el mundo completo. `null` activa el fallback reunido. */
+  cortePorDuenos?(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, lote: LoteFotoDuenos): SalidaFuenteFotograma | null;
   confirmar(f: FotogramaEnCurso): void;
 }
 
@@ -111,7 +120,7 @@ export function abrirFotograma(c: CtxF0, enlace: EnlaceCinta, epoca: number): Fo
 }
 
 /** F6: reserva un bloque por dueño y lee sus columnas del frente que se está cerrando. */
-export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: Iterable<number>): boolean {
+export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: Iterable<number>, chunksEscritos?: number[]): boolean {
   const versiones = f.versiones;
   const i32 = new Int32Array(f.ranura, 0, 8);
   const capO = i32[RANURA_I32.capOrganismos], capP = i32[RANURA_I32.capPaginas];
@@ -133,6 +142,7 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
   const desdeO = Atomics.add(i32, RANURA_I32.n, slots.length);
   const desdeP = Atomics.add(i32, RANURA_I32.paginas, chunks.length);
   if (desdeO + slots.length > capO || desdeP + chunks.length > capP) return false;
+  if (chunksEscritos) for (const chunk of chunks) chunksEscritos.push(chunk);
 
   const uid = w.f64('uid'), x = w.f32('x'), y = w.f32('y');
   const accion = w.u8('accion'), cuerpo = w.f32('cuerpo');
@@ -199,7 +209,7 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
   return true;
 }
 
-function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[]): [number, number] | null {
+function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[], bloques: readonly Uint8Array[] = []): [number, number] | null {
   const desde = Atomics.load(enlace.sucesosEscritos, 0);
   const registros = sucesos.map(s => {
     if (s.tipo !== 'persona' || !s.vista) return serialize(s);
@@ -207,7 +217,8 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
     const { experiences: _experiencias, trust: _confianza, ...vista } = s.vista as VistaPersonaFotograma & Pick<PersonView, 'experiences' | 'trust'>;
     return serialize({ ...s, vista });
   });
-  const bytes = registros.reduce((n, body) => n + 4 + body.length, 0);
+  let bytes = registros.reduce((n, body) => n + 4 + body.length, 0);
+  for (const bloque of bloques) bytes += bloque.byteLength;
   if (!bytes) return [Number(desde), Number(desde)];
   const anillo = enlace.sucesos;
   const hasta = desde + BigInt(bytes);
@@ -231,6 +242,7 @@ function escribirSucesos(enlace: EnlaceCinta, sucesos: readonly SucesoFotograma[
     copiar(cabecera);
     copiar(registro);
   }
+  for (const bloque of bloques) if (bloque.byteLength > 0) copiar(bloque);
   return [Number(desde), Number(hasta)];
 }
 
@@ -247,7 +259,7 @@ export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCur
     const fuente = fuentes.get(enlace);
     if (!fuente) throw new Error('El enlace de fotogramas necesita una fuente de sucesos y serie.');
     const paginas = fotogramaDe(f.ranura).paginas;
-    const { sucesos, serie } = fuente.corte(c, f, paginas);
+    const { sucesos, bloques, serie } = fuente.corte(c, f, paginas);
     const r = regionesRanura(capO, capP);
     new Float64Array(f.ranura, r.serie, SERIE_CAMPOS.length).set(SERIE_CAMPOS.map(k => serie[k]));
     const t = c.terreno, chunks: number[] = [];
@@ -256,7 +268,7 @@ export function cerrarFotograma(c: CtxF0, enlace: EnlaceCinta, f: FotogramaEnCur
       if (celda < 0) throw new Error('La página escrita dejó de estar residente antes de cerrar el fotograma.');
       chunks.push(t.chunkDe(celda));
     }
-    const rango = escribirSucesos(enlace, sucesos);
+    const rango = escribirSucesos(enlace, sucesos, bloques);
     if (!rango) return false;
     const [desde, hasta] = rango;
     for (const chunk of chunks) e.versiones[chunk] = t.versionVisible[chunk] + 1;

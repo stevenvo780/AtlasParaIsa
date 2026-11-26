@@ -48,6 +48,9 @@ import {
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
 import { abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type FotogramaEnCurso, type FuenteFotograma } from './fotograma.js';
+import {
+  EmisorFotoDueno, type EstadoCintaChunk, type EstadoCintaOrganismo, type ParteFotoDueno,
+} from './fotograma-dueno.js';
 import { leyesActivas } from './leyes.js';
 import { RegistroContenido } from './registro.js';
 import { crearArenasMateria, type ArenasMateria } from './reserva-materia.js';
@@ -70,11 +73,17 @@ const NONCES_POR_TICK = 2 ** 22;
 /** Órdenes del coordinador a un dueño (`Gesto`, dato[0]). */
 export const ORDEN = { gesto: 0, replica: 1, ceder: 2, detalle: 3, directorio: 4 } as const;
 /** Avisos de un dueño al coordinador (`Global`, dato[0]). */
-export const AVISO = { lugar: 0, comunidad: 1, resultado: 2, tick: 3, parte: 4, detalle: 5, chunk: 6 } as const;
+export const AVISO = { lugar: 0, comunidad: 1, resultado: 2, tick: 3, parte: 4, detalle: 5, chunk: 6, foto: 7 } as const;
 
 /** Celdas del control compartido del motor (Float64 sobre SAB). Las de cada dueño empiezan en `CTL.porDueno`. */
-export const CTL = { tick: 0, epoca: 1, fotoRanura: 2, fotoCompleto: 3, fotoInvalido: 4, lluvia: 5, falloConfirmar: 6, porDueno: 8 } as const;
-export const CTL_DUENO = { msF1: 0, msEco: 1, msPercibir: 2, msActuar: 3, msAplicar: 4, msTick: 5, intentos: 6, rechazados: 7, migraciones: 8, recibidos: 9, celdas: 10 } as const;
+export const CTL = {
+  tick: 0, epoca: 1, fotoRanura: 2, fotoCompleto: 3, fotoInvalido: 4, lluvia: 5, falloConfirmar: 6,
+  fotoCaras: 7, fotoDuenosEntregado: 8, fotoDuenosResync: 9, porDueno: 12,
+} as const;
+export const CTL_DUENO = {
+  msF1: 0, msEco: 1, msPercibir: 2, msActuar: 3, msAplicar: 4, msTick: 5,
+  intentos: 6, rechazados: 7, migraciones: 8, recibidos: 9, migrantesFoto: 10, celdas: 11,
+} as const;
 export const celdaDueno = (hilo: Hilo, campo: number): number => CTL.porDueno + hilo * CTL_DUENO.celdas + campo;
 
 /** Un chunk que cambia de dueño (o llega a su primer dueño), con todo lo que hay en él. Los organismos viajan con la fila
@@ -87,9 +96,17 @@ export interface MigranteChunk {
   /** Reparto al abrir la época: no es una activación (lo cubre `Ley.iniciar`). */
   inicial: boolean;
   cedido?: boolean;
+  /** Solo con `emisionFotogramaDuenos`: firmas confirmado/tentativo transferidas en una cesión (`destino >= 0`). */
+  estadoCinta?: EstadoCintaChunk;
 }
 /** Un organismo que cruzó a un chunk de otro dueño. */
-export interface MigranteOrganismo { tipo: 'organismo'; persona?: { persona: Person; ref: Ref }; animal?: { animal: Animal; ref: Ref } }
+export interface MigranteOrganismo {
+  tipo: 'organismo';
+  persona?: { persona: Person; ref: Ref };
+  animal?: { animal: Animal; ref: Ref };
+  /** Solo con `emisionFotogramaDuenos`: firmas confirmado/tentativo transferidas al receptor. */
+  estadoCinta?: EstadoCintaOrganismo;
+}
 export type Migrante = MigranteChunk | MigranteOrganismo;
 
 /** Lo que cada dueño manda al coordinador al cerrar el tick. */
@@ -111,6 +128,9 @@ export interface PiezasDueno {
   materia: (ArenasMateria & { quimica: ServicioQuimicoImpl }) | null;
   reservaLotesMateria?: number;
   enlace: DescriptorEnlace | null;
+  emisionFotogramaDuenos?: boolean;
+  limiteBytesFotoDueno?: number;
+  cabeceraFoto?: World;
 }
 
 type GanchoFase = 'F1' | 'eco' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6';
@@ -189,6 +209,8 @@ export class Dueno implements CtxF0 {
   #enlace: EnlaceCinta | null = null;
   #foto: FotogramaEnCurso | null = null;
   #fotoValida = true;
+  #emisorFoto: EmisorFotoDueno | null = null;
+  #parteFotoLocal: ParteFotoDueno | null = null;
   #pendientes: [ChunkId, string][] = [];
   #vaciar: ChunkId[] = [];
 
@@ -212,6 +234,9 @@ export class Dueno implements CtxF0 {
       }),
     };
     if (piezas.enlace) this.enlazar(piezas.enlace);
+    if (piezas.emisionFotogramaDuenos && piezas.cabeceraFoto) {
+      this.#emisorFoto = new EmisorFotoDueno(piezas.cabeceraFoto, { limiteBytes: piezas.limiteBytesFotoDueno });
+    }
     this.#nonce = (mundo.tick + 1) * NONCES_POR_TICK;
     enlazarCtx(mundo, this);
   }
@@ -440,9 +465,26 @@ export class Dueno implements CtxF0 {
     };
   }
 
+  /** Activa la emisión opt-in de vistas lentas de fotograma en este dueño con la cabecera de la época. */
+  activarEmisionFoto(cabecera: World, limiteBytes?: number): void {
+    this.#emisorFoto = new EmisorFotoDueno(cabecera, { limiteBytes });
+    this.#parteFotoLocal = null;
+  }
+
+  /** Parte de fotograma del coordinador (dueño 0) producido en F6, listo para `#recoger()`. */
+  tomarParteFotoLocal(): ParteFotoDueno | null {
+    const parte = this.#parteFotoLocal;
+    this.#parteFotoLocal = null;
+    return parte;
+  }
+
   /** Migrantes de la cola M (los aparta el buzón del dueño: ningún aplicador los ve). Y, si el aplicador de m5 no está
    * encendido, las órdenes del coordinador de la cola B, que sin él nadie vaciaría (no hay más intentos en ella). */
   adoptarMigrantes(): void {
+    const control = this.#piezas.control;
+    if (this.#emisorFoto && control) {
+      this.#emisorFoto.reconciliar(this.mundo.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!, true);
+    }
     this.buzon.vaciar('M', () => {});
     if (!this.params.v23.intentos) this.buzon.vaciar('B', () => {});
   }
@@ -771,11 +813,24 @@ export class Dueno implements CtxF0 {
   escribirFoto(): void {
     if (!this.#foto) return;
     if (this.hilos === 1) this.publicarTerreno();
-    const cupo = escribirFotograma(this, this.#foto, this.#filasFotograma());
-    if (cupo) return;
-    this.#fotoValida = false;
+    const chunksEscritos: number[] | undefined = this.#emisorFoto ? [] : undefined;
+    const cupo = escribirFotograma(this, this.#foto, this.#filasFotograma(), chunksEscritos);
+    if (!cupo) {
+      this.#fotoValida = false;
+      const control = this.#piezas.control;
+      if (control) control[CTL.fotoInvalido] = 1;
+      return;
+    }
     const control = this.#piezas.control;
-    if (control) control[CTL.fotoInvalido] = 1;
+    if (!this.#emisorFoto || !control) return;
+    const parte = this.#emisorFoto.emitir(
+      this, this.#foto, chunksEscritos!, this.organismos,
+      (px, py) => this.terrenoPercibido.paginaDe(px, py),
+      control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!,
+      control[CTL.fotoCaras] === 1,
+    );
+    if (this.hilo === 0) this.#parteFotoLocal = parte;
+    else this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.foto, this.hilo], serialize(parte)));
   }
 
   *#filasFotograma(): Iterable<number> {
@@ -868,9 +923,21 @@ export class Dueno implements CtxF0 {
       if (ref !== REF_NULA) organismos.fauna.adoptar(animal, ref);
     };
     if (mig.tipo === 'organismo') {
-      if (mig.persona) { adoptarPersona(mig.persona); for (const ley of this.leyes) ley.alAdoptar?.(this, mig.persona.persona); }
+      const control = this.#piezas.control;
+      if (mig.persona) {
+        adoptarPersona(mig.persona);
+        if (this.#emisorFoto && control && mig.persona.persona.uid !== undefined) {
+          this.#emisorFoto.adoptarOrganismo(mig.persona.persona.uid, Clase.Persona, mig.estadoCinta,
+            m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!);
+        }
+        for (const ley of this.leyes) ley.alAdoptar?.(this, mig.persona.persona);
+      }
       if (mig.animal) {
         adoptarAnimal(mig.animal.animal, mig.animal.ref);
+        if (this.#emisorFoto && control && mig.animal.animal.uid !== undefined) {
+          this.#emisorFoto.adoptarOrganismo(mig.animal.animal.uid, Clase.Animal, mig.estadoCinta,
+            m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!);
+        }
         for (const ley of this.leyes) ley.alAdoptar?.(this, mig.animal.animal);
       }
       return;
@@ -885,6 +952,11 @@ export class Dueno implements CtxF0 {
     for (const p of mig.personas) adoptarPersona(p);
     this.#activos.set(mig.chunk, mig.key); this.#chunks = undefined;
     this.terrenoPercibido.sincronizarPagina(mig.chunk, tileLookup(m.tiles), residentFastAccess(m.tiles));
+    const control = this.#piezas.control;
+    if (this.#emisorFoto && control && mig.cedido) {
+      this.#emisorFoto.adoptarChunk(mig.key, mig.estadoCinta,
+        m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!);
+    }
     // El reparto al abrir la época no es una activación: lo cubren `Ley.iniciar` y, tras una carga, `adoptarPropios`.
     if (mig.inicial) return;
     for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk, mig.cedido);
@@ -938,8 +1010,29 @@ export class Dueno implements CtxF0 {
         }
         return ref;
       });
-      if (destino >= 0) { mig.cedido = true; this.enviarMigrante(destino, mig); }
-      else {
+      if (destino >= 0) {
+        mig.cedido = true;
+        // Las proyecciones globales leen los activos del dueño 0 después de emigrar.
+        // El camino reunido añade los migrantes que aún no ha adoptado el destino.
+        if (this.#parteFotoLocal && (mig.structures.some(s => s.installed?.length || s.storedCompounds?.length)
+          || mig.personas.some(p => p.persona.compounds?.length))) this.#parteFotoLocal = null;
+        const control = this.#piezas.control;
+        if (this.#emisorFoto && control) {
+          mig.estadoCinta = this.#emisorFoto.extraerChunkCedido(
+            mig.key,
+            mig.structures.map(s => s.id),
+            mig.personas.map(p => p.persona.uid!).filter(uid => uid !== undefined),
+            mig.animals.map(a => a.uid!).filter(uid => uid !== undefined),
+            m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!,
+          );
+          control[celdaDueno(this.hilo, CTL_DUENO.migrantesFoto)]!++;
+        }
+        this.enviarMigrante(destino, mig);
+      } else {
+        const control = this.#piezas.control;
+        if (this.#emisorFoto && control) {
+          this.#emisorFoto.alRetirarChunk(mig.key, m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!);
+        }
         terreno.vaciarPagina(chunk);
         this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.chunk, chunk], serialize(mig)));
       }
@@ -951,13 +1044,22 @@ export class Dueno implements CtxF0 {
       const chunk = terreno.chunkDe(celda), siguiente = terreno.duenoSiguiente[chunk]!;
       return siguiente >= 0 ? siguiente : terreno.duenoChunk[chunk]!;
     };
+    const control = this.#piezas.control;
     let seVan: Person[] | undefined;
     for (const p of m.people) {
       const destino = duenoDe(p);
       if (destino === this.hilo || destino < 0) continue;
+      if (this.#parteFotoLocal && p.compounds?.length) this.#parteFotoLocal = null;
       const ref = organismos.personas.soltar(p);
       tabla.ceder(this.hilo, ref, destino);
-      this.enviarMigrante(destino, { tipo: 'organismo', persona: { persona: p, ref } });
+      let estadoCinta: EstadoCintaOrganismo | undefined;
+      if (this.#emisorFoto && control && p.uid !== undefined) {
+        estadoCinta = this.#emisorFoto.extraerOrganismo(
+          p.uid, Clase.Persona, m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!,
+        );
+        control[celdaDueno(this.hilo, CTL_DUENO.migrantesFoto)]!++;
+      }
+      this.enviarMigrante(destino, { tipo: 'organismo', persona: { persona: p, ref }, ...(estadoCinta ? { estadoCinta } : {}) });
       (seVan ??= []).push(p);
     }
     if (seVan) { const fuera = new Set(seVan); m.people = m.people.filter(p => !fuera.has(p)); }
@@ -967,7 +1069,14 @@ export class Dueno implements CtxF0 {
       if (destino === this.hilo || destino < 0) continue;
       const ref = organismos.fauna.soltar(a);
       if (ref !== REF_NULA) tabla.ceder(this.hilo, ref, destino);
-      this.enviarMigrante(destino, { tipo: 'organismo', animal: { animal: a, ref } });
+      let estadoCinta: EstadoCintaOrganismo | undefined;
+      if (this.#emisorFoto && control && a.uid !== undefined) {
+        estadoCinta = this.#emisorFoto.extraerOrganismo(
+          a.uid, Clase.Animal, m.tick, this.epoca, control[CTL.fotoDuenosEntregado]!, control[CTL.fotoDuenosResync]!,
+        );
+        control[celdaDueno(this.hilo, CTL_DUENO.migrantesFoto)]!++;
+      }
+      this.enviarMigrante(destino, { tipo: 'organismo', animal: { animal: a, ref }, ...(estadoCinta ? { estadoCinta } : {}) });
       (animales ??= []).push(a);
     }
     if (animales) { const fuera = new Set(animales); m.animals = m.animals.filter(a => !fuera.has(a)); }

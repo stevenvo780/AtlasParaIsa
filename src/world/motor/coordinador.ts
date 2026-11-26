@@ -37,7 +37,7 @@ import { olvidarOrganismos } from '../soa/organismos-mundo.js';
 import { RESERVA_FILAS_DUENOS, TablaOrganismosSoA } from '../soa/organismos.js';
 import { residentFastAccess } from '../soa/terreno.js';
 import { archivarChunk, bindWorldContext, tomarChunk, validCoordinate, worldContext } from '../spatial.js';
-import { recordSample } from '../statistics.js';
+import { recordSample, ESTADISTICAS_CARAS_CADA_TICKS } from '../statistics.js';
 import { chunkKey } from '../terrain.js';
 import { tileLookup } from '../tile-index.js';
 import { duenoDeVecino, pesosInicialesPorPoblacion, repartirPorTramos } from './bloques.js';
@@ -49,6 +49,10 @@ import {
 } from './contexto.js';
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
+import {
+  LIMITE_BYTES_FOTO_TOTAL_DEFECTO, trazaFotogramaDuenosVacia,
+  type LoteFotoDuenos, type ParteFotoDueno, type TrazaFotogramaDuenos,
+} from './fotograma-dueno.js';
 import { leyesActivas } from './leyes.js';
 import { CanalesCorte } from './mensajes-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
@@ -284,11 +288,77 @@ class MotorDuenos implements Motor {
   #epoca = 0;
   #enlace: DescriptorEnlace | null = null;
   #fuente?: FuenteFotograma;
+  readonly #partesFoto = new Map<Hilo, ParteFotoDueno>();
+  #ultimaCarasFoto = -1;
+  readonly #trazaFotoDuenos: TrazaFotogramaDuenos = trazaFotogramaDuenosVacia();
   #fuenteReunida(): FuenteFotograma | undefined {
     const fuente = this.#fuente;
-    if (fuente) return {
-      corte: (c, f, paginas) => fuente.corte(c, f, paginas, this.#reunirMundo().world),
-      confirmar: f => fuente.confirmar(f),
+    if (!fuente) return undefined;
+    let caminoEnCurso: 'ninguno' | 'duenos' | 'reunido' = 'ninguno';
+    let bytesEnCurso = 0;
+    let conCarasEnCurso = false;
+    return {
+      corte: (c, f, paginas) => {
+        caminoEnCurso = 'ninguno';
+        bytesEnCurso = 0;
+        conCarasEnCurso = false;
+        if (this.#config.emisionFotogramaDuenos && fuente.cortePorDuenos) {
+          const limiteTotal = Math.max(1, this.#config.limiteBytesFotoTotal ?? LIMITE_BYTES_FOTO_TOTAL_DEFECTO);
+          const partes: ParteFotoDueno[] = [];
+          let faltante = false, desbordado = false, compatFallback = false, totalBytes = 0;
+          for (let h = 0; h < this.#hilos; h++) {
+            const parte = this.#partesFoto.get(h);
+            if (!parte) { faltante = true; break; }
+            if (parte.desbordado) desbordado = true;
+            if (parte.compatFallback) compatFallback = true;
+            totalBytes += parte.bytes;
+            partes.push(parte);
+          }
+          if (desbordado || totalBytes > limiteTotal) {
+            this.#trazaFotoDuenos.fallbacksLimite++;
+          } else if (faltante || compatFallback) {
+            this.#trazaFotoDuenos.fallbacksCompat++;
+          } else {
+            const clavesActivas = new Set<string>();
+            const chunksActivos: ChunkId[] = [];
+            for (const pagina of this.#paginas.values()) {
+              clavesActivas.add(pagina.key);
+              chunksActivos.push(pagina.chunk);
+            }
+            const bajasConfirmadas = this.#bajasConfirmadas?.tick === this.#mundo.tick ? this.#bajasConfirmadas.bajas : [];
+            const conCaras = this.#control[CTL.fotoCaras] === 1;
+            const altasTick = new Map(this.#altas);
+            const lote: LoteFotoDuenos & { readonly altasTick?: ReadonlyMap<number, string> } = {
+              hilos: this.#hilos, cabecera: this.#cabecera, partes,
+              clavesActivas, chunksActivos, conCaras, limiteBytesTotal: limiteTotal, bajasConfirmadas, altasTick,
+            };
+            const salida = fuente.cortePorDuenos(c, f, paginas, lote);
+            if (salida !== null) {
+              caminoEnCurso = 'duenos';
+              bytesEnCurso = totalBytes;
+              conCarasEnCurso = conCaras;
+              return salida;
+            }
+            this.#trazaFotoDuenos.fallbacksCompat++;
+          }
+        }
+        caminoEnCurso = 'reunido';
+        return fuente.corte(c, f, paginas, this.#reunirMundo().world);
+      },
+      confirmar: f => {
+        fuente.confirmar(f);
+        if (this.#config.emisionFotogramaDuenos) {
+          if (caminoEnCurso === 'duenos') {
+            this.#control[CTL.fotoDuenosEntregado]!++;
+            if (conCarasEnCurso) this.#ultimaCarasFoto = f.tick;
+            this.#trazaFotoDuenos.emitidos++;
+            this.#trazaFotoDuenos.reunionesEvitadas++;
+            this.#trazaFotoDuenos.bytesEmitidos += bytesEnCurso;
+          } else if (caminoEnCurso === 'reunido') {
+            this.#control[CTL.fotoDuenosResync]!++;
+          }
+        }
+      },
     };
   }
   #piscina: Piscina<DatosDueno> | null = null;
@@ -360,7 +430,8 @@ class MotorDuenos implements Motor {
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
     this.#activacionesPendientes = 0;
-    this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#altas = [];
+    this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#partesFoto.clear(); this.#altas = [];
+    this.#ultimaCarasFoto = -1;
 
     // Memoria compartida de la época. La reserva de filas crece con el mundo que se carga: agotarla es fatal y la
     // recarga siguiente la abre mayor.
@@ -396,6 +467,7 @@ class MotorDuenos implements Motor {
     const perfilActuar = this.#perfilActuar = this.#config.medirPaso
       ? new Float64Array(new SharedArrayBuffer(hilos * Float64Array.BYTES_PER_ELEMENT)) : undefined;
     control[CTL.tick] = m.tick; control[CTL.epoca] = this.#epoca; control[CTL.fotoRanura] = -1;
+    control[CTL.fotoCaras] = 0; control[CTL.fotoDuenosEntregado] = 0; control[CTL.fotoDuenosResync] = 0;
     const azar = azarDeHilo(this.#config.semilla, 0);
     const conMateria = params.v23.materia;
     const registroSustancias = conMateria ? new RegistroContenido(hilos) : null;
@@ -428,6 +500,7 @@ class MotorDuenos implements Motor {
     this.#cabecera = deserialize(cabecera) as World;
     this.#tecnologiaInicial = this.#config.confirmarGuardadoVivo
       ? sinCheckpointTecnologia(structuredClone(this.#cabecera.technology)) : undefined;
+    if (this.#config.emisionFotogramaDuenos) d.activarEmisionFoto(this.#cabecera, this.#config.limiteBytesFotoDueno);
     d.repartirChunksIniciales(chunks, duenos);
     const tileIn = tileLookup(m.tiles), fast = residentFastAccess(m.tiles);
     for (let i = 0; i < claves.length; i++) if (duenos[i] === 0) terreno.sincronizarPagina(chunks[i]!, tileIn, fast);
@@ -440,6 +513,7 @@ class MotorDuenos implements Motor {
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca,
       brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
       destinatariosGarantias: destinatariosDeGarantias(garantias),
+      emisionFotogramaDuenos: this.#config.emisionFotogramaDuenos, limiteBytesFotoDueno: this.#config.limiteBytesFotoDueno,
     };
     const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {
@@ -502,6 +576,13 @@ class MotorDuenos implements Motor {
       }
       this.#pedirDetalles();
       d.F0();
+      if (this.#config.emisionFotogramaDuenos && control[CTL.fotoRanura]! >= 0) {
+        const completo = control[CTL.fotoCompleto] === 1;
+        control[CTL.fotoCaras] = completo || this.#ultimaCarasFoto < 0 || m.tick < this.#ultimaCarasFoto
+          || m.tick - this.#ultimaCarasFoto >= ESTADISTICAS_CARAS_CADA_TICKS ? 1 : 0;
+      } else {
+        control[CTL.fotoCaras] = 0;
+      }
       if (this.#activacionesPendientes) d.reservarMateria(this.#activacionesPendientes);
       d.prepararMateriaAntesDeF1();
       control[CTL.lluvia] = Number(m.weather === 'rain');
@@ -521,7 +602,17 @@ class MotorDuenos implements Motor {
       // Cierre en serie: lo que los dueños mandaron al coordinador en el tick (la crónica en orden, altas, resultados).
       this.#recoger();
       this.#cronica();
-      if (d.cerrarFoto()) this.#t.fotogramasSaltados++;
+      const fotoAbierta = control[CTL.fotoRanura]! >= 0;
+      const fotoCompleta = control[CTL.fotoCompleto] === 1;
+      const fotoPerdida = d.cerrarFoto();
+      this.#partesFoto.clear();
+      if (fotoPerdida) {
+        this.#t.fotogramasSaltados++;
+        if (this.#config.emisionFotogramaDuenos && fotoAbierta) {
+          this.#trazaFotoDuenos.abortos++;
+          if (fotoCompleta) this.#trazaFotoDuenos.completosAbortados++;
+        }
+      }
       resultados.push(...this.#resultados.splice(0));
       resultados.sort((a, b) => a.order - b.order);
       const fin = performance.now();
@@ -545,6 +636,8 @@ class MotorDuenos implements Motor {
     this.#d.recibirAvisos();
     const propia = this.#d.parteDelTick();
     if (propia) this.#partesTick.push(propia);
+    const fotoLocal = this.#d.tomarParteFotoLocal();
+    if (fotoLocal) this.#partesFoto.set(0, fotoLocal);
   }
 
   #aviso(clase: number, i: Intento): void {
@@ -552,6 +645,7 @@ class MotorDuenos implements Motor {
       case AVISO.resultado: this.#resultados.push(deserialize(i.bytes!) as GestureResult); break;
       case AVISO.tick: this.#partesTick.push(deserialize(i.bytes!) as ParteTick); break;
       case AVISO.parte: this.#partesMundo.set(i.dato![1]!, deserialize(i.bytes!) as World); break;
+      case AVISO.foto: this.#partesFoto.set(i.dato![1]!, deserialize(i.bytes!) as ParteFotoDueno); break;
       case AVISO.detalle: {
         const persona = i.bytes ? deserialize(i.bytes) as Person : null;
         for (const resolver of this.#detalles.get(i.dato![1]!) ?? []) resolver(persona);
@@ -774,6 +868,15 @@ class MotorDuenos implements Motor {
   /** Diagnóstico de la piscina viva (p. ej. `threadIds` y `fatal` para comprobar persistencia de dueños). */
   get diagnosticoPiscina(): DiagnosticoPiscina | undefined {
     return this.#piscina?.diagnostico();
+  }
+
+  /** Laboratorio: contadores de la emisión de vistas lentas de fotograma por dueño. */
+  get trazaFotogramaDuenos(): Readonly<TrazaFotogramaDuenos> {
+    let migrantesTransferidos = 0;
+    if (this.#control) {
+      for (let h = 0; h < this.#hilos; h++) migrantesTransferidos += this.#control[celdaDueno(h, CTL_DUENO.migrantesFoto)] ?? 0;
+    }
+    return { ...this.#trazaFotoDuenos, migrantesTransferidos };
   }
 
   #reunirMundo(paraConfirmar = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {

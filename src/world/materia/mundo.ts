@@ -584,7 +584,7 @@ export class MundoMaterial {
   readonly libro: Libro;
   readonly cuentas: Float64Array;
   readonly hilo: number;
-  /** Teselas y páginas dadas de alta (con el motor, `np` es la cota de los chunks vistos y crecen las dos). */
+  /** Teselas y páginas dadas de alta. En el motor, son las cotas de sus respectivos índices. */
   n: number;
   np: number;
   suelo: Float64Array;
@@ -622,7 +622,11 @@ export class MundoMaterial {
   private readonly gasesLibres: SustanciaId[];
   private readonly humos: SustanciaId[];
   private ids = new Uint32Array(64);
-  private indices = new Int32Array(0);
+  private indicesLab = new Int32Array(0);
+  /** Las páginas que empiezan en la celda 0 y no tienen huecos se indexan directamente. */
+  private readonly indicesActivos = new Map<number, Int32Array>();
+  /** Rangos privados abandonados, por cantidad de teselas. No son las ranuras de los lotes. */
+  private readonly rangosLibres = new Map<number, number[]>();
   private semilla = 0;
   private hojas = 0;
   private fN = 0;
@@ -812,36 +816,54 @@ export class MundoMaterial {
 
   /** Pone al día el índice celda → tesela de las teselas [desde, hasta). */
   private indexar(desde: number, hasta: number): void {
-    this.indices = agrandar(this.indices, 256 * this.np);
-    for (let i = desde; i < hasta; i++) this.indices[this.celda[i]!] = i + 1;
+    if (this.lab) {
+      this.indicesLab = agrandar(this.indicesLab, 256 * this.np);
+      for (let i = desde; i < hasta; i++) this.indicesLab[this.celda[i]!] = i + 1;
+      return;
+    }
+    if (desde >= hasta) return;
+    const p = this.paginaDe(desde), base = p * 256;
+    let i = desde;
+    while (i < hasta && this.celda[i] === base + i - desde) i++;
+    if (i === hasta) { this.indicesActivos.delete(p); return; }
+    const indice = new Int32Array(256);
+    for (let j = desde; j < hasta; j++) indice[this.celda[j]! & 255] = j + 1;
+    this.indicesActivos.set(p, indice);
   }
 
-  /** Una página dormida conserva el índice para reactivarse, aunque otro dueño esté usando sus lotes. */
+  /** La tesela de una celda material activa en este dueño, o −1 si no hay ninguna. */
   indiceDe(celda: number): number {
-    return celda >= 0 && celda < this.indices.length && this.activa[celda >> 8] === 1 ? this.indices[celda]! - 1 : -1;
+    const p = celda >> 8;
+    if (celda < 0 || this.activa[p] !== 1) return -1;
+    if (this.lab) return (this.indicesLab[celda] ?? 0) - 1;
+    const local = celda & 255, indice = this.indicesActivos.get(p);
+    if (indice) return indice[local]! - 1;
+    const i = this.inicio[p]! + local;
+    return i < this.fin[p]! && this.celda[i] === celda ? i : -1;
   }
 
   /** ¿Tiene este mundo la página p con sus lotes (activa o dormida)? */
   tiene(p: number): boolean { return p >= 0 && p < this.np && this.fin[p]! > this.inicio[p]! && this.aire[p]! >= 0; }
 
-  /** Abre sitio para las teselas de la página p al final de las tablas y devuelve su primer índice. */
+  /** Reserva un rango para las teselas de la página p y devuelve su primer índice. */
   private abrir(p: number, tiles: readonly Tile[]): number {
-    const i0 = this.n;
-    this.reservar(i0 + tiles.length, p + 1);
-    this.n = i0 + tiles.length; this.np = Math.max(this.np, p + 1);
+    const libres = this.rangosLibres.get(tiles.length);
+    const i0 = libres?.pop() ?? this.n, fin = i0 + tiles.length;
+    this.reservar(fin, p + 1);
+    this.n = Math.max(this.n, fin); this.np = Math.max(this.np, p + 1);
     for (let j = 0; j < tiles.length; j++) {
       const t = tiles[j]!;
       this.celda[i0 + j] = p * 256 + local(t); this.x[i0 + j] = t.x; this.y[i0 + j] = t.y;
     }
-    this.inicio[p] = i0; this.fin[p] = this.n;
-    this.indexar(i0, this.n);
+    this.inicio[p] = i0; this.fin[p] = fin;
+    this.indexar(i0, fin);
     return i0;
   }
 
   /**
    * Da de alta la página p con los lotes de sus teselas, sacados de los escalares de `tiles` (ordenadas por celda local),
    * su aire y sus dos depósitos: es la fuente declarada «chunk nuevo». `luz` fija la temperatura inicial. Con el motor las
-   * teselas van al final de las tablas; el laboratorio da el índice `en`.
+   * teselas toman un rango privado; el laboratorio da el índice `en`.
    */
   materializar(p: number, tiles: readonly Tile[], luz: number, en = -1): void {
     const i0 = en >= 0 ? en : this.abrir(p, tiles), nT = tiles.length, S = this.S, e = this.params.escalas, f = this.params.fisica;
@@ -922,7 +944,11 @@ export class MundoMaterial {
   }
 
   /** La página deja de dar pasos; sus lotes siguen en la arena y en el libro. */
-  dormir(p: number): void { if (p < this.np) this.activa[p] = 0; }
+  dormir(p: number): void {
+    if (p >= this.np) return;
+    this.activa[p] = 0;
+    this.indicesActivos.delete(p);
+  }
 
   /** Vuelve a dar pasos una página dormida. Si otro dueño la cedió, la roca latente vigente llega con sus teselas. */
   despertar(p: number, tiles: readonly Tile[], cedido: boolean): boolean {
@@ -936,6 +962,7 @@ export class MundoMaterial {
       const escala = this.params.escalas.piedra;
       for (let j = 0; j < tiles.length; j++) this.latente[i0 + j] = rocaLatenteDe(tiles[j]!, escala);
     }
+    if (!this.lab && this.activa[p] !== 1) this.indexar(i0, this.fin[p]!);
     this.activa[p] = 1;
     return true;
   }
@@ -943,8 +970,16 @@ export class MundoMaterial {
   /** Olvida la página p (sus lotes no se tocan): su ranura de chunk pasó a otro sitio del mundo o a otro dueño. */
   olvidar(p: number): void {
     if (p >= this.np) return;
-    for (let i = this.inicio[p]!; i < this.fin[p]!; i++) this.indices[this.celda[i]!] = 0;
-    this.activa[p] = 0; this.inicio[p] = 0; this.fin[p] = 0; this.aire[p] = -1; this.mar[p] = -1; this.cielo[p] = -1;
+    const inicio = this.inicio[p]!, fin = this.fin[p]!;
+    if (this.lab) {
+      for (let i = inicio; i < fin; i++) this.indicesLab[this.celda[i]!] = 0;
+    } else if (inicio < fin) {
+      const longitud = fin - inicio, libres = this.rangosLibres.get(longitud);
+      if (libres) libres.push(inicio);
+      else this.rangosLibres.set(longitud, [inicio]);
+    }
+    this.dormir(p);
+    this.inicio[p] = 0; this.fin[p] = 0; this.aire[p] = -1; this.mar[p] = -1; this.cielo[p] = -1;
   }
 
   // ── Forzamiento y utilidades ──

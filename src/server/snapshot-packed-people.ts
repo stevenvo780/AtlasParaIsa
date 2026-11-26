@@ -4,7 +4,8 @@ import { stringifyExact } from '../shared/exact-json.js';
 import { SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
 // WPF1 fixes the width on disk independently of the motor's current policy.
-const WEIGHTS = 212, WEIGHT_BYTES = WEIGHTS * Float64Array.BYTES_PER_ELEMENT;
+export const WPF1_WEIGHT_COUNT = 212;
+export const WPF1_WEIGHT_BYTES = WPF1_WEIGHT_COUNT * Float64Array.BYTES_PER_ELEMENT;
 const HEADER_BYTES = 16, MAGIC = Buffer.from('WPF1').readUInt32LE(0);
 const MAX_U32 = 0xffff_ffff, MAX_PAGE_BYTES = 4 * 1024 * 1024;
 const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
@@ -13,10 +14,10 @@ const lookupGetter: (this: object, key: PropertyKey) => unknown =
   Object.getOwnPropertyDescriptor(Object.prototype, '__lookupGetter__')!.value;
 
 export interface PackedPersonRow {
-  json: string;
+  readonly json: string;
   /** Weights captured when this row was prepared, before any flush callbacks. */
-  weights?: readonly number[];
-  bytes: number;
+  readonly weights?: readonly number[];
+  readonly bytes: number;
 }
 
 function failure(reason: string, cause?: unknown): never {
@@ -33,7 +34,7 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
   return (prototype === Object.prototype || prototype === null) && !('toJSON' in value);
 }
 
-function weight(value: unknown): value is number {
+export function isPackedPersonWeight(value: unknown): value is number {
   return typeof value === 'number' && value >= -1 && value <= 1;
 }
 
@@ -46,13 +47,13 @@ function packableWeights(record: Record<string, unknown>): readonly number[] | u
   const weightsProperty = Object.getOwnPropertyDescriptor(policy, 'weights');
   if (!weightsProperty?.enumerable || !Object.hasOwn(weightsProperty, 'value')) return;
   const weights: unknown = weightsProperty.value;
-  if (types.isProxy(weights) || !Array.isArray(weights) || weights.length !== WEIGHTS
+  if (types.isProxy(weights) || !Array.isArray(weights) || weights.length !== WPF1_WEIGHT_COUNT
     || Object.getPrototypeOf(weights) !== Array.prototype || 'toJSON' in weights) return;
-  const captured = new Array<number>(WEIGHTS);
-  for (let i = 0; i < WEIGHTS; i++) {
+  const captured = new Array<number>(WPF1_WEIGHT_COUNT);
+  for (let i = 0; i < WPF1_WEIGHT_COUNT; i++) {
     if (!Object.hasOwn(weights, i) || lookupGetter.call(weights, i) !== undefined) return;
     const value: unknown = weights[i];
-    if (!weight(value)) return;
+    if (!isPackedPersonWeight(value)) return;
     captured[i] = value;
   }
   return captured;
@@ -61,7 +62,7 @@ function packableWeights(record: Record<string, unknown>): readonly number[] | u
 function jsonRow(record: Record<string, unknown>, weights?: readonly number[]): PackedPersonRow {
   const json = stringifyExact(record);
   if (typeof json !== 'string' || !json.startsWith('{')) failure('row');
-  const bytes = Buffer.byteLength(json) + (weights === undefined ? 0 : WEIGHT_BYTES);
+  const bytes = Buffer.byteLength(json) + (weights === undefined ? 0 : WPF1_WEIGHT_BYTES);
   return weights === undefined ? { json, bytes } : { json, weights, bytes };
 }
 
@@ -100,17 +101,17 @@ export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer
   let packedCount = 0, sumRowBytes = 0;
   for (const row of rows) {
     if (typeof row.json !== 'string' || !row.json.startsWith('{') || !row.json.endsWith('}')
-      || row.bytes !== Buffer.byteLength(row.json) + (row.weights === undefined ? 0 : WEIGHT_BYTES))
+      || row.bytes !== Buffer.byteLength(row.json) + (row.weights === undefined ? 0 : WPF1_WEIGHT_BYTES))
       failure('row byte count');
     if (row.weights !== undefined) {
-      if (row.weights.length !== WEIGHTS) failure('weight count');
+      if (row.weights.length !== WPF1_WEIGHT_COUNT) failure('weight count');
       packedCount++;
     }
     sumRowBytes += row.bytes;
   }
   const size = packedPeoplePageBytes(count, sumRowBytes);
   const jsonStart = HEADER_BYTES + Math.ceil(count / 8);
-  const jsonBytes = size - jsonStart - packedCount * WEIGHT_BYTES;
+  const jsonBytes = size - jsonStart - packedCount * WPF1_WEIGHT_BYTES;
   assertSize(count, jsonBytes, size);
 
   const body = Buffer.alloc(size);
@@ -124,13 +125,13 @@ export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer
   for (let i = 0; i < count; i++) {
     if (i > 0) body[json++] = 0x2c; // ,
     const row = rows[i]!;
-    const bytes = row.bytes - (row.weights === undefined ? 0 : WEIGHT_BYTES);
+    const bytes = row.bytes - (row.weights === undefined ? 0 : WPF1_WEIGHT_BYTES);
     json += body.write(row.json, json, bytes, 'utf8');
     if (row.weights === undefined) continue;
     body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
-    for (let j = 0; j < WEIGHTS; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
+    for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
       const value = row.weights[j];
-      if (!weight(value)) failure('weight value');
+      if (!isPackedPersonWeight(value)) failure('weight value');
       data.setFloat64(binary, value, true);
     }
   }
@@ -146,7 +147,7 @@ export function decodePackedPeoplePage(body: Uint8Array, count: number, parse: (
   const jsonBytes = data.getUint32(4, true), packedCount = data.getUint32(12, true);
   assertSize(count, jsonBytes, body.byteLength);
   const jsonStart = HEADER_BYTES + Math.ceil(count / 8), binaryStart = jsonStart + jsonBytes;
-  if (packedCount > count || body.byteLength !== binaryStart + packedCount * WEIGHT_BYTES) failure('byte count');
+  if (packedCount > count || body.byteLength !== binaryStart + packedCount * WPF1_WEIGHT_BYTES) failure('byte count');
   const spare = count & 7;
   if (spare !== 0 && body[jsonStart - 1]! >>> spare !== 0) failure('mask padding');
   let present = 0;
@@ -175,10 +176,10 @@ export function decodePackedPeoplePage(body: Uint8Array, count: number, parse: (
     if (!Object.hasOwn(row, 'policy') || !object(policy) || Reflect.ownKeys(policy).length !== 1
       || !Object.hasOwn(policy, 'weights') || !Array.isArray(policy.weights) || policy.weights.length !== 0)
       failure('policy placeholder');
-    const weights = new Array<number>(WEIGHTS);
-    for (let j = 0; j < WEIGHTS; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
+    const weights = new Array<number>(WPF1_WEIGHT_COUNT);
+    for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
       const value = data.getFloat64(binary, true);
-      if (!weight(value)) failure('weight value');
+      if (!isPackedPersonWeight(value)) failure('weight value');
       weights[j] = value;
     }
     policy.weights = weights;

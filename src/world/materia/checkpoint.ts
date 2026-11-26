@@ -170,6 +170,13 @@ function validarLote(lote: LoteGuardado, exclusivos: Uint8Array): number {
 
 type Fuente<T> = Iterable<T> | (() => Iterable<T>);
 
+export interface RecorridoPaginas {
+  /** En orden lógico. El total de pares de un grupo puede imputarse a cualquiera de sus lotes. */
+  medir(): Iterable<{ celda: number; pares: number }>;
+  /** Lotes de una página de mundo en orden lógico. La página −1 agrupa los lotes sin celda. */
+  lotesDePagina(pagina: number): Iterable<LoteGuardado>;
+}
+
 function repetible<T>(origen: Fuente<T>): () => Iterable<T> {
   if (typeof origen === 'function') return origen;
   const elementos = Array.isArray(origen) ? origen : Array.from(origen);
@@ -191,13 +198,14 @@ function bytesDeLote(lote: LoteGuardado): number {
 
 /** Las fábricas recorren dos veces la misma arena inmóvil. El orden canónico es de primera visita por página y luego
  * de visita dentro de cada página. La primera pasada mide, la segunda escribe sin retener pares de otros lotes. */
-export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, libres: Fuente<LoteRef>): Uint8Array {
+export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, libres: Fuente<LoteRef>,
+  recorrido?: RecorridoPaginas): Uint8Array {
   entero(epoca);
-  const recorrerLotes = repetible(lotes), recorrerLibres = repetible(libres);
+  const recorrerLotes = recorrido ? undefined : repetible(lotes), recorrerLibres = repetible(libres);
   const paginas = new Map<number, PaginaPorEscribir>();
   let capacidad = 3 * BYTES_ENTERO; // época, número de páginas y número de ranuras retiradas
-  for (const lote of recorrerLotes()) {
-    const pagina = paginaDe(lote.celda), bytes = bytesDeLote(lote);
+  function medir(celda: number, bytes: number): void {
+    const pagina = paginaDe(celda);
     let plan = paginas.get(pagina);
     if (!plan) {
       plan = { bytes: 0, restantes: 0, posicion: 0, fin: 0, exclusivos: new Uint8Array(CELDAS_POR_PAGINA) };
@@ -207,6 +215,11 @@ export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, lib
     plan.bytes += bytes;
     plan.restantes++;
     capacidad += bytes;
+  }
+  if (recorrido) {
+    for (const lote of recorrido.medir()) medir(lote.celda, BYTES_LOTE + BYTES_PAR * entero(lote.pares));
+  } else {
+    for (const lote of recorrerLotes!()) medir(lote.celda, bytesDeLote(lote));
   }
   let numeroLibres = 0;
   for (const _ of recorrerLibres()) numeroLibres++;
@@ -225,7 +238,10 @@ export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, lib
     salida.irA(plan.fin);
   }
   const inicioLibres = salida.posicion;
-  for (const lote of recorrerLotes()) {
+  function* recorrerPaginas(orden: RecorridoPaginas): IterableIterator<LoteGuardado> {
+    for (const pagina of paginas.keys()) yield* orden.lotesDePagina(pagina);
+  }
+  for (const lote of recorrido ? recorrerPaginas(recorrido) : recorrerLotes!()) {
     const plan = paginas.get(paginaDe(lote.celda));
     const bytes = bytesDeLote(lote);
     if (!plan || plan.restantes === 0 || bytes > plan.fin - plan.posicion) throw new Error('Los lotes cambiaron durante la codificación.');

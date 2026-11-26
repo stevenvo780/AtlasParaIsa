@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -35,7 +36,7 @@ await once(sonda, 'listening');
 const { port } = sonda.address();
 await new Promise(ok => sonda.close(ok));
 const origen = `http://127.0.0.1:${port}`;
-const mundo = mkdtempSync(duracionMs ? join(resolve(salida), 'mundo-sostenida-') : '/tmp/atlas-v24-demo-');
+const mundo = mkdtempSync(duracionMs ? join(resolve(salida), 'mundo-sostenida-') : join(tmpdir(), 'atlas-v24-demo-'));
 const acceso = 'AtlasLab-' + randomBytes(16).toString('hex');
 let directorioCinta;
 const crearPasarela = () => createWorkerGateway({ worldPath: join(mundo, 'world.sqlite'), manual: true, deployment: true,
@@ -150,16 +151,19 @@ try {
       let cintaSeparaControles;
       if (tactil) {
         await expect(pagina.locator('[data-dvr-desfase]')).toContainText('de mundo hasta el presente');
-        cintaSeparaControles = await rango.evaluate(control => {
+        const geometria = await rango.evaluate(control => {
           const borde = getComputedStyle(control);
           const extension = parseFloat(borde.outlineWidth) + parseFloat(borde.outlineOffset);
           const caja = selector => document.querySelector(selector).getBoundingClientRect();
           const barra = caja('#dvr-bar');
-          return control.matches(':focus-visible') && borde.outlineStyle !== 'none' &&
-            control.getBoundingClientRect().bottom + extension <= caja('.dvr-readout').top &&
-            caja('#inspector-drawer').bottom <= barra.top && barra.bottom <= caja('#population-toggle').top;
+          return { foco: control.matches(':focus-visible') && borde.outlineStyle !== 'none',
+            focoFin: control.getBoundingClientRect().bottom + extension, etiquetasInicio: caja('.dvr-readout').top,
+            fichaFin: caja('#inspector-drawer').bottom, cintaInicio: barra.top,
+            cintaFin: barra.bottom, navegacionInicio: caja('#population-toggle').top };
         });
-        assert.equal(cintaSeparaControles, true, 'El foco, las etiquetas, la ficha y la navegación deben caber juntos');
+        cintaSeparaControles = geometria.foco && geometria.focoFin <= geometria.etiquetasInicio &&
+          geometria.fichaFin <= geometria.cintaInicio && geometria.cintaFin <= geometria.navegacionInicio;
+        assert.equal(cintaSeparaControles, true, `El foco, las etiquetas, la ficha y la navegación deben caber juntos: ${JSON.stringify({ nombre, ...geometria })}`);
       }
       await pagina.screenshot({ path: join(salida, `${nombre}-historia.png`) });
       await presente.click();

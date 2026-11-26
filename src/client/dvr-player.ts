@@ -382,12 +382,22 @@ export class DvrPlayer {
   }
 
   /** Vuelve al presente (con colchón) y reproduce. */
-  jumpToLiveEdge(): Promise<void> {
+  async jumpToLiveEdge(): Promise<void> {
     this.tramo = null;
     this.playing = !this.options.abrirEnInicio;
-    if (!this.enabled) { this.notify(); return Promise.resolve(); }
+    if (!this.enabled) { this.notify(); return; }
     this.epocaVista = null;
-    return this.jump(this.liveTick(), 'seek', 1).then(() => undefined);
+    // La meta puede tener varios segundos: el motor y la reproducción tienen relojes distintos.
+    // Una orden posterior del usuario invalida esta consulta, incluso antes de pedir el trozo.
+    const gen = this.generacion;
+    if (!this.options.abrirEnInicio) {
+      try {
+        const meta = await this.options.fetchMeta();
+        if (gen !== this.generacion) return;
+        this.applyMeta(meta);
+      } catch { if (gen !== this.generacion) return; }
+    }
+    await this.jump(this.liveTick(), 'seek', 1, undefined, !this.options.abrirEnInicio);
   }
 
   /** La cámara cambió: se fusiona ~200 ms y se refresca el trozo en `currentTick` sin perder la posición. */
@@ -670,7 +680,7 @@ export class DvrPlayer {
    * de la base del trozo (el fotograma clave ≤ t) y, si hay deltas hasta `t`, se aplican de una vez para aterrizar en
    * el último fotograma ≤ t en vez de reproducir el tramo desde el fotograma clave. Devuelve si pintó algo.
    */
-  private async jump(t: number, reason: DvrFrameReason, direccion: number, tramo?: Readonly<{ desde: number; hasta: number }>): Promise<boolean> {
+  private async jump(t: number, reason: DvrFrameReason, direccion: number, tramo?: Readonly<{ desde: number; hasta: number }>, alPresente = false): Promise<boolean> {
     const target = this.fueraDeLaguna(clamp(Math.floor(t), this.minTick, Math.max(this.minTick, this.maxTick)), direccion);
     const gen = ++this.generacion;
     this.aborter?.abort(); this.cargando = null;
@@ -692,7 +702,8 @@ export class DvrPlayer {
       if (aterriza < 0 || list[aterriza]!.tick > tramo.hasta) {
         this.options.onAviso?.('No hay cinta en ese tramo.'); this.notify(); return false;
       }
-    } else while (aterriza + 1 < list.length && list[aterriza + 1]!.tick <= target) aterriza++;
+    } else if (alPresente) aterriza = list.length - 1;
+    else while (aterriza + 1 < list.length && list[aterriza + 1]!.tick <= target) aterriza++;
     let frame: WorldView | null = null;
     try { for (let i = 0; i <= aterriza; i++) frame = this.decode(list[i]!).frame; }
     catch (error) { this.error = describe(error); this.frames = []; this.notify(); return false; }

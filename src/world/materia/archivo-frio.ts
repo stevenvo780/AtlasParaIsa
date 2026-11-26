@@ -4,6 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { PageArena } from '../soa/arena.js';
 import { desbordeDeEspecies, LOTES_POR_BLOQUE, type ArenaLotes } from './arena.js';
+import type { RecorridoPaginas } from './checkpoint.js';
 import { Rol, type LoteRef } from './tipos.js';
 
 const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -11,11 +12,12 @@ const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes)
 /** Contenido físico de lotes dormidos en un directorio privado de una instancia. VMAT sigue siendo el guardado durable. */
 export class ArchivoMateriaFria {
   readonly contenido: PageArena;
-  readonly #paginas = new Map<number, { huella: string; bytes: number; lotes: number }>();
+  readonly #paginas = new Map<number, { huella: string; bytes: number; lotes: number; pares: number }>();
   #directorio?: string;
   #cache?: { pagina: number; lotes: Map<LoteRef, Float64Array> };
   #errorEscritura?: string;
   #errorLimpieza?: string;
+  #lecturasArchivo = 0;
 
   constructor(private readonly raiz: string, maxRanuras: number, private readonly desborde: PageArena) {
     if (!isAbsolute(raiz) || !statSync(raiz, { throwIfNoEntry: false })?.isDirectory()) {
@@ -31,6 +33,41 @@ export class ArchivoMateriaFria {
     const pares = this.#leerPagina(pagina).get(ref);
     if (!pares) throw new Error(`No existe el lote ${ref} en la página fría ${pagina}.`);
     return pares;
+  }
+
+  fuenteCheckpoint(arena: ArenaLotes, celdaMundo: (celda: number) => number,
+    paginaLocal: (pagina: number) => number): RecorridoPaginas | undefined {
+    if (!this.#paginas.size) return undefined;
+    // Cada checkpoint vuelve a verificar la huella de su archivo, incluso si el último acceso lo dejó en caché.
+    this.#cache = undefined;
+    const paginas = this.#paginas;
+    return {
+      *medir() {
+        const contados = new Map<number, number>();
+        for (const lote of arena.medirComposiciones()) {
+          let pares = lote.pares;
+          if (pares === null) {
+            const pagina = Math.floor(lote.celda / 256), sello = paginas.get(pagina);
+            if (!sello) throw new Error(`Falta el sello de la página fría ${pagina}.`);
+            const contadosAntes = contados.get(pagina) ?? 0;
+            pares = contadosAntes === 0 ? sello.pares : 0;
+            contados.set(pagina, contadosAntes + 1);
+          }
+          yield { celda: celdaMundo(lote.celda), pares };
+        }
+        for (const [pagina, { lotes }] of paginas) if (contados.get(pagina) !== lotes) {
+          throw new Error(`El número de lotes aparcados no coincide con el sello de la página fría ${pagina}.`);
+        }
+      },
+      *lotesDePagina(pagina) {
+        const local = pagina === -1 ? -1 : paginaLocal(pagina);
+        if (pagina !== -1 && local < 0) throw new Error(`Falta la página de arena para la página de mundo ${pagina}.`);
+        for (const lote of arena.muestrasDePagina(local)) {
+          lote.celda = celdaMundo(lote.celda);
+          yield lote;
+        }
+      },
+    };
   }
 
   enfriar(arena: ArenaLotes, pagina: number, referencias: readonly LoteRef[]): void {
@@ -72,7 +109,12 @@ export class ArchivoMateriaFria {
       }
       return false;
     }
-    this.#paginas.set(pagina, { huella: digest(datos), bytes: datos.length, lotes: lotes.size });
+    // Al cargar VMAT se descartan los pares de cantidad cero; la posición original del calor no cambia el tamaño.
+    let pares = 0;
+    for (const composicion of lotes.values()) for (let i = 1; i < composicion.length; i += 2) {
+      if (composicion[i]! > 0) pares++;
+    }
+    this.#paginas.set(pagina, { huella: digest(datos), bytes: datos.length, lotes: lotes.size, pares });
     return true;
   }
 
@@ -95,7 +137,7 @@ export class ArchivoMateriaFria {
     for (const p of this.#paginas.values()) { bytesEnDisco += p.bytes; lotesFrios += p.lotes; }
     return { paginasFrias: this.#paginas.size, lotesFrios, bytesEnDisco, lotesFisicos: this.contenido.used,
       capacidadFisica: this.contenido.capacity, bytesFisicos: this.contenido.bytes,
-      errorEscritura: this.#errorEscritura, errorLimpieza: this.#errorLimpieza };
+      lecturasArchivo: this.#lecturasArchivo, errorEscritura: this.#errorEscritura, errorLimpieza: this.#errorLimpieza };
   }
 
   cerrar(): void {
@@ -114,6 +156,7 @@ export class ArchivoMateriaFria {
     if (this.#cache?.pagina === pagina) return this.#cache.lotes;
     const sello = this.#paginas.get(pagina);
     if (!sello) throw new Error(`Falta el archivo de la página fría ${pagina}.`);
+    this.#lecturasArchivo++;
     const datos = readFileSync(this.#ruta(pagina));
     if (datos.length !== sello.bytes || digest(datos) !== sello.huella) throw new Error(`Archivo frío corrupto en página ${pagina}.`);
     const lotes: Map<LoteRef, Float64Array> = deserialize(datos);

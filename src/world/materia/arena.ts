@@ -855,6 +855,33 @@ export class ArenaLotes implements ArenaMateria {
     for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) yield this.muestraDeRanura(s);
   }
 
+  /** Conserva la primera visita por ranura. El archivo aporta el tamaño de las composiciones frías. */
+  *medirComposiciones(): IterableIterator<{ celda: number; pares: number | null }> {
+    for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) {
+      const fisica = this.fisica(s);
+      yield { celda: this.celda[s]!, pares: fisica < 0 ? null : this.contenidoFisico(fisica, this.la).n };
+    }
+  }
+
+  /** En barrera. Los enlaces de celda dan pertenencia, y el orden canónico lo da la ranura lógica. */
+  *muestrasDePagina(pagina: number): IterableIterator<LoteGuardado> {
+    if (pagina === -1) {
+      for (let s = 0; s < this.op.lotes.slots; s++) if (this.celda[s] === -1 && this.activo(s)) yield this.muestraDeRanura(s);
+      return;
+    }
+    const ranuras: number[] = [];
+    const inicio = pagina * CELDAS_PAGINA, fin = inicio + CELDAS_PAGINA;
+    for (let celda = inicio; celda < fin; celda++) {
+      let restantes = this.op.lotes.slots;
+      for (let p = Atomics.load(this.primero, celda); p; p = Atomics.load(this.siguiente, p - 1)) {
+        if (restantes-- === 0 || this.celda[p - 1] !== celda) throw new Error(`Enlace inválido de lotes en celda ${celda}.`);
+        if (this.activo(p - 1)) ranuras.push(p - 1);
+      }
+    }
+    ranuras.sort((a, b) => a - b);
+    for (const s of ranuras) yield this.muestraDeRanura(s);
+  }
+
   *libres(): IterableIterator<LoteRef> {
     for (let s = 0; s < this.op.lotes.slots; s++) if (!this.activo(s)) {
       yield refDe(s, this.bloque(s).gen[s % LOTES_POR_BLOQUE]);

@@ -4,10 +4,11 @@ import type { Chunk } from '../world/terrain.js';
 import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
   assertWorldLimits, effectiveLimits, paramsOf, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
-import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
-import { residentBackingArray, residentTopologyToken } from '../world/soa/topologia.js';
-import { residentFastAccess } from '../world/soa/terreno.js';
+import { stringifyExact } from '../shared/exact-json.js';
+import { ANCHO_TESELA, SNAPSHOT_TILE_FIELDS, encodeSnapshotTileRows, materializarTuplaTesela, rocaValida } from '../world/teselas-snapshot.js';
 import { GOBERNADOR_DIGESTO_HISTORICO, type GobernadorLegado } from '../world/digesto.js';
+
+export { SNAPSHOT_TILE_FIELDS, encodeSnapshotTileRows } from '../world/teselas-snapshot.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
@@ -31,12 +32,7 @@ export const ARCHIVED_CHUNK_TILE_ENCODING = 'chunk-tiles-tuple-v1';
 const PARAMS_ENCODING = 'params-v1';
 const LEGACY_PARAMS_BODY = stringifyExact({ ...HISTORICAL_PARAMS, limites: LEGACY_WORLD_LIMITS });
 const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS);
-/** Orden de los campos de cada tupla de tesela. `encodeSnapshotTileRows` escribe el mismo orden a mano
- * (camino caliente de cada guardado); tests/snapshot-tile-fields.test.ts comprueba que coinciden. */
-export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life','paved','rocaLatente'] as const;
-const ANCHO_TESELA = SNAPSHOT_TILE_FIELDS.length - 1;
 const PAVED_TILE_RULES_VERSION = 14;
-const rocaValida = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
@@ -148,54 +144,6 @@ export function assertSnapshotCounts(record: Record<string, unknown>, limits: Re
     || !v23.fauna && Array.isArray(record.animals) && record.animals.length > limits.fauna)
     throw new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.');
 }
-/** Codifica `count` teselas desde `offset` sin copiar el tramo (el guardado por páginas ya no paga un
- * `slice` —otra pasada de traps sobre el array Proxy residente— por página). Sin tramo, el array entero. */
-export function encodeSnapshotTileRows(tiles: readonly Tile[], offset = 0, count = tiles.length - offset, nativo = false): unknown[][] {
-  // JSON null is reserved for absent optional fields. Never erase invalid present
-  // values (JSON itself would turn NaN/Infinity into null) during compaction.
-  const rows: unknown[][] = new Array(count);
-  const token = residentTopologyToken(tiles as Tile[]);
-  // An opaque array index accessor must keep the public Proxy as its receiver.
-  const raw = token === undefined ? tiles : residentBackingArray(tiles);
-  // The provider refuses busy stores and reflected resident descriptors. A binding
-  // lookup (not an array index/coordinate guess) also handles mixed/new chunks.
-  // Inherited optional values cannot be represented by the SoA absence sentinel.
-  const fast = token !== undefined
-    && !SNAPSHOT_TILE_FIELDS.some(key => key in Object.prototype) ? residentFastAccess(tiles) : undefined;
-  for (let n = 0; n < count; n++) {
-    const t = raw[offset + n]!;
-    const cell = fast ? fast.cellOf(t) : -1;
-    // Keep the historical tuple projection: custom object key order, extra keys
-    // and tile.toJSON do not change it. Unbound/opaque tiles take the old reads.
-    const row: unknown[] = cell < 0 ? [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life,t.paved]
-      : [t.x,t.y,fast!.TERRAIN_NAMES[fast!.terrainArr[cell]! - 1],
-        optionalNumber(fast!.moistureArr[cell]!),optionalNumber(fast!.vegetationArr[cell]!),optionalNumber(fast!.foodArr[cell]!),
-        fast!.BIOME_NAMES[fast!.biomeArr[cell]! - 1],t.elevation,optionalNumber(fast!.woodArr[cell]!),t.stone,
-        fast!.FEATURE_NAMES[fast!.featureArr[cell]! - 1],t.variety,optionalNumber(fast!.growthArr[cell]!),
-        optionalNumber(fast!.fertilityArr[cell]!),optionalNumber(fast!.cultivationArr[cell]!),optionalNumber(fast!.trafficArr[cell]!),
-        optionalNumber(fast!.drinkingWaterArr[cell]!),t.species,t.fauna,optionalNumber(fast!.lifeArr[cell]!),t.paved];
-    const roca = t.rocaLatente;
-    if (roca !== undefined) {
-      if (!rocaValida(roca)) throw new Error('Reserva de roca latente inválida. No se guardó la instantánea.');
-      row.push(roca);
-    }
-    for (let i = 0; i < row.length; i++) {
-      const value = row[i];
-      if (typeof value === 'number') {
-        if (!Number.isFinite(value)) {
-          if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
-          if (i >= 6) throw new Error('Invalid optional tile value. Snapshot was not written.');
-        } else if (!nativo && value === 0 && 1 / value < 0) row[i] = exactJsonNumber(value);
-      } else if (i < 6 && i !== 2) throw new Error('Invalid required numeric tile value. Snapshot was not written.');
-      else if (i >= 6 && value === null) throw new Error('Invalid optional tile value. Snapshot was not written.');
-    }
-    rows[n] = row;
-  }
-  return rows;
-}
-/** NaN is the resident absence sentinel; Infinity is a present value and must
- * reach the same validation/error below as it does through a resident getter. */
-function optionalNumber(value: number): number | undefined { return value === value ? value : undefined; }
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
   if (Object.hasOwn(world, 'snapshotReplay')) throw new Error('Reserved snapshot replay field. Snapshot was not written.');
   if (Object.hasOwn(world, 'snapshotEncoding')) throw new Error('Reserved snapshot encoding field. Snapshot was not written.');
@@ -349,9 +297,7 @@ export function decodeSnapshotTileRows(rows: unknown[], rulesVersion?: number): 
       && !(row.length === SNAPSHOT_TILE_FIELDS.length && rocaValida(row[ANCHO_TESELA]))
       && !(allowLegacyWidth && row.length === ANCHO_TESELA - 1))
       throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
-    const tile: Record<string, unknown> = {};
-    for (let i = 0; i < row.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
-    return tile as unknown as Tile;
+    return materializarTuplaTesela(row);
   });
 }
 export function decodeSnapshotValue(value: unknown): unknown {

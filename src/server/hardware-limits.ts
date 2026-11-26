@@ -58,6 +58,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     ...(gruposPercepcionGpu === undefined ? {} : { gruposPercepcionGpu }),
     ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
     ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
+    ...(env.CARTA_FAUNA_CORTE_SOMBRA === '1' ? { faunaCortePreparada: true } : {}),
     ...(confirmarGuardadoVivo ? { confirmarGuardadoVivo: true } : {}),
     ...(env.CARTA_MATERIA_FISICA_SEPARADA === '1' ? { materiaFisicaSeparada: true } : {}),
     ...(env.CARTA_FOTOGRAMA_DUENOS === '1' ? { emisionFotogramaDuenos: true } : {}),

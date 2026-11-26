@@ -26,6 +26,14 @@ test('la transferencia del corte debe solicitarse al arrancar el servidor', () =
   assert.equal(motorConfig(7, { ...configuracion, CARTA_CORTE_TRANSFERIBLE: '0' }).instantaneaTransferible, undefined);
 });
 
+test('el cotejo de fauna preparada se activa expresamente junto con el corte por puerto', () => {
+  const config = { CARTA_MOTOR_HILOS: '8', CARTA_CORTE_TRANSFERIBLE: '1' };
+  const activa = motorConfig(7, { ...config, CARTA_FAUNA_CORTE_SOMBRA: '1' });
+  assert.equal(activa.instantaneaTransferible, true);
+  assert.equal(activa.faunaCortePreparada, true);
+  assert.equal(motorConfig(7, config).faunaCortePreparada, undefined);
+});
+
 test('la emisión del fotograma por dueño debe solicitarse al arrancar el servidor', () => {
   const config = { CARTA_MOTOR_HILOS: '8', CARTA_CORTE_TRANSFERIBLE: '1' };
   const activa = motorConfig(7, { ...config, CARTA_FOTOGRAMA_DUENOS: '1' });

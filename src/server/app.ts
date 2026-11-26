@@ -619,9 +619,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   let ultimoTickGuardado = world?.tick ?? 0;
   let ultimoGuardadoEn: number | null = gateway ? null : loaded?.savedAt ?? null;
   function guardarMundo(draft: World, recibos: Recibos = [], sesiones: string[] = [], cambios: readonly SnapshotReplayChange[] = []): Instantanea | undefined {
-    const instantanea = motor?.instantanea();
+    const completo = ley(draft, 'guardadoCompleto');
+    const instantanea = motor?.instantanea(completo);
     const duradero = instantanea?.world ?? draft;
-    if (ley(draft, 'guardadoCompleto')) {
+    if (completo) {
       store.guardarConEntradas(instantanea ?? { world: draft, materia: null }, recibos, sesiones);
     } else store.save(duradero, recibos, sesiones, cambios);
     ultimoTickGuardado = duradero.tick;

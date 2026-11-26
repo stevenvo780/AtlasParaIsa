@@ -6,7 +6,8 @@
  * Tramos de un tick (las barreras las pone el coordinador, que fija entre ellas la fase de los buzones):
  *   percibir = F1 (adoptar, cola B, Ley.F1) · eco · F2      ── B2
  *   actuar   = F3 · F4                                       ── B3
- *   aplicar  = F5 (cola A, Ley.F5) · F6 (filas, Ley.F6, páginas, fotograma, emigrar, parte del tick)   ── B4
+ *   aplicar  = F5 (cola A, Ley.F5, admisión de cruces)
+ *   publicar = F6 (cruces admitidos, filas, Ley.F6, páginas, fotograma, emigrar, parte del tick)
  * Con dueños están encendidas todas las leyes. La demografía base sigue evaluando edad, daño y muerte en cada heap.
  */
 import { deserialize } from 'node:v8';
@@ -33,7 +34,7 @@ import type { Hilo } from './contratos.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
-export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6 } as const;
+export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7 } as const;
 
 /** Lo que cada worker recibe al nacer (por `workerData`: los SAB se comparten, lo demás se copia). */
 export interface DatosDueno {
@@ -159,6 +160,13 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
         comunidadesGlobales: true,
       });
       d.gancho('F5');
+      const ms = performance.now() - inicio;
+      control[celda(CTL_DUENO.msAplicar)] = ms;
+      control[celda(CTL_DUENO.msTick)]! += ms;
+      break;
+    }
+    case TRAMO.publicar: {
+      d.aplicar('C');
       d.publicarFilas();
       d.gancho('F6');
       d.publicarTerreno();
@@ -166,7 +174,7 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
       d.emigrar();
       if (d.hilo !== 0) d.enviarParte();
       const ms = performance.now() - inicio;
-      control[celda(CTL_DUENO.msAplicar)] = ms;
+      control[celda(CTL_DUENO.msAplicar)]! += ms;
       control[celda(CTL_DUENO.msTick)]! += ms;
       break;
     }

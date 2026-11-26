@@ -39,6 +39,8 @@ export interface CtxLey extends CtxDueno {
    * o si ya se olvidó (muerto hace más de un día). Vale para personas y fauna. */
   idDe(uid: number): string | undefined;
   uidDe(id: string): number;
+  /** El chunk se va al archivo al cerrar este tick. Una cesión a otro dueño sigue residente. */
+  retiraChunk(chunk: ChunkId): boolean;
   /** Percepción en lote del dueño (CPU en piscina o GPU) para las leyes que no son personas (carril f). Opcional: sin
    * ella la ley percibe en CPU por su cuenta. */
   percibir?(lote: LotePercepcion, planes: readonly Plan[]): Percepcion;
@@ -87,7 +89,7 @@ export interface Ley {
    * crea lo que falte (lotes de sus teselas, cuerpos de quien no los tenga). Idempotente: no repite lo ya hecho. */
   iniciar?(c: CtxLey): void;
   /** Un chunk pasa a ser residente de este dueño (F1) o deja de serlo (F6): materializar o guardar lo suyo. */
-  alActivar?(c: CtxLey, chunk: ChunkId): void;
+  alActivar?(c: CtxLey, chunk: ChunkId, cedido?: boolean): void;
   alRetirar?(c: CtxLey, chunk: ChunkId): void;
   /** Un organismo llega a este dueño por migración (F1): adoptar sus lotes ligados (`ArenaMateria.adoptar`). */
   alAdoptar?(c: CtxLey, organismo: Person | Animal): void;

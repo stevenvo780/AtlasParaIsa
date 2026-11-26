@@ -188,6 +188,7 @@ export const TipoIntento = {
   Tomar: 1, Depositar: 2, Dar: 3, Golpear: 4, Vincular: 5, Ensenar: 6, // sobre otro organismo, lote o celda de otro chunk
   Concedido: 7, Devuelto: 8,                                           // respuestas que llevan garantía
   Migrante: 9, Gesto: 10, Activar: 11, Global: 12,                     // motor: migración, gesto, chunk nuevo, coordinador
+  Cruzar: 13, Admitido: 14,                                         // huella animal: petición a la celda y permiso al animal
 } as const;
 export type TipoIntento = (typeof TipoIntento)[keyof typeof TipoIntento];
 
@@ -218,13 +219,13 @@ export const DATO_TOMAR = { rol: 0, parte: 1, esp: 2, cuantos: 3, loteDestino: 4
 export const DATO_GOLPEAR = { trabajo: 0, filo: 1, tenacidad: 2, esbeltez: 3, dureza: 4 } as const;
 
 /** Colas de cada dueño: M (migrantes, se vacía PRIMERO en F1 antes que B); B (respuestas y gestos, en F1); A (intentos
- * del tick, en F5); F0 (solo la del coordinador, en F0 de t+1). */
-export type Cola = 'M' | 'A' | 'B' | 'F0';
+ * del tick, en F5); C (cruces admitidos, al abrir F6); F0 (solo la del coordinador, en F0 de t+1). */
+export type Cola = 'M' | 'A' | 'B' | 'C' | 'F0';
 
 /** MPSC sobre SAB crecible. Implementa: M1 (`motor/buzon.ts`). Consumen: M4a, M4b, M5, W, N, F, S, E, T1. */
 export interface Buzon {
   /** Enruta según tipo y fase (el coordinador fija la fase en cada barrera): `Migrante` va siempre a M; `Activar` y
-   * `Global`, a F0 del coordinador; el resto, a A en F1–F4 y a B en F5–F6 (y gestos de F0 → B para F1 del mismo tick).
+   * `Global`, a F0 del coordinador; `Admitido`, a C; el resto, a A en F1–F4 y a B en F5–F6.
    * `enviar` copia el intento al SAB: al volver, el emisor puede reutilizar sus arrays. */
   enviar(destino: Hilo, i: Intento): void;
   /** Solo el dueño, en la fase de esa cola; orden barajado con su azar (salvo M y F0). Los arrays del intento entregado

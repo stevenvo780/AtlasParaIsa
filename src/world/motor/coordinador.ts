@@ -5,7 +5,7 @@
  *
  * Con un hilo, `MotorUnico` es una fachada de `stepWorld`: el hilo que llama es el único dueño. Con más,
  * `MotorDuenos` es el coordinador (y dueño 0): reparte el mundo en tramos Morton, lanza un worker por dueño sobre una
- * `Piscina` y conduce cada tick con cuatro barreras (F0 en serie, percibir, actuar, aplicar y el cierre en serie).
+ * `Piscina` conduce los tramos percibir, actuar, aplicar y publicar. F0 y el cierre son en serie.
  * Toda la memoria compartida se crea al abrir la época (un SAB no viaja por un buzón): cargar, o enlazar una cinta con
  * los workers ya en marcha, cierra la piscina y abre otra.
  */
@@ -188,6 +188,7 @@ class MotorDuenos implements Motor {
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
   #cesiones: [ChunkId, Hilo][] = [];
+  #activacionesPendientes = 0;
   #costeMs = new Float64Array(0);
   readonly #historial: number[] = [];
   // Lo que llega por la cola F0 del coordinador.
@@ -211,6 +212,7 @@ class MotorDuenos implements Motor {
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
+    this.#activacionesPendientes = 0;
     this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#altas = [];
 
     // Memoria compartida de la época. La reserva de filas crece con el mundo que se carga: agotarla es fatal y la
@@ -319,12 +321,14 @@ class MotorDuenos implements Motor {
       }
       this.#pedirDetalles();
       d.F0();
+      if (this.#activacionesPendientes) d.reservarMateria(this.#activacionesPendientes);
       control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
-      // B1 · percibir · B2 · actuar · B3 · aplicar · B4
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
+      this.#activacionesPendientes = 0;
       buzones.fijarFase(3); piscina.ejecutar(TRAMO.actuar);
       buzones.fijarFase(5); piscina.ejecutar(TRAMO.aplicar);
+      buzones.fijarFase(6); piscina.ejecutar(TRAMO.publicar);
       this.#tabla.publicar(m.tick);
       // Cierre en serie: lo que los dueños mandaron al coordinador en el tick (la crónica en orden, altas, resultados).
       this.#recoger();
@@ -435,18 +439,19 @@ class MotorDuenos implements Motor {
     const dueno = duenoDeVecino(px, py, paginas.map(p => p.px), paginas.map(p => p.py), paginas.map(p => terreno.duenoChunk[p.chunk]!), pide);
     const key = chunkKey(px * 16, py * 16);
     const { tiles, animals, structures, ...meta } = tomarChunk(m, key, px, py);
-    d.reservarMateria(1);
     const previa = terreno.paginaDe(px, py);
     const chunk = previa >= 0 ? previa : terreno.asegurarPagina(px, py, dueno);
     if (previa >= 0) terreno.asignar(chunk, dueno);
     for (const lugar of meta.places) if (!m.places.some(p => p.id === lugar.id)) m.places.push(lugar);
     this.#paginas.set(clave, { chunk, px, py, key, estado: 'activo' });
     d.enviarMigrante(dueno, { tipo: 'chunk', chunk, key, meta, tiles, structures: structures ?? [], animals: animals ?? [], personas: [], inicial: false });
+    this.#activacionesPendientes++;
   }
 
   /** Un dueño devolvió un chunk retirado: queda archivado en el mundo del coordinador, pendiente de guardado. */
   #archivar(mig: MigranteChunk): void {
     const m = this.#mundo;
+    if (paramsOf(m).v23.fauna) syncFauna(mig.tiles, mig.animals);
     archivarChunk(m, { ...mig.meta, lifeVersion: 4, lastTick: m.tick, tiles: mig.tiles, animals: mig.animals, structures: mig.structures });
     for (const [clave, pagina] of this.#paginas) if (pagina.chunk === mig.chunk) { this.#paginas.delete(clave); break; }
   }

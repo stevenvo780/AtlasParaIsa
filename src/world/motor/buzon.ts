@@ -4,10 +4,10 @@ import type { Buzon, Cola, Hilo, Intento } from './contratos.js';
 import { TipoIntento } from './contratos.js';
 
 export type FaseMotor = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-const FASE_LECTURA = { M: 1, A: 5, B: 1, F0: 0 } as const;
+const FASE_LECTURA = { M: 1, A: 5, B: 1, C: 6, F0: 0 } as const;
 const PALABRA = Float64Array.BYTES_PER_ELEMENT;
 const CABECERA = 9;
-/** Tope por cola si el anfitrión no da otro. Es reserva virtual, no memoria usada: 28 dueños × 3 colas
+/** Tope por cola si el anfitrión no da otro. Es reserva virtual, no memoria usada: 28 dueños × 4 colas
  * caben de sobra en los 128 TiB de direcciones. Las leyes no preguntan a la máquina, así que el
  * anfitrión que quiera el límite físico lo pasa al construir `Buzones`. */
 export const MAX_BYTES_COLA = 2 ** 36;
@@ -15,6 +15,7 @@ export const MAX_BYTES_COLA = 2 ** 36;
 function colaDe(fase: FaseMotor, tipo: Intento['tipo']): Cola {
   if (tipo === TipoIntento.Migrante) return 'M';
   if (tipo === TipoIntento.Activar || tipo === TipoIntento.Global) return 'F0';
+  if (tipo === TipoIntento.Admitido) return 'C';
   return fase >= 1 && fase <= 4 ? 'A' : 'B';
 }
 
@@ -34,7 +35,7 @@ interface ColaCompartida {
 export interface MemoriaBuzones {
   readonly fase: Int32Array;
   readonly f0: ColaCompartida;
-  readonly duenos: readonly Pick<Record<Cola, ColaCompartida>, 'M' | 'A' | 'B'>[];
+  readonly duenos: readonly Record<Exclude<Cola, 'F0'>, ColaCompartida>[];
 }
 
 function crearCola(maxBytes: number): ColaCompartida {
@@ -157,7 +158,7 @@ export function conectarBuzon(memoria: MemoriaBuzones, hilo: Hilo, azar: () => n
 export class Buzones {
   readonly memoria: MemoriaBuzones | null;
   private fase: FaseMotor = 0;
-  private local: Record<Cola, Intento[]> = { F0: [], M: [], A: [], B: [] };
+  private local: Record<Cola, Intento[]> = { F0: [], M: [], A: [], B: [], C: [] };
 
   constructor(hilos: number, maxBytesCola = MAX_BYTES_COLA) {
     if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
@@ -166,7 +167,7 @@ export class Buzones {
     this.memoria = hilos === 1 ? null : {
       fase: new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
       f0: crearCola(max),
-      duenos: Array.from({ length: hilos }, () => ({ M: crearCola(max), A: crearCola(max), B: crearCola(max) })),
+      duenos: Array.from({ length: hilos }, () => ({ M: crearCola(max), A: crearCola(max), B: crearCola(max), C: crearCola(max) })),
     };
   }
 
@@ -176,7 +177,7 @@ export class Buzones {
     const salida: Intento[] = [];
     if (this.memoria) {
       pendientesDe(this.memoria.f0, salida);
-      for (const d of this.memoria.duenos) { pendientesDe(d.M, salida); pendientesDe(d.A, salida); pendientesDe(d.B, salida); }
+      for (const d of this.memoria.duenos) for (const cola of Object.values(d)) pendientesDe(cola, salida);
     } else for (const cola of Object.values(this.local)) salida.push(...cola);
     return salida;
   }

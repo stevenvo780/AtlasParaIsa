@@ -14,7 +14,7 @@ function semilla(n: number): () => number {
   return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 2 ** 32; };
 }
 
-const FASE_DE_VACIADO: Record<Cola, FaseMotor> = { F0: 0, M: 1, B: 1, A: 5 };
+const FASE_DE_VACIADO: Record<Cola, FaseMotor> = { F0: 0, M: 1, B: 1, A: 5, C: 6 };
 
 function vaciarEnSuFase(buzones: Buzones, buzon: Buzon, cola: Cola): Intento[] {
   buzones.fijarFase(FASE_DE_VACIADO[cola]);
@@ -32,17 +32,18 @@ for (const hilos of [1, 2]) {
     assert.equal(buzones.memoria === null, hilos === 1);
     const tipos = Object.values(TipoIntento);
     let seq = 0;
-    const esperado: Record<Cola, number[]> = { F0: [], M: [], A: [], B: [] };
+    const esperado: Record<Cola, number[]> = { F0: [], M: [], A: [], B: [], C: [] };
     for (let fase = 0 as FaseMotor; fase <= 6; fase = fase + 1 as FaseMotor) {
       buzones.fijarFase(fase);
       for (const tipo of tipos) {
         const cola: Cola = tipo === TipoIntento.Migrante ? 'M'
-          : tipo === TipoIntento.Activar || tipo === TipoIntento.Global ? 'F0' : fase >= 1 && fase <= 4 ? 'A' : 'B';
+          : tipo === TipoIntento.Activar || tipo === TipoIntento.Global ? 'F0'
+            : tipo === TipoIntento.Admitido ? 'C' : fase >= 1 && fase <= 4 ? 'A' : 'B';
         esperado[cola].push(seq);
         buzon.enviar(0, { ...mensaje(0, 0, seq++), tipo });
       }
     }
-    for (const cola of ['F0', 'M', 'A', 'B'] as const) {
+    for (const cola of ['F0', 'M', 'A', 'B', 'C'] as const) {
       const recibidos = vaciarEnSuFase(buzones, buzon, cola).map(i => i.a).sort((x, y) => x - y);
       assert.deepEqual(recibidos, esperado[cola], `cola ${cola}`);
     }

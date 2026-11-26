@@ -575,6 +575,7 @@ function agrandar<A extends Tabla>(a: A, largo: number, relleno = 0): A {
 }
 
 const local = (t: { x: number; y: number }) => (((t.y % 16) + 16) % 16) * 16 + (((t.x % 16) + 16) % 16);
+const rocaLatenteDe = (t: Tile, escala: number): number => t.rocaLatente ?? Math.round((t.stone ?? 0) * escala);
 const esVaso = (t: Tile) => t.terrain !== 'water' && ((t.drinkingWater ?? 0) > 0 || t.feature === 'pool' || t.feature === 'spring' || t.biome === 'wetland');
 
 export class MundoMaterial {
@@ -869,7 +870,7 @@ export class MundoMaterial {
       const tejido = new Map<SustanciaId, number>();
       for (const o of ORGANOS) for (const [k, nu] of PARTES[o]) tejido.set(S[k], (tejido.get(S[k]) ?? 0) + u[o] * nu);
       this.llenar(this.vida[i]!, [...tejido], T);
-      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = rocaLatenteDe(t, e.piedra);
     }
     // Aire de la página: la columna de cada tesela, con el vapor a la humedad relativa media de sus suelos. Si un vecino
     // ya le mandó vapor antes de materializarse, el lote existe y se aprovecha.
@@ -904,7 +905,7 @@ export class MundoMaterial {
       this.suelo[i] = this.exigir(c, Rol.Suelo); this.vida[i] = this.exigir(c, Rol.Vida);
       this.agua[i] = this.buscar(c, Rol.Agua) ? this.buscado[0]! : -1;
       this.manantial[i] = this.agua[i]! >= 0 && t.feature === 'spring' ? 1 : 0;
-      this.latente[i] = t.rocaLatente ?? Math.round((t.stone ?? 0) * e.piedra);
+      this.latente[i] = rocaLatenteDe(t, e.piedra);
     }
     this.aire[p] = this.exigir(p * 256, Rol.Aire);
     this.mar[p] = this.exigir(p * 256 + CELDA_MAR, ROL_DEPOSITO); this.cielo[p] = this.exigir(p * 256 + CELDA_CIELO, ROL_DEPOSITO);
@@ -921,12 +922,18 @@ export class MundoMaterial {
   /** La página deja de dar pasos; sus lotes siguen en la arena y en el libro. */
   dormir(p: number): void { if (p < this.np) this.activa[p] = 0; }
 
-  /** Vuelve a dar pasos una página dormida que este mundo conserva. Devuelve false si no la tiene o sus lotes caducaron. */
-  despertar(p: number, x: number, y: number): boolean {
-    if (!this.tiene(p)) return false;
+  /** Vuelve a dar pasos una página dormida. Si otro dueño la cedió, la roca latente vigente llega con sus teselas. */
+  despertar(p: number, tiles: readonly Tile[], cedido: boolean): boolean {
+    const primera = tiles[0];
+    if (!primera || !this.tiene(p)) return false;
     const i0 = this.inicio[p]!;
+    if (this.fin[p]! - i0 !== tiles.length) return false;
     if (!this.arena.propio(this.suelo[i0]!) || !this.arena.propio(this.aire[p]!)) return false;
-    if (Math.floor(this.x[i0]! / 16) !== Math.floor(x / 16) || Math.floor(this.y[i0]! / 16) !== Math.floor(y / 16)) return false;
+    if (Math.floor(this.x[i0]! / 16) !== Math.floor(primera.x / 16) || Math.floor(this.y[i0]! / 16) !== Math.floor(primera.y / 16)) return false;
+    if (cedido) {
+      const escala = this.params.escalas.piedra;
+      for (let j = 0; j < tiles.length; j++) this.latente[i0 + j] = rocaLatenteDe(tiles[j]!, escala);
+    }
     this.activa[p] = 1;
     return true;
   }

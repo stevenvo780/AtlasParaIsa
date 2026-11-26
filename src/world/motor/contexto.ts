@@ -25,7 +25,7 @@ import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, decodificarPagi
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
-import { barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type Libro, type LoteRef, type MateriaCheckpoint, type ServicioQuimico, type Sustancia } from '../materia/tipos.js';
+import { Rol, barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type Libro, type LoteRef, type MateriaCheckpoint, type ServicioQuimico, type Sustancia } from '../materia/tipos.js';
 import { addEvent, random } from '../mundo/crear.js';
 import { MAX_EVENTS, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../mundo/tipos.js';
 import { paramsOf, type WorldParams } from '../params.js';
@@ -85,6 +85,7 @@ export interface MigranteChunk {
   refsFauna?: Ref[];
   /** Reparto al abrir la época: no es una activación (lo cubre `Ley.iniciar`). */
   inicial: boolean;
+  cedido?: boolean;
 }
 /** Un organismo que cruzó a un chunk de otro dueño. */
 export interface MigranteOrganismo { tipo: 'organismo'; persona?: { persona: Person; ref: Ref }; animal?: { animal: Animal; ref: Ref } }
@@ -513,7 +514,9 @@ export class Dueno implements CtxF0 {
   gancho(fase: GanchoFase): void { for (const ley of this.leyes) ley[fase]?.(this); }
 
   /** Vacía una cola con el aplicador de m5 (solo con `v23.intentos`). */
-  aplicar(cola: 'M' | 'A' | 'B'): void { if (this.params.v23.intentos) aplicarCola(this, cola); }
+  aplicar(cola: 'M' | 'A' | 'B' | 'C'): void { if (this.params.v23.intentos) aplicarCola(this, cola); }
+
+  retiraChunk(chunk: ChunkId): boolean { return this.cesiones.some(([c, destino]) => c === chunk && destino < 0); }
 
   /** F0, tras las regiones y los gestos: lo global del coordinador y `Ley.F0`. */
   F0(): void {
@@ -701,7 +704,7 @@ export class Dueno implements CtxF0 {
     this.terrenoPercibido.sincronizarPagina(mig.chunk, tileLookup(m.tiles), residentFastAccess(m.tiles));
     // El reparto al abrir la época no es una activación: lo cubren `Ley.iniciar` y, tras una carga, `adoptarPropios`.
     if (mig.inicial) return;
-    for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk);
+    for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk, mig.cedido);
     for (const ley of this.leyes) if (ley.alAdoptar) {
       for (const p of mig.personas) ley.alAdoptar(this, p.persona);
       for (const a of mig.animals) ley.alAdoptar(this, a);
@@ -752,7 +755,7 @@ export class Dueno implements CtxF0 {
         }
         return ref;
       });
-      if (destino >= 0) this.enviarMigrante(destino, mig);
+      if (destino >= 0) { mig.cedido = true; this.enviarMigrante(destino, mig); }
       else {
         terreno.vaciarPagina(chunk);
         this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.chunk, chunk], serialize(mig)));
@@ -841,8 +844,11 @@ export class Dueno implements CtxF0 {
   cargarMateria(cp: MateriaCheckpoint): Intento[] {
     if (!this.materia || !this.quimica) throw new Error('Cargar materia exige v23.materia.');
     const terreno = this.terrenoPercibido, { lotes: guardados, libres } = decodificarPaginas(cp.epoca, cp.paginas);
+    // Guardados previos: recoger roca dejaba su lote Objeto ligado a la celda aunque la persona ya lo llevaba.
+    const carga = new Set<LoteRef>();
+    for (const persona of this.mundo.people) for (const lote of persona.carga ?? []) carga.add(lote);
     // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
-    const lotes = guardados.map(l => ({ ...l, celda: celdaLocal(terreno, l.celda), dueno: 0 }));
+    const lotes = guardados.map(l => ({ ...l, celda: l.rol === Rol.Objeto && carga.has(l.ref) ? REF_NULA : celdaLocal(terreno, l.celda), dueno: 0 }));
     this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
     this.#desborde!.prepararF0(ranurasDesborde(lotes));
     (this.materia as ArenaLotes).cargar(lotes, libres);

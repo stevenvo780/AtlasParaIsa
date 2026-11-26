@@ -293,7 +293,7 @@ export function recogerACuestas(world: World, person: Person, cuerpo: Cuerpo, ti
     const receipt = useTool(world, person, material === 'wood' ? 'cutting' : 'abrasion');
     const kg = KG_POR_UNIDAD_MATERIAL * (1 + (receipt?.power ?? 0)) * escalaBocado(c, cuerpo);
     let lote: LoteRef = REF_NULA;
-    if (material === 'stone') lote = rocaDe(c, celda, kg);
+    if (material === 'stone') lote = rocaDe(c, celda, kg, 'carga');
     else {
       const vida = lotesDeCelda(c, celda, lotesCelda).vida;
       if (vida >= 0) {

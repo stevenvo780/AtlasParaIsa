@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as esperar } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -14,6 +14,9 @@ const segundos = process.env.ATLAS_DEMO_OBSERVACION_SEGUNDOS;
 const duracionMs = segundos === undefined ? 0 : Number(segundos) * 1000;
 assert.ok(segundos === undefined || (/^[1-9]\d*$/.test(segundos) && Number.isSafeInteger(duracionMs)),
   'ATLAS_DEMO_OBSERVACION_SEGUNDOS debe ser un entero positivo');
+const raizCinta = process.env.ATLAS_DEMO_CINTA_RAIZ;
+assert.ok(raizCinta === undefined || isAbsolute(raizCinta) && statSync(raizCinta, { throwIfNoEntry: false })?.isDirectory(),
+  'ATLAS_DEMO_CINTA_RAIZ debe apuntar a un directorio absoluto existente');
 const dosHorasMs = 120 * 60 * 1000;
 const raiz = resolve(copia);
 const { chromium, expect } = createRequire(join(raiz, 'package.json'))('@playwright/test');
@@ -34,8 +37,10 @@ await new Promise(ok => sonda.close(ok));
 const origen = `http://127.0.0.1:${port}`;
 const mundo = mkdtempSync(duracionMs ? join(resolve(salida), 'mundo-sostenida-') : '/tmp/atlas-v24-demo-');
 const acceso = 'AtlasLab-' + randomBytes(16).toString('hex');
+let directorioCinta;
 const crearPasarela = () => createWorkerGateway({ worldPath: join(mundo, 'world.sqlite'), manual: true, deployment: true,
   password: acceso, origin: origen, turbo: true, tape: true, observerOnly: true,
+  tapeDirectory: directorioCinta,
   staticDir: join(raiz, 'dist/client'), seed: 51926 });
 const detener = new AbortController();
 const interrumpir = () => detener.abort(new Error('Observación interrumpida.'));
@@ -107,6 +112,7 @@ if (duracionMs) {
   process.on('SIGTERM', interrumpir);
 }
 try {
+  if (raizCinta) directorioCinta = mkdtempSync(join(raizCinta, 'atlas-v24-cinta-'));
   app = crearPasarela();
   await abrir();
   app.start();
@@ -200,6 +206,8 @@ try {
   }
   const evidencia = { tick: salud.tick, ultimoTickGuardado: salud.ultimoTickGuardado, vistas,
     recargaCinta: { tick: recuperado.baseFrame.tick, epoca: recuperado.epoca, sha256, huellaExacta: true },
+    ...(directorioCinta && { almacenamiento: { dispositivoMundo: statSync(mundo).dev,
+      dispositivoCinta: statSync(directorioCinta).dev } }),
     ...(observacion && { sostenida: { ...observacion, reanudacion } }) };
   writeFileSync(join(salida, 'observacion.json'), JSON.stringify(evidencia, null, 2) + '\n', { mode: 0o600 });
   console.log(JSON.stringify(evidencia));
@@ -208,9 +216,13 @@ try {
   finally {
     try { await app?.close(); }
     finally {
-      rmSync(mundo, { recursive: true, force: true });
-      process.off('SIGINT', interrumpir);
-      process.off('SIGTERM', interrumpir);
+      try {
+        try { rmSync(mundo, { recursive: true, force: true }); }
+        finally { if (directorioCinta) rmSync(directorioCinta, { recursive: true, force: true }); }
+      } finally {
+        process.off('SIGINT', interrumpir);
+        process.off('SIGTERM', interrumpir);
+      }
     }
   }
 }

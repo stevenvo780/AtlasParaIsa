@@ -29,6 +29,8 @@ Las corridas de percepción a 32 hilos y la comparación de revalidación F2 se 
 
 En el candidato compilado, `ATLAS_DEMO_OBSERVACION_SEGUNDOS=7200 node scripts/lab/demo-observacion.mjs "$PWD" DIRECTORIO_NUEVO` prolonga la observación por dos horas y registra el avance, los guardados y la recuperación. Para conservar el mundo de prueba fuera de la RAM, el directorio nuevo se coloca en NVMe.
 
+Para probar la cinta en otro volumen, añade `ATLAS_DEMO_CINTA_RAIZ=/ruta/al/volumen`. El laboratorio crea allí un directorio temporal propio, verifica la recarga de un fotograma con la misma huella y registra los dispositivos de mundo y cinta. El directorio de salida conserva la evidencia. La prueba elimina las dos copias temporales al cerrar.
+
 Las responsabilidades de CPU, VRAM, RAM y discos están en [HARDWARE.md](HARDWARE.md). El material de la carta y los recuerdos autorizados solo los cambia Steven.
 
 ## Una grabación que puede verse sin el motor

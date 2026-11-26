@@ -631,7 +631,7 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
         if (!aceptacion.aceptada) throw new RechazoBasePesosError(aceptacion.motivo);
         const indiceAceptado = aceptacion.indice;
         const copiarDesdeBase = (destino: Buffer, offsetDestino: number): void => {
-          try { lector.copiarPesosEn(indiceAceptado, destino, offsetDestino); }
+          try { lector.copiarPesosEn(indiceAceptado, destino, offsetDestino, aceptacion.uid); }
           catch (error) {
             if (!lector.estaPublicada()) throw new RechazoBasePesosError('base_revocada');
             throw error;
@@ -647,7 +647,7 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
           get() {
             olvidarPoliticaBasePesos(politicaObjetivo);
             let valores: number[];
-            try { valores = lector.materializarPesosEn(indiceAceptado); }
+            try { valores = lector.materializarPesosEn(indiceAceptado, aceptacion.uid); }
             catch (error) {
               if (!lector.estaPublicada()) throw new RechazoBasePesosError('base_revocada');
               throw error;

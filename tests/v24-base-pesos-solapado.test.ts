@@ -404,6 +404,9 @@ test('rechazo de ticket ajeno/no registrado, otra vida tras reinicio y terminaci
     const authReal = await p1.autorizarTicket(idAjeno, idBase1);
     assert.equal(authReal.autorizado, true);
     assert.ok(authReal.tokenAutorizacion);
+    const otraEpoca = await p1.autorizarTicket({ ...idAjeno, epoca: idAjeno.epoca + 1 }, idBase1);
+    assert.equal(otraEpoca.motivo, 'epoca_cambiada');
+    assert.equal((await p1.autorizarTicket(idAjeno, idBase1)).motivo, 'ticket_duplicado');
     await assert.rejects(
       p1.guardar(cTokenAjeno, true, 'token-ajeno-invalido'),
       (err: unknown) => err instanceof RechazoBasePesosGuardadoError,
@@ -440,6 +443,27 @@ test('rechazo de ticket ajeno/no registrado, otra vida tras reinicio y terminaci
       (err: unknown) => err instanceof RechazoBasePesosGuardadoError,
     );
     assert.deepEqual(filaInstantanea(store), cabezaAntes);
+
+    // Una escritura externa válida en WAL, incluso en la misma época, invalida el prefijo esperado.
+    const preparado = motor.capturarCorteTransferido?.(true);
+    assert.ok(preparado?.admiteSolape);
+    const autorizado = await p1.autorizarTicket(preparado.corte, idBase1);
+    assert.ok(autorizado.tokenAutorizacion);
+    const otroEscritor = new Store(path, { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true });
+    const lectorExterno = new Store(path, { readOnly: true });
+    try {
+      const carga = lectorExterno.leerCorteParaProyeccion(0);
+      assert.equal(carga.epoca, preparado.corte.epoca);
+      carga.instantanea.world.people[0]!.name += ' externo';
+      otroEscritor.guardar(carga.instantanea);
+      const cabezaExterna = filaInstantanea(store);
+      assert.notEqual(cabezaExterna.digest, cabezaAntes.digest);
+      await assert.rejects(p1.guardar(preparado, true, autorizado.tokenAutorizacion), /La cabeza durable cambió/);
+      assert.deepEqual(filaInstantanea(store), cabezaExterna);
+    } finally {
+      lectorExterno.close();
+      otroEscritor.close();
+    }
   } finally {
     await p1?.cerrar().catch(() => undefined);
     await p2?.cerrar().catch(() => undefined);
@@ -600,7 +624,8 @@ test('migración entre dueños bajo revocación natural, rechazo de corrupción/
     assert.ok(remoto.sobres[0]!.personas![0]!.refs!.pares.buffer.byteLength > 0);
 
     // Reconstrucción FULL con lector autorizado tras revocación natural -> conserva migrante (-0) y mutado (-0).
-    const lectorReconstruccion = abrirLectorReconstruccionBasePesos(descriptor, publicador.identidad);
+    const lectorPrivado = publicador.abrirLectorDelEscritor();
+    const lectorReconstruccion = abrirLectorReconstruccionBasePesos(descriptor, publicador.identidad, lectorPrivado);
     const remotoFull = reconstruirCorteRemotoFull(remoto, lectorReconstruccion);
     assert.equal(inspeccionarReferenciasCorte(remotoFull).totalRefs, 0);
     const { partes } = decodificarCorteRemoto(remotoFull);
@@ -643,6 +668,9 @@ test('migración entre dueños bajo revocación natural, rechazo de corrupción/
     // Mutación fuera de contrato en un solo bit del SAB (+0 -> -0): SHA-256 rechaza la reconstrucción.
     const sabDatos = new Uint8Array(descriptor.slabs[0]!);
     sabDatos[7] ^= 0x80;
+    assert.throws(() => lectorReconstruccion.copiarPesosExactosEn(
+      lectorPrivado.uidEn(0), 0, new Uint8Array(WPF1_WEIGHT_BYTES), 0,
+    ), /fila F64 copiada/);
     assert.throws(() => abrirLectorReconstruccionBasePesos(descriptor, publicador.identidad), /digesto SHA-256/);
   } finally {
     canales.cerrar();

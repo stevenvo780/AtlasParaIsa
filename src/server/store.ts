@@ -2193,12 +2193,13 @@ export class Store {
       && this.db.prepare('PRAGMA main.journal_mode').get()?.journal_mode === 'wal';
   }
 
-  guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number, cerrarFase?: CerrarFaseGuardado): Instantanea {
+  guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number,
+    cerrarFase?: CerrarFaseGuardado, digestCabezaEsperado?: string): Instantanea {
     const pruebas = this.tomarPruebasGuardado();
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
     if (!Number.isSafeInteger(epocaCorte) || epocaCorte < 0 || instantanea.materia && instantanea.materia.epoca !== epocaCorte)
       throw new SnapshotSemanticError('La materia no corresponde a la época del corte solapado.');
-    this.guardarCompleto(pruebas, instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
+    this.guardarCompleto(pruebas, instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase, digestCabezaEsperado);
     return instantanea;
   }
 
@@ -2206,7 +2207,7 @@ export class Store {
     { world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
     teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number,
-    observarFase?: CerrarFaseGuardado): void {
+    observarFase?: CerrarFaseGuardado, digestCabezaEsperado?: string): void {
     let observador = observarFase;
     const cerrarFase: CerrarFaseGuardado | undefined = observador && (fase => {
       try { observador?.(fase); }
@@ -2228,14 +2229,14 @@ export class Store {
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
     this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas,
-      epocaSolapada, cerrarFase, pruebas);
+      epocaSolapada, cerrarFase, pruebas, digestCabezaEsperado);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
     faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas,
     personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number, cerrarFase?: CerrarFaseGuardado,
-    pruebas?: PruebasGuardado): void {
+    pruebas?: PruebasGuardado, digestCabezaEsperado?: string): void {
     const pruebaInicial = pruebas?.inicial;
     const complete = matter !== undefined;
     const solapado = epocaSolapada !== undefined;
@@ -2338,6 +2339,11 @@ export class Store {
       if (epocaSolapada !== undefined && (epoca === null || epocaSolapada < epoca || !this.admiteGuardadoSolapado()
         || !estadoAdmiteSolape(world) || this.technologyArchive.getHistoryOrigin()?.startsAfter !== world.technology.journal?.startsAfter))
         throw new SnapshotSemanticError('El archivo cambió o perdió las condiciones del guardado solapado.');
+      if (digestCabezaEsperado !== undefined) {
+        const head = this.db.prepare('SELECT body, digest FROM main.snapshots WHERE slot=0').get() as Pick<Row, 'body' | 'digest'> | undefined;
+        if (!head || head.digest !== digestCabezaEsperado || checksum(head.body) !== digestCabezaEsperado)
+          throw new SnapshotSemanticError('La cabeza durable cambió después de publicar la base F64.');
+      }
       if (complete && !agenda && this.requiereAgenda())
         throw new SnapshotSemanticError('Este mundo requiere guardar su corte de agenda territorial.');
       if (agenda && epoca !== null && agenda.corte.epoca !== epoca)

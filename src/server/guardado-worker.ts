@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readlinkSync } from 'node:fs';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
 import {
-  abrirLectorBasePesos, abrirLectorReconstruccionBasePesos, ESTADO_BASE_PESOS, identidadBasePesosValida,
+  abrirLectorReconstruccionBasePesos, ErrorIntegridadFilaBasePesos, ESTADO_BASE_PESOS, identidadBasePesosValida,
   mismaIdentidadBasePesos, type DescriptorBasePesosCorte, type IdentidadBasePesos, type LectorBasePesosCorte,
   type PublicadorBasePesos,
 } from '../world/motor/base-pesos-corte.js';
@@ -45,6 +45,8 @@ export interface PerfilPersistidor extends AfinidadPersistidor {
   ticketAutorizado?: boolean;
   reconstruidoFullPorRevocacion?: boolean;
   ticketsRetenidos?: number;
+  referenciasTransportadas?: number;
+  publicarBasePesosMs?: number;
 }
 
 export interface ResultadoAutorizacionTicket {
@@ -466,6 +468,7 @@ interface TicketAutorizado {
 interface EstadoBasePesos {
   readonly instancia: string;
   secuencia: number;
+  ultimoTickConfirmado?: number;
   activa?: BasePublicadaActiva;
   readonly tickets: Map<string, TicketAutorizado>;
 }
@@ -518,7 +521,6 @@ function autorizarTicketEnEscritor(
   if (!basePesosCorte) return denegar('base_desactivada');
   if (!identidadCorteValida(identidad)) return denegar('identidad_corte_invalida');
   if (!identidadBasePesosValida(baseIdentidad)) return denegar('identidad_base_invalida');
-  purgarTicketsOtraEpoca(estadoBase, identidad.epoca);
   const activa = estadoBase.activa;
   if (!activa) return denegar('sin_base');
   if (activa.publicador.estado() !== ESTADO_BASE_PESOS.PUBLICADA || !activa.activa.lector.estaPublicada()) {
@@ -528,6 +530,8 @@ function autorizarTicketEnEscritor(
   if (activa.descriptor.instancia !== estadoBase.instancia) return denegar('instancia_distinta');
   if (activa.descriptor.epoca !== identidad.epoca) return denegar('epoca_cambiada');
   if (!mismaIdentidadBasePesos(activa.descriptor, baseIdentidad)) return denegar('publicacion_distinta');
+  if (estadoBase.ultimoTickConfirmado !== undefined && identidad.tick <= estadoBase.ultimoTickConfirmado)
+    return denegar('corte_anterior');
   const clave = claveTicket(identidad);
   if (estadoBase.tickets.has(clave)) return denegar('ticket_duplicado');
   if (estadoBase.tickets.size >= MAX_TICKETS_EN_VUELO) return denegar('limite_tickets');
@@ -621,9 +625,9 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
   let ticketConsumible: TicketAutorizado | undefined;
   let reconstruidoFullPorRevocacion = false;
   try {
-    purgarTicketsOtraEpoca(estadoBase, corte.epoca);
-    if (estadoBase.activa && estadoBase.activa.activa.contexto.epoca !== corte.epoca) {
-      revocarEstadoBase(estadoBase);
+    if (tokenAutorizacion !== undefined) {
+      const existente = estadoBase.tickets.get(clave);
+      if (existente?.tokenAutorizacion === tokenAutorizacion) ticketConsumible = existente;
     }
     if (primerCorteConAncla) store.ofrecerPruebaCabeza(pruebaCabeza);
 
@@ -637,27 +641,26 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
     let baseParaMaterializar: BasePesosActiva | undefined;
 
     if (inspeccion.totalRefs === 0) {
-      const existente = estadoBase.tickets.get(clave);
-      if (existente && (tokenAutorizacion === undefined || existente.tokenAutorizacion === tokenAutorizacion)) {
-        ticketConsumible = existente;
-      }
+      if (tokenAutorizacion !== undefined)
+        throw new RechazoBasePesosError('referencia_invalida', 'El corte con ticket F64 no contiene referencias.');
     } else {
       if (!basePesosCorte) {
         throw new RechazoBasePesosError('sin_base', 'El corte usa referencias F64 con la base compartida desactivada.');
       }
       const requiereTicket = solapado || tokenAutorizacion !== undefined;
       if (requiereTicket) {
-        const ticket = estadoBase.tickets.get(clave);
-        if (!ticket || typeof tokenAutorizacion !== 'string' || ticket.tokenAutorizacion !== tokenAutorizacion
-          || !mismoCorte(ticket.identidad, identidad)) {
+        const ticket = ticketConsumible;
+        if (!ticket || !mismoCorte(ticket.identidad, identidad)) {
           throw new RechazoBasePesosError('identidad_ausente', 'El corte con referencias F64 carece de ticket autorizado vigente.');
         }
-        ticketConsumible = ticket;
         if (ticket.baseIdentidad.instancia !== estadoBase.instancia) {
           throw new RechazoBasePesosError('instancia_distinta', 'El ticket pertenece a otra vida del escritor.');
         }
         if (ticket.baseIdentidad.epoca !== corte.epoca) {
           throw new RechazoBasePesosError('epoca_cambiada', 'El ticket corresponde a otra época.');
+        }
+        if (estadoBase.ultimoTickConfirmado !== undefined && corte.tick <= estadoBase.ultimoTickConfirmado) {
+          throw new RechazoBasePesosError('referencia_invalida', 'El tick autorizado ya fue alcanzado por un guardado confirmado.');
         }
         if (!inspeccion.identidad || !mismaIdentidadBasePesos(ticket.baseIdentidad, inspeccion.identidad)) {
           throw new RechazoBasePesosError('publicacion_distinta', 'Las referencias F64 no coinciden con la base autorizada del ticket.');
@@ -667,7 +670,7 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
           // Revocación natural posterior a la autorización: verificar SHA-256 del SAB retenido y reconstruir FULL exacto.
           let lectorReconstruccion;
           try {
-            lectorReconstruccion = abrirLectorReconstruccionBasePesos(ticket.descriptor, ticket.baseIdentidad);
+            lectorReconstruccion = abrirLectorReconstruccionBasePesos(ticket.descriptor, ticket.baseIdentidad, ticket.lector);
           } catch (error) {
             if (estadoBase.activa?.descriptor.publicacion === ticket.baseIdentidad.publicacion) revocarEstadoBase(estadoBase);
             throw new RechazoBasePesosError(
@@ -695,7 +698,7 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
           baseParaMaterializar = { lector: ticket.lector, contexto: contextoDeBase(ticket.baseIdentidad) };
         }
       } else {
-        baseParaMaterializar = estadoBase.activa?.activa;
+        if (estadoBase.activa?.descriptor.epoca === corte.epoca) baseParaMaterializar = estadoBase.activa.activa;
       }
     }
 
@@ -704,7 +707,8 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
     const fases: FasesPersistidor | undefined = perfilarFases ? {} : undefined;
     const guardado = medirTramo(() => {
       const cerrarFase = fases && medirFasesGuardado(fases);
-      return solapado ? store.guardarCorteSolapado(sello, corte.epoca, cerrarFase)
+      return solapado ? store.guardarCorteSolapado(sello, corte.epoca, cerrarFase,
+        ticketAutorizadoUsado ? store.ultimoDigestGuardado : undefined)
         : store.guardarCorteSellado(sello, [], [], undefined, cerrarFase);
     });
     const { world } = guardado.valor;
@@ -713,7 +717,10 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
       estadoBase.tickets.delete(ticketConsumible.clave);
       ticketConsumible = undefined;
     }
+    purgarTicketsOtraEpoca(estadoBase, corte.epoca);
+    estadoBase.ultimoTickConfirmado = world.tick;
     let basePesos: DescriptorBasePesosCorte | undefined;
+    const inicioPublicacion = basePesosCorte ? performance.now() : 0;
     if (basePesosCorte && store.ultimoDigestGuardado !== undefined) {
       try {
         const siguienteSecuencia = estadoBase.secuencia + 1;
@@ -725,7 +732,7 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
             ...nuevoPublicador.identidad,
             confirmado: true,
           });
-          const lector = abrirLectorBasePesos(descriptor);
+          const lector = nuevoPublicador.abrirLectorDelEscritor();
           estadoBase.secuencia = siguienteSecuencia;
           const anterior = estadoBase.activa;
           estadoBase.activa = {
@@ -760,6 +767,8 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
           ticketAutorizado: ticketAutorizadoUsado,
           reconstruidoFullPorRevocacion,
           ticketsRetenidos: estadoBase.tickets.size,
+          referenciasTransportadas: inspeccion.totalRefs,
+          publicarBasePesosMs: performance.now() - inicioPublicacion,
         }) },
     } };
   } catch (error) {
@@ -769,8 +778,9 @@ function guardar(store: Store, { corte, solapado, pruebaCabeza, tokenAutorizacio
     }
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;
     if (primerCorteConAncla) store.ofrecerPruebaCabeza(undefined);
-    const baseRechazada = error instanceof RechazoBasePesosError;
-    if (baseRechazada && !solapado) revocarEstadoBase(estadoBase);
+    const integridadComprometida = error instanceof ErrorIntegridadFilaBasePesos;
+    const baseRechazada = error instanceof RechazoBasePesosError || integridadComprometida;
+    if (integridadComprometida || (baseRechazada && !solapado)) revocarEstadoBase(estadoBase);
     return { tipo: 'rechazado', identidad,
       mensaje: error instanceof Error ? error.message : 'No se pudo guardar el corte.',
       ...(baseRechazada && { baseRechazada: true }) };

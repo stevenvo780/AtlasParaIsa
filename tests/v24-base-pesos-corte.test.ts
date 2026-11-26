@@ -125,6 +125,16 @@ test('construcción WGP1, publicación tras acuse, -0 exacto y ausencia de vista
   const materializados = lector.materializarPesosEn(aceptada.indice);
   assert.ok(Object.is(materializados[0], -0) && Object.is(materializados[1], 0) && Object.is(materializados[2], Number.MIN_VALUE));
 
+  // La copia normal del escritor verifica su destino privado, también si el SAB cambia después de aceptar REF.
+  const lectorEscritor = publicador.abrirLectorDelEscritor();
+  assert.throws(() => lectorEscritor.copiarPesosEn(aceptada.indice, destino, 8, 20), /no coincide/);
+  const slab = new Uint8Array(descriptor.slabs[0]!);
+  slab[7] ^= 0x80;
+  assert.throws(() => lectorEscritor.copiarPesosEn(aceptada.indice, destino, 8, aceptada.uid), /no coincide/);
+  slab[7] ^= 0x80;
+  lectorEscritor.copiarPesosEn(aceptada.indice, destino, 8, aceptada.uid);
+  assert.equal(compararPesosF64BitABit(destino.subarray(8, 8 + BYTES_PESOS_PERSONA), w1), true);
+
   // Un solo giro -0 -> +0 debe caer a FULL y fallar compararPesosF64BitABit.
   const w1MasCero = w1.slice();
   w1MasCero[0] = +0;

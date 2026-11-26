@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, hash as cryptoHash, randomUUID } from 'node:crypto';
 import { types } from 'node:util';
 import { isPackedPersonWeight, WPF1_WEIGHT_BYTES, WPF1_WEIGHT_COUNT } from '../../server/snapshot-packed-people.js';
 import { decodePolicyWeightPage, POLICY_UIDS_PER_PAGE } from '../../server/snapshot-policy-pages.js';
@@ -26,6 +26,7 @@ const CONTROL_SELLADO = 1;
 const CONTROL_BYTES = CONTROL_SLOTS * Int32Array.BYTES_PER_ELEMENT;
 const DIGESTO_HEX = /^[0-9a-f]{64}$/;
 const DOMINIO_DIGESTO = Buffer.from('BASE_PESOS_F64_V1\0');
+const BYTES_HUELLA_FILA = 32;
 const ES_LITTLE_ENDIAN = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
 const CLAVES_IDENTIDAD = new Set([
   'version', 'publicacion', 'instancia', 'epoca', 'secuencia', 'digesto',
@@ -246,11 +247,15 @@ function validarYCopiarFilaWgp1(
  * Controlador de publicación inmutable de una base F64 en SAB.
  * Separado de la aceptación de REF: nace en PENDIENTE_ACUSE y solo publica tras acuse durable exacto.
  */
+type VerificarCopiaFila = (indice: number, uid: number, bytes: Uint8Array) => void;
+
+export class ErrorIntegridadFilaBasePesos extends Error {}
+
 export class PublicadorBasePesos {
   readonly #descriptor: DescriptorBasePesosCorte;
   readonly #control: Int32Array<SharedArrayBuffer>;
 
-  constructor(descriptor: DescriptorBasePesosCorte) {
+  constructor(descriptor: DescriptorBasePesosCorte, private readonly verificarCopia: VerificarCopiaFila) {
     this.#descriptor = descriptor;
     this.#control = new Int32Array(descriptor.control);
   }
@@ -266,6 +271,11 @@ export class PublicadorBasePesos {
 
   estado(): EstadoBasePesos {
     return Atomics.load(this.#control, CONTROL_ESTADO) as EstadoBasePesos;
+  }
+
+  /** El escritor conserva las huellas privadas. Los dueños solo reciben el descriptor SAB. */
+  abrirLectorDelEscritor(): LectorBasePesosCorte {
+    return new LectorBasePesosCorte(this.#descriptor, this.verificarCopia);
   }
 
   /** Expone el descriptor antes del acuse solo para inspección/pruebas; ningún consumidor REF lo aceptará. */
@@ -323,6 +333,8 @@ export function construirBasePesosDesdeFilasWgp1(
 
   const uidsF64 = new Float64Array(uids);
   const uidsData = new DataView(uids);
+  const uidsPrivados = new Float64Array(cantidad);
+  const huellas = Buffer.allocUnsafe(cantidad * BYTES_HUELLA_FILA);
   let anterior = 0;
   for (let i = 0; i < cantidad; i++) {
     const fila = filas[i];
@@ -333,6 +345,9 @@ export function construirBasePesosDesdeFilasWgp1(
     const slabIdx = Math.floor(i / cotas.filasPorSlab);
     const filaEnSlab = i - slabIdx * cotas.filasPorSlab;
     validarYCopiarFilaWgp1(fila.body, fila.offset, vistasSlabs[slabIdx]!, filaEnSlab * BYTES_PESOS_PERSONA);
+    uidsPrivados[i] = fila.uid;
+    huellas.set(cryptoHash('sha256', subvistaU8.call(fila.body, fila.offset, fila.offset + BYTES_PESOS_PERSONA), 'buffer'),
+      i * BYTES_HUELLA_FILA);
     anterior = fila.uid;
   }
 
@@ -362,7 +377,12 @@ export function construirBasePesosDesdeFilasWgp1(
     uids,
     slabs: Object.freeze(slabs),
   });
-  return new PublicadorBasePesos(descriptor);
+  return new PublicadorBasePesos(descriptor, (indice, uid, bytes) => {
+    const offset = indice * BYTES_HUELLA_FILA;
+    if (uidsPrivados[indice] !== uid
+      || !cryptoHash('sha256', bytes, 'buffer').equals(huellas.subarray(offset, offset + BYTES_HUELLA_FILA)))
+      throw new ErrorIntegridadFilaBasePesos('La fila F64 copiada no coincide con los bytes o el UID durables.');
+  });
 }
 
 /** Construye la base SAB directamente desde páginas WGP1 en orden de cubeta creciente. */
@@ -410,7 +430,7 @@ export class LectorBasePesosCorte {
   readonly #slabsU64: readonly BigUint64Array<SharedArrayBuffer>[];
   readonly #slabsData: readonly DataView<SharedArrayBuffer>[];
 
-  constructor(descriptor: DescriptorBasePesosCorte) {
+  constructor(descriptor: DescriptorBasePesosCorte, private readonly verificarCopia?: VerificarCopiaFila) {
     validarEstructuraDescriptor(descriptor);
     this.identidad = Object.freeze({
       version: descriptor.version,
@@ -461,7 +481,7 @@ export class LectorBasePesosCorte {
   }
 
   /** Copia los 1696 bytes F64LE directo al destino del consumidor sin copia intermedia ni exponer el SAB. */
-  copiarPesosEn(indice: number, destino: Uint8Array, offset: number): void {
+  copiarPesosEn(indice: number, destino: Uint8Array, offset: number, uidEsperado = this.uidEn(indice)): void {
     this.#assertPublicada();
     const { slabIdx, filaEnSlab } = this.#pos(indice);
     if (!types.isUint8Array(destino) || types.isProxy(destino) || !Number.isSafeInteger(offset) || offset < 0
@@ -473,19 +493,30 @@ export class LectorBasePesosCorte {
       rellenarBytesU8.call(destino, 0, offset, offset + BYTES_PESOS_PERSONA);
       throw new Error('La base de pesos fue revocada durante la copia.');
     }
+    this.verificarCopiaEn(indice, uidEsperado, destino, offset);
+  }
+
+  verificarCopiaEn(indice: number, uidEsperado: number, destino: Uint8Array, offset: number): void {
+    this.verificarCopia?.(indice, uidEsperado, subvistaU8.call(destino, offset, offset + BYTES_PESOS_PERSONA));
   }
 
   copiarPesosPorUid(uid: number, destino: Uint8Array, offset: number): boolean {
     if (!this.estaPublicada()) return false;
     const indice = this.buscarIndicePorUid(uid);
     if (indice < 0) return false;
-    this.copiarPesosEn(indice, destino, offset);
+    this.copiarPesosEn(indice, destino, offset, uid);
     return true;
   }
 
   /** Materializa un array JS mutable de 212 Float64 preservando -0 únicamente cuando el consumidor lo exige. */
-  materializarPesosEn(indice: number): number[] {
+  materializarPesosEn(indice: number, uidEsperado = this.uidEn(indice)): number[] {
     this.#assertPublicada();
+    if (this.verificarCopia) {
+      const bytes = new Uint8Array(BYTES_PESOS_PERSONA);
+      this.copiarPesosEn(indice, bytes, 0, uidEsperado);
+      const vista = new DataView(bytes.buffer);
+      return Array.from({ length: PESOS_POR_PERSONA }, (_, i) => vista.getFloat64(i * 8, true));
+    }
     const { slabIdx, filaEnSlab } = this.#pos(indice);
     const salida = new Array<number>(PESOS_POR_PERSONA);
     if (ES_LITTLE_ENDIAN) {
@@ -651,6 +682,7 @@ export function mismaIdentidadBasePesos(a: IdentidadBasePesos, b: IdentidadBaseP
 export function abrirLectorReconstruccionBasePesos(
   descriptor: DescriptorBasePesosCorte,
   identidadEsperada: IdentidadBasePesos,
+  lectorDelEscritor?: LectorBasePesosCorte,
 ): LectorReconstruccionBasePesos {
   if (!identidadBasePesosValida(identidadEsperada)) {
     throw new Error('Identidad esperada de reconstrucción de base F64 inválida.');
@@ -691,6 +723,7 @@ export function abrirLectorReconstruccionBasePesos(
       const filaEnSlab = indice - slabIdx * cotas.filasPorSlab;
       const inicio = filaEnSlab * BYTES_PESOS_PERSONA;
       copiarBytesU8.call(destino, subvistaU8.call(slabsU8[slabIdx]!, inicio, inicio + BYTES_PESOS_PERSONA), offset);
+      lectorDelEscritor?.verificarCopiaEn(indice, uidEsperado, destino, offset);
     },
     verificarIntegridadFinal(): void {
       verificarIntegridadBasePesos(descriptor);

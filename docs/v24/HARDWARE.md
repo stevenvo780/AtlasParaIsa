@@ -36,7 +36,7 @@ Reportar habitantes persistidos, residentes y activos durante la misma ventana. 
 
 ## Componentes disponibles para el laboratorio
 
-- `CARTA_PERCEPCION_RESIDENTE=1` reutiliza páginas y ventanas CUDA con un dueño. `CARTA_PERCEPCION_COSTE=1` prueba CPU y las tarjetas elegibles por tamaño de lote y conserva sus tiempos medidos. La percepción distribuida aún se ejecuta en CPU.
+- `CARTA_PERCEPCION_RESIDENTE=1` reutiliza páginas y ventanas CUDA con un dueño. `CARTA_PERCEPCION_COSTE=1` prueba CPU y las tarjetas elegibles por tamaño de lote y conserva sus tiempos medidos. `CARTA_PERCEPCION_DUENOS=1` permite que dos dueños compartan el contexto de GPU0 cuando la química está en CPU. El broker admite un despacho a la vez, invalida por generación y ofrece ruta CPU dentro del mismo tick ante ocupación o fallo. El modo CUDA del motor se fija para su vida y un cambio exige arrancar otra instancia.
 - `scripts/perf/banco-motor-v24.mts` compara dueños reales sobre una siembra o una copia SQLite sellada de laboratorio. Conserva las mediciones brutas y registra ocupación por chunk al salir del calentamiento y al cerrar cada brazo. `scripts/lab/localidad-cpu.mts` evalúa repartos alternativos con trazas reales y costes calibrados.
 - `CARTA_CINTA_DIR` admite una carpeta absoluta dedicada en un volumen independiente. Grabador, lector y respaldo deben recibir el mismo valor. La ruta predeterminada sigue junto a `world.sqlite`.
-- La agenda territorial ordena vencimientos lógicos y restaura cortes validados. Su conexión a la activación de regiones y al guardado de los efectos sigue pendiente.
+- La agenda territorial ordena vencimientos lógicos. `Store.guardar` admite un corte y lo confirma en la misma transacción que el mundo, ligado al tick, la época y la materia guardada. La activación automática y el avance multiescala de las leyes siguen pendientes.

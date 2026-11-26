@@ -9,6 +9,29 @@ export function evidenceAtTick<T extends { tick: number }>(events: readonly T[],
   return events.filter(event => event.tick <= tick);
 }
 
+/** Reutiliza el corte hasta que cambien los episodios o el reloj cruce uno de ellos. */
+export class EvidenceTimeline<T extends { tick: number }> {
+  private ordered: readonly T[] = [];
+  private revision = 0;
+  private count = -1;
+  private visible: T[] = [];
+  setEvents(ordered: readonly T[]): void {
+    this.ordered = ordered;
+    this.revision++;
+    this.count = -1;
+  }
+  at(tick: number): { events: readonly T[]; key: string } {
+    let lo = 0, hi = this.ordered.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.ordered[mid]!.tick <= tick) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo !== this.count) { this.count = lo; this.visible = this.ordered.slice(0, lo); }
+    return { events: this.visible, key: `${this.revision}:${lo}` };
+  }
+}
+
 /** Enlace a una persona. En cuadro: su nombre. Fuera de la cámara (M3): «Olmo · fuera de esta vista · Ir»,
  * que busca su posición; si murió hace poco, «Olmo · murió», que abre su despedida. Nunca un id interno. */
 export function personLink(world: WorldView, id: string): string {

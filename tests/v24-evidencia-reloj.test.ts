@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CronicaBuffer } from '../src/client/cronica.js';
-import { evidenceAtTick, recentEvidence } from '../src/client/world-evidence.js';
+import { EvidenceTimeline, evidenceAtTick, recentEvidence } from '../src/client/world-evidence.js';
 import type { ChronicleEvent, WorldView } from '../src/shared/types.js';
 
 test('la cinta muestra solo episodios hasta el corte sin borrar los recibidos después', () => {
@@ -18,4 +18,19 @@ test('la cinta muestra solo episodios hasta el corte sin borrar los recibidos de
   assert.match(later, /episodio 20/);
   assert.match(later, /episodio 30/);
   assert.equal(buffer.size, 3);
+});
+
+test('el corte se reutiliza entre episodios y cambia con el reloj o una revisión del búfer', () => {
+  const timeline = new EvidenceTimeline<{ tick: number }>();
+  timeline.setEvents([{ tick: 10 }, { tick: 20 }, { tick: 30 }]);
+  const first = timeline.at(11), same = timeline.at(19), next = timeline.at(20);
+  assert.strictEqual(first.events, same.events);
+  assert.equal(first.key, same.key);
+  assert.notEqual(first.key, next.key);
+  assert.deepEqual(next.events.map(e => e.tick), [10, 20]);
+  assert.deepEqual(timeline.at(9).events, []);
+  timeline.setEvents([{ tick: 5 }, { tick: 20 }, { tick: 30 }]);
+  const revised = timeline.at(11);
+  assert.notEqual(first.key, revised.key);
+  assert.deepEqual(revised.events.map(e => e.tick), [5]);
 });

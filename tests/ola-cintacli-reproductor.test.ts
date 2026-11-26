@@ -603,3 +603,24 @@ test('se guarda el marcador cada 5 s de reproducción y al parar o salir; en pau
   assert.equal(escrituras.at(-1)!.alSalir, true);
   h.player.stop();
 });
+
+
+test('tramo: corta entre muestras a la velocidad elegida, pausa y vuelve al presente', async () => {
+  const h = harness({ coberturas: [{ nivel: 3, t0: 0, t1: 24000 }] });
+  await h.player.start();
+  h.player.setSpeed(2);
+  await h.player.reproducirTramo(0, 6100);
+  assert.equal(h.player.speed, 2);
+  h.player.setPlaying(false);
+  await h.run(1000);
+  assert.equal(h.player.currentTick, 0);
+  h.player.setPlaying(true);
+  await h.run(1000, 1000);
+  assert.equal(h.player.currentTick, 4800);
+  assert.equal(h.player.playing, false);
+  assert.ok(h.emitted.every(e => e.info.reason !== 'play' || e.tick <= 6100));
+  await h.player.jumpToLiveEdge();
+  assert.equal(h.player.tramo, null);
+  assert.equal(h.player.playing, true);
+  h.player.stop();
+});

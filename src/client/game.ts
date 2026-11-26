@@ -220,6 +220,7 @@ function startTape(): void {
   connection?.setTapeMode(true);
   dvrBar = mountDvrBar(container, {
     togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
+    reproducirTramo: (desde, hasta) => void dvr?.reproducirTramo(desde, hasta),
     seek: tick => void dvr?.seek(tick), jumpLive: () => void dvr?.jumpToLiveEdge(),
   });
   const red = crearRedCinta({ alSesionTerminada: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });

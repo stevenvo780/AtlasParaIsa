@@ -188,6 +188,7 @@ class MotorDuenos implements Motor {
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
   #cesiones: [ChunkId, Hilo][] = [];
+  #activacionesPendientes = 0;
   #costeMs = new Float64Array(0);
   readonly #historial: number[] = [];
   // Lo que llega por la cola F0 del coordinador.
@@ -211,6 +212,7 @@ class MotorDuenos implements Motor {
     this.#fatal = undefined;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
+    this.#activacionesPendientes = 0;
     this.#resultados = []; this.#partesTick = []; this.#partesMundo.clear(); this.#altas = [];
 
     // Memoria compartida de la época. La reserva de filas crece con el mundo que se carga: agotarla es fatal y la
@@ -319,9 +321,11 @@ class MotorDuenos implements Motor {
       }
       this.#pedirDetalles();
       d.F0();
+      if (this.#activacionesPendientes) d.reservarMateria(this.#activacionesPendientes);
       control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
+      this.#activacionesPendientes = 0;
       buzones.fijarFase(3); piscina.ejecutar(TRAMO.actuar);
       buzones.fijarFase(5); piscina.ejecutar(TRAMO.aplicar);
       buzones.fijarFase(6); piscina.ejecutar(TRAMO.publicar);
@@ -435,13 +439,13 @@ class MotorDuenos implements Motor {
     const dueno = duenoDeVecino(px, py, paginas.map(p => p.px), paginas.map(p => p.py), paginas.map(p => terreno.duenoChunk[p.chunk]!), pide);
     const key = chunkKey(px * 16, py * 16);
     const { tiles, animals, structures, ...meta } = tomarChunk(m, key, px, py);
-    d.reservarMateria(1);
     const previa = terreno.paginaDe(px, py);
     const chunk = previa >= 0 ? previa : terreno.asegurarPagina(px, py, dueno);
     if (previa >= 0) terreno.asignar(chunk, dueno);
     for (const lugar of meta.places) if (!m.places.some(p => p.id === lugar.id)) m.places.push(lugar);
     this.#paginas.set(clave, { chunk, px, py, key, estado: 'activo' });
     d.enviarMigrante(dueno, { tipo: 'chunk', chunk, key, meta, tiles, structures: structures ?? [], animals: animals ?? [], personas: [], inicial: false });
+    this.#activacionesPendientes++;
   }
 
   /** Un dueño devolvió un chunk retirado: queda archivado en el mundo del coordinador, pendiente de guardado. */

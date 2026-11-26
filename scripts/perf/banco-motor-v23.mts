@@ -10,9 +10,10 @@
  * (SCHED_IDLE, nice 16) cambia algo; la clase se hereda, así que el banco mismo se lanza con ese enlace. Las
  * combinaciones se intercalan en cada repetición y al final sale una tabla (`TABLA`) con la mediana.
  *
- * El mundo se siembra igual en todas: `createWorld(semilla)` con los parámetros abiertos del anfitrión, 240 ticks de un
- * hilo, y personas clonadas sobre teselas de tierra al azar de un área que crece con ellas (≈ 32 teselas por persona,
- * más dispersas que en un poblado real); la fauna es la que el mundo tenga, sin techo. Mide, por tick y con `uptime` al
+ * El mundo parte de `createWorld(semilla)` con los parámetros abiertos del anfitrión. En modo pared se avanzan 240 ticks
+ * de un hilo antes de clonar personas. El modo dueños arranca las leyes V23 en un mundo nuevo. Los clones se reparten
+ * sobre teselas de tierra al azar de un área que crece con ellos (≈ 32 teselas por persona), con la fauna del mundo.
+ * Mide, por tick y con `uptime` al
  * lado (la torre se comparte):
  *  - pared del tick (media, p50, p95), CPU del hilo que simula y del proceso, las fases de `FaseMedicion`, µs por
  *    persona (fase personas) y por animal (fauna);
@@ -113,14 +114,13 @@ function politicas(): Record<string, number> {
   return cuenta;
 }
 
-/** El mundo sembrado del banco (también para otros scripts): `createWorld(semilla)` abierto, 240 ticks de un hilo y
- * clones hasta `personas`. */
-export async function sembrarMundo(personas: number, semilla: number, validar = true) {
+/** El mundo sembrado del banco: `createWorld(semilla)` abierto, calentamiento escalar y clones hasta `personas`. */
+export async function sembrarMundo(personas: number, semilla: number, validar = true, pasosPrevios = 240) {
 
   const abiertos = hostOpenWorldParams();
   const conMotor = (motor: Partial<typeof abiertos.motor>) => parseParams({ motor: { ...abiertos.motor, ...motor } }, abiertos);
   const world = createWorld(semilla, conMotor({ hilos: 1, gpu: [] }));
-  for (let i = 0; i < 240; i++) stepWorld(world);
+  for (let i = 0; i < pasosPrevios; i++) stepWorld(world);
 
   // Siembra determinista: el área crece en anillos de chunks alrededor del poblado hasta ≈ 32 teselas de tierra por
   // persona; cada clon cae en una tesela de tierra al azar (xorshift de la semilla) sin memorias de lugares ajenos.
@@ -240,10 +240,11 @@ function cargaAjena(n: number, binario: string): () => void {
 
 /** M7: el motor de dueños con `c.hilos` hilos, con o sin carga ajena. Mide el reparto por su telemetría, no por trazas. */
 async function correrDuenos(c: Config): Promise<Record<string, unknown>> {
-  const { world, conMotor } = await sembrarMundo(c.personas, c.semilla);
+  // El motor calienta con las leyes nuevas desde el inicio, sin inventario de la técnica escalar.
+  const { world, conMotor } = await sembrarMundo(c.personas, c.semilla, true, 0);
   const abiertos = hostOpenWorldParams();
   setParams(world, parseParams({ v23: escalon(c.hasta ?? 'rebalanceo'), motor: { ...conMotor({ hilos: c.hilos, gpu: c.gpu ? [0, 1] : [] }).motor } }, abiertos));
-  const motor = crearMotor(world, { hilos: c.hilos, gpu: c.gpu ? [0, 1] : [], decisionGpu: 'siempre', verificar: false, semilla: null });
+  const motor = crearMotor(world, { hilos: c.hilos, gpu: c.gpu ? [0, 1] : [], decisionGpu: 'siempre', verificar: false, semilla: c.semilla });
   const parar = cargaAjena(c.ajena ?? 0, arg('--binario-ajeno') ?? process.execPath);
   try {
     for (let i = 0; i < c.calentar; i++) motor.paso([]);

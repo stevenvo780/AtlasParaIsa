@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { constants as zstd, zstdCompressSync } from 'node:zlib';
 import {
-  decodePackedPeoplePage, decodeStoredPackedPeoplePage, encodePackedPeoplePage, encodeStoredPackedPeoplePage,
-  packedPeoplePageBytes, preparePackedPerson,
+  conservarPesosWpf1, copyPackedPersonWeights, decodePackedPeoplePage, decodeStoredDetachedPackedPeoplePage,
+  decodeStoredPackedPeoplePage, encodeDetachedPackedPeoplePage, encodePackedPeoplePage, encodeStoredPackedPeoplePage,
+  hasPackedPersonWeights, packedPeoplePageBytes, preparePackedPerson, WPF1_WEIGHT_BYTES,
 } from '../src/server/snapshot-packed-people.js';
 import { SnapshotPhysicalError, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
@@ -193,4 +194,66 @@ test('WPF1 conserva la clasificación de un error del analizador recibido', () =
   for (const error of [physical, semantic]) {
     assert.throws(() => decodePackedPeoplePage(body, 1, () => { throw error; }), value => value === error);
   }
+});
+
+test('WPD1 conserva JSON y máscara de WPF1 y recupera pesos por UID', () => {
+  const weights = weightsOf();
+  weights[0] = -0; weights[1] = Number.MIN_VALUE;
+  const original = [
+    { uid: 9, id: 'niño', policy: { weights }, after: -0, note: 'ñ'.repeat(512) },
+    { uid: 7, policy: { weights: [] } },
+    { uid: 5, policy: { weights: weightsOf(-0.5) } },
+  ];
+  const rows = original.map(preparePackedPerson);
+  const pesos = Buffer.alloc(WPF1_WEIGHT_BYTES);
+  assert.equal(copyPackedPersonWeights(rows[0]!, pesos, 0), true);
+  assert.equal(copyPackedPersonWeights(rows[1]!, pesos, 0), false);
+  assert.equal(pesos.readBigUInt64LE(0), 0x8000_0000_0000_0000n);
+  assert.equal(pesos.readBigUInt64LE(8), 1n);
+  assert.throws(() => copyPackedPersonWeights(rows[0]!, pesos, 1), SnapshotSemanticError);
+  const capturada = conservarPesosWpf1(pesos)(rows[0]!.json, 0);
+  pesos.fill(0);
+  capturada.pesos[0] = 0.5;
+  assert.equal(hasPackedPersonWeights(capturada.fila), true);
+  assert.equal(hasPackedPersonWeights(rows[1]!), false);
+  assert.equal(copyPackedPersonWeights(capturada.fila, pesos, 0), true);
+  assert.equal(pesos.readBigUInt64LE(0), 0x8000_0000_0000_0000n);
+
+  const wpf1 = encodePackedPeoplePage(rows);
+  const raw = encodeDetachedPackedPeoplePage([capturada.fila, ...rows.slice(1)]);
+  assert.equal(raw.toString('ascii', 0, 4), 'WPD1');
+  assert.deepEqual(raw.subarray(4), wpf1.subarray(4, -2 * WPF1_WEIGHT_BYTES));
+  const stored = encodeStoredPackedPeoplePage(raw);
+  assert.equal(Buffer.from(stored).toString('ascii', 0, 4), 'WZP1');
+  for (const page of [raw, stored]) {
+    const leidos: number[] = [];
+    const decoded = decodeStoredDetachedPackedPeoplePage(page, original.length, JSON.parse, uid => {
+      leidos.push(uid);
+      return uid === 9 ? weights : weightsOf(-0.5);
+    });
+    assert.deepEqual(leidos, [9, 5]);
+    assert.deepEqual(decoded, original);
+    assert.deepEqual(Object.keys(decoded[0] as object), Object.keys(original[0]!));
+  }
+  assert.throws(() => decodeStoredDetachedPackedPeoplePage(wpf1, original.length, JSON.parse, weightsOf), SnapshotSemanticError);
+  assert.throws(() => decodeStored(stored, original.length), SnapshotSemanticError);
+  assert.throws(() => decodeStoredDetachedPackedPeoplePage(stored.subarray(0, -1), original.length, JSON.parse, weightsOf),
+    SnapshotPhysicalError);
+});
+
+test('WPD1 rechaza UIDs inválidos o heredados en filas marcadas', () => {
+  for (const uid of [undefined, null, -0, -1, '7', 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const raw = encodeDetachedPackedPeoplePage([preparePackedPerson({ uid, policy: { weights: weightsOf() } })]);
+    assert.throws(() => decodeStoredDetachedPackedPeoplePage(raw, 1, JSON.parse, () => {
+      assert.fail('Un UID inválido no se consulta.');
+    }), /detached policy uid/);
+  }
+  const raw = encodeDetachedPackedPeoplePage([preparePackedPerson({ uid: 9, policy: { weights: weightsOf() } })]);
+  const inheritedUid = (json: string) => {
+    const [row] = JSON.parse(json);
+    delete row.uid;
+    return [Object.setPrototypeOf(row, { uid: 9 })];
+  };
+  assert.throws(() => decodeStoredDetachedPackedPeoplePage(raw, 1, inheritedUid, weightsOf), /detached policy uid/);
+  assert.throws(() => decodeStoredDetachedPackedPeoplePage(raw, 1, JSON.parse, () => []), /detached policy weight count/);
 });

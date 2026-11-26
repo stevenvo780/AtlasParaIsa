@@ -196,27 +196,56 @@ try {
   assert.ok(anterior.baseFrame);
   const sha256 = huella(anterior);
   await app.close();
-  let guardado;
+  let guardado, tickGuardado;
+  const pesosSeparados = process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1';
   const personasZstd = process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1';
-  if (personasZstd || process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1') {
+  if (pesosSeparados || personasZstd || process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1') {
     const db = new DatabaseSync(join(mundo, 'world.sqlite'), { readOnly: true });
     try {
       const { body } = db.prepare('SELECT body FROM main.snapshots WHERE slot=0').get();
-      const { snapshotEncoding, people } = JSON.parse(body);
-      assert.equal(snapshotEncoding, personasZstd ? 'snapshot-parts-v4' : 'snapshot-parts-v3');
+      const { snapshotEncoding, people, policies, world } = JSON.parse(body);
+      const formatoEsperado = pesosSeparados ? 'snapshot-parts-v5' : personasZstd ? 'snapshot-parts-v4' : 'snapshot-parts-v3';
+      assert.equal(snapshotEncoding, formatoEsperado);
       assert.ok(people.count > 0 && people.pages.length > 0);
-      const pagina = db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?').get(people.pages[0].digest);
-      assert.ok(pagina.body instanceof Uint8Array);
-      const formatoPagina = Buffer.from(pagina.body.subarray(0, 4)).toString('ascii');
-      assert.ok(formatoPagina === 'WPF1' || (personasZstd && formatoPagina === 'WZP1'));
+      const buscarPagina = db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?');
+      const pagina = buscarPagina.get(people.pages[0].digest)?.body;
+      assert.ok(pagina instanceof Uint8Array);
+      const formatoPagina = Buffer.from(pagina.subarray(0, 4)).toString('ascii');
+      const formatoCrudo = pesosSeparados ? 'WPD1' : 'WPF1';
+      assert.ok(formatoPagina === formatoCrudo || ((pesosSeparados || personasZstd) && formatoPagina === 'WZP1'));
       guardado = { formato: snapshotEncoding, personas: people.count, paginas: people.pages.length };
+      if (pesosSeparados) {
+        assert.ok(Number.isSafeInteger(policies?.count) && policies.count >= 0 && policies.count <= people.count);
+        assert.ok(Array.isArray(policies.pages));
+        let pesos = 0;
+        for (const descriptor of policies.pages) {
+          const bytes = buscarPagina.get(descriptor.digest)?.body;
+          assert.ok(bytes instanceof Uint8Array && bytes.byteLength === descriptor.bytes);
+          const politica = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          assert.equal(politica.toString('ascii', 0, 4), 'WGP1');
+          assert.equal(politica.readUInt32LE(4), descriptor.count);
+          assert.ok(descriptor.count > 0);
+          pesos += descriptor.count;
+        }
+        assert.equal(pesos, policies.count);
+        guardado.politicas = policies.count;
+        guardado.paginasPoliticas = policies.pages.length;
+      }
+      assert.ok(Number.isSafeInteger(world.tick) && world.tick > 0);
+      tickGuardado = world.tick;
     } finally { db.close(); }
     // La pasarela que reabre prueba la lectura sin activar la opción de escritura experimental.
     delete process.env.CARTA_SNAPSHOT_PACKED_PEOPLE;
     delete process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD;
+    delete process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS;
   }
   app = crearPasarela();
   await abrir();
+  if (tickGuardado !== undefined) {
+    const reabierta = app.salud();
+    assert.equal(reabierta.tick, tickGuardado);
+    assert.equal(reabierta.ultimoTickGuardado, tickGuardado);
+  }
   const leerDespues = await clienteCinta();
   const recuperado = await leerDespues(consulta);
   assert.ok(recuperado.baseFrame);

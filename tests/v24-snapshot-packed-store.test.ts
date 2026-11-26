@@ -16,6 +16,7 @@ interface Page { index: number; digest: string; count: number; bytes: number }
 interface Pages { count: number; pages: Page[] }
 interface Manifest {
   snapshotEncoding: string; world: Record<string, unknown>; tiles: Pages; people: Pages; animals: Pages;
+  policies?: Pages;
 }
 const params = parseParams('v23.guardadoCompleto=true');
 const manifest = (body: string): Manifest => JSON.parse(body) as Manifest;
@@ -253,5 +254,77 @@ test('Store mezcla páginas WPF1 crudas y comprimidas entre slots y reabre sin l
     assert.ok(Object.is(corte.world.people[0]!.inventory, -0));
     assert.ok(Object.is(corte.world.people[0]!.policy!.weights[0], -0));
     assert.equal((readStoredSnapshot(lector.db, 1)!.value as World).people[0]!.inventory, 0.125);
+  } finally { lector.close(); }
+});
+
+test('WPG5 conserva las páginas de pesos entre cambios de estado y protege las versiones retenidas', t => {
+  const directory = directorioTemporal(t, 'atlas-wpg5-'), path = join(directory, 'world.sqlite');
+  const world = createWorld(42, params);
+  const persona = world.people[0]!, policy = persona.policy = founderPolicy(42, persona.id);
+  persona.uid = 2049;
+  world.siguienteUid = 2050;
+  const sinUid = world.people[1]!;
+  sinUid.policy = founderPolicy(42, sinUid.id);
+  delete sinUid.uid;
+  policy.weights[0] = -0;
+  persona.inventory = 0.18;
+  const viejo = new Store(path, { snapshotCompressedPeople: true });
+  try { viejo.guardar({ world, materia: null }); }
+  finally { viejo.close(); }
+
+  const store = new Store(path, { snapshotSplitPeopleWeights: true });
+  try {
+    const { db } = store;
+    const save = (inventory: number) => {
+      persona.inventory = inventory;
+      store.guardar({ world, materia: null });
+      const value = manifest(filaInstantanea(store).body);
+      assert.equal(value.snapshotEncoding, 'snapshot-parts-v5');
+      assert.ok(value.policies?.count && value.policies.pages.length);
+      return value as Manifest & { policies: Pages };
+    };
+    const primero = save(-0);
+    assert.equal(primero.policies.count, 1);
+    assert.equal(manifest(filaInstantanea(store, 1).body).snapshotEncoding, 'snapshot-parts-v4');
+    const lote = primero.policies.pages[0]!, contenido = bodyPage(db, lote);
+    assert.ok(contenido instanceof Uint8Array);
+    assert.equal(Buffer.from(contenido.subarray(0, 4)).toString('ascii'), 'WGP1');
+    const segundo = save(0.19);
+    assert.notDeepEqual(segundo.people, primero.people);
+    assert.deepEqual(segundo.policies, primero.policies);
+    assert.ok(Object.is((readStoredSnapshot(db, 1)!.value as World).people[0]!.inventory, -0));
+
+    // Una clave ya presente debe volver a probar sus bytes después de una alteración externa.
+    const ajena = new DatabaseSync(path);
+    try {
+      const cambiar = ajena.prepare('UPDATE main.snapshot_parts SET body=? WHERE digest=?');
+      cambiar.run(Buffer.alloc(1), lote.digest);
+      assert.throws(() => save(0.20), SnapshotPhysicalError);
+      cambiar.run(contenido, lote.digest);
+    } finally { ajena.close(); }
+
+    db.exec(`CREATE TRIGGER dano_wpg5 AFTER INSERT ON snapshots WHEN NEW.slot=0 BEGIN
+      UPDATE snapshot_parts SET body=X'00' WHERE digest=json_extract(NEW.body,'$.policies.pages[0].digest'); END`);
+    assert.throws(() => save(0.21), SnapshotPhysicalError);
+    db.exec('DROP TRIGGER dano_wpg5');
+    assert.equal((readStoredSnapshot(db)!.value as World).people[0]!.inventory, 0.19);
+    policy.weights[0] = 0.5;
+    const tercero = save(0.22);
+    assert.notDeepEqual(tercero.policies, segundo.policies);
+    assert.deepEqual(bodyPage(db, lote), contenido);
+    assert.equal(readStoredSnapshot(db)!.snapshotBytes, store.lastSnapshotBytes);
+    assert.equal(store.previous(join(directory, 'previous.sqlite')), 1);
+    const copia = new Store(join(directory, 'previous.sqlite'), { readOnly: true });
+    try { assert.ok(Object.is(copia.verificarGuardado()!.world.people[0]!.policy!.weights[0], -0)); }
+    finally { copia.close(); }
+  } finally { store.close(); }
+
+  const lector = new Store(path, { readOnly: true });
+  try {
+    const actual = readStoredSnapshot(lector.db)!;
+    assert.equal((actual.value as World).people[0]!.policy!.weights[0], 0.5);
+    assert.deepEqual((actual.value as World).people[1]!.policy, sinUid.policy);
+    assert.equal(lector.verificarGuardado()!.slot, 0);
+    assert.ok(Object.is((readStoredSnapshot(lector.db, 1)!.value as World).people[0]!.policy!.weights[0], -0));
   } finally { lector.close(); }
 });

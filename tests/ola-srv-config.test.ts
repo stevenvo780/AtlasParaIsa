@@ -50,10 +50,12 @@ test('la preparación durable de teselas remotas se activa expresamente', () => 
   assert.equal(motorConfig(7, { ...config, CARTA_TESELAS_CORTE_DIRECTAS: '1' }).teselasCorteDirectas, true);
 });
 
-test('la preparación durable de personas remotas requiere el escritor WPF1', () => {
+test('la preparación durable de personas remotas requiere un formato binario de guardado', () => {
   const config = { CARTA_MOTOR_HILOS: '8', CARTA_CORTE_TRANSFERIBLE: '1', CARTA_PERSONAS_CORTE_DIRECTAS: '1' };
   assert.equal(motorConfig(7, config).personasCorteDirectas, undefined);
   assert.equal(motorConfig(7, { ...config, CARTA_SNAPSHOT_PACKED_PEOPLE: '1' }).personasCorteDirectas, true);
+  assert.equal(motorConfig(7, { ...config, CARTA_SNAPSHOT_PERSONAS_ZSTD: '1' }).personasCorteDirectas, true);
+  assert.equal(motorConfig(7, { ...config, CARTA_SNAPSHOT_PESOS_SEPARADOS: '1' }).personasCorteDirectas, true);
 });
 
 test('el motor rechaza un despacho inválido antes de arrancar', () => {

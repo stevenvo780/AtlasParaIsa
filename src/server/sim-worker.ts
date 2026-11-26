@@ -720,6 +720,7 @@ async function runSimulation(options: SimWorkerOptions) {
   const store = new Store(options.worldPath, {
     onProgress: informarAvance, snapshotPackedPeople: process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1',
     snapshotCompressedPeople: process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1',
+    snapshotSplitPeopleWeights: process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1',
   });
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();

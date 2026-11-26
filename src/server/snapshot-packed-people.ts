@@ -8,6 +8,7 @@ import { SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 export const WPF1_WEIGHT_COUNT = 212;
 export const WPF1_WEIGHT_BYTES = WPF1_WEIGHT_COUNT * Float64Array.BYTES_PER_ELEMENT;
 const HEADER_BYTES = 16, MAGIC = Buffer.from('WPF1').readUInt32LE(0);
+const DETACHED_MAGIC = Buffer.from('WPD1').readUInt32LE(0);
 const MAX_U32 = 0xffff_ffff, MAX_PAGE_BYTES = 4 * 1024 * 1024;
 const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
 const COMPRESSED_HEADER_BYTES = 8, COMPRESSED_MAGIC = Buffer.from('WZP1').readUInt32LE(0);
@@ -25,10 +26,42 @@ export interface PackedPersonRow {
   readonly bytes: number;
 }
 
-const binaryWeights = new WeakMap<PackedPersonRow, { body: Buffer; offset: number }>();
+export type PackedPersonWeights = Pick<PackedPersonRow, 'weights'>;
+const binaryWeights = new WeakMap<PackedPersonWeights, { body: Buffer; offset: number }>();
 
 function failure(reason: string, cause?: unknown): never {
   throw new SnapshotSemanticError(`Invalid WPF1 people page ${reason}. Explicit recovery required.`, { cause });
+}
+
+export function hasPackedPersonWeights(row: PackedPersonRow): boolean {
+  return row.weights !== undefined || binaryWeights.has(row);
+}
+
+export function retainPackedPersonWeights(row: PackedPersonRow): PackedPersonWeights {
+  const retained: PackedPersonWeights = row.weights === undefined ? {} : { weights: row.weights };
+  const stored = binaryWeights.get(row);
+  if (stored) binaryWeights.set(retained, stored);
+  return retained;
+}
+
+/** Copy a prepared row's F64LE weights. The original bytes stay private to the codec. */
+export function copyPackedPersonWeights(row: PackedPersonWeights, destino: Buffer, offset: number): boolean {
+  const stored = binaryWeights.get(row), weights = row.weights;
+  if (stored === undefined && weights === undefined) return false;
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset + WPF1_WEIGHT_BYTES > destino.byteLength)
+    failure('weight byte range');
+  if (stored) {
+    stored.body.copy(destino, offset, stored.offset, stored.offset + WPF1_WEIGHT_BYTES);
+    return true;
+  }
+  if (weights?.length !== WPF1_WEIGHT_COUNT) failure('weight count');
+  const data = new DataView(destino.buffer, destino.byteOffset + offset, WPF1_WEIGHT_BYTES);
+  for (let i = 0; i < WPF1_WEIGHT_COUNT; i++) {
+    const weight = weights[i];
+    if (!isPackedPersonWeight(weight)) failure('weight value');
+    data.setFloat64(i * Float64Array.BYTES_PER_ELEMENT, weight, true);
+  }
+  return true;
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -73,6 +106,10 @@ function jsonRow(record: Record<string, unknown>, weights?: readonly number[]): 
   return weights === undefined ? { json, bytes } : { json, weights, bytes };
 }
 
+export function prepareInlinePerson(record: Record<string, unknown>): PackedPersonRow {
+  return jsonRow(record);
+}
+
 export function preparePackedPerson(record: Record<string, unknown>): PackedPersonRow {
   const weights = packableWeights(record);
   if (!weights || Object.getOwnPropertySymbols(record).length !== 0) return jsonRow(record);
@@ -105,7 +142,7 @@ export function conservarPesosWpf1(cuerpo: Uint8Array, transferir = false):
       if (!isPackedPersonWeight(peso)) throw new Error('Peso de persona directa inválido.');
       pesos[i] = peso;
     }
-    const fila = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
+    const fila: PackedPersonRow = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
     binaryWeights.set(fila, { body, offset });
     return { fila, pesos };
   };
@@ -134,45 +171,49 @@ function maxPageBytes(count: number): number {
 /** Header: magic, JSON byte count, row count, packed count. Then a mask (least
  * significant bit first), one UTF-8 JSON array, and F64LE weights in row order. */
 export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer {
+  return encodePeoplePage(rows, false);
+}
+
+/** WPD1 preserves the WPF1 header, mask and JSON. Weights live in separate UID pages. */
+export function encodeDetachedPackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer {
+  return encodePeoplePage(rows, true);
+}
+
+function encodePeoplePage(rows: readonly PackedPersonRow[], detached: boolean): Buffer {
   const count = rows.length;
-  let packedCount = 0, sumRowBytes = 0;
+  let packedCount = 0, sumJsonBytes = 0;
   for (const row of rows) {
-    const packed = row.weights !== undefined || binaryWeights.has(row);
+    const packed = hasPackedPersonWeights(row);
+    const jsonBytes = row.bytes - (packed ? WPF1_WEIGHT_BYTES : 0);
     if (typeof row.json !== 'string' || !row.json.startsWith('{') || !row.json.endsWith('}')
-      || row.bytes !== Buffer.byteLength(row.json) + (packed ? WPF1_WEIGHT_BYTES : 0))
+      || jsonBytes !== Buffer.byteLength(row.json))
       failure('row byte count');
     if (row.weights !== undefined && row.weights.length !== WPF1_WEIGHT_COUNT) failure('weight count');
     if (packed) packedCount++;
-    sumRowBytes += row.bytes;
+    sumJsonBytes += jsonBytes;
   }
-  const size = packedPeoplePageBytes(count, sumRowBytes);
+  const weightBytes = detached ? 0 : packedCount * WPF1_WEIGHT_BYTES;
+  const size = packedPeoplePageBytes(count, sumJsonBytes + weightBytes);
   const jsonStart = HEADER_BYTES + Math.ceil(count / 8);
-  const jsonBytes = size - jsonStart - packedCount * WPF1_WEIGHT_BYTES;
+  const jsonBytes = size - jsonStart - weightBytes;
   assertSize(count, jsonBytes, size);
 
   const body = Buffer.alloc(size);
-  const data = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  data.setUint32(0, MAGIC, true);
-  data.setUint32(4, jsonBytes, true);
-  data.setUint32(8, count, true);
-  data.setUint32(12, packedCount, true);
+  body.writeUInt32LE(detached ? DETACHED_MAGIC : MAGIC, 0);
+  body.writeUInt32LE(jsonBytes, 4);
+  body.writeUInt32LE(count, 8);
+  body.writeUInt32LE(packedCount, 12);
   let json = jsonStart, binary = jsonStart + jsonBytes;
   body[json++] = 0x5b; // [
   for (let i = 0; i < count; i++) {
     if (i > 0) body[json++] = 0x2c; // ,
     const row = rows[i]!;
-    const stored = binaryWeights.get(row), weights = row.weights;
-    const packed = stored !== undefined || weights !== undefined;
+    const packed = detached ? hasPackedPersonWeights(row) : copyPackedPersonWeights(row, body, binary);
     const bytes = row.bytes - (packed ? WPF1_WEIGHT_BYTES : 0);
     json += body.write(row.json, json, bytes, 'utf8');
-    if (packed) body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
-    if (stored) {
-      stored.body.copy(body, binary, stored.offset, stored.offset + WPF1_WEIGHT_BYTES);
-      binary += WPF1_WEIGHT_BYTES;
-    } else if (weights) for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
-      const value = weights[j];
-      if (!isPackedPersonWeight(value)) failure('weight value');
-      data.setFloat64(binary, value, true);
+    if (packed) {
+      body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
+      if (!detached) binary += WPF1_WEIGHT_BYTES;
     }
   }
   body[json] = 0x5d; // ]
@@ -180,14 +221,21 @@ export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer
 }
 
 export function decodePackedPeoplePage(body: Uint8Array, count: number, parse: (json: string) => unknown): unknown[] {
+  return decodePeoplePage(body, count, parse);
+}
+
+function decodePeoplePage(body: Uint8Array, count: number, parse: (json: string) => unknown,
+  cargarPesos?: (uid: number) => number[]): unknown[] {
   if (body.byteLength < HEADER_BYTES) failure('header');
   const data = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  if (data.getUint32(0, true) !== MAGIC) failure('header');
+  const detached = cargarPesos !== undefined;
+  if (data.getUint32(0, true) !== (detached ? DETACHED_MAGIC : MAGIC)) failure('header');
   if (data.getUint32(8, true) !== count) failure('row count');
   const jsonBytes = data.getUint32(4, true), packedCount = data.getUint32(12, true);
   assertSize(count, jsonBytes, body.byteLength);
   const jsonStart = HEADER_BYTES + Math.ceil(count / 8), binaryStart = jsonStart + jsonBytes;
-  if (packedCount > count || body.byteLength !== binaryStart + packedCount * WPF1_WEIGHT_BYTES) failure('byte count');
+  if (packedCount > count || body.byteLength !== binaryStart + (detached ? 0 : packedCount * WPF1_WEIGHT_BYTES))
+    failure('byte count');
   const spare = count & 7;
   if (spare !== 0 && body[jsonStart - 1]! >>> spare !== 0) failure('mask padding');
   let present = 0;
@@ -216,6 +264,16 @@ export function decodePackedPeoplePage(body: Uint8Array, count: number, parse: (
     if (!Object.hasOwn(row, 'policy') || !object(policy) || Reflect.ownKeys(policy).length !== 1
       || !Object.hasOwn(policy, 'weights') || !Array.isArray(policy.weights) || policy.weights.length !== 0)
       failure('policy placeholder');
+    if (cargarPesos) {
+      const uid = row.uid;
+      if (!Object.hasOwn(row, 'uid') || typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0)
+        failure('detached policy uid');
+      // The resolver checks the referenced policy's values when decoding its weight page.
+      const weights = cargarPesos(uid);
+      if (!Array.isArray(weights) || weights.length !== WPF1_WEIGHT_COUNT) failure('detached policy weight count');
+      policy.weights = weights;
+      continue;
+    }
     const weights = new Array<number>(WPF1_WEIGHT_COUNT);
     for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
       const value = data.getFloat64(binary, true);
@@ -266,7 +324,7 @@ function assertCompleteZstdFrame(frame: Buffer, rawBytes: number): void {
   compressedFailure('Zstd frame length');
 }
 
-/** Store a WPF1 page as-is or as WZP1 plus its original u32 byte count and one Zstd frame. */
+/** Store a WPF1 or WPD1 page as-is or as WZP1 plus its original u32 byte count and one Zstd frame. */
 export function encodeStoredPackedPeoplePage(raw: Uint8Array): Uint8Array {
   // The existing format permits oversized pages with just one row.
   if (raw.byteLength > MAX_PAGE_BYTES) return raw;
@@ -281,9 +339,17 @@ export function encodeStoredPackedPeoplePage(raw: Uint8Array): Uint8Array {
 }
 
 export function decodeStoredPackedPeoplePage(body: Uint8Array, count: number, parse: (json: string) => unknown): unknown[] {
+  return decodePeoplePage(unwrapStoredPeoplePage(body, count), count, parse);
+}
+
+export function decodeStoredDetachedPackedPeoplePage(body: Uint8Array, count: number, parse: (json: string) => unknown,
+  cargarPesos: (uid: number) => number[]): unknown[] {
+  return decodePeoplePage(unwrapStoredPeoplePage(body, count), count, parse, cargarPesos);
+}
+
+function unwrapStoredPeoplePage(body: Uint8Array, count: number): Uint8Array {
   const stored = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
-  if (stored.length < 4 || stored.readUInt32LE(0) !== COMPRESSED_MAGIC)
-    return decodePackedPeoplePage(body, count, parse);
+  if (stored.length < 4 || stored.readUInt32LE(0) !== COMPRESSED_MAGIC) return body;
   if (stored.length < COMPRESSED_HEADER_BYTES) compressedFailure('header');
   const rawBytes = stored.readUInt32LE(4);
   if (rawBytes < HEADER_BYTES + 2 || rawBytes > maxPageBytes(count)) compressedFailure('declared byte count');
@@ -300,5 +366,5 @@ export function decodeStoredPackedPeoplePage(body: Uint8Array, count: number, pa
     compressedFailure('Zstd decompression', error);
   }
   if (raw.length !== rawBytes) compressedFailure('decompressed byte count');
-  return decodePackedPeoplePage(raw, count, parse);
+  return raw;
 }

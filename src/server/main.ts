@@ -99,6 +99,7 @@ try {
     store = new Store(resolve(dataPath, 'world.sqlite'), {
       snapshotPackedPeople: process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1',
       snapshotCompressedPeople: process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1',
+      snapshotSplitPeopleWeights: process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1',
     });
     app = createApp({ store, manual: true, deployment: true, commit, password: process.env.CARTA_PASSWORD,
       credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure,

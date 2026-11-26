@@ -53,7 +53,8 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
   const maximo = hilos === 'auto' ? availableParallelism() : undefined;
   const reservaLotesMateria = reservaMateriaHost(memoria ?? hostMemory());
   const confirmarGuardadoVivo = env.CARTA_GUARDADO_VIVO === '1';
-  const personasBinarias = env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1' || env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1';
+  const personasBinarias = env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1' || env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1'
+    || env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1';
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
     ...(gruposPercepcionGpu === undefined ? {} : { gruposPercepcionGpu }),

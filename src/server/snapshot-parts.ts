@@ -12,9 +12,12 @@ import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
-import { decodePackedPeoplePage, decodeStoredPackedPeoplePage, encodePackedPeoplePage, encodeStoredPackedPeoplePage,
-  packedPeoplePageBytes, preparePackedPerson,
-  type PackedPersonRow } from './snapshot-packed-people.js';
+import { decodePackedPeoplePage, decodeStoredPackedPeoplePage, decodeStoredDetachedPackedPeoplePage,
+  encodePackedPeoplePage, encodeStoredPackedPeoplePage, encodeDetachedPackedPeoplePage, hasPackedPersonWeights,
+  packedPeoplePageBytes, prepareInlinePerson, preparePackedPerson, retainPackedPersonWeights, WPF1_WEIGHT_BYTES,
+  type PackedPersonRow, type PackedPersonWeights } from './snapshot-packed-people.js';
+import { decodePolicyWeightPage, decodePolicyWeights, encodePolicyWeightPage, policyWeightPageBytes,
+  POLICY_UIDS_PER_PAGE } from './snapshot-policy-pages.js';
 import { residentBackingArray, residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
 import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/terreno.js';
 
@@ -27,7 +30,7 @@ const PAGE_BYTES = 4 * 1024 * 1024;
 // Upper bound for UTF-8 bytes representable in one JS string. SQLite also enforces its row limit.
 const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
 const ENCODING_V1 = 'snapshot-parts-v1', ENCODING_V2 = 'snapshot-parts-v2', ENCODING_V3 = 'snapshot-parts-v3';
-const ENCODING_V4 = 'snapshot-parts-v4';
+const ENCODING_V4 = 'snapshot-parts-v4', ENCODING_V5 = 'snapshot-parts-v5';
 const ORGANISM_FIELDS = ['people', 'animals'] as const;
 const checksum = (body: string | Uint8Array): string => createHash('sha256').update(body).digest('hex');
 class SnapshotPartsFormatError extends SnapshotSemanticError {}
@@ -43,8 +46,9 @@ interface Page { index: number; digest: string; count: number; bytes: number; }
 interface Pages { count: number; pages: Page[]; }
 interface ManifestBase { world: Record<string, unknown> & { version: number }; tiles: Pages; }
 type Manifest = ManifestBase & ({ snapshotEncoding: typeof ENCODING_V1 } |
-  { snapshotEncoding: typeof ENCODING_V2 | typeof ENCODING_V3 | typeof ENCODING_V4; people: Pages; animals: Pages; });
-type OrganismFormat = 'organisms' | 'packedPeople' | 'compressedPeople';
+  { snapshotEncoding: typeof ENCODING_V2 | typeof ENCODING_V3 | typeof ENCODING_V4; people: Pages; animals: Pages } |
+  { snapshotEncoding: typeof ENCODING_V5; people: Pages; animals: Pages; policies: Pages });
+type OrganismFormat = 'organisms' | 'packedPeople' | 'compressedPeople' | 'detachedPeople';
 type PageFormat = 'tiles' | OrganismFormat;
 type Organisms = Pick<World, typeof ORGANISM_FIELDS[number]>;
 /** `metadata` is the exact JSON of the world record with placeholders for its paged collections. */
@@ -59,13 +63,15 @@ export function hasCanonicalSnapshotPartsPrefix(body: string): boolean {
   return body.startsWith(`{"snapshotEncoding":"${ENCODING_V1}","world":{`)
     || body.startsWith(`{"snapshotEncoding":"${ENCODING_V2}","world":{`)
     || body.startsWith(`{"snapshotEncoding":"${ENCODING_V3}","world":{`)
-    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V4}","world":{`);
+    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V4}","world":{`)
+    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V5}","world":{`);
 }
 
 function organismFormat(encoding: unknown, field: keyof Organisms): OrganismFormat {
   if (field === 'people') {
     if (encoding === ENCODING_V3) return 'packedPeople';
     if (encoding === ENCODING_V4) return 'compressedPeople';
+    if (encoding === ENCODING_V5) return 'detachedPeople';
   }
   return 'organisms';
 }
@@ -73,6 +79,7 @@ function organismFormat(encoding: unknown, field: keyof Organisms): OrganismForm
 function* organismPages(manifest: Manifest): IterableIterator<Page> {
   if (manifest.snapshotEncoding !== ENCODING_V1)
     for (const field of ORGANISM_FIELDS) yield* manifest[field].pages;
+  if (manifest.snapshotEncoding === ENCODING_V5) yield* manifest.policies.pages;
 }
 
 function pageByteLimit(count: number, organisms: boolean): number {
@@ -99,6 +106,7 @@ export interface SnapshotReuseTicket { dataVersion: number; schemaCookie: number
 /** Directorio confirmado de una página: digesto y tamaño ya durables + la prueba de identidad para reusarla
  * (mismos objetos `Tile` en el mismo orden y la revisión lógica de cada uno al codificarla). Sin cuerpos. */
 interface CachedPage { offset: number; count: number; digest: string; bytes: number; tiles: readonly Tile[]; revisions: Int32Array; }
+type PolicyBuckets = Map<number, { uid: number; weights: PackedPersonWeights }[]>;
 interface PageCache {
   pages: readonly CachedPage[];
   /** Puerta paralela al codificar: `null` certifica que ninguna tesela estaba ligada a un `TileStore`. */
@@ -155,7 +163,7 @@ export class SnapshotParts {
   private readonly personasStats = { reused: 0, recoded: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
-    private readonly packedPeople = false, private readonly compressedPeople = false) {
+    private readonly packedPeople = false, private readonly compressedPeople = false, private readonly splitPeopleWeights = false) {
     if (!Number.isSafeInteger(organismPageBytes) || organismPageBytes < 2 || organismPageBytes > PAGE_BYTES)
       throw new RangeError('Invalid snapshot organism page byte limit.');
   }
@@ -359,8 +367,9 @@ export class SnapshotParts {
     }
     // Byte for byte `stringifyExact(manifest)`: the page descriptors hold only strings and non-negative integers.
     const manifestTiles: Pages = { count: tiles.length, pages }, digests = pages.map(page => page.digest);
-    const packed = prepared.nativo && (this.packedPeople || this.compressedPeople);
-    const packedEncoding = this.compressedPeople ? ENCODING_V4 : ENCODING_V3;
+    const packed = prepared.nativo && (this.packedPeople || this.compressedPeople || this.splitPeopleWeights);
+    const buckets: PolicyBuckets | undefined = packed && this.splitPeopleWeights ? new Map() : undefined;
+    const packedEncoding = buckets ? ENCODING_V5 : this.compressedPeople ? ENCODING_V4 : ENCODING_V3;
     const encoding = prepared.organisms ? (packed ? packedEncoding : ENCODING_V2) : ENCODING_V1;
     let body = `{"snapshotEncoding":"${encoding}","world":${prepared.metadata},"tiles":${JSON.stringify(manifestTiles)}`;
     if (prepared.organisms) {
@@ -368,13 +377,25 @@ export class SnapshotParts {
       for (const field of ORGANISM_FIELDS) {
         const faunaVerificada = field === 'animals' ? prepared.faunaVerificada : undefined;
         const manifest = packed && field === 'people'
-          ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage, prepared.personasVerificadas)
+          ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage, prepared.personasVerificadas, buckets)
           : this.writeOrganisms(prepared.organisms[field], writeOrganismPage,
             field === 'animals' && faunaVerificada === undefined ? faunaCorteDe(prepared.organisms.animals) : undefined,
             faunaVerificada);
         for (const page of manifest.pages) digests.push(page.digest);
         body += `,"${field}":${JSON.stringify(manifest)}`;
       }
+    }
+    if (buckets) {
+      const policies: Pages = { count: 0, pages: [] };
+      for (const bucket of [...buckets.keys()].sort((a, b) => a - b)) {
+        const rows = buckets.get(bucket)!.sort((a, b) => a.uid - b.uid);
+        const page = writePage(policies.pages.length, encodePolicyWeightPage(rows), rows.length);
+        policies.count += page.count;
+        policies.pages.push(page);
+        digests.push(page.digest);
+        this.onProgress?.();
+      }
+      body += `,"policies":${JSON.stringify(policies)}`;
     }
     body += '}';
     const size = Buffer.byteLength(body), digest = checksum(body);
@@ -508,7 +529,7 @@ export class SnapshotParts {
   }
 
   private writePackedPeople(people: readonly Person[], writePage: (index: number, body: Uint8Array, count: number) => Page,
-    personasVerificadas?: PersonasCorteVerificadas): Pages {
+    personasVerificadas?: PersonasCorteVerificadas, buckets?: PolicyBuckets): Pages {
     const pages: Page[] = [], rows: PackedPersonRow[] = [];
     const tramos = personasVerificadas?.tramos ?? [];
     const modificadas = personasVerificadas?.modificadas;
@@ -520,8 +541,8 @@ export class SnapshotParts {
     }
     let rowBytes = 0;
     const flush = () => {
-      const wpf1 = encodePackedPeoplePage(rows);
-      const body = this.compressedPeople ? encodeStoredPackedPeoplePage(wpf1) : wpf1;
+      const raw = buckets ? encodeDetachedPackedPeoplePage(rows) : encodePackedPeoplePage(rows);
+      const body = buckets || this.compressedPeople ? encodeStoredPackedPeoplePage(raw) : raw;
       pages.push(writePage(pages.length, body, rows.length));
       rows.length = 0;
       rowBytes = 0;
@@ -531,6 +552,8 @@ export class SnapshotParts {
     for (let i = 0; i < people.length; i++) {
       const person = people[i];
       if (!object(person)) failure('organism row');
+      const uid = buckets ? person.uid : undefined;
+      const keepInline = buckets !== undefined && uid === undefined;
       let verificada: PackedPersonRow | undefined;
       if (tramo && i >= tramo.desde) {
         const offset = i - tramo.desde;
@@ -538,15 +561,24 @@ export class SnapshotParts {
         if (offset + 1 === tramo.filas.length) tramo = tramos[++indexTramo];
       }
       if (verificada !== undefined) {
-        if (modificadas?.has(person)) {
+        if (keepInline || modificadas?.has(person)) {
           verificada = undefined;
           this.personasStats.recoded++;
         } else this.personasStats.reused++;
       }
-      const row = verificada ?? preparePackedPerson(person);
-      if (rows.length && packedPeoplePageBytes(rows.length + 1, rowBytes + row.bytes) > this.organismPageBytes) flush();
+      const row = verificada ?? (keepInline ? prepareInlinePerson(person) : preparePackedPerson(person));
+      let size = row.bytes;
+      if (buckets && hasPackedPersonWeights(row)) {
+        if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0) failure('policy uid');
+        const bucket = Math.floor(uid / POLICY_UIDS_PER_PAGE);
+        let entries = buckets.get(bucket);
+        if (!entries) buckets.set(bucket, entries = []);
+        entries.push({ uid, weights: retainPackedPersonWeights(row) });
+        size -= WPF1_WEIGHT_BYTES;
+      }
+      if (rows.length && packedPeoplePageBytes(rows.length + 1, rowBytes + size) > this.organismPageBytes) flush();
       rows.push(row);
-      rowBytes += row.bytes;
+      rowBytes += size;
       // Como en el formato JSON, un organismo histórico grande puede ocupar su propia página.
       if (packedPeoplePageBytes(rows.length, rowBytes) >= this.organismPageBytes) flush();
     }
@@ -565,10 +597,12 @@ export class SnapshotParts {
 
   private manifest(value: Record<string, unknown>, body: string, validateParams = true): Manifest {
     if (this.schemaVersion < 5) failure('encoding requires schema 5');
+    const splitPolicies = value.snapshotEncoding === ENCODING_V5;
     const pagedOrganisms = value.snapshotEncoding === ENCODING_V2 || value.snapshotEncoding === ENCODING_V3
-      || value.snapshotEncoding === ENCODING_V4;
+      || value.snapshotEncoding === ENCODING_V4 || splitPolicies;
     const fields = ['snapshotEncoding', 'world', 'tiles'];
     if (pagedOrganisms) fields.push(...ORGANISM_FIELDS);
+    if (splitPolicies) fields.push('policies');
     if (!keys(value, fields) || (!pagedOrganisms && value.snapshotEncoding !== ENCODING_V1)
       || !object(value.world) || !object(value.tiles)) failure('manifest encoding');
     const world = value.world as Record<string, unknown>, tiles = value.tiles as Record<string, unknown>;
@@ -603,6 +637,7 @@ export class SnapshotParts {
         this.assertOrganismManifest(value[field], organismFormat(value.snapshotEncoding, field));
       }
       const animals = value.animals as Pages;
+      if (splitPolicies) this.assertPolicyManifest(value.policies, (value.people as Pages).count);
       if (!params.v23.fauna && animals.count > limits.fauna)
         metadataFailure(new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.'));
     }
@@ -614,8 +649,9 @@ export class SnapshotParts {
       || (value.count as number) < 0 || (value.count as number) > 0xffff_ffff || !Array.isArray(value.pages)
       || value.pages.length > (value.count as number)) failure('organism count');
     let count = 0;
+    const compressed = format === 'compressedPeople' || format === 'detachedPeople';
     for (const [index, page] of value.pages.entries()) {
-      if (!pageDescriptor(page, index, true) || format !== 'compressedPeople' && page.bytes < 1 + 3 * page.count)
+      if (!pageDescriptor(page, index, true) || !compressed && page.bytes < 1 + 3 * page.count)
         failure('organism page descriptor');
       // Cada objeto JSON ocupa, como mínimo, los dos bytes de sus llaves.
       if (format === 'packedPeople' && page.bytes < packedPeoplePageBytes(page.count, 2 * page.count))
@@ -625,22 +661,68 @@ export class SnapshotParts {
     if (count !== value.count) failure('total organism count');
   }
 
-  private page(page: Page, format: PageFormat = 'tiles'): unknown[] {
+  private assertPolicyManifest(value: unknown, peopleCount: number): void {
+    if (!object(value) || !keys(value, ['count', 'pages']) || !Number.isSafeInteger(value.count)
+      || (value.count as number) < 0 || (value.count as number) > peopleCount || !Array.isArray(value.pages)
+      || value.pages.length > (value.count as number)) failure('policy count');
+    let count = 0;
+    for (const [index, page] of value.pages.entries()) {
+      if (!pageDescriptor(page, index) || page.count > POLICY_UIDS_PER_PAGE || page.bytes !== policyWeightPageBytes(page.count))
+        failure('policy page descriptor');
+      count += page.count;
+    }
+    if (count !== value.count) failure('total policy count');
+  }
+
+  private pageBody(page: Page, binary: boolean): string | Uint8Array {
     const body = this.db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?').get(page.digest)?.body;
     const text = typeof body === 'string';
-    const binary = format === 'packedPeople' || format === 'compressedPeople';
-    if ((!text && !(body instanceof Uint8Array)) || binary === text
-      || checksum(body) !== page.digest)
+    if ((!text && !(body instanceof Uint8Array)) || binary === text || checksum(body) !== page.digest)
       throw new SnapshotPhysicalError('Snapshot page missing or checksum mismatch.');
     if ((text ? Buffer.byteLength(body) : body.byteLength) !== page.bytes) failure('page byte count');
-    const decode = format === 'compressedPeople' ? decodeStoredPackedPeoplePage : decodePackedPeoplePage;
-    const rows = text ? parseSnapshotJSON(body) : decode(body, page.count, parsePackedPeopleJSON);
+    return body;
+  }
+
+  private page(page: Page, format: PageFormat = 'tiles', policy?: (uid: number) => number[]): unknown[] {
+    const body = this.pageBody(page, format !== 'tiles' && format !== 'organisms');
+    let rows: unknown;
+    if (typeof body === 'string') rows = parseSnapshotJSON(body);
+    else if (format === 'detachedPeople') {
+      if (!policy) failure('policy reader');
+      rows = decodeStoredDetachedPackedPeoplePage(body, page.count, parsePackedPeopleJSON, policy);
+    }
+    else if (format === 'compressedPeople') rows = decodeStoredPackedPeoplePage(body, page.count, parsePackedPeopleJSON);
+    else rows = decodePackedPeoplePage(body, page.count, parsePackedPeopleJSON);
     if (!Array.isArray(rows) || rows.length !== page.count) failure('page row count');
     if (format !== 'tiles') {
-      if (text) assertUniqueKeys(body);
+      if (typeof body === 'string') assertUniqueKeys(body);
       if (!rows.every(object)) failure('organism row');
     }
     return rows;
+  }
+
+  private policyWeights(policies: Pages): { load(uid: number): number[]; finish(): void; bytes: number } {
+    const remaining = new Map<number, { body: Uint8Array; offset: number }>();
+    let previousBucket = -1, bytes = 0;
+    for (const page of policies.pages) {
+      const body = this.pageBody(page, true) as Uint8Array;
+      const { bucket, entries } = decodePolicyWeightPage(body, page.count);
+      if (bucket <= previousBucket) failure('policy bucket order');
+      previousBucket = bucket;
+      for (const { uid, offset } of entries) remaining.set(uid, { body, offset });
+      bytes += page.bytes;
+      this.onProgress?.();
+    }
+    return {
+      load(uid) {
+        const entry = remaining.get(uid);
+        if (!entry) failure('missing or repeated policy uid');
+        remaining.delete(uid);
+        return decodePolicyWeights(entry.body, entry.offset);
+      },
+      finish() { if (remaining.size > 0) failure('unused policy uid'); },
+      bytes,
+    };
   }
 
   read(body: string): unknown {
@@ -661,18 +743,21 @@ export class SnapshotParts {
       this.onProgress?.();
     }
     const world: Record<string, unknown> = { ...manifest.world, tiles };
+    const weights = manifest.snapshotEncoding === ENCODING_V5 ? this.policyWeights(manifest.policies) : undefined;
     if (manifest.snapshotEncoding !== ENCODING_V1) {
       for (const field of ORGANISM_FIELDS) {
         const format = organismFormat(manifest.snapshotEncoding, field);
         const rows: unknown[] = [];
         for (const page of manifest[field].pages) {
-          for (const row of this.page(page, format)) rows.push(row);
+          for (const row of this.page(page, format, weights?.load)) rows.push(row);
           bytes += page.bytes;
           this.onProgress?.();
         }
         world[field] = rows;
       }
     }
+    weights?.finish();
+    bytes += weights?.bytes ?? 0;
     finishDecodedRecord(world);
     return { value: world, bytes };
   }
@@ -686,10 +771,12 @@ export class SnapshotParts {
     if (!object(value) || !Object.hasOwn(value, 'snapshotEncoding')) return;
     const manifest = this.manifest(value, body);
     for (const page of manifest.tiles.pages) decodeSnapshotTileRows(this.page(page), manifest.world.version);
+    const weights = manifest.snapshotEncoding === ENCODING_V5 ? this.policyWeights(manifest.policies) : undefined;
     if (manifest.snapshotEncoding !== ENCODING_V1) for (const field of ORGANISM_FIELDS) {
       const format = organismFormat(manifest.snapshotEncoding, field);
-      for (const page of manifest[field].pages) this.page(page, format);
+      for (const page of manifest[field].pages) this.page(page, format, weights?.load);
     }
+    weights?.finish();
   }
 
   /** Triggers can also damage pages now referenced only by a backup. Verify all

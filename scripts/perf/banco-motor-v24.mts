@@ -51,7 +51,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync,
+import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync,
   realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { availableParallelism, loadavg } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -282,6 +282,7 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
   try {
     const copia = join(temporal, 'world.sqlite');
     copyFileSync(original, copia, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    chmodSync(copia, 0o600); // Store reserves an epoch in this disposable copy.
     const hash = createHash('sha256');
     for await (const bloque of createReadStream(copia)) hash.update(bloque);
     const sha = hash.digest('hex');

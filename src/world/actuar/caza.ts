@@ -207,6 +207,8 @@ export function cazarAnimal(c: CtxLeyMateria, person: Person, presa: Ref, trabaj
  */
 export function extraerDeAnimal(c: CtxLeyMateria, person: Person, animal: Ref, parte: 'reserva' | 'fibra'): LoteRef {
   if (!person.cuerpo || animal === REF_NULA) return REF_NULA;
+  const de = c.ref(person.uid ?? 0), celda = c.terreno.celda(person.x, person.y);
+  if (c.params.v23.intentos && (de === REF_NULA || celda < 0)) return REF_NULA;
   const kg = TASA_EXTRACCION * masaDe(c, person.cuerpo) ** 0.75;
   if (!(kg > 0) || pagar(c, person.cuerpo, C_MOVER * kg) <= 0) return REF_NULA;
   let destino: LoteRef = person.cuerpo.digestivo;
@@ -214,7 +216,7 @@ export function extraerDeAnimal(c: CtxLeyMateria, person: Person, animal: Ref, p
   const dato = new Float64Array(DATO_TOMAR.kappa + 4);
   dato[DATO_TOMAR.rol] = parte === 'reserva' ? Rol.Reserva : Rol.Tejido;
   dato[DATO_TOMAR.esp] = 0; dato[DATO_TOMAR.cuantos] = kg * 1000; dato[DATO_TOMAR.loteDestino] = destino;
-  const intento = { tipo: TipoIntento.Tomar, de: c.ref(person.uid ?? 0), a: animal, celda: -1, lote: REF_NULA,
+  const intento = { tipo: TipoIntento.Tomar, de, a: animal, celda, lote: REF_NULA,
     nonce: c.id('nonce'), materia: null, dato, bytes: null };
   if (c.params.v23.intentos) c.buzon.enviar(duenoDe(c, animal), intento);
   else {

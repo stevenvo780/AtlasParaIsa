@@ -403,8 +403,13 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
 // ── F4: actuar ────────────────────────────────────────────────────────────────────────────────────────────
 
 function enviar(c: CtxLey, a: Ref, i: Omit<Intento, 'a'>): void {
-  const dueno = c.frente.dueno[slotDe(a)] ?? -1;
-  c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { ...i, a });
+  const f = c.frente, s = slotDe(a);
+  const vigente = a !== REF_NULA && s < f.alta && f.vivo[s] === 1 && f.gen[s] === genDe(a);
+  const celdaActual = vigente ? c.terreno.celda(f.x[s]!, f.y[s]!) : -1;
+  // La dirección material sigue sirviendo si el solicitante o su página se retiran antes del cobro.
+  const celda = celdaActual >= 0 ? celdaActual : i.celda;
+  const dueno = vigente ? f.dueno[s]! : celda >= 0 ? c.terreno.duenoChunk[c.terreno.chunkDe(celda)] ?? -1 : -1;
+  c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { ...i, a, celda });
 }
 
 export function golpearAnimal(c: CtxLeyMateria, de: Ref, presa: Ref, golpe: Float64Array): void {
@@ -729,7 +734,7 @@ function aplicarTomar(cl: CtxLey, i: Intento): Aplicado {
   const por = c.frente.uid[slotDe(i.de)] ?? 0;
   if (sacado > 0) { fa.extraido = { que: parte, tick: c.tick, por }; a.tends = (a.tends ?? 0) + 1; a.lastTended = c.tick; }
   const destino = i.dato[DATO_TOMAR.loteDestino] ?? REF_NULA;
-  if (c.params.v23.intentos) enviar(c, i.de, { tipo: TipoIntento.Concedido, de: f.ref, celda: -1, lote: destino,
+  if (c.params.v23.intentos) enviar(c, i.de, { tipo: TipoIntento.Concedido, de: f.ref, celda: i.celda, lote: destino,
     nonce: i.nonce, materia: garantia, dato: datoMateria(Rol.Objeto), bytes: null });
   else if (garantia.length) c.materia.abonar(destino, garantia, c.libro);
   return 'hecho';

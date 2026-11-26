@@ -7,12 +7,14 @@ import {
   rendimientoPresa, velocidadDe, vidaMaxima, type AgenteVisto, type CeldaVista, type PercepcionFaunaV23, type YoFauna,
 } from '../src/world/decision/fauna.js';
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
+import { extraerDeAnimal } from '../src/world/actuar/caza.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
 import { concebir, gestar, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
 import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
+import { conductorDe } from '../src/world/motor/contexto.js';
 import { DATO_GOLPEAR, DATO_MATERIA, REF_NULA, TipoIntento, type Intento } from '../src/world/motor/contratos.js';
 
 const azarFijo = (): (() => number) => { let s = 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
@@ -167,6 +169,38 @@ test('un golpe sobre una presa que cruzó de dueño deja su carne en tránsito',
     assert.equal(intento.dato?.[DATO_MATERIA.rol], Rol.Cadaver);
     assert.ok(intento.materia?.length);
   } finally { c.terreno.duenoChunk[chunk] = c.hilo; }
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('la garantía de esquilar llega al Suelo si el lote caduca y se archiva la página', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const d = conductorDe(mundo)!, c = ctxMateriaDe(mundo), [animal] = mundo.animals, [persona] = mundo.people;
+  assert.ok(animal?.uid && animal.fauna && persona?.uid);
+  animal.fauna.miedo = animal.fauna.sobresalto = 0;
+  const celda = c.terreno.celda(persona.x, persona.y);
+  assert.ok(celda >= 0);
+  const saldo = c.libro.enVuelo.slice();
+
+  d.fase(4);
+  const destino = extraerDeAnimal(c, persona, c.ref(animal.uid), 'fibra');
+  assert.notEqual(destino, REF_NULA);
+  d.fase(5);
+  d.aplicar('A');
+  const entrega = d.pendientes().find(i => i.tipo === TipoIntento.Concedido && i.lote === destino);
+  assert.ok(entrega?.materia?.length);
+  assert.equal(entrega.celda, celda);
+
+  const lotes = new Float64Array(1);
+  assert.equal(c.materia.lotes(celda, Rol.Suelo, lotes), 1);
+  const suelo = lotes[0]!, kg = c.materia.vista(suelo).masa;
+  c.materia.liberar(destino);
+  d.terrenoPercibido.vaciarPagina(c.terreno.chunkDe(celda));
+  assert.equal(c.terreno.celda(persona.x, persona.y), -1);
+  d.fase(1);
+  d.aplicar('B');
+  assert.ok(c.materia.vista(suelo).masa > kg);
+  assert.deepEqual(c.libro.enVuelo, saldo);
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

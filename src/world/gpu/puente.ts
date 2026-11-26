@@ -10,6 +10,7 @@ import {
 import { CanalCompartido, CanalGpuOcupado } from './canal.js';
 import { crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from './materia-gpu.js';
 import { CELDAS_VENTANA_GPU, PercibidorGpu, tieneVentanas, type PercepcionConVentanas } from './percibir-gpu.js';
+import { CostePercepcion } from './coste-percepcion.js';
 
 interface TransferenciaPercepcion {
   subidos: number;
@@ -30,20 +31,30 @@ interface TramoPercepcion {
   lote: LotePercepcion;
   tarjeta?: number;
 }
+interface OpcionesPuentePercepcion { porCoste?: boolean; reloj?: () => number }
+interface DespachoPercepcion {
+  tramos: TramoPercepcion[]; planes: readonly Plan[]; actores: number;
+  observarCoste?: () => void;
+}
 
 /** F0 despacha, B2 reúne. Sólo el dueño puede confirmar los efectos de las propuestas. */
 export class PuentePercepcion implements Percibidor {
   readonly dispositivo = 'cpu' as const;
   readonly #tasas: number[];
   readonly #apagadas = new Set<number>();
-  #pendiente?: { tramos: TramoPercepcion[]; planes: readonly Plan[]; actores: number };
+  #pendiente?: DespachoPercepcion;
   #ultimos: LoteGpuMedido[] = [];
   #cerrado = false;
+  readonly #coste?: CostePercepcion;
+  readonly #reloj: () => number;
 
-  constructor(private readonly cpu: Percibidor, private readonly tarjetas: readonly TarjetaPercepcion[], private readonly v23 = false) {
+  constructor(private readonly cpu: Percibidor, private readonly tarjetas: readonly TarjetaPercepcion[], private readonly v23 = false,
+    { porCoste, reloj = () => performance.now() }: OpcionesPuentePercepcion = {}) {
     // Arranque de la torre según el spike. Cada tarjeta corrige la estimación con sus propios lotes.
     this.#tasas = tarjetas.map(({ percibidor }, i) => percibidor.dispositivo === 'gpu0' ? 16
       : percibidor.dispositivo === 'gpu1' ? 1 : 1 / (i + 1));
+    this.#reloj = reloj;
+    if (porCoste) this.#coste = new CostePercepcion();
   }
 
   get ultimosLotes(): readonly LoteGpuMedido[] { return this.#ultimos; }
@@ -58,8 +69,7 @@ export class PuentePercepcion implements Percibidor {
     for (const { tarjeta } of tramos) if (tarjeta !== undefined) this.#apagar(tarjeta);
   }
 
-  #reparto(actores: number): number[] {
-    const activas = this.#tasas.map((_, i) => i).filter(i => !this.#apagadas.has(i));
+  #reparto(actores: number, activas: number[]): number[] {
     if (!this.v23 || activas.length < 2) return activas;
     const rapida = activas.reduce((mejor, i) => this.#tasas[i]! > this.#tasas[mejor]! ? i : mejor);
     const peso = activas.reduce((total, i) => total + this.#tasas[i]!, 0);
@@ -71,7 +81,13 @@ export class PuentePercepcion implements Percibidor {
     if (this.#cerrado || this.#pendiente) throw new Error('El puente está cerrado o tiene un lote pendiente.');
     if (lote.slots.length !== lote.plan.length) throw new RangeError('Planes y slots desalineados.');
     const actores = lote.slots.length;
-    const activas = this.#reparto(actores);
+    const disponibles = this.#tasas.map((_, i) => i).filter(i => !this.#apagadas.has(i));
+    const reparto = this.#reparto(actores, disponibles);
+    const eleccion = this.#coste && actores > 0 && disponibles.length > 0
+      ? this.#coste.elegir(planes, actores, [[], ...disponibles.map(i => [i]), ...(reparto.length > 1 ? [reparto] : [])])
+      : undefined;
+    const inicio = eleccion ? this.#reloj() : 0;
+    const activas = eleccion?.tarjetas ?? reparto;
     const pesoTotal = activas.reduce((total, i) => total + this.#tasas[i]!, 0);
     let desde = 0, peso = 0;
     const tramos: TramoPercepcion[] = [];
@@ -96,7 +112,8 @@ export class PuentePercepcion implements Percibidor {
       throw error;
     }
     if (!tramos.length) tramos.push({ desde: 0, lote });
-    this.#pendiente = { tramos, planes, actores };
+    this.#pendiente = { tramos, planes, actores,
+      observarCoste: eleccion && (() => eleccion.observar(this.#reloj() - inicio)) };
   }
 
   esperar(plazoMs: number): Percepcion {
@@ -104,11 +121,15 @@ export class PuentePercepcion implements Percibidor {
     const pendiente = this.#pendiente;
     if (!pendiente) throw new Error('No hay lote de percepción pendiente.');
     this.#pendiente = undefined;
-    try { return this.#reunir(pendiente, plazoMs); }
+    try {
+      const percepcion = this.#reunir(pendiente, plazoMs);
+      pendiente.observarCoste?.();
+      return percepcion;
+    }
     catch (error) { this.#cancelar(pendiente.tramos); throw error; }
   }
 
-  #reunir(pendiente: { tramos: TramoPercepcion[]; planes: readonly Plan[]; actores: number }, plazoMs: number): Percepcion {
+  #reunir(pendiente: DespachoPercepcion, plazoMs: number): Percepcion {
     const fin = performance.now() + plazoMs;
     const { tramos, planes, actores } = pendiente;
     this.#ultimos = [];
@@ -120,7 +141,10 @@ export class PuentePercepcion implements Percibidor {
       if (tarjeta !== undefined) {
         const gpu = this.tarjetas[tarjeta]!.percibidor;
         try {
-          percepcion = gpu.esperar(Math.max(0, fin - performance.now()));
+          const respuesta = gpu.esperar(Math.max(0, fin - performance.now()));
+          if (respuesta.tick !== lote.tick || respuesta.despacho !== lote.despacho)
+            throw new ErrorDispositivo(gpu.dispositivo, 'El tramo recibido corresponde a otro despacho de percepción.');
+          percepcion = respuesta;
           const datos = gpu.ultimasTransferencias;
           const tasa = lote.slots.length / Math.max(0.001, datos.ms);
           this.#tasas[tarjeta] = 0.75 * this.#tasas[tarjeta]! + 0.25 * tasa;
@@ -173,7 +197,7 @@ const ARRANQUE_GPU_MS = 30_000;
 
 /** El coordinador actualiza las fuentes de su percibidor CPU junto con las de las tarjetas. */
 export function crearPuentePercepcion(dispositivos: readonly number[], frente: FrentePublico, terreno: Terreno, cpu: Percibidor,
-  materiaGpu = false, ventanasGpu = materiaGpu) {
+  materiaGpu = false, ventanasGpu = materiaGpu, porCoste = false) {
   if (new Set(dispositivos).size !== dispositivos.length || dispositivos.some(d => !Number.isSafeInteger(d) || d < 0))
     throw new RangeError('Se requieren índices GPU no negativos y sin repetir.');
   const tarjetas: { percibidor: PercibidorGpu; canal: CanalCompartido; paso?: PasoMateriaGpu;
@@ -192,7 +216,11 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
         canal.iniciar(ARRANQUE_GPU_MS);
         if (materiaGpu) prepararMateriaGpu(canal, ARRANQUE_GPU_MS);
       }
-      catch (error) { if (error instanceof ErrorDispositivo) continue; throw error; }
+      catch (error) {
+        if (!(error instanceof ErrorDispositivo)) throw error;
+        canal.cerrar();
+        continue;
+      }
       tarjetas.push({
         percibidor: new PercibidorGpu(canal, frente, terreno, ventanasGpu), canal,
         paso: materiaGpu ? crearPasoMateriaGpu(canal) : undefined,
@@ -204,7 +232,7 @@ export function crearPuentePercepcion(dispositivos: readonly number[], frente: F
     for (const canal of canales) canal?.cerrar();
     throw error;
   }
-  const puente = new PuentePercepcion(cpu, tarjetas, ventanasGpu);
+  const puente = new PuentePercepcion(cpu, tarjetas, ventanasGpu, { porCoste });
   return {
     puente,
     /** Tarjetas que arrancaron y siguen activas. */

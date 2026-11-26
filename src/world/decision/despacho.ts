@@ -236,7 +236,7 @@ export class PercibidorTarjetas implements PercibidorCompartido {
   #salida: PercepcionCpu | undefined;
   #vacio = false;
 
-  constructor(readonly gpu: readonly number[], readonly cpu: CpuDelProceso, readonly ventanasGpu = false) {
+  constructor(readonly gpu: readonly number[], readonly cpu: CpuDelProceso, readonly ventanasGpu = false, readonly porCoste = false) {
     this.dispositivo = `gpu${gpu[0] ?? 0}` as const;
   }
 
@@ -248,7 +248,7 @@ export class PercibidorTarjetas implements PercibidorCompartido {
     this.cpu.fuentes(vista);
     this.#vista = vista;
     // Las tarjetas arrancan con el primer mundo (contexto CUDA y NVRTC, fuera del plazo del tick).
-    this.#puente ??= crearPuentePercepcion(this.gpu, vista.frente, vista.terreno, this.cpu, false, this.ventanasGpu);
+    this.#puente ??= crearPuentePercepcion(this.gpu, vista.frente, vista.terreno, this.cpu, false, this.ventanasGpu, this.porCoste);
     this.#puente.fuentes(vista.frente, vista.terreno);
   }
 
@@ -289,10 +289,11 @@ export function cpuDelProceso(hilos: number): CpuDelProceso {
 /** El percibidor del proceso para `motor`: tarjetas si las hay y hay NVRTC, si no la piscina, si no el hilo que simula. */
 export function percibidorDelProceso(motor: WorldParams['motor']): Percibidor | PercibidorCompartido | undefined {
   if (motor.gpu.length > 0 && gpuNvrtcAvailable()) {
-    const ventanasGpu = process.env.CARTA_PERCEPCION_RESIDENTE === '1';
-    const clave = `${motor.gpu.join(',')}/${motor.hilos}/${ventanasGpu}`;
+    const porCoste = process.env.CARTA_PERCEPCION_COSTE === '1';
+    const ventanasGpu = porCoste || process.env.CARTA_PERCEPCION_RESIDENTE === '1';
+    const clave = `${motor.gpu.join(',')}/${motor.hilos}/${ventanasGpu}/${porCoste}`;
     let t = tarjetas.get(clave);
-    if (!t) { t = new PercibidorTarjetas(motor.gpu, cpuDelProceso(motor.hilos), ventanasGpu); tarjetas.set(clave, t); }
+    if (!t) { t = new PercibidorTarjetas(motor.gpu, cpuDelProceso(motor.hilos), ventanasGpu, porCoste); tarjetas.set(clave, t); }
     return t;
   }
   return motor.hilos > 1 ? cpuDelProceso(motor.hilos) : undefined;

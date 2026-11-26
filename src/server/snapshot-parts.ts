@@ -1,4 +1,4 @@
-import { isUtf8 } from 'node:buffer';
+import { constants, isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
@@ -17,6 +17,8 @@ export const SNAPSHOT_PAGE_TILES = 4096;
 /** Cota del manifiesto heredado. El guardado completo crece hasta los límites de cadena de V8 y fila de SQLite. */
 export const SNAPSHOT_METADATA_BYTES = 256 * 1024 * 1024;
 const PAGE_BYTES = 4 * 1024 * 1024;
+// Upper bound for UTF-8 bytes representable in one JS string. SQLite also enforces its row limit.
+const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
 const ENCODING_V1 = 'snapshot-parts-v1', ENCODING_V2 = 'snapshot-parts-v2';
 const ORGANISM_FIELDS = ['people', 'animals'] as const;
 const checksum = (body: string | Uint8Array): string => createHash('sha256').update(body).digest('hex');
@@ -50,11 +52,16 @@ function* organismPages(manifest: Manifest): IterableIterator<Page> {
     for (const field of ORGANISM_FIELDS) yield* manifest[field].pages;
 }
 
-function pageDescriptor(value: unknown, index: number): value is Page {
+function pageByteLimit(count: number, organisms: boolean): number {
+  return organisms && count === 1 ? MAX_UTF8_TEXT_BYTES : PAGE_BYTES;
+}
+
+function pageDescriptor(value: unknown, index: number, organisms = false): value is Page {
   return object(value) && keys(value, ['index', 'digest', 'count', 'bytes']) && value.index === index
     && typeof value.digest === 'string' && /^[0-9a-f]{64}$/.test(value.digest)
     && Number.isSafeInteger(value.count) && (value.count as number) > 0
-    && Number.isSafeInteger(value.bytes) && (value.bytes as number) >= 2 && (value.bytes as number) <= PAGE_BYTES;
+    && Number.isSafeInteger(value.bytes) && (value.bytes as number) >= 2
+    && (value.bytes as number) <= pageByteLimit(value.count as number, organisms);
 }
 /** `digest` is sha256(body); `pages` are the digests write() proved inside the caller's transaction. */
 export interface WrittenSnapshot { body: string; digest: string; bytes: number; pages: readonly string[]; }
@@ -301,9 +308,9 @@ export class SnapshotParts {
     // just to prove its identity. BINARY ignores any collation a damaged schema could declare.
     const same = this.db.prepare('SELECT body = ? COLLATE BINARY AS same FROM main.snapshot_parts WHERE digest=?');
     let bytes = 0;
-    const writePage = (index: number, body: string, count: number): Page => {
+    const writePage = (index: number, body: string, count: number, organisms = false): Page => {
       const digest = checksum(body), size = Buffer.byteLength(body);
-      if (size > PAGE_BYTES) failure('page exceeds transport size');
+      if (size > pageByteLimit(count, organisms)) failure('page exceeds transport size');
       const existing = same.get(body, digest) as { same: number } | undefined;
       if (existing && existing.same !== 1) failure('existing page disagrees with its digest');
       if (!existing) insert.run(digest, body);
@@ -334,8 +341,9 @@ export class SnapshotParts {
     const encoding = prepared.organisms ? ENCODING_V2 : ENCODING_V1;
     let body = `{"snapshotEncoding":"${encoding}","world":${prepared.metadata},"tiles":${JSON.stringify(manifestTiles)}`;
     if (prepared.organisms) {
+      const writeOrganismPage = (index: number, page: string, count: number) => writePage(index, page, count, true);
       for (const field of ORGANISM_FIELDS) {
-        const manifest = this.writeOrganisms(prepared.organisms[field], writePage);
+        const manifest = this.writeOrganisms(prepared.organisms[field], writeOrganismPage);
         for (const page of manifest.pages) digests.push(page.digest);
         body += `,"${field}":${JSON.stringify(manifest)}`;
       }
@@ -367,10 +375,11 @@ export class SnapshotParts {
       const row = stringifyExact(organism);
       if (typeof row !== 'string' || !row.startsWith('{')) failure('organism row');
       const size = Buffer.byteLength(row);
-      if (size + 2 > this.organismPageBytes) failure('organism row exceeds transport size');
-      if (bytes + size + Number(rows.length > 0) > this.organismPageBytes) flush();
+      if (rows.length && bytes + size + 1 > this.organismPageBytes) flush();
       bytes += size + Number(rows.length > 0);
       rows.push(row);
+      // An oversized organism gets its own page so every row supported by the old transport still fits.
+      if (bytes >= this.organismPageBytes) flush();
     }
     if (rows.length) flush();
     return { count, pages };
@@ -436,7 +445,7 @@ export class SnapshotParts {
       || value.pages.length > (value.count as number)) failure('organism count');
     let count = 0;
     for (const [index, page] of value.pages.entries()) {
-      if (!pageDescriptor(page, index) || page.bytes < 1 + 3 * page.count) failure('organism page descriptor');
+      if (!pageDescriptor(page, index, true) || page.bytes < 1 + 3 * page.count) failure('organism page descriptor');
       count += page.count;
     }
     if (count !== value.count) failure('total organism count');

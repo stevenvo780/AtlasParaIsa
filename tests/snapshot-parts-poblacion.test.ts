@@ -75,7 +75,6 @@ test('partes de población respetan cupo UTF-8, orden y -0 sin serializar las co
     for (const alterar of [
       (m: Manifest) => { m.people.count++; },
       (m: Manifest) => { m.animals.pages[0]!.index++; },
-      (m: Manifest) => { m.people.pages[0]!.bytes = 4 * 1024 * 1024 + 1; },
       (m: Manifest) => { m.world.people = []; },
     ]) {
       const m = structuredClone(value);
@@ -83,10 +82,50 @@ test('partes de población respetan cupo UTF-8, orden y -0 sin serializar las co
       assert.throws(() => parts.read(JSON.stringify(m)), /organism/i);
     }
 
-    const demasiadoPequeno = new SnapshotParts(db, 5, undefined, maxBytes - 1);
-    assert.throws(() => demasiadoPequeno.write(demasiadoPequeno.prepare(world, params, 32768)), /organism row exceeds transport size/);
+    const objetivo = maxBytes - 1, conObjetivoBajo = new SnapshotParts(db, 5, undefined, objetivo);
+    const alternativo = conObjetivoBajo.write(conObjetivoBajo.prepare(world, params, 32768));
+    const descriptores = JSON.parse(alternativo.body) as Manifest;
+    const grandes = [...descriptores.people.pages, ...descriptores.animals.pages].filter(page => page.bytes > objetivo);
+    assert.ok(grandes.length > 0 && grandes.every(page => page.count === 1));
+    assert.ok(stringifyExact(conObjetivoBajo.read(alternativo.body)) === stringifyExact(expected));
     db.exec('ROLLBACK');
     assert.equal(db.prepare('SELECT count(*) AS n FROM snapshot_parts').get()!.n, 0);
+  } finally { db.close(); }
+});
+
+test('un organismo de más de 4 MiB ocupa una página propia y conserva los límites de las demás páginas', () => {
+  const world = createWorld(42, params);
+  const transportFixture = 'ñ'.repeat(2 * 1024 * 1024);
+  world.people[1] = { ...world.people[1]!, transportFixture } as World['people'][number];
+  const db = new DatabaseSync(':memory:');
+  try {
+    SnapshotParts.install(db);
+    db.exec('BEGIN');
+    const parts = new SnapshotParts(db, 5);
+    const written = parts.write(parts.prepare(world, params, 32768));
+    const value = JSON.parse(written.body) as Manifest;
+    const grandes = value.people.pages.filter(page => page.bytes > 4 * 1024 * 1024);
+    assert.equal(grandes.length, 1);
+    const grande = grandes[0]!;
+    assert.equal(grande.count, 1);
+    assert.equal(grande.index, 1, 'la fila anterior queda en su propia página');
+    assert.ok(value.people.pages.length > grande.index + 1);
+    parts.verify(written.body);
+    const loaded = parts.read(written.body) as World;
+    assert.deepEqual(loaded.people.map(p => p.id), world.people.map(p => p.id));
+    assert.ok((loaded.people[1] as { transportFixture?: string }).transportFixture === transportFixture);
+
+    const varias = structuredClone(value);
+    varias.people.pages[grande.index]!.count++;
+    varias.people.count++;
+    assert.throws(() => parts.read(JSON.stringify(varias)), /organism page descriptor/);
+    const teselas = structuredClone(value);
+    teselas.tiles.pages[0]!.bytes = grande.bytes;
+    assert.throws(() => parts.read(JSON.stringify(teselas)), /page descriptor/);
+    const bytesFalsos = structuredClone(value);
+    bytesFalsos.people.pages[grande.index]!.bytes++;
+    assert.throws(() => parts.read(JSON.stringify(bytesFalsos)), /page byte count/);
+    db.exec('ROLLBACK');
   } finally { db.close(); }
 });
 

@@ -209,3 +209,49 @@ test('Store conserva slots WPG2 y WPG3 y revierte si un trigger daña una págin
     assert.equal((readStoredSnapshot(resumed.db, 2)!.value as World).people[0]!.inventory, inventory);
   } finally { resumed.close(); }
 });
+
+test('Store mezcla páginas WPF1 crudas y comprimidas entre slots y reabre sin la opción de escritura', t => {
+  const path = join(directorioTemporal(t, 'atlas-wpg4-'), 'world.sqlite');
+  const world = createWorld(42, params);
+  const persona = world.people[0]!;
+  persona.policy = founderPolicy(42, persona.id);
+  persona.policy.weights[0] = -0;
+  persona.inventory = 0.125;
+  const anterior = new Store(path, { snapshotPackedPeople: true });
+  try { anterior.guardar({ world, materia: null }); }
+  finally { anterior.close(); }
+
+  const store = new Store(path, { snapshotCompressedPeople: true });
+  try {
+    persona.inventory = -0;
+    store.guardar({ world, materia: null });
+    const viejo = manifest(filaInstantanea(store, 1).body);
+    const actual = manifest(filaInstantanea(store).body);
+    assert.equal(viejo.snapshotEncoding, 'snapshot-parts-v3');
+    assert.equal(actual.snapshotEncoding, 'snapshot-parts-v4');
+    const page = actual.people.pages[0]!;
+    const body = bodyPage(store.db, page);
+    assert.ok(body instanceof Uint8Array);
+    assert.equal(Buffer.from(body.subarray(0, 4)).toString('ascii'), 'WZP1');
+    assert.equal(sha256(body), page.digest);
+    assert.equal(body.byteLength, page.bytes);
+    assert.ok(page.bytes < viejo.people.pages[0]!.bytes);
+
+    const alterada = Uint8Array.from(body);
+    alterada[alterada.length - 1]! ^= 1;
+    const reemplazar = store.db.prepare('UPDATE snapshot_parts SET body=? WHERE digest=?');
+    reemplazar.run(alterada, page.digest);
+    assert.throws(() => readStoredSnapshot(store.db), SnapshotPhysicalError);
+    assert.equal(store.verificarGuardado()!.slot, 1);
+    reemplazar.run(body, page.digest);
+  } finally { store.close(); }
+
+  const lector = new Store(path, { readOnly: true });
+  try {
+    const corte = lector.verificarGuardado()!;
+    assert.equal(corte.slot, 0);
+    assert.ok(Object.is(corte.world.people[0]!.inventory, -0));
+    assert.ok(Object.is(corte.world.people[0]!.policy!.weights[0], -0));
+    assert.equal((readStoredSnapshot(lector.db, 1)!.value as World).people[0]!.inventory, 0.125);
+  } finally { lector.close(); }
+});

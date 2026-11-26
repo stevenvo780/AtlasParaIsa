@@ -197,20 +197,23 @@ try {
   const sha256 = huella(anterior);
   await app.close();
   let guardado;
-  if (process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1') {
+  const personasZstd = process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1';
+  if (personasZstd || process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1') {
     const db = new DatabaseSync(join(mundo, 'world.sqlite'), { readOnly: true });
     try {
       const { body } = db.prepare('SELECT body FROM main.snapshots WHERE slot=0').get();
       const { snapshotEncoding, people } = JSON.parse(body);
-      assert.equal(snapshotEncoding, 'snapshot-parts-v3');
+      assert.equal(snapshotEncoding, personasZstd ? 'snapshot-parts-v4' : 'snapshot-parts-v3');
       assert.ok(people.count > 0 && people.pages.length > 0);
       const pagina = db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?').get(people.pages[0].digest);
       assert.ok(pagina.body instanceof Uint8Array);
-      assert.equal(Buffer.from(pagina.body.subarray(0, 4)).toString('ascii'), 'WPF1');
+      const formatoPagina = Buffer.from(pagina.body.subarray(0, 4)).toString('ascii');
+      assert.ok(formatoPagina === 'WPF1' || (personasZstd && formatoPagina === 'WZP1'));
       guardado = { formato: snapshotEncoding, personas: people.count, paginas: people.pages.length };
     } finally { db.close(); }
     // La pasarela que reabre prueba la lectura sin activar la opción de escritura experimental.
     delete process.env.CARTA_SNAPSHOT_PACKED_PEOPLE;
+    delete process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD;
   }
   app = crearPasarela();
   await abrir();

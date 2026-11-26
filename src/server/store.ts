@@ -274,6 +274,8 @@ export interface StoreOptions {
   snapshotMatterPartBytes?: number;
   /** Escribe las páginas de personas del guardado completo con pesos Float64 binarios. */
   snapshotPackedPeople?: boolean;
+  /** Usa páginas WPF1 comprimidas cuando reducen el tamaño guardado. */
+  snapshotCompressedPeople?: boolean;
   onProgress?: () => void;
   /** Recibos podados como mucho por guardado (default `TECHNOLOGY_PRUNE_ROWS_PER_SAVE`); las pruebas lo bajan. */
   technologyPruneRowsPerSave?: number;
@@ -281,7 +283,8 @@ export interface StoreOptions {
 function validateStoreOptions(options: StoreOptions): void {
   if (!options || typeof options !== 'object' || Array.isArray(options)
     || Object.keys(options).some(key =>
-      !['readOnly', 'snapshotInlineTileLimit', 'snapshotMatterPartBytes', 'snapshotPackedPeople', 'technologyPruneRowsPerSave', 'onProgress'].includes(key))
+      !['readOnly', 'snapshotInlineTileLimit', 'snapshotMatterPartBytes', 'snapshotPackedPeople', 'snapshotCompressedPeople',
+        'technologyPruneRowsPerSave', 'onProgress'].includes(key))
     || options.onProgress !== undefined && typeof options.onProgress !== 'function'
     || options.readOnly !== undefined && typeof options.readOnly !== 'boolean'
     || options.snapshotInlineTileLimit !== undefined && (!Number.isSafeInteger(options.snapshotInlineTileLimit)
@@ -289,11 +292,12 @@ function validateStoreOptions(options: StoreOptions): void {
     || options.snapshotMatterPartBytes !== undefined && (!Number.isSafeInteger(options.snapshotMatterPartBytes)
       || options.snapshotMatterPartBytes < 1 || options.snapshotMatterPartBytes > MAX_SNAPSHOT_MATTER_PART_BYTES)
     || options.snapshotPackedPeople !== undefined && typeof options.snapshotPackedPeople !== 'boolean'
+    || options.snapshotCompressedPeople !== undefined && typeof options.snapshotCompressedPeople !== 'boolean'
     || options.technologyPruneRowsPerSave !== undefined && (!Number.isSafeInteger(options.technologyPruneRowsPerSave)
       || options.technologyPruneRowsPerSave < 1 || options.technologyPruneRowsPerSave > 1_000_000))
     throw new Error('Invalid StoreOptions: readOnly must be boolean, snapshotInlineTileLimit an integer from 0 to 32768'
       + `, snapshotMatterPartBytes an integer from 1 to ${MAX_SNAPSHOT_MATTER_PART_BYTES}`
-      + ', snapshotPackedPeople a boolean, technologyPruneRowsPerSave an integer from 1 to 1000000 and onProgress a function.');
+      + ', snapshotPackedPeople and snapshotCompressedPeople booleans, technologyPruneRowsPerSave an integer from 1 to 1000000 and onProgress a function.');
 }
 export class Store {
   readonly db: DatabaseSync;
@@ -327,6 +331,7 @@ export class Store {
   private readonly snapshotMatterParts: SnapshotMatterParts;
   private readonly snapshotMatterPartBytes: number;
   private readonly snapshotPackedPeople: boolean;
+  private readonly snapshotCompressedPeople: boolean;
   private verifiedChronicle: ChronicleProof | null = null;
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number;
     schemaCookie: number; chain: TechnologyChain } | null = null;
@@ -357,6 +362,7 @@ export class Store {
     this.snapshotInlineTileLimit = options.snapshotInlineTileLimit ?? SNAPSHOT_INLINE_TILE_LIMIT;
     this.snapshotMatterPartBytes = options.snapshotMatterPartBytes ?? MAX_SNAPSHOT_MATTER_PART_BYTES;
     this.snapshotPackedPeople = options.snapshotPackedPeople ?? false;
+    this.snapshotCompressedPeople = options.snapshotCompressedPeople ?? false;
     this.explicitPruneCap = options.technologyPruneRowsPerSave !== undefined;
     this.technologyPruneRowsPerSave = options.technologyPruneRowsPerSave ?? TECHNOLOGY_PRUNE_ROWS_PER_SAVE;
     const existed = path !== ':memory:' && existsSync(path);
@@ -443,7 +449,8 @@ export class Store {
       this.autoVacuumIncremental = !this.readOnly
         && Number((this.db.prepare('PRAGMA auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum) === 2;
       this.schemaVersion = schemaVersion;
-      this.snapshotParts = new SnapshotParts(this.db, schemaVersion, this.onProgress, undefined, this.snapshotPackedPeople);
+      this.snapshotParts = new SnapshotParts(this.db, schemaVersion, this.onProgress, undefined,
+        this.snapshotPackedPeople, this.snapshotCompressedPeople);
     } catch (error) { this.db.close(); throw error; }
   }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
@@ -2408,7 +2415,8 @@ export class Store {
     if (!chosen) throw new Error(`No valid previous checkpoint (${refusals.join('; ')}).`);
     this.backup(destination);
     const recovered = new Store(destination, { snapshotInlineTileLimit: this.snapshotInlineTileLimit,
-      snapshotMatterPartBytes: this.snapshotMatterPartBytes, snapshotPackedPeople: this.snapshotPackedPeople });
+      snapshotMatterPartBytes: this.snapshotMatterPartBytes, snapshotPackedPeople: this.snapshotPackedPeople,
+      snapshotCompressedPeople: this.snapshotCompressedPeople });
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
       recovered.technologyArchive.beginHostTransaction();

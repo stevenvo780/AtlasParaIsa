@@ -1,5 +1,6 @@
 import { constants, isUtf8 } from 'node:buffer';
 import { types } from 'node:util';
+import { constants as zstd, zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import { stringifyExact } from '../shared/exact-json.js';
 import { SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
@@ -9,6 +10,10 @@ export const WPF1_WEIGHT_BYTES = WPF1_WEIGHT_COUNT * Float64Array.BYTES_PER_ELEM
 const HEADER_BYTES = 16, MAGIC = Buffer.from('WPF1').readUInt32LE(0);
 const MAX_U32 = 0xffff_ffff, MAX_PAGE_BYTES = 4 * 1024 * 1024;
 const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
+const COMPRESSED_HEADER_BYTES = 8, COMPRESSED_MAGIC = Buffer.from('WZP1').readUInt32LE(0);
+const ZSTD_MAGIC = 0xfd2f_b528, MAX_ZSTD_WINDOW_LOG = 22;
+const ZSTD_COMPRESSION = { params: { [zstd.ZSTD_c_compressionLevel]: 1 } };
+const ZSTD_WINDOW = { [zstd.ZSTD_d_windowLogMax]: MAX_ZSTD_WINDOW_LOG };
 const EMPTY_POLICY = { weights: [] };
 const lookupGetter: (this: object, key: PropertyKey) => unknown =
   Object.getOwnPropertyDescriptor(Object.prototype, '__lookupGetter__')!.value;
@@ -91,7 +96,11 @@ function assertSize(count: number, jsonBytes: number, bytes: number): void {
   const jsonMinimum = count === 0 ? 2 : 1 + 3 * count;
   // Like JSON organism pages, a large individual can occupy a page by itself.
   if (!u32(count) || !u32(jsonBytes) || jsonBytes < jsonMinimum
-    || bytes > (count === 1 ? MAX_UTF8_TEXT_BYTES : MAX_PAGE_BYTES)) failure('byte count');
+    || bytes > maxPageBytes(count)) failure('byte count');
+}
+
+function maxPageBytes(count: number): number {
+  return count === 1 ? MAX_UTF8_TEXT_BYTES : MAX_PAGE_BYTES;
 }
 
 /** Header: magic, JSON byte count, row count, packed count. Then a mask (least
@@ -185,4 +194,80 @@ export function decodePackedPeoplePage(body: Uint8Array, count: number, parse: (
     policy.weights = weights;
   }
   return rows;
+}
+
+function compressedFailure(reason: string, cause?: unknown): never {
+  throw new SnapshotPhysicalError(`Invalid WZP1 people page ${reason}.`, { cause });
+}
+
+// Node's streaming decoder can return the full output even if the frame trailer
+// was truncated. Check the boundaries of a single Zstd frame (RFC 8878 §3.1.1).
+function assertCompleteZstdFrame(frame: Buffer, rawBytes: number): void {
+  if (frame.length < 8 || frame.readUInt32LE(0) !== ZSTD_MAGIC) compressedFailure('Zstd frame header');
+  const descriptor = frame[4]!;
+  const singleSegment = (descriptor & 0x20) !== 0;
+  const sizeFlag = descriptor >>> 6, dictionaryFlag = descriptor & 3;
+  const sizeBytes = sizeFlag === 0 ? Number(singleSegment) : 1 << sizeFlag;
+  const dictionaryBytes = dictionaryFlag === 0 ? 0 : 1 << (dictionaryFlag - 1);
+  const sizeAt = (singleSegment ? 5 : 6) + dictionaryBytes;
+  let blockAt = sizeAt + sizeBytes;
+  if (frame.length < blockAt + 3) compressedFailure('Zstd frame header');
+  if (sizeBytes !== 0) {
+    const size = sizeBytes === 8 ? frame.readBigUInt64LE(sizeAt)
+      : BigInt(frame.readUIntLE(sizeAt, sizeBytes) + (sizeBytes === 2 ? 256 : 0));
+    if (size !== BigInt(rawBytes)) compressedFailure('Zstd frame content size');
+  }
+  // An exact power of two has a zero window mantissa in the descriptor.
+  const maxWindowDescriptor = (MAX_ZSTD_WINDOW_LOG - 10) << 3;
+  if (singleSegment ? rawBytes > 2 ** MAX_ZSTD_WINDOW_LOG : frame[5]! > maxWindowDescriptor)
+    compressedFailure('Zstd frame window');
+
+  const checksumBytes = (descriptor & 4) === 0 ? 0 : 4;
+  while (blockAt + 3 <= frame.length) {
+    const header = frame.readUIntLE(blockAt, 3);
+    const type = (header >>> 1) & 3;
+    if (type === 3) compressedFailure('Zstd block type');
+    blockAt += 3 + (type === 1 ? 1 : header >>> 3); // RLE stores only its repeated byte.
+    if ((header & 1) === 0) continue;
+    if (blockAt + checksumBytes === frame.length) return;
+    break;
+  }
+  compressedFailure('Zstd frame length');
+}
+
+/** Store a WPF1 page as-is or as WZP1 plus its original u32 byte count and one Zstd frame. */
+export function encodeStoredPackedPeoplePage(raw: Uint8Array): Uint8Array {
+  // The existing format permits oversized pages with just one row.
+  if (raw.byteLength > MAX_PAGE_BYTES) return raw;
+  const compressed = zstdCompressSync(raw, ZSTD_COMPRESSION);
+  const length = COMPRESSED_HEADER_BYTES + compressed.byteLength;
+  if (length >= raw.byteLength) return raw;
+  const body = Buffer.allocUnsafe(length);
+  body.writeUInt32LE(COMPRESSED_MAGIC, 0);
+  body.writeUInt32LE(raw.byteLength, 4);
+  compressed.copy(body, COMPRESSED_HEADER_BYTES);
+  return body;
+}
+
+export function decodeStoredPackedPeoplePage(body: Uint8Array, count: number, parse: (json: string) => unknown): unknown[] {
+  const stored = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  if (stored.length < 4 || stored.readUInt32LE(0) !== COMPRESSED_MAGIC)
+    return decodePackedPeoplePage(body, count, parse);
+  if (stored.length < COMPRESSED_HEADER_BYTES) compressedFailure('header');
+  const rawBytes = stored.readUInt32LE(4);
+  if (rawBytes < HEADER_BYTES + 2 || rawBytes > maxPageBytes(count)) compressedFailure('declared byte count');
+  const frame = stored.subarray(COMPRESSED_HEADER_BYTES);
+  assertCompleteZstdFrame(frame, rawBytes);
+  let raw: Buffer;
+  try {
+    raw = zstdDecompressSync(frame, {
+      chunkSize: Math.min(128 * 1024, Math.max(zstd.Z_MIN_CHUNK, rawBytes)),
+      maxOutputLength: rawBytes,
+      params: ZSTD_WINDOW,
+    });
+  } catch (error) {
+    compressedFailure('Zstd decompression', error);
+  }
+  if (raw.length !== rawBytes) compressedFailure('decompressed byte count');
+  return decodePackedPeoplePage(raw, count, parse);
 }

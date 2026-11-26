@@ -12,7 +12,8 @@ import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
-import { decodePackedPeoplePage, encodePackedPeoplePage, packedPeoplePageBytes, preparePackedPerson,
+import { decodePackedPeoplePage, decodeStoredPackedPeoplePage, encodePackedPeoplePage, encodeStoredPackedPeoplePage,
+  packedPeoplePageBytes, preparePackedPerson,
   type PackedPersonRow } from './snapshot-packed-people.js';
 import { residentBackingArray, residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
 import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/terreno.js';
@@ -26,6 +27,7 @@ const PAGE_BYTES = 4 * 1024 * 1024;
 // Upper bound for UTF-8 bytes representable in one JS string. SQLite also enforces its row limit.
 const MAX_UTF8_TEXT_BYTES = 3 * constants.MAX_STRING_LENGTH;
 const ENCODING_V1 = 'snapshot-parts-v1', ENCODING_V2 = 'snapshot-parts-v2', ENCODING_V3 = 'snapshot-parts-v3';
+const ENCODING_V4 = 'snapshot-parts-v4';
 const ORGANISM_FIELDS = ['people', 'animals'] as const;
 const checksum = (body: string | Uint8Array): string => createHash('sha256').update(body).digest('hex');
 class SnapshotPartsFormatError extends SnapshotSemanticError {}
@@ -41,8 +43,9 @@ interface Page { index: number; digest: string; count: number; bytes: number; }
 interface Pages { count: number; pages: Page[]; }
 interface ManifestBase { world: Record<string, unknown> & { version: number }; tiles: Pages; }
 type Manifest = ManifestBase & ({ snapshotEncoding: typeof ENCODING_V1 } |
-  { snapshotEncoding: typeof ENCODING_V2 | typeof ENCODING_V3; people: Pages; animals: Pages; });
-type PageFormat = 'tiles' | 'organisms' | 'packedPeople';
+  { snapshotEncoding: typeof ENCODING_V2 | typeof ENCODING_V3 | typeof ENCODING_V4; people: Pages; animals: Pages; });
+type OrganismFormat = 'organisms' | 'packedPeople' | 'compressedPeople';
+type PageFormat = 'tiles' | OrganismFormat;
 type Organisms = Pick<World, typeof ORGANISM_FIELDS[number]>;
 /** `metadata` is the exact JSON of the world record with placeholders for its paged collections. */
 export interface PreparedSnapshot {
@@ -55,7 +58,16 @@ export interface PreparedSnapshot {
 export function hasCanonicalSnapshotPartsPrefix(body: string): boolean {
   return body.startsWith(`{"snapshotEncoding":"${ENCODING_V1}","world":{`)
     || body.startsWith(`{"snapshotEncoding":"${ENCODING_V2}","world":{`)
-    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V3}","world":{`);
+    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V3}","world":{`)
+    || body.startsWith(`{"snapshotEncoding":"${ENCODING_V4}","world":{`);
+}
+
+function organismFormat(encoding: unknown, field: keyof Organisms): OrganismFormat {
+  if (field === 'people') {
+    if (encoding === ENCODING_V3) return 'packedPeople';
+    if (encoding === ENCODING_V4) return 'compressedPeople';
+  }
+  return 'organisms';
 }
 
 function* organismPages(manifest: Manifest): IterableIterator<Page> {
@@ -143,7 +155,7 @@ export class SnapshotParts {
   private readonly personasStats = { reused: 0, recoded: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
-    private readonly packedPeople = false) {
+    private readonly packedPeople = false, private readonly compressedPeople = false) {
     if (!Number.isSafeInteger(organismPageBytes) || organismPageBytes < 2 || organismPageBytes > PAGE_BYTES)
       throw new RangeError('Invalid snapshot organism page byte limit.');
   }
@@ -347,14 +359,15 @@ export class SnapshotParts {
     }
     // Byte for byte `stringifyExact(manifest)`: the page descriptors hold only strings and non-negative integers.
     const manifestTiles: Pages = { count: tiles.length, pages }, digests = pages.map(page => page.digest);
-    const encoding = prepared.organisms
-      ? (prepared.nativo && this.packedPeople ? ENCODING_V3 : ENCODING_V2) : ENCODING_V1;
+    const packed = prepared.nativo && (this.packedPeople || this.compressedPeople);
+    const packedEncoding = this.compressedPeople ? ENCODING_V4 : ENCODING_V3;
+    const encoding = prepared.organisms ? (packed ? packedEncoding : ENCODING_V2) : ENCODING_V1;
     let body = `{"snapshotEncoding":"${encoding}","world":${prepared.metadata},"tiles":${JSON.stringify(manifestTiles)}`;
     if (prepared.organisms) {
       const writeOrganismPage = (index: number, page: string | Uint8Array, count: number) => writePage(index, page, count, true);
       for (const field of ORGANISM_FIELDS) {
         const faunaVerificada = field === 'animals' ? prepared.faunaVerificada : undefined;
-        const manifest = encoding === ENCODING_V3 && field === 'people'
+        const manifest = packed && field === 'people'
           ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage, prepared.personasVerificadas)
           : this.writeOrganisms(prepared.organisms[field], writeOrganismPage,
             field === 'animals' && faunaVerificada === undefined ? faunaCorteDe(prepared.organisms.animals) : undefined,
@@ -507,7 +520,8 @@ export class SnapshotParts {
     }
     let rowBytes = 0;
     const flush = () => {
-      const body = encodePackedPeoplePage(rows);
+      const wpf1 = encodePackedPeoplePage(rows);
+      const body = this.compressedPeople ? encodeStoredPackedPeoplePage(wpf1) : wpf1;
       pages.push(writePage(pages.length, body, rows.length));
       rows.length = 0;
       rowBytes = 0;
@@ -551,7 +565,8 @@ export class SnapshotParts {
 
   private manifest(value: Record<string, unknown>, body: string, validateParams = true): Manifest {
     if (this.schemaVersion < 5) failure('encoding requires schema 5');
-    const pagedOrganisms = value.snapshotEncoding === ENCODING_V2 || value.snapshotEncoding === ENCODING_V3;
+    const pagedOrganisms = value.snapshotEncoding === ENCODING_V2 || value.snapshotEncoding === ENCODING_V3
+      || value.snapshotEncoding === ENCODING_V4;
     const fields = ['snapshotEncoding', 'world', 'tiles'];
     if (pagedOrganisms) fields.push(...ORGANISM_FIELDS);
     if (!keys(value, fields) || (!pagedOrganisms && value.snapshotEncoding !== ENCODING_V1)
@@ -585,7 +600,7 @@ export class SnapshotParts {
       if (!params?.v23.guardadoCompleto) failure('organism encoding requires complete save');
       for (const field of ORGANISM_FIELDS) {
         if (!Object.hasOwn(world, field) || world[field] !== null) failure('metadata organism encoding');
-        this.assertOrganismManifest(value[field], value.snapshotEncoding === ENCODING_V3 && field === 'people');
+        this.assertOrganismManifest(value[field], organismFormat(value.snapshotEncoding, field));
       }
       const animals = value.animals as Pages;
       if (!params.v23.fauna && animals.count > limits.fauna)
@@ -594,15 +609,17 @@ export class SnapshotParts {
     return value as unknown as Manifest;
   }
 
-  private assertOrganismManifest(value: unknown, packed: boolean): void {
+  private assertOrganismManifest(value: unknown, format: OrganismFormat): void {
     if (!object(value) || !keys(value, ['count', 'pages']) || !Number.isSafeInteger(value.count)
       || (value.count as number) < 0 || (value.count as number) > 0xffff_ffff || !Array.isArray(value.pages)
       || value.pages.length > (value.count as number)) failure('organism count');
     let count = 0;
     for (const [index, page] of value.pages.entries()) {
-      if (!pageDescriptor(page, index, true) || page.bytes < 1 + 3 * page.count) failure('organism page descriptor');
+      if (!pageDescriptor(page, index, true) || format !== 'compressedPeople' && page.bytes < 1 + 3 * page.count)
+        failure('organism page descriptor');
       // Cada objeto JSON ocupa, como mínimo, los dos bytes de sus llaves.
-      if (packed && page.bytes < packedPeoplePageBytes(page.count, 2 * page.count)) failure('organism page descriptor');
+      if (format === 'packedPeople' && page.bytes < packedPeoplePageBytes(page.count, 2 * page.count))
+        failure('organism page descriptor');
       count += page.count;
     }
     if (count !== value.count) failure('total organism count');
@@ -611,11 +628,13 @@ export class SnapshotParts {
   private page(page: Page, format: PageFormat = 'tiles'): unknown[] {
     const body = this.db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?').get(page.digest)?.body;
     const text = typeof body === 'string';
-    if ((!text && !(body instanceof Uint8Array)) || (format === 'packedPeople' ? text : !text)
+    const binary = format === 'packedPeople' || format === 'compressedPeople';
+    if ((!text && !(body instanceof Uint8Array)) || binary === text
       || checksum(body) !== page.digest)
       throw new SnapshotPhysicalError('Snapshot page missing or checksum mismatch.');
     if ((text ? Buffer.byteLength(body) : body.byteLength) !== page.bytes) failure('page byte count');
-    const rows = text ? parseSnapshotJSON(body) : decodePackedPeoplePage(body, page.count, parsePackedPeopleJSON);
+    const decode = format === 'compressedPeople' ? decodeStoredPackedPeoplePage : decodePackedPeoplePage;
+    const rows = text ? parseSnapshotJSON(body) : decode(body, page.count, parsePackedPeopleJSON);
     if (!Array.isArray(rows) || rows.length !== page.count) failure('page row count');
     if (format !== 'tiles') {
       if (text) assertUniqueKeys(body);
@@ -644,7 +663,7 @@ export class SnapshotParts {
     const world: Record<string, unknown> = { ...manifest.world, tiles };
     if (manifest.snapshotEncoding !== ENCODING_V1) {
       for (const field of ORGANISM_FIELDS) {
-        const format = manifest.snapshotEncoding === ENCODING_V3 && field === 'people' ? 'packedPeople' : 'organisms';
+        const format = organismFormat(manifest.snapshotEncoding, field);
         const rows: unknown[] = [];
         for (const page of manifest[field].pages) {
           for (const row of this.page(page, format)) rows.push(row);
@@ -668,7 +687,7 @@ export class SnapshotParts {
     const manifest = this.manifest(value, body);
     for (const page of manifest.tiles.pages) decodeSnapshotTileRows(this.page(page), manifest.world.version);
     if (manifest.snapshotEncoding !== ENCODING_V1) for (const field of ORGANISM_FIELDS) {
-      const format = manifest.snapshotEncoding === ENCODING_V3 && field === 'people' ? 'packedPeople' : 'organisms';
+      const format = organismFormat(manifest.snapshotEncoding, field);
       for (const page of manifest[field].pages) this.page(page, format);
     }
   }

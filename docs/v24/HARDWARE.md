@@ -115,7 +115,9 @@ En siete páginas de personas se midieron 28,6 MB en JSON, de los cuales 16,9 MB
 
 ### Políticas Float64 en el guardado completo
 
-`CARTA_SNAPSHOT_PACKED_PEOPLE=1` habilita la escritura de `snapshot-parts-v3` en el servidor y en la pasarela con worker. Para bibliotecas se elige con `StoreOptions.snapshotPackedPeople`. Las páginas de personas guardan JSON UTF-8 para los atributos y un bloque Float64 little-endian para las políticas del ancho actual. Una máscara marca las filas que usan el bloque. Las demás filas conservan sus campos en JSON. Cada página conserva un SHA-256 y un recuento de bytes y filas. El lector actualizado reconoce las tres versiones con cualquiera de los modos de escritura.
+`CARTA_SNAPSHOT_PACKED_PEOPLE=1` habilita la escritura de `snapshot-parts-v3` en el servidor y en la pasarela con worker. Para bibliotecas se elige con `StoreOptions.snapshotPackedPeople`. Las páginas de personas guardan JSON UTF-8 para los atributos y un bloque Float64 little-endian para las políticas del ancho actual. Una máscara marca las filas que usan el bloque. Las demás filas conservan sus campos en JSON. Cada página conserva un SHA-256 y un recuento de bytes y filas.
+
+`CARTA_SNAPSHOT_PERSONAS_ZSTD=1` o `StoreOptions.snapshotCompressedPeople` selecciona `snapshot-parts-v4` para el guardado completo. Usa Zstd nivel 1 por página de personas cuando reduce el tamaño. El lector reconoce los cuatro manifiestos con cualquiera de los modos de escritura. Un binario anterior a este cambio requiere una copia en el formato anterior para volver a abrir el mundo.
 
 En cuatro corridas alternadas sobre un corte de 63.980 personas, el SQLite confirmado pasó de 594,2 a 442,5 MB. Las páginas de personas pasaron de 443,5 a 292,0 MB. En la mediana, Store escribió en 4,70 s frente a 6,37 s y reabrió en 5,32 s frente a 6,83 s. El pico de RSS en lectura varió entre corridas y su mediana subió un 3,2 %. Coincidieron los 13.563.760 pesos, las huellas de las personas en su orden, la materia y los archivos adjuntos. Una reapertura adicional con el Store predeterminado avanzó del tick 12 al 13 con ocho dueños y saldo exacto en ambos cortes.
 

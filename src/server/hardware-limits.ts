@@ -53,6 +53,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
   const maximo = hilos === 'auto' ? availableParallelism() : undefined;
   const reservaLotesMateria = reservaMateriaHost(memoria ?? hostMemory());
   const confirmarGuardadoVivo = env.CARTA_GUARDADO_VIVO === '1';
+  const personasBinarias = env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1' || env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1';
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
     ...(gruposPercepcionGpu === undefined ? {} : { gruposPercepcionGpu }),
@@ -61,7 +62,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     ...(env.CARTA_FAUNA_CORTE_SOMBRA === '1' ? { faunaCortePreparada: true } : {}),
     ...(env.CARTA_FAUNA_CORTE_DIRECTA === '1' ? { faunaCorteDirecta: true } : {}),
     ...(env.CARTA_TESELAS_CORTE_DIRECTAS === '1' ? { teselasCorteDirectas: true } : {}),
-    ...(env.CARTA_PERSONAS_CORTE_DIRECTAS === '1' && env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1' ? { personasCorteDirectas: true } : {}),
+    ...(env.CARTA_PERSONAS_CORTE_DIRECTAS === '1' && personasBinarias ? { personasCorteDirectas: true } : {}),
     ...(confirmarGuardadoVivo ? { confirmarGuardadoVivo: true } : {}),
     ...(env.CARTA_MATERIA_FISICA_SEPARADA === '1' ? { materiaFisicaSeparada: true } : {}),
     ...(env.CARTA_FOTOGRAMA_DUENOS === '1' ? { emisionFotogramaDuenos: true } : {}),

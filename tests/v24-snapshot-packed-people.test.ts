@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { constants as zstd, zstdCompressSync } from 'node:zlib';
 import {
-  decodePackedPeoplePage, encodePackedPeoplePage, packedPeoplePageBytes, preparePackedPerson,
+  decodePackedPeoplePage, decodeStoredPackedPeoplePage, encodePackedPeoplePage, encodeStoredPackedPeoplePage,
+  packedPeoplePageBytes, preparePackedPerson,
 } from '../src/server/snapshot-packed-people.js';
 import { SnapshotPhysicalError, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 
 const weightsOf = (value = 0.125): number[] => Array<number>(212).fill(value);
 const decode = (body: Uint8Array, count: number) => decodePackedPeoplePage(body, count, JSON.parse);
+const decodeStored = (body: Uint8Array, count: number) => decodeStoredPackedPeoplePage(body, count, JSON.parse);
 
 test('WPF1 conserva orden, signos, pesos F64LE y una máscara de más de un byte', () => {
   const weights = weightsOf();
@@ -118,7 +121,69 @@ test('WPF1 rechaza dimensiones, máscara, JSON, UTF-8 y pesos incoherentes', () 
   assert.throws(() => encodePackedPeoplePage([{ ...rows[0]!, bytes: rows[0]!.bytes - 1 }]), SnapshotSemanticError);
   const oversizedRow = preparePackedPerson({ note: 'x'.repeat(4 * 1024 * 1024) });
   assert.throws(() => encodePackedPeoplePage([oversizedRow, rows[0]!]), SnapshotSemanticError);
-  assert.equal(decode(encodePackedPeoplePage([oversizedRow]), 1).length, 1);
+  const oversizedPage = encodePackedPeoplePage([oversizedRow]);
+  assert.equal(decode(oversizedPage, 1).length, 1);
+  assert.deepEqual(decodeStored(encodeStoredPackedPeoplePage(oversizedPage), 1), decode(oversizedPage, 1));
+});
+
+test('WZP1 conserva las filas WPF1 y el signo del cero al guardar páginas comprimidas y crudas', () => {
+  const weights = weightsOf();
+  weights[0] = -0;
+  const rows = [{ id: 'niño', policy: { weights }, after: -0 }, { id: 2 }].map(preparePackedPerson);
+  const raw = encodePackedPeoplePage(rows);
+  const stored = Buffer.from(encodeStoredPackedPeoplePage(raw));
+  assert.equal(stored.toString('ascii', 0, 4), 'WZP1');
+  assert.equal(stored.readUInt32LE(4), raw.length);
+  assert.ok(stored.length < raw.length);
+  const surrounding = Buffer.concat([Buffer.of(0xff, 0xee), stored, Buffer.of(0xcc)]);
+  assert.deepEqual(decodeStored(surrounding.subarray(2, -1), rows.length), decode(raw, rows.length));
+  assert.deepEqual(decodeStored(raw, rows.length), decode(raw, rows.length));
+
+  const empty = encodePackedPeoplePage([]);
+  assert.strictEqual(encodeStoredPackedPeoplePage(empty), empty);
+  assert.deepEqual(decodeStored(empty, 0), []);
+});
+
+test('WZP1 rechaza tamaños, ventanas y tramas Zstd corruptas como fallos físicos', () => {
+  const raw = encodePackedPeoplePage([{ policy: { weights: weightsOf() } }, { id: 2 }].map(preparePackedPerson));
+  const count = 2;
+  const stored = Buffer.from(encodeStoredPackedPeoplePage(raw));
+  const change = (edit: (copy: Buffer) => void) => {
+    const copy = Buffer.from(stored);
+    edit(copy);
+    return copy;
+  };
+  const withFrame = (frame: Buffer) => Buffer.concat([stored.subarray(0, 8), frame]);
+  const checksummed = withFrame(zstdCompressSync(raw, { params: { [zstd.ZSTD_c_checksumFlag]: 1 } }));
+  assert.deepEqual(decodeStored(checksummed, count), decode(raw, count));
+  const unknownSizeFrame = zstdCompressSync(raw, { params: { [zstd.ZSTD_c_contentSizeFlag]: 0 } });
+  const oversizedWindow = Buffer.from(unknownSizeFrame);
+  oversizedWindow[5] = 13 << 3; // 8 MiB.
+  const smallerOutputLimit = withFrame(unknownSizeFrame);
+  smallerOutputLimit.writeUInt32LE(raw.length - 1, 4);
+  const largerOutputLimit = withFrame(unknownSizeFrame);
+  largerOutputLimit.writeUInt32LE(raw.length + 1, 4);
+  const corrupt = [
+    stored.subarray(0, 7),
+    stored.subarray(0, -1),
+    checksummed.subarray(0, -1),
+    Buffer.concat([stored, Buffer.of(0)]),
+    change(copy => { copy[8] = 0; }),
+    change(copy => { copy.writeUInt32LE(raw.length + 1, 4); }),
+    change(copy => { copy.writeUInt32LE(4 * 1024 * 1024 + 1, 4); }),
+    withFrame(oversizedWindow),
+    smallerOutputLimit,
+    largerOutputLimit,
+  ];
+  for (const body of corrupt) assert.throws(() => decodeStored(body, count), SnapshotPhysicalError);
+});
+
+test('WZP1 conserva el fallo semántico de la página WPF1 interior', () => {
+  const raw = encodePackedPeoplePage([preparePackedPerson({ policy: { weights: weightsOf() } })]);
+  raw.writeDoubleLE(NaN, raw.length - 8);
+  const stored = encodeStoredPackedPeoplePage(raw);
+  assert.ok(stored.length < raw.length);
+  assert.throws(() => decodeStored(stored, 1), SnapshotSemanticError);
 });
 
 test('WPF1 conserva la clasificación de un error del analizador recibido', () => {

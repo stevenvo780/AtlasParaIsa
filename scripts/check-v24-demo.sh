@@ -18,7 +18,7 @@ npm run typecheck 2>&1 | tee "$evidencia/typecheck.log"
 node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-demo-agua.test.ts tests/v24-camino-material.test.ts tests/v24-cobijo-material.test.ts tests/v24-evidencia-reloj.test.ts \
   tests/v21-dvr-client.test.ts tests/ola-cintacli-reproductor.test.ts tests/v24-motor-perfil-cpu1.test.ts \
-  tests/v24-motor-perfil-paso.test.ts tests/fauna-rejilla.test.ts \
+  tests/v24-motor-perfil-paso.test.ts tests/v24-rutas-locales.test.ts tests/fauna-rejilla.test.ts \
   tests/v24-agenda-durable.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
   tests/v24-cinta-pavimento.test.ts tests/v23-motor-fotograma-retirada.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \

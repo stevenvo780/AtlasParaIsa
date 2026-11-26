@@ -27,6 +27,9 @@ const CONTROL_BYTES = CONTROL_SLOTS * Int32Array.BYTES_PER_ELEMENT;
 const DIGESTO_HEX = /^[0-9a-f]{64}$/;
 const DOMINIO_DIGESTO = Buffer.from('BASE_PESOS_F64_V1\0');
 const ES_LITTLE_ENDIAN = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
+const CLAVES_IDENTIDAD = new Set([
+  'version', 'publicacion', 'instancia', 'epoca', 'secuencia', 'digesto',
+]);
 const CLAVES_REFERENCIA = new Set([
   'version', 'publicacion', 'instancia', 'epoca', 'secuencia', 'digesto', 'uid', 'indice',
 ]);
@@ -602,6 +605,97 @@ function validarEstructuraDescriptor(descriptor: unknown): asserts descriptor is
     if (!esUidValido(uidMin) || !esUidValido(uidMax) || uidMin !== primero || uidMax !== ultimo || uidMin > uidMax)
       throw new Error('Extremos de UID incoherentes con el buffer de UIDs.');
   }
+}
+
+/**
+ * Lector sellado de reconstrucción FULL tras revocación natural de una base previamente autorizada.
+ * Nunca se expone como `LectorBasePesosCorte` ni admite REFs sin autorización previa: exige verificación
+ * criptográfica SHA-256 completa del SAB (`verificarIntegridadBasePesos`) antes y después de copiar
+ * los 1696 bytes F64LE a buffers privados del llamador, validando identidad, UID e índice exactos.
+ */
+export interface LectorReconstruccionBasePesos {
+  readonly identidad: IdentidadBasePesos;
+  readonly cantidad: number;
+  uidEn(indice: number): number;
+  copiarPesosExactosEn(uidEsperado: unknown, indice: number, destino: Uint8Array, offset: number): void;
+  verificarIntegridadFinal(): void;
+}
+
+/** Valida estrictamente una identidad de base F64 plana (sin getters, claves extra ni buffers embebidos). */
+export function identidadBasePesosValida(valor: unknown): valor is IdentidadBasePesos {
+  if (!esObjetoPlano(valor)) return false;
+  const claves = Reflect.ownKeys(valor);
+  if (claves.length !== CLAVES_IDENTIDAD.size) return false;
+  for (const clave of claves) {
+    if (typeof clave !== 'string' || !CLAVES_IDENTIDAD.has(clave) || lookupGetter.call(valor, clave) !== undefined)
+      return false;
+  }
+  return valor.version === VERSION_BASE_PESOS_CORTE
+    && typeof valor.publicacion === 'string' && valor.publicacion.length > 0 && valor.publicacion.length <= MAX_TEXTO_ID_LEN
+    && typeof valor.instancia === 'string' && valor.instancia.length > 0 && valor.instancia.length <= MAX_TEXTO_ID_LEN
+    && esEnteroNoNegativo(valor.epoca)
+    && esEnteroNoNegativo(valor.secuencia)
+    && typeof valor.digesto === 'string' && DIGESTO_HEX.test(valor.digesto);
+}
+
+export function mismaIdentidadBasePesos(a: IdentidadBasePesos, b: IdentidadBasePesos): boolean {
+  return a.version === b.version
+    && a.publicacion === b.publicacion
+    && a.instancia === b.instancia
+    && a.epoca === b.epoca
+    && a.secuencia === b.secuencia
+    && a.digesto === b.digesto;
+}
+
+/** Abre un lector sellado de reconstrucción FULL verificando la integridad SHA-256 completa del SAB. */
+export function abrirLectorReconstruccionBasePesos(
+  descriptor: DescriptorBasePesosCorte,
+  identidadEsperada: IdentidadBasePesos,
+): LectorReconstruccionBasePesos {
+  if (!identidadBasePesosValida(identidadEsperada)) {
+    throw new Error('Identidad esperada de reconstrucción de base F64 inválida.');
+  }
+  verificarIntegridadBasePesos(descriptor);
+  if (!mismaIdentidadBasePesos(descriptor, identidadEsperada)) {
+    throw new Error('La identidad del descriptor retenido no coincide con la base autorizada.');
+  }
+  const { cantidad, cotas, uids, slabs } = descriptor;
+  const uidsF64 = new Float64Array(uids);
+  const uidsData = new DataView(uids);
+  const slabsU8 = slabs.map(sab => new Uint8Array(sab));
+  const identidad: IdentidadBasePesos = Object.freeze({
+    version: descriptor.version,
+    publicacion: descriptor.publicacion,
+    instancia: descriptor.instancia,
+    epoca: descriptor.epoca,
+    secuencia: descriptor.secuencia,
+    digesto: descriptor.digesto,
+  });
+  return {
+    identidad,
+    cantidad,
+    uidEn(indice: number): number {
+      if (!Number.isSafeInteger(indice) || indice < 0 || indice >= cantidad) return -1;
+      return leerUidLe(uidsData, uidsF64, indice);
+    },
+    copiarPesosExactosEn(uidEsperado: unknown, indice: number, destino: Uint8Array, offset: number): void {
+      if (!esUidValido(uidEsperado)) throw new Error('UID inválido al reconstruir pesos FULL.');
+      if (!esEnteroNoNegativo(indice) || indice >= cantidad)
+        throw new Error(`Índice de base F64 fuera de rango al reconstruir FULL: ${indice}.`);
+      if (leerUidLe(uidsData, uidsF64, indice) !== uidEsperado)
+        throw new Error(`El UID de la fila no coincide con el índice ${indice} al reconstruir FULL.`);
+      if (!types.isUint8Array(destino) || types.isProxy(destino) || !Number.isSafeInteger(offset) || offset < 0
+        || offset + BYTES_PESOS_PERSONA > destino.byteLength)
+        throw new Error('Rango de destino inválido al reconstruir pesos FULL.');
+      const slabIdx = Math.floor(indice / cotas.filasPorSlab);
+      const filaEnSlab = indice - slabIdx * cotas.filasPorSlab;
+      const inicio = filaEnSlab * BYTES_PESOS_PERSONA;
+      copiarBytesU8.call(destino, subvistaU8.call(slabsU8[slabIdx]!, inicio, inicio + BYTES_PESOS_PERSONA), offset);
+    },
+    verificarIntegridadFinal(): void {
+      verificarIntegridadBasePesos(descriptor);
+    },
+  };
 }
 
 /** Abre un lector ligero sobre un descriptor clonado recibido por canal interno de trabajadores de confianza. */

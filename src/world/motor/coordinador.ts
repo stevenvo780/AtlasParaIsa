@@ -863,10 +863,9 @@ class MotorDuenos implements Motor {
         && diario !== undefined && diario.committedThrough + diario.pending.length === eventCounter && bajasPrevias.length === 0
         && estadoAdmiteSolape(coordinador)
         && isDeepStrictEqual(sinCheckpointTecnologia(coordinador.technology), this.#tecnologiaDurable);
-      // Con solape el motor puede haber avanzado cuando el escritor rechace una referencia.
-      // Solo el guardado serial puede volver a capturar el mismo tick con pesos completos.
+      // Con solape la admisión de REF exige autorización real de ticket en el escritor (o fallback FULL preventivo).
       const usarBasePesos = this.#config.basePesosCorte === true && opciones.prepararPersonas
-        && !comprobarSolape && !forzarPesosCompletos;
+        && !forzarPesosCompletos;
       const solicitud = this.#barreraCorte(opciones, comprobarSolape, usarBasePesos)!;
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();

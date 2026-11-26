@@ -6,8 +6,9 @@ import {
 import { clavesJsonUnicas } from '../../shared/json-keys.js';
 import type { Person } from '../mundo/tipos.js';
 import {
-  aceptarRefPesos, evaluarCandidatoRefPesos, type ContextoBasePesos, type IdentidadBasePesos,
-  type LectorBasePesosCorte, type MotivoRechazoRefPesos,
+  aceptarRefPesos, ESTADO_BASE_PESOS, evaluarCandidatoRefPesos, identidadBasePesosValida, mismaIdentidadBasePesos,
+  type ContextoBasePesos, type IdentidadBasePesos, type LectorBasePesosCorte, type LectorReconstruccionBasePesos,
+  type MotivoRechazoRefPesos,
 } from './base-pesos-corte.js';
 import type { ParteMundo } from './reunir.js';
 
@@ -54,6 +55,9 @@ export interface PersonasCorteVerificadas {
 const verificadas = new WeakMap<readonly Person[], PersonasCorteVerificadas>();
 const FILAS_POR_BLOQUE = 4096, BYTES_POR_BLOQUE = 4 * 1024 * 1024, PROFUNDIDAD_MAXIMA = 32;
 const utf8 = new TextEncoder();
+const utf8Strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const copiarU8 = Uint8Array.prototype.set;
+const subvistaU8 = Uint8Array.prototype.subarray;
 const lookupGetter: (this: object, key: PropertyKey) => unknown =
   Object.getOwnPropertyDescriptor(Object.prototype, '__lookupGetter__')!.value;
 
@@ -302,6 +306,248 @@ function bufferEntero(datos: unknown): datos is Uint8Array & { buffer: ArrayBuff
 function paresEnteros(datos: unknown): datos is Uint32Array & { buffer: ArrayBuffer } {
   return types.isUint32Array(datos) && datos.buffer instanceof ArrayBuffer
     && datos.byteOffset === 0 && datos.byteLength === datos.buffer.byteLength && (datos.length & 1) === 0;
+}
+
+function comprobarIdentidadContraBase(
+  identidadRef: unknown,
+  basePesos: BasePesosActiva | undefined,
+): void {
+  if (!identidadBasePesosValida(identidadRef)) {
+    throw new RechazoBasePesosError('referencia_invalida', 'Identidad de referencia F64 malformada o con campos inválidos.');
+  }
+  if (!basePesos) throw new RechazoBasePesosError('sin_base', 'El bloque usa referencias F64 sin una base publicada.');
+  const { lector, contexto } = basePesos;
+  const estado = lector.estado();
+  if (estado === ESTADO_BASE_PESOS.PENDIENTE_ACUSE) throw new RechazoBasePesosError('base_no_publicada');
+  if (estado !== ESTADO_BASE_PESOS.PUBLICADA) throw new RechazoBasePesosError('base_revocada');
+  const idBase = lector.identidad;
+  if (identidadRef.publicacion !== idBase.publicacion || identidadRef.publicacion !== contexto.publicacion)
+    throw new RechazoBasePesosError('publicacion_distinta');
+  if (identidadRef.epoca !== idBase.epoca || identidadRef.epoca !== contexto.epoca)
+    throw new RechazoBasePesosError('epoca_cambiada');
+  if (identidadRef.instancia !== idBase.instancia || identidadRef.instancia !== contexto.instancia)
+    throw new RechazoBasePesosError('instancia_distinta');
+  if (identidadRef.secuencia !== idBase.secuencia || identidadRef.secuencia !== contexto.secuencia)
+    throw new RechazoBasePesosError('secuencia_distinta');
+  if (identidadRef.digesto !== idBase.digesto || (contexto.digesto !== undefined && identidadRef.digesto !== contexto.digesto))
+    throw new RechazoBasePesosError('digesto_distinto');
+}
+
+function validarFormaBloquePersonas(
+  bloque: BloquePersonasCorte | undefined,
+  restantes: number,
+  buffers: WeakSet<ArrayBuffer>,
+): { filas: number; anchoMascara: number; marcadas: number; cantidadRefs: number } {
+  const refs = bloque?.refs;
+  const bytesRefs = refs ? (paresEnteros(refs.pares) ? refs.pares.byteLength : -1) : 0;
+  if (!Number.isSafeInteger(bloque?.filas) || bloque!.filas <= 0 || bloque!.filas > FILAS_POR_BLOQUE
+    || bloque!.filas > restantes || !bufferEntero(bloque!.cuerpo) || !bufferEntero(bloque!.pesos)
+    || bytesRefs < 0 || (refs && bytesRefs === 0)
+    || bloque!.cuerpo.byteLength + bloque!.pesos.byteLength + bytesRefs > BYTES_POR_BLOQUE)
+    throw new Error('Bloque de personas directas inválido.');
+  const { filas, cuerpo, pesos } = bloque!;
+  for (const bytes of [cuerpo, pesos, ...(refs ? [refs.pares] : [])]) {
+    const buffer = bytes.buffer as ArrayBuffer;
+    if (buffers.has(buffer)) throw new Error('Buffer repetido en personas directas.');
+    if (!bytes.byteLength) continue;
+    buffers.add(buffer);
+  }
+  const anchoMascara = Math.ceil(filas / 8), resto = filas & 7;
+  if (cuerpo.byteLength < anchoMascara + 3 * filas - 1 || (resto && cuerpo[anchoMascara - 1]! >>> resto))
+    throw new Error('Máscara de personas directas inválida.');
+  let marcadas = 0;
+  for (let i = 0; i < anchoMascara; i++) {
+    for (let bits = cuerpo[i]!; bits; bits &= bits - 1) marcadas++;
+  }
+  const cantidadRefs = refs ? refs.pares.length >>> 1 : 0;
+  if (cantidadRefs > marcadas) throw new Error('Referencias de pesos exceden las filas marcadas.');
+  if (pesos.byteLength !== (marcadas - cantidadRefs) * WPF1_WEIGHT_BYTES)
+    throw new Error('Longitud de pesos de personas directas inválida.');
+  if (refs) {
+    let filaAnterior = -1;
+    for (let r = 0; r < refs.pares.length; r += 2) {
+      const filaRef = refs.pares[r]!;
+      if (filaRef >= filas || filaRef <= filaAnterior || (cuerpo[filaRef >>> 3]! & (1 << (filaRef & 7))) === 0)
+        throw new Error('Índice de fila de referencia F64 inválido.');
+      filaAnterior = filaRef;
+    }
+  }
+  return { filas, anchoMascara, marcadas, cantidadRefs };
+}
+
+/** Validación previa no destructiva de forma, buffers y autoridad de referencias antes de consumir el sobre. */
+export function validarBloquesPersonasPreDecode(
+  bloques: readonly BloquePersonasCorte[],
+  cantidad: number,
+  basePesos?: BasePesosActiva,
+): void {
+  if (!Number.isSafeInteger(cantidad) || cantidad < 0 || cantidad > 0xffff_ffff || !Array.isArray(bloques))
+    throw new Error('Rango de personas directas inválido.');
+  const buffers = new WeakSet<ArrayBuffer>();
+  let total = 0;
+  for (const bloque of bloques) {
+    const { filas } = validarFormaBloquePersonas(bloque, cantidad - total, buffers);
+    if (bloque.refs) comprobarIdentidadContraBase(bloque.refs.identidad, basePesos);
+    total += filas;
+  }
+  if (total !== cantidad) throw new Error('Cantidad de personas directas inválida.');
+}
+
+/**
+ * Reconstruye bloques FULL privados e intactos a partir de bloques con REFs tras revocación natural de una base
+ * previamente autorizada. No muta ni desprende los buffers de entrada y divide bloques si expandir REF→FULL
+ * supera `BYTES_POR_BLOQUE`.
+ */
+export function reconstruirBloquesPersonasFull(
+  bloques: readonly BloquePersonasCorte[],
+  cantidad: number,
+  lector: LectorReconstruccionBasePesos,
+): BloquePersonasCorte[] {
+  if (!Number.isSafeInteger(cantidad) || cantidad < 0 || cantidad > 0xffff_ffff || !Array.isArray(bloques))
+    throw new Error('Rango de personas directas inválido.');
+  const buffers = new WeakSet<ArrayBuffer>();
+  const salida: BloquePersonasCorte[] = [];
+  let total = 0;
+  for (const bloque of bloques) {
+    const { filas, anchoMascara, marcadas } = validarFormaBloquePersonas(bloque, cantidad - total, buffers);
+    total += filas;
+    const refs = bloque.refs;
+    if (!refs) {
+      salida.push(bloque);
+      continue;
+    }
+    if (!identidadBasePesosValida(refs.identidad)) {
+      throw new RechazoBasePesosError('referencia_invalida', 'Identidad de referencia F64 malformada.');
+    }
+    if (!mismaIdentidadBasePesos(refs.identidad, lector.identidad)) {
+      throw new RechazoBasePesosError('publicacion_distinta', 'La referencia F64 no coincide con la base autorizada del ticket.');
+    }
+    const texto = utf8Strict.decode(subvistaU8.call(bloque.cuerpo, anchoMascara));
+    const lineas = texto.split('\n', filas + 1);
+    if (lineas.length !== filas) throw new Error('Cantidad de personas directas inválida.');
+    if (!clavesJsonUnicas(texto)) throw new Error('Personas directas con claves repetidas.');
+
+    const filasInfo: {
+      textoBytes: Uint8Array;
+      marcada: boolean;
+      indiceBase?: number;
+      uid?: number;
+      offsetPesoOrigen?: number;
+    }[] = new Array(filas);
+    let cursorRef = 0, offsetOrigen = 0;
+    for (let i = 0; i < filas; i++) {
+      const linea = lineas[i]!;
+      const separador = linea.startsWith('[{') ? linea.indexOf(',\t') : -1;
+      const conAusencias = linea.startsWith('[{') && linea.endsWith(']]') && separador !== -1;
+      const json = conAusencias ? linea.slice(1, separador) : linea;
+      if (!json.startsWith('{') || !json.endsWith('}') || json.includes('\r') || json.includes('\t'))
+        throw new Error('Fila de persona directa inválida.');
+      const ausencias = conAusencias ? ausenciasDe(linea.slice(separador + 2, -1)) : undefined;
+      const persona = validarYRestaurar(JSON.parse(json), ausencias);
+      if (!filaPersona(persona)) throw new Error('Fila de persona directa inválida.');
+      const marcada = (bloque.cuerpo[i >>> 3]! & (1 << (i & 7))) !== 0;
+      if (marcada) {
+        const candidata = persona.policy;
+        if (!Object.hasOwn(persona, 'policy') || !registro(candidata) || Object.keys(candidata).length !== 1
+          || !Object.hasOwn(candidata, 'weights') || !Array.isArray(candidata.weights) || candidata.weights.length !== 0)
+          throw new Error('Marcador de pesos de persona directa inválido.');
+      }
+      const esRef = marcada && cursorRef < refs.pares.length && refs.pares[cursorRef] === i;
+      if (esRef) {
+        const indiceEnBase = refs.pares[cursorRef + 1]!;
+        cursorRef += 2;
+        const uid = persona.uid;
+        if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0) {
+          throw new RechazoBasePesosError('uid_invalido');
+        }
+        if (indiceEnBase >= lector.cantidad) {
+          throw new RechazoBasePesosError('indice_invalido');
+        }
+        if (lector.uidEn(indiceEnBase) !== uid) {
+          throw new RechazoBasePesosError('uid_no_coincide');
+        }
+        filasInfo[i] = { textoBytes: utf8.encode(linea), marcada: true, indiceBase: indiceEnBase, uid };
+      } else if (marcada) {
+        filasInfo[i] = { textoBytes: utf8.encode(linea), marcada: true, offsetPesoOrigen: offsetOrigen };
+        offsetOrigen += WPF1_WEIGHT_BYTES;
+      } else {
+        filasInfo[i] = { textoBytes: utf8.encode(linea), marcada: false };
+      }
+    }
+    if (cursorRef !== refs.pares.length || offsetOrigen !== bloque.pesos.byteLength) {
+      throw new Error('Desajuste interno al reconstruir pesos FULL.');
+    }
+
+    const bytesFullUnico = bloque.cuerpo.byteLength + marcadas * WPF1_WEIGHT_BYTES;
+    if (bytesFullUnico <= BYTES_POR_BLOQUE) {
+      const cuerpoCopia = new Uint8Array(bloque.cuerpo.byteLength);
+      copiarU8.call(cuerpoCopia, bloque.cuerpo, 0);
+      const pesosFull = new Uint8Array(marcadas * WPF1_WEIGHT_BYTES);
+      let destinoOffset = 0;
+      for (const info of filasInfo) {
+        if (!info.marcada) continue;
+        if (info.indiceBase !== undefined) {
+          lector.copiarPesosExactosEn(info.uid, info.indiceBase, pesosFull, destinoOffset);
+        } else {
+          copiarU8.call(
+            pesosFull,
+            subvistaU8.call(bloque.pesos, info.offsetPesoOrigen!, info.offsetPesoOrigen! + WPF1_WEIGHT_BYTES),
+            destinoOffset,
+          );
+        }
+        destinoOffset += WPF1_WEIGHT_BYTES;
+      }
+      salida.push({ filas, cuerpo: cuerpoCopia, pesos: pesosFull });
+      continue;
+    }
+
+    // Si al expandir REF->FULL el bloque supera BYTES_POR_BLOQUE, se reparte en sub-bloques FULL válidos.
+    let subInicio = 0;
+    while (subInicio < filas) {
+      let subFin = subInicio, bytesTexto = 0, subMarcadas = 0;
+      while (subFin < filas && subFin - subInicio < FILAS_POR_BLOQUE) {
+        const info = filasInfo[subFin]!;
+        const siguienteFilas = subFin - subInicio + 1;
+        const siguienteTexto = bytesTexto + info.textoBytes.byteLength + Number(subFin > subInicio);
+        const siguienteMarcadas = subMarcadas + Number(info.marcada);
+        const totalSub = Math.ceil(siguienteFilas / 8) + siguienteTexto + siguienteMarcadas * WPF1_WEIGHT_BYTES;
+        if (totalSub > BYTES_POR_BLOQUE) {
+          if (subFin === subInicio) throw new Error('Fila individual excede BYTES_POR_BLOQUE al reconstruir FULL.');
+          break;
+        }
+        bytesTexto = siguienteTexto;
+        subMarcadas = siguienteMarcadas;
+        subFin++;
+      }
+      const subFilas = subFin - subInicio;
+      const bytesMascara = Math.ceil(subFilas / 8);
+      const cuerpoSub = new Uint8Array(bytesMascara + bytesTexto);
+      const pesosSub = new Uint8Array(subMarcadas * WPF1_WEIGHT_BYTES);
+      let cursorTexto = bytesMascara, cursorPeso = 0;
+      for (let j = 0; j < subFilas; j++) {
+        const info = filasInfo[subInicio + j]!;
+        if (j > 0) cuerpoSub[cursorTexto++] = 0x0a;
+        copiarU8.call(cuerpoSub, info.textoBytes, cursorTexto);
+        cursorTexto += info.textoBytes.byteLength;
+        if (!info.marcada) continue;
+        cuerpoSub[j >>> 3]! |= 1 << (j & 7);
+        if (info.indiceBase !== undefined) {
+          lector.copiarPesosExactosEn(info.uid, info.indiceBase, pesosSub, cursorPeso);
+        } else {
+          copiarU8.call(
+            pesosSub,
+            subvistaU8.call(bloque.pesos, info.offsetPesoOrigen!, info.offsetPesoOrigen! + WPF1_WEIGHT_BYTES),
+            cursorPeso,
+          );
+        }
+        cursorPeso += WPF1_WEIGHT_BYTES;
+      }
+      salida.push({ filas: subFilas, cuerpo: cuerpoSub, pesos: pesosSub });
+      subInicio = subFin;
+    }
+  }
+  if (total !== cantidad) throw new Error('Cantidad de personas directas inválida.');
+  return salida;
 }
 
 /** El puerto puede ceder los buffers completos. Cada buffer que el llamador conserva se copia. */

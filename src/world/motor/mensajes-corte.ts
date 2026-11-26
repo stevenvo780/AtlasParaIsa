@@ -3,13 +3,18 @@ import { deserialize, serialize } from 'node:v8';
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import type { LegacyRecord } from '../../shared/demography.js';
 import type { World } from '../mundo/tipos.js';
-import { abrirLectorBasePesos, type DescriptorBasePesosCorte } from './base-pesos-corte.js';
+import {
+  abrirLectorBasePesos, identidadBasePesosValida, mismaIdentidadBasePesos,
+  type DescriptorBasePesosCorte, type IdentidadBasePesos, type LectorReconstruccionBasePesos,
+} from './base-pesos-corte.js';
 import type { TokenLegadoCorte } from './custodia-legado.js';
 import { prepararFaunaCorte, prepararFaunaDirecta, recibirFaunaDirecta, validarFaunaCorte, vincularFaunaCorte,
   type BloqueFaunaCorte } from './fauna-corte.js';
 import type { ParteFotoDueno } from './fotograma-dueno.js';
-import { prepararPersonasDirectas, recibirPersonasDirectas, RechazoBasePesosError,
-  type BasePesosActiva, type BloquePersonasCorte } from './personas-corte.js';
+import {
+  prepararPersonasDirectas, recibirPersonasDirectas, reconstruirBloquesPersonasFull, RechazoBasePesosError,
+  validarBloquesPersonasPreDecode, type BasePesosActiva, type BloquePersonasCorte,
+} from './personas-corte.js';
 import { parteCorteDe, type ParteMundo } from './reunir.js';
 import { prepararTeselasDirectas, recibirTeselasDirectas, type BloqueTeselasCorte } from './teselas-corte.js';
 
@@ -224,6 +229,72 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
   for (const bloque of transferibles) if (bloque.byteLength !== 0) throw new Error('Un bloque de corte no se desprendió al enviarlo.');
 }
 
+export interface InspeccionReferenciasCorte {
+  readonly totalRefs: number;
+  readonly identidad?: IdentidadBasePesos;
+  readonly inconsistente: boolean;
+}
+
+/** Inspecciona sin consumir buffers si un corte remoto contiene referencias F64 y su identidad común. */
+export function inspeccionarReferenciasCorte(corte: CorteRemotoBinario): InspeccionReferenciasCorte {
+  let totalRefs = 0;
+  let identidad: IdentidadBasePesos | undefined;
+  if (!corte || !Array.isArray(corte.sobres)) return { totalRefs: 0, inconsistente: true };
+  for (const sobre of corte.sobres) {
+    if (!sobre || !Array.isArray(sobre.personas)) continue;
+    for (const bloque of sobre.personas) {
+      const refs = bloque?.refs;
+      if (refs === undefined) continue;
+      if (!refs || typeof refs !== 'object' || !(refs.pares instanceof Uint32Array)
+        || refs.pares.length === 0 || (refs.pares.length & 1) !== 0
+        || !identidadBasePesosValida(refs.identidad)) {
+        return { totalRefs: totalRefs + 1, inconsistente: true };
+      }
+      if (identidad === undefined) {
+        identidad = { ...refs.identidad };
+      } else if (!mismaIdentidadBasePesos(identidad, refs.identidad)) {
+        return { totalRefs: totalRefs + (refs.pares.length >>> 1), inconsistente: true };
+      }
+      totalRefs += refs.pares.length >>> 1;
+    }
+  }
+  return identidad === undefined ? { totalRefs: 0, inconsistente: false } : { totalRefs, identidad, inconsistente: false };
+}
+
+/**
+ * Reconstruye de forma no destructiva un `CorteRemotoBinario` 100 % FULL a partir de una base autorizada
+ * tras su revocación natural. Si cualquier validación falla, los sobres originales permanecen intactos.
+ */
+export function reconstruirCorteRemotoFull(
+  corte: CorteRemotoBinario,
+  lector: LectorReconstruccionBasePesos,
+): CorteRemotoBinario {
+  if (corte.sobres.length !== corte.duenosRemotos) throw new Error('El corte remoto está incompleto o ya fue consumido.');
+  const nuevosSobres: ParteCorte[] = [];
+  for (let i = 0; i < corte.sobres.length; i++) {
+    const parte = corte.sobres[i];
+    const dueno = i + 1;
+    comprobarIdentidad(parte, corte, dueno);
+    if (!corte.personasDirectas) {
+      if (Object.hasOwn(parte, 'personasSustituidas') || Object.hasOwn(parte, 'personas'))
+        throw new Error(`Modo de personas incoherente para el dueño ${dueno}.`);
+      nuevosSobres.push(parte);
+      continue;
+    }
+    const sustituidas = parte.personasSustituidas;
+    if (sustituidas === null && !Object.hasOwn(parte, 'personas')) {
+      nuevosSobres.push(parte);
+      continue;
+    }
+    if (!sustituidas || typeof sustituidas !== 'object' || !Array.isArray(parte.personas))
+      throw new Error(`Sobre de personas directas incoherente para el dueño ${dueno}.`);
+    const personasFull = reconstruirBloquesPersonasFull(parte.personas, sustituidas.cantidad, lector);
+    nuevosSobres.push({ ...parte, personas: personasFull });
+  }
+  lector.verificarIntegridadFinal();
+  return { ...corte, sobres: nuevosSobres };
+}
+
 /** Consume el corte retirado y libera cada sobre al decodificarlo. Los pesos verificados conservan sus buffers. */
 export function decodificarCorteRemoto(corte: CorteRemotoBinario, basePesos?: BasePesosActiva): {
   partes: ParteMundo[];
@@ -231,6 +302,28 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario, basePesos?: Ba
   diagnosticoPersonasCorte: DiagnosticoPersonasCorte | undefined;
 } {
   if (corte.sobres.length !== corte.duenosRemotos) throw new Error('El corte remoto está incompleto o ya fue consumido.');
+  // Prevalidación no destructiva: ante cualquier rechazo de base o sobre incoherente, `corte.sobres`
+  // y sus ArrayBuffer permanecen íntegros sin consumirse ni vaciarse.
+  for (let i = 0; i < corte.sobres.length; i++) {
+    const parte = corte.sobres[i];
+    const dueno = i + 1;
+    comprobarIdentidad(parte, corte, dueno);
+    if (corte.personasDirectas) {
+      const sustituidas = parte.personasSustituidas;
+      if (sustituidas !== null || Object.hasOwn(parte, 'personas')) {
+        if (!sustituidas || typeof sustituidas !== 'object' || !Array.isArray(parte.personas))
+          throw new Error(`Sobre de personas directas incoherente para el dueño ${dueno}.`);
+        try {
+          validarBloquesPersonasPreDecode(parte.personas, sustituidas.cantidad, basePesos);
+        } catch (error) {
+          if (error instanceof RechazoBasePesosError) throw error;
+          throw new Error(`Personas directas inválidas para el dueño ${dueno}.`, { cause: error });
+        }
+      }
+    } else if (Object.hasOwn(parte, 'personasSustituidas') || Object.hasOwn(parte, 'personas')) {
+      throw new Error(`Modo de personas incoherente para el dueño ${dueno}.`);
+    }
+  }
   const { modoFauna: modo, tick } = corte;
   const datos: DiagnosticoTeselasCorte | undefined = corte.teselasDirectas
     ? { bytesV8: 0, v8Ms: 0, bytesTuplas: 0, tuplasMs: 0, duenosTuplas: 0, duenosV8: 0 } : undefined;
@@ -332,10 +425,10 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario, basePesos?: Ba
     return contenido;
   };
   const partes: ParteMundo[] = [];
-  const sobres = corte.sobres.reverse();
-  try {
-    while (sobres.length) partes.push(decodificar(sobres.pop(), partes.length + 1));
-  } finally { sobres.length = 0; }
+  for (let i = 0; i < corte.sobres.length; i++) {
+    partes.push(decodificar(corte.sobres[i], i + 1));
+  }
+  corte.sobres.length = 0;
   return { partes, diagnosticoTeselasCorte: datos, diagnosticoPersonasCorte: datosPersonas };
 }
 

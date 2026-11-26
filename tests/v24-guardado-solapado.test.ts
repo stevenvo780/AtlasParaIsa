@@ -93,7 +93,7 @@ function abrirCabeza(path: string) {
   } finally { lector.close(); }
 }
 
-test('un corte solapable conserva pesos FULL aunque el corte anterior publique una base F64', async t => {
+test('un corte solapable autorizado reutiliza la base F64 por REF y libera el ticket tras COMMIT', async t => {
   const persistir = t.mock.method(PersistidorGuardado.prototype, 'guardar');
   const cadaTicks = 4;
   const { app, path } = escenario(t, cadaTicks, true);
@@ -108,8 +108,12 @@ test('un corte solapable conserva pesos FULL aunque el corte anterior publique u
     const confirmado = await segundo!.result;
     assert.ok(anterior?.basePesos, 'hay una base F64 durable antes del segundo corte');
     assert.equal(segundo!.arguments[1], true, 'el segundo corte admite que el motor avance mientras se guarda');
-    assert.equal(confirmado?.perfilPersistidor.personasRef, 0);
-    assert.ok((confirmado?.perfilPersistidor.personasFull ?? 0) > 0);
+    assert.ok(typeof segundo!.arguments[2] === 'string', 'el corte solapable con REF lleva token de ticket autorizado');
+    assert.ok((confirmado?.perfilPersistidor.personasRef ?? 0) > 0, 'el segundo corte solapable usa REF');
+    assert.ok((confirmado?.perfilPersistidor.bytesPesos ?? Infinity) < (anterior.perfilPersistidor.bytesPesos ?? 0));
+    assert.equal(confirmado?.perfilPersistidor.ticketAutorizado, true);
+    assert.equal(confirmado?.perfilPersistidor.reconstruidoFullPorRevocacion, false);
+    assert.equal(confirmado?.perfilPersistidor.ticketsRetenidos, 0);
     assert.equal(abrirCabeza(path).tick, 2 * cadaTicks);
     assert.equal(app.failed, false);
   } finally { await app.close(); }

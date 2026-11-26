@@ -29,8 +29,12 @@ import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, PersonDetai
 import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
-import { PersistidorGuardado, RechazoBasePesosGuardadoError, type GuardadoConfirmado } from './guardado-worker.js';
+import {
+  PersistidorGuardado, RechazoBasePesosGuardadoError,
+  type GuardadoConfirmado, type ResultadoAutorizacionTicket,
+} from './guardado-worker.js';
 import type { CapturaCorteTransferido } from '../world/motor/corte-transferido.js';
+import { inspeccionarReferenciasCorte } from '../world/motor/mensajes-corte.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { readWorldInstance } from './world-instance.js';
@@ -711,9 +715,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     store.lastSnapshotBytes = acuse.snapshotBytes;
     lastWorldSaveAt = monotonicNow();
   }
-  function iniciarGuardadoSolapado(captura: CapturaCorteTransferido): void {
+  function iniciarGuardadoSolapado(captura: CapturaCorteTransferido, tokenAutorizacion?: string): void {
     const tick = captura.corte.tick;
-    const respuesta = persistidor!.guardar(captura, true);
+    const respuesta = persistidor!.guardar(captura, true, tokenAutorizacion);
     const vuelo: NonNullable<typeof guardadoEnVuelo> = {
       tick,
       fin: respuesta.then(acuse => {
@@ -1335,7 +1339,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     pasoEnCurso = seguirTrasPausa(tramo.value).finally(() => { pasoEnCurso = undefined; });
     return pasoEnCurso;
 
-    function seguirTrasPausa(pausa: Promise<GuardadoConfirmado | undefined>): Promise<void> {
+    function seguirTrasPausa(pausa: Promise<GuardadoConfirmado | ResultadoAutorizacionTicket | undefined>): Promise<void> {
       return pausa.then(acuse => reanudar(() => avance.next(acuse)), error => reanudar(() => avance.throw(error)));
     }
     function reanudar(continuar: () => ReturnType<typeof avance.next>): void | Promise<void> {
@@ -1358,7 +1362,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       recuperarPaso(error, false, tickMotor);
     }
   }
-  function* avanzar(): Generator<Promise<GuardadoConfirmado | undefined>, void, GuardadoConfirmado | undefined> {
+  function* avanzar(): Generator<
+    Promise<GuardadoConfirmado | ResultadoAutorizacionTicket | undefined>,
+    void,
+    GuardadoConfirmado | ResultadoAutorizacionTicket | undefined
+  > {
     susurrosEnUltimoPaso = false;
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
@@ -1499,22 +1507,70 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             const ventana = paramsOf(draft).persistencia.ventanaEventosTicks;
             const requiereMantenimiento = ventana > 0 && tick - ultimoCorteSinSolape >= ventana;
             const habilitarSolape = maxTicksSolapados > 0 && !requiereMantenimiento && store.admiteGuardadoSolapado();
-            const captura = motor?.capturarCorteTransferido?.(habilitarSolape);
+            let captura = motor?.capturarCorteTransferido?.(habilitarSolape);
             if (captura) {
               const { maxTicksSolapados: _adelanto, reusarCabezaInicial, ...opcionesPersistidor } = options.guardadoEnHilo;
               persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, ...(basePesosCorte && { basePesosCorte: true }),
                 path: store.path, ...(reusarCabezaInicial && { probarCabeza: () => store.exportarPruebaCabeza() }) });
-              if (captura.admiteSolape) { iniciarGuardadoSolapado(captura); solapado = true; }
-              else {
+              let tokenAutorizacion: string | undefined;
+              if (captura.admiteSolape && basePesosCorte) {
+                const refs = inspeccionarReferenciasCorte(captura.corte.remoto);
+                if (refs.totalRefs > 0) {
+                  let autorizado = false;
+                  if (!refs.inconsistente && refs.identidad) {
+                    const respuesta = (yield persistidor.autorizarTicket(
+                      { solicitud: captura.corte.solicitud, epoca: captura.corte.epoca, tick: captura.corte.tick,
+                        eventCounter: captura.corte.eventCounter },
+                      refs.identidad,
+                    )) as ResultadoAutorizacionTicket | undefined;
+                    if (respuesta?.autorizado && typeof respuesta.tokenAutorizacion === 'string') {
+                      autorizado = true;
+                      tokenAutorizacion = respuesta.tokenAutorizacion;
+                    }
+                  }
+                  if (!autorizado) {
+                    // Sin ticket seguro: fallback FULL preventivo antes de desprender buffers o avanzar el motor.
+                    motor?.publicarBasePesosCorte?.(undefined);
+                    const preventiva = motor?.capturarCorteTransferido?.(habilitarSolape, true);
+                    if (!preventiva || preventiva.corte.tick !== captura.corte.tick || preventiva.corte.epoca !== captura.corte.epoca
+                      || preventiva.corte.eventCounter !== captura.corte.eventCounter) {
+                      throw new Error('No se pudo recapturar el corte con pesos completos tras denegar el ticket REF.');
+                    }
+                    captura = preventiva;
+                  }
+                }
+              }
+              if (captura.admiteSolape) {
                 try {
-                  acuse = yield persistidor.guardar(captura);
+                  iniciarGuardadoSolapado(captura, tokenAutorizacion);
+                  solapado = true;
                 } catch (error) {
+                  if (tokenAutorizacion !== undefined) {
+                    persistidor.abortarTicket(
+                      { solicitud: captura.corte.solicitud, epoca: captura.corte.epoca, tick: captura.corte.tick,
+                        eventCounter: captura.corte.eventCounter },
+                      tokenAutorizacion,
+                    );
+                  }
+                  throw error;
+                }
+              } else {
+                try {
+                  acuse = (yield persistidor.guardar(captura, false, tokenAutorizacion)) as GuardadoConfirmado | undefined;
+                } catch (error) {
+                  if (tokenAutorizacion !== undefined) {
+                    persistidor.abortarTicket(
+                      { solicitud: captura.corte.solicitud, epoca: captura.corte.epoca, tick: captura.corte.tick,
+                        eventCounter: captura.corte.eventCounter },
+                      tokenAutorizacion,
+                    );
+                  }
                   if (basePesosCorte && error instanceof RechazoBasePesosGuardadoError) {
                     motor?.publicarBasePesosCorte?.(undefined);
                     const reintento = motor?.capturarCorteTransferido?.(false, true);
                     if (!reintento || reintento.corte.tick !== captura.corte.tick || reintento.corte.epoca !== captura.corte.epoca
                       || reintento.corte.eventCounter !== captura.corte.eventCounter) throw error;
-                    acuse = yield persistidor.guardar(reintento, false);
+                    acuse = (yield persistidor.guardar(reintento, false)) as GuardadoConfirmado | undefined;
                   } else throw error;
                 }
                 if (!acuse) throw new Error('Falta el acuse del escritor de guardado.');
@@ -2143,7 +2199,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         } finally {
           try {
             if (!gateway) {
-              try { await esperarGuardado(); } finally { await persistidor?.cerrar(); }
+              try { for (let vuelo = esperarGuardado(); vuelo; vuelo = esperarGuardado()) await vuelo; }
+              finally { await persistidor?.cerrar(); }
               if (!failed && !aMedioPaso) duranteOperacion('guardando', () => guardarMundo(world));
             }
           } finally {

@@ -151,7 +151,6 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
 
 function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, escribirFila: (fila: Record<string, unknown>) => void): number {
   let mundo = origen;
-  let materia: Instantanea['materia'] | undefined;
   const params = paramsOf(origen);
   // El coordinador recibe los chunks retirados de todos los dueños y vuelve a activarlos desde este archivo.
   const { archivo, archivar } = archivoDeChunks(origen);
@@ -185,7 +184,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       msCpuPorTick: msCpu / medido, msParedPorTick: msPared / medido, ticksPorSegundo: medido * 1000 / msPared,
       ...(medicion ? { cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases) } : {}), maxRssMiB,
     } : undefined;
-    const digesto = o.digesto ? digestoCompleto(mundo, archivo, materia) : undefined;
+    const digesto = o.digesto ? digestoCompleto(mundo, archivo, motor?.instantanea().materia) : undefined;
     escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto });
     return duras ? 2 : 0;
   };
@@ -232,12 +231,10 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
         msPared += performance.now() - pared;
       } else paso();
       if (motor) {
-        const corte = motor.instantanea();
-        mundo = corte.world;
-        if (o.digesto) materia = corte.materia;
+        mundo = motor.vista();
         const dueno = duenoSi(origen);
         if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
-        // La instantánea reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
+        // La vista reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
         enlazarCtx(mundo, dueno);
       }
       if (params.v23.fauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {

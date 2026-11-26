@@ -13,7 +13,7 @@ import {
 import { comprobarConservacion, plegarLibros, registrarConservacion, sumarEnVuelo, type TotalesMateria } from '../src/world/materia/libro.js';
 import { REF_NULA, TipoIntento, genDe, refDe, slotDe, type Intento } from '../src/world/motor/contratos.js';
 import type { World } from '../src/world/mundo/tipos.js';
-import type { Elements } from '../src/world/soa/arena.js';
+import { PageArena, type Elements } from '../src/world/soa/arena.js';
 import { Parte, Rol, libroVacio, type Libro, type LoteRef, type ServicioQuimico, type Sustancia } from '../src/world/materia/tipos.js';
 
 const HILOS = 32;
@@ -634,6 +634,85 @@ if (isMainThread) test('el punto de control restaura lotes, generaciones, depós
   const otraVersion = bytes.slice();
   new DataView(otraVersion.buffer).setUint32(4, 2, true);
   assert.throws(() => decodificarCheckpoint(otraVersion, quimica.sustancia), /desconocido/);
+});
+
+if (isMainThread) test('aparcar la composición recicla memoria y conserva referencias, lecturas y checkpoint', t => {
+  const lotes = new PageArena(LOTES_POR_BLOQUE), contenido = new PageArena(LOTES_POR_BLOQUE);
+  const paginas = new PageArena(1), desborde = new PageArena(64), libro = libroVacio();
+  const frio = new Map<LoteRef, Float64Array>();
+  const arena = new ArenaLotes({
+    lotes, contenido, paginas, desborde, quimica, hilo: 0, agua: 1, digerible: () => 0,
+    terreno: { chunkDe: celda => celda >> 8, duenoChunk: Int16Array.of(0) },
+    leerFrio(ref, celda) { assert.equal(celda, 5); return frio.get(ref)!; },
+  });
+  lotes.prepararF0(4, LOTES_POR_BLOQUE);
+  contenido.prepararF0(4, LOTES_POR_BLOQUE);
+  desborde.prepararF0(32);
+  paginas.prepararF0(1);
+  paginas.reserve();
+
+  const l = arena.nuevo(Rol.Suelo, 5, 13), vida = arena.nuevo(Rol.Vida, 5, 0);
+  arena.fuente(l, Float64Array.from([...sustancias.flatMap(({ id }) => [id, 7 + id]), 0, 1200]), libro);
+  const muestra = arena.muestra(l), vista = arena.vista(l), saldo = arena.saldo(), libres = [...arena.libres()];
+  const checkpoint = codificarPaginas(7, () => arena.muestras(), () => arena.libres());
+  const exceso = desborde.used;
+  assert.ok(exceso >= 2);
+
+  frio.set(l, Float64Array.of(0, 1));
+  assert.throws(() => arena.aparcar(l), /no coincide/);
+  assert.equal(contenido.used, 2);
+  assert.deepEqual(arena.muestra(l), muestra);
+  frio.set(l, muestra.pares);
+  arena.aparcar(l);
+  assert.equal(contenido.used, 1);
+  assert.equal(desborde.used, 0);
+  assert.equal(lotes.used, 2);
+  assert.ok(arena.estaAparcado(l) && arena.vivo(l) && arena.propio(l));
+  const enCelda = new Float64Array(1);
+  assert.equal(arena.lotes(5, Rol.Suelo, enCelda), 1);
+  assert.equal(enCelda[0], l);
+  assert.deepEqual([...arena.libres()], libres);
+  assert.deepEqual(arena.muestra(l), muestra);
+  assert.deepEqual(arena.vista(l), vista);
+  assert.equal(arena.calor(l), 1200);
+  assert.equal(arena.cuantos(l, sustancias.at(-1)!.id), 7 + sustancias.at(-1)!.id);
+  const ids = new Uint32Array(10), cantidades = new Float64Array(10);
+  assert.equal(arena.especies(l, ids, cantidades), sustancias.length);
+  assert.deepEqual([...ids], sustancias.slice(0, 10).map(s => s.id));
+  assert.deepEqual([...cantidades], sustancias.slice(0, 10).map(s => s.id + 7));
+  assert.deepEqual(arena.saldoPropio(), saldo);
+  assert.deepEqual(codificarPaginas(7, () => arena.muestras(), () => arena.libres()), checkpoint);
+
+  const fuentes = libro.fuentes.slice();
+  assert.throws(() => arena.fuente(l, Float64Array.of(sustancias[0]!.id, 1), libro), /antes de mutarlo/);
+  assert.throws(() => arena.moverCalor(vida, l, 2), /antes de mutarlo/);
+  assert.deepEqual(libro.fuentes, fuentes);
+
+  const nuevo = arena.nuevo(Rol.Objeto, -1, 0);
+  assert.equal(contenido.slots, 2, 'reutiliza memoria física aunque abre otra ranura lógica');
+  assert.equal(slotDe(nuevo), 2);
+  assert.equal(arena.calor(nuevo), 0);
+  const reserva = desborde.reserve.bind(desborde);
+  let reservas = 0;
+  const fallo = t.mock.method(desborde, 'reserve', () => {
+    if (++reservas === 2) throw new Error('falta desborde');
+    return reserva();
+  });
+  assert.throws(() => arena.reponer(l), /falta desborde/);
+  assert.ok(arena.estaAparcado(l));
+  assert.equal(contenido.used, 2);
+  assert.equal(desborde.used, 0);
+  assert.deepEqual(arena.saldo(), saldo);
+  fallo.mock.restore();
+
+  arena.reponer(l);
+  assert.ok(!arena.estaAparcado(l) && arena.vivo(l));
+  assert.equal(contenido.used, 3);
+  assert.equal(desborde.used, exceso);
+  assert.deepEqual(arena.muestra(l), muestra);
+  assert.deepEqual(arena.saldo(), saldo);
+  assert.deepEqual([...arena.libres()], libres);
+  assert.equal(arena.cuantos(nuevo, sustancias[0]!.id), 0);
 });
 
 if (isMainThread) test('el punto de control detecta la corrupción de cualquier bit', () => {

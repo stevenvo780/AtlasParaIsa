@@ -21,7 +21,9 @@ import { faunaCacheAppended, faunaCacheFiltered, type Animal } from '../animals.
 import { percepcionDe, olvidarPercepcion } from '../decision/percepcion.js';
 import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE } from '../materia/arena.js';
+import { ArchivoMateriaFria } from '../materia/archivo-frio.js';
 import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
+import { sueloYVidaDormidos } from '../materia/ley-mundo.js';
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
@@ -39,7 +41,7 @@ import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  Clase, REF_NULA, TipoIntento, genDe, slotDe,
+  Clase, DATO_MATERIA, DATO_TOMAR, REF_NULA, TipoIntento, genDe, slotDe,
   type Buzon, type ChunkId, type FrenteEscritura, type FrentePublico, type Globales, type Hilo, type Intento, type Ref, type Slot,
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
@@ -190,6 +192,7 @@ export class Dueno implements CtxF0 {
       },
       vaciar: (cola, f) => this.#interno.vaciar(cola, i => {
         if (this.#aplicarMotor(i)) return;
+        if (this.#archivoFrio) this.#protegerDestinoFrio(i);
         f(i);
         this.#contar(CTL_DUENO.recibidos);
       }),
@@ -424,9 +427,13 @@ export class Dueno implements CtxF0 {
     const lotes = dadas?.lotes ?? new PageArena(RESERVA_LOTES), desborde = dadas?.desborde ?? new PageArena(RESERVA_DESBORDE);
     const base = sustanciasMundo(quimica), terreno = this.terrenoPercibido;
     this.#lotes = lotes; this.#desborde = desborde;
+    const raizFria = process.env.CARTA_MATERIA_FRIA_DIR;
+    const archivo = this.#archivoFrio = raizFria && this.hilos === 1 && this.params.v23.guardadoCompleto
+      ? new ArchivoMateriaFria(raizFria, RESERVA_LOTES, desborde) : undefined;
     this.quimica = quimica;
     this.materia = new ArenaLotes({
       lotes, desborde, paginas: terreno.paginasMateria, terreno, quimica, hilo: this.hilo, agua: base.H2O,
+      ...(archivo && { contenido: archivo.contenido, leerFrio: (ref, celda) => archivo.leer(ref, celda) }),
       // Lo digerible con κ a la temperatura del cuerpo, solo exotérmicas: la fracción que se oxida en un día de tránsito
       // (la misma regla que `MundoMaterial` da a su arena).
       digerible: (s: Readonly<Sustancia>, kappa: Kappa) => {
@@ -439,13 +446,25 @@ export class Dueno implements CtxF0 {
   }
   #lotes: PageArena | undefined;
   #desborde: PageArena | undefined;
+  #archivoFrio?: ArchivoMateriaFria;
+
+  muestraMemoriaMateria() {
+    if (!this.#lotes || !this.#desborde) return undefined;
+    const estadoFrio = this.#archivoFrio?.medidas();
+    return { lotesVivos: this.#lotes.used, bytesArena: this.#lotes.bytes + this.#desborde.bytes + (estadoFrio?.bytesFisicos ?? 0), estadoFrio };
+  }
+  cerrarMateriaFria(): void { this.#archivoFrio?.cerrar(); }
 
   /** F0 (coordinador): la arena de lotes solo crece aquí. Garantiza ranuras para `chunksNuevos` chunks y la holgura. */
   reservarMateria(chunksNuevos: number): void {
     if (!this.#lotes || !this.#desborde || this.hilo !== 0) return;
-    const libres = chunksNuevos * LOTES_POR_CHUNK_NUEVO + Math.max(LOTES_POR_CHUNK_NUEVO, this.#lotes.used);
+    const porChunk = chunksNuevos * LOTES_POR_CHUNK_NUEVO;
+    const libres = porChunk + Math.max(LOTES_POR_CHUNK_NUEVO, this.#lotes.used);
     this.#lotes.prepararF0(libres, LOTES_POR_BLOQUE);
-    this.#desborde.prepararF0(Math.max(libres, this.#desborde.used));
+    const contenido = this.#archivoFrio?.contenido;
+    const libresFisicos = contenido ? porChunk + Math.max(LOTES_POR_CHUNK_NUEVO, contenido.used) : libres;
+    contenido?.prepararF0(libresFisicos, LOTES_POR_BLOQUE);
+    this.#desborde.prepararF0(Math.max(libresFisicos, this.#desborde.used));
   }
 
   // ── Directorio de identidades ──────────────────────────────────────────────────────────────────────────
@@ -482,6 +501,7 @@ export class Dueno implements CtxF0 {
     const chunk = this.terrenoPercibido.paginaDe(cx, cy);
     if (chunk < 0 || !this.#activos.has(chunk)) return;
     for (const ley of this.leyes) ley.alRetirar?.(this, chunk);
+    if (this.#archivoFrio) this.#enfriarPagina(chunk, cx, cy);
     this.#activos.delete(chunk); this.#chunks = undefined;
     this.#vaciar.push(chunk);
   }
@@ -503,7 +523,42 @@ export class Dueno implements CtxF0 {
       this.#activos.set(chunk, key);
     }
     this.#chunks = undefined;
-    for (const [chunk] of nuevos) for (const ley of this.leyes) ley.alActivar?.(this, chunk);
+    for (const [chunk] of nuevos) {
+      this.#archivoFrio?.calentar(this.materia as ArenaLotes, chunk);
+      for (const ley of this.leyes) ley.alActivar?.(this, chunk);
+    }
+  }
+
+  #enfriarPagina(chunk: ChunkId, cx: number, cy: number): void {
+    const enPagina = ({ x, y }: { x: number; y: number }): boolean => Math.floor(x / 16) === cx && Math.floor(y / 16) === cy;
+    const m = this.mundo, x0 = cx * 16, y0 = cy * 16;
+    if (m.people.some(enPagina) || m.animals.some(enPagina) || m.structures.some(s => s.cells?.some(enPagina)
+      || (s.x < x0 + 16 && s.y < y0 + 16 && s.x + (s.footprint?.width ?? 1) > x0
+        && s.y + (s.footprint?.height ?? 1) > y0))) return;
+    const arena = this.materia as ArenaLotes;
+    const ninguno = new Float64Array(0);
+    for (let i = 0; i < 256; i++) {
+      const celda = chunk * 256 + i;
+      if (arena.lotes(celda, Rol.Objeto, ninguno) || arena.lotes(celda, Rol.Cadaver, ninguno) || arena.lotes(celda, Rol.Pieza, ninguno)) return;
+    }
+    this.#archivoFrio!.enfriar(arena, chunk, sueloYVidaDormidos(this, chunk));
+  }
+
+  #protegerDestinoFrio(i: Intento): void {
+    if (i.tipo !== TipoIntento.Tomar && !i.materia?.length) return;
+    const archivo = this.#archivoFrio!, arena = this.materia as ArenaLotes;
+    if (arena.estaAparcado(i.lote)) archivo.calentar(arena, Math.floor(arena.muestra(i.lote).celda / 256));
+    const destino = i.tipo === TipoIntento.Tomar ? i.dato?.[DATO_TOMAR.loteDestino] ?? REF_NULA : REF_NULA;
+    if (arena.estaAparcado(destino)) archivo.calentar(arena, Math.floor(arena.muestra(destino).celda / 256));
+    if (i.celda < 0) return;
+    const pagina = Math.floor(i.celda / 256);
+    if (!archivo.tiene(pagina)) return;
+    if (i.tipo === TipoIntento.Depositar && i.a === REF_NULA && i.lote === REF_NULA && i.dato?.[DATO_MATERIA.rol] === Rol.Aire) {
+      const aire = new Float64Array(1);
+      if (arena.lotes(i.celda, Rol.Aire, aire) && arena.propio(aire[0]!)) return;
+    }
+    // El piloto solo tiene un dueño: la reserva no puede competir con otro hilo al resolver esta entrega.
+    archivo.calentar(arena, pagina);
   }
 
   // ── Fases ──────────────────────────────────────────────────────────────────────────────────────────────

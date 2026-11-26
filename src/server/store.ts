@@ -140,6 +140,8 @@ export const fingerprint = (g: Gesture) => checksum(JSON.stringify(g.kind === 'c
   ? [g.kind, g.x, g.y, g.memoryId ?? null, g.agentId ?? null, g.order ?? null]
   : [g.kind, g.x, g.y, g.memoryId ?? null]));
 type Row = { body: string; digest: string; saved_at: number };
+type CabezaDurable = { digest: string; mundo: World } | 'checksum' | null;
+type LeerCabezaDurable = () => CabezaDurable;
 type ChronicleStamp = { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number };
 const sameChronicleStamp = (a: ChronicleStamp, b: ChronicleStamp) => Object.keys(a).every(key => a[key as keyof ChronicleStamp] === b[key as keyof ChronicleStamp]);
 function sameReplayState(left: World, right: World): boolean {
@@ -924,7 +926,7 @@ export class Store {
   /** Sin un sello vigente, comprueba la pareja mundo/materia antes de sobrescribir respaldos. */
   private completeMatterCanRotate(world: World, epoca: number): boolean {
     try {
-      const agenda = separarAgenda(world);
+      const agenda = (world as World & { [CAMPO_AGENDA]?: unknown })[CAMPO_AGENDA];
       if (agenda === undefined && this.requiereAgenda()) return false;
       const { materia, digest } = this.readCompleteMatter(0, world.tick);
       this.decodeCompleteAgenda(agenda, digest, materia, world.tick, epoca);
@@ -1090,17 +1092,35 @@ export class Store {
     return { world, savedAt: row.saved_at, slot, skipped, supersededAt: slot > 0 ? supersededAt : null,
       ...(agendaBruta !== undefined && { agendaBruta }) };
   }
+  /** La rotación y los dos archivos comprueban la misma cabeza bajo el BEGIN del guardado. */
+  private lecturaCabezaDurable(): LeerCabezaDurable {
+    if (!this.db.isTransaction) throw new Error('La lectura de la cabeza durable requiere la transacción de guardado.');
+    let cabeza: CabezaDurable | undefined;
+    let fallo: { error: unknown } | undefined;
+    return () => {
+      if (cabeza !== undefined) return cabeza;
+      if (fallo) throw fallo.error;
+      try {
+        const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+        if (!row) return cabeza = null;
+        if (checksum(row.body) !== row.digest) return cabeza = 'checksum';
+        return cabeza = { digest: row.digest, mundo: this.readSnapshot(row.body) as World };
+      } catch (error) {
+        fallo = { error };
+        throw error;
+      }
+    };
+  }
+
   /** ¿El cuerpo del slot 0 se lee entero? Lo pregunta `save()` cuando esta conexión aún
    * no ha cargado nada (no consta el estado de la cadena) y solo la primera vez: después
    * lo sabe por el guardado que acaba de confirmar. Un slot 0 ausente no tiene nada que
    * propagar, así que la rotación —que copiaría cero filas— no hace daño. */
-  private readSlot0(completeEpoch: number | null = null): boolean {
-    const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
-    if (!row) return this.slot0Readable = true;
-    if (checksum(row.body) !== row.digest) return this.slot0Readable = false;
+  private readSlot0(leerCabeza: LeerCabezaDurable, completeEpoch: number | null = null): boolean {
     try {
-      const world = this.readSnapshot(row.body) as World;
-      if (completeEpoch !== null && !this.completeMatterCanRotate(world, completeEpoch)) return this.slot0Readable = false;
+      const cabeza = leerCabeza();
+      if (cabeza === 'checksum' || cabeza && completeEpoch !== null && !this.completeMatterCanRotate(cabeza.mundo, completeEpoch))
+        return this.slot0Readable = false;
     }
     catch (error) {
       if (!(error instanceof SnapshotPhysicalError)) throw error;
@@ -1284,19 +1304,21 @@ export class Store {
     }
   }
   /** Called before any host SQL writes. A raw transaction can never supply a reusable proof. */
-  private assertChronicleChanges(world: World, stampBeforeBegin: ChronicleStamp, trusted: boolean): void {
+  private assertChronicleChanges(world: World, stampBeforeBegin: ChronicleStamp, trusted: boolean, leerCabeza: LeerCabezaDurable): void {
     const journal = world.chronicleJournal!, proof = this.verifiedChronicle;
     if (!trusted || !proof || !sameChronicleStamp(proof.stamp, stampBeforeBegin)
       || !sameChronicleStamp(stampBeforeBegin, this.chronicleStamp())) {
       this.verifiedChronicle = null;
       this.assertChronicleSchema();
-      const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
-      if (!row) {
+      const cabeza = leerCabeza();
+      if (!cabeza) {
         if (this.chronicleOrigin() !== null || this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get() || this.db.prepare('SELECT 1 FROM events LIMIT 1').get()) chronicleFailure('baseline snapshot is missing');
         if (journal.committedThrough !== journal.startsAfter || journal.committedDigest !== EMPTY_CHRONICLE_DIGEST) chronicleFailure('committed history has no baseline');
       } else {
-        if (checksum(row.body) !== row.digest) chronicleFailure('baseline snapshot checksum mismatch');
-        const baseline = this.readSnapshot(row.body) as World, declared = baseline.chronicleJournal !== undefined;
+        if (cabeza === 'checksum') chronicleFailure('baseline snapshot checksum mismatch');
+        const original = cabeza.mundo;
+        const declared = original.chronicleJournal !== undefined;
+        const baseline = declared ? original : { ...original };
         enableChronicleJournal(baseline); this.assertChronicleOrigin(baseline, declared); this.assertChronicleArchive(baseline);
         this.rememberChronicle(baseline, this.chronicleStamp());
       }
@@ -1778,7 +1800,8 @@ export class Store {
 
   /** All writes use the host transaction. Neither this helper nor a failed save clears queues.
    * Devuelve la cabeza de la cadena de recibos tras archivar los pendientes (la escribe `save`). */
-  private flushTechnology(world: World, recovering = false, recoveredChain: TechnologyChain | null = null): TechnologyChain {
+  private flushTechnology(world: World, leerCabeza: LeerCabezaDurable | null, recoveredChain: TechnologyChain | null = null): TechnologyChain {
+    const recovering = leerCabeza === null;
     const state = world.technology, journal = state.journal!;
     assertTechnologyJournal(state, world.tick);
     assertTechnologyCatalogueState(world);
@@ -1789,15 +1812,16 @@ export class Store {
       this.verifiedRecipes.clear();
       chain = null;
       assertTechnologySchema(this.db);
-      if (!recovering) {
+      if (leerCabeza) {
         // Validate the durable baseline BEFORE any idempotent writes. Otherwise a
         // deleted definition/statistics row could be silently rebuilt from the candidate.
-        const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
-        if (!row && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
+        const cabeza = leerCabeza();
+        if (!cabeza && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
         let baselineProved = false;
-        if (row) {
-          if (checksum(row.body) !== row.digest) technologyFailure('baseline snapshot checksum mismatch');
-          const baseline = this.migrateSnapshot(this.readSnapshot(row.body) as World);
+        if (cabeza) {
+          if (cabeza === 'checksum') technologyFailure('baseline snapshot checksum mismatch');
+          // La migración modifica la cabecera. Este es el último lector de la cabeza anterior.
+          const baseline = this.migrateSnapshot(cabeza.mundo);
           if (baseline.technology.journal !== undefined) {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -1807,7 +1831,7 @@ export class Store {
             if (baseline.technology.catalogue && state.catalogue?.committedThrough !== baseline.technology.catalogue.committedThrough)
               technologyFailure('candidate changed the committed definition boundary');
             this.rememberTechnology(baseline, chain);
-            this.rememberSlotBounds(row.digest, baseline);
+            this.rememberSlotBounds(cabeza.digest, baseline);
             baselineProved = true;
           } else if (this.technologyArchive.getHistoryOrigin()) {
             technologyFailure('baseline snapshot lost its declared history origin');
@@ -2050,9 +2074,10 @@ export class Store {
       const matterStillVerified = epoca !== null && !chronicleTriggers
         && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))
         && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
+      let leerCabeza: LeerCabezaDurable | undefined = this.lecturaCabezaDurable();
       const rotatesBackups = epoca === null || matterStillVerified
-        ? this.slot0Readable ?? this.readSlot0()
-        : this.slot0Readable !== false && this.readSlot0(epoca);
+        ? this.slot0Readable ?? this.readSlot0(leerCabeza)
+        : this.slot0Readable !== false && this.readSlot0(leerCabeza, epoca);
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
       const expectedMatterBackups = complete && chronicleTriggers ? this.expectedMatterBackups(rotatesBackups, deep) : null;
@@ -2065,9 +2090,10 @@ export class Store {
         replay = this.prepareReplay(world, inputs, changes, nextDurableSaves);
         if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
       }
-      this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
+      this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers, leerCabeza);
       const cambiosAntesDeTecnologia = solapado ? this.totalChanges() : undefined;
-      const technologyChain = this.flushTechnology(world);
+      const technologyChain = this.flushTechnology(world, leerCabeza);
+      leerCabeza = undefined;
       if (solapado) {
         const head = this.technologyChainRecord();
         if (this.totalChanges() !== cambiosAntesDeTecnologia || head?.version !== 2
@@ -2524,7 +2550,7 @@ export class Store {
       } else recovered.rebuildPreviousTechnology(world);
       recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
-      recovered.writeTechnologyMetadata(recovered.flushTechnology(world, true, chain), null);
+      recovered.writeTechnologyMetadata(recovered.flushTechnology(world, null, chain), null);
       const prepared = recovered.snapshotParts.prepare({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)),
         ...(agendaBruta !== undefined && { [CAMPO_AGENDA]: agendaBruta }) }, paramsOf(world), recovered.snapshotInlineTileLimit);
       const { body } = recovered.snapshotParts.write(prepared);

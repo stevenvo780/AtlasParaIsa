@@ -1,12 +1,38 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { Store } from '../src/server/store.js';
 import type { LegacyRecord } from '../src/shared/demography.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { inheritGenome } from '../src/world/genetics.js';
 import { createWorld } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { filaInstantanea, laboratorio, sha256 } from './lib/store.js';
+
+test('un escritor frío decodifica una sola vez la cabeza anterior y conserva el respaldo', t => {
+  const opciones = { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true };
+  const { store, path } = laboratorio(t, 'atlas-sello-cabeza-fria-', opciones);
+  const world = createWorld(42, parseParams('v23.guardadoCompleto=true,conducta.politicaPeso=1'));
+  store.guardar({ world, materia: null });
+  const cabeza = filaInstantanea(store);
+  world.tick++;
+  for (const persona of world.people) persona.demography.age++;
+
+  const frio = new Store(path, opciones);
+  try {
+    const lector = frio as unknown as { readSnapshot(body: string): unknown };
+    const leer = lector.readSnapshot.bind(lector);
+    let decodificaciones = 0;
+    t.mock.method(lector, 'readSnapshot', (body: string) => {
+      if (body === cabeza.body && frio.db.isTransaction) decodificaciones++;
+      return leer(body);
+    });
+    frio.guardar({ world, materia: null });
+    assert.equal(decodificaciones, 1);
+    assert.deepEqual(filaInstantanea(frio, 1), cabeza);
+    assert.equal(frio.verificarGuardado()?.world.tick, 1);
+  } finally { frio.close(); }
+});
 
 for (const corromper of [false, true]) {
   test(`revalida el candidato tras un commit WAL ajeno ${corromper ? 'en el archivo de identidades' : 'en las sesiones'}`, t => {

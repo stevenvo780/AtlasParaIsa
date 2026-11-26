@@ -19,17 +19,22 @@ assert.ok(segundos === undefined || (/^[1-9]\d*$/.test(segundos) && Number.isSaf
 const raizCinta = process.env.ATLAS_DEMO_CINTA_RAIZ;
 assert.ok(raizCinta === undefined || isAbsolute(raizCinta) && statSync(raizCinta, { throwIfNoEntry: false })?.isDirectory(),
   'ATLAS_DEMO_CINTA_RAIZ debe apuntar a un directorio absoluto existente');
+const hilos = Number(process.env.ATLAS_DEMO_HILOS ?? '1');
+assert.ok(Number.isSafeInteger(hilos) && hilos > 0, 'ATLAS_DEMO_HILOS debe ser un entero positivo');
+const perfil = { hilos, guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1',
+  adelantoMaximoTicks: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0') };
 const dosHorasMs = 120 * 60 * 1000;
 const raiz = resolve(copia);
 const { chromium, expect } = createRequire(join(raiz, 'package.json'))('@playwright/test');
 const { createWorkerGateway } = await import(pathToFileURL(join(raiz, 'dist/server/server/gateway.js')));
 mkdirSync(salida, { mode: 0o700 });
 process.env.CARTA_OPEN_WORLD = '1';
-process.env.CARTA_MOTOR_HILOS = '1';
+process.env.CARTA_MOTOR_HILOS = String(hilos);
 process.env.CARTA_MOTOR_GPU = '';
 process.env.CARTA_PARAMS = 'persistencia.cadaTicks=200,persistencia.ventanaEventosTicks=2400,red.deltas=true,' +
   'v23.guardadoCompleto=true,v23.fotograma=true,v23.cohesion=true,v23.natalidad=true,v23.comunidades=true,' +
-  'v23.materia=true,v23.cuerpos=true,v23.fauna=true,v23.tecnica=true,v23.obra=true,v23.intentos=true';
+  'v23.materia=true,v23.cuerpos=true,v23.fauna=true,v23.tecnica=true,v23.obra=true,v23.intentos=true' +
+  (hilos > 1 ? ',v23.duenos=true' : '');
 
 const sonda = createServer();
 sonda.listen(0, '127.0.0.1');
@@ -272,7 +277,7 @@ try {
     await expect.poll(async () => (await medirSalud('reanudada', false)).tick, { timeout: 15_000 }).toBeGreaterThan(reabierta.tick);
     reanudacion = { reabierta, reanudada: await medirSalud('reanudada') };
   }
-  const evidencia = { tick: salud.tick, ultimoTickGuardado: salud.ultimoTickGuardado, vistas,
+  const evidencia = { tick: salud.tick, ultimoTickGuardado: salud.ultimoTickGuardado, vistas, perfil,
     recargaCinta: { tick: recuperado.baseFrame.tick, epoca: recuperado.epoca, sha256, huellaExacta: true },
     ...(guardado && { guardado }),
     ...(directorioCinta && { almacenamiento: { dispositivoMundo: statSync(mundo).dev,

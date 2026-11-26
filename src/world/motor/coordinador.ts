@@ -172,7 +172,8 @@ class MotorUnico implements Motor {
     const d = duenoDe(i.world, i.materia?.sustancias);
     d.epoca = epoca;
     d.enlazar(this.#enlace, this.#fuente);
-    d.abrirEpoca(i.materia);
+    try { d.abrirEpoca(i.materia); }
+    catch (error) { d.cerrarMateriaFria(); throw error; }
   }
 
   enlazar(cinta: DescriptorEnlace, fuente?: FuenteFotograma): void {

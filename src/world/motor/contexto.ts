@@ -34,7 +34,8 @@ import { paramsOf, type WorldParams } from '../params.js';
 import { PageArena } from '../soa/arena.js';
 import { olvidarOrganismos, organismosDe, type OrganismosMundo } from '../soa/organismos-mundo.js';
 import { residentFastAccess } from '../soa/terreno.js';
-import { maintainRegions, observarRegiones, type ChunkMeta } from '../spatial.js';
+import { clavesDeHalo, maintainRegions, observarRegiones, worldContext, type ChunkMeta } from '../spatial.js';
+import { CHUNK_SIZE, chunkKey, type Chunk } from '../terrain.js';
 import { tileIndexAppended, tileLookup } from '../tile-index.js';
 import { ctxSi, desenlazarCtx, enlazarCtx, type CtxF0, type Ley } from './acceso.js';
 import { aplicarCola } from './aplicar.js';
@@ -120,6 +121,13 @@ const intento = (tipo: TipoIntento, dato: number[], bytes: Uint8Array | null): I
 /** Una celda en el punto de control: la posición de su página, no su ranura en la arena (que cambia de una carga a
  * otra). |px|, |py| < 2²⁰ (MAX_COORDINATE / 16), así que cabe exacta en un double y conserva `celda % 256`. */
 const SESGO_PAGINA = 2 ** 20, ANCHO_PAGINA = 2 ** 21;
+function coordenadasDePagina(guardada: number): [number, number] {
+  const pagina = Math.floor(guardada / 256);
+  return [Math.floor(pagina / ANCHO_PAGINA) - SESGO_PAGINA, pagina % ANCHO_PAGINA - SESGO_PAGINA];
+}
+function admiteComposicionFria(rol: Rol): boolean {
+  return rol === Rol.Suelo || rol === Rol.Vida;
+}
 export function celdaMundo(terreno: Pick<Terreno, 'paginaX' | 'paginaY'>, celda: number): number {
   if (celda < 0) return -1;
   const chunk = celda >> 8;
@@ -128,7 +136,7 @@ export function celdaMundo(terreno: Pick<Terreno, 'paginaX' | 'paginaY'>, celda:
 /** La celda de la arena de ahora para una del punto de control; da de alta la página si no está (solo el coordinador). */
 export function celdaLocal(terreno: TerrenoPercepcion, guardada: number): number {
   if (guardada < 0) return -1;
-  const pagina = Math.floor(guardada / 256), px = Math.floor(pagina / ANCHO_PAGINA) - SESGO_PAGINA, py = pagina % ANCHO_PAGINA - SESGO_PAGINA;
+  const [px, py] = coordenadasDePagina(guardada);
   return terreno.asegurarPagina(px, py, 0) * 256 + guardada % 256;
 }
 
@@ -919,17 +927,33 @@ export class Dueno implements CtxF0 {
     for (const persona of this.mundo.people) for (const lote of persona.carga ?? []) carga.add(lote);
     const celdaGuardada = (lote: LoteGuardado): number =>
       lote.rol === Rol.Objeto && carga.has(lote.ref) ? REF_NULA : lote.celda;
-    let desborde = 0;
+    const enVuelo = decodificarEnVuelo(cp.enVuelo);
+    const archivo = this.#archivoFrio;
+    const arranque = archivo && this.#prepararArranqueFrio(archivo, enVuelo);
+    let desborde = 0, vivos = 0;
     const paginasLocales = new Map<number, number>();
     const indice = indexarPaginas(cp.epoca, cp.paginas, (lote, especies) => {
       const celda = celdaGuardada(lote);
-      if (celda >= 0) paginasLocales.set(celda - celda % 256, 0);
-      desborde += desbordeDeEspecies(especies);
+      if (celda >= 0) {
+        const pagina = celda - celda % 256;
+        if (!paginasLocales.has(pagina)) paginasLocales.set(pagina, arranque ? celdaLocal(terreno, pagina) : 0);
+      }
+      const extra = desbordeDeEspecies(especies);
+      arranque?.observar(lote, paginasLocales, extra);
+      desborde += extra;
+      vivos++;
     });
-    // Se dan de alta en el orden del archivo, antes de instalar los lotes por ranura.
-    for (const pagina of paginasLocales.keys()) paginasLocales.set(pagina, celdaLocal(terreno, pagina));
-    this.reservarMateria(Math.ceil(indice.ranuras / LOTES_POR_CHUNK_NUEVO));
-    this.#desborde!.prepararF0(desborde);
+    if (arranque) {
+      const frio = arranque.terminar();
+      this.#lotes!.prepararF0(indice.ranuras, LOTES_POR_BLOQUE);
+      archivo!.contenido.prepararF0(vivos - frio.lotes, LOTES_POR_BLOQUE);
+      this.#desborde!.prepararF0(desborde - frio.desborde);
+    } else {
+      // Se dan de alta en el orden del archivo, antes de instalar los lotes por ranura.
+      for (const pagina of paginasLocales.keys()) paginasLocales.set(pagina, celdaLocal(terreno, pagina));
+      this.reservarMateria(Math.ceil(indice.ranuras / LOTES_POR_CHUNK_NUEVO));
+      this.#desborde!.prepararF0(desborde);
+    }
     (this.materia as ArenaLotes).cargarPorRanura(indice.ranuras, ranura => {
       const lote = indice.leer(ranura);
       if (lote === undefined || typeof lote === 'number') return lote;
@@ -938,12 +962,73 @@ export class Dueno implements CtxF0 {
       // Cada dueño adopta los lotes de sus organismos al repartir.
       lote.dueno = 0;
       return lote;
-    });
+    }, arranque ? lote => lote.celda >= 0 && admiteComposicionFria(lote.rol)
+      && archivo!.tiene(Math.floor(lote.celda / 256)) : undefined);
     this.registro.cargar(cp.registro);
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };
     const q = this.quimica, saldo = saldoEnVuelo(cp.enVuelo, id => q.sustancia(id));
     this.#piezas.libros[0]!.enVuelo.set(saldo.map(Number));
-    return decodificarEnVuelo(cp.enVuelo).map(i => ({ ...i, celda: celdaLocal(terreno, i.celda) }));
+    return enVuelo.map(i => ({ ...i, celda: celdaLocal(terreno, i.celda) }));
+  }
+
+  #prepararArranqueFrio(archivo: ArchivoMateriaFria, garantias: readonly Intento[]) {
+    // Una garantía sin coordenadas puede resolver su destino a través de un organismo durante F1.
+    if (garantias.some(i => i.celda < 0)) return undefined;
+    const m = this.mundo, contexto = worldContext(m);
+    const retiradas = new Map<string, Chunk>();
+    for (const chunk of m.retiredChunks) if (!retiradas.has(chunk.key)) retiradas.set(chunk.key, chunk);
+    if (!retiradas.size && !contexto.loadChunk) return undefined;
+    const ocupadas = new Set(Object.keys(m.chunks));
+    for (const p of m.people) for (const clave of clavesDeHalo(p.x, p.y)) ocupadas.add(clave);
+    for (const a of m.animals) ocupadas.add(chunkKey(a.x, a.y));
+    for (const s of m.structures) {
+      for (const punto of s.cells ?? [s]) ocupadas.add(chunkKey(punto.x, punto.y));
+      for (let x = 0; x < (s.footprint?.width ?? 1); x++) for (let y = 0; y < (s.footprint?.height ?? 1); y++) {
+        ocupadas.add(chunkKey(s.x + x, s.y + y));
+      }
+    }
+    const bloquesProtegidos = new Set(garantias.map(i => i.celda - i.celda % 256));
+    const refsProtegidas = new Set(garantias.map(i => i.lote));
+    const total = { lotes: 0, desborde: 0 };
+    let bloque: { local: number; cx: number; cy: number; clave: string; lotes: Map<LoteRef, Float64Array>; desborde: number } | undefined;
+    let baseAnterior = -Infinity;
+    const terminarBloque = () => {
+      if (!bloque || bloque.lotes.size !== 512) return;
+      const { local, cx, cy, clave, lotes, desborde } = bloque;
+      const guardado = retiradas.get(clave) ?? contexto.loadChunk?.(clave, m.tick, this.params.v23);
+      if (!guardado || guardado.key !== clave || guardado.cx !== cx || guardado.cy !== cy || guardado.lifeVersion !== 4
+        || !Number.isSafeInteger(guardado.lastTick) || guardado.lastTick < 0 || guardado.lastTick > m.tick
+        || guardado.tiles.length !== CHUNK_SIZE ** 2 || !Array.isArray(guardado.animals) || guardado.animals.length
+        || !Array.isArray(guardado.structures) || guardado.structures.length) return;
+      // Store valida al leer. Comprueba también las posiciones de las retiradas que aún no se guardaron.
+      if (retiradas.has(clave) && guardado.tiles.some((tile, i) =>
+        tile.x !== cx * CHUNK_SIZE + i % CHUNK_SIZE || tile.y !== cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE))) return;
+      if (archivo.guardar(local, lotes)) { total.lotes += lotes.size; total.desborde += desborde; }
+    };
+    return {
+      observar(lote: LoteGuardado, locales: ReadonlyMap<number, number>, desborde: number) {
+        const base = Math.floor(lote.celda / 256) * 256;
+        if (base !== baseAnterior) {
+          terminarBloque();
+          baseAnterior = base;
+          bloque = undefined;
+          if (base >= 0 && !bloquesProtegidos.has(base)) {
+            const [cx, cy] = coordenadasDePagina(base), clave = `${cx},${cy}`;
+            const local = locales.get(base);
+            if (local !== undefined && !ocupadas.has(clave)) bloque = { local: local / 256, cx, cy, clave, lotes: new Map(), desborde: 0 };
+          }
+        }
+        if (!bloque) return;
+        if (refsProtegidas.has(lote.ref)) { bloque = undefined; return; }
+        if (admiteComposicionFria(lote.rol)) {
+          bloque.lotes.set(lote.ref, lote.pares);
+          bloque.desborde += desborde;
+        } else if (lote.rol !== Rol.Agua && lote.rol !== Rol.Aire && lote.rol !== Rol.Roca && lote.rol !== Rol.Mar && lote.rol !== Rol.Cielo) {
+          bloque = undefined;
+        }
+      },
+      terminar() { terminarBloque(); return total; },
+    };
   }
 }
 

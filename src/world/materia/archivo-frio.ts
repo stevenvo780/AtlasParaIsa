@@ -43,6 +43,21 @@ export class ArchivoMateriaFria {
       }
       lotes.set(ref, lote.pares);
     }
+    if (!this.guardar(pagina, lotes)) return;
+    this.#cache = { pagina, lotes };
+    const retirados: LoteRef[] = [];
+    try {
+      for (const ref of lotes.keys()) { arena.aparcar(ref); retirados.push(ref); }
+    } catch (error) {
+      for (const ref of retirados) arena.reponer(ref);
+      this.#borrar(pagina);
+      throw error;
+    } finally { this.#cache = undefined; }
+  }
+
+  /** Registra composición ya validada. Al arrancar, su reserva física se decide después de confirmar la escritura. */
+  guardar(pagina: number, lotes: Map<LoteRef, Float64Array>): boolean {
+    if (!lotes.size || this.#errorEscritura || this.#errorLimpieza || this.tiene(pagina)) return false;
     const datos = serialize(lotes);
     let ruta: string | undefined;
     try {
@@ -55,18 +70,10 @@ export class ArchivoMateriaFria {
       if (ruta && this.#errorEscritura !== 'EEXIST') {
         try { rmSync(ruta, { force: true }); } catch { /* El directorio se limpia al cerrar la instancia. */ }
       }
-      return;
+      return false;
     }
     this.#paginas.set(pagina, { huella: digest(datos), bytes: datos.length, lotes: lotes.size });
-    this.#cache = { pagina, lotes };
-    const retirados: LoteRef[] = [];
-    try {
-      for (const ref of lotes.keys()) { arena.aparcar(ref); retirados.push(ref); }
-    } catch (error) {
-      for (const ref of retirados) arena.reponer(ref);
-      this.#borrar(pagina);
-      throw error;
-    } finally { this.#cache = undefined; }
+    return true;
   }
 
   calentar(arena: ArenaLotes, pagina: number): void {

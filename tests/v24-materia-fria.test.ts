@@ -16,7 +16,6 @@ import { duenoSi } from '../src/world/motor/contexto.js';
 import { REF_NULA, TipoIntento, unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { parseParams, setParams } from '../src/world/params.js';
-import { bindWorldContext } from '../src/world/spatial.js';
 
 test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', async t => {
   const directorio = mkdtempSync(join(tmpdir(), 'atlas-materia-fria-'));
@@ -45,7 +44,6 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
         p.target = { x: p.x, y: p.y };
       }
     };
-    let persistida;
     try {
       motor.paso([]);
       const dueno = duenoSi(mundo)!;
@@ -118,7 +116,7 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
         try {
           const instantanea = motor.instantanea();
           store.guardar({ ...instantanea, world: cloneWorld(instantanea.world) });
-          persistida = store.cargarGuardadoCompleto()!;
+          const persistida = store.cargarGuardadoCompleto()!;
           assert.deepEqual(codificarCheckpoint(persistida.instantanea.materia!), dormido.vmat);
         } finally { store.close(); }
       } else assert.equal(métricas, undefined);
@@ -137,7 +135,7 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
       motor.paso([]);
       const activo = corte();
       const reutilizable = motor.instantanea();
-      return { dormido, activo, persistida, reutilizable, métricas, origen, retirada: retirada.key };
+      return { dormido, activo, reutilizable, métricas, origen, retirada: retirada.key };
     } finally { await motor.cerrar(); }
   }
 
@@ -157,15 +155,29 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
   assert.deepEqual(fallida.dormido, base.dormido);
   assert.deepEqual(fallida.activo, base.activo);
   mkdirSync(disco, { recursive: true });
-  const guardada = frío.persistida!;
   const durable = new Store(join(directorio, 'piloto.sqlite'));
+  const guardada = durable.cargarGuardadoCompleto()!;
+  assert.equal(guardada.instantanea.world.retiredChunks.length, 0);
+  const sinLector = cloneWorld(guardada.instantanea.world, { loadChunk: undefined });
+  const caliente = crearMotor(sinLector, unSoloDueno(7));
+  let vmatArranque: Uint8Array;
+  try {
+    caliente.cargar({ world: sinLector, materia: guardada.instantanea.materia }, guardada.epoca);
+    assert.equal(duenoSi(sinLector)!.muestraMemoriaMateria()?.estadoFrio?.paginasFrias, 0);
+    vmatArranque = codificarCheckpoint(caliente.instantanea().materia!);
+  } finally { await caliente.cerrar(); }
   const recarga = crearMotor(guardada.instantanea.world, unSoloDueno(7));
   try {
-    bindWorldContext(guardada.instantanea.world, durable.context);
     recarga.cargar(guardada.instantanea, guardada.epoca);
     const dueno = duenoSi(recarga.vista())!;
     assert.deepEqual(dueno.balanceMateria().hallado, frío.dormido.saldo);
-    assert.equal(dueno.muestraMemoriaMateria()?.estadoFrio?.paginasFrias, 0);
+    const memoria = dueno.muestraMemoriaMateria()!;
+    assert.ok(memoria.estadoFrio!.paginasFrias > 0);
+    assert.equal(memoria.lotesVivos - memoria.estadoFrio!.lotesFisicos, memoria.estadoFrio!.lotesFrios);
+    const primerCorte = recarga.instantanea();
+    assert.deepEqual(codificarCheckpoint(primerCorte.materia!), vmatArranque);
+    durable.guardar({ ...primerCorte, world: cloneWorld(primerCorte.world) });
+    assert.equal(durable.verificarGuardado()?.world.tick, primerCorte.world.tick);
     for (const [i, p] of recarga.vista().people.entries()) Object.assign(p, frío.origen[i], { target: frío.origen[i] });
     recarga.paso([]);
     assert.ok(recarga.vista().chunks[frío.retirada]);

@@ -28,7 +28,7 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
   const base = demografiaDeCinta(inicial);
   const arranque = inicial.events.filter(e => e.tick === inicial.tick && (epoca === 0 || chronicleSerial(e.id) === null));
   let serial = inicial.eventCounter, sustancias = 0, primero = true;
-  let anterior = new Map<string, { datos: Buffer; baja: Suceso }>();
+  let anterior = new Map<string, { datos: Buffer | string; baja: Suceso }>();
   let siguiente = anterior, serialSiguiente = serial, sustanciasSiguientes = sustancias;
   return {
     corte(c, f, paginas, mundo = c.mundo) {
@@ -53,15 +53,22 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       }
       siguiente = new Map();
       function cambiar(clave: string, suceso: Suceso, baja: Suceso) {
-        const datos = serialize(suceso);
-        siguiente.set(clave, { datos, baja });
-        if (f.completo || !anterior.get(clave)?.datos.equals(datos)) sucesos.push(suceso);
+        const datos = serialize(suceso), previo = anterior.get(clave);
+        const igual = previo !== undefined && typeof previo.datos !== 'string' && previo.datos.equals(datos);
+        siguiente.set(clave, igual ? previo : { datos, baja });
+        if (f.completo || !igual) sucesos.push(suceso);
       }
       function emitir<K extends keyof VistasLentas>(tipo: K, id: string, vista: VistasLentas[K]) {
         cambiar(`${tipo}:${id}`, { tipo, id, vista } as Suceso, { tipo, id, vista: null } as Suceso);
       }
       function texto(uid: number, campo: string, valor: string | null | undefined) {
-        if (valor != null) cambiar(`texto:${uid}:${campo}`, { tipo: 'texto', uid, campo, valor }, { tipo: 'texto', uid, campo, valor: null });
+        if (valor == null) return;
+        const clave = `texto:${uid}:${campo}`, previo = anterior.get(clave);
+        const igual = previo !== undefined && previo.datos === valor;
+        siguiente.set(clave, igual ? previo : {
+          datos: valor, baja: previo?.baja ?? { tipo: 'texto', uid, campo, valor: null },
+        });
+        if (f.completo || !igual) sucesos.push({ tipo: 'texto', uid, campo, valor });
       }
       emitir('mundo', '', cabecera);
       emitir('cronicaVista', '', events);

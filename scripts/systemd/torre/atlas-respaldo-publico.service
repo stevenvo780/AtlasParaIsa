@@ -1,10 +1,12 @@
 [Unit]
-Description=Respaldo horario del mundo público (torre, V21)
+Description=Respaldo horario del mundo público V23 (torre)
 ConditionPathIsMountPoint=/mnt/Data2
+
 [Service]
 Type=oneshot
-Environment=CARTA_DATA_DIR=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v21-20261124 DEST=/mnt/Data2/respaldos-atlas-v21 RETENCION=24 RESPALDO_METODO=backup TMPDIR=/datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/tmp SQLITE_TMPDIR=/datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/tmp
+Environment=RETENCION=24 RESPALDO_METODO=backup
+EnvironmentFile=%h/.config/atlas-para-isa/publicacion-v23.env
 MemoryHigh=3G
 IOSchedulingClass=idle
 Nice=15
-ExecStart=/usr/bin/bash /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v22/scripts/respaldo.sh
+ExecStart=/usr/bin/bash -c 'exec /usr/bin/bash "$$CARTA_RELEASE_DIR/scripts/respaldo.sh"'

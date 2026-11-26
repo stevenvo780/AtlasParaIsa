@@ -2,14 +2,15 @@
 # Build y smoke del commit solicitado, fuera de los worktrees existentes.
 # Uso: bash scripts/deploy-check.sh <SHA/ref> [directorio-informe-nuevo]
 # El padre del informe explícito debe existir. Sin argumento se usa mktemp.
-# Reutiliza node_modules; no instala dependencias, publica ni controla servicios.
+# Copia node_modules; no instala dependencias, publica ni controla servicios.
 # DEPLOY_CHECK_TIMEOUT_SECONDS limita cada gate (1..3600; por defecto 600).
+# DEPLOY_CHECK_TMPDIR permite elegir un padre ya creado bajo /tmp para los temporales.
 set -euo pipefail
 umask 077
 
 fail() { echo "deploy-check.sh: $*" >&2; exit 1; }
 [[ $# -ge 1 && $# -le 2 ]] || fail 'uso: <SHA/ref> [directorio-informe-nuevo]'
-for command_name in git node npm timeout mktemp ps awk; do
+for command_name in git node npm timeout mktemp ps awk cp; do
   command -v "$command_name" >/dev/null || fail "falta el comando $command_name; no se instalará nada"
 done
 gate_timeout="${DEPLOY_CHECK_TIMEOUT_SECONDS:-600}"
@@ -24,10 +25,11 @@ revision="$("${git_repo[@]}" rev-parse --verify --end-of-options "${1}^{commit}"
 [[ -d "$repo/node_modules" ]] || fail "falta node_modules en $repo; no se instalará nada"
 dependencies="$(cd -- "$repo/node_modules" && pwd -P)"
 
-# /tmp no depende del TMPDIR del servidor. Comprobar también repositorios que
-# estén alojados allí; nunca construir dentro de ningún worktree ya registrado.
-sandbox="$(mktemp -d /tmp/atlas-deploy-check.XXXXXX)"
-worktree="$sandbox/worktree"
+# No heredar el TMPDIR del servidor.
+scratch_root="$(cd -- "${DEPLOY_CHECK_TMPDIR:-/tmp}" && pwd -P)" || fail 'el directorio temporal debe existir'
+[[ "$scratch_root/" == /tmp/* ]] || fail 'el directorio temporal debe estar bajo /tmp'
+sandbox=''
+worktree=''
 report=''
 phase=setup
 build_exit=null
@@ -100,7 +102,7 @@ finish() {
       echo "deploy-check.sh: no se pudo comprobar o retirar el worktree propio: $worktree" >&2
     fi
   fi
-  if [[ "$cleanup_ok" == true ]]; then
+  if [[ "$cleanup_ok" == true && -n "$sandbox" ]]; then
     rm -rf -- "$sandbox" || cleanup_ok=false
   fi
   if [[ "$cleanup_ok" != true && "$code" == 0 ]]; then code=1; fi
@@ -137,21 +139,24 @@ fi
 while IFS= read -r -d '' entry; do
   [[ "$entry" == 'worktree '* ]] || continue
   existing="${entry#worktree }"
-  case "$sandbox/" in "$existing/"*) fail "el temporal está dentro de un worktree existente: $existing";; esac
+  case "$scratch_root/" in "$existing/"*) fail "el temporal está dentro de un worktree existente: $existing";; esac
   for protected in "$existing/data" "$existing/dist"; do
     case "$report_candidate/" in "$protected/"*) fail "el informe no puede escribirse en $protected";; esac
   done
 done < <("${git_repo[@]}" worktree list --porcelain -z)
+sandbox="$(mktemp -d "$scratch_root/atlas-deploy-check.XXXXXX")"
+worktree="$sandbox/worktree"
 if [[ -n "$report_candidate" ]]; then
   mkdir -m 700 -- "$report_candidate" || fail 'el directorio del informe debe ser nuevo'
   report="$report_candidate"
 else
-  report="$(mktemp -d /tmp/atlas-deploy-report.XXXXXX)"
+  report="$(mktemp -d "$scratch_root/atlas-deploy-report.XXXXXX")"
 fi
 echo "deploy-check.sh: commit $revision; informe $report"
 worktree_add_attempted=true
 "${git_repo[@]}" worktree add --detach "$worktree" "$revision" > "$report/setup.log" 2>&1
-ln -s -- "$dependencies" "$worktree/node_modules"
+# Vite genera temporales en node_modules al cargar su configuración.
+cp -a --reflink=auto -- "$dependencies" "$worktree/node_modules"
 mkdir -m 700 -- "$sandbox/tmp" "$sandbox/data" "$sandbox/npm-cache"
 : > "$sandbox/npm-user.conf"
 : > "$sandbox/npm-global.conf"

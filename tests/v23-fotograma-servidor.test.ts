@@ -64,7 +64,7 @@ test('la cinta binaria graba y el guardado completo sigue los ticks sin cambiar 
   assert.equal(resultados[0], resultados[1]);
 });
 
-test('el primer guardado con cuerpos se puede cargar y la serie cuenta las sustancias internadas', async t => {
+test('el guardado con cuerpos conserva el trabajo parcial y la serie cuenta las sustancias internadas', async t => {
   const dir = carpeta(t), path = join(dir, 'mundo.sqlite');
   const params = parseParams({ v23: escalon('fauna') });
   for (const epoca of [0, 1]) {
@@ -74,6 +74,8 @@ test('el primer guardado con cuerpos se puede cargar y la serie cuenta las susta
       assert.equal(app.guardado.epoca, epoca);
       assert.equal(app.world.tick, 0);
       assert.ok(app.world.people.every(p => p.cuerpo));
+      if (epoca === 0) app.world.people[0]!.work = 0.5;
+      else assert.equal(app.world.people[0]!.work, 0.5);
       assert.ok(store.db.prepare('SELECT length(body) AS n FROM snapshot_matter WHERE slot=0').get()?.n);
       assert.ok(app.world.animals.every(a => a.cuerpo));
       await app.flushTape();

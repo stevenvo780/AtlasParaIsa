@@ -1,9 +1,11 @@
 /**
  * Banco del paso material (carril W1c): huella para la identidad de los arreglos, perfil por fases, velocidad con hilos,
- * error de la cadencia y proyección. Corre la sombra material sola (sin el mundo escalar al lado), como el punto (f) del
- * laboratorio, con el mismo tiempo (luz media de la ventana y lluvia por bloques de 600 ticks).
- *   huella    --pasos 600 [--lado 64] [--cada 10] [--semilla 1] [--gpu 0] --salida f
+ * error de la cadencia, proyección y perfil del mundo vivo. La sombra material sigue el tiempo del laboratorio
+ * (luz media de la ventana y lluvia por bloques de 600 ticks), como el punto (f).
+ *   huella    --pasos 600 [--lado 64] [--cada 10] [--semilla 1] [--gpu 0,1] --salida f
  *   comparar  a b [--estadistica]                                           primera diferencia o medias y dispersión
+ *   vivo      [--hasta intentos] [--semilla 7] [--dias 1] [--gpu cpu|0|1|0,1|todos] [--cada N] [--salida f]
+ *             mismo mundo y comprobaciones que encender, con un resumen del paso material por configuración.
  *   fases     [--pasos 60] [--lado 64] [--cada 10]                          ms por fase y reacciones evaluadas/aplicadas
  *   velocidad [--hilos 1,8] [--pasos 50] [--lado 64] [--cada 10] [--reparto modulo|coste]   µs por tesela y tick
  *   cadencia  --k 1,10,60,120 [--dias 1,5] [--lado 32] [--semilla 1] [--mapa 1] [--grupo vida|cinetica|intercambio] --salida dir
@@ -15,7 +17,8 @@
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { channel } from 'node:diagnostics_channel';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { cpus, hostname, loadavg } from 'node:os';
 import type { Tile } from '../src/shared/types.js';
 import { createWorld, phaseAt } from '../src/world/mundo/crear.js';
@@ -23,8 +26,8 @@ import { activate } from '../src/world/spatial.js';
 import { LUZ_CREPSCULO } from '../src/world/ecologia-constantes.js';
 import { TICKS_PER_DAY } from '../src/world/mundo/tipos.js';
 import { CanalCompartido } from '../src/world/gpu/canal.js';
-import { crearPasoMateriaGpu, prepararMateriaGpu } from '../src/world/gpu/materia-gpu.js';
-import { quimicaSuelosEnTarjeta } from '../src/world/materia/ley-mundo.js';
+import { crearPasoMateriaGpu, prepararMateriaGpu, type PasoMateriaGpu } from '../src/world/gpu/materia-gpu.js';
+import { lanzarQuimicaSuelos } from '../src/world/materia/ley-mundo.js';
 import { crearServicioQuimico, serializarSustancias } from '../src/world/materia/servicio.js';
 import { MundoMaterial, totalesVacios, CUENTA, DT_LLUVIA, type DescriptorMundo, type Forzamiento } from '../src/world/materia/mundo.js';
 import { cuentaIntegrador, pasoLote } from '../src/world/materia/paso.js';
@@ -32,11 +35,19 @@ import { fluir } from '../src/world/materia/fluir.js';
 import { CAPACIDAD_ATOMO, ELEMENTOS, KAPPA_SUELO, KAPPA_SUELO_HH } from '../src/shared/naturaleza.js';
 import { Rol, type LoteRef } from '../src/world/materia/tipos.js';
 import { vistaVacia } from '../src/world/materia/vistas.js';
+import { argumentosEncender, encender } from './lab/encender.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (k: string, d: string) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1]! : d; };
 const lista = (k: string, d: string) => opt(k, d).split(',').map(Number);
 const carga = () => `carga ${loadavg().map((x) => x.toFixed(1)).join(' ')} (${hostname()}, ${cpus().length} hilos)`;
+function indicesGpu(seleccion: string): number[] {
+  if (seleccion === 'cpu') return [];
+  if (!/^\d+(,\d+)*$/.test(seleccion)) throw new Error('Usa cpu o una lista de ID de GPU separados por comas.');
+  const gpu = seleccion.split(',').map(Number);
+  if (new Set(gpu).size !== gpu.length || !gpu.every(Number.isSafeInteger)) throw new Error('Los ID de GPU deben ser enteros distintos.');
+  return gpu;
+}
 
 function luzMedia(t: number, dt: number): number {
   let s = 0;
@@ -87,25 +98,31 @@ function lotes(m: MundoMaterial): string {
 
 function huella(): void {
   const pasos = +opt('pasos', '600'), lado = +opt('lado', '64'), cada = +opt('cada', '10'), semilla = +opt('semilla', '1');
-  const gpu = opt('gpu', ''), estadistica = argv.includes('--estadistica');
+  const gpu = indicesGpu(opt('gpu', 'cpu')), estadistica = argv.includes('--estadistica');
   const m = MundoMaterial.levantar(teselas(semilla, lado), crearServicioQuimico({ modo: 'inmediato' }), { semilla });
   const tot = totalesVacios(), clima = tiempo(semilla), filas: string[] = [];
   m.plegar(tot);
   let ms = 0, tripletas = 0;
-  const canal = gpu === '' ? null : new CanalCompartido(Number(gpu));
-  const gpuPaso = canal && crearPasoMateriaGpu(canal);
+  const tarjetas: { canal: CanalCompartido; paso: PasoMateriaGpu; paginas: number[] }[] = [];
   const paginas = Array.from({ length: m.np }, (_, p) => p);
   try {
-    if (canal) prepararMateriaGpu(canal, 30_000);
+    for (const id of gpu) {
+      const canal = new CanalCompartido(id);
+      tarjetas.push({ canal, paso: crearPasoMateriaGpu(canal), paginas: [] });
+      prepararMateriaGpu(canal, 30_000);
+    }
+    if (tarjetas.length) for (const p of paginas) tarjetas[p % tarjetas.length]!.paginas.push(p);
     for (let k = 0, t = 0; k < pasos; k++, t += cada) {
       const t0 = performance.now();
       m.prepararPaso();
       const f = clima(t, cada);
-      if (gpuPaso) {
+      if (tarjetas.length) {
         m.arenaLab.barrera();
         for (const p of paginas) m.pasarAntes(p, f);
-        tripletas += quimicaSuelosEnTarjeta(m, gpuPaso, paginas, f.dt, t);
-        for (const p of paginas) m.pasarDespues(p, f);
+        const pendientes = tarjetas.filter(g => g.paginas.length).map(g => lanzarQuimicaSuelos(m, g.paso, g.paginas, f.dt, t));
+        for (const p of paginas) m.quimicaCharcas(p, f.dt);
+        for (const recoger of pendientes) tripletas += recoger().tripletas;
+        for (const p of paginas) m.pasarDespues(p, f, true);
         m.recibir();
       } else m.pasar(f);
       ms += performance.now() - t0;
@@ -114,8 +131,9 @@ function huella(): void {
       filas.push(`${k} libro ${libro} vistas ${sha(vistas(m))} lotes ${lotes(m)}`);
     }
   } finally {
-    gpuPaso?.cerrar();
-    canal?.cerrar();
+    for (const { paso, canal } of tarjetas) {
+      try { paso.cerrar(); } finally { canal.cerrar(); }
+    }
   }
   const s = m.saldo(), exacto = s.every((x, k) => x === tot.esperado[k]);
   filas.push(`fin saldo ${s.join(',')} exacto ${exacto}`);
@@ -162,6 +180,81 @@ function comparar(): void {
     return;
   }
   console.log(`IDÉNTICAS: ${n} líneas (libro, vistas y lotes de cada paso, y el saldo final)`);
+}
+
+// ── Mundo vivo ──
+
+const FASES_GPU = ['msPreparar', 'msEnviar', 'msEsperar', 'msLeer', 'msServidor', 'msH2D',
+  'msLanzar', 'msKernel', 'msD2H', 'msSincronizar'] as const;
+type FaseGpu = typeof FASES_GPU[number];
+type DespachoGpu = Partial<Record<FaseGpu, number>> & {
+  dispositivo: number; tick: number; bytesH2D?: number; bytesD2H?: number; tripletas?: number; fallo?: string;
+};
+type ArranqueGpu = { dispositivo: number; msNvrtc: number; msModulo: number };
+type PasoVivo = { ms: number; paginas: number; paginasCpu: number; fallos: number };
+
+function duraciones(muestras: number[]) {
+  const n = muestras.length;
+  if (!n) return null;
+  muestras.sort((a, b) => a - b);
+  return { n, media: muestras.reduce((a, b) => a + b, 0) / n, p95: muestras[Math.ceil(n * 0.95) - 1]!, max: muestras[n - 1]! };
+}
+
+async function vivo(): Promise<void> {
+  const args = argv.slice(1);
+  const i = args.indexOf('--gpu'), seleccion = i < 0 ? 'cpu' : (args.splice(i, 2)[1] ?? '');
+  const modos = (seleccion === 'todos' ? ['cpu', '0', '1', '0,1'] : [seleccion]).map(indicesGpu);
+  const o = argumentosEncender(['--hasta', 'intentos', '--semilla', '7', ...args]);
+  if (!o.comprobar) throw new Error('El perfil del mundo vivo requiere las comprobaciones de encender.');
+  if (o.salida) writeFileSync(o.salida, '');
+  for (const gpu of modos) {
+    const cargaInicial = carga();
+    const ms: number[] = [], arranques: ArranqueGpu[] = [], despachos = new Map<number, DespachoGpu[]>();
+    let paginas = 0, paginasCpu = 0, fallos = 0;
+    const paso = (mensaje: unknown) => {
+      const p = mensaje as PasoVivo;
+      ms.push(p.ms);
+      paginas += p.paginas; paginasCpu += p.paginasCpu; fallos += p.fallos;
+    };
+    const despacho = (mensaje: unknown) => {
+      const d = mensaje as DespachoGpu;
+      let lista = despachos.get(d.dispositivo);
+      if (!lista) despachos.set(d.dispositivo, lista = []);
+      lista.push(d);
+    };
+    const arranque = (mensaje: unknown) => { arranques.push(mensaje as ArranqueGpu); };
+    const canalPaso = channel('atlas:materia:paso'), canalGpu = channel('atlas:materia:gpu'), canalCuda = channel('atlas:materia:cuda');
+    canalPaso.subscribe(paso); canalGpu.subscribe(despacho); canalCuda.subscribe(arranque);
+    const dias: { dia: unknown; tick: unknown; exacto: boolean; gpuMateria?: unknown }[] = [];
+    let violaciones = 0, fin: Record<string, unknown> | undefined;
+    let codigo: number;
+    try {
+      codigo = await encender({ ...o, gpu }, fila => {
+        if (fila.tipo === 'dia') dias.push({ dia: fila.dia, tick: fila.tick,
+          exacto: (fila.conservacion as { ok?: boolean } | null)?.ok === true, gpuMateria: fila.gpuMateria });
+        if (fila.tipo === 'fin') fin = fila;
+        if (fila.tipo === 'violacion' || fila.tipo === 'aviso') console.log(JSON.stringify(fila));
+        if (fila.tipo === 'violacion') violaciones++;
+      });
+    } finally {
+      canalPaso.unsubscribe(paso); canalGpu.unsubscribe(despacho); canalCuda.unsubscribe(arranque);
+    }
+    const tarjetas = gpu.map(dispositivo => {
+      const filas = despachos.get(dispositivo) ?? [];
+      return { dispositivo, tandas: filas.length, arranques: arranques.filter(a => a.dispositivo === dispositivo),
+        fases: Object.fromEntries(FASES_GPU.map(f => [f, duraciones(filas.flatMap(d => d[f] === undefined ? [] : [d[f]]))])),
+        bytesH2D: filas.reduce((s, d) => s + (d.bytesH2D ?? 0), 0), bytesD2H: filas.reduce((s, d) => s + (d.bytesD2H ?? 0), 0),
+        tripletas: filas.reduce((s, d) => s + (d.tripletas ?? 0), 0),
+        fallos: filas.flatMap(d => d.fallo ? [{ tick: d.tick, error: d.fallo }] : []) };
+    });
+    const msPorPagina = paginas ? ms.reduce((s, t) => s + t, 0) / paginas : null;
+    const resumen = JSON.stringify({ tipo: 'perfil-material', gpu, semilla: o.semilla, hasta: o.hasta, dias, fin, violaciones,
+      msPaso: duraciones(ms), msPorPagina, paginas, paginasCpu, fallos, tarjetas, cargaInicial, cargaFinal: carga() });
+    console.log(resumen);
+    if (o.salida) appendFileSync(o.salida, resumen + '\n');
+    if (codigo || fin?.estado !== 'completo' || dias.length !== o.dias || dias.some(d => !d.exacto) || violaciones || !ms.length
+      || fallos || (gpu.length > 0 && paginasCpu > 0) || tarjetas.some(t => !t.tripletas || t.fallos.length)) process.exitCode = 2;
+  }
 }
 
 // ── Fases ──
@@ -473,10 +566,11 @@ if (!isMainThread && (workerData as { bancoMaterial?: boolean } | null)?.bancoMa
   const orden = argv[0];
   if (orden === 'huella') huella();
   else if (orden === 'comparar') comparar();
+  else if (orden === 'vivo') await vivo();
   else if (orden === 'fases') await fases();
   else if (orden === 'velocidad') await velocidad();
   else if (orden === 'cadencia') cadencia();
   else if (orden === 'errores') errores();
   else if (orden === 'arder') arder();
-  else { console.log(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 13).join('\n')); process.exitCode = 2; }
+  else { console.log(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 15).join('\n')); process.exitCode = 2; }
 }

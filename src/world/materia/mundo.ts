@@ -1090,13 +1090,20 @@ export class MundoMaterial {
     this.dejarAzar(p);
   }
 
+  quimicaCharcas(p: number, dt: number): void {
+    this.tomarAzar(p);
+    for (let i = this.inicio[p]!, i1 = this.fin[p]!; i < i1; i++)
+      if (this.agua[i]! >= 0) pasoLote(this.ctx, this.agua[i]!, dt, SIN);
+    this.dejarAzar(p);
+  }
+
   /** El resto del paso: química de charcas y aire, intercambios, ciclo del agua, segunda media ventana de vida y radiación. */
-  pasarDespues(p: number, f: Forzamiento): void {
+  pasarDespues(p: number, f: Forzamiento, charcasHechas = false): void {
     const { dt } = f, a = this.aire[p]!, i0 = this.inicio[p]!, i1 = this.fin[p]!, c = this.ctx, partido = this.partido(f);
     const luzFin = f.luzFin ?? f.luz;
     const T = this.temperatura(p, partido ? (f.luz + luzFin) / 2 : f.luz), Taire = f.lluvia ? T - DT_LLUVIA : T;
+    if (!charcasHechas) this.quimicaCharcas(p, dt);
     this.tomarAzar(p);
-    for (let i = i0; i < i1; i++) if (this.agua[i]! >= 0) pasoLote(c, this.agua[i]!, dt, SIN);
     pasoLote(c, a, dt, SIN);
     const capAire = CAP_AIRE_TESELA * (i1 - i0);
     for (let i = i0; i < i1; i++) {

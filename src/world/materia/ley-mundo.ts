@@ -11,6 +11,7 @@
  * retirar), cuándo da su paso cada una (cadencia escalonada), con qué forzamiento (luz, tiempo y estación), por dónde
  * va la química de los suelos (tarjeta o CPU), los fuegos, las vistas y el libro.
  */
+import { channel } from 'node:diagnostics_channel';
 import { ELEMENTOS, KAPPA_SUELO, KAPPA_SUELO_HH, NE } from '../../shared/naturaleza.js';
 import type { MatTesela, SustanciaId, SustanciaVista } from '../../shared/materia.js';
 import type { Tile, WorldView } from '../../shared/types.js';
@@ -48,6 +49,7 @@ const PLAZO_GPU_MS = 50;
 const ARRANQUE_GPU_MS = 30_000;
 /** Ticks que w espera antes de volver a abrir la tarjeta tras un fallo. */
 const REINTENTO_GPU_TICKS = 600;
+const perfilPaso = channel('atlas:materia:paso');
 /** Ticks entre dos inventarios para el panel «Materia» (recorre todos los lotes del dueño). */
 const PANEL_TICKS = 600;
 /** Lo que el asiento de fuentes del hilo puede valer antes de materializar otra página (J o mmol de átomos): el libro
@@ -71,6 +73,16 @@ const DX = [-1, 1, 0, 0], DY = [0, 0, -1, 1];
 
 // ── Estado del dueño ─────────────────────────────────────────────────────────────────────────────────────
 
+interface TarjetaMateria {
+  dispositivo: number;
+  paso: PasoMateriaGpu | null;
+  canal: CanalCompartido | null;
+  reintento: number;
+  peso: number;
+  lotes: number;
+  ms: number;
+}
+
 interface Estado {
   /** El contexto vigente (se pone al día en cada gancho): lo leen los cierres que el mundo material llama. */
   caja: { c: CtxLeyMateria };
@@ -87,7 +99,7 @@ interface Estado {
   fuegos: Map<number, LoteRef[]>;
   cuentas: bigint[];
   libro: { ancla: bigint[] | null; neto: bigint[]; vistoF: Float64Array; vistoS: Float64Array };
-  gpu: { paso: PasoMateriaGpu | null; canal: CanalCompartido | null; reintento: number; fallo: string; tandas: number; tripletas: number };
+  gpu: { tarjetas: TarjetaMateria[]; fallo: string; fallos: number; tandas: number; tripletas: number };
   panel: MateriaMundoVisible | null;
   panelTick: number;
   desde: Map<SustanciaId, number>;
@@ -143,7 +155,7 @@ function crear(c0: CtxLeyMateria): Estado {
     caja, m, teselas: [], ultimo: new Int32Array(0), sal: new Uint32Array(0), pendientes: new Set(), asientoPagina: 0,
     fuegos: new Map(), cuentas: Array<bigint>(N_CUENTAS).fill(0n),
     libro: { ancla: null, neto: Array<bigint>(NE + 1).fill(0n), vistoF: new Float64Array(NE + 1), vistoS: new Float64Array(NE + 1) },
-    gpu: { paso: null, canal: null, reintento: 0, fallo: '', tandas: 0, tripletas: 0 },
+    gpu: { tarjetas: [], fallo: '', fallos: 0, tandas: 0, tripletas: 0 },
     panel: null, panelTick: 0, desde: new Map(), aire: new Map(), aireVista: null, mat: [], matTick: [],
     tocan: [], forzamientos: [], luces: new Map(), lucesTick: -1,
     puente: undefined as never, v: vistaVacia(), va: vistaAireVacia(),
@@ -316,15 +328,18 @@ function eco(c: CtxLey): void {
     tocan.push(p);
   }
   if (tocan.length) {
+    const inicio = perfilPaso.hasSubscribers ? performance.now() : 0;
     for (const p of tocan) m.pasarAntes(p, e.forzamientos[p]!);
-    quimicaSuelos(e, tocan);
+    const fallosAntes = e.gpu.fallos;
+    const { paginasCpu, charcasHechas } = quimicaSuelos(e, tocan);
     for (const p of tocan) {
       const f = e.forzamientos[p]!;
-      m.pasarDespues(p, f);
+      m.pasarDespues(p, f, charcasHechas);
       e.ultimo[p] = tick;
       escribirVistas(e, p, f.dt);
       anotarAire(e, p);
     }
+    if (inicio) perfilPaso.publish({ ms: performance.now() - inicio, paginas: tocan.length, paginasCpu, fallos: e.gpu.fallos - fallosAntes });
   }
   m.volcarCuentas(e.cuentas);
   asentar(e);
@@ -332,43 +347,59 @@ function eco(c: CtxLey): void {
 
 // ── Química de los suelos: tarjeta o CPU ─────────────────────────────────────────────────────────────────
 
-/** Para que quien aloja el motor comparta con w un paso material ya abierto sobre su canal (o lo retire con null). Si
- * nadie lo pone y `motor.gpu` nombra una tarjeta, w abre el suyo sobre la primera. */
+/** El dueño puede prestar a w un paso ya abierto (o retirarlo con null). */
 export function enlazarPasoGpu(c: CtxLeyMateria, paso: PasoMateriaGpu | null): void {
   const g = estado(c).gpu;
-  if (g.paso === paso) return;
+  if (paso && g.tarjetas.some(t => t.paso === paso)) return;
   cerrarMateriaGpu(c.mundo);
-  g.paso = paso; g.canal = null; g.fallo = '';
+  if (paso) g.tarjetas.push({ dispositivo: c.params.motor.gpu[0] ?? 0, paso, canal: null, reintento: 0, peso: 1, lotes: 0, ms: 0 });
 }
 
-export function diagnosticoMateriaGpu(mundo: CtxLey['mundo']): { tandas: number; tripletas: number; fallo: string } | null {
+export function diagnosticoMateriaGpu(mundo: CtxLey['mundo']): { tandas: number; tripletas: number; fallo: string; fallos: number } | null {
   const g = estados.get(mundo)?.gpu;
-  return g ? { tandas: g.tandas, tripletas: g.tripletas, fallo: g.fallo } : null;
+  return g ? { tandas: g.tandas, tripletas: g.tripletas, fallo: g.fallo, fallos: g.fallos } : null;
+}
+
+function cerrarTarjeta(t: TarjetaMateria): void {
+  try { t.paso?.cerrar(); }
+  finally { t.canal?.cerrar(); t.paso = null; t.canal = null; }
 }
 
 export function cerrarMateriaGpu(mundo: CtxLey['mundo']): void {
   const g = estados.get(mundo)?.gpu;
   if (!g) return;
-  try { g.paso?.cerrar(); }
-  finally { g.canal?.cerrar(); g.paso = null; g.canal = null; }
+  for (const t of g.tarjetas) cerrarTarjeta(t);
+  g.tarjetas.length = 0;
 }
 
-function pasoGpu(e: Estado): PasoMateriaGpu | null {
+function tarjetasGpu(e: Estado): TarjetaMateria[] {
   const c = e.caja.c, g = e.gpu;
-  if (g.paso) return g.paso;
-  if (c.tick < g.reintento || c.params.motor.gpu.length === 0) return null;
-  try {
-    g.canal = new CanalCompartido(c.params.motor.gpu[0]!);
-    prepararMateriaGpu(g.canal, ARRANQUE_GPU_MS);
-    g.paso = crearPasoMateriaGpu(g.canal);
-  } catch (error) { soltarGpu(e, error); }
-  return g.paso;
+  const prestada = g.tarjetas.find(t => t.paso && !t.canal);
+  if (prestada) return [prestada];
+  for (const dispositivo of c.params.motor.gpu) {
+    if (!g.tarjetas.some(t => t.dispositivo === dispositivo))
+      g.tarjetas.push({ dispositivo, paso: null, canal: null, reintento: 0, peso: 1, lotes: 0, ms: 0 });
+  }
+  for (const t of g.tarjetas) {
+    if (t.paso || c.tick < t.reintento) continue;
+    try { t.canal = new CanalCompartido(t.dispositivo); }
+    catch (error) { soltarGpu(e, t, error); }
+  }
+  for (const t of g.tarjetas) {
+    if (t.paso || !t.canal) continue;
+    try {
+      prepararMateriaGpu(t.canal, ARRANQUE_GPU_MS);
+      t.peso = t.canal.multiprocesadores;
+      t.paso = crearPasoMateriaGpu(t.canal);
+    } catch (error) { soltarGpu(e, t, error); }
+  }
+  return g.tarjetas.filter(t => t.paso);
 }
 
-function soltarGpu(e: Estado, error: unknown): void {
+function soltarGpu(e: Estado, t: TarjetaMateria, error: unknown): void {
   const g = e.gpu;
-  try { cerrarMateriaGpu(e.caja.c.mundo); } catch { /* la tarjeta ya no responde */ }
-  g.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error);
+  try { cerrarTarjeta(t); } catch { /* la tarjeta ya no responde */ }
+  t.reintento = e.caja.c.tick + REINTENTO_GPU_TICKS; g.fallo = String(error); g.fallos++;
 }
 
 /**
@@ -376,32 +407,60 @@ function soltarGpu(e: Estado, error: unknown): void {
  * cuántas veces aplicar cada reacción y la arena las aplica (con su recorte y su libro). Si la tarjeta falla o no llega a
  * tiempo (`ErrorDispositivo`), las páginas que falten dan ese paso en CPU en este mismo tick.
  */
-function quimicaSuelos(e: Estado, tocan: readonly number[]): void {
-  const c = e.caja.c, m = e.m, paso = c.params.v23.materiaGpu ? pasoGpu(e) : null, hechas = new Set<number>();
-  if (paso) {
-    try {
-      // Un lanzamiento por duración de paso: casi siempre una sola (K).
-      const porDt = new Map<number, number[]>();
-      for (const p of tocan) {
-        const dt = e.forzamientos[p]!.dt;
-        let grupo = porDt.get(dt);
-        if (!grupo) porDt.set(dt, grupo = []);
-        grupo.push(p);
+function quimicaSuelos(e: Estado, tocan: readonly number[]): { paginasCpu: number; charcasHechas: boolean } {
+  const c = e.caja.c, m = e.m, tarjetas = c.params.v23.materiaGpu ? tarjetasGpu(e) : [];
+  if (!tarjetas.length) {
+    for (const p of tocan) m.quimicaSuelos(p, e.forzamientos[p]!.dt);
+    return { paginasCpu: tocan.length, charcasHechas: false };
+  }
+  const hechas = new Set<number>(), porDt = new Map<number, number[]>();
+  for (const p of tocan) {
+    const dt = e.forzamientos[p]!.dt;
+    let grupo = porDt.get(dt);
+    if (!grupo) porDt.set(dt, grupo = []);
+    grupo.push(p);
+  }
+  for (const [dt, grupo] of porDt) {
+    const listas = tarjetas.filter(t => t.paso);
+    const medidas = listas.every(t => t.ms > 0);
+    const tandas = listas.map(t => ({ t, peso: medidas ? t.lotes / t.ms : t.peso, paginas: [] as number[], lotes: 0 }))
+      .sort((a, b) => b.peso - a.peso);
+    const calibrar = !medidas && grupo.length >= tandas.length;
+    if (tandas.length) for (const [i, p] of grupo.entries()) {
+      const lotes = m.fin[p]! - m.inicio[p]!;
+      const tanda = (calibrar ? tandas[i] : undefined)
+        ?? tandas.reduce((a, b) => (a.lotes + lotes) / a.peso <= (b.lotes + lotes) / b.peso ? a : b);
+      tanda.paginas.push(p); tanda.lotes += lotes;
+    }
+    const pendientes: { t: TarjetaMateria; paginas: number[]; lotes: number; recibir(): { tripletas: number; ms?: number } }[] = [];
+    for (const { t, paginas, lotes } of tandas) {
+      if (!paginas.length) continue;
+      try { pendientes.push({ t, paginas, lotes, recibir: lanzarQuimicaSuelos(m, t.paso!, paginas, dt, c.tick) }); }
+      catch (error) {
+        if (!(error instanceof ErrorDispositivo)) throw error;
+        soltarGpu(e, t, error);
       }
-      for (const [dt, grupo] of porDt) {
-        e.gpu.tripletas += quimicaSuelosEnTarjeta(m, paso, grupo, dt, c.tick);
+    }
+    // Las charcas y la química del suelo aún no se intercambian materia; el aire sí recibe viento de otras páginas.
+    for (const p of grupo) m.quimicaCharcas(p, dt);
+    for (const { t, paginas, lotes, recibir } of pendientes) {
+      try {
+        const { tripletas, ms } = recibir();
+        if (ms && ms > 0) { t.lotes += lotes; t.ms += ms; }
+        e.gpu.tripletas += tripletas;
         e.gpu.tandas++;
-        for (const p of grupo) hechas.add(p);
+        for (const p of paginas) hechas.add(p);
+      } catch (error) {
+        if (!(error instanceof ErrorDispositivo)) throw error;
+        soltarGpu(e, t, error);
       }
-    } catch (error) {
-      if (!(error instanceof ErrorDispositivo)) throw error;
-      soltarGpu(e, error);
     }
   }
   for (const p of tocan) if (!hechas.has(p)) m.quimicaSuelos(p, e.forzamientos[p]!.dt);
+  return { paginasCpu: tocan.length - hechas.size, charcasHechas: true };
 }
 
-export function quimicaSuelosEnTarjeta(m: MundoMaterial, paso: PasoMateriaGpu, paginas: readonly number[], dt: number, tick: number): number {
+export function lanzarQuimicaSuelos(m: MundoMaterial, paso: PasoMateriaGpu, paginas: readonly number[], dt: number, tick: number) {
   let n = 0;
   for (const p of paginas) n += m.fin[p]! - m.inicio[p]!;
   const lotes = new Float64Array(n), kappas = new Float64Array(4 * n);
@@ -411,9 +470,12 @@ export function quimicaSuelosEnTarjeta(m: MundoMaterial, paso: PasoMateriaGpu, p
     kappas.set(CATALISIS_SUELO, 4 * k);
   }
   paso.lanzar(m.ctx, lotes, kappas, dt, tick);
-  const propuesta = paso.esperar(PLAZO_GPU_MS);
-  aplicarVecesGpu(m.ctx, lotes, kappas, propuesta);
-  return propuesta.tripletas.length / 3;
+  const vence = performance.now() + PLAZO_GPU_MS;
+  return () => {
+    const propuesta = paso.esperar(Math.max(0, vence - performance.now()));
+    aplicarVecesGpu(m.ctx, lotes, kappas, propuesta);
+    return { tripletas: propuesta.tripletas.length / 3, ms: propuesta.ms };
+  };
 }
 
 // ── Vistas ───────────────────────────────────────────────────────────────────────────────────────────────

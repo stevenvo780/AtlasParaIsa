@@ -208,7 +208,8 @@ export function assertLifeState(world: World): void {
     if(blueprint.parents.some(id=>id===blueprint.id||!ids.has(id))||new Set(blueprint.parents).size!==blueprint.parents.length)fail();
     if(blueprint.id==='blueprint-base'){if(blueprint.generation!==0||blueprint.parents.length||blueprint.components.join(',')!=='frame,roof'||blueprint.inventorId!==null||blueprint.tick!==0)fail();}
     else {
-      const serial=/^blueprint-(?:obra-)?([1-9]\d*)$/.exec(blueprint.id);
+      const material = 'planoMaterial' in blueprint && blueprint.planoMaterial !== undefined;
+      const serial = (material ? /^blueprint-obra-(0|[1-9]\d*)$/ : /^blueprint-([1-9]\d*)$/).exec(blueprint.id);
       if(!serial||!integer(Number(serial[1]),world.blueprintCounter))fail();
       const parents=blueprint.parents.map(id=>world.blueprints.find(b=>b.id===id)!);
       if(!parents.length||blueprint.generation!==Math.max(...parents.map(b=>b.generation))+1||parents.some(b=>b.tick>blueprint.tick)||!(world.people.some(p=>p.id===blueprint.inventorId)||(world.version>=5&&world.legacy?.some(p=>p.id===blueprint.inventorId&&p.diedAt>=blueprint.tick))))fail();

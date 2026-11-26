@@ -7,8 +7,8 @@ import { blueprintCap, MAX_BLUEPRINTS, MAX_STRUCTURES, structureCap } from '../s
 import { colocarPieza, depositarEnObra, leyObra, loteDepositoObra, piezasDe, prestacionesDePiezas, servicioDe } from '../src/world/materia/piezas.js';
 import { Rol, type VistaLote } from '../src/world/materia/tipos.js';
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
-import type { World } from '../src/world/mundo/tipos.js';
-import { DEFAULT_PARAMS, setParams } from '../src/world/params.js';
+import { assertWorld, createWorld, type World } from '../src/world/index.js';
+import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import { materiaReal } from './lib/materia-real.js';
 
 const forma = codigoForma({ largo: 1, ancho: 1, grueso: 0.2, hueco: 0.4, filo: 0 });
@@ -76,4 +76,15 @@ test('los topes por cantidad solo pertenecen al camino escalar', () => {
   setParams(mundo, { ...DEFAULT_PARAMS, v23: { ...DEFAULT_PARAMS.v23, materia: true, cuerpos: true, tecnica: true, obra: true } });
   assert.equal(structureCap(mundo), Infinity);
   assert.equal(blueprintCap(mundo), Infinity);
+});
+
+test('el primer plano material, con el id cero del registro, se puede guardar', () => {
+  const mundo = createWorld(7, parseParams({ v23: { materia: true, natalidad: true, cuerpos: true, tecnica: true, obra: true } }));
+  const base = mundo.blueprints[0]!;
+  const plano = { ...base, id: 'blueprint-obra-0', generation: 1, parents: [base.id], inventorId: mundo.people[0]!.id,
+    cost: { wood: 0, stone: 0, work: 0 }, planoMaterial: { area: 2, compacto: true, forma } };
+  mundo.blueprints.push(plano);
+  assert.doesNotThrow(() => assertWorld(mundo));
+  plano.id = 'blueprint-obra-1';
+  assert.throws(() => assertWorld(mundo));
 });

@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Store } from '../src/server/store.js';
+import { hostParams } from '../src/server/hardware-limits.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { assertWorld, createWorld } from '../src/world/index.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { chunkKey, generateChunk } from '../src/world/terrain.js';
 import { projectAnimal, syncFauna } from '../src/world/animals.js';
+
+test('el perfil del host desacopla la fauna y las comunidades de su presupuesto de teselas cuando rigen sus leyes V23', () => {
+  const memoria = { fisicaBytes: 128 * 1024 ** 3, heapBytes: 4 * 1024 ** 3 };
+  const params = parseParams({ v23: escalon('fauna') });
+  const abierto = hostParams(params, memoria).limites;
+  const heredado = hostParams(undefined, memoria).limites;
+
+  assert.equal(abierto.chunks, heredado.chunks);
+  assert.equal(abierto.teselasActivas, heredado.teselasActivas);
+  assert.equal(abierto.comunidades, params.limites.comunidades);
+  assert.equal(abierto.fauna, params.limites.fauna);
+  assert.equal(heredado.comunidades, heredado.teselasActivas);
+  assert.equal(heredado.fauna, heredado.teselasActivas * 6);
+});
 
 for (const snapshotInlineTileLimit of [0, 32768]) {
   test(`el guardado completo admite comunidades sin cupo (umbral en línea: ${snapshotInlineTileLimit})`, t => {

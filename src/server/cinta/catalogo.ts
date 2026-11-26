@@ -5,12 +5,13 @@ import {
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Apertura, Bifurcacion, EntradaCatalogo, Hito, Laguna, Nivel, SeriePunto } from '../../shared/cinta.js';
-import { verificarBloque, verificarBloqueLeido } from './formato.js';
+import { verificarBloqueLeido, type LeerBytes } from './formato.js';
 
 export const NIVELES = [0, 1, 2, 3, 4] as const;
 export const INDICE_CINTA = 'cinta.idx.sqlite';
 export const VERSION_CATALOGO = 4;
 export const MAX_SEGMENTO = 64 * 1024 ** 2;
+const VENTANA_ESCRITURA = 1024 ** 2;
 
 export type PuntoEscritura = 'mitad de bloque' | 'bloque sincronizado' | 'catálogo podado';
 export interface EpocaCinta {
@@ -35,11 +36,14 @@ export function sincronizarDirectorio(path: string): void {
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
-function escribir(fd: number, buffer: Buffer, offset: number, desde: number, hasta: number): void {
-  for (let cursor = desde; cursor < hasta;) {
-    const n = writeSync(fd, buffer, cursor, hasta - cursor, offset + cursor);
-    if (!n) throw new Error('La escritura del bloque no avanzó.');
-    cursor += n;
+function escribir(fd: number, leer: LeerBytes, offset: number, desde: number, hasta: number): void {
+  for (let pos = desde; pos < hasta; pos += VENTANA_ESCRITURA) {
+    const buffer = leer(pos, Math.min(VENTANA_ESCRITURA, hasta - pos));
+    for (let cursor = 0; cursor < buffer.length;) {
+      const n = writeSync(fd, buffer, cursor, buffer.length - cursor, offset + pos + cursor);
+      if (!n) throw new Error('La escritura del bloque no avanzó.');
+      cursor += n;
+    }
   }
 }
 
@@ -280,30 +284,40 @@ export class CatalogoCinta {
   }
 
   escribirBloque(epoca: number, data: Buffer, segmento: SegmentoCinta | undefined): void {
+    this.escribirBloqueLeido(epoca, (offset, bytes) => data.subarray(offset, offset + bytes), data.length, segmento);
+  }
+
+  /** El origen debe ser estable. La cabecera sigue en uso durante la lectura del índice. */
+  escribirBloqueLeido(epoca: number, leer: LeerBytes, bytes: number, segmento: SegmentoCinta | undefined): void {
     if (segmento && this.db.prepare('SELECT 1 FROM cuarentena WHERE segmento=? LIMIT 1').get(segmento.id)) {
       throw new Error(`No se puede anexar al segmento ${segmento.id}: contiene bloques en cuarentena.`);
     }
-    const b = verificarBloque(data);
+    const leerCompleto: LeerBytes = (desde, cantidad) => {
+      const buffer = leer(desde, cantidad);
+      if (buffer.length !== cantidad) throw new Error(`Lectura incompleta del bloque en ${desde}.`);
+      return buffer;
+    };
+    const b = verificarBloqueLeido(leerCompleto, bytes);
     const id = segmento?.id ?? Number(this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='segmentos'").get()?.seq ?? 0) + 1;
     const path = rutaSegmento(this.directorio, b.nivel, id);
     const offset = segmento?.bytes ?? 0;
     const fd = openSync(path, segmento ? 'r+' : 'wx');
     try {
       if (this.punto) {
-        const mitad = Math.floor(data.length / 2);
-        escribir(fd, data, offset, 0, mitad);
+        const mitad = Math.floor(bytes / 2);
+        escribir(fd, leerCompleto, offset, 0, mitad);
         this.punto('mitad de bloque');
-        escribir(fd, data, offset, mitad, data.length);
-      } else escribir(fd, data, offset, 0, data.length);
+        escribir(fd, leerCompleto, offset, mitad, bytes);
+      } else escribir(fd, leerCompleto, offset, 0, bytes);
       fdatasyncSync(fd);
       if (!segmento) sincronizarDirectorio(join(this.directorio, `n${b.nivel}`));
       this.punto?.('bloque sincronizado');
       // El catálogo solo publica bytes que ya están en disco. Una cola posterior al offset confirmado se trunca al abrir.
       this.transaccion(() => {
-        if (segmento) this.db.prepare('UPDATE segmentos SET t1=?,bytes=? WHERE id=?').run(b.t1, offset + data.length, id);
-        else this.db.prepare('INSERT INTO segmentos VALUES (?,?,?,?,?,?)').run(id, epoca, b.nivel, b.t0, b.t1, data.length);
+        if (segmento) this.db.prepare('UPDATE segmentos SET t1=?,bytes=? WHERE id=?').run(b.t1, offset + bytes, id);
+        else this.db.prepare('INSERT INTO segmentos VALUES (?,?,?,?,?,?)').run(id, epoca, b.nivel, b.t0, b.t1, bytes);
         this.db.prepare('INSERT INTO bloques VALUES (?,?,?,?,?,?,?,?,?)')
-          .run(id, epoca, b.nivel, b.t0, b.t1, offset, data.length, b.crc, b.fotogramas);
+          .run(id, epoca, b.nivel, b.t0, b.t1, offset, bytes, b.crc, b.fotogramas);
         this.db.prepare('UPDATE epocas SET t1=max(t1,?) WHERE id=?').run(b.t1, epoca);
       });
     } finally { closeSync(fd); }

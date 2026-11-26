@@ -53,8 +53,8 @@ const errorFormato = (detalle: string): Error => new Error(`${detalle} CNT2 inv�
 type Posicion = { x: number; y: number; cells?: StructureView['cells']; footprint?: StructureView['footprint'] };
 interface Domicilio { sector: number; pos: Posicion }
 interface FilasSector { indices: number[]; valores: unknown[] }
-interface ParteComprimida { sector: number; datos: Buffer; crudos: number; crc: number }
-interface MarcoComprimido { tick: number; campos: number; partes: ParteComprimida[] }
+type ParteCodificada = Omit<Parte, 'offset'>;
+interface MarcoCodificado { tick: number; campos: number; partes: ParteCodificada[] }
 
 /** Cota acumulada del índice. Un parche parcial conserva su sector de origen y no añade sectores. */
 export function cotaIndiceBloque(base: WorldView): (delta: TapeClientDelta) => boolean {
@@ -91,7 +91,7 @@ export function cotaIndiceBloque(base: WorldView): (delta: TapeClientDelta) => b
  * Los ticks viven en el índice, separados del JSON. Cada entidad conserva su sector de entrada al bloque:
  * se amplía la cobertura de ese sector cuando se mueve para que una cámara nueva pueda leer también su base.
  */
-export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[]): (t0?: number) => Buffer {
+function prepararIndiceBloque(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[], guardar: (datos: Buffer) => void) {
   const original = base.tick;
   if (!nivelValido(nivel) || !tickValido(original)) throw errorFormato('Nivel o tick inicial');
   const sectores: Rectangulo[] = [];
@@ -124,7 +124,7 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     if (pos.footprint) agregar(pos.x + pos.footprint.width - 1, pos.y + pos.footprint.height - 1);
   };
 
-  const marcos: MarcoComprimido[] = [];
+  const marcos: MarcoCodificado[] = [];
   for (let i = 0; i <= deltas.length; i++) {
     const delta = deltas[i - 1], frame = delta ?? base;
     if (!tickValido(frame.tick) || (i && frame.tick <= marcos.at(-1)!.tick)) throw new Error('Ticks fuera de orden en CNT2.');
@@ -206,7 +206,7 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
       });
     }
 
-    const partes: ParteComprimida[] = [];
+    const partes: ParteCodificada[] = [];
     if (!filasPorSector.has(0)) filasPorSector.set(0, new Map());
     for (const [s, grupos] of filasPorSector) {
       const lineas = s === 0 ? [JSON.stringify(global)] : [];
@@ -223,7 +223,8 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
       // También las partes pequeñas: las deltas se reparten en muchas y, sin comprimir, doblaban el bloque.
       const comprimido = zstdCompressSync(crudo, COMPRESION);
       const datos = comprimido.length < crudos ? comprimido : crudo;
-      partes.push({ sector: s, datos, crudos, crc: crc32(datos) });
+      partes.push({ sector: s, bytes: datos.length, crudos, crc: crc32(datos) });
+      guardar(datos);
     }
     marcos.push({ tick, campos, partes });
   }
@@ -241,7 +242,8 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     for (const v of [r.x0, r.y0, r.x1, r.y1]) { indice.writeDoubleLE(v, cursor); cursor += 8; }
     indice.writeUInt8(r.margen, cursor++);
   }
-  const ticks: number[] = [], partes: Buffer[] = [];
+  const ticks: number[] = [];
+  let bytes = indice.length;
   for (const m of marcos) {
     ticks.push(cursor);
     indice.writeUInt32LE(m.campos, cursor + 8);
@@ -249,24 +251,36 @@ export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly T
     cursor += CABECERA_FOTOGRAMA;
     for (const p of m.partes) {
       indice.writeUInt32LE(p.sector, cursor);
-      indice.writeUInt32LE(p.datos.length, cursor + 4);
+      indice.writeUInt32LE(p.bytes, cursor + 4);
       indice.writeUInt32LE(p.crudos, cursor + 8);
       indice.writeUInt32LE(p.crc, cursor + 12);
       cursor += ENTRADA_PARTE;
-      partes.push(p.datos);
+      bytes += p.bytes;
     }
   }
-  const total = indice.length + partes.reduce((n, p) => n + p.length, 0);
   const ticksRelativos = marcos.map(m => m.tick - original);
-  return (t0 = original) => {
+  const indiceEn = (t0 = original): Buffer => {
     const t1 = t0 + ticksRelativos.at(-1)!;
     if (!tickValido(t0) || !tickValido(t1)) throw errorFormato('Tick');
     indice.writeDoubleLE(t0, 9);
     indice.writeDoubleLE(t1, 17);
     ticks.forEach((offset, i) => indice.writeDoubleLE(t0 + ticksRelativos[i]!, offset));
     indice.writeUInt32LE(crc32(indice.subarray(LONGITUD_INDICE), crc32(indice.subarray(0, CRC))), CRC);
-    return Buffer.concat([indice, ...partes], total);
+    return indice;
   };
+  return { indiceEn, bytes };
+}
+
+/** Entrega cada parte al codificarla. El índice devuelto precede a las partes en el archivo. */
+export function codificarBloquePorPartes(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[], guardar: (datos: Buffer) => void): { indice: Buffer; bytes: number } {
+  const { indiceEn, bytes } = prepararIndiceBloque(nivel, base, deltas, guardar);
+  return { indice: indiceEn(), bytes };
+}
+
+export function prepararBloque(nivel: Nivel, base: WorldView, deltas: readonly TapeClientDelta[]): (t0?: number) => Buffer {
+  const partes: Buffer[] = [];
+  const { indiceEn, bytes } = prepararIndiceBloque(nivel, base, deltas, datos => { partes.push(datos); });
+  return t0 => Buffer.concat([indiceEn(t0), ...partes], bytes);
 }
 
 /** CNT2: directorio little-endian con CRC; partes crudas o Zstd con CRC y longitud cruda propios. */

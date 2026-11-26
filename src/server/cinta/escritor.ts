@@ -6,11 +6,13 @@ import { CINTA, type Apertura, type Corte, type EntradaCatalogo, type Hito, type
 import type { TapeClientDelta } from '../../shared/tape-delta.js';
 import type { PersonView, Tile, WorldView } from '../../shared/types.js';
 import { CatalogoCinta, MAX_SEGMENTO, NIVELES, sincronizarDirectorio, type PuntoEscritura } from './catalogo.js';
-import { clientDelta, codificarBloque, cotaIndiceBloque } from './formato.js';
-import { podar } from './poda.js';
+import { clientDelta, codificarBloquePorPartes, cotaIndiceBloque } from './formato.js';
+import { CuerpoBloqueCinta } from './bloque-temporal.js';
+import { podar, RESERVA_DISCO } from './poda.js';
 import { reducir, reducirTesela } from './reducir.js';
 
 const FOTOGRAMAS_BLOQUE = 32;
+const PRESUPUESTO_CUERPO_BLOQUE = 16 * 1024 ** 2;
 export const PASO_MAXIMO = 32;
 export function cintaDeMundo(worldPath: string, directorio?: string): string {
   if (!directorio) return join(dirname(worldPath), 'cinta');
@@ -38,6 +40,7 @@ interface BloquePendiente {
 export interface OpcionesEscritor {
   directorio: string;
   topeBytes?: number;
+  memoriaCuerpoBloqueBytes?: number;
   puntoEscritura?: (p: PuntoEscritura) => void;
 }
 
@@ -45,6 +48,7 @@ export class EscritorCinta {
   private catalogo: CatalogoCinta;
   private readonly tope: number;
   private readonly margen: number;
+  private readonly memoriaCuerpoBloque: number;
   // Las teselas se siguen por coordenada para que un fotograma cueste lo que cambió y no lo que el mundo mide:
   // el espejo de L0, lo último grabado en L1 y L2, y lo tocado desde el último fotograma de L0, L1 y L2.
   private readonly teselas = new Map<string, Tile>();
@@ -66,6 +70,10 @@ export class EscritorCinta {
   constructor(private readonly opciones: OpcionesEscritor) {
     this.tope = opciones.topeBytes ?? CINTA.topeBytes;
     if (!Number.isSafeInteger(this.tope) || this.tope <= 0) throw new Error('Presupuesto de cinta inválido.');
+    this.memoriaCuerpoBloque = opciones.memoriaCuerpoBloqueBytes ?? PRESUPUESTO_CUERPO_BLOQUE;
+    if (!Number.isSafeInteger(this.memoriaCuerpoBloque) || this.memoriaCuerpoBloque < 0) {
+      throw new Error('Presupuesto de memoria para el bloque de cinta inválido.');
+    }
     this.margen = Math.min(16 * 1024 ** 2, Math.max(64 * 1024, Math.floor(0.02 * this.tope)));
     this.catalogo = new CatalogoCinta(opciones.directorio, opciones.puntoEscritura);
   }
@@ -197,12 +205,18 @@ export class EscritorCinta {
     const bloque = this.bloques[nivel];
     if (!bloque) return;
     this.confirmarFlujos();
-    const data = codificarBloque(nivel, bloque.base, bloque.deltas);
-    const ultimo = this.catalogo.segmentos().filter(s => s.nivel === nivel).at(-1);
-    const segmento = ultimo?.epoca === this.epoca && ultimo.bytes + data.length <= MAX_SEGMENTO ? ultimo : undefined;
-    podar(this.catalogo, this.tope, nivel, data.length, { margen: this.margen });
-    this.catalogo.escribirBloque(this.epoca, data, segmento);
-    this.bloques[nivel] = undefined;
+    const cuerpo = new CuerpoBloqueCinta(this.catalogo.directorio, this.memoriaCuerpoBloque, RESERVA_DISCO + this.margen);
+    try {
+      const { indice, bytes } = codificarBloquePorPartes(nivel, bloque.base, bloque.deltas, parte => cuerpo.agregar(parte));
+      const ultimo = this.catalogo.segmentos().filter(s => s.nivel === nivel).at(-1);
+      const segmento = ultimo?.epoca === this.epoca && ultimo.bytes + bytes <= MAX_SEGMENTO ? ultimo : undefined;
+      cuerpo.prepararDestino(bytes);
+      podar(this.catalogo, this.tope, nivel, bytes, { margen: this.margen });
+      this.catalogo.escribirBloqueLeido(this.epoca, cuerpo.lector(indice, bytes), bytes, segmento);
+      this.bloques[nivel] = undefined;
+    } finally {
+      cuerpo.cerrar();
+    }
   }
 
   private confirmarFlujos(): void {

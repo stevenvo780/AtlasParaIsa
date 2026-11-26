@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
@@ -8,6 +8,7 @@ import { enlaceCinta } from '../src/shared/fotograma.js';
 import { ClaseSustancia, type SustanciaVista } from '../src/shared/materia.js';
 import { applyClientTapeDelta } from '../src/shared/tape-delta.js';
 import { INDICE_CINTA, NIVELES, rutaSegmento, type BloqueCinta } from '../src/server/cinta/catalogo.js';
+import { CuerpoBloqueCinta } from '../src/server/cinta/bloque-temporal.js';
 import { EscritorCinta } from '../src/server/cinta/escritor.js';
 import { decodificarBloque } from '../src/server/cinta/formato.js';
 import { reducir } from '../src/server/cinta/reducir.js';
@@ -125,10 +126,10 @@ test('I7: cinta perdida, restauración, reinicio sin retroceso y otra instancia'
   } finally { antigua.close(); nueva.close(); }
 });
 
-test('I2/I7: una serie confirmada por delante del último bloque deja una laguna visual', t => {
+test('I2/I7: una serie confirmada por delante de un bloque volcado a disco deja una laguna visual', t => {
   const path = directorio(t);
   let fallar = false;
-  let escritor = new EscritorCinta({ directorio: path, puntoEscritura: p => {
+  let escritor = new EscritorCinta({ directorio: path, memoriaCuerpoBloqueBytes: 0, puntoEscritura: p => {
     if (fallar && p === 'mitad de bloque') throw new Error('Corte de prueba.');
   } });
   escritor.abrir({ instanciaId: 'a', epoca: 0, tMundo: 0, motivo: 'reinicio' });
@@ -139,6 +140,7 @@ test('I2/I7: una serie confirmada por delante del último bloque deja una laguna
   fallar = true;
   assert.throws(() => escritor.flush(), /Corte de prueba/);
   escritor.close(false);
+  assert.equal(readdirSync(path).some(nombre => nombre.endsWith('.tmp')), false);
 
   escritor = new EscritorCinta({ directorio: path });
   try { escritor.abrir({ instanciaId: 'a', epoca: 1, tMundo: 200, motivo: 'reinicio' }); }
@@ -149,6 +151,26 @@ test('I2/I7: una serie confirmada por delante del último bloque deja una laguna
     assert.equal(db.prepare('SELECT max(t1) AS t FROM bloques WHERE epoca=0 AND nivel=0').get()?.t, 0);
     assert.deepEqual(db.prepare('SELECT t0,t1 FROM lagunas WHERE epoca=1').all().map(r => Object.values(r)), [[0, 200]]);
   } finally { db.close(); }
+});
+
+test('el cuerpo temporal devuelve espacio y conserva sus bytes si no caben las dos copias', t => {
+  const path = directorio(t);
+  mkdirSync(path);
+  const abierto = () => readdirSync('/proc/self/fd').some(fd => {
+    try { return readlinkSync(`/proc/self/fd/${fd}`).startsWith(join(path, '.cnt2-')); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return false; }
+  });
+  const cuerpo = new CuerpoBloqueCinta(path, 1, 0);
+  try {
+    cuerpo.agregar(Buffer.from('a'));
+    cuerpo.agregar(Buffer.from('bc'));
+    assert.equal(abierto(), true);
+    cuerpo.prepararDestino(Number.MAX_SAFE_INTEGER);
+    assert.equal(abierto(), false);
+    const leer = cuerpo.lector(Buffer.from('hdr'), 6);
+    assert.equal(leer(1, 4).toString(), 'drab');
+    assert.equal(leer(3, 3).toString(), 'abc');
+  } finally { cuerpo.cerrar(); }
 });
 
 test('I4: una ráfaga a dos veces la capacidad del consumidor sube y luego devuelve la cadencia', () => {

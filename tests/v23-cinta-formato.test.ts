@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { crc32 } from 'node:zlib';
-import { clientDelta, codificarBloque, cotaIndiceBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
+import { clientDelta, codificarBloque, codificarBloquePorPartes, cotaIndiceBloque, decodificarBloque, leerIndiceBloque, leerMarcoJson, sectoresVisibles, verificarBloque } from '../src/server/cinta/formato.js';
 import { projectTapeFrame } from '../src/server/sim-worker.js';
 import { applyClientTapeDelta, indexTiles } from '../src/shared/tape-delta.js';
 import type { PersonView, RuntimeStats, Tile, WorldView } from '../src/shared/types.js';
@@ -105,10 +105,16 @@ test('CNT2: cada bit del bloque está cubierto por una suma de comprobación, ta
     tiles: [tesela(0), { ...tesela(0), x: 40, y: 3 }, { ...tesela(0), x: -300, y: 9 }], people: [persona('p', 1, 1)] };
   const medio = { ...base, tick: 4, tiles: [{ ...base.tiles[0]!, food: 0.9 }, ...base.tiles.slice(1)] };
   const fin = { ...medio, tick: 8, people: [{ ...medio.people[0]!, x: 41 }] };
-  const datos = codificarBloque(0, base, [clientDelta(base, medio), clientDelta(medio, fin)]);
+  const deltas = [clientDelta(base, medio), clientDelta(medio, fin)];
+  const datos = codificarBloque(0, base, deltas);
   const indice = leerIndiceBloque(lector(datos), datos.length);
   const partes = indice.marcos.flatMap((m, i) => m.partes.map(p => ({ ...p, marco: i })));
   assert.ok(partes.some(p => p.bytes < p.crudos) && partes.some(p => p.bytes === p.crudos), 'hay partes comprimidas y crudas');
+  const emitidas: Buffer[] = [];
+  const { indice: cabecera, bytes } = codificarBloquePorPartes(0, base, deltas, parte => { emitidas.push(parte); });
+  assert.equal(bytes, datos.length);
+  assert.deepEqual(cabecera, datos.subarray(0, indice.bytesIndice));
+  assert.deepEqual(emitidas, partes.map(p => datos.subarray(p.offset, p.offset + p.bytes)));
   for (let byte = 0; byte < datos.length; byte++) for (let bit = 0; bit < 8; bit++) {
     const corrupto = Buffer.from(datos);
     corrupto[byte] = corrupto[byte]! ^ (1 << bit);

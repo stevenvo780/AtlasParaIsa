@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readSync, rmSync, truncateSync, writeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync, truncateSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { CatalogoCinta, rutaSegmento } from '../src/server/cinta/catalogo.js';
@@ -45,6 +46,46 @@ test('n=1 reconstruye el fotograma exacto anterior incluso entre bloques y con c
       if (esperado !== undefined) assert.deepEqual(r.baseFrame, { ...vista(esperado), ...('w' in camara ? { originX: 0, originY: 0 } : {}) });
     }
   }
+});
+
+test('el apéndice con origen de lectura recupera una cola incompleta y confirma el bloque al reintentar', t => {
+  const ruta = directorio(t);
+  const previo = codificarBloque(0, vista(0), []);
+  const grande = (tick: number): WorldView => ({ ...vista(tick), paused: true,
+    pauseReason: createHash('shake256', { outputLength: 640 * 1024 }).update(String(tick)).digest('base64') });
+  const base = grande(4);
+  const bloque = codificarBloque(0, base, [clientDelta(base, grande(8))]);
+  const ventana = 1024 ** 2;
+  assert.ok(bloque.length > ventana);
+
+  let cortado = false;
+  const catalogo = new CatalogoCinta(ruta, punto => {
+    if (punto === 'mitad de bloque') cortado = true;
+  });
+  let epoca: number, path: string;
+  try {
+    epoca = catalogo.abrir({ instanciaId: 'prueba', epoca: 0, tMundo: 0, motivo: 'reinicio' });
+    catalogo.escribirBloque(epoca, previo, undefined);
+    const segmento = catalogo.segmentos()[0]!;
+    path = rutaSegmento(ruta, segmento.nivel, segmento.id);
+    cortado = false;
+    assert.throws(() => catalogo.escribirBloqueLeido(epoca, (offset, bytes) =>
+      bloque.subarray(offset, offset + bytes - Number(cortado)), bloque.length, segmento), /Lectura incompleta/);
+    assert.equal(catalogo.segmentos()[0]?.bytes, previo.length);
+    assert.equal(statSync(path).size, previo.length + Math.floor(bloque.length / 2));
+  } finally { catalogo.db.close(); }
+
+  const recuperado = new CatalogoCinta(ruta);
+  try {
+    assert.deepEqual(readFileSync(path), previo);
+    recuperado.escribirBloqueLeido(epoca, (offset, bytes) => {
+      assert.ok(bytes <= ventana);
+      return bloque.subarray(offset, offset + bytes);
+    }, bloque.length, recuperado.segmentos()[0]);
+    assert.deepEqual(readFileSync(path), Buffer.concat([previo, bloque]));
+    assert.equal(recuperado.segmentos()[0]?.t1, 8);
+    assert.equal(recuperado.segmentos()[0]?.bytes, previo.length + bloque.length);
+  } finally { recuperado.db.close(); }
 });
 
 test('verificar aísla un CRC malo en un segmento sellado y conserva sus bloques vecinos', t => {

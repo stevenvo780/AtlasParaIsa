@@ -316,6 +316,8 @@ export class SnapshotParts {
     const gate = certified ? residentSnapshotGate(tiles) : undefined;
     const candidates = certified ? this.reusablePages(tiles, reuse, gate) : null;
     const pages: Page[] = [], pending: CachedPage[] = [], insert = this.db.prepare('INSERT INTO main.snapshot_parts(digest,body) VALUES (?,?)');
+    // Probe the key before binding a multi-megabyte body. The caller's write transaction keeps the row stable.
+    const present = this.db.prepare('SELECT 1 FROM main.snapshot_parts WHERE digest=?');
     // SQLite compares the stored bytes itself: an unchanged multi-megabyte page is not copied into JS
     // just to prove its identity. BINARY ignores any collation a damaged schema could declare.
     const same = this.db.prepare('SELECT body = ? COLLATE BINARY AS same FROM main.snapshot_parts WHERE digest=?');
@@ -323,9 +325,10 @@ export class SnapshotParts {
     const writePage = (index: number, body: string | Uint8Array, count: number, organisms = false): Page => {
       const digest = checksum(body), size = typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength;
       if (size > pageByteLimit(count, organisms)) failure('page exceeds transport size');
-      const existing = same.get(body, digest) as { same: number } | undefined;
-      if (existing && existing.same !== 1) failure('existing page disagrees with its digest');
-      if (!existing) insert.run(digest, body);
+      if (present.get(digest)) {
+        const existing = same.get(body, digest) as { same: number } | undefined;
+        if (existing?.same !== 1) failure('existing page disagrees with its digest');
+      } else insert.run(digest, body);
       bytes += size;
       return { index, digest, count, bytes: size };
     };

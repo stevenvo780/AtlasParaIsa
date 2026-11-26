@@ -1179,7 +1179,14 @@ export class Dueno implements CtxF0 {
     const recorrido = this.#archivoFrio?.fuenteCheckpoint(arena, celda => celdaMundo(terreno, celda), pagina => {
       const [cx, cy] = coordenadasDePagina(pagina * 256);
       return terreno.paginaDe(cx, cy);
-    });
+    }) ?? {
+      *medir() {
+        for (const { celda, pares } of arena.medirComposiciones()) {
+          if (pares === null) throw new Error('Composición fría sin archivo en el punto de control.');
+          yield { celda: celdaMundo(terreno, celda), pares };
+        }
+      },
+    };
     const frente = this.frente;
     const enVuelo = pendientes.filter(i => i.materia !== null).map(i => {
       const celda = celdaMundo(terreno, i.celda);

@@ -277,8 +277,8 @@ type Fuente<T> = Iterable<T> | (() => Iterable<T>);
 export interface RecorridoPaginas {
   /** En orden lógico. El total de pares de un grupo puede imputarse a cualquiera de sus lotes. */
   medir(): Iterable<{ celda: number; pares: number }>;
-  /** Lotes de una página de mundo en orden lógico. La página −1 agrupa los lotes sin celda. */
-  lotesDePagina(pagina: number): Iterable<LoteGuardado>;
+  /** Puede agrupar las lecturas de archivos fríos. Sin este recorrido se usa la fábrica global de lotes. */
+  lotesDePagina?(pagina: number): Iterable<LoteGuardado>;
 }
 
 function repetible<T>(origen: Fuente<T>): () => Iterable<T> {
@@ -305,7 +305,8 @@ function bytesDeLote(lote: LoteGuardado): number {
 export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, libres: Fuente<LoteRef>,
   recorrido?: RecorridoPaginas): Uint8Array {
   entero(epoca);
-  const recorrerLotes = recorrido ? undefined : repetible(lotes), recorrerLibres = repetible(libres);
+  const lotesDePagina = recorrido?.lotesDePagina?.bind(recorrido);
+  const recorrerLotes = lotesDePagina ? undefined : repetible(lotes), recorrerLibres = repetible(libres);
   const paginas = new Map<number, PaginaPorEscribir>();
   let capacidad = 3 * BYTES_ENTERO; // época, número de páginas y número de ranuras retiradas
   function medir(celda: number, bytes: number): void {
@@ -342,10 +343,10 @@ export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, lib
     salida.irA(plan.fin);
   }
   const inicioLibres = salida.posicion;
-  function* recorrerPaginas(orden: RecorridoPaginas): IterableIterator<LoteGuardado> {
-    for (const pagina of paginas.keys()) yield* orden.lotesDePagina(pagina);
+  function* recorrerPaginas(leer: (pagina: number) => Iterable<LoteGuardado>): IterableIterator<LoteGuardado> {
+    for (const pagina of paginas.keys()) yield* leer(pagina);
   }
-  for (const lote of recorrido ? recorrerPaginas(recorrido) : recorrerLotes!()) {
+  for (const lote of lotesDePagina ? recorrerPaginas(lotesDePagina) : recorrerLotes!()) {
     const plan = paginas.get(paginaDe(lote.celda));
     const bytes = bytesDeLote(lote);
     if (!plan || plan.restantes === 0 || bytes > plan.fin - plan.posicion) throw new Error('Los lotes cambiaron durante la codificación.');

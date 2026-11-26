@@ -919,6 +919,13 @@ if (isMainThread) test('el escritor VMAT en dos pasadas conserva los bytes canó
   assert.equal(createHash('sha256').update(bytes).digest('hex'), '03eb9f28dc9d0899dcd750a12faed5af5a1971eab702839ad66ddd7e3c1d47bb');
   assert.deepEqual(decodificarPaginas(max, bytes), { lotes: [lotes[0], lotes[2], lotes[1], lotes[3]], libres });
 
+  let escrituras = 0;
+  const medido = codificarPaginas(max, () => { escrituras++; return lotes; }, libres, {
+    medir: () => lotes.map(({ celda, pares }) => ({ celda, pares: pares.length / 2 })),
+  });
+  assert.equal(escrituras, 1);
+  assert.deepEqual(medido, bytes);
+
   const duplicado = { ...lotes[2]!, celda: max, rol: Rol.Suelo };
   assert.throws(() => codificarPaginas(max, () => [lotes[0]!, lotes[1]!, duplicado, lotes[3]!], libres), /Lote exclusivo duplicado/);
   assert.throws(() => codificarPaginas(max, lotes, () => [lotes[0]!.ref, libres[1]!]), /Ranura de materia duplicada/);

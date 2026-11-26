@@ -197,25 +197,40 @@ function compartirPorIntento(c: CtxLeyMateria, donante: Person): void {
   const de = refDeOrganismo(c, donante);
   if (de === REF_NULA) return;
   const lugar = primeroCerca(c.mundo.places, donante, 4, p => distance(donante, p) <= 3);
-  if (!lugar) return;
-
   const f = c.frente, propio = slotDe(de);
-  let s = REF_NULA, hambre = 0.27, empates = 0;
-  cercanos(c, donante.x, donante.y, 2, Clase.Persona, candidato => {
-    if (candidato === propio || f.dueno[candidato] < 0) return;
-    const h = f.cuerpo[candidato * CUERPO_ANCHO + CAMPOS_CUERPO.hambre];
-    if (h > hambre) {
-      s = candidato;
-      hambre = h;
-      empates = 1;
-    } else if (s !== REF_NULA && h === hambre && c.azar() * ++empates < 1) {
-      s = candidato;
+  let s = REF_NULA, cuidado: Person | undefined;
+  if (ley(c.mundo, 'natalidad') && distance(donante, donante.target) <= 2) {
+    const objetivo = vecinos(c.mundo, donante, 2, p => p !== donante && p.x === donante.target.x && p.y === donante.target.y, 'share:cria');
+    for (const cria of objetivo) {
+      const ref = refDeOrganismo(c, cria);
+      if (ref === REF_NULA) continue;
+      const ranura = slotDe(ref);
+      if (f.dueno[ranura] !== c.hilo || c.personas.get(ranura) !== cria) continue;
+      if (!cria.cuerpo || cria.demography.deathCause !== null || !cria.crianza?.cuidadores.includes(donante.id)
+        || cria.hunger <= (cuidado?.hunger ?? donante.hunger)) continue;
+      s = ranura;
+      cuidado = cria;
     }
-  });
+  }
+  if (!cuidado) {
+    if (!lugar) return;
+    let hambre = 0.27, empates = 0;
+    cercanos(c, donante.x, donante.y, 2, Clase.Persona, candidato => {
+      if (candidato === propio || f.dueno[candidato] < 0) return;
+      const h = f.cuerpo[candidato * CUERPO_ANCHO + CAMPOS_CUERPO.hambre];
+      if (h > hambre) {
+        s = candidato;
+        hambre = h;
+        empates = 1;
+      } else if (s !== REF_NULA && h === hambre && c.azar() * ++empates < 1) {
+        s = candidato;
+      }
+    });
+  }
   if (s === REF_NULA) return;
-  const id = c.idDe(f.uid[s]);
+  const id = cuidado?.id ?? c.idDe(f.uid[s]);
   if (!id) return;
-  const celda = c.terreno.celda(f.x[s], f.y[s]);
+  const celda = c.terreno.celda(cuidado?.x ?? f.x[s], cuidado?.y ?? f.y[s]);
   if (celda < 0) return;
   const pedido = pedidoComida(c, donante.cuerpo, PORCION_COMPARTIDA_KG);
   const asegurar = (lote: number) => c.materia.propio(lote) ? c.materia.garantizar(lote, pedido, c.libro) : null;
@@ -232,12 +247,13 @@ function compartirPorIntento(c: CtxLeyMateria, donante: Person): void {
     materia, dato: PORCION_AL_DIGESTIVO, bytes: null,
   });
   donante.lastShared = c.tick;
+  const destino = cuidado ? `a ${cuidado.name}` : `en ${lugar!.name}`;
   const evento = c.suceso({
     kind: 'care', actors: [donante.id, id], x: donante.x, y: donante.y, source: 'simulation',
-    text: `${donante.name} ofreció alimento en ${lugar.name}.`,
+    text: `${donante.name} ofreció alimento ${destino}.`,
     cause: 'Iniciativa propia, hambre local y una porción debitada del lote que llevaba.',
   });
-  remember(donante, c.mundo, `Ofreció alimento en ${lugar.name}.`, evento, lugar.id);
+  remember(donante, c.mundo, `Ofreció alimento ${destino}.`, evento, lugar?.id);
 }
 
 function enCompania(p: Person): boolean {

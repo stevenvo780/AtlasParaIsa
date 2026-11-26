@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CAPACIDAD_ATOMO } from '../src/shared/naturaleza.js';
-import { encender, extraerEscalar, lotesDeCelda, sustanciasDe } from '../src/world/materia/ley-mundo.js';
+import { aportarEscalar, encender, extraerEscalar, fuegoEn, lotesDeCelda, sustanciasDe } from '../src/world/materia/ley-mundo.js';
 import { Rol } from '../src/world/materia/tipos.js';
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { repartirPorTramos } from '../src/world/motor/bloques.js';
@@ -63,6 +63,10 @@ test('una página que vuelve a su dueño conserva la roca que queda y continúa 
     assert.ok(combustibleEnVuelo > 0);
     motor.paso([]);
     assert.ok(d.materia.cuantos(fuego, madera) < combustibleEnVuelo, 'el fuego sigue consumiendo madera en el dueño original');
+    assert.equal(aportarEscalar(c, celda, 'agua', 1), 0);
+    const ajenos = lotesDeCelda(c, celda, { suelo, agua: -1, vida: -1, aire: -1 });
+    assert.deepEqual(ajenos, { suelo: -1, agua: -1, vida: -1, aire: -1 });
+    assert.equal(fuegoEn(c, celda), -1);
     for (let i = 0; i < DEFAULT_PARAMS.v23.cadenciaMateria; i++) motor.paso([]);
     const codificarMateria = prueba.mock.method(d, 'instantaneaMateria');
     const vista = motor.vista();

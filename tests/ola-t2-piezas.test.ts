@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { serialize } from 'node:v8';
+import { Store } from '../src/server/store.js';
+import { escalon } from '../src/shared/interruptores.js';
 import type { StructureView } from '../src/shared/life.js';
 import { codigoForma } from '../src/shared/materia.js';
 import type { WorldView } from '../src/shared/types.js';
-import { blueprintCap, MAX_BLUEPRINTS, MAX_STRUCTURES, structureCap } from '../src/world/inventions.js';
-import { colocarPieza, depositarEnObra, leyObra, loteDepositoObra, piezasDe, prestacionesDePiezas, servicioDe } from '../src/world/materia/piezas.js';
+import { blueprintCap, completeConstruction, MAX_BLUEPRINTS, MAX_STRUCTURES, structureCap } from '../src/world/inventions.js';
+import { colocarPieza, depositarEnObra, estadoObra, leyObra, loteDepositoObra, piezasDe, prestacionesDePiezas, servicioDe } from '../src/world/materia/piezas.js';
 import { Rol, type VistaLote } from '../src/world/materia/tipos.js';
-import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
+import { ctxMateriaDe, type CtxF0, type CtxLeyMateria } from '../src/world/motor/acceso.js';
+import { crearMotor } from '../src/world/motor/coordinador.js';
+import { sustanciasDe } from '../src/world/materia/ley-mundo.js';
+import { chunkKey } from '../src/world/terrain.js';
+import { tileAt } from '../src/world/spatial.js';
+import { assertStructures } from '../src/world/validation.js';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { DEFAULT_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import { materiaReal } from './lib/materia-real.js';
@@ -87,9 +95,57 @@ test('el primer plano material, con el id cero del registro, se puede guardar', 
   const mundo = createWorld(7, parseParams({ v23: { materia: true, natalidad: true, cuerpos: true, tecnica: true, obra: true } }));
   const base = mundo.blueprints[0]!;
   const plano = { ...base, id: 'blueprint-obra-0', generation: 1, parents: [base.id], inventorId: mundo.people[0]!.id,
+    components: Array.from({ length: 25 }, (): string => 'arco') as StructureView['components'],
     cost: { wood: 0, stone: 0, work: 0 }, planoMaterial: { area: 2, compacto: true, forma } };
   mundo.blueprints.push(plano);
   assert.doesNotThrow(() => assertWorld(mundo));
   plano.id = 'blueprint-obra-1';
   assert.throws(() => assertWorld(mundo));
+});
+
+test('la obra terminada deja un lugar durable antes del F0 que lo replica', async t => {
+  const mundo = createWorld(7, parseParams({ v23: escalon('obra') }));
+  const motor = crearMotor(mundo, { hilos: 1, gpu: [], decisionGpu: 'siempre', verificar: false, semilla: 7 });
+  t.after(() => motor.cerrar());
+  motor.paso([]);
+  const c = ctxMateriaDe(mundo), p = mundo.people.find(p => {
+    const tile = tileAt(mundo, p);
+    return tile && tile.terrain !== 'water' && tile.terrain !== 'shelter';
+  })!;
+  const tile = tileAt(mundo, p)!;
+  const celda = c.terreno.celda(p.x, p.y);
+  const lote = c.materia.nuevo(Rol.Objeto, celda, forma);
+  c.materia.fuente(lote, Float64Array.of(sustanciasDe(c).SiO2, 100_000, 0, 1000), c.libro);
+  p.carga!.push(lote);
+  const obra = completeConstruction(mundo, p, tile, e => ({ ...e, id: 'obra-prueba', tick: mundo.tick }));
+  assert.ok(obra && estadoObra(obra)?.terminada);
+  assert.deepEqual(obra.components, []);
+  const lugar = mundo.places.find(l => l.x === obra.x && l.y === obra.y && l.id.startsWith('settlement-'));
+  assert.ok(lugar);
+  assert.ok(mundo.chunks[chunkKey(obra.x, obra.y)]!.places.includes(lugar));
+
+  const otrasObras = mundo.structures.slice();
+  assert.doesNotThrow(() => assertStructures(otrasObras, mundo.tick, mundo.tiles, 1, true));
+  assert.throws(() => assertStructures(otrasObras, mundo.tick, mundo.tiles, 1));
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.guardar(motor.instantanea());
+  const carga = store.cargarInstantanea()!;
+  assert.deepEqual(carga.instantanea.world.places.find(l => l.id === lugar.id), lugar);
+  assert.deepEqual(carga.instantanea.world.structures.find(s => s.id === obra.id), obra);
+});
+
+test('F0 consume y replica las peticiones de lugar una vez', () => {
+  const mundo = createWorld(7);
+  const lugar = { id: 'settlement-320-40', name: 'Taller', x: 320, y: 40, description: '', gatherings: 0 };
+  const datos = [serialize(lugar), serialize(lugar)];
+  const c = {
+    mundo,
+    peticiones: (tipo: string) => { assert.equal(tipo, 'lugar'); return datos.splice(0); },
+    publicarLugares: (lugares: World['places']) => { mundo.places = lugares; },
+  } as unknown as CtxF0;
+  leyObra.F0!(c);
+  leyObra.F0!(c);
+  assert.equal(datos.length, 0);
+  assert.deepEqual(mundo.places.filter(l => l.id === lugar.id), [lugar]);
 });

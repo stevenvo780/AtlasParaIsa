@@ -332,7 +332,7 @@ export function spillContainedWater(host: TechnologyHost, actor: WaterActor): nu
   const ledger = nextAccount(host, { environmentalLoss: lost });
   host.technology.water = ledger;
   for (const change of changes) change.item.contents = change.contents;
-  delete actor.technology.waterPreparation;
+  if (actor.technology.waterPreparation !== undefined) actor.technology.waterPreparation = undefined;
   record(host, actor, waterEnvelope(actor, opening, 'spill', { lost })!);
   return lost;
 }
@@ -373,11 +373,11 @@ export function advanceWaterPreparation(host: TechnologyHost, actor: WaterActor)
   const plan = actor.technology.waterPreparation;
   if (!plan) return { moved: 0, complete: true };
   const item = actor.technology.items.find(item => item.id === plan.itemId);
-  const cancel = () => { delete actor.technology.waterPreparation; return { moved: 0, complete: true }; };
+  const cancel = () => { actor.technology.waterPreparation = undefined; return { moved: 0, complete: true }; };
   if (!preparationReady(actor) || !item || actor.x !== plan.sourceX || actor.y !== plan.sourceY
     || host.tick - plan.startedAt >= WATER_PREPARATION_MAX_TICKS || (item.contents?.water ?? 0) >= plan.targetQuanta) return cancel();
   const moved = fillContainedWater(host, actor, item.id, plan.targetQuanta - (item.contents?.water ?? 0));
   const complete = !moved || (item.contents?.water ?? 0) >= plan.targetQuanta;
-  if (complete) delete actor.technology.waterPreparation;
+  if (complete) actor.technology.waterPreparation = undefined;
   return { moved, complete };
 }

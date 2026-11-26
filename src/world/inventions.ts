@@ -203,7 +203,7 @@ function planoSeleccionado(c: CtxLeyMateria, persona: Person) {
   const base = selectedBlueprint(mundo, persona);
   const id = persona.blueprintId?.startsWith(PREFIJO_PLANO_OBRA) ? persona.blueprintId : base.id;
   const plano = formaDePlano(c, id);
-  return { id, name: id === base.id ? base.name : `Obra de ${plano.area} celdas`, components: base.components, plano };
+  return { id, name: id === base.id ? base.name : `Obra de ${plano.area} celdas`, plano };
 }
 
 function fittingMaterial(world: World, anchor: Point, plano: Readonly<PlanoObra>, existing?: StructureView): Point[] | false {
@@ -939,7 +939,7 @@ function candidatosObra(c: CtxLeyMateria, persona: Person): InventionCandidate[]
       if (value <= valorPadre) continue;
       firmas.add(firma);
       const masa = muestra.masa * variacion.area;
-      candidatos.push({ components: [...padre.components], parents: [padre.id], planoMaterial: variacion,
+      candidatos.push({ components: [], parents: [padre.id], planoMaterial: variacion,
         value, efficiency: value / (masa * COLOCACION_J_POR_KG), novelty: 1 - valorPadre / value });
     }
   }
@@ -1168,9 +1168,15 @@ function contribuirObraMaterial(c: CtxLeyMateria, persona: Person, s: StructureV
     obra.terminada = true;
     s.builtAt = mundo.tick;
     mundo.settlementCount++;
-    const lugar = { id: `settlement-${s.x}-${s.y}`, name: s.name, x: s.x, y: s.y,
+    const id = `settlement-${s.x}-${s.y}`;
+    const previo = c.globales.lugares.get(id) ?? mundo.places.find(p => p.id === id);
+    const lugar = previo ?? { id, name: s.name, x: s.x, y: s.y,
       description: 'Obra levantada con piezas colocadas.', gatherings: 0 };
-    c.pedirGlobal('lugar', serialize(lugar));
+    // El checkpoint puede caer entre F4 y F0. El dueño ya deja el lugar en su mundo y en el chunk.
+    if (!previo) mundo.places.push(lugar);
+    const locales = mundo.chunks[chunkKey(s.x, s.y)]!.places;
+    if (!locales.some(p => p.id === id)) locales.push(lugar);
+    if (!previo) c.pedirGlobal('lugar', serialize(lugar));
     emit({ kind: 'settlement', actors: [persona.id], x: s.x, y: s.y, source: 'simulation',
       text: `${persona.name} terminó ${s.name.toLocaleLowerCase('es')}.`,
       cause: `La obra sostiene ${servicio.masa.toFixed(3)} kg de piezas colocadas con trabajo pagado.` });
@@ -1191,7 +1197,7 @@ function construirObraMaterial(c: CtxLeyMateria, persona: Person, tile: Tile, em
       existente.cells = cells;
       existente.blueprintId = blueprint.id;
       existente.name = blueprint.name;
-      existente.components = [...blueprint.components];
+      existente.components = [];
       return existente;
     }
     return contribuirObraMaterial(c, persona, existente, emit) ? existente : null;
@@ -1201,7 +1207,7 @@ function construirObraMaterial(c: CtxLeyMateria, persona: Person, tile: Tile, em
   const serial = c.id('estructura');
   const s: StructureView & { obraMaterial: EstadoObra } = {
     id: `structure-${serial}`, x: tile.x, y: tile.y, cells, blueprintId: blueprint.id, name: blueprint.name,
-    components: [...blueprint.components], condition: 0, water: 0, food: 0, uses: 0, builtAt: mundo.tick, builderId: persona.id,
+    components: [], condition: 0, water: 0, food: 0, uses: 0, builtAt: mundo.tick, builderId: persona.id,
     obraMaterial: { piezas: [], pendiente: null, agua: -1, comida: -1, terminada: false },
   };
   mundo.structureCounter = Math.max(mundo.structureCounter, serial);

@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
-import { MAX_ANIMALS_PER_TILE } from '../world/animals.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
 import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
@@ -103,26 +102,25 @@ export function hostMemory(): HostMemory {
 
 /**
  * Fórmula: `presupuesto = min(RAM física, cgroup) · 0,5` acotado por `heap de V8 · 0,6`;
- * de ahí salen regiones ENTERAS (`presupuesto / (BYTES_PER_ACTIVE_TILE · 256 teselas)`) y de ellas,
- * las teselas y la fauna (6 animales por tesela, ley estructural). Nunca por debajo de los
- * defaults deterministas de hoy: una máquina pequeña no puede rechazar un mundo que el
- * binario anterior aceptaba. Las comunidades ADMITIDAS siguen el presupuesto de teselas:
- * este tope sólo valida el estado. La fundación lee por separado `social.maxComunidades`
- * (ley de reglas 11), por lo que la máquina nunca decide esa conducta.
+ * de ahí salen regiones ENTERAS (`presupuesto / (BYTES_PER_ACTIVE_TILE · 256 teselas)`).
+ * El perfil histórico admite tantas comunidades como teselas y seis animales por tesela.
+ * Con las leyes nuevas esos campos se conservan para leer el esquema del guardado.
  */
-export function hostLimits(memory: HostMemory): WorldLimits {
+export function hostLimits(memory: HostMemory, base = DEFAULT_PARAMS): WorldLimits {
   const budget = Math.min(Math.min(positive(memory.fisicaBytes), positive(memory.cgroupBytes)) * HOST_RAM_SHARE,
     positive(memory.heapBytes) * HEAP_SHARE);
   const chunks = Math.max(DEFAULT_PARAMS.limites.chunks,
     Number.isFinite(budget) ? Math.floor(budget / (BYTES_PER_ACTIVE_TILE * TILES_PER_CHUNK)) : 0);
   const teselasActivas = chunks * TILES_PER_CHUNK;
-  return { teselasActivas, chunks, comunidades: teselasActivas, fauna: teselasActivas * MAX_ANIMALS_PER_TILE };
+  return { teselasActivas, chunks,
+    comunidades: base.v23.comunidades ? base.limites.comunidades : teselasActivas,
+    fauna: base.v23.fauna ? base.limites.fauna : teselasActivas * 6 };
 }
 
 /** Precedencia: defaults deterministas → límites resueltos aquí → overrides explícitos del
  * operador (que se aplican DESPUÉS, en `deploymentParams`, aunque repitan el default). */
 export function hostParams(base: WorldParams = DEFAULT_PARAMS, memory: HostMemory = hostMemory()): WorldParams {
-  return parseParams({ limites: hostLimits(memory) }, base);
+  return parseParams({ limites: hostLimits(memory, base) }, base);
 }
 
 /** Timeout corto para consultar los índices CUDA con `nvidia-smi` sin bloquear el arranque. */

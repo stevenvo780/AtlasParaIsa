@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Store } from '../src/server/store.js';
+import { laboratorio } from './lib/store.js';
 import { assertWorld, createWorld, stepWorld, TICKS_PER_DAY, type Person } from '../src/world/index.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { DIAS_ABORTO, ETA, M0 } from '../src/shared/naturaleza.js';
@@ -96,16 +98,16 @@ test('n: una gestación en curso conserva alelos, generación y mutaciones en el
   assert.throws(() => assertWorld(guardado), /Gestación inválida/);
 });
 
-test('n: el parto tras la recarga conserva al progenitor fallecido en el genoma, sin vínculo ni cuidado', () => {
+test('n: el parto y el archivo conservan al progenitor fallecido sin vínculo ni cuidado', t => {
   const world = mundoConLey(), [madre, otro] = world.people.filter(p => p.role === 'neighbor') as [Person, Person];
   world.reproductionEnabled = false;
+  const b = balanceEscalar(world);
+  b.concebir(madre, { otro: 800, otroId: otro.id, genoma: [...madre.genome.alleles, 1, 0], inicio: 0 });
   world.tick = T_GESTACION_MIN * TICKS_PER_DAY;
   for (const p of world.people) p.demography.age = world.tick - p.bornAt - 1;
   otro.demography.health = 0;
   otro.demography.deathCause = 'starvation';
   advancePopulation(world, { emit() {}, beforeDeath() {} });
-  const b = balanceEscalar(world);
-  b.concebir(madre, { otro: 800, otroId: otro.id, genoma: [...madre.genome.alleles, 1, 0], inicio: 0 });
   madre.gestacion!.masa = madre.gestacion!.m0;
   assert.ok(referencedLegacy(world).has(otro.id));
   const guardado = JSON.parse(JSON.stringify(world)) as typeof world;
@@ -116,6 +118,36 @@ test('n: el parto tras la recarga conserva al progenitor fallecido en el genoma,
   assert.deepEqual(cria.crianza?.cuidadores, [madre.id]);
   assert.deepEqual(cria.bonds, { [madre.id]: 1 });
   assertWorld(guardado);
+
+  const { store, path } = laboratorio(t, 'atlas-genealogia-');
+  const padres = [madre.id, otro.id];
+  cria.genome.parents = [...padres].reverse();
+  assert.throws(() => assertWorld(guardado), /Estado procedural inválido/);
+  cria.genome.parents = [...padres];
+  store.save(guardado);
+  assert.ok(store.loadLegacy(otro.id)!.diedAt < cria.bornAt);
+
+  guardado.tick++;
+  cria.demography.health = 0;
+  cria.demography.deathCause = 'starvation';
+  advancePopulation(guardado, { emit() {}, beforeDeath() {} });
+  const registro = guardado.retiredLegacy.find(p => p.id === cria.id)!;
+  assert.deepEqual(registro.parents, padres);
+  registro.parents = [...padres].reverse();
+  registro.genome.parents = [...registro.parents];
+  assert.throws(() => store.save(guardado), /Archived genealogy is inconsistent/);
+  assert.equal(store.loadLegacy(cria.id), null);
+  registro.parents = [...padres];
+  registro.genome.parents = [...padres];
+  store.save(guardado);
+
+  const reabierto = new Store(path, { readOnly: true });
+  try {
+    const cargado = reabierto.load()!.world;
+    assert.deepEqual(cargado.legacy.find(p => p.id === cria.id)?.parents, padres);
+    assert.deepEqual(reabierto.loadLegacy(cria.id), registro);
+  } finally { reabierto.close(); }
+
   const antiguo = JSON.parse(JSON.stringify(world)) as typeof world;
   setParams(antiguo, paramsOf(world));
   delete mortal(antiguo).gestacion!.otroId;

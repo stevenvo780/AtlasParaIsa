@@ -12,7 +12,7 @@
  * F5 muertes y partos; F6 publica sus filas. A los demás se les escribe por intento (`Golpear`, `Tomar`).
  */
 import type { AnimalView } from '../shared/life.js';
-import { C_MOVER, DIAS_ABORTO, ETA, KAPPA0, KAPPA_HUMANA, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
+import { C_MOVER, DIAS_ABORTO, KAPPA0, KAPPA_HUMANA, M0, SALUD_FERTIL } from '../shared/naturaleza.js';
 import { ACTIONS, SPECIES, syncFauna, type Animal, type EstadoFauna } from './animals.js';
 import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, HUELLA_FORMA, decisionVacia, elegirFaunaV23, huella, radioVista, velocidadDe,
@@ -21,8 +21,8 @@ import {
 import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
-  abortar, beber, concebir, crearCuerpo, crecer, depositar, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
-  pagar, parir, plantillaDe, reservaJ, vistaCuerpo,
+  abortar, basalJ, beber, celdaDeMuerte, concebir, costeGestacionJ, crearCuerpo, crecer, depositar, extraer, gestar,
+  herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir, pagar, parir, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
 import { Parte, Rol, type Cuerpo, type Kappa, type LoteRef, type Plantilla, type VistaCuerpo } from './materia/tipos.js';
@@ -373,15 +373,6 @@ function medirPasto(c: CtxLeyMateria, e: Estado): void {
 
 // ── F3: elegir ────────────────────────────────────────────────────────────────────────────────────────────
 
-/** J de reserva que pide una cría: m0 kg de tejido a la densidad de energía del suyo, con rendimiento η (el mismo coste
- * que `natalidad.ts`). 0 si no puede criar ahora (gesta, le falta salud o no tiene masa de adulto). */
-function costeCria(c: CtxLeyMateria, f: Fila, pl: Plantilla): number {
-  const cu = f.animal.cuerpo!;
-  if (cu.gestacion || f.vista.salud < SALUD_FERTIL || f.vista.masa < MADUREZ_MASA * pl.masaAdulta) return 0;
-  const vt = c.materia.vista(cu.tejido);
-  return vt.masa > 0 ? pl.m0 * (vt.energia / vt.masa) / ETA : 0;
-}
-
 function prepararYo(c: CtxLeyMateria, f: Fila): void {
   const a = f.animal, fa = a.fauna!, cu = a.cuerpo!, yo = f.yo, v = f.vista;
   vistaCuerpo(c, cu, v);
@@ -390,16 +381,16 @@ function prepararYo(c: CtxLeyMateria, f: Fila): void {
   yo.habituacion = fa.habituacion; yo.sobresalto = sobresaltoActual(fa, c.tick);
   const vt = c.materia.vista(cu.tejido);
   yo.jPorKgCarne = vt.masa > 0 ? vt.energia / vt.masa : 0;
-  // Fértil: reserva para pagar la cría. Ese coste es ≈ 2,3 veces la reserva llena (M0·Q_tejido / (η·RESERVA_OBJETIVO_J_KG),
-  // la misma para toda la fauna), así que un adulto que puede criar sigue con hambre hasta reunirla, como la gestante de
-  // `natalidad.ts` (`provisionCrianza`): sin esto comía solo hasta la reserva llena y ninguno llegaba nunca a fértil.
-  const coste = costeCria(c, f, plantillaDe(c, cu));
-  f.fertil = coste > 0 && yo.reservaJ >= coste;
-  if (coste > 0 && !f.fertil) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / coste);
-  // Gestante: el embrión se hace con lo que hay en el tubo (el hueso y la proteína no se guardan en la reserva), así que
-  // la madre sigue con hambre hasta completarlo. Sin esto descansaba saciada con el tubo vacío y el embrión no crecía.
-  const g = cu.gestacion;
-  if (g) yo.hambre = Math.max(yo.hambre, 1 - c.materia.vista(g.embrion).masa / plantillaDe(c, cu).m0);
+  const pl = plantillaDe(c, cu), g = cu.gestacion;
+  f.fertil = false;
+  if (g || (v.salud >= SALUD_FERTIL && v.masa >= MADUREZ_MASA * pl.masaAdulta)) {
+    const pendiente = g ? sat01(1 - c.materia.vista(g.embrion).masa / pl.m0) : 1;
+    // La proteína y el hueso llegan del digestivo. La reserva solo cubre su parte de la síntesis y el basal que exige gestar.
+    const provision = pendiente * costeGestacionJ(c, cu) + basalJ(c, cu, TICKS_PER_DAY);
+    f.fertil = !g && provision > 0 && yo.reservaJ >= provision;
+    if (provision > 0) yo.hambre = Math.max(yo.hambre, 1 - yo.reservaJ / provision);
+    if (g) yo.hambre = Math.max(yo.hambre, pendiente);
+  }
   yo.fertil = f.fertil;
 }
 
@@ -551,7 +542,6 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const a = f.animal, fa = a.fauna!, cu = a.cuerpo!, d = f.decision, fr = c.frente;
   f.celda = c.terreno.celda(a.x, a.y); f.destino = -1;
   metabolizar(c, cu, f.celda, 1);
-  crecer(c, cu, 1);
   if (cu.gestacion) {
     const masa = gestar(c, cu, 1), g = cu.gestacion;
     if (g && masa >= plantillaDe(c, cu).m0) e.partos.push(f);
@@ -559,6 +549,8 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
     else if (g && g.bajoBasalDesde >= 0 && c.tick - g.bajoBasalDesde >= DIAS_ABORTO * TICKS_PER_DAY
       && c.materia.vista(g.embrion).masa <= margenKg(c, e, f, f.celda)) { abortar(c, cu); contarHuella(e, f, f.celda, masaDe(c, cu)); }
   }
+  // El mantenimiento ya se pagó. Si el tejido adulto sintetiza primero, puede acaparar toda la proteína del tubo.
+  crecer(c, cu, 1);
   fa.miedo = d.miedo; fa.habituacion = d.habituacion; fa.huyeDe = d.huyeDe; fa.persigue = d.presaUid; fa.pareja = d.pareja;
   // Contacto con la presa (posiciones del frente): muerde y no se mueve este tick.
   if (d.accion === 'hunt' && d.presa !== REF_NULA) {
@@ -630,7 +622,7 @@ function reflejar(c: CtxLey, f: Fila): void {
 export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por?: string): void {
   const e = estado(c), f = e.filas.get(animal), cu = animal.cuerpo;
   if (!cu || !f) return;
-  const celda = c.terreno.celda(animal.x, animal.y);
+  const celda = celdaDeMuerte(c, animal.x, animal.y);
   const masa = masaDe(c, cu);
   morir(c, cu, celda);
   const violenta = por !== undefined || (animal.fauna !== undefined && c.tick - animal.fauna.heridoEn <= 2);

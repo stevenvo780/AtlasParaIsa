@@ -108,6 +108,24 @@ export function assertLegacyRecord(value: unknown, atTick: number): asserts valu
   if (record.cause === 'senescence' && record.diedAt - record.bornAt < traits.senescenceStart) fail();
 }
 
+type IdentidadGenealogica = Pick<Person, 'id' | 'bornAt' | 'genome'> & { diedAt?: number };
+
+/** La ley de natalidad registra primero a quien gestó. El otro progenitor puede morir antes del parto. */
+export function genealogiaValida(hijo: IdentidadGenealogica, padres: readonly (IdentidadGenealogica | null | undefined)[],
+  natalidad: boolean): boolean {
+  if (!padres.length) return true;
+  const gestado = natalidad && /^nacido-[1-9]\d*$/.test(hijo.id);
+  let generacionMayor = -1;
+  for (let i = 0; i < padres.length; i++) {
+    const padre = padres[i];
+    if (!padre || padre.id === hijo.id || padre.bornAt >= hijo.bornAt
+      || (padre.diedAt !== undefined && padre.diedAt < hijo.bornAt && (!gestado || i === 0))
+      || padre.genome.generation >= hijo.genome.generation) return false;
+    generacionMayor = Math.max(generacionMayor, padre.genome.generation);
+  }
+  return hijo.genome.generation === generacionMayor + 1;
+}
+
 /** Only dead references need a legacy row; living parent/inventor identities are in the snapshot. */
 export function referencedLegacy(world: World): Set<string> {
   const required = new Set<string>();
@@ -237,22 +255,16 @@ function sampledBondDegree(people: readonly Person[]): number {
   return m ? keys / m : 0;
 }
 
-/** T142: borra de cada superviviente sus vínculos con los fallecidos. Mismo resultado que el bucle de siempre
- * (`delete` de cada id fallecido en cada superviviente): se borran exactamente las claves propias que son ids
- * fallecidos, y borrar nunca reordena las que quedan. Sólo cambia el coste: con pocas muertes se sondea
- * (vivos × muertes consultas, y `delete` sólo donde la clave existe); con muchas, cada superviviente recorre sus
- * claves una vez (Σ claves, independiente de las muertes). La reciprocidad de `bond()`/`convivir` no sirve de
- * índice inverso: el contrato admite vínculos unidireccionales y el mundo se clona en cada paso. */
+/** Sondea por id si hubo pocas muertes. Solo reconstruye los mapas que perdieron algún vínculo. */
 export function pruneBonds(survivors: readonly Person[], departed: readonly Person[]): void {
   if (!departed.length) return;
-  const ids = new Set(departed.map(person => person.id));
-  if (ids.size > BOND_SCAN_RATIO && ids.size > BOND_SCAN_RATIO * (sampledBondDegree(survivors) + 1)) {
-    for (const person of survivors) {
-      let hits: string[] | undefined;
-      for (const id of Object.keys(person.bonds)) if (ids.has(id)) (hits ??= []).push(id);
-      if (hits) for (const id of hits) delete person.bonds[id];
-    }
-  } else for (const person of survivors) for (const id of ids) if (Object.hasOwn(person.bonds, id)) delete person.bonds[id];
+  const muertos = departed.map(person => person.id), ids = new Set(muertos);
+  const barrer = ids.size > BOND_SCAN_RATIO && ids.size > BOND_SCAN_RATIO * (sampledBondDegree(survivors) + 1);
+  for (const person of survivors) {
+    const bonds = person.bonds;
+    const alcanzo = barrer ? Object.keys(bonds).some(id => ids.has(id)) : muertos.some(id => Object.hasOwn(bonds, id));
+    if (alcanzo) person.bonds = Object.fromEntries(Object.entries(bonds).filter(([id]) => !ids.has(id)));
+  }
 }
 
 /** One post-action tick. Bodies are evaluated simultaneously; this module creates neither

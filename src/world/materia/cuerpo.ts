@@ -17,9 +17,8 @@
  * Decisión del tubo (encargo, punto 4): con κ = KAPPA0 = 60 en las cuatro familias nada se aprovecha (oxidar un
  * combustible tiene barrera γ·D(O=O) − κ = 113 J: 9·10⁻¹¹ por tick a 310 K; desaminar o carbonizar, γ·D(C–H) − κ = 81 J:
  * 2·10⁻⁵). La dieta sale de dar κ por familia a cada plantilla, no de una lista: `KAPPA_HUMANA` abre C–C/C–H con 110
- * (grasa y carbono se absorben a 0,025 por tick: el 94 % antes de que el tránsito los saque) y C–N con 72 (la proteína
- * que el crecimiento no usa se desamina a 2·10⁻³ por tick y su carbono se quema; el NH₃ sale con las heces), y deja C–O
- * y H–H en KAPPA0: una persona no aprovecha la madera (CH₂O) ni fermenta, y un herbívoro es la misma ley con κ de C–O alta.
+ * (grasa y carbono se absorben a 0,025 por tick: el 94 % antes de que el tránsito los saque), y deja C–O y H–H en
+ * KAPPA0: una persona no aprovecha la madera (CH₂O) ni fermenta, y un herbívoro es la misma ley con κ de C–O alta.
  */
 import { DEMOGRAPHY_TICKS_PER_DAY } from '../../shared/demography.js';
 import type { SustanciaId } from '../../shared/materia.js';
@@ -38,6 +37,7 @@ import type { Person } from '../mundo/tipos.js';
 import type { Aplicado, CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { CAMPOS_CUERPO, CUERPO_ANCHO, REF_NULA, TipoIntento, slotDe, type Intento, type Registro } from '../motor/contratos.js';
 import { necesidadesDeVista } from '../needs.js';
+import { PAGE_CELLS, pageOf, pageOffset } from '../soa/region.js';
 import { copiar, crearPlantilla, leerPlantilla } from './copiar.js';
 import { fluir } from './fluir.js';
 import { conservacion, lotesDeCelda, sustanciasDe, temperaturaDe, type LotesCelda } from './ley-mundo.js';
@@ -360,6 +360,9 @@ export function pagar(c: CtxLeyMateria, cuerpo: Cuerpo, julios: number): number 
 // ── Metabolismo ──────────────────────────────────────────────────────────────────────────────────────────
 
 const CELDA: LotesCelda = { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA };
+// J/cuanto: durante la síntesis humana se conserva el N ligado. A 310 K la desaminación a κ_C–N = 72 consume
+// más de la mitad de la proteína en 300 ticks, menos de un tránsito digestivo.
+const KAPPA_ASIMILACION_HUMANA: Kappa = [KAPPA_HUMANA[0], KAPPA0, KAPPA_HUMANA[2], KAPPA_HUMANA[3]];
 
 /** Un paso de `dt` ticks del cuerpo: digestión (`pasoLote` del digestivo con la κ de su plantilla), absorción hacia la
  * reserva y el tejido, basal pagado, intercambio de gases y calor con el aire de `celda` y excreción a su Suelo. */
@@ -370,7 +373,8 @@ export function metabolizar(c: CtxLeyMateria, cuerpo: Cuerpo, celda: number, dt:
   const masa = masaLote(c, cuerpo.tejido);
   contextos.set(cuerpo, c);
   if (leer(a, cuerpo.digestivo) > 0) {
-    pasoLote(pasoDe(c), cuerpo.digestivo, dt, p.kappa);
+    const sintetiza = p === humanas.get(c.globales.registro) && (masa < p.masaAdulta || cuerpo.gestacion !== undefined);
+    pasoLote(pasoDe(c), cuerpo.digestivo, dt, sintetiza ? KAPPA_ASIMILACION_HUMANA : p.kappa);
     absorber(c, cuerpo, p, dt);
   }
   if (aire >= 0) respirar(c, cuerpo, aire, masa, dt);
@@ -519,10 +523,15 @@ function excretar(c: CtxLeyMateria, cuerpo: Cuerpo, suelo: LoteRef, dt: number):
  * objetivo de agua. No dependen de la masa: gasto y objetivo crecen los dos con el tejido. */
 export function tasasBasales(c: CtxLeyMateria, out: { hunger: number; thirst: number }): { hunger: number; thirst: number } {
   const agua = c.quimica.sustancia(entorno.sustancias(c).H2O);
-  const evaporada = FRACCION_EVAPORATIVA * BASAL_J_KG_TICK / (TROUTON_J * agua.prop.tEbullicion) * agua.masa * MG; // kg por kg y tick
   out.hunger = BASAL_J_KG_TICK / RESERVA_OBJETIVO_J_KG;
-  out.thirst = evaporada / AGUA_OBJETIVO_KG_KG + REPARTO_AGUA_TUBO / (1 + REPARTO_AGUA_TUBO) / TRANSITO_TICKS;
+  out.thirst = aguaBasalPorTick(agua);
   return out;
+}
+
+/** Fracción de la reserva de agua que se pierde por tick en reposo y con aire templado. */
+function aguaBasalPorTick(agua: Readonly<Sustancia>): number {
+  const evaporada = FRACCION_EVAPORATIVA * BASAL_J_KG_TICK / (TROUTON_J * agua.prop.tEbullicion) * agua.masa * MG;
+  return evaporada / AGUA_OBJETIVO_KG_KG + REPARTO_AGUA_TUBO / (1 + REPARTO_AGUA_TUBO) / TRANSITO_TICKS;
 }
 
 // ── Síntesis: crecer y gestar ────────────────────────────────────────────────────────────────────────────
@@ -543,6 +552,25 @@ function sintetizar(c: CtxLeyMateria, cuerpo: Cuerpo, p: Plantilla, destino: Lot
     energia = a.moverCalor(cuerpo.reserva, destino, n * e.dH);
   }
   return copiar(a, q, p, destino, [cuerpo.reserva, cuerpo.digestivo], cuerpo.digestivo, energia, n);
+}
+
+/** La síntesis humana incorpora nutrientes ya formados del tubo. Solo puede usar grasa y agua libres por encima del
+ * mantenimiento de un día. El alimento en tránsito cuenta en ese balance: también puede abastecer el mantenimiento. */
+function sintetizarTejidoHumano(c: CtxLeyMateria, cuerpo: Cuerpo, p: Plantilla, destino: LoteRef, maxUnidades: number): number {
+  const a = c.materia, q = c.quimica, { H2O, CH2 } = entorno.sustancias(c);
+  const { digestivo, reserva } = cuerpo;
+  let n = entero(maxUnidades, pasoDe(c).azar);
+  if (n <= 0) return 0;
+  const grasa = q.sustancia(CH2).prop.qOxidacion, agua = q.sustancia(H2O), masa = masaLote(c, cuerpo.tejido);
+  const grasaDisponible = a.cuantos(digestivo, CH2) + Math.min(a.cuantos(reserva, CH2),
+    (reservaJ(c, cuerpo) - basalJ(c, cuerpo, DEMOGRAPHY_TICKS_PER_DAY)) / grasa);
+  const aguaBasal = aguaBasalPorTick(agua) * DEMOGRAPHY_TICKS_PER_DAY * AGUA_OBJETIVO_KG_KG * masa / (agua.masa * MG);
+  const aguaDisponible = a.cuantos(digestivo, H2O) + a.cuantos(reserva, H2O) - aguaBasal;
+  for (const { id, nu } of p.sintesis.entradas) {
+    if (id === CH2) n = Math.min(n, Math.floor(grasaDisponible / nu));
+    if (id === H2O) n = Math.min(n, Math.floor(aguaDisponible / nu));
+  }
+  return n > 0 ? copiar(a, q, p, destino, [digestivo, reserva], digestivo, 0, n) : 0;
 }
 
 /** Repone en el tejido la parte que falta para completar unidades (tras esquilar o perder una sola sustancia) con la que
@@ -568,11 +596,34 @@ export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
   const p = plantillaDe(c, cuerpo), d = datosDe(c, p), antes = masaLote(c, cuerpo.tejido);
   reponer(c, cuerpo, p, dt);
   const tiene = masaLote(c, cuerpo.tejido) / (d.masaMg * MG), falta = p.masaAdulta / (d.masaMg * MG) - tiene;
-  if (falta > 0) sintetizar(c, cuerpo, p, cuerpo.tejido, Math.min(falta, G_SINTESIS * tiene * dt));
+  if (falta > 0) {
+    const sintetizarTejido = p === humanas.get(c.globales.registro) ? sintetizarTejidoHumano : sintetizar;
+    sintetizarTejido(c, cuerpo, p, cuerpo.tejido, Math.min(falta, G_SINTESIS * tiene * dt));
+  }
   return masaLote(c, cuerpo.tejido) - antes;
 }
 
 // ── Comer y beber ────────────────────────────────────────────────────────────────────────────────────────
+
+/** Fracción del nutriente estructural que falta para el tejido que puede formarse durante un tránsito del tubo. */
+export function apetitoDeTejido(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const p = plantillaDe(c, cuerpo);
+  if (p !== humanas.get(c.globales.registro)) return 0;
+  const masa = masaLote(c, cuerpo.tejido), a = c.materia;
+  const crecerKg = Math.max(0, Math.min(p.masaAdulta - masa, G_SINTESIS * masa * TRANSITO_TICKS));
+  const g = cuerpo.gestacion;
+  const gestarKg = g ? Math.max(0, Math.min(p.m0 - masaLote(c, g.embrion), G_SINTESIS * p.m0 * TRANSITO_TICKS)) : 0;
+  const unidades = Math.floor((crecerKg + gestarKg) / (datosDe(c, p).masaMg * MG));
+  if (unidades <= 0) return 0;
+  const { proteina, orgP } = entorno.sustancias(c);
+  let carencia = 0;
+  for (const { id, nu } of p.sintesis.entradas) {
+    if (id !== proteina && id !== orgP) continue;
+    const hay = a.cuantos(cuerpo.digestivo, id) + a.cuantos(cuerpo.reserva, id);
+    carencia = Math.max(carencia, 1 - hay / (unidades * nu));
+  }
+  return carencia;
+}
 
 /** Lo que este cuerpo pide para comer `kg` de un lote: parte Digerible con su κ. */
 export function pedidoComida(c: CtxLeyMateria, cuerpo: Cuerpo, kg: number): Pedido {
@@ -739,6 +790,19 @@ export function extraer(c: CtxLeyMateria, cuerpo: Cuerpo, parte: 'reserva' | 'fi
   return paresDe(acumulado);
 }
 
+/** La percepción puede vaciarse al retirar una página aunque todavía conserve material en esas coordenadas. */
+export function celdaDeMuerte(c: CtxLeyMateria, x: number, y: number): number {
+  const t = c.terreno, celda = t.celda(x, y);
+  if (celda >= 0) return celda;
+  const px = pageOf(x), py = pageOf(y), desplazamiento = pageOffset(x, y), sinLeer = new Float64Array(0);
+  for (let pagina = 0; pagina < t.paginas; pagina++) {
+    if (t.duenoChunk[pagina]! < 0 || t.paginaX[pagina] !== px || t.paginaY[pagina] !== py) continue;
+    const material = pagina * PAGE_CELLS + desplazamiento;
+    if (c.materia.lotes(material, Rol.Suelo, sinLeer) > 0) return material;
+  }
+  throw new Error(`b: falta la celda material de la defunción en (${x}, ${y}).`);
+}
+
 /** Muerte: funde tejido, reserva, digestivo y embrión en un lote Cadaver en `celda` (si la celda es de otro chunk, la
  * materia viaja en un `Depositar`) y libera los lotes del cuerpo. Devuelve el cadáver, o REF_NULA si viajó. */
 export function morir(c: CtxLeyMateria, cuerpo: Cuerpo, celda: number): LoteRef {
@@ -781,7 +845,8 @@ export function gestar(c: CtxLeyMateria, madre: Cuerpo, dt: number): number {
   const alNacer = p.m0 / (d.masaMg * MG), falta = alNacer - masaLote(c, g.embrion) / (d.masaMg * MG);
   // Una gestación se sostiene si la reserva cubre un día de basal Y el embrión crece (o ya está hecho): un embrión al
   // que la madre no puede dar alguna de sus partes (N, P) no crece y, como el que no se paga, se pierde a los DIAS_ABORTO.
-  const hechas = falta > 0 && dt > 0 ? sintetizar(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
+  const sintetizarEmbrion = p === humanas.get(c.globales.registro) ? sintetizarTejidoHumano : sintetizar;
+  const hechas = falta > 0 && dt > 0 ? sintetizarEmbrion(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
   const crece = !(falta > 0) || hechas > 0 || !(dt > 0);
   const paga = crece && reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);
   g.bajoBasalDesde = paga ? -1 : g.bajoBasalDesde < 0 ? c.tick : g.bajoBasalDesde;

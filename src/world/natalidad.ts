@@ -4,7 +4,7 @@
  *
  * LA LEY
  *   aporta(p)  = mortal ∧ edad ∈ [madurez, vejez) ∧ salud ≥ SALUD_FERTIL            (puede dar su genoma)
- *   fértil(p)  = aporta(p) ∧ sin gestación ∧ enfriamiento (gen) ∧ reserva(p) ≥ coste(p) + basal(p, T_MIN)
+ *   fértil(p)  = aporta(p) ∧ sin gestación ∧ enfriamiento (gen) ∧ reserva suficiente para empezar a gestar
  *   concebir   : p fértil toma el genoma del mejor q que aporta, no pariente, a ≤ `poblacion.radioPareja` celdas, por
  *                cercanía y por el vínculo que p le tiene (no se exige vínculo mutuo). q no cambia: solo dio información,
  *                así que varias gestantes pueden elegirlo a la vez y en una pareja mutua pueden gestar las dos; cada
@@ -76,7 +76,7 @@ export interface EstadoCria {
   salud: number;                                      // [0, 1]
   gestando: boolean;
   desdeParto: number; enfriamiento: number;           // ticks
-  reserva: number; coste: number;                     // coste = síntesis de la cría + basal de la gestación mínima
+  reserva: number; coste: number;                     // reserva mínima para empezar a gestar
 }
 
 export type CausaNoCria = 'rol' | 'inmadura' | 'vejez' | 'salud' | 'gestando' | 'enfriamiento' | 'reserva';
@@ -286,6 +286,14 @@ export function balanceDeMundo(world: World): Balance | undefined {
 
 // ── Fertilidad sobre el mundo ────────────────────────────────────────────────────────────────────────────
 
+/** En átomos el tejido se incorpora conforme llegan los nutrientes. Se anticipa un día de mantenimiento y solo
+ * el máximo que la placenta puede retirar de la reserva en el primer tick. */
+function reservaAlConcebir(b: Balance, p: Person): number {
+  return b.unidad === 'J'
+    ? b.basal(p, TICKS_PER_DAY) + b.coste(p) / TICKS_GESTACION_MIN
+    : b.basal(p, TICKS_GESTACION_MIN) + b.coste(p);
+}
+
 /** El estado completo de una persona ante la ley (para fichas e instrumentos; la ley usa el camino corto de abajo). */
 export function estadoCria(world: World, p: Person, b: Balance): EstadoCria {
   const rasgos = rasgosDe(world, p);
@@ -293,7 +301,7 @@ export function estadoCria(world: World, p: Person, b: Balance): EstadoCria {
     mortal: p.role === 'neighbor', edad: p.demography.age, madurez: rasgos.maturityAge, vejez: rasgos.senescenceStart,
     salud: b.salud(p), gestando: b.enCurso(p) !== undefined,
     desdeParto: world.tick - p.lastBirth, enfriamiento: rasgos.fertilityCooldown,
-    reserva: b.reserva(p), coste: b.coste(p) + b.basal(p, TICKS_GESTACION_MIN),
+    reserva: b.reserva(p), coste: reservaAlConcebir(b, p),
   };
 }
 
@@ -413,7 +421,9 @@ export function provisionCrianza(world: World, p: Person): Provision | null {
   if (causa === 'reserva') falta = e.coste - e.reserva;
   else if (causa === 'gestando') {
     const g = b.enCurso(p)!;
-    falta = b.coste(p) * Math.max(0, 1 - g.masa / g.m0) + b.basal(p, TICKS_PER_DAY) - e.reserva;
+    const restante = Math.max(0, 1 - g.masa / g.m0);
+    const fraccion = b.unidad === 'J' ? Math.min(restante, 1 / TICKS_GESTACION_MIN) : restante;
+    falta = b.coste(p) * fraccion + b.basal(p, TICKS_PER_DAY) - e.reserva;
   }
   if (!(falta > 0)) return null;
   return { reserveTarget: b.unidad === 'ua' ? p.inventory + falta : 0, comer: b.unidad === 'J', apremio: Math.min(1, falta / e.coste) };
@@ -536,7 +546,9 @@ function parto(c: CtxLey, b: Balance, madre: Person): void {
 }
 
 function aborto(c: CtxLey, b: Balance, madre: Person,
-  causa = `Su reserva no cubrió un día de gasto basal durante ${DIAS_ABORTO} día(s) seguidos; lo gestado volvió a su cuerpo.`): void {
+  causa = b.unidad === 'J'
+    ? `Durante ${DIAS_ABORTO} día(s) no pudo sostener el embrión y su propio mantenimiento; lo gestado volvió a su cuerpo.`
+    : `Su reserva no cubrió un día de gasto basal durante ${DIAS_ABORTO} día(s) seguidos; lo gestado volvió a su cuerpo.`): void {
   b.abortar(madre);
   c.suceso({ kind: 'care', actors: [madre.id], x: madre.x, y: madre.y, source: 'simulation',
     text: `${madre.name} perdió la gestación.`,
@@ -577,7 +589,7 @@ export const leyNatalidad: Ley = {
       if (!mundo.reproductionEnabled || !aporta(mundo, p, b)) continue;
       const rasgos = rasgosDe(mundo, p);
       if (tick - p.lastBirth < rasgos.fertilityCooldown) continue;
-      if (!(b.reserva(p) >= b.coste(p) + b.basal(p, TICKS_GESTACION_MIN))) continue;
+      if (!(b.reserva(p) >= reservaAlConcebir(b, p))) continue;
       const q = mejorPareja(c, p, slot, radio);
       if (q) concebirCon(c, b, p, q);
     }

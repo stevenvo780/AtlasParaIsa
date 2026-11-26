@@ -11,7 +11,7 @@ import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe,
 import { fuerzaReceta, nuevaTecnica, olvidarRecetas, pruneTechnologyCompetence, recetaRecordada, recordarReceta, rememberRecipe, tauRecetaTicks, technologyProjectPins, touchKnownRecipe, usarReceta } from './technology-memory.js';
 import { containerAffordance } from './material-affordances.js';
 import { firstTileAt } from './tile-index.js';
-import { boundParamsOf, HISTORICAL_PARAMS, ley, type WorldParams } from './params.js';
+import { boundParamsOf, HISTORICAL_PARAMS, ley, paramsOf, type WorldParams } from './params.js';
 import { ACTIVE_CAPABILITY_THRESHOLD, isGenuineFunctionalNovelty, novedadFuncional, type PerfilFuncional } from './tecnologia-complejidad.js';
 import type { Person } from './mundo/tipos.js';
 import type { RecetaRecordada, TecnicaPersona } from '../shared/technology.js';
@@ -107,13 +107,16 @@ export function defaultTechnologyState(): TechnologyState {
     ledger: { imported: empty(), estateLoss: empty(), work: 0, energy: 0, fuelMass: 0, attempts: 0, failures: 0, crafted: 0, toolUses: 0, shared: 0, recycled: 0 },
     budgets: { maxRecipes: 256, maxSteps: 12, maxInputs: 4, maxItems: 16, maxHistory: 256, maxGeneration: 32, maxMassPerInput: 4000 } };
 }
-export function initialTechnologyKnowledge(): TechnologyKnowledge {
-  return { knownRecipes: [], items: [], residue: empty(), attempts: 0, lastAttempt: -120, project: null, learnedFrom: [], competence: {} };
+export function initialTechnologyKnowledge(v23?: Pick<WorldParams['v23'], 'tecnica' | 'intentos'>): TechnologyKnowledge {
+  return { knownRecipes: [], items: [], residue: empty(), attempts: 0, lastAttempt: -120, project: null, learnedFrom: [], competence: {},
+    ...(v23?.tecnica || v23?.intentos ? { waterPreparation: undefined } : {}),
+    ...(v23?.tecnica ? { tecnica: nuevaTecnica() } : {}) };
 }
 /** Keep local instructions and practice bounded, including after stock leaves an actor. */
 export function maintainTechnologyMemory(host: TechnologyHost, actor: TechnologyActor): void {
   const knowledge = actor.technology, capacity = technologyMemoryCapacity(host.technology);
-  if (knowledge.waterPreparation && !knowledge.items.some(item => item.id === knowledge.waterPreparation!.itemId)) delete knowledge.waterPreparation;
+  if (knowledge.waterPreparation && !knowledge.items.some(item => item.id === knowledge.waterPreparation!.itemId)) knowledge.waterPreparation = undefined;
+  if (ley(host, 'tecnica')) return;
   if (knowledge.knownRecipes.length > capacity && !rememberRecipe(knowledge, knowledge.knownRecipes.at(-1)!, {
     capacity, protectedIds: technologyProjectPins(knowledge),
   }).remembered) throw new Error('Active technology instructions exceed local memory capacity.');
@@ -309,7 +312,7 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   if (plan.waterTile) { plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000); marcarTesela(plan.waterTile); }
   for (const item of actor.technology.items) {
     const amount = plan.itemMasses.get(item.id) ?? 0;
-    if (amount && actor.technology.waterPreparation?.itemId === item.id) delete actor.technology.waterPreparation;
+    if (amount && actor.technology.waterPreparation?.itemId === item.id) actor.technology.waterPreparation = undefined;
     if (amount) settleContainedWaterCapacity(host, item, true);
     subtract(item.composition, plan.itemCompositions.get(item.id) ?? empty()); item.mass -= amount;
   }
@@ -353,7 +356,7 @@ function spendToolMaterial(actor: TechnologyActor, best: { item: MaterialBatch; 
 export function useTool(host: TechnologyHost, actor: TechnologyActor, capability: Capability, demand = 1): ToolReceipt | undefined {
   if (!CAPABILITIES.includes(capability) || !Number.isFinite(demand) || demand <= 0) return;
   const best = bestTool(actor, capability); if (!best) return;
-  if (actor.technology.waterPreparation?.itemId === best.item.id) delete actor.technology.waterPreparation;
+  if (actor.technology.waterPreparation?.itemId === best.item.id) actor.technology.waterPreparation = undefined;
   const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), { wear, debris, power } = spendToolMaterial(actor, best, demand);
   const waterLost = settleContainedWaterCapacity(host, best.item, best.item.mass === 0);
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
@@ -947,7 +950,7 @@ function fixedTechnologyAssets(host: TechnologyHost): NonNullable<StructureView[
  * Local transfers move the existing objects; unclaimed material exits the technology model
  * at that location and is explicitly accounted as loss, never invented ecological food. */
 export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyActor, recipients: TechnologyActor[] = []): { transfers: { to: string; items: string[]; mass: number }[]; lost: Composition; executionIds: string[] } {
-  delete actor.technology.waterPreparation;
+  if (actor.technology.waterPreparation !== undefined) actor.technology.waterPreparation = undefined;
   const result = { transfers: [] as { to: string; items: string[]; mass: number }[], lost: empty(), executionIds: [] as string[] };
   const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && isHostMember(host.people, p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
   for (const recipient of nearby) {
@@ -1070,15 +1073,19 @@ export function assertTechnology(host: TechnologyHost): void {
   const composition = (c: Composition) => c && MATERIALS.every(m => integer(c[m]));
   const state = host.technology;
   if (!state || state.version !== 1 || !state.budgets || !state.ledger || !composition(state.ledger.imported) || !composition(state.ledger.estateLoss)) fail();
+  const v23 = paramsOf(host).v23, limitesHeredados = !v23.tecnica;
   const limits = defaultTechnologyState().budgets;
-  for (const key of Object.keys(limits) as (keyof typeof limits)[]) if (!integer(state.budgets[key], limits[key]) || state.budgets[key] < 1) fail();
-  if (!Array.isArray(state.recipes) || state.recipes.length > state.budgets.maxRecipes || !Array.isArray(state.history) || state.history.length > state.budgets.maxHistory) fail();
+  for (const key of Object.keys(limits) as (keyof typeof limits)[]) if (!integer(state.budgets[key], limitesHeredados ? limits[key] : Number.MAX_SAFE_INTEGER) || state.budgets[key] < 1) fail();
+  if (!Array.isArray(state.recipes) || limitesHeredados && state.recipes.length > state.budgets.maxRecipes || !Array.isArray(state.history) || state.history.length > state.budgets.maxHistory) fail();
   for (const key of ['recipeCounter', 'itemCounter', 'executionCounter', 'historyDropped'] as const) if (!integer(state[key])) fail();
   if ((!catalogueEnabled(state) && state.recipeCounter !== state.recipes.length) || state.historyDropped + state.history.length !== state.executionCounter || state.ledger.attempts !== state.ledger.crafted + state.ledger.failures) fail();
   try { assertTechnologyCatalogueState(host); } catch { fail(); }
   assertTechnologyJournal(state, host.tick);
   for (const [key, value] of Object.entries(state.ledger)) if (!['imported', 'estateLoss'].includes(key) && !(key === 'energy' ? finite(value) : integer(value))) fail();
   const recipeIds = new Set<string>(), signatures = new Set<string>();
+  const generationMax = limitesHeredados ? generationLimit(state) : Number.MAX_SAFE_INTEGER;
+  const memoryMax = limitesHeredados ? technologyMemoryCapacity(state) : Infinity;
+  const itemMax = limitesHeredados ? state.budgets.maxItems : Infinity;
   const getRecipe = (id: string, at = host.tick): TechnologyRecipe | undefined => {
     if (typeof id !== 'string' || !/^recipe-[1-9]\d*$/.test(id) || !integer(Number(id.slice(7)), state.recipeCounter)) return;
     const recipe = resolveTechnologyRecipe(host, id, { cache: false });
@@ -1087,7 +1094,7 @@ export function assertTechnology(host: TechnologyHost): void {
   // Uncommitted definitions remain authoritative even after their display cache entry was evicted.
   const pendingRecipes = state.catalogue?.pending ?? [], pendingIds = new Set(pendingRecipes.map(recipe => recipe.id));
   for (const recipe of [...pendingRecipes, ...state.recipes.filter(recipe => !pendingIds.has(recipe.id))]) {
-    if (!recipe || typeof recipe.id !== 'string' || !/^recipe-[1-9]\d*$/.test(recipe.id) || !integer(Number(recipe.id.slice(7)), state.recipeCounter) || recipeIds.has(recipe.id) || !validTechnologyProgram(recipe.program, state) || recipe.signature !== programSignature(recipe.program) || signatures.has(recipe.signature) || !integer(recipe.generation, generationLimit(state)) || recipe.generation < 1 || !integer(recipe.tick, host.tick) || !Array.isArray(recipe.parents) || recipe.parents.length > 6 || recipe.parents.some(id => !getRecipe(id, recipe.tick) || Number(id.slice(7)) >= Number(recipe.id.slice(7))) || !integer(recipe.uses) || !finite(recipe.utility) || !integer(recipe.manufactured) || !recipe.capacities || !CAPABILITIES.every(c => finite(recipe.capacities[c], 1))) fail();
+    if (!recipe || typeof recipe.id !== 'string' || !/^recipe-[1-9]\d*$/.test(recipe.id) || !integer(Number(recipe.id.slice(7)), state.recipeCounter) || recipeIds.has(recipe.id) || !validTechnologyProgram(recipe.program, state) || recipe.signature !== programSignature(recipe.program) || signatures.has(recipe.signature) || !integer(recipe.generation, generationMax) || recipe.generation < 1 || !integer(recipe.tick, host.tick) || !Array.isArray(recipe.parents) || recipe.parents.length > 6 || recipe.parents.some(id => !getRecipe(id, recipe.tick) || Number(id.slice(7)) >= Number(recipe.id.slice(7))) || !integer(recipe.uses) || !finite(recipe.utility) || !integer(recipe.manufactured) || !recipe.capacities || !CAPABILITIES.every(c => finite(recipe.capacities[c], 1))) fail();
     if (recipe.generation !== 1 + Math.max(0, ...recipe.parents.map(id => getRecipe(id, recipe.tick)!.generation))) fail();
     if (typeof recipe.name !== 'string' || recipe.name.length > 100 || typeof recipe.inventorId !== 'string' || recipe.inventorId.length > 100 || !Number.isFinite(recipe.x) || !Number.isFinite(recipe.y) || !['program', 'function', 'both'].includes(recipe.novelty) || new Set(recipe.parents).size !== recipe.parents.length || recipe.program.inputs.some(i => i.source === 'product' && (!getRecipe(i.recipeId!, recipe.tick) || !recipe.parents.includes(i.recipeId!)))) fail();
     recipeIds.add(recipe.id); signatures.add(recipe.signature);
@@ -1095,13 +1102,13 @@ export function assertTechnology(host: TechnologyHost): void {
   const itemIds = new Set<string>(); let current = empty();
   for (const actor of host.people) {
     const knowledge = actor.technology;
-    if (!knowledge || !Array.isArray(knowledge.items) || knowledge.items.length > state.budgets.maxItems || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > technologyMemoryCapacity(state) || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length || knowledge.knownRecipes.some(id => !getRecipe(id)) || !composition(knowledge.residue) || !integer(knowledge.attempts) || !Number.isSafeInteger(knowledge.lastAttempt) || knowledge.lastAttempt < -120 || knowledge.lastAttempt > host.tick || !Array.isArray(knowledge.learnedFrom) || knowledge.learnedFrom.length > technologyMemoryCapacity(state)) fail();
+    if (!knowledge || !Array.isArray(knowledge.items) || knowledge.items.length > itemMax || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > memoryMax || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length || knowledge.knownRecipes.some(id => !getRecipe(id)) || !composition(knowledge.residue) || !integer(knowledge.attempts) || !Number.isSafeInteger(knowledge.lastAttempt) || knowledge.lastAttempt < -120 || knowledge.lastAttempt > host.tick || !Array.isArray(knowledge.learnedFrom) || knowledge.learnedFrom.length > memoryMax) fail();
     add(current, knowledge.residue);
     for (const learned of knowledge.learnedFrom) if (!getRecipe(learned.recipeId, learned.tick) || !knowledge.knownRecipes.includes(learned.recipeId) || !integer(learned.tick, host.tick) || typeof learned.teacherId !== 'string' || learned.teacherId === actor.id) fail();
     if (!knowledge.competence || typeof knowledge.competence !== 'object') fail();
     for (const [id, practice] of Object.entries(knowledge.competence)) if (!getRecipe(id) || !practice || !integer(practice.attempts) || !integer(practice.successes, practice.attempts) || !integer(practice.work) || !finite(practice.benefit)) fail();
     for (const item of knowledge.items) {
-      if (!item || typeof item.id !== 'string' || !/^product-\d+$/.test(item.id) || Number(item.id.slice(8)) > state.itemCounter || itemIds.has(item.id) || !composition(item.composition) || item.mass !== mass(item.composition) || !integer(item.mass) || item.mass < 1 || !integer(item.initialMass) || item.initialMass < item.mass || !item.recipeId || !getRecipe(item.recipeId, item.madeAt) || !integer(item.madeAt, host.tick) || !integer(item.generation, generationLimit(state)) || item.generation !== getRecipe(item.recipeId, item.madeAt)?.generation || !item.properties || !Object.keys(rawProperties(empty())).every(k => finite(item.properties[k as keyof MaterialProperties], 1)) || !Array.isArray(item.parentItems) || item.parentItems.length > 16) fail();
+      if (!item || typeof item.id !== 'string' || !/^product-\d+$/.test(item.id) || Number(item.id.slice(8)) > state.itemCounter || itemIds.has(item.id) || !composition(item.composition) || item.mass !== mass(item.composition) || !integer(item.mass) || item.mass < 1 || !integer(item.initialMass) || item.initialMass < item.mass || !item.recipeId || !getRecipe(item.recipeId, item.madeAt) || !integer(item.madeAt, host.tick) || !integer(item.generation, generationMax) || item.generation !== getRecipe(item.recipeId, item.madeAt)?.generation || !item.properties || !Object.keys(rawProperties(empty())).every(k => finite(item.properties[k as keyof MaterialProperties], 1)) || !Array.isArray(item.parentItems) || item.parentItems.length > 16) fail();
       add(current, item.composition); itemIds.add(item.id);
     }
     const project = knowledge.project;
@@ -1142,7 +1149,7 @@ export function assertTechnology(host: TechnologyHost): void {
   }
   const totals = technologyCatalogueTotals(host);
   if (totals.manufactured !== state.ledger.crafted || totals.uses !== state.ledger.toolUses) fail();
-  assertTechnologyCheckpoint(state, host.tick);
+  assertTechnologyCheckpoint(state, host.tick, v23);
 }
 
 // ── V23 (`v23.tecnica`): técnica sobre lotes ─────────────────────────────────────────────────────────────

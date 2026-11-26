@@ -816,8 +816,10 @@ export class MundoMaterial {
     for (let i = desde; i < hasta; i++) this.indices[this.celda[i]!] = i + 1;
   }
 
-  /** Índice de la tesela de una celda (`chunk · 256 + local`), o −1 si este mundo no la tiene. */
-  indiceDe(celda: number): number { return celda >= 0 && celda < this.indices.length ? this.indices[celda]! - 1 : -1; }
+  /** Una página dormida conserva el índice para reactivarse, aunque otro dueño esté usando sus lotes. */
+  indiceDe(celda: number): number {
+    return celda >= 0 && celda < this.indices.length && this.activa[celda >> 8] === 1 ? this.indices[celda]! - 1 : -1;
+  }
 
   /** ¿Tiene este mundo la página p con sus lotes (activa o dormida)? */
   tiene(p: number): boolean { return p >= 0 && p < this.np && this.fin[p]! > this.inicio[p]! && this.aire[p]! >= 0; }

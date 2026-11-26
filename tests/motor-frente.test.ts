@@ -7,7 +7,7 @@ import { parseParams, DEFAULT_PARAMS } from '../src/world/params.js';
 import { FaunaSoA } from '../src/world/soa/fauna.js';
 import { faunaRegistrada } from '../src/world/soa/organismos-mundo.js';
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
-import { materializeAnimals, SPECIES, type Animal } from '../src/world/animals.js';
+import { materializeAnimals, especieVisual, SPECIES, type Animal } from '../src/world/animals.js';
 
 test('motor-frente conserva el frente t mientras cada dueño escribe t+1', () => {
   const tabla = new TablaOrganismosSoA(true);
@@ -80,7 +80,7 @@ test('stepWorld publica la fauna del tick y conserva las vistas clonables', () =
     assert.equal(frente.vivo[s], 1);
     assert.equal(frente.decideEn[s], mundo.tick + 1);
     assert.equal(frente.clase[s], Clase.Animal);
-    assert.equal(frente.col('especie')[s], SPECIES.indexOf(animal.species));
+    assert.equal(frente.col('especie')[s], SPECIES.indexOf(especieVisual(animal.species)));
     assert.equal(frente.cuerpo[s * CUERPO_ANCHO + CAMPOS_CUERPO.salud], Math.fround(animal.health));
     assert.deepEqual(structuredClone(animal), animal);
     assert.deepEqual(JSON.parse(JSON.stringify(animal)), animal);

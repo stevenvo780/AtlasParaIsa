@@ -1,3 +1,4 @@
+import { especieVisual } from './animals.js';
 import type { Tile, WorldStats, WorldSample } from '../shared/types.js';
 import type { World } from './index.js';
 import { CHUNK_SIZE, MAX_COORDINATE } from './terrain.js';
@@ -345,7 +346,7 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   }
   if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
   if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
-  for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
+  for(const animal of world.animals) { const especie=especieVisual(animal.species); wildlife[especie]=(wildlife[especie]??0)+1; }
   const structures: Record<string, number> = {};
   let polyominoStructures = 0, synergyLinks = 0;
   for (const structure of world.structures) {

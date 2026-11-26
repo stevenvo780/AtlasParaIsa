@@ -1,3 +1,4 @@
+import { INTERRUPTORES_APAGADOS } from '../shared/interruptores.js';
 import type { TechnologyCheckpoint, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import { resolveTechnologyRecipe } from './technology-catalogue.js';
 import { assertContainedWater, assertWaterLedger } from './technology-water.js';
@@ -107,13 +108,15 @@ export function captureTechnologyCheckpoint(state: TechnologyState, actors: read
 const MAX_CHECKPOINT_INVENTORIES = POPULATION_HARD_LIMIT;
 const ITEM_BITMAP_LIMIT = 2 ** 26;
 
-export function assertTechnologyCheckpoint(state: TechnologyState, tick: number): void {
+type LeyesInventario = Pick<typeof INTERRUPTORES_APAGADOS, 'natalidad' | 'tecnica'>;
+
+export function assertTechnologyCheckpoint(state: TechnologyState, tick: number, v23: LeyesInventario = INTERRUPTORES_APAGADOS): void {
   const checkpoint = state.checkpoint;
   if (checkpoint === undefined) return; // Legacy V5 is anchored explicitly by migrateWorld.
   const fail = (): never => { throw new Error('Invalid technology opening checkpoint.'); };
   if (!checkpoint || checkpoint.version !== 1 || !integer(checkpoint.tick, tick) || !integer(checkpoint.executionCounter, state.executionCounter) ||
     !['initial', 'migration', 'history-gap', 'roster-change'].includes(checkpoint.reason) ||
-    !Array.isArray(checkpoint.inventories) || checkpoint.inventories.length > MAX_CHECKPOINT_INVENTORIES) fail();
+    !Array.isArray(checkpoint.inventories) || !v23.natalidad && checkpoint.inventories.length > MAX_CHECKPOINT_INVENTORIES) fail();
   if (checkpoint.reason === 'initial' && (checkpoint.tick !== 0 || checkpoint.executionCounter !== 0)) fail();
   // A serial boundary must also be a whole-tick boundary. Otherwise a forged
   // earlier tick could hide executions included in the alleged opening stock.
@@ -147,7 +150,7 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
   };
   for (const inventory of checkpoint.inventories) {
     if (!inventory || !identifier(inventory.actorId) || actorIds.has(inventory.actorId) || !composition(inventory.residue) ||
-      !Array.isArray(inventory.items) || inventory.items.length > state.budgets.maxItems) fail();
+      !Array.isArray(inventory.items) || !v23.tecnica && inventory.items.length > state.budgets.maxItems) fail();
     actorIds.add(inventory.actorId);
     for (const item of inventory.items) {
       if (!item) fail();
@@ -200,7 +203,7 @@ let steady: { actors: string[]; inventories: string[] } | undefined;
 
 /** Called only after the whole world tick, including all estates and births.
  * The new opening is prospective: it never verifies the interval that was lost. */
-export function advanceTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number): void {
+export function advanceTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number, v23?: LeyesInventario): void {
   const checkpoint = state.checkpoint;
   if (checkpoint === undefined) { state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, 'migration'); return; }
   let rosterChanged = false, unique = false;
@@ -214,7 +217,7 @@ export function advanceTechnologyCheckpoint(state: TechnologyState, actors: read
     if (!rosterChanged) steady = snapshotRoster(actors, inventories);
   }
   if (rosterChanged || technologyHistoryGap(state)) {
-    assertTechnologyCheckpoint(state, tick); // Never normalize a malformed boundary by rotating it.
+    assertTechnologyCheckpoint(state, tick, v23); // Never normalize a malformed boundary by rotating it.
     state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, rosterChanged ? 'roster-change' : 'history-gap');
     // Sin ids repetidos, la apertura recién capturada contiene exactamente el padrón: el tick siguiente no rota.
     if (rosterChanged && unique) steady = snapshotRoster(actors, state.checkpoint.inventories);

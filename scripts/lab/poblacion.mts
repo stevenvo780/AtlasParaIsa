@@ -36,6 +36,8 @@ import { pruneBonds } from '../../src/world/lineage.js';
 import { captureTechnologyCheckpoint } from '../../src/world/technology-checkpoint.js';
 import { closeKin, reproductiveReadiness } from '../../src/world/family.js';
 import { crearComprobador } from '../../src/world/invariantes.js';
+import type { MateriaCheckpoint } from '../../src/world/materia/tipos.js';
+import { duenoDe, duenoSi } from '../../src/world/motor/contexto.js';
 import { hostOpenWorldParams } from '../../src/server/hardware-limits.js';
 import type { DemographicDeathCause, DemographicState } from '../../src/shared/demography.js';
 import { escalon, INTERRUPTORES, type Interruptor } from '../../src/shared/interruptores.js';
@@ -276,8 +278,10 @@ export function poblar(mundo: World, { n, zona, siembra }: Siembra): ResultadoSi
 
 // ── Puntos guardados ─────────────────────────────────────────────────────────────────────────────────────
 
-/** Un mundo detenido con lo que hace falta para seguirlo: sus params (viven fuera del objeto) y el territorio retirado. */
-export interface PuntoGuardado { formato: 'atlas-punto-1'; mundo: World; params: WorldParams; archivo: [string, Buffer][] }
+/** Un mundo detenido con sus parámetros, territorio retirado y arena material, si la hay. */
+export interface PuntoGuardado {
+  formato: 'atlas-punto-1'; mundo: World; params: WorldParams; archivo: [string, Buffer][]; materia?: MateriaCheckpoint | null;
+}
 
 /** Archivo de chunks retirados de una corrida sin almacén: el mundo los devuelve por `loadChunk` al volver a ellos. */
 export function archivoDeChunks(mundo: World, archivo = new Map<string, Buffer>()): { archivo: Map<string, Buffer>; archivar: () => void } {
@@ -291,16 +295,32 @@ export function archivoDeChunks(mundo: World, archivo = new Map<string, Buffer>(
 }
 
 export function guardarPunto(ruta: string, mundo: World, archivo: Map<string, Buffer>): void {
-  const punto: PuntoGuardado = { formato: 'atlas-punto-1', mundo, params: paramsOf(mundo), archivo: [...archivo] };
+  const d = duenoSi(mundo);
+  const materia = d?.instantaneaMateria(d.pendientes()) ?? null;
+  const punto: PuntoGuardado = { formato: 'atlas-punto-1', mundo, params: paramsOf(mundo), archivo: [...archivo], materia };
   writeFileSync(ruta, serialize(punto));
 }
 
-export function cargarPunto(ruta: string): { mundo: World; archivo: Map<string, Buffer> } {
+export function cargarPunto(ruta: string, ajustarParams: (base: WorldParams) => WorldParams = base => base): { mundo: World; archivo: Map<string, Buffer> } {
   // Vale el punto de este guion (`atlas-punto-1`, `archivo` como pares) y el que guarda `panel.ts --guardar-dia` (`formato: 1`, `archivo` como Map).
   const punto = deserialize(readFileSync(ruta)) as Omit<PuntoGuardado, 'formato' | 'archivo'> & { formato: unknown; archivo: [string, Buffer][] | Map<string, Buffer> };
   if (punto?.formato !== 'atlas-punto-1' && punto?.formato !== 1) throw new Error(`${ruta} no es un punto guardado atlas-punto-1`);
-  setParams(punto.mundo, punto.params);
-  return { mundo: punto.mundo, archivo: new Map(punto.archivo) };
+  const { mundo, materia } = punto, params = ajustarParams(punto.params);
+  if (!materia && ((punto.params.v23?.materia && mundo.tick > 0) || mundo.people.some(p => p.cuerpo) || mundo.animals.some(a => a.cuerpo))) {
+    throw new Error(`El punto ${ruta} no guarda su materia. Vuelve a generar el punto desde el origen.`);
+  }
+  if (materia && (!params.v23.materia || materia.tick !== mundo.tick)) {
+    throw new Error(`El punto de materia de ${ruta} requiere el mismo tick del mundo y v23.materia activa.`);
+  }
+  setParams(mundo, params);
+  const archivo = new Map(punto.archivo);
+  if (materia) {
+    archivoDeChunks(mundo, archivo);
+    const d = duenoDe(mundo, materia.sustancias);
+    d.epoca = materia.epoca;
+    d.abrirEpoca(materia);
+  }
+  return { mundo, archivo };
 }
 
 // ── Medir ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -666,8 +686,8 @@ export interface OpcionesCorrida {
   hasta?: Interruptor;
 }
 
-export function paramsDeCorrida(o: Pick<OpcionesCorrida, 'regimen' | 'params' | 'hilos' | 'gpu'> & { hasta?: Interruptor }): WorldParams {
-  let params = o.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS;
+export function paramsDeCorrida(o: Pick<OpcionesCorrida, 'regimen' | 'params' | 'hilos' | 'gpu'> & { hasta?: Interruptor }, base?: WorldParams): WorldParams {
+  let params = base ?? (o.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS);
   if (o.params) params = parseParams(JSON.parse(readFileSync(o.params, 'utf8')), params);
   if (o.hasta) params = parseParams({ v23: escalon(o.hasta) }, params);
   // Las opciones de hilos y tarjetas pasan tal cual al mundo: con un hilo y sin tarjeta, la corrida es reproducible.
@@ -678,10 +698,7 @@ export function correr(o: OpcionesCorrida): unknown {
   const cargaInicio = loadavg(), uptimeInicio = uptime(), t0 = performance.now();
   let mundo: World, archivo: Map<string, Buffer> | undefined, caminables: number, siembra: Omit<ResultadoSiembra, 'sembrados'> & { n: number } | undefined;
   if (o.desde) {
-    ({ mundo, archivo } = cargarPunto(o.desde));
-    if (o.hilos !== paramsOf(mundo).motor.hilos || o.gpu.join() !== paramsOf(mundo).motor.gpu.join())
-      setParams(mundo, parseParams({ motor: { ...paramsOf(mundo).motor, hilos: o.hilos, gpu: o.gpu } }, paramsOf(mundo)));
-    if (o.hasta) setParams(mundo, parseParams({ v23: escalon(o.hasta) }, paramsOf(mundo)));
+    ({ mundo, archivo } = cargarPunto(o.desde, base => paramsDeCorrida(o, base)));
     caminables = celdasDeTierra(mundo, o.zona).length;
   } else {
     mundo = createWorld(o.semilla, paramsDeCorrida(o));

@@ -12,7 +12,7 @@ import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encod
 import { digestoCanonico, type GobernadorLegado } from '../world/digesto.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
-import { assertLegacyRecord } from '../world/lineage.js';
+import { assertLegacyRecord, genealogiaValida } from '../world/lineage.js';
 import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
   legacyTechnologyChainStep, technologyChainStep, technologyPruneSeal,
   type TechnologyExecutionCounts } from './technology-archive.js';
@@ -24,7 +24,7 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
 import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
-import { ley, paramsOf, parseParams, setParams } from '../world/params.js';
+import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../world/materia/checkpoint.js';
@@ -236,7 +236,7 @@ function coordinatesFromKey(key: string): { cx: number; cy: number } {
 }
 
 /** Validate archived terrain before it re-enters the active world, even if its checksum matches. */
-function assertChunk(value: unknown, key: string, atTick: number): asserts value is Chunk {
+function assertChunk(value: unknown, key: string, atTick: number, v23?: WorldParams['v23']): asserts value is Chunk {
   const fail = (): never => { throw new Error('Invalid archived chunk state. Explicit recovery required.'); };
   const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
   const number = (v: unknown, max = 1): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max;
@@ -244,11 +244,11 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
   const string = (v: unknown, max = 2000): v is string => typeof v === 'string' && v.length <= max;
   const { cx, cy } = coordinatesFromKey(key);
   const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE;
-  if (!object(value) || value.key !== key || value.cx !== cx || value.cy !== cy || typeof value.discovered !== 'boolean' || !integer(value.lastTick, atTick) || !Array.isArray(value.tiles) || value.tiles.length !== CHUNK_SIZE ** 2 || !Array.isArray(value.places) || value.places.length > CHUNK_SIZE ** 2) fail();
+  if (!object(value) || value.key !== key || value.cx !== cx || value.cy !== cy || typeof value.discovered !== 'boolean' || !integer(value.lastTick, atTick) || !Array.isArray(value.tiles) || value.tiles.length !== CHUNK_SIZE ** 2 || !Array.isArray(value.places) || v23?.obra === false && value.places.length > CHUNK_SIZE ** 2) fail();
   const chunk = value as unknown as Chunk;
   for (let index = 0; index < chunk.tiles.length; index++) {
     const tile = chunk.tiles[index];
-    if (!object(tile) || tile.x !== x0 + index % CHUNK_SIZE || tile.y !== y0 + Math.floor(index / CHUNK_SIZE) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !number(tile.moisture) || !number(tile.vegetation) || !number(tile.food) || (tile.elevation !== undefined && !number(tile.elevation)) || (tile.wood !== undefined && !number(tile.wood, 12)) || (tile.stone !== undefined && !number(tile.stone, 8)) || (tile.biome !== undefined && !['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'].includes(String(tile.biome)))) fail();
+    if (!object(tile) || tile.x !== x0 + index % CHUNK_SIZE || tile.y !== y0 + Math.floor(index / CHUNK_SIZE) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !number(tile.moisture) || !number(tile.vegetation) || !number(tile.food) || (tile.elevation !== undefined && !number(tile.elevation)) || (tile.wood !== undefined && !number(tile.wood, v23?.materia === false ? 12 : Infinity)) || (tile.stone !== undefined && !number(tile.stone, v23?.materia === false ? 8 : Infinity)) || (tile.biome !== undefined && !['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'].includes(String(tile.biome)))) fail();
     assertEcosystemTile(tile, false);
   }
   const ids = new Set<string>();
@@ -256,7 +256,7 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
     if (!object(place) || !string(place.id, 200) || ids.has(place.id) || !string(place.name, 200) || !string(place.description) || !integer(place.gatherings, 1_000_000) || !Number.isInteger(place.x) || !Number.isInteger(place.y) || place.x < x0 || place.x >= x0 + CHUNK_SIZE || place.y < y0 || place.y >= y0 + CHUNK_SIZE) fail();
     ids.add(place.id);
   }
-  assertChunkLife(chunk, atTick);
+  assertChunkLife(chunk, atTick, v23?.obra ?? true, v23?.fauna ?? true);
 }
 export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
@@ -425,7 +425,7 @@ export class Store {
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get context(): WorldContext {
-    return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
+    return { loadChunk: (key, atTick, v23) => this.loadChunk(key, atTick, v23),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
       ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
   }
@@ -998,10 +998,14 @@ export class Store {
     return this.readLegacyRecord(id, atTick);
   }
   private assertLegacyParents(record: LegacyRecord, world: World): void {
-    const parents=record.parents.map(id=>world.people.find(p=>p.id===id)??world.retiredLegacy.find(p=>p.id===id)??this.loadLegacy(id,world.tick));
-    if (parents.some(p=>!p||p.id===record.id||p.bornAt>=record.bornAt||('diedAt' in p&&p.diedAt<record.bornAt)||p.genome.generation>=record.generation) || (parents.length&&record.generation!==Math.max(...parents.map(p=>p!.genome.generation))+1)) throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
+    const parents = record.parents.map(id => world.people.find(p => p.id === id)
+      ?? world.retiredLegacy.find(p => p.id === id) ?? this.loadLegacy(id, world.tick));
+    if (!genealogiaValida(record, parents, ley(world, 'natalidad'))) {
+      throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
+    }
   }
-  loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER): Chunk | null {
+  /** Los lectores históricos sin un mundo conocido validan la forma que comparten los dos modos. */
+  loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER, v23?: WorldParams['v23']): Chunk | null {
     coordinatesFromKey(key);
     if (!Number.isSafeInteger(atTick) || atTick < 0) throw new RangeError('Invalid archive lookup tick.');
     // Read-only recovery of a V1 database never silently creates an archive or alters its schema.
@@ -1011,7 +1015,7 @@ export class Store {
     if (!Number.isSafeInteger(row.tick) || row.tick < 0 || checksum(row.body) !== row.digest) throw new Error('Archived chunk checksum or version mismatch. Explicit recovery required.');
     // T133: accepts both the historical plain-JSON body and `chunk-tiles-tuple-v1`.
     const chunk: unknown = decodeArchivedChunk(row.body);
-    assertChunk(chunk, key, row.tick);
+    assertChunk(chunk, key, row.tick, v23);
     return chunk;
   }
 
@@ -1845,7 +1849,7 @@ export class Store {
           ? 'DELETE FROM chunks WHERE key=? AND tick<(SELECT MAX(tick) FROM chunks WHERE key=? AND tick<=?)'
           : 'DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
-          assertChunk(chunk, chunk.key, world.tick);
+          assertChunk(chunk, chunk.key, world.tick, paramsOf(world).v23);
           // T133: compact tuple body; digest is sha256 of the stored bytes, as before.
           const archivedBody = encodeArchivedChunk(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));

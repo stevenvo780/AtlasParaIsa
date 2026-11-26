@@ -1,6 +1,6 @@
 import type { AnimalAction, AnimalSpecies } from '../../shared/life.js';
 import {
-  MEMORY_TTL, RADIO_PAREJA, RAZON_PAREJA, RAZON_REPOSO_CRIA, SPECIES, hashCerrar, hashParcial, listoParaCriar, listoSalvoEnergia,
+  MEMORY_TTL, RADIO_PAREJA, RAZON_PAREJA, RAZON_REPOSO_CRIA, SPECIES, especieVisual, hashCerrar, hashParcial, listoParaCriar, listoSalvoEnergia,
   type Animal, type AnimalMemory, type AnimalWorld,
 } from '../animals.js';
 import { Clase, type Consulta, type ConsultaOrganismo, type Plan, type Ref } from '../motor/contratos.js';
@@ -41,8 +41,8 @@ const RECURSOS = [recurso(AGUA, HAY_AGUA), recurso(ALIMENTO, HAY_ALIMENTO)] as c
 const DIETA: Readonly<Partial<Record<AnimalSpecies, readonly AnimalSpecies[]>>> = {
   wolf: ['hare', 'deer', 'boar', 'fox'], fox: ['hare'],
 };
-export function presaDe(especie: AnimalSpecies, presa: AnimalSpecies): boolean {
-  return DIETA[especie]?.includes(presa) ?? false;
+export function presaDe(especie: string, presa: string): boolean {
+  return DIETA[especieVisual(especie)]?.some(p => p === presa) ?? false;
 }
 
 export interface PlanFauna extends Plan {
@@ -59,7 +59,7 @@ function consultaDe(especie: AnimalSpecies, radio: number, columnaEspecie: numbe
 
 const planes = new Map<string, PlanFauna>();
 export function planFauna(animal: Animal, columnaEspecie: number): PlanFauna {
-  const { species, genes } = animal;
+  const species = especieVisual(animal.species), { genes } = animal;
   const radio = 2 + Math.floor(genes.perception * 4), radioAmenaza = Math.min(radio, 1 + Math.floor(genes.perception * 5));
   const clave = `${columnaEspecie}:${species}:${radio}:${radioAmenaza}`;
   let plan = planes.get(clave);
@@ -81,7 +81,7 @@ export function habitableParaPlan(plan: PlanFauna, agua: boolean, refugio: boole
 }
 
 function coincide(plan: PlanFauna, otro: Animal, distancia: number, desde: number, hasta: number): boolean {
-  const codigo = SPECIES.indexOf(otro.species);
+  const codigo = SPECIES.indexOf(especieVisual(otro.species));
   for (let i = desde; i < hasta; i++) {
     const consulta = plan.organismos[i]!;
     if (distancia <= consulta.radio && codigo >= consulta.filtros[2]! && codigo <= consulta.filtros[3]!) return true;

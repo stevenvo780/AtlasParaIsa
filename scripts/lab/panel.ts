@@ -10,6 +10,7 @@ import type { WorldParams } from '../../src/world/params.js';
 import type { Chunk } from '../../src/world/terrain.js';
 import type { Violacion } from '../../src/world/invariantes.js';
 import type { Interruptor } from '../../src/shared/interruptores.js';
+import type { MateriaCheckpoint } from '../../src/world/materia/tipos.js';
 
 const TICKS_POR_DIA = 2400;
 type Estado = 'cumple' | 'falla' | 'desconocido';
@@ -328,6 +329,7 @@ const FORMATO_PUNTO = 1;
 interface PuntoGuardado {
   formato: number; semilla: number; dia: number; tick: number; version: number; origen: { raiz: string; brazo: string; arbol: string | null };
   params: WorldParams; mundo: World; archivo: Map<string, Buffer>; fundadores: string[];
+  materia?: MateriaCheckpoint | null;
   duras: number; blandas: number; comprobacionesRegion: number; pasoMaxMs: number; tiempos: number[]; picos: number[];
   /** Las filas de la corrida de origen hasta este día (censos y violaciones), para que la bifurcada se evalúe entera. */
   filas: string[];
@@ -354,8 +356,14 @@ async function replica(trabajo: Trabajo): Promise<void> {
     if (punto.formato !== FORMATO_PUNTO || punto.semilla !== trabajo.semilla) throw new Error(`El punto ${ruta} no es de esta semilla o de este formato`);
     if (punto.version !== RULES_VERSION) throw new Error(`El punto guarda reglas v${punto.version} y el árbol corre v${RULES_VERSION}: no se migra`);
     if (punto.dia >= trabajo.dias) throw new Error(`El punto está en el día ${punto.dia}: --dias debe ser mayor`);
+    if (punto.params.v23?.materia && !punto.materia) throw new Error(`El punto ${ruta} omite los lotes y el Registro de materia. Vuelve a guardarlo con --guardar-dia.`);
   }
   const params = await resolverParams(trabajo, punto?.params);
+  if (punto?.materia && (!params.v23?.materia || punto.materia.tick !== punto.mundo.tick)) {
+    throw new Error('El punto de materia requiere el mismo tick del mundo y v23.materia activa.');
+  }
+  const contexto: typeof import('../../src/world/motor/contexto.js') | undefined = punto?.materia || (trabajo.guardarEn && params.v23?.materia)
+    ? await importar(trabajo.raiz, 'world/motor/contexto.ts') : undefined;
   if (trabajo.paramsHash && sha(estable(params)) !== trabajo.paramsHash) throw new Error('Los parámetros resueltos en el proceso no coinciden con los de la clave de caché');
   // Sin almacén, el territorio que se retira se quedaría en memoria como objetos durante toda la corrida (≈ 25 MB por
   // día simulado). Se archiva serializado cada día, como hace el Store al guardar, y `loadChunk` lo devuelve al volver.
@@ -371,6 +379,11 @@ async function replica(trabajo: Trabajo): Promise<void> {
   }
   bindWorldContext(mundo, { loadChunk: clave => { const guardado = archivo.get(clave); return guardado ? deserialize(guardado) as Chunk : null; } });
   if (punto) mundoModulo.assertWorld(mundo, RULES_VERSION);
+  if (punto?.materia) {
+    const dueno = contexto!.duenoDe(mundo, punto.materia.sustancias);
+    dueno.epoca = punto.materia.epoca;
+    dueno.abrirEpoca(punto.materia);
+  }
   const archivar = () => {
     const vistos = new Set<string>();
     for (const chunk of mundo.retiredChunks) if (!vistos.has(chunk.key)) { vistos.add(chunk.key); archivo.set(chunk.key, serialize(chunk)); }
@@ -406,14 +419,17 @@ async function replica(trabajo: Trabajo): Promise<void> {
   };
   const guardarPunto = (dia: number) => {
     const destino = rutaPunto(trabajo.guardarEn!, trabajo.semilla, trabajo.replica), temporal = `${destino}.${process.pid}.tmp`;
+    const dueno = contexto?.duenoSi(mundo);
+    const materia = dueno?.instantaneaMateria(dueno.pendientes()) ?? null;
+    if (params.v23?.materia && !materia) throw new Error(`Falta el estado material al guardar ${destino}.`);
     const contenido: PuntoGuardado = { formato: FORMATO_PUNTO, semilla: trabajo.semilla, dia, tick: mundo.tick, version: mundo.version, origen: { raiz: trabajo.raiz, brazo: trabajo.brazo, arbol: arbolGit(trabajo.raiz)?.arbol ?? null },
-      params, mundo, archivo, fundadores: [...fundadores], duras, blandas, comprobacionesRegion, pasoMaxMs, tiempos, picos,
+      params, mundo, archivo, materia, fundadores: [...fundadores], duras, blandas, comprobacionesRegion, pasoMaxMs, tiempos, picos,
       filas: readFileSync(trabajo.salida, 'utf8').split('\n').filter(Boolean).slice(1) };
     mkdirSync(trabajo.guardarEn!, { recursive: true });
     writeFileSync(temporal, serialize(contenido)); renameSync(temporal, destino);
     // El mismo mundo en el formato que lee `poblacion.mts --desde` (`atlas-punto-1`), al lado del punto del panel.
     const paraPoblacion = `${destino.replace(/\.punto$/, '')}.atlas-punto`, temporalPoblacion = `${paraPoblacion}.${process.pid}.tmp`;
-    writeFileSync(temporalPoblacion, serialize({ formato: 'atlas-punto-1', mundo, params, archivo: [...archivo] })); renameSync(temporalPoblacion, paraPoblacion);
+    writeFileSync(temporalPoblacion, serialize({ formato: 'atlas-punto-1', mundo, params, archivo: [...archivo], materia })); renameSync(temporalPoblacion, paraPoblacion);
   };
   const medio: MedioInicio = { carga: loadavg(), ramBytes: totalmem(), invariantesDisponibles: !!comprobarInvariantes, limitaciones: ['En memoria sin servidor ni BD: el catálogo tecnológico standalone puede divergir de producción', 'RSS y tiempos por proceso; no incluyen consumo de otros trabajos', ...(!comprobarInvariantes ? ['Este brazo no integra invariantes.ts: M5 desconocida'] : [])] };
   const origenPunto = punto ? { bifurcacion: { punto: rutaPunto(trabajo.desde!, trabajo.semilla, trabajo.replica), dia: punto.dia, tick: punto.tick, origen: punto.origen } } : {};

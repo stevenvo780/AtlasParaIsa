@@ -8,7 +8,7 @@ import { assertChemistryState, assertCompoundLots } from '../chemistry.js';
 import { assertChronicleJournal } from '../chronicle-journal.js';
 import { MAX_RETAINED_WHISPERS, WHISPER_INTENTS } from '../whispers.js';
 import type { LegacyRecord } from '../../shared/demography.js';
-import { assertLegacyRecord, assertPopulation } from '../lineage.js';
+import { assertLegacyRecord, assertPopulation, genealogiaValida } from '../lineage.js';
 import { assertDormantTerrain, assertEcosystemTile, assertLifeState } from '../validation.js';
 import { chunkKey } from '../terrain.js';
 import { assertGenome } from '../genetics.js';
@@ -85,10 +85,10 @@ export function assertCommon(value: unknown, legacy = false, expectedVersion = R
   if (!object(value) || value.version !== (legacy ? 1 : expectedVersion) || value.width !== 40 || value.height !== 28 || !integer(value.seed, 0xffffffff) || !integer(value.rng, 0xffffffff) || !integer(value.tick) || !integer(value.eventCounter) || typeof value.learningEnabled !== 'boolean' || !['rain', 'clear'].includes(String(value.weather)) || !Number.isInteger(value.lastGestureTick) || (value.lastGestureTick as number) < -COOLDOWN || (value.lastGestureTick as number) > (value.tick as number)) fail();
   const world = value as unknown as World;
   const limits = limitsOf(world, expectedVersion);
-  const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(world).poblacion.maxima);
+  const populationCap = ley(world, 'natalidad') ? Infinity : Math.max(POPULATION_HARD_LIMIT, paramsOf(world).poblacion.maxima);
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
-  const placesCap = legacy ? 3 : openWorldCaps(world) ? Math.max(2048, limits.teselasActivas) : 2048;
+  const placesCap = legacy ? 3 : ley(world, 'obra') ? Infinity : openWorldCaps(world) ? Math.max(2048, limits.teselasActivas) : 2048;
   if (!list(world.tiles, legacy ? 1120 : limits.teselasActivas) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, placesCap) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
   for (let index = 0; index < world.tiles.length; index++) {
     const tile = world.tiles[index];
@@ -99,7 +99,7 @@ export function assertCommon(value: unknown, legacy = false, expectedVersion = R
     if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
     ids.add(person.id);
     for (const key of ['energy', 'hunger', 'fatigue', 'curiosity', 'sociability', 'generosity', 'closeness', 'socialLoad'] as const) if (!num(person[key])) fail();
-    if (!num(person.inventory, 0.25)) fail();
+    if (!num(person.inventory, ley(world, 'natalidad') || ley(world, 'cuerpos') ? Infinity : 0.25)) fail();
     for (const experience of person.experiences) if (!object(experience) || !integer(experience.tick, world.tick) || !str(experience.text) || !str(experience.causeId, 100) || !str(experience.placeId, 100)) fail();
     for (const habit of person.habits) {
       if (!object(habit) || !str(habit.placeId, 100) || !integer(habit.observations, 10) || !num(habit.strength) || !str(habit.demonstrator, 100) || !str(habit.sourceEvent, 100) || !integer(habit.repetitions, 1_000_000) || !list(habit.evidence, 2)) fail();
@@ -120,9 +120,10 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   const w = value;
   const cuerposMateriales = ley(w, 'cuerpos');
   const validarCuerpos = cuerposMateriales || ley(w, 'guardadoCompleto');
+  const v23 = paramsOf(w).v23;
   const limits = limitsOf(w, expectedVersion);
-  const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
-  if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick);
+  const populationCap = ley(w, 'natalidad') ? Infinity : Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
+  if (w.chemistry !== undefined) assertChemistryState(w.chemistry, w.tick, v23.tecnica);
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
@@ -152,7 +153,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   };
   if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > limits.chunks || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
   for (const chunk of w.retiredChunks) {
-    assertDormantTerrain(chunk, w.tick, expectedVersion >= 3);
+    assertDormantTerrain(chunk, w.tick, expectedVersion >= 3, v23);
     if (validarCuerpos) for (const animal of chunk.animals ?? []) assertCuerpo(animal.cuerpo, w.tick, false);
   }
   const keys = new Set<string>();
@@ -161,17 +162,23 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     const key = `${tile.x},${tile.y}`;
     if (tile.biome !== undefined && !['grassland','forest','desert','mountain','wetland','ocean'].includes(tile.biome) || tile.elevation !== undefined && (typeof tile.elevation !== 'number' || !Number.isFinite(tile.elevation) || tile.elevation < 0 || tile.elevation > 1)) fail();
     if (keys.has(key) || !w.chunks[chunkKey(tile.x, tile.y)]) fail();
-    if (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || tile.wood > 12))
+    if (tile.wood !== undefined && (!Number.isFinite(tile.wood) || tile.wood < 0 || !v23.materia && tile.wood > 12))
       throw new Error(`Estado procedural inválido. Madera fuera de rango en la tesela ${key}.`);
-    if (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || tile.stone > 8))
+    if (tile.stone !== undefined && (!Number.isFinite(tile.stone) || tile.stone < 0 || !v23.materia && tile.stone > 8))
       throw new Error(`Estado procedural inválido. Piedra fuera de rango en la tesela ${key}.`);
     keys.add(key);
   }
+  const lugares = new Map(w.places.map(p => [p.id, p]));
+  if (v23.obra && lugares.size !== w.places.length) fail();
+  const comunidades = new Set(Array.isArray(w.communities) ? w.communities.map(c => c?.id) : []);
   for (const [key, chunk] of Object.entries(w.chunks)) {
-    if (!chunk || chunk.key !== key || !Number.isInteger(chunk.cx) || !Number.isInteger(chunk.cy) || !validCoordinate(chunk.cx * 16) || !validCoordinate(chunk.cy * 16) || chunkKey(chunk.cx * 16, chunk.cy * 16) !== key || typeof chunk.discovered !== 'boolean' || !Array.isArray(chunk.places) || chunk.places.length > 32 || !Number.isSafeInteger(chunk.lastTick) || chunk.lastTick < 0 || chunk.lastTick > w.tick) fail();
+    if (!chunk || chunk.key !== key || !Number.isInteger(chunk.cx) || !Number.isInteger(chunk.cy) || !validCoordinate(chunk.cx * 16) || !validCoordinate(chunk.cy * 16) || chunkKey(chunk.cx * 16, chunk.cy * 16) !== key || typeof chunk.discovered !== 'boolean' || !Array.isArray(chunk.places) || !v23.obra && chunk.places.length > 32 || !Number.isSafeInteger(chunk.lastTick) || chunk.lastTick < 0 || chunk.lastTick > w.tick) fail();
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (!keys.has(`${chunk.cx * 16 + x},${chunk.cy * 16 + y}`)) fail();
+    const idsLocales = new Set<string>();
     for (const place of chunk.places) {
-      if (!place || typeof place.id !== 'string' || place.id.length > 100 || typeof place.name !== 'string' || place.name.length > 200 || typeof place.description !== 'string' || place.description.length > 2000 || !validCoordinate(place.x) || !validCoordinate(place.y) || chunkKey(place.x, place.y) !== key || !Number.isInteger(place.gatherings) || place.gatherings < 0 || place.gatherings > 1_000_000 || !w.places.some(p => p.id === place.id && p.x === place.x && p.y === place.y)) fail();
+      const global = lugares.get(place?.id);
+      if (!place || typeof place.id !== 'string' || place.id.length > 100 || typeof place.name !== 'string' || place.name.length > 200 || typeof place.description !== 'string' || place.description.length > 2000 || !validCoordinate(place.x) || !validCoordinate(place.y) || chunkKey(place.x, place.y) !== key || !Number.isInteger(place.gatherings) || place.gatherings < 0 || place.gatherings > 1_000_000 || global?.x !== place.x || global?.y !== place.y || v23.obra && idsLocales.has(place.id)) fail();
+      idsLocales.add(place.id);
     }
   }
   const numericMap = (v: unknown, min: number, max: number, limit: number) => v && typeof v === 'object' && !Array.isArray(v) && Object.entries(v).length <= limit && Object.entries(v).every(([k, n]) => k.length <= 50 && typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max);
@@ -193,20 +200,15 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       assertGenome(p.genome);
       if (p.genome.parents.length) {
         const parents = p.genome.parents.map(id => identity(id));
-        // En V23 la gestante va primero. El otro progenitor pudo morir entre la concepción y el parto.
-        const gestado = ley(w, 'natalidad') && /^nacido-[1-9]\d*$/.test(p.id);
-        if (parents.some((parent, i) => !parent || parent.id === p.id || parent.bornAt >= p.bornAt
-          || ('diedAt' in parent && parent.diedAt < p.bornAt && (!gestado || i === 0))
-          || parent.genome.generation >= p.genome.generation)
-          || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
+        if (!genealogiaValida(p, parents, v23.natalidad)) fail();
       }
-      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -MAX_FOUNDER_AGE_TICKS || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
+      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -MAX_FOUNDER_AGE_TICKS || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && comunidades.has(p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     // Un cuerpo material puede pagar una fracción del coste de trabajo de un tick.
     const trabajoValido = cuerposMateriales && p.cuerpo ? Number.isFinite(p.work) : Number.isSafeInteger(p.work);
     if (!trabajoValido || p.work < 0 || p.work > (expectedVersion >= 4 ? 600 : 90)) fail();
-    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
+    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || !v23.cuerpos && p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || !v23.cuerpos && p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
 
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
@@ -222,13 +224,15 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
   }
   if (expectedVersion >= 3) {
-    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !totalesValidos(w.totals, expectedVersion >= 14 ? 13 : 12)) fail();
-    const communityIds = new Set<string>();
+    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || !v23.comunidades && w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !totalesValidos(w.totals, expectedVersion >= 14 ? 13 : 12)) fail();
+    const communityIds = new Set<string>(), miembros = new Set<string>();
     for (const c of w.communities) {
-      if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();
+      if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => alive.get(id)?.communityId === c.id) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();
       communityIds.add(c.id);
-      if (!['sharing','stewardship','openness'].every(key => typeof c.culture[key as keyof Culture] === 'number') || w.people.some(p => p.communityId === c.id && !c.members.includes(p.id))) fail();
+      for (const id of c.members) miembros.add(id);
+      if (!['sharing','stewardship','openness'].every(key => typeof c.culture[key as keyof Culture] === 'number')) fail();
     }
+    if (w.people.some(p => p.communityId !== null && !miembros.has(p.id))) fail();
     for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < (expectedVersion>=5?2:16) || sample.population > populationCap || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
   if (expectedVersion >= 4) {

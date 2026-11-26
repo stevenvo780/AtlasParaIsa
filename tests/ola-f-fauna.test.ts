@@ -1,21 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { VIDA_EXPONENTE, VIDA_L0 } from '../src/shared/naturaleza.js';
+import { ETA, VIDA_EXPONENTE, VIDA_L0 } from '../src/shared/naturaleza.js';
 import {
   AREA_CELDA, DISTANCIA_CRUCE, GEN, GENES_FAUNA, decisionVacia, distanciaGenetica, elegirFaunaV23, habituar, huella, miedoDe,
   rendimientoPresa, velocidadDe, vidaMaxima, type AgenteVisto, type CeldaVista, type PercepcionFaunaV23, type YoFauna,
 } from '../src/world/decision/fauna.js';
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
 import { extraerDeAnimal } from '../src/world/actuar/caza.js';
-import { createWorld, stepWorld } from '../src/world/index.js';
+import { TICKS_PER_DAY, createWorld, stepWorld } from '../src/world/index.js';
 import { FUNDADORES, genomaFundador, golpearAnimal, leyFauna, matarAnimal } from '../src/world/ley-fauna.js';
-import { concebir, gestar, masaDe, plantillaDe } from '../src/world/materia/cuerpo.js';
+import { basalJ, concebir, costeGestacionJ, gestar, masaDe, plantillaDe, reservaJ } from '../src/world/materia/cuerpo.js';
+import { sustanciasDe } from '../src/world/materia/ley-mundo.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { alarmaEn, alarmaPorAtaque, subirAlarma, TAU_ALARMA } from '../src/world/soa/alarma.js';
 import { ctxMateriaDe, type CtxLey } from '../src/world/motor/acceso.js';
 import { conductorDe } from '../src/world/motor/contexto.js';
-import { DATO_GOLPEAR, DATO_MATERIA, REF_NULA, TipoIntento, type Intento } from '../src/world/motor/contratos.js';
+import { DATO_GOLPEAR, DATO_MATERIA, REF_NULA, TipoIntento, slotDe, type Intento } from '../src/world/motor/contratos.js';
 
 const azarFijo = (): (() => number) => { let s = 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 
@@ -204,6 +205,19 @@ test('la garantía de esquilar llega al Suelo si el lote caduca y se archiva la 
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
+test('la fauna retirada deja de actuar aunque los nuevos residentes repongan el censo', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), retirado = mundo.animals[0]!;
+  const estadoRetirado = structuredClone(retirado);
+  mundo.animals[0] = { ...structuredClone(retirado), id: 'animal-repuesto', uid: c.id('uid') };
+  leyFauna.F1!(c);
+  leyFauna.F2!(c);
+  leyFauna.F3!(c);
+  leyFauna.F4!(c);
+  assert.deepEqual(retirado, estadoRetirado);
+});
+
 test('un embrión completo nace con su masa y cabe en la huella', () => {
   const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
   stepWorld(mundo);
@@ -229,6 +243,27 @@ test('un embrión completo nace con su masa y cabe en la huella', () => {
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
+test('la fertilidad reserva la síntesis y el basal sin cobrar la oxidación de todo el tejido', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [animal] = mundo.animals;
+  assert.ok(animal?.cuerpo && animal.uid);
+  const cuerpo = animal.cuerpo, tejido = c.materia.vista(cuerpo.tejido);
+  const provision = costeGestacionJ(c, cuerpo) + basalJ(c, cuerpo, TICKS_PER_DAY);
+  const oxidacion = plantillaDe(c, cuerpo).m0 * tejido.energia / (ETA * tejido.masa);
+  assert.ok(reservaJ(c, cuerpo) < provision && provision < oxidacion);
+  assert.equal(c.frente.pareja[slotDe(c.ref(animal.uid))], -1);
+
+  const grasa = sustanciasDe(c).CH2, jPorCuanto = c.quimica.sustancia(grasa).prop.qOxidacion;
+  const cuantos = Math.ceil(((provision + oxidacion) / 2 - reservaJ(c, cuerpo)) / jPorCuanto);
+  c.materia.fuente(cuerpo.reserva, Float64Array.of(grasa, cuantos), c.libro);
+  assert.ok(reservaJ(c, cuerpo) >= provision && reservaJ(c, cuerpo) < oxidacion);
+  stepWorld(mundo);
+  const frente = ctxMateriaDe(mundo);
+  assert.equal(frente.frente.pareja[slotDe(frente.ref(animal.uid))], 0);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
 test('el embrión sigue creciendo aunque consuma el último precursor disponible', () => {
   const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
   stepWorld(mundo);
@@ -244,6 +279,29 @@ test('el embrión sigue creciendo aunque consuma el último precursor disponible
   assert.equal(cuerpo.gestacion!.bajoBasalDesde, -1);
   assert.equal(gestar(c, cuerpo, 1), masa);
   assert.equal(cuerpo.gestacion!.bajoBasalDesde, c.tick);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('el embrión toma su ración de síntesis antes de que el tejido materno use el resto', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo, sobrante = c.materia.nuevo(Rol.Cadaver, -1, 0);
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  const embrion = cuerpo.gestacion!.embrion;
+  for (const { id, nu } of plantillaDe(c, cuerpo).partes) {
+    for (const destino of [sobrante, cuerpo.digestivo]) {
+      const cuantos = 12 * nu;
+      assert.equal(c.materia.moverParte(cuerpo.tejido, destino, { parte: Parte.Exacta, esp: id, cuantos, kappa: null }), cuantos);
+    }
+  }
+  const proteina = sustanciasDe(c).proteina, proteinaMaterna = c.materia.cuantos(cuerpo.tejido, proteina);
+
+  stepWorld(mundo);
+
+  assert.ok(c.materia.cuantos(embrion, proteina) > 0);
+  assert.ok(c.materia.cuantos(cuerpo.tejido, proteina) > proteinaMaterna);
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

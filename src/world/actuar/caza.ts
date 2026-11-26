@@ -1,3 +1,4 @@
+import { ley } from '../params.js';
 import type { Person, World } from '../mundo/tipos.js';
 import { distance, clamp, type TileLookup } from '../mundo/geometria.js';
 import { workEffort, performWork } from './trabajo.js';
@@ -77,7 +78,7 @@ export function organicLot(world: World, person: Person, mass: number, recipe: E
   const lot: CompoundLot = { id: `L${++state.lotCounter}`, formulaId: `bio:${formulaSignature('raw', composition)}`,
     composition, mass: vectorMass(composition), phase: 'raw', properties: evaluateMaterialProperties(composition, 'raw') };
   const lots = person.compounds ?? (person.compounds = []);
-  if (lots.length >= MAX_PERSON_COMPOUNDS) {
+  if (!ley(world, 'tecnica') && lots.length >= MAX_PERSON_COMPOUNDS) {
     const b = lots.pop()!, a = lots.pop()!;
     lots.push(applyChemOperator('bind', a, { b, temperatureTier: 0, tick: world.tick, actorId: person.id }, state).product);
   }

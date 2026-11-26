@@ -1,3 +1,4 @@
+import { INTERRUPTORES_APAGADOS } from '../shared/interruptores.js';
 import type { Tile } from '../shared/types.js';
 import type { World } from './index.js';
 import type { Chunk } from './terrain.js';
@@ -30,7 +31,7 @@ export function assertEcosystemTile(tile: Tile, required = true): void {
     const value = tile[key];
     if ((required || value !== undefined) && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) fail();
   }
-  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0)) fail();
+  if ((required || tile.fauna !== undefined) && (!Number.isSafeInteger(tile.fauna) || tile.fauna! < 0)) fail();
   if (tile.species !== undefined && !['hare','deer','boar','fish','wolf','fox'].includes(tile.species)) fail();
   if ((tile.fauna ?? 0) > 0 && tile.species === undefined) fail();
 }
@@ -55,26 +56,27 @@ function obraMaterialValida(v: unknown): boolean {
   const q=v.pendiente;
   return pieza(q)&&number(q.trabajoJ,Number.MAX_VALUE)&&(q.proceso===null||object(q.proceso));
 }
+const componentesMaterialesValidos = (v: unknown): boolean => Array.isArray(v) && v.every(c => string(c, 100));
 export function assertBlueprint(value: unknown,tick: number,maxGeneration=64,modular=false): asserts value is BlueprintView {
   if(object(value)&&value.planoMaterial!==undefined){
-    if(!planoObraValido(value.planoMaterial)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,true)||!integer(value.generation)
+    if(!planoObraValido(value.planoMaterial)||!string(value.id,100)||!string(value.name,200)||!componentesMaterialesValidos(value.components)||!integer(value.generation)
       ||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))
-      ||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost))fail();
+      ||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||value.cost.wood!==0||value.cost.stone!==0||value.cost.work!==0)fail();
     return;
   }
   if(!object(value)||!string(value.id,100)||!string(value.name,200)||!validBlueprint(value.components,modular)||!integer(value.generation,maxGeneration)||!Array.isArray(value.parents)||value.parents.length>2||!value.parents.every(p=>string(p,100))||!(value.inventorId===null||string(value.inventorId,50))||!integer(value.tick,tick)||!integer(value.uses)||!number(value.usefulness)||!object(value.cost)||!integer(value.cost.wood,modular?Number.MAX_SAFE_INTEGER:12)||!integer(value.cost.stone,modular?Number.MAX_SAFE_INTEGER:8)||!integer(value.cost.work,modular?Number.MAX_SAFE_INTEGER:600)||value.cost.work<1)fail();
   const b=value as unknown as BlueprintView, cost=blueprintCost(b.components,modular);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
 }
-export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTiles=LEGACY_WORLD_LIMITS.teselasActivas): asserts value is StructureView[] {
+export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTiles=LEGACY_WORLD_LIMITS.teselasActivas,obraActiva=false): asserts value is StructureView[] {
   // The construction policy limits new work; it must not discard valid older roofs
   // when several archived regions become resident together.
-  if(!Array.isArray(value)||value.length>Math.min(maxTiles,tiles.length))fail();
+  if(!Array.isArray(value)||(!obraActiva&&value.length>Math.min(maxTiles,tiles.length)))fail();
   const positions=new Map(tiles.map(t=>[`${t.x},${t.y}`,t])),ids=new Set<string>(),occupied=new Set<string>();
   for(const s of value as StructureView[]) {
-    if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!validBlueprint(s.components,true)||!number(s.condition)||!number(s.water,Number.MAX_SAFE_INTEGER)||!number(s.food,Number.MAX_SAFE_INTEGER)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
-    const obra=(s as StructureView&{obraMaterial?:unknown}).obraMaterial;
-    if(obra!==undefined&&!obraMaterialValida(obra))fail();
+    const obra=(s as (StructureView&{obraMaterial?:unknown}) | null)?.obraMaterial;
+    if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!(obra===undefined?validBlueprint(s.components,true):componentesMaterialesValidos(s.components))||!number(s.condition)||!number(s.water,Number.MAX_SAFE_INTEGER)||!number(s.food,Number.MAX_SAFE_INTEGER)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
+    if(obra!==undefined&&(!obraMaterialValida(obra)||s.cells===undefined||s.footprint!==undefined||s.site!==undefined))fail();
     const capacity=blueprintAffordances(s.components);
     if(s.losses!==undefined&&(!object(s.losses)||Object.keys(s.losses).length!==2||!number(s.losses.water,Number.MAX_SAFE_INTEGER)||!number(s.losses.food,Number.MAX_SAFE_INTEGER)))fail();
     if(s.installed!==undefined){
@@ -87,7 +89,7 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
       }
       capacity.waterCapacity*=1+containment;capacity.foodCapacity*=1+containment;
     }
-    if(s.water>capacity.waterCapacity||s.food>capacity.foodCapacity)fail();
+    if(obra===undefined&&(s.water>capacity.waterCapacity||s.food>capacity.foodCapacity))fail();
     if(s.synergy!==undefined){
       const v=s.synergy;
       if(!object(v)||!integer(v.sharedEdges,24)||typeof v.heated!=='boolean'||typeof v.irrigated!=='boolean'
@@ -176,19 +178,23 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
     ids.add(s.id);
   }
 }
-export function assertChunkLife(chunk: Chunk,tick: number): void {
+export function assertChunkLife(chunk: Chunk,tick: number,obraActiva=false,faunaActiva=false): void {
   if(chunk.lifeVersion!==undefined&&chunk.lifeVersion!==4)fail();
   if(chunk.lifeVersion===4&&(chunk.animals===undefined||chunk.structures===undefined))fail();
-  if(chunk.animals!==undefined){assertAnimals(chunk.animals,tick,chunk.tiles);assertFaunaStock(chunk.tiles,chunk.animals);}
-  if(chunk.structures!==undefined)assertStructures(chunk.structures,tick,chunk.tiles);
+  if(chunk.animals!==undefined){assertAnimals(chunk.animals,tick,chunk.tiles,undefined,faunaActiva);assertFaunaStock(chunk.tiles,chunk.animals);}
+  if(chunk.structures!==undefined)assertStructures(chunk.structures,tick,chunk.tiles,undefined,obraActiva);
 }
-export function assertDormantTerrain(chunk:Chunk,tick:number,ecosystemRequired:boolean):void {
-  if(!object(chunk)||!integer(chunk.lastTick,tick)||!Number.isSafeInteger(chunk.cx)||!Number.isSafeInteger(chunk.cy)||!coordinate(chunk.cx*16)||!coordinate(chunk.cy*16)||chunk.key!==`${chunk.cx},${chunk.cy}`||typeof chunk.discovered!=='boolean'||!Array.isArray(chunk.tiles)||chunk.tiles.length!==256||!Array.isArray(chunk.places)||chunk.places.length>256)fail();
+export function assertDormantTerrain(chunk:Chunk,tick:number,ecosystemRequired:boolean,v23: Pick<typeof INTERRUPTORES_APAGADOS, 'obra' | 'materia'>=INTERRUPTORES_APAGADOS):void {
+  if(!object(chunk)||!integer(chunk.lastTick,tick)||!Number.isSafeInteger(chunk.cx)||!Number.isSafeInteger(chunk.cy)||!coordinate(chunk.cx*16)||!coordinate(chunk.cy*16)||chunk.key!==`${chunk.cx},${chunk.cy}`||typeof chunk.discovered!=='boolean'||!Array.isArray(chunk.tiles)||chunk.tiles.length!==256||!Array.isArray(chunk.places)||(!v23.obra&&chunk.places.length>256))fail();
   for(const [i,t] of chunk.tiles.entries()){
-    if(!object(t)||t.x!==chunk.cx*16+i%16||t.y!==chunk.cy*16+Math.floor(i/16)||!['water','soil','meadow','shelter'].includes(t.terrain)||!number(t.food)||!number(t.vegetation)||!number(t.moisture)||(t.wood!==undefined&&!number(t.wood,12))||(t.stone!==undefined&&!number(t.stone,8))||(t.elevation!==undefined&&!number(t.elevation)))fail();
+    if(!object(t)||t.x!==chunk.cx*16+i%16||t.y!==chunk.cy*16+Math.floor(i/16)||!['water','soil','meadow','shelter'].includes(t.terrain)||!number(t.food)||!number(t.vegetation)||!number(t.moisture)||(t.wood!==undefined&&!number(t.wood,v23.materia?Infinity:12))||(t.stone!==undefined&&!number(t.stone,v23.materia?Infinity:8))||(t.elevation!==undefined&&!number(t.elevation)))fail();
     assertEcosystemTile(t,ecosystemRequired);
   }
-  for(const p of chunk.places)if(!object(p)||!string(p.id,100)||!string(p.name,200)||typeof p.description!=='string'||p.description.length>2000||!coordinate(p.x)||!coordinate(p.y)||Math.floor(p.x/16)!==chunk.cx||Math.floor(p.y/16)!==chunk.cy||!integer(p.gatherings,1e6))fail();
+  const ids=new Set<string>();
+  for(const p of chunk.places){
+    if(!object(p)||!string(p.id,100)||!string(p.name,200)||typeof p.description!=='string'||p.description.length>2000||!coordinate(p.x)||!coordinate(p.y)||Math.floor(p.x/16)!==chunk.cx||Math.floor(p.y/16)!==chunk.cy||!integer(p.gatherings,1e6)||ids.has(p.id))fail();
+    ids.add(p.id);
+  }
 }
 function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
   const counts=new Map<string,number>();for(const a of animals){const key=`${a.x},${a.y}`;counts.set(key,(counts.get(key)??0)+1);}
@@ -196,9 +202,10 @@ function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
 }
 export function assertLifeState(world: World): void {
   const limits=limitsOf(world,world.version);
-  assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
+  const {obra:obraActiva,fauna:faunaActiva}=paramsOf(world).v23;
+  assertAnimals(world.animals,world.tick,world.tiles,faunaActiva?undefined:limits.fauna,faunaActiva);
   assertFaunaStock(world.tiles,world.animals);
-  assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas);
+  assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas,obraActiva);
   const maxBlueprints=blueprintCap(world);
   if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>maxBlueprints)fail();
   const ids=new Set<string>(),signatures=new Set<string>();
@@ -215,7 +222,7 @@ export function assertLifeState(world: World): void {
       if(!parents.length||blueprint.generation!==Math.max(...parents.map(b=>b.generation))+1||parents.some(b=>b.tick>blueprint.tick)||!(world.people.some(p=>p.id===blueprint.inventorId)||(world.version>=5&&world.legacy?.some(p=>p.id===blueprint.inventorId&&p.diedAt>=blueprint.tick))))fail();
     }
   }
-  for(const s of world.structures) if(!ids.has(s.blueprintId)||blueprintSignature(s.components)!==blueprintSignature(world.blueprints.find(b=>b.id===s.blueprintId)!.components))fail();
+  for(const s of world.structures) if(!ids.has(s.blueprintId)||(!('obraMaterial' in s)&&blueprintSignature(s.components)!==blueprintSignature(world.blueprints.find(b=>b.id===s.blueprintId)!.components)))fail();
   for(const s of [...world.structures,...world.retiredChunks.flatMap(c=>c.structures??[])]){
     const target=s.site?.expansion;
     if(target&&(!ids.has(target.blueprintId)||blueprintSignature(target.components)!==blueprintSignature(world.blueprints.find(b=>b.id===target.blueprintId)!.components)))fail();
@@ -236,7 +243,7 @@ export function assertLifeState(world: World): void {
   }
   const animalIds=new Set(world.animals.map(a=>a.id)),structureIds=new Set(world.structures.map(s=>s.id));
   for(const chunk of world.retiredChunks) {
-    assertChunkLife(chunk,world.tick);
+    assertChunkLife(chunk,world.tick,obraActiva,faunaActiva);
     for(const animal of chunk.animals??[]){if(animalIds.has(animal.id))fail();animalIds.add(animal.id);}
     for(const structure of chunk.structures??[]){if(structureIds.has(structure.id)||!ids.has(structure.blueprintId))fail();structureIds.add(structure.id);}
   }

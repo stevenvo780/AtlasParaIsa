@@ -633,12 +633,15 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
   const census: { counts?: Map<string, number> } = {};
   let practiced: string[] | undefined;
   if (world.tick - person.lastSocial < 30) return;
+  const { construccion, v23 } = paramsOf(world);
   for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {
     const same = person.communityId && person.communityId === other.communityId;
     const trust = person.bonds[other.id] ?? 0.2;
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
-    if (other.action === 'build' && paramsOf(world).construccion.modular) {
+    const obraEscalar = !v23.obra && other.action === 'build';
+    const cazaEscalar = !v23.fauna && other.action === 'hunt';
+    if (obraEscalar && construccion.modular) {
       const structure = activeSiteAt(world, other), site = structure?.site;
       const stored = structure ? storedMaterialsNear(world, person) : { wood: 0, stone: 0 };
       if (structure && site && distance(other, structure) <= 0.5 && distance(person, structure) <= 1.5
@@ -652,17 +655,17 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     // para cada vecino era trabajo puro tirado. La necesidad de proceso fuera de
     // `research`/`craft` es {0,0} sin resolver ninguna receta: mismo valor, sin la llamada.
     let costWood = 0, costStone = 0, costWork = 0;
-    if (other.action === 'build') { const cost = partnerConstructionCost(world, other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
-    const processNeed = ['research', 'craft'].includes(other.action) ? processMaterialNeed(world, other) : { wood: 0, stone: 0 };
+    if (obraEscalar) { const cost = partnerConstructionCost(world, other); costWood = cost.wood; costStone = cost.stone; costWork = cost.work; }
+    const processNeed = !v23.tecnica && ['research', 'craft'].includes(other.action) ? processMaterialNeed(world, other) : { wood: 0, stone: 0 };
     const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
     const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, census);
-    const exchange = person.technology.items.length === 0 || other.technology.items.length >= world.technology.budgets.maxItems ? undefined : productExchange(world, person, other);
+    const exchange = !v23.tecnica && !v23.obra ? productExchange(world, person, other) : undefined;
     if (exchange) opportunities.push({ person: other, kind: 'tools', exchange, score: score + 0.24 });
     if (supplyMaterial) opportunities.push({ person: other, kind: 'supply', supplyMaterial, score: score + 0.22 });
     if (recipeId) opportunities.push({ person: other, kind: 'teach', recipeId, score: score + 0.06 });
-    if (other.action === 'build' && ((other.materials.wood < costWood && person.materials.wood > 0) || (other.materials.stone < costStone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
-    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? costWork : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
-    else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
+    if (obraEscalar && ((other.materials.wood < costWood && person.materials.wood > 0) || (other.materials.stone < costStone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
+    else if ((obraEscalar || cazaEscalar) && other.work > 0 && other.work < (other.action === 'build' ? costWork : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
+    else if (!v23.obra && person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
     else if (practicedSkillToTeach(world, person, other)) opportunities.push({ person: other, kind: 'teach', score });
   }
   return opportunities.sort((a, b) => b.score - a.score || distance(person, a.person) - distance(person, b.person) || a.person.id.localeCompare(b.person.id))[0];
@@ -720,7 +723,7 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   // V23 (`quimica.emergente`): regional elemental deficit trade. Partners carrying complementary compounds
   // (e.g. Fe/Si from mountains against C fuel or Ca lime from forest/wetland) swap exact half-lots, so
   // matter flows across regions to distant workshops. Pure halving: elemental mass is conserved bit for bit.
-  if (paramsOf(world).quimica.emergente && person.compounds?.length && other.compounds?.length) {
+  if (!ley(world, 'tecnica') && paramsOf(world).quimica.emergente && person.compounds?.length && other.compounds?.length) {
     const traded = exchangeComplementaryCompounds(person, other, world.chemistry ??= defaultChemistryState());
     if (traded) detail += ` Además intercambiaron medio lote químico: ${person.name} dio uno rico en ${traded.elements[0]} y recibió uno rico en ${traded.elements[1]}.`;
   }

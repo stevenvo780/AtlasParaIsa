@@ -9,7 +9,7 @@ import { DATO_GOLPEAR, REF_NULA, type Intento, type Registro } from '../src/worl
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
-  KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
+  KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, apetitoDeTejido, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
   costeGestacionJ, extraer, fundarCuerpo, gestar, herir, ingerirSelecto, lotesDe, masaDe, masaLote, metabolizar, morir, pagar, parir,
   plantillaDe, plantillaHumana, plantillaPorId, provecho, reservaJ, soltar, tasasBasales, vistaCuerpo,
 } from '../src/world/materia/cuerpo.js';
@@ -136,6 +136,65 @@ test('una cría crece con lo que come y un adulto no pasa de su masa adulta', ()
   const adulto = crearCuerpo(c, humana.id, 60);
   ingerirSelecto(c, adulto, vida, 0.4);
   assert.ok(crecer(c, adulto, 10) < 0.01);
+  assert.ok(exacto());
+});
+
+test('el tejido humano crece y gesta con alimento que sobra del mantenimiento', () => {
+  const { CH2, H2O, proteina, orgP } = m.S;
+  const cria = fundarCuerpo(c, humana.id, 3, 0.4, 1);
+  const madre = fundarCuerpo(c, humana.id, 60, 0.4, 1);
+  concebir(c, madre, { otro: 9, genoma: [], inicio: c.tick });
+  for (const cuerpo of [cria, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 2000, orgP, 1000, H2O, 10000), m.libro);
+  }
+  assert.equal(crecer(c, cria, 120), 0);
+  assert.equal(gestar(c, madre, 120), 0);
+  for (const cuerpo of [cria, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(CH2, 10000), m.libro);
+  }
+  const antesCria = reservaJ(c, cria), antesMadre = reservaJ(c, madre);
+  assert.ok(crecer(c, cria, 120) > 0);
+  assert.ok(gestar(c, madre, 120) > 0);
+  assert.equal(reservaJ(c, cria), antesCria);
+  assert.equal(reservaJ(c, madre), antesMadre);
+  assert.ok(exacto());
+});
+
+test('una plantilla animal con el mismo número de linaje no usa el presupuesto humano', () => {
+  const animal = crearPlantilla(c.quimica, c.globales.registro, {
+    partes: humana.partes, entradas: humana.partes.map(p => p.id), subproductos: [],
+    kappa: humana.kappa, captura: 0, masaAdulta: 30, m0: 1.5, linaje: humana.linaje,
+  });
+  assert.ok(animal);
+  const cuerpo = fundarCuerpo(c, animal.id, 30, 0.4, 1), { H2O, proteina, orgP } = m.S;
+  m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 2000, orgP, 1000, H2O, 10000), m.libro);
+  concebir(c, cuerpo, { otro: 9, genoma: [], inicio: c.tick });
+  assert.ok(gestar(c, cuerpo, 120) > 0);
+  assert.ok(exacto());
+});
+
+test('la gestante conserva proteína de la comida para incorporarla al embrión', () => {
+  const adulto = crearCuerpo(c, humana.id, 60), madre = crearCuerpo(c, humana.id, 60);
+  concebir(c, madre, { otro: 9, genoma: [], inicio: c.tick });
+  const { proteina, orgP, H2O } = m.S;
+  for (const cuerpo of [adulto, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 4000, orgP, 1000, H2O, 10000), m.libro);
+    for (let t = 0; t < 300; t++) metabolizar(c, cuerpo, CELDA, 1);
+  }
+  const proteinaDisponible = m.arena.cuantos(madre.digestivo, proteina);
+  assert.ok(proteinaDisponible > m.arena.cuantos(adulto.digestivo, proteina));
+  assert.ok(gestar(c, madre, 120) > 0);
+  assert.ok(m.arena.cuantos(madre.digestivo, proteina) < proteinaDisponible);
+  assert.ok(exacto());
+});
+
+test('la saciedad de combustible no oculta la falta de nutrientes para crecer', () => {
+  const cria = crearCuerpo(c, humana.id, 3), adulto = crearCuerpo(c, humana.id, 60);
+  assert.ok(vistaCuerpo(c, cria, vista()).hambre < 0.001);
+  assert.equal(apetitoDeTejido(c, cria), 1);
+  assert.equal(apetitoDeTejido(c, adulto), 0);
+  m.arena.fuente(cria.digestivo, Float64Array.of(m.S.proteina, 10000, m.S.orgP, 2000), m.libro);
+  assert.equal(apetitoDeTejido(c, cria), 0);
   assert.ok(exacto());
 });
 

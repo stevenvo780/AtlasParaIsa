@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertWorld, createWorld, stepWorld, TICKS_PER_DAY } from '../src/world/index.js';
+import { demographicTraits } from '../src/world/demography.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf } from '../src/world/params.js';
 import { tileAt } from '../src/world/spatial.js';
@@ -89,14 +90,35 @@ test('la densidad cuenta tierra, no agua: la zona con agua tiene menos celdas ca
   for (const p of sembrados) assert.notEqual(tileAt(mundo, { x: p.x, y: p.y })?.terrain, 'water');
 });
 
-test('cada muerte lleva su causa: el registro coincide con la contabilidad del mundo causa a causa, con más de una causa presente', { timeout: 900_000 }, () => {
-  const { mundo, caminables } = sembrado(7, 150);
-  const antes = { ...mundo.demographyDynamics.causes }, { archivar } = archivoDeChunks(mundo);
-  const registro = medir(mundo, { dias: 1, zona: ZONA, caminables, archivar });
+test('cada muerte lleva su causa: el registro coincide con la contabilidad del mundo causa a causa', () => {
   const causas = ['starvation', 'dehydration', 'exposure', 'senescence'] as const;
-  const vistas = causas.filter(c => registro.individuos.some(i => i.causa === c));
-  assert.ok(vistas.length >= 2, `la sonda debe tener muertes de al menos dos causas, tuvo ${vistas}`);
-  for (const causa of causas) assert.equal(registro.individuos.filter(i => i.causa === causa).length, mundo.demographyDynamics.causes[causa] - antes[causa], causa);
+  const { mundo, sembrados, caminables } = sembrado(7, causas.length);
+  mundo.weather = 'rain';
+  // Cuerpos vivos al borde de morir. La necesidad o el desgaste dominantes se resuelven en el paso real.
+  for (const [i, causa] of causas.entries()) {
+    const persona = sembrados[i]!;
+    const rasgos = demographicTraits(persona.genome, paramsOf(mundo).cuerpo);
+    const edad = causa === 'senescence' ? rasgos.maximumAge - 1 : rasgos.maturityAge;
+    persona.bornAt = mundo.tick - edad;
+    persona.lastBirth = mundo.tick - Math.min(edad, TICKS_PER_DAY);
+    persona.demography = { age: edad, health: 1e-8, vitality: 0.1, deathCause: null };
+    persona.hunger = causa === 'starvation' ? 1 : 0.2;
+    persona.thirst = causa === 'dehydration' ? 1 : 0.2;
+    persona.action = 'rest';
+    persona.decisionAt = mundo.tick + 2;
+  }
+  assertWorld(mundo);
+  const antes = { ...mundo.demographyDynamics.causes }, { archivar } = archivoDeChunks(mundo);
+  const registro = medir(mundo, { dias: 1, ticks: 1, cadaInvariantes: 1, zona: ZONA, caminables, archivar });
+  assertWorld(mundo);
+  assert.deepEqual(registro.violaciones, { duras: 0, blandas: 0, comprobaciones: 2 });
+  assert.equal(registro.individuos.length, causas.length);
+  for (const [i, causa] of causas.entries()) {
+    const baja = registro.individuos.find(individuo => individuo.id === sembrados[i]!.id);
+    assert.equal(baja?.causa, causa);
+    assert.equal(baja.hasta, 1);
+    assert.equal(registro.individuos.filter(individuo => individuo.causa === causa).length, mundo.demographyDynamics.causes[causa] - antes[causa], causa);
+  }
 });
 
 test('sustituir a los fundadores no deja vínculos ni comunidades que apunten a quien ya no existe', { timeout: 600_000 }, () => {

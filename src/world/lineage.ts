@@ -1,5 +1,6 @@
+import { channel } from 'node:diagnostics_channel';
 import type { ChronicleEvent } from '../shared/types.js';
-import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.js';
+import type { LegacyRecord, DemographicDeathCause, DemographicState, DemographicTransition } from '../shared/demography.js';
 import type { StructureView } from '../shared/life.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
@@ -10,6 +11,32 @@ import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
 import { consumeInsulationTools, portableInsulationPower, toolEffectsEnabled } from './technology.js';
 import { bodilyShelter } from './decision/sentidos.js';
+import { masaDe, reservaJ } from './materia/cuerpo.js';
+import { sustanciasDe } from './materia/ley-mundo.js';
+import { ctxSi, type CtxLeyMateria } from './motor/acceso.js';
+
+export const CANAL_EXPOSICION = 'atlas:demografia:exposicion';
+const canalExposicion = channel(CANAL_EXPOSICION);
+
+export interface MuestraExposicion {
+  semilla: number; tick: number; id: string; uid?: number; rol: Person['role']; x: number; y: number;
+  lluvia: boolean; tipoTecho: 'material' | 'legado' | 'ninguno' | 'no-evaluado'; techo: number | null;
+  aportePrenda: number; abrigoEfectivo: number;
+  hambre: number; sed: number; energia: number; fatiga: number; resiliencia: number; edadInicioVejez: number; edadMaxima: number;
+  cuerpo: { masaKg: number; aguaReservaKg: number; reservaJ: number; gestacion: boolean } | null;
+  antes: Readonly<DemographicState>; despues: Readonly<DemographicState>;
+  dano: Readonly<DemographicTransition['damage']>; reparacion: number; desgasteEdad: number;
+  exposicionSinTechoNiPrenda: number; exposicionSoloTecho: number;
+  riesgoSenescencia: number; golpeSorteoSenescencia: number;
+  causaTerminal: DemographicDeathCause | null; muerteEvitadaPorPisoSI: DemographicDeathCause | null;
+}
+
+function muestraCuerpo(c: CtxLeyMateria | undefined, cuerpo: Person['cuerpo']): MuestraExposicion['cuerpo'] {
+  if (!cuerpo || !c?.materia || !c.quimica || !c.materia.propio(cuerpo.reserva)) return null;
+  const { H2O } = sustanciasDe(c);
+  return { masaKg: masaDe(c, cuerpo), aguaReservaKg: c.materia.cuantos(cuerpo.reserva, H2O) * c.quimica.sustancia(H2O).masa * 1e-6,
+    reservaJ: reservaJ(c, cuerpo), gestacion: cuerpo.gestacion !== undefined };
+}
 
 export const RECENT_LEGACY_COUNT = 32;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
@@ -281,6 +308,8 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   }
   const toolsActive = toolEffectsEnabled(world) && world.weather === 'rain' && world.shelterBenefitEnabled;
   const cloakWear: { person: Person; avoided: number }[] = [];
+  const muestras: MuestraExposicion[] | undefined = canalExposicion.hasSubscribers ? [] : undefined;
+  const contextoMaterial = muestras && (ctxSi(world) as CtxLeyMateria | undefined);
   // La ley del cuerpo es la del mundo durante todo el paso (nada en este bucle la cambia).
   const cuerpo = paramsOf(world).cuerpo, exposure = world.weather === 'rain' ? 1 : 0, wearTick = world.tick % 10 === 0;
   const transitions = world.people.map(person => {
@@ -298,11 +327,31 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
       const insul = person.technology.items.length ? portableInsulationPower(person) : 0;
       if (insul > 0) effectiveShelter = Math.min(1, shelter + insul * 0.55);
     }
-    const transition = updateDemography(bodyInput, effectiveShelter === shelter ? envBase : { ...envBase, shelter: effectiveShelter }, 1);
+    const detalle = muestras && { reparacion: 0, desgasteEdad: 0, saludAntesSorteo: 0 };
+    const transition = updateDemography(bodyInput, effectiveShelter === shelter ? envBase : { ...envBase, shelter: effectiveShelter }, 1, detalle);
+    let soloTecho: number | undefined;
     if (effectiveShelter > shelter && wearTick) {
       // El daño sin abrigo: `exposureDamage` es bit a bit el `damage.exposure` de la transición sin él.
-      const avoided = Math.max(0, exposureDamage(bodyInput, envBase, 1) - transition.damage.exposure);
+      soloTecho = exposureDamage(bodyInput, envBase, 1);
+      const avoided = Math.max(0, soloTecho - transition.damage.exposure);
       if (avoided > 0) cloakWear.push({ person, avoided: avoided * 10 });
+    }
+    if (muestras && detalle) {
+      const dano = transition.damage;
+      soloTecho ??= effectiveShelter > shelter ? exposureDamage(bodyInput, envBase, 1) : dano.exposure;
+      const exposicionSinTechoNiPrenda = exposure && shelter > 0 ? exposureDamage(bodyInput, { ...envBase, shelter: 0 }, 1) : soloTecho;
+      // Solo reutilizar el techo de la exposición. Consultar piezas en seco puede abrir reacciones químicas.
+      const techo = exposure ? shelter : null;
+      const resultadoTerminal = transition.death ?? transition.preventedDeath;
+      muestras.push({ semilla: world.seed, tick: world.tick, id: person.id, uid: person.uid, rol: person.role, x: person.x, y: person.y,
+        lluvia: exposure === 1, tipoTecho: techo === null ? 'no-evaluado' : techo > 0 ? (obra ? 'material' : 'legado') : 'ninguno', techo,
+        aportePrenda: effectiveShelter - shelter, abrigoEfectivo: exposure ? effectiveShelter : 0,
+        hambre: bodyInput.hunger, sed: bodyInput.thirst, energia: bodyInput.energy, fatiga: bodyInput.fatigue,
+        resiliencia: traits.resilience, edadInicioVejez: traits.senescenceStart, edadMaxima: traits.maximumAge,
+        cuerpo: muestraCuerpo(contextoMaterial, person.cuerpo), antes: { ...bodyInput.state }, despues: { ...transition.state }, dano: { ...dano },
+        reparacion: detalle.reparacion, desgasteEdad: detalle.desgasteEdad, exposicionSinTechoNiPrenda, exposicionSoloTecho: soloTecho,
+        riesgoSenescencia: transition.senescenceRisk, golpeSorteoSenescencia: resultadoTerminal === 'senescence' ? detalle.saludAntesSorteo : 0,
+        causaTerminal: transition.death, muerteEvitadaPorPisoSI: transition.preventedDeath });
     }
     return { person, transition, traits };
   });
@@ -315,6 +364,7 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     cause: transition.death!, genome: structuredClone(person.genome), traits, communityId: person.communityId }));
   for (const record of records) assertLegacyRecord(record, world.tick);
   for (const { person, transition } of transitions) person.demography = transition.state;
+  if (muestras) for (const muestra of muestras) canalExposicion.publish(muestra);
   for (const { person } of dying) callbacks.beforeDeath?.(world, person);
   if (dying.length) {
     const departed = new Set(dying.map(result => result.person.id));

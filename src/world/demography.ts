@@ -179,7 +179,8 @@ function nextVitality(actor: DemographicActor, hungry: number, thirsty: number, 
 /** Pure demographic transition. dt is simulation ticks (0..2400), not wall-clock seconds.
  * Needs/environment are held constant over this interval; age advances exactly once. The host
  * supplies the post-action body, handles deaths after the step and pays all reproduction costs. */
-export function updateDemography(actor: DemographicActor, environment: DemographicEnvironment, dt = 1): DemographicTransition {
+export function updateDemography(actor: DemographicActor, environment: DemographicEnvironment, dt = 1,
+  detalle?: DetalleDemografia): DemographicTransition {
   validate(actor, environment, dt);
   const state = { ...actor.state }, damage = emptyDamage();
   // Death is absorbing. Protection does not resurrect an identity already recorded as dead.
@@ -209,6 +210,11 @@ export function updateDemography(actor: DemographicActor, environment: Demograph
   const aging = clamp((state.age - traits.senescenceStart) / (traits.maximumAge - traits.senescenceStart));
   const healing = nourishment * actor.energy * state.vitality * 0.08 * (1 - aging) * days;
   state.health = clamp(state.health + healing - (0 + damage.starvation + damage.dehydration + damage.exposure + damage.senescence));
+  if (detalle) {
+    detalle.reparacion = healing;
+    detalle.desgasteEdad = damage.senescence;
+    detalle.saludAntesSorteo = state.health;
+  }
   let death: DemographicDeathCause | null = null;
   const senescenceRisk = mortalityRisk(actor.state.age, state.age, traits, care, law);
   if (state.health <= 0) death = dominantCause(damage);
@@ -222,3 +228,6 @@ export function updateDemography(actor: DemographicActor, environment: Demograph
   if (death) { state.deathCause = death; state.vitality = 0; }
   return { state, death, preventedDeath: null, offspringEligible: eligible(actor, state), senescenceRisk, damage };
 }
+
+/** Magnitudes de la transición antes de la tirada probabilística, solo para un observador. */
+export interface DetalleDemografia { reparacion: number; desgasteEdad: number; saludAntesSorteo: number }

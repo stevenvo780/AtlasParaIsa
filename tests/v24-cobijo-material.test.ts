@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { channel } from 'node:diagnostics_channel';
 import test from 'node:test';
 import { registrarSustanciasBase } from '../scripts/lab-materia.mjs';
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
@@ -7,12 +8,18 @@ import { codigoForma } from '../src/shared/materia.js';
 import { move } from '../src/world/actuar/mover.js';
 import { choose } from '../src/world/decision/personas.js';
 import { bodilyDamage, bodilyShelter } from '../src/world/decision/sentidos.js';
+import { demographicTraits } from '../src/world/demography.js';
+import { transferEstate } from '../src/world/demografia/morir.js';
+import { digestoCanonico } from '../src/world/digesto.js';
 import { createWorld, stepWorld, tileAt } from '../src/world/index.js';
-import { advancePopulation } from '../src/world/lineage.js';
-import { celdaObra, colocarPieza, trasladarLoteObra, type EstadoObra } from '../src/world/materia/piezas.js';
+import { advancePopulation, CANAL_EXPOSICION, type MuestraExposicion } from '../src/world/lineage.js';
+import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
+import { celdaObra, colocarPieza, estadoObra, trasladarLoteObra, type EstadoObra } from '../src/world/materia/piezas.js';
 import type { ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
+import { duenoSi } from '../src/world/motor/contexto.js';
+import { paramsOf, parseParams } from '../src/world/params.js';
 import { personaMovida } from '../src/world/rejilla.js';
 import { chunkKey } from '../src/world/terrain.js';
 
@@ -98,4 +105,98 @@ test('bajo lluvia la persona elige y alcanza la pieza protectora desde la celda 
   assert.ok(intacta.cobijo > 0);
   assert.notDeepEqual(desmontada.seleccion, { action: 'rest', ...desmontada.punto });
   assert.equal(desmontada.cobijo, 0);
+});
+
+test('la sonda observa el daño posacción y el techo material sin alterar el balance ni la trayectoria', () => {
+  const sonda = channel(CANAL_EXPOSICION);
+  function brazo(estado: 'intacta' | 'sinPieza', medir: boolean) {
+    const { mundo, persona } = escena(estado);
+    const muestras: MuestraExposicion[] = [], observar = (valor: unknown) => { muestras.push(valor as MuestraExposicion); };
+    if (medir) sonda.subscribe(observar);
+    try {
+      bodilyDamage(mundo, persona, persona, bodilyShelter(mundo, persona));
+      assert.equal(muestras.length, 0);
+      const n = mundo.people.length;
+      advancePopulation(mundo, { emit: () => { throw new Error('La escena corta debe conservar a sus habitantes.'); } });
+      assert.equal(muestras.length, medir ? n : 0);
+      const muestra = muestras.find(m => m.id === persona.id);
+      if (muestra) assert.deepEqual(muestra.despues, persona.demography);
+      return { muestra, digesto: digestoCanonico(mundo), balance: balanceConservacion(mundo) };
+    } finally { if (medir) sonda.unsubscribe(observar); }
+  }
+  const intacta = brazo('intacta', true), control = brazo('intacta', false), sinTecho = brazo('sinPieza', true);
+  assert.equal(intacta.digesto, control.digesto);
+  assert.deepEqual(intacta.balance, control.balance);
+  assert.ok(intacta.balance?.ok);
+  const cubierta = intacta.muestra!, expuesta = sinTecho.muestra!;
+  assert.ok(cubierta.lluvia && cubierta.cuerpo && cubierta.cuerpo.masaKg > 0 && cubierta.cuerpo.aguaReservaKg >= 0);
+  assert.equal(cubierta.tipoTecho, 'material');
+  assert.equal(expuesta.tipoTecho, 'ninguno');
+  assert.equal(cubierta.exposicionSinTechoNiPrenda, expuesta.dano.exposure);
+  assert.equal(cubierta.exposicionSoloTecho, cubierta.dano.exposure);
+  assert.ok(cubierta.dano.exposure < expuesta.dano.exposure);
+  assert.equal(expuesta.causaTerminal, null);
+  assert.equal(expuesta.golpeSorteoSenescencia, 0);
+});
+
+test('en seco el techo queda sin evaluar y la sonda conserva el checkpoint material', () => {
+  const sonda = channel(CANAL_EXPOSICION);
+  function brazo(medir: boolean) {
+    const { mundo, persona } = escena('intacta');
+    mundo.weather = 'clear';
+    const lote = estadoObra(mundo.structures.at(-1)!)!.piezas[0]!.lote;
+    const { materia } = ctxMateriaDe(mundo), vista = materia.vista;
+    let lecturasDelTecho = 0;
+    materia.vista = function (ref) {
+      if (ref === lote) lecturasDelTecho++;
+      return vista.call(this, ref);
+    };
+    const muestras: MuestraExposicion[] = [], observar = (valor: unknown) => { muestras.push(valor as MuestraExposicion); };
+    if (medir) sonda.subscribe(observar);
+    try { advancePopulation(mundo, { emit: () => { throw new Error('La escena corta debe conservar a sus habitantes.'); } }); }
+    finally { if (medir) sonda.unsubscribe(observar); materia.vista = vista; }
+    assert.equal(lecturasDelTecho, 0);
+    const muestra = muestras.find(m => m.id === persona.id);
+    if (medir) {
+      assert.ok(muestra);
+      assert.equal(muestra.lluvia, false);
+      assert.equal(muestra.techo, null);
+      assert.equal(muestra.tipoTecho, 'no-evaluado');
+      assert.equal(muestra.dano.exposure, 0);
+    } else assert.equal(muestras.length, 0);
+    const dueno = duenoSi(mundo)!;
+    const checkpoint = dueno.instantaneaMateria(dueno.pendientes());
+    assert.ok(checkpoint);
+    return { digesto: digestoCanonico(mundo), checkpoint: codificarCheckpoint(checkpoint) };
+  }
+  assert.deepEqual(brazo(true), brazo(false));
+});
+
+test('la sonda distingue una lesión terminal por lluvia de la tirada terminal de vejez', () => {
+  const sonda = channel(CANAL_EXPOSICION);
+  function terminal(vejez: boolean): MuestraExposicion {
+    const mundo = createWorld(7, parseParams({ cuerpo: { riesgoSenescenciaDiario: 1, riesgoSenescenciaPendiente: 50 } }));
+    mundo.tick = 100;
+    mundo.weather = 'rain';
+    mundo.shelterBenefitEnabled = false;
+    const persona = mundo.people.find(p => p.role === 'neighbor')!;
+    const edad = vejez ? 2 * demographicTraits(persona.genome, paramsOf(mundo).cuerpo).maximumAge : 100;
+    Object.assign(persona, { bornAt: mundo.tick - edad, hunger: 0, thirst: 0, energy: 1, fatigue: 0 });
+    Object.assign(persona.demography, { age: edad, health: vejez ? 0.7 : 1e-7, vitality: 0.75 });
+    const muestras: MuestraExposicion[] = [], observar = (valor: unknown) => { muestras.push(valor as MuestraExposicion); };
+    sonda.subscribe(observar);
+    try { advancePopulation(mundo, { emit: () => {}, beforeDeath: transferEstate }); }
+    finally { sonda.unsubscribe(observar); }
+    const muestra = muestras.find(m => m.id === persona.id);
+    assert.ok(muestra);
+    assert.equal(mundo.legacy.find(p => p.id === persona.id)?.cause, muestra.causaTerminal);
+    return muestra;
+  }
+  const lluvia = terminal(false), vejez = terminal(true);
+  assert.equal(lluvia.causaTerminal, 'exposure');
+  assert.equal(lluvia.golpeSorteoSenescencia, 0);
+  assert.ok(lluvia.dano.exposure > lluvia.antes.health);
+  assert.equal(vejez.causaTerminal, 'senescence');
+  assert.ok(vejez.golpeSorteoSenescencia > 0 && vejez.dano.exposure > 0);
+  assert.equal(vejez.dano.senescence, vejez.desgasteEdad + vejez.golpeSorteoSenescencia);
 });

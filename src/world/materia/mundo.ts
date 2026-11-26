@@ -1587,7 +1587,11 @@ export class MundoMaterial {
     this.arena.mover({ de: aire, a: fuego, esp: this.S.O2, cuantos: pedido });
     this.arena.mover({ de: aire, a: fuego, esp: this.S.N2, cuantos: Math.round(pedido * 78 / 21) });
     this.termostato(fuego, T_IGNICION, IGNICION);
-    for (let t = 0; t < TICKS_FUEGO; t++) pasoLote(this.ctx, fuego, 1, SIN);
+    // Cada paso de esta caja es un tick completo y puede reutilizar las ranuras que dejó el anterior.
+    for (let t = 0; t < TICKS_FUEGO; t++) {
+      pasoLote(this.ctx, fuego, 1, SIN);
+      this.arenaLab.barrera();
+    }
     const T = this.temperatura(p, 1);
     this.termostato(fuego, T);
     for (const id of [...this.especies(fuego)]) {
@@ -1595,6 +1599,7 @@ export class MundoMaterial {
     }
     this.arena.moverCalor(fuego, suelo, this.arena.calor(fuego));
     this.arena.liberar(fuego);
+    this.arenaLab.barrera();
     return quemadas;
   }
 

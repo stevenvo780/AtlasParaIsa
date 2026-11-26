@@ -22,6 +22,8 @@ La rama de hardware parte de `f65d08c`, un punto verificable de la candidata V23
 
 El broker por dispositivo debe acotar memoria y cola, reutilizar buffers y descartar resultados desfasados. Si una tanda vence, el dueño conserva la entrada versionada para recuperarla en CPU. La selección de equipo se decide con tiempo de pared del paso, incluidos preparación, barreras, transferencias y recuperación. El balance de átomos y energía usa su contabilidad exacta en cualquier ruta.
 
+En la torre, cada dominio L3 agrupa ocho núcleos físicos. El de 96 MiB corresponde a `0–7,16–23` y el de 32 MiB a `8–15,24–31`. Los dos dominios comparten 125 GiB de RAM. Cada GPU tiene su propia VRAM y las dos comparten el camino al host. `/datos` está en un RAID de NVMe. Separar allí dos carpetas ayuda a medir y retener archivos por separado. Para medir independencia física entre cinta y guardado hay que usar otro volumen NVMe. El HDD de `/mnt/Data2` queda para respaldos. Las esperas de disco, la presión de RAM y las transferencias CUDA se registran por separado para identificar qué domina la latencia.
+
 ## Escala y resolución
 
 Una región residente conserva sus entidades individuales. Una región que espera eventos mantiene identidad, inventarios y el siguiente tick material relevante. Una región fría se archiva con su último tick aplicado y el saldo de frontera. Se reactiva antes de consumir un evento que pueda afectarla. Los saltos temporales de una ley necesitan un avance equivalente o una aproximación explícita, comparada con una ventana de resolución completa. La cámara consulta el resultado de la simulación y nunca agenda el despertar de una región.

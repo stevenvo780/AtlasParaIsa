@@ -17,8 +17,9 @@ git rev-parse HEAD > "$evidencia/commit.txt"
 npm run typecheck 2>&1 | tee "$evidencia/typecheck.log"
 node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-demo-agua.test.ts tests/v24-camino-material.test.ts tests/v24-cobijo-material.test.ts tests/v24-evidencia-reloj.test.ts \
-  tests/v24-agenda-durable.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
+  tests/v24-agenda-durable.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
-  tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/ola-n-natalidad.test.ts 2>&1 | tee "$evidencia/pruebas.log"
+  tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
+  tests/ola-n-natalidad.test.ts 2>&1 | tee "$evidencia/pruebas.log"
 npm run build 2>&1 | tee "$evidencia/build.log"
 timeout 65s node scripts/lab/demo-observacion.mjs "$PWD" "$evidencia/observacion" 2>&1 | tee "$evidencia/observacion.log"

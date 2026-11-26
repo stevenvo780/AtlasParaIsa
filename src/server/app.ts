@@ -620,11 +620,15 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   let ultimoGuardadoEn: number | null = gateway ? null : loaded?.savedAt ?? null;
   function guardarMundo(draft: World, recibos: Recibos = [], sesiones: string[] = [], cambios: readonly SnapshotReplayChange[] = []): Instantanea | undefined {
     const completo = ley(draft, 'guardadoCompleto');
-    const instantanea = motor?.instantanea(completo);
+    const sello = completo ? motor?.corteGuardadoSellado?.() : undefined;
+    let instantanea: Instantanea | undefined;
+    if (sello) instantanea = store.guardarCorteSellado(sello, recibos, sesiones);
+    else {
+      instantanea = motor?.instantanea(completo);
+      if (completo) store.guardarConEntradas(instantanea ?? { world: draft, materia: null }, recibos, sesiones);
+      else store.save(instantanea?.world ?? draft, recibos, sesiones, cambios);
+    }
     const duradero = instantanea?.world ?? draft;
-    if (completo) {
-      store.guardarConEntradas(instantanea ?? { world: draft, materia: null }, recibos, sesiones);
-    } else store.save(duradero, recibos, sesiones, cambios);
     ultimoTickGuardado = duradero.tick;
     ultimoGuardadoEn = Date.now();
     return instantanea;

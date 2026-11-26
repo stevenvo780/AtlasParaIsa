@@ -48,8 +48,9 @@ import {
   type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
+import { crearCorteGuardado, type CorteGuardadoSellado } from './corte-sellado.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
-import { faunaCorteDe, vincularFaunaCorte, type TramoFaunaCorte } from './fauna-corte.js';
+import { faunaCorteDe, faunaVerificadaDe, vincularFaunaCorte, vincularFaunaVerificada, type TramoFaunaCorte, type TramoFaunaVerificada } from './fauna-corte.js';
 import {
   LIMITE_BYTES_FOTO_TOTAL_DEFECTO, trazaFotogramaDuenosVacia,
   type LoteFotoDuenos, type ParteFotoDueno, type TrazaFotogramaDuenos,
@@ -573,8 +574,10 @@ class MotorDuenos implements Motor {
       d.F0();
       if (this.#config.emisionFotogramaDuenos && control[CTL.fotoRanura]! >= 0) {
         const completo = control[CTL.fotoCompleto] === 1;
-        control[CTL.fotoCaras] = completo || this.#ultimaCarasFoto < 0 || m.tick < this.#ultimaCarasFoto
-          || m.tick - this.#ultimaCarasFoto >= ESTADISTICAS_CARAS_CADA_TICKS ? 1 : 0;
+        const necesita = this.#fuente?.necesitaCaras?.(m.tick, this.#epoca, completo)
+          ?? (completo || this.#ultimaCarasFoto < 0 || m.tick < this.#ultimaCarasFoto
+            || m.tick - this.#ultimaCarasFoto >= ESTADISTICAS_CARAS_CADA_TICKS);
+        control[CTL.fotoCaras] = Number(necesita);
       } else {
         control[CTL.fotoCaras] = 0;
       }
@@ -796,11 +799,26 @@ class MotorDuenos implements Motor {
   }
 
   instantanea(paraGuardado = false): Instantanea {
+    const prepararFauna = paraGuardado && this.#config.faunaCortePreparada === true && paramsOf(this.#mundo).v23.guardadoCompleto;
+    return this.#tomarInstantanea(prepararFauna);
+  }
+
+  corteGuardadoSellado(): CorteGuardadoSellado | undefined {
+    const piscina = this.#piscina;
+    if (!this.#config.faunaCorteDirecta || !piscina || !this.#canalesCorte || !paramsOf(this.#mundo).v23.guardadoCompleto) return undefined;
+    const { tick, eventCounter } = this.#mundo, epoca = this.#epoca;
+    return crearCorteGuardado(() => {
+      if (this.#piscina !== piscina || this.#epoca !== epoca || this.#mundo.tick !== tick || this.#mundo.eventCounter !== eventCounter)
+        throw new Error('El corte sellado pertenece a un paso anterior.');
+      return this.#tomarInstantanea('directa');
+    });
+  }
+
+  #tomarInstantanea(prepararFauna: boolean | 'directa'): Instantanea {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
       const paraConfirmar = this.#config.confirmarGuardadoVivo === true;
-      const prepararFauna = paraGuardado && this.#config.faunaCortePreparada === true && paramsOf(this.#mundo).v23.guardadoCompleto;
       const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna);
       recordSample(world);
       const materia = this.#d.instantaneaMateria(pendientes);
@@ -878,7 +896,7 @@ class MotorDuenos implements Motor {
     return { ...this.#trazaFotoDuenos, migrantesTransferidos };
   }
 
-  #reunirMundo(paraConfirmar = false, prepararFauna = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
+  #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
     const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
@@ -894,12 +912,18 @@ class MotorDuenos implements Motor {
     const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
     if (canales && prepararFauna) {
       const tramos: TramoFaunaCorte[] = [];
+      const verificados: TramoFaunaVerificada[] = [];
       let desde = this.#mundo.animals.length;
       for (const parte of partes) {
-        for (const tramo of faunaCorteDe(parte.animals) ?? []) tramos.push({ desde: desde + tramo.desde, bloques: tramo.bloques });
+        if (prepararFauna === 'directa') {
+          for (const tramo of faunaVerificadaDe(parte.animals) ?? []) verificados.push({ desde: desde + tramo.desde, filas: tramo.filas });
+        } else {
+          for (const tramo of faunaCorteDe(parte.animals) ?? []) tramos.push({ desde: desde + tramo.desde, bloques: tramo.bloques });
+        }
         desde += parte.animals.length;
       }
       if (tramos.length) vincularFaunaCorte(world.animals, tramos);
+      if (verificados.length) vincularFaunaVerificada(world.animals, verificados);
     }
     const pendientes = this.#d.pendientes();
     for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {

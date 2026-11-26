@@ -32,6 +32,8 @@ test('el cotejo de fauna preparada se activa expresamente junto con el corte por
   assert.equal(activa.instantaneaTransferible, true);
   assert.equal(activa.faunaCortePreparada, true);
   assert.equal(motorConfig(7, config).faunaCortePreparada, undefined);
+  assert.equal(motorConfig(7, config).faunaCorteDirecta, undefined);
+  assert.equal(motorConfig(7, { ...config, CARTA_FAUNA_CORTE_DIRECTA: '1' }).faunaCorteDirecta, true);
 });
 
 test('la emisión del fotograma por dueño debe solicitarse al arrancar el servidor', () => {

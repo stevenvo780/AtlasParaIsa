@@ -5,16 +5,17 @@ import type { ChronicleEvent, RuntimeStats, Tile, WorldView } from '../../shared
 import { chronicleSerial } from '../../world/chronicle-journal.js';
 import { ctxSi, type CtxF0, type CtxLeyMateria } from '../../world/motor/acceso.js';
 import { Clase, REF_NULA } from '../../world/motor/contratos.js';
-import type { FuenteFotograma, SucesoFotograma } from '../../world/motor/fotograma.js';
+import type { FotogramaEnCurso, FuenteFotograma, SucesoFotograma } from '../../world/motor/fotograma.js';
 import {
   CAMPOS_TEXTO_OPCIONALES, estadisticasCarasDesdeTerreno,
-  type CruceFaunaSaliente, type EstadisticasCarasCinta, type LoteFotoDuenos,
+  type CruceFaunaSaliente, type LoteFotoDuenos,
 } from '../../world/motor/fotograma-dueno.js';
 import { fundir } from '../../world/motor/reunir.js';
 import type { ServicioQuimicoAuditable } from '../../world/materia/servicio.js';
 import { projectChemistry, VIEW_EVENTS, VIEW_MEMORIES } from '../../world/proyeccion.js';
 import { PAGE_SIDE } from '../../world/soa/region.js';
 import { residentFastAccess } from '../../world/soa/terreno.js';
+import { estadisticasFotograma, ESTADISTICAS_CARAS_CADA_TICKS, type EstadisticasCaras } from '../../world/statistics.js';
 import { projectTechnology, type TechnologyActor } from '../../world/technology.js';
 import { analyzeTechnologyOrganization, type TechnologyOrganizationActor } from '../../world/technology-organization.js';
 import { tileLookup } from '../../world/tile-index.js';
@@ -72,14 +73,19 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
   let globalesAnterior = new Map<string, { datos: Buffer; baja: Suceso }>();
   let paginasEnCinta = new Set<string>();
   let estructurasEnCinta = new Set<string>();
-  let carasCacheadas: EstadisticasCarasCinta | null = null;
+  let carasConfirmadas: { muestra: EstadisticasCaras; tick: number; epoca: number } | null = null;
   let ultimoCamino: 'ninguno' | 'reunido' | 'duenos' = 'ninguno';
 
   let siguiente = anterior, globalesSiguientes = globalesAnterior;
   let paginasSiguientes = paginasEnCinta, estructurasSiguientes = estructurasEnCinta;
-  let carasSiguientes: EstadisticasCarasCinta | null = carasCacheadas;
+  let carasSiguientes: { muestra: EstadisticasCaras; fotograma: FotogramaEnCurso } | null = null;
   let caminoSiguiente: 'ninguno' | 'reunido' | 'duenos' = ultimoCamino;
   let serialSiguiente = serial, sustanciasSiguientes = sustancias;
+
+  function necesitaCaras(tick: number, epoca: number, completo: boolean): boolean {
+    return completo || !carasConfirmadas || carasConfirmadas.epoca !== epoca || tick < carasConfirmadas.tick
+      || tick - carasConfirmadas.muestra.statsTick >= ESTADISTICAS_CARAS_CADA_TICKS;
+  }
 
   function emitirCronicaYSustancias(c: CtxF0, mundo: World): SucesoFotograma[] {
     const sucesos: SucesoFotograma[] = primero ? arranque.map(evento => ({ tipo: 'cronica', evento })) : [];
@@ -101,8 +107,11 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
   }
 
   return {
+    necesitaCaras,
     corte(c, f, paginas, mundo = c.mundo) {
-      const vista = projectTapeFrame(mundo, runtime, instancia, []);
+      const muestra = necesitaCaras(f.tick, f.epoca, f.completo) ? null : carasConfirmadas!.muestra;
+      const { stats, caras } = estadisticasFotograma(mundo, muestra);
+      const vista = projectTapeFrame(mundo, runtime, instancia, [], stats);
       const { version: _version, sequence: _sequence, tick: _tick, day: _day, phase: _fase, tiles: _tiles,
         people, animals, places, events, memories, communities, structures, blueprints, technology, organization,
         whispers, weather, ...cabecera } = vista;
@@ -112,7 +121,7 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       globalesSiguientes = new Map();
       paginasSiguientes = new Set();
       estructurasSiguientes = new Set();
-      carasSiguientes = carasCacheadas;
+      carasSiguientes = { muestra: caras, fotograma: f };
       caminoSiguiente = 'reunido';
 
       function cambiar(clave: string, suceso: Suceso, baja: Suceso, esGlobal: boolean) {
@@ -226,6 +235,8 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       const m = c.mundo, cab = lote.cabecera, frente = c.frente;
       const partes = lote.partes;
       const resumenes = partes.map(p => p.resumen!);
+      const renovarCaras = necesitaCaras(f.tick, f.epoca, f.completo);
+      if (renovarCaras && !resumenes.every(r => r.diversidad !== undefined)) return null;
 
       // Cruces de fauna admitidos en F6: comprobar antes de construir sucesos que toda página destino en `f.paginas`
       // fue diferida por su dueño (`paginasPendientesCruce`); si alguna llegó sin diferir, fallback fail-closed.
@@ -352,12 +363,10 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
         lifeStage.juvenile += st.lifeStage.juvenile; lifeStage.adult += st.lifeStage.adult;
         lifeStage.senescent += st.lifeStage.senescent; lifeStage.unknown += st.lifeStage.unknown;
       }
-      const necesitaCaras = lote.conCaras || !carasCacheadas || m.tick < carasCacheadas.statsTick;
-      if (necesitaCaras && !resumenes.every(r => r.diversidad !== undefined)) return null;
-      const caras = necesitaCaras
-        ? estadisticasCarasDesdeTerreno(c.terreno, lote.chunksActivos, resumenes.map(r => r.diversidad!), m.tick)
-        : carasCacheadas!;
-      carasSiguientes = caras;
+      const caras = renovarCaras
+        ? estadisticasCarasDesdeTerreno(c.terreno, lote.chunksActivos, resumenes.map(r => r.diversidad!), f.tick)
+        : carasConfirmadas!.muestra;
+      carasSiguientes = { muestra: caras, fotograma: f };
 
       const totals = fundir(cab.totals, resumenes.map(r => r.totals)) as World['totals'];
       const animalDynamics = fundir(cab.animalDynamics, resumenes.map(r => r.animalDynamics)) as World['animalDynamics'];
@@ -471,12 +480,15 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       return { sucesos, bloques, serie };
     },
 
-    confirmar() {
+    confirmar(f) {
       anterior = siguiente;
       globalesAnterior = globalesSiguientes;
       paginasEnCinta = paginasSiguientes;
       estructurasEnCinta = estructurasSiguientes;
-      carasCacheadas = carasSiguientes;
+      if (carasSiguientes?.fotograma === f) {
+        carasConfirmadas = { muestra: carasSiguientes.muestra, tick: f.tick, epoca: f.epoca };
+        carasSiguientes = null;
+      }
       ultimoCamino = caminoSiguiente;
       serial = serialSiguiente;
       sustancias = sustanciasSiguientes;

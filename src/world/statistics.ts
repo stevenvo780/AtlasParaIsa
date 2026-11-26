@@ -20,7 +20,7 @@ export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: 
  * recalculaba por cliente y por tick. Se refrescan cada 200 pasos (~20 s a 10 Hz) y entre
  * medias se reutiliza el último valor, marcado en la vista con `statsTick`. */
 export const ESTADISTICAS_CARAS_CADA_TICKS = 200;
-type EstadisticasCaras = { statsTick: number; giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number; regionesSinAgua: number; diversidad: { conducta: number; oficios: number; total: number } };
+export type EstadisticasCaras = { statsTick: number; giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number; regionesSinAgua: number; diversidad: { conducta: number; oficios: number; total: number } };
 /** Cachés laterales (nunca viajan en la instantánea ni entran en `assertWorld`). */
 const carasPorMundo = new WeakMap<World, EstadisticasCaras>();
 const vistaPorMundo = new WeakMap<World, { tick: number; value: WorldStatsRecursos }>();
@@ -33,12 +33,15 @@ function estadisticasCaras(world: World, lectura: LecturaResidente | undefined):
   const previa = carasPorMundo.get(world);
   // Un mundo que retrocede (recuperación) o que ya cumplió la cadencia recalcula.
   if (previa && world.tick >= previa.statsTick && world.tick - previa.statsTick < ESTADISTICAS_CARAS_CADA_TICKS) return previa;
-  const caras: EstadisticasCaras = { statsTick: world.tick,
+  const caras = calcularEstadisticasCaras(world, lectura);
+  carasPorMundo.set(world, caras);
+  return caras;
+}
+function calcularEstadisticasCaras(world: World, lectura: LecturaResidente | undefined): EstadisticasCaras {
+  return { statsTick: world.tick,
     giniRecursosPorRegion: giniRecursosPorRegion(world.tiles, lectura), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles, 0.1, lectura),
     distanciaMediaAgua: distanciaMediaAgua(world.tiles, lectura), regionesSinAgua: regionesSinAguaDe(world.tiles, 16, lectura),
     diversidad: indiceDiversidad(world) };
-  carasPorMundo.set(world, caras);
-  return caras;
 }
 
 // Claves enteras, no cadenas: estas tres estadisticas recorren todas las celdas cargadas en cada
@@ -249,14 +252,22 @@ export function worldStatistics(world: World): WorldStatsRecursos {
   // recorrido de teselas y fauna es idéntico para todos dentro del mismo paso.
   const memoria = vistaPorMundo.get(world);
   if (memoria && memoria.tick === world.tick) return memoria.value;
-  const value = computeWorldStatistics(world);
+  const lectura = lecturaResidente(world.tiles);
+  const value = computeWorldStatistics(world, lectura, estadisticasCaras(world, lectura));
   vistaPorMundo.set(world, { tick: world.tick, value });
   return value;
 }
-function computeWorldStatistics(world: World): WorldStatsRecursos {
-  // Una sola resolución de celdas SoA para las cuatro métricas caras y el recorrido de biomas (`undefined` sin vía rápida).
+
+/** Proyecta el paso actual con la muestra de la cinta o mide una nueva sin tocar las cachés de proyección. */
+export function estadisticasFotograma(world: World, muestra: EstadisticasCaras | null): {
+  stats: WorldStatsRecursos; caras: EstadisticasCaras;
+} {
   const lectura = lecturaResidente(world.tiles);
-  const caras = estadisticasCaras(world, lectura);
+  const caras = muestra ?? calcularEstadisticasCaras(world, lectura);
+  return { stats: computeWorldStatistics(world, lectura, caras), caras };
+}
+
+function computeWorldStatistics(world: World, lectura: LecturaResidente | undefined, caras: EstadisticasCaras): WorldStatsRecursos {
   const actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
   const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0, pavedTiles = 0;
   // T134 (FR-026): censo sobre TODA la población, no solo la de la cámara — `people` ahora se

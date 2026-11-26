@@ -55,6 +55,8 @@ export interface SalidaFuenteFotograma {
 
 /** F0 reúne los partes de los dueños; después de B4 presenta el lote desde el último fotograma entregado. */
 export interface FuenteFotograma {
+  /** En F0, indica si los dueños necesitan calcular parciales para la próxima entrega. */
+  necesitaCaras?(tick: number, epoca: number, completo: boolean): boolean;
   corte(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, mundo?: World): SalidaFuenteFotograma;
   /** Opcional (opt-in): arma el corte desde partes de dueños sin reunir el mundo completo. `null` activa el fallback reunido. */
   cortePorDuenos?(c: CtxF0, f: FotogramaEnCurso, paginas: Int32Array, lote: LoteFotoDuenos): SalidaFuenteFotograma | null;

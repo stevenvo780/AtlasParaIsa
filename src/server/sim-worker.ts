@@ -115,6 +115,7 @@ interface MirrorProjection {
    * applied in the projection pass itself. */
   quantize?: boolean;
   v23?: boolean;
+  stats?: WorldView['stats'];
 }
 export function projectMirrorWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
   return projectMirror(world, context, {});
@@ -177,7 +178,7 @@ function projectMirror(world: World, context: WorldContext, options: MirrorProje
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
-    stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    stats: options.stats ?? worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: projectTechnology(world, peopleInView), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization!.value),
     ...(world.chemistry ? { chemistry: projectChemistry(world) } : {}),
     ...(world.whispers?.length ? { whispers: world.whispers.map(whisperView) } : {}),
@@ -462,8 +463,8 @@ export function createTileObserver(opciones: { v23?: boolean } = {}) {
  * so resting inhabitants and hundreds of grazing fauna don't rewrite unchanged entities on every delta
  * tick.
  */
-export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[]): WorldView {
-  const view = projectMirror(world, worldContext(world), { quantize: true, v23: true });
+export function projectTapeFrame(world: World, runtime: RuntimeStats, instanceId: string | undefined, tiles: Tile[], stats?: WorldView['stats']): WorldView {
+  const view = projectMirror(world, worldContext(world), { quantize: true, v23: true, stats });
   if (instanceId !== undefined) view.instanceId = instanceId;
   view.performance = { ...runtime };
   // Consume synchronously: postMessage clones the live structures exactly once before the next step.

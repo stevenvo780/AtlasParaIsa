@@ -13,10 +13,11 @@ import { ORDEN, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { EmisorFotoDueno, type ParteFotoDueno } from '../src/world/motor/fotograma-dueno.js';
-import type { SucesoEnlaceCinta } from '../src/world/motor/fotograma.js';
+import type { FotogramaEnCurso, SalidaFuenteFotograma, SucesoEnlaceCinta } from '../src/world/motor/fotograma.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import { crearSAB, crecerSAB } from '../src/world/soa/arena.js';
+import { ESTADISTICAS_CARAS_CADA_TICKS } from '../src/world/statistics.js';
 import { chunkKey } from '../src/world/terrain.js';
 
 const RUNTIME: RuntimeStats = {
@@ -76,7 +77,7 @@ function assertCerca(a: number, b: number, nombre: string, tol = 1e-12): void {
   assert.ok(Math.abs(a - b) <= tol, `${nombre}: ${a} !== ${b} (dif ${Math.abs(a - b)})`);
 }
 
-function assertCortesEquivalentes(actual: Corte, referencia: Corte, comprobarCaras = true): void {
+function assertCortesEquivalentes(actual: Corte, referencia: Corte): void {
   assert.equal(actual.t, referencia.t);
   assert.equal(actual.epoca, referencia.epoca);
   assert.equal(actual.seq, referencia.seq);
@@ -97,16 +98,14 @@ function assertCortesEquivalentes(actual: Corte, referencia: Corte, comprobarCar
   assertCerca(nA.continuos.meanFatigue, nR.continuos.meanFatigue, 'meanFatigue');
   assertCerca(nA.continuos.meanThirst, nR.continuos.meanThirst, 'meanThirst');
   assertCerca(nA.continuos.freshWater, nR.continuos.freshWater, 'freshWater');
-  if (comprobarCaras) {
-    assert.equal(nA.continuos.statsTick, nR.continuos.statsTick);
-    assertCerca(nA.continuos.giniRecursosPorRegion, nR.continuos.giniRecursosPorRegion, 'gini');
-    assertCerca(nA.continuos.fraccionCeldasConComida, nR.continuos.fraccionCeldasConComida, 'fraccionComida');
-    assertCerca(nA.continuos.distanciaMediaAgua, nR.continuos.distanciaMediaAgua, 'distanciaMediaAgua');
-    assertCerca(nA.continuos.regionesSinAgua, nR.continuos.regionesSinAgua, 'regionesSinAgua');
-    assertCerca(nA.continuos.diversidad.conducta, nR.continuos.diversidad.conducta, 'diversidad.conducta');
-    assertCerca(nA.continuos.diversidad.oficios, nR.continuos.diversidad.oficios, 'diversidad.oficios');
-    assertCerca(nA.continuos.diversidad.total, nR.continuos.diversidad.total, 'diversidad.total');
-  }
+  assert.equal(nA.continuos.statsTick, nR.continuos.statsTick);
+  assertCerca(nA.continuos.giniRecursosPorRegion, nR.continuos.giniRecursosPorRegion, 'gini');
+  assertCerca(nA.continuos.fraccionCeldasConComida, nR.continuos.fraccionCeldasConComida, 'fraccionComida');
+  assertCerca(nA.continuos.distanciaMediaAgua, nR.continuos.distanciaMediaAgua, 'distanciaMediaAgua');
+  assertCerca(nA.continuos.regionesSinAgua, nR.continuos.regionesSinAgua, 'regionesSinAgua');
+  assertCerca(nA.continuos.diversidad.conducta, nR.continuos.diversidad.conducta, 'diversidad.conducta');
+  assertCerca(nA.continuos.diversidad.oficios, nR.continuos.diversidad.oficios, 'diversidad.oficios');
+  assertCerca(nA.continuos.diversidad.total, nR.continuos.diversidad.total, 'diversidad.total');
 }
 
 test('emisionFotogramaDuenos está desactivada por defecto', async t => {
@@ -145,6 +144,7 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
 
   // Oráculo síncrono: sobre el mismo fotograma binario y el mismo estado de mundo, compara `cortePorDuenos` vs `corte` reunido.
   motor.enlazar(descriptor, {
+    necesitaCaras: fuenteDuenos.necesitaCaras,
     corte: (c, f, paginas, reunido) => fuenteDuenos.corte(c, f, paginas, reunido),
     cortePorDuenos: (c, f, paginas, lote) => {
       const salida = fuenteDuenos.cortePorDuenos!(c, f, paginas, lote);
@@ -180,8 +180,7 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
       const corteRef = fotogramaAVista(estadoRef, frame, refSucesos, seq);
       fuenteRef.confirmar(fCurso);
 
-      // En fotogramas completos (paso 1 y paso 5), las métricas caras también se recalculan y deben coincidir.
-      assertCortesEquivalentes(corteDuenos, corteRef, frame.completo);
+      assertCortesEquivalentes(corteDuenos, corteRef);
       comparados++;
     });
     assert.ok(ok);
@@ -194,6 +193,103 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
   assert.equal(traza.fallbacksLimite, 0);
   assert.equal(traza.fallbacksCompat, 0);
   assert.equal(traza.abortos, 0);
+});
+
+test('la muestra de estadísticas caras se confirma y se comparte entre dueños y reunido', t => {
+  const mundo = createWorld(61, {
+    ...DEFAULT_PARAMS,
+    v23: { ...DEFAULT_PARAMS.v23, duenos: true, fotograma: true },
+  });
+  const motor = crearMotor(mundo, unSoloDueno(61));
+  t.after(() => motor.cerrar());
+  const descriptor = crearDescriptor();
+  const enlace = enlaceCinta(descriptor);
+  motor.enlazar(descriptor);
+  motor.cargar({ world: mundo, materia: null }, 0);
+  const d = duenoSi(mundo)!;
+  const fuente = fuenteFotograma(mundo, 0, 'cadencia', RUNTIME, () => 12, () => undefined);
+  const emisor = new EmisorFotoDueno(mundo);
+  const chunksActivos = Array.from(d.chunks);
+  const paginas = new Int32Array(0);
+  const clavesActivas = new Set(Object.keys(mundo.chunks));
+  const tiles = Array.from(mundo.tiles);
+  const primera = tiles[0]!;
+  const comida = primera.food;
+  let lecturasComida = 0;
+  tiles[0] = { ...primera, get food() { lecturasComida++; return comida; } };
+
+  let hambre = 0.3;
+  function preparar(tick: number, completo = false, epoca = 0): FotogramaEnCurso {
+    mundo.tick = tick;
+    mundo.people[0]!.hunger = hambre;
+    hambre += 0.05;
+    return { tick, completo, epoca, ranura: descriptor.ranuras[0]!, versiones: enlace.versiones! };
+  }
+  function reunido(f: FotogramaEnCurso) {
+    return fuente.corte(d, f, paginas, { ...mundo, tiles });
+  }
+  function duenos(f: FotogramaEnCurso, conCaras: boolean) {
+    const parte = emisor.emitir(d, f, [], d.organismos, (px, py) => d.terrenoPercibido.paginaDe(px, py), 0, 0, conCaras);
+    return fuente.cortePorDuenos!(d, f, paginas, {
+      hilos: 1, cabecera: mundo, partes: [parte], clavesActivas, chunksActivos, conCaras,
+      limiteBytesTotal: 64 * 1024 * 1024, bajasConfirmadas: [],
+    });
+  }
+  function statsDe(salida: SalidaFuenteFotograma | null) {
+    const cabecera = salida?.sucesos.find(s => s.tipo === 'mundo')?.vista;
+    assert.ok(cabecera?.stats);
+    return cabecera.stats;
+  }
+  const necesitaCaras = fuente.necesitaCaras!;
+
+  const inicial = preparar(10, true);
+  assert.equal(necesitaCaras(inicial.tick, inicial.epoca, false), true);
+  const primerasStats = statsDe(reunido(inicial));
+  assert.equal(primerasStats.statsTick, 10);
+  assert.ok(lecturasComida > 0);
+  fuente.confirmar(inicial);
+
+  const abortado = preparar(30, true);
+  assert.equal(necesitaCaras(abortado.tick, abortado.epoca, abortado.completo), true);
+  assert.equal(statsDe(reunido(abortado)).statsTick, 30);
+  const trasAborto = preparar(31);
+  const leidas = lecturasComida;
+  assert.equal(necesitaCaras(trasAborto.tick, trasAborto.epoca, trasAborto.completo), false);
+  const intermedias = statsDe(reunido(trasAborto));
+  assert.equal(intermedias.statsTick, 10);
+  assert.notEqual(intermedias.meanHunger, primerasStats.meanHunger);
+  assert.equal(lecturasComida, leidas, 'un delta reunido omite el barrido de comida');
+  fuente.confirmar(trasAborto);
+
+  const vencimiento = inicial.tick + ESTADISTICAS_CARAS_CADA_TICKS;
+  assert.equal(necesitaCaras(vencimiento - 1, 0, false), false);
+  const fallback = preparar(vencimiento);
+  assert.equal(necesitaCaras(fallback.tick, fallback.epoca, fallback.completo), true);
+  assert.equal(duenos(fallback, false), null);
+  assert.equal(statsDe(reunido(fallback)).statsTick, fallback.tick);
+  fuente.confirmar(fallback);
+
+  const vuelta = preparar(vencimiento + 1);
+  assert.equal(necesitaCaras(vuelta.tick, vuelta.epoca, vuelta.completo), false);
+  assert.equal(statsDe(duenos(vuelta, false)).statsTick, fallback.tick);
+  fuente.confirmar(vuelta);
+
+  const retroceso = preparar(vencimiento);
+  assert.equal(necesitaCaras(retroceso.tick, retroceso.epoca, retroceso.completo), true);
+  assert.equal(statsDe(duenos(retroceso, true)).statsTick, retroceso.tick);
+  fuente.confirmar(retroceso);
+
+  const trasDuenos = preparar(vencimiento + 2);
+  const leidasTrasDuenos = lecturasComida;
+  assert.equal(statsDe(reunido(trasDuenos)).statsTick, retroceso.tick);
+  assert.equal(lecturasComida, leidasTrasDuenos);
+  fuente.confirmar(trasDuenos);
+
+  const nuevaEpoca = preparar(vencimiento + 3, false, 1);
+  assert.equal(necesitaCaras(nuevaEpoca.tick, nuevaEpoca.epoca, nuevaEpoca.completo), true);
+  assert.equal(statsDe(reunido(nuevaEpoca)).statsTick, nuevaEpoca.tick);
+  fuente.confirmar(nuevaEpoca);
+  assert.equal(necesitaCaras(nuevaEpoca.tick + 1, nuevaEpoca.epoca, false), false);
 });
 
 test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y el reintento', t => {
@@ -908,7 +1004,7 @@ test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, de
       fuenteRef.confirmar(fCurso);
 
       // Paridad exacta de todo el Corte en cada tick (incluidos origen y destino de cualquier cruce F6).
-      assertCortesEquivalentes(corteDuenos, corteRef, frame.completo);
+      assertCortesEquivalentes(corteDuenos, corteRef);
 
       if (ultimoCruce.length > 0) {
         const paginasEnFrame = new Set<string>();

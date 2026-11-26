@@ -49,6 +49,7 @@ Reportar habitantes persistidos, residentes y activos durante la misma ventana. 
 - Las teselas materiales contiguas se consultan mediante el desplazamiento dentro de su página. Solo las páginas activas con huecos mantienen un índice. Los rangos abandonados se reutilizan al cambiar de página o dueño. El retiro habitual conserva el estado material necesario para reabrir la región y contabilizar sus reservas.
 - El checkpoint material mide y escribe en dos pasadas para evitar retener la composición de todas las páginas en el heap. La carga indexada restaura lotes por ranura mediante posiciones compactas. El formato y el orden se conservan. En las decisiones de comida y bebida, el dueño reutiliza las celdas de la ventana de percepción cuando su terreno coincide con el de la arena, y lee cantidades vigentes tras comprobar propiedad.
 - El movimiento de origen entero usa tres buffers reutilizables por hilo para la búsqueda local. Conserva el recorrido cardinal, el orden de lectura del terreno, los desvíos costeros y el máximo de 2.048 nodos.
+- Una elección reutiliza el provecho de cada sustancia para la carga, las teselas y los depósitos que evalúa. Cada candidato lee las cantidades vigentes, y la primera consulta química de cada sustancia conserva el orden de la búsqueda.
 
 ### Materia fría
 

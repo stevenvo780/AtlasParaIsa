@@ -24,7 +24,7 @@ import { REF_NULA } from '../motor/contratos.js';
 import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
 import {
   MASA_ADULTA_HUMANA, apetitoDeTejido, beber, beberEnCelda, cargaKg, comerEnCelda, energiaAlimento,
-  ingerirSelecto, masaDe, soltar, trasladarAlimento,
+  ingerirSelecto, masaDe, soltar, trasladarAlimento, type EvaluarAlimento,
 } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
 import { madurezDe } from '../cohesion.js';
@@ -176,13 +176,13 @@ function listarCadaveres(c: CtxLeyMateria, celda: number): number {
 
 /** J de alimento en la arena del dueño. Si se da el identificador, debe pertenecer al terreno de `c`. */
 export function comidaEnCelda(c: CtxLeyMateria, cuerpo: Cuerpo, punto: { x: number; y: number }, kg: number,
-  celda = c.terreno.celda(punto.x, punto.y)): number {
+  celda = c.terreno.celda(punto.x, punto.y), evaluar: EvaluarAlimento = (l, kg) => energiaAlimento(c, cuerpo, l, kg)): number {
   if (!celdaEsPropia(c, celda)) return 0;
   const vida = lotesDeCelda(c, celda, lotesCelda).vida;
-  let energia = vida >= 0 ? energiaAlimento(c, cuerpo, vida, kg) : 0;
+  let energia = vida >= 0 ? evaluar(vida, kg) : 0;
   const cadaveres = listarCadaveres(c, celda);
   const lotes = lotesTmp;
-  for (let i = 0; i < cadaveres; i++) energia += energiaAlimento(c, cuerpo, lotes[i]!, kg);
+  for (let i = 0; i < cadaveres; i++) energia += evaluar(lotes[i]!, kg);
   return energia;
 }
 

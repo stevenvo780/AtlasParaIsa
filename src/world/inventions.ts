@@ -20,7 +20,7 @@ import { constructionWorkFactor, consumeConstructionTools, installTechnologyItem
 import { marcarTesela } from './soa/barrera-percepcion.js';
 import { ctxMateriaDe, refDeOrganismo, type CtxLeyMateria } from './motor/acceso.js';
 import { slotDe } from './motor/contratos.js';
-import { basalJ, beber, cargaKg, energiaAlimento, ingerirSelecto, pagar, reservaJ } from './materia/cuerpo.js';
+import { basalJ, beber, cargaKg, energiaAlimento, ingerirSelecto, pagar, reservaJ, type EvaluarAlimento } from './materia/cuerpo.js';
 import { aportarEscalar, extraerEscalar, lotesDeCelda, rocaDe } from './materia/ley-mundo.js';
 import {
   AREA_OBRA_M2, COBERTURA_COBIJO, DENSIDAD_AGUA_KG_M3, DENSIDAD_GRANO_KG_M3, FLUJO_CAPTACION_KG_M2_TICK, KG_POR_CUANTO_AGUA, MASA_PORTANTE_KG_M2,
@@ -1434,12 +1434,13 @@ export function foodAvailable(world: World, person: Point): number {
   return functionalNear(world, person).reduce((sum, s) => sum + (s.components.includes('granary') ? s.food : 0), 0);
 }
 
-export function comidaEnObra(c: CtxLeyMateria, cuerpo: NonNullable<Person['cuerpo']>, punto: Point, kg: number): number {
+export function comidaEnObra(c: CtxLeyMateria, cuerpo: NonNullable<Person['cuerpo']>, punto: Point, kg: number,
+  evaluar: EvaluarAlimento = (l, kg) => energiaAlimento(c, cuerpo, l, kg)): number {
   if (c.mundo.structures.length === 0) return 0;
   let energia = 0;
   for (const s of obraCercana(c.mundo, punto, 1.5)) {
     const lote = loteDepositoObra(c, s, 'comida');
-    if (lote >= 0 && prestacionesObra(c, s).volumen > 0) energia += energiaAlimento(c, cuerpo, lote, kg);
+    if (lote >= 0 && prestacionesObra(c, s).volumen > 0) energia += evaluar(lote, kg);
   }
   return energia;
 }

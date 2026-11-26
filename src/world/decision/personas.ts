@@ -33,7 +33,7 @@ import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '
 import { activeWhisperForPerson } from '../whispers.js';
 import { escuchaDe } from '../genetics.js';
 import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
-import { apetitoDeTejido, basalJ, cargaKg, energiaAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
+import { apetitoDeTejido, basalJ, cargaKg, evaluadorAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
 import { ctxMateriaDe } from '../motor/acceso.js';
 import { estadoObra, KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
 import { CHUNK_SIZE } from '../terrain.js';
@@ -139,6 +139,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const obra = ley(world, 'obra');
   const tramo = 30;
   const carga = person.carga ?? [];
+  const evaluarAlimento = cuerpo && materia ? evaluadorAlimento(materia, cuerpo) : undefined;
   const escala = cuerpo && materia ? escalaBocado(materia, cuerpo) : 0;
   const basal = cuerpo && materia ? basalJ(materia, cuerpo, 1) : 0;
   const reserva = cuerpo && materia ? reservaJ(materia, cuerpo) : 0;
@@ -151,9 +152,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     ? aguaMaterialDisponible(world, materia, p, obra, celda)
     : waterAvailable(world, p);
   let comidaCargada = 0, aguaCargada = 0;
-  if (cuerpo && materia) for (const lote of carga) {
+  if (evaluarAlimento && materia) for (const lote of carga) {
     if (!materia.materia.propio(lote)) continue;
-    comidaCargada += energiaAlimento(materia, cuerpo, lote, tramo * BOCADO_KG * escala);
+    comidaCargada += evaluarAlimento(lote, tramo * BOCADO_KG * escala);
     aguaCargada += materia.materia.vista(lote).agua * KG_POR_CUANTO_AGUA;
   }
   const foodArr = fast?.foodArr, dwArr = fast?.drinkingWaterArr;
@@ -220,9 +221,9 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
-      const j = comidaEnCelda(materia, cuerpo, tile, kg, materialCells?.[i])
+      const j = comidaEnCelda(materia, cuerpo, tile, kg, materialCells?.[i], evaluarAlimento)
         + (pasos === 0 ? comidaCargada : 0)
-        + (obra ? comidaEnObra(materia, cuerpo, tile, kg) : 0);
+        + (obra ? comidaEnObra(materia, cuerpo, tile, kg, evaluarAlimento) : 0);
       const valor = Math.min(j, prevista) / (tramo + pasos * 6 + recelo(tile) * 6);
       if (valor > mejor) { food = tile; mejor = valor; comidaJ = j; }
     }

@@ -23,8 +23,8 @@ import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { REF_NULA } from '../motor/contratos.js';
 import { extraerEscalar, lotesDeCelda, rocaDe, sustanciasDe, type LotesCelda } from '../materia/ley-mundo.js';
 import {
-  MASA_ADULTA_HUMANA, apetitoDeTejido, beber, beberEnCelda, cargaKg, comerEnCelda, energiaAlimento,
-  ingerirSelecto, masaDe, soltar, trasladarAlimento, type EvaluarAlimento,
+  MASA_ADULTA_HUMANA, aguaParaTejido, apetitoDeTejido, beber, beberEnCelda, cargaKg, comerEnCelda,
+  energiaAlimento, ingerirSelecto, masaDe, soltar, trasladarAlimento, type EvaluarAlimento,
 } from '../materia/cuerpo.js';
 import { Rol, type Cuerpo, type LoteRef } from '../materia/tipos.js';
 import { madurezDe } from '../cohesion.js';
@@ -262,7 +262,9 @@ export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
 /** Beber con cuerpo: de la charca de la celda propia (y, con obra, de una cisterna) y de lo que lleva con agua. */
 export function beberConCuerpo(world: World, person: Person, cuerpo: Cuerpo, current: Tile): number {
   const c = ctxMateriaDe(world), celda = c.terreno.celda(current.x, current.y);
-  const sorbo = SORBO_KG * escalaBocado(c, cuerpo);
+  const falta = person.thirst < 0.12 ? aguaParaTejido(c, cuerpo) : 0;
+  const normal = SORBO_KG * escalaBocado(c, cuerpo);
+  const sorbo = person.thirst > 0 ? normal : Math.min(normal, falta);
   let bebido = 0;
   if (ley(world, 'obra')) bebido = takeWater(world, person, sorbo);
   else if (celdaEsPropia(c, celda)) bebido = beberEnCelda(c, cuerpo, celda, sorbo);
@@ -274,7 +276,7 @@ export function beberConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
   if (bebido > 0 && ley(world, 'materia') && paramsOf(world).agua.memoria < 1) person.waterMemory = { x: person.x, y: person.y };
   contar(world, TOTAL_BEBIDA_KG, bebido);
   if (bebido > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', bebido / sorbo);
-  if (person.thirst < 0.12 || !(bebido > 0)) {
+  if ((person.thirst < 0.12 && (falta <= bebido || person.command?.order === 'drink')) || !(bebido > 0)) {
     if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; }
     person.decisionAt = world.tick + 1;
   }

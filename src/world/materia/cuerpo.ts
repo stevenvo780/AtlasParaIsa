@@ -569,16 +569,22 @@ function sintetizarTejidoHumano(c: CtxLeyMateria, cuerpo: Cuerpo, p: Plantilla, 
   const { digestivo, reserva } = cuerpo;
   let n = entero(maxUnidades, pasoDe(c).azar);
   if (n <= 0) return 0;
-  const grasa = q.sustancia(CH2).prop.qOxidacion, agua = q.sustancia(H2O), masa = masaLote(c, cuerpo.tejido);
-  const grasaDisponible = a.cuantos(digestivo, CH2) + Math.min(a.cuantos(reserva, CH2),
-    (reservaJ(c, cuerpo) - basalJ(c, cuerpo, DEMOGRAPHY_TICKS_PER_DAY)) / grasa);
-  const aguaBasal = aguaBasalPorTick(agua) * DEMOGRAPHY_TICKS_PER_DAY * AGUA_OBJETIVO_KG_KG * masa / (agua.masa * MG);
-  const aguaDisponible = a.cuantos(digestivo, H2O) + a.cuantos(reserva, H2O) - aguaBasal;
   for (const { id, nu } of p.sintesis.entradas) {
-    if (id === CH2) n = Math.min(n, Math.floor(grasaDisponible / nu));
-    if (id === H2O) n = Math.min(n, Math.floor(aguaDisponible / nu));
+    if (id === CH2) n = Math.min(n, Math.floor(grasaTrasBasal(c, cuerpo, CH2) / nu));
+    if (id === H2O) n = Math.min(n, Math.floor(aguaTrasBasal(c, cuerpo, H2O) / nu));
   }
   return n > 0 ? copiar(a, q, p, destino, [digestivo, reserva], digestivo, 0, n) : 0;
+}
+
+function grasaTrasBasal(c: CtxLeyMateria, cuerpo: Cuerpo, id: SustanciaId): number {
+  const a = c.materia, q = c.quimica, sobrante = reservaJ(c, cuerpo) - basalJ(c, cuerpo, DEMOGRAPHY_TICKS_PER_DAY);
+  return a.cuantos(cuerpo.digestivo, id) + Math.min(a.cuantos(cuerpo.reserva, id), sobrante / q.sustancia(id).prop.qOxidacion);
+}
+
+function aguaTrasBasal(c: CtxLeyMateria, cuerpo: Cuerpo, id: SustanciaId): number {
+  const a = c.materia, agua = c.quimica.sustancia(id), masa = masaLote(c, cuerpo.tejido);
+  const basal = aguaBasalPorTick(agua) * DEMOGRAPHY_TICKS_PER_DAY * AGUA_OBJETIVO_KG_KG * masa / (agua.masa * MG);
+  return a.cuantos(cuerpo.digestivo, id) + a.cuantos(cuerpo.reserva, id) - basal;
 }
 
 /** Repone en el tejido la parte que falta para completar unidades (tras esquilar o perder una sola sustancia) con la que
@@ -613,15 +619,19 @@ export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
 
 // ── Comer y beber ────────────────────────────────────────────────────────────────────────────────────────
 
+function unidadesEnTransito(c: CtxLeyMateria, cuerpo: Cuerpo, p: Plantilla): number {
+  const masa = masaLote(c, cuerpo.tejido);
+  const crecerKg = Math.max(0, Math.min(p.masaAdulta - masa, G_SINTESIS * masa * TRANSITO_TICKS));
+  const g = cuerpo.gestacion;
+  const gestarKg = g ? Math.max(0, Math.min(p.m0 - masaLote(c, g.embrion), G_SINTESIS * p.m0 * TRANSITO_TICKS)) : 0;
+  return Math.floor((crecerKg + gestarKg) / (datosDe(c, p).masaMg * MG));
+}
+
 /** Fracción del nutriente estructural que falta para el tejido que puede formarse durante un tránsito del tubo. */
 export function apetitoDeTejido(c: CtxLeyMateria, cuerpo: Cuerpo): number {
   const p = plantillaDe(c, cuerpo);
   if (p !== humanas.get(c.globales.registro)) return 0;
-  const masa = masaLote(c, cuerpo.tejido), a = c.materia;
-  const crecerKg = Math.max(0, Math.min(p.masaAdulta - masa, G_SINTESIS * masa * TRANSITO_TICKS));
-  const g = cuerpo.gestacion;
-  const gestarKg = g ? Math.max(0, Math.min(p.m0 - masaLote(c, g.embrion), G_SINTESIS * p.m0 * TRANSITO_TICKS)) : 0;
-  const unidades = Math.floor((crecerKg + gestarKg) / (datosDe(c, p).masaMg * MG));
+  const unidades = unidadesEnTransito(c, cuerpo, p), a = c.materia;
   if (unidades <= 0) return 0;
   const { proteina, orgP } = entorno.sustancias(c);
   let carencia = 0;
@@ -631,6 +641,22 @@ export function apetitoDeTejido(c: CtxLeyMateria, cuerpo: Cuerpo): number {
     carencia = Math.max(carencia, 1 - hay / (unidades * nu));
   }
   return carencia;
+}
+
+/** kg de agua que faltan para incorporar al tejido los demás nutrientes ya disponibles. */
+export function aguaParaTejido(c: CtxLeyMateria, cuerpo: Cuerpo): number {
+  const p = plantillaDe(c, cuerpo);
+  if (p !== humanas.get(c.globales.registro)) return 0;
+  let unidades = unidadesEnTransito(c, cuerpo, p), aguaPorUnidad = 0;
+  if (unidades <= 0) return 0;
+  const a = c.materia, { H2O, CH2 } = entorno.sustancias(c);
+  for (const { id, nu } of p.sintesis.entradas) {
+    if (id === H2O) { aguaPorUnidad = nu; continue; }
+    const hay = id === CH2 ? grasaTrasBasal(c, cuerpo, id) : a.cuantos(cuerpo.digestivo, id) + a.cuantos(cuerpo.reserva, id);
+    unidades = Math.min(unidades, Math.floor(hay / nu));
+  }
+  if (unidades <= 0) return 0;
+  return Math.max(0, unidades * aguaPorUnidad - aguaTrasBasal(c, cuerpo, H2O)) * c.quimica.sustancia(H2O).masa * MG;
 }
 
 /** Lo que este cuerpo pide para comer `kg` de un lote: parte Digerible con su κ. */

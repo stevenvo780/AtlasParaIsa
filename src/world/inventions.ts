@@ -1513,7 +1513,7 @@ export function waterAvailable(world: World, point: Point): number {
  * The engine applies the matching thirst reduction immediately after this call. */
 export function takeWater(world: World, person: Person, requested: number): number {
   if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person, world.tick) || person.action !== 'drink'
-    || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
+    || distance(person, person.target) > 0.5) return 0;
   const tile = tileAt(world, person); if (!tile) return 0;
   if (ley(world, 'obra')) {
     const c = ctxMateriaDe(world), celda = celdaObra(c, tile);
@@ -1522,6 +1522,7 @@ export function takeWater(world: World, person: Person, requested: number): numb
     const kg = agua < 0 ? 0 : beber(c, person.cuerpo, agua, requested);
     return kg + consumirDepositoObra(c, person, 'agua', requested - kg);
   }
+  if (person.thirst <= 0) return 0;
   const needed = Math.min(requested, person.thirst / SED_POR_UNIDAD), ambient = Math.min(tile.drinkingWater ?? 0, needed);
   let taken: number;
   if (ley(world, 'materia')) {

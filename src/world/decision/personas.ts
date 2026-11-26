@@ -33,7 +33,7 @@ import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '
 import { activeWhisperForPerson } from '../whispers.js';
 import { escuchaDe } from '../genetics.js';
 import { AGUA_OBJETIVO_KG_KG, C_MOVER, RESERVA_OBJETIVO_J_KG, TRABAJO_J_TICK } from '../../shared/naturaleza.js';
-import { apetitoDeTejido, basalJ, cargaKg, evaluadorAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
+import { aguaParaTejido, apetitoDeTejido, basalJ, cargaKg, evaluadorAlimento, masaDe, masaLote, reservaJ } from '../materia/cuerpo.js';
 import { ctxMateriaDe } from '../motor/acceso.js';
 import { estadoObra, KG_POR_CUANTO_AGUA } from '../materia/piezas.js';
 import { CHUNK_SIZE } from '../terrain.js';
@@ -144,6 +144,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const basal = cuerpo && materia ? basalJ(materia, cuerpo, 1) : 0;
   const reserva = cuerpo && materia ? reservaJ(materia, cuerpo) : 0;
   const masa = cuerpo && materia ? masaLote(materia, cuerpo.tejido) : 0;
+  const sed = cuerpo && materia && masa > 0
+    ? Math.max(person.thirst, clamp(aguaParaTejido(materia, cuerpo) / (AGUA_OBJETIVO_KG_KG * masa))) : person.thirst;
   const pasoJ = cuerpo && materia ? C_MOVER * (masaDe(materia, cuerpo) + cargaKg(materia, carga)) : 0;
   const puedePagar = (pasos: number, trabajo = 0) => cuerpo
     ? reserva >= pasos * (pasoJ + 6 * basal) + trabajo * (TRABAJO_J_TICK + basal)
@@ -442,7 +444,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   let volverAlAgua: Candidate | undefined;
   if (portableWater) candidates.push({ action: 'drink', target: { x: person.x, y: person.y }, score: Math.max(0, person.thirst - 0.18) * 3.1,
     reason: 'Lleva agua en un objeto y puede beber su contenido finito aquí.' });
-  if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
+  if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, sed - 0.18) * 3.1 - distance(person, water) * 0.015,
+    reason: sed > person.thirst ? 'Busca el agua que puede incorporar al tejido.' : 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
   else if (seekingWater) {
     // An empty perceptual neighborhood does not remove the bodily motive. Searching
     // uses the existing local exploration and movement costs; it reveals no distant

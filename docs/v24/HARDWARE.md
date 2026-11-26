@@ -22,6 +22,8 @@ La rama de hardware parte de `f65d08c`, un punto verificable de la candidata V23
 
 El broker por dispositivo debe acotar memoria y cola, reutilizar buffers y descartar resultados desfasados. Si una tanda vence, el dueño conserva la entrada versionada para recuperarla en CPU. La selección de equipo se decide con tiempo de pared del paso, incluidos preparación, barreras, transferencias y recuperación. El balance de átomos y energía usa su contabilidad exacta en cualquier ruta.
 
+F2 publica los pesos heredados al ocupar una ranura o al cambiar de dueño. Para una decisión posterior compara los bytes Float64 antes de escribir en el frente compartido. Cada escritura avanza la revisión de la política. CUDA conserva los pesos por generación de ranura y revisión, y recibe cambios de observación y plasticidad por separado.
+
 En la torre, cada dominio L3 agrupa ocho núcleos físicos. El de 96 MiB corresponde a `0–7,16–23` y el de 32 MiB a `8–15,24–31`. Los dos dominios comparten 125 GiB de RAM. La 5070 Ti tiene enlace PCIe x16 directo y la 2060 dispone de x4 a través del chipset. Cada GPU tiene su propia VRAM y comparte el tráfico a RAM con los otros dispositivos. `/datos` está en un RAID de NVMe. Separar allí dos carpetas ayuda a medir y retener archivos por separado. Para medir independencia física entre cinta y guardado hay que usar otro volumen NVMe. El HDD de `/mnt/Data2` queda para respaldos. Las esperas de disco, la presión de RAM y las transferencias CUDA se registran por separado para identificar qué domina la latencia.
 
 ## Escala y resolución

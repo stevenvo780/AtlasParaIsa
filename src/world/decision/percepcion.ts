@@ -368,6 +368,7 @@ export interface DescriptorVista { terreno: TerrenoCompartido; frente: FrenteCom
  * piscina terminan antes de que vuelva; la tarjeta copia lo que sube), así que nadie la lee mientras el dueño la escribe.
  */
 export class VistaMundo implements Lectura {
+  private comparacionPesos?: { fila: Float64Array; bytes: Buffer; frentes: WeakMap<Float64Array, Buffer> };
   private constructor(readonly terreno: TerrenoPercepcion, private readonly leer: () => FrentePublico, readonly organismos?: OrganismosMundo) {}
   static de(organismos: OrganismosMundo, terreno: TerrenoPercepcion): VistaMundo {
     return new VistaMundo(terreno, () => organismos.tabla.lectura(), organismos);
@@ -398,22 +399,34 @@ export class VistaMundo implements Lectura {
   pesosAlDia(slot: number): boolean { return this.organismos!.personas.pesosAlDia(slot, this.frente.gen[slot]!); }
   /** Pesos heredados del ocupante de la ranura. Las columnas del cerebro no tienen doble búfer: se escriben en el frente. */
   escribirPesos(slot: number, pesos: ArrayLike<number>): void {
-    (this.frente.col('politica') as Float64Array).set(pesos, slot * COLUMNAS_CEREBRO.politica);
-    const revision = this.frente.col('revisionPolitica') as Int32Array;
+    const frente = this.frente;
+    (frente.col('politica') as Float64Array).set(pesos, slot * COLUMNAS_CEREBRO.politica);
+    const revision = frente.col('revisionPolitica') as Int32Array;
     revision[slot] = revision[slot]! + 1;
-    this.organismos!.personas.marcarPesosPublicados(slot, this.frente.gen[slot]!);
+    this.organismos!.personas.marcarPesosPublicados(slot, frente.gen[slot]!);
   }
   /** Conserva los pesos publicados si se mantienen los valores exactos, incluido el signo del cero. */
   actualizarPesos(slot: number, pesos: ArrayLike<number>): void {
     const ancho = COLUMNAS_CEREBRO.politica;
-    if (this.pesosAlDia(slot) && pesos.length === ancho) {
-      const publicados = this.frente.col('politica') as Float64Array;
-      const desde = slot * ancho;
-      let i = 0;
-      while (i < ancho && Object.is(publicados[desde + i], pesos[i])) i++;
-      if (i === ancho) return;
+    if (!this.pesosAlDia(slot) || pesos.length !== ancho) {
+      this.escribirPesos(slot, pesos);
+      return;
     }
-    this.escribirPesos(slot, pesos);
+    if (!this.comparacionPesos) {
+      const fila = new Float64Array(ancho);
+      this.comparacionPesos = { fila, bytes: Buffer.from(fila.buffer), frentes: new WeakMap() };
+    }
+    const { fila, bytes, frentes } = this.comparacionPesos;
+    const publicados = this.frente.col('politica') as Float64Array;
+    let frente = frentes.get(publicados);
+    // El SAB puede crecer conservando la identidad de la vista tipada.
+    if (!frente || frente.byteLength !== publicados.byteLength) {
+      frente = Buffer.from(publicados.buffer, publicados.byteOffset, publicados.byteLength);
+      frentes.set(publicados, frente);
+    }
+    fila.set(pesos);
+    const desde = slot * bytes.byteLength;
+    if (bytes.compare(frente, desde, desde + bytes.byteLength) !== 0) this.escribirPesos(slot, fila);
   }
   /** Observación y plasticidad de la ranura para este despacho. */
   escribirEstado(slot: number, observacion: ArrayLike<number>, sesgo: ArrayLike<number>): void {

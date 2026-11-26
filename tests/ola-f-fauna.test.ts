@@ -205,6 +205,19 @@ test('la garantía de esquilar llega al Suelo si el lote caduca y se archiva la 
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
+test('la fauna retirada deja de actuar aunque los nuevos residentes repongan el censo', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), retirado = mundo.animals[0]!;
+  const estadoRetirado = structuredClone(retirado);
+  mundo.animals[0] = { ...structuredClone(retirado), id: 'animal-repuesto', uid: c.id('uid') };
+  leyFauna.F1!(c);
+  leyFauna.F2!(c);
+  leyFauna.F3!(c);
+  leyFauna.F4!(c);
+  assert.deepEqual(retirado, estadoRetirado);
+});
+
 test('un embrión completo nace con su masa y cabe en la huella', () => {
   const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'fauna' }));
   stepWorld(mundo);

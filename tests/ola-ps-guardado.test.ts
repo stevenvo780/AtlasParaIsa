@@ -10,6 +10,7 @@ import { codificarCheckpoint, codificarEnVuelo, codificarPaginas } from '../src/
 import { plegarLibros } from '../src/world/materia/libro.js';
 import { serializarSustancias } from '../src/world/materia/servicio.js';
 import { NE } from '../src/shared/naturaleza.js';
+import { escalon } from '../src/shared/interruptores.js';
 import { Rol, type MateriaCheckpoint } from '../src/world/materia/tipos.js';
 import { COLUMNAS_CEREBRO, GENOMA_ANCHO } from '../src/world/motor/contratos.js';
 import { materiaReal } from './lib/materia-real.js';
@@ -132,6 +133,22 @@ test('la validación de cuerpo, gestación y carga se activa por ley', async () 
   assert.throws(() => assertWorld(world), /Cuerpo inválido/);
   setParams(world, parseParams('v23.guardadoCompleto=false'));
   assertWorld(world);
+});
+
+test('el guardado material conserva el trabajo pagado parcialmente', async t => {
+  const { store } = laboratorio(t, 'ps-trabajo-fraccional-');
+  const world = createWorld(7, parseParams({ v23: escalon('cuerpos') }, params));
+  const materia = await prepararMateria(world);
+  const persona = world.people[0]!;
+  persona.work = 4.518518518518519;
+  store.guardar({ world, materia });
+  assert.equal(store.cargarInstantanea()!.instantanea.world.people[0]!.work, persona.work);
+
+  persona.work = Number.NaN;
+  assert.throws(() => assertWorld(world), /Estado procedural inválido/);
+  const legado = createWorld(7);
+  legado.people[0]!.work = 0.5;
+  assert.throws(() => assertWorld(legado), /Estado procedural inválido/);
 });
 
 test('la carga deja visible el diagnóstico del genoma de siete genes', t => {

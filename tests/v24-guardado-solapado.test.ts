@@ -132,6 +132,11 @@ for (const { motivo, cadaTicks, posteriores } of [
     const recibo = motivo === 'una entrada' ? app.requestGesture(gesto, sesion) : undefined;
     const siguiente = app.stepOnce();
     assert.ok(siguiente, 'el paso siguiente debe esperar el acuse');
+    const sesionTrasCadencia = motivo === 'la siguiente cadencia' ? app.despuesDeGuardados(() => {
+      assert.equal(app.esperarGuardado(), undefined);
+      assert.equal(app.guardado.ultimoTickGuardado, tickVivo + 1);
+      store.addSession('sesion-tras-dos-cortes', Date.now() + 60_000);
+    }) : undefined;
     await siguienteVuelta();
     assert.equal(vivo.tick, tickVivo);
     assert.equal(app.guardado.ultimoTickGuardado, 0);
@@ -148,8 +153,9 @@ for (const { motivo, cadaTicks, posteriores } of [
       assert.deepEqual(store.result(gesto), guardado);
       assert.equal(abrirCabeza(path).tick, tickVivo + 1);
     } else if (motivo === 'la siguiente cadencia') {
-      await app.esperarGuardado();
+      await sesionTrasCadencia;
       assert.equal(abrirCabeza(path).tick, tickVivo + 1);
+      assert.equal(store.sessionValid('sesion-tras-dos-cortes'), true);
     } else {
       assert.equal(app.guardado.ultimoTickGuardado, cadaTicks);
     }

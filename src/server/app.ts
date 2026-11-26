@@ -638,6 +638,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     recuperacion?: { error: unknown; tick: number };
   } | undefined;
   function esperarGuardado() { return pasoEnCurso ?? guardadoEnVuelo?.fin; }
+  async function despuesDeGuardados<T>(accion: () => T): Promise<T> {
+    for (let vuelo = esperarGuardado(); vuelo; vuelo = esperarGuardado()) await vuelo;
+    return accion();
+  }
   function leerDuranteGuardado<T>(leer: () => T): T {
     return guardadoEnVuelo ? store.leerPasoSolapado(leer) : leer();
   }
@@ -838,7 +842,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     options.onOperacion?.(tipo);
     try { return ejecutar(); } finally { options.onOperacion?.(null); }
   }
-  const proyectar = (viewport?: Viewport) => {
+  const proyectar = (viewport?: Viewport) => leerDuranteGuardado(() => {
     const start = monotonicNow(), fuente = mundoParaEmision(), projected = projectWorld(fuente, viewport, context);
     if (projected.lotes) {
       const { x, y, width, height } = normalizeViewport(viewport);
@@ -848,7 +852,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (reparto) projected.reparto = reparto;
     runtime.projectionMs = monotonicNow() - start;
     return { ...projected, instanceId, regionesVivas: clavesVivasEn(fuente, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
-  };
+  });
   const view = (viewport?: Viewport): WorldView => {
     if (gateway) return gateway.view(viewport);
     if (!aMedioPaso) return ultimaVista = proyectar(viewport);
@@ -1004,7 +1008,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (uid === undefined) return null;
     const epocaConsulta = epoca;
     const persona = await motor.detalle(uid);
-    return epocaConsulta === epoca && persona ? enriquecerPersona(mundoConsultable(), id, persona) ?? null : null;
+    return epocaConsulta === epoca && persona
+      ? leerDuranteGuardado(() => enriquecerPersona(mundoConsultable(), id, persona) ?? null) : null;
   }
   /** V24 direct mode (no gateway): minimap, directory and whispers read the live `world` between steps,
    * rebuilt at most once per simulated tick (the same object is served while the tick does not move). */
@@ -1728,9 +1733,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         rate(loginGlobal, '*', 600, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
-        const vuelo = esperarGuardado(); if (vuelo) await vuelo;
-        const oldHash = sessionHash(req); if (oldHash) sessions.revoke(oldHash);
-        const token = makeToken(); sessions.addSession(hashToken(token), Date.now() + 14 * 86400_000);
+        const token = await despuesDeGuardados(() => {
+          if (stopped) throw new HttpError(503, 'El servicio se está cerrando.');
+          const oldHash = sessionHash(req); if (oldHash) sessions.revoke(oldHash);
+          const token = makeToken(); sessions.addSession(hashToken(token), Date.now() + 14 * 86400_000);
+          return token;
+        });
         res.setHeader('Set-Cookie', cookie(token, !!options.secure));
         armarGraciaCarga();
         return json(res, 200, { ok: true });
@@ -1738,8 +1746,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (url.pathname.startsWith('/api/')) {
         const hash = authorized(req);
         if (req.method === 'POST' && url.pathname === '/api/logout') {
-          const vuelo = esperarGuardado(); if (vuelo) await vuelo;
-          sessions.revoke(hash); res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
+          await despuesDeGuardados(() => {
+            if (stopped) throw new HttpError(503, 'El servicio se está cerrando.');
+            sessions.revoke(hash);
+          });
+          res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
           for (const [socket, client] of clients) if (client.hash === hash) socket.close(4001, 'La sesión terminó.');
           return json(res, 200, { ok: true });
         }
@@ -1933,7 +1944,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
             if (parsed?.type === 'recipe' || (parsed as { type?: string })?.type === 'receta') {
               if (typeof parsed.id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de procedimiento no válido.');
-              send(client, { type: 'recipe', id: parsed.id, recipe: gateway ? await gateway.recipe(parsed.id) : technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null });
+              send(client, { type: 'recipe', id: parsed.id, recipe: gateway ? await gateway.recipe(parsed.id)
+                : leerDuranteGuardado(() => technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null) });
               return;
             }
             if (parsed?.type === 'suscripcion') {
@@ -2033,7 +2045,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud, detallePersona, mundoParaEmision,
-    esperarGuardado,
+    esperarGuardado, despuesDeGuardados, leerDuranteGuardado,
     get guardadoEnBarrera() { return pasoEnCurso !== undefined; },
     get usaMotor() { return usaMotor; },
     get turbo() { return turbo; },

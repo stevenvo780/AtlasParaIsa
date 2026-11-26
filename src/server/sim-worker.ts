@@ -839,7 +839,7 @@ async function runSimulation(options: SimWorkerOptions) {
       const comma = key.indexOf(',');
       minimap.push({ key, cells: encodeChunkMinimapCells(tiles, Number(key.slice(0, comma)), Number(key.slice(comma + 1))) });
     }
-    const base = vistaParaEmision(world, store.context);
+    const base = live.leerDuranteGuardado(() => vistaParaEmision(world, store.context));
     const reparto = live.repartoMotor;
     const view: WorldView = { ...base, tiles: [], instanceId, performance: live.runtime, ...(reparto && { reparto }),
       ...(base.technology ? { technology: { ...base.technology } } : {}) };
@@ -921,6 +921,12 @@ async function runSimulation(options: SimWorkerOptions) {
     try { await app?.close(); } finally { store.close(); }
     throw error;
   }
+  function despuesDeGuardados<T>(accion: () => T): Promise<T> {
+    return app!.despuesDeGuardados(() => {
+      if (closing) throw new HttpError(503, 'El servicio se está cerrando.');
+      return accion();
+    });
+  }
   async function handle(message: SimRpc | SimControl) {
     if (message.type === 'espejoAplicado') {
       espejosEnVuelo = Math.max(0, espejosEnVuelo - 1);
@@ -938,28 +944,34 @@ async function runSimulation(options: SimWorkerOptions) {
     const { id, method, args } = message;
     try {
       if (closing) throw new HttpError(503, 'El servicio se está cerrando.');
-      if (method === 'login' || method === 'logout' || method === 'personDetail' || method === 'recipeDetail') {
-        const guardado = app!.esperarGuardado();
-        if (guardado) await guardado;
-        if (closing) throw new HttpError(503, 'El servicio se está cerrando.');
-      }
       let value: unknown;
       switch (method) {
         case 'start': app!.start(); break;
         case 'login': {
           const [hash, expires, validity] = args as [string, number, SharedArrayBuffer];
-          store.addSession(hash, expires); sessionFlags.set(hash, new Int32Array(validity)); break;
+          await despuesDeGuardados(() => { store.addSession(hash, expires); sessionFlags.set(hash, new Int32Array(validity)); });
+          break;
         }
-        case 'logout': { const hash = args[0] as string; store.revoke(hash); sessionFlags.delete(hash); break; }
+        case 'logout': {
+          const hash = args[0] as string;
+          await despuesDeGuardados(() => { store.revoke(hash); sessionFlags.delete(hash); });
+          break;
+        }
         case 'verifySession': value = store.sessionValid(args[0] as string); break;
         case 'gesture': value = await app!.requestGesture(args[0] as Gesture, args[1] as string); break;
         case 'personDetail': {
-          if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
-          value = await app!.detallePersona(args[0] as string); break;
+          value = await despuesDeGuardados(() => {
+            if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
+            return app!.detallePersona(args[0] as string);
+          });
+          break;
         }
         case 'recipeDetail': {
-          if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
-          value = technologyRecipeDetail(app!.mundoParaEmision(), args[0] as string) ?? null; break;
+          value = await despuesDeGuardados(() => {
+            if (app!.failed) throw new HttpError(503, 'El mundo está en pausa.');
+            return technologyRecipeDetail(app!.mundoParaEmision(), args[0] as string) ?? null;
+          });
+          break;
         }
         case 'whisper': {
           // V24 Mensajes Divinos: allowed in observer-only worlds (an inhabitant hears them later, never an order).

@@ -131,6 +131,7 @@ export interface PiezasDueno {
   emisionFotogramaDuenos?: boolean;
   limiteBytesFotoDueno?: number;
   cabeceraFoto?: World;
+  publicarFoto?: (epoca: number, parte: ParteFotoDueno) => void;
 }
 
 type GanchoFase = 'F1' | 'eco' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6';
@@ -838,6 +839,7 @@ export class Dueno implements CtxF0 {
     );
     this.#crucesFaunaEntrantes.clear();
     if (this.hilo === 0) this.#parteFotoLocal = parte;
+    else if (this.#piezas.publicarFoto) this.#piezas.publicarFoto(this.epoca, parte);
     else this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.foto, this.hilo], serialize(parte)));
   }
 

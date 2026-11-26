@@ -34,7 +34,7 @@ import { conectarBuzon, type MemoriaBuzones } from './buzon.js';
 import { Contadores } from './contadores.js';
 import { AVISO, CTL, CTL_DUENO, Dueno, celdaDueno, type PiezasDueno } from './contexto.js';
 import type { Hilo } from './contratos.js';
-import { enviarParteCorte, type SolicitudCorte } from './mensajes-corte.js';
+import { enviarParteCorte, enviarParteFoto, type SolicitudCorte } from './mensajes-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
@@ -118,6 +118,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
     emisionFotogramaDuenos: datos.emisionFotogramaDuenos,
     limiteBytesFotoDueno: datos.limiteBytesFotoDueno,
     cabeceraFoto: datos.emisionFotogramaDuenos ? mundo : undefined,
+    publicarFoto: datos.emisionFotogramaDuenos && puertoCorte ? (epoca, parte) => enviarParteFoto(puertoCorte, epoca, parte) : undefined,
   };
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;

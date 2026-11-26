@@ -604,6 +604,9 @@ class MotorDuenos implements Motor {
       this.#cronica();
       const fotoAbierta = control[CTL.fotoRanura]! >= 0;
       const fotoCompleta = control[CTL.fotoCompleto] === 1;
+      if (fotoAbierta && this.#config.emisionFotogramaDuenos && this.#canalesCorte) {
+        for (const parte of this.#canalesCorte.recibirFotos(this.#epoca, m.tick)) this.#partesFoto.set(parte.hilo, parte);
+      }
       const fotoPerdida = d.cerrarFoto();
       this.#partesFoto.clear();
       if (fotoPerdida) {

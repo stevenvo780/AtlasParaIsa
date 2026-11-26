@@ -1,6 +1,7 @@
 import { deserialize, serialize } from 'node:v8';
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import type { World } from '../mundo/tipos.js';
+import type { ParteFotoDueno } from './fotograma-dueno.js';
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
 
@@ -10,6 +11,24 @@ interface ParteCorte {
   tick: number;
   dueno: number;
   bytes: Uint8Array;
+}
+
+interface FotoTransferida {
+  tipo: 'foto';
+  epoca: number;
+  parte: ParteFotoDueno;
+}
+
+export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: ParteFotoDueno): void {
+  const bloques = new Set<ArrayBuffer>();
+  for (const bytes of [parte.bajasBytes, parte.altasBytes]) {
+    if (bytes.byteLength === 0) continue;
+    if (!(bytes.buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== bytes.buffer.byteLength)
+      throw new Error('El bloque de fotograma debe ocupar su propio ArrayBuffer.');
+    bloques.add(bytes.buffer);
+  }
+  const entrega: FotoTransferida = { tipo: 'foto', epoca, parte };
+  puerto.postMessage(entrega, [...bloques]);
 }
 
 /** Se transfiere el bloque de V8 tal cual. Un runtime que no lo pueda mover falla antes de construir el corte. */
@@ -62,6 +81,21 @@ export class CanalesCorte {
       if (mundo.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
       return mundo;
     });
+  }
+
+  /** F6 ya terminó y el coordinador aún no puede pedir otro corte. Un dueño sin parte provoca el camino reunido. */
+  recibirFotos(epoca: number, tick: number): ParteFotoDueno[] {
+    const partes: ParteFotoDueno[] = [];
+    for (const [i, puerto] of this.entradas.entries()) {
+      const entrega = receiveMessageOnPort(puerto)?.message as FotoTransferida | undefined;
+      let repetida = false;
+      while (receiveMessageOnPort(puerto) !== undefined) repetida = true;
+      if (repetida || entrega?.tipo !== 'foto' || entrega.epoca !== epoca || entrega.parte?.tick !== tick
+        || entrega.parte.hilo !== i + 1 || !(entrega.parte.bajasBytes instanceof Uint8Array)
+        || !(entrega.parte.altasBytes instanceof Uint8Array)) continue;
+      partes.push(entrega.parte);
+    }
+    return partes;
   }
 
   cerrar(): void {

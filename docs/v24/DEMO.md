@@ -22,3 +22,14 @@ Las pruebas causales pueden intervenir en un fixture para aislar un efecto. El d
 4. Reservar la prueba prolongada de servidor, el panel de semillas y el crecimiento a escala para el candidato que supere esos controles. Registrar mortales vivos, residentes y activos por ventana, además del territorio. El volumen almacenado y la escala que se puede simular son mediciones distintas.
 
 Las responsabilidades de CPU, VRAM, RAM y discos están en [HARDWARE.md](HARDWARE.md). El material de la carta y los recuerdos autorizados solo los cambia Steven.
+
+## Primer corte medido
+
+En `4deaee1`, las pruebas de laboratorio acreditaron bebida y alivio de sed con débito material, preferencia de ruta por piedra instalada y refugio bajo una cubierta que pierde su efecto al desgastarse o desmontarse. Las 11 pruebas focales y la compilación pasaron. Un recorrido autenticado en Chromium abrió Historia, pausó la cinta, buscó un corte anterior y volvió al presente con la ficha abierta en 1440 × 900 y 390 × 844.
+
+| Escena | CPU y un dueño | CPU y dos dueños | GPU0 y dos dueños |
+|---|---:|---:|---:|
+| Siembra de 200 mortales | 95,6 ms/paso | 73,5 ms/paso | 76,0 ms/paso |
+| Copia de laboratorio desde el tick 3.316 | 88,3 ms/paso | 86,9 ms/paso | 91,8 ms/paso |
+
+Son medias de dos bloques con 30 pasos de calentamiento y 60 medidos por brazo, en los mismos seis núcleos físicos del primer dominio L3. Las 12 corridas conservaron el balance exacto y tuvieron cero violaciones. En 320 tandas confirmadas, la 5070 Ti reportó 0,22 ms por tanda y el recorrido observado por el dueño promedió 2,03 ms. En estas escenas la referencia para la siguiente ola es CPU. La selección final exige medir el candidato con las leyes integradas y una variedad mayor de cargas.

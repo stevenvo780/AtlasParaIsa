@@ -40,7 +40,7 @@ import { residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
 import type { CtxLey } from './acceso.js';
 import { Clase, REF_NULA, slotDe, type ChunkId, type Hilo, type Terreno } from './contratos.js';
-import type { FotogramaEnCurso, SucesoFotograma } from './fotograma.js';
+import type { FotogramaEnCurso, SucesoEnlaceCinta, SucesoFotograma } from './fotograma.js';
 import { nuevosDe } from './reunir.js';
 
 /** Tope por defecto de bytes pre-serializados que un dueño puede transferir en un fotograma (por debajo del anillo de 256 MiB). */
@@ -277,7 +277,7 @@ class EmpaquetadorSucesos {
     return true;
   }
 
-  agregar(suceso: SucesoFotograma): boolean {
+  agregar(suceso: SucesoEnlaceCinta): boolean {
     if (this.presupuesto.desbordado) return false;
     return this.agregarBytes(serialize(suceso));
   }
@@ -553,24 +553,25 @@ export class EmisorFotoDueno {
           if (!altas.agregarBytes(bytes)) break;
         }
         const textosPrevios = previa?.textos;
+        let cambios: Record<string, string> | undefined;
         for (const campo of CAMPOS_TEXTO_OBLIGATORIOS) {
           const valor = textos[campo]!;
           if (emitirTodo || textosPrevios?.[campo] !== valor) {
-            if (!altas.agregar({ tipo: 'texto', uid, campo, valor })) break;
+            (cambios ??= {})[campo] = valor;
           }
         }
-        if (presupuesto.desbordado) break;
         for (const campo of CAMPOS_TEXTO_OPCIONALES) {
           const valor = textos[campo];
           if (valor !== undefined) {
             if (emitirTodo || textosPrevios?.[campo] !== valor) {
-              if (!altas.agregar({ tipo: 'texto', uid, campo, valor })) break;
+              (cambios ??= {})[campo] = valor;
             }
           } else if (!completo && (trasFallback || textosPrevios?.[campo] !== undefined)) {
             if (!bajas.agregar({ tipo: 'texto', uid, campo, valor: null })) break;
           }
         }
         if (presupuesto.desbordado) break;
+        if (cambios && !altas.agregar({ tipo: 'textosPersona', uid, textos: cambios })) break;
         tentativo.personas.set(uid, { vista: firmaVista, textos });
       }
     }

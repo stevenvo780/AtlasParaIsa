@@ -39,12 +39,16 @@ export type SucesoVistaAdicional =
   | { tipo: 'pagina'; id: string; vista: VistaPaginaFotograma | null };
 export type SucesoFotograma = Suceso | SucesoVistaAdicional;
 
+/** Registro interno del anillo. La cinta expande las altas agrupadas antes de aplicar los sucesos. */
+export type SucesoEnlaceCinta = SucesoFotograma
+  | { tipo: 'textosPersona'; uid: number; textos: Readonly<Record<string, string>> };
+
 import type { LoteFotoDuenos } from './fotograma-dueno.js';
 
 /** Resultado de una fuente de sucesos y serie para un fotograma binario. */
 export interface SalidaFuenteFotograma {
   sucesos: readonly SucesoFotograma[];
-  /** Bloques ya empaquetados con formato del anillo (`[u32 len LE][v8.serialize(suceso)]`) por los dueños. */
+  /** Bloques de `SucesoEnlaceCinta` ya empaquetados por los dueños (`[u32 len LE][v8.serialize]`). */
   bloques?: readonly Uint8Array[];
   serie: Readonly<Record<CampoSerie, number>>;
 }

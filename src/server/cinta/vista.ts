@@ -7,8 +7,9 @@ import {
 import type { MatTesela } from '../../shared/materia.js';
 import { PROTOCOL_VERSION, type AnimalView, type ChronicleEvent, type PersonView, type Tile, type WorldView } from '../../shared/types.js';
 import { ACTIONS as ACCIONES_FAUNA } from '../../world/animals.js';
-import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoFotograma, type SucesoVistaAdicional, type VistaAnimalFotograma, type VistaMundoFotograma,
-  type VistaPaginaFotograma, type VistaPersonaFotograma } from '../../world/motor/fotograma.js';
+import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoEnlaceCinta, type SucesoFotograma, type SucesoVistaAdicional,
+  type VistaAnimalFotograma, type VistaMundoFotograma, type VistaPaginaFotograma, type VistaPersonaFotograma,
+} from '../../world/motor/fotograma.js';
 import { Clase } from '../../world/motor/contratos.js';
 import { phaseAt } from '../../world/mundo/crear.js';
 import { TICKS_PER_DAY } from '../../world/mundo/tipos.js';
@@ -235,7 +236,14 @@ function leerSucesos(enlace: EnlaceCinta, f: Fotograma): SucesoFotograma[] {
   while (cursor < hasta) {
     const bytes = leer(4).readUInt32LE();
     if (!bytes) throw new Error('Registro de sucesos vacío.');
-    sucesos.push(deserialize(leer(bytes)));
+    const suceso: SucesoEnlaceCinta = deserialize(leer(bytes));
+    if (suceso.tipo === 'textosPersona') {
+      for (const [campo, valor] of Object.entries(suceso.textos)) {
+        sucesos.push({ tipo: 'texto', uid: suceso.uid, campo, valor });
+      }
+    } else {
+      sucesos.push(suceso);
+    }
   }
   return sucesos;
 }

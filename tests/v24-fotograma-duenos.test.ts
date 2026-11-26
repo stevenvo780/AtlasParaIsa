@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deserialize } from 'node:v8';
+import { deserialize, serialize } from 'node:v8';
 import { fuenteFotograma } from '../src/server/cinta/fuente.js';
 import { estadoVista, fotogramaAVista, leerFotograma } from '../src/server/cinta/vista.js';
 import type { Corte } from '../src/shared/cinta.js';
-import { CONTROL_ENLACE_BYTES, enlaceCinta, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
+import { CONTROL_ENLACE_BYTES, enlaceCinta, RANURA_F64, regionesRanura, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { RuntimeStats } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
@@ -12,10 +12,11 @@ import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { ORDEN, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
-import { EmisorFotoDueno } from '../src/world/motor/fotograma-dueno.js';
+import { EmisorFotoDueno, type ParteFotoDueno } from '../src/world/motor/fotograma-dueno.js';
+import type { SucesoEnlaceCinta } from '../src/world/motor/fotograma.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
-import { crearSAB } from '../src/world/soa/arena.js';
+import { crearSAB, crecerSAB } from '../src/world/soa/arena.js';
 import { chunkKey } from '../src/world/terrain.js';
 
 const RUNTIME: RuntimeStats = {
@@ -36,15 +37,15 @@ function crearDescriptor(bytesAnillo = 16 * 1024 * 1024) {
   };
 }
 
-function decodificarBloques(bloques: readonly Uint8Array[] = []): Suceso[] {
-  const salida: Suceso[] = [];
+function decodificarBloques<T extends SucesoEnlaceCinta = Suceso>(bloques: readonly Uint8Array[] = []): T[] {
+  const salida: T[] = [];
   for (const bloque of bloques) {
     const view = new DataView(bloque.buffer, bloque.byteOffset, bloque.byteLength);
     let offset = 0;
     while (offset < bloque.byteLength) {
       const len = view.getUint32(offset, true);
       offset += 4;
-      salida.push(deserialize(bloque.subarray(offset, offset + len)) as Suceso);
+      salida.push(deserialize(bloque.subarray(offset, offset + len)) as T);
       offset += len;
     }
   }
@@ -193,6 +194,103 @@ test('paridad exacta de Corte entre emisión por dueños y camino reunido sobre 
   assert.equal(traza.fallbacksLimite, 0);
   assert.equal(traza.fallbacksCompat, 0);
   assert.equal(traza.abortos, 0);
+});
+
+test('las altas agrupadas conservan los sucesos de texto exactos, los borrados y el reintento', t => {
+  const mundo = createWorld(53, {
+    ...DEFAULT_PARAMS,
+    v23: { ...DEFAULT_PARAMS.v23, duenos: true, fotograma: true },
+  });
+  const suelo = mundo.tiles.find(tile => tile.terrain === 'soil')!;
+  mundo.animals = materializeAnimals(mundo.seed, [{ ...suelo, fauna: 1, species: 'hare' }], mundo.tick);
+  syncFauna(mundo.tiles, mundo.animals);
+  const motor = crearMotor(mundo, unSoloDueno(53));
+  t.after(() => motor.cerrar());
+  const descriptor = crearDescriptor();
+  const enlace = enlaceCinta(descriptor);
+  motor.enlazar(descriptor);
+  motor.cargar({ world: mundo, materia: null }, 0);
+  const d = duenoSi(mundo)!;
+  const persona = mundo.people[0]!;
+  persona.recentMemory = 'Raíz 🌱';
+  persona.activity = { rest: 3 };
+  persona.compounds = [{
+    id: 'lot-prueba', formulaId: 'f-prueba', composition: { C: 0, Si: 1, Ca: 0, Fe: 0, S: 0, H: 0 },
+    phase: 'raw', mass: 1,
+    properties: { hardness: 1, toughness: 1, seal: 0, insulation: 0, fuelPower: 0, colorHex: '#7a5c44' },
+  }];
+
+  const emisor = new EmisorFotoDueno(mundo);
+  const ranura = descriptor.ranuras[0]!;
+  crecerSAB(ranura, regionesRanura(0, 0).total);
+  const anillo = enlace.sucesos!;
+  const uid = persona.uid!;
+  const texto = (campo: string, valor: string | null): Suceso => ({ tipo: 'texto', uid, campo, valor });
+  const delUid = (sucesos: readonly Suceso[]) => sucesos.filter(s => s.tipo === 'texto' && s.uid === uid);
+  function emitir(completo: boolean, genEntregado: number): ParteFotoDueno {
+    const f = { ranura, completo, tick: ++mundo.tick, epoca: 0, versiones: enlace.versiones! };
+    const parte = emisor.emitir(d, f, [], d.organismos, (px, py) => d.terrenoPercibido.paginaDe(px, py), genEntregado, 0, false);
+    assert.equal(parte.desbordado, false);
+    return parte;
+  }
+  // El primer prefijo de longitud cruza el final del anillo.
+  const inicio = BigInt(anillo.byteLength - 2);
+  Atomics.store(enlace.sucesosEscritos, 0, inicio);
+  Atomics.store(enlace.sucesosLeidos, 0, inicio);
+  function leer(parte: ParteFotoDueno): readonly Suceso[] {
+    const desde = Number(Atomics.load(enlace.sucesosEscritos, 0));
+    let hasta = desde;
+    for (const bloque of [parte.bajasBytes, parte.altasBytes]) {
+      const posicion = hasta % anillo.byteLength;
+      const primera = Math.min(bloque.byteLength, anillo.byteLength - posicion);
+      anillo.set(bloque.subarray(0, primera), posicion);
+      anillo.set(bloque.subarray(primera), 0);
+      hasta += bloque.byteLength;
+    }
+    const cabecera = new Float64Array(ranura, 0, 8);
+    cabecera[RANURA_F64.sucesosDesde] = desde;
+    cabecera[RANURA_F64.sucesosHasta] = hasta;
+    Atomics.store(enlace.sucesosEscritos, 0, BigInt(hasta));
+    const leidos = Atomics.add(enlace.entregados, 0, 1n);
+    let sucesos: readonly Suceso[] = [];
+    assert.ok(leerFotograma(enlace, leidos, (_f, leidos) => { sucesos = leidos; }));
+    return sucesos;
+  }
+
+  const completo = emitir(true, 0);
+  const wire = decodificarBloques<SucesoEnlaceCinta>([completo.altasBytes]);
+  const agrupados = wire.filter(s => s.tipo === 'textosPersona');
+  assert.equal(agrupados.length, mundo.people.length);
+  assert.ok(wire.some(s => s.tipo === 'texto' && s.campo === 'reason' && s.uid !== uid));
+  const sucesos = leer(completo);
+  const ficha = sucesos.findIndex(s => s.tipo === 'persona' && s.id === String(uid));
+  assert.ok(ficha >= 0);
+  const esperados = [
+    texto('name', persona.name), texto('color', persona.color), texto('reason', persona.reason), texto('need', persona.need),
+    texto('recentMemory', 'Raíz 🌱'), texto('specialty', 'recuperación'), texto('craftTint', '#7a5c44'), texto('craftFocus', 'cutting'),
+  ];
+  assert.deepEqual(sucesos.slice(ficha + 1, ficha + 1 + esperados.length), esperados);
+  assert.deepEqual(delUid(sucesos).map(s => serialize(s)), esperados.map(s => serialize(s)));
+  const bytesAntes = sucesos.reduce((n, s) => n + 4 + serialize(s).byteLength, 0);
+  assert.ok(completo.bytes < bytesAntes);
+  t.diagnostic(`Sucesos iniciales del dueño sin páginas: ${bytesAntes} → ${completo.bytes} bytes`);
+
+  persona.recentMemory = null;
+  delete persona.compounds;
+  persona.reason = '😌';
+  persona.need = '';
+  const abortado = emitir(false, 1);
+  const reintento = emitir(false, 1);
+  assert.deepEqual(reintento.bajasBytes, abortado.bajasBytes);
+  const altasTexto = (parte: ParteFotoDueno) => decodificarBloques<SucesoEnlaceCinta>([parte.altasBytes])
+    .filter(s => s.tipo === 'textosPersona');
+  assert.deepEqual(altasTexto(reintento), altasTexto(abortado));
+  assert.deepEqual(delUid(leer(reintento)), [
+    texto('recentMemory', null), texto('craftTint', null), texto('craftFocus', null), texto('reason', '😌'), texto('need', ''),
+  ]);
+  assert.ok(!leer(emitir(false, 2)).some(s => s.tipo === 'texto'));
+  persona.recentMemory = '';
+  assert.deepEqual(delUid(leer(emitir(false, 3))), [texto('recentMemory', '')]);
 });
 
 test('conserva páginas archivadas si siguen en mundo.chunks y excluye fauna y estructuras al archivar', async t => {

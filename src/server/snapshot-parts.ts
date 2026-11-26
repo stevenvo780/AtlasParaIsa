@@ -4,8 +4,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import { clavesJsonUnicas } from '../shared/json-keys.js';
-import type { World } from '../world/index.js';
+import type { Person, World } from '../world/index.js';
 import { faunaCorteDe, type TramoFaunaCorte, type TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
+import type { PersonasCorteVerificadas } from '../world/motor/personas-corte.js';
 import type { TeselasCorteVerificadas } from '../world/motor/teselas-corte.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
@@ -48,6 +49,7 @@ export interface PreparedSnapshot {
   inline?: string; metadata?: string; tiles: readonly Tile[]; organisms?: Organisms; nativo: boolean;
   faunaVerificada?: readonly TramoFaunaVerificada[];
   teselasVerificadas?: TeselasCorteVerificadas;
+  personasVerificadas?: PersonasCorteVerificadas;
 }
 
 export function hasCanonicalSnapshotPartsPrefix(body: string): boolean {
@@ -138,6 +140,7 @@ export class SnapshotParts {
   private pagesEncoded = 0;
   private readonly faunaStats = { compared: 0, accepted: 0, rejected: 0, reused: 0 };
   private readonly teselasStats = { reused: 0, recoded: 0 };
+  private readonly personasStats = { reused: 0, recoded: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
     private readonly packedPeople = false) {
@@ -157,6 +160,10 @@ export class SnapshotParts {
   /** Filas verificadas reutilizadas o recodificadas por una mutación posterior al corte. */
   get teselasCorteStats(): { reused: number; recoded: number } {
     return { ...this.teselasStats };
+  }
+  /** Filas WPF1 verificadas reutilizadas o recodificadas tras una mutación posterior al corte. */
+  get personasCorteStats(): { reused: number; recoded: number } {
+    return { ...this.personasStats };
   }
   /** Solo tras el COMMIT de la transacción en la que `write`/`collect` construyeron lo pendiente. */
   confirmPendingPages(): void {
@@ -182,7 +189,7 @@ export class SnapshotParts {
   }
 
   prepare(world: World, params: WorldParams, inlineLimit: number, faunaVerificada?: readonly TramoFaunaVerificada[],
-    teselasVerificadas?: TeselasCorteVerificadas): PreparedSnapshot {
+    teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas): PreparedSnapshot {
     const nativo = params.v23.guardadoCompleto;
     if (!nativo && world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [], nativo };
     // Keep null placeholders to preserve the world's enumerable property order after reloading.
@@ -194,7 +201,7 @@ export class SnapshotParts {
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
     if (!nativo && metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES)
       failure('metadata exceeds transport size');
-    return { metadata, tiles: world.tiles, organisms, nativo, faunaVerificada, teselasVerificadas };
+    return { metadata, tiles: world.tiles, organisms, nativo, faunaVerificada, teselasVerificadas, personasVerificadas };
   }
 
   /** Los tres campos del vale que una conexión ajena puede mover, recotejados DENTRO de la transacción:
@@ -348,7 +355,7 @@ export class SnapshotParts {
       for (const field of ORGANISM_FIELDS) {
         const faunaVerificada = field === 'animals' ? prepared.faunaVerificada : undefined;
         const manifest = encoding === ENCODING_V3 && field === 'people'
-          ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage)
+          ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage, prepared.personasVerificadas)
           : this.writeOrganisms(prepared.organisms[field], writeOrganismPage,
             field === 'animals' && faunaVerificada === undefined ? faunaCorteDe(prepared.organisms.animals) : undefined,
             faunaVerificada);
@@ -487,8 +494,17 @@ export class SnapshotParts {
     return { count, pages };
   }
 
-  private writePackedPeople(people: readonly unknown[], writePage: (index: number, body: Uint8Array, count: number) => Page): Pages {
+  private writePackedPeople(people: readonly Person[], writePage: (index: number, body: Uint8Array, count: number) => Page,
+    personasVerificadas?: PersonasCorteVerificadas): Pages {
     const pages: Page[] = [], rows: PackedPersonRow[] = [];
+    const tramos = personasVerificadas?.tramos ?? [];
+    const modificadas = personasVerificadas?.modificadas;
+    let fin = 0;
+    for (const { desde, filas } of tramos) {
+      if (!Number.isSafeInteger(desde) || desde < fin || filas.length === 0 || desde + filas.length > people.length)
+        failure('verified people range');
+      fin = desde + filas.length;
+    }
     let rowBytes = 0;
     const flush = () => {
       const body = encodePackedPeoplePage(rows);
@@ -497,10 +513,23 @@ export class SnapshotParts {
       rowBytes = 0;
       this.onProgress?.();
     };
+    let indexTramo = 0, tramo = tramos[indexTramo];
     for (let i = 0; i < people.length; i++) {
       const person = people[i];
       if (!object(person)) failure('organism row');
-      const row = preparePackedPerson(person);
+      let verificada: PackedPersonRow | undefined;
+      if (tramo && i >= tramo.desde) {
+        const offset = i - tramo.desde;
+        verificada = tramo.filas[offset];
+        if (offset + 1 === tramo.filas.length) tramo = tramos[++indexTramo];
+      }
+      if (verificada !== undefined) {
+        if (modificadas?.has(person)) {
+          verificada = undefined;
+          this.personasStats.recoded++;
+        } else this.personasStats.reused++;
+      }
+      const row = verificada ?? preparePackedPerson(person);
       if (rows.length && packedPeoplePageBytes(rows.length + 1, rowBytes + row.bytes) > this.organismPageBytes) flush();
       rows.push(row);
       rowBytes += row.bytes;

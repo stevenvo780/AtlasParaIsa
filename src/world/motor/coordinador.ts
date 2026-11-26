@@ -163,6 +163,7 @@ class MotorUnico implements Motor {
 
   cargar(i: Instantanea, epoca: number): void {
     cerrarMateriaGpu(this.#mundo);
+    if (i.world !== this.#mundo) duenoSi(this.#mundo)?.cerrarMateriaFria();
     this.#mundo = i.world;
     this.#epoca = epoca;
     this.#perfilPaso = undefined;
@@ -211,6 +212,7 @@ class MotorUnico implements Motor {
   cerrar(): Promise<void> {
     this.#perfilPaso = undefined;
     cerrarMateriaGpu(this.#mundo);
+    duenoSi(this.#mundo)?.cerrarMateriaFria();
     return Promise.resolve();
   }
 }

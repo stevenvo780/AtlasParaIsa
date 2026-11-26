@@ -285,6 +285,15 @@ function alRetirar(c: CtxLey, chunk: ChunkId): void {
   e.aireVista = null;
 }
 
+/** Lotes de suelo y vida de una página completa después de terminar todos los ganchos de retiro. */
+export function sueloYVidaDormidos(c: CtxLey, chunk: ChunkId): LoteRef[] {
+  const { m } = estado(c);
+  if (!m.tiene(chunk) || m.activa[chunk] !== 0 || m.fin[chunk]! - m.inicio[chunk]! !== 256) return [];
+  const referencias: LoteRef[] = [];
+  for (let i = m.inicio[chunk]!; i < m.fin[chunk]!; i++) referencias.push(m.suelo[i]!, m.vida[i]!);
+  return referencias;
+}
+
 function limpiarTeselas(e: Estado, p: ChunkId): void {
   for (let i = e.m.inicio[p]!; i < e.m.fin[p]!; i++) { e.teselas[i] = undefined; e.mat[i] = undefined; }
 }

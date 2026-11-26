@@ -7,7 +7,7 @@ import type { Corte } from '../src/shared/cinta.js';
 import { CONTROL_ENLACE_BYTES, enlaceCinta, type Fotograma, type Suceso } from '../src/shared/fotograma.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { RuntimeStats } from '../src/shared/types.js';
-import { syncFauna } from '../src/world/animals.js';
+import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { ORDEN, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
@@ -616,6 +616,88 @@ test('límite de transferencia activa fallback reunido y recupera emisión por d
   assert.equal(motor2.trazaFotogramaDuenos!.emitidos, 2);
 });
 
+test('el delta reunido entrega los cambios de fauna de F5 tras saltar un fotograma, sin ensuciar la percepción', t => {
+  const mundo = createWorld(17, parseParams({ v23: { ...escalon('duenos'), fotograma: true } }));
+  const celdas = mundo.tiles.filter(tile => chunkKey(tile.x, tile.y) === '0,0' && tile.terrain === 'soil').slice(0, 3);
+  assert.equal(celdas.length, 3);
+  const [origen, otra, destino] = celdas;
+  mundo.animals = materializeAnimals(mundo.seed, [
+    { ...origen, fauna: 1, species: 'hare' }, { ...otra, fauna: 1, species: 'hare' },
+  ], mundo.tick);
+  syncFauna(mundo.tiles, mundo.animals);
+
+  const motor = crearMotor(mundo, unSoloDueno(17));
+  t.after(() => motor.cerrar());
+  const descriptor = crearDescriptor();
+  const enlace = enlaceCinta(descriptor);
+  motor.enlazar(descriptor, fuenteFotograma(mundo, 0, 'fauna-f5', RUNTIME, () => 10, () => undefined));
+  motor.cargar({ world: mundo, materia: null }, 0);
+  const d = duenoSi(mundo)!;
+  const terreno = d.terreno, chunk = terreno.chunkDe(terreno.celda(origen.x, origen.y));
+  const vista = estadoVista(0);
+  const leerTesela = (x: number, y: number, tiles: Corte['vista']['tiles']) => {
+    const tile = tiles.find(t => t.x === x && t.y === y);
+    assert.ok(tile);
+    return [tile.fauna, tile.species];
+  };
+  const publicarFauna = () => {
+    mundo.tick++;
+    d.fase(0); d.F0();
+    d.fase(5); d.gancho('F5');
+    d.fase(6); d.publicarFilas(); d.gancho('F6');
+    d.escribirFoto(); d.publicarFrente(); d.cerrarFoto();
+  };
+
+  Atomics.store(enlace.creditos, 0, 1);
+  publicarFauna();
+  const [fisica, visible] = [terreno.versionPagina[chunk]!, terreno.versionVisible[chunk]!];
+  const movil = mundo.animals.find(a => a.x === origen.x && a.y === origen.y)!;
+  const quieto = mundo.animals.find(a => a.x === otra.x && a.y === otra.y)!;
+  assert.ok(leerFotograma(enlace, 0n, (f, s) => {
+    assert.equal(f.completo, true);
+    const { tiles } = fotogramaAVista(vista, f, s, 1).vista;
+    assert.equal(leerTesela(origen.x, origen.y, tiles)[0], 1);
+    assert.equal(leerTesela(destino.x, destino.y, tiles)[0], undefined);
+    assert.deepEqual(leerTesela(otra.x, otra.y, tiles), [1, quieto.species]);
+  }));
+
+  movil.x = destino.x; movil.y = destino.y;
+  Atomics.store(enlace.creditos, 0, 0);
+  publicarFauna();
+  assert.equal(Atomics.load(enlace.entregados, 0), 1n);
+  assert.equal(terreno.versionPagina[chunk], fisica);
+  assert.equal(terreno.versionVisible[chunk], visible + 1, 'las dos teselas cambian una sola versión visible');
+  assert.equal(enlace.versiones![chunk], visible + 1, 'el lector conserva la versión del keyframe (+1)');
+
+  Atomics.store(enlace.creditos, 0, 1);
+  publicarFauna();
+  assert.equal(terreno.versionPagina[chunk], fisica);
+  assert.equal(terreno.versionVisible[chunk], visible + 1, 'F5 no marca de nuevo al repetir la misma proyección');
+  assert.ok(leerFotograma(enlace, 1n, (f, s) => {
+    assert.equal(f.completo, false);
+    assert.equal(f.saltados, 1);
+    assert.deepEqual([...f.paginas], [0, 0]);
+    const { tilesCambiadas } = fotogramaAVista(vista, f, s, 2);
+    assert.ok(Array.isArray(tilesCambiadas));
+    assert.deepEqual(leerTesela(origen.x, origen.y, tilesCambiadas), [undefined, undefined]);
+    assert.deepEqual(leerTesela(destino.x, destino.y, tilesCambiadas), [1, movil.species]);
+    assert.deepEqual(leerTesela(otra.x, otra.y, tilesCambiadas), [1, quieto.species]);
+  }));
+  assert.equal(enlace.versiones![chunk], visible + 2);
+
+  quieto.species = quieto.species === 'wolf' ? 'hare' : 'wolf';
+  publicarFauna();
+  assert.equal(terreno.versionPagina[chunk], fisica);
+  assert.equal(terreno.versionVisible[chunk], visible + 2);
+  assert.ok(leerFotograma(enlace, 2n, (f, s) => {
+    assert.equal(f.completo, false);
+    assert.deepEqual([...f.paginas], [0, 0]);
+    const { tilesCambiadas } = fotogramaAVista(vista, f, s, 3);
+    assert.ok(Array.isArray(tilesCambiadas));
+    assert.deepEqual(leerTesela(otra.x, otra.y, tilesCambiadas), [1, quieto.species]);
+  }));
+});
+
 test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, destino y keyframe sin reunir', async t => {
   const params = parseParams({ v23: { ...escalon('duenos'), fotograma: true } });
   const mundo = createWorld(17, params);
@@ -700,16 +782,10 @@ test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, de
     motor.instantanea().world.animals.map(a => [a.id, { x: a.x, y: a.y }]),
   );
 
-  const chunksFrontera = new Set<number>();
-
   for (let paso = 1; paso <= 120 && (crucesEnKeyframe === 0 || crucesEnDeltaConAmbasPaginas === 0); paso++) {
     // Alternamos keyframe y delta hasta capturar ambos escenarios con cruces F6 reales.
     const pedirKey = crucesEnKeyframe === 0 ? paso % 2 === 1 : false;
     if (pedirKey) Atomics.store(enlace.pedirCompleto, 0, 1);
-    else if (crucesEnKeyframe > 0 && enlace.versiones) {
-      // Aseguramos que tanto origen como destino fronterizos entren en `f.paginas` del delta sin alterar la simulación.
-      for (const ch of chunksFrontera) enlace.versiones[ch] = 0;
-    }
     motor.paso([]);
     const leidosAntes = BigInt(seq);
     assert.equal(Atomics.load(enlace.entregados, 0), leidosAntes + 1n);
@@ -718,15 +794,6 @@ test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, de
     const reunido = motor.instantanea().world;
     reunido.history = mundo.history.map(s => ({ ...s }));
     const d = duenoSi(mundo)!;
-    if (chunksFrontera.size === 0) {
-      for (const par of frontera) {
-        const cO = d.terrenoPercibido.paginaDe(par.ox >> 4, par.oy >> 4);
-        const cD = d.terrenoPercibido.paginaDe(par.dx >> 4, par.dy >> 4);
-        if (cO >= 0) chunksFrontera.add(cO);
-        if (cD >= 0) chunksFrontera.add(cD);
-      }
-    }
-
     const ok = leerFotograma(enlace, leidosAntes, (frame: Fotograma, sucesosDuenos: readonly Suceso[]) => {
       seq++;
       const corteDuenos = fotogramaAVista(estadoDuenos, frame, sucesosDuenos, seq);
@@ -758,8 +825,11 @@ test('cruce F6 de fauna realmente aceptado mantiene paridad exacta en origen, de
           const prev = posPrevias.get(a.id);
           if (!prev || (prev.x === a.x && prev.y === a.y)) continue;
           const kOrig = chunkKey(prev.x, prev.y), kDest = chunkKey(a.x, a.y);
-          if (kOrig === kDest || duenoDeChunk.get(kOrig) === duenoDeChunk.get(kDest)) continue;
-          if (!paginasEnFrame.has(kOrig) || !paginasEnFrame.has(kDest)) continue;
+          const indice = ((a.y & 15) << 4) | (a.x & 15);
+          if (!ultimoCruce.some(cruce => cruce.hilo === duenoDeChunk.get(kOrig) && cruce.destinoKey === kDest
+            && cruce.indice === indice)) continue;
+          assert.ok(paginasEnFrame.has(kOrig), `el delta debe incluir el origen ${kOrig} del cruce F6`);
+          assert.ok(paginasEnFrame.has(kDest), `el delta debe incluir el destino ${kDest} del cruce F6`);
           const tOrig = teselasActuales.find(tile => tile.x === prev.x && tile.y === prev.y);
           const tOrigRef = teselasRef.find(tile => tile.x === prev.x && tile.y === prev.y);
           const tDest = teselasActuales.find(tile => tile.x === a.x && tile.y === a.y);

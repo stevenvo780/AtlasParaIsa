@@ -357,8 +357,9 @@ export function faunaCacheFiltered(prevTiles: Tile[], nextTiles: Tile[]): void {
 
 /** Compatibility projection only. Mixed-species totals must be counted from identities, not this representative species.
  * P2: only tiles with fauna the previous call or this one are written; a cache keyed on the tiles array remembers which
- * (rebuilt, reading ground-truth `fauna`, whenever that array is replaced or grows — same trigger as the terrain index). */
-export function syncFauna(tiles: Tile[], animals: Animal[]): void {
+ * (rebuilt, reading ground-truth `fauna`, whenever that array is replaced or grows — same trigger as the terrain index).
+ * The optional observer is called once for each tile whose count or representative species changed. */
+export function syncFauna(tiles: Tile[], animals: Animal[], alCambiar?: (x: number, y: number) => void): void {
   const counts = new Map<Cell, { count: number; species: AnimalSpecies; x: number; y: number }>();
   for (const animal of animals) {
     const p = cell(animal);
@@ -388,10 +389,12 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     const tile = tileIn(at.x, at.y);
     if (!tile) { if (count) missing = true; return; }
     const nextFauna = count?.count ?? 0;
-    if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
-    if (count) {
-      if (tile.species !== count.species) tile.species = count.species;
-    } else if (tile.species !== undefined) tile.species = undefined;
+    const cambiaFauna = !Object.is(tile.fauna, nextFauna);
+    if (cambiaFauna) tile.fauna = nextFauna;
+    const nextSpecies = count?.species;
+    const cambiaEspecie = tile.species !== nextSpecies;
+    if (cambiaEspecie) tile.species = nextSpecies;
+    if (cambiaFauna || cambiaEspecie) alCambiar?.(at.x, at.y);
   };
   // Cada celda una sola vez: primero las ocupadas antes y luego las nuevas, el orden del antiguo
   // `new Set([...occupied, ...counts.keys()])` (cada celda escribe una tesela distinta).

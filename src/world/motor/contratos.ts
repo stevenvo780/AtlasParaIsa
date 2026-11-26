@@ -150,7 +150,7 @@ export interface Terreno {
   readonly paginaX: Int32Array;
   readonly paginaY: Int32Array;
   readonly versionPagina: Uint32Array;   // por chunk; la sube el dueño y la GPU solo sube lo que cambió
-  readonly versionVisible: Uint32Array;  // por chunk; la sube marcar(c, true): M6 compara con la última entregada (saltar no pierde cambios)
+  readonly versionVisible: Uint32Array;  // por chunk; M6 la compara con la última entregada, incluso si saltó un fotograma
   readonly duenoChunk: Int16Array;       // vigente durante el tick (−1 si libre); lo cambia el coordinador en F0
   readonly campos: readonly string[];    // nombres por índice: así los citan las consultas
   celda(x: number, y: number): number;   // −1 si no residente
@@ -161,6 +161,7 @@ export interface TerrenoDueno extends Terreno {
   /** Subarray de las 256 celdas del chunk `c`, indexado por `celda & 255` (`ly·16 + lx`); verifica dueño en modo verificar. */
   escribible(nombre: string, c: ChunkId): Float64Array | Float32Array | Int32Array | Uint8Array;
   marcar(c: ChunkId, visible: boolean): void; // versionPagina[c]++ y, si visible, versionVisible[c]++
+  marcarVisible(c: ChunkId): void; // solo versionVisible[c]++, para proyecciones ajenas a las columnas de percepción
 }
 
 // ── Intentos ─────────────────────────────────────────────────────────────────────────────────────────────

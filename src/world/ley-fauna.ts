@@ -29,7 +29,7 @@ import { Parte, Rol, type Cuerpo, type Kappa, type LoteRef, type Plantilla, type
 import { ctxMateriaDe, type Aplicado, type CtxLey, type CtxLeyMateria, type Ley } from './motor/acceso.js';
 import {
   CAMPOS_CUERPO, Clase, CUERPO_ANCHO, DATO_GOLPEAR, DATO_MATERIA, DATO_TOMAR, GENOMA_ANCHO, REF_NULA, TipoIntento,
-  genDe, refDe, slotDe, type Col, type Intento, type Ref,
+  genDe, refDe, slotDe, type ChunkId, type Col, type Intento, type Ref,
 } from './motor/contratos.js';
 import { cercanos } from './motor/vecinos.js';
 import { TICKS_PER_DAY, type World } from './mundo/tipos.js';
@@ -89,6 +89,7 @@ interface Estado {
   partos: Fila[];
   mordiscos: Intento[];
   cruces: { de: Ref; celda: number; nonce: number; huella: number }[];
+  paginasFauna: Set<ChunkId>;
   orden: Fila[];
   lotes: LotesCelda;
   buf: Float64Array;
@@ -99,7 +100,8 @@ function estado(c: CtxLey): Estado {
   let e = estados.get(c.mundo);
   if (!e) estados.set(c.mundo, e = {
     filas: new Map(), porSlot: new Map(), plantillas: new Map(), jPorComida: 0, ocupacion: new Map(), aguaVecina: new Map(),
-    partos: [], mordiscos: [], cruces: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
+    partos: [], mordiscos: [], cruces: [], paginasFauna: new Set(), orden: [],
+    lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
     buf: new Float64Array(16), campos: null,
   });
   return e;
@@ -112,6 +114,16 @@ function campos(c: CtxLey, e: Estado): Campos {
   return e.campos;
 }
 const propia = (c: CtxLey, celda: number): boolean => celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo;
+
+/** La proyección de fauna vive en el heap propio. El delta necesita su página aunque no cambie la percepción. */
+function marcarFauna(c: CtxLey, e: Estado, celda: number): void {
+  if (celda < 0) return;
+  const chunk = c.terreno.chunkDe(celda);
+  if (c.terreno.duenoChunk[chunk] !== c.hilo || e.paginasFauna.has(chunk)) return;
+  e.paginasFauna.add(chunk);
+  c.propio.marcarVisible(chunk);
+}
+
 const vistaVacia = (): VistaCuerpo => ({ hambre: 0, sed: 0, energia: 0, salud: 0, masa: 0, carga: 0, T: 0 });
 const percepcionVacia = (): PercepcionFaunaV23 => ({ agentes: [], nAgentes: 0, celdas: [], nCeldas: 0, alarma: 0, jPorComida: 0, carronaJ: 0 });
 const yoVacio = (): YoFauna => ({ uid: 0, x: 0, y: 0, masa: 0, genoma: [], hambre: 0, sed: 0, reservaRel: 0, reservaJ: 0,
@@ -527,14 +539,20 @@ function admitirCruces(c: CtxLeyMateria, e: Estado): void {
     const dueno = c.frente.dueno[slotDe(i.de)]!;
     c.buzon.enviar(dueno, { tipo: TipoIntento.Admitido, de: REF_NULA, a: i.de, celda: i.celda, lote: REF_NULA,
       nonce: i.nonce, materia: null, dato: Float64Array.of(i.huella), bytes: null });
+    // Este dueño puede marcar la página destino en F5. El cruce efectivo se resuelve en F6 en el origen.
+    marcarFauna(c, e, i.celda);
   }
   e.cruces.length = 0;
 }
 
 function aplicarAdmitido(cl: CtxLey, i: Intento): Aplicado {
-  const c = ctxMateriaDe(cl.mundo), f = filaDeRef(estado(c), i.a);
+  const c = ctxMateriaDe(cl.mundo), e = estado(c), f = filaDeRef(e, i.a);
   if (!f || f.destino !== i.celda || huella(f.vista.masa) > i.dato![0]!) return 'hecho';
-  if (pagarMovimiento(c, f)) { vistaCuerpo(c, f.animal.cuerpo!, f.vista); reflejar(c, f); }
+  if (pagarMovimiento(c, f)) {
+    marcarFauna(c, e, f.celda);
+    vistaCuerpo(c, f.animal.cuerpo!, f.vista);
+    reflejar(c, f);
+  }
   return 'hecho';
 }
 
@@ -865,6 +883,7 @@ export const leyFauna: Ley = {
   },
   F5(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c);
+    e.paginasFauna.clear();
     // Antes de encender intentos, F5 resuelve los mordiscos locales que no pasan por la cola A.
     for (const i of e.mordiscos) aplicarGolpear(c, i);
     e.mordiscos.length = 0;
@@ -877,7 +896,7 @@ export const leyFauna: Ley = {
     for (const f of e.partos) if (e.filas.get(f.animal) === f) nacer(c, e, f);
     e.partos.length = 0;
     admitirCruces(c, e);
-    syncFauna(c.mundo.tiles, c.mundo.animals);
+    syncFauna(c.mundo.tiles, c.mundo.animals, (x, y) => marcarFauna(c, e, c.terreno.celda(x, y)));
   },
   F6(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c), w = c.escritura;

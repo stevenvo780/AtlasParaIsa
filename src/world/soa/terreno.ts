@@ -159,6 +159,10 @@ export class ArenaTerreno implements Terreno {
         return this.columna(nombre).subarray(c * PAGE_CELLS, (c + 1) * PAGE_CELLS);
       },
       marcar: (c, visible) => this.marcar(c, visible, hilo),
+      marcarVisible: c => {
+        this.comprobarDueno(c, hilo);
+        Atomics.add(this.versionVisible, c, 1);
+      },
     };
   }
 

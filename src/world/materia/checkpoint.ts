@@ -18,6 +18,9 @@ const FIRMA = 0x54414d56; // VMAT, little endian
 const VERSION = 1;
 const CELDAS_POR_PAGINA = 256;
 const U32_MAX = 0xffff_ffff;
+const BYTES_ENTERO = 8;
+const BYTES_LOTE = 4 * BYTES_ENTERO + 1 + 4; // ref, celda, dueño, número de pares, rol y forma
+const BYTES_PAR = 12;
 const TIPOS_CON_GARANTIA = new Set<TipoIntento>([TipoIntento.Depositar, TipoIntento.Dar, TipoIntento.Concedido, TipoIntento.Devuelto]);
 
 function entero(valor: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
@@ -52,6 +55,8 @@ class Escritor {
   u32(valor: number): void { const inicio = this.reservar(4); this.vista.setUint32(inicio, entero(valor, 0, U32_MAX), true); }
   f64(valor: number): void { const inicio = this.reservar(8); this.vista.setFloat64(inicio, valor, true); }
   entero(valor: number, min = 0): void { this.f64(entero(valor, min)); }
+  get posicion(): number { return this.pos; }
+  irA(posicion: number): void { this.pos = posicion; }
 
   bloque(bytes: Uint8Array | null): void {
     this.entero(bytes?.length ?? -1, -1);
@@ -140,27 +145,16 @@ class Lector {
 
 function paginaDe(celda: number): number { return Math.floor(entero(celda, -1) / CELDAS_POR_PAGINA); }
 
-function registrarRanura(ranuras: Set<number>, ref: LoteRef): void {
-  const ranura = slotDe(entero(ref));
-  if (ranuras.has(ranura)) throw new Error(`Ranura de materia duplicada: ${ranura}`);
-  ranuras.add(ranura);
-}
-
-function validarRanuras(ranuras: Set<number>): void {
-  for (const ranura of ranuras) if (ranura >= ranuras.size || ranura >= U32_MAX) {
-    throw new Error(`Ranuras de materia no consecutivas: ${ranura}.`);
-  }
-}
-
-function validarLote(lote: LoteGuardado, exclusivos: Set<string>): number {
+function validarLote(lote: LoteGuardado, exclusivos: Uint8Array): number {
   const { celda, rol, dueno, pares } = lote;
   entero(rol, Rol.Suelo, Rol.Cielo);
   entero(dueno, 0, U32_MAX);
   if (celda >= 0 && (rol <= Rol.Aire || rol === Rol.Mar || rol === Rol.Cielo)) {
     if (rol >= Rol.Aire && celda % CELDAS_POR_PAGINA !== 0) throw new Error('Celda de aire fuera del inicio de página.');
-    const clave = `${celda}:${rol}`;
-    if (exclusivos.has(clave)) throw new Error(`Lote exclusivo duplicado en celda ${celda}.`);
-    exclusivos.add(clave);
+    const local = celda % CELDAS_POR_PAGINA;
+    const bit = 1 << (rol <= Rol.Aire ? rol : Rol.Aire + 1 + rol - Rol.Mar);
+    if (exclusivos[local]! & bit) throw new Error(`Lote exclusivo duplicado en celda ${celda}.`);
+    exclusivos[local]! |= bit;
   }
   if (!(pares instanceof Float64Array)) throw new Error('Composición de lote ausente en el punto de control.');
   const ids = new Set<number>();
@@ -174,38 +168,91 @@ function validarLote(lote: LoteGuardado, exclusivos: Set<string>): number {
   return especies;
 }
 
-export function codificarPaginas(epoca: number, lotes: Iterable<LoteGuardado>, libres: Iterable<LoteRef>): Uint8Array {
-  const paginas = new Map<number, LoteGuardado[]>();
-  const ranuras = new Set<number>();
-  const exclusivos = new Set<string>();
-  for (const lote of lotes) {
-    registrarRanura(ranuras, lote.ref);
-    const pagina = paginaDe(lote.celda);
-    validarLote(lote, exclusivos);
-    let propios = paginas.get(pagina);
-    if (!propios) { propios = []; paginas.set(pagina, propios); }
-    propios.push(lote);
+type Fuente<T> = Iterable<T> | (() => Iterable<T>);
+
+function repetible<T>(origen: Fuente<T>): () => Iterable<T> {
+  if (typeof origen === 'function') return origen;
+  const elementos = Array.isArray(origen) ? origen : Array.from(origen);
+  return () => elementos;
+}
+
+interface PaginaPorEscribir {
+  bytes: number;
+  restantes: number;
+  posicion: number;
+  fin: number;
+  exclusivos: Uint8Array;
+}
+
+function bytesDeLote(lote: LoteGuardado): number {
+  if (!(lote.pares instanceof Float64Array)) throw new Error('Composición de lote ausente en el punto de control.');
+  return BYTES_LOTE + BYTES_PAR * entero(lote.pares.length / 2);
+}
+
+/** Las fábricas recorren dos veces la misma arena inmóvil. El orden canónico es de primera visita por página y luego
+ * de visita dentro de cada página. La primera pasada mide, la segunda escribe sin retener pares de otros lotes. */
+export function codificarPaginas(epoca: number, lotes: Fuente<LoteGuardado>, libres: Fuente<LoteRef>): Uint8Array {
+  entero(epoca);
+  const recorrerLotes = repetible(lotes), recorrerLibres = repetible(libres);
+  const paginas = new Map<number, PaginaPorEscribir>();
+  let capacidad = 3 * BYTES_ENTERO; // época, número de páginas y número de ranuras retiradas
+  for (const lote of recorrerLotes()) {
+    const pagina = paginaDe(lote.celda), bytes = bytesDeLote(lote);
+    let plan = paginas.get(pagina);
+    if (!plan) {
+      plan = { bytes: 0, restantes: 0, posicion: 0, fin: 0, exclusivos: new Uint8Array(CELDAS_POR_PAGINA) };
+      paginas.set(pagina, plan);
+      capacidad += 3 * BYTES_ENTERO; // clave, época y número de lotes de la página
+    }
+    plan.bytes += bytes;
+    plan.restantes++;
+    capacidad += bytes;
   }
-  const salida = new Escritor();
+  let numeroLibres = 0;
+  for (const _ of recorrerLibres()) numeroLibres++;
+  capacidad = entero(capacidad + numeroLibres * BYTES_ENTERO);
+
+  const salida = new Escritor(capacidad);
+  const ranuras = new RanurasPaginas(capacidad, false);
   salida.entero(epoca);
   salida.entero(paginas.size);
-  for (const [pagina, propios] of paginas) {
+  for (const [pagina, plan] of paginas) {
     salida.entero(pagina, -1);
     salida.entero(epoca);
-    salida.entero(propios.length);
-    for (const lote of propios) {
-      salida.entero(lote.ref);
-      salida.entero(lote.celda, -1);
-      salida.u8(lote.rol);
-      salida.u32(lote.forma);
-      salida.entero(lote.dueno);
-      salida.pares(lote.pares);
-    }
+    salida.entero(plan.restantes);
+    plan.posicion = salida.posicion;
+    plan.fin = plan.posicion + plan.bytes;
+    salida.irA(plan.fin);
   }
-  const retirados = Array.from(libres);
-  salida.entero(retirados.length);
-  for (const ref of retirados) { registrarRanura(ranuras, ref); salida.entero(ref); }
-  validarRanuras(ranuras);
+  const inicioLibres = salida.posicion;
+  for (const lote of recorrerLotes()) {
+    const plan = paginas.get(paginaDe(lote.celda));
+    const bytes = bytesDeLote(lote);
+    if (!plan || plan.restantes === 0 || bytes > plan.fin - plan.posicion) throw new Error('Los lotes cambiaron durante la codificación.');
+    validarLote(lote, plan.exclusivos);
+    ranuras.registrar(entero(lote.ref), plan.posicion);
+    salida.irA(plan.posicion);
+    salida.entero(lote.ref);
+    salida.entero(lote.celda, -1);
+    salida.u8(lote.rol);
+    salida.u32(lote.forma);
+    salida.entero(lote.dueno);
+    salida.pares(lote.pares);
+    plan.posicion = salida.posicion;
+    plan.restantes--;
+  }
+  for (const plan of paginas.values()) {
+    if (plan.restantes !== 0 || plan.posicion !== plan.fin) throw new Error('Los lotes cambiaron durante la codificación.');
+  }
+  salida.irA(inicioLibres);
+  salida.entero(numeroLibres);
+  for (const ref of recorrerLibres()) {
+    if (salida.posicion === capacidad) throw new Error('Las ranuras retiradas cambiaron durante la codificación.');
+    ranuras.registrar(entero(ref), salida.posicion, true);
+    salida.entero(ref);
+  }
+  if (salida.posicion !== capacidad) throw new Error('Las ranuras retiradas cambiaron durante la codificación.');
+  ranuras.validar();
   return salida.terminar();
 }
 
@@ -217,9 +264,9 @@ class RanurasPaginas {
   private mayor = -1;
   private cantidad = 0;
 
-  constructor(bytes: Uint8Array, private readonly indexar: boolean) {
-    this.maximo = Math.min(U32_MAX, Math.floor(bytes.length / 8));
-    this.Tipo = !indexar ? Uint8Array : bytes.length <= 0x7fff_ffff ? Int32Array : Float64Array;
+  constructor(bytes: number, private readonly indexar: boolean) {
+    this.maximo = Math.min(U32_MAX, Math.floor(bytes / BYTES_ENTERO));
+    this.Tipo = !indexar ? Uint8Array : bytes <= 0x7fff_ffff ? Int32Array : Float64Array;
     this.posiciones = new this.Tipo(Math.min(256, this.maximo));
   }
 
@@ -263,15 +310,15 @@ function leerPaginas(
   if (entrada.entero() !== epoca) throw new Error('Sello de época incorrecto en las páginas de materia.');
   const cantidad = entrada.entero();
   const paginas = new Set<number>();
-  const ranuras = new RanurasPaginas(bytes, indexar);
-  const exclusivos = new Set<string>();
+  const ranuras = new RanurasPaginas(bytes.length, indexar);
+  const exclusivos = new Uint8Array(CELDAS_POR_PAGINA);
   for (let i = 0; i < cantidad; i++) {
     const pagina = entrada.entero(-1);
     if (paginas.has(pagina)) throw new Error(`Página de materia duplicada: ${pagina}`);
     paginas.add(pagina);
     if (entrada.entero() !== epoca) throw new Error(`Sello de época incorrecto en la página de materia ${pagina}.`);
     const numeroLotes = entrada.entero();
-    exclusivos.clear(); // La celda de cada lote se comprueba contra esta página, que es única.
+    exclusivos.fill(0); // La celda de cada lote se comprueba contra esta página, que es única.
     for (let j = 0; j < numeroLotes; j++) {
       const posicion = entrada.posicion;
       const ref = entrada.entero();

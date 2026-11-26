@@ -838,7 +838,7 @@ export class Dueno implements CtxF0 {
     return {
       epoca: this.epoca, tick: this.mundo.tick,
       sustancias: serializarSustancias(this.quimica as ServicioQuimicoImpl), registro: this.registro.guardar(),
-      paginas: codificarPaginas(this.epoca, lotes(), arena.libres()), enVuelo: codificarEnVuelo(enVuelo),
+      paginas: codificarPaginas(this.epoca, lotes, () => arena.libres()), enVuelo: codificarEnVuelo(enVuelo),
       inicial: this.totales.inicial, fuentes: this.totales.fuentes, sumideros: this.totales.sumideros,
     };
   }

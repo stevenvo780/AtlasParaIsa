@@ -29,6 +29,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { consumirCorteGuardado, type CorteGuardadoSellado } from '../world/motor/corte-sellado.js';
 import type { TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
+import type { TeselasCorteVerificadas } from '../world/motor/teselas-corte.js';
 import { codificarCheckpoint } from '../world/materia/checkpoint.js';
 import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts, type PreparedMatterParts } from './snapshot-matter-parts.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
@@ -448,6 +449,9 @@ export class Store {
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
     return this.snapshotParts.faunaCorteStats;
+  }
+  get snapshotTeselasCorteStats(): { reused: number; recoded: number } {
+    return this.snapshotParts.teselasCorteStats;
   }
   get context(): WorldContext {
     return { loadChunk: (key, atTick, v23) => this.loadChunk(key, atTick, v23),
@@ -1821,13 +1825,14 @@ export class Store {
 
   guardarCorteSellado(sello: CorteGuardadoSellado, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial): Instantanea {
-    const { instantanea, fauna } = consumirCorteGuardado(sello);
-    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna);
+    const { instantanea, fauna, teselas } = consumirCorteGuardado(sello);
+    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna, teselas);
     return instantanea;
   }
 
   private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
-    sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[]): void {
+    sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
+    teselasVerificadas?: TeselasCorteVerificadas): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
@@ -1841,12 +1846,12 @@ export class Store {
       corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
-    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada);
+    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
-    faunaVerificada?: readonly TramoFaunaVerificada[]): void {
+    faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas): void {
     const complete = matter !== undefined;
     const matterParts = matter && !(matter instanceof Uint8Array) ? matter : null;
     let matterBody = matter instanceof Uint8Array ? matter : null;
@@ -1912,7 +1917,7 @@ export class Store {
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
     let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle,
       technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) },
-    paramsOf(world), this.snapshotInlineTileLimit, faunaVerificada);
+    paramsOf(world), this.snapshotInlineTileLimit, faunaVerificada, teselasVerificadas);
     let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
     let written: WrittenSnapshot | undefined;

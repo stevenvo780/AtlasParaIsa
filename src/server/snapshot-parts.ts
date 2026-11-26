@@ -6,6 +6,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import { clavesJsonUnicas } from '../shared/json-keys.js';
 import type { World } from '../world/index.js';
 import { faunaCorteDe, type TramoFaunaCorte, type TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
+import type { TeselasCorteVerificadas } from '../world/motor/teselas-corte.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
@@ -46,6 +47,7 @@ type Organisms = Pick<World, typeof ORGANISM_FIELDS[number]>;
 export interface PreparedSnapshot {
   inline?: string; metadata?: string; tiles: readonly Tile[]; organisms?: Organisms; nativo: boolean;
   faunaVerificada?: readonly TramoFaunaVerificada[];
+  teselasVerificadas?: TeselasCorteVerificadas;
 }
 
 export function hasCanonicalSnapshotPartsPrefix(body: string): boolean {
@@ -135,6 +137,7 @@ export class SnapshotParts {
   private pagesReused = 0;
   private pagesEncoded = 0;
   private readonly faunaStats = { compared: 0, accepted: 0, rejected: 0, reused: 0 };
+  private readonly teselasStats = { reused: 0, recoded: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
     private readonly packedPeople = false) {
@@ -150,6 +153,10 @@ export class SnapshotParts {
   /** Filas remotas cotejadas, rechazadas o reutilizadas desde un corte sellado durante la escritura. */
   get faunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
     return { ...this.faunaStats };
+  }
+  /** Filas verificadas reutilizadas o recodificadas por una mutación posterior al corte. */
+  get teselasCorteStats(): { reused: number; recoded: number } {
+    return { ...this.teselasStats };
   }
   /** Solo tras el COMMIT de la transacción en la que `write`/`collect` construyeron lo pendiente. */
   confirmPendingPages(): void {
@@ -174,7 +181,8 @@ export class SnapshotParts {
     if (!this.db.isTransaction) throw new Error('Snapshot parts require a coherent transaction.');
   }
 
-  prepare(world: World, params: WorldParams, inlineLimit: number, faunaVerificada?: readonly TramoFaunaVerificada[]): PreparedSnapshot {
+  prepare(world: World, params: WorldParams, inlineLimit: number, faunaVerificada?: readonly TramoFaunaVerificada[],
+    teselasVerificadas?: TeselasCorteVerificadas): PreparedSnapshot {
     const nativo = params.v23.guardadoCompleto;
     if (!nativo && world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [], nativo };
     // Keep null placeholders to preserve the world's enumerable property order after reloading.
@@ -186,7 +194,7 @@ export class SnapshotParts {
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
     if (!nativo && metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES)
       failure('metadata exceeds transport size');
-    return { metadata, tiles: world.tiles, organisms, nativo, faunaVerificada };
+    return { metadata, tiles: world.tiles, organisms, nativo, faunaVerificada, teselasVerificadas };
   }
 
   /** Los tres campos del vale que una conexión ajena puede mover, recotejados DENTRO de la transacción:
@@ -290,6 +298,8 @@ export class SnapshotParts {
     const certified = residentTopologyToken(tiles) !== undefined;
     const gate = certified ? residentSnapshotGate(tiles) : undefined;
     const candidates = certified ? this.reusablePages(tiles, reuse, gate) : null;
+    const writeTeselasCorte = prepared.nativo && prepared.teselasVerificadas?.tramos.length
+      ? this.teselasCortePages(tiles, prepared.teselasVerificadas) : undefined;
     const pages: Page[] = [], pending: CachedPage[] = [], insert = this.db.prepare('INSERT INTO main.snapshot_parts(digest,body) VALUES (?,?)');
     // Probe the key before binding a multi-megabyte body. The caller's write transaction keeps the row stable.
     const present = this.db.prepare('SELECT 1 FROM main.snapshot_parts WHERE digest=?');
@@ -319,8 +329,10 @@ export class SnapshotParts {
         this.onProgress?.();
         continue;
       }
-      const rows = encodeSnapshotTileRows(tiles, offset, Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset), prepared.nativo);
-      const page = writePage(index, JSON.stringify(rows), rows.length);
+      const count = Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset);
+      const body = writeTeselasCorte ? writeTeselasCorte(offset, count)
+        : JSON.stringify(encodeSnapshotTileRows(tiles, offset, count, prepared.nativo));
+      const page = writePage(index, body, count);
       pages.push(page);
       this.pagesEncoded++;
       if (certified) pending.push(this.cachedPage(tiles, offset, page.count, page.digest, page.bytes));
@@ -353,6 +365,45 @@ export class SnapshotParts {
       ? { pages: pending, parallel: gate ? { identity: gate.identity, epoch: gate.epoch, serial: gate.serial } : null }
       : null;
     return { body, digest, bytes: bytes + size, pages: digests };
+  }
+
+  /** El cursor conserva un tramo que atraviese páginas. Los huecos y las filas sucias consecutivas
+   * se codifican juntos con la misma proyección nativa que el guardado sin corte. */
+  private teselasCortePages(tiles: Tile[], { tramos, modificadas }: TeselasCorteVerificadas):
+    (offset: number, count: number) => string {
+    let fin = 0;
+    for (const { desde, filas } of tramos) {
+      if (!Number.isSafeInteger(desde) || desde < fin || filas.length === 0 || desde + filas.length > tiles.length)
+        failure('verified tile range');
+      fin = desde + filas.length;
+    }
+    const raw = residentTopologyToken(tiles) === undefined ? tiles : residentBackingArray(tiles);
+    const hayModificadas = modificadas.size > 0;
+    const filasCanonicas = (desde: number, count: number) =>
+      JSON.stringify(encodeSnapshotTileRows(tiles, desde, count, true)).slice(1, -1);
+    let index = 0;
+    return (offset, count) => {
+      const fin = offset + count, fragmentos: string[] = [];
+      let inicioCanonico = offset, reused = 0, recoded = 0;
+      for (let tramo = tramos[index]; tramo && tramo.desde < fin; tramo = tramos[++index]) {
+        const finTramo = tramo.desde + tramo.filas.length, finFilas = Math.min(fin, finTramo);
+        for (let i = Math.max(offset, tramo.desde); i < finFilas; i++) {
+          if (hayModificadas && modificadas.has(raw[i]!)) { recoded++; continue; }
+          if (inicioCanonico < i) fragmentos.push(filasCanonicas(inicioCanonico, i - inicioCanonico));
+          const fila = tramo.filas[i - tramo.desde]!;
+          if (typeof fila !== 'string' || !fila.startsWith('[')) failure('verified tile row');
+          fragmentos.push(fila);
+          inicioCanonico = i + 1;
+          reused++;
+        }
+        if (finTramo > fin) break;
+      }
+      if (inicioCanonico < fin) fragmentos.push(filasCanonicas(inicioCanonico, fin - inicioCanonico));
+      const body = `[${fragmentos.join(',')}]`;
+      this.teselasStats.reused += reused;
+      this.teselasStats.recoded += recoded;
+      return body;
+    };
   }
 
   private *faunaCorteRows(tramos: readonly TramoFaunaCorte[], count: number): Generator<{ index: number; row: string }, void> {

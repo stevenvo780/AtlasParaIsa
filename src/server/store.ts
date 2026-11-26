@@ -1943,7 +1943,12 @@ export class Store {
   private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
     teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number,
-    cerrarFase?: CerrarFaseGuardado): void {
+    observarFase?: CerrarFaseGuardado): void {
+    let observador = observarFase;
+    const cerrarFase: CerrarFaseGuardado | undefined = observador && (fase => {
+      try { observador?.(fase); }
+      catch { observador = undefined; /* Un fallo de telemetría no participa en el guardado. */ }
+    });
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');

@@ -6,8 +6,26 @@ import type { LegacyRecord } from '../src/shared/demography.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { inheritGenome } from '../src/world/genetics.js';
 import { createWorld } from '../src/world/index.js';
+import { crearCorteGuardado } from '../src/world/motor/corte-sellado.js';
 import { parseParams } from '../src/world/params.js';
 import { filaInstantanea, laboratorio, sha256 } from './lib/store.js';
+
+test('un fallo del observador tras el COMMIT conserva la confirmación del corte', t => {
+  const { store, path } = laboratorio(t, 'atlas-sello-perfil-');
+  const world = createWorld(42, parseParams('v23.guardadoCompleto=true'));
+  const sello = crearCorteGuardado(() => ({ world, materia: null }));
+  const fases: string[] = [];
+  const cargada = store.guardarCorteSellado(sello, [], [], undefined, fase => {
+    fases.push(fase);
+    if (fase === 'commit') throw new Error('Fallo inyectado del reloj de telemetría.');
+  });
+  assert.equal(fases.at(-1), 'commit');
+  assert.equal(store.confirmacionesDeGuardado, 1);
+  assert.equal(store.db.isTransaction, false);
+  const lector = new Store(path, { readOnly: true });
+  try { assert.equal(lector.verificarGuardado()?.world.tick, cargada.world.tick); }
+  finally { lector.close(); }
+});
 
 test('un escritor frío decodifica una sola vez la cabeza anterior y conserva el respaldo', t => {
   const opciones = { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true };

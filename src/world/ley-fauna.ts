@@ -22,7 +22,7 @@ import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
   abortar, beber, concebir, crearCuerpo, crecer, depositar, extraer, gestar, herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir,
-  pagar, parir, pedidoComida, plantillaDe, reservaJ, vistaCuerpo,
+  pagar, parir, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
 import { Parte, Rol, type Cuerpo, type Kappa, type LoteRef, type Plantilla, type VistaCuerpo } from './materia/tipos.js';
@@ -88,6 +88,7 @@ interface Estado {
   aguaVecina: Map<number, number>;
   partos: Fila[];
   mordiscos: Intento[];
+  cruces: { de: Ref; celda: number; nonce: number; huella: number }[];
   orden: Fila[];
   lotes: LotesCelda;
   buf: Float64Array;
@@ -98,7 +99,7 @@ function estado(c: CtxLey): Estado {
   let e = estados.get(c.mundo);
   if (!e) estados.set(c.mundo, e = {
     filas: new Map(), porSlot: new Map(), plantillas: new Map(), jPorComida: 0, ocupacion: new Map(), aguaVecina: new Map(),
-    partos: [], mordiscos: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
+    partos: [], mordiscos: [], cruces: [], orden: [], lotes: { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA },
     buf: new Float64Array(16), campos: null,
   });
   return e;
@@ -447,22 +448,6 @@ function comer(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, rol: Rol, to
   return comido;
 }
 
-/** Come de una celda ajena: `Tomar` de su lote `rol` lo digerible para su κ; llega al tubo con el `Concedido`. */
-function comerAjeno(c: CtxLeyMateria, f: Fila, celda: number, rol: Rol, tope: number): number {
-  const cu = f.animal.cuerpo!, masa = f.vista.masa;
-  const kg = Math.min(tope, CAPACIDAD_DIGESTIVO * masa - c.materia.vista(cu.digestivo).masa, TASA_INGESTA * masa ** 0.75);
-  if (!(kg > 0)) return 0;
-  const pd = pedidoComida(c, cu, kg), dato = new Float64Array(DATO_TOMAR.kappa + 4);
-  dato[DATO_TOMAR.rol] = rol; dato[DATO_TOMAR.parte] = pd.parte; dato[DATO_TOMAR.esp] = pd.esp;
-  dato[DATO_TOMAR.cuantos] = pd.cuantos; dato[DATO_TOMAR.loteDestino] = cu.digestivo;
-  const k = pd.kappa ?? plantillaDe(c, cu).kappa;
-  for (let i = 0; i < 4; i++) dato[DATO_TOMAR.kappa + i] = k[i]!;
-  const dueno = c.terreno.duenoChunk[c.terreno.chunkDe(celda)] ?? -1;
-  c.buzon.enviar(dueno >= 0 ? dueno : c.hilo, { tipo: TipoIntento.Tomar, de: f.ref, a: REF_NULA, celda, lote: REF_NULA,
-    nonce: c.id('nonce'), materia: null, dato, bytes: null });
-  return kg;
-}
-
 /** Bebe del agua de su celda o, en tierra, de la de una vecina propia (orilla). */
 function beberAqui(c: CtxLeyMateria, e: Estado, f: Fila, celda: number, tope: number): void {
   const cu = f.animal.cuerpo!, masa = f.vista.masa;
@@ -497,19 +482,62 @@ function proponer(c: CtxLeyMateria, e: Estado, f: Fila, pasos: number): void {
 /** Segunda pasada del movimiento, en orden al azar: cada propuesta entra si su huella cabe en el área libre de la celda
  * de destino y si paga C_MOVER·masa·distancia con su reserva. */
 function moverse(c: CtxLeyMateria, e: Estado, f: Fila): void {
-  const a = f.animal, fa = a.fauna!;
-  if (f.destino < 0) return;
+  if (!propia(c, f.destino)) return;
   const h = f.huellaContada, ocupado = e.ocupacion.get(f.destino) ?? 0;
-  if (ocupado + h > AREA_CELDA) return;
-  const dist = Math.abs(f.dx - a.x) + Math.abs(f.dy - a.y), coste = C_MOVER * (f.vista.masa + f.vista.carga) * dist;
-  if (f.yo.reservaJ < coste) { fa.avance = 0; return; }
-  const pagado = pagar(c, a.cuerpo!, coste);
-  if (pagado < coste) { fa.avance = 0; return; }
-  const antes = c.terreno.celda(a.x, a.y);
-  e.ocupacion.set(antes, Math.max(0, (e.ocupacion.get(antes) ?? 0) - h));
+  if (ocupado + h > AREA_CELDA || !pagarMovimiento(c, f)) return;
+  e.ocupacion.set(f.celda, Math.max(0, (e.ocupacion.get(f.celda) ?? 0) - h));
   e.ocupacion.set(f.destino, ocupado + h);
+}
+
+function pagarMovimiento(c: CtxLeyMateria, f: Fila): boolean {
+  const a = f.animal, fa = a.fauna!;
+  const dist = Math.abs(f.dx - a.x) + Math.abs(f.dy - a.y), coste = C_MOVER * (f.yo.masa + f.vista.carga) * dist;
+  if (f.yo.reservaJ < coste || pagar(c, a.cuerpo!, coste) < coste) { fa.avance = 0; return false; }
   a.x = f.dx; a.y = f.dy; a.lastMove = c.tick;
   fa.avance = Math.max(0, fa.avance - dist);
+  return true;
+}
+
+/** En la frontera el animal sigue en origen mientras el destino resuelve la admisión. */
+function solicitarCruce(c: CtxLey, f: Fila): void {
+  if (f.destino < 0 || propia(c, f.destino)) return;
+  const dueno = c.terreno.duenoChunk[c.terreno.chunkDe(f.destino)]!;
+  if (dueno < 0) return;
+  c.buzon.enviar(dueno, { tipo: TipoIntento.Cruzar, de: f.ref, a: REF_NULA, celda: f.destino, lote: REF_NULA,
+    nonce: c.id('nonce'), materia: null, dato: Float64Array.of(huella(f.vista.masa)), bytes: null });
+}
+
+function aplicarCruzar(c: CtxLey, i: Intento): Aplicado {
+  estado(c).cruces.push({ de: i.de, celda: i.celda, nonce: i.nonce, huella: i.dato![0]! });
+  return 'hecho';
+}
+
+/** Tras los partos y las muertes, el dueño de la celda reserva espacio para cada cruce admitido. */
+function admitirCruces(c: CtxLeyMateria, e: Estado): void {
+  if (!e.cruces.length) return;
+  e.ocupacion.clear();
+  for (const i of e.cruces) e.ocupacion.set(i.celda, 0);
+  for (const a of c.mundo.animals) {
+    const celda = c.terreno.celda(a.x, a.y);
+    const ocupada = e.ocupacion.get(celda);
+    if (ocupada !== undefined && a.cuerpo) e.ocupacion.set(celda, ocupada + huella(masaDe(c, a.cuerpo)));
+  }
+  for (const i of e.cruces) {
+    const total = (e.ocupacion.get(i.celda) ?? 0) + i.huella;
+    if (total > AREA_CELDA || c.retiraChunk(c.terreno.chunkDe(i.celda))) continue;
+    e.ocupacion.set(i.celda, total);
+    const dueno = c.frente.dueno[slotDe(i.de)]!;
+    c.buzon.enviar(dueno, { tipo: TipoIntento.Admitido, de: REF_NULA, a: i.de, celda: i.celda, lote: REF_NULA,
+      nonce: i.nonce, materia: null, dato: Float64Array.of(i.huella), bytes: null });
+  }
+  e.cruces.length = 0;
+}
+
+function aplicarAdmitido(cl: CtxLey, i: Intento): Aplicado {
+  const c = ctxMateriaDe(cl.mundo), f = filaDeRef(estado(c), i.a);
+  if (!f || f.destino !== i.celda || huella(f.vista.masa) > i.dato![0]!) return 'hecho';
+  if (pagarMovimiento(c, f)) { vistaCuerpo(c, f.animal.cuerpo!, f.vista); reflejar(c, f); }
+  return 'hecho';
 }
 
 function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
@@ -564,14 +592,12 @@ function contarHuella(e: Estado, f: Fila, celda: number, masa: number): void {
  * huella que gana queda contada para quien coma después en la misma celda. */
 function alimentarse(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const a = f.animal, d = f.decision, celda = c.terreno.celda(a.x, a.y);
-  if (celda < 0) return;
-  const mia = propia(c, celda), tope = margenKg(c, e, f, celda);
+  if (!propia(c, celda)) return;
+  const tope = margenKg(c, e, f, celda);
   if (!(tope > 0)) return;
-  if (d.accion === 'drink') { if (mia) beberAqui(c, e, f, celda, tope); }
+  if (d.accion === 'drink') beberAqui(c, e, f, celda, tope);
   else if (d.accion === 'graze' || d.accion === 'hunt') {
     const carn = sat01(a.fauna!.genoma[GEN.carnivoria] ?? 0);
-    // De una celda ajena la comida llega luego (`Concedido`): su huella se cuenta ya, como si hubiera llegado.
-    if (!mia) { contarHuella(e, f, celda, masaDe(c, a.cuerpo!) + comerAjeno(c, f, celda, carn >= 0.5 ? Rol.Cadaver : Rol.Vida, tope)); return; }
     // Carne primero si la hay y la digiere mejor que la hierba; si no, la vegetación de la celda.
     let queda = tope;
     if (carn > 0 && c.materia.lotes(celda, Rol.Cadaver, e.buf) > 0) queda -= comer(c, e, f, celda, Rol.Cadaver, queda);
@@ -831,7 +857,12 @@ export const leyFauna: Ley = {
     for (const f of orden) actuar(c, e, f);
     barajar(c, orden);
     for (const f of orden) moverse(c, e, f);
-    for (const f of orden) { alimentarse(c, e, f); vistaCuerpo(c, f.animal.cuerpo!, f.vista); reflejar(c, f); }
+    for (const f of orden) {
+      alimentarse(c, e, f);
+      vistaCuerpo(c, f.animal.cuerpo!, f.vista);
+      reflejar(c, f);
+      solicitarCruce(c, f);
+    }
   },
   F5(cl) {
     const c = ctxMateriaDe(cl.mundo), e = estado(c);
@@ -846,6 +877,7 @@ export const leyFauna: Ley = {
     }
     for (const f of e.partos) if (e.filas.get(f.animal) === f) nacer(c, e, f);
     e.partos.length = 0;
+    admitirCruces(c, e);
     syncFauna(c.mundo.tiles, c.mundo.animals);
   },
   F6(cl) {
@@ -862,7 +894,7 @@ export const leyFauna: Ley = {
       });
     }
   },
-  aplicar: { Golpear: aplicarGolpear, Tomar: aplicarTomar },
+  aplicar: { Golpear: aplicarGolpear, Tomar: aplicarTomar, Cruzar: aplicarCruzar, Admitido: aplicarAdmitido },
   proyectar: { animal: proyectarAnimal },
   comprobar: comprobarFauna,
 };

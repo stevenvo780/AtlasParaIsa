@@ -272,7 +272,7 @@ function resolver(c: CtxLey, i: Intento, leyes: ReturnType<typeof leyesActivas>)
 const NOMBRE_INTENTO = Object.fromEntries(Object.entries(TipoIntento).map(([nombre, tipo]) => [tipo, nombre])) as
   Record<TipoIntento, keyof typeof TipoIntento>;
 
-/** Vacía una cola de este dueño ('M' y 'B' en F1, 'A' en F5) y aplica cada intento. Devuelve cuántos aplicó. */
+/** Vacía una cola de este dueño ('M' y 'B' en F1, 'A' en F5 y 'C' en F6) y devuelve cuántos intentos aplicó. */
 export function aplicarCola(c: CtxLey, cola: Cola): number {
   if (!c.params.v23.intentos) return 0;
   const e = estadoDe(c);

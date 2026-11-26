@@ -513,7 +513,9 @@ export class Dueno implements CtxF0 {
   gancho(fase: GanchoFase): void { for (const ley of this.leyes) ley[fase]?.(this); }
 
   /** Vacía una cola con el aplicador de m5 (solo con `v23.intentos`). */
-  aplicar(cola: 'M' | 'A' | 'B'): void { if (this.params.v23.intentos) aplicarCola(this, cola); }
+  aplicar(cola: 'M' | 'A' | 'B' | 'C'): void { if (this.params.v23.intentos) aplicarCola(this, cola); }
+
+  retiraChunk(chunk: ChunkId): boolean { return this.cesiones.some(([c, destino]) => c === chunk && destino < 0); }
 
   /** F0, tras las regiones y los gestos: lo global del coordinador y `Ley.F0`. */
   F0(): void {

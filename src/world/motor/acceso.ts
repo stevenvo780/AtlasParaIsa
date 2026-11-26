@@ -39,6 +39,8 @@ export interface CtxLey extends CtxDueno {
    * o si ya se olvidó (muerto hace más de un día). Vale para personas y fauna. */
   idDe(uid: number): string | undefined;
   uidDe(id: string): number;
+  /** El chunk se va al archivo al cerrar este tick. Una cesión a otro dueño sigue residente. */
+  retiraChunk(chunk: ChunkId): boolean;
   /** Percepción en lote del dueño (CPU en piscina o GPU) para las leyes que no son personas (carril f). Opcional: sin
    * ella la ley percibe en CPU por su cuenta. */
   percibir?(lote: LotePercepcion, planes: readonly Plan[]): Percepcion;

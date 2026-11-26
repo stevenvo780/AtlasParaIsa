@@ -5,7 +5,7 @@
  *
  * Con un hilo, `MotorUnico` es una fachada de `stepWorld`: el hilo que llama es el único dueño. Con más,
  * `MotorDuenos` es el coordinador (y dueño 0): reparte el mundo en tramos Morton, lanza un worker por dueño sobre una
- * `Piscina` y conduce cada tick con cuatro barreras (F0 en serie, percibir, actuar, aplicar y el cierre en serie).
+ * `Piscina` conduce los tramos percibir, actuar, aplicar y publicar. F0 y el cierre son en serie.
  * Toda la memoria compartida se crea al abrir la época (un SAB no viaja por un buzón): cargar, o enlazar una cinta con
  * los workers ya en marcha, cierra la piscina y abre otra.
  */
@@ -321,10 +321,10 @@ class MotorDuenos implements Motor {
       d.F0();
       control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
-      // B1 · percibir · B2 · actuar · B3 · aplicar · B4
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);
       buzones.fijarFase(3); piscina.ejecutar(TRAMO.actuar);
       buzones.fijarFase(5); piscina.ejecutar(TRAMO.aplicar);
+      buzones.fijarFase(6); piscina.ejecutar(TRAMO.publicar);
       this.#tabla.publicar(m.tick);
       // Cierre en serie: lo que los dueños mandaron al coordinador en el tick (la crónica en orden, altas, resultados).
       this.#recoger();
@@ -447,6 +447,7 @@ class MotorDuenos implements Motor {
   /** Un dueño devolvió un chunk retirado: queda archivado en el mundo del coordinador, pendiente de guardado. */
   #archivar(mig: MigranteChunk): void {
     const m = this.#mundo;
+    if (paramsOf(m).v23.fauna) syncFauna(mig.tiles, mig.animals);
     archivarChunk(m, { ...mig.meta, lifeVersion: 4, lastTick: m.tick, tiles: mig.tiles, animals: mig.animals, structures: mig.structures });
     for (const [clave, pagina] of this.#paginas) if (pagina.chunk === mig.chunk) { this.#paginas.delete(clave); break; }
   }

@@ -63,7 +63,7 @@ test('guardado completo paginado: mundo, materia, clon y épocas tras reabrir', 
 
   store.guardar({ world, materia });
   const body = JSON.parse(filaInstantanea(store).body);
-  assert.equal(body.snapshotEncoding, 'snapshot-parts-v1');
+  assert.equal(body.snapshotEncoding, 'snapshot-parts-v2');
   assert.equal(Object.hasOwn(body.world, 'materia'), false);
   assert.equal(store.db.prepare("SELECT 1 FROM metadata WHERE key GLOB 'snapshot-replay-v1:*'").get(), undefined);
   const blob = store.db.prepare('SELECT body FROM snapshot_matter WHERE slot=0').get()!.body;
@@ -81,7 +81,7 @@ test('guardado completo paginado: mundo, materia, clon y épocas tras reabrir', 
 });
 
 for (const snapshotInlineTileLimit of [0, SNAPSHOT_INLINE_TILE_LIMIT]) {
-  test(`mundo sin materia en JSON nativo (límite en línea ${snapshotInlineTileLimit})`, t => {
+  test(`guardado completo sin materia conserva el signo de heading (límite de teselas ${snapshotInlineTileLimit})`, t => {
     const { store } = laboratorio(t, 'ps-json-', { snapshotInlineTileLimit });
     const world = createWorld(7, params);
     const tile = world.tiles[0]!;
@@ -91,7 +91,7 @@ for (const snapshotInlineTileLimit of [0, SNAPSHOT_INLINE_TILE_LIMIT]) {
     const loaded = store.cargarInstantanea()!;
     assert.equal(loaded.instantanea.materia, null);
     assert.equal(loaded.epoca, 1);
-    assert.equal(loaded.instantanea.world.people[0]!.heading, 0);
+    assert.equal(loaded.instantanea.world.people[0]!.heading, -0);
     assert.equal(loaded.instantanea.world.tiles[0]!.elevation, 0);
   });
 }

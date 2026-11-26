@@ -49,6 +49,7 @@ import {
 } from './contexto.js';
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
+import { faunaCorteDe, vincularFaunaCorte, type TramoFaunaCorte } from './fauna-corte.js';
 import {
   LIMITE_BYTES_FOTO_TOTAL_DEFECTO, trazaFotogramaDuenosVacia,
   type LoteFotoDuenos, type ParteFotoDueno, type TrazaFotogramaDuenos,
@@ -794,12 +795,13 @@ class MotorDuenos implements Motor {
     } catch (error) { throw this.#fallo(error); }
   }
 
-  instantanea(): Instantanea {
+  instantanea(paraGuardado = false): Instantanea {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
       const paraConfirmar = this.#config.confirmarGuardadoVivo === true;
-      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar);
+      const prepararFauna = paraGuardado && this.#config.faunaCortePreparada === true && paramsOf(this.#mundo).v23.guardadoCompleto;
+      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna);
       recordSample(world);
       const materia = this.#d.instantaneaMateria(pendientes);
       if (paraConfirmar) this.#ultimaInstantanea = {
@@ -876,8 +878,8 @@ class MotorDuenos implements Motor {
     return { ...this.#trazaFotoDuenos, migrantesTransferidos };
   }
 
-  #reunirMundo(paraConfirmar = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
-    const canales = this.#canalesCorte, solicitud = canales?.pedir();
+  #reunirMundo(paraConfirmar = false, prepararFauna = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
+    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
@@ -890,6 +892,15 @@ class MotorDuenos implements Motor {
     const tecnologiaRemotaEquivalente = paraConfirmar && partes.every(parte =>
       isDeepStrictEqual(sinCheckpointTecnologia(parte.technology), this.#tecnologiaInicial));
     const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
+    if (canales && prepararFauna) {
+      const tramos: TramoFaunaCorte[] = [];
+      let desde = this.#mundo.animals.length;
+      for (const parte of partes) {
+        for (const tramo of faunaCorteDe(parte.animals) ?? []) tramos.push({ desde: desde + tramo.desde, bloques: tramo.bloques });
+        desde += parte.animals.length;
+      }
+      if (tramos.length) vincularFaunaCorte(world.animals, tramos);
+    }
     const pendientes = this.#d.pendientes();
     for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
       // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.

@@ -4,6 +4,7 @@ import { deserialize, serialize } from 'node:v8';
 import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
+import { materializeAnimals, type Animal } from '../src/world/animals.js';
 import { enableChronicleJournal } from '../src/world/chronicle-journal.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
@@ -12,6 +13,7 @@ import { Buzones } from '../src/world/motor/buzon.js';
 import { AVISO, duenoSi } from '../src/world/motor/contexto.js';
 import { unSoloDueno, type Instantanea } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
+import { faunaCorteDe } from '../src/world/motor/fauna-corte.js';
 import { CanalesCorte, enviarParteCorte } from '../src/world/motor/mensajes-corte.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import type { World } from '../src/world/mundo/tipos.js';
@@ -63,6 +65,49 @@ test('los mensajes llegan por dueño con los campos del corte y conservan los pe
   } finally { canales.cerrar(); }
 });
 
+test('un dueño transfiere filas exactas de fauna solo en los cortes solicitados', () => {
+  const canales = CanalesCorte.abrir(1);
+  assert.ok(canales);
+  try {
+    const mundo = createWorld(semilla, parametros);
+    const [animal] = materializeAnimals(mundo.seed, [{ ...mundo.tiles[0]!, fauna: 1, species: 'hare' }], mundo.tick);
+    assert.ok(animal);
+    const pequena = { ...animal, reason: 'Río 🐇\nRefugio', work: -0 };
+    const grande = { ...animal, id: 'grande', reason: '🐇'.repeat(1024 * 1024) };
+    mundo.animals = [pequena, grande, { ...pequena, id: 'final' }];
+    const recibir = (conFauna: boolean) => {
+      const solicitud = canales.pedir(conFauna);
+      enviarParteCorte(canales.puertosRemotos[0]!, canales.solicitud, 3, 1, mundo);
+      return canales.recibir(solicitud, 3, mundo.tick)[0]!.animals;
+    };
+    const animales = recibir(true);
+    const tramos = faunaCorteDe(animales);
+    assert.equal(tramos?.length, 1);
+    const { desde, bloques } = tramos![0]!;
+    assert.equal(desde, 0);
+    assert.deepEqual(bloques.map(b => b.filas), [1, 1, 1]);
+    const utf8 = new TextDecoder();
+    for (const [i, bloque] of bloques.entries()) {
+      const fila = utf8.decode(bloque.cuerpo);
+      assert.equal(fila === stringifyExact(animales[i]), true);
+      assert.equal(fila.includes('\n'), false);
+      assert.equal(bloque.cuerpo.buffer.byteLength, bloque.cuerpo.byteLength);
+    }
+    assert.ok(bloques[1]!.cuerpo.byteLength > 4 * 1024 * 1024);
+    assert.ok(Object.is(JSON.parse(utf8.decode(bloques[0]!.cuerpo)).work, -0));
+    assert.equal(faunaCorteDe(recibir(false)), undefined);
+
+    const bytes = serialize({ tick: mundo.tick, animals: [animal] });
+    for (const fauna of [undefined, [{ filas: 1, cuerpo: 'inválido' }], [{ filas: 2, cuerpo: bloques[0]!.cuerpo }]]) {
+      const solicitud = canales.pedir(true);
+      canales.puertosRemotos[0]!.postMessage({ solicitud, epoca: 3, tick: mundo.tick, dueno: 1, bytes, fauna });
+      const canonicos: Animal[] = canales.recibir(solicitud, 3, mundo.tick)[0]!.animals;
+      assert.deepEqual(canonicos, [animal]);
+      assert.equal(faunaCorteDe(canonicos), undefined);
+    }
+  } finally { canales.cerrar(); }
+});
+
 test('un mensaje duplicado, tardío, ajeno o con bytes incoherentes invalida el corte', () => {
   const datos = { solicitud: 1n, epoca: 3, tick: 6, dueno: 1, bytes: serialize({ tick: 6 }) };
   for (const cambios of [{}, { solicitud: 0n }, { epoca: 2 }, { tick: 7 }, { dueno: 2 },
@@ -96,7 +141,7 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     assert.ok(tile);
     persona.x = tile.x; persona.y = tile.y; persona.target = { x: tile.x, y: tile.y };
   }
-  const motor = crearMotor(vivo, { ...config, instantaneaTransferible: true });
+  const motor = crearMotor(vivo, { ...config, instantaneaTransferible: true, faunaCortePreparada: true });
   const store = new Store(':memory:', { snapshotPackedPeople: true, snapshotMatterPartBytes: 4096 });
   try {
     assert.equal(motor.vista().tick, 0);
@@ -109,6 +154,7 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     assert.equal(f0!.datos.byteLength, capacidad);
     assert.deepEqual(corte.world.people, vista.people);
     assert.deepEqual(corte.world.animals, vista.animals);
+    assert.equal(faunaCorteDe(corte.world.animals), undefined);
     const [parte] = recibir.mock.calls.at(-1)!.result!;
     assert.ok(parte?.tiles.length && parte.people.length && vivo.people.length);
     for (const campo of ['tiles', 'people', 'animals', 'structures'] as const) {
@@ -122,7 +168,15 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     assert.ok(corte.world.people.every(p => Number.isSafeInteger(p.uid)));
     assert.ok(corte.materia);
     const vmat = codificarCheckpoint(corte.materia);
-    store.guardar(corte);
+    const preparado = motor.instantanea(true);
+    assert.deepEqual(preparado.world.animals, corte.world.animals);
+    const [tramo] = faunaCorteDe(preparado.world.animals) ?? [];
+    assert.ok(tramo && parte.animals.length && vivo.animals.length);
+    assert.equal(tramo.desde, vivo.animals.length);
+    const filas = tramo.bloques.flatMap(b => new TextDecoder().decode(b.cuerpo).split('\n'));
+    assert.equal(filas.length, parte.animals.length);
+    assert.deepEqual(filas, parte.animals.map(a => stringifyExact(a)));
+    store.guardar(preparado);
     const leido = store.cargarGuardadoCompleto();
     assert.ok(leido?.instantanea.materia);
     assert.deepEqual(codificarCheckpoint(leido.instantanea.materia), vmat);
@@ -205,12 +259,13 @@ test('el mismo corte guarda los mismos bytes con la parte F0 y con su proyecció
 test('la ruta F0 se elige si no se pide el canal o si no se puede abrir', async t => {
   const abrir = t.mock.method(CanalesCorte, 'abrir', () => undefined);
   for (const instantaneaTransferible of [undefined, true]) {
-    const motor = crearMotor(createWorld(semilla, parametros), { ...config, instantaneaTransferible });
+    const motor = crearMotor(createWorld(semilla, parametros), { ...config, instantaneaTransferible, faunaCortePreparada: true });
     try {
       motor.paso([]);
-      const corte = motor.instantanea();
+      const corte = motor.instantanea(true);
       assert.equal(corte.world.tick, 1);
       assert.ok(corte.world.people.length > 0 && corte.materia);
+      assert.equal(faunaCorteDe(corte.world.animals), undefined);
     } finally { await motor.cerrar(); }
     assert.equal(abrir.mock.callCount(), instantaneaTransferible ? 1 : 0);
   }

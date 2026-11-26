@@ -401,7 +401,8 @@ export interface Motor {
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] };
   /** Mundo reunido en barrera para proyectar el paso completo. */
   vista(): World;
-  instantanea(): Instantanea;
+  /** El guardado completo puede aprovechar las filas de fauna preparadas por los dueños remotos. */
+  instantanea(paraGuardado?: boolean): Instantanea;
   /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.
    * Devuelve `false` solo ante un rechazo comprobado antes de mutar estado vivo (el anfitrión puede recurrir a `cargar`).
    * Si la mutación viva falla a medias tras el COMMIT, la piscina queda fatal y lanza (exige recarga desde disco). */
@@ -537,6 +538,8 @@ export interface MotorConfig {
   indiceUidCompartido?: boolean;
   /** Laboratorio: transfiere las partes de la instantánea fuera de la cola F0. */
   instantaneaTransferible?: boolean;
+  /** Laboratorio: prepara las filas de fauna remota al reunir una instantánea transferible para guardado completo. */
+  faunaCortePreparada?: boolean;
   /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */

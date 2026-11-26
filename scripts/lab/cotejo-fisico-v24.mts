@@ -1,4 +1,4 @@
-/** Trayectorias cortas desde una siembra natural, con dos controles por reparto.
+/** Trayectorias cortas desde una siembra del laboratorio, con dos controles por reparto.
  * node --import tsx scripts/lab/cotejo-fisico-v24.mts [--dual] [--semilla 7] [--poblacion 64] [--pasos 12] [--zona 0,0,48,32]
  * Para --dual, COMPUTE_NVRTC debe apuntar a la biblioteca instalada. La salida es JSONL. Código 2 indica una
  * diferencia física o informativa y código 3, actividad CUDA insuficiente o fallos del corredor. Orden y digestos

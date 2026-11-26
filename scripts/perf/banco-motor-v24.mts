@@ -75,7 +75,7 @@ const esId = /^[a-z0-9][a-z0-9_-]*$/;
 function validacionConfiguracion(config: Config): Brazo[] {
   assert.ok(config && (Array.isArray(config.hilos) ? config.brazos === undefined : config.hilos === undefined && Array.isArray(config.brazos)),
     'Indica hilos o brazos');
-  const brazos = config.brazos ?? config.hilos!.map(hilos => ({ id: `h${hilos}`, hilos, gpu: [] }));
+  const brazos: Brazo[] = config.brazos ?? config.hilos!.map(hilos => ({ id: `h${hilos}`, hilos, gpu: [] }));
   assert.ok(brazos.length >= 2 && brazos.every(b => b && typeof b.id === 'string' && esId.test(b.id) &&
     entero(b.hilos, 1) && b.hilos <= availableParallelism() && Array.isArray(b.gpu) &&
     (b.gpu.length === 0 || b.hilos === 2 && b.gpu.length === 1 && b.gpu[0] === 0) &&

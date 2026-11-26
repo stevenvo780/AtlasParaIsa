@@ -20,6 +20,11 @@ test('la fauna directa solo viaja como filas UTF-8 con signo exacto y conserva s
   const world = mundoConFauna(), animal = world.animals[0]!;
   animal.reason = 'Río 🐇\nRefugio\r';
   animal.work = -0;
+  animal.cuerpoVisto = undefined;
+  animal.v23 = undefined;
+  animal.cuerpo = { tejido: 1, reserva: 2, digestivo: 3, plantilla: 1,
+    gestacion: { embrion: 4, otro: 2, otroId: undefined, genoma: [0], politica: undefined, inicio: 0, bajoBasalDesde: -1 } };
+  world.animals[1]!.cuerpo = { tejido: 5, reserva: 6, digestivo: 7, plantilla: 1, gestacion: undefined };
   assert.equal(Object.hasOwn(animal, 'morphology'), true);
   const canales = CanalesCorte.abrir(1)!;
   const { port1, port2 } = new MessageChannel();
@@ -40,6 +45,9 @@ test('la fauna directa solo viaja como filas UTF-8 con signo exacto y conserva s
     assert.equal(fauna[0]!.reason, animal.reason);
     assert.ok(Object.is(fauna[0]!.work, -0));
     assert.equal(fauna[0]!.morphology, undefined);
+    assert.equal(fauna[0]!.cuerpo!.gestacion!.otroId, undefined);
+    assert.equal(fauna[0]!.cuerpo!.gestacion!.politica, undefined);
+    assert.equal(fauna[1]!.cuerpo!.gestacion, undefined);
     assert.deepEqual(fauna.map(animal => stringifyExact(animal)), esperadas);
     assert.equal(faunaCorteDe(fauna), undefined);
     const tramos = faunaVerificadaDe(fauna);
@@ -61,6 +69,8 @@ test('la guardia de fauna conserva V8 para el dueño que produciría JSON con p�
     world => { Object.assign(world.animals[0]!.memory, { otroCampo: 3 }); },
     world => { Object.setPrototypeOf(world.animals[0]!.target, null); },
     world => { Object.assign(world.animals[0]!, { otroCampo: 5n }); },
+    world => { Object.assign(world.animals[0]!, { otroCampo: undefined }); },
+    world => { Object.assign(world.animals[0]!, { reason: undefined }); },
     world => { Object.defineProperty(world.animals[0]!, 'toJSON', { value: () => ({}) }); },
   ];
   const canales = CanalesCorte.abrir(2)!;
@@ -78,6 +88,25 @@ test('la guardia de fauna conserva V8 para el dueño que produciría JSON con p�
       if (!Number.isFinite(world.animals[0]!.health)) assert.throws(() => assertAnimal(canonica!.animals[0], tick), /inválido/);
       if (world.animals[0]!.target === world.tiles[0]) assert.equal(canonica!.animals[0]!.target, canonica!.tiles[0]);
       assert.ok(faunaVerificadaDe(directa!.animals));
+    }
+  } finally { canales.cerrar(); }
+});
+
+test('las claves propias undefined de genes y morfología conservan el rechazo canónico', () => {
+  const canales = CanalesCorte.abrir(1)!;
+  try {
+    for (const [campo, clave] of [['genes', 'extra'], ['morphology', 'extra'], ['genes', 'uid']] as const) {
+      const world = mundoConFauna(), animal = world.animals[0]!;
+      animal.morphology = { caution: 0.5, size: 0.5, coat: 0.5, defense: 0.5 };
+      assertAnimal(animal, tick);
+      Object.assign(animal[campo]!, { [clave]: undefined });
+
+      const solicitud = canales.pedir('directa');
+      enviarParteCorte(canales.puertosRemotos[0]!, canales.solicitud, epoca, 1, world);
+      const fauna = canales.recibir(solicitud, epoca, tick)[0]!.animals;
+      assert.equal(faunaVerificadaDe(fauna), undefined);
+      assert.equal(Object.hasOwn(fauna[0]![campo]!, clave), true);
+      assert.throws(() => assertAnimal(fauna[0], tick), /inválid/);
     }
   } finally { canales.cerrar(); }
 });

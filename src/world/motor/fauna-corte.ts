@@ -2,6 +2,7 @@ import { types } from 'node:util';
 import { stringifyExact } from '../../shared/exact-json.js';
 import { clavesJsonUnicas } from '../../shared/json-keys.js';
 import type { Animal } from '../animals.js';
+import type { Cuerpo, Gestacion } from '../materia/tipos.js';
 import type { ParteMundo } from './reunir.js';
 
 export interface BloqueFaunaCorte {
@@ -24,6 +25,17 @@ const verificadas = new WeakMap<readonly Animal[], readonly TramoFaunaVerificada
 const TAMANO_BLOQUE = 4 * 1024 * 1024;
 const utf8 = new TextEncoder();
 const utf8Estricto = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+type OpcionalesDe<T> = { [K in keyof T as {} extends Pick<T, K> ? K : never]-?: true };
+const CAMPOS_OMISIBLES = {
+  animal: {
+    reproReserve: true, morphology: true, habituation: true, tends: true, cuerpoVisto: true, v23: true,
+    lastTended: true, lastHunted: true, uid: true, cuerpo: true, fauna: true,
+  } satisfies OpcionalesDe<Animal>,
+  cuerpo: { gestacion: true } satisfies OpcionalesDe<Cuerpo>,
+  gestacion: { otroId: true, politica: true } satisfies OpcionalesDe<Gestacion>,
+};
+type FormaFauna = keyof typeof CAMPOS_OMISIBLES;
 
 /** Las filas preparadas viven lo que vive el array de la instantánea. */
 export function vincularFaunaCorte(animales: readonly Animal[], tramos: readonly TramoFaunaCorte[]): void {
@@ -49,7 +61,7 @@ export function tomarFaunaVerificada(animales: readonly Animal[]): readonly Tram
 }
 
 /** Comprueba un árbol de datos antes de delegar la codificación al JSON durable. */
-function representable(valor: unknown, vistos: WeakSet<object>, profundidad = 0): boolean {
+function representable(valor: unknown, vistos: WeakSet<object>, profundidad = 0, forma?: FormaFauna): boolean {
   if (valor === null || typeof valor === 'string' || typeof valor === 'boolean') return true;
   if (typeof valor === 'number') return Number.isFinite(valor);
   // Una forma desconocida muy profunda conserva el camino canónico, incluida su gestión de errores.
@@ -69,9 +81,16 @@ function representable(valor: unknown, vistos: WeakSet<object>, profundidad = 0)
     const descriptor = Object.getOwnPropertyDescriptor(valor, clave);
     if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) return false;
     const hijo: unknown = descriptor.value;
-    // JSON durable omite propiedades opcionales propias con valor undefined.
-    if (!array && hijo === undefined) continue;
-    if (!representable(hijo, vistos, profundidad + 1)) return false;
+    // Omitir una clave extra de genes o morfología puede ocultar un error de cardinalidad.
+    if (hijo === undefined) {
+      if (array || forma === undefined || !Object.hasOwn(CAMPOS_OMISIBLES[forma], clave)) return false;
+      continue;
+    }
+    let formaHijo: FormaFauna | undefined;
+    if (profundidad === 0) formaHijo = 'animal';
+    else if (forma === 'animal' && clave === 'cuerpo') formaHijo = 'cuerpo';
+    else if (forma === 'cuerpo' && clave === 'gestacion') formaHijo = 'gestacion';
+    if (!representable(hijo, vistos, profundidad + 1, formaHijo)) return false;
   }
   return true;
 }

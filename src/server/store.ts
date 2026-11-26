@@ -187,6 +187,7 @@ type IdentidadCabeza = { archivo: ArchivoCabeza; digest: string; epoca: number }
 type CatalogoVerificado = { totals: TechnologyCatalogueTotals; functions: number[] };
 /** Resumen interno que el lector puede transferir al persistidor tras comprobar el slot 0 completo. */
 export type PruebaCabezaGuardada = IdentidadCabeza & {
+  materiaVerificada: boolean;
   cronica: Omit<ChronicleProof, 'stamp'>;
   cadena: TechnologyChain;
   definiciones: number;
@@ -396,6 +397,7 @@ export class Store {
   private loadedMatterStamp: ChronicleStamp | null = null;
   private readonly archivoOriginal: ArchivoCabeza | undefined;
   private pruebaCabezaLeida?: { prueba: PruebaCabezaGuardada; stamp: ChronicleStamp };
+  private cabezaCompletaEscritaSinAgenda = false;
   private anclaCabeza?: AnclaCabeza;
   private pruebaCabezaOfrecida?: PruebaCabezaOfrecida;
   private primerCorteIntentado = false;
@@ -874,7 +876,7 @@ export class Store {
       if (loaded.slot === 0 && !this.chronicleHasTriggers()) {
         matterStamp = this.chronicleStamp();
         if (Number(reserva.changes) === 1 && sameChronicleStamp({ ...antesDeReservar, totalChanges: antesDeReservar.totalChanges + 1 }, matterStamp)) {
-          const prueba = this.resumirCabezaCargada(antesDeReservar);
+          const prueba = this.resumirCabezaVerificada(antesDeReservar, true);
           if (prueba) pruebaLeida = { prueba, stamp: matterStamp };
         }
       }
@@ -899,11 +901,17 @@ export class Store {
 
   exportarPruebaCabeza(): PruebaCabezaGuardada | undefined {
     const leida = this.pruebaCabezaLeida;
-    if (!leida) return undefined;
+    const escrita = this.cabezaCompletaEscritaSinAgenda ? this.snapshotPagesStamp : null;
+    if (!leida && !escrita) return undefined;
     const prueba = this.leerPruebaCabeza(() => {
       const cabeza = this.identificarCabeza();
-      if (cabeza && mismaCabeza(cabeza, leida.prueba) && sameChronicleStamp(leida.stamp, this.chronicleStamp()))
+      if (!cabeza) return undefined;
+      const stamp = this.chronicleStamp();
+      if (leida && mismaCabeza(cabeza, leida.prueba) && sameChronicleStamp(leida.stamp, stamp))
         return structuredClone(leida.prueba);
+      // El guardado síncrono de arranque instala otra cabeza. Sus páginas y
+      // fronteras ya se validaron. El persistidor todavía coteja su VMAT.
+      if (escrita && sameChronicleStamp(escrita, stamp)) return this.resumirCabezaVerificada(escrita, false);
       return undefined;
     });
     if (!prueba) this.pruebaCabezaLeida = undefined;
@@ -944,17 +952,17 @@ export class Store {
     return epoca !== null && hexDigest(row?.digest) ? { archivo, digest: row.digest, epoca } : undefined;
   }
 
-  private resumirCabezaCargada(antesDeReservar: ChronicleStamp): PruebaCabezaGuardada | undefined {
+  private resumirCabezaVerificada(stamp: ChronicleStamp, materiaVerificada: boolean): PruebaCabezaGuardada | undefined {
     const chronicle = this.verifiedChronicle, tech = this.verifiedTechnology, catalogo = this.verifiedCatalogue;
-    if (!chronicle || !tech || !catalogo || !sameChronicleStamp(chronicle.stamp, antesDeReservar)
-      || tech.totalChanges !== antesDeReservar.totalChanges || tech.dataVersion !== antesDeReservar.dataVersion
-      || tech.schemaCookie !== antesDeReservar.schemaCookie) return undefined;
+    if (!chronicle || !tech || !catalogo || !sameChronicleStamp(chronicle.stamp, stamp)
+      || tech.totalChanges !== stamp.totalChanges || tech.dataVersion !== stamp.dataVersion
+      || tech.schemaCookie !== stamp.schemaCookie) return undefined;
     const cabeza = this.identificarCabeza();
     const cotas = cabeza && this.slotBounds.get(cabeza.digest);
     if (!cabeza || !cotas || cotas === 'unusable' || cotas.tick !== chronicle.tick
       || cotas.committed !== tech.chain.through || catalogo.totals.recipes !== tech.catalogueThrough) return undefined;
     const { stamp: _stamp, ...cronica } = chronicle;
-    return { ...cabeza, cronica, cadena: { ...tech.chain }, definiciones: tech.catalogueThrough,
+    return { ...cabeza, materiaVerificada, cronica, cadena: { ...tech.chain }, definiciones: tech.catalogueThrough,
       catalogo: { totals: { ...catalogo.totals }, functions: [...catalogo.functions] }, cotas: { ...cotas } };
   }
 
@@ -990,6 +998,10 @@ export class Store {
       const head = this.technologyChainRecord();
       if (head?.version !== 2 || head.startsAfter !== cadena.startsAfter || head.through !== cadena.through
         || head.digest !== cadena.digest) return false;
+      if (!prueba.materiaVerificada) {
+        if (this.requiereAgenda()) return false;
+        this.readCompleteMatter(0, cotas.tick);
+      }
       this.verifiedCatalogue = { totals: { ...catalogo.totals }, functions: [...catalogo.functions] };
       this.verifiedChronicle = { ...cronica, stamp };
       this.verifiedTechnology = { startsAfter: cadena.startsAfter, through: cadena.through, catalogueThrough: definiciones,
@@ -2409,6 +2421,7 @@ export class Store {
       this.db.exec('COMMIT');
       this.saves++;
       this.pruebaCabezaLeida = undefined;
+      this.cabezaCompletaEscritaSinAgenda = complete && !agenda && !chronicleTriggers;
       if (cabezaAdmitida) this.cabezaInicialReutilizada = true;
       cerrarFase?.('commit');
       if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);

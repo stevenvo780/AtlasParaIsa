@@ -30,6 +30,7 @@ const SMI_SPAN = 32_768;
 interface Indice {
   length: number;
   celdas: Map<number, number[]> | null;
+  celdasOrdenadas?: Float64Array;
   smi: boolean;
   minCx: number;
   maxCx: number;
@@ -154,6 +155,24 @@ function filtrarEn<T extends Punto>(puntos: readonly T[], pred: (punto: T) => bo
   return result;
 }
 
+/** En un rectángulo disperso omite las casillas vacías y conserva el orden de llamada del recorrido por filas. */
+function filtrarDisperso<T extends Punto>(puntos: readonly T[], mapa: ReadonlyMap<number, number[]>,
+  claves: Float64Array, inicio: number, fin: number, paso: number, pred: (punto: T) => boolean, out: T[]): T[] {
+  const minColumna = inicio % paso, maxColumna = fin % paso;
+  const posiciones: number[] = [];
+  for (const k of claves) {
+    if (k > fin) break;
+    if (k < inicio) continue;
+    const columna = k % paso;
+    if (columna < minColumna || columna > maxColumna) continue;
+    for (const i of mapa.get(k)!) if (pred(puntos[i]!)) posiciones.push(i);
+  }
+  posiciones.sort((a, b) => a - b);
+  out.length = posiciones.length;
+  for (let i = 0; i < posiciones.length; i++) out[i] = puntos[posiciones[i]!]!;
+  return out;
+}
+
 export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punto, alcance: number, pred: (punto: T) => boolean, out?: T[]): T[] {
   if (out) out.length = 0;
   if (puntos.length === 0) return out ?? [];
@@ -171,6 +190,12 @@ export function filtrarCerca<T extends Punto>(puntos: readonly T[], centro: Punt
   if (cx0 > cx1 || cy0 > cy1) return out ?? [];
   const paso = ind.smi ? SMI_SPAN : SPAN;
   let claveFila = ind.smi ? (((cx0 + SMI_BIAS) << 15) | (cy0 + SMI_BIAS)) : clave(cx0, cy0);
+  // El recorrido disperso comprueba la columna de cada clave. Solo compensa si sobran muchas casillas vacías.
+  if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 4 * mapa.size) {
+    const claves = ind.celdasOrdenadas ??= Float64Array.from(mapa.keys()).sort();
+    const ultima = claveFila + (cx1 - cx0) * paso + cy1 - cy0;
+    return filtrarDisperso(puntos, mapa, claves, claveFila, ultima, paso, pred, out ?? []);
+  }
   let count = 0, i0 = -1, i1 = -1, ultimo = -1, ordenado = true;
   const useScratch = !scratchBusy;
   let dynPos: number[] | null = null;

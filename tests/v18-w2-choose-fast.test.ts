@@ -174,6 +174,26 @@ test('V18 ola2 filtrarCerca/algunoCerca/primeroCerca: mismos elementos, mismo or
   assert.deepEqual(filtrarCerca([], { x: 0, y: 0 }, 5, () => true), []);
 });
 
+test('un rectángulo disperso mantiene los órdenes de llamada y de resultado con ambas claves', () => {
+  for (const origen of [0, 70_000, -70_000]) {
+    const centro = { x: origen, y: -origen }, alcance = 40;
+    const puntos = [
+      { x: 35, y: 60 }, { x: -24, y: 28 }, { x: 30, y: -15 },
+      { x: -24, y: -20 }, { x: -23, y: -17 }, { x: -70, y: 0 },
+    ].map(({ x, y }, id) => ({ x: x + centro.x, y: y + centro.y, id }));
+    const llamadas: number[] = [], salida = [puntos[0]!];
+    const resultado = filtrarCerca(puntos, centro, alcance, punto => {
+      llamadas.push(punto.id);
+      return punto.id !== 2;
+    }, salida);
+    assert.deepEqual(llamadas, ordenDeLlamadas(puntos, centro, alcance));
+    assert.equal(resultado, salida);
+    assert.deepEqual(resultado.map(({ id }) => id), [1, 3, 4]);
+    puntos.push({ x: origen - 13, y: -origen - 2, id: 6 });
+    assert.deepEqual(filtrarCerca(puntos, centro, alcance, () => true).map(({ id }) => id), [1, 2, 3, 4, 6]);
+  }
+});
+
 // ───────────────────────── 4. micro-bancos (diagnóstico, sin umbral de pared estricto) ─────────────────────────
 test('V18 ola2 banco: tileLookup sobre 262.144 teselas en chunks (disco de radio 7, consulta nueva por disco)', (t) => {
   const tiles: Celda[] = [];

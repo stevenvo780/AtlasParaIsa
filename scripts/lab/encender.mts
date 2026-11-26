@@ -158,6 +158,8 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   // El coordinador recibe los chunks retirados de todos los dueños y vuelve a activarlos desde este archivo.
   const { archivo, archivar } = archivoDeChunks(origen);
   const contexto = worldContext(origen);
+  const panel = o.panelCorto ? { pasosMedidos: 0, pasoMaximoMs: 0, pasosSobre30s: 0, comprobacionesRegiones: 0,
+    reunionMaximaMs: 0, comprobacionMaximaMs: 0, archivoMaximoMs: 0 } : undefined;
   const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
   const medicion: FaseMedicion | undefined = o.perfil && !motor ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
   const paso = (): number => {
@@ -168,15 +170,16 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   };
   const reunir = (tick: number): void => {
     if (!motor) return;
+    const inicio = panel ? performance.now() : 0;
     mundo = motor.vista();
     if (mundo.tick !== tick) throw new Error(`Vista del tick ${mundo.tick}, se esperaba ${tick}.`);
     const dueno = duenoSi(origen);
     if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
     // La vista reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
     enlazarCtx(mundo, dueno);
+    if (panel) panel.reunionMaximaMs = Math.max(panel.reunionMaximaMs, performance.now() - inicio);
   };
   const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
-  const panel = o.panelCorto ? { pasosMedidos: 0, pasoMaximoMs: 0, pasosSobre30s: 0, comprobacionesRegiones: 0 } : undefined;
   const cada = o.cada ?? (panel ? 120 : undefined);
   const mortalesIniciales = panel ? mundo.people.filter(p => p.role === 'neighbor') : [];
   const fundadores = new Set(mortalesIniciales.map(p => p.id));
@@ -228,6 +231,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   };
   const revisar = (): boolean => {
     if (!o.comprobar) return false;
+    const inicio = panel ? performance.now() : 0;
     // El comprobador por corrida suma a los invariantes los de historia (Δpoblación, acumulados, nacimientos).
     const invariantes = comprobador!(mundo);
     // Los invariantes regionales recorren el mundo residente completo, una cobertura por región del corte.
@@ -243,14 +247,16 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       avisoSinContexto = true;
       escribirFila({ tipo: 'aviso', tick: mundo.tick, texto: 'Hay leyes encendidas pero el mundo no tiene contexto de dueño (ctxSi): no corren sus comprobar ni I-C/I-R/I-B.' });
     }
-    return registrar([...invariantes, ...deLeyes]);
+    const dura = registrar([...invariantes, ...deLeyes]);
+    if (panel) panel.comprobacionMaximaMs = Math.max(panel.comprobacionMaximaMs, performance.now() - inicio);
+    return dura;
   };
 
   let nacidosAntes = mundo.totals.births ?? 0, muertesAntes = mundo.demographyDynamics.deaths;
   let causasAntes = { ...mundo.demographyDynamics.causes };
   let faunaAntes = { ...mundo.animalDynamics };
   if (revisar() && !o.continuar) return fin('violacion');
-  const contarCausasFauna = params.v23.fauna && !(panel && motor);
+  const leerCronicaViva = Boolean(panel && motor);
   let tick = mundo.tick;
   for (let dia = 1; tick < ticks; dia++) {
     const causasFauna: Record<string, number> = {};
@@ -275,10 +281,12 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       const cierraDia = t + 1 === TICKS_PER_DAY || tick === ticks;
       const revisarPaso = toca || Boolean(panel && cierraDia);
       if (!panel || cierraDia || o.comprobar && revisarPaso) reunir(tick);
-      if (contarCausasFauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
-        for (let i = mundo.events.length - 1; i >= 0; i--) {
-          const evento = mundo.events[i]!;
-          if (evento.tick < mundo.tick) break;
+      if (params.v23.fauna && (leerCronicaViva || mundo.animalDynamics.deaths > muertesFaunaAntes)) {
+        // El coordinador recoge los sucesos confirmados de todos los dueños en el mismo paso.
+        const eventos = leerCronicaViva ? origen.events : mundo.events;
+        for (let i = eventos.length - 1; i >= 0; i--) {
+          const evento = eventos[i]!;
+          if (evento.tick < tick) break;
           if (evento.kind === 'animal' && evento.text.startsWith('Muere un animal de ')) {
             causasFauna[evento.cause] = (causasFauna[evento.cause] ?? 0) + 1;
           }
@@ -287,7 +295,9 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       if (revisarPaso && revisar() && !o.continuar) return fin('violacion');
     }
     if (!panel && cada !== undefined && tick % cada !== 0 && revisar() && !o.continuar) return fin('violacion');
+    const inicioArchivo = panel ? performance.now() : 0;
     archivar();
+    if (panel) panel.archivoMaximoMs = Math.max(panel.archivoMaximoMs, performance.now() - inicioArchivo);
     const dinamica = mundo.demographyDynamics;
     const fauna = { ...mundo.animalDynamics };
     const vecinos = mundo.people.filter(p => p.role === 'neighbor');
@@ -295,7 +305,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     const nacimientos = mundo.totals.births ?? 0;
     escribirFila({
       tipo: 'dia', dia, tick: mundo.tick, poblacion: mortales, personas: mundo.people.length,
-      ...(panel && { fundadoresMortalesVivos: vecinos.filter(p => fundadores.has(p.id)).length }),
+      ...(panel && { fundadoresMortalesVivos: vecinos.filter(p => fundadores.has(p.id)).length, regionesArchivadas: archivo.size }),
       nacimientos, nacidosDia: nacimientos - nacidosAntes, muertes: dinamica.deaths, muertesDia: dinamica.deaths - muertesAntes,
       muertesPorCausa: { ...dinamica.causes }, muertesPorCausaDia: Object.fromEntries(Object.entries(dinamica.causes).map(([k, v]) => [k, v - (causasAntes[k as keyof typeof causasAntes] ?? 0)])),
       fauna: mundo.animals.length, faunaDinamica: fauna,
@@ -304,7 +314,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
         predations: fauna.predations - faunaAntes.predations, humanHunts: fauna.humanHunts - faunaAntes.humanHunts,
         waterConsumed: fauna.waterConsumed - faunaAntes.waterConsumed, plantConsumed: fauna.plantConsumed - faunaAntes.plantConsumed,
       },
-      ...(panel && motor ? {} : { faunaMuertesPorCausaDia: causasFauna }),
+      faunaMuertesPorCausaDia: causasFauna,
       vistasMedias: vistasMedias(mundo.tiles),
       comunidades: mundo.communities.length, estructuras: mundo.structures.length,
       totales: { ...mundo.totals }, conservacion: balanceConservacion(mundo), violaciones, duras,

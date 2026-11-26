@@ -43,7 +43,7 @@ bash scripts/lab/panel-corto.sh "$sha" /ruta/nueva/panel-corto
 bash scripts/lab/panel-corto.sh --smoke "$sha" /ruta/nueva/smoke-panel-corto 14,15
 ```
 
-`manifest.json` deja el SHA, perfil, réplica y afinidad de cada corrida. Cada carpeta conserva su JSONL, errores y código de salida. `resumen.json` reúne M1–M6. El smoke comprueba la instrumentación con 24 pasos y carece de veredicto de publicación. El perfil de laboratorio mide pasos del motor en CPU. Los tiempos con persistencia y cinta se miden en el banco del servidor.
+`manifest.json` deja el SHA, perfil, réplica y afinidad de cada corrida. Cada carpeta conserva su JSONL, errores y código de salida. `resumen.json` reúne M1–M6. El smoke comprueba la instrumentación con 24 pasos y carece de veredicto de publicación. El perfil de laboratorio mide pasos del motor en CPU y registra por separado el máximo de reunir, verificar y archivar una muestra. Los tiempos con persistencia y cinta se miden en el banco del servidor.
 
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 

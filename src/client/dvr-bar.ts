@@ -161,7 +161,11 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     if (!button || !container.contains(button)) return;
     if (button.hasAttribute('data-tramo-inicio') && last) { inicio = last.currentTick; actualizarTramo(); }
     else if (button.hasAttribute('data-tramo-fin') && last) { fin = last.currentTick; actualizarTramo(); }
-    else if (button.hasAttribute('data-tramo-play') && inicio !== null && fin !== null) handlers.reproducirTramo?.(inicio, fin);
+    else if (button.hasAttribute('data-tramo-play') && inicio !== null && fin !== null) {
+      handlers.reproducirTramo?.(inicio, fin);
+      const detalle = button.closest('details');
+      if (detalle) { detalle.open = false; detalle.querySelector('summary')?.focus({ preventScroll: true }); }
+    }
     else if (button.hasAttribute('data-dvr-play')) handlers.togglePlay();
     else if (button.hasAttribute('data-dvr-live')) handlers.jumpLive();
     else if (button.hasAttribute('data-dvr-step')) handlers.step(button.getAttribute('data-dvr-step') === '-1' ? -1 : 1);

@@ -62,6 +62,8 @@ try {
       assert.ok(comienzo >= inicio && comienzo < fin);
       await expect(rango).toHaveValue(String(fin), { timeout: 20_000 });
       await expect(reproduciendo).toHaveAttribute('aria-pressed', 'false');
+      await expect(pagina.locator('.dvr-tramo')).not.toHaveAttribute('open', '');
+      await pagina.screenshot({ path: join(salida, `${nombre}-final.png`) });
       await pagina.evaluate(() => localStorage.setItem('carta:last-visit-v2', 'visita-previa'));
       assert.equal(await pagina.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await pagina.goto(new URL('/api/session', url).href);

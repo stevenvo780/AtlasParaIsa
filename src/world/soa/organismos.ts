@@ -139,8 +139,9 @@ export class TablaOrganismosSoA implements TablaOrganismos {
   readonly hilo: Hilo;
   readonly verificar: boolean;
 
-  constructor(verificar = false, opciones: { reservaFilas?: number; compartida?: TablaCompartida; hilo?: Hilo } = {}) {
-    const { compartida, reservaFilas } = opciones;
+  constructor(verificar = false,
+    opciones: { reservaFilas?: number; indiceUidCompartido?: boolean; compartida?: TablaCompartida; hilo?: Hilo } = {}) {
+    const { compartida, indiceUidCompartido, reservaFilas } = opciones;
     this.verificar = compartida?.verificar ?? verificar;
     this.hilo = compartida ? opciones.hilo ?? 0 : 0;
     this.reserva = reservaFilas ?? RESERVA_INICIAL;
@@ -162,7 +163,7 @@ export class TablaOrganismosSoA implements TablaOrganismos {
         this.ctl = new Int32Array(new SharedArrayBuffer(C_CELDAS * Int32Array.BYTES_PER_ELEMENT));
         this.pilaLibres = new Int32Array(pilaCompartida(reservaFilas));
         this.colaBajas = new Int32Array(pilaCompartida(reservaFilas));
-        if (Number.isSafeInteger(reservaFilas) && reservaFilas > 0 && reservaFilas <= MAX_FILAS_INDICE_UID)
+        if (indiceUidCompartido && Number.isSafeInteger(reservaFilas) && reservaFilas > 0 && reservaFilas <= MAX_FILAS_INDICE_UID)
           this.indiceUid = new IndiceUid(reservaFilas);
         if (this.verificar) this.escritoPor = new Int32Array(pilaCompartida(reservaFilas));
       }

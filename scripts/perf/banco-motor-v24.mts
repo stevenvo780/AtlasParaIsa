@@ -33,6 +33,7 @@
  * orden de ejecución. `resumen.json` distingue el arranque, la actividad y la degradación de cada brazo CUDA.
  * Las aceleraciones requieren un brazo y una referencia completos. Cada JSONL conserva los tiempos brutos.
  * `perfilPaso` añade fases crudas y esperas del coordinador. Sus lecturas forman parte del tiempo medido.
+ * `CARTA_INDICE_UID=1` activa el índice compartido para los brazos de varios dueños.
  * El libro y la carga por chunk se comprueban al salir del
  * calentamiento y al final, fuera de la medición. `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
  * páginas del motor y `chunksArchivados` cuenta copias retenidas en RAM durante la corrida,
@@ -262,6 +263,7 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
 
 async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolean) {
   const { hilos, gpu, duenosPercepcionGpu } = brazo;
+  const indiceUidCompartido = hilos > 1 && process.env.CARTA_INDICE_UID === '1';
   const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
   assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined, 'Mapeo CUDA inválido para el brazo');
   const { mundo, siembra, fixture, carga, cerrar } = await preparar(e, dirname(salida));
@@ -285,7 +287,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const descriptor = fd = openSync(salida, 'wx', 0o600);
     const anotar = (fila: object) => writeSync(descriptor, JSON.stringify(fila) + '\n');
     const pared: number[] = [], cpuProceso: number[] = [], barrera: number[] = [];
-    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, duenosPorRanura, perfilPaso, commit: git('rev-parse', 'HEAD'), node: process.version,
+    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, duenosPorRanura, perfilPaso, indiceUidCompartido,
+      commit: git('rev-parse', 'HEAD'), node: process.version,
       digestoInicial, ...siembra, fixture, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
       interruptores: params.v23, motor: params.motor, carga: loadavg(), planificador: planificador() };
     anotar(inicio);
@@ -293,7 +296,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const conNvrtc = !!biblioteca && existsSync(biblioteca);
     if (!gpu.length || conNvrtc) {
       motor = crearMotor(mundo, { hilos, gpu, duenosPercepcionGpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
-        medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso });
+        medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso, indiceUidCompartido });
       if (carga) motor.cargar(carga.instantanea, carga.epoca);
     }
     if (gpu.length) {

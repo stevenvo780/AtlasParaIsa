@@ -310,7 +310,9 @@ class MotorDuenos implements Motor {
     // recarga siguiente la abre mayor.
     let reserva = RESERVA_FILAS_DUENOS;
     while (reserva < 8 * (m.people.length + m.animals.length)) reserva *= 2;
-    const tabla = this.#tabla = new TablaOrganismosSoA(verificar, { reservaFilas: reserva });
+    const tabla = this.#tabla = new TablaOrganismosSoA(verificar, {
+      reservaFilas: reserva, indiceUidCompartido: this.#config.indiceUidCompartido,
+    });
     const contadores = this.#contadores = new Contadores(hilos, {
       uid: m.siguienteUid ?? 1, comunidad: m.communityCounter + 1, estructura: m.structureCounter + 1,
       nonce: Math.min(2 ** 52, (m.tick + 1) * 2 ** 22),

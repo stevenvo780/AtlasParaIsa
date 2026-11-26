@@ -4,8 +4,9 @@ import { Clase, REF_NULA, genDe, slotDe } from '../src/world/motor/contratos.js'
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
 
 test('el índice compartido se publica con el frente y sigue las bajas, cesiones y el reúso', () => {
-  const coordinador = new TablaOrganismosSoA(false, { reservaFilas: 32 });
+  const coordinador = new TablaOrganismosSoA(false, { reservaFilas: 32, indiceUidCompartido: true });
   const descriptor = coordinador.compartirTabla();
+  assert.ok(descriptor.indiceUid instanceof SharedArrayBuffer);
   const dueno = TablaOrganismosSoA.conectar(descriptor, 1);
   const lector = TablaOrganismosSoA.conectar(descriptor, 2);
   const primero = coordinador.alta(0, Clase.Persona), segundo = dueno.alta(1, Clase.Animal);

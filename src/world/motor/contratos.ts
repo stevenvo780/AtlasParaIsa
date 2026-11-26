@@ -513,6 +513,8 @@ export interface MotorConfig {
   medirBrokerGpu?: boolean;              // contadores acumulados opcionales del banco de percepción distribuida
   /** Capacidad virtual de la arena material de esta época. El anfitrión la dimensiona fuera del estado del mundo. */
   reservaLotesMateria?: number;
+  /** Laboratorio: comparte la búsqueda de uid entre los dueños del motor. */
+  indiceUidCompartido?: boolean;
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */
   medirPaso?: boolean;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de

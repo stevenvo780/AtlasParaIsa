@@ -178,7 +178,9 @@ export class Buzones {
     if (this.memoria) {
       pendientesDe(this.memoria.f0, salida);
       for (const d of this.memoria.duenos) for (const cola of Object.values(d)) pendientesDe(cola, salida);
-    } else for (const cola of Object.values(this.local)) salida.push(...cola);
+    } else {
+      for (const cola of Object.values(this.local)) for (const intento of cola) salida.push(intento);
+    }
     return salida;
   }
 

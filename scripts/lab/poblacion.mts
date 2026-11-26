@@ -271,7 +271,7 @@ export function poblar(mundo: World, { n, zona, siembra }: Siembra): ResultadoSi
     else { delete persona.policy; delete persona.policyPlasticity; }
     sembrados.push(persona);
   }
-  mundo.people.push(...sembrados);
+  for (const persona of sembrados) mundo.people.push(persona);
   mundo.technology.checkpoint = captureTechnologyCheckpoint(mundo.technology, mundo.people, mundo.tick, 'initial');
   return { sembrados, caminables: tierra.length, candidatos: candidato };
 }

@@ -90,10 +90,17 @@ export function reunir(coordinador: World, cabecera: World, partes: readonly Wor
   const todos = [coordinador, ...partes];
   const copia = <T>(v: T): T => structuredClone(v);
   const mundo: World = { ...coordinador };
-  mundo.tiles = [...coordinador.tiles.map(t => ({ ...t }) as Tile), ...partes.flatMap(p => p.tiles)];
-  mundo.people = [...copia(coordinador.people), ...partes.flatMap(p => p.people)];
-  mundo.animals = [...copia(coordinador.animals), ...partes.flatMap(p => p.animals)];
-  mundo.structures = [...copia(coordinador.structures), ...partes.flatMap(p => p.structures)];
+  mundo.tiles = coordinador.tiles.map(t => ({ ...t }) as Tile);
+  mundo.people = copia(coordinador.people);
+  mundo.animals = copia(coordinador.animals);
+  mundo.structures = copia(coordinador.structures);
+  // Los arrays de destino ya son del corte. Los objetos remotos se deserializaron para este corte.
+  for (const parte of partes) {
+    for (const tile of parte.tiles) mundo.tiles.push(tile);
+    for (const persona of parte.people) mundo.people.push(persona);
+    for (const animal of parte.animals) mundo.animals.push(animal);
+    for (const estructura of parte.structures) mundo.structures.push(estructura);
+  }
   mundo.chunks = Object.assign({}, ...todos.map(p => copia(p.chunks)));
   mundo.communities = copia(coordinador.communities);
   mundo.events = copia(coordinador.events);

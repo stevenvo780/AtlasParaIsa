@@ -5,6 +5,7 @@ import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
+import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { Buzones } from '../src/world/motor/buzon.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
@@ -60,7 +61,16 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     return dueno.call(this, hilo, azar);
   });
   const recibir = t.mock.method(CanalesCorte.prototype, 'recibir');
-  const motor = crearMotor(createWorld(semilla, parametros), { ...config, instantaneaTransferible: true });
+  const vivo = createWorld(semilla, parametros);
+  const paginas = Object.values(vivo.chunks);
+  const reparto = repartirPorTramos(paginas.map(p => p.cx), paginas.map(p => p.cy), hilos);
+  for (const [hilo, persona] of vivo.people.slice(0, hilos).entries()) {
+    const tile = vivo.tiles.find(t => t.terrain !== 'water' && (t.x & 15) > 1 && (t.x & 15) < 14 && (t.y & 15) > 1 && (t.y & 15) < 14 &&
+      paginas.some((p, i) => reparto[i] === hilo && p.cx === t.x >> 4 && p.cy === t.y >> 4));
+    assert.ok(tile);
+    persona.x = tile.x; persona.y = tile.y; persona.target = { x: tile.x, y: tile.y };
+  }
+  const motor = crearMotor(vivo, { ...config, instantaneaTransferible: true });
   const store = new Store(':memory:', { snapshotPackedPeople: true, snapshotMatterPartBytes: 4096 });
   try {
     assert.equal(motor.vista().tick, 0);
@@ -73,6 +83,16 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     assert.equal(f0!.datos.byteLength, capacidad);
     assert.deepEqual(corte.world.people, vista.people);
     assert.deepEqual(corte.world.animals, vista.animals);
+    const [parte] = recibir.mock.calls.at(-1)!.result!;
+    assert.ok(parte?.tiles.length && parte.people.length && vivo.people.length);
+    for (const campo of ['tiles', 'people', 'animals', 'structures'] as const) {
+      assert.notEqual(corte.world[campo], vivo[campo]);
+      assert.notEqual(corte.world[campo], parte[campo]);
+      const locales = vivo[campo].length;
+      if (locales) assert.notEqual(corte.world[campo][0], vivo[campo][0]);
+      parte[campo].forEach((fila, i) => assert.equal(corte.world[campo][locales + i], fila));
+    }
+    assert.notEqual(corte.world.people[0]!.genome.alleles, vivo.people[0]!.genome.alleles);
     assert.ok(corte.world.people.every(p => Number.isSafeInteger(p.uid)));
     assert.ok(corte.materia);
     const vmat = codificarCheckpoint(corte.materia);

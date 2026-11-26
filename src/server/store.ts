@@ -1749,13 +1749,14 @@ export class Store {
     if (latest && latest.serial > state.executionCounter) technologyFailure('execution identity exceeds snapshot counter');
   }
 
-  private rememberTechnology(world: World, chain: TechnologyChain): void {
+  private rememberTechnology(world: World, chain: TechnologyChain, stamp?: ChronicleStamp): void {
     const state = world.technology, journal = state.journal!;
     if (chain.startsAfter !== journal.startsAfter || chain.through !== journal.committedThrough)
       technologyFailure('execution chain head disagrees with snapshot');
     this.verifiedTechnology = { startsAfter: journal.startsAfter, through: journal.committedThrough,
       catalogueThrough: state.catalogue?.committedThrough ?? state.recipeCounter,
-      dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie(), chain: { ...chain } };
+      dataVersion: stamp?.dataVersion ?? this.dataVersion(), totalChanges: stamp?.totalChanges ?? this.totalChanges(),
+      schemaCookie: stamp?.schemaCookie ?? this.schemaCookie(), chain: { ...chain } };
     // `definitionOf` strips the three mutable stats fields, so its JSON is a pure function
     // of properties `registerTechnologyRecipe` sets once and nothing ever reassigns
     // (T105: grep confirms the only post-creation mutation site is `Object.assign` in
@@ -2049,6 +2050,7 @@ export class Store {
     let body = '', bodyDigest = '';
     let written: WrittenSnapshot | undefined;
     let committedChain: TechnologyChain | null = null;
+    let selloConfirmado: ChronicleStamp | null = null;
     let technologyPruned: TechnologyPrune | null = null;
     let statsCompacted = 0;
     cerrarFase?.('prepararSnapshot');
@@ -2224,6 +2226,9 @@ export class Store {
       }
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
+      // El sello describe los bytes que acabamos de verificar bajo el candado.
+      try { selloConfirmado = this.chronicleStamp(); }
+      catch { /* El guardado puede confirmarse sin cachés. */ }
       cerrarFase?.('sqlFinalYGc');
       this.db.exec('COMMIT');
       this.saves++;
@@ -2248,8 +2253,10 @@ export class Store {
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
     world.chronicleJournal = committedChronicle;
     this.verifiedChronicle = null;
+    let selloVigente: ChronicleStamp | null = null;
     try {
       const current = this.chronicleStamp();
+      if (selloConfirmado && sameChronicleStamp(selloConfirmado, current)) selloVigente = selloConfirmado;
       const unchangedEnv = !chronicleTriggers && current.dataVersion === chronicleStamp.dataVersion && current.schemaCookie === chronicleStamp.schemaCookie
         && current.tempSchemaCookie === chronicleStamp.tempSchemaCookie;
       if (unchangedEnv) this.rememberChronicle(world, current);
@@ -2270,34 +2277,31 @@ export class Store {
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
     markTechnologyCatalogueCommitted(world.technology);
-    this.replayCache = null;
-    if (replay) {
-      try { this.replayCache = { digest: bodyDigest, world: replay.world, stamp: this.chronicleStamp() }; }
-      catch { /* A lost cache never changes an acknowledged commit. */ }
-    }
     // The transaction is already durable. Failure to refresh an optimization
     // cannot turn a successful save into a reported failure or a discarded tick.
     try {
-      this.rememberTechnology(world, committedChain!);
+      if (selloVigente) this.rememberTechnology(world, committedChain!, selloVigente);
       this.rememberSlotBounds(bodyDigest, world);
       if (!this.readOnly && this.autoVacuumIncremental && (technologyPruned !== null || statsCompacted > 0 || prunes)) {
         this.db.exec('PRAGMA incremental_vacuum(256)');
       }
     }
-    catch {
+    catch { selloVigente = null; }
+    if (!selloVigente) {
       this.verifiedTechnology = null; this.verifiedCatalogue = null; this.verifiedRecipes.clear();
       this.technologyArchive.invalidateVerification();
     }
-    // v18: solo ahora —COMMIT hecho y pasada la limpieza post-confirmación (vacuum incremental incluido)—
-    // el directorio de páginas pasa a confirmado y el sello queda tomado sobre el estado durable. Si el
-    // sello no se puede leer, se olvida todo el directorio: perder la caché nunca invalida el guardado.
+    this.replayCache = replay && selloVigente ? { digest: bodyDigest, world: replay.world, stamp: selloVigente } : null;
+    // Un escritor ajeno tras COMMIT invalida la prueba. Las cachés conservan el sello
+    // de la transacción aunque otro escritor confirme después de este cotejo.
+    this.snapshotPagesStamp = null;
     try {
-      this.snapshotParts.confirmPendingPages();
-      this.snapshotPagesStamp = this.chronicleStamp();
-    } catch {
-      this.snapshotPagesStamp = null;
-      this.snapshotParts.invalidatePageCache();
-    }
+      if (selloVigente) {
+        this.snapshotParts.confirmPendingPages();
+        this.snapshotPagesStamp = selloVigente;
+      }
+    } catch { /* El directorio se puede reconstruir en el siguiente guardado. */ }
+    if (!this.snapshotPagesStamp) this.snapshotParts.invalidatePageCache();
     cerrarFase?.('poscommit');
   }
   result(gesture: Gesture): GestureResult | null {

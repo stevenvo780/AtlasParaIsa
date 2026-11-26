@@ -3,6 +3,7 @@ import test, { type TestContext } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/server/store.js';
 import { encodeSnapshotTileRows } from '../src/server/snapshot.js';
 import { SnapshotParts, type SnapshotReuseTicket } from '../src/server/snapshot-parts.js';
@@ -205,6 +206,28 @@ test('v18: una escritura de otra conexión entre guardados rompe el sello y fuer
     'data_version se movió: sin vale, camino completo');
   assert.equal(slotBody(lab.store), bodyBefore, 'el cuerpo recodificado es byte a byte el mismo');
   assert.deepEqual(statsDelta(lab.store, () => lab.store.save(world)), { reused: PAGES, encoded: 0 }, 'sello retomado tras COMMIT');
+});
+
+test('v18: un cambio externo justo después del COMMIT no se incorpora al sello de páginas', t => {
+  const lab = laboratory(t);
+  const { world } = makeWorld(true);
+  lab.store.save(world);
+  const writer = new DatabaseSync(lab.path);
+  try {
+    const ejecutar = lab.store.db.exec.bind(lab.store.db);
+    let escribiendo = false;
+    const intercalar = t.mock.method(lab.store.db, 'exec', (sql: string) => {
+      ejecutar(sql);
+      if (sql === 'BEGIN IMMEDIATE') escribiendo = true;
+      if (sql !== 'COMMIT' || !escribiendo) return;
+      escribiendo = false;
+      assert.equal(writer.prepare('UPDATE snapshots SET saved_at=saved_at+7 WHERE slot=0').run().changes, 1);
+    });
+    try { lab.store.save(world); } finally { intercalar.mock.restore(); }
+    const antes = slotBody(lab.store);
+    assert.deepEqual(statsDelta(lab.store, () => lab.store.save(world)), { reused: 0, encoded: PAGES });
+    assert.equal(slotBody(lab.store), antes);
+  } finally { writer.close(); }
 });
 
 for (const damage of ['borrado externo de una página referenciada', 'cuerpo de página alterado externamente'] as const) {

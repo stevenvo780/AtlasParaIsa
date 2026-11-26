@@ -1855,7 +1855,8 @@ export class Store {
       for (const recipe of world.technology.catalogue?.pending ?? world.technology.recipes) this.assertTechnologyAuthor(world, recipe);
       if (deepValidation) assertWorld(world, world.version, this.context);
     };
-    if (deepValidation && world.version >= 5 && world.technology.journal !== undefined) {
+    const validatedInReadSnapshot = deepValidation && world.version >= 5 && world.technology.journal !== undefined;
+    if (validatedInReadSnapshot) {
       // assertWorld ya comprueba la tecnología. Resuelve sus referencias a recetas sobre una sola lectura SQLite.
       this.prepareTechnology(world, 0, validateBeforeWrite);
     } else {
@@ -1927,6 +1928,9 @@ export class Store {
       // con lecturas de `catalogueReader`; sin ella cada consulta descartaba pruebas y reescaneaba
       // toda `technology_definitions` (12+ min y >120 GB leídos en un mundo V14 real de 705 hab.).
       this.technologyArchive.beginHostTransaction();
+      // Otra conexión puede confirmar entre el snapshot de lectura y BEGIN IMMEDIATE. Si cambió
+      // el archivo, revalidar los vínculos del candidato sobre la versión que vamos a escribir.
+      if (validatedInReadSnapshot && !sameChronicleStamp(chronicleStamp, this.chronicleStamp())) validateBeforeWrite();
       chronicleTriggers = this.chronicleHasTriggers();
       const matterStillVerified = epoca !== null && !chronicleTriggers
         && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))

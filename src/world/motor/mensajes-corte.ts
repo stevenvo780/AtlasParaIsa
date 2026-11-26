@@ -1,6 +1,9 @@
+import { isDeepStrictEqual } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
+import type { LegacyRecord } from '../../shared/demography.js';
 import type { World } from '../mundo/tipos.js';
+import type { TokenLegadoCorte } from './custodia-legado.js';
 import { prepararFaunaCorte, prepararFaunaDirecta, recibirFaunaDirecta, validarFaunaCorte, vincularFaunaCorte,
   type BloqueFaunaCorte } from './fauna-corte.js';
 import type { ParteFotoDueno } from './fotograma-dueno.js';
@@ -10,6 +13,7 @@ import { prepararTeselasDirectas, recibirTeselasDirectas, type BloqueTeselasCort
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
 const SOLICITUD = 0, PREPARAR_FAUNA = 1, PREPARAR_TESELAS = 2, PREPARAR_PERSONAS = 3, COMPROBAR_SOLAPE = 4;
+const CUSTODIA_SOLICITUD = 5, CUSTODIA_EPOCA = 6, CUSTODIA_TICK = 7;
 const SIN_FAUNA = 0n, FAUNA_SOMBRA = 1n, FAUNA_DIRECTA = 2n;
 
 interface ParteCorte {
@@ -25,7 +29,7 @@ interface ParteCorte {
   personas?: readonly BloquePersonasCorte[];
   personasSustituidas?: { cantidad: number } | null;
   preparacionPersonasMs?: number;
-  admiteSolape?: boolean;
+  legadoSolape?: readonly LegacyRecord[];
 }
 
 /** Sobres ordenados por dueño que ya salieron de los puertos de una solicitud. */
@@ -123,7 +127,7 @@ export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: Parte
 
 /** Se transfiere el bloque de V8 tal cual. Un runtime que no lo pueda mover falla antes de construir el corte. */
 export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World,
-  admiteSolape?: () => boolean): void {
+  legadoSolape?: (token: TokenLegadoCorte) => readonly LegacyRecord[] | undefined): void {
   const contenido = parteCorteDe(mundo);
   const modo = Atomics.load(solicitud, PREPARAR_FAUNA);
   const fauna = modo === FAUNA_DIRECTA ? prepararFaunaDirecta(contenido) : undefined;
@@ -139,7 +143,10 @@ export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte,
   if (!(buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength)
     throw new Error('V8 no entregó un bloque de corte transferible entero.');
   const parte: ParteCorte = { solicitud: Atomics.load(solicitud, SOLICITUD), epoca, tick: mundo.tick, dueno, bytes };
-  if (Atomics.load(solicitud, COMPROBAR_SOLAPE) === 1n) parte.admiteSolape = admiteSolape?.() ?? false;
+  if (Atomics.load(solicitud, COMPROBAR_SOLAPE) === 1n) {
+    const registros = legadoSolape?.({ solicitud: parte.solicitud, epoca, tick: parte.tick });
+    if (registros) parte.legadoSolape = registros;
+  }
   if (modo === FAUNA_DIRECTA) parte.faunaSustituida = fauna ? { cantidad: fauna.reduce((n, bloque) => n + bloque.filas, 0) } : null;
   if (fauna) parte.fauna = fauna;
   if (modo === FAUNA_SOMBRA) parte.fauna = prepararFaunaCorte(contenido.animals);
@@ -175,6 +182,8 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
     const contenido = deserialize(parte.bytes) as ParteMundo;
     const v8Ms = datos || datosPersonas ? performance.now() - inicioV8 : 0;
     if (contenido.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
+    if (parte.legadoSolape !== undefined && !isDeepStrictEqual(parte.legadoSolape, contenido.retiredLegacy))
+      throw new Error(`El legado del sobre no coincide con el del corte del dueño ${dueno}.`);
     if (datos) {
       datos.bytesV8 += parte.bytes.byteLength;
       datos.v8Ms += v8Ms;
@@ -258,9 +267,15 @@ export function decodificarCorteRemoto(corte: CorteRemotoBinario): {
   return { partes, diagnosticoTeselasCorte: datos, diagnosticoPersonasCorte: datosPersonas };
 }
 
+/** Identidad de la operación de custodia, independiente de la última reunión o vista solicitada. */
+export function leerCustodiaLegado(memoria: SolicitudCorte): TokenLegadoCorte {
+  return { solicitud: Atomics.load(memoria, CUSTODIA_SOLICITUD), epoca: Number(Atomics.load(memoria, CUSTODIA_EPOCA)),
+    tick: Number(Atomics.load(memoria, CUSTODIA_TICK)) };
+}
+
 /** Un canal por dueño remoto, nuevo en cada apertura. Solo se elige F0 antes de abrir la piscina. */
 export class CanalesCorte {
-  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(5 * BigUint64Array.BYTES_PER_ELEMENT));
+  readonly solicitud = new BigUint64Array(new SharedArrayBuffer(8 * BigUint64Array.BYTES_PER_ELEMENT));
   private readonly entradas: MessagePort[] = [];
   readonly puertosRemotos: MessagePort[] = [];
   private ultimaRecepcionTeselas?: DiagnosticoTeselasCorte;
@@ -300,6 +315,12 @@ export class CanalesCorte {
     return BigInt.asUintN(64, Atomics.add(this.solicitud, SOLICITUD, 1n) + 1n);
   }
 
+  fijarCustodiaLegado(token: TokenLegadoCorte): void {
+    Atomics.store(this.solicitud, CUSTODIA_SOLICITUD, token.solicitud);
+    Atomics.store(this.solicitud, CUSTODIA_EPOCA, BigInt(token.epoca));
+    Atomics.store(this.solicitud, CUSTODIA_TICK, BigInt(token.tick));
+  }
+
   /** Los dueños ya pasaron la barrera de reunión. Retira un sobre por puerto. */
   retirarCorte(solicitud: bigint, epoca: number, tick: number): CorteRemotoBinario {
     if (solicitud !== Atomics.load(this.solicitud, SOLICITUD)) throw new Error('La solicitud del corte ya no está vigente.');
@@ -320,6 +341,8 @@ export class CanalesCorte {
       comprobarMarca(parte, 'fauna', corte.modoFauna === FAUNA_DIRECTA, sombra);
       comprobarMarca(parte, 'teselas', corte.teselasDirectas);
       comprobarMarca(parte, 'personas', corte.personasDirectas);
+      if (parte.legadoSolape !== undefined && (!Array.isArray(parte.legadoSolape) || Atomics.load(this.solicitud, COMPROBAR_SOLAPE) !== 1n))
+        throw new Error(`Sobre de legado incoherente para el dueño ${dueno}.`);
       // Las filas de sombra son opcionales: si son inválidas se conserva el V8 canónico.
       if (sombra && (!Array.isArray(parte.fauna) || !parte.fauna.every(b => ocupaSuBuffer(b?.cuerpo)))) delete parte.fauna;
       sobres.push(parte);

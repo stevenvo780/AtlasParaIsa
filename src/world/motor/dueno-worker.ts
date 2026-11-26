@@ -36,12 +36,16 @@ import { Contadores } from './contadores.js';
 import { AVISO, CTL, CTL_DUENO, Dueno, celdaDueno, type PiezasDueno } from './contexto.js';
 import type { Hilo } from './contratos.js';
 import { estadoAdmiteSolape } from './corte-transferido.js';
-import { enviarParteCorte, enviarParteFoto, type SolicitudCorte } from './mensajes-corte.js';
+import { CustodiaLegado, type TokenLegadoCorte } from './custodia-legado.js';
+import { enviarParteCorte, enviarParteFoto, leerCustodiaLegado, type SolicitudCorte } from './mensajes-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 import { sinCheckpointTecnologia } from './reunir.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
-export const TRAMO = { cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7, confirmarGuardado: 8 } as const;
+export const TRAMO = {
+  cargar: 1, percibir: 2, actuar: 3, aplicar: 4, reunir: 5, cerrar: 6, publicar: 7, confirmarGuardado: 8,
+  separarLegado: 9, confirmarLegado: 10, restituirLegado: 11,
+} as const;
 
 /** Lo que cada worker recibe al nacer (por `workerData`: los SAB se comparten, lo demás se copia). */
 export interface DatosDueno {
@@ -128,11 +132,25 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;
   const control = piezas.control!;
-  const admiteSolape = tecnologiaBase ? () => estadoAdmiteSolape(mundo)
-    && isDeepStrictEqual(sinCheckpointTecnologia(mundo.technology), tecnologiaBase) : undefined;
+  const custodia = tecnologiaBase ? new CustodiaLegado(mundo) : undefined;
+  const legadoSolape = custodia ? (token: TokenLegadoCorte) =>
+    estadoAdmiteSolape(mundo) && isDeepStrictEqual(sinCheckpointTecnologia(mundo.technology), tecnologiaBase)
+      ? custodia.capturar(token) : undefined : undefined;
   const publicarCorte = puertoCorte && solicitud
-    ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo, admiteSolape) : undefined;
-  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.destinatariosGarantias, datos.perfilActuar, publicarCorte);
+    ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo, legadoSolape) : undefined;
+  return tramo => {
+    if (tramo === TRAMO.separarLegado || tramo === TRAMO.confirmarLegado || tramo === TRAMO.restituirLegado) {
+      if (!custodia || !solicitud) throw new Error('El dueño no tiene custodia de legado.');
+      const token = leerCustodiaLegado(solicitud);
+      if (tramo === TRAMO.separarLegado) {
+        if (token.tick !== mundo.tick) throw new Error('Separación de legado fuera del tick del corte.');
+        custodia.separar(token);
+      } else custodia.resolver(token, tramo === TRAMO.restituirLegado);
+      return;
+    }
+    faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.destinatariosGarantias, datos.perfilActuar, publicarCorte);
+    if (tramo === TRAMO.confirmarGuardado) custodia?.descartarCandidato();
+  };
 }
 
 /** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
@@ -229,6 +247,9 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
           throw new Error(`Fallo inyectado al confirmar guardado en el dueño ${d.hilo}.`);
         }
       }
+      break;
+    case TRAMO.separarLegado: case TRAMO.confirmarLegado: case TRAMO.restituirLegado:
+      // Los remotos lo resuelven en su propio heap. El coordinador adopta después de la barrera.
       break;
     case TRAMO.cerrar:
       cerrarMateriaGpu(m);

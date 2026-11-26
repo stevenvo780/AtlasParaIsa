@@ -204,7 +204,7 @@ function guardar(store: Store, corte: CorteTransferido, solapado: boolean): Resp
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
-    const { sello, tecnologiaRemotaEquivalente, bajas } = materializarCorteTransferido(corte, store.context);
+    const { sello, tecnologiaRemotaEquivalente, bajas } = materializarCorteTransferido(corte, store.context, solapado);
     const { world } = solapado ? store.guardarCorteSolapado(sello, corte.epoca) : store.guardarCorteSellado(sello, [], []);
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
     return { tipo: 'confirmado', guardado: {

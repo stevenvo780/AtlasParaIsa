@@ -709,7 +709,12 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         return undefined;
       }, (error: unknown) => {
         guardadoEnVuelo = undefined;
-        pausarPorGuardado(error, tick, !!vuelo.recuperacion);
+        let parcial = !!vuelo.recuperacion;
+        if (!parcial) {
+          try { motor?.cancelarCorteSolapado?.(); }
+          catch { parcial = true; }
+        }
+        pausarPorGuardado(error, tick, parcial);
         acabarPaso();
         return undefined;
       }).finally(() => { options.onOperacion?.(null); }),
@@ -1429,7 +1434,11 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
       };
       const gestos = valid.map(item => item.gesture);
-      const pasoMotor = motor && (guardadoEnVuelo ? store.leerPasoSolapado(() => motor.paso(gestos)) : motor.paso(gestos));
+      const corteEnVuelo = guardadoEnVuelo;
+      const pasoMotor = motor && (corteEnVuelo ? store.leerPasoSolapado(() => {
+        if (tickMotor === corteEnVuelo.tick) motor.prepararPasoSolapado?.();
+        return motor.paso(gestos);
+      }) : motor.paso(gestos));
       if (pasoMotor) tickMotor = pasoMotor.tick;
       const results = pasoMotor?.resultados ?? stepWorld(draft, gestos, contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;

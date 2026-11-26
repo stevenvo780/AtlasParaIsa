@@ -51,6 +51,7 @@ import { Clase, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type 
 import { crearCorteGuardado, type CorteGuardadoSellado } from './corte-sellado.js';
 import { estadoAdmiteSolape, migrantesDelCorte, prepararCorteTransferido, reunirCorte, type AcuseCorteTransferido, type CapturaCorteTransferido,
   type IdentidadCorteTransferido, type OpcionesReunionCorte } from './corte-transferido.js';
+import { CapaLegadoCorte, CustodiaLegado, indexarLegadoCorte, type TokenLegadoCorte } from './custodia-legado.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import {
   LIMITE_BYTES_FOTO_TOTAL_DEFECTO, trazaFotogramaDuenosVacia,
@@ -399,7 +400,10 @@ class MotorDuenos implements Motor {
     tecnologiaRemotaEquivalente: boolean;
     bajasTick: LegacyRecord[];
   } | null = null;
-  #ultimoCorteTransferido: (IdentidadCorteTransferido & { prefijoCronica?: ChronicleJournal }) | null = null;
+  #ultimoCorteTransferido: (IdentidadCorteTransferido & { prefijoCronica?: ChronicleJournal;
+    legado?: ReadonlyMap<string, LegacyRecord> }) | null = null;
+  #custodiaLegado?: CustodiaLegado;
+  #capaLegado?: { token: TokenLegadoCorte; capa: CapaLegadoCorte };
   #bajasConfirmadas: { tick: number; bajas: LegacyRecord[] } | null = null;
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
@@ -442,6 +446,7 @@ class MotorDuenos implements Motor {
     this.#perfilPaso = undefined;
     this.#ultimaInstantanea = null;
     this.#ultimoCorteTransferido = null;
+    this.#custodiaLegado = this.#config.solapeGuardado ? new CustodiaLegado(m) : undefined;
     this.#tecnologiaDurable = undefined;
     this.#bajasConfirmadas = null;
     olvidarPercepcion(m); olvidarOrganismos(m);
@@ -842,6 +847,7 @@ class MotorDuenos implements Motor {
 
   capturarCorteTransferido(permitirSolape = false): CapturaCorteTransferido | undefined {
     if (this.#fatal) throw this.#fatal;
+    if (this.#capaLegado) throw new Error('Debe resolverse el corte con custodia de legado antes de capturar otro.');
     const canales = this.#canalesCorte;
     const coordinador = this.#mundo;
     if (!this.#piscina || !canales || !paramsOf(coordinador).v23.guardadoCompleto) return undefined;
@@ -859,12 +865,18 @@ class MotorDuenos implements Motor {
       const remoto = canales.retirarCorte(solicitud, epoca, tick);
       const pendientes = this.#d.pendientes();
       // Recoger los avisos de la barrera puede añadir un retiro al archivo local.
+      const hayLegado = coordinador.retiredLegacy.length > 0 || remoto.sobres.some(sobre => sobre.legadoSolape?.length);
       const prefijoCronica = comprobarSolape && diario && estadoAdmiteSolape(coordinador)
-        && remoto.sobres.every(sobre => sobre.admiteSolape === true) ? { ...diario, pending: diario.pending.slice() } : undefined;
+        && (coordinador.cooperationEnabled || !hayLegado) && remoto.sobres.every(sobre => Array.isArray(sobre.legadoSolape))
+        ? { ...diario, pending: diario.pending.slice() } : undefined;
+      const token = { solicitud, epoca, tick, eventCounter };
+      const legado = prefijoCronica && hayLegado && this.#custodiaLegado
+        ? indexarLegadoCorte([this.#custodiaLegado.capturar(token), ...remoto.sobres.map(sobre => sobre.legadoSolape!)], tick)
+        : undefined;
       const captura = prepararCorteTransferido({ coordinador, cabecera: this.#cabecera, siguientes: this.#contadores.siguientes(),
         remoto, migrantes: migrantesDelCorte(pendientes), materia: this.#d.instantaneaMateria(pendientes),
         bajasPrevias, opciones, comprobarTecnologia, admiteSolape: prefijoCronica !== undefined });
-      this.#ultimoCorteTransferido = comprobarTecnologia ? { solicitud, epoca, tick, eventCounter, prefijoCronica } : null;
+      this.#ultimoCorteTransferido = comprobarTecnologia ? { ...token, prefijoCronica, legado } : null;
       return captura;
     } catch (error) { throw this.#fallo(error); }
   }
@@ -883,6 +895,42 @@ class MotorDuenos implements Motor {
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
     return solicitud;
+  }
+
+  prepararPasoSolapado(): void {
+    if (this.#fatal) throw this.#fatal;
+    const corte = this.#ultimoCorteTransferido;
+    if (!corte?.legado || this.#capaLegado) return;
+    try {
+      if (corte.epoca !== this.#epoca || corte.tick !== this.#mundo.tick)
+        throw new Error('El prefijo de legado debe separarse antes del primer paso posterior al corte.');
+      this.#barreraLegado(corte, TRAMO.separarLegado);
+      this.#custodiaLegado!.separar(corte);
+      this.#capaLegado = { token: corte, capa: new CapaLegadoCorte(this.#mundo, corte.legado) };
+    } catch (error) { throw this.#fallo(error); }
+  }
+
+  cancelarCorteSolapado(): void {
+    if (this.#fatal || !this.#piscina) return;
+    if (this.#capaLegado) this.#resolverLegado(true);
+    this.#custodiaLegado?.descartarCandidato();
+    this.#ultimoCorteTransferido = null;
+  }
+
+  #barreraLegado(token: TokenLegadoCorte, tramo: number): void {
+    this.#canalesCorte!.fijarCustodiaLegado(token);
+    this.#buzones.fijarFase(0);
+    this.#piscina!.ejecutar(tramo);
+  }
+
+  #resolverLegado(restituir: boolean): void {
+    const { token, capa } = this.#capaLegado!;
+    try {
+      this.#barreraLegado(token, restituir ? TRAMO.restituirLegado : TRAMO.confirmarLegado);
+      this.#custodiaLegado!.resolver(token, restituir);
+      capa.revocar();
+      this.#capaLegado = undefined;
+    } catch (error) { throw this.#fallo(error); }
   }
 
   #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false, prepararPersonas = false): Instantanea {
@@ -921,19 +969,25 @@ class MotorDuenos implements Motor {
     const { solicitud, epoca, tick, eventCounter, tecnologiaRemotaEquivalente, cronica, historia, tecnologia, bajas } = acuse;
     if (!meta || meta.solicitud !== solicitud || meta.epoca !== epoca || meta.tick !== tick || meta.eventCounter !== eventCounter
       || this.#epoca !== epoca || m.tick < tick || m.eventCounter < eventCounter) return false;
-    this.#ultimoCorteTransferido = null;
     if (!tecnologiaRemotaEquivalente) return false;
-    if (m.tick > tick) return !!meta.prefijoCronica && this.#confirmarPrefijo(acuse, meta.prefijoCronica);
+    if (m.tick > tick) {
+      if (!meta.prefijoCronica || !this.#confirmarPrefijo(acuse, meta.prefijoCronica, meta.legado)) return false;
+      this.#ultimoCorteTransferido = null;
+      return true;
+    }
     if (m.eventCounter !== eventCounter) return false;
+    this.#ultimoCorteTransferido = null;
     return this.#confirmarDiarios(cronica, historia, tecnologia, bajas);
   }
 
-  /** El corte admitido tenía las colas retiradas vacías y la misma tecnología que el durable anterior. */
-  #confirmarPrefijo(acuse: AcuseCorteTransferido, prefijo: ChronicleJournal): boolean {
+  /** Confirma el prefijo durable y conserva la crónica, la tecnología y las bajas posteriores. */
+  #confirmarPrefijo(acuse: AcuseCorteTransferido, prefijo: ChronicleJournal, legado?: ReadonlyMap<string, LegacyRecord>): boolean {
     const m = this.#mundo;
     const vivo = m.chronicleJournal;
     const { tick, eventCounter, cronica, historia, tecnologia, bajas } = acuse;
-    if (bajas.length || !isDeepStrictEqual(sinCheckpointTecnologia(tecnologia), this.#tecnologiaDurable)) return false;
+    if (!isDeepStrictEqual(sinCheckpointTecnologia(tecnologia), this.#tecnologiaDurable)) return false;
+    const bajasEnCorte = legado ? [...legado.values()].filter(registro => registro.diedAt === tick) : [];
+    if (!isDeepStrictEqual(bajas, bajasEnCorte) || (legado !== undefined) !== (this.#capaLegado !== undefined)) return false;
     if (!vivo || !cronica || cronica.version !== prefijo.version || vivo.version !== prefijo.version
       || cronica.startsAfter !== prefijo.startsAfter || vivo.startsAfter !== prefijo.startsAfter
       || vivo.committedThrough !== prefijo.committedThrough || vivo.committedDigest !== prefijo.committedDigest
@@ -952,8 +1006,10 @@ class MotorDuenos implements Motor {
       historiaViva.splice(posterior === -1 ? historiaViva.length : posterior, 0, structuredClone(muestra));
       historiaViva = historiaViva.slice(-96);
     }
-    m.chronicleJournal = { ...vivo, committedThrough: eventCounter, committedDigest: cronica.committedDigest,
+    const diarioConfirmado = { ...vivo, committedThrough: eventCounter, committedDigest: cronica.committedDigest,
       pending: vivo.pending.slice(prefijo.pending.length) };
+    if (legado) this.#resolverLegado(false);
+    m.chronicleJournal = diarioConfirmado;
     m.history = historiaViva;
     return true;
   }
@@ -979,6 +1035,7 @@ class MotorDuenos implements Motor {
     // Fase 2 (mutación viva tras COMMIT): nunca toca buzones ni garantías en vuelo.
     // Si falla a medias en un worker o en el coordinador tras mutar workers, la piscina queda fatal y lanza.
     try {
+      if (this.#capaLegado) this.#resolverLegado(false);
       const falloPrueba = falloConfirmarGuardadoPrueba;
       if (falloPrueba !== null) {
         falloConfirmarGuardadoPrueba = null;
@@ -991,6 +1048,7 @@ class MotorDuenos implements Motor {
       m.history = historiaConfirmada;
       m.retiredChunks = [];
       m.retiredLegacy = [];
+      this.#custodiaLegado?.descartarCandidato();
       m.technology = tecnologiaConfirmada;
       this.#tecnologiaDurable = tecnologiaDurable;
       const contexto = { ...worldContext(m), ...contextoGuardado };
@@ -1162,6 +1220,9 @@ class MotorDuenos implements Motor {
   }
 
   async #cerrarPiscina(): Promise<void> {
+    this.#capaLegado?.capa.revocar();
+    this.#capaLegado = undefined;
+    this.#custodiaLegado = undefined;
     this.#clienteGpu?.cerrar();
     this.#clienteGpu = undefined;
     const canalesCorte = this.#canalesCorte;

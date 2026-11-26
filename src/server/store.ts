@@ -1143,6 +1143,41 @@ export class Store {
       throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
     }
   }
+
+  private archivarIdentidades(world: World, solapado: boolean): void {
+    const bajas = world.retiredLegacy;
+    if (!bajas.length) return;
+    const insertar = this.db.prepare('INSERT INTO main.legacy VALUES (?,?,?,?)');
+    const leerFila = solapado ? this.db.prepare('SELECT body,digest,tick FROM main.legacy WHERE id=? AND tick<=?') : undefined;
+    const cambiosAntes = solapado ? this.totalChanges() : 0;
+    for (const record of bajas) {
+      assertLegacyRecord(record, world.tick);
+      this.assertLegacyParents(record, world);
+      const prior = leerFila ? this.readLegacyRecord(record.id, Number.MAX_SAFE_INTEGER, leerFila) : this.loadLegacy(record.id);
+      const body = stringifyExact(record);
+      if (prior) {
+        if (solapado || stringifyExact(prior) !== body)
+          throw new Error('An archived identity cannot be overwritten. Explicit recovery required.');
+        continue;
+      }
+      const digest = checksum(body);
+      insertar.run(record.id, record.diedAt, body, digest);
+      if (leerFila) {
+        const fila = leerFila.get(record.id, world.tick);
+        if (!fila || fila.tick !== record.diedAt || fila.body !== body || fila.digest !== digest)
+          throw new SnapshotSemanticError('La fila de identidad no coincide con la baja del corte solapado.');
+      }
+    }
+    if (solapado) {
+      // Solo se cuentan las altas de legado de este corte. Crónica y tecnología tienen su propia frontera.
+      if (this.totalChanges() - cambiosAntes !== bajas.length)
+        throw new SnapshotSemanticError('El corte solapado modificó identidades fuera de sus bajas.');
+      const cobertura = this.db.prepare('SELECT COUNT(*) AS cantidad, MAX(tick) AS ultimaBaja FROM main.legacy').get()!;
+      if (cobertura.cantidad !== world.demographyDynamics.deaths || typeof cobertura.ultimaBaja !== 'number' || cobertura.ultimaBaja > world.tick)
+        throw new SnapshotSemanticError('El archivo de identidades no cubre el corte solapado.');
+    }
+  }
+
   /** Los lectores históricos sin un mundo conocido validan la forma que comparten los dos modos. */
   loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER, v23?: WorldParams['v23']): Chunk | null {
     coordinatesFromKey(key);
@@ -1862,6 +1897,7 @@ export class Store {
   admiteGuardadoSolapado(): boolean {
     return !this.readOnly && this.path !== ':memory:' && this.schemaVersion >= 5
       && !this.chronicleHasTriggers() && this.readCompleteEpoch() !== null && !this.requiereAgenda()
+      && !this.db.prepare("SELECT 1 FROM temp.sqlite_schema WHERE name IN ('legacy','chunks') LIMIT 1").get()
       && this.technologyChainRecord()?.version === 2
       && this.db.prepare('PRAGMA main.journal_mode').get()?.journal_mode === 'wal';
   }
@@ -2043,14 +2079,7 @@ export class Store {
       this.technologyArchive.observeHostWrites(() => {
       if (this.schemaVersion >= 4 && !solapado) this.writeTechnologyMetadata(technologyChain, technologyPruned);
       this.flushChronicle(world);
-      const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
-      for (const record of world.retiredLegacy) {
-        assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
-        const prior=this.loadLegacy(record.id);
-        const archivedBody=stringifyExact(record);
-        if (prior) { if(stringifyExact(prior)!==archivedBody) throw new Error('An archived identity cannot be overwritten. Explicit recovery required.'); }
-        else archiveIdentity.run(record.id,record.diedAt,archivedBody,checksum(archivedBody));
-      }
+      this.archivarIdentidades(world, solapado);
       if (retired.length) {
         const archive = this.db.prepare('INSERT OR REPLACE INTO chunks VALUES (?,?,?,?)');
         // Con ventana de poda el terreno dormido guarda una sola versión por clave:
@@ -2119,6 +2148,7 @@ export class Store {
       });
       if (replay && this.replayParent(bodyDigest) !== body) throw new SnapshotPhysicalError('Replay head changed before commit.');
       if (agenda && !this.requiereAgenda()) throw new SnapshotSemanticError('La marca de agenda territorial cambió antes del commit.');
+      if (solapado && this.readCompleteEpoch() !== epoca) throw new SnapshotSemanticError('La época durable cambió durante el corte solapado.');
       if (chronicleTriggers) {
         this.assertChronicleOrigin({ ...world, chronicleJournal: committedChronicle }, true);
         this.assertChronicleArchive({ ...world, chronicleJournal: committedChronicle });

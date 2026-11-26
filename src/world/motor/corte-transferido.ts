@@ -49,6 +49,7 @@ export interface CorteTransferido extends IdentidadCorteTransferido {
   readonly materia: MateriaCheckpoint | null;
   readonly opciones: OpcionesReunionCorte;
   readonly comprobarTecnologia: boolean;
+  readonly legadoLocal?: readonly LegacyRecord[];
 }
 
 export interface CapturaCorteTransferido {
@@ -68,10 +69,10 @@ export interface AcuseCorteTransferido extends IdentidadCorteTransferido {
   readonly bajas: LegacyRecord[];
 }
 
-/** Este carril solo solapa cortes sin cambios de catálogo/diario técnico ni archivos por escribir. */
-export function estadoAdmiteSolape(mundo: Pick<World, 'technology' | 'retiredLegacy' | 'retiredChunks'>): boolean {
+/** El solape conserva la tecnología y no retira terreno. La próxima F0 debe poder reparar el padrón por las bajas. */
+export function estadoAdmiteSolape(mundo: Pick<World, 'technology' | 'retiredLegacy' | 'retiredChunks' | 'cooperationEnabled'>): boolean {
   const tech = mundo.technology;
-  return mundo.retiredLegacy.length === 0 && mundo.retiredChunks.length === 0
+  return (mundo.retiredLegacy.length === 0 || mundo.cooperationEnabled) && mundo.retiredChunks.length === 0
     && tech.journal !== undefined && tech.journal.pending.length === 0 && tech.executionCounter === tech.journal.committedThrough
     && tech.catalogue !== undefined && tech.catalogue.pending.length === 0 && tech.recipeCounter === tech.catalogue.committedThrough;
 }
@@ -132,13 +133,14 @@ export function prepararCorteTransferido(datos: Omit<DatosLocales, 'params' | 'c
   const copiaMateria = materia && { ...materia,
     inicial: [...materia.inicial], fuentes: [...materia.fuentes], sumideros: [...materia.sumideros] };
   const corte: CorteTransferido = { solicitud: remoto.solicitud, epoca: remoto.epoca, tick, eventCounter,
-    local, remoto, migrantes, materia: copiaMateria, opciones, comprobarTecnologia };
+    local, remoto, migrantes, materia: copiaMateria, opciones, comprobarTecnologia,
+    ...(admiteSolape && { legadoLocal: structuredClone(coordinador.retiredLegacy) }) };
   return { corte, transferibles: [...transferibles], admiteSolape };
 }
 
 /** El persistidor conserva las capacidades de su propio Store y las filas verificadas por el decodificador. */
-export function materializarCorteTransferido(corte: CorteTransferido, contexto: WorldContext) {
-  const { solicitud, epoca, tick, eventCounter, local, remoto, migrantes, materia, opciones, comprobarTecnologia } = corte;
+export function materializarCorteTransferido(corte: CorteTransferido, contexto: WorldContext, solapado = false) {
+  const { solicitud, epoca, tick, eventCounter, local, remoto, migrantes, materia, opciones, comprobarTecnologia, legadoLocal } = corte;
   if (solicitud !== remoto.solicitud || epoca !== remoto.epoca || tick !== remoto.tick
     || !remoto.sobres.length || remoto.sobres.length !== remoto.duenosRemotos
     || materia !== null && (materia.tick !== tick || materia.epoca !== epoca))
@@ -146,6 +148,9 @@ export function materializarCorteTransferido(corte: CorteTransferido, contexto: 
   const { coordinador, cabecera, siguientes, params, bajasPrevias } = deserialize(local) as DatosLocales;
   if (coordinador.tick !== tick || coordinador.eventCounter !== eventCounter)
     throw new Error('El coordinador no pertenece al corte de guardado.');
+  if (solapado && (!Array.isArray(legadoLocal) || !remoto.sobres.every(sobre => Array.isArray(sobre.legadoSolape)))
+    || legadoLocal !== undefined && !isDeepStrictEqual(legadoLocal, coordinador.retiredLegacy))
+    throw new Error('La custodia de legado no coincide con el corte de guardado.');
   const { partes } = decodificarCorteRemoto(remoto);
   const tecnologiaRemotaEquivalente = comprobarTecnologia && partes.every(parte =>
     isDeepStrictEqual(sinCheckpointTecnologia(parte.technology), cabecera.technology));

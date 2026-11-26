@@ -407,6 +407,10 @@ export interface Motor {
   corteGuardadoSellado?(): import('./corte-sellado.js').CorteGuardadoSellado | undefined;
   /** Captura binaria fuera del paso para un persistidor en otro hilo. */
   capturarCorteTransferido?(permitirSolape?: boolean): import('./corte-transferido.js').CapturaCorteTransferido | undefined;
+  /** Da al primer paso posterior al corte la misma cola de legado que vería después de un COMMIT síncrono. */
+  prepararPasoSolapado?(): void;
+  /** Restituye las bajas de un corte solapado rechazado mientras los dueños sigan sanos. */
+  cancelarCorteSolapado?(): void;
   /** Aplica al corte identificado la misma confirmación viva que el guardado local. */
   confirmarCorteTransferido?(acuse: import('./corte-transferido.js').AcuseCorteTransferido): boolean;
   /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.

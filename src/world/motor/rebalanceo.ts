@@ -111,16 +111,17 @@ function repartoVigenteValido(m: MedidaReparto, orden: Int32Array, hilos: number
 /** Reparto nuevo: los chunks en orden Morton, cortados en `hilos` tramos contiguos de coste parecido, dando menos a
  * los hilos que la máquina está retrasando (`hiloMs` alto con el mismo coste asignado). Devuelve el dueño de cada chunk
  * de `m.chunks`. Un chunk recién activado (coste 0) cuenta con el coste medio. Si el reparto vigente ya es completo,
- * contiguo y su desequilibrio no pasa del umbral, se devuelve tal cual: no se mueve nada que ya funciona. */
-export function repartir(m: MedidaReparto, hilos: number): Int16Array {
+ * contiguo y su desequilibrio no pasa del umbral, se devuelve tal cual: no se mueve nada que ya funciona.
+ * El laboratorio puede probar un orden espacial alternativo sin el atajo del reparto estable. */
+export function repartir(m: MedidaReparto, hilos: number, conservarEstable = true): Int16Array {
   const n = m.chunks.length;
   if (!Number.isInteger(hilos) || hilos < 1) throw new RangeError(`repartir: hilos inválido (${hilos}).`);
-  const res = new Int16Array(n);
-  if (n === 0 || hilos === 1) return res;
+  if (n === 0 || hilos === 1) return new Int16Array(n);
   const orden = ordenMorton(m);
-  if (m.dueno.length === n && m.hiloMs.length === hilos && desequilibrio(m) <= UMBRAL_DESEQUILIBRIO
+  if (conservarEstable && m.dueno.length === n && m.hiloMs.length === hilos && desequilibrio(m) <= UMBRAL_DESEQUILIBRIO
     && repartoVigenteValido(m, orden, hilos)) return Int16Array.from(m.dueno);
 
+  const res = new Int16Array(n);
   const coste = costes(m, orden), cuota = cuotas(m, hilos);
   let total = 0;
   for (let k = 0; k < n; k++) total += coste[k]!;

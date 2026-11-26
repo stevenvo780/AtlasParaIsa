@@ -16,23 +16,29 @@ function corte(seq: number, epoca: number, t: number, completo: boolean): Corte 
     serie: { hz: 6, poblacion: 0, nacimientos: 0, muertes: 0, fauna: 0, estructuras: 0, sustancias: 0 } };
 }
 
-test('el hilo por puerto devuelve créditos, informa el fallo de escritura y acepta otra apertura', async t => {
+test('el hilo por puerto devuelve créditos, revoca el enlace al fallar y reabre con uno nuevo', async t => {
   const raiz = '/tmp/atlas-v23-o-cinta';
   mkdirSync(raiz, { recursive: true });
   const directorio = mkdtempSync(join(raiz, 'hilo-'));
-  const descriptor = crearEnlaceCortes(), enlace = enlaceCinta(descriptor);
+  const trabajadores: Worker[] = [];
+  function iniciar() {
+    const descriptor = crearEnlaceCortes(), enlace = enlaceCinta(descriptor);
+    const worker = new Worker(`
+      const { workerData } = require('node:worker_threads');
+      (async () => {
+        (await import(workerData.loader)).register();
+        await import(workerData.modulo);
+      })().catch(error => setImmediate(() => { throw error; }));
+    `, { eval: true, execArgv: [], workerData: { descriptor, options: { directorio }, role: 'carta-tape',
+      loader: import.meta.resolve('tsx/esm/api'), modulo: new URL('../src/server/tape-worker.ts', import.meta.url).href } });
+    trabajadores.push(worker);
+    return { worker, enlace };
+  }
+  let { worker, enlace } = iniciar();
   const creditos = Atomics.load(enlace.creditos, 0);
-  const worker = new Worker(`
-    const { workerData } = require('node:worker_threads');
-    (async () => {
-      (await import(workerData.loader)).register();
-      await import(workerData.modulo);
-    })().catch(error => setImmediate(() => { throw error; }));
-  `, { eval: true, execArgv: [], workerData: { descriptor, options: { directorio }, role: 'carta-tape',
-    loader: import.meta.resolve('tsx/esm/api'), modulo: new URL('../src/server/tape-worker.ts', import.meta.url).href } });
   const lector = new LectorCinta(directorio);
   t.after(async () => {
-    await worker.terminate();
+    await Promise.all(trabajadores.map(hilo => hilo.terminate()));
     lector.close();
     rmSync(directorio, { recursive: true, force: true });
   });
@@ -73,20 +79,31 @@ test('el hilo por puerto devuelve créditos, informa el fallo de escritura y ace
   registrar(corte(2, 0, 4, false));
   enviar({ type: 'flush', id: 2 });
   const [estado, respuesta] = await mensajes;
-  assert.ok(estado?.type === 'estado' && estado.estado === 'error' && !estado.reiniciarEnlace);
+  assert.ok(estado?.type === 'estado' && estado.estado === 'error' && estado.reiniciarEnlace);
   assert.ok(respuesta?.type === 'reply' && respuesta.id === 2 && respuesta.error === estado.motivo);
-  registrar(corte(3, 0, 8, false));
-  enviar({ type: 'flush', id: 3 });
-  assert.equal((await reply(3)).error, estado.motivo);
-  assert.equal(Atomics.load(enlace.creditos, 0), creditos);
+  const enlaceRevocado = enlace;
+  assert.equal(Atomics.load(enlaceRevocado.creditos, 0), 0);
 
   renameSync(fuera, pista);
+  // El mismo hilo y el mismo SAB siguen revocados aunque la causa física ya se reparó.
+  abrir(1, 40);
+  enviar({ type: 'flush', id: 3 });
+  assert.equal((await reply(3)).error, estado.motivo);
+  assert.equal(Atomics.load(enlaceRevocado.creditos, 0), 0);
+  const salidaRevocada = once(worker, 'exit');
+  enviar({ type: 'close', id: 4 });
+  assert.equal((await reply(4)).error, estado.motivo);
+  assert.deepEqual(await salidaRevocada, [0]);
+
+  ({ worker, enlace } = iniciar());
+  assert.equal(Atomics.load(enlace.creditos, 0), creditos);
+  assert.equal(Atomics.load(enlaceRevocado.creditos, 0), 0);
   abrir(1, 40);
   assert.deepEqual(await recibir(), { type: 'estado', estado: 'ok', epoca: 1 });
   registrar(corte(4, 1, 40, true));
   const salido = once(worker, 'exit');
-  enviar({ type: 'close', id: 4 });
-  assert.deepEqual(await reply(4), { type: 'reply', id: 4, frames: 1, latestTick: 40 });
+  enviar({ type: 'close', id: 5 });
+  assert.deepEqual(await reply(5), { type: 'reply', id: 5, frames: 1, latestTick: 40 });
   assert.deepEqual(await salido, [0]);
   assert.equal(Atomics.load(enlace.creditos, 0), creditos);
 

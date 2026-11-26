@@ -322,7 +322,8 @@ test('createApp turbo + tape: DVR content from the tape thread, viewport clippin
   const chunk = res.json() as TapeChunkResponse;
   assert.equal(chunk.frames.length, available);
   assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, chunk.frames.at(-1)!.tick);
-  assert.equal(chunk.hasMore, meta.totalFrames > available);
+  assert.equal(chunk.hasMore, chunk.toTick < chunk.maxTick);
+  if (meta.totalFrames > available) assert.equal(chunk.hasMore, true);
   for (let i = 1; i < chunk.frames.length; i++) {
     const paso = chunk.frames[i]!.tick - chunk.frames[i - 1]!.tick;
     assert.ok(paso >= CINTA.pasos[0] && paso <= PASO_MAXIMO, `history at the tape cadence (${paso})`);

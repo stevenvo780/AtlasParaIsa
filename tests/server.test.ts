@@ -161,20 +161,24 @@ test('save failure halts the world and never acknowledges a discarded gesture', 
   assert.ok(pausada.tick <= f.store.load()!.world.tick, `se sirvió el paso ${pausada.tick}, más allá de lo guardado`);
 });
 
-test('restart restores intention, memory, PRNG and body without retrospective simulation', () => {
+test('restart restores intention, memory, PRNG and body without retrospective simulation', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'carta-restart-')); const path = join(dir, 'world.sqlite');
   let store = new Store(path);
+  let app: ReturnType<typeof createApp> | undefined;
   try {
     const initial = createWorld(42); for(let i=0;i<30;i++) stepWorld(initial);
     store.save(initial); store.close(); store = new Store(path);
     igualesSinUndefined(store.load()!.world, initial);
-    const app = createApp({store,password,origin:'http://127.0.0.1:3000',manual:true});
+    app = createApp({store,password,origin:'http://127.0.0.1:3000',manual:true});
     assert.equal(app.world.tick, initial.tick);
     const actual = structuredClone(app.world); actual.events = initial.events;
     igualesSinUndefined(actual, initial);
     assert.equal(app.world.events.at(-1)?.kind, 'pause');
-    assert.deepEqual(store.load()!.world, app.world); void app.close();
-  } finally {store.close(); rmSync(dir,{recursive:true,force:true});}
+    assert.deepEqual(store.load()!.world, app.world);
+  } finally {
+    try { await app?.close(); }
+    finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 test('checksum/schema corruption and missing committed snapshot fail closed', () => {

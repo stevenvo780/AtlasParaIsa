@@ -1,6 +1,6 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { Gesture, GestureResult } from '../shared/types.js';
@@ -182,6 +182,32 @@ type TechnologyPrune = TechnologyChain & { tick: number; count: number; byKind: 
 /** Lo que una instantánea exige del archivo para volver a cargarse o recuperarse: su tick,
  * sus recibos confirmados y los de su anillo residente (`ringTick`, tick del primero; `null` si está vacío). */
 type SlotBounds = { tick: number; committed: number; ringTick: number | null };
+type ArchivoCabeza = { path: string; dev: bigint; ino: bigint };
+type IdentidadCabeza = { archivo: ArchivoCabeza; digest: string; epoca: number };
+type CatalogoVerificado = { totals: TechnologyCatalogueTotals; functions: number[] };
+/** Resumen interno que el lector puede transferir al persistidor tras comprobar el slot 0 completo. */
+export type PruebaCabezaGuardada = IdentidadCabeza & {
+  cronica: Omit<ChronicleProof, 'stamp'>;
+  cadena: TechnologyChain;
+  definiciones: number;
+  catalogo: CatalogoVerificado;
+  cotas: SlotBounds;
+};
+type AnclaCabeza = IdentidadCabeza & { stamp: ChronicleStamp };
+type PruebaCabezaOfrecida = { ancla: AnclaCabeza; prueba: PruebaCabezaGuardada };
+
+function archivoCabeza(path: string): ArchivoCabeza | undefined {
+  try {
+    const stat = statSync(path, { bigint: true });
+    if (stat.isFile()) return { path, dev: stat.dev, ino: stat.ino };
+  } catch { /* La optimización solo se admite mientras podamos identificar el archivo. */ }
+  return undefined;
+}
+const mismoArchivoCabeza = (a: ArchivoCabeza, b: ArchivoCabeza) =>
+  a.path === b.path && a.dev === b.dev && a.ino === b.ino;
+const mismaCabeza = (a: IdentidadCabeza, b: IdentidadCabeza) =>
+  a.digest === b.digest && a.epoca === b.epoca && mismoArchivoCabeza(a.archivo, b.archivo);
+
 const TECHNOLOGY_PRUNED_KEY = 'technology-pruned-v1', TECHNOLOGY_CHAIN_KEY = 'technology-chain-v1';
 const DEEP_CHECKPOINT_SAVES_KEY = 'deep-checkpoint-saves-v1';
 const REPLAY_KEY = 'snapshot-replay-v1:';
@@ -358,7 +384,7 @@ export class Store {
    * nunca hace falta decodificar un respaldo para saber cuánto archivo necesita. Acotada a 8 entradas. */
   private readonly slotBounds = new Map<string, SlotBounds | 'unusable'>();
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
-  private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
+  private verifiedCatalogue: CatalogoVerificado | null = null;
   private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe>; warmMemo: ArchivedRecipeMemo | null } | null = null;
   private replayCache: { digest: string; world: World; stamp: ChronicleStamp } | null = null;
   private readonly replayFloors = new Map<string, number>();
@@ -368,6 +394,12 @@ export class Store {
    * contabilizada lo desajusta y el guardado siguiente recodifica todas las páginas. */
   private snapshotPagesStamp: ChronicleStamp | null = null;
   private loadedMatterStamp: ChronicleStamp | null = null;
+  private readonly archivoOriginal: ArchivoCabeza | undefined;
+  private pruebaCabezaLeida?: { prueba: PruebaCabezaGuardada; stamp: ChronicleStamp };
+  private anclaCabeza?: AnclaCabeza;
+  private pruebaCabezaOfrecida?: PruebaCabezaOfrecida;
+  private primerCorteIntentado = false;
+  private cabezaInicialReutilizada = false;
   private readonly onProgress: StoreOptions['onProgress'];
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
@@ -382,12 +414,19 @@ export class Store {
     this.technologyPruneRowsPerSave = options.technologyPruneRowsPerSave ?? TECHNOLOGY_PRUNE_ROWS_PER_SAVE;
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !this.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
+    const archivoAntesDeAbrir = existed ? archivoCabeza(resolve(path)) : undefined;
     this.db = new DatabaseSync(path, { readOnly: this.readOnly });
     this.snapshotMatterParts = new SnapshotMatterParts(this.db);
     // El archivo consulta la frontera de poda en cada verificación: nunca la recuerda (ver TechnologyArchiveHost).
     this.technologyArchive = new TechnologyArchive(this.db, { prunedThrough: () => this.prunedTechnology()?.through ?? null });
     let schemaVersion = existed ? 0 : 5;
     try {
+      const ubicacion = this.db.location();
+      const archivoAbierto = ubicacion ? archivoCabeza(ubicacion) : undefined;
+      // La ruta de SQLite identifica también sus archivos WAL. Conservar el inodo de
+      // apertura evita certificar un archivo de reemplazo mientras se usa el anterior.
+      if (archivoAbierto && (!existed || archivoAntesDeAbrir?.dev === archivoAbierto.dev
+        && archivoAntesDeAbrir.ino === archivoAbierto.ino)) this.archivoOriginal = archivoAbierto;
       if (existed) {
         const marker = this.db.prepare('PRAGMA application_id').get() as { application_id: number };
         const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
@@ -470,6 +509,7 @@ export class Store {
   }
   /** Confirma si un guardado alcanzó COMMIT aunque falle después al preparar su acuse. */
   get confirmacionesDeGuardado(): number { return this.saves; }
+  get reutilizoCabezaInicial(): boolean { return this.cabezaInicialReutilizada; }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
@@ -813,6 +853,8 @@ export class Store {
 
   cargarGuardadoCompleto(): (InstantaneaCargada & { metadatos: Omit<LoadedSnapshot, 'world'> }) | null {
     if (this.readOnly || this.db.isTransaction) throw new Error('Store.cargarInstantanea requiere una transacción propia de escritura.');
+    this.pruebaCabezaLeida = undefined;
+    let pruebaLeida: Store['pruebaCabezaLeida'];
     let matterStamp: ChronicleStamp | null = null;
     const carga = this.loadTransaction(rawTransaction => {
       const anterior = this.readCompleteEpoch();
@@ -824,15 +866,140 @@ export class Store {
       const corteAgenda = this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, anterior);
       const epoca = Math.max(anterior, materia?.epoca ?? 0) + 1;
       if (!Number.isSafeInteger(epoca)) throw new SnapshotSemanticError('La época de carga excede el rango de enteros exactos.');
-      this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
+      const antesDeReservar = this.chronicleStamp();
+      const reserva = this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
       if (this.readCompleteEpoch() !== epoca) throw new SnapshotSemanticError('La época cambió antes del commit.');
       // Reservar la época es la única escritura después de leer materia. Solo sin triggers
       // esa lectura prueba también el estado tras la reserva y evita repetirla al primer guardado.
-      if (loaded.slot === 0 && !this.chronicleHasTriggers()) matterStamp = this.chronicleStamp();
+      if (loaded.slot === 0 && !this.chronicleHasTriggers()) {
+        matterStamp = this.chronicleStamp();
+        if (Number(reserva.changes) === 1 && sameChronicleStamp({ ...antesDeReservar, totalChanges: antesDeReservar.totalChanges + 1 }, matterStamp)) {
+          const prueba = this.resumirCabezaCargada(antesDeReservar);
+          if (prueba) pruebaLeida = { prueba, stamp: matterStamp };
+        }
+      }
       return { instantanea: { world, materia }, epoca, metadatos, ...(corteAgenda && { corteAgenda }) };
     }, true);
+    this.pruebaCabezaLeida = pruebaLeida;
     this.loadedMatterStamp = matterStamp;
     return carga;
+  }
+
+  /** Ambas conexiones fijan su propia vista SQLite. Solo comparten la identidad de la cabeza. */
+  anclarPruebaCabeza(): boolean {
+    this.anclaCabeza = undefined;
+    this.pruebaCabezaOfrecida = undefined;
+    if (this.readOnly || this.saves !== 0 || this.primerCorteIntentado) return false;
+    this.anclaCabeza = this.leerPruebaCabeza(() => {
+      const cabeza = this.identificarCabeza();
+      return cabeza && { ...cabeza, stamp: this.chronicleStamp() };
+    });
+    return this.anclaCabeza !== undefined;
+  }
+
+  exportarPruebaCabeza(): PruebaCabezaGuardada | undefined {
+    const leida = this.pruebaCabezaLeida;
+    if (!leida) return undefined;
+    const prueba = this.leerPruebaCabeza(() => {
+      const cabeza = this.identificarCabeza();
+      if (cabeza && mismaCabeza(cabeza, leida.prueba) && sameChronicleStamp(leida.stamp, this.chronicleStamp()))
+        return structuredClone(leida.prueba);
+      return undefined;
+    });
+    if (!prueba) this.pruebaCabezaLeida = undefined;
+    return prueba;
+  }
+
+  ofrecerPruebaCabeza(prueba: PruebaCabezaGuardada | undefined): void {
+    const ancla = this.anclaCabeza;
+    this.anclaCabeza = undefined;
+    this.pruebaCabezaOfrecida = ancla && prueba && !this.primerCorteIntentado ? { ancla, prueba } : undefined;
+  }
+
+  private leerPruebaCabeza<T>(leer: () => T | undefined): T | undefined {
+    if (this.db.isTransaction) return undefined;
+    try {
+      this.db.exec('BEGIN');
+      const valor = leer();
+      this.db.exec('COMMIT');
+      return valor;
+    } catch {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      return undefined;
+    }
+  }
+
+  private identificarCabeza(): IdentidadCabeza | undefined {
+    const original = this.archivoOriginal;
+    if (!original) return undefined;
+    const archivo = archivoCabeza(original.path);
+    if (!archivo || !mismoArchivoCabeza(archivo, original)) return undefined;
+    if (!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE name='snapshots' AND type='table'").get()
+      || this.chronicleHasTriggers() || this.db.prepare(`
+        SELECT 1 FROM temp.sqlite_schema t JOIN main.sqlite_schema m ON t.name=m.name COLLATE NOCASE
+        WHERE t.type IN ('table','view') AND m.type IN ('table','view') LIMIT 1
+      `).get()) return undefined;
+    const row = this.db.prepare('SELECT digest FROM main.snapshots WHERE slot=0').get();
+    const epoca = this.readCompleteEpoch();
+    return epoca !== null && hexDigest(row?.digest) ? { archivo, digest: row.digest, epoca } : undefined;
+  }
+
+  private resumirCabezaCargada(antesDeReservar: ChronicleStamp): PruebaCabezaGuardada | undefined {
+    const chronicle = this.verifiedChronicle, tech = this.verifiedTechnology, catalogo = this.verifiedCatalogue;
+    if (!chronicle || !tech || !catalogo || !sameChronicleStamp(chronicle.stamp, antesDeReservar)
+      || tech.totalChanges !== antesDeReservar.totalChanges || tech.dataVersion !== antesDeReservar.dataVersion
+      || tech.schemaCookie !== antesDeReservar.schemaCookie) return undefined;
+    const cabeza = this.identificarCabeza();
+    const cotas = cabeza && this.slotBounds.get(cabeza.digest);
+    if (!cabeza || !cotas || cotas === 'unusable' || cotas.tick !== chronicle.tick
+      || cotas.committed !== tech.chain.through || catalogo.totals.recipes !== tech.catalogueThrough) return undefined;
+    const { stamp: _stamp, ...cronica } = chronicle;
+    return { ...cabeza, cronica, cadena: { ...tech.chain }, definiciones: tech.catalogueThrough,
+      catalogo: { totals: { ...catalogo.totals }, functions: [...catalogo.functions] }, cotas: { ...cotas } };
+  }
+
+  private tomarPruebaCabeza(): PruebaCabezaOfrecida | undefined {
+    const ofrecida = this.pruebaCabezaOfrecida;
+    this.ofrecerPruebaCabeza(undefined);
+    this.primerCorteIntentado = true;
+    return ofrecida;
+  }
+
+  private admitirPruebaCabeza(ofrecida: PruebaCabezaOfrecida, world: World, antesDelBegin: ChronicleStamp): boolean {
+    const { ancla, prueba } = ofrecida;
+    try {
+      const stamp = this.chronicleStamp();
+      if (!sameChronicleStamp(ancla.stamp, stamp) || !sameChronicleStamp(antesDelBegin, stamp)) return false;
+      const cabeza = this.identificarCabeza();
+      if (!cabeza || !mismaCabeza(ancla, cabeza) || !mismaCabeza(prueba, cabeza)) return false;
+      // El tick vive en el manifiesto SQLite. Solo se extrae ese escalar y se deja
+      // intacta la lectura de páginas, organismos y VMAT ya verificados al cargar.
+      const row = this.db.prepare(`SELECT coalesce(json_extract(body,'$.world.tick'), json_extract(body,'$.tick')) AS tick
+        FROM main.snapshots WHERE slot=0 AND digest=?`).get(cabeza.digest);
+      const { cronica, cadena, definiciones, catalogo, cotas } = prueba;
+      const chronicle = world.chronicleJournal!, technology = world.technology.journal!;
+      if (!safeCount(cotas.tick) || row?.tick !== cotas.tick || cronica.tick !== cotas.tick
+        || chronicle.startsAfter !== cronica.startsAfter || chronicle.committedThrough !== cronica.through
+        || chronicle.committedDigest !== cronica.digest || world.tick < cronica.tick
+        || chronicle.pending.some(event => event.tick < cronica.tick)
+        || technology.startsAfter !== cadena.startsAfter || technology.committedThrough !== cadena.through
+        || cotas.committed !== cadena.through || world.technology.catalogue?.committedThrough !== definiciones
+        || catalogo.totals.recipes !== definiciones || catalogo.functions.length !== TECHNOLOGY_FUNCTION_WORDS
+        || cotas.ringTick !== null && (!safeCount(cotas.ringTick) || cotas.ringTick > cotas.tick)) return false;
+      assertTechnologySchema(this.db);
+      const head = this.technologyChainRecord();
+      if (head?.version !== 2 || head.startsAfter !== cadena.startsAfter || head.through !== cadena.through
+        || head.digest !== cadena.digest) return false;
+      this.verifiedCatalogue = { totals: { ...catalogo.totals }, functions: [...catalogo.functions] };
+      this.verifiedChronicle = { ...cronica, stamp };
+      this.verifiedTechnology = { startsAfter: cadena.startsAfter, through: cadena.through, catalogueThrough: definiciones,
+        dataVersion: stamp.dataVersion, totalChanges: stamp.totalChanges, schemaCookie: stamp.schemaCookie, chain: { ...cadena } };
+      // Los detalles de las recetas residentes conservan la comparación habitual
+      // contra el archivo. El resumen no lleva recetas ni cachés de páginas.
+      this.verifiedRecipes.clear();
+      this.slotBounds.set(cabeza.digest, { ...cotas });
+      return true;
+    } catch { return false; }
   }
 
   /** Verifica una copia en solo lectura sin abrir una época del motor. */
@@ -1904,6 +2071,7 @@ export class Store {
 
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = [],
     changes: readonly SnapshotReplayChange[] = []): void {
+    this.tomarPruebaCabeza();
     if (ley(world, 'guardadoCompleto')) throw new Error('El mundo usa guardado completo. Guárdalo con Store.guardar.');
     this.saveSnapshot(world, inputs, requiredSessions, changes);
   }
@@ -1914,13 +2082,14 @@ export class Store {
 
   guardarConEntradas(instantanea: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial): void {
-    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda);
+    this.guardarCompleto(this.tomarPruebaCabeza(), instantanea, inputs, sesiones, corteAgenda);
   }
 
   guardarCorteSellado(sello: CorteGuardadoSellado, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, cerrarFase?: CerrarFaseGuardado): Instantanea {
+    const pruebaInicial = this.tomarPruebaCabeza();
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
-    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas, undefined, cerrarFase);
+    this.guardarCompleto(pruebaInicial, instantanea, inputs, sesiones, corteAgenda, fauna, teselas, personas, undefined, cerrarFase);
     return instantanea;
   }
 
@@ -1934,14 +2103,16 @@ export class Store {
   }
 
   guardarCorteSolapado(sello: CorteGuardadoSellado, epocaCorte: number, cerrarFase?: CerrarFaseGuardado): Instantanea {
+    const pruebaInicial = this.tomarPruebaCabeza();
     const { instantanea, fauna, teselas, personas } = consumirCorteGuardado(sello);
     if (!Number.isSafeInteger(epocaCorte) || epocaCorte < 0 || instantanea.materia && instantanea.materia.epoca !== epocaCorte)
       throw new SnapshotSemanticError('La materia no corresponde a la época del corte solapado.');
-    this.guardarCompleto(instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
+    this.guardarCompleto(pruebaInicial, instantanea, [], [], undefined, fauna, teselas, personas, epocaCorte, cerrarFase);
     return instantanea;
   }
 
-  private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
+  private guardarCompleto(pruebaInicial: PruebaCabezaOfrecida | undefined,
+    { world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
     sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[],
     teselasVerificadas?: TeselasCorteVerificadas, personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number,
     observarFase?: CerrarFaseGuardado): void {
@@ -1966,13 +2137,14 @@ export class Store {
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
     this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada, teselasVerificadas, personasVerificadas,
-      epocaSolapada, cerrarFase);
+      epocaSolapada, cerrarFase, pruebaInicial);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
     changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
     faunaVerificada?: readonly TramoFaunaVerificada[], teselasVerificadas?: TeselasCorteVerificadas,
-    personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number, cerrarFase?: CerrarFaseGuardado): void {
+    personasVerificadas?: PersonasCorteVerificadas, epocaSolapada?: number, cerrarFase?: CerrarFaseGuardado,
+    pruebaInicial?: PruebaCabezaOfrecida): void {
     const complete = matter !== undefined;
     const solapado = epocaSolapada !== undefined;
     if (solapado && !estadoAdmiteSolape(world)) throw new SnapshotSemanticError('El corte solapado contiene cambios en los archivos.');
@@ -2066,6 +2238,7 @@ export class Store {
     }
     if (revoked) { this.db.exec('ROLLBACK'); throw new SessionRevoked('Session revoked before commit.'); }
     let chronicleTriggers = false;
+    let cabezaAdmitida = false;
     try {
       const epoca = this.readCompleteEpoch();
       chronicleTriggers = this.chronicleHasTriggers();
@@ -2091,13 +2264,15 @@ export class Store {
       // el archivo, revalidar los vínculos del candidato sobre la versión que vamos a escribir.
       if (validatedInReadSnapshot && !sameChronicleStamp(chronicleStamp, this.chronicleStamp())) validateBeforeWrite();
       cerrarFase?.('abrirTransaccion');
+      cabezaAdmitida = !!pruebaInicial && epoca !== null && !chronicleTriggers
+        && this.admitirPruebaCabeza(pruebaInicial, world, chronicleStamp);
       const matterStillVerified = epoca !== null && !chronicleTriggers
         && (stampTicket !== undefined || this.loadedMatterStamp !== null && sameChronicleStamp(this.loadedMatterStamp, chronicleStamp))
         && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
       let leerCabeza: LeerCabezaDurable | undefined = this.lecturaCabezaDurable();
-      const rotatesBackups = epoca === null || matterStillVerified
+      const rotatesBackups = cabezaAdmitida || (epoca === null || matterStillVerified
         ? this.slot0Readable ?? this.readSlot0(leerCabeza)
-        : this.slot0Readable !== false && this.readSlot0(leerCabeza, epoca);
+        : this.slot0Readable !== false && this.readSlot0(leerCabeza, epoca));
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
       const expectedMatterBackups = complete && chronicleTriggers ? this.expectedMatterBackups(rotatesBackups, deep) : null;
@@ -2114,6 +2289,7 @@ export class Store {
         if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
       }
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers, leerCabeza);
+      if (cabezaAdmitida) this.assertTechnologyRing(world);
       const cambiosAntesDeTecnologia = solapado ? this.totalChanges() : undefined;
       const technologyChain = this.flushTechnology(world, leerCabeza);
       leerCabeza = undefined;
@@ -2232,6 +2408,8 @@ export class Store {
       cerrarFase?.('sqlFinalYGc');
       this.db.exec('COMMIT');
       this.saves++;
+      this.pruebaCabezaLeida = undefined;
+      if (cabezaAdmitida) this.cabezaInicialReutilizada = true;
       cerrarFase?.('commit');
       if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
@@ -2245,6 +2423,12 @@ export class Store {
       this.technologyArchive.invalidateVerification();
       this.verifiedChronicle = null;
       this.archivedRecipes = null;
+      if (cabezaAdmitida) {
+        this.verifiedTechnology = null;
+        this.verifiedCatalogue = null;
+        this.verifiedRecipes.clear();
+        this.slotBounds.delete(pruebaInicial!.prueba.digest);
+      }
       // El directorio de páginas construido en esta transacción jamás se confirma: lo durable sigue siendo
       // el del COMMIT anterior (y el sello v18 no avanza, así que el reintento recoteja contra él).
       this.snapshotParts.discardPendingPages();
@@ -2328,7 +2512,10 @@ export class Store {
    * la revocación de sesiones participa en la transacción anfitriona sin retocar las pruebas.
    */
   private auxiliaryWrite<T extends { changes: number }>(write: () => T): T {
-    if (this.db.isTransaction) return write();
+    if (this.db.isTransaction) {
+      this.pruebaCabezaLeida = undefined;
+      return write();
+    }
     const before = this.chronicleStamp();
     const beforeMemoEpoch = this.archivedRecipes ? this.technologyArchive.readEpoch() : null;
     this.db.exec('BEGIN IMMEDIATE');
@@ -2343,6 +2530,7 @@ export class Store {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
       this.archivedRecipes = null;
+      this.pruebaCabezaLeida = undefined;
       throw error;
     }
     const after = this.chronicleStamp();
@@ -2353,6 +2541,11 @@ export class Store {
       && technology.schemaCookie === before.schemaCookie) technology.totalChanges = after.totalChanges;
     const chronicle = this.verifiedChronicle;
     if (own && chronicle && sameChronicleStamp(chronicle.stamp, before)) chronicle.stamp = after;
+    const pruebaCabeza = this.pruebaCabezaLeida;
+    if (pruebaCabeza) {
+      if (own && sameChronicleStamp(pruebaCabeza.stamp, before)) pruebaCabeza.stamp = after;
+      else this.pruebaCabezaLeida = undefined;
+    }
     if (own && this.snapshotPagesStamp && sameChronicleStamp(this.snapshotPagesStamp, before)) this.snapshotPagesStamp = after;
     if (own && this.archivedRecipes && beforeMemoEpoch && this.archivedRecipes.epoch === beforeMemoEpoch) {
       const afterEpoch = this.technologyArchive.readEpoch();

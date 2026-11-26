@@ -52,6 +52,48 @@ test('un escritor frío decodifica una sola vez la cabeza anterior y conserva el
   } finally { frio.close(); }
 });
 
+for (const ventana of ['antes de exportar', 'antes de adquirir el candado'] as const) {
+  test(`una escritura ajena ${ventana} invalida la prueba de la cabeza inicial`, t => {
+    const opciones = { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true };
+    const { store, path } = laboratorio(t, 'atlas-prueba-inicial-wal-', opciones);
+    const world = createWorld(42, parseParams('v23.guardadoCompleto=true,conducta.politicaPeso=1'));
+    store.guardar({ world, materia: null });
+    const carga = store.cargarGuardadoCompleto()!;
+    const cabeza = filaInstantanea(store);
+    const escritor = new Store(path, opciones);
+    const externo = new DatabaseSync(path);
+    const tocarCabeza = () => {
+      // La escritura cambia data_version aunque el digesto y la época queden idénticos.
+      assert.equal(externo.prepare('UPDATE main.snapshots SET saved_at=saved_at+1 WHERE slot=0').run().changes, 1);
+    };
+    try {
+      assert.equal(escritor.anclarPruebaCabeza(), true);
+      if (ventana === 'antes de exportar') tocarCabeza();
+      const prueba = store.exportarPruebaCabeza();
+      assert.equal(prueba !== undefined, ventana === 'antes de adquirir el candado');
+      escritor.ofrecerPruebaCabeza(prueba);
+
+      const ejecutar = escritor.db.exec.bind(escritor.db);
+      let escrituras = 0;
+      const intercalar = t.mock.method(escritor.db, 'exec', (sql: string) => {
+        if (sql === 'BEGIN IMMEDIATE' && ventana === 'antes de adquirir el candado') {
+          assert.equal(escrituras++, 0);
+          tocarCabeza();
+        }
+        ejecutar(sql);
+      });
+      try {
+        carga.instantanea.world.tick++;
+        for (const persona of carga.instantanea.world.people) persona.demography.age++;
+        escritor.guardarCorteSellado(crearCorteGuardado(() => carga.instantanea), [], []);
+        assert.equal(escritor.reutilizoCabezaInicial, false);
+      } finally { intercalar.mock.restore(); }
+      assert.equal(filaInstantanea(escritor, 1).digest, cabeza.digest);
+      assert.equal(escritor.verificarGuardado()?.world.tick, 1);
+    } finally { externo.close(); escritor.close(); }
+  });
+}
+
 for (const corromper of [false, true]) {
   test(`revalida el candidato tras un commit WAL ajeno ${corromper ? 'en el archivo de identidades' : 'en las sesiones'}`, t => {
     const { store, path } = laboratorio(t, 'atlas-sello-guardado-');

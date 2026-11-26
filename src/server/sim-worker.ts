@@ -887,6 +887,7 @@ async function runSimulation(options: SimWorkerOptions) {
       tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
       guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1' ? { ...opcionesStore,
         perfilarFases: process.env.CARTA_PERFIL_FASES_GUARDADO === '1',
+        reusarCabezaInicial: process.env.CARTA_PRUEBA_CABEZA_INICIAL === '1',
         maxTicksSolapados: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0'),
         ...(cpuPersistidor && { cpuPersistidor: Number(cpuPersistidor) }),
       } : undefined,

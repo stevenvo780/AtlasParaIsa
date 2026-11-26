@@ -4,7 +4,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
 import { materializarCorteTransferido, type AcuseCorteTransferido, type CapturaCorteTransferido, type CorteTransferido,
   type IdentidadCorteTransferido } from '../world/motor/corte-transferido.js';
-import { Store, type FaseGuardado, type StoreOptions } from './store.js';
+import { Store, type FaseGuardado, type PruebaCabezaGuardada, type StoreOptions } from './store.js';
 
 type OpcionesDisco = Pick<StoreOptions, 'snapshotPackedPeople' | 'snapshotCompressedPeople' | 'snapshotSplitPeopleWeights'>;
 
@@ -25,6 +25,8 @@ export interface PerfilPersistidor extends AfinidadPersistidor {
   guardar: TiempoPersistidor;
   /** Intervalos consecutivos dentro de guardar, disponibles si se solicita el desglose. */
   fases?: FasesPersistidor;
+  /** Disponible cuando se habilita la prueba de la cabeza inicial. */
+  cabezaInicialReutilizada?: boolean;
 }
 
 export type GuardadoConfirmado = AcuseCorteTransferido & {
@@ -45,10 +47,17 @@ export interface OpcionesPersistidor extends OpcionesDisco {
   onProgress?: () => void;
   cpuPersistidor?: number;
   perfilarFases?: boolean;
+  probarCabeza?: () => PruebaCabezaGuardada | undefined;
 }
 
-type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean } | { tipo: 'cerrar' };
-type RespuestaGuardado = { tipo: 'listo' | 'avance' | 'cerrado' }
+interface OpcionesHilo extends Omit<OpcionesPersistidor, 'path' | 'onProgress' | 'probarCabeza'> {
+  probarCabeza: boolean;
+}
+
+type OrdenGuardar = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean; pruebaCabeza?: PruebaCabezaGuardada };
+type OrdenGuardado = OrdenGuardar | { tipo: 'cerrar' };
+type RespuestaGuardado = { tipo: 'listo'; solicitaPruebaCabeza?: boolean }
+  | { tipo: 'avance' | 'cerrado' }
   | { tipo: 'confirmado'; guardado: GuardadoConfirmado }
   | { tipo: 'rechazado'; identidad: IdentidadCorteTransferido; mensaje: string };
 
@@ -78,14 +87,16 @@ export class PersistidorGuardado {
   private cierre?: Promise<void>;
   private cierrePedido = false;
   private cierreConfirmado = false;
+  private probarCabeza: OpcionesPersistidor['probarCabeza'];
 
-  constructor({ path, onProgress, ...options }: OpcionesPersistidor) {
+  constructor({ path, onProgress, probarCabeza, ...options }: OpcionesPersistidor) {
     if (path === ':memory:' || !existsSync(path)) throw new Error('El persistidor necesita un archivo de mundo inicializado.');
     if (options.cpuPersistidor !== undefined && (!Number.isSafeInteger(options.cpuPersistidor) || options.cpuPersistidor < 0))
       throw new RangeError('La CPU del persistidor debe ser un entero no negativo.');
     let moduleURL = new URL('./guardado-worker.js', import.meta.url);
     const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
     if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./guardado-worker.ts', import.meta.url);
+    this.probarCabeza = probarCabeza;
     this.hilo = new Worker(`
       const { workerData } = require('node:worker_threads');
       (async () => {
@@ -95,7 +106,7 @@ export class PersistidorGuardado {
     `, { eval: true, execArgv: [], name: 'carta-guardado', workerData: {
       role: 'carta-guardado', moduleURL: moduleURL.href,
       loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
-      path, options,
+      path, options: { ...options, probarCabeza: probarCabeza !== undefined } satisfies OpcionesHilo,
     } });
 
     let resolverInicio!: () => void;
@@ -115,6 +126,7 @@ export class PersistidorGuardado {
           case 'listo':
             if (this.listo || this.fallo) throw new Error('El hilo de guardado se anunció fuera de orden.');
             this.listo = true;
+            if (!mensaje.solicitaPruebaCabeza) this.probarCabeza = undefined;
             resolverInicio();
             return;
           case 'avance':
@@ -151,7 +163,16 @@ export class PersistidorGuardado {
     this.pendiente = pendiente;
     void this.ready.then(() => {
       if (this.pendiente !== pendiente) return;
-      this.hilo.postMessage({ tipo: 'guardar', corte, solapado } satisfies OrdenGuardado, transferibles);
+      const probarCabeza = this.probarCabeza;
+      this.probarCabeza = undefined;
+      let pruebaCabeza: PruebaCabezaGuardada | undefined;
+      if (probarCabeza) {
+        // Comprueba el descriptor aparte, antes de entregar los buffers del corte.
+        try { pruebaCabeza = structuredClone(probarCabeza()); }
+        catch { /* El guardado conserva su verificación completa sin la prueba. */ }
+      }
+      this.hilo.postMessage({ tipo: 'guardar', corte, solapado,
+        ...(pruebaCabeza !== undefined && { pruebaCabeza }) } satisfies OrdenGuardado, transferibles);
       pendiente.enviado = true;
     }).catch(error => {
       if (this.pendiente !== pendiente) return;
@@ -178,6 +199,7 @@ export class PersistidorGuardado {
     const pendiente = this.pendiente;
     this.fallo = pendiente?.enviado ? new GuardadoIndeterminado(error) : error;
     this.pendiente = undefined;
+    this.probarCabeza = undefined;
     pendiente?.rechazar(this.fallo);
     void this.hilo.terminate().catch(() => undefined);
   }
@@ -187,6 +209,7 @@ export class PersistidorGuardado {
       await this.ready;
       // El solicitante recibe por separado el resultado del guardado ya enviado.
       await this.pendiente?.fin.catch(() => undefined);
+      this.probarCabeza = undefined;
       if (this.fallo) throw this.fallo;
       this.cierrePedido = true;
       this.hilo.postMessage({ tipo: 'cerrar' } satisfies OrdenGuardado);
@@ -258,8 +281,7 @@ function medirFasesGuardado(fases: FasesPersistidor): (fase: FaseGuardado) => vo
   };
 }
 
-function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false, ...options }:
-  Omit<OpcionesPersistidor, 'path' | 'onProgress'>): void {
+function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false, probarCabeza, ...options }: OpcionesHilo): void {
   const puerto = parentPort!;
   const responder = (mensaje: RespuestaGuardado) => puerto.postMessage(mensaje);
   const afinidad = fijarAfinidad(cpuPersistidor);
@@ -270,6 +292,7 @@ function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false,
     ultimoAvance = ahora;
     responder({ tipo: 'avance' });
   } });
+  let solicitaPruebaCabeza = probarCabeza && store.anclarPruebaCabeza();
   puerto.on('messageerror', error => { throw error; });
   puerto.on('message', (orden: OrdenGuardado) => {
     switch (orden.tipo) {
@@ -278,22 +301,26 @@ function abrirPersistidor(path: string, { cpuPersistidor, perfilarFases = false,
         responder({ tipo: 'cerrado' });
         puerto.close();
         return;
-      case 'guardar':
+      case 'guardar': {
         ultimoAvance = -Infinity;
-        responder(guardar(store, orden.corte, orden.solapado, afinidad, perfilarFases));
+        const primerCorteConAncla = solicitaPruebaCabeza;
+        solicitaPruebaCabeza = false;
+        responder(guardar(store, orden, afinidad, perfilarFases, probarCabeza, primerCorteConAncla));
         return;
+      }
       default:
         throw new Error('Orden desconocida en el hilo de guardado.');
     }
   });
-  responder({ tipo: 'listo' });
+  responder({ tipo: 'listo', ...(solicitaPruebaCabeza && { solicitaPruebaCabeza }) });
 }
 
-function guardar(store: Store, corte: CorteTransferido, solapado: boolean, afinidad: AfinidadPersistidor,
-  perfilarFases: boolean): RespuestaGuardado {
+function guardar(store: Store, { corte, solapado, pruebaCabeza }: OrdenGuardar, afinidad: AfinidadPersistidor,
+  perfilarFases: boolean, probarCabeza: boolean, primerCorteConAncla: boolean): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
+    if (primerCorteConAncla) store.ofrecerPruebaCabeza(pruebaCabeza);
     const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado));
     const { sello, tecnologiaRemotaEquivalente, bajas } = materializado.valor;
     const fases: FasesPersistidor | undefined = perfilarFases ? {} : undefined;
@@ -307,10 +334,12 @@ function guardar(store: Store, corte: CorteTransferido, solapado: boolean, afini
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,
       historia: world.history, tecnologia: world.technology, tecnologiaRemotaEquivalente, bajas,
-      perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo, ...(fases && { fases }) },
+      perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo, ...(fases && { fases }),
+        ...(probarCabeza && { cabezaInicialReutilizada: primerCorteConAncla && store.reutilizoCabezaInicial }) },
     } };
   } catch (error) {
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;
+    if (primerCorteConAncla) store.ofrecerPruebaCabeza(undefined);
     return { tipo: 'rechazado', identidad,
       mensaje: error instanceof Error ? error.message : 'No se pudo guardar el corte.' };
   }

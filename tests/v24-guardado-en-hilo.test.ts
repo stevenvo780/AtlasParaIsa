@@ -74,7 +74,7 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
   const app = createApp({
     store, origin: 'http://127.0.0.1:3000', password: 'guardado-en-hilo-v24', seed: semilla,
     tape: false, manual: true, confirmarGuardadoVivo: true,
-    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, perfilarFases: true,
+    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true, perfilarFases: true, reusarCabezaInicial: true,
       ...(cpuPersistidor === undefined ? {} : { cpuPersistidor }) },
   });
   try {
@@ -125,6 +125,7 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
       assert.equal(acuse.tick, index + 1);
       const perfil = acuse.perfilPersistidor;
       assert.ok(perfil);
+      assert.equal(perfil.cabezaInicialReutilizada, index === 0);
       const fases = perfil.fases;
       assert.ok(fases);
       for (const nombre of ['verificarCorte', 'prepararVmat', 'prepararMundoTecnologia', 'prepararSnapshot', 'abrirTransaccion',

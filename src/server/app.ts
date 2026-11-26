@@ -102,7 +102,9 @@ export interface AppOptions {
   /** Laboratorio: confirma guardados rutinarios en los dueños vivos cuando la época no cambia (apagada por defecto). */
   confirmarGuardadoVivo?: boolean;
   /** Laboratorio: reconstruye y escribe el corte rutinario en un hilo de persistencia. */
-  guardadoEnHilo?: Omit<ConstructorParameters<typeof PersistidorGuardado>[0], 'path'> & { maxTicksSolapados?: number };
+  guardadoEnHilo?: Omit<ConstructorParameters<typeof PersistidorGuardado>[0], 'path' | 'probarCabeza'> & {
+    maxTicksSolapados?: number; reusarCabezaInicial?: boolean;
+  };
 }
 /** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
 export const PASO_PARADO_S = 60;
@@ -1479,8 +1481,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
             const habilitarSolape = maxTicksSolapados > 0 && !requiereMantenimiento && store.admiteGuardadoSolapado();
             const captura = motor?.capturarCorteTransferido?.(habilitarSolape);
             if (captura) {
-              const { maxTicksSolapados: _adelanto, ...opcionesPersistidor } = options.guardadoEnHilo;
-              persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, path: store.path });
+              const { maxTicksSolapados: _adelanto, reusarCabezaInicial, ...opcionesPersistidor } = options.guardadoEnHilo;
+              persistidor ??= new PersistidorGuardado({ ...opcionesPersistidor, path: store.path,
+                ...(reusarCabezaInicial && { probarCabeza: () => store.exportarPruebaCabeza() }) });
               if (captura.admiteSolape) { iniciarGuardadoSolapado(captura); solapado = true; }
               else {
                 acuse = yield persistidor.guardar(captura);

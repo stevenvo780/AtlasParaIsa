@@ -647,8 +647,8 @@ export function rocaDe(c: CtxLeyMateria, celda: number, kg: number, destino: 'ce
 /** Lote que arde en una celda propia (REF_NULA si no hay fuego). Un fuego es un lote con rol Objeto que w mantiene
  * tomando aire de su página mientras quede combustible y su T supere la de ignición de lo que contiene. */
 export function fuegoEn(c: CtxLeyMateria, celda: number): LoteRef {
-  const lista = estado(c).fuegos.get(celda);
-  if (lista) for (const l of lista) if (c.materia.vivo(l)) return l;
+  const e = estado(c), lista = e.fuegos.get(celda);
+  if (lista && e.m.indiceDe(celda) >= 0) for (const l of lista) if (c.materia.propio(l)) return l;
   return REF_NULA;
 }
 

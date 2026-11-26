@@ -247,7 +247,9 @@ function fittingFootprint(world: World, point: Point, components: readonly Struc
 }
 
 export function structureDistance(point: Point, structure: StructureView): number {
-  return Math.min(...completedStructureCells(structure).map(cell => distance(point, cell)));
+  let minima = Infinity;
+  for (const cell of completedStructureCells(structure)) minima = Math.min(minima, distance(point, cell));
+  return minima;
 }
 
 const hasCompletedBuilding = (s: StructureView) => !s.site || !!s.site.expansion;
@@ -1032,8 +1034,19 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
  * blueprint needs (`constructionWorkFactor`) without changing its materials. The work saved is measured,
  * not assumed: only work the builder really did not spend wears the tools and counts as their benefit. */
 function obraCercana(world: World, p: Point, radio: number): StructureView[] {
+  const margen = radio + 1;
   return filtrarCerca(world.structures, p, CHUNK_SIZE + radio,
-    s => !!estadoObra(s) && structureDistance(p, s) <= radio)
+    s => {
+      if (!estadoObra(s)) return false;
+      let minima = Infinity;
+      for (const celda of completedStructureCells(s)) {
+        const dx = Math.abs(p.x - celda.x), dy = Math.abs(p.y - celda.y);
+        // El margen deja fuera solo celdas inalcanzables. Con NaN se conserva el resultado de distance.
+        if ((dx > margen && dy >= 0) || (dy > margen && dx >= 0)) continue;
+        minima = Math.min(minima, distance(p, celda));
+      }
+      return minima <= radio;
+    })
     .sort((a, b) => structureDistance(p, a) - structureDistance(p, b) || a.id.localeCompare(b.id));
 }
 

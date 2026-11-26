@@ -21,6 +21,10 @@ Las pruebas causales pueden intervenir en un fixture para aislar un efecto. El d
 3. Ejecutar una sola comparación por ventana final con los mismos estados de partida. Medir CPU con uno y dos dueños y dos dueños con GPU0. Comparar una siembra y un guardado material sellado con el mismo reloj inicial dentro de cada pareja. Reportar p50/p95/p99, tiempo de paso y de espera, RAM, tandas CUDA confirmadas dentro de la ventana, tráfico, caída a CPU y guardados. Se elige por el paso completo y la integridad.
 4. Reservar la prueba prolongada de servidor, el panel de semillas y el crecimiento a escala para el candidato que supere esos controles. Registrar mortales vivos, residentes y activos por ventana, además del territorio. El volumen almacenado y la escala que se puede simular son mediciones distintas.
 
+Desde la copia de trabajo del candidato, `bash scripts/check-v24-demo.sh DIRECTORIO_NUEVO` guarda el SHA, agrupa las pruebas focales, compila y ejecuta el recorrido de Chromium con una recarga real de la cinta. La variable `COMPUTE_NVRTC` habilita las pruebas de hardware CUDA cuando apunta a la biblioteca instalada.
+
+`bash scripts/lab/panel-demo.sh DIRECTORIO_NUEVO [CONCURRENCIA]` ejecuta la referencia demográfica de 30 días sobre las ocho semillas fijadas. Registra un censo material exacto cada día, comprobaciones cada 120 ticks y el resultado individual de cada corrida. El panel usa un dueño y CPU. Los bancos de escala comparan esa referencia con otros repartos en escenas emparejadas.
+
 Las responsabilidades de CPU, VRAM, RAM y discos están en [HARDWARE.md](HARDWARE.md). El material de la carta y los recuerdos autorizados solo los cambia Steven.
 
 ## Primer corte medido

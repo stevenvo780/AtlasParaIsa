@@ -908,11 +908,15 @@ export class Dueno implements CtxF0 {
         yield lote;
       }
     }
+    const recorrido = this.#archivoFrio?.fuenteCheckpoint(arena, celda => celdaMundo(terreno, celda), pagina => {
+      const [cx, cy] = coordenadasDePagina(pagina * 256);
+      return terreno.paginaDe(cx, cy);
+    });
     const enVuelo = pendientes.filter(i => i.materia !== null).map(i => ({ ...i, celda: celdaMundo(terreno, i.celda) }));
     return {
       epoca: this.epoca, tick: this.mundo.tick,
       sustancias: serializarSustancias(this.quimica as ServicioQuimicoImpl), registro: this.registro.guardar(),
-      paginas: codificarPaginas(this.epoca, lotes, () => arena.libres()), enVuelo: codificarEnVuelo(enVuelo),
+      paginas: codificarPaginas(this.epoca, lotes, () => arena.libres(), recorrido), enVuelo: codificarEnVuelo(enVuelo),
       inicial: this.totales.inicial, fuentes: this.totales.fuentes, sumideros: this.totales.sumideros,
     };
   }

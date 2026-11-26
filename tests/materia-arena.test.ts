@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as esperar } from 'node:timers/promises';
 import test from 'node:test';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
 import { ClaseSustancia, TIPOS } from '../src/shared/materia.js';
 import { NE, TABLA } from '../src/shared/naturaleza.js';
+import { ArchivoMateriaFria } from '../src/world/materia/archivo-frio.js';
 import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE, ranurasDesborde, type MemoriaMateria } from '../src/world/materia/arena.js';
 import {
   codificarCheckpoint, codificarEnVuelo, codificarPaginas, decodificarCheckpoint, decodificarEnVuelo, decodificarPaginas,
@@ -884,6 +888,61 @@ if (isMainThread) test('el escritor VMAT en dos pasadas conserva los bytes canó
     if (primera) { primera = false; return libres; }
     return [...libres, refDe(6, 1)];
   }), /Las ranuras retiradas cambiaron/);
+});
+
+if (isMainThread) test('el checkpoint agrupa ranuras frías intercaladas y lee cada archivo una vez', t => {
+  const raiz = mkdtempSync(join(tmpdir(), 'vm-ordenado-'));
+  const lotes = new PageArena(LOTES_POR_BLOQUE), paginas = new PageArena(2), desborde = new PageArena(64);
+  const archivo = new ArchivoMateriaFria(raiz, LOTES_POR_BLOQUE, desborde);
+  t.after(() => { archivo.cerrar(); rmSync(raiz, { recursive: true, force: true }); });
+  const arena = new ArenaLotes({
+    lotes, paginas, desborde, contenido: archivo.contenido, hilo: 0, agua: 1, quimica, digerible: () => 0,
+    terreno: { duenoChunk: Int16Array.of(0, 0), chunkDe: celda => celda >> 8 },
+    leerFrio: (ref, celda) => archivo.leer(ref, celda),
+  });
+  lotes.prepararF0(12, LOTES_POR_BLOQUE);
+  archivo.contenido.prepararF0(12, LOTES_POR_BLOQUE);
+  desborde.prepararF0(32);
+  paginas.prepararF0(2);
+  paginas.reserve(); paginas.reserve();
+  const b0 = arena.nuevo(Rol.Suelo, 260, 0), a0 = arena.nuevo(Rol.Suelo, 4, 0);
+  const sinCelda = arena.nuevo(Rol.Objeto, REF_NULA, 3);
+  const b1 = arena.nuevo(Rol.Vida, 260, 0), a1 = arena.nuevo(Rol.Vida, 4, 0);
+  const aire = arena.nuevo(Rol.Aire, 256, 0), pieza = arena.nuevo(Rol.Pieza, 4, 4), libre = arena.nuevo(Rol.Objeto, 4, 0);
+  arena.liberar(libre);
+  arena.barrera();
+  const libreReutilizado = arena.nuevo(Rol.Objeto, 4, 0);
+  arena.liberar(libreReutilizado);
+  arena.barrera();
+  const libro = libroVacio();
+  for (const [i, ref] of [b0, a0, sinCelda, b1, a1, aire, pieza].entries()) {
+    arena.fuente(ref, Float64Array.of(sustancias[0]!.id, 2 + i, 0, 100 + i), libro);
+  }
+  arena.fuente(a1, Float64Array.from(sustancias.slice(1).flatMap(({ id }) => [id, 3])), libro);
+  const saldo = arena.saldo();
+  const deArena = () => arena.muestras(), libres = () => arena.libres();
+  const control = codificarPaginas(9, deArena, libres);
+  archivo.enfriar(arena, 0, [a0, a1]);
+  archivo.enfriar(arena, 1, [b0, b1]);
+
+  const fuente = () => archivo.fuenteCheckpoint(arena, celda => celda, pagina => pagina)!;
+  const recorrido = fuente(), medir = [...recorrido.medir()];
+  assert.deepEqual(medir.map(l => Math.floor(l.celda / 256)), [1, 0, -1, 1, 0, 1, 0]);
+  assert.equal(archivo.medidas().lecturasArchivo, 0);
+  const optimizado = codificarPaginas(9, () => { throw new Error('Lectura global del contenido'); }, libres, recorrido);
+  assert.equal(archivo.medidas().lecturasArchivo, 2);
+  assert.deepEqual(optimizado, control);
+  const leido = decodificarPaginas(9, optimizado);
+  assert.deepEqual(leido.lotes.map(l => l.ref), [b0, b1, aire, a0, a1, pieza, sinCelda]);
+  assert.deepEqual(leido.libres, [libreReutilizado]);
+  assert.deepEqual(arena.saldo(), saldo);
+  assert.equal(arena.nuevo(Rol.Objeto, 4, 0), refDe(slotDe(libre), 2));
+
+  const ruta = join(raiz, readdirSync(raiz)[0]!, '0.bin');
+  const bytes = readFileSync(ruta);
+  bytes[bytes.length - 1] ^= 1;
+  writeFileSync(ruta, bytes);
+  assert.throws(() => codificarPaginas(9, deArena, libres, fuente()), /Archivo frío corrupto en página 0/);
 });
 
 if (isMainThread) test('el registro comprueba el balance global a los 2.400 ticks, incluso con asientos sin plegar', async () => {

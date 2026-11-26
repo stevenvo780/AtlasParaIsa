@@ -112,8 +112,9 @@ try {
   app.start();
   navegador = await chromium.launch({ executablePath: chromium.executablePath(), headless: true, args: ['--disable-gpu'] });
   const vistas = [];
-  for (const [nombre, ancho, alto] of [['escritorio', 1440, 900], ['movil', 390, 844]]) {
-    const contexto = await navegador.newContext({ viewport: { width: ancho, height: alto }, reducedMotion: 'reduce', hasTouch: nombre === 'movil' });
+  for (const [nombre, ancho, alto] of [['escritorio', 1440, 900], ['movil', 390, 844], ['movil-compacto', 320, 720]]) {
+    const tactil = nombre !== 'escritorio';
+    const contexto = await navegador.newContext({ viewport: { width: ancho, height: alto }, reducedMotion: 'reduce', hasTouch: tactil });
     try {
       const pagina = await contexto.newPage();
       const errores = [];
@@ -140,13 +141,27 @@ try {
       const presente = pagina.locator('[data-dvr-live]');
       await rango.press('Home');
       await expect(presente).toHaveAttribute('aria-pressed', 'false');
+      let cintaSeparaControles;
+      if (tactil) {
+        await expect(pagina.locator('[data-dvr-desfase]')).toContainText('de mundo hasta el presente');
+        cintaSeparaControles = await rango.evaluate(control => {
+          const borde = getComputedStyle(control);
+          const extension = parseFloat(borde.outlineWidth) + parseFloat(borde.outlineOffset);
+          const caja = selector => document.querySelector(selector).getBoundingClientRect();
+          const barra = caja('#dvr-bar');
+          return control.matches(':focus-visible') && borde.outlineStyle !== 'none' &&
+            control.getBoundingClientRect().bottom + extension <= caja('.dvr-readout').top &&
+            caja('#inspector-drawer').bottom <= barra.top && barra.bottom <= caja('#population-toggle').top;
+        });
+        assert.equal(cintaSeparaControles, true, 'El foco, las etiquetas, la ficha y la navegación deben caber juntos');
+      }
       await pagina.screenshot({ path: join(salida, `${nombre}-historia.png`) });
       await presente.click();
       await expect(presente).toHaveAttribute('aria-pressed', 'true');
       await expect(historia).toHaveAttribute('aria-selected', 'true');
       assert.equal(await pagina.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.deepEqual(errores, []);
-      vistas.push({ nombre, ancho, alto, controlesConHistoria: true });
+      vistas.push({ nombre, ancho, alto, controlesConHistoria: true, cintaSeparaControles });
     } finally { await contexto.close(); }
   }
   await navegador.close();

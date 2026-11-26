@@ -98,6 +98,8 @@ class Lector {
   u32(): number { return this.vista.getUint32(this.leer(4), true); }
   f64(): number { return this.vista.getFloat64(this.leer(8), true); }
   entero(min = 0): number { return entero(this.f64(), min); }
+  get posicion(): number { return this.pos; }
+  irA(posicion: number): void { this.pos = posicion; }
 
   bloque(): Uint8Array | null {
     const longitud = this.entero(-1);
@@ -150,7 +152,7 @@ function validarRanuras(ranuras: Set<number>): void {
   }
 }
 
-function validarLote(lote: LoteGuardado, exclusivos: Set<string>): void {
+function validarLote(lote: LoteGuardado, exclusivos: Set<string>): number {
   const { celda, rol, dueno, pares } = lote;
   entero(rol, Rol.Suelo, Rol.Cielo);
   entero(dueno, 0, U32_MAX);
@@ -162,11 +164,14 @@ function validarLote(lote: LoteGuardado, exclusivos: Set<string>): void {
   }
   if (!(pares instanceof Float64Array)) throw new Error('Composición de lote ausente en el punto de control.');
   const ids = new Set<number>();
+  let especies = 0;
   for (let i = 0; i < pares.length; i += 2) {
     const id = pares[i]!;
     if (ids.has(id)) throw new Error(`Composición de lote con sustancia repetida: ${id}.`);
     ids.add(id);
+    if (id !== 0 && pares[i + 1] !== 0) especies++;
   }
+  return especies;
 }
 
 export function codificarPaginas(epoca: number, lotes: Iterable<LoteGuardado>, libres: Iterable<LoteRef>): Uint8Array {
@@ -204,12 +209,61 @@ export function codificarPaginas(epoca: number, lotes: Iterable<LoteGuardado>, l
   return salida.terminar();
 }
 
-function leerPaginas(epoca: number, bytes: Uint8Array, lote: (lote: LoteGuardado) => void, libre: (ref: LoteRef) => void): void {
+/** Las referencias ocupan al menos ocho bytes por ranura. Una referencia corrupta no puede dimensionar sola el índice. */
+class RanurasPaginas {
+  private readonly maximo: number;
+  private readonly Tipo: Uint8ArrayConstructor | Int32ArrayConstructor | Float64ArrayConstructor;
+  private posiciones: Uint8Array | Int32Array | Float64Array;
+  private mayor = -1;
+  private cantidad = 0;
+
+  constructor(bytes: Uint8Array, private readonly indexar: boolean) {
+    this.maximo = Math.min(U32_MAX, Math.floor(bytes.length / 8));
+    this.Tipo = !indexar ? Uint8Array : bytes.length <= 0x7fff_ffff ? Int32Array : Float64Array;
+    this.posiciones = new this.Tipo(Math.min(256, this.maximo));
+  }
+
+  get longitud(): number { return this.cantidad; }
+  en(ranura: number): number { return this.posiciones[ranura]!; }
+
+  registrar(ref: LoteRef, posicion: number, libre = false): void {
+    const ranura = slotDe(ref);
+    if (ranura >= this.maximo) throw new Error(`Ranuras de materia no consecutivas: ${ranura}.`);
+    if (ranura >= this.posiciones.length) {
+      const crecidas = new this.Tipo(Math.min(this.maximo, Math.max(ranura + 1, this.posiciones.length * 2)));
+      crecidas.set(this.posiciones);
+      this.posiciones = crecidas;
+    }
+    if (this.posiciones[ranura] !== 0) throw new Error(`Ranura de materia duplicada: ${ranura}`);
+    // 0 indica que no figura en el checkpoint. En el índice, el signo distingue una ranura retirada.
+    this.posiciones[ranura] = this.indexar ? (libre ? -(posicion + 1) : posicion + 1) : 1;
+    this.mayor = Math.max(this.mayor, ranura);
+    this.cantidad++;
+  }
+
+  validar(): void {
+    if (this.mayor >= this.cantidad) throw new Error(`Ranuras de materia no consecutivas: ${this.mayor}.`);
+  }
+}
+
+function leerLote(entrada: Lector, ref: LoteRef, celda: number): LoteGuardado {
+  const rol = entrada.u8() as Rol;
+  const forma = entrada.u32();
+  const dueno = entrada.entero();
+  const pares = entrada.pares();
+  if (pares === null) throw new Error('Composición de lote ausente en el punto de control.');
+  return { ref, celda, rol, forma, dueno, pares };
+}
+
+function leerPaginas(
+  epoca: number, bytes: Uint8Array, lote: (lote: LoteGuardado, especies: number) => void, libre: (ref: LoteRef) => void,
+  indexar = false,
+): RanurasPaginas {
   const entrada = new Lector(bytes);
   if (entrada.entero() !== epoca) throw new Error('Sello de época incorrecto en las páginas de materia.');
   const cantidad = entrada.entero();
   const paginas = new Set<number>();
-  const ranuras = new Set<number>();
+  const ranuras = new RanurasPaginas(bytes, indexar);
   const exclusivos = new Set<string>();
   for (let i = 0; i < cantidad; i++) {
     const pagina = entrada.entero(-1);
@@ -217,29 +271,27 @@ function leerPaginas(epoca: number, bytes: Uint8Array, lote: (lote: LoteGuardado
     paginas.add(pagina);
     if (entrada.entero() !== epoca) throw new Error(`Sello de época incorrecto en la página de materia ${pagina}.`);
     const numeroLotes = entrada.entero();
+    exclusivos.clear(); // La celda de cada lote se comprueba contra esta página, que es única.
     for (let j = 0; j < numeroLotes; j++) {
+      const posicion = entrada.posicion;
       const ref = entrada.entero();
-      registrarRanura(ranuras, ref);
+      ranuras.registrar(ref, posicion);
       const celda = entrada.entero(-1);
       if (paginaDe(celda) !== pagina) throw new Error(`Celda ${celda} fuera de su página de materia.`);
-      const rol = entrada.u8() as Rol;
-      const forma = entrada.u32();
-      const dueno = entrada.entero();
-      const pares = entrada.pares();
-      if (pares === null) throw new Error('Composición de lote ausente en el punto de control.');
-      const guardado = { ref, celda, rol, forma, dueno, pares };
-      validarLote(guardado, exclusivos);
-      lote(guardado);
+      const guardado = leerLote(entrada, ref, celda);
+      lote(guardado, validarLote(guardado, exclusivos));
     }
   }
   const numeroLibres = entrada.entero();
   for (let i = 0; i < numeroLibres; i++) {
+    const posicion = entrada.posicion;
     const ref = entrada.entero();
-    registrarRanura(ranuras, ref);
+    ranuras.registrar(ref, posicion, true);
     libre(ref);
   }
-  validarRanuras(ranuras);
+  ranuras.validar();
   entrada.terminar();
+  return ranuras;
 }
 
 export function decodificarPaginas(epoca: number, bytes: Uint8Array): { lotes: LoteGuardado[]; libres: LoteRef[] } {
@@ -247,6 +299,24 @@ export function decodificarPaginas(epoca: number, bytes: Uint8Array): { lotes: L
   const libres: LoteRef[] = [];
   leerPaginas(epoca, bytes, lote => lotes.push(lote), ref => libres.push(ref));
   return { lotes, libres };
+}
+
+/** Valida las páginas en el orden del archivo. Después se puede leer cada lote o referencia retirada por ranura. */
+export function indexarPaginas(
+  epoca: number, bytes: Uint8Array, observarLote: (lote: LoteGuardado, especies: number) => void = () => {},
+): { ranuras: number; leer(ranura: number): LoteGuardado | LoteRef | undefined } {
+  const posiciones = leerPaginas(epoca, bytes, observarLote, () => {}, true);
+  const entrada = new Lector(bytes);
+  return {
+    ranuras: posiciones.longitud,
+    leer(ranura) {
+      if (!Number.isInteger(ranura) || ranura < 0 || ranura >= posiciones.longitud) return undefined;
+      const posicion = posiciones.en(ranura);
+      entrada.irA(Math.abs(posicion) - 1);
+      const ref = entrada.entero();
+      return posicion < 0 ? ref : leerLote(entrada, ref, entrada.entero(-1));
+    },
+  };
 }
 
 function validarGarantia(tipo: TipoIntento, nonce: number, nonces: Set<number>): void {

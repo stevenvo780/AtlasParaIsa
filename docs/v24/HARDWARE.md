@@ -138,3 +138,9 @@ Con ocho dueños en la L3 grande, la mediana del dueño más lento fue de 1,20 s
 El perfil de V8 sobre el dueño 0 del corte de 128.000 atribuyó a la búsqueda de vecinos 1.244 de las 1.576 muestras de convivencia. Las consultas de personas en radio de hasta dos celdas agrupan las ranuras de una página en subceldas de cuatro por cuatro. La visita sigue el orden anterior de páginas y ranuras, con la misma prueba de distancia.
 
 Un par con el mismo SQLite y ocho dueños en la L3 grande midió seis pasos tras calentar dos. La mediana de aplicación del dueño crítico bajó de 1.221 a 335 ms. La del paso bajó de 3,15 a 2,21 s y el pico de RSS subió de 6.548 a 6.878 MiB. Ambos brazos cerraron el saldo exacto con 127.944 personas y 1.026 páginas. Sus trayectorias de fauna difirieron.
+
+### Percepción agrupada en dos GPU físicas
+
+En una siembra de 16.000 habitantes con ocho dueños, seis pasos de calentamiento y doce medidos, la 5070 Ti confirmó 72 resultados aceptados por F2 y la 2060 confirmó 24. Cada dueño recibió doce resultados válidos. En la ventana agrupada no se registraron vencimientos ni fallos de canal. La media del paso pasó de 351 a 322 ms frente a CPU y el p95 de 417 a 358 ms. Los dos cierres conservaron el saldo exacto y registraron cero violaciones.
+
+En la misma escena, la asignación anterior de un dueño por tarjeta registró degradación de la 2060. El banco lo identifica en su veredicto de actividad. Los tiempos corresponden a una ventana por brazo en esta torre. La asignación agrupada sigue disponible como opción de laboratorio.

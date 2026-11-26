@@ -46,6 +46,12 @@ node --import tsx scripts/lab/servir-demo.mts DIRECTORIO_NUEVO 3130
 
 El servidor del reproductor sirve archivos estáticos y el tramo sellado. El navegador no abre una conexión con el motor ni inicia un mundo desde un guardado.
 
+### El refugio junto al sendero
+
+Una continuación del guardado del día 30 de la semilla 7 produjo el tramo 72.199–72.599. Sus 101 fotogramas consecutivos muestran la lluvia, la huella de tránsito, el agua almacenada y un refugio terminado con siete piezas en (63,23). En el tick 72.391, el cálculo de exposición para un vecino allí registró un daño un 42,9 % menor con su techo material frente al cálculo del mismo estado sin techo. El tramo se cotejó fotograma a fotograma con la fuente y el reproductor se detuvo al final seleccionado en tres tamaños de navegador.
+
+El registro de 600 pasos conserva sus huecos iniciales. La exportación comienza en el último tramo continuo. El navegador muestra día 31 porque la trayectoria continúa desde el cierre del día 30.
+
 ## Primer corte medido
 
 En `4deaee1`, las pruebas de laboratorio acreditaron bebida y alivio de sed con débito material, preferencia de ruta por piedra instalada y refugio bajo una cubierta que pierde su efecto al desgastarse o desmontarse. Las 11 pruebas focales y la compilación pasaron. Un recorrido autenticado en Chromium abrió Historia, pausó la cinta, buscó un corte anterior y volvió al presente con la ficha abierta en 1440 × 900 y 390 × 844.

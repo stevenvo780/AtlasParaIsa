@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { types } from 'node:util';
 import type { World } from './index.js';
 import { paramsOf } from './params.js';
 import { todosApagados } from '../shared/interruptores.js';
@@ -101,7 +102,35 @@ function compareKeys(a: string, b: string): number {
   return ai && bi ? Number(a) - Number(b) : ai ? -1 : bi ? 1 : a < b ? -1 : a > b ? 1 : 0;
 }
 
-function emitCanonical(value: unknown, emit: (text: string) => void): void {
+const NUMBER_RUN_MIN = 64, NUMBER_RUN_MAX = 1024;
+
+function emitNumberRun(numbers: number[], length: number, emit: (text: string) => void): void {
+  numbers.length = length;
+  const json = JSON.stringify(numbers);
+  emit(json.slice(1, -1)); // The caller emits the array brackets.
+}
+
+/** Native JSON prints bounded runs of numbers already read from the source.
+ * Gaps, -0 and other values keep the historical per-slot encoding. */
+function emitArrayRuns(value: unknown[], emit: (text: string) => void, numbers: number[]): void {
+  let run = 0;
+  for (let i = 0; i < value.length; i++) {
+    const present = i in value;
+    const item: unknown = present ? value[i] : undefined;
+    if (typeof item === 'number' && Number.isFinite(item) && !Object.is(item, -0)) {
+      if (run === 0 && i > 0) emit(',');
+      numbers[run++] = item;
+      if (run === NUMBER_RUN_MAX) { emitNumberRun(numbers, run, emit); run = 0; }
+      continue;
+    }
+    if (run > 0) { emitNumberRun(numbers, run, emit); run = 0; }
+    if (i > 0) emit(',');
+    if (present) emitCanonical(item, emit, numbers);
+  }
+  if (run > 0) emitNumberRun(numbers, run, emit);
+}
+
+function emitCanonical(value: unknown, emit: (text: string) => void, numbers: number[]): void {
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new TypeError('Non-finite canonical world value.');
     emit(Object.is(value, -0) ? '-0' : JSON.stringify(value)); return;
@@ -109,9 +138,10 @@ function emitCanonical(value: unknown, emit: (text: string) => void): void {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') { emit(JSON.stringify(value)); return; }
   if (Array.isArray(value)) {
     emit('[');
-    for (let i = 0; i < value.length; i++) {
+    if (!types.isProxy(value) && value.length >= NUMBER_RUN_MIN) emitArrayRuns(value, emit, numbers);
+    else for (let i = 0; i < value.length; i++) {
       if (i) emit(',');
-      if (i in value) emitCanonical(value[i], emit);
+      if (i in value) emitCanonical(value[i], emit, numbers);
     }
     emit(']'); return;
   }
@@ -120,13 +150,15 @@ function emitCanonical(value: unknown, emit: (text: string) => void): void {
   const entries = Object.entries(value).filter(([, entry]) => entry !== undefined).sort(([a], [b]) => compareKeys(a, b));
   for (let i = 0; i < entries.length; i++) {
     if (i) emit(',');
-    const [key, entry] = entries[i]!; emit(JSON.stringify(key)); emit(':'); emitCanonical(entry, emit);
+    const [key, entry] = entries[i]!; emit(JSON.stringify(key)); emit(':'); emitCanonical(entry, emit, numbers);
   }
   emit('}');
 }
 
 export function digestoCanonico(world: World, gobernadorLegado?: GobernadorLegado): string {
   const hash = createHash('sha256');
+  // The scratch array owns its numeric entries and inherits no toJSON.
+  const numbers = Object.setPrototypeOf([] as number[], null);
   let pieces: string[] = [], length = 0;
   const flush = () => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
   emitCanonical({ world: sinUidsDelMotor(world), params: paramsParaDigesto(world, gobernadorLegado) }, text => {
@@ -134,7 +166,7 @@ export function digestoCanonico(world: World, gobernadorLegado?: GobernadorLegad
     // No full-world copy or string: a large valid world can exceed V8's string limit.
     // Flush only between complete JSON tokens so UTF-16 pairs are never split.
     if (length >= 64 * 1024) flush();
-  });
+  }, numbers);
   flush(); return hash.digest('hex');
 }
 

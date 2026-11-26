@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { escalon } from '../src/shared/interruptores.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
-import type { Animal } from '../src/world/animals.js';
+import { syncFauna, type Animal } from '../src/world/animals.js';
 import { AREA_CELDA, huella } from '../src/world/decision/fauna.js';
 import { masaDe } from '../src/world/materia/cuerpo.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
@@ -42,19 +42,47 @@ test('la fauna cruza entre dueños sin superar el área de la celda de destino',
 
 test('al retirarse un chunk junto a la frontera, cada animal residente conserva su tesela', async () => {
   const semilla = 51926;
-  const base = hostOpenWorldParams();
-  const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos: 2, gpu: [] } }, base);
-  const motor = crearMotor(createWorld(semilla, params), { ...unSoloDueno(semilla), hilos: 2 });
-  try {
-    for (let tick = 0; tick < 120; tick++) motor.paso([]);
-    const { world } = motor.instantanea();
-    assert.ok(world.retiredChunks.some(chunk => chunk.key === '2,-1'));
-    const tesela = tileLookup(world.tiles);
-    for (const a of world.animals) {
-      assert.ok(tesela(a.x, a.y), `${a.id} quedó en una celda no residente (${a.x}, ${a.y})`);
+  const params = parseParams({ v23: escalon('duenos'), motor: { hilos: 2, gpu: [] } });
+  const origen = { x: 20, y: 15 }, destino = { x: 20, y: 16 };
+  const claveDestino = chunkKey(destino.x, destino.y);
+  for (const retirar of [false, true]) {
+    const mundo = createWorld(semilla, params);
+    const animal = mundo.animals.find(a => a.x === origen.x && a.y === origen.y);
+    assert.ok(animal);
+    mundo.animals = [animal];
+    syncFauna(mundo.tiles, mundo.animals);
+    // La banda queda detrás del animal y su halo mantiene ambos chunks. Huir en línea recta cruza al otro dueño.
+    const banda = { x: origen.x, y: origen.y - 2 };
+    for (const p of mundo.people) {
+      Object.assign(p, banda, { action: 'rest', target: banda, decisionAt: 3 });
     }
-  } finally {
-    await motor.cerrar();
+    const motor = crearMotor(mundo, { ...unSoloDueno(semilla), hilos: 2 });
+    try {
+      motor.paso([]);
+      assert.ok(animal.fauna);
+      assert.deepEqual({ x: animal.x, y: animal.y }, origen);
+      animal.fauna.avance = 1;
+      const d = duenoSi(mundo)!, t = d.terrenoPercibido;
+      const paginaOrigen = t.chunkDe(t.celda(origen.x, origen.y));
+      const paginaDestino = t.chunkDe(t.celda(destino.x, destino.y));
+      assert.equal(t.duenoChunk[paginaOrigen], 0);
+      assert.equal(t.duenoChunk[paginaDestino], 1);
+      if (retirar) d.ordenar(t.duenoChunk[paginaDestino]!, [ORDEN.ceder, paginaDestino, -1]);
+      motor.paso([]);
+      const { world } = motor.instantanea();
+      assert.equal(world.retiredChunks.some(chunk => chunk.key === claveDestino), retirar);
+      assert.equal(Object.hasOwn(world.chunks, claveDestino), !retirar);
+      const tesela = tileLookup(world.tiles);
+      for (const a of world.animals) {
+        assert.ok(tesela(a.x, a.y), `${a.id} quedó en una celda no residente (${a.x}, ${a.y})`);
+      }
+      const observado = world.animals.find(a => a.id === animal.id);
+      assert.ok(observado);
+      assert.deepEqual(observado.target, destino);
+      assert.deepEqual({ x: observado.x, y: observado.y }, retirar ? origen : destino);
+    } finally {
+      await motor.cerrar();
+    }
   }
 });
 

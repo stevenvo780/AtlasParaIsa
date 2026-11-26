@@ -26,9 +26,11 @@ const UNIDAS = ['memories', 'blueprints', 'places', 'whispers', 'invitations', '
 /** Listas que solo lleva el coordinador: los demás empiezan vacíos. */
 const DEL_COORDINADOR = ['legacy', 'retiredLegacy', 'retiredChunks'] as const satisfies readonly (keyof World)[];
 
+const CAMPOS_BASE = [...UNIDAS, ...ADITIVOS] as const;
 const CAMPOS_PARTE = ['tick', 'tiles', 'people', 'animals', 'structures', 'chunks', ...ADITIVOS, ...UNIDAS, ...DEL_COORDINADOR] as const;
 type TecnologiaSinCheckpoint = Omit<World['technology'], 'checkpoint'>;
 export type ParteMundo = Pick<World, Exclude<typeof CAMPOS_PARTE[number], 'technology'>> & { technology: TecnologiaSinCheckpoint };
+export type BaseReunion = Pick<World, typeof CAMPOS_BASE[number]>;
 
 export function sinCheckpointTecnologia(tech: World['technology'] | undefined): TecnologiaSinCheckpoint | undefined {
   if (!tech) return tech;
@@ -44,6 +46,13 @@ export function parteCorteDe(mundo: World): ParteMundo {
   const tecnologia = sinCheckpointTecnologia(mundo.technology);
   if (tecnologia) parte.technology = tecnologia;
   return parte;
+}
+
+/** La base que usa el guardado se toma en el tick del corte: el F0 poda invitaciones y recordatorios. */
+export function baseReunionDe(cabecera: World): BaseReunion {
+  const base = Object.fromEntries(CAMPOS_BASE.map(campo => [campo, cabecera[campo]])) as BaseReunion;
+  if (base.technology) base.technology = sinCheckpointTecnologia(base.technology)!;
+  return base;
 }
 
 /** El mundo que recibe cada dueño al abrir la época (se serializa: no comparte nada con `mundo`). */
@@ -103,14 +112,15 @@ export function fundir(base: unknown, valores: readonly unknown[]): unknown {
 /**
  * Arma el `World` de una instantánea. `coordinador` es el mundo del dueño 0 (que además lleva la crónica y el archivo),
  * `cabecera` la base de la que partieron todos y `partes` los mundos parciales de los demás dueños, ya deserializados.
- * `siguientes` son los contadores comunes. No modifica ninguno de sus argumentos ni comparte con ellos lo que cambia en
- * el tick (teselas, personas, fauna y estructuras del coordinador se copian).
+ * `siguientes` son los contadores comunes. El coordinador vivo conserva sus objetos y el corte recibe copias.
+ * Un coordinador deserializado exclusivamente para este corte ya es del receptor y sus arrays se pueden adoptar.
  */
-export function reunir(coordinador: World, cabecera: World, partes: readonly ParteMundo[], siguientes: Record<TipoId, number>): World {
+export function reunir(coordinador: World, cabecera: BaseReunion, partes: readonly ParteMundo[], siguientes: Record<TipoId, number>,
+  adoptarCoordinador = false): World {
   const todos = [coordinador, ...partes];
-  const copia = <T>(v: T): T => structuredClone(v);
+  const copia = <T>(v: T): T => adoptarCoordinador ? v : structuredClone(v);
   const mundo: World = { ...coordinador };
-  mundo.tiles = coordinador.tiles.map(t => ({ ...t }) as Tile);
+  mundo.tiles = adoptarCoordinador ? coordinador.tiles : coordinador.tiles.map(t => ({ ...t }) as Tile);
   mundo.people = copia(coordinador.people);
   mundo.animals = copia(coordinador.animals);
   mundo.structures = copia(coordinador.structures);
@@ -128,8 +138,7 @@ export function reunir(coordinador: World, cabecera: World, partes: readonly Par
   if (coordinador.chronicleJournal) mundo.chronicleJournal = copia(coordinador.chronicleJournal);
   const campos = mundo as unknown as Record<string, unknown>;
   for (const k of DEL_COORDINADOR) campos[k] = [...copia(coordinador[k]), ...partes.flatMap(p => p[k] as unknown[])];
-  for (const k of UNIDAS) if (todos.some(m => m[k] !== undefined)) campos[k] = fundir(copia(cabecera[k]), todos.map(m => m[k]));
-  for (const k of ADITIVOS) if (todos.some(m => m[k] !== undefined)) campos[k] = fundir(copia(cabecera[k]), todos.map(m => m[k]));
+  for (const k of CAMPOS_BASE) if (todos.some(m => m[k] !== undefined)) campos[k] = fundir(copia(cabecera[k]), todos.map(m => m[k]));
   // El punto de control técnico describe a las personas de un solo heap: el siguiente paso lo vuelve a capturar.
   if (mundo.technology) mundo.technology = { ...mundo.technology, checkpoint: undefined };
   mundo.siguienteUid = siguientes.uid;

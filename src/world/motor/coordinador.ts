@@ -15,7 +15,7 @@ import { deserialize, serialize } from 'node:v8';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import type { FuenteFotograma } from './fotograma.js';
 import type { RepartoVisible } from '../../shared/vistas-v23.js';
-import type { ChronicleEvent, FaseNombre, Gesture, GestureResult, Tile } from '../../shared/types.js';
+import type { ChronicleEvent, FaseNombre, Gesture, GestureResult } from '../../shared/types.js';
 import type { LegacyRecord } from '../../shared/demography.js';
 import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
@@ -23,13 +23,12 @@ import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { BrokerPercepcionGpu, resolverDuenosPercepcionGpu,
   type DuenosBroker, type EpocaBrokerPercepcion, type PercibidorBroker } from '../gpu/broker-percepcion.js';
-import { pruneBonds } from '../lineage.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
 import { appendWorldEvent } from '../mundo/crear.js';
 import { stepWorld, type FaseMedicion } from '../mundo/paso.js';
-import { TICKS_PER_DAY, type Person, type World } from '../mundo/tipos.js';
+import { TICKS_PER_DAY, type Person, type World, type WorldContext } from '../mundo/tipos.js';
 import { paramsOf } from '../params.js';
 import { ErrorFatalMotor } from '../paralelo/barrera.js';
 import { Piscina, type DiagnosticoPiscina } from '../paralelo/piscina.js';
@@ -45,24 +44,23 @@ import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
   AVISO, CTL, CTL_DUENO, Dueno, ORDEN, celdaDueno, destinatariosDeGarantias, duenoDe, duenoSi,
-  type Migrante, type MigranteChunk, type ParteTick,
+  type MigranteChunk, type ParteTick,
 } from './contexto.js';
-import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
+import { Clase, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { crearCorteGuardado, type CorteGuardadoSellado } from './corte-sellado.js';
+import { migrantesDelCorte, prepararCorteTransferido, reunirCorte, type AcuseCorteTransferido, type CapturaCorteTransferido,
+  type IdentidadCorteTransferido, type OpcionesReunionCorte } from './corte-transferido.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
-import { faunaCorteDe, faunaVerificadaDe, vincularFaunaCorte, vincularFaunaVerificada, type TramoFaunaCorte, type TramoFaunaVerificada } from './fauna-corte.js';
 import {
   LIMITE_BYTES_FOTO_TOTAL_DEFECTO, trazaFotogramaDuenosVacia,
   type LoteFotoDuenos, type ParteFotoDueno, type TrazaFotogramaDuenos,
 } from './fotograma-dueno.js';
 import { leyesActivas } from './leyes.js';
 import { CanalesCorte } from './mensajes-corte.js';
-import { personasVerificadasDe, vincularPersonasVerificadas, type TramoPersonasVerificadas } from './personas-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
-import { cabeceraDe, fundir, reunir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
+import { cabeceraDe, fundir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
 import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
-import { teselasVerificadasDe, vincularTeselasVerificadas, type TramoTeselasVerificadas } from './teselas-corte.js';
 
 /** Comprueba por igualdad estructural profunda (jamás por contadores ni longitudes) que las partes remotas
  * no divergieron de su tecnología inicial y que `fundir` reproducirá exactamente la tecnología confirmada. */
@@ -399,6 +397,7 @@ class MotorDuenos implements Motor {
     tecnologiaRemotaEquivalente: boolean;
     bajasTick: LegacyRecord[];
   } | null = null;
+  #ultimoCorteTransferido: IdentidadCorteTransferido | null = null;
   #bajasConfirmadas: { tick: number; bajas: LegacyRecord[] } | null = null;
   readonly #paginas = new Map<number, Pagina>();
   /** Chunks mandados ceder en el tick anterior: cambian de dueño en este F0. */
@@ -440,6 +439,7 @@ class MotorDuenos implements Motor {
     this.#fatal = undefined;
     this.#perfilPaso = undefined;
     this.#ultimaInstantanea = null;
+    this.#ultimoCorteTransferido = null;
     this.#bajasConfirmadas = null;
     olvidarPercepcion(m); olvidarOrganismos(m);
     this.#paginas.clear(); this.#cesiones = []; this.#historial.length = 0;
@@ -567,6 +567,7 @@ class MotorDuenos implements Motor {
     const inicio = performance.now();
     try {
       this.#ultimaInstantanea = null;
+      this.#ultimoCorteTransferido = null;
       this.#bajasConfirmadas = null;
       m.tick++;
       control[CTL.tick] = m.tick;
@@ -837,6 +838,33 @@ class MotorDuenos implements Motor {
     });
   }
 
+  capturarCorteTransferido(): CapturaCorteTransferido | undefined {
+    if (this.#fatal) throw this.#fatal;
+    const piscina = this.#piscina, canales = this.#canalesCorte;
+    const coordinador = this.#mundo;
+    if (!piscina || !canales || !paramsOf(coordinador).v23.guardadoCompleto) return undefined;
+    const opciones: OpcionesReunionCorte = {
+      prepararFauna: this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true,
+      prepararTeselas: this.#config.teselasCorteDirectas === true,
+      prepararPersonas: this.#config.personasCorteDirectas === true,
+    };
+    try {
+      const epoca = this.#epoca, { tick, eventCounter } = coordinador;
+      const solicitud = canales.pedir(opciones.prepararFauna, opciones.prepararTeselas, opciones.prepararPersonas);
+      this.#buzones.fijarFase(0);
+      piscina.ejecutar(TRAMO.reunir);
+      this.#recoger();
+      const remoto = canales.retirarCorte(solicitud, epoca, tick);
+      const pendientes = this.#d.pendientes();
+      const comprobarTecnologia = this.#config.confirmarGuardadoVivo === true;
+      const captura = prepararCorteTransferido({ coordinador, cabecera: this.#cabecera, siguientes: this.#contadores.siguientes(),
+        remoto, migrantes: migrantesDelCorte(pendientes), materia: this.#d.instantaneaMateria(pendientes),
+        bajasPrevias: this.#bajasConfirmadas?.tick === tick ? this.#bajasConfirmadas.bajas : [], opciones, comprobarTecnologia });
+      this.#ultimoCorteTransferido = comprobarTecnologia ? { solicitud, epoca, tick, eventCounter } : null;
+      return captura;
+    } catch (error) { throw this.#fallo(error); }
+  }
+
   #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false, prepararPersonas = false): Instantanea {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
@@ -862,12 +890,28 @@ class MotorDuenos implements Motor {
     // Fase 1 (solo lectura y copias previas): cualquier `false` rechaza antes de tocar estado vivo.
     if (!meta || meta.world.deref() !== w || meta.tick !== m.tick || meta.eventCounter !== m.eventCounter) return false;
     if (!meta.tecnologiaRemotaEquivalente) return false;
-    // Con cooperación apagada, la próxima fase de comunidades no actualiza el padrón vivo.
-    if (!m.cooperationEnabled && meta.bajasTick.length) return false;
     if (w.retiredChunks.length !== 0 || w.retiredLegacy.length !== 0) return false;
-    const cronica = w.chronicleJournal;
+    return this.#confirmarDiarios(w.chronicleJournal, w.history, w.technology, meta.bajasTick, worldContext(w));
+  }
+
+  confirmarCorteTransferido(acuse: AcuseCorteTransferido): boolean {
+    if (this.#fatal) throw this.#fatal;
+    if (!this.#config.confirmarGuardadoVivo || !this.#piscina) return false;
+    const meta = this.#ultimoCorteTransferido, m = this.#mundo;
+    const { solicitud, epoca, tick, eventCounter, tecnologiaRemotaEquivalente, cronica, historia, tecnologia, bajas } = acuse;
+    if (!meta || meta.solicitud !== solicitud || meta.epoca !== epoca || meta.tick !== tick || meta.eventCounter !== eventCounter
+      || this.#epoca !== epoca || m.tick !== tick || m.eventCounter !== eventCounter) return false;
+    this.#ultimoCorteTransferido = null;
+    if (!tecnologiaRemotaEquivalente) return false;
+    return this.#confirmarDiarios(cronica, historia, tecnologia, bajas);
+  }
+
+  #confirmarDiarios(cronica: World['chronicleJournal'], historia: World['history'], tech: World['technology'],
+    bajas: LegacyRecord[], contextoGuardado?: WorldContext): boolean {
+    const m = this.#mundo;
+    // Con cooperación apagada, la próxima fase de comunidades no actualiza el padrón vivo.
+    if (!m.cooperationEnabled && bajas.length) return false;
     if (!cronica || cronica.pending.length !== 0 || cronica.committedThrough !== m.eventCounter) return false;
-    const tech = w.technology;
     if (!tech?.journal || tech.journal.pending.length !== 0) return false;
     if (!tech.catalogue || tech.catalogue.pending.length !== 0) return false;
     const candidataTech = structuredClone(tech);
@@ -875,9 +919,9 @@ class MotorDuenos implements Motor {
     if (!tecnologiaEquivalenteParaConfirmar(this.#cabecera.technology, this.#tecnologiaInicial, partesBase, candidataTech)) return false;
 
     const diarioConfirmado = structuredClone(cronica);
-    const historiaConfirmada = structuredClone(w.history);
+    const historiaConfirmada = structuredClone(historia);
     const tecnologiaConfirmada = { ...candidataTech, checkpoint: undefined };
-    const contextoGuardado = worldContext(w);
+    const bajasConfirmadas = bajas.length ? { tick: m.tick, bajas: structuredClone(bajas) } : null;
 
     // Fase 2 (mutación viva tras COMMIT): nunca toca buzones ni garantías en vuelo.
     // Si falla a medias en un worker o en el coordinador tras mutar workers, la piscina queda fatal y lanza.
@@ -888,17 +932,18 @@ class MotorDuenos implements Motor {
         if (falloPrueba > 0) this.#control[CTL.falloConfirmar] = falloPrueba;
       }
       this.#buzones.fijarFase(0);
-      this.#piscina.ejecutar(TRAMO.confirmarGuardado);
+      this.#piscina!.ejecutar(TRAMO.confirmarGuardado);
       if (falloPrueba === 0) throw new Error('Fallo inyectado al confirmar guardado en el coordinador tras mutar workers.');
       m.chronicleJournal = diarioConfirmado;
       m.history = historiaConfirmada;
       m.retiredChunks = [];
       m.retiredLegacy = [];
       m.technology = tecnologiaConfirmada;
-      if (contextoGuardado.loadChunk || contextoGuardado.loadLegacy || contextoGuardado.catalogueReader) {
-        bindWorldContext(m, { ...worldContext(m), ...contextoGuardado });
+      const contexto = { ...worldContext(m), ...contextoGuardado };
+      if (contexto.loadChunk || contexto.loadLegacy || contexto.catalogueReader) {
+        bindWorldContext(m, contexto);
       }
-      this.#bajasConfirmadas = meta.bajasTick.length ? { tick: meta.tick, bajas: meta.bajasTick } : null;
+      this.#bajasConfirmadas = bajasConfirmadas;
       return true;
     } catch (error) {
       throw this.#fallo(error);
@@ -933,77 +978,10 @@ class MotorDuenos implements Motor {
     this.#partesMundo.clear();
     const tecnologiaRemotaEquivalente = paraConfirmar && partes.every(parte =>
       isDeepStrictEqual(sinCheckpointTecnologia(parte.technology), this.#tecnologiaInicial));
-    const world = reunir(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes());
-    if (canales && prepararFauna) {
-      const tramos: TramoFaunaCorte[] = [];
-      const verificados: TramoFaunaVerificada[] = [];
-      let desde = this.#mundo.animals.length;
-      for (const parte of partes) {
-        if (prepararFauna === 'directa') {
-          for (const tramo of faunaVerificadaDe(parte.animals) ?? []) verificados.push({ desde: desde + tramo.desde, filas: tramo.filas });
-        } else {
-          for (const tramo of faunaCorteDe(parte.animals) ?? []) tramos.push({ desde: desde + tramo.desde, bloques: tramo.bloques });
-        }
-        desde += parte.animals.length;
-      }
-      if (tramos.length) vincularFaunaCorte(world.animals, tramos);
-      if (verificados.length) vincularFaunaVerificada(world.animals, verificados);
-    }
-    const tramosPersonas: TramoPersonasVerificadas[] = [];
-    if (prepararPersonas) {
-      let desde = this.#mundo.people.length;
-      for (const parte of partes) {
-        for (const tramo of personasVerificadasDe(parte.people)?.tramos ?? [])
-          tramosPersonas.push({ desde: desde + tramo.desde, filas: tramo.filas });
-        desde += parte.people.length;
-      }
-    }
-    const personasModificadas = tramosPersonas.length ? new Set<Person>() : undefined;
     const pendientes = this.#d.pendientes();
-    for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
-      // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
-      const mig = deserialize(i.bytes!) as Migrante;
-      if (mig.tipo === 'chunk') {
-        world.chunks[mig.key] = mig.meta;
-        world.tiles.push(...mig.tiles);
-        world.structures.push(...mig.structures);
-        world.animals.push(...mig.animals);
-        for (const p of mig.personas) world.people.push(p.persona);
-      } else {
-        if (mig.persona) world.people.push(mig.persona.persona);
-        if (mig.animal) world.animals.push(mig.animal.animal);
-      }
-    }
-    // El padrón de F0 todavía puede contener las bajas que se confirmaron en F5 (incluidas las ya archivadas en este mismo tick).
-    const bajasNuevas = world.retiredLegacy.filter(persona => persona.diedAt === world.tick);
-    const bajasPrevias = this.#bajasConfirmadas?.tick === world.tick ? this.#bajasConfirmadas.bajas : [];
-    const bajas = bajasPrevias.length
-      ? [...bajasPrevias, ...bajasNuevas.filter(p => !bajasPrevias.some(prev => prev.id === p.id))]
-      : bajasNuevas;
-    if (bajas.length) {
-      pruneBonds(world.people, bajas, personasModificadas && (persona => personasModificadas.add(persona)));
-      const ids = new Set(bajas.map(persona => persona.id));
-      world.communities = world.communities.filter(comunidad => {
-        if (!comunidad.members.some(id => ids.has(id))) return true;
-        comunidad.members = comunidad.members.filter(id => !ids.has(id));
-        if (comunidad.memberCount !== undefined) comunidad.memberCount = comunidad.members.length;
-        return comunidad.members.length > 0;
-      });
-    }
-    if (prepararTeselas) {
-      const tramos: TramoTeselasVerificadas[] = [];
-      let desde = this.#mundo.tiles.length;
-      // Reunir conserva el orden de los dueños y añade al final todos los migrantes en vuelo.
-      for (const parte of partes) {
-        for (const tramo of teselasVerificadasDe(parte.tiles)?.tramos ?? [])
-          tramos.push({ desde: desde + tramo.desde, filas: tramo.filas });
-        desde += parte.tiles.length;
-      }
-      const modificadas = new Set<Tile>();
-      if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals, (_x, _y, tile) => modificadas.add(tile));
-      if (tramos.length) vincularTeselasVerificadas(world.tiles, { tramos, modificadas });
-    } else if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
-    if (personasModificadas) vincularPersonasVerificadas(world.people, { tramos: tramosPersonas, modificadas: personasModificadas });
+    const bajasPrevias = this.#bajasConfirmadas?.tick === this.#mundo.tick ? this.#bajasConfirmadas.bajas : [];
+    const { world, bajas } = reunirCorte(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes(),
+      migrantesDelCorte(pendientes), bajasPrevias, { prepararFauna, prepararTeselas, prepararPersonas });
     return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 

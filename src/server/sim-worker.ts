@@ -717,11 +717,12 @@ async function runSimulation(options: SimWorkerOptions) {
     publicarAvance(ahora);
   }
   publicarOperacion('arrancando');
-  const store = new Store(options.worldPath, {
+  const opcionesStore = {
     onProgress: informarAvance, snapshotPackedPeople: process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1',
     snapshotCompressedPeople: process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1',
     snapshotSplitPeopleWeights: process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1',
-  });
+  };
+  const store = new Store(options.worldPath, opcionesStore);
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();
   const realSessionValid = store.sessionValid.bind(store);
@@ -774,7 +775,7 @@ async function runSimulation(options: SimWorkerOptions) {
     } satisfies PulsoWorker);
   }
   function atenderDemandaSiLista() {
-    if (closing || !app || app.failed || espejosEnVuelo > 0 || !tieneDemanda()) return;
+    if (closing || !app || app.failed || app.esperarGuardado() || espejosEnVuelo > 0 || !tieneDemanda()) return;
     if (app.salud().tick <= lastMirrorTick) return;
     const now = performance.now();
     if (!app.turbo || demandaPuntual || espejoAplazadoPorVuelo || now - lastPostAt >= TURBO_MIRROR_MS) publish(false);
@@ -883,6 +884,7 @@ async function runSimulation(options: SimWorkerOptions) {
       manual: true, seed: options.seed, tickMs: turbo ? 0 : options.tickMs, turbo, observerOnly: options.observerOnly,
       deployment: options.deployment, tape: options.tape, tapeDirectory: options.tapeDirectory,
       tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
+      guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1' ? opcionesStore : undefined,
       onEstadoCinta: error => {
         port.postMessage({ type: 'cinta', error });
         if (error) port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error } });
@@ -935,6 +937,11 @@ async function runSimulation(options: SimWorkerOptions) {
     const { id, method, args } = message;
     try {
       if (closing) throw new HttpError(503, 'El servicio se está cerrando.');
+      if (method === 'login' || method === 'logout' || method === 'personDetail' || method === 'recipeDetail') {
+        const guardado = app!.esperarGuardado();
+        if (guardado) await guardado;
+        if (closing) throw new HttpError(503, 'El servicio se está cerrando.');
+      }
       let value: unknown;
       switch (method) {
         case 'start': app!.start(); break;

@@ -405,6 +405,10 @@ export interface Motor {
   instantanea(paraGuardado?: boolean): Instantanea;
   /** Solo cuando el motor puede entregar la captura sin compartirla antes de Store. */
   corteGuardadoSellado?(): import('./corte-sellado.js').CorteGuardadoSellado | undefined;
+  /** Captura binaria fuera del paso para un persistidor en otro hilo. */
+  capturarCorteTransferido?(): import('./corte-transferido.js').CapturaCorteTransferido | undefined;
+  /** Aplica al corte identificado la misma confirmación viva que el guardado local. */
+  confirmarCorteTransferido?(acuse: import('./corte-transferido.js').AcuseCorteTransferido): boolean;
   /** Confirma un guardado rutinario sobre los dueños vivos cuando la época no cambia.
    * Devuelve `false` solo ante un rechazo comprobado antes de mutar estado vivo (el anfitrión puede recurrir a `cargar`).
    * Si la mutación viva falla a medias tras el COMMIT, la piscina queda fatal y lanza (exige recarga desde disco). */

@@ -29,6 +29,7 @@ import type { ChronicleEvent, ClientMessage, Gesture, GestureResult, PersonDetai
 import type { DiagnosticoSalud, OperacionSalud, Salud } from '../shared/salud.js';
 import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked, type LoadedSnapshot } from './store.js';
+import { PersistidorGuardado, type GuardadoConfirmado } from './guardado-worker.js';
 import { Muestreador } from './diagnostico.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { readWorldInstance } from './world-instance.js';
@@ -99,6 +100,8 @@ export interface AppOptions {
   observerOnly?: boolean;
   /** Laboratorio: confirma guardados rutinarios en los dueños vivos cuando la época no cambia (apagada por defecto). */
   confirmarGuardadoVivo?: boolean;
+  /** Laboratorio: reconstruye y escribe el corte rutinario en un hilo de persistencia. */
+  guardadoEnHilo?: Omit<ConstructorParameters<typeof PersistidorGuardado>[0], 'path'>;
 }
 /** Segundos sin completar un paso tras los cuales el mundo se declara `parado`. */
 export const PASO_PARADO_S = 60;
@@ -576,6 +579,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const confirmarGuardadoVivo = options.confirmarGuardadoVivo ?? baseConfig?.confirmarGuardadoVivo ?? false;
   const config = baseConfig ? { ...baseConfig, confirmarGuardadoVivo } : undefined;
   const conDuenos = usaMotor && config!.hilos !== 1;
+  if (!gateway && options.guardadoEnHilo && (!conDuenos || !confirmarGuardadoVivo || !config?.instantaneaTransferible
+    || !ley(world, 'guardadoCompleto') || store.path === ':memory:')) {
+    throw new Error('El guardado en hilo requiere guardado completo en disco, dueños y corte transferible con confirmación viva.');
+  }
   let epoca = loaded?.epoca ?? 0;
   let tickMotor = world?.tick ?? 0;
   let lecturaMotor: World | undefined;
@@ -618,6 +625,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   }
   let ultimoTickGuardado = world?.tick ?? 0;
   let ultimoGuardadoEn: number | null = gateway ? null : loaded?.savedAt ?? null;
+  let persistidor: PersistidorGuardado | undefined;
+  let pasoEnCurso: Promise<void> | undefined;
   function guardarMundo(draft: World, recibos: Recibos = [], sesiones: string[] = [], cambios: readonly SnapshotReplayChange[] = []): Instantanea | undefined {
     const completo = ley(draft, 'guardadoCompleto');
     const sello = completo ? motor?.corteGuardadoSellado?.() : undefined;
@@ -643,6 +652,20 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     motor.cargar(guardado, epoca);
     world = guardado.world;
     lecturaMotor = undefined;
+  }
+  function adoptarGuardadoEnHilo(acuse: GuardadoConfirmado): void {
+    lecturaMotor = undefined;
+    if (motor?.confirmarCorteTransferido?.(acuse)) return;
+    // El motor sigue en el tick del corte. Si el acuse no se puede instalar en vivo,
+    // se reconstruye la época desde el mismo COMMIT, como en el guardado local.
+    const carga = cargarGuardado(store, options.deployment);
+    if (!motor || !carga || carga.slot !== 0 || carga.world.tick !== acuse.tick || carga.epoca === null
+      || carga.materia && carga.materia.epoca !== acuse.epoca) {
+      throw new Error('El corte confirmado por el persistidor no coincide con la cabeza durable.');
+    }
+    motor.cargar({ world: carga.world, materia: carga.materia }, carga.epoca);
+    epoca = carga.epoca;
+    world = carga.world;
   }
   let stopped = false;
   /** El hilo `carta-tape` abre el catálogo, comprime y sincroniza los bloques fuera de la simulación. */
@@ -1210,12 +1233,30 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     return promise;
   }
   function stepOnce() {
+    if (pasoEnCurso) return pasoEnCurso;
     const desde = relojReal();
     if (gateway) throw new Error('Read-only gateway cannot advance the simulation.');
     // A saturated recorder yields this event-loop turn without advancing or dropping a tick.
     if (options.beforeStep?.() === false) return;
+    const avance = avanzar();
     enPaso = true;
-    try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
+    let tramo;
+    try { tramo = avance.next(); } finally { enPaso = false; anotarOcupado(desde); }
+    if (tramo.done) { acabarPaso(); return; }
+    pasoEnCurso = tramo.value.then(
+      acuse => reanudar(() => avance.next(acuse)),
+      error => reanudar(() => avance.throw(error)),
+    ).finally(() => { pasoEnCurso = undefined; });
+    return pasoEnCurso;
+
+    function reanudar(continuar: () => void): void {
+      const desde = relojReal();
+      enPaso = true;
+      try { continuar(); } finally { enPaso = false; anotarOcupado(desde); }
+      acabarPaso();
+    }
+  }
+  function acabarPaso() {
     try {
       prepararCinta();
       grabarCinta();
@@ -1225,7 +1266,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       recuperarPaso(error, false, tickMotor);
     }
   }
-  function avanzar() {
+  function* avanzar(): Generator<Promise<GuardadoConfirmado>, void, GuardadoConfirmado> {
     susurrosEnUltimoPaso = false;
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
@@ -1340,14 +1381,30 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // sin tocar esa invariante.
       const tick = pasoMotor?.tick ?? draft.tick;
       let guardado: Instantanea | undefined;
+      let acuse: GuardadoConfirmado | undefined;
       const routineSaveDue = tick % paramsOf(draft).persistencia.cadaTicks === 0
         && (ley(draft, 'guardadoCompleto') || !turbo || monotonicNow() - lastWorldSaveAt >= turboSaveIntervalMs);
-      if (valid.length > 0 || susurrosAplicados.length > 0 || routineSaveDue
-        || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
-        || technologyCatalogueNearCapacity(draft.technology)) {
+      const guardarEntradas = valid.length > 0 || susurrosAplicados.length > 0;
+      const presionDiarios = !guardarEntradas && (technologyJournalNearCapacity(draft.technology)
+        || chronicleJournalNearCapacity(draft) || technologyCatalogueNearCapacity(draft.technology));
+      if (guardarEntradas || routineSaveDue || presionDiarios) {
         const saveStarted = monotonicNow();
         guardando = true;
-        guardado = duranteOperacion('guardando', () => guardarMundo(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
+        if (options.guardadoEnHilo && !guardarEntradas && !presionDiarios) {
+          options.onOperacion?.('guardando');
+          try {
+            const captura = motor?.capturarCorteTransferido?.();
+            if (captura) {
+              persistidor ??= new PersistidorGuardado({ ...options.guardadoEnHilo, path: store.path });
+              acuse = yield persistidor.guardar(captura, [], []);
+              ultimoTickGuardado = acuse.tick;
+              ultimoGuardadoEn = acuse.guardadoEn;
+              store.lastSnapshotBytes = acuse.snapshotBytes;
+            }
+          } finally { options.onOperacion?.(null); }
+        }
+        if (!acuse) guardado = duranteOperacion('guardando', () => guardarMundo(draft,
+          valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })),
           [...valid.map(item => item.hash), ...susurrosAplicados.map(({ item }) => item.hash)], cambios));
         guardando = false; cambiosPendientes.length = 0;
         lastWorldSaveAt = monotonicNow();
@@ -1370,7 +1427,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         item.resolve(whisper);
       }
       susurrosEnUltimoPaso = susurrosAplicados.length > 0;
-      try { adoptarGuardado(guardado); }
+      try { if (acuse) adoptarGuardadoEnHilo(acuse); else adoptarGuardado(guardado); }
       catch (error) { recuperarPaso(error, false, tick); return; }
       runtime.stepMs = monotonicNow() - stepStarted;
       if (!conDuenos) muestrear();
@@ -1595,6 +1652,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
         rate(loginGlobal, '*', 600, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
+        if (pasoEnCurso) await pasoEnCurso;
         const oldHash = sessionHash(req); if (oldHash) sessions.revoke(oldHash);
         const token = makeToken(); sessions.addSession(hashToken(token), Date.now() + 14 * 86400_000);
         res.setHeader('Set-Cookie', cookie(token, !!options.secure));
@@ -1604,6 +1662,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       if (url.pathname.startsWith('/api/')) {
         const hash = authorized(req);
         if (req.method === 'POST' && url.pathname === '/api/logout') {
+          if (pasoEnCurso) await pasoEnCurso;
           sessions.revoke(hash); res.setHeader('Set-Cookie', cookie('', !!options.secure, 0));
           for (const [socket, client] of clients) if (client.hash === hash) socket.close(4001, 'La sesión terminó.');
           return json(res, 200, { ok: true });
@@ -1842,8 +1901,9 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
       // Uncapped: never an idle sleep. `setImmediate` runs after the poll phase, so every step leaves
       // a full event-loop turn to HTTP, WS and worker RPCs. A failed world stops spinning.
       inmediato = undefined;
-      stepOnce();
-      if (!stopped && !failed) citar(0);
+      const paso = stepOnce();
+      const siguiente = () => { if (!stopped && !failed) citar(0); };
+      if (paso) void paso.then(siguiente); else siguiente();
       return;
     }
     // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
@@ -1897,6 +1957,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, broadcast, requestGesture, requestWhisper, view, salud, detallePersona, mundoParaEmision,
+    esperarGuardado() { return pasoEnCurso; },
     get usaMotor() { return usaMotor; },
     get turbo() { return turbo; },
     get grabaCinta() { return !!grabador; },
@@ -1947,7 +2008,10 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
           if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
         } finally {
           try {
-            if (!gateway && !failed && !aMedioPaso) duranteOperacion('guardando', () => guardarMundo(world));
+            if (!gateway) {
+              try { await pasoEnCurso; } finally { await persistidor?.cerrar(); }
+              if (!failed && !aMedioPaso) duranteOperacion('guardando', () => guardarMundo(world));
+            }
           } finally {
             try {
               try { await cerrarCinta(); } finally { await lectores?.close(); }

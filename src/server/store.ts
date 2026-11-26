@@ -459,6 +459,8 @@ export class Store {
         this.snapshotPackedPeople, this.snapshotCompressedPeople, this.snapshotSplitPeopleWeights);
     } catch (error) { this.db.close(); throw error; }
   }
+  /** Confirma si un guardado alcanzó COMMIT aunque falle después al preparar su acuse. */
+  get confirmacionesDeGuardado(): number { return this.saves; }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
@@ -2101,8 +2103,8 @@ export class Store {
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
       this.db.exec('COMMIT');
-      if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);
       this.saves++;
+      if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
       // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.
       this.slot0Readable = true;

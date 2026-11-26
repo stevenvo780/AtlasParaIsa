@@ -11,7 +11,9 @@ import { setTimeout as esperar } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 const [copia, salida, ...otros] = process.argv.slice(2);
-assert.ok(copia && salida && otros.length === 0, 'Uso: node scripts/lab/demo-observacion.mjs WORKTREE_COMPILADO DIRECTORIO_NUEVO');
+const perfilEntorno = otros.length === 1 && otros[0] === '--perfil-entorno';
+assert.ok(copia && salida && (otros.length === 0 || perfilEntorno),
+  'Uso: node scripts/lab/demo-observacion.mjs WORKTREE_COMPILADO DIRECTORIO_NUEVO [--perfil-entorno]');
 const segundos = process.env.ATLAS_DEMO_OBSERVACION_SEGUNDOS;
 const duracionMs = segundos === undefined ? 0 : Number(segundos) * 1000;
 assert.ok(segundos === undefined || (/^[1-9]\d*$/.test(segundos) && Number.isSafeInteger(duracionMs)),
@@ -19,8 +21,16 @@ assert.ok(segundos === undefined || (/^[1-9]\d*$/.test(segundos) && Number.isSaf
 const raizCinta = process.env.ATLAS_DEMO_CINTA_RAIZ;
 assert.ok(raizCinta === undefined || isAbsolute(raizCinta) && statSync(raizCinta, { throwIfNoEntry: false })?.isDirectory(),
   'ATLAS_DEMO_CINTA_RAIZ debe apuntar a un directorio absoluto existente');
-const hilos = Number(process.env.ATLAS_DEMO_HILOS ?? '1');
-assert.ok(Number.isSafeInteger(hilos) && hilos > 0, 'ATLAS_DEMO_HILOS debe ser un entero positivo');
+const hilos = Number(perfilEntorno ? process.env.CARTA_MOTOR_HILOS : process.env.ATLAS_DEMO_HILOS ?? '1');
+assert.ok(Number.isSafeInteger(hilos) && hilos > 0, 'El perfil de observación requiere un número fijo de hilos');
+const tapeTopeBytes = perfilEntorno ? Number(process.env.CARTA_TAPE_TOPE_BYTES) : undefined;
+if (perfilEntorno) {
+  for (const variable of ['CARTA_OPEN_WORLD', 'CARTA_SIM_WORKER', 'CARTA_TURBO', 'CARTA_TAPE', 'CARTA_OBSERVER_ONLY'])
+    assert.equal(process.env[variable], '1', `La observación requiere ${variable}=1`);
+  assert.ok(process.env.CARTA_PARAMS, 'Falta CARTA_PARAMS del perfil de observación');
+  assert.equal(process.env.CARTA_MOTOR_GPU, '', 'El perfil de observación requiere CPU');
+  assert.ok(Number.isSafeInteger(tapeTopeBytes) && tapeTopeBytes > 0, 'El perfil requiere un tope de cinta positivo');
+}
 const perfil = { hilos, guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1',
   adelantoMaximoTicks: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0') };
 const dosHorasMs = 120 * 60 * 1000;
@@ -28,13 +38,15 @@ const raiz = resolve(copia);
 const { chromium, expect } = createRequire(join(raiz, 'package.json'))('@playwright/test');
 const { createWorkerGateway } = await import(pathToFileURL(join(raiz, 'dist/server/server/gateway.js')));
 mkdirSync(salida, { mode: 0o700 });
-process.env.CARTA_OPEN_WORLD = '1';
-process.env.CARTA_MOTOR_HILOS = String(hilos);
-process.env.CARTA_MOTOR_GPU = '';
-process.env.CARTA_PARAMS = 'persistencia.cadaTicks=200,persistencia.ventanaEventosTicks=2400,red.deltas=true,' +
-  'v23.guardadoCompleto=true,v23.fotograma=true,v23.cohesion=true,v23.natalidad=true,v23.comunidades=true,' +
-  'v23.materia=true,v23.cuerpos=true,v23.fauna=true,v23.tecnica=true,v23.obra=true,v23.intentos=true' +
-  (hilos > 1 ? ',v23.duenos=true' : '');
+if (!perfilEntorno) {
+  process.env.CARTA_OPEN_WORLD = '1';
+  process.env.CARTA_MOTOR_HILOS = String(hilos);
+  process.env.CARTA_MOTOR_GPU = '';
+  process.env.CARTA_PARAMS = 'persistencia.cadaTicks=200,persistencia.ventanaEventosTicks=2400,red.deltas=true,' +
+    'v23.guardadoCompleto=true,v23.fotograma=true,v23.cohesion=true,v23.natalidad=true,v23.comunidades=true,' +
+    'v23.materia=true,v23.cuerpos=true,v23.fauna=true,v23.tecnica=true,v23.obra=true,v23.intentos=true' +
+    (hilos > 1 ? ',v23.duenos=true' : '');
+}
 
 const sonda = createServer();
 sonda.listen(0, '127.0.0.1');
@@ -47,6 +59,7 @@ const acceso = 'AtlasLab-' + randomBytes(16).toString('hex');
 let directorioCinta;
 const crearPasarela = () => createWorkerGateway({ worldPath: join(mundo, 'world.sqlite'), manual: true, deployment: true,
   password: acceso, origin: origen, turbo: true, tape: true, observerOnly: true,
+  tapeTopeBytes,
   tapeDirectory: directorioCinta,
   staticDir: join(raiz, 'dist/client'), seed: 51926 });
 const detener = new AbortController();
@@ -252,10 +265,12 @@ try {
       assert.ok(Number.isSafeInteger(world.tick) && world.tick > 0);
       tickGuardado = world.tick;
     } finally { db.close(); }
-    // La pasarela que reabre prueba la lectura sin activar la opción de escritura experimental.
-    delete process.env.CARTA_SNAPSHOT_PACKED_PEOPLE;
-    delete process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD;
-    delete process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS;
+    if (!perfilEntorno) {
+      // El ensayo histórico comprueba que el lector abre la cabeza con el escritor experimental apagado.
+      delete process.env.CARTA_SNAPSHOT_PACKED_PEOPLE;
+      delete process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD;
+      delete process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS;
+    }
   }
   app = crearPasarela();
   await abrir();

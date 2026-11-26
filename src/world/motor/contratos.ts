@@ -526,6 +526,8 @@ export interface MotorConfig {
   reservaLotesMateria?: number;
   /** Laboratorio: comparte la búsqueda de uid entre los dueños del motor. */
   indiceUidCompartido?: boolean;
+  /** Laboratorio: transfiere las partes de la instantánea fuera de la cola F0. */
+  instantaneaTransferible?: boolean;
   /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */

@@ -48,6 +48,7 @@ import {
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import { leyesActivas } from './leyes.js';
+import { CanalesCorte } from './mensajes-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
 import { cabeceraDe, reunir } from './reunir.js';
@@ -278,6 +279,8 @@ class MotorDuenos implements Motor {
   #resultados: GestureResult[] = [];
   #partesTick: ParteTick[] = [];
   readonly #partesMundo = new Map<Hilo, World>();
+  #canalesCorte: CanalesCorte | undefined;
+  #cierrePendiente = Promise.resolve();
   #altas: [number, string][] = [];
   readonly #detalles = new Map<number, ((p: Person | null) => void)[]>();
   readonly #t: TelemetriaMotor;
@@ -382,11 +385,14 @@ class MotorDuenos implements Motor {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: arenas?.lotes.compartir() ?? null, desborde: arenas?.desborde.compartir() ?? null,
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
-      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
+      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca,
+      brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
     };
+    const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {
+      datos.solicitudCorte = canalesCorte?.solicitud;
       const piscina = this.#piscina = new Piscina<DatosDueno>({
-        hilos, datos, moduleURL: new URL('./dueno-worker.js', import.meta.url), exportName: crearDueno.name,
+        hilos, datos, puertosRemotos: canalesCorte?.puertosRemotos, moduleURL: new URL('./dueno-worker.js', import.meta.url), exportName: crearDueno.name,
         crear: (hilo, dd) => hilo === 0 ? tramo => faseDueno(d, tramo, control, dd.conMateriaCargada, dd.perfilActuar) : crearDueno(hilo, dd),
       });
       buzones.fijarFase(1);
@@ -394,7 +400,11 @@ class MotorDuenos implements Motor {
       tabla.publicar(m.tick);
       this.#recoger();
       this.#cronica();
-    } catch (error) { throw this.#fallo(error); }
+    } catch (error) {
+      const fallo = this.#fallo(error);
+      if (canalesCorte) void this.#cerrarPiscina().catch(() => {});
+      throw fallo;
+    }
   }
 
   #fallo(error: unknown): ErrorFatalMotor {
@@ -642,10 +652,11 @@ class MotorDuenos implements Motor {
   }
 
   #reunirMundo(): { world: World; pendientes: Intento[] } {
+    const canales = this.#canalesCorte, solicitud = canales?.pedir();
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
-    const partes = Array.from({ length: this.#hilos - 1 }, (_, i) => {
+    const partes = canales ? canales.recibir(solicitud!, this.#epoca, this.#mundo.tick) : Array.from({ length: this.#hilos - 1 }, (_, i) => {
       const parte = this.#partesMundo.get(i + 1);
       if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
       return parte;
@@ -810,9 +821,20 @@ class MotorDuenos implements Motor {
   async #cerrarPiscina(): Promise<void> {
     this.#clienteGpu?.cerrar();
     this.#clienteGpu = undefined;
+    const canalesCorte = this.#canalesCorte;
+    this.#canalesCorte = undefined;
+    canalesCorte?.cerrar();
     const piscina = this.#piscina;
-    if (!piscina) return;
+    const anterior = this.#cierrePendiente;
+    if (!piscina) return anterior;
     this.#piscina = null;
+    const cierre = this.#retirarPiscina(piscina);
+    // Una apertura puede retirar la piscina anterior sin esperar. El cierre explícito sí espera a todas.
+    this.#cierrePendiente = Promise.all([anterior, cierre.catch(() => {})]).then(() => {});
+    return cierre.finally(() => anterior);
+  }
+
+  async #retirarPiscina(piscina: Piscina<DatosDueno>): Promise<void> {
     try {
       if (this.#fatal || !paramsOf(this.#d.mundo).v23.materiaGpu) cerrarMateriaGpu(this.#d.mundo);
       else piscina.ejecutar(TRAMO.cerrar);

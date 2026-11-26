@@ -11,6 +11,7 @@
  * Con dueños están encendidas todas las leyes. La demografía base sigue evaluando edad, daño y muerte en cada heap.
  */
 import { deserialize } from 'node:v8';
+import type { MessagePort } from 'node:worker_threads';
 import type { DescriptorEnlace } from '../../shared/fotograma.js';
 import { conRejillaFauna } from '../animals.js';
 import { PercepcionDelPaso, PercibidorCpu, registrarPercepcion } from '../decision/percepcion.js';
@@ -33,6 +34,7 @@ import { conectarBuzon, type MemoriaBuzones } from './buzon.js';
 import { Contadores } from './contadores.js';
 import { AVISO, CTL, CTL_DUENO, Dueno, celdaDueno, type PiezasDueno } from './contexto.js';
 import type { Hilo } from './contratos.js';
+import { enviarParteCorte, type SolicitudCorte } from './mensajes-corte.js';
 import { RegistroContenido, type MemoriaRegistro } from './registro.js';
 
 /** Tramos que el coordinador pide a la piscina (`Piscina.ejecutar`). */
@@ -59,6 +61,7 @@ export interface DatosDueno {
   cabecera: Uint8Array;
   params: WorldParams;
   epoca: number;
+  solicitudCorte?: SolicitudCorte;
   brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
@@ -90,7 +93,9 @@ export function ligarCompartido(mundo: World, tabla: TablaOrganismosSoA, terreno
 }
 
 /** Cuerpo de cálculo de la `Piscina`: el dueño `hilo` (≥ 1) sobre su parte del mundo. */
-export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => void {
+export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessagePort): (tramo: number) => void {
+  const solicitud = datos.solicitudCorte;
+  if ((solicitud === undefined) !== (puertoCorte === undefined)) throw new Error('Canal de corte incompleto al abrir el dueño.');
   const mundo = deserialize(datos.cabecera) as World;
   setParams(mundo, datos.params);
   const azar = azarDeHilo(datos.semilla, hilo), contadores = new Contadores(datos.contadores);
@@ -107,16 +112,19 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
   const dueno = new Dueno(mundo, piezas);
   dueno.epoca = datos.epoca;
   const control = piezas.control!;
-  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.perfilActuar);
+  const publicarCorte = puertoCorte && solicitud ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo) : undefined;
+  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.perfilActuar, publicarCorte);
 }
 
 /** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
  * del mundo, como el tick de un dueño (`stepWorld`), por si una ley usa una consulta espacial de las de siempre. */
-export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false, perfilActuar?: Float64Array<SharedArrayBuffer>): void {
-  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, perfilActuar));
+export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false,
+  perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
+  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, perfilActuar, publicarCorte));
 }
 
-function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, perfilActuar?: Float64Array<SharedArrayBuffer>): void {
+function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean,
+  perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
   const m = d.mundo, celda = (campo: number): number => celdaDueno(d.hilo, campo), inicio = performance.now();
   switch (tramo) {
     case TRAMO.cargar:
@@ -189,8 +197,9 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
       break;
     }
     case TRAMO.reunir:
-      // Instantánea: cada dueño manda su parte del mundo; el coordinador la arma tras la barrera.
-      if (d.hilo !== 0) d.avisarCoordinador([AVISO.parte, d.hilo], m);
+      // El coordinador reúne todas las partes tras esta barrera, por el canal elegido al abrir.
+      if (publicarCorte) publicarCorte();
+      else if (d.hilo !== 0) d.avisarCoordinador([AVISO.parte, d.hilo], m);
       break;
     case TRAMO.cerrar:
       cerrarMateriaGpu(m);

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { threadId, Worker } from 'node:worker_threads';
+import { threadId, Worker, type MessagePort } from 'node:worker_threads';
 import {
   BARRIER_HEADER, WORKER_CELL, ERROR_CHARACTERS, ErrorFatalMotor, PLAZO_BARRERA_MS, createBarrier,
   workerCell, waitForBarrier, readWorkerError, readSupervisorError, type SharedBarrier,
@@ -18,6 +18,8 @@ export interface OpcionesPiscina<Datos> extends ModuloCalculo {
   /** Cuenta al coordinador (dueño 0) entre los hilos de cálculo. */
   hilos: number;
   datos: Datos;
+  /** Opcional, en orden de dueño remoto. Cada extremo se entrega solo al hilo que lo usa. */
+  puertosRemotos?: readonly MessagePort[];
   /** Plazo sin avance durante una fase. El arranque de los hilos conserva su propio plazo. */
   plazoFaseMs?: number;
   /** El export indicado en moduleURL tiene esta misma firma. Cada hilo conserva su función entre fases. */
@@ -128,10 +130,13 @@ if (workerData.index === undefined) {
   process.on('unhandledRejection', stop);
   Atomics.store(control, H.supervisorThreadId, threadId);
   try {
+    const { puertosRemotos, bootstrap, ...datos } = workerData;
     for (let index = 0; index < workerData.workers; index++) {
-      const child = new Worker(workerData.bootstrap, {
+      const puerto = puertosRemotos?.[index];
+      const child = new Worker(bootstrap, {
         eval: true, execArgv: [], name: 'atlas-compute-' + index,
-        workerData: { ...workerData, index, bootstrap: undefined },
+        workerData: { ...datos, index, puerto },
+        transferList: puerto ? [puerto] : [],
       });
       children.push(child);
       child.on('message', () => stop());
@@ -185,7 +190,7 @@ if (workerData.index === undefined) {
       ready();
       return;
     }
-    const ejecutar = handler(index + 1, workerData.compartida.datos);
+    const ejecutar = handler(index + 1, workerData.compartida.datos, workerData.puerto);
     if (typeof ejecutar !== 'function') throw new TypeError('La fábrica de cálculo debe devolver una función.');
     let epoca = 0;
     ready();
@@ -227,9 +232,10 @@ class HilosPersistentes {
   esperaBarreraMs = 0;
   tiempoLocalMs = 0;
 
-  constructor(opciones: StaticWorkerPoolOptions, compartida?: { datos: unknown; plazoFaseMs?: number }) {
+  constructor(opciones: StaticWorkerPoolOptions, compartida?: { datos: unknown; plazoFaseMs?: number }, puertosRemotos?: readonly MessagePort[]) {
     if (!Number.isSafeInteger(opciones.workers) || opciones.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
     if (!opciones.exportName) throw new TypeError('exportName no puede estar vacío.');
+    if (puertosRemotos && puertosRemotos.length !== opciones.workers) throw new RangeError('Falta un puerto por hilo remoto.');
     this.#plazoFaseMs = compartida?.plazoFaseMs ?? PLAZO_BARRERA_MS;
     if (!Number.isFinite(this.#plazoFaseMs) || this.#plazoFaseMs <= 0) throw new RangeError('plazoFaseMs debe ser positivo y finito.');
     this.workers = opciones.workers;
@@ -243,12 +249,13 @@ class HilosPersistentes {
     this.#supervisor = new Worker(WORKER_BOOTSTRAP, {
       eval: true, execArgv: [], name: 'atlas-supervisor',
       workerData: {
-        workers: this.workers, moduleURL, exportName: opciones.exportName, compartida,
+        workers: this.workers, moduleURL, exportName: opciones.exportName, compartida, puertosRemotos,
         loaderURL: this.sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
         control: control.buffer, errors: errors.buffer,
         layout: { header: BARRIER_HEADER, cells: WORKER_CELL, errorCharacters: ERROR_CHARACTERS },
         bootstrap: WORKER_BOOTSTRAP,
       },
+      ...(puertosRemotos && { transferList: [...puertosRemotos] }),
     });
     this.#supervisor.on('error', error => { this.#errorSupervisor = error; });
     this.#exit = new Promise(resolve => {
@@ -362,14 +369,14 @@ export class Piscina<Datos = unknown> {
   #tiempoLocalMs = 0;
 
   constructor(opciones: OpcionesPiscina<Datos>) {
-    const { hilos, crear, datos, plazoFaseMs } = opciones;
+    const { hilos, crear, datos, plazoFaseMs, puertosRemotos } = opciones;
     if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError('hilos debe ser un entero positivo.');
     this.#hilos = hilos;
     try {
       const ejecutar = crear(0, datos);
       if (typeof ejecutar !== 'function') throw new TypeError('La fábrica de cálculo debe devolver una función.');
       this.#local = fase => ejecutarSincrono(ejecutar, fase);
-      this.#equipo = hilos === 1 ? null : new HilosPersistentes({ ...opciones, workers: hilos - 1 }, { datos, plazoFaseMs });
+      this.#equipo = hilos === 1 ? null : new HilosPersistentes({ ...opciones, workers: hilos - 1 }, { datos, plazoFaseMs }, puertosRemotos);
     } catch (error) {
       throw error instanceof ErrorFatalMotor ? error : new ErrorFatalMotor(error);
     }

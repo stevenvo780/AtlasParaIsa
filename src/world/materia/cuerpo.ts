@@ -593,7 +593,7 @@ export function crecer(c: CtxLeyMateria, cuerpo: Cuerpo, dt: number): number {
   reponer(c, cuerpo, p, dt);
   const tiene = masaLote(c, cuerpo.tejido) / (d.masaMg * MG), falta = p.masaAdulta / (d.masaMg * MG) - tiene;
   if (falta > 0) {
-    const sintetizarTejido = p.linaje === LINAJE_HUMANO ? sintetizarTejidoHumano : sintetizar;
+    const sintetizarTejido = p === humanas.get(c.globales.registro) ? sintetizarTejidoHumano : sintetizar;
     sintetizarTejido(c, cuerpo, p, cuerpo.tejido, Math.min(falta, G_SINTESIS * tiene * dt));
   }
   return masaLote(c, cuerpo.tejido) - antes;
@@ -808,7 +808,7 @@ export function gestar(c: CtxLeyMateria, madre: Cuerpo, dt: number): number {
   const alNacer = p.m0 / (d.masaMg * MG), falta = alNacer - masaLote(c, g.embrion) / (d.masaMg * MG);
   // Una gestación se sostiene si la reserva cubre un día de basal Y el embrión crece (o ya está hecho): un embrión al
   // que la madre no puede dar alguna de sus partes (N, P) no crece y, como el que no se paga, se pierde a los DIAS_ABORTO.
-  const sintetizarEmbrion = p.linaje === LINAJE_HUMANO ? sintetizarTejidoHumano : sintetizar;
+  const sintetizarEmbrion = p === humanas.get(c.globales.registro) ? sintetizarTejidoHumano : sintetizar;
   const hechas = falta > 0 && dt > 0 ? sintetizarEmbrion(c, madre, p, g.embrion, Math.min(falta, G_SINTESIS * alNacer * dt)) : 0;
   const crece = !(falta > 0) || hechas > 0 || !(dt > 0);
   const paga = crece && reservaJ(c, madre) >= basalJ(c, madre, DEMOGRAPHY_TICKS_PER_DAY);

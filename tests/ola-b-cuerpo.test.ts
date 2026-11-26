@@ -160,6 +160,19 @@ test('el tejido humano crece y gesta con alimento que sobra del mantenimiento', 
   assert.ok(exacto());
 });
 
+test('una plantilla animal con el mismo número de linaje no usa el presupuesto humano', () => {
+  const animal = crearPlantilla(c.quimica, c.globales.registro, {
+    partes: humana.partes, entradas: humana.partes.map(p => p.id), subproductos: [],
+    kappa: humana.kappa, captura: 0, masaAdulta: 30, m0: 1.5, linaje: humana.linaje,
+  });
+  assert.ok(animal);
+  const cuerpo = fundarCuerpo(c, animal.id, 30, 0.4, 1), { H2O, proteina, orgP } = m.S;
+  m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 2000, orgP, 1000, H2O, 10000), m.libro);
+  concebir(c, cuerpo, { otro: 9, genoma: [], inicio: c.tick });
+  assert.ok(gestar(c, cuerpo, 120) > 0);
+  assert.ok(exacto());
+});
+
 test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => {
   const madre = crearCuerpo(c, humana.id, 60);
   const masaUnidad = humana.partes.reduce((mg, p) => mg + p.nu * c.quimica.sustancia(p.id).masa, 0) * 1e-6;

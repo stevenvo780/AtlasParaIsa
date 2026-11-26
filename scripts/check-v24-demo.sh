@@ -33,9 +33,10 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
   tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
   tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/ola-b-cuerpo.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \
-  tests/materia-paso.test.ts \
   tests/v23-motor-carga-rocosa.test.ts tests/v23-motor-guardado-carga.test.ts \
   tests/v23-motor-guardado-global.test.ts tests/v23-motor-guardado-planos.test.ts 2>&1 | tee "$evidencia/pruebas.log"
+# Los casos de distribución química ocupan alrededor de 47 s incluso en un proceso aislado.
+node --import tsx --test --test-timeout=90000 tests/materia-paso.test.ts 2>&1 | tee "$evidencia/materia-paso.log"
 node --import tsx --test --test-timeout=30000 \
   --test-name-pattern='^(la vista se comparte|una página solo sube|las páginas históricas)' \
   tests/v23-decision-percepcion.test.ts 2>&1 | tee "$evidencia/percepcion-paginas.log"

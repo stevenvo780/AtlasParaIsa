@@ -21,8 +21,8 @@ import {
 import type { Violacion } from './invariantes.js';
 import { crearPlantilla } from './materia/copiar.js';
 import {
-  abortar, basalJ, beber, concebir, costeGestacionJ, crearCuerpo, crecer, depositar, extraer, gestar, herir, ingerirSelecto,
-  lotesDe, masaDe, metabolizar, morir, pagar, parir, plantillaDe, reservaJ, vistaCuerpo,
+  abortar, basalJ, beber, celdaDeMuerte, concebir, costeGestacionJ, crearCuerpo, crecer, depositar, extraer, gestar,
+  herir, ingerirSelecto, lotesDe, masaDe, metabolizar, morir, pagar, parir, plantillaDe, reservaJ, vistaCuerpo,
 } from './materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe, type LotesCelda } from './materia/ley-mundo.js';
 import { Parte, Rol, type Cuerpo, type Kappa, type LoteRef, type Plantilla, type VistaCuerpo } from './materia/tipos.js';
@@ -622,7 +622,7 @@ function reflejar(c: CtxLey, f: Fila): void {
 export function matarAnimal(c: CtxLeyMateria, animal: Animal, causa: string, por?: string): void {
   const e = estado(c), f = e.filas.get(animal), cu = animal.cuerpo;
   if (!cu || !f) return;
-  const celda = c.terreno.celda(animal.x, animal.y);
+  const celda = celdaDeMuerte(c, animal.x, animal.y);
   const masa = masaDe(c, cu);
   morir(c, cu, celda);
   const violenta = por !== undefined || (animal.fauna !== undefined && c.tick - animal.fauna.heridoEn <= 2);

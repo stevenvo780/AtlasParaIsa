@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.mjs';
 import { dejarCadaver } from '../src/world/demografia/morir.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
+import { matarAnimal } from '../src/world/ley-fauna.js';
 import { herir, lotesDe, masaDe, masaLote } from '../src/world/materia/cuerpo.js';
 import { Rol } from '../src/world/materia/tipos.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
@@ -39,5 +40,24 @@ test('la defunción conserva el cadáver y la carga en la celda material aunque 
   assert.equal(persona.cuerpo, undefined);
   assert.deepEqual(persona.carga, []);
   assert.ok(!c.materia.vivo(carga) && lotesCuerpo.every(l => !c.materia.vivo(l)));
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
+test('la muerte de fauna deja el cadáver en la página material retirada de la percepción', () => {
+  const mundo = createWorld(19106, paramsDeEncender({ regimen: 'abierto', hasta: 'obra' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), animal = mundo.animals.find(a => a.cuerpo);
+  assert.ok(animal?.cuerpo);
+  const celda = c.terreno.celda(animal.x, animal.y), masa = masaDe(c, animal.cuerpo);
+  assert.ok(celda >= 0);
+
+  conductorDe(mundo)!.terrenoPercibido.vaciarPagina(c.terreno.chunkDe(celda));
+  assert.equal(c.terreno.celda(animal.x, animal.y), -1);
+  matarAnimal(c, animal, 'senescencia');
+
+  const lotes = new Float64Array(1);
+  assert.equal(c.materia.lotes(celda, Rol.Cadaver, lotes), 1);
+  assert.ok(Math.abs(masaLote(c, lotes[0]!) - masa) < 1e-6);
+  assert.ok(!mundo.animals.includes(animal));
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });

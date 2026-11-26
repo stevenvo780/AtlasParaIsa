@@ -37,6 +37,7 @@ import type { Person } from '../mundo/tipos.js';
 import type { Aplicado, CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { CAMPOS_CUERPO, CUERPO_ANCHO, REF_NULA, TipoIntento, slotDe, type Intento, type Registro } from '../motor/contratos.js';
 import { necesidadesDeVista } from '../needs.js';
+import { PAGE_CELLS, pageOf, pageOffset } from '../soa/region.js';
 import { copiar, crearPlantilla, leerPlantilla } from './copiar.js';
 import { fluir } from './fluir.js';
 import { conservacion, lotesDeCelda, sustanciasDe, temperaturaDe, type LotesCelda } from './ley-mundo.js';
@@ -787,6 +788,19 @@ export function extraer(c: CtxLeyMateria, cuerpo: Cuerpo, parte: 'reserva' | 'fi
     if (n > 0) sumarPares(acumulado, a.garantizar(cuerpo.reserva, exacta(id, n), c.libro));
   }
   return paresDe(acumulado);
+}
+
+/** La percepción puede vaciarse al retirar una página aunque todavía conserve material en esas coordenadas. */
+export function celdaDeMuerte(c: CtxLeyMateria, x: number, y: number): number {
+  const t = c.terreno, celda = t.celda(x, y);
+  if (celda >= 0) return celda;
+  const px = pageOf(x), py = pageOf(y), desplazamiento = pageOffset(x, y), sinLeer = new Float64Array(0);
+  for (let pagina = 0; pagina < t.paginas; pagina++) {
+    if (t.duenoChunk[pagina]! < 0 || t.paginaX[pagina] !== px || t.paginaY[pagina] !== py) continue;
+    const material = pagina * PAGE_CELLS + desplazamiento;
+    if (c.materia.lotes(material, Rol.Suelo, sinLeer) > 0) return material;
+  }
+  throw new Error(`b: falta la celda material de la defunción en (${x}, ${y}).`);
 }
 
 /** Muerte: funde tejido, reserva, digestivo y embrión en un lote Cadaver en `celda` (si la celda es de otro chunk, la

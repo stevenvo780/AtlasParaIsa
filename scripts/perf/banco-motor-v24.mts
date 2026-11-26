@@ -40,8 +40,9 @@
  * Las aceleraciones requieren un brazo y una referencia completos. Cada JSONL conserva los tiempos brutos.
  * `perfilPaso` añade fases crudas y esperas del coordinador. Sus lecturas forman parte del tiempo medido.
  * `CARTA_INDICE_UID=1` activa el índice compartido para los brazos de varios dueños.
- * El libro y la carga por chunk se comprueban al salir del
- * calentamiento y al final, fuera de la medición. La cabecera y esos controles registran sus costes por separado.
+ * El libro y la carga por chunk se comprueban al cierre, fuera de la medición. La cabecera y ese control
+ * registran sus costes por separado. `verificarCalentamiento:true` añade un corte completo al salir del
+ * calentamiento para diagnosticar errores tempranos.
  * `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
  * páginas del motor y `chunksArchivados` cuenta copias retenidas en RAM durante la corrida,
  * incluidas las de chunks que se hayan reactivado. En fixtures, el archivo SQLite previo
@@ -75,7 +76,7 @@ import { crearMotor } from '../../src/world/motor/coordinador.js';
 import { paramsOf, setParams } from '../../src/world/params.js';
 import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
 
-type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolean } & (
+type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolean; verificarCalentamiento?: boolean } & (
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
 interface Brazo {
   id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste'; duenosPercepcionGpu?: number[];
@@ -136,6 +137,8 @@ export function validacionConfiguracion(config: Config): Brazo[] {
   for (const e of config.escenas) {
     assert.ok(e && typeof e.id === 'string' && esId.test(e.id), 'ID de escena inválido');
     assert.ok(e.rebalanceo === undefined || typeof e.rebalanceo === 'boolean', `Rebalanceo inválido en ${e.id}`);
+    assert.ok(e.verificarCalentamiento === undefined || typeof e.verificarCalentamiento === 'boolean',
+      `Verificación de calentamiento inválida en ${e.id}`);
     if ('fixture' in e) {
       assert.ok(typeof e.fixture?.sqlite === 'string' && e.fixture.sqlite.length > 0 &&
         typeof e.fixture.sha256 === 'string' && esSha256.test(e.fixture.sha256) &&
@@ -439,7 +442,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
         ...(perfil && { perfilPaso: perfil }),
         ...(gpu.length && { gpuEstado: t.gpuEstado, gpuBrokers: gpuTick }) });
       if (paso % 120 === 0 || tick === inicio.intervalos.fin) archivar();
-      if (paso === e.calentar || tick === inicio.intervalos.fin) {
+      if (tick === inicio.intervalos.fin || (e.verificarCalentamiento && paso === e.calentar)) {
         const [cargaChunk, cargaChunkMs] = cronometrar(() => motor!.muestraCarga());
         assert.ok(cargaChunk && cargaChunk.tick === tick, 'Falta la carga del frente confirmado');
         anotar({ tipo: 'cargaChunk', ...cargaChunk });

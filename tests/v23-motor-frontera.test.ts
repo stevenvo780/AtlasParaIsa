@@ -6,6 +6,7 @@ import { AREA_CELDA, huella } from '../src/world/decision/fauna.js';
 import { masaDe } from '../src/world/materia/cuerpo.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
 import { duenoSi } from '../src/world/motor/contexto.js';
+import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
@@ -31,6 +32,26 @@ test('la fauna cruza entre dueños sin superar el área de la celda de destino',
     const { enviados, recibidos, pendientes } = duenoSi(mundo)!.balanceIntentos();
     assert.equal(enviados, recibidos + pendientes);
     assert.ok(motor.telemetria().migraciones > 0);
+  } finally {
+    await motor.cerrar();
+  }
+});
+
+test('un alta sin fila no mantiene activa la fila de un animal que ya se fue', async () => {
+  const semilla = 7;
+  const base = hostOpenWorldParams();
+  const params = parseParams({ v23: escalon('fauna'), motor: { ...base.motor, hilos: 1, gpu: [] } }, base);
+  const mundo = createWorld(semilla, params);
+  const motor = crearMotor(mundo, unSoloDueno(semilla));
+  try {
+    motor.paso([]);
+    const saliente = mundo.animals[0]!;
+    const entrante = { ...structuredClone(saliente), id: 'animal-entrante', uid: undefined, cuerpo: undefined, fauna: undefined };
+    mundo.animals[0] = entrante;
+    const ultimaDecision = saliente.lastDecision;
+    motor.paso([]);
+    assert.equal(saliente.lastDecision, ultimaDecision);
+    assert.ok(entrante.uid && entrante.uid !== saliente.uid);
   } finally {
     await motor.cerrar();
   }

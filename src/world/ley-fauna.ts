@@ -260,10 +260,12 @@ function filaDeRef(e: Estado, r: Ref): Fila | undefined {
  * vuelve del archivo) recibe la fila en el F6 en que la tabla le da el alta; hasta entonces no actúa. */
 function sincronizar(c: CtxLeyMateria): void {
   const e = estado(c), animales = c.mundo.animals, tabla = faunaRegistrada(c.mundo);
+  let conFila = 0;
   for (let i = 0; i < animales.length; i++) {
     const a = animales[i]!;
     if (!a.cuerpo || !a.fauna) convertir(c, a);
     const ref = tabla?.ref(a) ?? REF_NULA, f = e.filas.get(a);
+    if (ref !== REF_NULA) conFila++;
     if (f && f.ref === ref) continue;
     if (f && ref !== REF_NULA) {
       if (e.porSlot.get(slotDe(f.ref)) === f) e.porSlot.delete(slotDe(f.ref));
@@ -272,7 +274,7 @@ function sincronizar(c: CtxLeyMateria): void {
     } else if (f) olvidar(e, f);
     else if (ref !== REF_NULA) nuevaFila(e, a, ref);
   }
-  if (e.filas.size !== animales.length) {
+  if (e.filas.size !== conFila) {
     const vigentes = new Set(animales);
     for (const f of [...e.filas.values()]) if (!vigentes.has(f.animal)) olvidar(e, f);
   }

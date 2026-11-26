@@ -4,7 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
-import { faunaCorteDe, type TramoFaunaCorte } from '../world/motor/fauna-corte.js';
+import { faunaCorteDe, type TramoFaunaCorte, type TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
@@ -44,6 +44,7 @@ type Organisms = Pick<World, typeof ORGANISM_FIELDS[number]>;
 /** `metadata` is the exact JSON of the world record with placeholders for its paged collections. */
 export interface PreparedSnapshot {
   inline?: string; metadata?: string; tiles: readonly Tile[]; organisms?: Organisms; nativo: boolean;
+  faunaVerificada?: readonly TramoFaunaVerificada[];
 }
 
 export function hasCanonicalSnapshotPartsPrefix(body: string): boolean {
@@ -165,7 +166,7 @@ export class SnapshotParts {
   private writtenDigest: string | null = null;
   private pagesReused = 0;
   private pagesEncoded = 0;
-  private readonly faunaStats = { compared: 0, accepted: 0, rejected: 0 };
+  private readonly faunaStats = { compared: 0, accepted: 0, rejected: 0, reused: 0 };
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number,
     private readonly onProgress?: () => void, private readonly organismPageBytes = PAGE_BYTES,
     private readonly packedPeople = false) {
@@ -178,8 +179,8 @@ export class SnapshotParts {
   get pageStats(): { reused: number; encoded: number } {
     return { reused: this.pagesReused, encoded: this.pagesEncoded };
   }
-  /** Filas remotas intentadas durante la escritura. Un bloque mal formado se rechaza antes del cotejo. */
-  get faunaCorteStats(): { compared: number; accepted: number; rejected: number } {
+  /** Filas remotas cotejadas, rechazadas o reutilizadas desde un corte sellado durante la escritura. */
+  get faunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
     return { ...this.faunaStats };
   }
   /** Solo tras el COMMIT de la transacción en la que `write`/`collect` construyeron lo pendiente. */
@@ -205,7 +206,7 @@ export class SnapshotParts {
     if (!this.db.isTransaction) throw new Error('Snapshot parts require a coherent transaction.');
   }
 
-  prepare(world: World, params: WorldParams, inlineLimit: number): PreparedSnapshot {
+  prepare(world: World, params: WorldParams, inlineLimit: number, faunaVerificada?: readonly TramoFaunaVerificada[]): PreparedSnapshot {
     const nativo = params.v23.guardadoCompleto;
     if (!nativo && world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [], nativo };
     // Keep null placeholders to preserve the world's enumerable property order after reloading.
@@ -217,7 +218,7 @@ export class SnapshotParts {
     // no puede excederlo y se ahorra re-codificar los metadatos enteros solo para contarlos.
     if (!nativo && metadata.length * 3 > SNAPSHOT_METADATA_BYTES && Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES)
       failure('metadata exceeds transport size');
-    return { metadata, tiles: world.tiles, organisms, nativo };
+    return { metadata, tiles: world.tiles, organisms, nativo, faunaVerificada };
   }
 
   /** Los tres campos del vale que una conexión ajena puede mover, recotejados DENTRO de la transacción:
@@ -365,10 +366,12 @@ export class SnapshotParts {
     if (prepared.organisms) {
       const writeOrganismPage = (index: number, page: string | Uint8Array, count: number) => writePage(index, page, count, true);
       for (const field of ORGANISM_FIELDS) {
+        const faunaVerificada = field === 'animals' ? prepared.faunaVerificada : undefined;
         const manifest = encoding === ENCODING_V3 && field === 'people'
           ? this.writePackedPeople(prepared.organisms.people, writeOrganismPage)
           : this.writeOrganisms(prepared.organisms[field], writeOrganismPage,
-            field === 'animals' ? faunaCorteDe(prepared.organisms.animals) : undefined);
+            field === 'animals' && faunaVerificada === undefined ? faunaCorteDe(prepared.organisms.animals) : undefined,
+            faunaVerificada);
         for (const page of manifest.pages) digests.push(page.digest);
         body += `,"${field}":${JSON.stringify(manifest)}`;
       }
@@ -412,7 +415,7 @@ export class SnapshotParts {
   }
 
   private writeOrganisms(organisms: readonly unknown[], writePage: (index: number, body: string, count: number) => Page,
-    faunaCorte?: readonly TramoFaunaCorte[]): Pages {
+    faunaCorte?: readonly TramoFaunaCorte[], faunaVerificada?: readonly TramoFaunaVerificada[]): Pages {
     const pages: Page[] = [], rows: string[] = [];
     let bytes = 2; // Opening and closing brackets.
     const flush = () => {
@@ -422,12 +425,29 @@ export class SnapshotParts {
       this.onProgress?.();
     };
     const count = organisms.length;
+    if (faunaVerificada) {
+      let fin = 0;
+      for (const { desde, filas } of faunaVerificada) {
+        if (!Number.isSafeInteger(desde) || desde < fin || filas.length === 0 || desde + filas.length > count)
+          failure('verified fauna range');
+        fin = desde + filas.length;
+      }
+    }
     const remote = faunaCorte && this.faunaCorteRows(faunaCorte, count);
     let candidate = remote?.next().value;
+    let indexTramo = 0, tramo = faunaVerificada?.[0];
     for (let i = 0; i < count; i++) {
-      const organism = organisms[i];
-      if (!object(organism)) failure('organism row');
-      let row = stringifyExact(organism);
+      let row: string;
+      if (tramo && i >= tramo.desde) {
+        const offset = i - tramo.desde;
+        row = tramo.filas[offset]!;
+        this.faunaStats.reused++;
+        if (offset + 1 === tramo.filas.length) tramo = faunaVerificada![++indexTramo];
+      } else {
+        const organism = organisms[i];
+        if (!object(organism)) failure('organism row');
+        row = stringifyExact(organism);
+      }
       if (typeof row !== 'string' || !row.startsWith('{')) failure('organism row');
       if (candidate?.index === i) {
         this.faunaStats.compared++;

@@ -27,6 +27,8 @@ import { assertTechnology, maintainTechnologyMemory } from '../world/technology.
 import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
+import { consumirCorteGuardado, type CorteGuardadoSellado } from '../world/motor/corte-sellado.js';
+import type { TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
 import { codificarCheckpoint } from '../world/materia/checkpoint.js';
 import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts, type PreparedMatterParts } from './snapshot-matter-parts.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
@@ -444,7 +446,7 @@ export class Store {
   }
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
-  get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number } {
+  get snapshotFaunaCorteStats(): { compared: number; accepted: number; rejected: number; reused: number } {
     return this.snapshotParts.faunaCorteStats;
   }
   get context(): WorldContext {
@@ -1812,7 +1814,20 @@ export class Store {
     this.guardarConEntradas(i, [], [], corteAgenda);
   }
 
-  guardarConEntradas({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[], sesiones: string[], corteAgenda?: CorteAgendaTerritorial): void {
+  guardarConEntradas(instantanea: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
+    sesiones: string[], corteAgenda?: CorteAgendaTerritorial): void {
+    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda);
+  }
+
+  guardarCorteSellado(sello: CorteGuardadoSellado, inputs: { gesture: Gesture; result: GestureResult }[],
+    sesiones: string[], corteAgenda?: CorteAgendaTerritorial): Instantanea {
+    const { instantanea, fauna } = consumirCorteGuardado(sello);
+    this.guardarCompleto(instantanea, inputs, sesiones, corteAgenda, fauna);
+    return instantanea;
+  }
+
+  private guardarCompleto({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[],
+    sesiones: string[], corteAgenda?: CorteAgendaTerritorial, faunaVerificada?: readonly TramoFaunaVerificada[]): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
@@ -1826,11 +1841,12 @@ export class Store {
       corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
       materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
-    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto);
+    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto, faunaVerificada);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
-    changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda): void {
+    changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda,
+    faunaVerificada?: readonly TramoFaunaVerificada[]): void {
     const complete = matter !== undefined;
     const matterParts = matter && !(matter instanceof Uint8Array) ? matter : null;
     let matterBody = matter instanceof Uint8Array ? matter : null;
@@ -1896,7 +1912,7 @@ export class Store {
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
     let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle,
       technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) },
-    paramsOf(world), this.snapshotInlineTileLimit);
+    paramsOf(world), this.snapshotInlineTileLimit, faunaVerificada);
     let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
     let written: WrittenSnapshot | undefined;

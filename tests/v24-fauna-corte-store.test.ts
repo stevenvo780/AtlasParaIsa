@@ -6,7 +6,8 @@ import { SnapshotPhysicalError } from '../src/server/snapshot.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import type { Animal } from '../src/world/animals.js';
 import { createWorld, type World } from '../src/world/index.js';
-import { vincularFaunaCorte, type BloqueFaunaCorte } from '../src/world/motor/fauna-corte.js';
+import { crearCorteGuardado } from '../src/world/motor/corte-sellado.js';
+import { faunaVerificadaDe, vincularFaunaCorte, vincularFaunaVerificada, type BloqueFaunaCorte } from '../src/world/motor/fauna-corte.js';
 import { parseParams } from '../src/world/params.js';
 import { filaInstantanea, laboratorio, todasLasTablas } from './lib/store.js';
 
@@ -20,8 +21,12 @@ function mundo(): World {
   return world;
 }
 
+function filas(animals: readonly Animal[]): string[] {
+  return animals.map(animal => stringifyExact(animal));
+}
+
 function bloque(animals: readonly Animal[]): BloqueFaunaCorte {
-  return { filas: animals.length, cuerpo: Buffer.from(animals.map(animal => stringifyExact(animal)).join('\n')) };
+  return { filas: animals.length, cuerpo: Buffer.from(filas(animals).join('\n')) };
 }
 
 function partes(db: DatabaseSync) {
@@ -52,8 +57,19 @@ for (const packedPeople of [false, true]) {
       parts.verify(remote.body);
       assert.deepEqual(remote, canonical);
       assert.deepEqual(partes(db), bodies);
-      assert.deepEqual(parts.faunaCorteStats, { compared: 6, accepted: 6, rejected: 0 });
-      const restored = parts.read(remote.body) as World;
+      assert.deepEqual(parts.faunaCorteStats, { compared: 6, accepted: 6, rejected: 0, reused: 0 });
+
+      const verified = parts.write(parts.prepare(world, params, 32768, [
+        { desde: 0, filas: filas(animals.slice(0, 4)) },
+        { desde: 5, filas: filas(animals.slice(5, 7)) },
+      ]));
+      parts.assertWritten(verified);
+      parts.verify(verified.body);
+      assert.deepEqual(verified, canonical);
+      assert.deepEqual(partes(db), bodies);
+      assert.deepEqual(parts.faunaCorteStats, { compared: 6, accepted: 6, rejected: 0, reused: 6 });
+
+      const restored = parts.read(verified.body) as World;
       assert.equal(restored.animals[1]!.reason, animals[1]!.reason);
       assert.ok(Object.is(restored.animals[1]!.work, -0));
       db.exec('COMMIT');
@@ -67,7 +83,7 @@ test('Store recurre a fauna canónica ante filas divergentes y conserva validaci
   const world = mundo(), animals = world.animals, controlWorld = mundo();
   control.guardar({ world: controlWorld, materia: null });
   store.guardar({ world, materia: null });
-  assert.deepEqual(store.snapshotFaunaCorteStats, { compared: 0, accepted: 0, rejected: 0 });
+  assert.deepEqual(store.snapshotFaunaCorteStats, { compared: 0, accepted: 0, rejected: 0, reused: 0 });
 
   const utf8 = Buffer.from(stringifyExact(animals[4])), reemplazo = Buffer.from('\uFFFD');
   const position = utf8.indexOf(reemplazo);
@@ -86,7 +102,7 @@ test('Store recurre a fauna canónica ante filas divergentes y conserva validaci
     { desde: animals.length, bloques: [bloque([animals[0]!])] },
   ]);
   store.guardar({ world, materia: null });
-  assert.deepEqual(store.snapshotFaunaCorteStats, { compared: 4, accepted: 2, rejected: 5 });
+  assert.deepEqual(store.snapshotFaunaCorteStats, { compared: 4, accepted: 2, rejected: 5, reused: 0 });
   assert.deepEqual(filaInstantanea(store), filaInstantanea(control));
   assert.deepEqual(filaInstantanea(store, 1), filaInstantanea(control, 1));
   assert.deepEqual(partes(store.db), partes(control.db));
@@ -106,4 +122,60 @@ test('Store recurre a fauna canónica ante filas divergentes y conserva validaci
   assert.throws(() => store.guardar({ world, materia: null }), SnapshotPhysicalError);
   assert.deepEqual(todasLasTablas(store), before);
   assert.equal(store.db.isTransaction, false);
+});
+
+test('Store consume la fauna sellada una sola vez y devuelve un mundo editable después del commit', t => {
+  const { store: control } = laboratorio(t, 'atlas-fauna-sellada-control-');
+  const { store } = laboratorio(t, 'atlas-fauna-sellada-');
+  const controlWorld = mundo();
+  control.guardar({ world: controlWorld, materia: null });
+  let capturas = 0;
+  const sello = crearCorteGuardado(() => {
+    capturas++;
+    const world = mundo();
+    vincularFaunaVerificada(world.animals, [{ desde: 0, filas: filas(world.animals) }]);
+    return { world, materia: null };
+  });
+  assert.equal(capturas, 0);
+  const instantanea = store.guardarCorteSellado(sello, [], []);
+  assert.equal(capturas, 1);
+  assert.equal(store.db.isTransaction, false);
+  assert.equal(faunaVerificadaDe(instantanea.world.animals), undefined);
+  assert.deepEqual(store.snapshotFaunaCorteStats, {
+    compared: 0, accepted: 0, rejected: 0, reused: instantanea.world.animals.length,
+  });
+  assert.deepEqual(filaInstantanea(store), filaInstantanea(control));
+  assert.deepEqual(partes(store.db), partes(control.db));
+  assert.throws(() => store.guardarCorteSellado(sello, [], []));
+  assert.equal(capturas, 1);
+
+  const animales = instantanea.world.animals;
+  vincularFaunaVerificada(animales, [{ desde: 0, filas: filas(animales) }]);
+  animales[0]!.reason = 'Editado después del commit';
+  controlWorld.animals[0]!.reason = animales[0]!.reason;
+  store.guardar(instantanea);
+  control.guardar({ world: controlWorld, materia: null });
+  assert.equal(store.snapshotFaunaCorteStats.reused, animales.length);
+  assert.deepEqual(filaInstantanea(store), filaInstantanea(control));
+  assert.deepEqual(filaInstantanea(store, 1), filaInstantanea(control, 1));
+  assert.deepEqual(partes(store.db), partes(control.db));
+});
+
+test('Store deshace un guardado sellado si cambia una página de fauna antes del commit', t => {
+  const { store } = laboratorio(t, 'atlas-fauna-sellada-rollback-');
+  const world = mundo();
+  store.guardar({ world, materia: null });
+  const before = todasLasTablas(store);
+  const sello = crearCorteGuardado(() => {
+    world.animals[0]!.reason = 'Guardado sellado que revierte';
+    vincularFaunaVerificada(world.animals, [{ desde: 0, filas: filas(world.animals) }]);
+    return { world, materia: null };
+  });
+  store.db.exec(`CREATE TRIGGER corrupt_fauna AFTER INSERT ON snapshots WHEN NEW.slot=0 BEGIN
+      UPDATE snapshot_parts SET body=body||' ' WHERE digest=json_extract(NEW.body,'$.animals.pages[0].digest');
+    END`);
+  assert.throws(() => store.guardarCorteSellado(sello, [], []), SnapshotPhysicalError);
+  assert.deepEqual(todasLasTablas(store), before);
+  assert.equal(store.db.isTransaction, false);
+  assert.throws(() => store.guardarCorteSellado(sello, [], []));
 });

@@ -1,13 +1,14 @@
 /**
- * scripts/lab/encender.mts — enciende un escalón de la V23 en un mundo de UN hilo, sin tarjeta y con semilla, y lo
+ * scripts/lab/encender.mts — enciende un escalón de la V23 en un mundo de UN hilo y con semilla, y lo
  * vigila tick a tick: para en la primera violación dura de un invariante o de un `Ley.comprobar` e imprime tick, ley y entorno.
  *
  *   tsx scripts/lab/encender.mts --semilla 51926 --hasta materia --dias 3 [--params p.json | "a.b=1,c.d=2"] [--regimen abierto|defecto]
- *        [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
+ *        [--gpu 0[,1]] [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
  *        [--n N] [--ticks N] [--perfil] [--digesto]
  *
  *  --hasta X     enciende los interruptores hasta X incluido, en el orden de `ORDEN_ENCENDIDO` (`escalon()`); se aplica
  *                ENCIMA de `--params`. Sin él, rigen los interruptores de `--params` (todos apagados por defecto).
+ *  --gpu         añade materiaGpu sobre el escalón y usa las tarjetas indicadas. Por defecto corre en CPU.
  *  --cada N      comprueba los invariantes y las leyes cada N ticks. Sin él, cada tick, cada invariante con su propia cadencia.
  *  --continuar   no para en la primera violación dura: las anota todas (para ver su alcance, no para estabilizar).
  *
@@ -33,7 +34,7 @@ import { comprobarLeyes, crearComprobador, listaInvariantes, type Violacion } fr
 import { LEYES } from '../../src/world/motor/leyes.js';
 import { ctxSi } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
-import { conservacion } from '../../src/world/materia/ley-mundo.js';
+import { cerrarMateriaGpu, conservacion, diagnosticoMateriaGpu } from '../../src/world/materia/ley-mundo.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { escalon, INTERRUPTORES, ORDEN_ENCENDIDO, type Interruptor, type InterruptoresV23 } from '../../src/shared/interruptores.js';
 import { archivoDeChunks, poblar } from './poblacion.mjs';
@@ -41,7 +42,7 @@ import { archivoDeChunks, poblar } from './poblacion.mjs';
 export interface OpcionesEncender {
   semilla: number; hasta?: Interruptor; params?: string; dias: number; regimen: 'abierto' | 'defecto';
   /** Cada cuántos ticks se comprueba todo; `undefined` = cada tick con la cadencia propia de cada invariante. */
-  cada?: number; topeMortales?: number; continuar: boolean; salida?: string; comprobar: boolean;
+  cada?: number; topeMortales?: number; continuar: boolean; salida?: string; comprobar: boolean; gpu?: number[];
   n?: number; ticks?: number; perfil?: boolean; digesto?: boolean;
 }
 
@@ -70,6 +71,9 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
       case '--dias': o.dias = entero(valor, bandera); break;
       case '--ticks': o.ticks = entero(valor, bandera); break;
       case '--n': o.n = entero(valor, bandera); break;
+      case '--gpu':
+        if (!/^\d+(,\d+)*$/.test(valor)) throw new Error('--gpu espera índices separados por comas');
+        o.gpu = [...new Set(valor.split(',').map(id => entero(id, bandera, 0)))]; break;
       case '--regimen': if (valor !== 'abierto' && valor !== 'defecto') throw new Error('Régimen inválido'); o.regimen = valor; break;
       case '--cada': o.cada = entero(valor, bandera); break;
       case '--tope-mortales': o.topeMortales = entero(valor, bandera); break;
@@ -80,15 +84,17 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
   return o;
 }
 
-/** Los params del mundo de referencia: régimen, `--params`, el escalón de `--hasta` y un solo dueño, sin tarjeta. */
-export function paramsDeEncender(o: Pick<OpcionesEncender, 'regimen' | 'params' | 'hasta'>): WorldParams {
+/** Los params del mundo de referencia: régimen, `--params`, el escalón de `--hasta` y un solo dueño. */
+export function paramsDeEncender(o: Pick<OpcionesEncender, 'regimen' | 'params' | 'hasta' | 'gpu'>): WorldParams {
   let params: WorldParams = o.regimen === 'abierto' ? hostOpenWorldParams() : DEFAULT_PARAMS;
   if (o.params) {
     const texto = existsSync(o.params) ? readFileSync(o.params, 'utf8') : o.params;
     params = parseParams(texto.trimStart().startsWith('{') ? JSON.parse(texto) : texto, params);
   }
   if (o.hasta) params = parseParams({ v23: escalon(o.hasta) }, params);
-  return parseParams({ motor: { ...params.motor, hilos: 1, gpu: [] } }, params);
+  const gpu = o.gpu ?? [];
+  return parseParams({ motor: { ...params.motor, hilos: 1, gpu },
+    ...(gpu.length ? { v23: { ...params.v23, materiaGpu: true } } : {}) }, params);
 }
 
 const interruptoresEncendidos = (v: Readonly<InterruptoresV23>): Interruptor[] => INTERRUPTORES.filter(k => v[k]);
@@ -128,6 +134,12 @@ export function vistasMedias(tiles: Readonly<World['tiles']>) {
 export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<string, unknown>) => void): Promise<number> {
   const params = paramsDeEncender(o);
   const mundo = createWorld(o.semilla, params);
+  try { return correr(o, mundo, escribirFila); }
+  finally { cerrarMateriaGpu(mundo); }
+}
+
+function correr(o: OpcionesEncender, mundo: World, escribirFila: (fila: Record<string, unknown>) => void): number {
+  const params = paramsOf(mundo);
   if (o.n !== undefined) poblar(mundo, { n: o.n, zona: { x: 0, y: 0, ancho: 48, alto: 32 }, siembra: o.semilla });
   const { archivo, archivar } = archivoDeChunks(mundo);
   const contexto = worldContext(mundo);
@@ -144,7 +156,7 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
     mortales: mundo.people.filter(p => p.role === 'neighbor').length, fauna: mundo.animals.length, ...extra,
   });
   escribirFila({ tipo: 'inicio', ...entorno(), leyes: leyesEncendidas.map(l => l.id), invariantes: [...carriles.keys()], comprobar: o.comprobar,
-    cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY });
+    cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY, gpu: params.motor.gpu });
 
   let violaciones = 0, duras = 0, avisoSinContexto = false;
   const fin = (estado: string, dia?: number): number => {
@@ -226,6 +238,7 @@ export async function encender(o: OpcionesEncender, escribirFila: (fila: Record<
       faunaMuertesPorCausaDia: causasFauna, vistasMedias: vistasMedias(mundo.tiles),
       comunidades: mundo.communities.length, estructuras: mundo.structures.length,
       totales: { ...mundo.totals }, conservacion: balanceConservacion(mundo), violaciones, duras,
+      ...(params.motor.gpu.length ? { gpuMateria: diagnosticoMateriaGpu(mundo) } : {}),
     });
     nacidosAntes = nacimientos; muertesAntes = dinamica.deaths; causasAntes = { ...dinamica.causes };
     faunaAntes = fauna;

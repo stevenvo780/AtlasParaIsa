@@ -45,8 +45,17 @@ class Dispositivo:
         self.subir = enlace(driver, 'cuMemcpyHtoD_v2', d, p, z)
         self.bajar = enlace(driver, 'cuMemcpyDtoH_v2', p, d, z)
         self.copiar = enlace(driver, 'cuMemcpyDtoD_v2', d, d, z)
+        self.subir_async = enlace(driver, 'cuMemcpyHtoDAsync_v2', d, p, z, p)
+        self.bajar_async = enlace(driver, 'cuMemcpyDtoHAsync_v2', p, d, z, p)
         self.lanzar = enlace(driver, 'cuLaunchKernel', p, u, u, u, u, u, u, u, p, C.POINTER(p), p)
         self.sync = enlace(driver, 'cuCtxSynchronize')
+        self.crear_flujo = enlace(driver, 'cuStreamCreate', C.POINTER(p), u)
+        self.esperar_flujo = enlace(driver, 'cuStreamSynchronize', p)
+        self.fijar_host = enlace(driver, 'cuMemAllocHost_v2', C.POINTER(p), z)
+        self.soltar_host = enlace(driver, 'cuMemFreeHost', p)
+        self.crear_evento = enlace(driver, 'cuEventCreate', C.POINTER(p), u)
+        self.grabar_evento = enlace(driver, 'cuEventRecord', p, p)
+        self.elapsed = enlace(driver, 'cuEventElapsedTime', C.POINTER(C.c_float), p, p)
         self.buffers = {}
 
         self.nvrtc = nvrtc
@@ -60,9 +69,11 @@ class Dispositivo:
             self.cerrar()
             raise
 
-    def cargar(self, nombre, *funciones):
+    def cargar(self, nombre, *funciones, perfil=None):
         fuente = Path(__file__).with_name(nombre).read_bytes()
+        inicio = perf_counter()
         ptx = compilar(self.nvrtc, fuente, self.arquitectura, nombre)
+        compilado = perf_counter()
         modulo = C.c_void_p()
         self.cargar_modulo(C.byref(modulo), ptx)
         resultado = []
@@ -70,14 +81,17 @@ class Dispositivo:
             funcion = C.c_void_p()
             self.buscar_funcion(C.byref(funcion), modulo, nombre_funcion)
             resultado.append(funcion)
+        if perfil is not None:
+            perfil['msNvrtc'] = (compilado - inicio) * 1000
+            perfil['msModulo'] = (perf_counter() - compilado) * 1000
         return resultado
 
-    def buffer(self, nombre, bytes_, conservar=False):
+    def buffer(self, nombre, bytes_, conservar=False, crecer=False):
         puntero, capacidad = self.buffers.get(nombre, (None, 0))
         if capacidad >= max(1, bytes_):
             return puntero
         nuevo = C.c_uint64()
-        tamano = max(1, bytes_)
+        tamano = max(1, bytes_, capacidad * 3 // 2 if crecer else 0)
         self.alojar(C.byref(nuevo), tamano)
         if puntero is not None:
             if conservar:
@@ -86,10 +100,10 @@ class Dispositivo:
         self.buffers[nombre] = nuevo, tamano
         return nuevo
 
-    def kernel(self, funcion, bloques, *argumentos, hilos=256):
+    def kernel(self, funcion, bloques, *argumentos, hilos=256, flujo=None):
         if bloques:
             argv = (C.c_void_p * len(argumentos))(*(C.addressof(arg) for arg in argumentos))
-            self.lanzar(funcion, bloques, 1, 1, hilos, 1, 1, 0, None, argv, None)
+            self.lanzar(funcion, bloques, 1, 1, hilos, 1, 1, 0, flujo, argv, None)
 
     def ejecutar(self, orden, mm):
         subida, bajada, salida = (orden[k] for k in ('subida', 'bajada', 'salida'))
@@ -97,18 +111,18 @@ class Dispositivo:
             raise ValueError('Lote fuera del canal GPU.')
         inicio = perf_counter()
         kind = orden['kind']
-        if kind in ('materia', 'prepararMateria') and self.materia is None:
+        arranque = kind in ('materia', 'prepararMateria') and self.materia is None
+        if arranque:
             self.materia = MateriaKernel(self)
         if kind == 'prepararMateria':
-            return {'ms': (perf_counter() - inicio) * 1000}
+            perfil = self.materia.perfil_arranque if arranque and orden.get('perfil') else {}
+            return {'ms': (perf_counter() - inicio) * 1000, **perfil}
         if kind not in ('materia', 'percibir'):
             raise ValueError('Orden GPU desconocida.')
-        lote = self.buffer('lote', subida)
         direccion = C.addressof(C.c_ubyte.from_buffer(mm))
         if kind == 'materia':
-            self.subir(lote, direccion, subida)
-            tripletas = self.materia.ejecutar(orden, lote, direccion + salida, mm)
-            return {'ms': (perf_counter() - inicio) * 1000, 'tripletas': tripletas}
+            return self.materia.ejecutar(orden, direccion, inicio)
+        lote = self.buffer('lote', subida)
         resultado = self.buffer('resultado', bajada)
         terreno = self.buffer('terreno', orden['terrenoBytes'], conservar=True)
         cerebro = self.buffer('cerebro', orden['cerebroBytes'], conservar=True)
@@ -124,7 +138,11 @@ class Dispositivo:
         return {'ms': (perf_counter() - inicio) * 1000}
 
     def cerrar(self):
-        self.destruir(self.contexto)
+        try:
+            if self.materia is not None:
+                self.materia.cerrar()
+        finally:
+            self.destruir(self.contexto)
 
 
 def compilar(nvrtc, fuente, arquitectura, nombre):

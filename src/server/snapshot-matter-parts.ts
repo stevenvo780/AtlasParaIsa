@@ -71,6 +71,10 @@ function exigirTransaccion(db: DatabaseSync): void {
 export class SnapshotMatterParts {
   constructor(private readonly db: DatabaseSync) {}
 
+  static installed(db: DatabaseSync): boolean {
+    return !!db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name='snapshot_matter_parts'").get();
+  }
+
   static install(db: DatabaseSync): void {
     exigirTransaccion(db);
     db.exec(`CREATE TABLE IF NOT EXISTS main.snapshot_matter_parts (
@@ -143,7 +147,7 @@ export class SnapshotMatterParts {
   }
 
   private verificarManifiesto(manifiesto: Manifiesto, destino?: Uint8Array): string {
-    if (!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name='snapshot_matter_parts'").get())
+    if (!SnapshotMatterParts.installed(this.db))
       return error('Falta la tabla de partes de materia.');
     const leer = this.db.prepare('SELECT body FROM main.snapshot_matter_parts WHERE digest=?');
     const sha = createHash('sha256');

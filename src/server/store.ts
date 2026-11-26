@@ -28,6 +28,7 @@ import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../worl
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../world/materia/checkpoint.js';
+import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts, type PreparedMatterParts } from './snapshot-matter-parts.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
 import { AgendaTerritorial, type CorteAgendaTerritorial } from '../world/territorio/agenda.js';
 
@@ -63,6 +64,8 @@ interface AdjuntoAgenda {
   corte: CorteAgendaTerritorial;
   materiaDigest: string | null;
 }
+type MatterForWrite = Uint8Array | PreparedMatterParts | null;
+interface MatterManifestRow { slot: SnapshotSlot; world_digest: string; body: Uint8Array; }
 type LoadedSnapshotBruto = LoadedSnapshot & { agendaBruta?: unknown };
 interface InstantaneaCargada {
   instantanea: Instantanea;
@@ -262,20 +265,25 @@ export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
 export interface StoreOptions {
   readOnly?: boolean; snapshotInlineTileLimit?: number;
+  /** Umbral de los bloques de materia y máximo de bytes por parte. Por defecto, 4 MiB. */
+  snapshotMatterPartBytes?: number;
   onProgress?: () => void;
   /** Recibos podados como mucho por guardado (default `TECHNOLOGY_PRUNE_ROWS_PER_SAVE`); las pruebas lo bajan. */
   technologyPruneRowsPerSave?: number;
 }
 function validateStoreOptions(options: StoreOptions): void {
   if (!options || typeof options !== 'object' || Array.isArray(options)
-    || Object.keys(options).some(key => !['readOnly', 'snapshotInlineTileLimit', 'technologyPruneRowsPerSave', 'onProgress'].includes(key))
+    || Object.keys(options).some(key => !['readOnly', 'snapshotInlineTileLimit', 'snapshotMatterPartBytes', 'technologyPruneRowsPerSave', 'onProgress'].includes(key))
     || options.onProgress !== undefined && typeof options.onProgress !== 'function'
     || options.readOnly !== undefined && typeof options.readOnly !== 'boolean'
     || options.snapshotInlineTileLimit !== undefined && (!Number.isSafeInteger(options.snapshotInlineTileLimit)
       || options.snapshotInlineTileLimit < 0 || options.snapshotInlineTileLimit > SNAPSHOT_INLINE_TILE_LIMIT)
+    || options.snapshotMatterPartBytes !== undefined && (!Number.isSafeInteger(options.snapshotMatterPartBytes)
+      || options.snapshotMatterPartBytes < 1 || options.snapshotMatterPartBytes > MAX_SNAPSHOT_MATTER_PART_BYTES)
     || options.technologyPruneRowsPerSave !== undefined && (!Number.isSafeInteger(options.technologyPruneRowsPerSave)
       || options.technologyPruneRowsPerSave < 1 || options.technologyPruneRowsPerSave > 1_000_000))
     throw new Error('Invalid StoreOptions: readOnly must be boolean, snapshotInlineTileLimit an integer from 0 to 32768'
+      + `, snapshotMatterPartBytes an integer from 1 to ${MAX_SNAPSHOT_MATTER_PART_BYTES}`
       + ', technologyPruneRowsPerSave an integer from 1 to 1000000 and onProgress a function.');
 }
 export class Store {
@@ -307,6 +315,8 @@ export class Store {
   private readonly schemaVersion: number;
   private readonly snapshotParts: SnapshotParts;
   private readonly snapshotInlineTileLimit: number;
+  private readonly snapshotMatterParts: SnapshotMatterParts;
+  private readonly snapshotMatterPartBytes: number;
   private verifiedChronicle: ChronicleProof | null = null;
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number;
     schemaCookie: number; chain: TechnologyChain } | null = null;
@@ -334,11 +344,13 @@ export class Store {
     this.onProgress = options.onProgress;
     this.readOnly = options.readOnly ?? false;
     this.snapshotInlineTileLimit = options.snapshotInlineTileLimit ?? SNAPSHOT_INLINE_TILE_LIMIT;
+    this.snapshotMatterPartBytes = options.snapshotMatterPartBytes ?? MAX_SNAPSHOT_MATTER_PART_BYTES;
     this.explicitPruneCap = options.technologyPruneRowsPerSave !== undefined;
     this.technologyPruneRowsPerSave = options.technologyPruneRowsPerSave ?? TECHNOLOGY_PRUNE_ROWS_PER_SAVE;
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !this.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path, { readOnly: this.readOnly });
+    this.snapshotMatterParts = new SnapshotMatterParts(this.db);
     // El archivo consulta la frontera de poda en cada verificación: nunca la recuerda (ver TechnologyArchiveHost).
     this.technologyArchive = new TechnologyArchive(this.db, { prunedThrough: () => this.prunedTechnology()?.through ?? null });
     let schemaVersion = existed ? 0 : 5;
@@ -753,10 +765,10 @@ export class Store {
       if (anterior === null) return null;
       const loaded = this.loadVerified(rawTransaction, true);
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
-      const bytes = this.readCompleteMatter(loaded.slot);
+      const { bytes, digest } = this.readCompleteMatter(loaded.slot);
       const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
       const { world, agendaBruta, ...metadatos } = loaded;
-      const corteAgenda = this.decodeCompleteAgenda(agendaBruta, bytes, materia, world.tick, anterior);
+      const corteAgenda = this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, anterior);
       const epoca = Math.max(anterior, materia?.epoca ?? 0) + 1;
       if (!Number.isSafeInteger(epoca)) throw new SnapshotSemanticError('La época de carga excede el rango de enteros exactos.');
       this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
@@ -773,20 +785,81 @@ export class Store {
       if (epoca === null) return loaded;
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
       const { agendaBruta, ...verificado } = loaded;
-      const bytes = this.readCompleteMatter(loaded.slot);
+      const { bytes, digest } = this.readCompleteMatter(loaded.slot);
       const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
-      this.decodeCompleteAgenda(agendaBruta, bytes, materia, loaded.world.tick, epoca);
+      this.decodeCompleteAgenda(agendaBruta, digest, materia, loaded.world.tick, epoca);
       return verificado;
     });
   }
 
-  private readCompleteMatter(slot: SnapshotSlot): Uint8Array | null {
+  private completeMatterBody(slot: SnapshotSlot): Uint8Array | null {
     const row = this.db.prepare(`
       SELECT m.body FROM main.snapshot_matter m
       JOIN main.snapshots s ON s.slot=m.slot AND s.digest=m.world_digest WHERE s.slot=?
     `).get(slot) as { body: Uint8Array | null } | undefined;
     if (!row) throw new SnapshotPhysicalError('Falta la materia asociada al guardado completo.');
     return row.body;
+  }
+
+  private readCompleteMatter(slot: SnapshotSlot): { bytes: Uint8Array | null; digest: string | null } {
+    return this.snapshotMatterParts.read(this.completeMatterBody(slot));
+  }
+
+  private retainedMatterManifests(): MatterManifestRow[] {
+    // Haría falta leer los VMAT legados enteros si se filtrara en JavaScript.
+    return this.db.prepare(`SELECT slot, world_digest, body FROM main.snapshot_matter
+      WHERE slot IN (0,1,2) AND substr(body,1,4)=X'564d5054' ORDER BY slot`).all() as unknown as MatterManifestRow[];
+  }
+
+  private collectMatterParts(): void {
+    const manifests = this.retainedMatterManifests();
+    if (SnapshotMatterParts.installed(this.db)) this.snapshotMatterParts.collect(manifests.map(row => row.body));
+    else if (manifests.length) throw new SnapshotPhysicalError('Falta la tabla de partes de materia.');
+  }
+
+  private expectedMatterBackups(rotates: boolean, deep: boolean): Map<SnapshotSlot, MatterManifestRow> {
+    const manifests = new Map(this.retainedMatterManifests().map(row => [row.slot, row]));
+    const slot0 = manifests.get(0);
+    manifests.delete(0);
+    if (rotates && this.db.prepare('SELECT 1 FROM main.snapshot_matter WHERE slot=0').get()) {
+      for (const slot of deep ? [1, 2] as const : [1] as const) {
+        if (slot0) manifests.set(slot, slot0);
+        else manifests.delete(slot);
+      }
+    }
+    return manifests;
+  }
+
+  private verifyMatterBackups(expected: Map<SnapshotSlot, MatterManifestRow>): void {
+    for (const row of this.retainedMatterManifests()) {
+      if (row.slot !== 0) {
+        const before = expected.get(row.slot);
+        if (!before || row.world_digest !== before.world_digest || Buffer.compare(row.body, before.body) !== 0)
+          throw new SnapshotPhysicalError('El manifiesto de materia de un respaldo cambió antes del commit.');
+        expected.delete(row.slot);
+      }
+      this.snapshotMatterParts.verify(row.body);
+    }
+    if (expected.size) throw new SnapshotPhysicalError('Falta el manifiesto de materia de un respaldo antes del commit.');
+  }
+
+  /** En una base cambiada desde el último guardado, un manifiesto ilegible no reemplaza un respaldo válido. */
+  private completeMatterCanRotate(): boolean {
+    const row = this.db.prepare(`
+      SELECT m.slot AS matterSlot,
+        m.body IS NULL OR substr(m.body,1,4) IN (X'564d4154', X'564d5054') AS known,
+        CASE WHEN substr(m.body,1,4)=X'564d5054' THEN m.body END AS manifest
+      FROM main.snapshots s LEFT JOIN main.snapshot_matter m ON m.slot=s.slot AND m.world_digest=s.digest
+      WHERE s.slot=0
+    `).get() as { matterSlot: number | null; known: number; manifest: Uint8Array | null } | undefined;
+    if (!row) return true;
+    if (row.matterSlot === null || !row.known) return false;
+    try { this.snapshotMatterParts.verify(row.manifest); }
+    catch (error) {
+      if (!(error instanceof SnapshotPhysicalError)) throw error;
+      return false;
+    }
+    return true;
   }
 
   private decodeCompleteMatter(bytes: Uint8Array | null, tick: number): Instantanea['materia'] {
@@ -801,10 +874,10 @@ export class Store {
     } finally { void quimica?.cerrar(); }
   }
 
-  private decodeCompleteAgenda(raw: unknown, bytes: Uint8Array | null, materia: Instantanea['materia'], tick: number, epocaReservada: number): CorteAgendaTerritorial | undefined {
+  private decodeCompleteAgenda(raw: unknown, matterDigest: string | null, materia: Instantanea['materia'], tick: number, epocaReservada: number): CorteAgendaTerritorial | undefined {
     if (raw === undefined) return undefined;
     const adjunto = raw as Partial<AdjuntoAgenda> | null;
-    if (!adjunto || typeof adjunto !== 'object' || adjunto.materiaDigest !== (bytes === null ? null : checksum(bytes)))
+    if (!adjunto || typeof adjunto !== 'object' || adjunto.materiaDigest !== matterDigest)
       throw new SnapshotSemanticError('La agenda territorial no corresponde a la materia del guardado.');
     const epoca = materia?.epoca ?? adjunto.corte?.epoca;
     if (epoca === undefined || epoca > epocaReservada)
@@ -1711,17 +1784,24 @@ export class Store {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
-    const bytes = materia === null ? null : codificarCheckpoint(materia);
+    let guardado: MatterForWrite = null;
+    if (materia !== null) {
+      const bytes = materia.paginas.byteLength + materia.enVuelo.byteLength + materia.sustancias.byteLength + materia.registro.byteLength;
+      guardado = bytes > this.snapshotMatterPartBytes
+        ? SnapshotMatterParts.prepare(materia, this.snapshotMatterPartBytes) : codificarCheckpoint(materia);
+    }
     const adjunto = corteAgenda === undefined ? undefined : {
       corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
-      materiaDigest: bytes === null ? null : checksum(bytes),
+      materiaDigest: guardado instanceof Uint8Array ? checksum(guardado) : guardado?.digest ?? null,
     };
-    this.saveSnapshot(world, inputs, sesiones, [], bytes, adjunto);
+    this.saveSnapshot(world, inputs, sesiones, [], guardado, adjunto);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
-    changes: readonly SnapshotReplayChange[], matter?: Uint8Array | null, agenda?: AdjuntoAgenda): void {
+    changes: readonly SnapshotReplayChange[], matter?: MatterForWrite, agenda?: AdjuntoAgenda): void {
     const complete = matter !== undefined;
+    const matterParts = matter && !(matter instanceof Uint8Array) ? matter : null;
+    let matterBody = matter instanceof Uint8Array ? matter : null;
     if (Object.hasOwn(world, CAMPO_AGENDA)) throw new SnapshotSemanticError('Campo reservado para el corte durable de la agenda territorial.');
     const retired = world.retiredChunks;
     if (this.db.isTransaction) { this.verifiedChronicle = null; throw new Error("Store.save requires its own transaction."); }
@@ -1813,9 +1893,14 @@ export class Store {
       // con lecturas de `catalogueReader`; sin ella cada consulta descartaba pruebas y reescaneaba
       // toda `technology_definitions` (12+ min y >120 GB leídos en un mundo V14 real de 705 hab.).
       this.technologyArchive.beginHostTransaction();
-      const rotatesBackups = this.slot0Readable ?? this.readSlot0();
+      chronicleTriggers = this.chronicleHasTriggers();
+      const matterStillVerified = epoca !== null && !chronicleTriggers && stampTicket !== undefined
+        && sameChronicleStamp(chronicleStamp, this.chronicleStamp());
+      const rotatesBackups = (this.slot0Readable ?? this.readSlot0())
+        && (epoca === null || matterStillVerified || this.completeMatterCanRotate());
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
+      const expectedMatterBackups = complete && chronicleTriggers ? this.expectedMatterBackups(rotatesBackups, deep) : null;
       const replayFloor = replayRetained ? this.replayFloor(world.tick) : null;
       if (replayRetained && configuredWindow > 0) {
         window = replayFloor === null ? 0 : Math.max(configuredWindow, world.tick - replayFloor + 1);
@@ -1825,7 +1910,6 @@ export class Store {
         replay = this.prepareReplay(world, inputs, changes, nextDurableSaves);
         if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
       }
-      chronicleTriggers = this.chronicleHasTriggers();
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
       const technologyChain = this.flushTechnology(world);
       technologyPruned = this.pruneTechnology(world, window, rotatesBackups, deep);
@@ -1888,14 +1972,23 @@ export class Store {
         if (!complete) this.lastSnapshotBytes = written!.bytes;
       }
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
-      if (complete) this.db.prepare('INSERT OR REPLACE INTO main.snapshot_matter VALUES (0,?,?)').run(bodyDigest, matter);
+      if (complete) {
+        if (matterParts) {
+          SnapshotMatterParts.install(this.db);
+          matterBody = this.snapshotMatterParts.write(matterParts);
+        }
+        this.db.prepare('INSERT OR REPLACE INTO main.snapshot_matter VALUES (0,?,?)').run(bodyDigest, matterBody);
+      }
       if (agenda) this.db.prepare('INSERT OR IGNORE INTO main.metadata VALUES (?,?)').run(AGENDA_DURABLE_KEY, '1');
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
       const collectionTicket = chronicleTriggers ? undefined : stampTicket;
-      if (complete) this.snapshotParts.collect(collectionTicket);
+      if (complete) {
+        this.snapshotParts.collect(collectionTicket);
+        this.collectMatterParts();
+      }
       else this.collectSnapshots(collectionTicket);
       });
       if (replay && this.replayParent(bodyDigest) !== body) throw new SnapshotPhysicalError('Replay head changed before commit.');
@@ -1906,8 +1999,9 @@ export class Store {
         const saved = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
         if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
         if (complete && !this.db.prepare(`SELECT 1 FROM main.snapshot_matter
-          WHERE slot=0 AND world_digest=? AND body IS ?`).get(bodyDigest, matter))
+          WHERE slot=0 AND world_digest=? AND body IS ?`).get(bodyDigest, matterBody))
           throw new SnapshotPhysicalError('La materia cambió antes del commit.');
+        if (expectedMatterBackups) this.verifyMatterBackups(expectedMatterBackups);
       }
       // La revisión de la cadena retenida comparte guardado con `assertWorld`.
       // Antes usaba `nextDurableSaves` y caía un guardado antes: dos picos
@@ -1921,7 +2015,7 @@ export class Store {
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
       this.db.exec('COMMIT');
-      if (complete) this.lastSnapshotBytes = written!.bytes + (matter?.byteLength ?? 0);
+      if (complete) this.lastSnapshotBytes = written!.bytes + (matterParts?.longitud ?? matterBody?.byteLength ?? 0);
       this.saves++;
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
       // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.
@@ -2216,12 +2310,12 @@ export class Store {
         const { world, agendaBruta } = this.verifyPrevious(decoded, complete);
         if (complete && slot === 0 && agendaBruta === undefined && this.requiereAgenda())
           throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
-        const bytes = complete ? this.readCompleteMatter(slot) : null;
+        const { bytes, digest } = complete ? this.readCompleteMatter(slot) : { bytes: null, digest: null };
         if (epoca !== null) {
           const materia = this.decodeCompleteMatter(bytes, world.tick);
-          this.decodeCompleteAgenda(agendaBruta, bytes, materia, world.tick, epoca);
+          this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, epoca);
         }
-        chosen = { slot, row: candidate, matterDigest: bytes === null ? null : checksum(bytes) };
+        chosen = { slot, row: candidate, matterDigest: digest };
         break;
       }
       catch (error) {
@@ -2237,7 +2331,8 @@ export class Store {
     } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); this.technologyArchive.invalidateVerification(); throw error; }
     if (!chosen) throw new Error(`No valid previous checkpoint (${refusals.join('; ')}).`);
     this.backup(destination);
-    const recovered = new Store(destination, { snapshotInlineTileLimit: this.snapshotInlineTileLimit });
+    const recovered = new Store(destination, { snapshotInlineTileLimit: this.snapshotInlineTileLimit,
+      snapshotMatterPartBytes: this.snapshotMatterPartBytes });
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
       recovered.technologyArchive.beginHostTransaction();
@@ -2249,8 +2344,8 @@ export class Store {
         throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
       const copiedWorld = (complete ? recovered.snapshotParts.read(copied.body) : recovered.readSnapshot(copied.body)) as World;
       const { world, declaredJournal, agendaBruta } = recovered.verifyPrevious(copiedWorld, complete);
-      const matter = complete ? recovered.readCompleteMatter(chosen.slot) : null;
-      if ((matter === null ? null : checksum(matter)) !== chosen.matterDigest)
+      const matter = complete ? recovered.completeMatterBody(chosen.slot) : null;
+      if (complete && recovered.snapshotMatterParts.verify(matter) !== chosen.matterDigest)
         throw new Error('La materia del respaldo seleccionado cambió antes de copiarlo.');
       bindWorldContext(world, recovered.context);
       // Antes de borrar nada: la cadena del original tiene que cerrar sobre lo retenido, y su pliegue en este
@@ -2297,7 +2392,10 @@ export class Store {
       recovered.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('chronicle-origin-v1',?)").run(JSON.stringify({ version: 1, startsAfter: world.chronicleJournal!.startsAfter }));
       recovered.assertChronicleOrigin(world, true); recovered.assertChronicleArchive(world);
       recovered.revoke();
-      if (complete) recovered.snapshotParts.collect();
+      if (complete) {
+        recovered.snapshotParts.collect();
+        recovered.collectMatterParts();
+      }
       else recovered.collectSnapshots();
       if (recovered.chronicleHasTriggers()) recovered.snapshotParts.verifyRetained();
       else if (prepared.inline === undefined) recovered.snapshotParts.verify(body);
@@ -2309,6 +2407,8 @@ export class Store {
       if (complete && !recovered.db.prepare(`SELECT 1 FROM main.snapshot_matter
         WHERE slot=0 AND world_digest=? AND body IS ?`).get(digest, matter))
         throw new SnapshotPhysicalError('La materia del respaldo cambió antes del commit.');
+      if (complete && recovered.db.prepare('SELECT 1 FROM main.snapshot_matter WHERE slot<>0 LIMIT 1').get())
+        throw new SnapshotPhysicalError('La copia recuperada conserva otros slots de materia.');
       // All writes, including revocation and GC triggers, precede this full read.
       // A failed archive check must roll back the copy, not report failure after
       // committing an already damaged recovery destination.

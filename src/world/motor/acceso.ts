@@ -89,7 +89,7 @@ export interface Ley {
    * crea lo que falte (lotes de sus teselas, cuerpos de quien no los tenga). Idempotente: no repite lo ya hecho. */
   iniciar?(c: CtxLey): void;
   /** Un chunk pasa a ser residente de este dueño (F1) o deja de serlo (F6): materializar o guardar lo suyo. */
-  alActivar?(c: CtxLey, chunk: ChunkId): void;
+  alActivar?(c: CtxLey, chunk: ChunkId, cedido?: boolean): void;
   alRetirar?(c: CtxLey, chunk: ChunkId): void;
   /** Un organismo llega a este dueño por migración (F1): adoptar sus lotes ligados (`ArenaMateria.adoptar`). */
   alAdoptar?(c: CtxLey, organismo: Person | Animal): void;

@@ -211,11 +211,11 @@ function cabeEnLibro(e: Estado): boolean {
  * que la arena ya tiene en sus celdas (durmió con otro dueño, o el mundo se cargó); y, si nunca existió, los materializa
  * de los escalares de sus teselas (fuente «chunk nuevo»). Devuelve false si hay que reintentarlo.
  */
-function activar(e: Estado, chunk: ChunkId): boolean {
+function activar(e: Estado, chunk: ChunkId, cedido = false): boolean {
   const c = e.caja.c, m = e.m, tiles = teselasDe(c, chunk);
   if (!tiles.length) { e.pendientes.add(chunk); return false; }
   let adoptada = false;
-  if (m.tiene(chunk) && !(m.fin[chunk]! - m.inicio[chunk]! === tiles.length && m.despertar(chunk, tiles[0]!.x, tiles[0]!.y))) m.olvidar(chunk);
+  if (m.tiene(chunk) && !m.despertar(chunk, tiles, cedido)) m.olvidar(chunk);
   if (!m.tiene(chunk)) {
     adoptada = m.adoptar(chunk, tiles);
     if (!adoptada) {
@@ -231,7 +231,8 @@ function activar(e: Estado, chunk: ChunkId): boolean {
   e.sal[chunk] = (Math.imul(c.terreno.paginaX[chunk]!, 0x9e3779b1) ^ Math.imul(c.terreno.paginaY[chunk]!, 0x85ebca77)) >>> 0;
   const i0 = m.inicio[chunk]!;
   for (let j = 0; j < tiles.length; j++) { e.teselas[i0 + j] = tiles[j]; e.matTick[i0 + j] = -1; }
-  if (adoptada) { buscarFuegos(e, chunk); escribirVistas(e, chunk, 0); }
+  if (adoptada || cedido) buscarFuegos(e, chunk, cedido);
+  if (adoptada) escribirVistas(e, chunk, 0);
   anotarAire(e, chunk);
   e.aireVista = null;
   return true;
@@ -245,9 +246,9 @@ function iniciar(c: CtxLey): void {
   asentar(e);
 }
 
-function alActivar(c: CtxLey, chunk: ChunkId): void {
+function alActivar(c: CtxLey, chunk: ChunkId, cedido?: boolean): void {
   const e = estado(c);
-  activar(e, chunk);
+  activar(e, chunk, cedido);
   e.m.volcarCuentas(e.cuentas);
   asentar(e);
 }
@@ -626,12 +627,14 @@ function arderFuegos(e: Estado): void {
   }
 }
 
-/** Tras adoptar una página (durmió con otro dueño o el mundo se cargó): los objetos que siguen por encima de la
+/** Tras adoptar o recibir una página de otro dueño: los objetos que siguen por encima de la
  * temperatura de brasa y con algo que oxidar son fuegos que ardían. */
-function buscarFuegos(e: Estado, p: number): void {
+function buscarFuegos(e: Estado, p: number, cedido: boolean): void {
   const c = e.caja.c, m = e.m, buf = new Float64Array(32), brasa = m.params.fisica.tBrasa;
   for (let i = m.inicio[p]!; i < m.fin[p]!; i++) {
-    const celda = m.celda[i]!, n = Math.min(buf.length, c.materia.lotes(celda, Rol.Objeto, buf));
+    const celda = m.celda[i]!;
+    if (cedido) e.fuegos.delete(celda);
+    const n = Math.min(buf.length, c.materia.lotes(celda, Rol.Objeto, buf));
     for (let k = 0; k < n; k++) {
       const l = buf[k]!;
       if (m.temperaturaLote(l) < brasa || !(m.oxigenoQuePide(l) > 0)) continue;

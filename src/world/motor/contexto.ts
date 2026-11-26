@@ -85,6 +85,7 @@ export interface MigranteChunk {
   refsFauna?: Ref[];
   /** Reparto al abrir la época: no es una activación (lo cubre `Ley.iniciar`). */
   inicial: boolean;
+  cedido?: boolean;
 }
 /** Un organismo que cruzó a un chunk de otro dueño. */
 export interface MigranteOrganismo { tipo: 'organismo'; persona?: { persona: Person; ref: Ref }; animal?: { animal: Animal; ref: Ref } }
@@ -703,7 +704,7 @@ export class Dueno implements CtxF0 {
     this.terrenoPercibido.sincronizarPagina(mig.chunk, tileLookup(m.tiles), residentFastAccess(m.tiles));
     // El reparto al abrir la época no es una activación: lo cubren `Ley.iniciar` y, tras una carga, `adoptarPropios`.
     if (mig.inicial) return;
-    for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk);
+    for (const ley of this.leyes) ley.alActivar?.(this, mig.chunk, mig.cedido);
     for (const ley of this.leyes) if (ley.alAdoptar) {
       for (const p of mig.personas) ley.alAdoptar(this, p.persona);
       for (const a of mig.animals) ley.alAdoptar(this, a);
@@ -754,7 +755,7 @@ export class Dueno implements CtxF0 {
         }
         return ref;
       });
-      if (destino >= 0) this.enviarMigrante(destino, mig);
+      if (destino >= 0) { mig.cedido = true; this.enviarMigrante(destino, mig); }
       else {
         terreno.vaciarPagina(chunk);
         this.#interno.enviar(0, intento(TipoIntento.Global, [AVISO.chunk, chunk], serialize(mig)));

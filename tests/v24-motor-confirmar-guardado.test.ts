@@ -22,6 +22,8 @@ import { ErrorFatalMotor } from '../src/world/paralelo/barrera.js';
 import type { DiagnosticoPiscina } from '../src/world/paralelo/piscina.js';
 import { parseParams } from '../src/world/params.js';
 import { activate, tomarChunk, worldContext } from '../src/world/spatial.js';
+import { enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
+import { filaInstantanea } from './lib/store.js';
 
 type MotorInspeccion = Motor & { diagnosticoPiscina?: DiagnosticoPiscina; cronicaDesfasada?: number };
 
@@ -223,6 +225,50 @@ for (const cooperacion of [true, false]) test(`bajas remotas con cooperación ${
     store.close();
     await motor.cerrar();
   }
+});
+
+test('el corte WPF1 conserva los bytes al podar un vínculo del sobreviviente remoto', async t => {
+  const semilla = 7, hilos = 2;
+  const params = parseParams({ v23: escalon('duenos'), motor: { hilos }, conducta: { politicaPeso: 0.8 } });
+  const mundo = createWorld(semilla, params);
+  enableTechnologyCatalogue(mundo.technology);
+  const [victima, superviviente] = mundo.people.filter(p => p.role === 'neighbor');
+  assert.ok(victima && superviviente);
+  situarEnDueno(mundo, hilos, victima, 0);
+  situarEnDueno(mundo, hilos, superviviente, 1);
+  const edad = demographicTraits(victima.genome, params.cuerpo);
+  victima.demography.age = Math.floor((edad.senescenceStart + edad.maximumAge) / 2);
+  victima.bornAt = -victima.demography.age;
+  victima.demography.health = Number.MIN_VALUE;
+  superviviente.bonds[victima.id] = 0.8;
+  assert.ok(superviviente.policy);
+  superviviente.policy.weights[0] = -0;
+  const motor = crearMotor(mundo, { ...unSoloDueno(semilla), hilos,
+    instantaneaTransferible: true, personasCorteDirectas: true });
+  const opciones = { snapshotPackedPeople: true };
+  const canonico = new Store(':memory:', opciones), directo = new Store(':memory:', opciones);
+  t.after(async () => { await motor.cerrar(); canonico.close(); directo.close(); });
+
+  motor.cargar({ world: mundo, materia: null }, 0);
+  motor.paso([]);
+  const referencia = motor.instantanea();
+  assert.ok(referencia.world.retiredLegacy.some(p => p.id === victima.id && p.diedAt === 1));
+  canonico.guardar(referencia);
+  const sello = motor.corteGuardadoSellado?.();
+  assert.ok(sello);
+  directo.guardarCorteSellado(sello, [], []);
+  const paginas = (store: Store) => store.db.prepare('SELECT digest, body FROM snapshot_parts ORDER BY digest').all();
+  assert.deepEqual(filaInstantanea(directo), filaInstantanea(canonico));
+  assert.deepEqual(paginas(directo), paginas(canonico));
+  assert.ok(directo.snapshotPersonasCorteStats.reused > 0);
+  assert.equal(directo.snapshotPersonasCorteStats.recoded, 1);
+
+  const corte = directo.cargarGuardadoCompleto()!;
+  const leido = corte.instantanea.world.people.find(p => p.id === superviviente.id);
+  assert.ok(leido && !Object.hasOwn(leido.bonds, victima.id));
+  assert.ok(Object.is(leido.policy?.weights[0], -0));
+  motor.cargar(corte.instantanea, corte.epoca);
+  assert.equal(motor.paso([]).tick, 2);
 });
 
 test('mundos nuevos con retiros conservan la ruta de Store en arranque y al reactivar chunks', async () => {

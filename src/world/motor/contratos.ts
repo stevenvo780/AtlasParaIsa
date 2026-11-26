@@ -546,6 +546,8 @@ export interface MotorConfig {
   faunaCorteDirecta?: boolean;
   /** Laboratorio: transfiere las teselas remotas como filas del formato durable del guardado. */
   teselasCorteDirectas?: boolean;
+  /** Laboratorio: prepara en los dueños remotos las filas que guardará WPF1. */
+  personasCorteDirectas?: boolean;
   /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
   repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */

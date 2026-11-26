@@ -57,6 +57,7 @@ import {
 } from './fotograma-dueno.js';
 import { leyesActivas } from './leyes.js';
 import { CanalesCorte } from './mensajes-corte.js';
+import { personasVerificadasDe, vincularPersonasVerificadas, type TramoPersonasVerificadas } from './personas-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
 import { cabeceraDe, fundir, reunir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
@@ -807,23 +808,24 @@ class MotorDuenos implements Motor {
   corteGuardadoSellado(): CorteGuardadoSellado | undefined {
     const piscina = this.#piscina;
     const prepararTeselas = this.#config.teselasCorteDirectas === true;
-    if ((!this.#config.faunaCorteDirecta && !prepararTeselas) || !piscina || !this.#canalesCorte
+    const prepararPersonas = this.#config.personasCorteDirectas === true;
+    if ((!this.#config.faunaCorteDirecta && !prepararTeselas && !prepararPersonas) || !piscina || !this.#canalesCorte
       || !paramsOf(this.#mundo).v23.guardadoCompleto) return undefined;
     const prepararFauna = this.#config.faunaCorteDirecta ? 'directa' : this.#config.faunaCortePreparada === true;
     const { tick, eventCounter } = this.#mundo, epoca = this.#epoca;
     return crearCorteGuardado(() => {
       if (this.#piscina !== piscina || this.#epoca !== epoca || this.#mundo.tick !== tick || this.#mundo.eventCounter !== eventCounter)
         throw new Error('El corte sellado pertenece a un paso anterior.');
-      return this.#tomarInstantanea(prepararFauna, prepararTeselas);
+      return this.#tomarInstantanea(prepararFauna, prepararTeselas, prepararPersonas);
     });
   }
 
-  #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false): Instantanea {
+  #tomarInstantanea(prepararFauna: boolean | 'directa', prepararTeselas = false, prepararPersonas = false): Instantanea {
     if (this.#fatal) throw this.#fatal;
     if (!this.#piscina) return { world: this.#mundo, materia: null };
     try {
       const paraConfirmar = this.#config.confirmarGuardadoVivo === true;
-      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna, prepararTeselas);
+      const { world, pendientes, tecnologiaRemotaEquivalente, bajas } = this.#reunirMundo(paraConfirmar, prepararFauna, prepararTeselas, prepararPersonas);
       recordSample(world);
       const materia = this.#d.instantaneaMateria(pendientes);
       if (paraConfirmar) this.#ultimaInstantanea = {
@@ -900,8 +902,9 @@ class MotorDuenos implements Motor {
     return { ...this.#trazaFotoDuenos, migrantesTransferidos };
   }
 
-  #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false, prepararTeselas = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
-    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna, prepararTeselas);
+  #reunirMundo(paraConfirmar = false, prepararFauna: boolean | 'directa' = false, prepararTeselas = false,
+    prepararPersonas = false): { world: World; pendientes: Intento[]; tecnologiaRemotaEquivalente: boolean; bajas: LegacyRecord[] } {
+    const canales = this.#canalesCorte, solicitud = canales?.pedir(prepararFauna, prepararTeselas, prepararPersonas);
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
@@ -929,6 +932,16 @@ class MotorDuenos implements Motor {
       if (tramos.length) vincularFaunaCorte(world.animals, tramos);
       if (verificados.length) vincularFaunaVerificada(world.animals, verificados);
     }
+    const tramosPersonas: TramoPersonasVerificadas[] = [];
+    if (prepararPersonas) {
+      let desde = this.#mundo.people.length;
+      for (const parte of partes) {
+        for (const tramo of personasVerificadasDe(parte.people)?.tramos ?? [])
+          tramosPersonas.push({ desde: desde + tramo.desde, filas: tramo.filas });
+        desde += parte.people.length;
+      }
+    }
+    const personasModificadas = tramosPersonas.length ? new Set<Person>() : undefined;
     const pendientes = this.#d.pendientes();
     for (const i of pendientes) if (i.tipo === TipoIntento.Migrante) {
       // El frente ya publicó la cesión, pero el siguiente dueño aún no abrió su buzón de migrantes.
@@ -951,7 +964,7 @@ class MotorDuenos implements Motor {
       ? [...bajasPrevias, ...bajasNuevas.filter(p => !bajasPrevias.some(prev => prev.id === p.id))]
       : bajasNuevas;
     if (bajas.length) {
-      pruneBonds(world.people, bajas);
+      pruneBonds(world.people, bajas, personasModificadas && (persona => personasModificadas.add(persona)));
       const ids = new Set(bajas.map(persona => persona.id));
       world.communities = world.communities.filter(comunidad => {
         if (!comunidad.members.some(id => ids.has(id))) return true;
@@ -973,6 +986,7 @@ class MotorDuenos implements Motor {
       if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals, (_x, _y, tile) => modificadas.add(tile));
       if (tramos.length) vincularTeselasVerificadas(world.tiles, { tramos, modificadas });
     } else if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
+    if (personasModificadas) vincularPersonasVerificadas(world.people, { tramos: tramosPersonas, modificadas: personasModificadas });
     return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 

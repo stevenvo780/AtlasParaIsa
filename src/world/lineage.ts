@@ -283,14 +283,18 @@ function sampledBondDegree(people: readonly Person[]): number {
 }
 
 /** Sondea por id si hubo pocas muertes. Solo reconstruye los mapas que perdieron algún vínculo. */
-export function pruneBonds(survivors: readonly Person[], departed: readonly Pick<Person, 'id'>[]): void {
+export function pruneBonds(survivors: readonly Person[], departed: readonly Pick<Person, 'id'>[],
+  alCambiar?: (persona: Person) => void): void {
   if (!departed.length) return;
   const muertos = departed.map(person => person.id), ids = new Set(muertos);
   const barrer = ids.size > BOND_SCAN_RATIO && ids.size > BOND_SCAN_RATIO * (sampledBondDegree(survivors) + 1);
   for (const person of survivors) {
     const bonds = person.bonds;
     const alcanzo = barrer ? Object.keys(bonds).some(id => ids.has(id)) : muertos.some(id => Object.hasOwn(bonds, id));
-    if (alcanzo) person.bonds = Object.fromEntries(Object.entries(bonds).filter(([id]) => !ids.has(id)));
+    if (alcanzo) {
+      person.bonds = Object.fromEntries(Object.entries(bonds).filter(([id]) => !ids.has(id)));
+      alCambiar?.(person);
+    }
   }
 }
 

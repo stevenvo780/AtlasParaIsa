@@ -19,7 +19,7 @@ import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelem
 import { anotarCiclo, cicloVacio, leerMateria, renderPanelMateria } from './panel-materia.js';
 import { firmaMotor, luzMotor, pedirTelemetria, renderPanelMotor, vistaMotor, type LuzSalud, type TelemetriaRecibida } from './panel-motor.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
-import { personLink, recentEvidence } from './world-evidence.js';
+import { EvidenceTimeline, evidenceAtTick, personLink, recentEvidence } from './world-evidence.js';
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
@@ -68,6 +68,15 @@ let lastVisit: number | null = null;
 /** M5: los episodios que este navegador recibió en esta visita (sin duplicados, acotados) y los hitos
  * guardados en visitas anteriores de este mismo mundo (localStorage, como mucho 80). */
 const cronica = new CronicaBuffer();
+const evidenceTimeline = new EvidenceTimeline<ChronicleEvent>();
+let evidenceDirty = true;
+function acumularCronica(events: readonly ChronicleEvent[]): void {
+  if (cronica.acumular(events)) evidenceDirty = true;
+}
+function evidenciaVisible(tick: number): { events: readonly ChronicleEvent[]; key: string } {
+  if (evidenceDirty) { evidenceTimeline.setEvents(cronica.todos()); evidenceDirty = false; }
+  return evidenceTimeline.at(tick);
+}
 let hitosGuardados: HitoGuardado[] = [];
 let journalFilter: GrupoCronica | 'todo' = 'todo';
 let populationSignature = '', inspectorSignature = '', statsSignature = '';
@@ -172,7 +181,7 @@ function startupSettings(): GraphicsSettings {
 
 function enterWorld(flags: SessionFlags = {}): void {
   sessionFlags = flags;
-  clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
+  clean(); lastVisit = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   inspectorTab = 'now';
   focusedRecipe = null; focusedCommunity = null; statsSignature = ''; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
@@ -202,7 +211,7 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   const tiles = info.changedTiles ?? frame.tiles;
   // V24: el paisaje también recibe `changedTiles`: solo rehornea los trozos de 8×8 que tocan esas teselas.
   if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
-  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); cronica.acumular(frame.events); }
+  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
 }
 
@@ -729,7 +738,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
   renderTelemetryHud(next); renderSaludIndicador();
   const firmaCapas = [...capasV23Disponibles(next)].join(); if (firmaCapas !== capasV23Firma) { capasV23Firma = firmaCapas; renderLayers(); }
-  cronica.acumular(next.events);
+  acumularCronica(next.events);
   if (first) {
     try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
     lastVisit = readVisit(next);
@@ -878,16 +887,21 @@ function renderInspector(): void {
     }
     // T036(h): la biografía no viaja en el `state`; se pide al abrir la ficha y se cachea por tick.
     const cached = personaDetails.get(p.id);
-    if (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick) connection?.requestPersona(p.id);
-    const persona = cached?.detail ?? undefined;
+    // La ficha a demanda procede del servidor actual, no del fotograma histórico.
+    const historical = !!dvr?.enabled && !dvr.atLiveEdge;
+    if (!historical && (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick)) connection?.requestPersona(p.id);
+    const persona = !historical && cached && cached.tick <= world.tick ? cached.detail : undefined;
     landscape?.setVinculos(p.id, persona ? vinculosEnMapa(persona.trust) : []);
     const ownCommunity = p.communityId ? world.communities?.find(c => c.id === p.communityId) ?? null : null;
-    const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    const currentTick = world.tick;
+    const visible = evidenciaVisible(currentTick);
+    const visibleEvents = visible.events;
+    const signature = JSON.stringify([p, persona ?? null, visible.key, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     // The progress meter is rendered by the always-visible telemetry below.
-    const sections = inheritedAndLearned(persona ? { ...p, working: false, experiences: persona.experiences, trust: persona.trust } : { ...p, working: false }, world, persona?.recipeIds, persona ?? null, id => cronica.get(id) ?? world?.events.find(event => event.id === id), cronica.todos());
+    const sections = inheritedAndLearned(persona ? { ...p, working: false, experiences: persona.experiences, trust: persona.trust } : { ...p, working: false }, world, persona?.recipeIds, persona ?? null, id => { const event = cronica.get(id) ?? world?.events.find(event => event.id === id); return event && event.tick <= currentTick ? event : undefined; }, visibleEvents);
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, cronica.todos())}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, visibleEvents)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
@@ -922,7 +936,7 @@ function renderRhythm(): void {
 function returnCard(current: WorldView, since: number): void {
   let counters = null; try { counters = readVisitCounters(localStorage, current); } catch { counters = null; }
   const resumen = resumenDesdeVisita(counters, since, current);
-  const hitos = [...hitosGuardados.filter(h => h.tick > since), ...current.events.filter(event => event.tick > since && esHito(event))]
+  const hitos = [...hitosGuardados.filter(h => h.tick > since && h.tick <= current.tick), ...current.events.filter(event => event.tick > since && esHito(event))]
     .filter((h, i, all) => all.findIndex(other => other.id === h.id) === i).sort((a, b) => b.tick - a.tick).slice(0, 4);
   if (current.tick <= since && !hitos.length) return;
   const card = el('return-card'); card.hidden = false;
@@ -933,10 +947,11 @@ function renderJournal(): void {
   for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.setAttribute('aria-pressed', String(chip.dataset.journalFilter === journalFilter));
   // Los hitos que este navegador vio en visitas anteriores (localStorage) no se pierden: se listan con su
   // texto y su momento, sin causa (no se guardó), marcados como vistos antes.
-  const anteriores: ChronicleEvent[] = hitosGuardados.filter(h => !cronica.get(h.id)).map(h => ({ id: h.id, tick: h.tick, kind: h.kind as ChronicleEvent['kind'], actors: [], text: h.text, cause: '', source: 'simulation' }));
+  const anteriores: ChronicleEvent[] = evidenceAtTick(hitosGuardados, world?.tick ?? Infinity).filter(h => !cronica.get(h.id)).map(h => ({ id: h.id, tick: h.tick, kind: h.kind as ChronicleEvent['kind'], actors: [], text: h.text, cause: '', source: 'simulation' }));
   const previos = new Set(anteriores.map(e => e.id));
-  const todos = [...anteriores, ...cronica.todos()].sort((a, b) => a.tick - b.tick), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
-  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(cronica.size)} episodios desde que abriste la carta${anteriores.length ? ` y ${number(anteriores.length)} ${anteriores.length === 1 ? 'hito' : 'hitos'} de visitas anteriores` : ''}${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
+  const visibles = evidenciaVisible(world?.tick ?? Infinity).events;
+  const todos = [...anteriores, ...visibles].sort((a, b) => a.tick - b.tick), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
+  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(visibles.length)} episodios hasta este momento desde que abriste la carta${anteriores.length ? ` y ${number(anteriores.length)} ${anteriores.length === 1 ? 'hito' : 'hitos'} de visitas anteriores` : ''}${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
   el('journal-events').innerHTML = shown.length ? shown.map(event => {
     const tipo = clasificar(event), cedio = quienCedio(event);
     const who = (id: string) => world ? personLink(world, id) : esc(id);
@@ -1095,8 +1110,9 @@ function renderStatsContent(): void {
   const history = stats.history ?? [];
   const actionLabels = Object.fromEntries(Object.entries(actions).map(([key, text]) => [key, text]));
   // M7: cooperación por tipo (identidad de society.ts), comida compartida, graneros y desacuerdos con quién cedió.
-  const accumulated = `${seccionJuntos(world, cronica.todos())}${seccionDesacuerdos(world, cronica.todos())}`;
-  panel.innerHTML = `${stamp}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
+  const visibles = evidenciaVisible(world.tick).events;
+  const accumulated = `${seccionJuntos(world, visibles)}${seccionDesacuerdos(world, visibles)}`;
+  panel.innerHTML = `${stamp}${demographicSummary(world)}${vidasQueTerminaron(world)}${renderLifeTelemetry(stats)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, visibles)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
 window.addEventListener('pagehide', saveVisit);

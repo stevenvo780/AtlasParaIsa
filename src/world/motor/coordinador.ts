@@ -489,6 +489,7 @@ class MotorDuenos implements Motor {
       }
       this.#regiones();
       this.#rebalancear();
+      d.prepararMateriaParaGestos(gestos);
       const resultados = this.#gestos(gestos);
       m.invitations = m.invitations.filter(invitacion => invitacion.until > m.tick);
       m.reminders = m.reminders.filter(aviso => aviso.until > m.tick);
@@ -502,6 +503,7 @@ class MotorDuenos implements Motor {
       this.#pedirDetalles();
       d.F0();
       if (this.#activacionesPendientes) d.reservarMateria(this.#activacionesPendientes);
+      d.prepararMateriaAntesDeF1();
       control[CTL.lluvia] = Number(m.weather === 'rain');
       const f0 = performance.now();
       buzones.fijarFase(1); piscina.ejecutar(TRAMO.percibir);

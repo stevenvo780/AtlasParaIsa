@@ -206,7 +206,7 @@ export class Dueno implements CtxF0 {
       },
       vaciar: (cola, f) => this.#interno.vaciar(cola, i => {
         if (this.#aplicarMotor(i)) return;
-        if (this.#archivoFrio) this.#protegerDestinoFrio(i);
+        if (this.hilos === 1 && this.#archivoFrio) this.#protegerDestinoFrio(i);
         f(i);
         this.#contar(CTL_DUENO.recibidos);
       }),
@@ -581,6 +581,72 @@ export class Dueno implements CtxF0 {
     archivo.calentar(this.materia as ArenaLotes, chunk);
   }
 
+  /** Los gestos directos del coordinador todavía se ejecutan en F0. */
+  prepararMateriaParaGestos(gestos: readonly Gesture[]): void {
+    if (!this.#archivoFrio || gestos.length === 0) return;
+    this.#exigirBarreraMateriaFria();
+    for (const gesto of gestos) {
+      const celda = this.terreno.celda(gesto.x, gesto.y);
+      if (celda >= 0) this.reponerMateriaParaCeder(this.terreno.chunkDe(celda));
+      if (gesto.agentId === undefined) continue;
+      const posicion = this.#celdaMaterialDeRef(this.ref(this.uidDe(gesto.agentId)));
+      if (posicion >= 0) this.reponerMateriaParaCeder(this.terreno.chunkDe(posicion));
+    }
+  }
+
+  /** F0, después del último envío del coordinador y antes de que los dueños vacíen sus colas.
+   * Solo prepara mensajes ya publicados. Activar el retiro distribuido exige además acotar destinos nuevos de F1–F6. */
+  prepararMateriaAntesDeF1(): number {
+    const archivo = this.#archivoFrio;
+    if (!archivo) return 0;
+    this.#exigirBarreraMateriaFria();
+    const arena = this.materia as ArenaLotes, paginas = new Set<ChunkId>();
+    const aire = new Float64Array(1);
+    const protegerCelda = (celda: number): boolean => {
+      if (!Number.isSafeInteger(celda) || celda < 0) return false;
+      const pagina = this.terreno.chunkDe(celda);
+      if (!(this.terreno.duenoChunk[pagina]! >= 0)) return false;
+      if (archivo.tiene(pagina)) paginas.add(pagina);
+      return true;
+    };
+    const protegerLote = (ref: LoteRef): boolean => {
+      if (arena.estaAparcado(ref)) protegerCelda(arena.muestra(ref).celda);
+      return arena.vivo(ref);
+    };
+    for (const i of this.pendientes()) {
+      if (i.tipo !== TipoIntento.Tomar && !i.materia?.length) continue;
+      if (this.#esVaporResidente(i, arena, aire)) continue;
+      // Incluye los destinos alternativos que pueden resultar al aplicar o reenviar, aunque el principal siga vivo.
+      const explicita = protegerCelda(i.celda);
+      const receptor = protegerCelda(this.#celdaMaterialDeRef(i.a));
+      const emisor = protegerCelda(this.#celdaMaterialDeRef(i.de));
+      const lote = protegerLote(i.lote);
+      const destino = i.tipo === TipoIntento.Tomar && protegerLote(i.dato?.[DATO_TOMAR.loteDestino] ?? REF_NULA);
+      if (!(explicita || receptor || emisor || lote || destino)) throw new Error(`Intento material ${i.nonce} sin destino demostrable en F0.`);
+    }
+    for (const pagina of paginas) this.reponerMateriaParaCeder(pagina);
+    return paginas.size;
+  }
+
+  #exigirBarreraMateriaFria(): void {
+    if (this.hilo !== 0 || this.#piezas.buzones?.faseActual !== 0) throw new Error('La preparación de materia fría exige la barrera F0 del coordinador.');
+  }
+
+  #celdaMaterialDeRef(ref: Ref): number {
+    if (!Number.isSafeInteger(ref) || ref < 0) return REF_NULA;
+    const frente = this.frente, slot = slotDe(ref), generacion = genDe(ref);
+    if (slot >= frente.alta) return REF_NULA;
+    // M5 admite la última celda del destinatario recién muerto como caída de la garantía.
+    if (frente.gen[slot] !== generacion && !(frente.vivo[slot] === 0 && frente.gen[slot] === generacion + 1)) return REF_NULA;
+    return this.terreno.celda(frente.x[slot]!, frente.y[slot]!);
+  }
+
+  #esVaporResidente(i: Intento, arena: ArenaLotes, aire: Float64Array): boolean {
+    return i.tipo === TipoIntento.Depositar && i.a === REF_NULA && i.lote === REF_NULA && i.celda >= 0
+      && i.dato?.[DATO_MATERIA.rol] === Rol.Aire && arena.lotes(i.celda, Rol.Aire, aire) === 1
+      && arena.propio(aire[0]!) && !arena.estaAparcado(aire[0]!);
+  }
+
   #enfriarPagina(chunk: ChunkId, cx: number, cy: number): void {
     const enPagina = ({ x, y }: { x: number; y: number }): boolean => Math.floor(x / 16) === cx && Math.floor(y / 16) === cy;
     const m = this.mundo, x0 = cx * 16, y0 = cy * 16;
@@ -605,10 +671,7 @@ export class Dueno implements CtxF0 {
     if (i.celda < 0) return;
     const pagina = Math.floor(i.celda / 256);
     if (!archivo.tiene(pagina)) return;
-    if (i.tipo === TipoIntento.Depositar && i.a === REF_NULA && i.lote === REF_NULA && i.dato?.[DATO_MATERIA.rol] === Rol.Aire) {
-      const aire = new Float64Array(1);
-      if (arena.lotes(i.celda, Rol.Aire, aire) && arena.propio(aire[0]!)) return;
-    }
+    if (this.#esVaporResidente(i, arena, new Float64Array(1))) return;
     // El piloto solo tiene un dueño: la reserva no puede competir con otro hilo al resolver esta entrega.
     archivo.calentar(arena, pagina);
   }

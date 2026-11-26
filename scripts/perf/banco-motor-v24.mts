@@ -12,6 +12,9 @@
  * Para comparar CUDA, reemplaza `hilos` por `brazos` y pasa `COMPUTE_NVRTC`:
  * [{"id":"cpu1","hilos":1,"gpu":[]},{"id":"cpu2","hilos":2,"gpu":[]},
  *  {"id":"gpu0-cpu2","hilos":2,"gpu":[0]}]
+ * `"rutaGpu":"porCoste"` añade un brazo adaptativo con la misma GPU y dueños.
+ * El modo fijo exige confirmaciones CUDA medidas. El adaptativo admite una ventana
+ * íntegramente en CPU si se registraron decisiones de coste y confirmaciones previas.
  * Para medir desde un mundo ya crecido, prepara una copia de laboratorio con
  * `CARTA_DATA_DIR=/ruta/laboratorio npm run backup -- copia.sqlite` y calcula su SHA-256.
  * En la escena reemplaza `semilla`, `siembra`, `n` y `zona` por
@@ -55,7 +58,7 @@ import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
 
 type Escena = { id: string; calentar: number; medir: number } & (
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
-interface Brazo { id: string; hilos: number; gpu: number[] }
+interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste' }
 interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[] }
 interface Integridad {
   tick: number; mortalesVivos: number; faunaResidente: number; paginasActivas: number; chunksArchivados: number;
@@ -75,10 +78,12 @@ function validacionConfiguracion(config: Config): Brazo[] {
   const brazos = config.brazos ?? config.hilos!.map(hilos => ({ id: `h${hilos}`, hilos, gpu: [] }));
   assert.ok(brazos.length >= 2 && brazos.every(b => b && typeof b.id === 'string' && esId.test(b.id) &&
     entero(b.hilos, 1) && b.hilos <= availableParallelism() && Array.isArray(b.gpu) &&
-    (b.gpu.length === 0 || b.hilos === 2 && b.gpu.length === 1 && b.gpu[0] === 0)),
+    (b.gpu.length === 0 || b.hilos === 2 && b.gpu.length === 1 && b.gpu[0] === 0) &&
+    (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length === 1)),
   'Indica al menos dos brazos CPU o GPU0 con dos dueños');
   assert.equal(new Set(brazos.map(b => b.id)).size, brazos.length, 'IDs de brazos repetidos');
-  assert.equal(new Set(brazos.map(b => `${b.hilos}:${b.gpu.join(',')}`)).size, brazos.length, 'Configuraciones de brazos repetidas');
+  assert.equal(new Set(brazos.map(b => `${b.hilos}:${b.gpu.join(',')}:${b.rutaGpu ?? ''}`)).size, brazos.length,
+    'Configuraciones de brazos repetidas');
   if (brazos.some(b => b.gpu.length)) assert.ok(process.env.COMPUTE_NVRTC && existsSync(process.env.COMPUTE_NVRTC),
     'El brazo CUDA requiere COMPUTE_NVRTC');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
@@ -122,6 +127,18 @@ function deltaGpu(fin: TelemetriaBrokerGpu, inicio?: TelemetriaBrokerGpu): Telem
   for (const campo of campos) delta[campo] = contadores[campo]! - (inicio?.[campo] ?? 0);
   assert.ok(campos.every(campo => entero(delta[campo] ?? NaN, 0)) && delta.completadas.every(n => entero(n, 0)), 'Contadores CUDA incoherentes');
   return delta;
+}
+
+function acreditarGpu(brazo: Brazo, ventana?: TelemetriaBrokerGpu, calentamiento?: TelemetriaBrokerGpu): void {
+  if (!brazo.gpu.length) return;
+  if (brazo.rutaGpu === 'porCoste') {
+    assert.ok(ventana && ventana.cpuPorCoste !== undefined &&
+      (ventana.completadas.some(n => n > 0) || ventana.cpuPorCoste > 0 && calentamiento?.completadas.some(n => n > 0)),
+    'Falta actividad del corredor adaptativo en la ventana o confirmación CUDA durante su calibración');
+  } else {
+    assert.ok(ventana?.completadas.some(n => n > 0) && ventana.cpuPorCoste === undefined,
+      'El corredor fijo debe confirmar CUDA durante la ventana medida');
+  }
 }
 
 interface Preparada {
@@ -271,12 +288,13 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
     }
     assert.ok(integridad?.tick === inicio.intervalos.fin && conPaginas.size > 0, 'Falta evidencia de cierre');
     const gpuVentana = anteriorGpu && deltaGpu(anteriorGpu, inicialGpu);
-    if (gpu.length) assert.ok(gpuVentana?.completadas.some(n => n > 0), 'GPU0 no confirmó ningún lote en la ventana medida');
+    acreditarGpu(brazo, gpuVentana, inicialGpu);
     const latencia = tiempos(pared);
     anotar({ tipo: 'fin', estado: 'completo', muestras: pared.length, carga: loadavg(), planificador: planificador(),
       paredMs: latencia, cpuProcesoMs: tiempos(cpuProceso), barreraEmaMs: barrera.length ? tiempos(barrera) : null,
       hz: 1000 / latencia.media, maxRssMiB: process.resourceUsage().maxRSS / 1024,
-      duenosConPaginas: [...conPaginas].sort((a, b) => a - b), ...integridad, gpuBroker: gpuVentana });
+      duenosConPaginas: [...conPaginas].sort((a, b) => a - b), ...integridad,
+      gpuBroker: gpuVentana, gpuBrokerCalentamiento: inicialGpu });
   } finally {
     try {
       if (fd !== undefined) closeSync(fd);
@@ -307,7 +325,8 @@ function medirBloques(rutaConfig: string, salida: string) {
       const ruta = join(salida, nombre);
       const e = 'fixture' in escena ? { ...escena, fixture: { ...escena.fixture, sqlite: resolve(dirname(rutaConfig), escena.fixture.sqlite) } } : escena;
       const hijo = spawnSync(process.execPath, ['--import', 'tsx', script, '--medir', JSON.stringify(e), JSON.stringify(brazo), ruta],
-        { cwd: repo, env: { ...process.env, CARTA_PERCEPCION_DUENOS: gpu.length ? '1' : '0' }, stdio: ['ignore', 'inherit', 'inherit'] });
+        { cwd: repo, env: { ...process.env, CARTA_PERCEPCION_DUENOS: gpu.length ? '1' : '0',
+          CARTA_PERCEPCION_COSTE_DUENOS: brazo.rutaGpu === 'porCoste' ? '1' : '0' }, stdio: ['ignore', 'inherit', 'inherit'] });
       if (hijo.error) throw hijo.error;
       assert.equal(hijo.status, 0, `Falló ${nombre} (${hijo.signal ?? hijo.status})`);
       const filas = readFileSync(ruta, 'utf8').trimEnd().split('\n').map(linea => JSON.parse(linea));
@@ -332,8 +351,8 @@ function medirBloques(rutaConfig: string, salida: string) {
         Array.isArray(fin.violaciones) && fin.violaciones.length === 0, `Cierre inválido en ${nombre}`);
       assert.ok(medidas.every((fila, i) => fila.tick === tickInicial + escena.calentar + i + 1), `Ventana incompleta en ${nombre}`);
       assert.deepEqual(fin.paredMs, tiempos(medidas.map(fila => fila.paredMs)), `Percentiles inconsistentes en ${nombre}`);
-      if (gpu.length) assert.ok(fin.gpuBroker?.completadas.some((n: number) => n > 0), `Brazo sin evidencia CUDA en ${nombre}`);
-      corridas.push({ brazo: brazo.id, hilos, gpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin });
+      acreditarGpu(brazo, fin.gpuBroker, fin.gpuBrokerCalentamiento);
+      corridas.push({ brazo: brazo.id, hilos, gpu, rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin });
     }
     const referencia = corridas.find(corrida => corrida.brazo === brazos[0]!.id)!;
     bloques.push({ escena: escena.id, repeticion: repeticion + 1, digestoInicial: origen!.digesto, tickInicial: origen!.tick,

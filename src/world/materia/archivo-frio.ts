@@ -15,6 +15,7 @@ export class ArchivoMateriaFria {
   #directorio?: string;
   #cache?: { pagina: number; lotes: Map<LoteRef, Float64Array> };
   #errorEscritura?: string;
+  #errorLimpieza?: string;
 
   constructor(private readonly raiz: string, maxRanuras: number, private readonly desborde: PageArena) {
     if (!isAbsolute(raiz) || !statSync(raiz, { throwIfNoEntry: false })?.isDirectory()) {
@@ -33,7 +34,7 @@ export class ArchivoMateriaFria {
   }
 
   enfriar(arena: ArenaLotes, pagina: number, referencias: readonly LoteRef[]): void {
-    if (!referencias.length || this.#errorEscritura || this.tiene(pagina)) return;
+    if (!referencias.length || this.#errorEscritura || this.#errorLimpieza || this.tiene(pagina)) return;
     const lotes = new Map<LoteRef, Float64Array>();
     for (const ref of referencias) {
       const lote = arena.muestra(ref);
@@ -86,14 +87,18 @@ export class ArchivoMateriaFria {
     let bytesEnDisco = 0, lotesFrios = 0;
     for (const p of this.#paginas.values()) { bytesEnDisco += p.bytes; lotesFrios += p.lotes; }
     return { paginasFrias: this.#paginas.size, lotesFrios, bytesEnDisco, lotesFisicos: this.contenido.used,
-      capacidadFisica: this.contenido.capacity, bytesFisicos: this.contenido.bytes, errorEscritura: this.#errorEscritura };
+      capacidadFisica: this.contenido.capacity, bytesFisicos: this.contenido.bytes,
+      errorEscritura: this.#errorEscritura, errorLimpieza: this.#errorLimpieza };
   }
 
   cerrar(): void {
     this.#cache = undefined;
     this.#paginas.clear();
-    if (this.#directorio) rmSync(this.#directorio, { recursive: true, force: true });
+    const directorio = this.#directorio;
     this.#directorio = undefined;
+    if (!directorio) return;
+    try { rmSync(directorio, { recursive: true, force: true }); }
+    catch (error) { this.#errorLimpieza = (error as NodeJS.ErrnoException).code ?? 'desconocido'; }
   }
 
   #ruta(pagina: number): string { return join(this.#directorio!, `${pagina}.bin`); }
@@ -110,8 +115,13 @@ export class ArchivoMateriaFria {
   }
 
   #borrar(pagina: number): void {
-    unlinkSync(this.#ruta(pagina));
     this.#paginas.delete(pagina);
     if (this.#cache?.pagina === pagina) this.#cache = undefined;
+    // Todos los lotes están residentes. Un archivo sobrante no deshace la rehidratación.
+    try { unlinkSync(this.#ruta(pagina)); }
+    catch (error) {
+      const codigo = (error as NodeJS.ErrnoException).code;
+      if (codigo !== 'ENOENT') this.#errorLimpieza = codigo ?? 'desconocido';
+    }
   }
 }

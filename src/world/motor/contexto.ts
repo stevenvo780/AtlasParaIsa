@@ -23,7 +23,7 @@ import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE } from '../materia/arena.js';
 import { ArchivoMateriaFria } from '../materia/archivo-frio.js';
 import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
-import { sueloYVidaDormidos } from '../materia/ley-mundo.js';
+import { olvidarEstadoMateria, sueloYVidaDormidos } from '../materia/ley-mundo.js';
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
@@ -36,7 +36,7 @@ import { olvidarOrganismos, organismosDe, type OrganismosMundo } from '../soa/or
 import { residentFastAccess } from '../soa/terreno.js';
 import { maintainRegions, observarRegiones, type ChunkMeta } from '../spatial.js';
 import { tileIndexAppended, tileLookup } from '../tile-index.js';
-import { ctxSi, enlazarCtx, type CtxF0, type Ley } from './acceso.js';
+import { ctxSi, desenlazarCtx, enlazarCtx, type CtxF0, type Ley } from './acceso.js';
 import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
@@ -453,7 +453,18 @@ export class Dueno implements CtxF0 {
     const estadoFrio = this.#archivoFrio?.medidas();
     return { lotesVivos: this.#lotes.used, bytesArena: this.#lotes.bytes + this.#desborde.bytes + (estadoFrio?.bytesFisicos ?? 0), estadoFrio };
   }
-  cerrarMateriaFria(): void { this.#archivoFrio?.cerrar(); }
+  cerrarMateriaFria(): void {
+    if (!this.#archivoFrio) return;
+    this.#archivoFrio.cerrar();
+    this.#archivoFrio = undefined;
+    if (ctxSi(this.mundo) !== this) return;
+    // Las columnas y vistas siguen apuntando a una arena que contenía referencias al directorio privado.
+    observarRegiones(this.mundo, undefined);
+    olvidarEstadoMateria(this.mundo);
+    olvidarPercepcion(this.mundo);
+    olvidarOrganismos(this.mundo);
+    desenlazarCtx(this.mundo, this);
+  }
 
   /** F0 (coordinador): la arena de lotes solo crece aquí. Garantiza ranuras para `chunksNuevos` chunks y la holgura. */
   reservarMateria(chunksNuevos: number): void {

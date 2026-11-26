@@ -127,6 +127,11 @@ const contextos = new WeakMap<object, CtxLey>();
 /** m4a: liga el contexto del dueño a su `mundo` (una vez por época; el contexto vive lo que el mundo). */
 export function enlazarCtx(mundo: World, c: CtxLey): void { contextos.set(mundo, c); }
 
+/** Quita el dueño de una instancia terminada sin borrar un contexto que ya lo reemplazó. */
+export function desenlazarCtx(mundo: World, c: CtxLey): void {
+  if (contextos.get(mundo) === c) contextos.delete(mundo);
+}
+
 /** El contexto del dueño de `mundo`, o `undefined` si ese mundo aún no pasó por el motor (un mundo recién creado en una
  * prueba unitaria): quien lo use fuera del tick decide qué hacer sin él. */
 export function ctxSi(mundo: World): CtxLey | undefined { return contextos.get(mundo); }

@@ -422,6 +422,9 @@ export function cerrarMateriaGpu(mundo: CtxLey['mundo']): void {
   g.tarjetas.length = 0;
 }
 
+/** El próximo dueño del mismo objeto debe reconstruir sus vistas sobre la arena cargada. */
+export function olvidarEstadoMateria(mundo: CtxLey['mundo']): void { estados.delete(mundo); }
+
 function tarjetasGpu(e: Estado): TarjetaMateria[] {
   const c = e.caja.c, g = e.gpu;
   const prestada = g.tarjetas.find(t => t.paso && !t.canal);

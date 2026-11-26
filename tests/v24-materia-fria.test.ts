@@ -73,9 +73,10 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
         return referencia[0]!;
       };
       const suelo = lote(Rol.Suelo), aire = lote(Rol.Aire);
+      let rutaFria: string | undefined;
       if (frío && !perderDestino) {
         const subdirectorio = join(frío, readdirSync(frío)[0]!);
-        const archivo = join(subdirectorio, `${celda / 256}.bin`);
+        const archivo = rutaFria = join(subdirectorio, `${celda / 256}.bin`);
         const otroArchivo = readdirSync(subdirectorio).find(p => p !== `${celda / 256}.bin`)!;
         const otraCelda = Number(otroArchivo.split('.')[0]) * 256;
         assert.equal(arena.lotes(otraCelda, Rol.Suelo, referencia), 1);
@@ -123,13 +124,20 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
       } else assert.equal(métricas, undefined);
 
       const aguaSuelo = arena.cuantos(suelo, H2O);
+      if (rutaFria) {
+        // Fuerza un fallo de unlink después de que se validó la lectura de la página.
+        rmSync(rutaFria);
+        mkdirSync(rutaFria);
+      }
       entregar(Rol.Suelo, 202);
       assert.equal(arena.cuantos(suelo, H2O), aguaSuelo + 100);
       assert.equal(arena.estaAparcado(suelo), false, 'la mutación promueve la página antes de abonar');
+      if (rutaFria) assert.equal(dueno.muestraMemoriaMateria()?.estadoFrio?.errorLimpieza, 'EISDIR');
       mover(0);
       motor.paso([]);
       const activo = corte();
-      return { dormido, activo, persistida, métricas, origen, retirada: retirada.key };
+      const reutilizable = motor.instantanea();
+      return { dormido, activo, persistida, reutilizable, métricas, origen, retirada: retirada.key };
     } finally { await motor.cerrar(); }
   }
 
@@ -139,6 +147,11 @@ test('el retiro material usa un archivo y conserva VMAT, balance y reapertura', 
   assert.deepEqual(frío.dormido, base.dormido);
   assert.deepEqual(frío.activo, base.activo);
   assert.deepEqual(readdirSync(disco), []);
+  const repetido = crearMotor(frío.reutilizable.world, unSoloDueno(7));
+  try {
+    repetido.cargar(frío.reutilizable, frío.reutilizable.materia!.epoca);
+    assert.deepEqual(codificarCheckpoint(repetido.instantanea().materia!), frío.activo.vmat);
+  } finally { await repetido.cerrar(); }
   mkdirSync(disco, { recursive: true });
   const fallida = await escena(disco, true);
   assert.deepEqual(fallida.dormido, base.dormido);

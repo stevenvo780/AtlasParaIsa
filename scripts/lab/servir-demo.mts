@@ -202,7 +202,8 @@ async function abrirCinta(directorio: string): Promise<Demo> {
 async function servir(directorio: string, puerto: number, cliente: string): Promise<void> {
   const raiz = realpathSync(cliente);
   if (!abrirCliente(raiz, '/')) throw new Error('Falta el index.html del cliente compilado.');
-  const demo = existsSync(join(directorio, 'cortes.json')) ? abrirCortes(directorio) : await abrirCinta(directorio);
+  const cortes = existsSync(join(directorio, 'cortes.json'));
+  const demo = cortes ? abrirCortes(directorio) : await abrirCinta(directorio);
   try {
     const host = `127.0.0.1:${puerto}`;
     const origen = `http://${host}`;
@@ -222,6 +223,10 @@ async function servir(directorio: string, puerto: number, cliente: string): Prom
         if (respuesta) return responderApi(respuesta);
         const estatico = abrirCliente(raiz, url.pathname);
         if (estatico) return responder(req, res, 200, estatico.mime, estatico.contenido);
+        if (cortes && url.pathname === '/favicon.ico') {
+          res.writeHead(204);
+          return res.end();
+        }
         return responderApi(json(404, { error: 'Ruta no encontrada.' }));
       } catch (error) {
         if (error instanceof URIError) return responderApi(json(400, { error: 'URL inválida.' }));

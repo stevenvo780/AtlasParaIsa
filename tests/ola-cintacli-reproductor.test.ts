@@ -179,7 +179,7 @@ test('enlace de escena de archivo: el primer trozo usa foco y tick exactos, abre
 test('enlace de escena de archivo: vuelve a t0 si el foco no se puede reconstruir', async () => {
   const config = { coberturas: [{ nivel: 0 as const, t0: 80, t1: 480 }], abrirEnInicio: true };
   for (const [escenaArchivo, pedidos] of [
-    [{ tick: 154, x: 5, y: 4 }, [80]],
+    [{ tick: 154, x: 5, y: 4 }, [154, 80]],
     [{ tick: 152, x: 200, y: 4 }, [152, 80]],
     [{ tick: 152, x: 5, y: 4, tramo: { desde: 148, hasta: 484 } }, [80]],
   ] as const) {
@@ -203,6 +203,17 @@ test('enlace de escena de archivo: vuelve a t0 si el foco no se puede reconstrui
   assert.equal(vivo.player.currentTick, 448);
   assert.equal(vivo.player.playing, true);
   vivo.player.stop();
+});
+
+test('enlace de escena de archivo: usa el fotograma real tras un cambio de fase de L0', async () => {
+  const h = harness({ coberturas: [{ nivel: 0, t0: 80, t1: 84 }, { nivel: 0, t0: 85, t1: 97 }],
+    abrirEnInicio: true, escenaArchivo: { tick: 85, x: 5, y: 4 } });
+  try {
+    assert.equal(await h.player.start(), true);
+    assert.deepEqual(h.requests.map(peticion => peticion.t), [85]);
+    assert.deepEqual(h.emitted.map(frame => frame.tick), [85]);
+    assert.equal(h.player.playing, false);
+  } finally { h.player.stop(); }
 });
 
 test('un tramo entre muestras solo muestra fotogramas dentro de los dos límites', async () => {

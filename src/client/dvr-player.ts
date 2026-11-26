@@ -487,10 +487,10 @@ export class DvrPlayer {
 
   private escenaDisponible(): EscenaArchivo | undefined {
     const escena = this.options.escenaArchivo, nivel = this.niveles.find(n => n.nivel === 0);
-    if (!escena || !nivel || !Number.isSafeInteger(nivel.paso) || nivel.paso <= 0) return undefined;
+    if (!escena || !nivel) return undefined;
     const desde = escena.tramo?.desde ?? escena.tick, hasta = escena.tramo?.hasta ?? escena.tick;
+    // El paso del nivel es nominal. Un reinicio puede desplazar la fase de los fotogramas reales.
     if (desde < Math.max(this.minTick, nivel.t0) || hasta > Math.min(this.maxTick, nivel.t1)
-      || [desde, escena.tick, hasta].some(tick => (tick - nivel.t0) % nivel.paso !== 0)
       || this.lagunas.some(l => (l.nivel === undefined || l.nivel === 0) && l.t0 < hasta && l.t1 > desde)) return undefined;
     return escena;
   }

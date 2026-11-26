@@ -639,16 +639,35 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     world = guardado.world;
     lecturaMotor = undefined;
   }
-  if (!gateway) {
+  let stopped = false;
+  /** El hilo `carta-tape` abre el catálogo, comprime y sincroniza los bloques fuera de la simulación. */
+  const grabador = directorioCinta ? new GrabadorCinta(directorioCinta, options.tapeTopeBytes, binario, error => {
+    if (options.onEstadoCinta) options.onEstadoCinta(error);
+    else if (error) console.warn(`La cinta dejó de grabar: ${error}.`);
+  }, () => {
+    if (stopped) return;
+    try { prepararCinta(); grabarCinta(); }
+    catch (error) { recuperarPaso(error, false, tickMotor); }
+  }) : undefined;
+  function iniciarMundo(): string {
     try {
+      // Los dueños reciben las ranuras al nacer. La fuente se instala tras el guardado inicial, con el mismo descriptor.
+      if (binario && grabador && motor && motor.telemetria().hilos > 1) {
+        const arranque = grabador.iniciar();
+        if (arranque) motor.enlazar(arranque.descriptor);
+      }
       motor?.cargar({ world, materia: loaded?.materia ?? null }, epoca);
       adoptarGuardado(guardarMundo(world, [], [], cambiosPendientes));
       cambiosPendientes.length = 0;
+      return existingInstanceId ?? ensureWorldInstance(store.db);
     } catch (error) {
+      stopped = true;
+      void grabador?.cerrar().catch(() => undefined);
       void motor?.cerrar().catch(() => undefined);
       throw error;
     }
   }
+  const instanceId = gateway ? undefined : iniciarMundo();
   let lastWorldSaveAt = monotonicNow();
   /** Salud operacional y recuperación (reloj real, no el inyectable de las cuentas de paso). */
   let ultimoPasoEn = relojReal();
@@ -658,8 +677,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   let fallo: { tick: number; intentos: number } | null = null;
   const salirFatal = options.onFatalExit ?? ((codigo: number) => process.exit(codigo));
   const turboSaveIntervalMs = Math.max(0, options.turboSaveIntervalMs ?? 30_000);
-  const instanceId = gateway ? undefined : existingInstanceId ?? ensureWorldInstance(store.db);
-  let stopped = false;
   let failed = false;
   /** PERF3: `failed` con `world` a medio paso (un paso sin reserva, o un punto que no se pudo
    * restaurar, que falló). Terminal como `failed`; además, `world` ya no se proyecta ni se consulta. */
@@ -780,17 +797,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
   }
   if (!gateway) renovarReserva();
-  /** Cinta de un mundo simulado en este hilo (`createApp`): la graba el hilo `carta-tape`, como tras la pasarela, con
-   * la misma cadencia, créditos y épocas; los lectores van en los suyos. Ni abrir un catálogo roto ni comprimir o
-   * sincronizar un bloque ocurre en este hilo, y un fallo de la cinta nunca impide arrancar ni pausa el mundo. */
-  const grabador = directorioCinta ? new GrabadorCinta(directorioCinta, options.tapeTopeBytes, binario, error => {
-    if (options.onEstadoCinta) options.onEstadoCinta(error);
-    else if (error) console.warn(`La cinta dejó de grabar: ${error}.`);
-  }, () => {
-    if (stopped) return;
-    try { prepararCinta(); grabarCinta(); }
-    catch (error) { recuperarPaso(error, false, tickMotor); }
-  }) : undefined;
   let observadorCinta: ReturnType<typeof createTileObserver> | undefined;
   let epocaCinta = -1, seqCinta = 0, ultimoCorte = -Infinity, serialCronica = 0;
   let ultimoPuntoSerie = -1;

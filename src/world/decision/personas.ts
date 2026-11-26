@@ -91,10 +91,15 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const celdaPercibida = (consulta: number): number => salida.celda[fila * salida.q + consulta]!;
   const percibida = (consulta: number): Tile | undefined => {
     const c = celdaPercibida(consulta);
-    return c >= 0 ? terreno.teselas[c] : undefined;
+    return c >= 0 ? terreno.vistaLocal(c >> 8)?.teselas[c & 255] : undefined;
   };
   /** Celda del SoA residente de lo percibido en `consulta` (−1 sin SoA): para leer en vivo el campo que la ley mira. */
-  const soaPercibida = (consulta: number): number => fast ? terreno.soa[celdaPercibida(consulta)]! : -1;
+  const soaPercibida = (consulta: number): number => {
+    if (!fast) return -1;
+    const c = celdaPercibida(consulta);
+    if (c < 0) return -1;
+    return terreno.vistaLocal(c >> 8)?.soa[c & 255] ?? -1;
+  };
   const pasosPercibidos = (consulta: number): number => salida.pasos[fila * salida.q + consulta]!;
   /** Pasos BFS hasta `point` dentro de la ventana (undefined fuera de ella, en agua o sin ruta), como `perceivedRoutes`. */
   const stepsTo = (point: Point): number | undefined => {
@@ -112,9 +117,11 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     const c = ventanaCelda[base + k]!;
     if (c < 0) continue;
     // El BFS compartido cruza páginas ajenas. Los candidatos que leen una tesela JS requieren la del heap propio.
-    const t = terreno.teselas[c];
+    const pagina = terreno.vistaLocal(c >> 8);
+    if (!pagina) continue;
+    const o = c & 255, t = pagina.teselas[o];
     if (!t) continue;
-    const st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? terreno.soa[c]! : -1;
+    const st = ventana[base + k]!, d = DISTANCIA_VENTANA[k]!, cell = fast ? pagina.soa[o]! : -1;
     const i = nearbyTiles.length;
     nearbyTiles.push(t); nearbyCells.push(cell); nearbySteps[i] = st; nearbyDist[i] = d;
     if (st >= 0) { const ri = reachableTiles.length; reachableTiles.push(t); reachableCells.push(cell); reachableSteps[ri] = st; reachableDist[ri] = d; }

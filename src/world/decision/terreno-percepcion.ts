@@ -13,6 +13,11 @@ const numero = (v: number): number => v === v ? v : 0;
 /** Distintos para la percepción: también un cero que cambia de signo. */
 const distinto = (a: number, b: number): boolean => a !== b || (a === 0 && 1 / a !== 1 / b);
 
+interface VistaLocalPagina {
+  readonly teselas: (Tile | undefined)[];
+  readonly soa: Int32Array;
+}
+
 /**
  * El terreno que percibe el mundo: páginas 16 × 16 de `ArenaTerreno` (M1) con los campos de `CAMPOS_PERCEPCION`, que
  * viven lo que vive el mundo y que leen los hilos de la piscina y las tarjetas sobre los mismos SAB. Una página entra la
@@ -22,14 +27,13 @@ const distinto = (a: number, b: number): boolean => a !== b || (a === 0 && 1 / a
  * sabe si el disco de alguien sigue como en F2 con las versiones de sus ≤ 4 páginas y, en las que cambiaron, con las
  * celdas que se escribieron desde la captura.
  *
- * Una celda sin tesela lleva `terreno` = 0 y `celda` la da por ausente. Las teselas y las celdas del SoA residente de
- * cada celda (`teselas`, `soa`) solo existen en el hilo dueño.
+ * Una celda sin tesela lleva `terreno` = 0 y `celda` la da por ausente. Los valores de páginas vecinas se leen del SAB.
+ * Las referencias a teselas y las posiciones del SoA del heap propio se guardan solo en los bloques locales.
  */
 export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   readonly valores: readonly Float64Array[];
   readonly duenoSiguiente: Int16Array;
-  teselas: (Tile | undefined)[] = [];
-  soa = new Int32Array(0);
+  readonly #vistasLocales: (VistaLocalPagina | undefined)[] = [];
   /** Páginas comparadas con el mundo y cuántas de ellas habían cambiado, desde que se creó. */
   readonly cuentas = { sincronizadas: 0, cambiadas: 0 };
   #dueno: TerrenoDueno | undefined;
@@ -75,6 +79,9 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   #deDuenos = false;
   #ajena(chunk: ChunkId): boolean { return this.#deDuenos && this.duenoChunk[chunk] !== this.#hilo; }
 
+  /** Vista del heap propio, preparada al sincronizar y depurada de páginas vecinas en F2. */
+  vistaLocal(chunk: ChunkId): VistaLocalPagina | undefined { return this.#vistasLocales[chunk]; }
+
   override celda(x: number, y: number): number {
     if ((x | 0) !== x || (y | 0) !== y) return -1;
     const chunk = this.#paginaDe(x >> 4, y >> 4);
@@ -116,9 +123,12 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       // Con dueños, la arena crece solo en F0 (coordinador) y una página ajena se lee como la dejó su dueño.
       if (chunk < 0) { if (this.#deDuenos) continue; chunk = this.#alta(px, py); }
       this.#reservar(chunk);
-      if (this.#ajena(chunk)) { if (this.#capturando && this.#capturadaEn[chunk] !== this.#epoca) { this.#capturadaEn[chunk] = this.#epoca; this.#enCaptura.push(chunk); } continue; }
-      // Con la barrera abierta y la versión de su última sincronización, nadie la tocó desde entonces: sigue al día.
-      if (!this.#vigilado || this.#sincronizadaEn[chunk] !== this.#epoca || this.versionPagina[chunk] !== this.#versionSincronizada[chunk]) this.#sincronizar(chunk, tileIn, fast);
+      if (this.#ajena(chunk)) {
+        this.#vistasLocales[chunk] = undefined;
+      } else if (!this.#vigilado || this.#sincronizadaEn[chunk] !== this.#epoca || this.versionPagina[chunk] !== this.#versionSincronizada[chunk]) {
+        // Con la barrera abierta y la misma versión, nadie la tocó desde la sincronización.
+        this.#sincronizar(chunk, tileIn, fast);
+      }
       if (this.#capturando && this.#capturadaEn[chunk] !== this.#epoca) { this.#capturadaEn[chunk] = this.#epoca; this.#enCaptura.push(chunk); }
     }
   }
@@ -190,7 +200,7 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       const x = cx + dx, y = cy + dy, chunk = this.#paginaDe(x >> 4, y >> 4);
       if (chunk < 0) return false;
       const c = (chunk << 8) | ((y & 15) << 4) | (x & 15);
-      this.#leer(x, y, tileIn, fast, leido);
+      this.#leer(x, y, tileIn(x, y), fast, leido);
       for (let k = 0; k < valores.length; k++) if (distinto(valores[k]![c]!, leido[k]!)) return false;
     }
     return true;
@@ -218,8 +228,7 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
     this.#reservar(chunk);
     const base = chunk << 8;
     for (const valores of this.valores) valores.fill(0, base, base + CELDAS_PAGINA);
-    this.teselas.fill(undefined, base, base + CELDAS_PAGINA);
-    this.soa.fill(-1, base, base + CELDAS_PAGINA);
+    this.#vistasLocales[chunk] = undefined;
     this.#escritura().marcar(chunk, true);
   }
 
@@ -240,14 +249,10 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       const bits = new Uint32Array(cap * 8);
       bits.set(this.#bitsTocadas);
       this.#bitsTocadas = bits;
-      while (this.#tocadas.length < cap) this.#tocadas.push([]);
-      const soa = new Int32Array(cap * CELDAS_PAGINA).fill(-1);
-      soa.set(this.soa);
-      this.soa = soa;
-      // Arreglo denso desde el principio: escribir índices sueltos en uno vacío lo pasa a diccionario.
-      const teselas = new Array<Tile | undefined>(cap * CELDAS_PAGINA).fill(undefined);
-      for (let i = 0; i < this.teselas.length; i++) teselas[i] = this.teselas[i];
-      this.teselas = teselas;
+      while (this.#tocadas.length < cap) {
+        this.#tocadas.push([]);
+        this.#vistasLocales.push(undefined);
+      }
     }
   }
 
@@ -256,25 +261,29 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
   #sincronizar(chunk: ChunkId, tileIn: TileLookup, fast: ResidentFastAccess | undefined): void {
     const x0 = this.paginaX[chunk]! << 4, y0 = this.paginaY[chunk]! << 4, base = chunk << 8, leido = this.#lectura;
     const valores = this.valores, n = valores.length;
-    let cambio = false;
+    let cambio = false, hayTeselas = false, local = this.#vistasLocales[chunk];
     for (let o = 0; o < CELDAS_PAGINA; o++) {
-      const c = base + o;
-      this.#leer(x0 + (o & 15), y0 + (o >> 4), tileIn, fast, leido, c);
+      const c = base + o, x = x0 + (o & 15), y = y0 + (o >> 4), tile = tileIn(x, y);
+      const soa = this.#leer(x, y, tile, fast, leido);
+      if (tile) {
+        hayTeselas = true;
+        local ??= { teselas: new Array<Tile | undefined>(CELDAS_PAGINA).fill(undefined), soa: new Int32Array(CELDAS_PAGINA).fill(-1) };
+      }
+      if (local) { local.teselas[o] = tile; local.soa[o] = soa; }
       for (let k = 0; k < n; k++) {
         const v = leido[k]!;
         if (distinto(valores[k]![c]!, v)) { valores[k]![c] = v; cambio = true; this.#anotar(chunk, o); }
       }
     }
+    if (local) this.#vistasLocales[chunk] = hayTeselas ? local : undefined;
     this.cuentas.sincronizadas++;
     if (cambio) { this.#escritura().marcar(chunk, true); this.cuentas.cambiadas++; }
     this.#sincronizadaEn[chunk] = this.#epoca;
     this.#versionSincronizada[chunk] = this.versionPagina[chunk]!;
   }
 
-  /** Los campos percibidos de (x, y) como los lee `choose`: del SoA residente si la tesela está en él, si no del objeto.
-   * Con `c`, guarda también la tesela y su celda del SoA. */
-  #leer(x: number, y: number, tileIn: TileLookup, fast: ResidentFastAccess | undefined, out: Float64Array, c = -1): void {
-    const tile = tileIn(x, y);
+  /** Escribe los campos percibidos y devuelve su posición en el SoA local (−1 si no está). */
+  #leer(x: number, y: number, tile: Tile | undefined, fast: ResidentFastAccess | undefined, out: Float64Array): number {
     let s = -1;
     if (!tile) out.fill(0);
     else {
@@ -291,6 +300,6 @@ export class TerrenoPercepcion extends ArenaTerreno implements DestinoBarrera {
       }
       out[4] = tile.stone ?? 0;
     }
-    if (c >= 0) { this.teselas[c] = tile; this.soa[c] = s; }
+    return s;
   }
 }

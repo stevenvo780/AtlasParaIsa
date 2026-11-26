@@ -156,7 +156,7 @@ test('la ventana y las consultas percibidas son las de la búsqueda de siempre',
       }
       for (const [consulta, tile] of Object.entries(ref.consultas)) {
         const c = salida.celda[i * salida.q + Number(consulta)]!;
-        assert.equal(c >= 0 ? vista.terreno.teselas[c] : undefined, tile, `semilla ${seed}, ${person.id}, consulta ${consulta}`);
+        assert.equal(c >= 0 ? vista.terreno.vistaLocal(c >> 8)?.teselas[c & 255] : undefined, tile, `semilla ${seed}, ${person.id}, consulta ${consulta}`);
         if (tile) celdasConsultadas++;
       }
     });
@@ -394,6 +394,60 @@ test('una página solo sube de versión si cambia lo que lleva, también vista d
   for (let k = 0; k < terreno.paginas; k++) assert.equal(otra.versionPagina[k], terreno.versionPagina[k]);
 });
 
+test('las páginas históricas no conservan bloques de percepción local', () => {
+  const world = mundo(42, 10, RESIDENTE), terreno = new TerrenoPercepcion();
+  const fast = residentFastAccess(world.tiles), tileIn = tileLookup(world.tiles);
+  assert.ok(fast?.exact);
+  const tile = world.tiles[0]!;
+  const historicas = Array.from({ length: 128 }, (_, i) => terreno.asegurarPagina(128 + i, 0));
+  const p = terreno.asegurarPagina(tile.x >> 4, tile.y >> 4);
+  const local = ((tile.y & 15) << 4) | (tile.x & 15), c = (p << 8) | local;
+  const versiones = terreno.versionPagina, campos = terreno.valores;
+  assert.ok(historicas.every(chunk => terreno.vistaLocal(chunk) === undefined));
+  assert.equal(terreno.vistaLocal(p), undefined);
+
+  terreno.sincronizarPagina(p, tileIn, fast);
+  const vista = terreno.vistaLocal(p);
+  assert.ok(vista);
+  assert.equal(vista.teselas[local], tile);
+  assert.equal(vista.soa[local], fast.exact.cellAt(tile.x, tile.y));
+  assert.equal(vista.soa.byteLength, 256 * Int32Array.BYTES_PER_ELEMENT);
+  const version = versiones[p]!;
+  terreno.sincronizarPagina(p, tileIn, fast);
+  assert.equal(terreno.vistaLocal(p), vista);
+  assert.equal(versiones[p], version);
+
+  terreno.sincronizarPagina(p, () => undefined, undefined);
+  assert.equal(terreno.vistaLocal(p), undefined);
+  assert.equal(terreno.celda(tile.x, tile.y), -1);
+  assert.ok(versiones[p]! > version);
+  terreno.sincronizarPagina(p, () => undefined, undefined);
+  assert.equal(terreno.vistaLocal(p), undefined);
+
+  terreno.sincronizarPagina(p, tileIn, fast);
+  const vuelta = terreno.vistaLocal(p);
+  assert.ok(vuelta && vuelta !== vista);
+  assert.equal(vuelta.teselas[local], tile);
+  assert.equal(vuelta.soa[local], fast.exact.cellAt(tile.x, tile.y));
+  assert.equal(terreno.celda(tile.x, tile.y), c);
+
+  const vecino = TerrenoPercepcion.conectarDueno(terreno.compartir(), 1);
+  assert.equal(vecino.celda(tile.x, tile.y), c);
+  assert.equal(vecino.vistaLocal(p), undefined);
+  terreno.usarDuenos();
+  terreno.asignar(p, 1);
+  terreno.capturarDisco(tile.x, tile.y, tileIn, fast);
+  assert.equal(terreno.vistaLocal(p), undefined);
+  assert.equal(terreno.celda(tile.x, tile.y), c, 'la cesión conserva los valores compartidos');
+  vecino.sincronizarPagina(p, tileIn, fast);
+  assert.equal(vecino.vistaLocal(p)?.teselas[local], tile);
+  vecino.vaciarPagina(p);
+  assert.equal(vecino.vistaLocal(p), undefined);
+  assert.equal(terreno.celda(tile.x, tile.y), -1);
+  assert.equal(terreno.valores, campos);
+  assert.equal(terreno.versionPagina, versiones);
+});
+
 test('una persona que sale da de baja su ranura: las demás la conservan y la ranura vuelve tras la cuarentena con otra gen', () => {
   const world = mundo(42, 300), tileIn = tileLookup(world.tiles);
   const organismos = organismosPropios(world, true), vista = VistaMundo.de(organismos, new TerrenoPercepcion(true));
@@ -450,7 +504,7 @@ test('quien decide fuera del lote se percibe donde está sin escribir en el fren
     const ref = referencia(world, persona.x, persona.y);
     for (const [consulta, tile] of Object.entries(ref.consultas)) {
       const c = salida.celda[fila * salida.q + Number(consulta)]!;
-      assert.equal(c >= 0 ? terreno.teselas[c] : undefined, tile, `consulta ${consulta}`);
+      assert.equal(c >= 0 ? terreno.vistaLocal(c >> 8)?.teselas[c & 255] : undefined, tile, `consulta ${consulta}`);
     }
     assert.equal(tabla.lectura(), frente, 'sin publicar otro frente');
     assert.deepEqual(filas(frente.x, frente.alta), x);

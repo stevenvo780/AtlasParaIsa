@@ -23,6 +23,8 @@ Las pruebas causales pueden intervenir en un fixture para aislar un efecto. El d
 
 Desde la copia de trabajo del candidato, `bash scripts/check-v24-demo.sh DIRECTORIO_NUEVO` guarda el SHA, agrupa las pruebas focales, compila y ejecuta el recorrido de Chromium con una recarga real de la cinta. La variable `COMPUTE_NVRTC` habilita las pruebas de hardware CUDA cuando apunta a la biblioteca instalada.
 
+La comparación larga de revalidación F2 se ejecuta una vez por candidato integrado mediante `node --import tsx --test --test-timeout=600000 --test-name-pattern='^F2 con revalidación da el mismo mundo' tests/v23-decision-percepcion.test.ts`. Las demás comprobaciones de ese archivo son parte de la puerta breve.
+
 `bash scripts/lab/panel-demo.sh DIRECTORIO_NUEVO [CONCURRENCIA]` ejecuta la referencia demográfica de 30 días sobre las ocho semillas fijadas. Registra un censo material exacto cada día, comprobaciones cada 120 ticks y el resultado individual de cada corrida. El panel usa un dueño y CPU. Los bancos de escala comparan esa referencia con otros repartos en escenas emparejadas.
 
 En el candidato compilado, `ATLAS_DEMO_OBSERVACION_SEGUNDOS=7200 node scripts/lab/demo-observacion.mjs "$PWD" DIRECTORIO_NUEVO` prolonga la observación por dos horas y registra el avance, los guardados y la recuperación. Para conservar el mundo de prueba fuera de la RAM, el directorio nuevo se coloca en NVMe.

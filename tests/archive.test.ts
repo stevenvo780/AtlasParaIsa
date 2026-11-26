@@ -65,6 +65,21 @@ test('archive versions restore exact edited terrain at the latest permitted worl
   assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number }).n, 2);
 });
 
+test('a legacy world rejects material-sized stocks before reactivating an archived chunk', t => {
+  const { store } = fixture(t);
+  const world = createWorld(42);
+  const chunk = archived(world, 0, 0.25);
+  world.retiredChunks = [chunk];
+  store.save(world);
+  const cargado = store.load()!.world;
+
+  chunk.tiles[0]!.wood = 20;
+  const body = JSON.stringify(chunk);
+  store.db.prepare('UPDATE chunks SET body=?,digest=? WHERE key=?').run(body, sha256(body), chunk.key);
+  assert.throws(() => activate(cargado, chunk.cx * 16, chunk.cy * 16), /Invalid archived chunk state/);
+  assert.equal(cargado.chunks[chunk.key], undefined);
+});
+
 test('input failure rolls back archive, world, events and ledger while preserving the pending caller queue', t => {
   const { store } = fixture(t);
   const world = createWorld(42); store.save(world);

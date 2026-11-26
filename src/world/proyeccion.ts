@@ -3,7 +3,7 @@ import type { TechnologyState } from '../shared/technology.js';
 import { publicGeologyKey, type ChemicalFormulaView, type ChemistrySummaryView } from '../shared/chemistry.js';
 import { phaseAt, TICKS_PER_DAY, type Person, type World, type WorldContext } from './index.js';
 import { bindWorldContext, projectTerrain, worldContext } from './spatial.js';
-import { paramsOf } from './params.js';
+import { paramsOf, type WorldParams } from './params.js';
 import { demographicTraits } from './demography.js';
 import { escuchaDe } from './genetics.js';
 import { constructionCost } from './inventions.js';
@@ -119,8 +119,8 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
   const animales = ganchos.some(l => l.animal) ? new Map<string, Animal>() : undefined;
   const loadChunk = context.loadChunk;
   // La proyección del terreno también puede encontrar fauna archivada en el almacén.
-  const contextoTerreno = animales && loadChunk ? { ...context, loadChunk(key: string, tick: number) {
-    const chunk = loadChunk.call(context, key, tick);
+  const contextoTerreno = animales && loadChunk ? { ...context, loadChunk(key: string, tick: number, v23?: WorldParams['v23']) {
+    const chunk = loadChunk.call(context, key, tick, v23);
     for (const a of chunk?.animals ?? []) animales.set(a.id, a);
     return chunk;
   } } : context;

@@ -108,6 +108,24 @@ export function assertLegacyRecord(value: unknown, atTick: number): asserts valu
   if (record.cause === 'senescence' && record.diedAt - record.bornAt < traits.senescenceStart) fail();
 }
 
+type IdentidadGenealogica = Pick<Person, 'id' | 'bornAt' | 'genome'> & { diedAt?: number };
+
+/** La ley de natalidad registra primero a quien gestó. El otro progenitor puede morir antes del parto. */
+export function genealogiaValida(hijo: IdentidadGenealogica, padres: readonly (IdentidadGenealogica | null | undefined)[],
+  natalidad: boolean): boolean {
+  if (!padres.length) return true;
+  const gestado = natalidad && /^nacido-[1-9]\d*$/.test(hijo.id);
+  let generacionMayor = -1;
+  for (let i = 0; i < padres.length; i++) {
+    const padre = padres[i];
+    if (!padre || padre.id === hijo.id || padre.bornAt >= hijo.bornAt
+      || (padre.diedAt !== undefined && padre.diedAt < hijo.bornAt && (!gestado || i === 0))
+      || padre.genome.generation >= hijo.genome.generation) return false;
+    generacionMayor = Math.max(generacionMayor, padre.genome.generation);
+  }
+  return hijo.genome.generation === generacionMayor + 1;
+}
+
 /** Only dead references need a legacy row; living parent/inventor identities are in the snapshot. */
 export function referencedLegacy(world: World): Set<string> {
   const required = new Set<string>();

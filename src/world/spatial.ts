@@ -2,7 +2,7 @@ import type { PlaceView, Tile, Viewport } from '../shared/types.js';
 import { CHUNK_SIZE, MAX_COORDINATE, chunkCoords, chunkKey, generateChunk, generateTile, legacyStructures, type Chunk } from './terrain.js';
 import type { World } from './index.js';
 import { initializeEcosystem } from './ecosystem.js';
-import { paramsOf } from './params.js';
+import { paramsOf, type WorldParams } from './params.js';
 import { faunaCacheAppended, faunaCacheFiltered, materializeAnimals, projectAnimal } from './animals.js';
 import type { AnimalView, StructureView } from '../shared/life.js';
 import type { LegacyRecord } from '../shared/demography.js';
@@ -15,7 +15,7 @@ import { chunkLruFor } from './lru.js';
 export interface WorldContext {
   /** Propiedad privada del host, creada antes de exponer teselas; nunca se serializa. */
   tileOwnership?: ResidentTopologyOwner;
-  loadChunk?: (key: string, atTick: number) => Chunk | null;
+  loadChunk?: (key: string, atTick: number, v23?: WorldParams['v23']) => Chunk | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
 }
@@ -147,7 +147,7 @@ export function tomarChunk(world: World, key: string, cx: number, cy: number, co
   const lru = chunkLruFor(world);
   let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : lru.get(key);
   lru.delete(key);
-  if (!archived && context.loadChunk) archived = context.loadChunk(key, world.tick) ?? undefined;
+  if (!archived && context.loadChunk) archived = context.loadChunk(key, world.tick, v23) ?? undefined;
   const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
   const tiles = chunk.tiles.map(tile => initializeEcosystem(world.seed, v23.fauna ? { ...tile, species: tile.species } : tile, cuencas));
   return { ...chunk, tiles, animals: chunk.animals ?? materializeAnimals(world.seed, tiles, world.tick, v23.fauna),
@@ -176,7 +176,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : lru.get(key);
   lru.delete(key);
   if (!archived && context.loadChunk) {
-    archived = context.loadChunk(key, world.tick) ?? undefined;
+    archived = context.loadChunk(key, world.tick, v23) ?? undefined;
   }
   // Los Tile observados son proxies. El archivo se materializa antes de cruzar structuredClone.
   const archivePlain = archived && context.tileOwnership
@@ -382,7 +382,7 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
   const archive = new Map<string, Chunk>();
   // T035 ronda de arreglo (hallazgo crítico #2): misma cuenca que `activate()`, para que la
   // previsualización de una zona aún no materializada coincida con lo que se generará de verdad.
-  const cuencas = paramsOf(world).agua.cuencas;
+  const { agua: { cuencas }, v23 } = paramsOf(world);
   for (let y = v.y; y < v.y + v.height; y++) for (let x = v.x; x < v.x + v.width; x++) {
     const active = activeTile(x, y);
     if (active) { tiles.push({ ...active }); continue; }
@@ -390,7 +390,7 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
     let chunk = archive.get(key);
     if (!chunk) {
       const { cx, cy } = chunkCoords(x, y);
-      chunk = archivedChunk(world.retiredChunks, key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
+      chunk = archivedChunk(world.retiredChunks, key) ?? context.loadChunk?.(key, world.tick, v23) ?? generateChunk(world.seed, cx, cy, cuencas);
       archive.set(key, chunk);
       // Undiscovered landmarks are scenery, not recorded discoveries.
       for (const place of chunk.places) places.set(place.id, place);

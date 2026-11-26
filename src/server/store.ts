@@ -12,7 +12,7 @@ import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encod
 import { digestoCanonico, type GobernadorLegado } from '../world/digesto.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
-import { assertLegacyRecord } from '../world/lineage.js';
+import { assertLegacyRecord, genealogiaValida } from '../world/lineage.js';
 import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
   legacyTechnologyChainStep, technologyChainStep, technologyPruneSeal,
   type TechnologyExecutionCounts } from './technology-archive.js';
@@ -425,7 +425,7 @@ export class Store {
   /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
   get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get context(): WorldContext {
-    return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
+    return { loadChunk: (key, atTick, v23) => this.loadChunk(key, atTick, v23),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
       ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
   }
@@ -998,10 +998,14 @@ export class Store {
     return this.readLegacyRecord(id, atTick);
   }
   private assertLegacyParents(record: LegacyRecord, world: World): void {
-    const parents=record.parents.map(id=>world.people.find(p=>p.id===id)??world.retiredLegacy.find(p=>p.id===id)??this.loadLegacy(id,world.tick));
-    if (parents.some(p=>!p||p.id===record.id||p.bornAt>=record.bornAt||('diedAt' in p&&p.diedAt<record.bornAt)||p.genome.generation>=record.generation) || (parents.length&&record.generation!==Math.max(...parents.map(p=>p!.genome.generation))+1)) throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
+    const parents = record.parents.map(id => world.people.find(p => p.id === id)
+      ?? world.retiredLegacy.find(p => p.id === id) ?? this.loadLegacy(id, world.tick));
+    if (!genealogiaValida(record, parents, ley(world, 'natalidad'))) {
+      throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
+    }
   }
-  loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER): Chunk | null {
+  /** Los lectores históricos sin un mundo conocido validan la forma que comparten los dos modos. */
+  loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER, v23?: WorldParams['v23']): Chunk | null {
     coordinatesFromKey(key);
     if (!Number.isSafeInteger(atTick) || atTick < 0) throw new RangeError('Invalid archive lookup tick.');
     // Read-only recovery of a V1 database never silently creates an archive or alters its schema.
@@ -1011,7 +1015,7 @@ export class Store {
     if (!Number.isSafeInteger(row.tick) || row.tick < 0 || checksum(row.body) !== row.digest) throw new Error('Archived chunk checksum or version mismatch. Explicit recovery required.');
     // T133: accepts both the historical plain-JSON body and `chunk-tiles-tuple-v1`.
     const chunk: unknown = decodeArchivedChunk(row.body);
-    assertChunk(chunk, key, row.tick);
+    assertChunk(chunk, key, row.tick, v23);
     return chunk;
   }
 

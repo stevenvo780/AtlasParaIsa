@@ -167,7 +167,7 @@ inicial('referencias.validas', 'global', m => {
     const clave = /^landmark:(-?\d+,-?\d+)$/.exec(id)?.[1]
       ?? (asentamiento ? chunkKey(Number(asentamiento[1]), Number(asentamiento[2])) : undefined);
     if (!clave) return false;
-    const chunk = m.retiredChunks.find(c => c.key === clave) ?? worldContext(m).loadChunk?.(clave, m.tick);
+    const chunk = m.retiredChunks.find(c => c.key === clave) ?? worldContext(m).loadChunk?.(clave, m.tick, paramsOf(m).v23);
     if (chunk?.places.some(p => p.id === id)) { lugares.add(id); return true; }
     return false;
   };

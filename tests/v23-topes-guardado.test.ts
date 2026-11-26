@@ -6,6 +6,7 @@ import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { assertWorld, createWorld } from '../src/world/index.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { tomarChunk } from '../src/world/spatial.js';
 import { chunkKey, generateChunk } from '../src/world/terrain.js';
 import { projectAnimal, syncFauna } from '../src/world/animals.js';
 
@@ -79,6 +80,9 @@ test('el guardado conserva lugares y existencias por encima de los límites esca
   assert.equal(restored.wood, tile.wood);
   assert.equal(restored.stone, tile.stone);
   assert.deepEqual(store.loadChunk(dormido.key), dormido);
+  const reactivado = tomarChunk(loaded, dormido.key, dormido.cx, dormido.cy);
+  assert.equal(reactivado.tiles[0]!.stone, 15);
+  assert.equal(reactivado.places.length, 257);
 
   restored.stone = Infinity;
   assert.throws(() => assertWorld(loaded), /Piedra fuera de rango/);

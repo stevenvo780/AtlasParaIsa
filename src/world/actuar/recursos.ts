@@ -168,19 +168,21 @@ let lotesTmp = new Float64Array(8);
 export const celdaEsPropia = (c: CtxLeyMateria, celda: number): boolean =>
   celda >= 0 && c.terreno.duenoChunk[c.terreno.chunkDe(celda)] === c.hilo;
 
-function cadaveresDe(c: CtxLeyMateria, celda: number): Float64Array {
+function listarCadaveres(c: CtxLeyMateria, celda: number): number {
   const n = c.materia.lotes(celda, Rol.Cadaver, lotesTmp);
   if (n > lotesTmp.length) c.materia.lotes(celda, Rol.Cadaver, lotesTmp = new Float64Array(n));
-  return lotesTmp.subarray(0, n);
+  return n;
 }
 
-/** J de alimento que la persona puede comer en esta celda, consultados en la arena del dueño. */
-export function comidaEnCelda(c: CtxLeyMateria, cuerpo: Cuerpo, punto: { x: number; y: number }, kg: number): number {
-  const celda = c.terreno.celda(punto.x, punto.y);
+/** J de alimento en la arena del dueño. Si se da el identificador, debe pertenecer al terreno de `c`. */
+export function comidaEnCelda(c: CtxLeyMateria, cuerpo: Cuerpo, punto: { x: number; y: number }, kg: number,
+  celda = c.terreno.celda(punto.x, punto.y)): number {
   if (!celdaEsPropia(c, celda)) return 0;
   const vida = lotesDeCelda(c, celda, lotesCelda).vida;
   let energia = vida >= 0 ? energiaAlimento(c, cuerpo, vida, kg) : 0;
-  for (const lote of cadaveresDe(c, celda)) energia += energiaAlimento(c, cuerpo, lote, kg);
+  const cadaveres = listarCadaveres(c, celda);
+  const lotes = lotesTmp;
+  for (let i = 0; i < cadaveres; i++) energia += energiaAlimento(c, cuerpo, lotes[i]!, kg);
   return energia;
 }
 
@@ -240,7 +242,8 @@ export function comerConCuerpo(world: World, person: Person, cuerpo: Cuerpo, cur
   const bocado = BOCADO_KG * escalaBocado(c, cuerpo);
   let comido = 0, fauna = 0;
   if (celdaEsPropia(c, celda)) {
-    for (const lote of cadaveresDe(c, celda)) {
+    const cadaveres = listarCadaveres(c, celda);
+    for (const lote of lotesTmp.subarray(0, cadaveres)) {
       if (comido >= bocado) break;
       const k = ingerirSelecto(c, cuerpo, lote, bocado - comido);
       comido += k; fauna += k;

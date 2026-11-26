@@ -156,7 +156,7 @@ let quimicaPase: ServicioQuimico | null = null;
 const sustanciaPase = (id: SustanciaId): Readonly<Sustancia> => quimicaPase!.sustancia(id);
 
 function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
-  let n = arena.especies(l, ids);
+  let n = arena.especies(l, ids, cant);
   if (n > ids.length) {
     const t = 2 * n;
     ids = new Uint32Array(t); cant = new Float64Array(t); x = new Float64Array(t); xm = new Float64Array(t);
@@ -165,14 +165,18 @@ function leerEspecies(arena: ArenaMateria, l: LoteRef): number {
     consumo = new Float64Array(t); usos = new Int32Array(t); inicio = new Int32Array(t + 1); esNueva = new Uint8Array(t);
     riesgo = new Float64Array(t); riesgoFijo = new Float64Array(t); riesgoLento = new Float64Array(t);
     demanda = new Float64Array(t); reparto = new Float64Array(t); rapido = new Uint8Array(t);
-    n = arena.especies(l, ids);
+    n = arena.especies(l, ids, cant);
   }
   // Orden de id (nada depende de en qué ranura esté cada sustancia): por inserción, sin asignar.
   for (let a = 1; a < n; a++) {
-    const v = ids[a]!;
+    const id = ids[a]!, cantidad = cant[a]!;
     let b = a - 1;
-    for (; b >= 0 && ids[b]! > v; b--) ids[b + 1] = ids[b]!;
-    ids[b + 1] = v;
+    for (; b >= 0 && ids[b]! > id; b--) {
+      ids[b + 1] = ids[b]!;
+      cant[b + 1] = cant[b]!;
+    }
+    ids[b + 1] = id;
+    cant[b + 1] = cantidad;
   }
   return n;
 }
@@ -194,10 +198,7 @@ let presentes = 0; // sustancias de `ids` (con sus cuantos en `cant`) que leyó 
 export function medir(c: CtxPaso, l: LoteRef): Readonly<Estado> {
   const n = presentes = leerEspecies(c.arena, l);
   let atomos = 0;
-  for (let i = 0; i < n; i++) {
-    cant[i] = c.arena.cuantos(l, ids[i]!);
-    atomos += cant[i]! * atomosDe(c.quimica, ids[i]!);
-  }
+  for (let i = 0; i < n; i++) atomos += cant[i]! * atomosDe(c.quimica, ids[i]!);
   const T = atomos > 0 ? c.arena.calor(l) / (CAPACIDAD_ATOMO * atomos) : 0;
   let V = 0;
   for (let i = 0; i < n; i++) V += cant[i]! * volumenMolar(c.quimica, ids[i]!, T);
@@ -473,7 +474,6 @@ export function pasoLote(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa): numb
     let vol = 0;
     for (let i = 0; i < n; i++) {
       const id = ids[i]!;
-      cant[i] = c.arena.cuantos(l, id);
       vol += cant[i]! * volumenMolar(c.quimica, id, T);
       const nueva = id < nuevos.length && nuevos[id]! > 0;
       esNueva[i] = nueva ? 1 : 0;

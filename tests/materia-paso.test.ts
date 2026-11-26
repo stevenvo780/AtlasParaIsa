@@ -641,8 +641,16 @@ test('coste: con la tabla densa el sorteo es lineal en los canales, no cúbico',
       return r;
     };
     const arena = {
-      especies: (_l: number, ids: Uint32Array) => { for (let i = 0; i < Math.min(n, ids.length); i++) ids[i] = i + 1; return n; },
-      cuantos: () => 1000, calor: () => 0.025 * 1000 * n * 300, aplicar: () => assert.fail('nada debería aplicarse'),
+      especies(_l: number, ids: Uint32Array, cantidades?: Float64Array) {
+        const limite = Math.min(n, ids.length, cantidades?.length ?? n);
+        for (let i = 0; i < limite; i++) {
+          ids[i] = i + 1;
+          if (cantidades) cantidades[i] = 1000;
+        }
+        return n;
+      },
+      cuantos: () => assert.fail('las cantidades ya llegaron con los IDs'),
+      calor: () => 0.025 * 1000 * n * 300, aplicar: () => assert.fail('nada debería aplicarse'),
     } as unknown as ArenaMateria;
     const c: CtxPaso = { arena, quimica: { internar: () => 0, sustancia: id => tabla[id]!, reaccion }, azar: () => 0.5 };
     pasoLote(c, 0, 1, SIN); // llena la tabla de filas fuera de la medida

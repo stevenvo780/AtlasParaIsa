@@ -1038,6 +1038,25 @@ export class Store {
     });
   }
 
+  /** Comprueba mundo y materia para proyectar un corte, aunque se haya podado su crónica. */
+  leerCorteParaProyeccion(slot: SnapshotSlot): { instantanea: Instantanea; epoca: number; digest: string } {
+    if (!this.readOnly || !SNAPSHOT_SLOTS.includes(slot)) throw new Error('El corte requiere un Store de solo lectura y un slot válido.');
+    return this.loadTransaction(() => {
+      const epoca = this.readCompleteEpoch();
+      if (epoca === null) throw new SnapshotSemanticError('El corte requiere un guardado completo.');
+      const row = this.db.prepare('SELECT body,digest FROM main.snapshots WHERE slot=?').get(slot) as Pick<Row, 'body' | 'digest'> | undefined;
+      if (!row || checksum(row.body) !== row.digest) throw new SnapshotPhysicalError('El slot del corte falta o su digest no coincide.');
+      const decoded = this.snapshotParts.read(row.body) as World;
+      const agendaBruta = separarAgenda(decoded);
+      const world = this.migrateSnapshot(decoded, true);
+      if (slot === 0 && agendaBruta === undefined && this.requiereAgenda())
+        throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
+      const { materia, digest } = this.readCompleteMatter(slot, world.tick);
+      this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, epoca);
+      return { instantanea: { world, materia }, epoca: materia?.epoca ?? epoca, digest: row.digest };
+    });
+  }
+
   private completeMatterBody(slot: SnapshotSlot): Uint8Array | null {
     const row = this.db.prepare(`
       SELECT m.body FROM main.snapshot_matter m

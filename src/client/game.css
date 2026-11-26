@@ -93,6 +93,22 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .dvr-live.is-live{color:#1b2c23;background:#e87a6a;border-color:#e87a6a;font-weight:700}
 .dvr-transport[data-loading=true] .dvr-time::after{content:" …";opacity:.7}
 .game-shell.has-dvr .map-hint{display:none}
+.game-shell.has-archive-cuts{--base-cortes:92px;--tope-cortes:calc(var(--base-cortes) + var(--alto-cortes,110px) + 8px)}
+#archive-cuts{width:min(640px,calc(100% - 40px));bottom:var(--base-cortes);font-size:12px;line-height:1.35}
+.archive-cuts-heading{font-weight:600;margin-bottom:6px}
+.archive-cuts-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.archive-cuts-choices button{width:100%;min-height:44px}
+.archive-cuts-choices p,.archive-cuts-status{margin-top:4px;overflow-wrap:anywhere}
+.archive-cuts-status{color:#d9e6ca}
+.has-archive-cuts .map-hint{display:none}
+.game-shell.has-archive-cuts .layers-dock{bottom:var(--tope-cortes);max-height:max(80px,calc(100dvh - var(--tope-cortes) - 68px))}
+@media (max-width:1100px){.game-shell.has-archive-cuts .world-coordinates{bottom:var(--tope-cortes)}}
+@media(max-width:760px){
+  .game-shell.has-archive-cuts{--base-cortes:calc(max(10px,env(safe-area-inset-bottom)) + 73px)}
+  #archive-cuts{width:auto}
+  .game-shell.has-archive-cuts .game-drawer{bottom:var(--tope-cortes);max-height:max(80px,calc(100dvh - var(--tope-cortes) - 68px))}
+  .game-shell.has-archive-cuts :is(.camera-controls,#heat-legend){bottom:var(--tope-cortes)}
+}
 /* V21 — observador puro: ninguna orden ni gesto; todo lo demás sigue vivo. */
 .game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette){display:none!important}
 .game-shell.is-observer-only .control-pair{grid-template-columns:1fr}

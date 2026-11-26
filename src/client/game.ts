@@ -16,6 +16,7 @@ import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, 
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
 import { DvrPlayer, PerfilCinta, crearRedCinta, leerEscenaArchivo, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
+import { mountArchiveCuts } from './archivo-cortes.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
 import { anotarCiclo, cicloVacio, leerMateria, renderPanelMateria } from './panel-materia.js';
 import { firmaMotor, luzMotor, pedirTelemetria, renderPanelMotor, vistaMotor, type LuzSalud, type TelemetriaRecibida } from './panel-motor.js';
@@ -54,9 +55,10 @@ let dvrBar: DvrBarController | null = null;
 let dvrResize: ResizeObserver | null = null;
 let dvrRaf = 0;
 let lastTapeHudAt = 0;
+let archiveCuts: ReturnType<typeof mountArchiveCuts> | null = null;
 /** V21: el servidor sólo deja observar (sin órdenes ni gestos): la UI de dirección e intervención no existe. */
 let observerOnly = false;
-interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean; archiveMode?: boolean }
+interface SessionFlags { tapeEnabled?: boolean; observerOnly?: boolean; archiveMode?: boolean; archiveCuts?: boolean }
 let landscape: Landscape | null = null;
 /** V18: última verdad de teselas recibida (256 trozos); la cámara pinta lo ya visitado sin esperar al servidor. Se vacía al salir o cambiar de mundo. */
 // V24: 640 trozos de 16×16 (≈ 164 k teselas): alejar al zoom mínimo (≈ 480×270 teselas a 1080p) cabe sin expulsar lo visible.
@@ -169,7 +171,7 @@ function registrarVisitaPresente(current: WorldView): void {
   }
 }
 function stopSound(): void { soundEnabled = false; soundBusy = false; soundscape.stop(); document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; capasV23Firma = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { archiveCuts?.destroy(); archiveCuts = null; stopClientUi(); stopTape(); observerOnly = false; tileCache.clear(); activeLayers = clearLayers(); saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; capasV23Firma = ''; inspectorSignature = ''; statsSignature = ''; if (statsTrailing) { clearTimeout(statsTrailing); statsTrailing = null; } focusedCommunity = null; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -203,6 +205,7 @@ function startupSettings(): GraphicsSettings {
 
 function enterWorld(flags: SessionFlags = {}): void {
   clean();
+  if (flags.archiveCuts) flags = { ...flags, archiveMode: true };
   sessionFlags = flags;
   visita = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
@@ -212,7 +215,7 @@ function enterWorld(flags: SessionFlags = {}): void {
   graphicsSettings = startupSettings();
   const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
   if (!flags.archiveMode) connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (statsTab === 'communities') renderStats(); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo });
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo, cutArchive: !!flags.archiveCuts });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -222,7 +225,13 @@ function enterWorld(flags: SessionFlags = {}): void {
   if (flags.archiveMode) {
     for (const control of ['logout-button', 'world-minimap', 'whisper-toggle', 'salud-chip', 'salud-indicador']) el(control).hidden = true;
   }
-  if (flags.tapeEnabled || flags.archiveMode) startTape();
+  if (flags.archiveCuts) {
+    el('game').setAttribute('aria-label', 'Cortes guardados del mundo');
+    el('map-loading').hidden = true;
+    el('sound-toggle').hidden = true;
+    archiveCuts = mountArchiveCuts(el('dvr-bar'), receiveArchiveCut, () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'));
+    renderStatus();
+  } else if (flags.tapeEnabled || flags.archiveMode) startTape();
   connection?.start();
 }
 
@@ -572,7 +581,7 @@ function startClientUi(): void {
         if (!whisperPicked && !el('whisper-drawer').hidden) followWhisperTile(); // lo que se ve en el formulario es lo que se envía
       }
       // Con el mundo en pausa (o la cinta detenida) el paisaje conserva sus camas pero no repite golpes sobre un fotograma congelado.
-      if (!world.paused && !(dvr?.enabled && !dvr.playing)) soundscape.update(world, { ...viewport, zoom: camera.zoom });
+      if (!sessionFlags.archiveCuts && !world.paused && !(dvr?.enabled && !dvr.playing)) soundscape.update(world, { ...viewport, zoom: camera.zoom });
     } catch { /* La cámara visible manda; el minimapa y el sonido son accesorios. */ }
   };
   uiRaf = requestAnimationFrame(frame);
@@ -613,7 +622,7 @@ async function refreshSalud(): Promise<void> {
   ultimaSalud = salud; renderSaludIndicador();
 }
 /** Reparto de los átomos que ve este navegador, lectura a lectura, para el ciclo del panel «Materia». */
-const cicloMateria = cicloVacio();
+let cicloMateria = cicloVacio();
 function anotarMateria(next: WorldView): void {
   const lectura = leerMateria(next.materia);
   if (lectura) anotarCiclo(cicloMateria, lectura);
@@ -765,6 +774,25 @@ function wireClientUi(): void {
   });
 }
 
+function receiveArchiveCut(next: WorldView, foco: { x: number; y: number }): void {
+  const first = world === null;
+  tileCache.clear();
+  cronica.clear(); evidenceDirty = true; cicloMateria = cicloVacio();
+  recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos();
+  focusedRecipe = null; focusedCommunity = null; buscando = null; grafo = null;
+  populationSignature = ''; inspectorSignature = ''; statsSignature = '';
+  inspectorTab = 'now';
+  activePersonId = next.people.find(p => p.role === 'S')?.id ?? next.people[0]?.id ?? 's';
+  following = false; control = 'inspect';
+  landscape?.setHome(null);
+  landscape?.focusTile(foco.x, foco.y);
+  selected = { kind: 'tile', ...foco };
+  landscape?.select(selected);
+  receiveWorld(next);
+  // El encuadre inicial del paisaje usa S. En el archivo fija la casilla al terminar de cargar.
+  if (first) landscape?.focusTile(foco.x, foco.y);
+}
+
 function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.tiles, changedTiles?: readonly Tile[]): void {
   anotarMateria(next);
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
@@ -779,7 +807,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
   renderTelemetryHud(next); renderSaludIndicador();
   const firmaCapas = [...capasV23Disponibles(next)].join(); if (firmaCapas !== capasV23Firma) { capasV23Firma = firmaCapas; renderLayers(); }
   acumularCronica(next.events);
-  if (first) {
+  if (first && !sessionFlags.archiveCuts) {
     if (!sessionFlags.archiveMode) {
       try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
     }
@@ -846,7 +874,7 @@ function renderPopulation(): void {
   const found = `${number(matches.length)} coincidencias${matches.length > shown.length ? ` · se muestran ${number(shown.length)}` : ''}`;
   // Sin directorio global, el recuento honesto de siempre: lo recibido por la cámara frente al censo del mundo.
   el('population-count').textContent = !directory && populationKind === 'people' ? `${rotuloRecuento(world)}${query ? ` · ${found}` : ''}` : `${number(totals ?? rows.length)}${directory ? ' en el mundo' : ' recibidos'} · ${found}`;
-  el('population-note').textContent = sessionFlags.archiveMode ? 'Lo que se conserva en la vista de este fotograma.' : observerNote(directory ? `Directorio global · paso ${directory.tick}${directoryState === 'failed' ? ' (no se pudo actualizar; se reintenta solo)' : ''}.${fauna ? ' La fauna está agrupada en rebaños; toca uno para inspeccionar el lugar y sus individuos recibidos.' : ''}` : directoryState === 'loading' ? 'Cargando el directorio global… mientras tanto se muestra lo recibido por la cámara.' : 'Directorio global no disponible. Se muestra solo la instantánea recibida por la cámara; se reintenta solo.');
+  el('population-note').textContent = sessionFlags.archiveMode ? (sessionFlags.archiveCuts ? 'Habitantes, fauna y obras guardados en este corte.' : 'Lo que se conserva en la vista de este fotograma.') : observerNote(directory ? `Directorio global · paso ${directory.tick}${directoryState === 'failed' ? ' (no se pudo actualizar; se reintenta solo)' : ''}.${fauna ? ' La fauna está agrupada en rebaños; toca uno para inspeccionar el lugar y sus individuos recibidos.' : ''}` : directoryState === 'loading' ? 'Cargando el directorio global… mientras tanto se muestra lo recibido por la cámara.' : 'Directorio global no disponible. Se muestra solo la instantánea recibida por la cámara; se reintenta solo.');
   const html = shown.map(row => `<button type="button" class="population-person${row.kind === 'animal' ? ' animal-row' : ''}"${row.kind === 'person' && row.id ? ` data-person="${esc(row.id)}" aria-pressed="${row.id === activePersonId && selected.kind === 'person'}"` : row.kind === 'animal' && row.id ? ` data-animal="${esc(row.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === row.id}"` : ''} data-directory-kind="${row.kind}" data-directory-id="${esc(row.id ?? '')}" data-directory-x="${esc(row.x)}" data-directory-y="${esc(row.y)}"><span><strong>${esc(row.name)}${row.tame ? ' <b class="tame-badge">Habituado / manso</b>' : ''}</strong><small>${esc(row.detail)}</small><small>${esc(row.x)}, ${esc(row.y)}</small></span>${icon.arrow}</button>`).join('') + (matches.length > shown.length ? '<p class="drawer-note">Hay más resultados: escribe un nombre, oficio, comunidad o coordenadas para afinar la búsqueda.</p>' : '') || '<p class="drawer-note">No hay coincidencias en la información recibida.</p>';
   if (populationSignature !== html) { populationSignature = html; el('population-list').innerHTML = html; }
 }
@@ -974,8 +1002,8 @@ function renderControls(): void {
 function renderStatus(): void {
   if (!document.getElementById('connection-label')) return;
   if (sessionFlags.archiveMode) {
-    el('connection-label').textContent = 'Grabación';
-    el('connection-notice').hidden = world !== null;
+    el('connection-label').textContent = sessionFlags.archiveCuts ? 'Cortes guardados' : 'Grabación';
+    el('connection-notice').hidden = !!sessionFlags.archiveCuts || world !== null;
     el('connection-notice').textContent = 'Cargando la grabación…';
     renderControls(); if (!el('stats-drawer').hidden) renderStats();
     return;

@@ -732,6 +732,7 @@ export class Landscape {
   // de `decidirModo()` cuando no se pasa ninguno explícito. Se asigna en el constructor (no aquí,
   // en el inicializador de campo) porque ahí ya existe `options`.
   private readonly modo: Modo;
+  private readonly cutArchive: boolean;
   private lastFrameAt = 0;
 
   private pointers = new Map<number, PointerState>();
@@ -753,13 +754,14 @@ export class Landscape {
   private readonly onKeyDown = (e: KeyboardEvent): void => this.handleKeyDown(e);
   private readonly onWindowResize = (): void => this.resize();
   private readonly onMotionChange = (e: MediaQueryListEvent): void => {
-    this.reduceMotion = e.matches;
+    this.reduceMotion = this.cutArchive || e.matches;
   };
 
-  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void, options: { allowSoftwareWebGL?: boolean; modo?: 'completo' | 'observador' } = {}) {
+  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void, options: { allowSoftwareWebGL?: boolean; modo?: 'completo' | 'observador'; cutArchive?: boolean } = {}) {
     this.canvas = canvas;
     this.onSelect = onSelect;
     this.modo = options.modo ?? decidirModo();
+    this.cutArchive = !!options.cutArchive;
 
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) throw new Error('Landscape: este navegador no expone un contexto 2D.');
@@ -790,13 +792,13 @@ export class Landscape {
     canvas.setAttribute('role', 'img');
     canvas.setAttribute(
       'aria-label',
-      'Mundo vivo. Arrastra o usa las flechas para recorrer, más y menos para acercar, Inicio para volver. También puedes seleccionar habitantes y fauna desde el panel Población.',
+      `${this.cutArchive ? 'Corte guardado del mundo' : 'Mundo vivo'}. Arrastra o usa las flechas para recorrer, más y menos para acercar, Inicio para volver. También puedes seleccionar habitantes y fauna desde el panel Población.`,
     );
 
     this.motionQuery =
       typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    this.reduceMotion = this.cutArchive || (this.motionQuery?.matches ?? false);
     if (this.motionQuery) {
-      this.reduceMotion = this.motionQuery.matches;
       this.motionQuery.addEventListener('change', this.onMotionChange);
     }
 
@@ -842,15 +844,16 @@ export class Landscape {
 
     const now = performance.now();
     const first = this.curr === null;
+    if (this.cutArchive && !first) this.clearCut();
     const resubmitted = this.curr === world; // el mismo objeto otra vez: su contenido pudo mutarse en sitio
     // Un eco de cámara (misma `sequence`) no es un paso del servidor: no mide cadencia.
-    this.cadence.observe(world.sequence, world.tick, now);
-    this.interval = this.cadence.tickIntervalMs;
-    // Un eco de cámara (misma `sequence`) sustituye la vista del fotograma sin avanzar el reloj de reproducción.
-    // V22: con la cinta DVR el reproductor ya entrega los fotogramas a su ritmo exacto: no hay colchón V18 que llenar.
-    // Los cuerpos se alimentan al llegar (A→B por `MotionTracker`, sin los 3–6 s de retraso del colchón).
-    if (this.dvrMode) { if (!this.reduceMotion) { this.peopleMotion.ingest(world.people, now); this.animalMotion.ingest(world.animals ?? [], now); } }
-    else this.playback.push(world, world.sequence, world.tick, now);
+    if (!this.cutArchive) {
+      this.cadence.observe(world.sequence, world.tick, now);
+      this.interval = this.cadence.tickIntervalMs;
+      // V22: el DVR ya entrega los fotogramas a su ritmo exacto. Los cuerpos interpolan sin el colchón V18.
+      if (this.dvrMode) { if (!this.reduceMotion) { this.peopleMotion.ingest(world.people, now); this.animalMotion.ingest(world.animals ?? [], now); } }
+      else this.playback.push(world, world.sequence, world.tick, now);
+    }
 
     // A new camera window at the same tick must not restart body interpolation.
     if (!this.curr || this.curr.tick !== world.tick) {
@@ -905,7 +908,7 @@ export class Landscape {
     this.serverWindow = { x: world.originX ?? 0, y: world.originY ?? 0, w: Math.max(0, Math.floor(world.width)), h: Math.max(0, Math.floor(world.height)) };
     // La cámara pudo moverse mientras el servidor terminaba el paso: si su ventana ya no cubre lo que se ve,
     // se compone con la caché (verdad fresca encima) en vez de dejar el hueco hasta el siguiente estado.
-    const view = !first && this.tileCache ? this.visibleBounds() : null;
+    const view = !first && !this.cutArchive && this.tileCache ? this.visibleBounds() : null;
     // V24: si la rejilla ya cubre la cámara y la ventana del servidor, un tick solo parchea sus teselas (antes cada tick
     // recomponía/rehorneaba la ventana entera: al alejar, decenas de miles de teselas 6 veces por segundo).
     if (!first && !resubmitted && this.canPatch(world, view)) this.patchTiles(changedTiles ?? world.tiles, changedTiles === undefined, world.tiles);
@@ -915,6 +918,24 @@ export class Landscape {
     if (first) {
       this.fitWorld();
     }
+  }
+
+  /** Un corte reemplaza la escena completa, incluida la información que una vista continua puede heredar. */
+  private clearCut(): void {
+    this.curr = this.prev = null;
+    this.eventAccents = [];
+    this.playback.clear(); this.peopleMotion.clear(); this.animalMotion.clear();
+    this.atmosphere.reset();
+
+    this.paleta.clear(); this.aire = null; this.aireKey = '';
+    this.reparto = null; this.repartoKey = ''; this.migraciones.clear(); this.loteCache.clear();
+
+    this.sceneKey = ''; this.ambientKey = '';
+    this.sceneProps = null; this.staticPropsOwner = null;
+    this.spriteCache.clear(); this.animalCache.clear(); this.personSprites?.clear(); this.hallSlots.clear();
+    this.layerImages.data = this.layerImages.legacy = null; this.heatImage = null; this.layerDirty = [];
+    this.terrainCache.clear(); this.canopyCache.clear(); this.mapCache.clear(); this.reducedCache?.clear();
+    this.chunks = []; this.groundBaked = false; this.gridTilesRef = null;
   }
 
   /** V18 capa 1.5: colapsa el colchón al estado más reciente (cámara movida u orden directa); luego se vuelve a llenar. */
@@ -2045,7 +2066,7 @@ export class Landscape {
     const world = this.curr;
     if (world && this.groundBaked && this.worldW > 0) {
       const t = now / 1000;
-      this.actionActive = !world.paused && now - this.currAt < Math.max(1200, this.interval * 2);
+      this.actionActive = !this.cutArchive && !world.paused && now - this.currAt < Math.max(1200, this.interval * 2);
       // V18: la fase del día y la lluvia se acercan a lo recibido en ~1,5 s en vez de saltar entre amanecer/día/noche.
       if (this.reduceMotion) this.atmosphere.reset();
       // Con colchón, la luz y la lluvia siguen al mismo instante A→B que se dibuja (no al más reciente).

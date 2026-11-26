@@ -19,7 +19,8 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-demo-agua.test.ts tests/v24-camino-material.test.ts tests/v24-cobijo-material.test.ts tests/v24-evidencia-reloj.test.ts \
   tests/v21-dvr-client.test.ts tests/ola-cintacli-reproductor.test.ts tests/v24-motor-perfil-cpu1.test.ts \
   tests/v24-motor-perfil-paso.test.ts tests/v24-rutas-locales.test.ts tests/fauna-rejilla.test.ts \
-  tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
+  tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-materia-fria-barrera.test.ts \
+  tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
   tests/v24-indice-uid.test.ts tests/v24-indice-frente.test.ts tests/v24-reparto-inicial.test.ts \
   tests/v24-apertura-lineal.test.ts tests/v24-vecinos-localidad.test.ts tests/digesto-validacion.test.ts \
   tests/v24-motor-corte-transferible.test.ts tests/v24-motor-cronica.test.ts tests/v24-motor-confirmar-guardado.test.ts \
@@ -31,6 +32,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-cinta-pavimento.test.ts tests/v24-cinta-fuente.test.ts tests/v20-roads.test.ts tests/v20-visuals.test.ts \
   tests/v23-motor-fotograma-retirada.test.ts \
   tests/v24-worldmap-whispers.test.ts tests/v23-topes-reguladores.test.ts \
+  tests/v24-pulso-espejo.test.ts tests/v18-sim-worker-gateway.test.ts tests/v24-sim-hz.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
   tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
   tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/ola-b-cuerpo.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \

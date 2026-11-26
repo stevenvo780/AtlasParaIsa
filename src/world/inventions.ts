@@ -953,28 +953,35 @@ function costeEnsayoObraJ(): number {
 function inventarObra(c: CtxLeyMateria, persona: Person, emit: Emit): boolean {
   const mundo = c.mundo, cuerpo = persona.cuerpo;
   if (!mundo.noveltyEnabled || !cuerpo || !puedeTrabajarEn(c, persona, celdaObra(c, persona))) return false;
-  const [candidato] = candidatosObra(c, persona);
-  if (!candidato?.planoMaterial) return false;
-  const coste = costeEnsayoObraJ(), pago = pagar(c, cuerpo, coste);
-  if (pago < coste) return false;
-  const { planoMaterial } = candidato;
-  const serial = c.globales.registro.insertar(new TextEncoder().encode(JSON.stringify(
-    ['obra-v23', planoMaterial.area, planoMaterial.compacto, planoMaterial.forma],
-  )));
-  const padre = mundo.blueprints.find(b => b.id === candidato.parents[0])!;
-  const plano: BlueprintView & { planoMaterial: PlanoObra } = {
-    id: `${PREFIJO_PLANO_OBRA}${serial}`, name: `Obra de ${planoMaterial.area} celdas`, generation: padre.generation + 1,
-    parents: candidato.parents, inventorId: persona.id, tick: mundo.tick, components: candidato.components,
-    uses: 0, usefulness: 0, cost: { wood: 0, stone: 0, work: 0 }, planoMaterial,
-  };
-  mundo.blueprintCounter = Math.max(mundo.blueprintCounter, serial);
-  mundo.blueprints.push(plano);
-  mundo.inventionDynamics.attempts++;
-  mundo.inventionDynamics.accepted++;
-  persona.lastInvention = mundo.tick; persona.blueprintId = plano.id;
-  emit({ kind: 'invention', actors: [persona.id], x: persona.x, y: persona.y, source: 'simulation',
-    text: `${persona.name} ensayó otra planta de obra.`, cause: `Ensayo de una variación sobre ${padre.name} con ${pago} J de trabajo.` });
-  return true;
+  const coste = costeEnsayoObraJ();
+  for (const candidato of candidatosObra(c, persona)) {
+    const { planoMaterial } = candidato;
+    if (!planoMaterial) continue;
+    const canonico = new TextEncoder().encode(JSON.stringify(
+      ['obra-v23', planoMaterial.area, planoMaterial.compacto, planoMaterial.forma],
+    ));
+    let pago: number | undefined;
+    const serial = c.globales.registro.insertarNuevo(canonico, () => (pago = pagar(c, cuerpo, coste)) >= coste);
+    if (serial === undefined) {
+      if (pago !== undefined) return false;
+      continue;
+    }
+    const padre = mundo.blueprints.find(b => b.id === candidato.parents[0])!;
+    const plano: BlueprintView & { planoMaterial: PlanoObra } = {
+      id: `${PREFIJO_PLANO_OBRA}${serial}`, name: `Obra de ${planoMaterial.area} celdas`, generation: padre.generation + 1,
+      parents: candidato.parents, inventorId: persona.id, tick: mundo.tick, components: candidato.components,
+      uses: 0, usefulness: 0, cost: { wood: 0, stone: 0, work: 0 }, planoMaterial,
+    };
+    mundo.blueprintCounter = Math.max(mundo.blueprintCounter, serial);
+    mundo.blueprints.push(plano);
+    mundo.inventionDynamics.attempts++;
+    mundo.inventionDynamics.accepted++;
+    persona.lastInvention = mundo.tick; persona.blueprintId = plano.id;
+    emit({ kind: 'invention', actors: [persona.id], x: persona.x, y: persona.y, source: 'simulation',
+      text: `${persona.name} ensayó otra planta de obra.`, cause: `Ensayo de una variación sobre ${padre.name} con ${pago} J de trabajo.` });
+    return true;
+  }
+  return false;
 }
 export function inventionOpportunity(world: World, person: Person): { score: number; target: Point; reason: string } | undefined {
   if (ley(world, 'obra')) {

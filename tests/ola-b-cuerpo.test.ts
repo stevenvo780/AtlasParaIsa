@@ -6,8 +6,9 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { initialDemography } from '../src/world/demography.js';
-import { DATO_GOLPEAR, REF_NULA, type Intento, type Registro } from '../src/world/motor/contratos.js';
+import { DATO_GOLPEAR, REF_NULA, type Intento } from '../src/world/motor/contratos.js';
 import type { CtxLeyMateria } from '../src/world/motor/acceso.js';
+import { RegistroContenido } from '../src/world/motor/registro.js';
 import { crearPlantilla } from '../src/world/materia/copiar.js';
 import {
   KAPPA_HUMANA, MASA_ADULTA_HUMANA, T_CUERPO, abonar, abortar, apetitoDeTejido, basalJ, beber, cargaKg, concebir, crearCuerpo, crecer, entorno,
@@ -17,19 +18,6 @@ import {
 import { Parte, Rol, type LoteRef, type VistaCuerpo } from '../src/world/materia/tipos.js';
 import { materiaReal, azarSembrado } from './lib/materia-real.js';
 
-class RegistroPrueba implements Registro {
-  private readonly ids = new Map<string, number>();
-  private readonly bytes: Uint8Array[] = [];
-  insertar(c: Uint8Array): number {
-    const k = Buffer.from(c).toString('hex');
-    let id = this.ids.get(k);
-    if (id === undefined) { this.ids.set(k, id = this.bytes.length); this.bytes.push(Uint8Array.from(c)); }
-    return id;
-  }
-  leer(id: number): Uint8Array | undefined { return this.bytes[id]; }
-  get n(): number { return this.bytes.length; }
-}
-
 const m = materiaReal({ capacidad: 1024 });
 after(() => m.cerrar());
 const enviados: Intento[] = [];
@@ -37,7 +25,7 @@ let nonce = 1;
 const azar = azarSembrado(7);
 const c = {
   tick: 100, hilo: 0, materia: m.arena, quimica: m.quimica, libro: m.libro, azar,
-  globales: { registro: new RegistroPrueba(), lugares: new Map(), comunidades: new Map(), version: 0 },
+  globales: { registro: new RegistroContenido(1), lugares: new Map(), comunidades: new Map(), version: 0 },
   terreno: { duenoChunk: Int16Array.of(0), chunkDe: (celda: number) => celda >> 8 },
   buzon: { enviar: (_h: number, i: Intento) => { enviados.push({ ...i, materia: i.materia && Float64Array.from(i.materia) }); } },
   id: () => nonce++,
@@ -64,7 +52,7 @@ test('la plantilla humana se balancea y vuelve igual del Registro', () => {
   assert.equal(humana.sintesis.dH, 0, 'asimilación: las entradas son las partes');
   assert.deepEqual([...humana.kappa], [...KAPPA_HUMANA]);
   assert.equal(humana.masaAdulta, MASA_ADULTA_HUMANA);
-  const registro = new RegistroPrueba(), S = m.S;
+  const registro = new RegistroContenido(1), S = m.S;
   const otra = crearPlantilla(m.quimica, registro, {
     partes: [{ id: S.madera, nu: 20 }, { id: S.CH2, nu: 2 }, { id: S.proteina, nu: 2 }, { id: S.orgP, nu: 1 }],
     entradas: [S.CO2, S.H2O, S.NH3, S.H3PO4], subproductos: [S.O2], kappa: [0, 0, 0, 0], captura: 0.1, masaAdulta: 1, m0: 0.05, linaje: 3,

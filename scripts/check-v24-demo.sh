@@ -20,7 +20,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v21-dvr-client.test.ts tests/ola-cintacli-reproductor.test.ts tests/v24-motor-perfil-cpu1.test.ts \
   tests/v24-motor-perfil-paso.test.ts tests/v24-rutas-locales.test.ts tests/fauna-rejilla.test.ts \
   tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
-  tests/v24-indice-uid.test.ts tests/v24-indice-frente.test.ts \
+  tests/v24-indice-uid.test.ts tests/v24-indice-frente.test.ts tests/v24-reparto-inicial.test.ts \
   tests/v24-materia-tramos-store.test.ts tests/v24-vmat-tramos.test.ts tests/v24-snapshot-matter-parts.test.ts \
   tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \
@@ -28,7 +28,8 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
   tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
   tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/ola-b-cuerpo.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \
-  tests/v23-motor-carga-rocosa.test.ts 2>&1 | tee "$evidencia/pruebas.log"
+  tests/v23-motor-carga-rocosa.test.ts tests/v23-motor-guardado-carga.test.ts \
+  tests/v23-motor-guardado-global.test.ts tests/v23-motor-guardado-planos.test.ts 2>&1 | tee "$evidencia/pruebas.log"
 node --import tsx --test --test-timeout=30000 \
   --test-name-pattern='^(la vista se comparte|una página solo sube|las páginas históricas)' \
   tests/v23-decision-percepcion.test.ts 2>&1 | tee "$evidencia/percepcion-paginas.log"

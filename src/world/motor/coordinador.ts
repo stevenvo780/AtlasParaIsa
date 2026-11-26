@@ -21,6 +21,7 @@ import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { BrokerPercepcionGpu, resolverDuenosPercepcionGpu,
   type DuenosBroker, type EpocaBrokerPercepcion, type PercibidorBroker } from '../gpu/broker-percepcion.js';
+import { pruneBonds } from '../lineage.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
@@ -37,7 +38,7 @@ import { archivarChunk, tomarChunk, validCoordinate } from '../spatial.js';
 import { recordSample } from '../statistics.js';
 import { chunkKey } from '../terrain.js';
 import { tileLookup } from '../tile-index.js';
-import { duenoDeVecino, repartirPorTramos } from './bloques.js';
+import { duenoDeVecino, pesosInicialesPorPoblacion, repartirPorTramos } from './bloques.js';
 import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
@@ -109,6 +110,7 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
   const hilos = config.hilos === 'auto' ? (paramsOf(mundo).v23.duenos ? availableParallelism() : 1) : config.hilos;
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
   if (config.reservaLotesMateria !== undefined) validarReservaLotesMateria(config.reservaLotesMateria);
+  if (config.repartoInicial !== undefined && config.repartoInicial !== 'poblacion') throw new RangeError('Reparto inicial inválido.');
   const duenosGpu = resolverDuenosPercepcionGpu(hilos, config.gpu, config.duenosPercepcionGpu);
   if (config.duenosPercepcionGpu !== undefined && !duenosGpu) throw new RangeError('Asignación de dueños CUDA inválida.');
   if (hilos === 1) return new MotorUnico(mundo, config);
@@ -354,9 +356,10 @@ class MotorDuenos implements Motor {
     d.avisar = (clase, i) => this.#aviso(clase, i);
     d.prepararEpoca();
 
-    // Páginas y reparto inicial: tramos Morton con el mismo peso por chunk (aún no hay coste medido).
+    // Aún no hay coste medido: los tramos Morton tienen peso uniforme salvo en el brazo de población.
     const claves = Object.keys(m.chunks), px = Int32Array.from(claves, k => m.chunks[k]!.cx), py = Int32Array.from(claves, k => m.chunks[k]!.cy);
-    const duenos = repartirPorTramos(px, py, hilos), chunks = new Int32Array(claves.length);
+    const pesos = this.#config.repartoInicial === 'poblacion' ? pesosInicialesPorPoblacion(claves, m.people) : undefined;
+    const duenos = repartirPorTramos(px, py, hilos, pesos), chunks = new Int32Array(claves.length);
     for (let i = 0; i < claves.length; i++) {
       const chunk = chunks[i] = terreno.asegurarPagina(px[i]!, py[i]!, duenos[i]!);
       d.tenerChunk(chunk, claves[i]!);
@@ -663,6 +666,18 @@ class MotorDuenos implements Motor {
         if (mig.persona) world.people.push(mig.persona.persona);
         if (mig.animal) world.animals.push(mig.animal.animal);
       }
+    }
+    // El padrón de F0 todavía puede contener las bajas que se confirmaron en F5.
+    const bajas = world.retiredLegacy.filter(persona => persona.diedAt === world.tick);
+    if (bajas.length) {
+      pruneBonds(world.people, bajas);
+      const ids = new Set(bajas.map(persona => persona.id));
+      world.communities = world.communities.filter(comunidad => {
+        if (!comunidad.members.some(id => ids.has(id))) return true;
+        comunidad.members = comunidad.members.filter(id => !ids.has(id));
+        if (comunidad.memberCount !== undefined) comunidad.memberCount = comunidad.members.length;
+        return comunidad.members.length > 0;
+      });
     }
     if (paramsOf(world).v23.fauna) syncFauna(world.tiles, world.animals);
     return { world, pendientes };

@@ -92,6 +92,17 @@ export class RegistroContenido implements Registro {
     });
   }
 
+  insertarNuevo(canonico: Uint8Array, aceptar: () => boolean): number | undefined {
+    const copia = new Uint8Array(canonico);
+    const hash = clave(copia);
+    if (this.indices.has(hash)) return;
+    return this.conEscritor(() => {
+      this.sincronizar();
+      if (this.indices.has(hash) || !aceptar()) return;
+      return this.agregar(copia, hash);
+    });
+  }
+
   /** Formato denso LE: número de ids, fines acumulados, bytes canónicos en orden de id. */
   guardar(): Uint8Array {
     const n = this.n, cabecera = (n + 1) * BYTES;

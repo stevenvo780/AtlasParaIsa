@@ -249,7 +249,10 @@ export interface Registro {
 export interface Globales {
   lugares: ReadonlyMap<string, PlaceView>;
   comunidades: ReadonlyMap<string, CommunityView>;
-  registro: Registro;
+  registro: Registro & {
+    /** Solo quien crea la entrada puede publicar su ficha. La condición se evalúa si la firma aún está libre. */
+    insertarNuevo(canonico: Uint8Array, aceptar: () => boolean): number | undefined;
+  };
   version: number;
 }
 
@@ -515,6 +518,8 @@ export interface MotorConfig {
   reservaLotesMateria?: number;
   /** Laboratorio: comparte la búsqueda de uid entre los dueños del motor. */
   indiceUidCompartido?: boolean;
+  /** Laboratorio: pondera el reparto al abrir una época con peso 1 más una unidad por persona residente. */
+  repartoInicial?: 'poblacion';
   /** Instrumento de laboratorio para el paso V23. El reloj nunca interviene en la simulación. */
   medirPaso?: boolean;
   /** Con `hilos: 'auto'`: el coordinador mide los Hz con T y ¾T dueños y llama a `elegir(medidas)` (Hz por número de

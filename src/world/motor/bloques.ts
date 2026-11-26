@@ -4,6 +4,23 @@
  * (`motor/rebalanceo.ts`) y entra por aquí cuando `v23.rebalanceo` está encendido.
  */
 import { mortonCode } from '../soa/morton.js';
+import { validCoordinate } from '../spatial.js';
+import { chunkKey } from '../terrain.js';
+import type { Point } from '../mundo/geometria.js';
+
+/** Coste inicial de laboratorio, alineado con las páginas presentes al abrir la época. */
+export function pesosInicialesPorPoblacion(claves: readonly string[], personas: readonly Point[]): Float64Array {
+  const pesos = new Float64Array(claves.length).fill(1);
+  const posiciones = new Map<string, number>();
+  for (let i = 0; i < claves.length; i++) posiciones.set(claves[i]!, i);
+  for (const { x, y } of personas) {
+    const celdaX = Math.floor(x), celdaY = Math.floor(y);
+    if (!validCoordinate(celdaX) || !validCoordinate(celdaY)) continue;
+    const posicion = posiciones.get(chunkKey(celdaX, celdaY));
+    if (posicion !== undefined) pesos[posicion]!++;
+  }
+  return pesos;
+}
 
 /** Índices de los chunks (posiciones en `px` y `py`) en orden Morton de su página. */
 export function ordenMorton(px: ArrayLike<number>, py: ArrayLike<number>): Int32Array {

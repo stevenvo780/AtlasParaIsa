@@ -1,7 +1,5 @@
 import { types } from 'node:util';
-import {
-  isPackedPersonWeight, preparePackedPerson, type PackedPersonRow, WPF1_WEIGHT_BYTES, WPF1_WEIGHT_COUNT,
-} from '../../server/snapshot-packed-people.js';
+import { conservarPesosWpf1, preparePackedPerson, type PackedPersonRow, WPF1_WEIGHT_BYTES } from '../../server/snapshot-packed-people.js';
 import { clavesJsonUnicas } from '../../shared/json-keys.js';
 import type { Person } from '../mundo/tipos.js';
 import type { ParteMundo } from './reunir.js';
@@ -249,7 +247,9 @@ function bufferEntero(datos: unknown): datos is Uint8Array & { buffer: ArrayBuff
     && datos.byteOffset === 0 && datos.byteLength === datos.buffer.byteLength;
 }
 
-export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[], cantidad: number): Person[] {
+/** El puerto puede ceder los buffers de pesos. Los demás llamadores conservan la propiedad de sus bytes. */
+export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[], cantidad: number,
+  { transferirPesos = false }: { transferirPesos?: boolean } = {}): Person[] {
   if (!Number.isSafeInteger(cantidad) || cantidad < 0 || cantidad > 0xffff_ffff || !Array.isArray(bloques))
     throw new Error('Rango de personas directas inválido.');
   const personas: Person[] = [], tramos: TramoPersonasVerificadas[] = [], buffers = new WeakSet<ArrayBuffer>();
@@ -260,8 +260,8 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
       throw new Error('Bloque de personas directas inválido.');
     const { filas, cuerpo, pesos } = bloque;
     for (const bytes of [cuerpo, pesos]) {
-      if (!bytes.byteLength) continue;
       if (buffers.has(bytes.buffer)) throw new Error('Buffer repetido en personas directas.');
+      if (!bytes.byteLength) continue;
       buffers.add(bytes.buffer);
     }
     const anchoMascara = Math.ceil(filas / 8), resto = filas & 7;
@@ -275,7 +275,8 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
     const texto = utf8Estricto.decode(cuerpo.subarray(anchoMascara));
     const lineas = texto.split('\n', filas + 1);
     if (lineas.length !== filas) throw new Error('Cantidad de personas directas inválida.');
-    const desde = personas.length, preparadas: PackedPersonRow[] = [], datos = new DataView(pesos.buffer);
+    const desde = personas.length, preparadas: PackedPersonRow[] = [];
+    const conservar = marcadas ? conservarPesosWpf1(pesos, transferirPesos) : undefined;
     let offset = 0;
     for (let i = 0; i < filas; i++) {
       const linea = lineas[i]!, separador = linea.indexOf(',\t');
@@ -286,23 +287,18 @@ export function recibirPersonasDirectas(bloques: readonly BloquePersonasCorte[],
       const ausencias = conAusencias ? ausenciasDe(linea.slice(separador + 2, -1)) : undefined;
       const persona = validarYRestaurar(JSON.parse(json), ausencias);
       if (!filaPersona(persona)) throw new Error('Fila de persona directa inválida.');
-      let weights: readonly number[] | undefined;
       if ((cuerpo[i >>> 3]! & (1 << (i & 7))) !== 0) {
         const policy = persona.policy;
         if (!Object.hasOwn(persona, 'policy') || !registro(policy) || Object.keys(policy).length !== 1
           || !Object.hasOwn(policy, 'weights') || !Array.isArray(policy.weights) || policy.weights.length !== 0)
           throw new Error('Marcador de pesos de persona directa inválido.');
-        const valores = new Array<number>(WPF1_WEIGHT_COUNT);
-        for (let j = 0; j < valores.length; j++, offset += Float64Array.BYTES_PER_ELEMENT) {
-          const peso = datos.getFloat64(offset, true);
-          if (!isPackedPersonWeight(peso)) throw new Error('Peso de persona directa inválido.');
-          valores[j] = peso;
-        }
-        policy.weights = valores.slice();
-        weights = Object.freeze(valores);
+        const { fila, pesos: valores } = conservar!(json, offset);
+        offset += WPF1_WEIGHT_BYTES;
+        policy.weights = valores;
+        preparadas.push(fila);
+      } else {
+        preparadas.push(Object.freeze({ json, bytes: Buffer.byteLength(json) }));
       }
-      const bytes = Buffer.byteLength(json) + (weights ? WPF1_WEIGHT_BYTES : 0);
-      preparadas.push(Object.freeze(weights ? { json, bytes, weights } : { json, bytes }));
       personas.push(persona as unknown as Person);
     }
     if (!clavesJsonUnicas(texto)) throw new Error('Personas directas con claves repetidas.');

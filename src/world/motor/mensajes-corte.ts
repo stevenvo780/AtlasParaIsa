@@ -198,10 +198,11 @@ export class CanalesCorte {
             if (!sustituidas || typeof sustituidas !== 'object' || contenido.people.length !== 0
               || Object.keys(contenido.people).length !== 0 || !Array.isArray(parte.personas))
               throw new Error('Sobre de personas directas incoherente.');
+            const bytesFilas = parte.personas.reduce((n, bloque) => n + bloque.cuerpo.byteLength + bloque.pesos.byteLength, 0);
             const inicioFilas = performance.now();
-            contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad);
+            contenido.people = recibirPersonasDirectas(parte.personas, sustituidas.cantidad, { transferirPesos: true });
             datosPersonas.filasMs += performance.now() - inicioFilas;
-            datosPersonas.bytesFilas += parte.personas.reduce((n, bloque) => n + bloque.cuerpo.byteLength + bloque.pesos.byteLength, 0);
+            datosPersonas.bytesFilas += bytesFilas;
             datosPersonas.duenosFilas++;
           }
         } catch (error) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { deserialize, serialize } from 'node:v8';
-import { preparePackedPerson, WPF1_WEIGHT_BYTES } from '../src/server/snapshot-packed-people.js';
+import { encodePackedPeoplePage, preparePackedPerson, WPF1_WEIGHT_BYTES } from '../src/server/snapshot-packed-people.js';
 import { escalon } from '../src/shared/interruptores.js';
 import {
   personasVerificadasDe, prepararPersonasDirectas, recibirPersonasDirectas, tomarPersonasVerificadas,
@@ -55,11 +55,16 @@ test('el corte directo recupera la forma V8 y prepara las mismas filas WPF1 de u
   const verificado = personasVerificadasDe(personas);
   assert.ok(verificado);
   const filas = verificado.tramos.flatMap(tramo => tramo.filas);
-  assert.deepEqual(filas, parte.people.map(p => preparePackedPerson(p as unknown as Record<string, unknown>)));
-  assert.ok(Object.isFrozen(filas[0]) && Object.isFrozen(filas[0]!.weights));
+  const canonico = encodePackedPeoplePage(parte.people.map(p => preparePackedPerson(p as unknown as Record<string, unknown>)));
+  assert.deepEqual(encodePackedPeoplePage(filas), canonico);
+  assert.ok(Object.isFrozen(filas[0]));
   assert.equal(verificado.modificadas.size, 0);
   restaurada.policy!.weights[0] = 1;
-  assert.ok(Object.is(filas[0]!.weights![0], -0));
+  for (const bloque of movidos) {
+    bloque.pesos.fill(0);
+    bloque.cuerpo.fill(0);
+  }
+  assert.deepEqual(encodePackedPeoplePage(filas), canonico);
   assert.equal(tomarPersonasVerificadas(personas), verificado);
   assert.equal(personasVerificadasDe(personas), undefined);
 });
@@ -117,6 +122,20 @@ function bloqueManual(texto: string, mascara = 0, pesos = new Uint8Array()): Blo
   cuerpo.set(bytes, 1);
   return { filas: 1, cuerpo, pesos };
 }
+
+test('el puerto consume los pesos y detecta alias aunque el buffer previo ya se haya desprendido', () => {
+  const json = '{"id":"i","x":0,"y":0,"policy":{"weights":[]}}';
+  const pesos = new Uint8Array(WPF1_WEIGHT_BYTES);
+  new DataView(pesos.buffer).setFloat64(0, -0, true);
+  const personas = recibirPersonasDirectas([bloqueManual(json, 1, pesos)], 1, { transferirPesos: true });
+  assert.equal(pesos.buffer.byteLength, 0);
+  assert.ok(Object.is(personas[0]!.policy!.weights[0], -0));
+
+  const compartidos = new Uint8Array(WPF1_WEIGHT_BYTES);
+  assert.throws(() => recibirPersonasDirectas([
+    bloqueManual(json, 1, compartidos), bloqueManual(json, 0, compartidos),
+  ], 2, { transferirPesos: true }), /Buffer repetido/);
+});
 
 test('el receptor rechaza bytes, pesos, recuentos y formas incoherentes', () => {
   const valida = '{"id":"i","x":0,"y":0}', bloque = bloqueManual(valida);

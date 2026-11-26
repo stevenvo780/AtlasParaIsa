@@ -25,6 +25,8 @@ export interface PackedPersonRow {
   readonly bytes: number;
 }
 
+const binaryWeights = new WeakMap<PackedPersonRow, { body: Buffer; offset: number }>();
+
 function failure(reason: string, cause?: unknown): never {
   throw new SnapshotSemanticError(`Invalid WPF1 people page ${reason}. Explicit recovery required.`, { cause });
 }
@@ -83,6 +85,32 @@ export function preparePackedPerson(record: Record<string, unknown>): PackedPers
   return jsonRow(prepared, weights);
 }
 
+/** Captura el cuerpo en bloque. Las filas preparadas retienen sus bytes privados y la persona recibe su array mutable. */
+export function conservarPesosWpf1(cuerpo: Uint8Array, transferir = false):
+  (json: string, offset: number) => { fila: PackedPersonRow; pesos: number[] } {
+  let body: Buffer;
+  if (transferir) {
+    const buffer = cuerpo.buffer;
+    if (!(buffer instanceof ArrayBuffer) || cuerpo.byteOffset !== 0 || cuerpo.byteLength !== buffer.byteLength)
+      throw new Error('El bloque de pesos directos debe ocupar su propio ArrayBuffer.');
+    body = Buffer.from(structuredClone(buffer, { transfer: [buffer] }));
+  } else body = Buffer.from(cuerpo);
+  const data = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  return (json, offset) => {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset % WPF1_WEIGHT_BYTES !== 0
+      || offset + WPF1_WEIGHT_BYTES > data.byteLength) throw new Error('Rango de pesos de persona directa inválido.');
+    const pesos = new Array<number>(WPF1_WEIGHT_COUNT);
+    for (let i = 0, cursor = offset; i < pesos.length; i++, cursor += Float64Array.BYTES_PER_ELEMENT) {
+      const peso = data.getFloat64(cursor, true);
+      if (!isPackedPersonWeight(peso)) throw new Error('Peso de persona directa inválido.');
+      pesos[i] = peso;
+    }
+    const fila = Object.freeze({ json, bytes: Buffer.byteLength(json) + WPF1_WEIGHT_BYTES });
+    binaryWeights.set(fila, { body, offset });
+    return { fila, pesos };
+  };
+}
+
 function u32(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0 && value <= MAX_U32;
 }
@@ -109,13 +137,12 @@ export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer
   const count = rows.length;
   let packedCount = 0, sumRowBytes = 0;
   for (const row of rows) {
+    const packed = row.weights !== undefined || binaryWeights.has(row);
     if (typeof row.json !== 'string' || !row.json.startsWith('{') || !row.json.endsWith('}')
-      || row.bytes !== Buffer.byteLength(row.json) + (row.weights === undefined ? 0 : WPF1_WEIGHT_BYTES))
+      || row.bytes !== Buffer.byteLength(row.json) + (packed ? WPF1_WEIGHT_BYTES : 0))
       failure('row byte count');
-    if (row.weights !== undefined) {
-      if (row.weights.length !== WPF1_WEIGHT_COUNT) failure('weight count');
-      packedCount++;
-    }
+    if (row.weights !== undefined && row.weights.length !== WPF1_WEIGHT_COUNT) failure('weight count');
+    if (packed) packedCount++;
     sumRowBytes += row.bytes;
   }
   const size = packedPeoplePageBytes(count, sumRowBytes);
@@ -134,12 +161,16 @@ export function encodePackedPeoplePage(rows: readonly PackedPersonRow[]): Buffer
   for (let i = 0; i < count; i++) {
     if (i > 0) body[json++] = 0x2c; // ,
     const row = rows[i]!;
-    const bytes = row.bytes - (row.weights === undefined ? 0 : WPF1_WEIGHT_BYTES);
+    const stored = binaryWeights.get(row), weights = row.weights;
+    const packed = stored !== undefined || weights !== undefined;
+    const bytes = row.bytes - (packed ? WPF1_WEIGHT_BYTES : 0);
     json += body.write(row.json, json, bytes, 'utf8');
-    if (row.weights === undefined) continue;
-    body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
-    for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
-      const value = row.weights[j];
+    if (packed) body[HEADER_BYTES + (i >>> 3)]! |= 1 << (i & 7);
+    if (stored) {
+      stored.body.copy(body, binary, stored.offset, stored.offset + WPF1_WEIGHT_BYTES);
+      binary += WPF1_WEIGHT_BYTES;
+    } else if (weights) for (let j = 0; j < WPF1_WEIGHT_COUNT; j++, binary += Float64Array.BYTES_PER_ELEMENT) {
+      const value = weights[j];
       if (!isPackedPersonWeight(value)) failure('weight value');
       data.setFloat64(binary, value, true);
     }

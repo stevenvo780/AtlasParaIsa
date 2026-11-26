@@ -47,7 +47,7 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
   /** V21: same rule as the worker (`tickMs: 0` is turbo; the tape follows turbo unless set). */
   const turbo = !!options.turbo || options.tickMs === 0;
   /** Lectores de la cinta que graba `carta-tape`: el DVR nunca manda una RPC a la simulación. */
-  const directorio = cintaDeMundo(options.worldPath);
+  const directorio = cintaDeMundo(options.worldPath, options.tapeDirectory);
   let lectores: LectoresCinta | undefined;
   /** El motivo con el que la simulación dio la cinta por perdida. */
   let errorCinta: string | undefined;
@@ -271,7 +271,8 @@ export function createWorkerGateway(options: WorkerGatewayOptions) {
       loaderURL: sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
       options: { worldPath: options.worldPath, commit: options.commit, seed: options.seed, params: options.params, tickMs: options.tickMs,
         deployment: options.deployment, testStepDelayMs: options.testStepDelayMs,
-        turbo, tape: options.tape, tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
+        turbo, tape: options.tape, tapeDirectory: options.tapeDirectory ? directorio : undefined,
+        tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
         turboSaveIntervalMs: options.turboSaveIntervalMs,
         observerOnly: options.observerOnly } satisfies SimWorkerOptions } });
   let workerExited = false;

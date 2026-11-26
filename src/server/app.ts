@@ -89,6 +89,8 @@ export interface AppOptions {
   turboSaveIntervalMs?: number;
   /** Graba la cinta en el hilo `carta-tape` y sirve `/api/cinta/*` y su alias `/api/tape/*` (por defecto, con `turbo`). */
   tape?: boolean;
+  /** Directorio absoluto y exclusivo de este mundo. Por defecto, cinta/ junto a world.sqlite. */
+  tapeDirectory?: string;
   /** Bytes que puede ocupar la cinta (por defecto `CINTA.topeBytes`). */
   tapeTopeBytes?: number;
   tapeSinCreditoMs?: number;
@@ -563,6 +565,8 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   const turbo = turboSolicitado || !gateway && (ley(world, 'fotograma') || ley(world, 'duenos'));
   const binario = !gateway && ley(world, 'fotograma');
   const tapeRequested = options.tape ?? (binario || turboSolicitado);
+  const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:'
+    ? cintaDeMundo(store.path, options.tapeDirectory) : undefined;
   const config = usaMotor ? motorConfig(options.seed) : undefined;
   const conDuenos = usaMotor && config!.hilos !== 1;
   let epoca = loaded?.epoca ?? 0;
@@ -766,7 +770,6 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
   /** Cinta de un mundo simulado en este hilo (`createApp`): la graba el hilo `carta-tape`, como tras la pasarela, con
    * la misma cadencia, créditos y épocas; los lectores van en los suyos. Ni abrir un catálogo roto ni comprimir o
    * sincronizar un bloque ocurre en este hilo, y un fallo de la cinta nunca impide arrancar ni pausa el mundo. */
-  const directorioCinta = !gateway && tapeRequested && store.path !== ':memory:' ? cintaDeMundo(store.path) : undefined;
   const grabador = directorioCinta ? new GrabadorCinta(directorioCinta, options.tapeTopeBytes, binario, error => {
     if (options.onEstadoCinta) options.onEstadoCinta(error);
     else if (error) console.warn(`La cinta dejó de grabar: ${error}.`);

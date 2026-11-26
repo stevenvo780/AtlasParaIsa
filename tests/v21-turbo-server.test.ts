@@ -137,6 +137,35 @@ async function appFixture(t: TestContext, overrides: Partial<AppOptions> = {}) {
   return { ...h, app, store, worldPath };
 }
 
+test('la cinta externa se graba y se lee desde la misma ruta en ambos modos de servidor', { timeout: 20_000 }, async t => {
+  const volumen = mkdtempSync(join(tmpdir(), 'carta-cinta-externa-'));
+  t.after(() => rmSync(volumen, { recursive: true, force: true }));
+  for (const [modo, abrir] of [['directo', appFixture], ['trabajador', gatewayFixture]] as const) {
+    const tapeDirectory = join(volumen, `cinta ${modo}`);
+    mkdirSync(tapeDirectory);
+    const f = await abrir(t, { tape: true, tapeDirectory });
+    await f.login();
+    const grabado = await f.app.flushTape();
+    assert.ok(grabado.frames > 0, modo);
+    assert.ok(existsSync(join(tapeDirectory, INDICE_CINTA)), modo);
+    assert.equal(existsSync(cintaDeMundo(f.worldPath)), false, modo);
+    const meta = await f.http('/api/cinta/meta');
+    assert.equal(meta.status, 200, meta.text);
+    assert.equal(meta.json().niveles[0]?.t1, grabado.latestTick, modo);
+    await f.app.close();
+  }
+});
+
+test('la ruta explícita de cinta debe señalar un directorio existente que no contiene el mundo', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'carta-cinta-ruta-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const mundo = join(dir, 'world.sqlite');
+  assert.equal(cintaDeMundo(mundo), join(dir, 'cinta'));
+  assert.throws(() => cintaDeMundo(mundo, 'cinta'), /ruta absoluta/);
+  assert.throws(() => cintaDeMundo(mundo, join(dir, 'sin montar', 'cinta')), /ya creado/);
+  assert.throws(() => cintaDeMundo(mundo, dir), /separado/);
+});
+
 test('turbo worker: uncapped loop advances many ticks per second, tape records at its cadence, mirror is throttled', { timeout: 20_000 }, async t => {
   const f = await gatewayFixture(t, { turbo: true, tape: true });
   await f.login();

@@ -3,7 +3,7 @@ import { CINTA, type Nivel } from '../../shared/cinta.js';
 import type { CatalogoCinta, SegmentoCinta } from './catalogo.js';
 import { fijadosEn, segmentoFijado } from './marcadores.js';
 
-/** Lo que la cinta deja libre en su disco, que comparte con el mundo: un mundo que no puede guardar se para. */
+/** Lo que la cinta deja libre en su disco. Con la ruta por defecto, el mundo comparte ese espacio. */
 export const RESERVA_DISCO = 4 * 1024 ** 3;
 
 export interface Holguras {

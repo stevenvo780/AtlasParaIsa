@@ -1,5 +1,5 @@
-import { renameSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as igual } from 'node:util';
 import { CINTA, type Apertura, type Corte, type EntradaCatalogo, type Hito, type Nivel, type SeriePunto } from '../../shared/cinta.js';
@@ -12,7 +12,22 @@ import { reducir, reducirTesela } from './reducir.js';
 
 const FOTOGRAMAS_BLOQUE = 32;
 export const PASO_MAXIMO = 32;
-export const cintaDeMundo = (worldPath: string): string => join(dirname(worldPath), 'cinta');
+export function cintaDeMundo(worldPath: string, directorio?: string): string {
+  if (!directorio) return join(dirname(worldPath), 'cinta');
+  if (!isAbsolute(directorio)) throw new Error('CARTA_CINTA_DIR debe ser una ruta absoluta.');
+  if (!statSync(directorio, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error('CARTA_CINTA_DIR debe ser un directorio ya creado en el volumen de la cinta.');
+  }
+  const cinta = realpathSync.native(directorio);
+  const mundo = dirname(resolve(worldPath));
+  const datos = existsSync(mundo) ? realpathSync.native(mundo) : mundo;
+  const desdeCinta = relative(cinta, datos);
+  // El escritor puede mover una cinta huérfana al abrir una instancia nueva.
+  if (!isAbsolute(desdeCinta) && desdeCinta !== '..' && !desdeCinta.startsWith(`..${sep}`)) {
+    throw new Error('CARTA_CINTA_DIR debe estar separado del directorio que contiene el mundo.');
+  }
+  return cinta;
+}
 
 interface BloquePendiente {
   base: WorldView;

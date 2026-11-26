@@ -7,7 +7,10 @@ import {
 import type { Action, ChronicleEvent, PersonView } from '../../shared/types.js';
 import { ESCUCHA_LOCUS } from '../genetics.js';
 import { matDeCelda, temperaturaDe } from '../materia/ley-mundo.js';
+import { calidadEmpedrado } from '../materia/piezas.js';
+import { Rol } from '../materia/tipos.js';
 import { ley } from '../params.js';
+import { tileLookup } from '../tile-index.js';
 import { crecerSAB } from '../soa/arena.js';
 import { PAGE_CELLS, PAGE_SIDE } from '../soa/region.js';
 import type { World } from '../mundo/tipos.js';
@@ -165,6 +168,9 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
 
   const materia = ley(c.mundo, 'materia') ? c as CtxLeyMateria : undefined;
   if (materia && (!materia.materia || !materia.quimica)) throw new Error('El fotograma de materia necesita arena y química.');
+  const obra = materia && ley(c.mundo, 'obra') ? materia : undefined;
+  const buscarTesela = obra && chunks.length ? tileLookup(c.mundo.tiles) : undefined;
+  const pieza = obra && chunks.length ? new Float64Array(1) : undefined;
   const paginas = new Int32Array(f.ranura, r.paginas, capP * 2);
   const reparto = f.completo ? new Int16Array(f.ranura, r.reparto, capP) : undefined;
   for (let p = 0; p < chunks.length; p++) {
@@ -184,6 +190,10 @@ export function escribirFotograma(c: CtxLey, f: FotogramaEnCurso, filasLocales: 
       binario.setUint8(offset + campoC.fr1, Math.round((b?.[1] ?? 0) * escalaU8));
       binario.setUint8(offset + campoC.fr2, Math.round((d?.[1] ?? 0) * escalaU8));
       binario.setFloat32(offset + campoC.T, materia ? temperaturaDe(materia, celda) : NaN, true);
+      const i = celda - primera;
+      const hayPiezas = obra && pieza && obra.materia.lotes(celda, Rol.Pieza, pieza) > 0;
+      const tile = hayPiezas && buscarTesela?.(t.paginaX[chunk]! * PAGE_SIDE + i % PAGE_SIDE, t.paginaY[chunk]! * PAGE_SIDE + Math.floor(i / PAGE_SIDE));
+      binario.setFloat32(offset + campoC.paved, !obra ? NaN : hayPiezas && !tile ? -1 : tile ? calidadEmpedrado(obra, tile) : 0, true);
     }
   }
   return true;

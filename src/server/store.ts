@@ -24,7 +24,7 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
 import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
-import { ley, paramsOf, parseParams, setParams } from '../world/params.js';
+import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../world/materia/checkpoint.js';
@@ -236,7 +236,7 @@ function coordinatesFromKey(key: string): { cx: number; cy: number } {
 }
 
 /** Validate archived terrain before it re-enters the active world, even if its checksum matches. */
-function assertChunk(value: unknown, key: string, atTick: number): asserts value is Chunk {
+function assertChunk(value: unknown, key: string, atTick: number, v23?: WorldParams['v23']): asserts value is Chunk {
   const fail = (): never => { throw new Error('Invalid archived chunk state. Explicit recovery required.'); };
   const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
   const number = (v: unknown, max = 1): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max;
@@ -244,11 +244,11 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
   const string = (v: unknown, max = 2000): v is string => typeof v === 'string' && v.length <= max;
   const { cx, cy } = coordinatesFromKey(key);
   const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE;
-  if (!object(value) || value.key !== key || value.cx !== cx || value.cy !== cy || typeof value.discovered !== 'boolean' || !integer(value.lastTick, atTick) || !Array.isArray(value.tiles) || value.tiles.length !== CHUNK_SIZE ** 2 || !Array.isArray(value.places) || value.places.length > CHUNK_SIZE ** 2) fail();
+  if (!object(value) || value.key !== key || value.cx !== cx || value.cy !== cy || typeof value.discovered !== 'boolean' || !integer(value.lastTick, atTick) || !Array.isArray(value.tiles) || value.tiles.length !== CHUNK_SIZE ** 2 || !Array.isArray(value.places) || v23?.obra === false && value.places.length > CHUNK_SIZE ** 2) fail();
   const chunk = value as unknown as Chunk;
   for (let index = 0; index < chunk.tiles.length; index++) {
     const tile = chunk.tiles[index];
-    if (!object(tile) || tile.x !== x0 + index % CHUNK_SIZE || tile.y !== y0 + Math.floor(index / CHUNK_SIZE) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !number(tile.moisture) || !number(tile.vegetation) || !number(tile.food) || (tile.elevation !== undefined && !number(tile.elevation)) || (tile.wood !== undefined && !number(tile.wood, 12)) || (tile.stone !== undefined && !number(tile.stone, 8)) || (tile.biome !== undefined && !['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'].includes(String(tile.biome)))) fail();
+    if (!object(tile) || tile.x !== x0 + index % CHUNK_SIZE || tile.y !== y0 + Math.floor(index / CHUNK_SIZE) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !number(tile.moisture) || !number(tile.vegetation) || !number(tile.food) || (tile.elevation !== undefined && !number(tile.elevation)) || (tile.wood !== undefined && !number(tile.wood, v23?.materia === false ? 12 : Infinity)) || (tile.stone !== undefined && !number(tile.stone, v23?.materia === false ? 8 : Infinity)) || (tile.biome !== undefined && !['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'].includes(String(tile.biome)))) fail();
     assertEcosystemTile(tile, false);
   }
   const ids = new Set<string>();
@@ -1845,7 +1845,7 @@ export class Store {
           ? 'DELETE FROM chunks WHERE key=? AND tick<(SELECT MAX(tick) FROM chunks WHERE key=? AND tick<=?)'
           : 'DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
-          assertChunk(chunk, chunk.key, world.tick);
+          assertChunk(chunk, chunk.key, world.tick, paramsOf(world).v23);
           // T133: compact tuple body; digest is sha256 of the stored bytes, as before.
           const archivedBody = encodeArchivedChunk(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));

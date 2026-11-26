@@ -1,3 +1,4 @@
+import { INTERRUPTORES_APAGADOS } from '../shared/interruptores.js';
 import type { Tile } from '../shared/types.js';
 import type { World } from './index.js';
 import type { Chunk } from './terrain.js';
@@ -182,13 +183,17 @@ export function assertChunkLife(chunk: Chunk,tick: number): void {
   if(chunk.animals!==undefined){assertAnimals(chunk.animals,tick,chunk.tiles);assertFaunaStock(chunk.tiles,chunk.animals);}
   if(chunk.structures!==undefined)assertStructures(chunk.structures,tick,chunk.tiles);
 }
-export function assertDormantTerrain(chunk:Chunk,tick:number,ecosystemRequired:boolean):void {
-  if(!object(chunk)||!integer(chunk.lastTick,tick)||!Number.isSafeInteger(chunk.cx)||!Number.isSafeInteger(chunk.cy)||!coordinate(chunk.cx*16)||!coordinate(chunk.cy*16)||chunk.key!==`${chunk.cx},${chunk.cy}`||typeof chunk.discovered!=='boolean'||!Array.isArray(chunk.tiles)||chunk.tiles.length!==256||!Array.isArray(chunk.places)||chunk.places.length>256)fail();
+export function assertDormantTerrain(chunk:Chunk,tick:number,ecosystemRequired:boolean,v23: Pick<typeof INTERRUPTORES_APAGADOS, 'obra' | 'materia'>=INTERRUPTORES_APAGADOS):void {
+  if(!object(chunk)||!integer(chunk.lastTick,tick)||!Number.isSafeInteger(chunk.cx)||!Number.isSafeInteger(chunk.cy)||!coordinate(chunk.cx*16)||!coordinate(chunk.cy*16)||chunk.key!==`${chunk.cx},${chunk.cy}`||typeof chunk.discovered!=='boolean'||!Array.isArray(chunk.tiles)||chunk.tiles.length!==256||!Array.isArray(chunk.places)||(!v23.obra&&chunk.places.length>256))fail();
   for(const [i,t] of chunk.tiles.entries()){
-    if(!object(t)||t.x!==chunk.cx*16+i%16||t.y!==chunk.cy*16+Math.floor(i/16)||!['water','soil','meadow','shelter'].includes(t.terrain)||!number(t.food)||!number(t.vegetation)||!number(t.moisture)||(t.wood!==undefined&&!number(t.wood,12))||(t.stone!==undefined&&!number(t.stone,8))||(t.elevation!==undefined&&!number(t.elevation)))fail();
+    if(!object(t)||t.x!==chunk.cx*16+i%16||t.y!==chunk.cy*16+Math.floor(i/16)||!['water','soil','meadow','shelter'].includes(t.terrain)||!number(t.food)||!number(t.vegetation)||!number(t.moisture)||(t.wood!==undefined&&!number(t.wood,v23.materia?Infinity:12))||(t.stone!==undefined&&!number(t.stone,v23.materia?Infinity:8))||(t.elevation!==undefined&&!number(t.elevation)))fail();
     assertEcosystemTile(t,ecosystemRequired);
   }
-  for(const p of chunk.places)if(!object(p)||!string(p.id,100)||!string(p.name,200)||typeof p.description!=='string'||p.description.length>2000||!coordinate(p.x)||!coordinate(p.y)||Math.floor(p.x/16)!==chunk.cx||Math.floor(p.y/16)!==chunk.cy||!integer(p.gatherings,1e6))fail();
+  const ids=new Set<string>();
+  for(const p of chunk.places){
+    if(!object(p)||!string(p.id,100)||!string(p.name,200)||typeof p.description!=='string'||p.description.length>2000||!coordinate(p.x)||!coordinate(p.y)||Math.floor(p.x/16)!==chunk.cx||Math.floor(p.y/16)!==chunk.cy||!integer(p.gatherings,1e6)||ids.has(p.id))fail();
+    ids.add(p.id);
+  }
 }
 function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
   const counts=new Map<string,number>();for(const a of animals){const key=`${a.x},${a.y}`;counts.set(key,(counts.get(key)??0)+1);}

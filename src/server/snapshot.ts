@@ -1,3 +1,4 @@
+import type { InterruptoresV23 } from '../shared/interruptores.js';
 import type { Gesture, GestureResult, Tile } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
 import { RULES_VERSION, type World } from '../world/index.js';
@@ -111,9 +112,9 @@ function assertSnapshotRulesVersion(record: Record<string, unknown>): void {
 
 /** Admission is checked before tuples/pages are expanded. The profile is transport
  * metadata; effective laws remain the complete params covered by the world digest. */
-export function readSnapshotLimits(record: Record<string, unknown>, validateParams = true): Readonly<WorldLimits> {
+export function readSnapshotLimits(record: Record<string, unknown>, params?: WorldParams | null): Readonly<WorldLimits> {
   assertSnapshotRulesVersion(record);
-  const params = validateParams ? readSnapshotParams(record) : undefined;
+  if (params === undefined) params = readSnapshotParams(record);
   const declaredMode = hasSnapshotLimitMode(record);
   if (!Object.hasOwn(record, 'limitsProfile')) {
     if (declaredMode) throw new SnapshotSemanticError('Missing snapshot limits profile for declared application mode. Explicit recovery required.');
@@ -139,11 +140,11 @@ export function readSnapshotLimits(record: Record<string, unknown>, validatePara
   return limits;
 }
 
-export function assertSnapshotCounts(record: Record<string, unknown>, limits: Readonly<WorldLimits>, tileCount?: number): void {
+export function assertSnapshotCounts(record: Record<string, unknown>, limits: Readonly<WorldLimits>, v23: Readonly<InterruptoresV23>, tileCount?: number): void {
   if (tileCount !== undefined && tileCount > (record.version === 1 ? 1120 : limits.teselasActivas))
     throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
   if (record.chunks && typeof record.chunks === 'object' && Object.keys(record.chunks).length > limits.chunks
-    || Array.isArray(record.communities) && record.communities.length > limits.comunidades
+    || !v23.comunidades && Array.isArray(record.communities) && record.communities.length > limits.comunidades
     || Array.isArray(record.animals) && record.animals.length > limits.fauna)
     throw new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.');
 }
@@ -201,7 +202,7 @@ export function snapshotRecord(world: World, params: WorldParams, tiles: unknown
   if (Object.hasOwn(world, 'limitsProfile')) throw new Error('Reserved snapshot limits profile. Snapshot was not written.');
   assertWorldLimits(params.limites, true);
   const limits = world.version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(params);
-  assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, world.tiles.length);
+  assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, params.v23, world.tiles.length);
   const current = world.version >= PARAMETER_LIMITS_RULES_VERSION;
   const serializedParams = current ? params : { ...params, limites: Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, params.limites[key]])) };
   const body = stringifyExact(serializedParams, params.v23.guardadoCompleto);
@@ -358,8 +359,9 @@ export function decodeSnapshotValue(value: unknown): unknown {
   const record = value as Record<string, unknown>;
   if ('snapshotReplay' in record) throw new SnapshotSemanticError('Snapshot replay requires a durable reader. Explicit recovery required.');
   if ('snapshotEncoding' in record) throw new SnapshotSemanticError('Snapshot parts require a durable reader. Explicit recovery required.');
-  const limits = readSnapshotLimits(record);
-  assertSnapshotCounts(record, limits, Array.isArray(record.tiles) ? record.tiles.length : undefined);
+  const params = readSnapshotParams(record);
+  const limits = readSnapshotLimits(record, params);
+  assertSnapshotCounts(record, limits, params.v23, Array.isArray(record.tiles) ? record.tiles.length : undefined);
   if ('tileEncoding' in record) {
     if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles)) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
     record.tiles = decodeSnapshotTileRows(record.tiles, record.version as number);

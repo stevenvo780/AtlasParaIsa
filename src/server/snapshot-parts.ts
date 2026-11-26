@@ -6,7 +6,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
-  assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
+  assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, readSnapshotParams, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 import { residentBackingArray, residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
 import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/terreno.js';
@@ -330,12 +330,13 @@ export class SnapshotParts {
     if (!Object.hasOwn(world, 'tiles') || world.tiles !== null || Object.hasOwn(world, 'snapshotEncoding')
       || world.tileEncoding !== SNAPSHOT_TILE_ENCODING) failure('metadata tile encoding');
     let limits: Readonly<WorldLimits>;
-    try { limits = readSnapshotLimits(world, validateParams); }
+    let params: WorldParams | null;
+    try { params = validateParams ? readSnapshotParams(world) : null; limits = readSnapshotLimits(world, params); }
     catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
     if (!keys(tiles, ['count', 'pages']) || !Number.isSafeInteger(tiles.count) || (tiles.count as number) < 1
       || !Array.isArray(tiles.pages)
       || tiles.pages.length !== Math.ceil((tiles.count as number) / SNAPSHOT_PAGE_TILES)) failure('tile count');
-    try { assertSnapshotCounts(world, limits, tiles.count as number); }
+    try { if (params) assertSnapshotCounts(world, limits, params.v23, tiles.count as number); }
     catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
     let count = 0;
     for (const [index, page] of (tiles.pages as unknown[]).entries()) {

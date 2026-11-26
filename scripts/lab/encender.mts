@@ -14,6 +14,10 @@
  *  --continuar   no para en la primera violación dura: las anota todas (para ver su alcance, no para estabilizar).
  *  --panel-corto mide cada paso y sigue tras la extinción mortal. Comprueba al inicio, según --cada (120 por defecto)
  *                y al cierre de cada día.
+ *  CARTA_PANEL_AVANCE=1
+ *                progreso optativo en stderr (paso, reunion, verificacion, archivo,
+ *                censo y digesto, con tick al abrir y cerrar el tramo).
+ *                Detalle: scripts/lab/panel-corto/avance.ts.
  *
  * Salida: una línea JSON por suceso, en stdout y (si se pide) en `--salida`:
  *   {tipo:'inicio'}  semilla, interruptores, hilos, comprobadores disponibles.
@@ -43,6 +47,7 @@ import { cerrarMateriaGpu, conservacion, diagnosticoMateriaGpu } from '../../src
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { escalon, INTERRUPTORES, ORDEN_ENCENDIDO, type Interruptor, type InterruptoresV23 } from '../../src/shared/interruptores.js';
 import { archivoDeChunks, poblar } from './poblacion.mjs';
+import { crearAvance, panelAvanceActivo } from './panel-corto/avance.js';
 
 export interface OpcionesEncender {
   semilla: number; hasta?: Interruptor; params?: string; dias: number; regimen: 'abierto' | 'defecto';
@@ -161,6 +166,8 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   const panel = o.panelCorto ? { pasosMedidos: 0, pasoMaximoMs: 0, pasosSobre30s: 0, comprobacionesRegiones: 0,
     reunionMaximaMs: 0, comprobacionMaximaMs: 0, archivoMaximoMs: 0,
     tiemposMs: { paso: 0, reunion: 0, comprobacion: 0, archivo: 0 } } : undefined;
+  // Apagado por defecto. Encendido, las marcas van a stderr y no entran en puertaCorta ni en M6.
+  const avance = panelAvanceActivo() ? crearAvance() : undefined;
   const inicioPanel = panel ? performance.now() : 0;
   const tiemposPanel = () => panel && { ...panel.tiemposMs, pared: performance.now() - inicioPanel };
   const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
@@ -173,6 +180,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   };
   const reunir = (tick: number): void => {
     if (!motor) return;
+    avance?.entrar('reunion', tick);
     const inicio = panel ? performance.now() : 0;
     mundo = motor.vista();
     if (mundo.tick !== tick) throw new Error(`Vista del tick ${mundo.tick}, se esperaba ${tick}.`);
@@ -185,6 +193,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       panel.tiemposMs.reunion += ms;
       panel.reunionMaximaMs = Math.max(panel.reunionMaximaMs, ms);
     }
+    avance?.salir('reunion', tick);
   };
   const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
   const cada = o.cada ?? (panel ? 120 : undefined);
@@ -221,7 +230,13 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       msCpuPorTick: msCpu / medido, msParedPorTick: msPared / medido, ticksPorSegundo: medido * 1000 / msPared,
       ...(medicion ? { cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases) } : {}), maxRssMiB: rssPicoKiB / 1024,
     } : undefined;
-    const digesto = o.digesto ? digestoCompleto(mundo, archivo, motor?.instantanea().materia) : undefined;
+    avance?.cerrar(mundo.tick);
+    let digesto: string | undefined;
+    if (o.digesto) {
+      avance?.entrar('digesto', mundo.tick);
+      digesto = digestoCompleto(mundo, archivo, motor?.instantanea().materia);
+      avance?.salir('digesto', mundo.tick);
+    }
     escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto,
       ...(panel && { puertaCorta: { ...panel, tiemposMs: tiemposPanel(), rssPicoKiB } }) });
     return duras ? 2 : 0;
@@ -238,6 +253,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   };
   const revisar = (): boolean => {
     if (!o.comprobar) return false;
+    avance?.entrar('verificacion', mundo.tick);
     const inicio = panel ? performance.now() : 0;
     // El comprobador por corrida suma a los invariantes los de historia (Δpoblación, acumulados, nacimientos).
     const invariantes = comprobador!(mundo);
@@ -260,6 +276,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       panel.tiemposMs.comprobacion += ms;
       panel.comprobacionMaximaMs = Math.max(panel.comprobacionMaximaMs, ms);
     }
+    avance?.salir('verificacion', mundo.tick);
     return dura;
   };
 
@@ -274,6 +291,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     for (let t = 0; t < TICKS_PER_DAY && tick < ticks; t++) {
       const muertesFaunaAntes = mundo.animalDynamics.deaths;
       const anterior = tick;
+      avance?.entrar('paso', tick);
       if (o.perfil || panel) {
         const cpu = o.perfil ? cpuMs() : 0, pared = performance.now();
         tick = paso();
@@ -286,6 +304,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
           if (ms > 30_000) panel.pasosSobre30s++;
         }
       } else tick = paso();
+      avance?.salir('paso', tick);
       if (panel && tick !== anterior + 1) {
         throw new Error(`El paso saltó del tick ${anterior} al ${tick}.`);
       }
@@ -307,6 +326,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       if (revisarPaso && revisar() && !o.continuar) return fin('violacion');
     }
     if (!panel && cada !== undefined && tick % cada !== 0 && revisar() && !o.continuar) return fin('violacion');
+    avance?.entrar('archivo', tick);
     const inicioArchivo = panel ? performance.now() : 0;
     archivar();
     if (panel) {
@@ -314,6 +334,8 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       panel.tiemposMs.archivo += ms;
       panel.archivoMaximoMs = Math.max(panel.archivoMaximoMs, ms);
     }
+    avance?.salir('archivo', tick);
+    avance?.entrar('censo', tick);
     const dinamica = mundo.demographyDynamics;
     const fauna = { ...mundo.animalDynamics };
     const vecinos = mundo.people.filter(p => p.role === 'neighbor');
@@ -336,6 +358,7 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
       totales: { ...mundo.totals }, conservacion: balanceConservacion(mundo), violaciones, duras,
       ...(params.motor.gpu.length ? { gpuMateria: diagnosticoMateriaGpu(mundo) } : {}),
     });
+    avance?.salir('censo', tick);
     nacidosAntes = nacimientos; muertesAntes = dinamica.deaths; causasAntes = { ...dinamica.causes };
     faunaAntes = fauna;
     if (!panel && mortales === 0) return fin('extinta', dia);
@@ -357,7 +380,7 @@ function digestoCompleto(mundo: World, archivo: ReadonlyMap<string, Buffer>, reu
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--help')) {
-    process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 22).join('\n') + '\n');
+    process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 26).join('\n') + '\n');
   } else {
     (async () => {
       const o = argumentosEncender(process.argv.slice(2));

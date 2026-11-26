@@ -65,7 +65,7 @@ import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
 import { admiteBrokerPercepcionGpu, resolverDuenosPercepcionGpu } from '../../src/world/gpu/broker-percepcion.js';
 import { assertWorld, createWorld, RULES_VERSION, type World } from '../../src/world/index.js';
 import { comprobarLeyes, crearComprobador } from '../../src/world/invariantes.js';
-import { codificarCheckpoint, decodificarCheckpoint } from '../../src/world/materia/checkpoint.js';
+import { codificarCheckpoint, decodificarCheckpoint, decodificarEnVuelo } from '../../src/world/materia/checkpoint.js';
 import { enlazarCtx } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
 import type { Instantanea, Motor, PerfilPasoMotor, TelemetriaBrokerGpu, TelemetriaDispositivoBrokerGpu, TelemetriaMotor } from '../../src/world/motor/contratos.js';
@@ -334,10 +334,13 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const descriptor = fd = openSync(salida, 'wx', 0o600);
     const anotar = (fila: object) => writeSync(descriptor, JSON.stringify(fila) + '\n');
     const pared: number[] = [], cpuProceso: number[] = [], barrera: number[] = [];
+    // Al abrir una época, las garantías que ya viajan en el corte no son envíos nuevos.
+    const materiaInicial = carga?.instantanea.materia;
+    const intentosRestaurados = materiaInicial ? decodificarEnVuelo(materiaInicial.enVuelo).filter(i => i.nonce !== 0).length : 0;
     const inicio = { tipo: 'inicio', escena: e, brazo, hilos, duenosPorRanura, perfilPaso, indiceUidCompartido,
       repartoInicial: repartoInicial ?? 'uniforme', preparacionMs: { prepararMundoMs, validarMundoMs, digestoMundoMs },
       commit: git('rev-parse', 'HEAD'), node: process.version,
-      digestoInicial, ...siembra, fixture, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
+      digestoInicial, ...siembra, fixture, intentosRestaurados, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
       interruptores: params.v23, motor: params.motor, carga: loadavg(), planificador: planificador() };
     anotar(inicio);
     const biblioteca = process.env.COMPUTE_NVRTC;
@@ -412,7 +415,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
         const quimica = d?.quimica;
         assert.ok(d && quimica && materia, 'Falta contexto o checkpoint material');
         const { enviados, recibidos, pendientes } = d.balanceIntentos();
-        assert.equal(enviados, recibidos + pendientes, 'Saldo de intentos');
+        assert.equal(enviados + intentosRestaurados, recibidos + pendientes, 'Saldo de intentos');
         const [, validarMundoMs] = cronometrar(() => assertWorld(world, RULES_VERSION, worldContext(mundo)));
         const [codificado, codificarVmatMs] = cronometrar(() => codificarCheckpoint(materia));
         const [, decodificarVmatMs] = cronometrar(() => decodificarCheckpoint(codificado, id => quimica.sustancia(id)));
@@ -503,7 +506,8 @@ function medirBloques(rutaConfig: string, salida: string) {
       const verificaciones = filas.filter(fila => fila.tipo === 'integridad').map(({ tick, costeVerificacionMs }) =>
         ({ tick, ...costeVerificacionMs }));
       const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, duenosPorRanura, repartoInicial, afinidad,
-        rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, preparacionMs: inicio.preparacionMs, verificaciones, ...fin };
+        rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, preparacionMs: inicio.preparacionMs,
+        intentosRestaurados: inicio.intentosRestaurados, verificaciones, ...fin };
       if (fin?.estado === 'sin-arranque-gpu') {
         const arranque = filas.find(fila => fila.tipo === 'arranqueGpu');
         assert.ok(fin.tipo === 'fin' && gpu.length && arranque?.disponible === false && fin.sinGpu?.length, `Arranque inválido en ${nombre}`);

@@ -16,6 +16,7 @@ import {
   inyectarFalloConfirmarGuardadoParaPrueba,
   tecnologiaEquivalenteParaConfirmar,
 } from '../src/world/motor/coordinador.js';
+import { CanalesCorte } from '../src/world/motor/mensajes-corte.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { assertWorld } from '../src/world/mundo/validar.js';
 import { ErrorFatalMotor } from '../src/world/paralelo/barrera.js';
@@ -232,10 +233,17 @@ test('el corte WPF1 conserva los bytes al podar un vínculo del sobreviviente re
   const params = parseParams({ v23: escalon('duenos'), motor: { hilos }, conducta: { politicaPeso: 0.8 } });
   const mundo = createWorld(semilla, params);
   enableTechnologyCatalogue(mundo.technology);
-  const [victima, superviviente] = mundo.people.filter(p => p.role === 'neighbor');
-  assert.ok(victima && superviviente);
+  const [victima, superviviente, vecina] = mundo.people.filter(p => p.role === 'neighbor');
+  assert.ok(victima && superviviente && vecina);
   situarEnDueno(mundo, hilos, victima, 0);
-  situarEnDueno(mundo, hilos, superviviente, 1);
+  const parcelaRemota = situarEnDueno(mundo, hilos, superviviente, 1);
+  const otraTesela = mundo.tiles.find(tile => tile.terrain !== 'water'
+    && (tile.x >> 4) === (parcelaRemota.x >> 4) && (tile.y >> 4) === (parcelaRemota.y >> 4)
+    && (tile.x & 15) === 8 && (tile.y & 15) === 8);
+  assert.ok(otraTesela);
+  vecina.x = otraTesela.x;
+  vecina.y = otraTesela.y;
+  vecina.target = { x: otraTesela.x, y: otraTesela.y };
   const edad = demographicTraits(victima.genome, params.cuerpo);
   victima.demography.age = Math.floor((edad.senescenceStart + edad.maximumAge) / 2);
   victima.bornAt = -victima.demography.age;
@@ -247,6 +255,7 @@ test('el corte WPF1 conserva los bytes al podar un vínculo del sobreviviente re
     instantaneaTransferible: true, personasCorteDirectas: true });
   const opciones = { snapshotPackedPeople: true };
   const canonico = new Store(':memory:', opciones), directo = new Store(':memory:', opciones);
+  const recepciones = t.mock.method(CanalesCorte.prototype, 'recibir');
   t.after(async () => { await motor.cerrar(); canonico.close(); directo.close(); });
 
   motor.cargar({ world: mundo, materia: null }, 0);
@@ -256,11 +265,17 @@ test('el corte WPF1 conserva los bytes al podar un vínculo del sobreviviente re
   canonico.guardar(referencia);
   const sello = motor.corteGuardadoSellado?.();
   assert.ok(sello);
-  directo.guardarCorteSellado(sello, [], []);
+  const guardado = directo.guardarCorteSellado(sello, [], []);
   const paginas = (store: Store) => store.db.prepare('SELECT digest, body FROM snapshot_parts ORDER BY digest').all();
   assert.deepEqual(filaInstantanea(directo), filaInstantanea(canonico));
   assert.deepEqual(paginas(directo), paginas(canonico));
-  assert.ok(directo.snapshotPersonasCorteStats.reused > 0);
+  const recibida = recepciones.mock.calls.at(-1);
+  assert.ok(directo.snapshotPersonasCorteStats.reused > 0, JSON.stringify({
+    transporte: (recibida?.this as CanalesCorte | undefined)?.diagnosticoPersonasCorte,
+    personasRemotas: recibida?.result?.[0]?.people.length,
+    retenidas: directo.snapshotPersonasCorteStats,
+    catalogo: guardado.world.technology.catalogue !== undefined,
+  }));
   assert.equal(directo.snapshotPersonasCorteStats.recoded, 1);
 
   const corte = directo.cargarGuardadoCompleto()!;

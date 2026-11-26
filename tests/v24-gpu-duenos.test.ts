@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,7 +13,7 @@ import { percepcionDe } from '../src/world/decision/percepcion.js';
 import { PLAN } from '../src/world/decision/planes.js';
 import { admiteBrokerPercepcionGpu, BrokerPercepcionGpu, PercibidorBroker, resolverDuenosPercepcionGpu,
   type DuenosBroker } from '../src/world/gpu/broker-percepcion.js';
-import type { Plan } from '../src/world/motor/contratos.js';
+import { COLUMNAS_CEREBRO, type Plan } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { paramsOf, parseParams } from '../src/world/params.js';
@@ -55,6 +55,119 @@ test('la asignación de GPU conserva las ranuras de dos dueños y valida los ín
   assert.equal(admiteBrokerPercepcionGpu(1, [1], [0]), false);
   assert.equal(admiteBrokerPercepcionGpu(8, [0, 0], [2, 5]), false);
   assert.throws(() => corredorMedido(false, [5, 5]), /Asignación de dueños inválida/);
+});
+
+test('los grupos GPU son opcionales, disjuntos y ordenados por tarjeta', () => {
+  const grupos = [[7, 4, 3], [5, 1]];
+  const resueltos = resolverDuenosPercepcionGpu(8, [0, 1], undefined, grupos);
+  assert.deepEqual(resueltos, grupos);
+  grupos[0]!.push(2);
+  assert.deepEqual(resueltos, [[7, 4, 3], [5, 1]]);
+  for (const invalidos of [[], [[1]], [[1], []], [[1], [1]], [[2, 2], [1]], [[8], [1]], [[2.5], [1]]])
+    assert.equal(resolverDuenosPercepcionGpu(8, [0, 1], undefined, invalidos), undefined);
+  assert.equal(admiteBrokerPercepcionGpu(8, [0, 1], [0, 1], [[0, 1], [2]]), false);
+  assert.equal(admiteBrokerPercepcionGpu(8, [], undefined, [[0]]), false);
+});
+
+test('tres ranuras del grupo despachan y una recarga descarta los clientes de la generación previa', { timeout: 10_000 }, async t => {
+  const duenos = [8, 17, 28];
+  const broker = corredorMedido(false, duenos);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const { percepcion, lote } = mundoParaPercibir();
+  const epoca = broker.abrirEpoca(18);
+  const clientes = duenos.map(dueno => new PercibidorBroker(percepcion.vista, epoca, dueno));
+  t.after(() => clientes.forEach(cliente => cliente.cerrar()));
+  for (const [i, cliente] of clientes.entries()) cliente.lanzar({ ...lote, despacho: i + 1 }, planes);
+  for (const [i, cliente] of clientes.entries()) {
+    assert.equal(cliente.esperar(100).despacho, i + 1);
+    cliente.confirmar(true);
+  }
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [1, 1, 1]);
+  const nueva = broker.abrirEpoca(18);
+  assert.equal(broker.medidas().aceptaEnEpoca, false);
+  clientes[2]!.lanzar(lote, planes);
+  assert.equal(clientes[2]!.esperar(100).despacho, lote.despacho);
+  assert.equal(broker.medidas().peticiones, 3);
+  const renovado = new PercibidorBroker(percepcion.vista, nueva, duenos[2]!);
+  t.after(() => renovado.cerrar());
+  renovado.lanzar(lote, planes);
+  assert.equal(renovado.esperar(100).despacho, lote.despacho);
+  renovado.confirmar(true);
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [1, 1, 2]);
+});
+
+test('un vencimiento antes de enviar protege ambas GPU y el dueño recupera su ranura', { timeout: 10_000 }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-cola-gpu-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const marca = join(dir, 'orden');
+  const entorno = { CARTA_GPU_PRUEBA_FASE: 'broker-retiene', CARTA_GPU_PRUEBA_MARCA: marca };
+  const broker = new BrokerPercepcionGpu({ script, entorno }, true, 1, [8, 17, 28]);
+  const otra = new BrokerPercepcionGpu({ script, entorno: { ...entorno, CARTA_GPU_PRUEBA_FASE: 'broker' } }, true, 0);
+  t.after(() => Promise.all([broker.cerrar(), otra.cerrar()]));
+  assert.deepEqual(await Promise.all([broker.listo, otra.listo]), [true, true]);
+  const { mundo, percepcion, lote, tiles } = mundoParaPercibir();
+  const epoca = broker.abrirEpoca(18);
+  const primero = new PercibidorBroker(percepcion.vista, epoca, 8);
+  const retrasado = new PercibidorBroker(percepcion.vista, epoca, 17);
+  const duplicado = new PercibidorBroker(percepcion.vista, epoca, 8);
+  const independiente = new PercibidorBroker(percepcion.vista, otra.abrirEpoca(18), 0);
+  t.after(() => [primero, retrasado, duplicado, independiente].forEach(cliente => cliente.cerrar()));
+  const paquetes: Uint8Array[] = [];
+  const observar = new BroadcastChannel(`${epoca.canal}:1`);
+  observar.onmessage = ({ data }) => paquetes.push(data.datos);
+  const entrada = watch(dir);
+  t.after(() => { entrada.close(); observar.close(); });
+  const enServidor = new Promise<void>(resolve => {
+    entrada.on('change', (_, nombre) => { if (nombre === 'orden') resolve(); });
+  });
+  primero.lanzar(lote, planes);
+  await enServidor;
+  try {
+    duplicado.lanzar(lote, planes);
+    assert.equal(duplicado.esperar(100).despacho, lote.despacho);
+    independiente.lanzar(lote, planes);
+    assert.equal(independiente.esperar(100).despacho, lote.despacho);
+    independiente.confirmar(true);
+    assert.deepEqual(otra.medidas().detalle?.aceptadas, [1, 0]);
+    const esperarRetrasado = retrasado.esperar.bind(retrasado);
+    const plazoInmediato = t.mock.method(retrasado, 'esperar', () => esperarRetrasado(0));
+    percepcion.percibidor = retrasado;
+    const salida = percepcion.percibir(mundo.people, lote.tick,
+      { tick: lote.tick, slots: Int32Array.of(0), plan: Uint16Array.of(PLAN.conCerebro) }, tiles, undefined,
+      (vista, despacho) => vista.escribirPesos(despacho.slots[0]!, new Float64Array(COLUMNAS_CEREBRO.politica).fill(0.25)));
+    percepcion.cerrar();
+    assert.equal(salida.tick, lote.tick);
+    assert.equal(percepcion.respaldos, 1);
+    plazoInmediato.mock.restore();
+  } finally { writeFileSync(marca + '.libre', ''); }
+  assert.equal(primero.esperar(100).despacho, lote.despacho);
+  primero.confirmar(true);
+  // Un nuevo paquete de otro dueño sirve de corte después del descarte en la misma cola.
+  const tercero = new PercibidorBroker(percepcion.vista, epoca, 28);
+  t.after(() => tercero.cerrar());
+  tercero.lanzar(lote, planes);
+  assert.equal(tercero.esperar(100).despacho, lote.despacho);
+  tercero.confirmar(true);
+  // Los BroadcastChannel de slots distintos no garantizan orden entre sí.
+  for (let i = 0; i < 3 && broker.medidas().detalle?.aceptadas[1] === 0; i++) {
+    retrasado.lanzar({ ...lote, despacho: i + 2 }, percepcion.planes);
+    assert.equal(retrasado.esperar(100).despacho, i + 2);
+    retrasado.confirmar(true);
+    if (broker.medidas().detalle?.aceptadas[1] === 0) await esperar(1);
+  }
+  const medida = broker.medidas();
+  assert.equal(medida.lista, true);
+  assert.equal(medida.peticiones, 3, 'el despacho abandonado no llegó al servidor');
+  assert.deepEqual(medida.detalle?.aceptadas, [1, 1, 1]);
+  assert.equal(medida.detalle?.cpuColaVencida, 1);
+  assert.equal(medida.detalle?.erroresCanal, 0);
+  assert.ok(medida.detalle!.cpuOcupada >= 1 && medida.detalle!.colaMicros! > 0);
+  await esperar(0);
+  assert.equal(paquetes.length, 2);
+  const valorNuevo = paquetes[1]![0]!;
+  paquetes[0]![0] ^= 0xff;
+  assert.equal(paquetes[1]![0], valorNuevo, 'el nuevo despacho tiene otro búfer');
 });
 
 test('la ranura del corredor conserva la identidad global del dueño en el despacho', { timeout: 10_000 }, async t => {
@@ -216,10 +329,14 @@ test('el coste del corredor descarta respuestas GPU incoherentes en la ruta real
   assert.equal(percepcion.respaldos, 2);
 });
 
-for (const fallo of ['broker-rancio', 'broker-expira']) {
-  test(`el dueño pierde el búfer y conserva el tick ante ${fallo}`, { timeout: 10_000 }, async t => {
+for (const { fallo, duenos } of [
+  { fallo: 'broker-rancio', duenos: [5, null] },
+  { fallo: 'broker-expira', duenos: [5, null] },
+  { fallo: 'broker-rancio', duenos: [8, 17, 5] },
+]) {
+  test(`el dueño pierde el búfer y conserva el tick ante ${fallo} en ${duenos.length} ranuras`, { timeout: 10_000 }, async t => {
     const broker = new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: fallo, CARTA_GPU_PRUEBA_MARCA: '' } },
-      false, 0, [5, null]);
+      false, 0, duenos);
     t.after(() => broker.cerrar());
     assert.equal(await broker.listo, true);
     const { percepcion, lote, mundo, tiles } = mundoParaPercibir();
@@ -231,13 +348,13 @@ for (const fallo of ['broker-rancio', 'broker-expira']) {
     percepcion.cerrar();
     assert.equal(salida.tick, lote.tick);
     assert.equal(percepcion.respaldos, 1, 'el mismo despacho se repite en CPU');
-    assert.equal(broker.medidas().completadas[0], 0);
+    assert.deepEqual(broker.medidas().completadas, duenos.map(() => 0));
     cliente.lanzar({ ...lote, despacho: 2 }, planes);
     assert.equal(cliente.esperar(100).despacho, 2, 'CPU toma el despacho siguiente con una salida propia');
   });
 }
 
-test('motor de dos dueños comparte GPU1 y aísla los fallos de GPU0 en dual', { timeout: 20_000 }, async t => {
+test('el motor distribuye los grupos CUDA y conserva los modos compartido y dual de dos dueños', { timeout: 20_000 }, async t => {
   const python = execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
   const dir = mkdtempSync(join(tmpdir(), 'atlas-v24-gpu-simulada-'));
   writeFileSync(join(dir, 'python3'), [
@@ -302,6 +419,20 @@ test('motor de dos dueños comparte GPU1 y aísla los fallos de GPU0 en dual', {
       }
     } finally { await motor.cerrar(); }
   }
+  process.env.CARTA_GPU_PRUEBA_FASE_GPU0 = 'broker-valido';
+  const hilos = 3, gpu = [0, 1], gruposPercepcionGpu = [[2, 0], [1]];
+  const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos, gpu } }, base);
+  const mundo = createWorld(semilla, params);
+  const { x, y } = mundo.tiles.find(celda => celda.x >= 32 && celda.terrain !== 'water')!;
+  for (const persona of mundo.people.slice(-2)) Object.assign(persona, { x, y, target: { x, y }, decisionAt: 2 });
+  const motor = crearMotor(mundo, { hilos, gpu, gruposPercepcionGpu, decisionGpu: 'siempre', verificar: true, semilla, medirBrokerGpu: true });
+  try {
+    assert.equal(await motor.prepararBrokerGpu?.(), true);
+    for (let i = 1; i <= 3; i++) assert.equal(motor.paso([]).tick, i);
+    const tarjetas = motor.telemetria().gpuBrokers!;
+    assert.deepEqual(tarjetas.map(tarjeta => tarjeta.duenosPorRanura), gruposPercepcionGpu);
+    assert.ok(tarjetas.every(tarjeta => tarjeta.detalle!.aceptadas.every(n => n > 0)), JSON.stringify(tarjetas));
+  } finally { await motor.cerrar(); }
 });
 
 test('CUDA real: F2 distribuida usa el corredor desde el motor de dos dueños', {

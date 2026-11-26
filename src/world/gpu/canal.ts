@@ -343,6 +343,11 @@ export class CanalGpuOcupado extends ErrorDispositivo {
   constructor(canal: CanalGpu) { super(`gpu${canal.dispositivo}`, 'El canal GPU ya tiene un despacho pendiente.'); }
 }
 
+/** El dueño recalcula en CPU ese tick. El servidor no recibió la orden y el canal sigue válido. */
+export class DespachoGpuDescartado extends ErrorDispositivo {
+  constructor(canal: CanalGpu) { super(`gpu${canal.dispositivo}`, 'El despacho GPU venció antes de enviarse al servidor.'); }
+}
+
 /** Los clientes de una tarjeta comparten el tramo de /dev/shm desde el byte 0. */
 export function reservarCanalGpu(canal: CanalGpu): (() => void) | undefined {
   if (canalesOcupados.has(canal)) return;

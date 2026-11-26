@@ -50,9 +50,20 @@ def main():
             if fase.startswith('broker'):
                 if fase == 'broker-expira':
                     time.sleep(0.1)
+                if fase == 'broker-retiene' and orden['dueno'] == 8:
+                    marca.touch()
+                    while not marca.with_suffix('.libre').exists():
+                        time.sleep(0.001)
+                if fase == 'broker-retiene' and orden['dueno'] == 17:
+                    parches, total = struct.unpack_from('<2I', zona, 12 * 4)
+                    # El primer paquete de este dueño expiró en cola. El nuevo debe traer los pesos completos.
+                    assert any(
+                        destino == 1 and palabras >= 212 and struct.unpack_from('<f', zona, fuente)[0] == 0.25
+                        for destino, _, fuente, palabras in struct.iter_unpack('<4I', zona[parches:parches + total * 16])
+                    )
                 ventanas = orden['n'] * 225
                 inicio = salida + bajada - ventanas
-                if fase == 'broker-valido':
+                if fase in ('broker-valido', 'broker-retiene'):
                     n, q, v, _ = struct.unpack_from('<4I', zona)
                     zona[salida:inicio] = bytes(inicio - salida)
                     zona[salida:salida + n * q * 4] = b'\xff' * (n * q * 4)

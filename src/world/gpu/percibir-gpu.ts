@@ -3,7 +3,7 @@ import {
   type CanalGpu, type Col, type Dispositivo, type FrentePublico, type LotePercepcion, type Percepcion,
   type Percibidor, type Plan, type Terreno,
 } from '../motor/contratos.js';
-import { CanalGpuOcupado, enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
+import { CanalGpuOcupado, DespachoGpuDescartado, enviarOrden, recibirRespuesta, reservarCanalGpu } from './canal.js';
 
 const RADIO = 7;
 const LADO = 2 * RADIO + 1, CENTRO = RADIO * LADO + RADIO;
@@ -718,6 +718,15 @@ export class PercibidorGpu implements Percibidor {
   }
 
   private marcarFallo(error: unknown): ErrorDispositivo {
+    if (error instanceof DespachoGpuDescartado) {
+      // F2 recalcula en CPU este tick. El siguiente despacho GPU repone los espejos de este dueño.
+      this.paginas.clear();
+      this.columnasResidentes.clear();
+      this.cerebros.clear(); // Preparar pesos y estado ya había tocado esta caché.
+      this.csr = undefined;
+      this.campos = '';
+      return error;
+    }
     this.fallo = error instanceof ErrorDispositivo ? error : new ErrorDispositivo(this.dispositivo,
       error instanceof Error ? error.message : String(error));
     try { this.canal.cerrar(); } catch { /* El primer error explica la caída. */ }

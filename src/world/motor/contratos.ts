@@ -466,15 +466,19 @@ export interface PerfilPasoMotor {
 export interface TelemetriaBrokerGpu {
   /** Lotes no vacíos, confirmaciones del canal y desvíos admitidos por el percibidor. */
   lotes: number;
-  completadas: [number, number];
+  completadas: number[];
   /** Salidas GPU aceptadas por F2 por dueño y salidas válidas en el canal que F2 rechazó. */
-  aceptadas: [number, number];
+  aceptadas: number[];
   rechazadas: number;
   cpuArranque: number;
   cpuOcupada: number;
   cpuSinCanal: number;
   /** CPU elegida con el corredor disponible, incluidas las sondas de calibración del modo adaptativo. */
   cpuPorCoste?: number;
+  /** Despachos del grupo que vencieron en el dueño o el corredor antes de llegar al servidor. */
+  cpuColaVencida?: number;
+  /** Espera acumulada desde publicar hasta tomar el paquete o abandonar su espera. */
+  colaMicros?: number;
   erroresCanal: number;
   /** Solo bytes de despachos confirmados. El tiempo CUDA incluye las copias del servidor. */
   subidaConfirmadaBytes: number;
@@ -488,8 +492,8 @@ export interface TelemetriaBrokerGpu {
 export interface TelemetriaDispositivoBrokerGpu {
   dispositivo: number;
   lista: boolean;
-  /** Correspondencia entre las dos celdas de conteo del corredor y los dueños del motor. */
-  duenosPorRanura?: readonly [number | null, number | null];
+  /** Correspondencia entre las celdas de conteo del corredor y los dueños del motor. */
+  duenosPorRanura?: readonly (number | null)[];
   detalle?: TelemetriaBrokerGpu;
 }
 
@@ -510,6 +514,8 @@ export interface MotorConfig {
   gpu: readonly number[];                // tarjetas CUDA; el trabajo se reparte por rendimiento medido, nunca a medias
   /** Asignación de laboratorio. Un dueño global por tarjeta, en el orden de gpu. */
   duenosPercepcionGpu?: readonly number[];
+  /** Asignación de laboratorio. Un grupo disjunto por tarjeta, en el orden de gpu. */
+  gruposPercepcionGpu?: readonly (readonly number[])[];
   decisionGpu: 'siempre';                // §1.2: si hay tarjeta, la percepción va a ella aunque no compense
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)

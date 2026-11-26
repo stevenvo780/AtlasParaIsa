@@ -111,8 +111,10 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
   if (config.reservaLotesMateria !== undefined) validarReservaLotesMateria(config.reservaLotesMateria);
   if (config.repartoInicial !== undefined && config.repartoInicial !== 'poblacion') throw new RangeError('Reparto inicial inválido.');
-  const duenosGpu = resolverDuenosPercepcionGpu(hilos, config.gpu, config.duenosPercepcionGpu);
-  if (config.duenosPercepcionGpu !== undefined && !duenosGpu) throw new RangeError('Asignación de dueños CUDA inválida.');
+  const duenosGpu = resolverDuenosPercepcionGpu(hilos, config.gpu, config.duenosPercepcionGpu, config.gruposPercepcionGpu);
+  if ((config.duenosPercepcionGpu !== undefined || config.gruposPercepcionGpu !== undefined) && !duenosGpu) {
+    throw new RangeError('Asignación de dueños CUDA inválida.');
+  }
   if (hilos === 1) return new MotorUnico(mundo, config);
   if (!paramsOf(mundo).v23.duenos) throw new Error('Un motor de varios dueños exige v23.duenos (y con él todas las leyes de la V23).');
   return new MotorDuenos(mundo, config, hilos, duenosGpu);
@@ -326,7 +328,8 @@ class MotorDuenos implements Motor {
     if (this.#duenosBrokerGpu && !materiaGpu) {
       this.#brokersGpu = this.#duenosBrokerGpu.map((duenos, i) => {
         try {
-          return this.#brokersGpu[i] ?? new BrokerPercepcionGpu(undefined, this.#config.medirBrokerGpu, this.#config.gpu[i]!, duenos);
+          return this.#brokersGpu[i] ?? new BrokerPercepcionGpu(undefined, this.#config.medirBrokerGpu, this.#config.gpu[i]!, duenos,
+            this.#config.gruposPercepcionGpu !== undefined);
         } catch { return undefined; } // El dueño de esa tarjeta conserva la ruta CPU.
       });
       this.#duenosBrokerGpu.forEach((duenos, i) => {

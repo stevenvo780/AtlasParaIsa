@@ -2,21 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { BroadcastChannel, isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { PercibidorCpu, type VistaMundo } from '../decision/percepcion.js';
 import { ErrorDispositivo, type CanalGpu, type Dispositivo, type LotePercepcion, type Percibidor, type Plan, type TelemetriaBrokerGpu } from '../motor/contratos.js';
-import { CanalCompartido, enviarOrden, recibirRespuesta, type OpcionesCanalGpu } from './canal.js';
+import { CanalCompartido, DespachoGpuDescartado, enviarOrden, recibirRespuesta, type OpcionesCanalGpu } from './canal.js';
 import { CostePercepcion } from './coste-percepcion.js';
 import { PercibidorGpu } from './percibir-gpu.js';
 
-const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, completada0: 4, completada1: 5, micros: 6, bytes: 7,
-  senal0: 8, validacion0: 10, celdas: 12 };
-const MEDIDA = { lotes: 0, completada0: 1, completada1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
-  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14,
-  preparacionMicros: 15, celdas: 16 };
+const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, micros: 4, bytes: 5, ranuras: 6 };
+const RANURA = { permiso: 0, senal: 1, validacion: 2, completadas: 3, celdas: 4 };
+const CONTROL_LARGO = { epoca: 0, finActivo: 1, servicio: 2, celdas: 3 };
+const MEDIDA = { lotes: 0, cpuArranque: 1, cpuOcupada: 2, cpuSinCanal: 3, errores: 4,
+  subida: 5, bajada: 6, cudaMicros: 7, recorridoMicros: 8, cpuPorCoste: 9, rechazada: 10,
+  preparacionMicros: 11, colaMicros: 12, cpuColaVencida: 13, ranuras: 14 };
+const MEDIDA_RANURA = { completadas: 0, aceptadas: 1, celdas: 2 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
-export type DuenosBroker = readonly [number | null, number | null];
-const RANURAS = [0, 1] as const;
-type Ranura = typeof RANURAS[number];
+export type DuenosBroker = readonly (number | null)[];
 const SOLO_CPU = [[]];
-const ESTADO = { esperando: 0, lista: 1, fallo: 2, cancelada: 3 };
+const ESTADO = { enCola: 0, enServidor: 1, lista: 2, fallo: 3, descartada: 4, cancelada: 5 };
+const MAX_GENERACION = 0x1fffffff; // El permiso legado deja dos bits para distinguir las ranuras.
 const LIMITE_MS = 50;
 const PLAZO_TRANSITO_NANOS = BigInt(LIMITE_MS) * 1_000_000n;
 const restante = (fin: bigint): number => Number(fin - process.hrtime.bigint()) / 1e6;
@@ -24,42 +25,71 @@ const TRAZAR = process.env.CARTA_PERCEPCION_TRAZA === '1';
 const trazar = (fase: string, gpu: number, datos: object) => {
   if (TRAZAR) console.error('[percepcion-gpu]', JSON.stringify({ fase, gpu, ...datos }));
 };
-const turno = (generacion: number, ranura: Ranura): number => (generacion << 2) | (ranura + 1);
-function despertar(control: Int32Array<SharedArrayBuffer>, ranura: Ranura): void {
-  const senal = CONTROL.senal0 + ranura;
+const celda = (ranura: number, campo: number) => CONTROL.ranuras + ranura * RANURA.celdas + campo;
+const celdaMedida = (ranura: number, campo: number) => MEDIDA.ranuras + ranura * MEDIDA_RANURA.celdas + campo;
+const celdaPermiso = (agrupado: boolean, ranura: number) => agrupado ? celda(ranura, RANURA.permiso) : CONTROL.ocupado;
+const turno = (agrupado: boolean, generacion: number, ranura: number) => agrupado ? generacion : (generacion << 2) | (ranura + 1);
+function servicioEstimado(control: BigInt64Array<SharedArrayBuffer>, generacion: number): number {
+  const dato = Atomics.load(control, CONTROL_LARGO.servicio);
+  return Number(dato >> 32n) === generacion ? Number(dato & 0xffffffffn) : 0;
+}
+function despertar(control: Int32Array<SharedArrayBuffer>, ranura: number): void {
+  const senal = celda(ranura, RANURA.senal);
   Atomics.add(control, senal, 1);
   Atomics.notify(control, senal);
 }
-function desactivar(control: Int32Array<SharedArrayBuffer>): void {
+function desactivar({ control, duenosPorRanura }: PuertoBroker): void {
   Atomics.store(control, CONTROL.listo, -1);
-  despertar(control, 0);
-  despertar(control, 1);
+  duenosPorRanura.forEach((_, ranura) => despertar(control, ranura));
+}
+function cancelar(estado: Int32Array<SharedArrayBuffer>): number {
+  const anterior = Atomics.compareExchange(estado, 0, ESTADO.enCola, ESTADO.descartada);
+  return anterior === ESTADO.enServidor ? Atomics.compareExchange(estado, 0, ESTADO.enServidor, ESTADO.cancelada) : anterior;
 }
 
 interface Identidad { generacion: number; epoca: number; dueno: number; tick: number; despacho: number }
 interface Orden { kind: 'percibir'; subida: number; salida: number; bajada: number; tick: number; despacho: number }
 interface Peticion {
   identidad: Identidad; orden: Orden; inicio: bigint; enviada: bigint; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
-  estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>;
+  estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>; tomada: BigInt64Array<SharedArrayBuffer>;
 }
 interface PuertoBroker {
   dispositivo: number; canal: string; control: Int32Array<SharedArrayBuffer>; readonly duenosPorRanura: DuenosBroker;
+  controlLargo: BigInt64Array<SharedArrayBuffer>; agrupado: boolean;
   medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean;
 }
 export interface EpocaBrokerPercepcion extends PuertoBroker { generacion: number; epoca: number }
 
-export function resolverDuenosPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[]): DuenosBroker[] | undefined {
+export function resolverDuenosPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[],
+  grupos?: readonly (readonly number[])[]): DuenosBroker[] | undefined {
   const simple = gpu.length === 1 && (gpu[0] === 0 || gpu[0] === 1);
   const dual = gpu.length === 2 && gpu[0] === 0 && gpu[1] === 1;
   if ((!simple && !dual) || !Number.isSafeInteger(hilos) || hilos < 2) return undefined;
+  if (grupos !== undefined) {
+    if (duenos !== undefined || !Array.isArray(grupos) || grupos.length !== gpu.length) return undefined;
+    const usados = new Set<number>();
+    const resultado: number[][] = [];
+    for (const grupo of grupos) {
+      if (!Array.isArray(grupo) || grupo.length === 0) return undefined;
+      const asignados: number[] = [];
+      for (const dueno of grupo) {
+        if (!Number.isSafeInteger(dueno) || dueno < 0 || dueno >= hilos || usados.has(dueno)) return undefined;
+        usados.add(dueno);
+        asignados.push(dueno);
+      }
+      resultado.push(asignados);
+    }
+    return resultado;
+  }
   if (duenos === undefined) return hilos === 2 ? (simple ? [[0, 1]] : [[0, null], [null, 1]]) : undefined;
   if (duenos.length !== gpu.length || (dual && duenos[0] === duenos[1])) return undefined;
   for (const dueno of duenos) if (!Number.isSafeInteger(dueno) || dueno < 0 || dueno >= hilos) return undefined;
   return duenos.map(dueno => [dueno, null]);
 }
 
-export function admiteBrokerPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[]): boolean {
-  return resolverDuenosPercepcionGpu(hilos, gpu, duenos) !== undefined;
+export function admiteBrokerPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[],
+  grupos?: readonly (readonly number[])[]): boolean {
+  return resolverDuenosPercepcionGpu(hilos, gpu, duenos, grupos) !== undefined;
 }
 
 export class BrokerPercepcionGpu {
@@ -69,16 +99,22 @@ export class BrokerPercepcionGpu {
   #cerrando = false;
   readonly listo: Promise<boolean>;
 
-  constructor(opciones?: OpcionesCanalGpu, medir = false, dispositivo = 0, duenosPorRanura: DuenosBroker = [0, 1]) {
-    const asignacion = Object.freeze([duenosPorRanura[0], duenosPorRanura[1]] as const);
-    if (asignacion[0] === asignacion[1] || asignacion.some(dueno => dueno !== null && (!Number.isSafeInteger(dueno) || dueno < 0))) {
+  constructor(opciones?: OpcionesCanalGpu, medir = false, dispositivo = 0, duenosPorRanura: DuenosBroker = [0, 1],
+    agrupado = duenosPorRanura.length > 2) {
+    const asignacion = Object.freeze([...duenosPorRanura]);
+    const duenos = asignacion.filter(dueno => dueno !== null);
+    if (duenos.length === 0 || new Set(duenos).size !== duenos.length ||
+      duenos.some(dueno => !Number.isSafeInteger(dueno) || dueno < 0) ||
+      (agrupado ? duenos.length !== asignacion.length : asignacion.length !== 2)) {
       throw new RangeError('Asignación de dueños inválida para el corredor de percepción.');
     }
     this.#puertos = { dispositivo, canal: `atlas-percepcion-duenos-${randomUUID()}`,
-      duenosPorRanura: asignacion,
-      control: new Int32Array(new SharedArrayBuffer(CONTROL.celdas * Int32Array.BYTES_PER_ELEMENT)) };
+      duenosPorRanura: asignacion, agrupado,
+      control: new Int32Array(new SharedArrayBuffer((CONTROL.ranuras + asignacion.length * RANURA.celdas) * Int32Array.BYTES_PER_ELEMENT)),
+      controlLargo: new BigInt64Array(new SharedArrayBuffer(CONTROL_LARGO.celdas * BigInt64Array.BYTES_PER_ELEMENT)) };
     if (process.env.CARTA_PERCEPCION_COSTE_DUENOS === '1') this.#puertos.porCoste = true;
-    if (medir || this.#puertos.porCoste) this.#puertos.medida = new BigInt64Array(new SharedArrayBuffer(MEDIDA.celdas * BigInt64Array.BYTES_PER_ELEMENT));
+    if (medir || this.#puertos.porCoste) this.#puertos.medida =
+      new BigInt64Array(new SharedArrayBuffer((MEDIDA.ranuras + asignacion.length * MEDIDA_RANURA.celdas) * BigInt64Array.BYTES_PER_ELEMENT));
     this.#worker = new Worker(`
       const { workerData } = require('node:worker_threads');
       (async () => {
@@ -91,10 +127,10 @@ export class BrokerPercepcionGpu {
       ...this.#puertos, opciones,
     } });
     this.#salida = new Promise(resolve => this.#worker.once('exit', () => {
-      desactivar(this.#puertos.control);
+      desactivar(this.#puertos);
       resolve();
     }));
-    this.#worker.on('error', () => desactivar(this.#puertos.control));
+    this.#worker.on('error', () => desactivar(this.#puertos));
     this.listo = Promise.race([
       new Promise<boolean>(resolve => this.#worker.once('message', resolve)),
       this.#salida.then(() => false),
@@ -102,33 +138,38 @@ export class BrokerPercepcionGpu {
   }
 
   abrirEpoca(epoca: number): EpocaBrokerPercepcion {
-    const { control } = this.#puertos;
-    const generacion = Atomics.add(control, CONTROL.generacion, 1) + 1;
+    const { control, controlLargo, duenosPorRanura } = this.#puertos;
+    const generacion = Atomics.load(control, CONTROL.generacion) + 1;
+    if (generacion > MAX_GENERACION || !Number.isSafeInteger(epoca) || epoca < 0) throw new RangeError('Época de percepción GPU inválida.');
+    Atomics.store(controlLargo, CONTROL_LARGO.epoca, BigInt(epoca));
+    Atomics.store(control, CONTROL.generacion, generacion);
     Atomics.store(control, CONTROL.ocupado, 0);
-    despertar(control, 0);
-    despertar(control, 1);
+    duenosPorRanura.forEach((_, ranura) => {
+      Atomics.store(control, celda(ranura, RANURA.permiso), 0);
+      despertar(control, ranura);
+    });
     return { ...this.#puertos, epoca, generacion };
   }
 
   medidas() {
-    const c = this.#puertos.control;
+    const { control: c, duenosPorRanura } = this.#puertos;
     const generacion = Atomics.load(c, CONTROL.generacion);
     return { lista: Atomics.load(c, CONTROL.listo) === 1,
-      aceptaEnEpoca: generacion > 0 && (Atomics.load(c, CONTROL.validacion0) === generacion ||
-        Atomics.load(c, CONTROL.validacion0 + 1) === generacion),
+      aceptaEnEpoca: generacion > 0 && duenosPorRanura.some((_, r) => Atomics.load(c, celda(r, RANURA.validacion)) === generacion),
       bytes: Atomics.load(c, CONTROL.bytes), ms: Atomics.load(c, CONTROL.micros) / 1000,
-      completadas: [Atomics.load(c, CONTROL.completada0), Atomics.load(c, CONTROL.completada1)],
+      completadas: duenosPorRanura.map((_, r) => Atomics.load(c, celda(r, RANURA.completadas))),
       peticiones: Atomics.load(c, CONTROL.peticiones), detalle: this.#detalle() };
   }
 
   #detalle(): TelemetriaBrokerGpu | undefined {
-    const m = this.#puertos.medida;
+    const { medida: m, duenosPorRanura, agrupado, porCoste } = this.#puertos;
     if (!m) return undefined;
     const leer = (i: number) => Number(Atomics.load(m, i));
-    return { lotes: leer(MEDIDA.lotes), completadas: [leer(MEDIDA.completada0), leer(MEDIDA.completada1)],
-      aceptadas: [leer(MEDIDA.aceptada0), leer(MEDIDA.aceptada1)], rechazadas: leer(MEDIDA.rechazada),
+    return { lotes: leer(MEDIDA.lotes), completadas: duenosPorRanura.map((_, r) => leer(celdaMedida(r, MEDIDA_RANURA.completadas))),
+      aceptadas: duenosPorRanura.map((_, r) => leer(celdaMedida(r, MEDIDA_RANURA.aceptadas))), rechazadas: leer(MEDIDA.rechazada),
       cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
-      ...(this.#puertos.porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
+      ...(porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
+      ...(agrupado && { colaMicros: leer(MEDIDA.colaMicros), cpuColaVencida: leer(MEDIDA.cpuColaVencida) }),
       erroresCanal: leer(MEDIDA.errores), subidaConfirmadaBytes: leer(MEDIDA.subida), bajadaConfirmadaBytes: leer(MEDIDA.bajada),
       cudaConfirmadaMicros: leer(MEDIDA.cudaMicros), recorridoConfirmadoMicros: leer(MEDIDA.recorridoMicros),
       preparacionMicros: leer(MEDIDA.preparacionMicros) };
@@ -137,7 +178,7 @@ export class BrokerPercepcionGpu {
   cerrar(): Promise<void> {
     if (!this.#cerrando) {
       this.#cerrando = true;
-      desactivar(this.#puertos.control);
+      desactivar(this.#puertos);
       this.#worker.postMessage('cerrar');
     }
     return this.#salida;
@@ -147,7 +188,9 @@ export class BrokerPercepcionGpu {
 /** El dueño empaqueta desde su captura F2. El corredor solo ve el paquete, nunca las páginas vivas del dueño. */
 class CanalPercepcionBroker implements CanalGpu {
   readonly #puerto: BroadcastChannel;
-  readonly #ranura: Ranura;
+  readonly #ranura: number;
+  readonly #celdaPermiso: number;
+  readonly #permiso: number;
   #datos = new Uint8Array(new SharedArrayBuffer(0));
   #pendiente?: Peticion;
   #reserva?: bigint;
@@ -155,21 +198,34 @@ class CanalPercepcionBroker implements CanalGpu {
 
   constructor(private readonly epoca: EpocaBrokerPercepcion, private readonly dueno: number) {
     const ranura = epoca.duenosPorRanura.indexOf(dueno);
-    if (ranura !== 0 && ranura !== 1) throw new RangeError(`El dueño ${dueno} no está asignado a este corredor de percepción.`);
+    if (ranura < 0) throw new RangeError(`El dueño ${dueno} no está asignado a este corredor de percepción.`);
     this.#ranura = ranura;
+    this.#celdaPermiso = celdaPermiso(epoca.agrupado, ranura);
+    this.#permiso = turno(epoca.agrupado, epoca.generacion, ranura);
     this.#puerto = new BroadcastChannel(`${epoca.canal}:${ranura}`);
     this.#puerto.unref();
   }
 
   get dispositivo(): number { return this.epoca.dispositivo; }
   get bytes(): number { return this.#datos.length; }
+  #cabeEnGrupo(nuevo: number): boolean {
+    const { agrupado, control, controlLargo, duenosPorRanura } = this.epoca;
+    if (!agrupado) return true;
+    const finActivo = Atomics.load(controlLargo, CONTROL_LARGO.finActivo);
+    if (finActivo && restante(finActivo) <= 0) return false;
+    const servicio = servicioEstimado(controlLargo, this.epoca.generacion);
+    if (!servicio) return true; // Primera tanda de la época: admite hasta una por ranura.
+    let reservas = nuevo;
+    for (let r = 0; r < duenosPorRanura.length; r++) if (Atomics.load(control, celda(r, RANURA.permiso))) reservas++;
+    return reservas * servicio < LIMITE_MS * 1000;
+  }
   obstaculo(comprobarOcupacion: boolean): MotivoCpu | undefined {
     const { control, generacion } = this.epoca;
     const listo = Atomics.load(control, CONTROL.listo);
     if (this.#cerrado || listo !== 1 || Atomics.load(control, CONTROL.generacion) !== generacion) {
       return listo === 0 && !this.#cerrado ? 'cpuArranque' : 'cpuSinCanal';
     }
-    if (comprobarOcupacion && Atomics.load(control, CONTROL.ocupado) !== 0) return 'cpuOcupada';
+    if (comprobarOcupacion && (Atomics.load(control, this.#celdaPermiso) !== 0 || !this.#cabeEnGrupo(1))) return 'cpuOcupada';
   }
   anotarRuta(ruta: MotivoCpu | 'cpuPorCoste' | 'lotes'): void {
     if (this.epoca.medida) Atomics.add(this.epoca.medida, MEDIDA[ruta], 1n);
@@ -178,14 +234,19 @@ class CanalPercepcionBroker implements CanalGpu {
     const { control, generacion } = this.epoca;
     const obstaculo = this.obstaculo(false);
     if (obstaculo) { this.anotarRuta(obstaculo); return false; }
-    const permiso = turno(generacion, this.#ranura);
-    if (Atomics.compareExchange(control, CONTROL.ocupado, 0, permiso) !== 0) {
+    if (Atomics.compareExchange(control, this.#celdaPermiso, 0, this.#permiso) !== 0) {
       this.anotarRuta('cpuOcupada');
       return false;
     }
     if (Atomics.load(control, CONTROL.generacion) !== generacion) {
-      Atomics.compareExchange(control, CONTROL.ocupado, permiso, 0);
+      Atomics.compareExchange(control, this.#celdaPermiso, this.#permiso, 0);
       this.anotarRuta('cpuSinCanal');
+      return false;
+    }
+    // Reserva como máximo una tanda por dueño; si el trabajo admitido no parece caber, el dueño va a CPU sin empaquetar.
+    if (!this.#cabeEnGrupo(0)) {
+      Atomics.compareExchange(control, this.#celdaPermiso, this.#permiso, 0);
+      this.anotarRuta('cpuOcupada');
       return false;
     }
     this.#reserva = process.hrtime.bigint();
@@ -205,13 +266,14 @@ class CanalPercepcionBroker implements CanalGpu {
     if (this.#reserva === undefined || this.#pendiente) throw new Error('El dueño no reservó el canal de percepción.');
     const orden = JSON.parse(Buffer.from(datos).toString()) as Orden;
     const { epoca, generacion } = this.epoca;
-    const respuesta = new SharedArrayBuffer(16);
+    const respuesta = new SharedArrayBuffer(24);
     // El dueño ya acabó de empaquetar. Los 50 ms cubren buzón, copias y respuesta del servidor.
     const enviada = process.hrtime.bigint(), inicio = this.#reserva;
     const peticion: Peticion = {
       identidad: { generacion, epoca, dueno: this.dueno, tick: orden.tick, despacho: orden.despacho },
       orden, inicio, enviada, fin: enviada + PLAZO_TRANSITO_NANOS, datos: this.#datos,
       estado: new Int32Array(respuesta, 0, 1), tiempo: new Float64Array(respuesta, 8, 1),
+      tomada: new BigInt64Array(respuesta, 16, 1),
     };
     this.#puerto.postMessage(peticion);
     this.#pendiente = peticion;
@@ -225,26 +287,34 @@ class CanalPercepcionBroker implements CanalGpu {
     const peticion = this.#pendiente;
     if (!peticion) throw new Error('El dueño no tiene un despacho pendiente.');
     const { estado, fin, tiempo, identidad } = peticion;
-    const { control } = this.epoca;
-    const senal = CONTROL.senal0 + this.#ranura, limite = performance.now() + plazoMs;
+    const { control, controlLargo, agrupado, medida } = this.epoca;
+    const senal = celda(this.#ranura, RANURA.senal), limite = performance.now() + plazoMs;
     for (;;) {
       const aviso = Atomics.load(control, senal), queda = Math.min(limite - performance.now(), restante(fin));
-      if (queda <= 0 || Atomics.load(estado, 0) !== ESTADO.esperando || Atomics.load(control, CONTROL.listo) !== 1
+      if (queda <= 0 || Atomics.load(estado, 0) > ESTADO.enServidor || Atomics.load(control, CONTROL.listo) !== 1
         || Atomics.load(control, CONTROL.generacion) !== identidad.generacion) break;
       Atomics.wait(control, senal, aviso, queda);
     }
-    // Si vence el plazo, el corredor aún podría escribir sus bytes. El dueño pierde este búfer para siempre.
-    const antes = Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.cancelada);
+    const antes = cancelar(estado);
     this.#pendiente = undefined;
-    if (antes !== ESTADO.lista || restante(fin) <= 0 || Atomics.load(control, CONTROL.generacion) !== identidad.generacion
-      || Atomics.load(control, CONTROL.listo) !== 1) {
+    if (agrupado && medida) {
+      const tomada = Atomics.load(peticion.tomada, 0) || process.hrtime.bigint();
+      Atomics.add(medida, MEDIDA.colaMicros, (tomada - peticion.enviada) / 1000n);
+    }
+    const vigente = Atomics.load(control, CONTROL.generacion) === identidad.generacion
+      && Atomics.load(controlLargo, CONTROL_LARGO.epoca) === BigInt(identidad.epoca) && Atomics.load(control, CONTROL.listo) === 1;
+    if (antes !== ESTADO.lista || restante(fin) <= 0 || !vigente) {
       if (TRAZAR) trazar('sin-respuesta', this.dispositivo, { ...identidad, estado: antes,
         lista: Atomics.load(control, CONTROL.listo), restanteMs: restante(fin), desdeEnvioMs: -restante(peticion.enviada) });
+      if (agrupado && vigente && (antes === ESTADO.enCola || antes === ESTADO.descartada)) {
+        // El broker pudo leer el paquete para la subida. No se reutiliza su memoria aunque no se haya enviado la orden.
+        this.#datos = new Uint8Array(new SharedArrayBuffer(0));
+        throw new DespachoGpuDescartado(this);
+      }
       throw new ErrorDispositivo(`gpu${this.dispositivo}`, 'El corredor no confirmó el despacho de este dueño y generación.');
     }
-    const medida = this.epoca.medida;
     if (medida) {
-      Atomics.add(medida, MEDIDA.completada0 + this.#ranura, 1n);
+      Atomics.add(medida, celdaMedida(this.#ranura, MEDIDA_RANURA.completadas), 1n);
       Atomics.add(medida, MEDIDA.subida, BigInt(peticion.orden.subida));
       Atomics.add(medida, MEDIDA.bajada, BigInt(peticion.orden.bajada));
       Atomics.add(medida, MEDIDA.cudaMicros, BigInt(Math.round(tiempo[0]! * 1000)));
@@ -255,16 +325,16 @@ class CanalPercepcionBroker implements CanalGpu {
   anotarError(error: unknown): void {
     if (!(error instanceof ErrorDispositivo)) return;
     this.#validarEnEpoca(false);
-    if (this.epoca.medida) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
+    if (this.epoca.medida) Atomics.add(this.epoca.medida, error instanceof DespachoGpuDescartado ? MEDIDA.cpuColaVencida : MEDIDA.errores, 1n);
   }
   anotarValidacion(aceptada: boolean): void {
     if (this.#validarEnEpoca(aceptada) && this.epoca.medida)
-      Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.#ranura : MEDIDA.rechazada, 1n);
+      Atomics.add(this.epoca.medida, aceptada ? celdaMedida(this.#ranura, MEDIDA_RANURA.aceptadas) : MEDIDA.rechazada, 1n);
   }
   #validarEnEpoca(aceptada: boolean): boolean {
     const { control, generacion } = this.epoca;
     if (Atomics.load(control, CONTROL.generacion) !== generacion) return false;
-    const posicion = CONTROL.validacion0 + this.#ranura;
+    const posicion = celda(this.#ranura, RANURA.validacion);
     // El signo representa la última validación. Un cliente que cierra tarde no pisa otra generación.
     let anterior = Atomics.load(control, posicion);
     while (Math.abs(anterior) <= generacion) {
@@ -277,8 +347,8 @@ class CanalPercepcionBroker implements CanalGpu {
   cerrar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
-    if (this.#reserva !== undefined) Atomics.compareExchange(this.epoca.control, CONTROL.ocupado, turno(this.epoca.generacion, this.#ranura), 0);
-    if (this.#pendiente) Atomics.compareExchange(this.#pendiente.estado, 0, ESTADO.esperando, ESTADO.cancelada);
+    if (this.#reserva !== undefined) Atomics.compareExchange(this.epoca.control, this.#celdaPermiso, this.#permiso, 0);
+    if (this.#pendiente) cancelar(this.#pendiente.estado);
     this.#pendiente = undefined;
     this.#puerto.close();
     this.#datos = new Uint8Array(new SharedArrayBuffer(0));
@@ -354,12 +424,12 @@ export class PercibidorBroker implements Percibidor {
 }
 
 function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
-  const { canal, control, dispositivo, duenosPorRanura } = puertos;
+  const { canal, control, controlLargo, dispositivo, duenosPorRanura, agrupado, medida } = puertos;
   const port = parentPort!;
   let gpu: CanalCompartido | undefined;
   const entradas: BroadcastChannel[] = [];
   const cerrar = () => {
-    desactivar(control);
+    desactivar(puertos);
     for (const entrada of entradas) entrada.close();
     gpu?.cerrar();
     port.close();
@@ -367,19 +437,21 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
   try {
     gpu = new CanalCompartido(dispositivo, opciones);
     gpu.iniciar(3000);
-    for (const ranura of RANURAS) {
-      const dueno = duenosPorRanura[ranura];
+    for (const [ranura, dueno] of duenosPorRanura.entries()) {
       if (dueno === null) continue;
+      const posicion = celdaPermiso(agrupado, ranura);
       const entrada = new BroadcastChannel(`${canal}:${ranura}`);
       entradas.push(entrada);
       entrada.onmessage = ({ data }) => {
-        const { identidad: id, orden, enviada, fin, estado, datos, tiempo } = data as Peticion;
-        if (id.dueno !== dueno) return;
-        const permiso = turno(id.generacion, ranura);
+        const { identidad: id, orden, enviada, fin, estado, datos, tiempo, tomada } = data as Peticion;
+        if (id.dueno !== dueno || id.tick !== orden.tick || id.despacho !== orden.despacho || !Number.isSafeInteger(id.epoca)) return;
+        const permiso = turno(agrupado, id.generacion, ranura), epoca = BigInt(id.epoca);
         const pertenece = () => Atomics.load(control, CONTROL.generacion) === id.generacion
-          && Atomics.load(control, CONTROL.listo) === 1;
-        const vigente = () => pertenece() && Atomics.load(control, CONTROL.ocupado) === permiso
-          && Atomics.load(estado, 0) === ESTADO.esperando && restante(fin) > 0;
+          && Atomics.load(controlLargo, CONTROL_LARGO.epoca) === epoca && Atomics.load(control, CONTROL.listo) === 1;
+        const vigente = () => pertenece() && Atomics.load(control, posicion) === permiso
+          && Atomics.load(estado, 0) === ESTADO.enCola && restante(fin) > 0;
+        const desde = agrupado ? process.hrtime.bigint() : 0n;
+        if (agrupado && medida) Atomics.store(tomada, 0, desde);
         let fase = 'admisión';
         const tiempos: Record<string, number> | undefined = TRAZAR ? { colaMs: -restante(enviada) } : undefined;
         let marca = TRAZAR ? performance.now() : 0;
@@ -397,16 +469,22 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
             if (TRAZAR) trazar('descartada', dispositivo, { ...id, etapa: fase, estado: Atomics.load(estado, 0), restanteMs: restante(fin), ...tiempos });
             return;
           }
-          Atomics.add(control, CONTROL.peticiones, 1);
           medir('copiarSubidaMs');
           if (datos.length > gpu!.bytes) gpu!.crecer(datos.length);
           gpu!.escribir(0, datos.subarray(0, orden.subida));
           medir('enviarOrdenMs');
-          if (!vigente()) {
+          // La carrera con el dueño se decide antes de escribir a Python. Solo después de ganar puede tocar el espejo.
+          if (!vigente() || Atomics.compareExchange(estado, 0, ESTADO.enCola, ESTADO.enServidor) !== ESTADO.enCola) {
             if (TRAZAR) trazar('descartada', dispositivo, { ...id, etapa: fase, estado: Atomics.load(estado, 0), restanteMs: restante(fin), ...tiempos });
             return;
           }
+          if (!pertenece() || restante(fin) <= 0 || Atomics.load(estado, 0) !== ESTADO.enServidor) {
+            Atomics.compareExchange(estado, 0, ESTADO.enServidor, ESTADO.descartada);
+            return;
+          }
+          if (agrupado) Atomics.store(controlLargo, CONTROL_LARGO.finActivo, fin);
           enviarOrden(gpu!, { ...orden, ...id });
+          Atomics.add(control, CONTROL.peticiones, 1);
           medir('esperarRespuestaMs');
           const respuesta = recibirRespuesta<Identidad & { ok: boolean; ms: number }>(gpu!, Math.max(0, restante(fin)));
           medir('copiarBajadaMs');
@@ -415,7 +493,7 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
             || respuesta.tick !== id.tick || respuesta.despacho !== id.despacho) {
             throw new ErrorDispositivo(`gpu${dispositivo}`, 'El corredor recibió el eco de otro despacho.');
           }
-          if (pertenece() && restante(fin) > 0 && Atomics.load(estado, 0) === ESTADO.esperando) {
+          if (pertenece() && restante(fin) > 0 && Atomics.load(estado, 0) === ESTADO.enServidor) {
             gpu!.leer(orden.salida, datos.subarray(orden.salida, orden.salida + orden.bajada));
             tiempo[0] = respuesta.ms;
             ms = respuesta.ms;
@@ -426,17 +504,27 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
               error instanceof Error && error.message.includes('eco de otro despacho') ? 'identidad' : 'canal' });
           cerrar();
         } finally {
+          if (agrupado) Atomics.store(controlLargo, CONTROL_LARGO.finActivo, 0n);
           if (TRAZAR && ms !== undefined) {
             medir('fin');
             trazar('respuesta', dispositivo, { ...id, cudaMs: ms, restanteMs: restante(fin), ...tiempos });
           }
-          Atomics.compareExchange(control, CONTROL.ocupado, permiso, 0);
+          Atomics.compareExchange(control, posicion, permiso, 0);
           if (ms !== undefined && pertenece() && restante(fin) > 0
-            && Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.lista) === ESTADO.esperando) {
-            Atomics.add(control, CONTROL.completada0 + ranura, 1);
+            && Atomics.compareExchange(estado, 0, ESTADO.enServidor, ESTADO.lista) === ESTADO.enServidor) {
+            Atomics.add(control, celda(ranura, RANURA.completadas), 1);
             Atomics.store(control, CONTROL.micros, Math.round(ms * 1000));
             Atomics.store(control, CONTROL.bytes, orden.subida + orden.bajada);
-          } else Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.fallo);
+            if (agrupado) {
+              const servicio = Math.max(1, Number((process.hrtime.bigint() - desde) / 1000n));
+              const previo = servicioEstimado(controlLargo, id.generacion);
+              const media = previo ? Math.round(0.75 * previo + 0.25 * servicio) : servicio;
+              Atomics.store(controlLargo, CONTROL_LARGO.servicio, (BigInt(id.generacion) << 32n) | BigInt(media));
+            }
+          } else {
+            Atomics.compareExchange(estado, 0, ESTADO.enCola, ESTADO.descartada);
+            Atomics.compareExchange(estado, 0, ESTADO.enServidor, ESTADO.fallo);
+          }
           despertar(control, ranura);
         }
       };

@@ -53,14 +53,21 @@ test('dos dueños despachan por un corredor y una generación nueva descarta la 
   }
   assert.deepEqual(broker.medidas().completadas, [1, 1]);
   assert.equal(broker.medidas().peticiones, 2);
+  assert.equal(broker.medidas().aceptaEnEpoca, false, 'el eco no prueba que F2 aceptó la tanda');
+  clientes[0]!.confirmar(true);
+  assert.equal(broker.medidas().aceptaEnEpoca, true);
   assert.ok(!Object.hasOwn(broker.medidas().detalle!, 'cpuPorCoste'), 'la telemetría fija conserva su esquema');
   const nueva = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(19), 0);
   t.after(() => nueva.cerrar());
+  clientes[1]!.confirmar(true);
+  assert.equal(broker.medidas().aceptaEnEpoca, false, 'la generación anterior no acredita la nueva');
   clientes[0]!.lanzar(lote, planes);
   assert.equal(clientes[0]!.esperar(100).despacho, lote.despacho);
   assert.equal(broker.medidas().peticiones, 2, 'un cliente antiguo ejecuta en CPU');
   nueva.lanzar(lote, planes);
   assert.equal(nueva.esperar(100).tick, lote.tick);
+  nueva.confirmar(false);
+  assert.equal(broker.medidas().aceptaEnEpoca, false);
   assert.deepEqual(broker.medidas().completadas, [2, 1]);
   nueva.lanzar({ ...lote, despacho: 2 }, planes);
   const cierre = broker.cerrar();
@@ -119,6 +126,7 @@ test('el coste del corredor descarta respuestas GPU incoherentes en la ruta real
   assert.deepEqual(confirmar.mock.calls.map(c => c.arguments[0]), [true, false, true, true, true, true]);
   assert.deepEqual(broker.medidas().detalle?.completadas, [1, 0], 'el corredor sí recibió una respuesta con el eco correcto');
   assert.deepEqual(broker.medidas().detalle?.aceptadas, [0, 0]);
+  assert.equal(broker.medidas().aceptaEnEpoca, false);
   assert.equal(broker.medidas().detalle?.rechazadas, 1);
   assert.equal(broker.medidas().detalle?.cpuPorCoste, 5, 'pospone otra sonda de la ruta observada como inválida');
   for (let i = 0; i < 60; i++) ejecutar();

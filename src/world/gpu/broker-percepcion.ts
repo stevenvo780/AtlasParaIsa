@@ -6,7 +6,8 @@ import { CanalCompartido, enviarOrden, recibirRespuesta, type OpcionesCanalGpu }
 import { CostePercepcion } from './coste-percepcion.js';
 import { PercibidorGpu } from './percibir-gpu.js';
 
-const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7, senal0: 8, celdas: 10 };
+const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7,
+  senal0: 8, validacion0: 10, celdas: 12 };
 const MEDIDA = { lotes: 0, dueno0: 1, dueno1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
   subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14, celdas: 15 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
@@ -86,7 +87,10 @@ export class BrokerPercepcionGpu {
 
   medidas() {
     const c = this.#puertos.control;
+    const generacion = Atomics.load(c, CONTROL.generacion);
     return { lista: Atomics.load(c, CONTROL.listo) === 1,
+      aceptaEnEpoca: generacion > 0 && (Atomics.load(c, CONTROL.validacion0) === generacion ||
+        Atomics.load(c, CONTROL.validacion0 + 1) === generacion),
       bytes: Atomics.load(c, CONTROL.bytes), ms: Atomics.load(c, CONTROL.micros) / 1000,
       completadas: [Atomics.load(c, CONTROL.dueno0), Atomics.load(c, CONTROL.dueno1)],
       peticiones: Atomics.load(c, CONTROL.peticiones), detalle: this.#detalle() };
@@ -214,7 +218,17 @@ class CanalPercepcionBroker implements CanalGpu {
     if (this.epoca.medida && error instanceof ErrorDispositivo) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
   }
   anotarValidacion(aceptada: boolean): void {
-    if (this.epoca.medida) Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
+    const { control, generacion, medida } = this.epoca;
+    if (Atomics.load(control, CONTROL.generacion) !== generacion) return;
+    const posicion = CONTROL.validacion0 + this.dueno;
+    // El signo representa la última validación. Un cliente que cierra tarde no pisa otra generación.
+    let anterior = Atomics.load(control, posicion);
+    while (Math.abs(anterior) <= generacion) {
+      const leida = Atomics.compareExchange(control, posicion, anterior, aceptada ? generacion : -generacion);
+      if (leida === anterior) break;
+      anterior = leida;
+    }
+    if (medida) Atomics.add(medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
   }
   cerrar(): void {
     if (this.#cerrado) return;

@@ -19,6 +19,7 @@ import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
+import { BrokerPercepcionGpu, type PercibidorBroker } from '../gpu/broker-percepcion.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
@@ -209,6 +210,8 @@ class MotorDuenos implements Motor {
     };
   }
   #piscina: Piscina<DatosDueno> | null = null;
+  #brokerGpu?: BrokerPercepcionGpu;
+  #clienteGpu?: PercibidorBroker;
   #fatal: ErrorFatalMotor | undefined;
   // Vigentes mientras hay piscina (los arma `#arrancar`).
   #d!: Dueno;
@@ -260,7 +263,14 @@ class MotorDuenos implements Motor {
     contadores.fijarCronica(m.eventCounter + 1);
     const terreno = this.#terreno = new TerrenoPercepcion(verificar);
     terreno.usarDuenos();
-    ligarCompartido(m, tabla, terreno, contadores);
+    const usarBroker = process.env.CARTA_PERCEPCION_DUENOS === '1' && !!process.env.COMPUTE_NVRTC
+      && hilos === 2 && this.#config.gpu.length === 1 && this.#config.gpu[0] === 0 && !params.v23.materiaGpu;
+    if (usarBroker && !this.#brokerGpu) {
+      try { this.#brokerGpu = new BrokerPercepcionGpu(); }
+      catch { /* Crear un corredor es opcional: los dueños ya tienen la ruta CPU. */ }
+    }
+    const brokerGpu = usarBroker ? this.#brokerGpu?.abrirEpoca(this.#epoca) : undefined;
+    this.#clienteGpu = ligarCompartido(m, tabla, terreno, contadores, brokerGpu);
     for (const ley of leyesActivas(params.v23)) for (const [nombre, tipo, ancho] of ley.columnas ?? []) tabla.columna(nombre, tipo, ancho);
     const buzones = this.#buzones = new Buzones(hilos), libros = crearLibros(hilos), registro = new RegistroContenido(hilos);
     const control = this.#control = new Float64Array(new SharedArrayBuffer((CTL.porDueno + hilos * CTL_DUENO.celdas) * Float64Array.BYTES_PER_ELEMENT));
@@ -305,7 +315,7 @@ class MotorDuenos implements Motor {
       hilos, tabla: tabla.compartirTabla(), terreno: terreno.compartir(), buzones: buzones.memoria!, contadores: contadores.memoria!,
       registro: registro.memoria!, libros, lotes: lotes?.compartir() ?? null, desborde: desborde?.compartir() ?? null,
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
-      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, conMateriaCargada: materia !== null,
+      semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca, brokerGpu, conMateriaCargada: materia !== null,
     };
     try {
       const piscina = this.#piscina = new Piscina<DatosDueno>({
@@ -668,15 +678,24 @@ class MotorDuenos implements Motor {
     t.intentos = suma(CTL_DUENO.intentos); t.rechazados = suma(CTL_DUENO.rechazados); t.migraciones = suma(CTL_DUENO.migraciones);
   }
 
-  telemetria(): TelemetriaMotor { return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice() }; }
+  telemetria(): TelemetriaMotor {
+    const gpu = this.#brokerGpu?.medidas();
+    return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice(), ...(gpu && {
+      gpuEstado: [gpu.lista && gpu.completadas.some(n => n > 0) ? 'ok' : 'cpu'],
+      gpuMs: [gpu.ms], gpuBytes: [gpu.bytes],
+    }) };
+  }
 
   async cerrar(): Promise<void> {
     for (const resolvedores of this.#detalles.values()) for (const resolver of resolvedores) resolver(null);
     this.#detalles.clear();
-    await this.#cerrarPiscina();
+    try { await this.#cerrarPiscina(); }
+    finally { await this.#brokerGpu?.cerrar(); }
   }
 
   async #cerrarPiscina(): Promise<void> {
+    this.#clienteGpu?.cerrar();
+    this.#clienteGpu = undefined;
     const piscina = this.#piscina;
     if (!piscina) return;
     this.#piscina = null;

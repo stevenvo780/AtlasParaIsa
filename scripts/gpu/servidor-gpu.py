@@ -57,6 +57,7 @@ class Dispositivo:
         self.grabar_evento = enlace(driver, 'cuEventRecord', p, p)
         self.elapsed = enlace(driver, 'cuEventElapsedTime', C.POINTER(C.c_float), p, p)
         self.buffers = {}
+        self.generacion_percepcion = None
 
         self.nvrtc = nvrtc
         self.arquitectura = f'compute_{mayor.value}{menor.value}'
@@ -124,9 +125,16 @@ class Dispositivo:
             return self.materia.ejecutar(orden, direccion, inicio)
         lote = self.buffer('lote', subida)
         resultado = self.buffer('resultado', bajada)
-        terreno = self.buffer('terreno', orden['terrenoBytes'], conservar=True)
-        cerebro = self.buffer('cerebro', orden['cerebroBytes'], conservar=True)
-        ocupantes = self.buffer('ocupantes', orden['organismosBytes'], conservar=True)
+        dueno = orden.get('dueno')
+        if dueno is not None and orden['generacion'] != self.generacion_percepcion:
+            self.generacion_percepcion = orden['generacion']
+            # Una época nueva invalida los espejos, pero conserva el contexto y los módulos CUDA.
+            for clave in [c for c in self.buffers if isinstance(c, tuple)]:
+                puntero, _ = self.buffers.pop(clave)
+                self.liberar(puntero)
+        terreno = self.buffer('terreno' if dueno is None else ('terreno', dueno), orden['terrenoBytes'], conservar=True)
+        cerebro = self.buffer('cerebro' if dueno is None else ('cerebro', dueno), orden['cerebroBytes'], conservar=True)
+        ocupantes = self.buffer('ocupantes' if dueno is None else ('ocupantes', dueno), orden['organismosBytes'], conservar=True)
         inicio = perf_counter()
         self.subir(lote, direccion, subida)
         self.kernel(self.actualizar, orden['parches'], lote, terreno, cerebro, ocupantes)
@@ -199,7 +207,8 @@ def main():
                 mm = mmap.mmap(args.fd, capacidad)
             datos = gpu.ejecutar(orden, mm)
             # Eco del despacho: el motor descarta la respuesta que no sea la del lote que espera.
-            emitir({'ok': True, **datos, 'tick': orden['tick'], 'despacho': orden['despacho']})
+            eco = {k: orden[k] for k in ('tick', 'despacho', 'generacion', 'epoca', 'dueno') if k in orden}
+            emitir({'ok': True, **datos, **eco})
     finally:
         if mm is not None:
             mm.close()

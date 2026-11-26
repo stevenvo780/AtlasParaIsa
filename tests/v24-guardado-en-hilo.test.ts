@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { setImmediate as siguienteVuelta } from 'node:timers/promises';
 import { createApp } from '../src/server/app.js';
+import { PersistidorGuardado } from '../src/server/guardado-worker.js';
 import { Store } from '../src/server/store.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
@@ -13,6 +16,12 @@ import { inyectarFalloConfirmarGuardadoParaPrueba } from '../src/world/motor/coo
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
 import { filaInstantanea, laboratorio } from './lib/store.js';
+
+function afinidadDe(status: string): string {
+  const lista = /^Cpus_allowed_list:[\t ]+([0-9,-]+)$/m.exec(readFileSync(status, 'utf8'))?.[1];
+  assert.ok(lista, `Falta la lista de CPU permitidos en ${status}.`);
+  return lista;
+}
 
 test('el guardado rutinario cede el event loop y conserva dueños, pesos y materia', async t => {
   const entorno = {
@@ -48,10 +57,25 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
   remota.policy.weights[1] = Number.MIN_VALUE;
   store.guardar({ world: inicial, materia: null });
 
+  let afinidadInicial: string | undefined;
+  let cpuPersistidor: number | undefined;
+  if (process.platform === 'linux') {
+    const taskset = spawnSync('taskset', ['--version'], { stdio: 'ignore' });
+    if ((taskset.error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+      assert.ifError(taskset.error);
+      assert.equal(taskset.status, 0);
+      afinidadInicial = afinidadDe('/proc/thread-self/status');
+      cpuPersistidor = Number.parseInt(afinidadInicial, 10);
+      assert.ok(Number.isSafeInteger(cpuPersistidor));
+    }
+  }
+  if (cpuPersistidor === undefined) t.diagnostic('La comprobación de afinidad requiere Linux y taskset.');
+  const persistir = t.mock.method(PersistidorGuardado.prototype, 'guardar');
   const app = createApp({
     store, origin: 'http://127.0.0.1:3000', password: 'guardado-en-hilo-v24', seed: semilla,
     tape: false, manual: true, confirmarGuardadoVivo: true,
-    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true },
+    guardadoEnHilo: { snapshotPackedPeople: true, snapshotSplitPeopleWeights: true,
+      ...(cpuPersistidor === undefined ? {} : { cpuPersistidor }) },
   });
   try {
     const mundo = app.world;
@@ -93,6 +117,27 @@ test('el guardado rutinario cede el event loop y conserva dueños, pesos y mater
     assert.equal(duenoSi(app.world), dueno);
     assert.equal(app.salud().recargas, 0);
     assert.ok(!mundo.people.some(p => p.id === remota.id));
+
+    assert.equal(persistir.mock.callCount(), 2);
+    for (const [index, llamada] of persistir.mock.calls.entries()) {
+      const acuse = await llamada.result;
+      assert.ok(acuse);
+      assert.equal(acuse.tick, index + 1);
+      const perfil = acuse.perfilPersistidor;
+      assert.ok(perfil);
+      for (const fase of [perfil.materializar, perfil.guardar]) {
+        assert.ok(Number.isFinite(fase.paredMs) && fase.paredMs >= 0);
+        if (typeof process.threadCpuUsage === 'function') assert.notEqual(fase.cpuMs, null);
+        if (fase.cpuMs !== null) assert.ok(Number.isFinite(fase.cpuMs) && fase.cpuMs >= 0);
+      }
+      if (cpuPersistidor !== undefined) {
+        assert.ok(perfil.tid !== null && Number.isSafeInteger(perfil.tid) && perfil.tid > 0);
+        assert.notEqual(perfil.tid, process.pid);
+        assert.equal(perfil.afinidad, String(cpuPersistidor));
+        assert.equal(afinidadDe(`/proc/self/task/${perfil.tid}/status`), String(cpuPersistidor));
+        assert.equal(afinidadDe('/proc/thread-self/status'), afinidadInicial);
+      }
+    }
 
     const manifiesto = JSON.parse(filaInstantanea(store).body);
     assert.equal(manifiesto.snapshotEncoding, 'snapshot-parts-v5');

@@ -722,6 +722,7 @@ async function runSimulation(options: SimWorkerOptions) {
     snapshotCompressedPeople: process.env.CARTA_SNAPSHOT_PERSONAS_ZSTD === '1',
     snapshotSplitPeopleWeights: process.env.CARTA_SNAPSHOT_PESOS_SEPARADOS === '1',
   };
+  const cpuPersistidor = process.env.CARTA_GUARDADO_CPU_PERSISTIDOR?.trim();
   const store = new Store(options.worldPath, opcionesStore);
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();
@@ -885,7 +886,9 @@ async function runSimulation(options: SimWorkerOptions) {
       deployment: options.deployment, tape: options.tape, tapeDirectory: options.tapeDirectory,
       tapeTopeBytes: options.tapeTopeBytes, tapeSinCreditoMs: options.tapeSinCreditoMs,
       guardadoEnHilo: process.env.CARTA_GUARDADO_EN_HILO === '1' ? { ...opcionesStore,
-        maxTicksSolapados: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0') } : undefined,
+        maxTicksSolapados: Number(process.env.CARTA_GUARDADO_ADELANTO_TICKS ?? '0'),
+        ...(cpuPersistidor && { cpuPersistidor: Number(cpuPersistidor) }),
+      } : undefined,
       onEstadoCinta: error => {
         port.postMessage({ type: 'cinta', error });
         if (error) port.postMessage({ type: 'log', level: 'warn', value: { cinta: 'detenida', motivo: error } });

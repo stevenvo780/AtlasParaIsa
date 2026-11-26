@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readlinkSync } from 'node:fs';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { ChronicleJournal } from '../world/chronicle-journal.js';
 import { materializarCorteTransferido, type AcuseCorteTransferido, type CapturaCorteTransferido, type CorteTransferido,
@@ -7,7 +8,25 @@ import { Store, type StoreOptions } from './store.js';
 
 type OpcionesDisco = Pick<StoreOptions, 'snapshotPackedPeople' | 'snapshotCompressedPeople' | 'snapshotSplitPeopleWeights'>;
 
-export type GuardadoConfirmado = AcuseCorteTransferido & { readonly cronica: ChronicleJournal };
+interface TiempoPersistidor {
+  paredMs: number;
+  cpuMs: number | null;
+}
+
+interface AfinidadPersistidor {
+  afinidad: string | null;
+  tid: number | null;
+}
+
+export interface PerfilPersistidor extends AfinidadPersistidor {
+  materializar: TiempoPersistidor;
+  guardar: TiempoPersistidor;
+}
+
+export type GuardadoConfirmado = AcuseCorteTransferido & {
+  readonly cronica: ChronicleJournal;
+  readonly perfilPersistidor: PerfilPersistidor;
+};
 
 /** El hilo perdió el acuse después de recibir el corte. El disco debe decidir desde dónde reanudar. */
 class GuardadoIndeterminado extends Error {
@@ -20,6 +39,7 @@ class GuardadoIndeterminado extends Error {
 export interface OpcionesPersistidor extends OpcionesDisco {
   path: string;
   onProgress?: () => void;
+  cpuPersistidor?: number;
 }
 
 type OrdenGuardado = { tipo: 'guardar'; corte: CorteTransferido; solapado: boolean } | { tipo: 'cerrar' };
@@ -56,6 +76,8 @@ export class PersistidorGuardado {
 
   constructor({ path, onProgress, ...options }: OpcionesPersistidor) {
     if (path === ':memory:' || !existsSync(path)) throw new Error('El persistidor necesita un archivo de mundo inicializado.');
+    if (options.cpuPersistidor !== undefined && (!Number.isSafeInteger(options.cpuPersistidor) || options.cpuPersistidor < 0))
+      throw new RangeError('La CPU del persistidor debe ser un entero no negativo.');
     let moduleURL = new URL('./guardado-worker.js', import.meta.url);
     const sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
     if (sourceLoader && !existsSync(moduleURL)) moduleURL = new URL('./guardado-worker.ts', import.meta.url);
@@ -171,9 +193,55 @@ export class PersistidorGuardado {
   }
 }
 
-function abrirPersistidor(path: string, options: OpcionesDisco): void {
+function fijarAfinidad(cpu: number | undefined): AfinidadPersistidor {
+  if (process.platform !== 'linux') {
+    if (cpu !== undefined) throw new Error('La afinidad del persistidor requiere Linux.');
+    return { tid: null, afinidad: null };
+  }
+  let tid: number | null = null;
+  try {
+    // Worker.threadId identifica el worker en Node. taskset necesita el TID de Linux.
+    const enlace = readlinkSync('/proc/thread-self');
+    const id = Number(/(?:^|\/)task\/([1-9]\d*)$/.exec(enlace)?.[1]);
+    if (!Number.isSafeInteger(id)) throw new Error('No se pudo identificar el hilo del persistidor en /proc.');
+    tid = id;
+    if (cpu !== undefined) {
+      const resultado = spawnSync('taskset', ['-pc', String(cpu), String(tid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      if (resultado.error) throw resultado.error;
+      if (resultado.status !== 0)
+        throw new Error(resultado.stderr?.trim() || `taskset terminó con ${resultado.signal ?? resultado.status}.`);
+    }
+    const estado = readFileSync('/proc/thread-self/status', 'utf8');
+    const afinidad = /^Cpus_allowed_list:[ \t]*(\S+)$/m.exec(estado)?.[1] ?? null;
+    if (cpu !== undefined && afinidad !== String(cpu))
+      throw new Error(`La máscara efectiva del hilo es ${afinidad ?? 'desconocida'}.`);
+    return { tid, afinidad };
+  } catch (error) {
+    if (cpu !== undefined) {
+      const detalle = error instanceof Error ? error.message : String(error);
+      throw new Error(`No se pudo fijar el persistidor a la CPU ${cpu}. ${detalle}`, { cause: error });
+    }
+    return { tid, afinidad: null };
+  }
+}
+
+function cpuDelHilo(inicio?: NodeJS.CpuUsage): NodeJS.CpuUsage | undefined {
+  try { return process.threadCpuUsage?.(inicio); } catch { return undefined; }
+}
+
+function medirTramo<T>(ejecutar: () => T): { valor: T; tiempo: TiempoPersistidor } {
+  const cpuInicio = cpuDelHilo();
+  const paredInicio = performance.now();
+  const valor = ejecutar();
+  const paredMs = performance.now() - paredInicio;
+  const gasto = cpuInicio && cpuDelHilo(cpuInicio);
+  return { valor, tiempo: { paredMs, cpuMs: gasto ? (gasto.user + gasto.system) / 1000 : null } };
+}
+
+function abrirPersistidor(path: string, { cpuPersistidor, ...options }: Omit<OpcionesPersistidor, 'path' | 'onProgress'>): void {
   const puerto = parentPort!;
   const responder = (mensaje: RespuestaGuardado) => puerto.postMessage(mensaje);
+  const afinidad = fijarAfinidad(cpuPersistidor);
   let ultimoAvance = -Infinity;
   const store = new Store(path, { ...options, onProgress: () => {
     const ahora = performance.now();
@@ -191,7 +259,7 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
         return;
       case 'guardar':
         ultimoAvance = -Infinity;
-        responder(guardar(store, orden.corte, orden.solapado));
+        responder(guardar(store, orden.corte, orden.solapado, afinidad));
         return;
       default:
         throw new Error('Orden desconocida en el hilo de guardado.');
@@ -200,16 +268,19 @@ function abrirPersistidor(path: string, options: OpcionesDisco): void {
   responder({ tipo: 'listo' });
 }
 
-function guardar(store: Store, corte: CorteTransferido, solapado: boolean): RespuestaGuardado {
+function guardar(store: Store, corte: CorteTransferido, solapado: boolean, afinidad: AfinidadPersistidor): RespuestaGuardado {
   const identidad = identidadDe(corte);
   const confirmaciones = store.confirmacionesDeGuardado;
   try {
-    const { sello, tecnologiaRemotaEquivalente, bajas } = materializarCorteTransferido(corte, store.context, solapado);
-    const { world } = solapado ? store.guardarCorteSolapado(sello, corte.epoca) : store.guardarCorteSellado(sello, [], []);
+    const materializado = medirTramo(() => materializarCorteTransferido(corte, store.context, solapado));
+    const { sello, tecnologiaRemotaEquivalente, bajas } = materializado.valor;
+    const guardado = medirTramo(() => solapado ? store.guardarCorteSolapado(sello, corte.epoca) : store.guardarCorteSellado(sello, [], []));
+    const { world } = guardado.valor;
     if (!world.chronicleJournal) throw new Error('El corte confirmado carece de crónica.');
     return { tipo: 'confirmado', guardado: {
       ...identidad, guardadoEn: Date.now(), snapshotBytes: store.lastSnapshotBytes, cronica: world.chronicleJournal,
       historia: world.history, tecnologia: world.technology, tecnologiaRemotaEquivalente, bajas,
+      perfilPersistidor: { ...afinidad, materializar: materializado.tiempo, guardar: guardado.tiempo },
     } };
   } catch (error) {
     if (store.confirmacionesDeGuardado !== confirmaciones || store.db.isTransaction) throw error;

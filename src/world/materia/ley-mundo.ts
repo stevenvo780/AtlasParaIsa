@@ -569,14 +569,14 @@ export function plantillaVegetal(c: CtxLeyMateria, celda: number): Plantilla | n
   return m.plantillas[organo][0]?.p ?? null;
 }
 
-/** Materializa hasta `kg` de la roca latente de una celda propia en un lote nuevo con rol Objeto y sin forma, y lo
- * devuelve (REF_NULA si no queda). La roca latente es una fuente declarada («roca») del libro. */
-export function rocaDe(c: CtxLeyMateria, celda: number, kg: number): LoteRef {
+/** Materializa hasta `kg` de la roca latente de una celda propia en un lote Objeto sin forma, en la celda o a cuestas.
+ * Devuelve REF_NULA si no queda. La roca latente es una fuente declarada («roca») del libro. */
+export function rocaDe(c: CtxLeyMateria, celda: number, kg: number, destino: 'celda' | 'carga' = 'celda'): LoteRef {
   const e = estado(c), m = e.m, i = m.indiceDe(celda);
   if (i < 0 || !(kg > 0) || !(m.latente[i]! > 0)) return REF_NULA;
   const cuantos = Math.round(kg * m.params.escalas.piedra); // la escala de la piedra son los cuantos de SiO₂ de 1 kg
   if (!(cuantos > 0)) return REF_NULA;
-  const lote = c.materia.nuevo(Rol.Objeto, celda, 0);
+  const lote = c.materia.nuevo(Rol.Objeto, destino === 'carga' ? REF_NULA : celda, 0);
   m.sacarRoca(i, cuantos, lote);
   refrescar(e, i);
   return lote;

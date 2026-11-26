@@ -25,7 +25,7 @@ import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, decodificarPagi
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
-import { barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type Libro, type LoteRef, type MateriaCheckpoint, type ServicioQuimico, type Sustancia } from '../materia/tipos.js';
+import { Rol, barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type Libro, type LoteRef, type MateriaCheckpoint, type ServicioQuimico, type Sustancia } from '../materia/tipos.js';
 import { addEvent, random } from '../mundo/crear.js';
 import { MAX_EVENTS, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../mundo/tipos.js';
 import { paramsOf, type WorldParams } from '../params.js';
@@ -844,8 +844,11 @@ export class Dueno implements CtxF0 {
   cargarMateria(cp: MateriaCheckpoint): Intento[] {
     if (!this.materia || !this.quimica) throw new Error('Cargar materia exige v23.materia.');
     const terreno = this.terrenoPercibido, { lotes: guardados, libres } = decodificarPaginas(cp.epoca, cp.paginas);
+    // Guardados previos: recoger roca dejaba su lote Objeto ligado a la celda aunque la persona ya lo llevaba.
+    const carga = new Set<LoteRef>();
+    for (const persona of this.mundo.people) for (const lote of persona.carga ?? []) carga.add(lote);
     // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
-    const lotes = guardados.map(l => ({ ...l, celda: celdaLocal(terreno, l.celda), dueno: 0 }));
+    const lotes = guardados.map(l => ({ ...l, celda: l.rol === Rol.Objeto && carga.has(l.ref) ? REF_NULA : celdaLocal(terreno, l.celda), dueno: 0 }));
     this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
     this.#desborde!.prepararF0(ranurasDesborde(lotes));
     (this.materia as ArenaLotes).cargar(lotes, libres);

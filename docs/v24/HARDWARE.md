@@ -91,3 +91,15 @@ La percepción CUDA aportó trabajo aceptado en ambos patrones de reparto. El ti
 `CARTA_INDICE_UID=1` habilita en el banco una tabla compartida de ranuras por UID. Cada dueño lee la generación en el mismo frente que consulta. El coordinador compara las columnas de vida y UID entre ambos lados al publicar, y reconstruye el índice si cambia su contenido o el número de ranuras. Durante el paso, los dueños leen el frente anterior. Tras una baja, la referencia caduca al cambiar de frente y la ranura se recupera con otra generación. Una cesión cambia el dueño de la fila.
 
 En una sonda serial con un millón de filas y ocho lectores, el índice ocupó 8 MiB compartidos frente a 348 MiB de heap que retuvieron ocho mapas. El motor con ocho dueños cerró cuatro corridas de 64.000 habitantes sembrados con 63.978 mortales, saldo exacto y cero violaciones. Con el índice, la media del paso fue de 1.269–1.383 ms frente a 1.283–1.403 ms en base. El p95 fue de 1.693–1.806 frente a 1.579–1.644 ms. Se conserva como opción de laboratorio por el coste de cola observado. La sonda del índice mide solo la representación y la consulta de identidades.
+
+## Reparto inicial ponderado
+
+Un brazo con `repartoInicial: "poblacion"` usa tramos contiguos del orden Morton y pondera cada página inicial por uno más su número de personas. La asignación se calcula al abrir la época, antes de la incorporación de halos. El experimento conserva la misma afinidad CPU y los ajustes del mundo para ambos brazos.
+
+A 64.000 habitantes sembrados y ocho dueños, la media del paso fue de 1.332 ms con carga uniforme y 1.240 ms con ponderación. El p95 pasó de 1.606 a 1.493 ms en los ocho pasos medidos. La mediana del dueño crítico en actuación pasó de 443 a 403 ms y los pares vecinos de frontera de 479 a 478. A 32.000 habitantes, la media cambió de 906 a 899 ms y el p95 de 1.407 a 1.376 ms en 24 pasos. El dueño crítico en actuación subió de 314 a 342 ms y los pares de frontera de 479 a 490. Los cuatro brazos conservaron el balance. Las ventanas cortas y la distinta respuesta de actuación mantienen la ponderación como opción de laboratorio.
+
+## Escritura y recuperación a escala
+
+Un SQLite sellado al tick 12 con 63.980 personas y 11.140 animales ocupó 594,2 MB. Store escribió el corte en 8,57 s y lo leyó en 6,43 s. La reconstrucción posterior del motor tomó 6,59 s y se verificó un paso con ocho dueños. Coincidieron las huellas de SQLite y VMAT, el orden de los UID y el saldo. La confirmación de una copia de ese archivo con el origen en caché tomó 0,25–0,32 s en NVMe y 5,89–5,99 s en HDD. Ese tiempo de copia excluye codificación, validación y arranque.
+
+En siete páginas de personas se midieron 28,6 MB en JSON, de los cuales 16,9 MB eran las políticas. Sus 212 pesos por persona ocuparon 7,0 MB en Float64 con los mismos valores. La compresión de toda la muestra con gzip nivel 1 ocupó 16,2 MB y recuperó los mismos bytes. Ambas sondas midieron representación, antes de integrar un formato de guardado.

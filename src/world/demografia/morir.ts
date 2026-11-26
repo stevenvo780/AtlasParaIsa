@@ -5,16 +5,30 @@ import { addEvent } from '../mundo/crear.js';
 import { cancelTechnologyProject, settleTechnologyEstate } from '../technology.js';
 import { vecinos } from '../rejilla.js';
 import { ley } from '../params.js';
-import { ctxMateriaDe } from '../motor/acceso.js';
+import { ctxMateriaDe, type CtxLeyMateria } from '../motor/acceso.js';
 import { morir, soltar } from '../materia/cuerpo.js';
+import { Rol } from '../materia/tipos.js';
+import { PAGE_CELLS, pageOf, pageOffset } from '../soa/region.js';
 
+function celdaDeMuerte(c: CtxLeyMateria, x: number, y: number): number {
+  const t = c.terreno, celda = t.celda(x, y);
+  if (celda >= 0) return celda;
+  // La percepción puede vaciarse aunque la página conserve los lotes de esas coordenadas.
+  const px = pageOf(x), py = pageOf(y), desplazamiento = pageOffset(x, y), sinLeer = new Float64Array(0);
+  for (let pagina = 0; pagina < t.paginas; pagina++) {
+    if (t.duenoChunk[pagina]! < 0 || t.paginaX[pagina] !== px || t.paginaY[pagina] !== py) continue;
+    const material = pagina * PAGE_CELLS + desplazamiento;
+    if (c.materia.lotes(material, Rol.Suelo, sinLeer) > 0) return material;
+  }
+  throw new Error('b: falta la celda material de la defunción.');
+}
 
 /** V23 (`v23.cuerpos`): la muerte deja el cuerpo como un lote Cadaver en la celda donde cayó (lo descompone la κ del
  * suelo) y lo que la persona llevaba a cuestas queda en el suelo como objetos, con su forma. Nada sale del mundo. */
 export function dejarCadaver(world: World, person: Person): void {
   const cuerpo = person.cuerpo;
   if (!cuerpo) return;
-  const c = ctxMateriaDe(world), celda = c.terreno.celda(person.x, person.y);
+  const c = ctxMateriaDe(world), celda = celdaDeMuerte(c, person.x, person.y);
   if (person.carga) {
     for (const lote of person.carga) soltar(c, lote, celda);
     person.carga.length = 0;

@@ -35,6 +35,11 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
   let nextStep: Point | null = null;
   let blocked = false;
   const physicalRoads = paramsOf(world).terreno.caminosFisicos;
+  const obraCamino = physicalRoads && ley(world, 'obra') ? ctxMateriaDe(world) : undefined;
+  const roadTieScore = (dist: number, tile: Tile | undefined): number => {
+    const paved = tile ? (obraCamino ? calidadEmpedrado(obraCamino, tile) : tile.paved ?? 0) : 0;
+    return dist - 0.18 * ((tile?.traffic ?? 0) + paved * 0.5);
+  };
   const startDistance = physicalRoads ? distance(start, person.target) : 0;
   let roadStep: Point | null = null, roadDistance = Infinity, roadBestDistance = Infinity, roadScore = Infinity;
   // At most two cardinal neighbors can reduce Euclidean distance. Compare those in one pass;
@@ -44,7 +49,7 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
     const d = distance({ x, y }, person.target);
     if (d >= startDistance) return;
     roadBestDistance = Math.min(roadBestDistance, d);
-    const score = d - 0.18 * ((tile.traffic ?? 0) + (tile.paved ?? 0) * 0.5);
+    const score = roadTieScore(d, tile);
     if (d <= roadBestDistance + 0.15 && (roadDistance > roadBestDistance + 0.15 || score < roadScore)) {
       roadStep = { x, y }; roadDistance = d; roadScore = score;
     }
@@ -112,7 +117,7 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
     const baselineDistance = distance(nextStep, person.target);
     if (baselineDistance < startDistance && baselineDistance <= roadBestDistance + 0.15) {
       const tile = tileIn(nextStep.x, nextStep.y);
-      const baselineScore = baselineDistance - 0.18 * ((tile?.traffic ?? 0) + (tile?.paved ?? 0) * 0.5);
+      const baselineScore = roadTieScore(baselineDistance, tile);
       if (roadScore < baselineScore) nextStep = roadStep;
     }
   }
@@ -127,7 +132,7 @@ export function move(world: World, person: Person, tileInArg?: TileLookup, reade
     }
     return;
   }
-  const conCuerpo = person.cuerpo && ley(world, 'cuerpos') ? ctxMateriaDe(world) : undefined;
+  const conCuerpo = person.cuerpo && ley(world, 'cuerpos') ? obraCamino ?? ctxMateriaDe(world) : undefined;
   if (conCuerpo && person.cuerpo) {
     const pagado = pagarPaso(conCuerpo, world, person, person.cuerpo, tileIn(start.x, start.y));
     if (pagado < 0) return;

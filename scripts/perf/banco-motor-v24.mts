@@ -16,6 +16,8 @@
  *  {"id":"dual-cpu4","hilos":4,"gpu":[0,1],"duenosPercepcionGpu":[2,3]}]
  * Sin asignación explícita se usan dos dueños. Una sola GPU atiende ambos y, con dos, cada dueño usa la de
  * su índice. `duenosPercepcionGpu` fija un dueño global distinto por tarjeta, en el orden de `gpu`.
+ * `"gruposPercepcionGpu":[[0,1,2,3,4,5],[6,7]]` asigna varias ranuras por tarjeta.
+ * Cada dueño de un grupo debe acreditar al menos una salida aceptada. Con coste adaptativo sirve el calentamiento.
  * Las siembras con CUDA requieren al menos un tick de calentamiento para abrir todos los motores antes de medir.
  * `"rutaGpu":"porCoste"` añade un brazo adaptativo. Cada GPU del brazo fijo debe entregar
  * resultados aceptados por F2 durante la ventana. El adaptativo puede elegir CPU si F2
@@ -77,6 +79,7 @@ type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolea
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
 interface Brazo {
   id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste'; duenosPercepcionGpu?: number[];
+  gruposPercepcionGpu?: number[][];
   repartoInicial?: 'poblacion';
   afinidad?: number[];
 }
@@ -104,7 +107,9 @@ export function validacionConfiguracion(config: Config): Brazo[] {
   assert.ok(brazos.length >= 2 && brazos.every(b => b && typeof b.id === 'string' && esId.test(b.id) &&
     entero(b.hilos, 1) && b.hilos <= availableParallelism() && Array.isArray(b.gpu) &&
     (b.duenosPercepcionGpu === undefined || Array.isArray(b.duenosPercepcionGpu)) &&
-    (b.gpu.length === 0 ? b.duenosPercepcionGpu === undefined : admiteBrokerPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu)) &&
+    (b.gruposPercepcionGpu === undefined || Array.isArray(b.gruposPercepcionGpu) && b.gruposPercepcionGpu.every(Array.isArray)) &&
+    (b.gpu.length === 0 ? b.duenosPercepcionGpu === undefined && b.gruposPercepcionGpu === undefined :
+      admiteBrokerPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu, b.gruposPercepcionGpu)) &&
     (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length > 0)),
   'Indica al menos dos brazos CPU o CUDA [0], [1] o [0,1] con un mapeo de dueños válido');
   assert.ok(brazos.every(repartoInicialValido), 'El reparto inicial por población exige más de un dueño');
@@ -120,7 +125,9 @@ export function validacionConfiguracion(config: Config): Brazo[] {
   }
   assert.equal(new Set(brazos.map(b => b.id)).size, brazos.length, 'IDs de brazos repetidos');
   assert.equal(new Set(brazos.map(b => JSON.stringify([b.hilos, b.gpu, b.rutaGpu,
-    resolverDuenosPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu), b.repartoInicial, b.afinidad ?? afinidadLanzador]))).size, brazos.length,
+    resolverDuenosPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu, b.gruposPercepcionGpu),
+    b.gruposPercepcionGpu !== undefined, b.repartoInicial,
+    b.afinidad ?? afinidadLanzador]))).size, brazos.length,
     'Configuraciones de brazos repetidas');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
   assert.ok(config.perfilPaso === undefined || typeof config.perfilPaso === 'boolean', 'perfilPaso debe ser booleano');
@@ -199,8 +206,10 @@ function resumenPerfilPaso(perfiles: readonly PerfilPasoMotor[]) {
 function deltaGpu(fin: TelemetriaBrokerGpu, inicio?: TelemetriaBrokerGpu): TelemetriaBrokerGpu {
   const { completadas, aceptadas, ...contadores } = fin;
   const campos = Object.keys(contadores) as (keyof typeof contadores)[];
-  const restar = (total: [number, number], previo?: [number, number]): [number, number] =>
-    [total[0] - (previo?.[0] ?? 0), total[1] - (previo?.[1] ?? 0)];
+  const restar = (total: number[], previo?: number[]): number[] => {
+    assert.ok(previo === undefined || total.length === previo.length, 'Cambió el número de ranuras CUDA');
+    return total.map((valor, i) => valor - (previo?.[i] ?? 0));
+  };
   const delta = { ...fin, completadas: restar(completadas, inicio?.completadas),
     aceptadas: restar(aceptadas, inicio?.aceptadas) };
   for (const campo of campos) delta[campo] = contadores[campo]! - (inicio?.[campo] ?? 0);
@@ -217,12 +226,15 @@ function deltaBrokersGpu(fin: TelemetriaDispositivoBrokerGpu[] = [], inicio: Tel
   }));
 }
 
-function comprobarRanurasGpu(tarjeta: TelemetriaDispositivoBrokerGpu, esperadas: readonly [number | null, number | null],
+function comprobarRanurasGpu(tarjeta: TelemetriaDispositivoBrokerGpu, esperadas: readonly (number | null)[],
   explicito: boolean): void {
   const { dispositivo, duenosPorRanura, detalle } = tarjeta;
   if (explicito || duenosPorRanura !== undefined)
     assert.deepEqual(duenosPorRanura, esperadas, `Mapeo por ranura GPU${dispositivo} distinto del solicitado`);
-  if (detalle) for (const [ranura, dueno] of esperadas.entries()) {
+  if (!detalle) return;
+  assert.ok(detalle.completadas.length === esperadas.length && detalle.aceptadas.length === esperadas.length,
+    `Contadores por ranura GPU${dispositivo} incompletos`);
+  for (const [ranura, dueno] of esperadas.entries()) {
     if (dueno === null) assert.ok(detalle.completadas[ranura] === 0 && detalle.aceptadas[ranura] === 0,
       `GPU${dispositivo} sirvió una ranura sin dueño`);
   }
@@ -230,24 +242,40 @@ function comprobarRanurasGpu(tarjeta: TelemetriaDispositivoBrokerGpu, esperadas:
 
 export function acreditarGpu(brazo: Brazo, ventana: TelemetriaDispositivoBrokerGpu[] = [], calentamiento: TelemetriaDispositivoBrokerGpu[] = []) {
   assert.deepEqual(ventana.map(d => d.dispositivo), brazo.gpu, 'Telemetría CUDA de otros dispositivos');
-  const explicito = brazo.duenosPercepcionGpu !== undefined;
-  const mapeo = resolverDuenosPercepcionGpu(brazo.hilos, brazo.gpu, brazo.duenosPercepcionGpu);
+  const agrupado = brazo.gruposPercepcionGpu !== undefined;
+  const explicito = agrupado || brazo.duenosPercepcionGpu !== undefined;
+  const mapeo = resolverDuenosPercepcionGpu(brazo.hilos, brazo.gpu, brazo.duenosPercepcionGpu, brazo.gruposPercepcionGpu);
   assert.ok(brazo.gpu.length ? mapeo : !explicito, 'Mapeo CUDA inválido para el brazo');
   if (calentamiento.length) assert.deepEqual(calentamiento.map(d => d.dispositivo), brazo.gpu, 'Calentamiento CUDA de otros dispositivos');
   const adaptativo = brazo.rutaGpu === 'porCoste';
   const acepto = (d?: TelemetriaBrokerGpu): boolean =>
     !!d && d.aceptadas.some(n => n > 0) && d.subidaConfirmadaBytes > 0 && d.bajadaConfirmadaBytes > 0;
   const sinGpu: number[] = [], gpuDegradadas: number[] = [];
+  const duenosSinGpu: { dispositivo: number; duenos: number[] }[] = [];
   ventana.forEach((tarjeta, i) => {
     const { detalle, dispositivo, lista } = tarjeta;
     const previa = calentamiento[i], antes = previa?.detalle;
     assert.ok(detalle && (detalle.cpuPorCoste !== undefined) === adaptativo, `Faltan contadores de GPU${dispositivo}`);
-    comprobarRanurasGpu(tarjeta, mapeo![i]!, explicito);
-    if (previa) comprobarRanurasGpu(previa, mapeo![i]!, explicito);
+    const ranuras = mapeo![i]!;
+    comprobarRanurasGpu(tarjeta, ranuras, explicito);
+    if (previa) comprobarRanurasGpu(previa, ranuras, explicito);
     if (!lista || detalle.erroresCanal > 0 || detalle.cpuSinCanal > 0) gpuDegradadas.push(dispositivo);
-    if (!acepto(detalle) && !(adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes))) sinGpu.push(dispositivo);
+    const aceptaVentana = acepto(detalle);
+    const aceptaCalentamiento = adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes);
+    if (agrupado) {
+      const sinConfirmar: number[] = [];
+      for (const [ranura, dueno] of ranuras.entries()) {
+        if (dueno !== null && !(aceptaVentana && detalle.aceptadas[ranura]! > 0) &&
+          !(aceptaCalentamiento && antes!.aceptadas[ranura]! > 0)) sinConfirmar.push(dueno);
+      }
+      if (sinConfirmar.length) {
+        sinGpu.push(dispositivo);
+        duenosSinGpu.push({ dispositivo, duenos: sinConfirmar });
+      }
+    } else if (!aceptaVentana && !aceptaCalentamiento) sinGpu.push(dispositivo);
   });
-  return { estado: gpuDegradadas.length ? 'gpu-degradada' : sinGpu.length ? 'sin-actividad-gpu' : 'completo', sinGpu, gpuDegradadas };
+  return { estado: gpuDegradadas.length ? 'gpu-degradada' : sinGpu.length ? 'sin-actividad-gpu' : 'completo',
+    sinGpu, gpuDegradadas, ...(duenosSinGpu.length && { duenosSinGpu }) };
 }
 
 interface Preparada {
@@ -305,12 +333,13 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
 }
 
 async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolean) {
-  const { hilos, gpu, duenosPercepcionGpu, repartoInicial, afinidad } = brazo;
+  const { hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu, repartoInicial, afinidad } = brazo;
   assert.ok(repartoInicialValido(brazo), 'El reparto inicial por población exige más de un dueño');
   if (afinidad) assert.deepEqual(cpusDeAfinidad(afinidadActual()), afinidad, 'Afinidad efectiva distinta de la solicitada');
   const indiceUidCompartido = hilos > 1 && process.env.CARTA_INDICE_UID === '1';
-  const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
-  assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined, 'Mapeo CUDA inválido para el brazo');
+  const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu);
+  assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined && gruposPercepcionGpu === undefined,
+    'Mapeo CUDA inválido para el brazo');
   const desdePreparacion = performance.now();
   const { mundo, siembra, fixture, carga, cerrar } = await preparar(e, dirname(salida));
   const prepararMundoMs = performance.now() - desdePreparacion;
@@ -346,7 +375,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const biblioteca = process.env.COMPUTE_NVRTC;
     const conNvrtc = !!biblioteca && existsSync(biblioteca);
     if (!gpu.length || conNvrtc) {
-      motor = crearMotor(mundo, { hilos, gpu, duenosPercepcionGpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
+      motor = crearMotor(mundo, { hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
         medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso, indiceUidCompartido, repartoInicial });
       if (carga) motor.cargar(carga.instantanea, carga.epoca);
     }
@@ -435,10 +464,10 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     }
     assert.ok(integridad?.tick === inicio.intervalos.fin && conPaginas.size > 0, 'Falta evidencia de cierre');
     const gpuVentana = anteriorGpu && deltaBrokersGpu(anteriorGpu, inicialGpu);
-    const { estado, sinGpu, gpuDegradadas } = acreditarGpu(brazo, gpuVentana, inicialGpu);
+    const { estado, sinGpu, gpuDegradadas, duenosSinGpu } = acreditarGpu(brazo, gpuVentana, inicialGpu);
     const latencia = tiempos(pared);
     anotar({ tipo: 'fin', estado, muestras: pared.length, ...(sinGpu.length && { sinGpu }),
-      ...(gpuDegradadas.length && { gpuDegradadas }), carga: loadavg(), planificador: planificador(),
+      ...(gpuDegradadas.length && { gpuDegradadas }), duenosSinGpu, carga: loadavg(), planificador: planificador(),
       paredMs: latencia, cpuProcesoMs: tiempos(cpuProceso), barreraEmaMs: barrera.length ? tiempos(barrera) : null,
       hz: 1000 / latencia.media, maxRssMiB: process.resourceUsage().maxRSS / 1024,
       duenosConPaginas: [...conPaginas].sort((a, b) => a - b), ...integridad,
@@ -469,8 +498,8 @@ function medirBloques(rutaConfig: string, salida: string) {
     const corridas = [];
     let origen: { digesto: string; tick: number; fixture?: Preparada['fixture'] } | undefined;
     for (const brazo of orden) {
-      const { hilos, gpu, duenosPercepcionGpu, repartoInicial = 'uniforme', afinidad } = brazo;
-      const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
+      const { hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu, repartoInicial = 'uniforme', afinidad } = brazo;
+      const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu);
       const nombre = `${escena.id}.r${repeticion + 1}.${brazo.id}.jsonl`;
       const ruta = join(salida, nombre);
       const e = 'fixture' in escena ? { ...escena, fixture: { ...escena.fixture, sqlite: resolve(dirname(rutaConfig), escena.fixture.sqlite) } } : escena;
@@ -505,7 +534,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(fuente, origen, `Estado inicial diferente en ${nombre}`);
       const verificaciones = filas.filter(fila => fila.tipo === 'integridad').map(({ tick, costeVerificacionMs }) =>
         ({ tick, ...costeVerificacionMs }));
-      const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, duenosPorRanura, repartoInicial, afinidad,
+      const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, gruposPercepcionGpu, duenosPorRanura, repartoInicial, afinidad,
         rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, preparacionMs: inicio.preparacionMs,
         intentosRestaurados: inicio.intentosRestaurados, verificaciones, ...fin };
       if (fin?.estado === 'sin-arranque-gpu') {
@@ -525,10 +554,11 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(fin.paredMs, tiempos(medidas.map(fila => fila.paredMs)), `Percentiles inconsistentes en ${nombre}`);
       assert.match(fin.digestoMundo, esSha256, `Falta la huella final del mundo en ${nombre}`);
       assert.match(fin.digestoMateria, esSha256, `Falta la huella final de materia en ${nombre}`);
-      const { estado, sinGpu, gpuDegradadas } = acreditarGpu(brazo, fin.gpuBrokers, fin.gpuBrokersCalentamiento);
+      const { estado, sinGpu, gpuDegradadas, duenosSinGpu } = acreditarGpu(brazo, fin.gpuBrokers, fin.gpuBrokersCalentamiento);
       assert.equal(fin.estado, estado);
       assert.deepEqual(fin.sinGpu ?? [], sinGpu);
       assert.deepEqual(fin.gpuDegradadas ?? [], gpuDegradadas);
+      assert.deepEqual(fin.duenosSinGpu, duenosSinGpu);
       corridas.push(perfilPaso ? { ...corrida, perfilPaso: resumenPerfilPaso(medidas.map(fila => fila.perfilPaso)) } : corrida);
     }
     const referencia = corridas.find(corrida => corrida.brazo === brazos[0]!.id && corrida.estado === 'completo');

@@ -10,6 +10,7 @@ import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
+import { tileLookup } from '../src/world/tile-index.js';
 
 test('la fauna cruza entre dueños sin superar el área de la celda de destino', async () => {
   const semilla = 2321171583;
@@ -32,6 +33,24 @@ test('la fauna cruza entre dueños sin superar el área de la celda de destino',
     const { enviados, recibidos, pendientes } = duenoSi(mundo)!.balanceIntentos();
     assert.equal(enviados, recibidos + pendientes);
     assert.ok(motor.telemetria().migraciones > 0);
+  } finally {
+    await motor.cerrar();
+  }
+});
+
+test('al retirarse un chunk junto a la frontera, cada animal residente conserva su tesela', async () => {
+  const semilla = 51926;
+  const base = hostOpenWorldParams();
+  const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos: 2, gpu: [] } }, base);
+  const motor = crearMotor(createWorld(semilla, params), { ...unSoloDueno(semilla), hilos: 2 });
+  try {
+    for (let tick = 0; tick < 120; tick++) motor.paso([]);
+    const { world } = motor.instantanea();
+    assert.ok(world.retiredChunks.some(chunk => chunk.key === '2,-1'));
+    const tesela = tileLookup(world.tiles);
+    for (const a of world.animals) {
+      assert.ok(tesela(a.x, a.y), `${a.id} quedó en una celda no residente (${a.x}, ${a.y})`);
+    }
   } finally {
     await motor.cerrar();
   }

@@ -60,6 +60,7 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
     ...(confirmarGuardadoVivo ? { confirmarGuardadoVivo: true } : {}),
     ...(env.CARTA_MATERIA_FISICA_SEPARADA === '1' ? { materiaFisicaSeparada: true } : {}),
+    ...(env.CARTA_FOTOGRAMA_DUENOS === '1' ? { emisionFotogramaDuenos: true } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };
 }
 

@@ -485,6 +485,8 @@ export interface TelemetriaBrokerGpu {
 export interface TelemetriaDispositivoBrokerGpu {
   dispositivo: number;
   lista: boolean;
+  /** Correspondencia entre las dos celdas de conteo del corredor y los dueños del motor. */
+  duenosPorRanura?: readonly [number | null, number | null];
   detalle?: TelemetriaBrokerGpu;
 }
 
@@ -503,6 +505,8 @@ export interface TelemetriaMotor {
 export interface MotorConfig {
   hilos: number | 'auto';
   gpu: readonly number[];                // tarjetas CUDA; el trabajo se reparte por rendimiento medido, nunca a medias
+  /** Asignación de laboratorio. Un dueño global por tarjeta, en el orden de gpu. */
+  duenosPercepcionGpu?: readonly number[];
   decisionGpu: 'siempre';                // §1.2: si hay tarjeta, la percepción va a ella aunque no compense
   verificar: boolean;                    // sellos y CRC del frente (I-F), comprobación de dueño al escribir
   semilla: number | null;                // null: entropía real (el mundo público es irrepetible)

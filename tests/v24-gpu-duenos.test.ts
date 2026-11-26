@@ -6,11 +6,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as esperar } from 'node:timers/promises';
+import { BroadcastChannel } from 'node:worker_threads';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { percepcionDe } from '../src/world/decision/percepcion.js';
 import { PLAN } from '../src/world/decision/planes.js';
-import { BrokerPercepcionGpu, PercibidorBroker } from '../src/world/gpu/broker-percepcion.js';
+import { admiteBrokerPercepcionGpu, BrokerPercepcionGpu, PercibidorBroker, resolverDuenosPercepcionGpu,
+  type DuenosBroker } from '../src/world/gpu/broker-percepcion.js';
 import type { Plan } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
@@ -28,16 +30,55 @@ function mundoParaPercibir() {
   return { percepcion, lote, mundo, tiles };
 }
 
-function corredorMedido(porCoste: boolean) {
+function corredorMedido(porCoste: boolean, duenosPorRanura?: DuenosBroker) {
   const anterior = process.env.CARTA_PERCEPCION_COSTE_DUENOS;
   process.env.CARTA_PERCEPCION_COSTE_DUENOS = porCoste ? '1' : '0';
   try {
-    return new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: 'broker', CARTA_GPU_PRUEBA_MARCA: '' } }, !porCoste);
+    return new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: 'broker', CARTA_GPU_PRUEBA_MARCA: '' } },
+      !porCoste, 0, duenosPorRanura);
   } finally {
     if (anterior === undefined) delete process.env.CARTA_PERCEPCION_COSTE_DUENOS;
     else process.env.CARTA_PERCEPCION_COSTE_DUENOS = anterior;
   }
 }
+
+test('la asignación de GPU conserva las ranuras de dos dueños y valida los índices globales', () => {
+  assert.deepEqual(resolverDuenosPercepcionGpu(2, [0]), [[0, 1]]);
+  assert.deepEqual(resolverDuenosPercepcionGpu(2, [1]), [[0, 1]]);
+  assert.deepEqual(resolverDuenosPercepcionGpu(2, [0, 1]), [[0, null], [null, 1]]);
+  assert.deepEqual(resolverDuenosPercepcionGpu(4, [1], [3]), [[3, null]]);
+  assert.deepEqual(resolverDuenosPercepcionGpu(8, [0, 1], [2, 5]), [[2, null], [5, null]]);
+  assert.equal(admiteBrokerPercepcionGpu(12, [0, 1], [11, 3]), true);
+  assert.equal(admiteBrokerPercepcionGpu(8, [0, 1]), false, 'hace falta una selección explícita');
+  for (const duenos of [[], [2], [2, 2], [2, 8], [-1, 5], [2.5, 5], [2, 3, 5]])
+    assert.equal(resolverDuenosPercepcionGpu(8, [0, 1], duenos), undefined);
+  assert.equal(admiteBrokerPercepcionGpu(1, [1], [0]), false);
+  assert.equal(admiteBrokerPercepcionGpu(8, [0, 0], [2, 5]), false);
+  assert.throws(() => corredorMedido(false, [5, 5]), /Asignación de dueños inválida/);
+});
+
+test('la ranura del corredor conserva la identidad global del dueño en el despacho', { timeout: 10_000 }, async t => {
+  const broker = corredorMedido(false, [5, null]);
+  t.after(() => broker.cerrar());
+  assert.equal(await broker.listo, true);
+  const epoca = broker.abrirEpoca(18);
+  const { percepcion, lote } = mundoParaPercibir();
+  assert.throws(() => new PercibidorBroker(percepcion.vista, epoca, 0), /El dueño 0 no está asignado/);
+  const cliente = new PercibidorBroker(percepcion.vista, epoca, 5);
+  t.after(() => cliente.cerrar());
+  const observador = new BroadcastChannel(`${epoca.canal}:0`);
+  t.after(() => observador.close());
+  const identidad = new Promise(resolve => {
+    observador.onmessage = ({ data }) => resolve(data.identidad);
+  });
+  cliente.lanzar(lote, planes);
+  assert.equal(cliente.esperar(100).despacho, lote.despacho);
+  cliente.confirmar(true);
+  assert.deepEqual(await identidad, { generacion: epoca.generacion, epoca: 18, dueno: 5, tick: lote.tick, despacho: lote.despacho });
+  assert.deepEqual(broker.medidas().completadas, [1, 0]);
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [1, 0]);
+  assert.equal(broker.medidas().aceptaEnEpoca, true);
+});
 
 test('dos dueños despachan por un corredor y una generación nueva descarta la anterior', { timeout: 10_000 }, async t => {
   const broker = corredorMedido(false);
@@ -177,11 +218,12 @@ test('el coste del corredor descarta respuestas GPU incoherentes en la ruta real
 
 for (const fallo of ['broker-rancio', 'broker-expira']) {
   test(`el dueño pierde el búfer y conserva el tick ante ${fallo}`, { timeout: 10_000 }, async t => {
-    const broker = new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: fallo, CARTA_GPU_PRUEBA_MARCA: '' } });
+    const broker = new BrokerPercepcionGpu({ script, entorno: { CARTA_GPU_PRUEBA_FASE: fallo, CARTA_GPU_PRUEBA_MARCA: '' } },
+      false, 0, [5, null]);
     t.after(() => broker.cerrar());
     assert.equal(await broker.listo, true);
     const { percepcion, lote, mundo, tiles } = mundoParaPercibir();
-    const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(12), 0);
+    const cliente = new PercibidorBroker(percepcion.vista, broker.abrirEpoca(12), 5);
     t.after(() => cliente.cerrar());
     percepcion.percibidor = cliente;
     const salida = percepcion.percibir(mundo.people, lote.tick,

@@ -6,12 +6,15 @@ import { CanalCompartido, enviarOrden, recibirRespuesta, type OpcionesCanalGpu }
 import { CostePercepcion } from './coste-percepcion.js';
 import { PercibidorGpu } from './percibir-gpu.js';
 
-const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7,
+const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, completada0: 4, completada1: 5, micros: 6, bytes: 7,
   senal0: 8, validacion0: 10, celdas: 12 };
-const MEDIDA = { lotes: 0, dueno0: 1, dueno1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
+const MEDIDA = { lotes: 0, completada0: 1, completada1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
   subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14,
   preparacionMicros: 15, celdas: 16 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
+export type DuenosBroker = readonly [number | null, number | null];
+const RANURAS = [0, 1] as const;
+type Ranura = typeof RANURAS[number];
 const SOLO_CPU = [[]];
 const ESTADO = { esperando: 0, lista: 1, fallo: 2, cancelada: 3 };
 const LIMITE_MS = 50;
@@ -21,9 +24,9 @@ const TRAZAR = process.env.CARTA_PERCEPCION_TRAZA === '1';
 const trazar = (fase: string, gpu: number, datos: object) => {
   if (TRAZAR) console.error('[percepcion-gpu]', JSON.stringify({ fase, gpu, ...datos }));
 };
-const turno = (generacion: number, dueno: number): number => (generacion << 2) | (dueno + 1);
-function despertar(control: Int32Array<SharedArrayBuffer>, dueno: number): void {
-  const senal = CONTROL.senal0 + dueno;
+const turno = (generacion: number, ranura: Ranura): number => (generacion << 2) | (ranura + 1);
+function despertar(control: Int32Array<SharedArrayBuffer>, ranura: Ranura): void {
+  const senal = CONTROL.senal0 + ranura;
   Atomics.add(control, senal, 1);
   Atomics.notify(control, senal);
 }
@@ -39,12 +42,24 @@ interface Peticion {
   identidad: Identidad; orden: Orden; inicio: bigint; enviada: bigint; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
   estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>;
 }
-interface PuertoBroker { dispositivo: number; canal: string; control: Int32Array<SharedArrayBuffer>; medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean }
+interface PuertoBroker {
+  dispositivo: number; canal: string; control: Int32Array<SharedArrayBuffer>; readonly duenosPorRanura: DuenosBroker;
+  medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean;
+}
 export interface EpocaBrokerPercepcion extends PuertoBroker { generacion: number; epoca: number }
 
-export function admiteBrokerPercepcionGpu(hilos: number, gpu: readonly number[]): boolean {
-  return hilos === 2 && (gpu.length === 1 && (gpu[0] === 0 || gpu[0] === 1) ||
-    gpu.length === 2 && gpu[0] === 0 && gpu[1] === 1);
+export function resolverDuenosPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[]): DuenosBroker[] | undefined {
+  const simple = gpu.length === 1 && (gpu[0] === 0 || gpu[0] === 1);
+  const dual = gpu.length === 2 && gpu[0] === 0 && gpu[1] === 1;
+  if ((!simple && !dual) || !Number.isSafeInteger(hilos) || hilos < 2) return undefined;
+  if (duenos === undefined) return hilos === 2 ? (simple ? [[0, 1]] : [[0, null], [null, 1]]) : undefined;
+  if (duenos.length !== gpu.length || (dual && duenos[0] === duenos[1])) return undefined;
+  for (const dueno of duenos) if (!Number.isSafeInteger(dueno) || dueno < 0 || dueno >= hilos) return undefined;
+  return duenos.map(dueno => [dueno, null]);
+}
+
+export function admiteBrokerPercepcionGpu(hilos: number, gpu: readonly number[], duenos?: readonly number[]): boolean {
+  return resolverDuenosPercepcionGpu(hilos, gpu, duenos) !== undefined;
 }
 
 export class BrokerPercepcionGpu {
@@ -54,8 +69,13 @@ export class BrokerPercepcionGpu {
   #cerrando = false;
   readonly listo: Promise<boolean>;
 
-  constructor(opciones?: OpcionesCanalGpu, medir = false, dispositivo = 0) {
+  constructor(opciones?: OpcionesCanalGpu, medir = false, dispositivo = 0, duenosPorRanura: DuenosBroker = [0, 1]) {
+    const asignacion = Object.freeze([duenosPorRanura[0], duenosPorRanura[1]] as const);
+    if (asignacion[0] === asignacion[1] || asignacion.some(dueno => dueno !== null && (!Number.isSafeInteger(dueno) || dueno < 0))) {
+      throw new RangeError('Asignación de dueños inválida para el corredor de percepción.');
+    }
     this.#puertos = { dispositivo, canal: `atlas-percepcion-duenos-${randomUUID()}`,
+      duenosPorRanura: asignacion,
       control: new Int32Array(new SharedArrayBuffer(CONTROL.celdas * Int32Array.BYTES_PER_ELEMENT)) };
     if (process.env.CARTA_PERCEPCION_COSTE_DUENOS === '1') this.#puertos.porCoste = true;
     if (medir || this.#puertos.porCoste) this.#puertos.medida = new BigInt64Array(new SharedArrayBuffer(MEDIDA.celdas * BigInt64Array.BYTES_PER_ELEMENT));
@@ -97,7 +117,7 @@ export class BrokerPercepcionGpu {
       aceptaEnEpoca: generacion > 0 && (Atomics.load(c, CONTROL.validacion0) === generacion ||
         Atomics.load(c, CONTROL.validacion0 + 1) === generacion),
       bytes: Atomics.load(c, CONTROL.bytes), ms: Atomics.load(c, CONTROL.micros) / 1000,
-      completadas: [Atomics.load(c, CONTROL.dueno0), Atomics.load(c, CONTROL.dueno1)],
+      completadas: [Atomics.load(c, CONTROL.completada0), Atomics.load(c, CONTROL.completada1)],
       peticiones: Atomics.load(c, CONTROL.peticiones), detalle: this.#detalle() };
   }
 
@@ -105,7 +125,7 @@ export class BrokerPercepcionGpu {
     const m = this.#puertos.medida;
     if (!m) return undefined;
     const leer = (i: number) => Number(Atomics.load(m, i));
-    return { lotes: leer(MEDIDA.lotes), completadas: [leer(MEDIDA.dueno0), leer(MEDIDA.dueno1)],
+    return { lotes: leer(MEDIDA.lotes), completadas: [leer(MEDIDA.completada0), leer(MEDIDA.completada1)],
       aceptadas: [leer(MEDIDA.aceptada0), leer(MEDIDA.aceptada1)], rechazadas: leer(MEDIDA.rechazada),
       cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
       ...(this.#puertos.porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
@@ -127,13 +147,17 @@ export class BrokerPercepcionGpu {
 /** El dueño empaqueta desde su captura F2. El corredor solo ve el paquete, nunca las páginas vivas del dueño. */
 class CanalPercepcionBroker implements CanalGpu {
   readonly #puerto: BroadcastChannel;
+  readonly #ranura: Ranura;
   #datos = new Uint8Array(new SharedArrayBuffer(0));
   #pendiente?: Peticion;
   #reserva?: bigint;
   #cerrado = false;
 
   constructor(private readonly epoca: EpocaBrokerPercepcion, private readonly dueno: number) {
-    this.#puerto = new BroadcastChannel(`${epoca.canal}:${dueno}`);
+    const ranura = epoca.duenosPorRanura.indexOf(dueno);
+    if (ranura !== 0 && ranura !== 1) throw new RangeError(`El dueño ${dueno} no está asignado a este corredor de percepción.`);
+    this.#ranura = ranura;
+    this.#puerto = new BroadcastChannel(`${epoca.canal}:${ranura}`);
     this.#puerto.unref();
   }
 
@@ -154,12 +178,13 @@ class CanalPercepcionBroker implements CanalGpu {
     const { control, generacion } = this.epoca;
     const obstaculo = this.obstaculo(false);
     if (obstaculo) { this.anotarRuta(obstaculo); return false; }
-    if (Atomics.compareExchange(control, CONTROL.ocupado, 0, turno(generacion, this.dueno)) !== 0) {
+    const permiso = turno(generacion, this.#ranura);
+    if (Atomics.compareExchange(control, CONTROL.ocupado, 0, permiso) !== 0) {
       this.anotarRuta('cpuOcupada');
       return false;
     }
     if (Atomics.load(control, CONTROL.generacion) !== generacion) {
-      Atomics.compareExchange(control, CONTROL.ocupado, turno(generacion, this.dueno), 0);
+      Atomics.compareExchange(control, CONTROL.ocupado, permiso, 0);
       this.anotarRuta('cpuSinCanal');
       return false;
     }
@@ -201,7 +226,7 @@ class CanalPercepcionBroker implements CanalGpu {
     if (!peticion) throw new Error('El dueño no tiene un despacho pendiente.');
     const { estado, fin, tiempo, identidad } = peticion;
     const { control } = this.epoca;
-    const senal = CONTROL.senal0 + this.dueno, limite = performance.now() + plazoMs;
+    const senal = CONTROL.senal0 + this.#ranura, limite = performance.now() + plazoMs;
     for (;;) {
       const aviso = Atomics.load(control, senal), queda = Math.min(limite - performance.now(), restante(fin));
       if (queda <= 0 || Atomics.load(estado, 0) !== ESTADO.esperando || Atomics.load(control, CONTROL.listo) !== 1
@@ -219,7 +244,7 @@ class CanalPercepcionBroker implements CanalGpu {
     }
     const medida = this.epoca.medida;
     if (medida) {
-      Atomics.add(medida, MEDIDA.dueno0 + this.dueno, 1n);
+      Atomics.add(medida, MEDIDA.completada0 + this.#ranura, 1n);
       Atomics.add(medida, MEDIDA.subida, BigInt(peticion.orden.subida));
       Atomics.add(medida, MEDIDA.bajada, BigInt(peticion.orden.bajada));
       Atomics.add(medida, MEDIDA.cudaMicros, BigInt(Math.round(tiempo[0]! * 1000)));
@@ -234,12 +259,12 @@ class CanalPercepcionBroker implements CanalGpu {
   }
   anotarValidacion(aceptada: boolean): void {
     if (this.#validarEnEpoca(aceptada) && this.epoca.medida)
-      Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
+      Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.#ranura : MEDIDA.rechazada, 1n);
   }
   #validarEnEpoca(aceptada: boolean): boolean {
     const { control, generacion } = this.epoca;
     if (Atomics.load(control, CONTROL.generacion) !== generacion) return false;
-    const posicion = CONTROL.validacion0 + this.dueno;
+    const posicion = CONTROL.validacion0 + this.#ranura;
     // El signo representa la última validación. Un cliente que cierra tarde no pisa otra generación.
     let anterior = Atomics.load(control, posicion);
     while (Math.abs(anterior) <= generacion) {
@@ -252,7 +277,7 @@ class CanalPercepcionBroker implements CanalGpu {
   cerrar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
-    if (this.#reserva !== undefined) Atomics.compareExchange(this.epoca.control, CONTROL.ocupado, turno(this.epoca.generacion, this.dueno), 0);
+    if (this.#reserva !== undefined) Atomics.compareExchange(this.epoca.control, CONTROL.ocupado, turno(this.epoca.generacion, this.#ranura), 0);
     if (this.#pendiente) Atomics.compareExchange(this.#pendiente.estado, 0, ESTADO.esperando, ESTADO.cancelada);
     this.#pendiente = undefined;
     this.#puerto.close();
@@ -329,7 +354,7 @@ export class PercibidorBroker implements Percibidor {
 }
 
 function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
-  const { canal, control, dispositivo } = puertos;
+  const { canal, control, dispositivo, duenosPorRanura } = puertos;
   const port = parentPort!;
   let gpu: CanalCompartido | undefined;
   const entradas: BroadcastChannel[] = [];
@@ -342,13 +367,16 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
   try {
     gpu = new CanalCompartido(dispositivo, opciones);
     gpu.iniciar(3000);
-    for (const dueno of [0, 1]) {
-      const entrada = new BroadcastChannel(`${canal}:${dueno}`);
+    for (const ranura of RANURAS) {
+      const dueno = duenosPorRanura[ranura];
+      if (dueno === null) continue;
+      const entrada = new BroadcastChannel(`${canal}:${ranura}`);
       entradas.push(entrada);
       entrada.onmessage = ({ data }) => {
         const { identidad: id, orden, enviada, fin, estado, datos, tiempo } = data as Peticion;
-        const permiso = turno(id.generacion, dueno);
-        const pertenece = () => id.dueno === dueno && Atomics.load(control, CONTROL.generacion) === id.generacion
+        if (id.dueno !== dueno) return;
+        const permiso = turno(id.generacion, ranura);
+        const pertenece = () => Atomics.load(control, CONTROL.generacion) === id.generacion
           && Atomics.load(control, CONTROL.listo) === 1;
         const vigente = () => pertenece() && Atomics.load(control, CONTROL.ocupado) === permiso
           && Atomics.load(estado, 0) === ESTADO.esperando && restante(fin) > 0;
@@ -405,11 +433,11 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
           Atomics.compareExchange(control, CONTROL.ocupado, permiso, 0);
           if (ms !== undefined && pertenece() && restante(fin) > 0
             && Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.lista) === ESTADO.esperando) {
-            Atomics.add(control, CONTROL.dueno0 + dueno, 1);
+            Atomics.add(control, CONTROL.completada0 + ranura, 1);
             Atomics.store(control, CONTROL.micros, Math.round(ms * 1000));
             Atomics.store(control, CONTROL.bytes, orden.subida + orden.bajada);
           } else Atomics.compareExchange(estado, 0, ESTADO.esperando, ESTADO.fallo);
-          despertar(control, dueno);
+          despertar(control, ranura);
         }
       };
     }

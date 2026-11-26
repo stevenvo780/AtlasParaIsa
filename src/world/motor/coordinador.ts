@@ -19,7 +19,8 @@ import { applyGesture } from '../actuar/gestos.js';
 import { syncFauna } from '../animals.js';
 import { olvidarPercepcion } from '../decision/percepcion.js';
 import { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { admiteBrokerPercepcionGpu, BrokerPercepcionGpu, type PercibidorBroker } from '../gpu/broker-percepcion.js';
+import { BrokerPercepcionGpu, resolverDuenosPercepcionGpu,
+  type DuenosBroker, type EpocaBrokerPercepcion, type PercibidorBroker } from '../gpu/broker-percepcion.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
@@ -108,9 +109,11 @@ export function crearMotor(mundo: World, config: MotorConfig): Motor {
   const hilos = config.hilos === 'auto' ? (paramsOf(mundo).v23.duenos ? availableParallelism() : 1) : config.hilos;
   if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError(`Cantidad de hilos inválida: ${hilos}.`);
   if (config.reservaLotesMateria !== undefined) validarReservaLotesMateria(config.reservaLotesMateria);
+  const duenosGpu = resolverDuenosPercepcionGpu(hilos, config.gpu, config.duenosPercepcionGpu);
+  if (config.duenosPercepcionGpu !== undefined && !duenosGpu) throw new RangeError('Asignación de dueños CUDA inválida.');
   if (hilos === 1) return new MotorUnico(mundo, config);
   if (!paramsOf(mundo).v23.duenos) throw new Error('Un motor de varios dueños exige v23.duenos (y con él todas las leyes de la V23).');
-  return new MotorDuenos(mundo, config, hilos);
+  return new MotorDuenos(mundo, config, hilos, duenosGpu);
 }
 
 // ── Un dueño ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -246,7 +249,7 @@ class MotorDuenos implements Motor {
     };
   }
   #piscina: Piscina<DatosDueno> | null = null;
-  readonly #brokerConfigurado: boolean;
+  readonly #duenosBrokerGpu: DuenosBroker[] | undefined;
   #materiaGpuDeArranque?: boolean;
   #brokersGpu: (BrokerPercepcionGpu | undefined)[] = [];
   #clienteGpu?: PercibidorBroker;
@@ -275,10 +278,9 @@ class MotorDuenos implements Motor {
   readonly #detalles = new Map<number, ((p: Person | null) => void)[]>();
   readonly #t: TelemetriaMotor;
 
-  constructor(mundo: World, config: MotorConfig, hilos: number) {
+  constructor(mundo: World, config: MotorConfig, hilos: number, duenosGpu?: DuenosBroker[]) {
     this.#mundo = mundo; this.#config = config; this.#hilos = hilos;
-    this.#brokerConfigurado = process.env.CARTA_PERCEPCION_DUENOS === '1' && !!process.env.COMPUTE_NVRTC
-      && admiteBrokerPercepcionGpu(hilos, config.gpu);
+    this.#duenosBrokerGpu = process.env.CARTA_PERCEPCION_DUENOS === '1' && process.env.COMPUTE_NVRTC ? duenosGpu : undefined;
     this.#t = telemetriaVacia(hilos);
   }
 
@@ -295,7 +297,7 @@ class MotorDuenos implements Motor {
     const m = this.#mundo, hilos = this.#hilos, params = paramsOf(m), verificar = this.#config.verificar || params.motor.depuracion;
     const materiaGpu = params.v23.materiaGpu;
     this.#validarModoGpu(materiaGpu);
-    if (this.#brokerConfigurado) this.#materiaGpuDeArranque ??= materiaGpu;
+    if (this.#duenosBrokerGpu) this.#materiaGpuDeArranque ??= materiaGpu;
     void this.#cerrarPiscina().catch(() => {});
     this.#fatal = undefined;
     this.#perfilPaso = undefined;
@@ -316,13 +318,18 @@ class MotorDuenos implements Motor {
     contadores.fijarCronica(m.eventCounter + 1);
     const terreno = this.#terreno = new TerrenoPercepcion(verificar);
     terreno.usarDuenos();
-    const usarBroker = this.#brokerConfigurado && !materiaGpu;
-    if (usarBroker) this.#brokersGpu = this.#config.gpu.map((dispositivo, i) => {
-      try { return this.#brokersGpu[i] ?? new BrokerPercepcionGpu(undefined, this.#config.medirBrokerGpu, dispositivo); }
-      catch { return undefined; } // El dueño de esa tarjeta conserva la ruta CPU.
-    });
-    const epocasGpu = usarBroker ? this.#brokersGpu.map(broker => broker?.abrirEpoca(this.#epoca)) : [];
-    const brokersGpuPorDueno = epocasGpu.length === 1 ? [epocasGpu[0], epocasGpu[0]] : epocasGpu;
+    const brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[] = new Array(hilos).fill(undefined);
+    if (this.#duenosBrokerGpu && !materiaGpu) {
+      this.#brokersGpu = this.#duenosBrokerGpu.map((duenos, i) => {
+        try {
+          return this.#brokersGpu[i] ?? new BrokerPercepcionGpu(undefined, this.#config.medirBrokerGpu, this.#config.gpu[i]!, duenos);
+        } catch { return undefined; } // El dueño de esa tarjeta conserva la ruta CPU.
+      });
+      this.#duenosBrokerGpu.forEach((duenos, i) => {
+        const epoca = this.#brokersGpu[i]?.abrirEpoca(this.#epoca);
+        for (const dueno of duenos) if (dueno !== null) brokersGpuPorDueno[dueno] = epoca;
+      });
+    }
     this.#clienteGpu = ligarCompartido(m, tabla, terreno, contadores, brokersGpuPorDueno[0]);
     for (const ley of leyesActivas(params.v23)) for (const [nombre, tipo, ancho] of ley.columnas ?? []) tabla.columna(nombre, tipo, ancho);
     const buzones = this.#buzones = new Buzones(hilos), libros = crearLibros(hilos), registro = new RegistroContenido(hilos);
@@ -757,7 +764,7 @@ class MotorDuenos implements Motor {
   }
 
   async prepararBrokerGpu(): Promise<boolean> {
-    if (!this.#brokerConfigurado) return false;
+    if (!this.#duenosBrokerGpu) return false;
     if (!this.#piscina) this.#arrancar(null);
     const listas = await Promise.all(this.#brokersGpu.map(broker => broker?.listo ?? false));
     return listas.length > 0 && listas.every(Boolean);
@@ -769,7 +776,8 @@ class MotorDuenos implements Motor {
     return { ...this.#t, faseMs: { ...this.#t.faseMs }, ocupacion: this.#t.ocupacion.slice(), ...(gpus.length > 0 && {
       gpuEstado: gpus.map(gpu => gpu?.lista && gpu.aceptaEnEpoca ? 'ok' : 'cpu'),
       gpuMs: gpus.map(gpu => gpu?.ms ?? 0), gpuBytes: gpus.map(gpu => gpu?.bytes ?? 0),
-      gpuBrokers: gpus.map((gpu, i) => ({ dispositivo: this.#config.gpu[i]!, lista: gpu?.lista ?? false, detalle: gpu?.detalle })),
+      gpuBrokers: gpus.map((gpu, i) => ({ dispositivo: this.#config.gpu[i]!, lista: gpu?.lista ?? false,
+        duenosPorRanura: this.#duenosBrokerGpu?.[i], detalle: gpu?.detalle })),
       ...(unica && { gpuBroker: unica }),
     }) };
   }

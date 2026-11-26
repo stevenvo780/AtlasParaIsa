@@ -12,8 +12,10 @@
  * Para comparar CUDA, reemplaza `hilos` por `brazos` y pasa `COMPUTE_NVRTC`:
  * [{"id":"cpu1","hilos":1,"gpu":[]},{"id":"cpu2","hilos":2,"gpu":[]},
  *  {"id":"gpu0-cpu2","hilos":2,"gpu":[0]},{"id":"gpu1-cpu2","hilos":2,"gpu":[1]},
- *  {"id":"dual-cpu2","hilos":2,"gpu":[0,1]}]
- * Con una GPU, ambos dueños comparten el corredor. Con dos, cada dueño usa la GPU de su índice.
+ *  {"id":"dual-cpu2","hilos":2,"gpu":[0,1]},
+ *  {"id":"dual-cpu4","hilos":4,"gpu":[0,1],"duenosPercepcionGpu":[2,3]}]
+ * Sin asignación explícita se usan dos dueños. Una sola GPU atiende ambos y, con dos, cada dueño usa la de
+ * su índice. `duenosPercepcionGpu` fija un dueño global distinto por tarjeta, en el orden de `gpu`.
  * Las siembras con CUDA requieren al menos un tick de calentamiento para abrir todos los motores antes de medir.
  * `"rutaGpu":"porCoste"` añade un brazo adaptativo. Cada GPU del brazo fijo debe entregar
  * resultados aceptados por F2 durante la ventana. El adaptativo puede elegir CPU si F2
@@ -54,7 +56,7 @@ import { Store } from '../../src/server/store.js';
 import { cerrarPercibidores } from '../../src/world/decision/despacho.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
-import { admiteBrokerPercepcionGpu } from '../../src/world/gpu/broker-percepcion.js';
+import { admiteBrokerPercepcionGpu, resolverDuenosPercepcionGpu } from '../../src/world/gpu/broker-percepcion.js';
 import { assertWorld, createWorld, RULES_VERSION, type World } from '../../src/world/index.js';
 import { comprobarLeyes, crearComprobador } from '../../src/world/invariantes.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../../src/world/materia/checkpoint.js';
@@ -67,7 +69,7 @@ import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
 
 type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolean } & (
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
-interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste' }
+interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste'; duenosPercepcionGpu?: number[] }
 interface ArranqueDispositivo { dispositivo: number; disponible: boolean }
 interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[]; perfilPaso?: boolean }
 interface Integridad {
@@ -83,17 +85,19 @@ const sha256 = (contenido: Uint8Array): string => createHash('sha256').update(co
 const esSha256 = /^[a-f0-9]{64}$/;
 const esId = /^[a-z0-9][a-z0-9_-]*$/;
 
-function validacionConfiguracion(config: Config): Brazo[] {
+export function validacionConfiguracion(config: Config): Brazo[] {
   assert.ok(config && (Array.isArray(config.hilos) ? config.brazos === undefined : config.hilos === undefined && Array.isArray(config.brazos)),
     'Indica hilos o brazos');
   const brazos: Brazo[] = config.brazos ?? config.hilos!.map(hilos => ({ id: `h${hilos}`, hilos, gpu: [] }));
   assert.ok(brazos.length >= 2 && brazos.every(b => b && typeof b.id === 'string' && esId.test(b.id) &&
     entero(b.hilos, 1) && b.hilos <= availableParallelism() && Array.isArray(b.gpu) &&
-    (b.gpu.length === 0 || admiteBrokerPercepcionGpu(b.hilos, b.gpu)) &&
+    (b.duenosPercepcionGpu === undefined || Array.isArray(b.duenosPercepcionGpu)) &&
+    (b.gpu.length === 0 ? b.duenosPercepcionGpu === undefined : admiteBrokerPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu)) &&
     (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length > 0)),
-  'Indica al menos dos brazos CPU o CUDA [0], [1] o [0,1] con dos dueños');
+  'Indica al menos dos brazos CPU o CUDA [0], [1] o [0,1] con un mapeo de dueños válido');
   assert.equal(new Set(brazos.map(b => b.id)).size, brazos.length, 'IDs de brazos repetidos');
-  assert.equal(new Set(brazos.map(b => `${b.hilos}:${b.gpu.join(',')}:${b.rutaGpu ?? ''}`)).size, brazos.length,
+  assert.equal(new Set(brazos.map(b => JSON.stringify([b.hilos, b.gpu, b.rutaGpu,
+    resolverDuenosPercepcionGpu(b.hilos, b.gpu, b.duenosPercepcionGpu)]))).size, brazos.length,
     'Configuraciones de brazos repetidas');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
   assert.ok(config.perfilPaso === undefined || typeof config.perfilPaso === 'boolean', 'perfilPaso debe ser booleano');
@@ -170,18 +174,33 @@ function deltaBrokersGpu(fin: TelemetriaDispositivoBrokerGpu[] = [], inicio: Tel
   }));
 }
 
+function comprobarRanurasGpu(tarjeta: TelemetriaDispositivoBrokerGpu, esperadas: readonly [number | null, number | null],
+  explicito: boolean): void {
+  const { dispositivo, duenosPorRanura, detalle } = tarjeta;
+  if (explicito || duenosPorRanura !== undefined)
+    assert.deepEqual(duenosPorRanura, esperadas, `Mapeo por ranura GPU${dispositivo} distinto del solicitado`);
+  if (detalle) for (const [ranura, dueno] of esperadas.entries()) {
+    if (dueno === null) assert.ok(detalle.completadas[ranura] === 0 && detalle.aceptadas[ranura] === 0,
+      `GPU${dispositivo} sirvió una ranura sin dueño`);
+  }
+}
+
 export function acreditarGpu(brazo: Brazo, ventana: TelemetriaDispositivoBrokerGpu[] = [], calentamiento: TelemetriaDispositivoBrokerGpu[] = []) {
   assert.deepEqual(ventana.map(d => d.dispositivo), brazo.gpu, 'Telemetría CUDA de otros dispositivos');
+  const explicito = brazo.duenosPercepcionGpu !== undefined;
+  const mapeo = resolverDuenosPercepcionGpu(brazo.hilos, brazo.gpu, brazo.duenosPercepcionGpu);
+  assert.ok(brazo.gpu.length ? mapeo : !explicito, 'Mapeo CUDA inválido para el brazo');
+  if (calentamiento.length) assert.deepEqual(calentamiento.map(d => d.dispositivo), brazo.gpu, 'Calentamiento CUDA de otros dispositivos');
   const adaptativo = brazo.rutaGpu === 'porCoste';
   const acepto = (d?: TelemetriaBrokerGpu): boolean =>
     !!d && d.aceptadas.some(n => n > 0) && d.subidaConfirmadaBytes > 0 && d.bajadaConfirmadaBytes > 0;
   const sinGpu: number[] = [], gpuDegradadas: number[] = [];
-  ventana.forEach(({ detalle, dispositivo, lista }, i) => {
-    const antes = calentamiento.find(tarjeta => tarjeta.dispositivo === dispositivo)?.detalle;
+  ventana.forEach((tarjeta, i) => {
+    const { detalle, dispositivo, lista } = tarjeta;
+    const previa = calentamiento[i], antes = previa?.detalle;
     assert.ok(detalle && (detalle.cpuPorCoste !== undefined) === adaptativo, `Faltan contadores de GPU${dispositivo}`);
-    if (brazo.gpu.length === 2) {
-      assert.ok(!detalle.completadas[1 - i] && !antes?.completadas[1 - i], `GPU${dispositivo} sirvió otro dueño`);
-    }
+    comprobarRanurasGpu(tarjeta, mapeo![i]!, explicito);
+    if (previa) comprobarRanurasGpu(previa, mapeo![i]!, explicito);
     if (!lista || detalle.erroresCanal > 0 || detalle.cpuSinCanal > 0) gpuDegradadas.push(dispositivo);
     if (!acepto(detalle) && !(adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes))) sinGpu.push(dispositivo);
   });
@@ -242,7 +261,9 @@ async function preparar(e: Escena, directorio: string): Promise<Preparada> {
 }
 
 async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolean) {
-  const { hilos, gpu } = brazo;
+  const { hilos, gpu, duenosPercepcionGpu } = brazo;
+  const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
+  assert.ok(gpu.length ? duenosPorRanura : duenosPercepcionGpu === undefined, 'Mapeo CUDA inválido para el brazo');
   const { mundo, siembra, fixture, carga, cerrar } = await preparar(e, dirname(salida));
   let fd: number | undefined;
   let motor: Motor | undefined;
@@ -264,14 +285,14 @@ async function medir(e: Escena, brazo: Brazo, salida: string, perfilPaso: boolea
     const descriptor = fd = openSync(salida, 'wx', 0o600);
     const anotar = (fila: object) => writeSync(descriptor, JSON.stringify(fila) + '\n');
     const pared: number[] = [], cpuProceso: number[] = [], barrera: number[] = [];
-    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, perfilPaso, commit: git('rev-parse', 'HEAD'), node: process.version,
+    const inicio = { tipo: 'inicio', escena: e, brazo, hilos, duenosPorRanura, perfilPaso, commit: git('rev-parse', 'HEAD'), node: process.version,
       digestoInicial, ...siembra, fixture, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
       interruptores: params.v23, motor: params.motor, carga: loadavg(), planificador: planificador() };
     anotar(inicio);
     const biblioteca = process.env.COMPUTE_NVRTC;
     const conNvrtc = !!biblioteca && existsSync(biblioteca);
     if (!gpu.length || conNvrtc) {
-      motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
+      motor = crearMotor(mundo, { hilos, gpu, duenosPercepcionGpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed,
         medirBrokerGpu: gpu.length > 0, medirPaso: perfilPaso });
       if (carga) motor.cargar(carga.instantanea, carga.epoca);
     }
@@ -390,7 +411,8 @@ function medirBloques(rutaConfig: string, salida: string) {
     const corridas = [];
     let origen: { digesto: string; tick: number; fixture?: Preparada['fixture'] } | undefined;
     for (const brazo of orden) {
-      const { hilos, gpu } = brazo;
+      const { hilos, gpu, duenosPercepcionGpu } = brazo;
+      const duenosPorRanura = resolverDuenosPercepcionGpu(hilos, gpu, duenosPercepcionGpu);
       const nombre = `${escena.id}.r${repeticion + 1}.${brazo.id}.jsonl`;
       const ruta = join(salida, nombre);
       const e = 'fixture' in escena ? { ...escena, fixture: { ...escena.fixture, sqlite: resolve(dirname(rutaConfig), escena.fixture.sqlite) } } : escena;
@@ -406,6 +428,7 @@ function medirBloques(rutaConfig: string, salida: string) {
       assert.deepEqual(inicio.escena, e, `Escena distinta en ${nombre}`);
       assert.deepEqual(inicio.brazo, brazo, `Brazo distinto en ${nombre}`);
       assert.deepEqual(inicio.motor.gpu, gpu, `Dispositivo distinto en ${nombre}`);
+      assert.deepEqual(inicio.duenosPorRanura, duenosPorRanura, `Mapeo CUDA distinto en ${nombre}`);
       if (escena.rebalanceo !== undefined) assert.equal(inicio.interruptores.rebalanceo, escena.rebalanceo,
         `Rebalanceo distinto en ${nombre}`);
       assert.match(inicio.digestoInicial, esSha256, `Huella inicial inválida en ${nombre}`);
@@ -418,7 +441,8 @@ function medirBloques(rutaConfig: string, salida: string) {
       const fuente = { digesto: inicio.digestoInicial, tick: tickInicial, fixture: inicio.fixture };
       origen ??= fuente;
       assert.deepEqual(fuente, origen, `Estado inicial diferente en ${nombre}`);
-      const corrida = { brazo: brazo.id, hilos, gpu, rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin };
+      const corrida = { brazo: brazo.id, hilos, gpu, duenosPercepcionGpu, duenosPorRanura,
+        rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin };
       if (fin?.estado === 'sin-arranque-gpu') {
         const arranque = filas.find(fila => fila.tipo === 'arranqueGpu');
         assert.ok(fin.tipo === 'fin' && gpu.length && arranque?.disponible === false && fin.sinGpu?.length, `Arranque inválido en ${nombre}`);
@@ -455,7 +479,7 @@ function medirBloques(rutaConfig: string, salida: string) {
   assert.equal(git('diff', '--binary', 'HEAD', '--', 'src', 'scripts', 'package.json', 'package-lock.json'), diferencia,
     'Cambió el código durante la medición');
   assert.equal(sha256(readFileSync(script)), instrumentoSha256, 'Cambió el instrumento durante la medición');
-  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 3, commit, perfilPaso, configSha256: sha256(contenido),
+  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 4, commit, perfilPaso, configSha256: sha256(contenido),
     instrumentoSha256, diffSha256: sha256(Buffer.from(diferencia)), arbolLimpio: git('status', '--porcelain', '--', 'src', 'scripts',
       'package.json', 'package-lock.json') === '', config, bloques }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 }

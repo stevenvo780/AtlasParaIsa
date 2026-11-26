@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { availableParallelism } from 'node:os';
 import test from 'node:test';
-import { acreditarGpu } from '../scripts/perf/banco-motor-v24.mjs';
+import { acreditarGpu, validacionConfiguracion } from '../scripts/perf/banco-motor-v24.mjs';
 import { escalon } from '../src/shared/interruptores.js';
 import { createWorld } from '../src/world/index.js';
-import type { TelemetriaBrokerGpu } from '../src/world/motor/contratos.js';
+import type { TelemetriaBrokerGpu, TelemetriaDispositivoBrokerGpu } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { parseParams } from '../src/world/params.js';
 
@@ -63,13 +64,14 @@ test('el motor por defecto no publica el perfil', async t => {
   assert.equal(motor.muestraPerfilPaso(), undefined);
 });
 
+const medido: TelemetriaBrokerGpu = { lotes: 1, completadas: [1, 0], aceptadas: [1, 0], rechazadas: 0, cpuArranque: 0,
+  cpuOcupada: 0, cpuSinCanal: 0, erroresCanal: 0, subidaConfirmadaBytes: 1, bajadaConfirmadaBytes: 1,
+  cudaConfirmadaMicros: 1, recorridoConfirmadoMicros: 1, preparacionMicros: 0 };
+
 test('el banco distingue GPU degradada de desvíos esperados a CPU', () => {
   const brazoGpu = { id: 'adaptativo', hilos: 2, gpu: [0], rutaGpu: 'porCoste' as const };
-  const medido: TelemetriaBrokerGpu = { lotes: 1, completadas: [1, 0], aceptadas: [1, 0], rechazadas: 0, cpuArranque: 0,
-    cpuOcupada: 0, cpuSinCanal: 0, cpuPorCoste: 0, erroresCanal: 0, subidaConfirmadaBytes: 1, bajadaConfirmadaBytes: 1,
-    cudaConfirmadaMicros: 1, recorridoConfirmadoMicros: 1, preparacionMicros: 0 };
   const gpu = (lista: boolean, cambios: Partial<TelemetriaBrokerGpu> = {}) =>
-    [{ dispositivo: 0, lista, detalle: { ...medido, ...cambios } }];
+    [{ dispositivo: 0, lista, detalle: { ...medido, cpuPorCoste: 0, ...cambios } }];
   assert.equal(acreditarGpu(brazoGpu, gpu(true, { cpuOcupada: 1, cpuPorCoste: 1 })).estado, 'completo');
   const soloCpu = { completadas: [0, 0], aceptadas: [0, 0], subidaConfirmadaBytes: 0, bajadaConfirmadaBytes: 0, cpuPorCoste: 1 } satisfies Partial<TelemetriaBrokerGpu>;
   assert.equal(acreditarGpu(brazoGpu, gpu(true, soloCpu), gpu(true)).estado, 'completo');
@@ -80,4 +82,41 @@ test('el banco distingue GPU degradada de desvíos esperados a CPU', () => {
     assert.equal(resultado.estado, 'gpu-degradada');
     assert.deepEqual(resultado.gpuDegradadas, [0]);
   }
+});
+
+test('el banco distingue las asignaciones por dueño y rechaza mapeos repetidos o inválidos',
+  { skip: availableParallelism() < 2 }, () => {
+    const config = { repeticiones: 1, escenas: [{ id: 'ejemplo', semilla: 7, siembra: 7, n: 20, zona: '0,0,48,32', calentar: 1, medir: 1 }] };
+    const a = { id: 'a', hilos: 2, gpu: [0], duenosPercepcionGpu: [0] };
+    const b = { ...a, id: 'b', duenosPercepcionGpu: [1] };
+    assert.deepEqual(validacionConfiguracion({ ...config, brazos: [a, b] }), [a, b]);
+    assert.throws(() => validacionConfiguracion({ ...config, brazos: [a, { ...a, id: 'b' }] }), /Configuraciones de brazos repetidas/);
+    for (const invalido of [
+      { ...b, duenosPercepcionGpu: [2] }, { ...b, duenosPercepcionGpu: [0.5] },
+      { ...b, gpu: [], duenosPercepcionGpu: [] }, { ...b, gpu: [0, 1], duenosPercepcionGpu: [1, 1] },
+    ]) assert.throws(() => validacionConfiguracion({ ...config, brazos: [a, invalido] }), /mapeo de dueños válido/);
+});
+
+test('el banco coteja el mapeo global en ventana y calentamiento y deja vacía la ranura sobrante', () => {
+  const brazo = { id: 'dual-cpu4', hilos: 4, gpu: [0, 1], duenosPercepcionGpu: [3, 1] };
+  const primera: TelemetriaDispositivoBrokerGpu = { dispositivo: 0, lista: true, detalle: medido, duenosPorRanura: [3, null] };
+  const segunda: TelemetriaDispositivoBrokerGpu = { dispositivo: 1, lista: true, detalle: medido, duenosPorRanura: [1, null] };
+  const ventana = [primera, segunda];
+  assert.equal(acreditarGpu(brazo, ventana, ventana).estado, 'completo');
+  assert.equal(acreditarGpu(brazo, ventana).estado, 'completo');
+  assert.throws(() => acreditarGpu(brazo, [primera, { ...segunda, duenosPorRanura: undefined }]), /Mapeo por ranura GPU1/);
+  assert.throws(() => acreditarGpu(brazo, ventana, [{ ...primera, duenosPorRanura: [0, null] }, segunda]), /Mapeo por ranura GPU0/);
+  assert.throws(() => acreditarGpu(brazo, ventana, [primera, { ...segunda, duenosPorRanura: undefined }]), /Mapeo por ranura GPU1/);
+  const completaFuera: TelemetriaDispositivoBrokerGpu = { ...segunda, detalle: { ...medido, completadas: [1, 1] } };
+  const aceptaFuera: TelemetriaDispositivoBrokerGpu = { ...segunda, detalle: { ...medido, aceptadas: [1, 1] } };
+  assert.throws(() => acreditarGpu(brazo, [primera, completaFuera]), /ranura sin dueño/);
+  assert.throws(() => acreditarGpu(brazo, ventana, [primera, aceptaFuera]), /ranura sin dueño/);
+  assert.deepEqual(acreditarGpu(brazo, [primera, { ...segunda, lista: false }]).gpuDegradadas, [1]);
+
+  const legado = { id: 'dual-cpu2', hilos: 2, gpu: [0, 1] };
+  const antigua0 = { ...primera, duenosPorRanura: undefined };
+  const antigua1: TelemetriaDispositivoBrokerGpu = { ...segunda, duenosPorRanura: undefined,
+    detalle: { ...medido, completadas: [0, 1], aceptadas: [0, 1] } };
+  assert.equal(acreditarGpu(legado, [antigua0, antigua1]).estado, 'completo');
+  assert.throws(() => acreditarGpu(legado, [antigua0, { ...antigua1, duenosPorRanura: [1, null] }]), /Mapeo por ranura GPU1/);
 });

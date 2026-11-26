@@ -53,16 +53,14 @@ test('el guardado completo repone los lotes a cuestas por encima del tope escala
   assert.throws(() => assertWorld(restaurado), /Materiales transportados inválidos/);
 });
 
-test('la carga escalar sin cuerpo sigue limitada a 12 de madera y 8 de piedra', () => {
-  for (const mundo of [createWorld(7), createWorld(7, parseParams({ v23: escalon('cuerpos') }))]) {
-    const persona = mundo.people[0]!;
-    assert.equal(persona.cuerpo, undefined);
-    persona.materials = { wood: 12, stone: 8 };
-    assertWorld(mundo);
-    for (const recurso of ['wood', 'stone'] as const) {
-      persona.materials[recurso]++;
-      assert.throws(() => assertWorld(mundo), /Materiales transportados inválidos/);
-      persona.materials[recurso]--;
-    }
+test('la carga del inventario escalar heredado sigue limitada a 12 de madera y 8 de piedra', () => {
+  const mundo = createWorld(7);
+  const persona = mundo.people[0]!;
+  persona.materials = { wood: 12, stone: 8 };
+  assertWorld(mundo);
+  for (const recurso of ['wood', 'stone'] as const) {
+    persona.materials[recurso]++;
+    assert.throws(() => assertWorld(mundo), /Materiales transportados inválidos/);
+    persona.materials[recurso]--;
   }
 });

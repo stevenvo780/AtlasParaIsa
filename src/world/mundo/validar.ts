@@ -208,8 +208,9 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     // Un cuerpo material puede pagar una fracción del coste de trabajo de un tick.
     const trabajoValido = cuerposMateriales && p.cuerpo ? Number.isFinite(p.work) : Number.isSafeInteger(p.work);
     if (!trabajoValido || p.work < 0 || p.work > (expectedVersion >= 4 ? 600 : 90)) fail();
-    // La recolección corporal usa la masa. Con obra, los materiales son una vista de los lotes a cuestas.
-    const inventarioPorMasa = cuerposMateriales && p.cuerpo !== undefined && (!v23.obra || p.carga !== undefined);
+    // Los cortes previos a inicializar cuerpos conservan sus existencias. Con cuerpo y obra
+    // la proyección de la carga requiere las referencias a los lotes a cuestas.
+    const inventarioPorMasa = cuerposMateriales && (!v23.obra || p.cuerpo === undefined || p.carga !== undefined);
     if (!p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0
       || !Number.isFinite(p.materials.stone) || p.materials.stone < 0
       || (!inventarioPorMasa && (p.materials.wood > 12 || p.materials.stone > 8))) throw new Error('Materiales transportados inválidos.');

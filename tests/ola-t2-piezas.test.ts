@@ -62,6 +62,11 @@ test('colocar cambia rol, conserva átomos y calor, y publica la pieza desde la 
     const deposito = loteDepositoObra(c, s as unknown as StructureView, 'agua');
     assert.ok(deposito >= 0);
     assert.equal(arena.cuantos(agua, S.H2O) + arena.cuantos(deposito, S.H2O), 100_000);
+    const original = { ...s, water: 0, food: 0 } as unknown as StructureView;
+    const reflejo = { structures: [original] } as WorldView;
+    leyObra.proyectar?.mundo?.(c, reflejo);
+    assert.equal(reflejo.structures![0]!.water, almacenado);
+    assert.equal(original.water, 0);
     assert.deepEqual(arena.saldo(), material.esperado());
     assert.deepEqual(leyObra.comprobar?.(c), []);
     s.obraMaterial.comida = ref!;

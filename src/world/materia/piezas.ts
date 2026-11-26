@@ -378,14 +378,14 @@ export function desgastarEmpedrado(c: CtxLeyMateria, tesela: Tile, trabajoJ: num
 }
 
 function proyectarObra(c: CtxLeyMateria, vista: WorldView): void {
+  if (!vista.structures) return;
   const obras = new Map(c.mundo.structures.map(s => [s.id, s]));
-  for (const s of vista.structures ?? []) {
+  // La proyección de terreno puede traer las estructuras vivas. Los kg visibles pertenecen a la vista.
+  vista.structures = vista.structures.map(s => {
     const obra = obras.get(s.id);
-    if (!obra) continue;
-    s.piezas = piezasVisibles(c, obra);
-    s.water = stockObra(c, obra, 'agua');
-    s.food = stockObra(c, obra, 'comida');
-  }
+    if (!obra) return s;
+    return { ...s, piezas: piezasVisibles(c, obra), water: stockObra(c, obra, 'agua'), food: stockObra(c, obra, 'comida') };
+  });
 }
 
 export const leyObra: Ley = {

@@ -1818,8 +1818,8 @@ export class Store {
         const cabeza = leerCabeza();
         if (!cabeza && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
         let baselineProved = false;
-        if (cabeza) {
-          if (cabeza === 'checksum') technologyFailure('baseline snapshot checksum mismatch');
+        if (cabeza === 'checksum') technologyFailure('baseline snapshot checksum mismatch');
+        else if (cabeza) {
           // La migración modifica la cabecera. Este es el último lector de la cabeza anterior.
           const baseline = this.migrateSnapshot(cabeza.mundo);
           if (baseline.technology.journal !== undefined) {

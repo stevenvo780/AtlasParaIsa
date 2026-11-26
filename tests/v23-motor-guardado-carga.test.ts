@@ -56,7 +56,7 @@ test('el guardado completo repone los lotes a cuestas por encima del tope escala
   assert.throws(() => assertWorld(restaurado), /Materiales transportados inválidos/);
 });
 
-test('al reabrir se asientan las garantías sin atribuir la referencia antigua a un actor', prueba => {
+test('al reabrir un corte v1 se valida la celda y se recupera el portador por su lote', prueba => {
   const mundo = createWorld(7, parseParams({ v23: escalon('duenos') }));
   const motor = crearMotor(mundo, unSoloDueno(7)), store = new Store(':memory:');
   const motores = [motor];
@@ -66,7 +66,7 @@ test('al reabrir se asientan las garantías sin atribuir la referencia antigua a
   });
   motor.cargar({ world: mundo, materia: null }, 0);
   const c = ctxMateriaDe(mundo), d = duenoSi(mundo)!;
-  const persona = mundo.people.find(p => p.role === 'I')!;
+  const persona = mundo.people.find(p => p.role === 'neighbor')!;
   const refAnterior = c.ref(persona.uid!);
   assert.notEqual(refAnterior, REF_NULA);
   const celdaPortador = c.terreno.celda(persona.x, persona.y);
@@ -97,7 +97,12 @@ test('al reabrir se asientan las garantías sin atribuir la referencia antigua a
   enviar(3, { nonce: 2, celda: REF_NULA });
   enviar(4, { nonce: 3, tipo: TipoIntento.Depositar, a: REF_NULA, lote: objeto, celda: REF_NULA });
   enviar(5, { nonce: 4, tipo: TipoIntento.Depositar, a: REF_NULA, lote: REF_NULA });
-  store.guardar(motor.instantanea());
+  const guardadoNuevo = motor.instantanea(), materia = guardadoNuevo.materia!;
+  const originales = new Map(d.pendientes().map(i => [i.nonce, i]));
+  const enVuelo = codificarEnVuelo(decodificarEnVuelo(materia.enVuelo).map(i => ({
+    ...originales.get(i.nonce)!, celda: i.celda,
+  })));
+  store.guardar({ world: guardadoNuevo.world, materia: { ...materia, enVuelo } });
   const guardado = store.cargarInstantanea()!, cp = guardado.instantanea.materia!;
   const intentos = decodificarEnVuelo(cp.enVuelo);
   assert.equal(intentos.length, 4);
@@ -119,13 +124,15 @@ test('al reabrir se asientan las garantías sin atribuir la referencia antigua a
   assert.ok(re.frente.vivo[slotDe(refAnterior)] && re.frente.gen[slotDe(refAnterior)] === genDe(refAnterior));
   const repuestos = lectorReal.pendientes();
   assert.equal(repuestos.length, 4);
-  assert.ok(repuestos.every(i => i.a === REF_NULA && i.de === REF_NULA));
+  const refPortador = re.ref(persona.uid!);
+  assert.notEqual(refPortador, REF_NULA);
+  assert.ok(repuestos.every(i => i.de === REF_NULA && i.a === (i.nonce <= 2 ? refPortador : REF_NULA)));
   lectorReal.fase(1);
   lectorReal.aplicar('B');
-  assert.deepEqual(estadoLote(re, suelo), [antes[0]![0]! + 2, antes[0]![1]! + 4]);
-  assert.deepEqual(estadoLote(re, sueloPortador), [antes[1]![0]! + 3, antes[1]![1]! + 6]);
+  assert.deepEqual(estadoLote(re, suelo), antes[0]);
+  assert.deepEqual(estadoLote(re, sueloPortador), antes[1]);
   assert.deepEqual(estadoLote(re, objeto), [antes[2]![0]! + 9, antes[2]![1]! + 18]);
-  assert.deepEqual(estadoLote(re, carga), [0, 0]);
+  assert.deepEqual(estadoLote(re, carga), [5, 10]);
   assert.ok(re.libro.enVuelo.every(n => n === 0));
   assert.equal(lectorReal.pendientes().length, 0);
   const saldo = conservacion(re);

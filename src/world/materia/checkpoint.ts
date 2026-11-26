@@ -24,6 +24,14 @@ const BYTES_LOTE = 4 * BYTES_ENTERO + 1 + 4; // ref, celda, dueño, número de p
 const BYTES_PAR = 12;
 const TIPOS_CON_GARANTIA = new Set<TipoIntento>([TipoIntento.Depositar, TipoIntento.Dar, TipoIntento.Concedido, TipoIntento.Devuelto]);
 
+// El bloque original empieza con un conteo no negativo.
+const MARCA_DESTINOS_UID = -1;
+
+export interface GarantiaGuardada extends Intento {
+  /** Ausente en el bloque original. -1: celda, 0: actor sin identidad verificable, >0: UID. */
+  uidDestino?: number;
+}
+
 function entero(valor: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
   if (!Number.isSafeInteger(valor) || valor < min || valor > max) throw new Error(`Entero inválido en el punto de control: ${valor}`);
   return valor;
@@ -485,17 +493,22 @@ function validarGarantia(tipo: TipoIntento, nonce: number, nonces: Set<number>):
   nonces.add(nonce);
 }
 
-export function codificarEnVuelo(intentos: Iterable<Intento>): Uint8Array {
+export function codificarEnVuelo(intentos: Iterable<GarantiaGuardada>): Uint8Array {
   const salida = new Escritor();
   const pendientes = Array.from(intentos);
   const nonces = new Set<number>();
+  const conUids = pendientes.some(i => i.uidDestino !== undefined);
+  if (conUids) salida.entero(MARCA_DESTINOS_UID, MARCA_DESTINOS_UID);
   salida.entero(pendientes.length);
   for (const i of pendientes) {
     validarGarantia(i.tipo, i.nonce, nonces);
     salida.u8(i.tipo);
     salida.entero(i.nonce);
-    salida.entero(i.de, REF_NULA);
-    salida.entero(i.a, REF_NULA);
+    if (conUids && i.a !== REF_NULA && i.uidDestino === undefined) {
+      throw new Error('Garantía sin identidad de destino en el bloque de UID.');
+    }
+    salida.entero(conUids ? REF_NULA : i.de, REF_NULA);
+    salida.entero(conUids ? i.uidDestino ?? REF_NULA : i.a, REF_NULA);
     salida.entero(i.celda, -1);
     salida.entero(i.lote, REF_NULA);
     salida.pares(i.materia);
@@ -506,29 +519,33 @@ export function codificarEnVuelo(intentos: Iterable<Intento>): Uint8Array {
   return salida.terminar();
 }
 
-function leerEnVuelo(bytes: Uint8Array, intento: (i: Intento) => void): void {
+function leerEnVuelo(bytes: Uint8Array, intento: (i: GarantiaGuardada) => void): void {
   const entrada = new Lector(bytes);
-  const cantidad = entrada.entero();
+  const marca = entrada.entero(MARCA_DESTINOS_UID);
+  const conUids = marca === MARCA_DESTINOS_UID;
+  const cantidad = conUids ? entrada.entero() : marca;
   const nonces = new Set<number>();
   for (let j = 0; j < cantidad; j++) {
     const tipo = entrada.u8() as TipoIntento;
     const nonce = entrada.entero();
     validarGarantia(tipo, nonce, nonces);
     const de = entrada.entero(REF_NULA);
-    const a = entrada.entero(REF_NULA);
+    const destino = entrada.entero(REF_NULA);
+    if (conUids && de !== REF_NULA) throw new Error('Garantía durable con una referencia de origen.');
     const celda = entrada.entero(-1);
     const lote = entrada.entero(REF_NULA);
     const materia = entrada.pares();
     const longitudDato = entrada.entero(-1);
     entrada.comprobarLongitud(longitudDato, 8);
     const dato = longitudDato === -1 ? null : Float64Array.from({ length: longitudDato }, () => entrada.f64());
-    intento({ tipo, de, a, celda, lote, nonce, materia, dato, bytes: entrada.bloque() });
+    intento({ tipo, de, a: conUids ? REF_NULA : destino, celda, lote, nonce, materia, dato, bytes: entrada.bloque(),
+      ...(conUids ? { uidDestino: destino } : {}) });
   }
   entrada.terminar();
 }
 
-export function decodificarEnVuelo(bytes: Uint8Array): Intento[] {
-  const intentos: Intento[] = [];
+export function decodificarEnVuelo(bytes: Uint8Array): GarantiaGuardada[] {
+  const intentos: GarantiaGuardada[] = [];
   leerEnVuelo(bytes, intento => intentos.push(intento));
   return intentos;
 }

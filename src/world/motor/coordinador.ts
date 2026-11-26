@@ -44,7 +44,7 @@ import { duenoDeVecino, pesosInicialesPorPoblacion, repartirPorTramos } from './
 import { Buzones } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  AVISO, CTL, CTL_DUENO, Dueno, ORDEN, celdaDueno, duenoDe, duenoSi,
+  AVISO, CTL, CTL_DUENO, Dueno, ORDEN, celdaDueno, destinatariosDeGarantias, duenoDe, duenoSi,
   type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
 import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type PerfilPasoMotor, type PerfilTramoMotor, type TelemetriaMotor } from './contratos.js';
@@ -421,7 +421,7 @@ class MotorDuenos implements Motor {
       this.#paginas.set(clavePagina(px[i]!, py[i]!), { chunk, px: px[i]!, py: py[i]!, key: claves[i]!, estado: 'activo' });
     }
     buzones.fijarFase(0);
-    if (materia) d.reponer(d.cargarMateria(materia));
+    const garantias = materia ? d.cargarMateria(materia) : [];
     // Cada dueño materializa en su `Ley.iniciar` los chunks que no traen lotes: la arena compartida solo crece aquí.
     d.reservarMateria(materia ? 0 : claves.length);
     const cabecera = serialize(cabeceraDe(m));
@@ -439,17 +439,22 @@ class MotorDuenos implements Motor {
       sustancias: registroSustancias?.memoria ?? null, control: control.buffer as SharedArrayBuffer, enlace: this.#enlace,
       semilla: this.#config.semilla, cabecera, params, epoca: this.#epoca,
       brokersGpuPorDueno, conMateriaCargada: materia !== null, perfilActuar,
+      destinatariosGarantias: destinatariosDeGarantias(garantias),
     };
     const canalesCorte = this.#canalesCorte = this.#config.instantaneaTransferible === true ? CanalesCorte.abrir(hilos - 1) : undefined;
     try {
       datos.solicitudCorte = canalesCorte?.solicitud;
       const piscina = this.#piscina = new Piscina<DatosDueno>({
         hilos, datos, puertosRemotos: canalesCorte?.puertosRemotos, moduleURL: new URL('./dueno-worker.js', import.meta.url), exportName: crearDueno.name,
-        crear: (hilo, dd) => hilo === 0 ? tramo => faseDueno(d, tramo, control, dd.conMateriaCargada, dd.perfilActuar) : crearDueno(hilo, dd),
+        crear: (hilo, dd) => hilo === 0
+          ? tramo => faseDueno(d, tramo, control, dd.conMateriaCargada, dd.destinatariosGarantias, dd.perfilActuar)
+          : crearDueno(hilo, dd),
       });
       buzones.fijarFase(1);
       piscina.ejecutar(TRAMO.cargar);
       tabla.publicar(m.tick);
+      buzones.fijarFase(0);
+      d.reponer(garantias, datos.destinatariosGarantias);
       this.#recoger();
       this.#cronica();
     } catch (error) {

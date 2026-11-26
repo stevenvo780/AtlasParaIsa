@@ -22,7 +22,7 @@ import { percepcionDe, olvidarPercepcion } from '../decision/percepcion.js';
 import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
 import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE } from '../materia/arena.js';
 import { ArchivoMateriaFria } from '../materia/archivo-frio.js';
-import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
+import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type GarantiaGuardada, type LoteGuardado } from '../materia/checkpoint.js';
 import { lotesDe } from '../materia/cuerpo.js';
 import { olvidarEstadoMateria, sueloYVidaDormidos } from '../materia/ley-mundo.js';
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
@@ -43,7 +43,7 @@ import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  Clase, DATO_MATERIA, DATO_TOMAR, REF_NULA, TipoIntento, genDe, slotDe,
+  Clase, DATO_MATERIA, DATO_TOMAR, REF_NULA, TipoIntento, genDe, refDe, slotDe,
   type Buzon, type ChunkId, type FrenteEscritura, type FrentePublico, type Globales, type Hilo, type Intento, type Ref, type Slot,
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
@@ -137,6 +137,14 @@ export function celdaLocal(terreno: TerrenoPercepcion, guardada: number): number
   if (guardada < 0) return -1;
   const [px, py] = coordenadasDePagina(guardada);
   return terreno.asegurarPagina(px, py, 0) * 256 + guardada % 256;
+}
+
+type GarantiaRestaurable = GarantiaGuardada & { uidDestino: number };
+
+export function destinatariosDeGarantias(pendientes: readonly GarantiaRestaurable[]): ReadonlySet<number> {
+  const uids = new Set<number>();
+  for (const i of pendientes) if (i.uidDestino > 0) uids.add(i.uidDestino);
+  return uids;
 }
 
 // ── El dueño ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -343,12 +351,13 @@ export class Dueno implements CtxF0 {
    */
   abrirEpoca(cp?: MateriaCheckpoint | null): void {
     if (!this.prepararEpoca()) return;
-    if (cp) this.reponer(this.cargarMateria(cp));
+    const pendientes = cp ? this.cargarMateria(cp) : [], destinatarios = destinatariosDeGarantias(pendientes);
     // `Ley.iniciar` de w materializa cada chunk ya activo que no traiga sus lotes: la reserva de F0 los cubre todos.
     this.reservarMateria(cp ? 0 : this.chunks.length);
-    this.publicarFilas();
+    this.publicarFilas(destinatarios);
     this.organismos.tabla.publicar(this.mundo.tick);
     this.iniciarLeyes();
+    this.reponer(pendientes, destinatarios);
   }
 
   /** Leyes encendidas, sus columnas y la materia. Devuelve false si la época ya estaba abierta con las mismas leyes. */
@@ -389,9 +398,28 @@ export class Dueno implements CtxF0 {
     }
   }
 
-  /** Vuelve a poner en vuelo los intentos con garantía de un punto de control: el aplicador de este dueño los resuelve
-   * en su F1 (o los reenvía a quien toque). `cargarMateria` ya convirtió las direcciones de la época anterior. */
-  reponer(intentos: readonly Intento[]): void { for (const i of intentos) this.#interno.enviar(this.hilo, i); }
+  /** En F0, con el frente de la nueva época publicado, vuelve a encaminar las garantías para su F1. */
+  reponer(pendientes: readonly GarantiaRestaurable[], destinatarios: ReadonlySet<number>): void {
+    if (!pendientes.length) return;
+    const frente = this.frente, refs = new Map<number, Ref>();
+    if (destinatarios.size) for (let slot = 0; slot < frente.alta; slot++) {
+      const uid = frente.uid[slot]!;
+      if (frente.vivo[slot] === 1 && destinatarios.has(uid)) {
+        refs.set(uid, refs.has(uid) ? REF_NULA : refDe(slot, frente.gen[slot]!));
+      }
+    }
+    for (const { uidDestino, ...i } of pendientes) {
+      const a = refs.get(uidDestino) ?? REF_NULA;
+      if (a !== REF_NULA) {
+        this.#interno.enviar(frente.dueno[slotDe(a)]!, { ...i, a });
+        continue;
+      }
+      // Una garantía dirigida sin actor comprobable se liquida en la celda persistida.
+      const entrega = uidDestino === REF_NULA ? i : { ...i, tipo: TipoIntento.Depositar, lote: REF_NULA, dato: null, bytes: null };
+      const dueno = i.celda < 0 ? REF_NULA : this.terreno.duenoChunk[this.terreno.chunkDe(i.celda)]!;
+      this.#interno.enviar(dueno >= 0 ? dueno : this.hilo, entrega);
+    }
+  }
 
   /** Intentos que siguen en los buzones (solo quien tiene los buzones: el coordinador o el único dueño). */
   pendientes(): Intento[] { return this.#piezas.buzones?.pendientes() ?? []; }
@@ -645,12 +673,25 @@ export class Dueno implements CtxF0 {
 
   /** F6, antes de `Ley.F6`: cada organismo propio tiene fila y sus columnas base quedan escritas en el frente t+1. Las
    * leyes escriben después las suyas (`c.escritura`). */
-  publicarFilas(): void {
+  publicarFilas(destinatarios?: ReadonlySet<number>): void {
     const m = this.mundo, organismos = this.organismos, terreno = this.terrenoPercibido;
     const faunaHeredada = !this.params.v23.fauna;
     organismos.fauna.sincronizar(m.animals);
     organismos.escribir(m.tick, faunaHeredada ? { celda: (x, y) => terreno.celda(x, y), chunkDe: c => c >> 8 } : undefined, m.people);
     const w = this.escritura, chunk = w.i32('chunk');
+    if (!faunaHeredada && destinatarios?.size) {
+      // La ley de fauna aún no ha corrido F6. Solo publica lo que requiere encaminar una garantía repuesta.
+      const uid = w.f64('uid'), x = w.f32('x'), y = w.f32('y');
+      for (const a of m.animals) {
+        if (a.uid === undefined || !destinatarios.has(a.uid)) continue;
+        const slot = slotDe(organismos.fauna.ref(a));
+        uid[slot] = a.uid;
+        x[slot] = a.x;
+        y[slot] = a.y;
+        const celda = terreno.celda(a.x, a.y);
+        chunk[slot] = celda < 0 ? -1 : celda >> 8;
+      }
+    }
     for (const [slot, p] of organismos.personas.mapa) {
       const celda = terreno.celda(p.x, p.y);
       chunk[slot] = celda < 0 ? -1 : celda >> 8;
@@ -959,7 +1000,14 @@ export class Dueno implements CtxF0 {
       const [cx, cy] = coordenadasDePagina(pagina * 256);
       return terreno.paginaDe(cx, cy);
     });
-    const enVuelo = pendientes.filter(i => i.materia !== null).map(i => ({ ...i, celda: celdaMundo(terreno, i.celda) }));
+    const frente = this.frente;
+    const enVuelo = pendientes.filter(i => i.materia !== null).map(i => {
+      const celda = celdaMundo(terreno, i.celda);
+      if (i.a === REF_NULA) return { ...i, de: REF_NULA, celda };
+      const slot = slotDe(i.a);
+      const uid = frente.vivo[slot] === 1 && frente.gen[slot] === genDe(i.a) ? frente.uid[slot]! : 0;
+      return { ...i, de: REF_NULA, a: REF_NULA, celda, uidDestino: uid };
+    });
     return {
       epoca: this.epoca, tick: this.mundo.tick,
       sustancias: serializarSustancias(this.quimica as ServicioQuimicoImpl), registro: this.registro.guardar(),
@@ -970,7 +1018,7 @@ export class Dueno implements CtxF0 {
 
   /** Repone la materia de un punto de control en la arena recién creada y devuelve los intentos con garantía que
    * estaban en vuelo (quien llama los repone en un buzón). */
-  cargarMateria(cp: MateriaCheckpoint): Intento[] {
+  cargarMateria(cp: MateriaCheckpoint): GarantiaRestaurable[] {
     if (!this.materia || !this.quimica) throw new Error('Cargar materia exige v23.materia.');
     const terreno = this.terrenoPercibido;
     // Guardados previos: recoger roca dejaba su lote Objeto ligado a la celda aunque la persona ya lo llevaba.
@@ -995,20 +1043,20 @@ export class Dueno implements CtxF0 {
       desborde += extra;
       vivos++;
     });
-    if (sinCelda.length > 0) {
-      // Con guardados sin coordenadas, validar la dirección completa antes de tocar arena, registro o libro.
-      const ligados = new Set<LoteRef>();
-      for (const i of sinCelda) {
-        const lote = i.lote < 0 ? undefined : indice.leer(slotDe(i.lote));
-        if (lote === undefined || typeof lote === 'number' || lote.ref !== i.lote) continue;
-        i.celda = celdaGuardada(lote);
-        if (i.celda < 0) ligados.add(i.lote);
-      }
-      const celdas = ligados.size > 0 ? this.#celdasDePortadores(ligados) : undefined;
-      for (const i of sinCelda) {
-        if (i.celda < 0) i.celda = celdas?.get(i.lote) ?? REF_NULA;
-        if (i.celda < 0) throw new Error(`Garantía guardada ${i.nonce} sin celda ni destino material demostrable.`);
-      }
+    // Demostrar la identidad o la celda con la generación exacta del lote antes de instalar la arena.
+    const ligados = new Set<LoteRef>();
+    for (const i of enVuelo) {
+      const actorLegado = i.uidDestino === undefined && i.a !== REF_NULA;
+      if ((!actorLegado && i.celda >= 0) || i.lote === REF_NULA || !i.materia?.length) continue;
+      const lote = indice.leer(slotDe(i.lote));
+      if (lote === undefined || typeof lote === 'number' || lote.ref !== i.lote) continue;
+      if (i.celda < 0) i.celda = celdaGuardada(lote);
+      if (actorLegado || i.celda < 0) ligados.add(i.lote);
+    }
+    const portadores = ligados.size ? this.#portadoresDeGarantias(ligados) : undefined;
+    for (const i of sinCelda) {
+      if (i.celda < 0) i.celda = portadores?.get(i.lote)?.celda ?? REF_NULA;
+      if (i.celda < 0) throw new Error(`Garantía guardada ${i.nonce} sin celda ni destino material demostrable.`);
     }
     if (arranque) {
       const frio = arranque.terminar();
@@ -1036,31 +1084,34 @@ export class Dueno implements CtxF0 {
     const q = this.quimica, saldo = saldoEnVuelo(cp.enVuelo, id => q.sustancia(id));
     this.#piezas.libros[0]!.enVuelo.set(saldo.map(Number));
     return enVuelo.map(i => {
-      const celda = celdaLocal(terreno, i.celda);
-      // Las filas de organismos se reasignan al cargar. La misma ranura y generación puede ser otro actor.
-      if (i.a !== REF_NULA) return {
-        ...i, tipo: TipoIntento.Depositar, de: REF_NULA, a: REF_NULA, lote: REF_NULA, celda, dato: null, bytes: null,
-      };
-      return { ...i, de: REF_NULA, celda };
+      const uidDestino = i.uidDestino ?? (i.a === REF_NULA ? REF_NULA : portadores?.get(i.lote)?.uid ?? 0);
+      return { ...i, de: REF_NULA, a: REF_NULA, celda: celdaLocal(terreno, i.celda), uidDestino };
     });
   }
 
-  #celdasDePortadores(ligados: ReadonlySet<LoteRef>): Map<LoteRef, number> {
-    const terreno = this.terrenoPercibido, celdas = new Map<LoteRef, number>(), componentes: LoteRef[] = [];
+  #portadoresDeGarantias(ligados: ReadonlySet<LoteRef>): Map<LoteRef, { celda: number; uid?: number } | null> {
+    const terreno = this.terrenoPercibido, portadores = new Map<LoteRef, { celda: number; uid?: number } | null>();
+    const componentes: LoteRef[] = [];
     const anotar = (organismo: Person | Animal, carga: readonly LoteRef[]): void => {
       const { x, y, cuerpo } = organismo;
-      const pagina = terreno.paginaDe(x >> 4, y >> 4);
-      const celda = pagina < 0 ? REF_NULA : celdaMundo(terreno, pagina * 256 + (y & 15) * 16 + (x & 15));
+      const uid = organismo.uid !== undefined && Number.isSafeInteger(organismo.uid) && organismo.uid > 0 ? organismo.uid : undefined;
       componentes.length = 0;
       if (cuerpo) lotesDe(cuerpo, componentes);
       for (const l of carga) componentes.push(l);
+      let celda: number | undefined;
       for (const l of componentes) {
-        if (ligados.has(l)) celdas.set(l, celdas.has(l) ? REF_NULA : celda);
+        if (!ligados.has(l)) continue;
+        if (portadores.has(l)) { portadores.set(l, null); continue; }
+        if (celda === undefined) {
+          const pagina = terreno.paginaDe(x >> 4, y >> 4);
+          celda = pagina < 0 ? REF_NULA : celdaMundo(terreno, pagina * 256 + (y & 15) * 16 + (x & 15));
+        }
+        portadores.set(l, { celda, uid });
       }
     };
     for (const p of this.mundo.people) if (p.demography.deathCause === null) anotar(p, p.carga ?? []);
     for (const a of this.mundo.animals) anotar(a, []);
-    return celdas;
+    return portadores;
   }
 
   #prepararArranqueFrio(archivo: ArchivoMateriaFria, garantias: readonly Intento[]) {

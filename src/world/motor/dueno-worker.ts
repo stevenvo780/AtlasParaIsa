@@ -66,6 +66,7 @@ export interface DatosDueno {
   brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
+  destinatariosGarantias: ReadonlySet<number>;
   /** Solo en el perfil de laboratorio. Una duración por dueño entre el inicio de actuación y F4. */
   perfilActuar?: Float64Array<SharedArrayBuffer>;
 }
@@ -115,17 +116,17 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno, puertoCorte?: MessageP
   dueno.epoca = datos.epoca;
   const control = piezas.control!;
   const publicarCorte = puertoCorte && solicitud ? () => enviarParteCorte(puertoCorte, solicitud, dueno.epoca, hilo, mundo) : undefined;
-  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.perfilActuar, publicarCorte);
+  return tramo => faseDueno(dueno, tramo, control, datos.conMateriaCargada, datos.destinatariosGarantias, datos.perfilActuar, publicarCorte);
 }
 
 /** Un tramo del tick (o de la apertura de época) de un dueño, entre dos barreras. Corre dentro del ámbito de rejilla
  * del mundo, como el tick de un dueño (`stepWorld`), por si una ley usa una consulta espacial de las de siempre. */
-export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada = false,
+export function faseDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, destinatariosGarantias: ReadonlySet<number>,
   perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
-  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, perfilActuar, publicarCorte));
+  conRejilla(d.mundo, () => tramoDueno(d, tramo, control, conMateriaCargada, destinatariosGarantias, perfilActuar, publicarCorte));
 }
 
-function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean,
+function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCargada: boolean, destinatariosGarantias: ReadonlySet<number>,
   perfilActuar?: Float64Array<SharedArrayBuffer>, publicarCorte?: () => void): void {
   const m = d.mundo, celda = (campo: number): number => celdaDueno(d.hilo, campo), inicio = performance.now();
   switch (tramo) {
@@ -137,7 +138,7 @@ function tramoDueno(d: Dueno, tramo: number, control: Float64Array, conMateriaCa
       d.adoptarMigrantes();
       if (conMateriaCargada) d.adoptarPropios();
       d.iniciarLeyes();
-      d.publicarFilas();
+      d.publicarFilas(destinatariosGarantias);
       if (d.hilo !== 0) d.enviarParte();
       break;
     case TRAMO.percibir: {

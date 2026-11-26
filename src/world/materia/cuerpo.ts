@@ -17,9 +17,8 @@
  * Decisión del tubo (encargo, punto 4): con κ = KAPPA0 = 60 en las cuatro familias nada se aprovecha (oxidar un
  * combustible tiene barrera γ·D(O=O) − κ = 113 J: 9·10⁻¹¹ por tick a 310 K; desaminar o carbonizar, γ·D(C–H) − κ = 81 J:
  * 2·10⁻⁵). La dieta sale de dar κ por familia a cada plantilla, no de una lista: `KAPPA_HUMANA` abre C–C/C–H con 110
- * (grasa y carbono se absorben a 0,025 por tick: el 94 % antes de que el tránsito los saque) y C–N con 72 (la proteína
- * que el crecimiento no usa se desamina a 2·10⁻³ por tick y su carbono se quema; el NH₃ sale con las heces), y deja C–O
- * y H–H en KAPPA0: una persona no aprovecha la madera (CH₂O) ni fermenta, y un herbívoro es la misma ley con κ de C–O alta.
+ * (grasa y carbono se absorben a 0,025 por tick: el 94 % antes de que el tránsito los saque), y deja C–O y H–H en
+ * KAPPA0: una persona no aprovecha la madera (CH₂O) ni fermenta, y un herbívoro es la misma ley con κ de C–O alta.
  */
 import { DEMOGRAPHY_TICKS_PER_DAY } from '../../shared/demography.js';
 import type { SustanciaId } from '../../shared/materia.js';
@@ -360,6 +359,9 @@ export function pagar(c: CtxLeyMateria, cuerpo: Cuerpo, julios: number): number 
 // ── Metabolismo ──────────────────────────────────────────────────────────────────────────────────────────
 
 const CELDA: LotesCelda = { suelo: REF_NULA, agua: REF_NULA, vida: REF_NULA, aire: REF_NULA };
+// J/cuanto: durante la síntesis humana se conserva el N ligado. A 310 K la desaminación a κ_C–N = 72 consume
+// más de la mitad de la proteína en 300 ticks, menos de un tránsito digestivo.
+const KAPPA_ASIMILACION_HUMANA: Kappa = [KAPPA_HUMANA[0], KAPPA0, KAPPA_HUMANA[2], KAPPA_HUMANA[3]];
 
 /** Un paso de `dt` ticks del cuerpo: digestión (`pasoLote` del digestivo con la κ de su plantilla), absorción hacia la
  * reserva y el tejido, basal pagado, intercambio de gases y calor con el aire de `celda` y excreción a su Suelo. */
@@ -370,7 +372,8 @@ export function metabolizar(c: CtxLeyMateria, cuerpo: Cuerpo, celda: number, dt:
   const masa = masaLote(c, cuerpo.tejido);
   contextos.set(cuerpo, c);
   if (leer(a, cuerpo.digestivo) > 0) {
-    pasoLote(pasoDe(c), cuerpo.digestivo, dt, p.kappa);
+    const sintetiza = p === humanas.get(c.globales.registro) && (masa < p.masaAdulta || cuerpo.gestacion !== undefined);
+    pasoLote(pasoDe(c), cuerpo.digestivo, dt, sintetiza ? KAPPA_ASIMILACION_HUMANA : p.kappa);
     absorber(c, cuerpo, p, dt);
   }
   if (aire >= 0) respirar(c, cuerpo, aire, masa, dt);

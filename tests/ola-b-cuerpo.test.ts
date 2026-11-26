@@ -173,6 +173,21 @@ test('una plantilla animal con el mismo número de linaje no usa el presupuesto 
   assert.ok(exacto());
 });
 
+test('la gestante conserva proteína de la comida para incorporarla al embrión', () => {
+  const adulto = crearCuerpo(c, humana.id, 60), madre = crearCuerpo(c, humana.id, 60);
+  concebir(c, madre, { otro: 9, genoma: [], inicio: c.tick });
+  const { proteina, orgP, H2O } = m.S;
+  for (const cuerpo of [adulto, madre]) {
+    m.arena.fuente(cuerpo.digestivo, Float64Array.of(proteina, 4000, orgP, 1000, H2O, 10000), m.libro);
+    for (let t = 0; t < 300; t++) metabolizar(c, cuerpo, CELDA, 1);
+  }
+  const proteinaDisponible = m.arena.cuantos(madre.digestivo, proteina);
+  assert.ok(proteinaDisponible > m.arena.cuantos(adulto.digestivo, proteina));
+  assert.ok(gestar(c, madre, 120) > 0);
+  assert.ok(m.arena.cuantos(madre.digestivo, proteina) < proteinaDisponible);
+  assert.ok(exacto());
+});
+
 test('gestar, abortar y parir mueven átomos de la madre sin crear nada', () => {
   const madre = crearCuerpo(c, humana.id, 60);
   const masaUnidad = humana.partes.reduce((mg, p) => mg + p.nu * c.quimica.sustancia(p.id).masa, 0) * 1e-6;

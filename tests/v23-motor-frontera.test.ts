@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { escalon } from '../src/shared/interruptores.js';
 import { hostOpenWorldParams } from '../src/server/hardware-limits.js';
+import type { Animal } from '../src/world/animals.js';
 import { AREA_CELDA, huella } from '../src/world/decision/fauna.js';
 import { masaDe } from '../src/world/materia/cuerpo.js';
 import { ctxMateriaDe } from '../src/world/motor/acceso.js';
-import { duenoSi } from '../src/world/motor/contexto.js';
+import { duenoSi, ORDEN } from '../src/world/motor/contexto.js';
 import { unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
+import { chunkKey } from '../src/world/terrain.js';
 import { tileLookup } from '../src/world/tile-index.js';
 
 test('la fauna cruza entre dueños sin superar el área de la celda de destino', async () => {
@@ -56,21 +58,44 @@ test('al retirarse un chunk junto a la frontera, cada animal residente conserva 
   }
 });
 
-test('un alta sin fila no mantiene activa la fila de un animal que ya se fue', async () => {
-  const semilla = 7;
+test('un alta sin fila no deja al dueño anterior actuando sobre un cuerpo cedido', async () => {
+  const semilla = 51926;
   const base = hostOpenWorldParams();
-  const params = parseParams({ v23: escalon('fauna'), motor: { ...base.motor, hilos: 1, gpu: [] } }, base);
+  const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos: 2, gpu: [] } }, base);
   const mundo = createWorld(semilla, params);
-  const motor = crearMotor(mundo, unSoloDueno(semilla));
+  const saliente = mundo.animals[0];
+  assert.ok(saliente);
+  mundo.animals = [saliente];
+  const motor = crearMotor(mundo, { ...unSoloDueno(semilla), hilos: 2 });
   try {
     motor.paso([]);
-    const saliente = mundo.animals[0]!;
-    const entrante = { ...structuredClone(saliente), id: 'animal-entrante', uid: undefined, cuerpo: undefined, fauna: undefined };
-    mundo.animals[0] = entrante;
-    const ultimaDecision = saliente.lastDecision;
+    const d = duenoSi(mundo)!;
+    assert.ok(d.materia);
+    const t = d.terrenoPercibido, origen = chunkKey(saliente.x, saliente.y);
+    const chunk = t.chunkDe(t.celda(saliente.x, saliente.y));
+    assert.equal(t.duenoChunk[chunk], 0);
+    const habitat = tileLookup(mundo.tiles)(saliente.x, saliente.y)?.terrain;
+    const tesela = mundo.tiles.find(t => t.terrain === habitat && chunkKey(t.x, t.y) !== origen);
+    assert.ok(tesela);
+    const entrante: Animal = { ...structuredClone(saliente), id: 'animal-entrante',
+      uid: undefined, cuerpo: undefined, fauna: undefined, x: tesela.x, y: tesela.y };
+
+    d.ordenar(0, [ORDEN.ceder, chunk, 1]);
+    t.duenoSiguiente[chunk] = 1;
     motor.paso([]);
-    assert.equal(saliente.lastDecision, ultimaDecision);
-    assert.ok(entrante.uid && entrante.uid !== saliente.uid);
+    t.asignar(chunk, 1);
+    t.duenoSiguiente[chunk] = -1;
+    assert.ok(!mundo.animals.includes(saliente));
+    // Con un alta sin fila, el número de animales vuelve a coincidir con el de filas del tick anterior.
+    mundo.animals.push(entrante);
+    motor.paso([]);
+
+    const { world } = motor.instantanea();
+    const cuerpoCedido = world.animals.find(a => a.id === saliente.id)?.cuerpo;
+    assert.ok(cuerpoCedido && entrante.cuerpo);
+    assert.ok(d.materia.vivo(cuerpoCedido.digestivo));
+    assert.equal(d.materia.propio(cuerpoCedido.digestivo), false);
+    assert.ok(d.materia.propio(entrante.cuerpo.digestivo));
   } finally {
     await motor.cerrar();
   }

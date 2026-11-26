@@ -28,7 +28,7 @@ test('confirma y recupera junta la agenda de un mundo material paginado', async 
   assert.throws(() => store.guardar(inicial, { ...origen, tick: origen.tick - 1 }), /otro tick o época/);
   store.guardar(inicial, origen);
   const fila = filaInstantanea(store);
-  assert.equal(JSON.parse(fila.body).snapshotEncoding, 'snapshot-parts-v1');
+  assert.equal(JSON.parse(fila.body).snapshotEncoding, 'snapshot-parts-v2');
   const claveEpoca = 'v23-complete-epoch-v1';
   store.db.prepare('DELETE FROM metadata WHERE key=?').run(claveEpoca);
   assert.throws(() => store.verificarGuardado(), /agenda territorial requiere guardado completo/);
@@ -89,7 +89,7 @@ test('confirma y recupera junta la agenda de un mundo material paginado', async 
 });
 
 test('sólo la recuperación explícita permite volver a un slot anterior a la agenda', t => {
-  const { directory, store } = laboratorio(t, 'agenda-inline-', { snapshotInlineTileLimit: SNAPSHOT_INLINE_TILE_LIMIT });
+  const { directory, store } = laboratorio(t, 'agenda-anterior-', { snapshotInlineTileLimit: SNAPSHOT_INLINE_TILE_LIMIT });
   const world = createWorld(51926, parseParams('v23.guardadoCompleto=true'));
   store.guardar({ world, materia: null });
   const carga = store.cargarInstantanea()!;
@@ -102,11 +102,11 @@ test('sólo la recuperación explícita permite volver a un slot anterior a la a
   const corte = agenda.corte(carga.epoca);
   store.guardar({ world: siguiente, materia: null }, corte);
   const fila = filaInstantanea(store), raw = JSON.parse(fila.body);
-  assert.equal(raw.snapshotEncoding, undefined);
-  assert.deepEqual(raw.agendaTerritorialV1, { corte, materiaDigest: null });
+  assert.equal(raw.snapshotEncoding, 'snapshot-parts-v2');
+  assert.deepEqual(raw.world.agendaTerritorialV1, { corte, materiaDigest: null });
   assert.throws(() => store.guardar({ world: siguiente, materia: null }), /requiere guardar su corte de agenda/);
   assert.deepEqual(filaInstantanea(store), fila);
-  delete raw.agendaTerritorialV1;
+  delete raw.world.agendaTerritorialV1;
   reescribirInstantanea(store, JSON.stringify(raw));
   assert.throws(() => store.cargarInstantanea(), /Falta el corte territorial/);
   reescribirInstantanea(store, fila.body);

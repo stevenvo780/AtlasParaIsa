@@ -19,6 +19,7 @@ const VERSION = 1;
 const CELDAS_POR_PAGINA = 256;
 const U32_MAX = 0xffff_ffff;
 const BYTES_ENTERO = 8;
+const BYTES_CRC = 4;
 const BYTES_LOTE = 4 * BYTES_ENTERO + 1 + 4; // ref, celda, dueño, número de pares, rol y forma
 const BYTES_PAR = 12;
 const TIPOS_CON_GARANTIA = new Set<TipoIntento>([TipoIntento.Depositar, TipoIntento.Dar, TipoIntento.Concedido, TipoIntento.Devuelto]);
@@ -437,7 +438,7 @@ export function decodificarEnVuelo(bytes: Uint8Array): Intento[] {
   return intentos;
 }
 
-export function codificarCheckpoint(checkpoint: MateriaCheckpoint): Uint8Array {
+function prepararCheckpoint(checkpoint: MateriaCheckpoint): { cuerpo: Uint8Array[]; longitud: number } {
   const epoca = entero(checkpoint.epoca);
   const tick = entero(checkpoint.tick);
   const bloques = [checkpoint.sustancias, checkpoint.registro, checkpoint.paginas, checkpoint.enVuelo];
@@ -450,13 +451,56 @@ export function codificarCheckpoint(checkpoint: MateriaCheckpoint): Uint8Array {
   leerPaginas(epoca, checkpoint.paginas, () => {}, () => {});
   leerEnVuelo(checkpoint.enVuelo, () => {});
   const libro = cuentas.terminar();
-  const salida = new Escritor(28 + libro.length + bloques.reduce((n, bytes) => n + 8 + bytes.length, 0));
-  salida.u32(FIRMA);
-  salida.u32(VERSION);
-  salida.entero(epoca);
-  salida.entero(tick);
-  for (const bytes of bloques) salida.bloque(bytes);
-  salida.crudo(libro);
+  const cabeceras = new Escritor();
+  cabeceras.u32(FIRMA);
+  cabeceras.u32(VERSION);
+  cabeceras.entero(epoca);
+  cabeceras.entero(tick);
+  const inicioLongitudes = cabeceras.posicion;
+  for (const bytes of bloques) cabeceras.entero(bytes.length);
+
+  const prefijos = cabeceras.terminar();
+  const cuerpo = [prefijos.subarray(0, inicioLongitudes)];
+  let longitud = prefijos.length + libro.length + BYTES_CRC;
+  let pos = inicioLongitudes;
+  for (const bytes of bloques) {
+    cuerpo.push(prefijos.subarray(pos, pos + BYTES_ENTERO), bytes);
+    pos += BYTES_ENTERO;
+    longitud += bytes.length;
+  }
+  cuerpo.push(libro);
+  return { cuerpo, longitud };
+}
+
+function* partir(bloque: Uint8Array, maximo: number): IterableIterator<Uint8Array> {
+  for (let pos = 0; pos < bloque.length; pos += maximo) yield bloque.subarray(pos, pos + maximo);
+}
+
+function* escribirTramos(cuerpo: readonly Uint8Array[], maximo: number): IterableIterator<Uint8Array> {
+  let crc = 0;
+  for (const bloque of cuerpo) for (const tramo of partir(bloque, maximo)) {
+    crc = crc32(tramo, crc);
+    yield tramo;
+  }
+  const sello = new Escritor(BYTES_CRC);
+  sello.u32(crc);
+  yield* partir(sello.terminar(), maximo);
+}
+
+/** Valida la estructura antes de emitir y devuelve la longitud total (incluido el CRC32). Los tramos de una
+ * sola pasada son vistas de solo lectura por contrato. Los bloques de entrada deben permanecer inmóviles
+ * y accesibles hasta consumir el último tramo. */
+export function codificarCheckpointEnTramos(checkpoint: MateriaCheckpoint, maximo: number):
+  { longitud: number; tramos: IterableIterator<Uint8Array> } {
+  entero(maximo, 1);
+  const { cuerpo, longitud } = prepararCheckpoint(checkpoint);
+  return { longitud, tramos: escribirTramos(cuerpo, maximo) };
+}
+
+export function codificarCheckpoint(checkpoint: MateriaCheckpoint): Uint8Array {
+  const { cuerpo, longitud } = prepararCheckpoint(checkpoint);
+  const salida = new Escritor(longitud);
+  for (const bloque of cuerpo) salida.crudo(bloque);
   // La validación estructural y el balance no ven un bit cambiado en una forma, una celda o los bloques opacos.
   salida.u32(crc32(salida.terminar()));
   return salida.terminar();
@@ -479,12 +523,12 @@ export function saldoEnVuelo(enVuelo: Uint8Array, sustancia: (id: number) => Rea
 }
 
 export function decodificarCheckpoint(bytes: Uint8Array, sustancia: (id: number, registroQuimico: Uint8Array) => Readonly<Sustancia>): MateriaCheckpoint {
-  const fin = bytes.length - 4;
+  const fin = bytes.length - BYTES_CRC;
   if (fin < 0) throw new Error('Punto de control truncado.');
   const cuerpo = bytes.subarray(0, fin);
   const entrada = new Lector(cuerpo);
   if (entrada.u32() !== FIRMA || entrada.u32() !== VERSION) throw new Error('Formato de punto de control de materia desconocido.');
-  if (crc32(cuerpo) !== new DataView(bytes.buffer, bytes.byteOffset + fin, 4).getUint32(0, true)) {
+  if (crc32(cuerpo) !== new DataView(bytes.buffer, bytes.byteOffset + fin, BYTES_CRC).getUint32(0, true)) {
     throw new Error('Punto de control de materia corrupto o truncado: no cuadra su CRC32.');
   }
   const epoca = entrada.entero();

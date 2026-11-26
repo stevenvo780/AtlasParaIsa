@@ -10,7 +10,7 @@ import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk,
   parseSnapshotJSON, readSnapshotReplay, assertReplayPath, separarGobernadorLegado, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
 import { digestoCanonico, type GobernadorLegado } from '../world/digesto.js';
-import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
+import { SnapshotParts, assertSnapshotPartsSchema, hasCanonicalSnapshotPartsPrefix, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord, genealogiaValida } from '../world/lineage.js';
 import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
@@ -1382,7 +1382,7 @@ export class Store {
    * ignorarlo, solo puede retener de más. La carga y la recuperación siguen juzgando el cuerpo
    * entero exactamente igual. `null` = sin extracción fiable, que decida la lectura completa. */
   private cheapSlotBounds(slot: SnapshotSlot, digest: string, body: string): SlotBounds | null {
-    if (!body.startsWith('{"snapshotEncoding":"snapshot-parts-v1","world":{')) return null;
+    if (!hasCanonicalSnapshotPartsPrefix(body)) return null;
     try {
       const row = this.db.prepare("SELECT json_extract(body,'$.world.tick','$.world.technology.executionCounter','$.world.technology.history[0].tick') AS v FROM main.snapshots WHERE slot=? AND digest=?").get(slot, digest) as { v: unknown } | undefined;
       if (!row || typeof row.v !== 'string') return null;

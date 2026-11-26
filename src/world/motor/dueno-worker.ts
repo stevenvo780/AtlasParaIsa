@@ -59,7 +59,7 @@ export interface DatosDueno {
   cabecera: Uint8Array;
   params: WorldParams;
   epoca: number;
-  brokerGpu?: EpocaBrokerPercepcion;
+  brokersGpuPorDueno: (EpocaBrokerPercepcion | undefined)[];
   /** La época se abre desde un punto de control con materia: cada dueño adopta los lotes de sus organismos. */
   conMateriaCargada: boolean;
 }
@@ -93,7 +93,7 @@ export function crearDueno(hilo: Hilo, datos: DatosDueno): (tramo: number) => vo
   setParams(mundo, datos.params);
   const azar = azarDeHilo(datos.semilla, hilo), contadores = new Contadores(datos.contadores);
   ligarCompartido(mundo, TablaOrganismosSoA.conectar(datos.tabla, hilo), TerrenoPercepcion.conectarDueno(datos.terreno, hilo), contadores,
-    datos.brokerGpu, hilo);
+    datos.brokersGpuPorDueno[hilo], hilo);
   const piezas: PiezasDueno = {
     hilo, hilos: datos.hilos, buzones: null, buzon: conectarBuzon(datos.buzones, hilo, azar), libros: datos.libros, contadores,
     registro: new RegistroContenido(datos.registro), azar, control: new Float64Array(datos.control), enlace: datos.enlace,

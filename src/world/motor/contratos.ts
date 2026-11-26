@@ -441,6 +441,9 @@ export interface TelemetriaBrokerGpu {
   /** Lotes no vacíos, confirmaciones del canal y desvíos admitidos por el percibidor. */
   lotes: number;
   completadas: [number, number];
+  /** Salidas GPU aceptadas por F2 por dueño y salidas válidas en el canal que F2 rechazó. */
+  aceptadas: [number, number];
+  rechazadas: number;
   cpuArranque: number;
   cpuOcupada: number;
   cpuSinCanal: number;
@@ -454,12 +457,19 @@ export interface TelemetriaBrokerGpu {
   recorridoConfirmadoMicros: number;
 }
 
+export interface TelemetriaDispositivoBrokerGpu {
+  dispositivo: number;
+  lista: boolean;
+  detalle?: TelemetriaBrokerGpu;
+}
+
 export interface TelemetriaMotor {
   tick: number; hz: number; diasPorMinuto: number; hilos: number; desequilibrio: number;
   faseMs: Record<'F0' | 'eco' | 'percibir' | 'actuar' | 'aplicar', number>; esperaBarreraMs: number;
   ocupacion: Float32Array;                 // por hilo, en [0, 1]
   gpuMs: number[]; gpuBytes: number[]; gpuEstado: ('ok' | 'cpu' | 'sin')[]; // por tarjeta de MotorConfig.gpu
-  gpuBroker?: TelemetriaBrokerGpu;
+  gpuBroker?: TelemetriaBrokerGpu;         // para consumidores del corredor de una sola tarjeta
+  gpuBrokers?: TelemetriaDispositivoBrokerGpu[]; // mismo orden que MotorConfig.gpu
   intentos: number; rechazados: number; migraciones: number; fotogramasSaltados: number;
 }
 

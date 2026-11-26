@@ -22,7 +22,7 @@ def main():
     parser.add_argument('--nvrtc', required=True)
     parser.add_argument('--fd', type=int, required=True)
     args = parser.parse_args()
-    fase = os.environ['CARTA_GPU_PRUEBA_FASE']
+    fase = os.environ.get(f'CARTA_GPU_PRUEBA_FASE_GPU{args.device}', os.environ['CARTA_GPU_PRUEBA_FASE'])
     marca = Path(os.environ['CARTA_GPU_PRUEBA_MARCA'])
 
     def matar(nombre):
@@ -52,6 +52,12 @@ def main():
                     time.sleep(0.1)
                 ventanas = orden['n'] * 225
                 inicio = salida + bajada - ventanas
+                if fase == 'broker-valido':
+                    n, q, v, _ = struct.unpack_from('<4I', zona)
+                    zona[salida:inicio] = bytes(inicio - salida)
+                    zona[salida:salida + n * q * 4] = b'\xff' * (n * q * 4)
+                    refs = salida + ((n * q * 10 + 7) // 8) * 8
+                    zona[refs:refs + n * v * 8] = struct.pack('<d', -1) * (n * v)
                 zona[inicio:salida + bajada] = b'\xff' * ventanas
                 for fila in range(orden['n']):
                     zona[inicio + fila * 225 + 112] = 253

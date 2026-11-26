@@ -11,10 +11,12 @@
  * }
  * Para comparar CUDA, reemplaza `hilos` por `brazos` y pasa `COMPUTE_NVRTC`:
  * [{"id":"cpu1","hilos":1,"gpu":[]},{"id":"cpu2","hilos":2,"gpu":[]},
- *  {"id":"gpu0-cpu2","hilos":2,"gpu":[0]}]
- * `"rutaGpu":"porCoste"` añade un brazo adaptativo con la misma GPU y dueños.
- * El modo fijo exige confirmaciones CUDA medidas. El adaptativo admite una ventana
- * íntegramente en CPU si se registraron decisiones de coste y confirmaciones previas.
+ *  {"id":"gpu0-cpu2","hilos":2,"gpu":[0]},{"id":"gpu1-cpu2","hilos":2,"gpu":[1]},
+ *  {"id":"dual-cpu2","hilos":2,"gpu":[0,1]}]
+ * Con una GPU, ambos dueños comparten el corredor. Con dos, cada dueño usa la GPU de su índice.
+ * `"rutaGpu":"porCoste"` añade un brazo adaptativo. Cada GPU del brazo fijo debe entregar
+ * resultados aceptados por F2 durante la ventana. El adaptativo puede elegir CPU si F2
+ * aceptó resultados de esa GPU durante la calibración.
  * Para medir desde un mundo ya crecido, prepara una copia de laboratorio con
  * `CARTA_DATA_DIR=/ruta/laboratorio npm run backup -- copia.sqlite` y calcula su SHA-256.
  * En la escena reemplaza `semilla`, `siembra`, `n` y `zona` por
@@ -25,14 +27,15 @@
  * Las huellas de cierre permiten detectar divergencias entre brazos y repeticiones.
  *
  * El primer brazo es la referencia. Cada bloque comparte el mismo estado y alterna el
- * orden de ejecución. `resumen.json` aparece al pasar todas las comprobaciones. Cada JSONL
+ * orden de ejecución. `resumen.json` identifica los brazos completos, sin arranque o sin
+ * actividad acreditada. Las aceleraciones requieren un brazo y una referencia completos. Cada JSONL
  * conserva los tiempos brutos. El libro y la carga por chunk se comprueban al salir del
  * calentamiento y al final, fuera de la medición. `mortalesVivos` excluye figuras protegidas, `paginasActivas` cuenta
  * páginas del motor y `chunksArchivados` cuenta copias retenidas en RAM durante la corrida,
  * incluidas las de chunks que se hayan reactivado. En fixtures, el archivo SQLite previo
  * sigue accesible desde la copia. La medición se limita al motor, incluido el corredor cuando
- * se solicita. CUDA acredita los lotes confirmados por el canal en la ventana medida. Su tiempo
- * incluye copias y ejecución en el servidor. Los errores de revalidación posteriores no se imputan al canal.
+ * se solicita. Cada GPU registra confirmaciones del canal, sus bytes y tiempo, resultados
+ * aceptados por F2, rechazos y desvíos a CPU. El tiempo CUDA incluye copias y ejecución en el servidor.
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -48,12 +51,13 @@ import { Store } from '../../src/server/store.js';
 import { cerrarPercibidores } from '../../src/world/decision/despacho.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { closeEcosystemWorkers } from '../../src/world/ecosystem.js';
+import { admiteBrokerPercepcionGpu } from '../../src/world/gpu/broker-percepcion.js';
 import { assertWorld, createWorld, RULES_VERSION, type World } from '../../src/world/index.js';
 import { comprobarLeyes, crearComprobador } from '../../src/world/invariantes.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../../src/world/materia/checkpoint.js';
 import { enlazarCtx } from '../../src/world/motor/acceso.js';
 import { duenoSi } from '../../src/world/motor/contexto.js';
-import type { Instantanea, Motor, TelemetriaBrokerGpu, TelemetriaMotor } from '../../src/world/motor/contratos.js';
+import type { Instantanea, Motor, TelemetriaBrokerGpu, TelemetriaDispositivoBrokerGpu, TelemetriaMotor } from '../../src/world/motor/contratos.js';
 import { crearMotor } from '../../src/world/motor/coordinador.js';
 import { paramsOf, setParams } from '../../src/world/params.js';
 import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
@@ -61,6 +65,7 @@ import { bindWorldContext, worldContext } from '../../src/world/spatial.js';
 type Escena = { id: string; calentar: number; medir: number; rebalanceo?: boolean } & (
   { semilla: number; siembra: number; n: number; zona: string } | { fixture: { sqlite: string; sha256: string } });
 interface Brazo { id: string; hilos: number; gpu: number[]; rutaGpu?: 'porCoste' }
+interface ArranqueDispositivo { dispositivo: number; disponible: boolean }
 interface Config { hilos?: number[]; brazos?: Brazo[]; repeticiones: number; escenas: Escena[] }
 interface Integridad {
   tick: number; mortalesVivos: number; faunaResidente: number; paginasActivas: number; chunksArchivados: number;
@@ -81,14 +86,12 @@ function validacionConfiguracion(config: Config): Brazo[] {
   const brazos: Brazo[] = config.brazos ?? config.hilos!.map(hilos => ({ id: `h${hilos}`, hilos, gpu: [] }));
   assert.ok(brazos.length >= 2 && brazos.every(b => b && typeof b.id === 'string' && esId.test(b.id) &&
     entero(b.hilos, 1) && b.hilos <= availableParallelism() && Array.isArray(b.gpu) &&
-    (b.gpu.length === 0 || b.hilos === 2 && b.gpu.length === 1 && b.gpu[0] === 0) &&
-    (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length === 1)),
-  'Indica al menos dos brazos CPU o GPU0 con dos dueños');
+    (b.gpu.length === 0 || admiteBrokerPercepcionGpu(b.hilos, b.gpu)) &&
+    (b.rutaGpu === undefined || b.rutaGpu === 'porCoste' && b.gpu.length > 0)),
+  'Indica al menos dos brazos CPU o CUDA [0], [1] o [0,1] con dos dueños');
   assert.equal(new Set(brazos.map(b => b.id)).size, brazos.length, 'IDs de brazos repetidos');
   assert.equal(new Set(brazos.map(b => `${b.hilos}:${b.gpu.join(',')}:${b.rutaGpu ?? ''}`)).size, brazos.length,
     'Configuraciones de brazos repetidas');
-  if (brazos.some(b => b.gpu.length)) assert.ok(process.env.COMPUTE_NVRTC && existsSync(process.env.COMPUTE_NVRTC),
-    'El brazo CUDA requiere COMPUTE_NVRTC');
   assert.ok(entero(config.repeticiones, 1), 'repeticiones debe ser un entero positivo');
   assert.ok(Array.isArray(config.escenas) && config.escenas.length > 0, 'Faltan escenas');
   for (const e of config.escenas) {
@@ -124,25 +127,39 @@ function tiempos(muestras: readonly number[]) {
 }
 
 function deltaGpu(fin: TelemetriaBrokerGpu, inicio?: TelemetriaBrokerGpu): TelemetriaBrokerGpu {
-  const { completadas, ...contadores } = fin;
+  const { completadas, aceptadas, ...contadores } = fin;
   const campos = Object.keys(contadores) as (keyof typeof contadores)[];
-  const delta = { ...fin, completadas: [completadas[0] - (inicio?.completadas[0] ?? 0),
-    completadas[1] - (inicio?.completadas[1] ?? 0)] } satisfies TelemetriaBrokerGpu;
+  const restar = (total: [number, number], previo?: [number, number]): [number, number] =>
+    [total[0] - (previo?.[0] ?? 0), total[1] - (previo?.[1] ?? 0)];
+  const delta = { ...fin, completadas: restar(completadas, inicio?.completadas),
+    aceptadas: restar(aceptadas, inicio?.aceptadas) };
   for (const campo of campos) delta[campo] = contadores[campo]! - (inicio?.[campo] ?? 0);
-  assert.ok(campos.every(campo => entero(delta[campo] ?? NaN, 0)) && delta.completadas.every(n => entero(n, 0)), 'Contadores CUDA incoherentes');
+  assert.ok(campos.every(campo => entero(delta[campo] ?? NaN, 0)) &&
+    delta.completadas.every((n, i) => entero(n, 0) && entero(delta.aceptadas[i]!, 0) && delta.aceptadas[i]! <= n),
+  'Contadores CUDA incoherentes');
   return delta;
 }
 
-function acreditarGpu(brazo: Brazo, ventana?: TelemetriaBrokerGpu, calentamiento?: TelemetriaBrokerGpu): void {
-  if (!brazo.gpu.length) return;
-  if (brazo.rutaGpu === 'porCoste') {
-    assert.ok(ventana && ventana.cpuPorCoste !== undefined &&
-      (ventana.completadas.some(n => n > 0) || ventana.cpuPorCoste > 0 && calentamiento?.completadas.some(n => n > 0)),
-    'Falta actividad del corredor adaptativo en la ventana o confirmación CUDA durante su calibración');
-  } else {
-    assert.ok(ventana?.completadas.some(n => n > 0) && ventana.cpuPorCoste === undefined,
-      'El corredor fijo debe confirmar CUDA durante la ventana medida');
-  }
+function deltaBrokersGpu(fin: TelemetriaDispositivoBrokerGpu[] = [], inicio: TelemetriaDispositivoBrokerGpu[] = []) {
+  return fin.map(tarjeta => ({
+    ...tarjeta,
+    detalle: tarjeta.detalle && deltaGpu(tarjeta.detalle, inicio.find(anterior => anterior.dispositivo === tarjeta.dispositivo)?.detalle),
+  }));
+}
+
+function sinAcreditarGpu(brazo: Brazo, ventana: TelemetriaDispositivoBrokerGpu[] = [], calentamiento: TelemetriaDispositivoBrokerGpu[] = []) {
+  assert.deepEqual(ventana.map(d => d.dispositivo), brazo.gpu, 'Telemetría CUDA de otros dispositivos');
+  const adaptativo = brazo.rutaGpu === 'porCoste';
+  const acepto = (d?: TelemetriaBrokerGpu): boolean =>
+    !!d && d.aceptadas.some(n => n > 0) && d.subidaConfirmadaBytes > 0 && d.bajadaConfirmadaBytes > 0;
+  return ventana.filter(({ detalle, dispositivo }, i) => {
+    const antes = calentamiento.find(tarjeta => tarjeta.dispositivo === dispositivo)?.detalle;
+    assert.ok(detalle && (detalle.cpuPorCoste !== undefined) === adaptativo, `Faltan contadores de GPU${dispositivo}`);
+    if (brazo.gpu.length === 2) {
+      assert.ok(!detalle.completadas[1 - i] && !antes?.completadas[1 - i], `GPU${dispositivo} sirvió otro dueño`);
+    }
+    return !acepto(detalle) && !(adaptativo && detalle.cpuPorCoste! > 0 && acepto(antes));
+  }).map(tarjeta => tarjeta.dispositivo);
 }
 
 interface Preparada {
@@ -225,16 +242,30 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       digestoInicial, ...siembra, fixture, intervalos: { inicio: mundo.tick, fin: mundo.tick + e.calentar + e.medir },
       interruptores: params.v23, motor: params.motor, carga: loadavg(), planificador: planificador() };
     anotar(inicio);
-    motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed, medirBrokerGpu: gpu.length > 0 });
-    if (carga) motor.cargar(carga.instantanea, carga.epoca);
+    const biblioteca = process.env.COMPUTE_NVRTC;
+    const conNvrtc = !!biblioteca && existsSync(biblioteca);
+    if (!gpu.length || conNvrtc) {
+      motor = crearMotor(mundo, { hilos, gpu, decisionGpu: 'siempre', verificar: false, semilla: mundo.seed, medirBrokerGpu: gpu.length > 0 });
+      if (carga) motor.cargar(carga.instantanea, carga.epoca);
+    }
     if (gpu.length) {
       const desde = performance.now();
-      const disponible = await motor.prepararBrokerGpu?.();
-      anotar({ tipo: 'arranqueGpu', disponible: disponible === true, paredMs: performance.now() - desde });
-      assert.equal(disponible, true, 'El corredor de GPU0 no está disponible');
+      await motor?.prepararBrokerGpu?.();
+      const brokers = motor?.telemetria().gpuBrokers ?? [];
+      const dispositivos = gpu.map(dispositivo => ({ dispositivo,
+        disponible: brokers.some(tarjeta => tarjeta.dispositivo === dispositivo && tarjeta.lista) }));
+      const sinGpu = dispositivos.filter(tarjeta => !tarjeta.disponible).map(tarjeta => tarjeta.dispositivo);
+      const disponible = sinGpu.length === 0;
+      anotar({ tipo: 'arranqueGpu', disponible, dispositivos, paredMs: performance.now() - desde });
+      if (!disponible) {
+        anotar({ tipo: 'fin', estado: 'sin-arranque-gpu', sinGpu,
+          motivo: conNvrtc ? 'El corredor no confirmó el arranque' : 'Falta una biblioteca válida en COMPUTE_NVRTC' });
+        return;
+      }
     }
+    assert.ok(motor, 'Falta el motor de la corrida');
     let integridad: Integridad | undefined;
-    let anteriorGpu: TelemetriaBrokerGpu | undefined, inicialGpu: TelemetriaBrokerGpu | undefined;
+    let anteriorGpu: TelemetriaDispositivoBrokerGpu[] | undefined, inicialGpu: TelemetriaDispositivoBrokerGpu[] | undefined;
     const conPaginas = new Set<number>();
     for (let paso = 1; paso <= e.calentar + e.medir; paso++) {
       const cpuAntes = process.cpuUsage();
@@ -248,7 +279,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       assert.equal(tick, inicio.intervalos.inicio + paso);
       assert.ok(paredMs > 0 && Number.isFinite(paredMs) && Number.isFinite(cpuMs), 'Tiempo de paso inválido');
       assert.equal(t.hilos, hilos);
-      if (!gpu.length) assert.ok(!t.gpuEstado.length && !t.gpuMs.length && !t.gpuBytes.length && !t.gpuBroker, 'Actividad GPU inesperada');
+      if (!gpu.length) assert.ok(!t.gpuEstado.length && !t.gpuMs.length && !t.gpuBytes.length && !t.gpuBrokers, 'Actividad GPU inesperada');
       assert.ok(reparto && reparto.msPorHilo.length === hilos && reparto.msPorHilo.every(ms => Number.isFinite(ms) && ms > 0),
         'El reparto efectivo no acredita la ejecución solicitada');
       for (const [,, dueno] of reparto.paginas) {
@@ -257,8 +288,8 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       }
       const medido = paso > e.calentar;
       const barreraEmaMs = hilos > 1 ? t.esperaBarreraMs : null;
-      const gpuTick = t.gpuBroker && deltaGpu(t.gpuBroker, anteriorGpu);
-      anteriorGpu = t.gpuBroker;
+      const gpuTick = t.gpuBrokers && deltaBrokersGpu(t.gpuBrokers, anteriorGpu);
+      anteriorGpu = t.gpuBrokers;
       if (paso === e.calentar) inicialGpu = anteriorGpu;
       if (medido) {
         pared.push(paredMs);
@@ -268,7 +299,7 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       anotar({ tipo: 'tick', tick, medido, paredMs, cpuMs, barreraEmaMs, fasesEmaMs: t.faseMs,
         paginasActivas: reparto.paginas.length, duenoMaxMs: hilos > 1 ? Math.max(...reparto.msPorHilo) : null,
         migraciones: t.migraciones, intentos: t.intentos, rssMiB: process.memoryUsage.rss() / 2 ** 20,
-        ...(gpu.length && { gpuEstado: t.gpuEstado[0] ?? 'sin', gpuBroker: gpuTick }) });
+        ...(gpu.length && { gpuEstado: t.gpuEstado, gpuBrokers: gpuTick }) });
       if (paso % 120 === 0 || tick === inicio.intervalos.fin) archivar();
       if (paso === e.calentar || tick === inicio.intervalos.fin) {
         const cargaChunk = motor.muestraCarga();
@@ -294,14 +325,15 @@ async function medir(e: Escena, brazo: Brazo, salida: string) {
       }
     }
     assert.ok(integridad?.tick === inicio.intervalos.fin && conPaginas.size > 0, 'Falta evidencia de cierre');
-    const gpuVentana = anteriorGpu && deltaGpu(anteriorGpu, inicialGpu);
-    acreditarGpu(brazo, gpuVentana, inicialGpu);
+    const gpuVentana = anteriorGpu && deltaBrokersGpu(anteriorGpu, inicialGpu);
+    const sinGpu = sinAcreditarGpu(brazo, gpuVentana, inicialGpu);
     const latencia = tiempos(pared);
-    anotar({ tipo: 'fin', estado: 'completo', muestras: pared.length, carga: loadavg(), planificador: planificador(),
+    anotar({ tipo: 'fin', estado: sinGpu.length ? 'sin-actividad-gpu' : 'completo', muestras: pared.length,
+      ...(sinGpu.length && { sinGpu }), carga: loadavg(), planificador: planificador(),
       paredMs: latencia, cpuProcesoMs: tiempos(cpuProceso), barreraEmaMs: barrera.length ? tiempos(barrera) : null,
       hz: 1000 / latencia.media, maxRssMiB: process.resourceUsage().maxRSS / 1024,
       duenosConPaginas: [...conPaginas].sort((a, b) => a - b), ...integridad,
-      gpuBroker: gpuVentana, gpuBrokerCalentamiento: inicialGpu });
+      gpuBrokers: gpuVentana, gpuBrokersCalentamiento: inicialGpu });
   } finally {
     try {
       if (fd !== undefined) closeSync(fd);
@@ -354,29 +386,43 @@ function medirBloques(rutaConfig: string, salida: string) {
       const fuente = { digesto: inicio.digestoInicial, tick: tickInicial, fixture: inicio.fixture };
       origen ??= fuente;
       assert.deepEqual(fuente, origen, `Estado inicial diferente en ${nombre}`);
+      const corrida = { brazo: brazo.id, hilos, gpu, rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin };
+      if (fin?.estado === 'sin-arranque-gpu') {
+        const arranque = filas.find(fila => fila.tipo === 'arranqueGpu');
+        assert.ok(fin.tipo === 'fin' && gpu.length && arranque?.disponible === false && fin.sinGpu?.length, `Arranque inválido en ${nombre}`);
+        const dispositivos = arranque.dispositivos as ArranqueDispositivo[];
+        assert.deepEqual(dispositivos.map(d => d.dispositivo), gpu);
+        assert.deepEqual(dispositivos.filter(d => !d.disponible).map(d => d.dispositivo), fin.sinGpu);
+        corridas.push(corrida);
+        continue;
+      }
       const medidas = filas.filter(fila => fila.tipo === 'tick' && fila.medido === true);
-      assert.ok(fin?.tipo === 'fin' && fin.estado === 'completo' && fin.muestras === escena.medir &&
+      assert.ok(fin?.tipo === 'fin' && fin.muestras === escena.medir &&
         medidas.length === escena.medir && fin.tick === inicio.intervalos.fin && fin.conservacion === true &&
         Array.isArray(fin.violaciones) && fin.violaciones.length === 0, `Cierre inválido en ${nombre}`);
       assert.ok(medidas.every((fila, i) => fila.tick === tickInicial + escena.calentar + i + 1), `Ventana incompleta en ${nombre}`);
       assert.deepEqual(fin.paredMs, tiempos(medidas.map(fila => fila.paredMs)), `Percentiles inconsistentes en ${nombre}`);
       assert.match(fin.digestoMundo, esSha256, `Falta la huella final del mundo en ${nombre}`);
       assert.match(fin.digestoMateria, esSha256, `Falta la huella final de materia en ${nombre}`);
-      acreditarGpu(brazo, fin.gpuBroker, fin.gpuBrokerCalentamiento);
-      corridas.push({ brazo: brazo.id, hilos, gpu, rutaGpu: brazo.rutaGpu, jsonl: nombre, cargaInicial: inicio.carga, ...fin });
+      const sinGpu = sinAcreditarGpu(brazo, fin.gpuBrokers, fin.gpuBrokersCalentamiento);
+      assert.equal(fin.estado, sinGpu.length ? 'sin-actividad-gpu' : 'completo');
+      assert.deepEqual(fin.sinGpu ?? [], sinGpu);
+      corridas.push(corrida);
     }
-    const referencia = corridas.find(corrida => corrida.brazo === brazos[0]!.id)!;
+    const referencia = corridas.find(corrida => corrida.brazo === brazos[0]!.id && corrida.estado === 'completo');
     bloques.push({ escena: escena.id, repeticion: repeticion + 1, digestoInicial: origen!.digesto, tickInicial: origen!.tick,
       fixture: origen!.fixture, corridas: corridas.map(corrida => ({
-      ...corrida, aceleracionMedia: referencia.paredMs.media / corrida.paredMs.media,
-      aceleracionP95: referencia.paredMs.p95 / corrida.paredMs.p95,
+      ...corrida, ...(referencia && corrida.estado === 'completo' && {
+        aceleracionMedia: referencia.paredMs.media / corrida.paredMs.media,
+        aceleracionP95: referencia.paredMs.p95 / corrida.paredMs.p95,
+      }),
     })) });
   }
   assert.equal(git('rev-parse', 'HEAD'), commit, 'Cambió el commit durante la medición');
   assert.equal(git('diff', '--binary', 'HEAD', '--', 'src', 'scripts', 'package.json', 'package-lock.json'), diferencia,
     'Cambió el código durante la medición');
   assert.equal(sha256(readFileSync(script)), instrumentoSha256, 'Cambió el instrumento durante la medición');
-  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 1, commit, configSha256: sha256(contenido),
+  writeFileSync(join(salida, 'resumen.json'), JSON.stringify({ version: 2, commit, configSha256: sha256(contenido),
     instrumentoSha256, diffSha256: sha256(Buffer.from(diferencia)), arbolLimpio: git('status', '--porcelain', '--', 'src', 'scripts',
       'package.json', 'package-lock.json') === '', config, bloques }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
 }

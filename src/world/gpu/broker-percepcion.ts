@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { BroadcastChannel, isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { PercibidorCpu, type VistaMundo } from '../decision/percepcion.js';
-import { ErrorDispositivo, type CanalGpu, type LotePercepcion, type Percibidor, type Plan, type TelemetriaBrokerGpu } from '../motor/contratos.js';
+import { ErrorDispositivo, type CanalGpu, type Dispositivo, type LotePercepcion, type Percibidor, type Plan, type TelemetriaBrokerGpu } from '../motor/contratos.js';
 import { CanalCompartido, enviarOrden, recibirRespuesta, type OpcionesCanalGpu } from './canal.js';
 import { CostePercepcion } from './coste-percepcion.js';
 import { PercibidorGpu } from './percibir-gpu.js';
 
 const CONTROL = { listo: 0, ocupado: 1, generacion: 2, peticiones: 3, dueno0: 4, dueno1: 5, micros: 6, bytes: 7, senal0: 8, celdas: 10 };
 const MEDIDA = { lotes: 0, dueno0: 1, dueno1: 2, cpuArranque: 3, cpuOcupada: 4, cpuSinCanal: 5, errores: 6,
-  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, celdas: 12 };
+  subida: 7, bajada: 8, cudaMicros: 9, recorridoMicros: 10, cpuPorCoste: 11, aceptada0: 12, aceptada1: 13, rechazada: 14, celdas: 15 };
 type MotivoCpu = 'cpuArranque' | 'cpuOcupada' | 'cpuSinCanal';
-const SOLO_CPU = [[]], CPU_GPU = [[], [0]];
+const SOLO_CPU = [[]];
 const ESTADO = { esperando: 0, lista: 1, fallo: 2, cancelada: 3 };
 const LIMITE_MS = 50;
 const LIMITE_NANOS = BigInt(LIMITE_MS) * 1_000_000n;
@@ -33,18 +33,24 @@ interface Peticion {
   identidad: Identidad; orden: Orden; fin: bigint; datos: Uint8Array<SharedArrayBuffer>;
   estado: Int32Array<SharedArrayBuffer>; tiempo: Float64Array<SharedArrayBuffer>;
 }
-interface PuertoBroker { canal: string; control: Int32Array<SharedArrayBuffer>; medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean }
+interface PuertoBroker { dispositivo: number; canal: string; control: Int32Array<SharedArrayBuffer>; medida?: BigInt64Array<SharedArrayBuffer>; porCoste?: boolean }
 export interface EpocaBrokerPercepcion extends PuertoBroker { generacion: number; epoca: number }
 
+export function admiteBrokerPercepcionGpu(hilos: number, gpu: readonly number[]): boolean {
+  return hilos === 2 && (gpu.length === 1 && (gpu[0] === 0 || gpu[0] === 1) ||
+    gpu.length === 2 && gpu[0] === 0 && gpu[1] === 1);
+}
+
 export class BrokerPercepcionGpu {
-  readonly #puertos: PuertoBroker = { canal: `atlas-percepcion-duenos-${randomUUID()}`,
-    control: new Int32Array(new SharedArrayBuffer(CONTROL.celdas * Int32Array.BYTES_PER_ELEMENT)) };
+  readonly #puertos: PuertoBroker;
   readonly #worker: Worker;
   readonly #salida: Promise<void>;
   #cerrando = false;
   readonly listo: Promise<boolean>;
 
-  constructor(opciones?: OpcionesCanalGpu, medir = false) {
+  constructor(opciones?: OpcionesCanalGpu, medir = false, dispositivo = 0) {
+    this.#puertos = { dispositivo, canal: `atlas-percepcion-duenos-${randomUUID()}`,
+      control: new Int32Array(new SharedArrayBuffer(CONTROL.celdas * Int32Array.BYTES_PER_ELEMENT)) };
     if (process.env.CARTA_PERCEPCION_COSTE_DUENOS === '1') this.#puertos.porCoste = true;
     if (medir || this.#puertos.porCoste) this.#puertos.medida = new BigInt64Array(new SharedArrayBuffer(MEDIDA.celdas * BigInt64Array.BYTES_PER_ELEMENT));
     this.#worker = new Worker(`
@@ -53,7 +59,7 @@ export class BrokerPercepcionGpu {
         if (workerData.loaderURL) (await import(workerData.loaderURL)).register();
         await import(workerData.moduleURL);
       })().catch(error => { setImmediate(() => { throw error; }); });
-    `, { eval: true, execArgv: [], name: 'carta-gpu-duenos', workerData: {
+    `, { eval: true, execArgv: [], name: `carta-gpu${dispositivo}-duenos`, workerData: {
       role: 'carta-gpu-duenos', moduleURL: import.meta.url,
       loaderURL: import.meta.url.endsWith('.ts') ? import.meta.resolve('tsx/esm/api') : undefined,
       ...this.#puertos, opciones,
@@ -91,6 +97,7 @@ export class BrokerPercepcionGpu {
     if (!m) return undefined;
     const leer = (i: number) => Number(Atomics.load(m, i));
     return { lotes: leer(MEDIDA.lotes), completadas: [leer(MEDIDA.dueno0), leer(MEDIDA.dueno1)],
+      aceptadas: [leer(MEDIDA.aceptada0), leer(MEDIDA.aceptada1)], rechazadas: leer(MEDIDA.rechazada),
       cpuArranque: leer(MEDIDA.cpuArranque), cpuOcupada: leer(MEDIDA.cpuOcupada), cpuSinCanal: leer(MEDIDA.cpuSinCanal),
       ...(this.#puertos.porCoste && { cpuPorCoste: leer(MEDIDA.cpuPorCoste) }),
       erroresCanal: leer(MEDIDA.errores), subidaConfirmadaBytes: leer(MEDIDA.subida), bajadaConfirmadaBytes: leer(MEDIDA.bajada),
@@ -109,7 +116,6 @@ export class BrokerPercepcionGpu {
 
 /** El dueño empaqueta desde su captura F2. El corredor solo ve el paquete, nunca las páginas vivas del dueño. */
 class CanalPercepcionBroker implements CanalGpu {
-  readonly dispositivo = 0;
   readonly #puerto: BroadcastChannel;
   #datos = new Uint8Array(new SharedArrayBuffer(0));
   #pendiente?: Peticion;
@@ -121,6 +127,7 @@ class CanalPercepcionBroker implements CanalGpu {
     this.#puerto.unref();
   }
 
+  get dispositivo(): number { return this.epoca.dispositivo; }
   get bytes(): number { return this.#datos.length; }
   obstaculo(comprobarOcupacion: boolean): MotivoCpu | undefined {
     const { control, generacion } = this.epoca;
@@ -191,7 +198,7 @@ class CanalPercepcionBroker implements CanalGpu {
     this.#pendiente = undefined;
     if (antes !== ESTADO.lista || Atomics.load(control, CONTROL.generacion) !== identidad.generacion
       || Atomics.load(control, CONTROL.listo) !== 1) {
-      throw new ErrorDispositivo('gpu0', 'El corredor no confirmó el despacho de este dueño y generación.');
+      throw new ErrorDispositivo(`gpu${this.dispositivo}`, 'El corredor no confirmó el despacho de este dueño y generación.');
     }
     const medida = this.epoca.medida;
     if (medida) {
@@ -206,6 +213,9 @@ class CanalPercepcionBroker implements CanalGpu {
   anotarError(error: unknown): void {
     if (this.epoca.medida && error instanceof ErrorDispositivo) Atomics.add(this.epoca.medida, MEDIDA.errores, 1n);
   }
+  anotarValidacion(aceptada: boolean): void {
+    if (this.epoca.medida) Atomics.add(this.epoca.medida, aceptada ? MEDIDA.aceptada0 + this.dueno : MEDIDA.rechazada, 1n);
+  }
   cerrar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
@@ -218,18 +228,22 @@ class CanalPercepcionBroker implements CanalGpu {
 }
 
 export class PercibidorBroker implements Percibidor {
-  readonly dispositivo = 'gpu0' as const;
+  readonly dispositivo: Dispositivo;
   readonly #canal: CanalPercepcionBroker;
   readonly #gpu: PercibidorGpu;
   readonly #cpu: PercibidorCpu;
   readonly #coste?: CostePercepcion;
+  readonly #rutas: number[][];
   #medicion?: { inicio: number; eleccion: ReturnType<CostePercepcion['elegir']> };
   #usaGpu = false;
+  #recibioGpu = false;
 
   constructor(private readonly vista: VistaMundo, epoca: EpocaBrokerPercepcion, dueno: number,
     private readonly reloj = () => performance.now()) {
     this.#canal = new CanalPercepcionBroker(epoca, dueno);
     this.#gpu = new PercibidorGpu(this.#canal, vista.frente, vista.terreno, true);
+    this.dispositivo = this.#gpu.dispositivo;
+    this.#rutas = [[], [epoca.dispositivo]];
     this.#cpu = new PercibidorCpu(vista);
     if (epoca.porCoste) this.#coste = new CostePercepcion();
   }
@@ -237,11 +251,12 @@ export class PercibidorBroker implements Percibidor {
   lanzar(lote: LotePercepcion, planes: readonly Plan[]): void {
     this.#medicion = undefined;
     this.#usaGpu = false;
+    this.#recibioGpu = false;
     if (lote.slots.length > 0) {
       this.#canal.anotarRuta('lotes');
       if (this.#coste) {
         const obstaculo = this.#canal.obstaculo(true);
-        const eleccion = this.#coste.elegir(planes, lote.slots.length, obstaculo ? SOLO_CPU : CPU_GPU);
+        const eleccion = this.#coste.elegir(planes, lote.slots.length, obstaculo ? SOLO_CPU : this.#rutas);
         const inicio = this.reloj();
         const proponeGpu = eleccion.tarjetas.length > 0;
         if (proponeGpu) this.#usaGpu = this.#canal.admitir();
@@ -258,10 +273,16 @@ export class PercibidorBroker implements Percibidor {
   }
   esperar(plazoMs: number) {
     if (!this.#usaGpu) return this.#cpu.esperar();
-    try { return this.#gpu.esperar(plazoMs); }
+    try {
+      const salida = this.#gpu.esperar(plazoMs);
+      this.#recibioGpu = true;
+      return salida;
+    }
     catch (error) { this.#canal.anotarError(error); throw error; }
   }
   confirmar(aceptada: boolean): void {
+    if (this.#recibioGpu) this.#canal.anotarValidacion(aceptada);
+    this.#recibioGpu = false;
     const medicion = this.#medicion;
     this.#medicion = undefined;
     if (!medicion) return;
@@ -275,7 +296,7 @@ export class PercibidorBroker implements Percibidor {
 }
 
 function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
-  const { canal, control } = puertos;
+  const { canal, control, dispositivo } = puertos;
   const port = parentPort!;
   let gpu: CanalCompartido | undefined;
   const entradas: BroadcastChannel[] = [];
@@ -286,7 +307,7 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
     port.close();
   };
   try {
-    gpu = new CanalCompartido(0, opciones);
+    gpu = new CanalCompartido(dispositivo, opciones);
     gpu.iniciar(3000);
     for (const dueno of [0, 1]) {
       const entrada = new BroadcastChannel(`${canal}:${dueno}`);
@@ -308,7 +329,7 @@ function atender(puertos: PuertoBroker, opciones?: OpcionesCanalGpu): void {
           if (!respuesta.ok || !Number.isFinite(respuesta.ms) || respuesta.ms < 0
             || respuesta.generacion !== id.generacion || respuesta.epoca !== id.epoca || respuesta.dueno !== id.dueno
             || respuesta.tick !== id.tick || respuesta.despacho !== id.despacho) {
-            throw new ErrorDispositivo('gpu0', 'El corredor recibió el eco de otro despacho.');
+            throw new ErrorDispositivo(`gpu${dispositivo}`, 'El corredor recibió el eco de otro despacho.');
           }
           if (pertenece() && restante(fin) > 0 && Atomics.load(estado, 0) === ESTADO.esperando) {
             gpu!.leer(orden.salida, datos.subarray(orden.salida, orden.salida + orden.bajada));

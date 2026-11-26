@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as esperar } from 'node:timers/promises';
@@ -114,6 +118,8 @@ test('el coste del corredor descarta respuestas GPU incoherentes en la ruta real
   assert.equal(percepcion.respaldos, 1);
   assert.deepEqual(confirmar.mock.calls.map(c => c.arguments[0]), [true, false, true, true, true, true]);
   assert.deepEqual(broker.medidas().detalle?.completadas, [1, 0], 'el corredor sí recibió una respuesta con el eco correcto');
+  assert.deepEqual(broker.medidas().detalle?.aceptadas, [0, 0]);
+  assert.equal(broker.medidas().detalle?.rechazadas, 1);
   assert.equal(broker.medidas().detalle?.cpuPorCoste, 5, 'pospone otra sonda de la ruta observada como inválida');
   for (let i = 0; i < 60; i++) ejecutar();
   assert.deepEqual(broker.medidas().detalle?.completadas, [2, 0], 'la calibración vuelve a sondear pasado el intervalo');
@@ -139,6 +145,73 @@ for (const fallo of ['broker-rancio', 'broker-expira']) {
     assert.equal(cliente.esperar(100).despacho, 2, 'CPU toma el despacho siguiente con una salida propia');
   });
 }
+
+test('motor de dos dueños comparte GPU1 y aísla los fallos de GPU0 en dual', { timeout: 20_000 }, async t => {
+  const python = execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-v24-gpu-simulada-'));
+  writeFileSync(join(dir, 'python3'), [
+    '#!/bin/sh', 'modo="$1"', 'shift 2', 'exec "$CARTA_GPU_PRUEBA_PYTHON" "$modo" "$CARTA_GPU_PRUEBA_SCRIPT" "$@"',
+  ].join('\n') + '\n', { mode: 0o700 });
+  const entorno = {
+    PATH: `${dir}:${process.env.PATH}`, COMPUTE_NVRTC: 'solo-para-el-servidor-simulado',
+    CARTA_PERCEPCION_DUENOS: '1', CARTA_PERCEPCION_COSTE_DUENOS: '0',
+    CARTA_GPU_PRUEBA_PYTHON: python, CARTA_GPU_PRUEBA_SCRIPT: script, CARTA_GPU_PRUEBA_FASE: 'broker-valido',
+    CARTA_GPU_PRUEBA_MARCA: join(dir, 'fallo'), CARTA_GPU_PRUEBA_FASE_GPU0: 'broker-rancio',
+  };
+  const anterior = Object.fromEntries(Object.keys(entorno).map(k => [k, process.env[k]]));
+  Object.assign(process.env, entorno);
+  t.after(() => {
+    for (const [k, v] of Object.entries(anterior)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const semilla = 2321171583, base = hostOpenWorldParams();
+  for (const { gpu, faseGpu0, arranca } of [
+    { gpu: [1], faseGpu0: 'broker-rancio', arranca: true },
+    { gpu: [0, 1], faseGpu0: 'broker-valido', arranca: true },
+    { gpu: [0, 1], faseGpu0: 'broker-rancio', arranca: true },
+    { gpu: [0, 1], faseGpu0: 'arranque', arranca: false },
+  ]) {
+    process.env.CARTA_GPU_PRUEBA_FASE_GPU0 = faseGpu0;
+    const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos: 2, gpu } }, base);
+    const mundo = createWorld(semilla, params);
+    const destino = mundo.tiles.find(celda => celda.x >= 32 && celda.terrain !== 'water')!;
+    const { x, y } = destino;
+    // El este pertenece al dueño 1. Escalonar los vencimientos deja despachos de ambos dueños en la GPU compartida.
+    for (const persona of mundo.people.slice(-3)) Object.assign(persona, { x, y, target: { x, y }, decisionAt: 2 });
+    mundo.people[2]!.decisionAt = 3;
+    const motor = crearMotor(mundo, { hilos: 2, gpu, decisionGpu: 'siempre', verificar: true, semilla, medirBrokerGpu: true });
+    try {
+      assert.equal(await motor.prepararBrokerGpu?.(), arranca);
+      assert.deepEqual(motor.telemetria().gpuBrokers?.map(tarjeta => tarjeta.lista), gpu.map(d => arranca || d === 1));
+      for (let i = 1; i <= 3; i++) assert.equal(motor.paso([]).tick, i);
+      const tarjeta = motor.telemetria().gpuBrokers!;
+      assert.deepEqual(tarjeta.map(d => d.dispositivo), gpu);
+      const gpu1 = tarjeta.at(-1)!.detalle!;
+      assert.ok(gpu1.aceptadas[1] > 0 && gpu1.subidaConfirmadaBytes > 0 && gpu1.bajadaConfirmadaBytes > 0,
+        JSON.stringify({ gpu, faseGpu0, tarjeta }));
+      if (gpu.length === 1) {
+        assert.ok(gpu1.aceptadas[0] > 0, 'los dos dueños comparten GPU1');
+        assert.deepEqual(motor.telemetria().gpuBroker, gpu1);
+      } else {
+        assert.equal(gpu1.lotes, gpu1.aceptadas[1], 'GPU1 atiende solo al dueño 1');
+        assert.deepEqual(gpu1.aceptadas, [0, gpu1.aceptadas[1]]);
+        const gpu0 = tarjeta[0]!.detalle!;
+        if (faseGpu0 === 'broker-valido') {
+          assert.ok(gpu0.aceptadas[0] > 0);
+          assert.equal(gpu0.lotes, gpu0.aceptadas[0], 'GPU0 atiende solo al dueño 0');
+          assert.deepEqual(motor.telemetria().gpuEstado, ['ok', 'ok']);
+        } else {
+          assert.equal(tarjeta[0]!.lista, false);
+          assert.ok(gpu0.lotes > 0 && gpu0.cpuSinCanal > 0, 'el dueño 0 conserva la ruta CPU');
+          assert.equal(gpu0.erroresCanal, arranca ? 1 : 0);
+          assert.deepEqual(motor.telemetria().gpuEstado, ['cpu', 'ok']);
+        }
+      }
+    } finally { await motor.cerrar(); }
+  }
+});
 
 test('CUDA real: F2 distribuida usa el corredor desde el motor de dos dueños', {
   timeout: 15_000, skip: !process.env.COMPUTE_NVRTC && 'Se requiere GPU0 y COMPUTE_NVRTC',

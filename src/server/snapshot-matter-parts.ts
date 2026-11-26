@@ -2,8 +2,8 @@ import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { crc32 } from 'node:zlib';
-import { codificarCheckpointEnTramos } from '../world/materia/checkpoint.js';
-import type { MateriaCheckpoint } from '../world/materia/tipos.js';
+import { codificarCheckpointEnTramos, decodificarCheckpoint, decodificarCheckpointEnTramos } from '../world/materia/checkpoint.js';
+import type { MateriaCheckpoint, Sustancia } from '../world/materia/tipos.js';
 import { SnapshotPhysicalError } from './snapshot.js';
 
 export const MAX_SNAPSHOT_MATTER_PART_BYTES = 4 * 1024 * 1024;
@@ -128,14 +128,15 @@ export class SnapshotMatterParts {
       if (!retenidos.has(digest)) borrar.run(digest);
   }
 
-  /** El decodificador de VMAT sigue a cargo de la estructura y el balance del material. */
-  read(body: Uint8Array | null): { bytes: Uint8Array | null; digest: string | null } {
+  /** El decodificador agota las partes en la misma transacción y valida estructura, CRC y balance. */
+  decode(body: Uint8Array | null, sustancia: (id: number, registro: Uint8Array) => Readonly<Sustancia>):
+    { materia: MateriaCheckpoint | null; digest: string | null } {
     exigirTransaccion(this.db);
-    if (body === null) return { bytes: null, digest: null };
+    if (body === null) return { materia: null, digest: null };
     const manifiesto = leerManifiesto(body);
-    if (!manifiesto) return { bytes: body, digest: checksum(body) };
-    const bytes = new Uint8Array(manifiesto.longitud);
-    return { bytes, digest: this.verificarManifiesto(manifiesto, bytes) };
+    if (!manifiesto) return { materia: decodificarCheckpoint(body, sustancia), digest: checksum(body) };
+    const materia = decodificarCheckpointEnTramos(this.partesVerificadas(manifiesto), sustancia);
+    return { materia, digest: manifiesto.digest };
   }
 
   /** Para cotejar cuerpos retenidos en la transacción de escritura sin ensamblar la carga útil. */
@@ -146,15 +147,11 @@ export class SnapshotMatterParts {
     return manifiesto ? this.verificarManifiesto(manifiesto) : checksum(body);
   }
 
-  private verificarManifiesto(manifiesto: Manifiesto, destino?: Uint8Array): string {
+  private *partesVerificadas(manifiesto: Manifiesto): IterableIterator<Uint8Array> {
     if (!SnapshotMatterParts.installed(this.db))
       return error('Falta la tabla de partes de materia.');
     const leer = this.db.prepare('SELECT body FROM main.snapshot_matter_parts WHERE digest=?');
     const sha = createHash('sha256');
-    const cabecera = new Uint8Array(8);
-    const sello = new Uint8Array(CRC_BYTES);
-    const finCrc = manifiesto.longitud - sello.length;
-    let pos = 0, crc = 0;
     for (const [indice, parte] of manifiesto.partes.entries()) {
       const fila = leer.get(parte.digest);
       if (!fila) return error(`Falta la parte de materia ${indice}.`);
@@ -162,19 +159,27 @@ export class SnapshotMatterParts {
       if (!(bytes instanceof Uint8Array) || bytes.byteLength !== parte.bytes || checksum(bytes) !== parte.digest)
         return error(`La parte de materia ${indice} no coincide con su longitud o SHA-256.`);
       sha.update(bytes);
+      yield bytes;
+    }
+    if (sha.digest('hex') !== manifiesto.digest) return error('Las partes no coinciden con el SHA-256 del VMAT.');
+  }
+
+  private verificarManifiesto(manifiesto: Manifiesto): string {
+    const cabecera = new Uint8Array(8);
+    const sello = new Uint8Array(CRC_BYTES);
+    const finCrc = manifiesto.longitud - sello.length;
+    let pos = 0, crc = 0;
+    for (const bytes of this.partesVerificadas(manifiesto)) {
       if (pos < cabecera.length) cabecera.set(bytes.subarray(0, cabecera.length - pos), pos);
       const nCrc = Math.max(0, Math.min(bytes.length, finCrc - pos));
       if (nCrc > 0) crc = crc32(bytes.subarray(0, nCrc), crc);
       if (nCrc < bytes.length) sello.set(bytes.subarray(nCrc), pos + nCrc - finCrc);
-      destino?.set(bytes, pos);
       pos += bytes.length;
     }
-    const digest = sha.digest('hex');
-    if (digest !== manifiesto.digest) return error('Las partes no coinciden con el SHA-256 del VMAT.');
     const formato = new DataView(cabecera.buffer);
     if (formato.getUint32(0, true) !== VMAT || formato.getUint32(4, true) !== VERSION_VMAT)
       return error('El encabezado VMAT de las partes de materia es desconocido.');
     if (crc !== new DataView(sello.buffer).getUint32(0, true)) return error('Las partes no coinciden con el CRC32 del VMAT.');
-    return digest;
+    return manifiesto.digest;
   }
 }

@@ -2,16 +2,18 @@ import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { crc32 } from 'node:zlib';
 import { NE } from '../src/shared/naturaleza.js';
 import {
   codificarCheckpoint, codificarCheckpointEnTramos, codificarEnVuelo, codificarPaginas, decodificarCheckpoint,
+  decodificarCheckpointEnTramos, decodificarPaginas, indexarPaginas,
 } from '../src/world/materia/checkpoint.js';
 import { Rol, type MateriaCheckpoint } from '../src/world/materia/tipos.js';
 import { REF_NULA, TipoIntento, refDe } from '../src/world/motor/contratos.js';
 
 const sinQuimica = (): never => { throw new Error('La escena sólo contiene energía.'); };
 
-function vacio(): MateriaCheckpoint {
+function vacio(): MateriaCheckpoint<Uint8Array> {
   return {
     epoca: 0, tick: 0, sustancias: new Uint8Array(), registro: new Uint8Array(),
     paginas: codificarPaginas(0, [], []), enVuelo: codificarEnVuelo([]),
@@ -19,7 +21,7 @@ function vacio(): MateriaCheckpoint {
   };
 }
 
-function poblado(): MateriaCheckpoint {
+function poblado(): MateriaCheckpoint<Uint8Array> {
   const base = vacio(), epoca = 14;
   const paginas = codificarPaginas(epoca, [
     { ref: refDe(0, 1), celda: 18, rol: Rol.Suelo, dueno: 0, forma: 7, pares: Float64Array.of(0, 53) },
@@ -79,4 +81,58 @@ test('VMAT por tramos valida íntegramente antes de entregar el iterador', () =>
   assert.throws(() => codificarCheckpointEnTramos({ ...checkpoint, paginas: checkpoint.paginas.subarray(0, -1) }, 5), /truncado/);
   assert.throws(() => codificarCheckpointEnTramos({ ...checkpoint, enVuelo: checkpoint.enVuelo.subarray(0, -1) }, 5), /truncado/);
   assert.throws(() => codificarCheckpointEnTramos({ ...checkpoint, inicial: [] }, 5), /Ancho de cuenta/);
+});
+
+function* cortar(bytes: Uint8Array, tamanos: readonly number[]): IterableIterator<Uint8Array> {
+  for (let pos = 0, i = 0; pos < bytes.length; i++) {
+    const n = Math.min(tamanos[i % tamanos.length]!, bytes.length - pos);
+    const soporte = new Uint8Array(n + 3);
+    soporte.set(bytes.subarray(pos, pos + n), 2);
+    yield soporte.subarray(2, 2 + n);
+    pos += n;
+  }
+}
+
+test('VMAT fragmentado conserva páginas prestadas, guarda los mismos bytes e indexa lotes por ranura', () => {
+  const checkpoint = poblado(), canonico = codificarCheckpoint(checkpoint);
+  const fila = indexarPaginas(checkpoint.epoca, checkpoint.paginas);
+  for (const tamanos of [[1], [9, 3, 19, 4, 13, 5]] as const) {
+    const originales = [...cortar(canonico, tamanos)];
+    const soportes = new Set(originales.map(tramo => tramo.buffer));
+    const cp = decodificarCheckpointEnTramos(originales, sinQuimica);
+    const { paginas, ...resto } = cp;
+    const { paginas: _original, ...restoOriginal } = checkpoint;
+    assert.deepEqual(resto, restoOriginal);
+    assert.ok(!(paginas instanceof Uint8Array));
+    assert.ok(paginas.tramos.length > 1 && paginas.tramos.every(vista => soportes.has(vista.buffer)));
+    assert.equal(paginas.byteLength, checkpoint.paginas.byteLength);
+    assert.deepEqual(decodificarPaginas(cp.epoca, paginas), decodificarPaginas(checkpoint.epoca, checkpoint.paginas));
+    assert.deepEqual(codificarCheckpoint(cp), canonico);
+    const recodificado = codificarCheckpointEnTramos(cp, 7);
+    assert.deepEqual(Buffer.concat([...recodificado.tramos]), Buffer.from(canonico));
+
+    // La carga entrega la materia entre workers como datos clonables. El orden de ranura
+    // intercala búsquedas hacia atrás, hacia delante y referencias liberadas.
+    const clonado = structuredClone(cp);
+    const indice = indexarPaginas(clonado.epoca, clonado.paginas);
+    assert.equal(indice.ranuras, fila.ranuras);
+    for (const ranura of [2, 0, 1, 0, 2, -1, 3]) assert.deepEqual(indice.leer(ranura), fila.leer(ranura));
+  }
+});
+
+test('VMAT fragmentado agota el iterador y rechaza CRC, truncado y estructura dañada', () => {
+  const checkpoint = poblado(), canonico = codificarCheckpoint(checkpoint);
+  const rechazoFinal = new Error('Verificación del origen al alcanzar EOF');
+  function* fuenteAlterada(): IterableIterator<Uint8Array> {
+    yield* cortar(canonico, [5]);
+    throw rechazoFinal;
+  }
+  assert.throws(() => decodificarCheckpointEnTramos(fuenteAlterada(), sinQuimica), error => error === rechazoFinal);
+  assert.throws(() => decodificarCheckpointEnTramos(cortar(canonico.subarray(0, -1), [5]), sinQuimica), /truncado/);
+  const corrupto = canonico.slice();
+  const inicioPaginas = 24 + 8 + checkpoint.sustancias.length + 8 + checkpoint.registro.length + 8;
+  new DataView(corrupto.buffer).setFloat64(inicioPaginas, checkpoint.epoca + 1, true);
+  assert.throws(() => decodificarCheckpointEnTramos(cortar(corrupto, [3]), sinQuimica), /CRC32/);
+  new DataView(corrupto.buffer).setUint32(corrupto.length - 4, crc32(corrupto.subarray(0, -4)), true);
+  assert.throws(() => decodificarCheckpointEnTramos(cortar(corrupto, [3]), sinQuimica), /[Ss]ello de época/);
 });

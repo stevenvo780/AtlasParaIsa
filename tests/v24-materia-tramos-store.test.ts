@@ -69,6 +69,10 @@ test('Store rota, verifica y recupera VMAT legado y en partes junto con la agend
   assert.equal(firma(blob(store, 1)), 'VMPT');
   const actual = store.cargarGuardadoCompleto()!;
   assert.deepEqual(actual.corteAgenda, tercero.corte);
+  const paginas = actual.instantanea.materia!.paginas;
+  assert.ok(!(paginas instanceof Uint8Array) && paginas.tramos.length > 1);
+  assert.equal(paginas.tramos.reduce((total, tramo) => total + tramo.byteLength, 0), paginas.byteLength);
+  assert.ok(paginas.tramos.every(tramo => tramo.byteLength <= 32 * 1024));
   assert.deepEqual(codificarCheckpoint(actual.instantanea.materia!), codificarCheckpoint(tercero.siguiente.materia!));
   const salvado = join(directory, 'respaldo-segmentado.sqlite');
   assert.equal(store.previous(salvado), 1);

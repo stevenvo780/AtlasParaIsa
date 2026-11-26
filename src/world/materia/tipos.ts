@@ -326,17 +326,25 @@ export interface ProcesoMaterial { lote: LoteRef; pasos: readonly Paso[]; i: num
 
 // ── Punto de control ─────────────────────────────────────────────────────────────────────────────────────
 
+/** Vistas en orden. Se transportan como datos planos y conservan sus búferes hasta terminar la carga. */
+export interface TramosMateria {
+  readonly tramos: readonly Uint8Array[];
+  readonly byteLength: number;
+  readonly length: number;
+}
+export type BytesMateria = Uint8Array | TramosMateria;
+
 /**
  * Materia guardada en la misma operación que el `World` (cada 2.400 ticks, §1.2), fuera del JSON: binario y con el
  * sello de la época. Al cargar se exige el sello en todas las páginas y Σ lotes + Σ garantías de `enVuelo` =
  * inicial + fuentes − sumideros, por posición del libro.
  * Implementa: A (`materia/checkpoint.ts`). Consumen: PS (`Store`), M4a (`instantanea`, `cargar`).
  */
-export interface MateriaCheckpoint {
+export interface MateriaCheckpoint<Paginas extends BytesMateria = BytesMateria> {
   epoca: number; tick: number;
   sustancias: Uint8Array; // registro de Q (solo crece)
   registro: Uint8Array;   // el `Registro` del motor (plantillas, recetas, planos) con sus ids
-  paginas: Uint8Array;    // lotes por página
+  paginas: Paginas;       // lotes por página, en vistas clonables si el VMAT llegó en tramos
   enVuelo: Uint8Array;    // intentos con garantía aún en los buzones
   /** Totales del mundo ya plegados (NE + 1 cada uno), en bigint: la suma del mundo puede pasar de 2⁵³. */
   inicial: readonly bigint[]; fuentes: readonly bigint[]; sumideros: readonly bigint[];

@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts } from '../src/server/snapshot-matter-parts.js';
 import { NE } from '../src/shared/naturaleza.js';
-import { codificarCheckpoint, codificarEnVuelo, codificarPaginas, decodificarCheckpoint } from '../src/world/materia/checkpoint.js';
+import { codificarCheckpoint, codificarEnVuelo, codificarPaginas } from '../src/world/materia/checkpoint.js';
 import type { MateriaCheckpoint } from '../src/world/materia/tipos.js';
 
 function materia(tick: number): MateriaCheckpoint {
@@ -19,6 +19,7 @@ function materia(tick: number): MateriaCheckpoint {
 }
 
 const sha = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const sinSustancias = () => { throw new Error('La arena está vacía.'); };
 
 test('VMPT retiene partes de los tres slots y conserva bytes, SHA de agenda, nulos y VMAT legado', t => {
   const db = new DatabaseSync(':memory:');
@@ -30,14 +31,18 @@ test('VMPT retiene partes de los tres slots y conserva bytes, SHA de agenda, nul
   assert.throws(() => SnapshotMatterParts.prepare(actual, MAX_SNAPSHOT_MATTER_PART_BYTES + 1), /Límite/);
   assert.throws(() => SnapshotMatterParts.install(db), /transacción/);
   assert.throws(() => parts.write(preparado), /transacción/);
+  assert.throws(() => parts.decode(null, sinSustancias), /transacción/);
   assert.throws(() => parts.collect([]), /transacción/);
   assert.equal(preparado.longitud, vmActual.length);
   assert.equal(preparado.digest, sha(vmActual));
 
   db.exec('BEGIN IMMEDIATE');
-  assert.deepEqual(parts.read(null), { bytes: null, digest: null });
+  assert.deepEqual(parts.decode(null, sinSustancias), { materia: null, digest: null });
   assert.equal(parts.verify(null), null);
-  assert.equal(parts.read(vmAnterior).bytes, vmAnterior);
+  const anteriorLeido = parts.decode(vmAnterior, sinSustancias);
+  assert.equal(anteriorLeido.digest, sha(vmAnterior));
+  assert.ok(anteriorLeido.materia?.paginas instanceof Uint8Array);
+  assert.deepEqual(codificarCheckpoint(anteriorLeido.materia), vmAnterior);
   assert.equal(parts.verify(vmAnterior), sha(vmAnterior));
 
   SnapshotMatterParts.install(db);
@@ -49,9 +54,28 @@ test('VMPT retiene partes de los tres slots y conserva bytes, SHA de agenda, nul
   guardar.run(0, vigente);
   guardar.run(1, vmAnterior);
   guardar.run(2, viejo);
-  assert.deepEqual(parts.read(vigente), { bytes: vmActual, digest: preparado.digest });
+  const sqlParte = 'SELECT body FROM main.snapshot_matter_parts WHERE digest=?';
+  const consulta = db.prepare(sqlParte);
+  const lecturas = t.mock.method(consulta, 'get');
+  const preparar = db.prepare.bind(db);
+  const prepare = t.mock.method(db, 'prepare', (sql: string) => sql === sqlParte ? consulta : preparar(sql));
+  const Uint8ArrayReal = globalThis.Uint8Array;
+  globalThis.Uint8Array = new Proxy(Uint8ArrayReal, {
+    construct(objetivo, argumentos, constructor) {
+      assert.notEqual(argumentos[0], vmActual.length, 'La carga no debe reservar un VMAT contiguo.');
+      return Reflect.construct(objetivo, argumentos, constructor);
+    },
+  });
+  let vigenteLeido: ReturnType<SnapshotMatterParts['decode']>;
+  try { vigenteLeido = parts.decode(vigente, sinSustancias); }
+  finally { globalThis.Uint8Array = Uint8ArrayReal; prepare.mock.restore(); }
+  assert.equal(lecturas.mock.callCount(), preparado.partes.length);
+  assert.equal(vigenteLeido.digest, preparado.digest);
+  assert.ok(vigenteLeido.materia);
+  const paginas = vigenteLeido.materia.paginas;
+  assert.ok(!(paginas instanceof Uint8Array) && paginas.tramos.length > 1);
+  assert.deepEqual(codificarCheckpoint(vigenteLeido.materia), vmActual);
   assert.equal(parts.verify(vigente), preparado.digest);
-  assert.deepEqual(decodificarCheckpoint(parts.read(vigente).bytes!, () => { throw new Error('La arena está vacía.'); }), actual);
   assert.deepEqual(SnapshotMatterParts.references(vmAnterior), []);
   assert.deepEqual(SnapshotMatterParts.references(null), []);
 
@@ -72,7 +96,7 @@ test('VMPT retiene partes de los tres slots y conserva bytes, SHA de agenda, nul
   db.exec('BEGIN');
   assert.deepEqual(lista(), [...refs].sort());
   assert.deepEqual(cuerpos(), [vigente, vmAnterior, viejo]);
-  assert.deepEqual(parts.read(cuerpos()[2]!).bytes, vmAnterior);
+  assert.deepEqual(codificarCheckpoint(parts.decode(cuerpos()[2]!, sinSustancias).materia!), vmAnterior);
   db.exec('COMMIT');
 });
 
@@ -90,7 +114,7 @@ test('VMPT rechaza partes ausentes, corruptas o reordenadas y verifica el CRC de
   assert.throws(() => parts.verify(body), /Falta la tabla de partes/);
   db.exec('ROLLBACK TO prueba');
   db.prepare('DELETE FROM snapshot_matter_parts WHERE digest=?').run(digest);
-  assert.throws(() => parts.read(body), /Falta la parte de materia 0/);
+  assert.throws(() => parts.decode(body, sinSustancias), /Falta la parte de materia 0/);
   db.exec('ROLLBACK TO prueba');
   db.prepare('UPDATE snapshot_matter_parts SET body=? WHERE digest=?').run(Uint8Array.of(99, 2, 3), digest);
   assert.throws(() => parts.verify(body), /parte de materia 0.*SHA-256/);
@@ -101,6 +125,7 @@ test('VMPT rechaza partes ausentes, corruptas o reordenadas y verifica el CRC de
   reordenado.set(body.subarray(cabecera + entrada, cabecera + 2 * entrada), cabecera);
   reordenado.set(body.subarray(cabecera, cabecera + entrada), cabecera + entrada);
   assert.throws(() => parts.verify(reordenado), /SHA-256 del VMAT/);
+  assert.throws(() => parts.decode(reordenado, sinSustancias), /SHA-256 del VMAT/);
 
   // Un cuerpo distinto con hashes de transporte válidos aún debe pasar el CRC de VMAT.
   const alterado = body.slice(), canonico = codificarCheckpoint(materia(4));
@@ -110,6 +135,7 @@ test('VMPT rechaza partes ausentes, corruptas o reordenadas y verifica el CRC de
   alterado.set(Buffer.from(sha(canonico), 'hex'), 16);
   alterado.set(Buffer.from(hashParte, 'hex'), alterado.length - 32);
   assert.throws(() => parts.verify(alterado), /CRC32 del VMAT/);
+  assert.throws(() => parts.decode(alterado, sinSustancias), /CRC32/);
   db.exec('RELEASE prueba');
   db.exec('COMMIT');
 });

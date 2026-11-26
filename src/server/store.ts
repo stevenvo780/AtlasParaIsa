@@ -27,7 +27,7 @@ import { assertTechnology, maintainTechnologyMemory } from '../world/technology.
 import { ley, paramsOf, parseParams, setParams, type WorldParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
-import { codificarCheckpoint, decodificarCheckpoint } from '../world/materia/checkpoint.js';
+import { codificarCheckpoint } from '../world/materia/checkpoint.js';
 import { MAX_SNAPSHOT_MATTER_PART_BYTES, SnapshotMatterParts, type PreparedMatterParts } from './snapshot-matter-parts.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
 import { AgendaTerritorial, type CorteAgendaTerritorial } from '../world/territorio/agenda.js';
@@ -767,8 +767,7 @@ export class Store {
       if (anterior === null) return null;
       const loaded = this.loadVerified(rawTransaction, true);
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
-      const { bytes, digest } = this.readCompleteMatter(loaded.slot);
-      const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
+      const { materia, digest } = this.readCompleteMatter(loaded.slot, loaded.world.tick);
       const { world, agendaBruta, ...metadatos } = loaded;
       const corteAgenda = this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, anterior);
       const epoca = Math.max(anterior, materia?.epoca ?? 0) + 1;
@@ -792,8 +791,7 @@ export class Store {
       if (epoca === null) return loaded;
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
       const { agendaBruta, ...verificado } = loaded;
-      const { bytes, digest } = this.readCompleteMatter(loaded.slot);
-      const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
+      const { materia, digest } = this.readCompleteMatter(loaded.slot, loaded.world.tick);
       this.decodeCompleteAgenda(agendaBruta, digest, materia, loaded.world.tick, epoca);
       return verificado;
     });
@@ -808,8 +806,17 @@ export class Store {
     return row.body;
   }
 
-  private readCompleteMatter(slot: SnapshotSlot): { bytes: Uint8Array | null; digest: string | null } {
-    return this.snapshotMatterParts.read(this.completeMatterBody(slot));
+  private readCompleteMatter(slot: SnapshotSlot, tick: number): { materia: Instantanea['materia']; digest: string | null } {
+    let quimica: ServicioQuimicoImpl | undefined;
+    try {
+      const resultado = this.snapshotMatterParts.decode(this.completeMatterBody(slot), (id, registro) =>
+        (quimica ??= cargarSustancias(registro, { modo: 'inmediato' })).sustancia(id));
+      if (resultado.materia) {
+        quimica ??= cargarSustancias(resultado.materia.sustancias, { modo: 'inmediato' });
+        if (resultado.materia.tick !== tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
+      }
+      return resultado;
+    } finally { void quimica?.cerrar(); }
   }
 
   private retainedMatterManifests(): MatterManifestRow[] {
@@ -875,8 +882,7 @@ export class Store {
     try {
       const agenda = separarAgenda(world);
       if (agenda === undefined && this.requiereAgenda()) return false;
-      const { bytes, digest } = this.readCompleteMatter(0);
-      const materia = this.decodeCompleteMatter(bytes, world.tick);
+      const { materia, digest } = this.readCompleteMatter(0, world.tick);
       this.decodeCompleteAgenda(agenda, digest, materia, world.tick, epoca);
       return true;
     } catch (error) {
@@ -885,18 +891,6 @@ export class Store {
           (!(error instanceof Error) || error.constructor !== Error || 'code' in error)) throw error;
       return false;
     }
-  }
-
-  private decodeCompleteMatter(bytes: Uint8Array | null, tick: number): Instantanea['materia'] {
-    if (bytes === null) return null;
-    let quimica: ServicioQuimicoImpl | undefined;
-    try {
-      const materia = decodificarCheckpoint(bytes, (id, registro) =>
-        (quimica ??= cargarSustancias(registro, { modo: 'inmediato' })).sustancia(id));
-      quimica ??= cargarSustancias(materia.sustancias, { modo: 'inmediato' });
-      if (materia.tick !== tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
-      return materia;
-    } finally { void quimica?.cerrar(); }
   }
 
   private decodeCompleteAgenda(raw: unknown, matterDigest: string | null, materia: Instantanea['materia'], tick: number, epocaReservada: number): CorteAgendaTerritorial | undefined {
@@ -2340,9 +2334,8 @@ export class Store {
         const { world, agendaBruta } = this.verifyPrevious(decoded, complete);
         if (complete && slot === 0 && agendaBruta === undefined && this.requiereAgenda())
           throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
-        const { bytes, digest } = complete ? this.readCompleteMatter(slot) : { bytes: null, digest: null };
+        const { materia, digest } = complete ? this.readCompleteMatter(slot, world.tick) : { materia: null, digest: null };
         if (epoca !== null) {
-          const materia = this.decodeCompleteMatter(bytes, world.tick);
           this.decodeCompleteAgenda(agendaBruta, digest, materia, world.tick, epoca);
         }
         chosen = { slot, row: candidate, matterDigest: digest };

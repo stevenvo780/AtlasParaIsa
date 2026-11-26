@@ -31,7 +31,7 @@ import { Rol, barreraEfectiva, nivelDeLote, type ArenaMateria, type Kappa, type 
 import { addEvent, random } from '../mundo/crear.js';
 import { MAX_EVENTS, TICKS_PER_DAY, type Person, type World, type WorldContext } from '../mundo/tipos.js';
 import { paramsOf, type WorldParams } from '../params.js';
-import { PageArena } from '../soa/arena.js';
+import type { PageArena } from '../soa/arena.js';
 import { olvidarOrganismos, organismosDe, type OrganismosMundo } from '../soa/organismos-mundo.js';
 import { residentFastAccess } from '../soa/terreno.js';
 import { clavesDeHalo, maintainRegions, observarRegiones, worldContext, type ChunkMeta } from '../spatial.js';
@@ -49,16 +49,13 @@ import {
 import { abrirFotograma, cerrarFotograma, enlazarFuenteFotograma, escribirFotograma, type FotogramaEnCurso, type FuenteFotograma } from './fotograma.js';
 import { leyesActivas } from './leyes.js';
 import { RegistroContenido } from './registro.js';
+import { crearArenasMateria } from './reserva-materia.js';
 
 // ── Constantes ───────────────────────────────────────────────────────────────────────────────────────────
 
 /** Temperatura corporal (K) a la que la arena valora lo digerible de una sustancia. Es la misma `T_CUERPO` de
  * `materia/mundo.ts`, que no la exporta: el integrador las une en `shared/naturaleza.ts`. */
 export const T_DIGESTION_K = 310;
-/** Reserva virtual de ranuras de la arena de lotes y de su desborde (las mismas de `materia/mundo.ts`). No es memoria
- * usada: agotarla es fatal. */
-export const RESERVA_LOTES = 2 ** 23;
-export const RESERVA_DESBORDE = 2 ** 25;
 /** Lotes libres que el coordinador garantiza en F0 por cada chunk que se activa en el tick (3 por tesela y el aire de
  * la página, redondeado a bloques de 256) y, además, una holgura igual a los lotes en uso (crías, objetos, cadáveres):
  * la arena solo crece en F0 y quedarse sin ranuras a mitad de tick es fatal. Es política de memoria, no una ley. */
@@ -111,6 +108,7 @@ export interface PiezasDueno {
   control: Float64Array | null;
   /** Memoria de la materia ya creada (varios dueños) o null para que el dueño la cree al encender `v23.materia`. */
   materia: { lotes: PageArena; desborde: PageArena; quimica: ServicioQuimicoImpl } | null;
+  reservaLotesMateria?: number;
   enlace: DescriptorEnlace | null;
 }
 
@@ -432,12 +430,12 @@ export class Dueno implements CtxF0 {
   #armarMateria(): void {
     const dadas = this.#piezas.materia;
     const quimica = dadas?.quimica ?? crearServicioQuimico({ modo: 'inmediato' });
-    const lotes = dadas?.lotes ?? new PageArena(RESERVA_LOTES), desborde = dadas?.desborde ?? new PageArena(RESERVA_DESBORDE);
+    const { lotes, desborde } = dadas ?? crearArenasMateria(this.#piezas.reservaLotesMateria);
     const base = sustanciasMundo(quimica), terreno = this.terrenoPercibido;
     this.#lotes = lotes; this.#desborde = desborde;
     const raizFria = process.env.CARTA_MATERIA_FRIA_DIR;
     const archivo = this.#archivoFrio = raizFria && this.hilos === 1 && this.params.v23.guardadoCompleto
-      ? new ArchivoMateriaFria(raizFria, RESERVA_LOTES, desborde) : undefined;
+      ? new ArchivoMateriaFria(raizFria, lotes.maxCapacity, desborde) : undefined;
     this.quimica = quimica;
     this.materia = new ArenaLotes({
       lotes, desborde, paginas: terreno.paginasMateria, terreno, quimica, hilo: this.hilo, agua: base.H2O,
@@ -459,7 +457,12 @@ export class Dueno implements CtxF0 {
   muestraMemoriaMateria() {
     if (!this.#lotes || !this.#desborde) return undefined;
     const estadoFrio = this.#archivoFrio?.medidas();
-    return { lotesVivos: this.#lotes.used, bytesArena: this.#lotes.bytes + this.#desborde.bytes + (estadoFrio?.bytesFisicos ?? 0), estadoFrio };
+    return {
+      lotesVivos: this.#lotes.used, capacidadLotes: this.#lotes.capacity,
+      limiteLotes: this.#lotes.maxCapacity, limiteDesborde: this.#desborde.maxCapacity,
+      limiteLotesFisicos: this.#archivoFrio?.contenido.maxCapacity,
+      bytesArena: this.#lotes.bytes + this.#desborde.bytes + (estadoFrio?.bytesFisicos ?? 0), estadoFrio,
+    };
   }
   cerrarMateriaFria(): void {
     if (!this.#archivoFrio) return;
@@ -1046,7 +1049,7 @@ export function duenoSi(mundo: World): Dueno | undefined {
 
 /** El dueño único de `mundo`: el hilo que llama, sobre el mundo entero, con el azar del mundo. Se crea al primer uso.
  * `sustancias`: el registro químico de un punto de control que se va a cargar. */
-export function duenoDe(mundo: World, sustancias?: Uint8Array): Dueno {
+export function duenoDe(mundo: World, sustancias?: Uint8Array, reservaLotesMateria?: number): Dueno {
   const previo = duenoSi(mundo);
   if (previo) return previo;
   const buzones = new Buzones(1), azar = (): number => random(mundo);
@@ -1054,7 +1057,8 @@ export function duenoDe(mundo: World, sustancias?: Uint8Array): Dueno {
   return new Dueno(mundo, {
     hilo: 0, hilos: 1, buzones, buzon: buzones.dueno(0, azar), libros: crearLibros(1), contadores: null,
     registro: new RegistroContenido(1), azar, control: null, enlace: null,
-    materia: quimica ? { lotes: new PageArena(RESERVA_LOTES), desborde: new PageArena(RESERVA_DESBORDE), quimica } : null,
+    materia: quimica ? { ...crearArenasMateria(reservaLotesMateria), quimica } : null,
+    reservaLotesMateria,
   });
 }
 

@@ -18,7 +18,8 @@ test('WPF1 conserva orden, signos, pesos F64LE y una máscara de más de un byte
   records[8]!.policy = { weights: weightsOf(0.75) };
 
   const rows = records.map(preparePackedPerson);
-  assert.strictEqual(rows[0]!.weights, weights);
+  assert.notStrictEqual(rows[0]!.weights, weights);
+  assert.deepEqual(rows[0]!.weights, weights);
   assert.equal(rows[0]!.json, '{"id":"niño","policy":{"weights":[]},"after":-0}');
   assert.equal(rows[0]!.bytes, Buffer.byteLength(rows[0]!.json) + 1696);
   assert.deepEqual(rows[1], { json: '{"id":1}', bytes: 8 });
@@ -40,6 +41,13 @@ test('WPF1 conserva orden, signos, pesos F64LE y una máscara de más de un byte
   assert.deepEqual(Object.keys(decoded[0] as object), Object.keys(records[0]!));
   assert.ok(Object.is(records[0]!.after, -0));
   assert.ok(Object.is(weights[0], -0));
+});
+
+test('la fila preparada conserva sus pesos si el original cambia antes de escribir la página', () => {
+  const weights = weightsOf(0.125);
+  const row = preparePackedPerson({ policy: { weights } });
+  weights.fill(0.5);
+  assert.deepEqual(decode(encodePackedPeoplePage([row]), 1), [{ policy: { weights: weightsOf(0.125) } }]);
 });
 
 test('las formas ajenas a WPF1 conservan el JSON exacto', () => {

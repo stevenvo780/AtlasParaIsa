@@ -14,7 +14,7 @@ const lookupGetter: (this: object, key: PropertyKey) => unknown =
 
 export interface PackedPersonRow {
   json: string;
-  /** Original weights, borrowed until the caller encodes the page. */
+  /** Weights captured when this row was prepared, before any flush callbacks. */
   weights?: readonly number[];
   bytes: number;
 }
@@ -48,10 +48,14 @@ function packableWeights(record: Record<string, unknown>): readonly number[] | u
   const weights: unknown = weightsProperty.value;
   if (types.isProxy(weights) || !Array.isArray(weights) || weights.length !== WEIGHTS
     || Object.getPrototypeOf(weights) !== Array.prototype || 'toJSON' in weights) return;
+  const captured = new Array<number>(WEIGHTS);
   for (let i = 0; i < WEIGHTS; i++) {
-    if (!Object.hasOwn(weights, i) || lookupGetter.call(weights, i) !== undefined || !weight(weights[i])) return;
+    if (!Object.hasOwn(weights, i) || lookupGetter.call(weights, i) !== undefined) return;
+    const value: unknown = weights[i];
+    if (!weight(value)) return;
+    captured[i] = value;
   }
-  return weights;
+  return captured;
 }
 
 function jsonRow(record: Record<string, unknown>, weights?: readonly number[]): PackedPersonRow {

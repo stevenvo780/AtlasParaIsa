@@ -157,6 +157,8 @@ export class ArenaLotes implements ArenaMateria {
   private readonly anchoContenido: number;
   /** Puntero a ranura física. Cero en un lote vivo indica que está aparcado. */
   private readonly fisicas: Uint32Array | null;
+  /** Saldo de los lotes aparcados. En el modo frío todos tienen el mismo dueño. */
+  private readonly saldoFrio: bigint[] | null;
   private readonly bloques: ReturnType<typeof columnasIdentidad>[] = [];
   private readonly contenidos: ReturnType<typeof columnasContenido>[] = [];
   private readonly celda: Float64Array;
@@ -198,6 +200,7 @@ export class ArenaLotes implements ArenaMateria {
     this.datos = lotes.field('materia.lotes', Uint8Array, this.anchoIdentidad);
     this.datosContenido = contenido?.field('materia.contenido', Uint8Array, this.anchoContenido) ?? this.datos;
     this.fisicas = contenido ? lotes.field('materia.fisica', Uint32Array, 1) : null;
+    this.saldoFrio = leerFrio ? Array<bigint>(NE + 1).fill(0n) : null;
     this.celda = lotes.field('materia.celda', Float64Array, 1);
     this.dueno = lotes.field('materia.dueno', Uint32Array, 1);
     this.siguiente = lotes.field('materia.siguiente', Uint32Array, 1);
@@ -380,17 +383,24 @@ export class ArenaLotes implements ArenaMateria {
     return this.op.leerFrio(ref, this.celda[s]);
   }
 
+  private ajustarSaldoFrio(parcial: readonly bigint[], sumar: boolean): void {
+    const saldo = this.saldoFrio!;
+    for (let i = 0; i < saldo.length; i++) saldo[i] += sumar ? parcial[i] : -parcial[i];
+  }
+
   /** Solo en barrera, después de confirmar la copia durable. Valida la secuencia exacta antes de soltar memoria. */
   aparcar(l: LoteRef): void {
     if (!this.fisicas || !this.op.contenido) throw new Error('Falta la arena física de la materia fría.');
-    const s = this.propioSlot(l), fisica = this.fisica(s);
-    const esperado = this.contenido(s, this.la).pares(), guardado = this.paresFrios(s);
+    const s = this.propioSlot(l), fisica = this.fisica(s), contenido = this.contenidoFisico(fisica, this.la);
+    const esperado = contenido.pares(), guardado = this.paresFrios(s);
     if (esperado.length !== guardado.length || !esperado.every((v, i) => Object.is(v, guardado[i]))) {
       throw new Error(`La copia fría del lote ${l} no coincide con la composición residente.`);
     }
+    const saldo = balancePares(contenido, this.sustancia);
     const previas = this.retirarExtra.length;
     this.escribirFisico(fisica, this.la.vaciar(), this.nuevasA);
     Atomics.store(this.fisicas, s, 0);
+    this.ajustarSaldoFrio(saldo, true);
     for (let i = previas; i < this.retirarExtra.length; i++) this.op.desborde.release(this.retirarExtra[i]!);
     this.retirarExtra.length = previas;
     this.op.contenido.release(fisica);
@@ -402,6 +412,7 @@ export class ArenaLotes implements ArenaMateria {
     const s = this.propioLogico(l);
     if (this.fisica(s) >= 0) return;
     const m = leerPares(this.paresFrios(s), this.la);
+    const saldo = balancePares(m, this.sustancia);
     const fisica = this.op.contenido.reserve(), nuevas = this.nuevasA;
     nuevas.length = 0;
     try { this.reservarEn(fisica, m, nuevas); }
@@ -413,6 +424,7 @@ export class ArenaLotes implements ArenaMateria {
     }
     this.escribirFisico(fisica, m, nuevas);
     Atomics.store(this.fisicas, s, puntero(fisica));
+    this.ajustarSaldoFrio(saldo, false);
   }
 
   lotes(celda: number, rol: Rol, destino: Float64Array): number {
@@ -434,7 +446,21 @@ export class ArenaLotes implements ArenaMateria {
   /** Lo que hay en la ranura s en `m`: sus ranuras y su desborde en orden, y el calor al final si no es 0. */
   private contenido(s: number, m: Lista): Lista {
     const fisica = this.fisica(s);
-    if (fisica < 0) return leerPares(this.paresFrios(s), m);
+    if (fisica >= 0) return this.contenidoFisico(fisica, m);
+    leerPares(this.paresFrios(s), m);
+    // VMAT admite el calor en cualquier posición. La arena física siempre lo emite al final.
+    const indice = m.indice(0), ultimo = m.n - 1;
+    if (indice >= 0 && indice < ultimo) {
+      const calor = m.q[indice]!;
+      m.id.copyWithin(indice, indice + 1, m.n);
+      m.q.copyWithin(indice, indice + 1, m.n);
+      m.id[ultimo] = 0;
+      m.q[ultimo] = calor;
+    }
+    return m;
+  }
+
+  private contenidoFisico(fisica: number, m: Lista): Lista {
     const b = this.bloqueContenido(fisica), i = fisica % LOTES_POR_BLOQUE, inicio = i * RANURAS;
     m.vaciar();
     for (let j = inicio; j < inicio + RANURAS; j++) {
@@ -847,9 +873,11 @@ export class ArenaLotes implements ArenaMateria {
   saldoPropio(): bigint[] { return this.sumar(true); }
 
   private sumar(soloPropios: boolean): bigint[] {
-    const saldo = Array<bigint>(NE + 1).fill(0n);
+    const saldo = this.saldoFrio?.slice() ?? Array<bigint>(NE + 1).fill(0n);
     for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s) && (!soloPropios || this.duenoDe(s) === this.op.hilo)) {
-      const parcial = balancePares(this.contenido(s, this.la), this.sustancia);
+      const fisica = this.fisica(s);
+      if (fisica < 0) continue;
+      const parcial = balancePares(this.contenidoFisico(fisica, this.la), this.sustancia);
       for (let i = 0; i < saldo.length; i++) saldo[i] += parcial[i];
     }
     return saldo;
@@ -862,15 +890,19 @@ export class ArenaLotes implements ArenaMateria {
     this.cargarPorRanura(lotes.length + libres.length, s => porSlot.get(s) ?? retirados.get(s));
   }
 
-  /** Instala en el mismo orden de encadenado que la carga desde arrays. */
-  cargarPorRanura(cantidad: number, leer: (ranura: number) => LoteGuardado | LoteRef | undefined): void {
+  /** Instala en el mismo orden de encadenado que la carga desde arrays. Si `fria` devuelve true, el llamador ya
+   * archivó la composición exacta de ese lote bajo `leerFrio`. La carga no reserva espacio físico para esos lotes. */
+  cargarPorRanura(cantidad: number, leer: (ranura: number) => LoteGuardado | LoteRef | undefined,
+    fria?: (lote: LoteGuardado) => boolean): void {
     if (this.op.lotes.slots !== 0) throw new Error('La carga de materia exige una arena vacía.');
     let primerLibre = cantidad, ultimoLibre = -1;
     for (let s = 0; s < cantidad; s++) {
-      if (this.op.lotes.reserve() !== s) throw new Error('Ranuras de materia no consecutivas durante la carga.');
-      const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
       const lote = leer(s);
       if (lote === undefined) throw new Error(`Falta la ranura ${s} de materia.`);
+      const celda = typeof lote === 'number' ? -1 : this.celdaDe(lote.celda, lote.rol);
+      const saldoFrio = typeof lote !== 'number' && fria?.(lote) ? this.saldoDeCargaFria(s, lote, celda) : null;
+      if (this.op.lotes.reserve() !== s) throw new Error('Ranuras de materia no consecutivas durante la carga.');
+      const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
       if (typeof lote === 'number') {
         const gen = genDe(lote);
         b.gen[i] = gen;
@@ -881,9 +913,12 @@ export class ArenaLotes implements ArenaMateria {
         }
       } else {
         b.gen[i] = genDe(lote.ref);
-        if (this.fisicas) Atomics.store(this.fisicas, s, puntero(this.op.contenido!.reserve()));
-        this.escribirUno(s, leerPares(lote.pares, this.lp));
-        this.instalar(s, lote.rol, this.celdaDe(lote.celda, lote.rol), lote.forma, lote.dueno);
+        if (saldoFrio) this.ajustarSaldoFrio(saldoFrio, true);
+        else {
+          if (this.fisicas) Atomics.store(this.fisicas, s, puntero(this.op.contenido!.reserve()));
+          this.escribirUno(s, leerPares(lote.pares, this.lp));
+        }
+        this.instalar(s, lote.rol, celda, lote.forma, lote.dueno);
       }
     }
     // Se devuelven después de asignar todas las ranuras. El asignador LIFO las reutiliza en orden descendente.
@@ -891,5 +926,14 @@ export class ArenaLotes implements ArenaMateria {
       const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
       if (b.marcas[i * MARCAS + ACTIVO] === 0 && b.gen[i] < GEN_MAX) this.op.lotes.release(s);
     }
+  }
+
+  private saldoDeCargaFria(s: number, lote: LoteGuardado, celda: number): bigint[] {
+    if (!this.saldoFrio || !this.fisicas) throw new Error('La carga fría requiere una arena física y un lector.');
+    if (slotDe(natural(lote.ref, 'Referencia de lote')) !== s || celda < 0
+      || this.op.terreno.duenoChunk[this.op.terreno.chunkDe(celda)] !== this.op.hilo) {
+      throw new Error(`El lote ${lote.ref} no identifica una ranura propia con celda para la carga fría.`);
+    }
+    return balancePares(leerPares(lote.pares, this.lp), this.sustancia);
   }
 }

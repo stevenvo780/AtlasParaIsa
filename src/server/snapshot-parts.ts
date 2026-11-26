@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
+import { clavesJsonUnicas } from '../shared/json-keys.js';
 import type { World } from '../world/index.js';
 import { faunaCorteDe, type TramoFaunaCorte, type TramoFaunaVerificada } from '../world/motor/fauna-corte.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
@@ -91,40 +92,7 @@ interface PageCache {
 /** JSON.parse accepts duplicate keys. A manifest must not hide an earlier encoding
  * or tile source through last-key-wins semantics, including inside its metadata. */
 function assertUniqueKeys(body: string): void {
-  const stack: (Set<string> | null)[] = [];
-  const pool: Set<string>[] = [];
-  const len = body.length;
-  for (let i = 0; i < len; i++) {
-    const code = body.charCodeAt(i);
-    if (code === 123 /* { */) {
-      const set = pool.pop() ?? new Set<string>();
-      stack.push(set);
-    } else if (code === 91 /* [ */) {
-      stack.push(null);
-    } else if (code === 125 /* } */ || code === 93 /* ] */) {
-      const top = stack.pop();
-      if (top) { top.clear(); pool.push(top); }
-    } else if (code === 34 /* " */) {
-      const start = i++;
-      let escaped = false;
-      for (; i < len; i++) {
-        const ch = body.charCodeAt(i);
-        if (ch === 92 /* \ */) { escaped = true; i++; }
-        else if (ch === 34 /* " */) break;
-      }
-      let next = i + 1;
-      while (next < len) {
-        const ws = body.charCodeAt(next);
-        if (ws === 32 || ws === 9 || ws === 10 || ws === 13) next++; else break;
-      }
-      if (next < len && body.charCodeAt(next) === 58 /* : */) {
-        const key = escaped ? JSON.parse(body.slice(start, i + 1)) as string : body.slice(start + 1, i);
-        const seen = stack[stack.length - 1];
-        if (!seen || seen.has(key)) failure('duplicate metadata key');
-        seen.add(key);
-      }
-    }
-  }
+  if (!clavesJsonUnicas(body)) failure('duplicate metadata key');
 }
 
 function parsePackedPeopleJSON(body: string): unknown {

@@ -1,5 +1,6 @@
 import { types } from 'node:util';
 import { stringifyExact } from '../../shared/exact-json.js';
+import { clavesJsonUnicas } from '../../shared/json-keys.js';
 import type { Animal } from '../animals.js';
 import type { ParteMundo } from './reunir.js';
 
@@ -136,7 +137,9 @@ export function recibirFaunaDirecta(bloques: readonly BloqueFaunaCorte[], cantid
   const animales: Animal[] = [], tramos: TramoFaunaVerificada[] = [];
   for (const { filas, cuerpo } of bloques) {
     if (filas > (cuerpo.byteLength + 1) / 3) throw new Error('Cantidad de fauna directa inválida.');
-    const filasTexto = utf8Estricto.decode(cuerpo).split('\n', filas + 1);
+    const texto = utf8Estricto.decode(cuerpo);
+    if (!clavesJsonUnicas(texto)) throw new Error('Fauna directa con claves repetidas.');
+    const filasTexto = texto.split('\n', filas + 1);
     if (filasTexto.length !== filas) throw new Error('Cantidad de fauna directa inválida.');
     const desde = animales.length;
     for (const fila of filasTexto) {

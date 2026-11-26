@@ -4,7 +4,9 @@ import { deserialize } from 'node:v8';
 import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
+import { syncFauna } from '../src/world/animals.js';
 import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
+import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { ORDEN, duenoSi, type Migrante } from '../src/world/motor/contexto.js';
 import { TipoIntento, unSoloDueno } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
@@ -20,6 +22,16 @@ test('la recepción directa rechaza una clave repetida aunque venga escapada', (
 
 test('el corte sellado conserva fauna de dos dueños y una cesión en vuelo byte a byte', async t => {
   const mundo = createWorld(42, parseParams({ v23: { ...escalon('duenos'), guardadoCompleto: true } }));
+  const paginas = Object.values(mundo.chunks);
+  const reparto = repartirPorTramos(paginas.map(p => p.cx), paginas.map(p => p.cy), 2);
+  const parcelaRemota = mundo.tiles.find(tile => tile.terrain !== 'water' && (tile.x & 15) === 8 && (tile.y & 15) === 8
+    && paginas.some((p, i) => reparto[i] === 1 && p.cx === tile.x >> 4 && p.cy === tile.y >> 4));
+  const animalRemoto = mundo.animals.find(a => a.species !== 'fish');
+  assert.ok(parcelaRemota && animalRemoto);
+  animalRemoto.x = parcelaRemota.x;
+  animalRemoto.y = parcelaRemota.y;
+  animalRemoto.target = { x: parcelaRemota.x, y: parcelaRemota.y };
+  syncFauna(mundo.tiles, mundo.animals);
   const motor = crearMotor(mundo, { ...unSoloDueno(42), hilos: 2,
     instantaneaTransferible: true, faunaCorteDirecta: true });
   const anterior = new Store(':memory:', { snapshotPackedPeople: true });

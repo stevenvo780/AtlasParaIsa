@@ -1462,17 +1462,18 @@ export function takeFood(world: World, person: Point, requested: number): number
 const lotesAguaDisponible = { suelo: -1, agua: -1, vida: -1, aire: -1 };
 
 /** Lee el agua actual de una celda propia y, si corresponde, la de sus cisternas. La celda es del terreno de `c`. */
-export function aguaMaterialDisponible(c: CtxLeyMateria, point: Point, obra: boolean, celda = c.terreno.celda(point.x, point.y)): number {
+export function aguaMaterialDisponible(world: World, c: CtxLeyMateria, point: Point, obra: boolean,
+  celda = c.terreno.celda(point.x, point.y)): number {
   if (celda < 0 || c.terreno.duenoChunk[c.terreno.chunkDe(celda)] !== c.hilo) return 0;
   const { agua } = lotesDeCelda(c, celda, lotesAguaDisponible);
   const total = agua >= 0 ? c.materia.vista(agua).agua * KG_POR_CUANTO_AGUA : 0;
-  if (!obra || c.mundo.structures.length === 0) return total;
-  return obraCercana(c.mundo, point, 0.5).reduce((suma, s) => suma + stockObra(c, s, 'agua'), total);
+  if (!obra || world.structures.length === 0) return total;
+  return obraCercana(world, point, 0.5).reduce((suma, s) => suma + stockObra(c, s, 'agua'), total);
 }
 
 /** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */
 export function waterAvailable(world: World, point: Point): number {
-  if (ley(world, 'obra')) return aguaMaterialDisponible(ctxMateriaDe(world), point, true);
+  if (ley(world, 'obra')) return aguaMaterialDisponible(world, ctxMateriaDe(world), point, true);
   let total = tileAt(world, point)?.drinkingWater ?? 0;
   if (paramsOf(world).construccion.modular) return total + functionalNear(world, point, 0.5)
     .reduce((sum, s) => sum + (s.components.includes('cistern') ? s.water : 0), 0);

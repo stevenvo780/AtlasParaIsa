@@ -148,7 +148,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
     ? reserva >= pasos * (pasoJ + 6 * basal) + trabajo * (TRABAJO_J_TICK + basal)
     : planAffordable(person, payload, pasos, trabajo);
   const aguaLibre = (p: Point, celda?: number): number => materia
-    ? aguaMaterialDisponible(materia, p, obra, celda)
+    ? aguaMaterialDisponible(world, materia, p, obra, celda)
     : waterAvailable(world, p);
   let comidaCargada = 0, aguaCargada = 0;
   if (cuerpo && materia) for (const lote of carga) {

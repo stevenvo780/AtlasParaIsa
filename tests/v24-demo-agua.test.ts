@@ -26,10 +26,10 @@ test('sin agua material no hay sorbo ni alivio de sed en una charca', () => {
     const celda = c.terreno.celda(charca.x, charca.y);
     const { agua } = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
     assert.ok(agua >= 0);
-    const aguaInicial = aguaMaterialDisponible(c, charca, false, celda);
+    const aguaInicial = aguaMaterialDisponible(mundo, c, charca, false, celda);
     assert.ok(aguaInicial > 0);
-    assert.equal(aguaInicial, aguaMaterialDisponible(c, charca, false));
-    assert.equal(aguaMaterialDisponible(c, charca, false, -1), 0);
+    assert.equal(aguaInicial, aguaMaterialDisponible(mundo, c, charca, false));
+    assert.equal(aguaMaterialDisponible(mundo, c, charca, false, -1), 0);
     const apartado = c.materia.nuevo(Rol.Objeto, -1, 0);
     const quitarAgua = (origen: number, cuantos: number) => {
       const trasladados = c.materia.moverParte(origen, apartado, { parte: Parte.Exacta, esp: H2O, cuantos, kappa: null });
@@ -37,7 +37,7 @@ test('sin agua material no hay sorbo ni alivio de sed en una charca', () => {
     };
     quitarAgua(cuerpo.reserva, Math.floor(c.materia.cuantos(cuerpo.reserva, H2O) / 2));
     if (agotada) quitarAgua(agua, c.materia.cuantos(agua, H2O));
-    assert.equal(aguaMaterialDisponible(c, charca, false, celda), agotada ? 0 : aguaInicial);
+    assert.equal(aguaMaterialDisponible(mundo, c, charca, false, celda), agotada ? 0 : aguaInicial);
 
     persona.x = charca.x;
     persona.y = charca.y;

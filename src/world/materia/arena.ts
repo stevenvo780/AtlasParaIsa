@@ -15,6 +15,10 @@ interface OpcionesArena {
   lotes: MemoriaMateria;
   desborde: MemoriaMateria;
   paginas: MemoriaMateria;
+  /** Solo para un dueño. El coordinador reserva los bloques físicos en F0. */
+  contenido?: MemoriaMateria;
+  /** Composición ya confirmada del lote, en el orden de `muestra`. */
+  leerFrio?: (ref: LoteRef, celda: number) => Float64Array;
   terreno: Pick<Terreno, 'chunkDe' | 'duenoChunk'>;
   quimica: Pick<ServicioQuimico, 'sustancia'>;
   hilo: Hilo;
@@ -24,7 +28,9 @@ interface OpcionesArena {
 
 const RANURAS = 8;
 const MARCAS = 4;
-const BYTES_POR_LOTE = 120;
+const BYTES_CONTENIDO = 108;
+const BYTES_IDENTIDAD = 12;
+const BYTES_POR_LOTE = BYTES_CONTENIDO + BYTES_IDENTIDAD;
 const ACTIVO = 1;
 const USADO = 2; // Distingue la primera asignación de la reutilización de una ranura.
 const GEN_MAX = genDe(Number.MAX_SAFE_INTEGER);
@@ -121,24 +127,38 @@ export function desbordeDeEspecies(especies: number): number {
 /** Entradas y salidas de una ecuación agrupadas por sustancia (id, ν, id, ν…), ya comprobado su balance. */
 interface Grupos { entradas: Float64Array; salidas: Float64Array }
 
-function columnasLote(bytes: Uint8Array, bloque: number) {
+function columnasContenido(bytes: Uint8Array, bloque: number, ancho: number) {
   const n = LOTES_POR_BLOQUE;
-  const base = bytes.byteOffset + bloque * n * BYTES_POR_LOTE;
+  const base = bytes.byteOffset + bloque * n * ancho;
   const memoria = bytes.buffer;
   return {
     esp: new Uint32Array(memoria, base, n * RANURAS),
     cant: new Float64Array(memoria, base + 32 * n, n * RANURAS),
     calor: new Float64Array(memoria, base + 96 * n, n),
     exceso: new Uint32Array(memoria, base + 104 * n, n),
-    marcas: new Uint8Array(memoria, base + 108 * n, n * MARCAS),
-    forma: new Uint32Array(memoria, base + 112 * n, n),
-    gen: new Uint32Array(memoria, base + 116 * n, n),
+  };
+}
+
+function columnasIdentidad(bytes: Uint8Array, bloque: number, ancho: number) {
+  const n = LOTES_POR_BLOQUE;
+  const base = bytes.byteOffset + ((bloque + 1) * ancho - BYTES_IDENTIDAD) * n;
+  const memoria = bytes.buffer;
+  return {
+    marcas: new Uint8Array(memoria, base, n * MARCAS),
+    forma: new Uint32Array(memoria, base + 4 * n, n),
+    gen: new Uint32Array(memoria, base + 8 * n, n),
   };
 }
 
 export class ArenaLotes implements ArenaMateria {
   private readonly datos: Uint8Array;
-  private readonly bloques: ReturnType<typeof columnasLote>[] = [];
+  private readonly anchoIdentidad: number;
+  private readonly datosContenido: Uint8Array;
+  private readonly anchoContenido: number;
+  /** Puntero a ranura física. Cero en un lote vivo indica que está aparcado. */
+  private readonly fisicas: Uint32Array | null;
+  private readonly bloques: ReturnType<typeof columnasIdentidad>[] = [];
+  private readonly contenidos: ReturnType<typeof columnasContenido>[] = [];
   private readonly celda: Float64Array;
   private readonly dueno: Uint32Array;
   private readonly siguiente: Uint32Array;
@@ -148,6 +168,7 @@ export class ArenaLotes implements ArenaMateria {
   private readonly extraSig: Uint32Array;
   private readonly retirar: number[] = [];
   private readonly retirarExtra: number[] = [];
+  private readonly retirarFisicas: number[] = [];
   // I-B: una garantía se resuelve en dos ticks. Las tres cubetas incluyen el tick en curso.
   private readonly garantizados = [new Set<number>(), new Set<number>(), new Set<number>()];
   private readonly abonados = [new Set<number>(), new Set<number>(), new Set<number>()];
@@ -165,10 +186,18 @@ export class ArenaLotes implements ArenaMateria {
   private readonly asiento = new Float64Array(NE + 1);
 
   constructor(private readonly op: OpcionesArena) {
-    const { lotes, paginas, desborde } = op;
+    const { lotes, paginas, desborde, contenido, leerFrio } = op;
     natural(op.hilo, 'Hilo', UINT32_MAX);
+    if (contenido && (op.hilo !== 0 || contenido === lotes || contenido === desborde || contenido === paginas)) {
+      throw new Error('La composición separada requiere una arena física independiente y un solo dueño.');
+    }
+    if (leerFrio && !contenido) throw new Error('La materia fría requiere una arena física independiente.');
     // M1 reserva bloques completos en F0. Al crecer el SAB las columnas anteriores mantienen su desplazamiento.
-    this.datos = lotes.field('materia.lotes', Uint8Array, BYTES_POR_LOTE);
+    this.anchoIdentidad = contenido ? BYTES_IDENTIDAD : BYTES_POR_LOTE;
+    this.anchoContenido = contenido ? BYTES_CONTENIDO : BYTES_POR_LOTE;
+    this.datos = lotes.field('materia.lotes', Uint8Array, this.anchoIdentidad);
+    this.datosContenido = contenido?.field('materia.contenido', Uint8Array, this.anchoContenido) ?? this.datos;
+    this.fisicas = contenido ? lotes.field('materia.fisica', Uint32Array, 1) : null;
     this.celda = lotes.field('materia.celda', Float64Array, 1);
     this.dueno = lotes.field('materia.dueno', Uint32Array, 1);
     this.siguiente = lotes.field('materia.siguiente', Uint32Array, 1);
@@ -177,9 +206,11 @@ export class ArenaLotes implements ArenaMateria {
     this.extraCant = desborde.field('materia.cant', Float64Array, 1);
     this.extraSig = desborde.field('materia.siguiente', Uint32Array, 1);
     // Una vista que no crece con la memoria pierde en silencio lo que se escribe tras su final: sería materia destruida.
-    for (const columna of [this.datos, this.celda, this.dueno, this.siguiente, this.primero, this.extraEsp, this.extraCant, this.extraSig]) {
+    for (const columna of [this.datos, this.datosContenido, this.fisicas, this.celda, this.dueno, this.siguiente,
+      this.primero, this.extraEsp, this.extraCant, this.extraSig]) {
+      if (!columna) continue;
       const memoria = columna.buffer;
-      if (!(memoria instanceof SharedArrayBuffer) || !('growable' in memoria && memoria.growable)) {
+      if (!(memoria instanceof SharedArrayBuffer) || !memoria.growable) {
         throw new Error('La materia exige columnas sobre un SharedArrayBuffer crecible.');
       }
     }
@@ -204,11 +235,21 @@ export class ArenaLotes implements ArenaMateria {
 
   private bloque(s: number) {
     const i = Math.floor(s / LOTES_POR_BLOQUE);
-    if (i >= this.bloques.length && this.datos.byteLength < (i + 1) * LOTES_POR_BLOQUE * BYTES_POR_LOTE) {
+    if (i >= this.bloques.length && this.datos.byteLength < (i + 1) * LOTES_POR_BLOQUE * this.anchoIdentidad) {
       throw new Error(`Falta el bloque ${i} de materia que debe reservarse en F0.`);
     }
-    return this.bloques[i] ??= columnasLote(this.datos, i);
+    return this.bloques[i] ??= columnasIdentidad(this.datos, i, this.anchoIdentidad);
   }
+
+  private bloqueContenido(fisica: number) {
+    const i = Math.floor(fisica / LOTES_POR_BLOQUE);
+    if (i >= this.contenidos.length && this.datosContenido.byteLength < (i + 1) * LOTES_POR_BLOQUE * this.anchoContenido) {
+      throw new Error(`Falta el bloque físico ${i} de materia que debe reservarse en F0.`);
+    }
+    return this.contenidos[i] ??= columnasContenido(this.datosContenido, i, this.anchoContenido);
+  }
+
+  private fisica(s: number): number { return this.fisicas ? Atomics.load(this.fisicas, s) - 1 : s; }
 
   private celdaDe(celda: number, rol: Rol): number {
     if (celda === -1) return celda;
@@ -250,10 +291,17 @@ export class ArenaLotes implements ArenaMateria {
     if (celda !== -1 && (rol <= Rol.Aire || rol === Rol.Mar || rol === Rol.Cielo) && this.lotes(celda, rol, new Float64Array(0))) {
       throw new Error(`Lote de rol ${rol} duplicado en celda ${celda}.`);
     }
-    const s = this.op.lotes.reserve();
+    const fisica = this.op.contenido?.reserve();
+    let s: number;
+    try { s = this.op.lotes.reserve(); }
+    catch (error) {
+      if (fisica !== undefined) this.op.contenido!.release(fisica);
+      throw error;
+    }
     puntero(s);
     const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
     if (b.marcas[i * MARCAS + USADO]) b.gen[i] = natural(b.gen[i] + 1, 'Generación de lote', GEN_MAX);
+    if (fisica !== undefined) Atomics.store(this.fisicas!, s, puntero(fisica));
     this.instalar(s, rol, celda, forma, this.op.hilo);
     return refDe(s, b.gen[i]);
   }
@@ -261,7 +309,8 @@ export class ArenaLotes implements ArenaMateria {
   liberar(l: LoteRef): void {
     const s = this.propioSlot(l);
     const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
-    if (b.calor[i] !== 0 || b.esp[i * RANURAS] || b.exceso[i]) {
+    const fisica = this.fisica(s), carga = this.bloqueContenido(fisica), local = fisica % LOTES_POR_BLOQUE;
+    if (carga.calor[local] !== 0 || carga.esp[local * RANURAS] || carga.exceso[local]) {
       throw new Error(`No se puede liberar un lote con materia o calor: ${l}`);
     }
     Atomics.store(b.marcas, i * MARCAS + ACTIVO, 0);
@@ -276,6 +325,10 @@ export class ArenaLotes implements ArenaMateria {
       if (anterior === -1) Atomics.store(this.primero, celda, sig);
       else Atomics.store(this.siguiente, anterior, sig);
     }
+    if (this.fisicas) {
+      Atomics.store(this.fisicas, s, 0);
+      this.retirarFisicas.push(fisica);
+    }
     if (b.gen[i] < GEN_MAX) this.retirar.push(s);
   }
 
@@ -283,8 +336,10 @@ export class ArenaLotes implements ArenaMateria {
   barrera(): void {
     for (const s of this.retirar) this.op.lotes.release(s);
     for (const s of this.retirarExtra) this.op.desborde.release(s);
+    for (const s of this.retirarFisicas) this.op.contenido!.release(s);
     this.retirar.length = 0;
     this.retirarExtra.length = 0;
+    this.retirarFisicas.length = 0;
     this.turno = (this.turno + 1) % this.garantizados.length;
     this.garantizados[this.turno].clear();
     this.abonados[this.turno].clear();
@@ -306,10 +361,58 @@ export class ArenaLotes implements ArenaMateria {
     if (!this.vivo(l)) throw new Error(`Lote caducado: ${l}`);
     return slotDe(l);
   }
-  private propioSlot(l: LoteRef): number {
+  private propioLogico(l: LoteRef): number {
     const s = this.vivoSlot(l);
     if (this.duenoDe(s) !== this.op.hilo) throw new Error(`Lote ajeno: ${l}`);
     return s;
+  }
+  private propioSlot(l: LoteRef): number {
+    const s = this.propioLogico(l);
+    if (this.fisica(s) < 0) throw new Error(`Hay que reponer el lote aparcado antes de mutarlo: ${l}`);
+    return s;
+  }
+
+  estaAparcado(l: LoteRef): boolean { return this.vivo(l) && this.fisica(slotDe(l)) < 0; }
+
+  private paresFrios(s: number): Float64Array {
+    const ref = refDe(s, this.bloque(s).gen[s % LOTES_POR_BLOQUE]);
+    if (!this.op.leerFrio) throw new Error(`Falta el lector de la composición fría del lote ${ref}.`);
+    return this.op.leerFrio(ref, this.celda[s]);
+  }
+
+  /** Solo en barrera, después de confirmar la copia durable. Valida la secuencia exacta antes de soltar memoria. */
+  aparcar(l: LoteRef): void {
+    if (!this.fisicas || !this.op.contenido) throw new Error('Falta la arena física de la materia fría.');
+    const s = this.propioSlot(l), fisica = this.fisica(s);
+    const esperado = this.contenido(s, this.la).pares(), guardado = this.paresFrios(s);
+    if (esperado.length !== guardado.length || !esperado.every((v, i) => Object.is(v, guardado[i]))) {
+      throw new Error(`La copia fría del lote ${l} no coincide con la composición residente.`);
+    }
+    const previas = this.retirarExtra.length;
+    this.escribirFisico(fisica, this.la.vaciar(), this.nuevasA);
+    Atomics.store(this.fisicas, s, 0);
+    for (let i = previas; i < this.retirarExtra.length; i++) this.op.desborde.release(this.retirarExtra[i]!);
+    this.retirarExtra.length = previas;
+    this.op.contenido.release(fisica);
+  }
+
+  /** Solo en F0, con espacio físico y de desborde reservado. Publica el enlace después de rellenar la composición. */
+  reponer(l: LoteRef): void {
+    if (!this.fisicas || !this.op.contenido) throw new Error('Falta la arena física de la materia fría.');
+    const s = this.propioLogico(l);
+    if (this.fisica(s) >= 0) return;
+    const m = leerPares(this.paresFrios(s), this.la);
+    const fisica = this.op.contenido.reserve(), nuevas = this.nuevasA;
+    nuevas.length = 0;
+    try { this.reservarEn(fisica, m, nuevas); }
+    catch (error) {
+      for (const extra of nuevas) this.op.desborde.release(extra);
+      nuevas.length = 0;
+      this.op.contenido.release(fisica);
+      throw error;
+    }
+    this.escribirFisico(fisica, m, nuevas);
+    Atomics.store(this.fisicas, s, puntero(fisica));
   }
 
   lotes(celda: number, rol: Rol, destino: Float64Array): number {
@@ -330,7 +433,9 @@ export class ArenaLotes implements ArenaMateria {
 
   /** Lo que hay en la ranura s en `m`: sus ranuras y su desborde en orden, y el calor al final si no es 0. */
   private contenido(s: number, m: Lista): Lista {
-    const b = this.bloque(s), i = s % LOTES_POR_BLOQUE, inicio = i * RANURAS;
+    const fisica = this.fisica(s);
+    if (fisica < 0) return leerPares(this.paresFrios(s), m);
+    const b = this.bloqueContenido(fisica), i = fisica % LOTES_POR_BLOQUE, inicio = i * RANURAS;
     m.vaciar();
     for (let j = inicio; j < inicio + RANURAS; j++) {
       const id = b.esp[j]!;
@@ -346,9 +451,23 @@ export class ArenaLotes implements ArenaMateria {
     return m;
   }
   especies(l: LoteRef, ids: Uint32Array, cantidades?: Float64Array): number {
-    const s = this.vivoSlot(l), b = this.bloque(s), i = s % LOTES_POR_BLOQUE, inicio = i * RANURAS;
+    const s = this.vivoSlot(l), fisica = this.fisica(s);
     const limite = cantidades ? Math.min(ids.length, cantidades.length) : ids.length;
     let n = 0;
+    if (fisica < 0) {
+      const m = leerPares(this.paresFrios(s), this.la);
+      for (let k = 0; k < m.n; k++) {
+        const id = m.id[k]!;
+        if (id === 0) continue;
+        if (n < limite) {
+          ids[n] = id;
+          if (cantidades) cantidades[n] = m.q[k]!;
+        }
+        n++;
+      }
+      return n;
+    }
+    const b = this.bloqueContenido(fisica), i = fisica % LOTES_POR_BLOQUE, inicio = i * RANURAS;
     for (let j = inicio; j < inicio + RANURAS; j++) {
       const id = b.esp[j]!;
       if (id === 0) continue;
@@ -374,7 +493,9 @@ export class ArenaLotes implements ArenaMateria {
   cuantos(l: LoteRef, id: SustanciaId): number {
     const s = this.vivoSlot(l);
     if (id === 0) return 0; // el calor no es una sustancia: `calor`
-    const b = this.bloque(s), i = s % LOTES_POR_BLOQUE, inicio = i * RANURAS;
+    const fisica = this.fisica(s);
+    if (fisica < 0) return leerPares(this.paresFrios(s), this.la).get(id);
+    const b = this.bloqueContenido(fisica), i = fisica % LOTES_POR_BLOQUE, inicio = i * RANURAS;
     for (let j = inicio; j < inicio + RANURAS; j++) if (b.esp[j] === id) return b.cant[j]!;
     let restantes = this.op.desborde.slots;
     for (let p = Atomics.load(b.exceso, i); p && restantes-- > 0; p = Atomics.load(this.extraSig, p - 1)) {
@@ -383,8 +504,9 @@ export class ArenaLotes implements ArenaMateria {
     return 0;
   }
   calor(l: LoteRef): number {
-    const s = this.vivoSlot(l);
-    return this.bloque(s).calor[s % LOTES_POR_BLOQUE];
+    const s = this.vivoSlot(l), fisica = this.fisica(s);
+    if (fisica < 0) return leerPares(this.paresFrios(s), this.la).get(0);
+    return this.bloqueContenido(fisica).calor[fisica % LOTES_POR_BLOQUE];
   }
 
   /** Reserva, antes de escribir nada, el desborde que les falta a estas composiciones: si no alcanza la memoria, ningún
@@ -394,16 +516,16 @@ export class ArenaLotes implements ArenaMateria {
     this.nuevasA.length = 0;
     this.nuevasB.length = 0;
     try {
-      this.reservarEn(s, m, this.nuevasA);
-      if (md) this.reservarEn(d, md, this.nuevasB);
+      this.reservarEn(this.fisica(s), m, this.nuevasA);
+      if (md) this.reservarEn(this.fisica(d), md, this.nuevasB);
     } catch (error) {
       this.retirarExtra.push(...this.nuevasA, ...this.nuevasB);
       throw error;
     }
   }
-  private reservarEn(s: number, m: Lista, nuevas: number[]): void {
+  private reservarEn(fisica: number, m: Lista, nuevas: number[]): void {
     let faltan = m.especies() - RANURAS;
-    for (let p = this.bloque(s).exceso[s % LOTES_POR_BLOQUE]; p && faltan > 0; p = this.extraSig[p - 1]) faltan--;
+    for (let p = this.bloqueContenido(fisica).exceso[fisica % LOTES_POR_BLOQUE]; p && faltan > 0; p = this.extraSig[p - 1]) faltan--;
     while (nuevas.length < faltan) {
       nuevas.push(this.op.desborde.reserve());
       puntero(nuevas[nuevas.length - 1]);
@@ -416,7 +538,11 @@ export class ArenaLotes implements ArenaMateria {
   }
 
   private escribir(s: number, m: Lista, nuevas: number[]): void {
-    const b = this.bloque(s), local = s % LOTES_POR_BLOQUE;
+    this.escribirFisico(this.fisica(s), m, nuevas);
+  }
+
+  private escribirFisico(fisica: number, m: Lista, nuevas: number[]): void {
+    const b = this.bloqueContenido(fisica), local = fisica % LOTES_POR_BLOQUE;
     let i = local * RANURAS;
     const fin = i + RANURAS;
     let p = b.exceso[local];
@@ -437,10 +563,10 @@ export class ArenaLotes implements ArenaMateria {
       }
       this.extraEsp[extra] = id;
       this.extraCant[extra] = q;
-      this.enlazarExtra(s, anterior, puntero(extra));
+      this.enlazarExtra(b.exceso, local, anterior, puntero(extra));
       anterior = extra;
     }
-    this.enlazarExtra(s, anterior, 0);
+    this.enlazarExtra(b.exceso, local, anterior, 0);
     while (p !== 0) {
       const extra = p - 1;
       p = this.extraSig[extra];
@@ -453,9 +579,8 @@ export class ArenaLotes implements ArenaMateria {
   }
 
   /** Enlaza el desborde; un enlace que ya vale p no se vuelve a escribir (el almacén atómico es lo caro). */
-  private enlazarExtra(s: number, anterior: number, p: number): void {
+  private enlazarExtra(exceso: Uint32Array, i: number, anterior: number, p: number): void {
     if (anterior === -1) {
-      const exceso = this.bloque(s).exceso, i = s % LOTES_POR_BLOQUE;
       if (exceso[i] !== p) Atomics.store(exceso, i, p);
     } else if (this.extraSig[anterior] !== p) Atomics.store(this.extraSig, anterior, p);
   }
@@ -494,8 +619,9 @@ export class ArenaLotes implements ArenaMateria {
 
   moverCalor(de: LoteRef, a: LoteRef, j: number): number {
     const s = this.propioSlot(de), d = this.propioSlot(a);
-    const origen = this.bloque(s).calor, destino = this.bloque(d).calor;
-    const i = s % LOTES_POR_BLOQUE, k = d % LOTES_POR_BLOQUE;
+    const origenFisico = this.fisica(s), destinoFisico = this.fisica(d);
+    const origen = this.bloqueContenido(origenFisico).calor, destino = this.bloqueContenido(destinoFisico).calor;
+    const i = origenFisico % LOTES_POR_BLOQUE, k = destinoFisico % LOTES_POR_BLOQUE;
     const usar = Math.min(natural(j, 'Calor'), origen[i]);
     if (s === d || !usar) return 0;
     const calor = natural(destino[k] + usar, 'Calor');
@@ -658,7 +784,7 @@ export class ArenaLotes implements ArenaMateria {
     const m = this.contenido(s, this.la), partes: { esp: Readonly<Sustancia>; q: number }[] = [];
     for (let k = 0; k < m.n; k++) if (m.id[k] !== 0) partes.push({ esp: this.sustancia(m.id[k]!), q: m.q[k]! });
     const atomos = partes.reduce((total, { esp, q }) => total + q * esp.atomos.reduce((a, b) => a + b, 0), 0);
-    const T = atomos ? b.calor[i] / (CAPACIDAD_ATOMO * atomos) : 0;
+    const T = atomos ? m.get(0) / (CAPACIDAD_ATOMO * atomos) : 0;
     let masa = 0, energia = 0, digerible = 0, agua = 0, principal = 0, masaPrincipal = 0;
     let volumen = 0, rigido = 0, dura = 0, tenaz = 0, permeable = 0, conductancia = 0;
     const color = [0, 0, 0];
@@ -691,12 +817,16 @@ export class ArenaLotes implements ArenaMateria {
       color: masa ? color.reduce((rgb, c) => rgb * 256 + Math.round(c / masa), 0) : 0 };
   }
 
+  private muestraDeRanura(s: number): LoteGuardado {
+    const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
+    return { ref: refDe(s, b.gen[i]), celda: this.celda[s], rol: b.marcas[i * MARCAS] as Rol, forma: b.forma[i],
+      dueno: this.duenoDe(s), pares: this.contenido(s, this.la).pares() };
+  }
+
+  muestra(ref: LoteRef): LoteGuardado { return this.muestraDeRanura(this.vivoSlot(ref)); }
+
   *muestras(): IterableIterator<LoteGuardado> {
-    for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) {
-      const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
-      yield { ref: refDe(s, b.gen[i]), celda: this.celda[s], rol: b.marcas[i * MARCAS] as Rol, forma: b.forma[i],
-        dueno: this.duenoDe(s), pares: this.contenido(s, this.la).pares() };
-    }
+    for (let s = 0; s < this.op.lotes.slots; s++) if (this.activo(s)) yield this.muestraDeRanura(s);
   }
 
   *libres(): IterableIterator<LoteRef> {
@@ -751,6 +881,7 @@ export class ArenaLotes implements ArenaMateria {
         }
       } else {
         b.gen[i] = genDe(lote.ref);
+        if (this.fisicas) Atomics.store(this.fisicas, s, puntero(this.op.contenido!.reserve()));
         this.escribirUno(s, leerPares(lote.pares, this.lp));
         this.instalar(s, lote.rol, this.celdaDe(lote.celda, lote.rol), lote.forma, lote.dueno);
       }

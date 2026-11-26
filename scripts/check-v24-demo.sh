@@ -23,7 +23,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-cinta-pavimento.test.ts tests/v23-motor-fotograma-retirada.test.ts \
   tests/v23-crianza-intentos.test.ts tests/v23-muerte-residencia.test.ts tests/v23-motor-frontera.test.ts \
   tests/v23-topes-guardado.test.ts tests/v23-punto-materia.test.ts tests/v23-motor-cesion-materia.test.ts \
-  tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \
+  tests/ola-n-natalidad.test.ts tests/ola-g-materia.test.ts tests/ola-b-cuerpo.test.ts tests/materia-mundo.test.ts tests/materia-arena.test.ts \
   tests/v23-motor-carga-rocosa.test.ts 2>&1 | tee "$evidencia/pruebas.log"
 node --import tsx --test --test-timeout=30000 \
   --test-name-pattern='^(la vista se comparte|una página solo sube|las páginas históricas)' \

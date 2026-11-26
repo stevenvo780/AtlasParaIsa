@@ -2,6 +2,7 @@ import { deserialize, serialize } from 'node:v8';
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import type { World } from '../mundo/tipos.js';
 import type { ParteFotoDueno } from './fotograma-dueno.js';
+import { parteCorteDe, type ParteMundo } from './reunir.js';
 
 export type SolicitudCorte = BigUint64Array<SharedArrayBuffer>;
 
@@ -33,7 +34,7 @@ export function enviarParteFoto(puerto: MessagePort, epoca: number, parte: Parte
 
 /** Se transfiere el bloque de V8 tal cual. Un runtime que no lo pueda mover falla antes de construir el corte. */
 export function enviarParteCorte(puerto: MessagePort, solicitud: SolicitudCorte, epoca: number, dueno: number, mundo: World): void {
-  const bytes = serialize(mundo), buffer = bytes.buffer;
+  const bytes = serialize(parteCorteDe(mundo)), buffer = bytes.buffer;
   if (!(buffer instanceof ArrayBuffer) || bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength)
     throw new Error('V8 no entregó un bloque de corte transferible entero.');
   const parte: ParteCorte = { solicitud: Atomics.load(solicitud, 0), epoca, tick: mundo.tick, dueno, bytes };
@@ -70,16 +71,16 @@ export class CanalesCorte {
   }
 
   /** La barrera de reunir ya terminó. Una respuesta llega antes de que su dueño indique que terminó. */
-  recibir(solicitud: bigint, epoca: number, tick: number): World[] {
+  recibir(solicitud: bigint, epoca: number, tick: number): ParteMundo[] {
     return this.entradas.map((puerto, i) => {
       const dueno = i + 1;
       const parte = receiveMessageOnPort(puerto)?.message as ParteCorte | undefined;
       if (!parte || parte.dueno !== dueno || parte.solicitud !== solicitud || parte.epoca !== epoca || parte.tick !== tick
         || !(parte.bytes instanceof Uint8Array) || parte.bytes.byteLength === 0 || receiveMessageOnPort(puerto) !== undefined)
         throw new Error(`Instantánea incompleta o incoherente para el dueño ${dueno}.`);
-      const mundo = deserialize(parte.bytes) as World;
-      if (mundo.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
-      return mundo;
+      const contenido = deserialize(parte.bytes) as ParteMundo;
+      if (contenido.tick !== tick) throw new Error(`El mundo del dueño ${dueno} no pertenece al tick del corte.`);
+      return contenido;
     });
   }
 

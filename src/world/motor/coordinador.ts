@@ -57,14 +57,8 @@ import { leyesActivas } from './leyes.js';
 import { CanalesCorte } from './mensajes-corte.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
 import { RegistroContenido } from './registro.js';
-import { cabeceraDe, fundir, reunir } from './reunir.js';
+import { cabeceraDe, fundir, reunir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
 import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
-
-function sinCheckpointTecnologia(tech: World['technology'] | undefined): unknown {
-  if (!tech) return tech;
-  const { checkpoint: _checkpoint, ...resto } = tech;
-  return resto;
-}
 
 /** Comprueba por igualdad estructural profunda (jamás por contadores ni longitudes) que las partes remotas
  * no divergieron de su tecnología inicial y que `fundir` reproducirá exactamente la tecnología confirmada. */
@@ -377,7 +371,7 @@ class MotorDuenos implements Motor {
   #terreno!: TerrenoPercepcion;
   #tabla!: TablaOrganismosSoA;
   #cabecera!: World;
-  #tecnologiaInicial: unknown;
+  #tecnologiaInicial: ParteMundo['technology'] | undefined;
   #ultimaInstantanea: {
     world: WeakRef<World>;
     tick: number;
@@ -834,7 +828,7 @@ class MotorDuenos implements Motor {
     if (!tech?.journal || tech.journal.pending.length !== 0) return false;
     if (!tech.catalogue || tech.catalogue.pending.length !== 0) return false;
     const candidataTech = structuredClone(tech);
-    const partesBase = Array.from({ length: this.#hilos - 1 }, () => this.#tecnologiaInicial as World['technology'] | undefined);
+    const partesBase = Array.from({ length: this.#hilos - 1 }, () => this.#tecnologiaInicial);
     if (!tecnologiaEquivalenteParaConfirmar(this.#cabecera.technology, this.#tecnologiaInicial, partesBase, candidataTech)) return false;
 
     const diarioConfirmado = structuredClone(cronica);
@@ -887,7 +881,7 @@ class MotorDuenos implements Motor {
     this.#buzones.fijarFase(0);
     this.#piscina!.ejecutar(TRAMO.reunir);
     this.#recoger();
-    const partes = canales ? canales.recibir(solicitud!, this.#epoca, this.#mundo.tick) : Array.from({ length: this.#hilos - 1 }, (_, i) => {
+    const partes: ParteMundo[] = canales ? canales.recibir(solicitud!, this.#epoca, this.#mundo.tick) : Array.from({ length: this.#hilos - 1 }, (_, i) => {
       const parte = this.#partesMundo.get(i + 1);
       if (!parte) throw new Error(`Instantánea incompleta: falta el dueño ${i + 1}.`);
       return parte;

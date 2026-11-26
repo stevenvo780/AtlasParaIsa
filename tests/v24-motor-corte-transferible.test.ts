@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { serialize } from 'node:v8';
+import { deserialize, serialize } from 'node:v8';
 import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
+import { enableChronicleJournal } from '../src/world/chronicle-journal.js';
+import { demographicTraits } from '../src/world/demography.js';
 import { codificarCheckpoint } from '../src/world/materia/checkpoint.js';
 import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { Buzones } from '../src/world/motor/buzon.js';
-import { unSoloDueno } from '../src/world/motor/contratos.js';
+import { AVISO, duenoSi } from '../src/world/motor/contexto.js';
+import { unSoloDueno, type Instantanea } from '../src/world/motor/contratos.js';
 import { crearMotor } from '../src/world/motor/coordinador.js';
 import { CanalesCorte, enviarParteCorte } from '../src/world/motor/mensajes-corte.js';
 import { createWorld } from '../src/world/mundo/crear.js';
@@ -15,24 +18,47 @@ import type { World } from '../src/world/mundo/tipos.js';
 import { Piscina } from '../src/world/paralelo/piscina.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import { TablaOrganismosSoA } from '../src/world/soa/organismos.js';
+import { activate } from '../src/world/spatial.js';
+import { enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
+import { enableTechnologyJournal } from '../src/world/technology-journal.js';
+import { generateChunk } from '../src/world/terrain.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
 
 const semilla = 7, hilos = 2;
 const config = { ...unSoloDueno(semilla), hilos, verificar: false };
 const parametros = parseParams({ ...DEFAULT_PARAMS, v23: escalon('duenos'), motor: { hilos },
   conducta: { ...DEFAULT_PARAMS.conducta, politicaPeso: 0.8 } });
 
-test('los mensajes se reciben por dueño y preservan el bloque V8', () => {
+test('los mensajes llegan por dueño con los campos del corte y conservan los pesos exactos', () => {
   const canales = CanalesCorte.abrir(2);
   assert.ok(canales);
   try {
-    const partes = [
-      { tick: 6, people: [{ uid: 50, policy: { weights: [-0, Math.PI] } }] },
-      { tick: 6, people: [{ uid: 23, policy: { weights: [Math.PI, -0] } }] },
-    ] as World[];
+    const partes = [createWorld(7, parametros), createWorld(11, parametros)] as const;
+    for (const [i, parte] of partes.entries()) {
+      parte.tick = 6;
+      parte.people[0]!.policy!.weights.splice(0, 2, -0, Math.PI + i);
+      parte.retiredChunks.push(generateChunk(parte.seed, 4, 4));
+      enableChronicleJournal(parte);
+      enableTechnologyJournal(parte.technology);
+      enableTechnologyCatalogue(parte.technology);
+    }
     const solicitud = canales.pedir();
-    enviarParteCorte(canales.puertosRemotos[1]!, canales.solicitud, 3, 2, partes[1]!);
-    enviarParteCorte(canales.puertosRemotos[0]!, canales.solicitud, 3, 1, partes[0]!);
-    assert.deepEqual(canales.recibir(solicitud, 3, 6), partes);
+    enviarParteCorte(canales.puertosRemotos[1]!, canales.solicitud, 3, 2, partes[1]);
+    enviarParteCorte(canales.puertosRemotos[0]!, canales.solicitud, 3, 1, partes[0]);
+    const recibidas = canales.recibir(solicitud, 3, 6);
+    assert.equal(recibidas.length, partes.length);
+    for (const [i, parte] of recibidas.entries()) {
+      const original = partes[i]!;
+      for (const campo of ['communities', 'events', 'history', 'chronicleJournal', 'seed', 'rng']) {
+        assert.equal(Object.hasOwn(parte, campo), false, campo);
+      }
+      const { checkpoint, ...tecnologia } = original.technology;
+      assert.ok(checkpoint);
+      assert.deepEqual(parte.technology, tecnologia);
+      assert.deepEqual(parte.people, original.people);
+      assert.deepEqual(parte.retiredChunks, original.retiredChunks);
+      assert.ok(serialize(parte).byteLength < serialize(original).byteLength);
+    }
     assert.throws(() => canales.recibir(solicitud, 3, 6), /incompleta.*dueño 1/);
   } finally { canales.cerrar(); }
 });
@@ -110,6 +136,70 @@ test('el motor conserva el mundo, el orden y VMAT al cortar y reabrir otra époc
     assert.deepEqual(recibir.mock.calls.at(-1)?.arguments, [1n, leido.epoca, 1]);
     assert.equal(motor.paso([]).tick, 2);
   } finally { store.close(); await motor.cerrar(); }
+});
+
+test('el mismo corte guarda los mismos bytes con la parte F0 y con su proyección transferible', async () => {
+  const mundo = createWorld(semilla, parametros);
+  const claveRetirada = '4,4';
+  activate(mundo, 66, 66);
+  const paginas = Object.values(mundo.chunks);
+  const reparto = repartirPorTramos(paginas.map(p => p.cx), paginas.map(p => p.cy), hilos);
+  const tile = mundo.tiles.find(t => t.terrain !== 'water' && paginas.some((p, i) =>
+    reparto[i] === 1 && p.key !== claveRetirada && p.cx === (t.x >> 4) && p.cy === (t.y >> 4)));
+  const victima = mundo.people.find(p => p.role === 'neighbor');
+  assert.ok(tile && victima);
+  victima.x = tile.x; victima.y = tile.y; victima.target = { x: tile.x, y: tile.y };
+  const edad = demographicTraits(victima.genome, parametros.cuerpo);
+  victima.demography.age = Math.floor((edad.senescenceStart + edad.maximumAge) / 2);
+  victima.bornAt = -victima.demography.age;
+  victima.demography.health = Number.MIN_VALUE;
+  enableChronicleJournal(mundo);
+  enableTechnologyJournal(mundo.technology);
+  enableTechnologyCatalogue(mundo.technology);
+  const canales = CanalesCorte.abrir(hilos - 1);
+  assert.ok(canales);
+  const motor = crearMotor(mundo, config);
+  const guardar = (corte: Instantanea) => {
+    const store = new Store(':memory:', { snapshotPackedPeople: true, snapshotMatterPartBytes: 4096 });
+    try {
+      assert.ok(corte.world.retiredChunks.some(c => c.key === claveRetirada));
+      assert.ok(corte.world.chronicleJournal?.pending.some(e => e.kind === 'death' && e.actors.includes(victima.id)));
+      assert.ok(corte.materia);
+      const vmat = sha256(codificarCheckpoint(corte.materia));
+      store.guardar(corte);
+      const legado = store.loadLegacy(victima.id);
+      const chunk = store.loadChunk(claveRetirada, corte.world.tick, parametros.v23);
+      assert.ok(legado && chunk);
+      const cronica = store.db.prepare('SELECT * FROM events ORDER BY id').all();
+      return {
+        manifiesto: filaInstantanea(store).digest, vmat,
+        archivo: sha256(stringifyExact({ legado, chunk, cronica })),
+      };
+    } finally { store.close(); }
+  };
+  try {
+    for (let i = 0; i < 3; i++) motor.paso([]);
+    const f0 = motor.instantanea();
+    const coordinador = duenoSi(mundo);
+    assert.ok(coordinador?.avisar);
+    const avisar = coordinador.avisar;
+    // Compara dos reuniones del mismo tick: dos corridas paralelas pueden numerar los sucesos de forma distinta.
+    coordinador.avisar = (clase, intento) => {
+      if (clase !== AVISO.parte) return avisar(clase, intento);
+      const remota = deserialize(intento.bytes!) as World;
+      const solicitud = canales.pedir();
+      enviarParteCorte(canales.puertosRemotos[0]!, canales.solicitud, coordinador.epoca, 1, remota);
+      const [parte] = canales.recibir(solicitud, coordinador.epoca, remota.tick);
+      assert.ok(parte?.legacy.some(p => p.id === victima.id));
+      assert.ok(parte.retiredLegacy.some(p => p.id === victima.id));
+      avisar(clase, { ...intento, bytes: serialize(parte) });
+    };
+    const proyectada = motor.instantanea();
+    assert.deepEqual(guardar(proyectada), guardar(f0));
+  } finally {
+    canales.cerrar();
+    await motor.cerrar();
+  }
 });
 
 test('la ruta F0 se elige si no se pide el canal o si no se puede abrir', async t => {

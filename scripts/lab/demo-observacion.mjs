@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as esperar } from 'node:timers/promises';
@@ -193,6 +194,22 @@ try {
   assert.ok(anterior.baseFrame);
   const sha256 = huella(anterior);
   await app.close();
+  let guardado;
+  if (process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1') {
+    const db = new DatabaseSync(join(mundo, 'world.sqlite'), { readOnly: true });
+    try {
+      const { body } = db.prepare('SELECT body FROM main.snapshots WHERE slot=0').get();
+      const { snapshotEncoding, people } = JSON.parse(body);
+      assert.equal(snapshotEncoding, 'snapshot-parts-v3');
+      assert.ok(people.count > 0 && people.pages.length > 0);
+      const pagina = db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?').get(people.pages[0].digest);
+      assert.ok(pagina.body instanceof Uint8Array);
+      assert.equal(Buffer.from(pagina.body.subarray(0, 4)).toString('ascii'), 'WPF1');
+      guardado = { formato: snapshotEncoding, personas: people.count, paginas: people.pages.length };
+    } finally { db.close(); }
+    // La pasarela que reabre prueba la lectura sin activar la opción de escritura experimental.
+    delete process.env.CARTA_SNAPSHOT_PACKED_PEOPLE;
+  }
   app = crearPasarela();
   await abrir();
   const leerDespues = await clienteCinta();
@@ -210,6 +227,7 @@ try {
   }
   const evidencia = { tick: salud.tick, ultimoTickGuardado: salud.ultimoTickGuardado, vistas,
     recargaCinta: { tick: recuperado.baseFrame.tick, epoca: recuperado.epoca, sha256, huellaExacta: true },
+    ...(guardado && { guardado }),
     ...(directorioCinta && { almacenamiento: { dispositivoMundo: statSync(mundo).dev,
       dispositivoCinta: statSync(directorioCinta).dev } }),
     ...(observacion && { sostenida: { ...observacion, reanudacion } }) };

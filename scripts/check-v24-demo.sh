@@ -22,6 +22,7 @@ node --import tsx --test --test-concurrency=2 --test-timeout=30000 \
   tests/v24-agenda-durable.test.ts tests/v24-materia-fria.test.ts tests/v24-cadencia-eco.test.ts tests/v24-gpu-coste.test.ts tests/v24-gpu-duenos.test.ts \
   tests/v24-indice-uid.test.ts tests/v24-indice-frente.test.ts tests/v24-reparto-inicial.test.ts \
   tests/v24-materia-tramos-store.test.ts tests/v24-vmat-tramos.test.ts tests/v24-snapshot-matter-parts.test.ts \
+  tests/v24-snapshot-packed-people.test.ts tests/v24-snapshot-packed-store.test.ts \
   tests/v24-reserva-materia.test.ts tests/ola-srv-config.test.ts \
   tests/snapshot-parts-poblacion.test.ts tests/snapshot-parts.test.ts tests/snapshot-parts-order.test.ts tests/ola-ps-guardado.test.ts \
   tests/v24-cinta-pavimento.test.ts tests/v23-motor-fotograma-retirada.test.ts \
@@ -34,4 +35,4 @@ node --import tsx --test --test-timeout=30000 \
   --test-name-pattern='^(la vista se comparte|una página solo sube|las páginas históricas)' \
   tests/v23-decision-percepcion.test.ts 2>&1 | tee "$evidencia/percepcion-paginas.log"
 npm run build 2>&1 | tee "$evidencia/build.log"
-timeout 65s node scripts/lab/demo-observacion.mjs "$PWD" "$evidencia/observacion" 2>&1 | tee "$evidencia/observacion.log"
+CARTA_SNAPSHOT_PACKED_PEOPLE=1 timeout 65s node scripts/lab/demo-observacion.mjs "$PWD" "$evidencia/observacion" 2>&1 | tee "$evidencia/observacion.log"

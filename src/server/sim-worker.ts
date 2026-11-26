@@ -659,7 +659,9 @@ async function runSimulation(options: SimWorkerOptions) {
     publicarAvance(ahora);
   }
   publicarOperacion('arrancando');
-  const store = new Store(options.worldPath, { onProgress: informarAvance });
+  const store = new Store(options.worldPath, {
+    onProgress: informarAvance, snapshotPackedPeople: process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1',
+  });
   let closing = false;
   const sessionFlags = new Map<string, Int32Array>();
   const realSessionValid = store.sessionValid.bind(store);

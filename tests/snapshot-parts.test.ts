@@ -419,6 +419,7 @@ const invalidOptions: readonly [string, unknown][] = [
   ['umbral mayor que 32768', { snapshotInlineTileLimit: 32769 }],
   ['umbral string', { snapshotInlineTileLimit: '0' }],
   ['readOnly string', { readOnly: 'false' }],
+  ['snapshotPackedPeople string', { snapshotPackedPeople: '1' }],
 ];
 
 for (const [label, options] of invalidOptions) {

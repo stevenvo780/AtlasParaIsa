@@ -96,7 +96,7 @@ try {
     escuchar(pasarela);
     await app.ready;
   } else {
-    store = new Store(resolve(dataPath, 'world.sqlite'));
+    store = new Store(resolve(dataPath, 'world.sqlite'), { snapshotPackedPeople: process.env.CARTA_SNAPSHOT_PACKED_PEOPLE === '1' });
     app = createApp({ store, manual: true, deployment: true, commit, password: process.env.CARTA_PASSWORD,
       credentialPath: resolve(dataPath, 'access.scrypt'), origin, extraOrigins, secure,
       params: paramsNuevosDeDespliegue, ...v21 });

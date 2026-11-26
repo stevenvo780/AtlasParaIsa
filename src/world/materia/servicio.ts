@@ -240,6 +240,12 @@ export class ServicioQuimicoImpl implements ServicioQuimicoAuditable {
     return this.sustancias[id]!;
   }
 
+  /** Consulta especulativa de la GPU: un fallo de memo no echa a andar el solver. */
+  reaccionPublicada(a: SustanciaId, b: SustanciaId, nivelT: number): Reaccion | null | undefined {
+    const [a1, b1] = normalizarPar(a, b);
+    return this.memo.get(claveMemo(a1, b1, nivelT))?.reaccion;
+  }
+
   /**
    * Consulta el memo de reacciones. Simétrica en `(a, b)` si `b > 0` (`b === 0` es unaria).
    * En modo `'worker'` o `'diferido'`, un fallo encola la pareja y devuelve `undefined` hasta la barrera siguiente.

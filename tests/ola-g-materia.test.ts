@@ -4,6 +4,7 @@ import { ClaseSustancia } from '../src/shared/materia.js';
 import { CAPACIDAD_ATOMO } from '../src/shared/naturaleza.js';
 import { CanalCompartido } from '../src/world/gpu/canal.js';
 import { aplicarVecesGpu, crearPasoMateriaGpu, empaquetarMateriaGpu, prepararMateriaGpu } from '../src/world/gpu/materia-gpu.js';
+import { ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 import type { CtxPaso } from '../src/world/materia/paso.js';
 import type { Reaccion, Sustancia } from '../src/world/materia/tipos.js';
 import { ErrorDispositivo, type CanalGpu } from '../src/world/motor/contratos.js';
@@ -158,10 +159,10 @@ test('G confirma el nivel de todas las tripletas antes de aplicar con la arena d
   const desde = Int32Array.of(0, 6, 6);
   const kappas = [...kappa, 0, 0, 0, 0];
   const tripletas = Float64Array.of(9, 0, 20, 11, 17, 10);
-  assert.throws(() => aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }), /en el nivel 2/);
+  assert.throws(() => aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }, 1), /en el nivel 2/);
   assert.deepEqual(aplicaciones, []);
   tripletas[4] = 13;
-  assert.equal(aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }), 30);
+  assert.equal(aplicarVecesGpu(ctx, [1, 3], kappas, { desde, tripletas }, 1), 30);
   assert.deepEqual(aplicaciones, [[1, reacciones[0], 20], [1, reacciones[1], 10]]);
 });
 
@@ -177,11 +178,13 @@ test('G invalida el cliente al vencer o caer el dispositivo durante la espera', 
   }
 });
 
+const dispositivo = Number(process.env.CARTA_TEST_MATERIA_GPU_DEVICE ?? 0);
+
 test('G CUDA real aplica catálisis por par, encadena con composición nueva y veta por fase a 270 K', {
   skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC',
 }, () => {
   const { ctx, kappa } = fixture();
-  const canal = new CanalCompartido(0);
+  const canal = new CanalCompartido(dispositivo);
   try {
     prepararMateriaGpu(canal, 30_000);
     const paso = crearPasoMateriaGpu(canal);
@@ -189,5 +192,32 @@ test('G CUDA real aplica catálisis por par, encadena con composición nueva y v
     const r = paso.esperar(2_000);
     assert.deepEqual([...r.desde], [0, 6, 6]);
     assert.deepEqual([...r.tripletas], [9, 0, 20, 11, 13, 10]);
+  } finally { canal.cerrar(); }
+});
+
+test('G CUDA solo devuelve a CPU los lotes que alcanzan una reacción sin resolver', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC',
+}, () => {
+  const { ctx, consultas, kappa, reacciones, aplicaciones } = fixture();
+  const quimica = Object.assign(new ServicioQuimicoImpl({ modo: 'inmediato' }), ctx.quimica);
+  const real = { ...ctx, quimica };
+  const canal = new CanalCompartido(dispositivo);
+  try {
+    prepararMateriaGpu(canal, 30_000);
+    const paso = crearPasoMateriaGpu(canal);
+    paso.lanzar(real, [1], kappa, 1, 1);
+    assert.ok(consultas.length > 0);
+    assert.ok(consultas.every(([a, b]) => a !== 13 && b !== 13));
+    const pendiente = paso.esperar(2_000);
+    assert.deepEqual([...pendiente.desde], [0, 3]);
+    assert.deepEqual([...pendiente.tripletas], [0, 0, 0]);
+    assert.equal(aplicarVecesGpu(real, [1], kappa, pendiente, 1), 20);
+    assert.ok(aplicaciones.length > 0);
+
+    reacciones[0] = { ...reacciones[0]!, dH: 10 };
+    paso.lanzar(real, [1], kappa, 1, 2);
+    const inerte = paso.esperar(2_000);
+    assert.deepEqual([...inerte.desde], [0, 0]);
+    assert.equal(inerte.tripletas.length, 0);
   } finally { canal.cerrar(); }
 });

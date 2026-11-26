@@ -448,6 +448,15 @@ struct Paso {
             c.tasa = 0;
             const int i = canales[k].i, j = canales[k].j;
             if (encadenado && s[i].nuevos <= 0 && (j <= i || s[j].nuevos <= 0)) continue;
+            // Los reactivos hipotéticos solo se resuelven si llegaron a existir en este lote.
+            if (canales[k].reaccion == ~0u) {
+                if (s[i].cant >= (i == j ? 2 : 1) && (j <= i || s[j].cant >= 1)) {
+                    salida[0] = {0, 0, 0};
+                    escritos = -1;
+                    return;
+                }
+                continue;
+            }
             const Reaccion& r = fila(k);
             if (r.nivel != lote.nivel || (i == j && s[i].cant < 2)) continue;
             c.p = c.q = 0;
@@ -510,6 +519,7 @@ struct Paso {
                 if (!produjo) break;
             }
             pase(dt, p > 0);
+            if (escritos < 0) return;
         }
     }
 };
@@ -529,7 +539,7 @@ extern "C" __global__ void materia(const byte* binario, u32 n, EstadoEspecie* s,
         en<Termino>(binario, cab.terminos), en<Composicion>(binario, l.composicion), en<Canal>(binario, l.canales),
         s + inicioS, c + inicioC, temporal + static_cast<u64>(inicioC) * (cab.pases + 1), l.semilla, 0, 0, l.calor, 0};
     paso.ejecutar();
-    cuentas[i] = paso.escritos;
+    cuentas[i] = paso.escritos < 0 ? 1 : paso.escritos;
 }
 
 extern "C" __global__ void offsets_materia(const u32* cuentas, u32 n, u32* desde) {

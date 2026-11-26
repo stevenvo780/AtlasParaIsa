@@ -507,8 +507,8 @@ export function lanzarQuimicaSuelos(m: MundoMaterial, paso: PasoMateriaGpu, pagi
   const vence = performance.now() + PLAZO_GPU_MS;
   return () => {
     const propuesta = paso.esperar(Math.max(0, vence - performance.now()));
-    aplicarVecesGpu(m.ctx, lotes, kappas, propuesta);
-    return { tripletas: propuesta.tripletas.length / 3, ms: propuesta.ms };
+    aplicarVecesGpu(m.ctx, lotes, kappas, propuesta, dt);
+    return { tripletas: propuesta.tripletas.length / 3 - (propuesta.lotesCpu ?? 0), ms: propuesta.ms };
   };
 }
 

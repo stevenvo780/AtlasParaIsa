@@ -33,7 +33,8 @@ export function paramsNuevosDeDespliegue(): WorldParams {
   const arranque = deploymentParams(DEFAULT_PARAMS, carta);
   const v23 = arranque.v23.duenos || arranque.v23.fotograma;
   const sinDespachoHeredado = v23 ? { nvrtcAvailable: () => false, cpuThreads: () => 1 } : undefined;
-  const base = process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams(DEFAULT_PARAMS, sinDespachoHeredado)
-    : process.env.CARTA_FULL_HARDWARE === '1' && !v23 ? hostFullHardwareParams() : hostParams();
+  const leyes = parseParams({ v23: arranque.v23 }, DEFAULT_PARAMS);
+  const base = process.env.CARTA_OPEN_WORLD === '1' ? hostOpenWorldParams(leyes, sinDespachoHeredado)
+    : process.env.CARTA_FULL_HARDWARE === '1' && !v23 ? hostFullHardwareParams(leyes) : hostParams(leyes);
   return deploymentParams(base, carta);
 }

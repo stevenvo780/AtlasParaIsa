@@ -1,4 +1,4 @@
-import { ACTIONS, animalBiomass, SPECIES, type Animal } from '../animals.js';
+import { ACTIONS, animalBiomass, especieVisual, SPECIES, type Animal } from '../animals.js';
 import { CAMPOS_CUERPO, Clase, CUERPO_ANCHO, GENOMA_ANCHO, REF_NULA, slotDe, type FrenteEscritura, type FrentePublico, type Ref } from '../motor/contratos.js';
 import { TablaOrganismosSoA } from './organismos.js';
 
@@ -82,7 +82,7 @@ export class FaunaSoA {
       chunk[slot] = actual < 0 ? -1 : chunkDe?.(actual) ?? -1;
       objetivo[slot] = celda?.(animal.target.x, animal.target.y) ?? -1;
       accion[slot] = ACTIONS.indexOf(animal.action);
-      especie[slot] = SPECIES.indexOf(animal.species);
+      especie[slot] = SPECIES.indexOf(especieVisual(animal.species));
       decideEn[slot] = tick + 1;
       pareja[slot] = fertil?.(animal) ? 0 : -1;
       const base = slot * CUERPO_ANCHO;

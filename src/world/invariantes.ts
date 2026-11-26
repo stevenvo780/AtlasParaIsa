@@ -2,7 +2,7 @@ import type { World } from './index.js';
 import { worldContext } from './spatial.js';
 import { tileLookup } from './tile-index.js';
 import { conRejilla, vecinos } from './rejilla.js';
-import { animalesVivosEnCelda, conRejillaFauna } from './animals.js';
+import { especieVisual, animalesVivosEnCelda, conRejillaFauna } from './animals.js';
 import { resolveTechnologyRecipe } from './technology-catalogue.js';
 import { ELEMENTS, vectorMass } from '../shared/chemistry.js';
 import type { CompoundLot } from '../shared/chemistry.js';
@@ -228,7 +228,7 @@ inicial('indices.coherentes', 'global', m => conRejilla(m, () => conRejillaFauna
     if (encontrar(t.x, t.y) !== t) h.fallo('Índice de teselas incoherente.', { x: t.x, y: t.y });
     const grupo = fauna.get(`${t.x},${t.y}`) ?? [];
     if ((t.fauna ?? 0) !== grupo.length) h.fallo('Proyección de fauna incoherente.', { x: t.x, y: t.y }, grupo.length, t.fauna ?? 0);
-    if (grupo.length && t.species !== grupo.reduce((menor, a) => a.species < menor ? a.species : menor, grupo[0]!.species)) h.fallo('Especie representativa de la fauna incoherente.', { x: t.x, y: t.y, especie: t.species });
+    if (grupo.length && t.species !== grupo.reduce((menor, a) => { const especie = especieVisual(a.species); return especie < menor ? especie : menor; }, especieVisual(grupo[0]!.species))) h.fallo('Especie representativa de la fauna incoherente.', { x: t.x, y: t.y, especie: t.species });
     const indexados = animalesVivosEnCelda(m, t.x, t.y);
     if (indexados) {
       const vivos = grupo.filter(a => a.health > 0);

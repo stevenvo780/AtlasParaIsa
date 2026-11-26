@@ -26,7 +26,7 @@ import { filtrarCerca, algunoCerca, primeroCerca } from '../indice-puntos.js';
 import { demographicTraits, updateDemography } from '../demography.js';
 import { advanceNeeds } from '../needs.js';
 import { WATER_QUANTA_PER_UNIT } from '../material-affordances.js';
-import { type Animal, animalesVivosEnCelda, animalBiomass } from '../animals.js';
+import { type Animal, animalesVivosEnCelda, animalBiomass, especieVisual } from '../animals.js';
 import { technologyOpportunity } from '../technology.js';
 import { FOOD_PER_ANIMAL } from '../ecosystem.js';
 import { evaluatePolicySingle, policyActionBias, updatePolicyPlasticity } from '../politica.js';
@@ -762,7 +762,7 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
       : !food && meal === 0)) {
       // Conditional on that visible animal remaining until the paid hunt ends.
       // The real action must still remove its identity before feeding the body.
-      const meat = params.quimica.emergente ? animalBiomass(huntPlan.victim) * 0.8 : FOOD_PER_ANIMAL[huntPlan.victim.species], saved = Math.min(.25 - person.inventory, meat * .5);
+      const meat = params.quimica.emergente ? animalBiomass(huntPlan.victim) * 0.8 : FOOD_PER_ANIMAL[especieVisual(huntPlan.victim.species)], saved = Math.min(.25 - person.inventory, meat * .5);
       assimilateFood(forecast, meat - saved, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 }); work = huntPlan.work;
       if (params.quimica.emergente) candidate.score += (Math.min(person.hunger, (meat - saved) * HAMBRE_POR_UNIDAD) + saved * 2) / (1 + (travel * 6 + work) / 24);
     }

@@ -114,7 +114,7 @@ export class WorldMapCache {
     chunks: WorldMapChunkSummary[];
     people: readonly Pick<WorldView['people'][number], 'id' | 'name' | 'role' | 'x' | 'y'>[];
     communities?: readonly NonNullable<WorldView['communities']>[number][];
-    animals?: readonly NonNullable<WorldView['animals']>[number][];
+    animals?: readonly (Omit<NonNullable<WorldView['animals']>[number], 'species'> & { species: string })[];
     whispers?: readonly DivineWhisper[];
   }): WorldMapResponse {
     let minCx = Infinity, maxCx = -Infinity, minCy = Infinity, maxCy = -Infinity;

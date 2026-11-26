@@ -145,7 +145,7 @@ export function assertSnapshotCounts(record: Record<string, unknown>, limits: Re
     throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
   if (record.chunks && typeof record.chunks === 'object' && Object.keys(record.chunks).length > limits.chunks
     || !v23.comunidades && Array.isArray(record.communities) && record.communities.length > limits.comunidades
-    || Array.isArray(record.animals) && record.animals.length > limits.fauna)
+    || !v23.fauna && Array.isArray(record.animals) && record.animals.length > limits.fauna)
     throw new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.');
 }
 /** Codifica `count` teselas desde `offset` sin copiar el tramo (el guardado por páginas ya no paga un

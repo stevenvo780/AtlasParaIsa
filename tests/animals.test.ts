@@ -232,9 +232,10 @@ test('P2: incremental syncFauna cache matches a from-scratch recomputation throu
   const fromScratch = (): { fauna: number; species: AnimalSpecies | null }[] => {
     const counts = new Map<string, { count: number; species: AnimalSpecies }>();
     for (const a of w.animals) {
+      const species = a.species as AnimalSpecies;
       const p = k(a), existing = counts.get(p);
-      if (existing) { existing.count++; if (a.species < existing.species) existing.species = a.species; }
-      else counts.set(p, { count: 1, species: a.species });
+      if (existing) { existing.count++; if (species < existing.species) existing.species = species; }
+      else counts.set(p, { count: 1, species });
     }
     return w.tiles.map(t => { const c = counts.get(k(t)); return { fauna: c?.count ?? 0, species: c?.species ?? null }; });
   };

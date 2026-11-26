@@ -6,6 +6,7 @@ import { escalon } from '../src/shared/interruptores.js';
 import { assertWorld, createWorld } from '../src/world/index.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { chunkKey, generateChunk } from '../src/world/terrain.js';
+import { projectAnimal, syncFauna } from '../src/world/animals.js';
 
 for (const snapshotInlineTileLimit of [0, 32768]) {
   test(`el guardado completo admite comunidades sin cupo (umbral en línea: ${snapshotInlineTileLimit})`, t => {
@@ -72,4 +73,30 @@ test('el guardado conserva lugares y existencias por encima de los límites esca
   loaded.people[0]!.inventory = 0.7;
   loaded.places.pop();
   assert.throws(() => assertWorld(loaded), /Estado procedural inválido/);
+});
+
+test('la fauna nueva guarda diez animales de un linaje abierto en la misma tesela', t => {
+  const store = new Store(':memory:', { snapshotInlineTileLimit: 0 });
+  t.after(() => store.close());
+  const params = parseParams({ v23: escalon('fauna'), limites: { fauna: 6 } });
+  const world = createWorld(7, params);
+  const base = world.animals[0]!;
+  world.animals = Array.from({ length: 10 }, (_, i) => ({ ...base, id: `animal-prueba-${i}`, species: 'linaje-emergente' }));
+  syncFauna(world.tiles, world.animals);
+  const tile = world.tiles.find(t => t.x === base.x && t.y === base.y)!;
+  assert.equal(tile.fauna, 10);
+  store.guardar({ world, materia: null });
+  const loaded = store.cargarInstantanea()!.instantanea.world;
+  assert.deepEqual(loaded.animals, world.animals);
+  assert.equal(loaded.tiles.find(t => t.x === base.x && t.y === base.y)?.fauna, 10);
+  assert.equal(projectAnimal(loaded.animals[0]!, 0).species, tile.species);
+
+  loaded.animals[0]!.species = '';
+  assert.throws(() => assertWorld(loaded), /Animal individual inválido/);
+  loaded.animals[0]!.species = 'linaje-emergente';
+  loaded.animals.pop();
+  assert.throws(() => assertWorld(loaded), /Estado de vida o estructuras inválido/);
+  setParams(world, parseParams({ v23: { fauna: false } }, params));
+  assert.throws(() => assertWorld(world), /Colección de fauna inválida/);
+  assert.throws(() => encodeSnapshot(world, paramsOf(world)), /collection limit/);
 });

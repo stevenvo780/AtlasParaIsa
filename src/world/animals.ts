@@ -20,7 +20,6 @@ import { assertAnimalTraits } from './validation.js';
 
 // Los importadores del perfil de hardware y del soak aún usan las cifras históricas.
 export const MAX_ACTIVE_ANIMALS = 8192;
-export const MAX_ANIMALS_PER_TILE = 6;
 export const MAX_ANIMAL_MEMORY = 12;
 export const MEMORY_TTL = 480;
 const MATURITY = 600;
@@ -47,13 +46,17 @@ export function listoSalvoEnergia(a: Animal, reserva: boolean): boolean {
 export const RADIO_PAREJA = 12;
 export const RAZON_REPOSO_CRIA = 'Saciado y listo para criar salvo por las fuerzas; descansa para recuperarlas, sin dejar de tener hambre y sed.';
 export const SPECIES: readonly AnimalSpecies[] = ['hare', 'deer', 'boar', 'fish', 'wolf', 'fox'];
+const especieHeredada = (valor: unknown): valor is AnimalSpecies => typeof valor === 'string' && Object.hasOwn(FOOD_PER_ANIMAL, valor);
+/** La vista de teselas y los sprites conservan la paleta histórica; el guardado retiene el nombre original. */
+export const especieVisual = (valor: string): AnimalSpecies => especieHeredada(valor) ? valor : 'hare';
 /** Orden de las acciones de la fauna: su índice es la columna `accion` del frente. */
 export const ACTIONS: readonly AnimalAction[] = ['roam', 'graze', 'drink', 'rest', 'hunt', 'flee'];
 const LIFESPAN: Record<AnimalSpecies, number> = { hare: 18000, deer: 36000, boar: 30000, fish: 20000, wolf: 32000, fox: 26000 };
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 interface Point { x: number; y: number; }
 export interface AnimalMemory extends Point { tick: number; food: number; water: number; visited: boolean; }
-export interface Animal extends AnimalView {
+export interface Animal extends Omit<AnimalView, 'species'> {
+  species: string;
   bornAt: number; lastBirth: number; lastBirthAge: number; lastDecision: number; lastMove: number;
   target: Point; memory: AnimalMemory[]; work: number; preyId: string | null;
   /** V19/R (`fauna.reservaReproductiva`): biomasa de la dieta apartada para la cría, en [0, `RESERVA_MAXIMA`]. Ausente = 0. */
@@ -140,7 +143,7 @@ const MORPH_BASE: Record<AnimalSpecies, AnimalMorphology> = {
 };
 function ensureMorphology(animal: Animal, seed: number): AnimalMorphology {
   if (!animal.morphology) {
-    const base = MORPH_BASE[animal.species];
+    const base = MORPH_BASE[especieVisual(animal.species)];
     animal.morphology = { ...base };
     for (const field of MORPH_FIELDS) animal.morphology[field] = Math.max(0.05, Math.min(0.95,
       base[field] + (hash(seed, `${animal.id}:morph:${field}`) / 4294967296 - 0.5) * 0.18));
@@ -148,7 +151,7 @@ function ensureMorphology(animal: Animal, seed: number): AnimalMorphology {
   return animal.morphology;
 }
 export const isHerdAnimal = (animal: Animal): boolean => animal.species === 'deer' || animal.species === 'boar' || animal.species === 'hare';
-export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[animal.species] * (0.75 + (animal.morphology?.size ?? 0.5) * 0.65);
+export const animalBiomass = (animal: Animal): number => FOOD_PER_ANIMAL[especieVisual(animal.species)] * (0.75 + (animal.morphology?.size ?? 0.5) * 0.65);
 
 /** V23 serial physical overlay, after the fauna decision. All sensing is local
  * (Manhattan ≤ 6); no person/structure data enters the fauna Plan.
@@ -357,9 +360,9 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   const counts = new Map<Cell, { count: number; species: AnimalSpecies; x: number; y: number }>();
   for (const animal of animals) {
     const p = cell(animal);
-    const entry = counts.get(p);
-    if (entry) { entry.count++; if (animal.species < entry.species) entry.species = animal.species; }
-    else counts.set(p, { count: 1, species: animal.species, x: animal.x, y: animal.y });
+    const species = especieVisual(animal.species), entry = counts.get(p);
+    if (entry) { entry.count++; if (species < entry.species) entry.species = species; }
+    else counts.set(p, { count: 1, species, x: animal.x, y: animal.y });
   }
   const raw = residentBackingArray(tiles);
   const inPlaceRev = residentInPlaceRevision(tiles);
@@ -386,14 +389,7 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
     if (count) {
       if (tile.species !== count.species) tile.species = count.species;
-    } else if (inPlaceRev === undefined) {
-      // Sin propiedad residente (un hilo): `delete` pasaba la tesela a modo diccionario en V8 y cada
-      // lectura posterior de cualquier campo era una búsqueda en tabla hash. `undefined` se lee igual
-      // (`tile.species` sigue siendo `undefined`) y el digesto canónico omite las claves `undefined`.
-      if (tile.species !== undefined) tile.species = undefined;
-    } else if (Object.hasOwn(tile, 'species')) {
-      delete tile.species;
-    }
+    } else if (tile.species !== undefined) tile.species = undefined;
   };
   // Cada celda una sola vez: primero las ocupadas antes y luego las nuevas, el orden del antiguo
   // `new Set([...occupied, ...counts.keys()])` (cada celda escribe una tesela distinta).
@@ -960,7 +956,7 @@ function physiology(animal: Animal, desert: boolean, world: AnimalWorld, emergen
   // Dormancy never catches up. A founder materialized in this very tick has not yet completed another age interval.
   animal.age = Math.min(animal.age + 1, world.tick - animal.bornAt);
   const cause = animal.thirst >= 0.985 ? 'deshidratación' : animal.hunger >= 0.985 ? 'inanición'
-    : animal.energy <= 0.001 ? 'agotamiento' : animal.age > LIFESPAN[animal.species] ? 'senescencia' : '';
+    : animal.energy <= 0.001 ? 'agotamiento' : animal.age > LIFESPAN[especieVisual(animal.species)] ? 'senescencia' : '';
   if (cause) animal.health = clamp(animal.health - (cause === 'deshidratación' ? 0.0012 : cause === 'inanición' ? 0.0008 : 0.0003));
   else if (animal.hunger < 0.55 && animal.thirst < 0.55 && animal.energy > 0.35 && animal.health < 1) {
     animal.health = clamp(animal.health + 0.00015); animal.energy = clamp(animal.energy - 0.00003);
@@ -1186,7 +1182,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
       * (emergent ? 1 - (prey.morphology?.defense ?? 0) * 0.5 : 1));
     if (prey.health > 0) continue;
     death(world, prey, 'depredación', emit, animal.id); world.animalDynamics.predations++;
-    const botin = emergent ? animalBiomass(prey) : FOOD_PER_ANIMAL[prey.species];
+    const botin = emergent ? animalBiomass(prey) : FOOD_PER_ANIMAL[especieVisual(prey.species)];
     assimilateFood(animal, state.reserva ? botin - reservar(animal, botin, state.fraccionReserva) : botin, { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     // V19/R: una presa es también agua. Como el pasto (`feed`: 3 unidades de agua por unidad de biomasa, 0,3 de sed
     // por unidad), el cuerpo de la presa aporta la que conservaba: `botín · 3 · (1 − sed de la presa)`. Sale de ESE
@@ -1214,7 +1210,7 @@ export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, em
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
   world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
   solicitarFrenteFauna(world);
-  return paramsOf(world).quimica.emergente ? animalBiomass(victim) : FOOD_PER_ANIMAL[victim.species];
+  return paramsOf(world).quimica.emergente ? animalBiomass(victim) : FOOD_PER_ANIMAL[especieVisual(victim.species)];
 }
 
 function alarmHerd(animals: readonly Animal[], at: Point, tick: number): void {
@@ -1224,7 +1220,7 @@ function alarmHerd(animals: readonly Animal[], at: Point, tick: number): void {
 }
 
 export function projectAnimal(animal: Animal, _tick: number): AnimalView {
-  return { id: animal.id, species: animal.species, x: animal.x, y: animal.y, action: animal.action, reason: animal.reason,
+  return { id: animal.id, species: especieVisual(animal.species), x: animal.x, y: animal.y, action: animal.action, reason: animal.reason,
     hunger: animal.hunger, thirst: animal.thirst, energy: animal.energy, fatigue: animal.fatigue, health: animal.health,
     generation: animal.generation, parents: [...animal.parents], genes: { ...animal.genes }, age: animal.age,
     ...(animal.morphology === undefined ? {} : { morphology: { ...animal.morphology } }),
@@ -1232,15 +1228,15 @@ export function projectAnimal(animal: Animal, _tick: number): AnimalView {
     ...(animal.tends === undefined ? {} : { tends: animal.tends }),
     ...(animal.reproReserve === undefined ? {} : { reproReserve: Math.round(animal.reproReserve * 1000) / 1000 }) };
 }
-export function assertAnimal(value: unknown, tick: number): asserts value is Animal {
+export function assertAnimal(value: unknown, tick: number, faunaV23 = false): asserts value is Animal {
   const fail = (): never => { throw new Error('Animal individual inválido.'); };
   if (!value || typeof value !== 'object') fail();
   const a = value as Animal, time = (n: number, lower = 0): boolean => Number.isSafeInteger(n) && n >= lower && n <= tick;
   assertAnimalTraits(a, tick);
-  if (typeof a.id !== 'string' || !/^animal-[a-zA-Z0-9-]{1,110}$/.test(a.id) || !SPECIES.includes(a.species) || !ACTIONS.includes(a.action)
+  if (typeof a.id !== 'string' || !/^animal-[a-zA-Z0-9-]{1,110}$/.test(a.id) || !(faunaV23 ? typeof a.species === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(a.species) : especieHeredada(a.species)) || !ACTIONS.includes(a.action)
     || !point(a) || !point(a.target) || typeof a.reason !== 'string' || a.reason.length > 240
     || !['hunger', 'thirst', 'energy', 'fatigue', 'health'].every(k => unit(a[k as keyof Animal])) || a.health <= 0
-    || !Number.isSafeInteger(a.generation) || a.generation < 0 || a.generation > 1e6 || !Array.isArray(a.parents)
+    || !Number.isSafeInteger(a.generation) || a.generation < 0 || (!faunaV23 && a.generation > 1e6) || !Array.isArray(a.parents)
     || !(a.generation === 0 ? a.parents.length === 0 : a.parents.length === 2) || new Set(a.parents).size !== a.parents.length
     || a.parents.some(id => typeof id !== 'string' || !/^animal-[a-zA-Z0-9-]{1,110}$/.test(id) || id === a.id)
     || !a.genes || Object.keys(a.genes).length !== 6 || !['speed','perception','metabolism','carnivory','waterEfficiency','camouflage'].every(k => unit(a.genes[k as keyof AnimalGenes]))
@@ -1256,12 +1252,12 @@ export function assertAnimal(value: unknown, tick: number): asserts value is Ani
     seen.add(key(memory));
   }
 }
-export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = Number.MAX_SAFE_INTEGER): asserts value is Animal[] {
+export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = Number.MAX_SAFE_INTEGER, faunaV23 = false): asserts value is Animal[] {
   if (!Number.isSafeInteger(maxAnimals) || maxAnimals < 1 || !Array.isArray(value) || value.length > maxAnimals) throw new Error('Colección de fauna inválida.');
   const ids = new Set<string>();
   const positions = tiles && new Map(residentBackingArray(tiles).map(t => [key(t), t]));
   for (const animal of value) {
-    assertAnimal(animal, tick);
+    assertAnimal(animal, tick, faunaV23);
     if (ids.has(animal.id) || positions && !positions.has(key(animal))) throw new Error('Identidad o región animal inválida.');
     ids.add(animal.id);
   }

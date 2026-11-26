@@ -31,7 +31,7 @@ export function assertEcosystemTile(tile: Tile, required = true): void {
     const value = tile[key];
     if ((required || value !== undefined) && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) fail();
   }
-  if ((required || tile.fauna !== undefined) && (!Number.isInteger(tile.fauna) || tile.fauna! < 0)) fail();
+  if ((required || tile.fauna !== undefined) && (!Number.isSafeInteger(tile.fauna) || tile.fauna! < 0)) fail();
   if (tile.species !== undefined && !['hare','deer','boar','fish','wolf','fox'].includes(tile.species)) fail();
   if ((tile.fauna ?? 0) > 0 && tile.species === undefined) fail();
 }
@@ -178,10 +178,10 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
     ids.add(s.id);
   }
 }
-export function assertChunkLife(chunk: Chunk,tick: number,obraActiva=false): void {
+export function assertChunkLife(chunk: Chunk,tick: number,obraActiva=false,faunaActiva=false): void {
   if(chunk.lifeVersion!==undefined&&chunk.lifeVersion!==4)fail();
   if(chunk.lifeVersion===4&&(chunk.animals===undefined||chunk.structures===undefined))fail();
-  if(chunk.animals!==undefined){assertAnimals(chunk.animals,tick,chunk.tiles);assertFaunaStock(chunk.tiles,chunk.animals);}
+  if(chunk.animals!==undefined){assertAnimals(chunk.animals,tick,chunk.tiles,undefined,faunaActiva);assertFaunaStock(chunk.tiles,chunk.animals);}
   if(chunk.structures!==undefined)assertStructures(chunk.structures,tick,chunk.tiles,undefined,obraActiva);
 }
 export function assertDormantTerrain(chunk:Chunk,tick:number,ecosystemRequired:boolean,v23: Pick<typeof INTERRUPTORES_APAGADOS, 'obra' | 'materia'>=INTERRUPTORES_APAGADOS):void {
@@ -202,9 +202,9 @@ function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
 }
 export function assertLifeState(world: World): void {
   const limits=limitsOf(world,world.version);
-  assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
+  const {obra:obraActiva,fauna:faunaActiva}=paramsOf(world).v23;
+  assertAnimals(world.animals,world.tick,world.tiles,faunaActiva?undefined:limits.fauna,faunaActiva);
   assertFaunaStock(world.tiles,world.animals);
-  const obraActiva=paramsOf(world).v23.obra;
   assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas,obraActiva);
   const maxBlueprints=blueprintCap(world);
   if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>maxBlueprints)fail();
@@ -243,7 +243,7 @@ export function assertLifeState(world: World): void {
   }
   const animalIds=new Set(world.animals.map(a=>a.id)),structureIds=new Set(world.structures.map(s=>s.id));
   for(const chunk of world.retiredChunks) {
-    assertChunkLife(chunk,world.tick,obraActiva);
+    assertChunkLife(chunk,world.tick,obraActiva,faunaActiva);
     for(const animal of chunk.animals??[]){if(animalIds.has(animal.id))fail();animalIds.add(animal.id);}
     for(const structure of chunk.structures??[]){if(structureIds.has(structure.id)||!ids.has(structure.blueprintId))fail();structureIds.add(structure.id);}
   }

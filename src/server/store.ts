@@ -256,7 +256,7 @@ function assertChunk(value: unknown, key: string, atTick: number, v23?: WorldPar
     if (!object(place) || !string(place.id, 200) || ids.has(place.id) || !string(place.name, 200) || !string(place.description) || !integer(place.gatherings, 1_000_000) || !Number.isInteger(place.x) || !Number.isInteger(place.y) || place.x < x0 || place.x >= x0 + CHUNK_SIZE || place.y < y0 || place.y >= y0 + CHUNK_SIZE) fail();
     ids.add(place.id);
   }
-  assertChunkLife(chunk, atTick, v23?.obra ?? true);
+  assertChunkLife(chunk, atTick, v23?.obra ?? true, v23?.fauna ?? true);
 }
 export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}

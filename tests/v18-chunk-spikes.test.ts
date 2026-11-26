@@ -28,12 +28,12 @@ function wrapResident(world: World): ResidentTopologyOwner {
 
 /** Proyección de referencia desde cero (sin caché): recorre todas las teselas y aplica `animals`. */
 function referenceSyncFaunaScratch(tiles: Tile[], animals: Animal[]): void {
-  const counts = new Map<string, { count: number; species: Animal['species'] }>();
+  const counts = new Map<string, { count: number; species: NonNullable<Tile['species']> }>();
   for (const a of animals) {
     const k = `${a.x},${a.y}`;
-    const prev = counts.get(k);
-    if (prev) { prev.count++; if (a.species < prev.species) prev.species = a.species; }
-    else counts.set(k, { count: 1, species: a.species });
+    const prev = counts.get(k), species = a.species as NonNullable<Tile['species']>;
+    if (prev) { prev.count++; if (species < prev.species) prev.species = species; }
+    else counts.set(k, { count: 1, species });
   }
   const byKey = new Map<string, Tile>();
   for (const t of tiles) byKey.set(`${t.x},${t.y}`, t);
@@ -48,9 +48,7 @@ function referenceSyncFaunaScratch(tiles: Tile[], animals: Animal[]): void {
     if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
     if (c) {
       if (tile.species !== c.species) tile.species = c.species;
-    } else if (Object.hasOwn(tile, 'species')) {
-      delete tile.species;
-    }
+    } else if (tile.species !== undefined) tile.species = undefined;
   }
 }
 
@@ -199,7 +197,7 @@ test('V18 spikes: fail-closed ante teselas parciales/no-bloque, mutaciones exter
   assert.equal(tileSnapshot(resident.tiles), tileSnapshot(plain.tiles), 'fallback no-bloque coincide con referencia');
   const looseAfter = tileAt(resident, { x: 999, y: 999 })!;
   assert.equal(looseAfter.fauna, 0);
-  assert.equal(Object.hasOwn(looseAfter, 'species'), false);
+  assert.equal(Object.hasOwn(looseAfter, 'species'), true);
 
   // 2. Mutación in-place en un array observado (residentInPlaceRevision cambia sin cambiar length).
   const w2 = createWorld(23);
@@ -214,7 +212,7 @@ test('V18 spikes: fail-closed ante teselas parciales/no-bloque, mutaciones exter
   syncFauna(w2.tiles, w2.animals);
   assert.equal(faunaCacheBuilds(), scansBefore + 1, 'mutación in-place revoca caché y fuerza rescan');
   assert.equal(w2.tiles[emptyIdx]!.fauna, 0);
-  assert.equal(Object.hasOwn(w2.tiles[emptyIdx]!, 'species'), false);
+  assert.equal(Object.hasOwn(w2.tiles[emptyIdx]!, 'species'), true);
 
   // 3. Push externo sin avisar a tileIndexAppended / faunaCacheAppended.
   const w3 = createWorld(29);
@@ -231,7 +229,7 @@ test('V18 spikes: fail-closed ante teselas parciales/no-bloque, mutaciones exter
   syncFauna(w3.tiles, w3.animals);
   assert.equal(faunaCacheBuilds(), scans3 + 1, 'push externo sin aviso reconstruye');
   assert.equal(extraChunk[0]!.fauna, 0);
-  assert.equal(Object.hasOwn(extraChunk[0]!, 'species'), false);
+  assert.equal(Object.hasOwn(extraChunk[0]!, 'species'), true);
 
   // 3b. Reemplazar el array público sin ganchos no puede reutilizar la caché de la identidad anterior.
   const scansReplace = faunaCacheBuilds();

@@ -723,18 +723,42 @@ export function ingerirSelecto(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, kg
   return trasladarAlimento(c, cuerpo, de, cuerpo.digestivo, kg);
 }
 
+// Independientes del scratch de masaLote: el traslado usa ambos antes de consumir la selección.
+const IDS_ALIMENTO = new Uint32Array(32);
+const PARTES_ALIMENTO = new Float64Array(IDS_ALIMENTO.length);
+
 export function trasladarAlimento(c: CtxLeyMateria, cuerpo: Cuerpo, de: LoteRef, destino: LoteRef, kg: number): number {
   if (!(kg > 0)) return 0;
   const a = c.materia, q = c.quimica, p = plantillaDe(c, cuerpo), azar = pasoDe(c).azar;
-  const ids = especiesDe(a, de), partes = new Float64Array(ids.length);
+  const nEspecies = a.especies(de, IDS_ALIMENTO, PARTES_ALIMENTO);
+  let ids: Uint32Array = IDS_ALIMENTO, partes = PARTES_ALIMENTO;
+  if (nEspecies <= IDS_ALIMENTO.length) {
+    // El orden numérico determina la suma y el turno de cada sorteo.
+    for (let i = 1; i < nEspecies; i++) {
+      const id = ids[i]!, cantidad = partes[i]!;
+      let j = i;
+      for (; j > 0 && ids[j - 1]! > id; j--) {
+        ids[j] = ids[j - 1]!;
+        partes[j] = partes[j - 1]!;
+      }
+      ids[j] = id;
+      partes[j] = cantidad;
+    }
+  } else {
+    // Los lotes muy diversos conservan la ordenación nativa, sin un coste cuadrático.
+    ids = especiesDe(a, de);
+    partes = new Float64Array(ids.length);
+    for (let i = 0; i < ids.length; i++) partes[i] = a.cuantos(de, ids[i]!);
+  }
   let ofrecido = 0;
-  for (let i = 0; i < ids.length; i++) {
-    partes[i] = a.cuantos(de, ids[i]!) * provecho(c, p, ids[i]!);
-    ofrecido += partes[i]! * q.sustancia(ids[i]!).masa * MG;
+  for (let i = 0; i < nEspecies; i++) {
+    const id = ids[i]!;
+    partes[i] = partes[i]! * provecho(c, p, id);
+    ofrecido += partes[i]! * q.sustancia(id).masa * MG;
   }
   if (!(ofrecido > 0)) return 0;
   const escala = Math.min(1, kg / ofrecido), antes = masaLote(c, destino);
-  for (let i = 0; i < ids.length; i++) {
+  for (let i = 0; i < nEspecies; i++) {
     const n = entero(partes[i]! * escala, azar);
     if (n > 0) a.moverParte(de, destino, exacta(ids[i]!, n));
   }

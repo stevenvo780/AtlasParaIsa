@@ -115,6 +115,26 @@ test('comer elige lo que el cuerpo aprovecha, lo absorbe y excreta el resto al s
   assert.ok(exacto());
 });
 
+test('trasladar alimento lee juntos especies y cuantos y conserva el orden ascendente del traslado', t => {
+  const cuerpo = crearCuerpo(c, humana.id, 60);
+  const [menor, mayor] = [m.S.CH2, m.S.proteina].sort((a, b) => a - b);
+  const de = m.arena.nuevo(Rol.Vida, -1, 0);
+  m.arena.fuente(de, Float64Array.of(mayor, 20_000, menor, 10_000, 0, 45), m.libro);
+  const cuantos = t.mock.method(m.arena, 'cuantos');
+  const mover = m.arena.moverParte.bind(m.arena);
+  const orden: number[] = [];
+  t.mock.method(m.arena, 'moverParte', (...args: Parameters<typeof mover>) => {
+    orden.push(args[2].esp);
+    return mover(...args);
+  });
+  assert.ok(ingerirSelecto(c, cuerpo, de, Infinity) > 0);
+  assert.deepEqual(orden, [menor, mayor]);
+  assert.equal(cuantos.mock.calls.filter(({ arguments: [lote] }) => lote === de).length, 0);
+  assert.equal(m.arena.cuantos(cuerpo.digestivo, menor), 10_000);
+  assert.equal(m.arena.cuantos(cuerpo.digestivo, mayor), 20_000);
+  assert.ok(exacto());
+});
+
 test('una elección reutiliza el provecho por especie y vuelve a leer la cantidad viva de cada lote', t => {
   const cuerpo = crearCuerpo(c, humana.id, 60);
   const primero = m.lote({ madera: 20_000, proteina: 6_000, H2O: 40_000 }, T_AIRE, Rol.Vida);

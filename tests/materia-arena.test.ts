@@ -483,6 +483,51 @@ if (isMainThread) test('desborde y moverParte conservan composición y calor par
   arena.liberar(origen);
 });
 
+if (isMainThread) test('transferencia en línea y general coinciden en composición, orden y calor', t => {
+  const rapida = arenaDe(memoriaDe(2, 8), 1), general = arenaDe(memoriaDe(2, 8), 1);
+  type Ruta = { transferirSinReordenar(): boolean };
+  const rutaRapida = t.mock.method(rapida as unknown as Ruta, 'transferirSinReordenar');
+  t.mock.method(general as unknown as Ruta, 'transferirSinReordenar', () => false);
+
+  function realizar(arena: ArenaLotes) {
+    const libro = libroVacio();
+    const origen = arena.nuevo(Rol.Tejido, 256, 0), destino = arena.nuevo(Rol.Reserva, 256, 0);
+    arena.fuente(origen, Float64Array.of(3, 12, 2, 24, 1, 6, 0, 841), libro);
+    arena.fuente(destino, Float64Array.of(2, 42, 3, 8, 0, 37), libro);
+    const saldo = arena.saldo();
+    const moverParte = (esp: number, cuantos: number) =>
+      arena.moverParte(origen, destino, { parte: Parte.Exacta, esp, cuantos, kappa: null });
+    assert.equal(arena.mover({ de: origen, a: destino, esp: 3, cuantos: 6 }), 6);
+    assert.equal(moverParte(2, 4), 4);
+    assert.equal(arena.calor(destino), 130); // floor(841 * 4 / 36) + 37.
+    const primera = [arena.muestra(origen), arena.muestra(destino)];
+    assert.equal(moverParte(1, 2), 2); // Inserta una especie en destino.
+    assert.equal(moverParte(3, 6), 6); // Quita la especie del origen.
+    assert.deepEqual(arena.saldo(), saldo);
+    return { primera, ultima: [arena.muestra(origen), arena.muestra(destino)], saldo };
+  }
+
+  assert.deepEqual(realizar(rapida), realizar(general));
+  assert.deepEqual(rutaRapida.mock.calls.map(({ result }) => result), [true, true, false, false]);
+});
+
+if (isMainThread) test('transferencia en línea valida desbordes de cantidad y calor antes de modificar ambos lotes', () => {
+  const max = Number.MAX_SAFE_INTEGER;
+  const de = refDe(0, 1), a = refDe(1, 1);
+  for (const limite of ['Cantidad', 'Calor']) {
+    const arena = arenaDe(memoriaDe(1, 8), 0);
+    arena.cargar([
+      { ref: de, celda: -1, rol: Rol.Tejido, forma: 0, dueno: 0, pares: Float64Array.of(1, 10, 0, 100) },
+      { ref: a, celda: -1, rol: Rol.Reserva, forma: 0, dueno: 0,
+        pares: Float64Array.of(1, limite === 'Cantidad' ? max : 1, 0, limite === 'Calor' ? max : 1) },
+    ], []);
+    const antes = arena.guardar();
+    assert.throws(() => arena.moverParte(de, a, { parte: Parte.Exacta, esp: 1, cuantos: 1, kappa: null }),
+      new RegExp(`${limite} inválido`));
+    assert.deepEqual(arena.guardar(), antes);
+  }
+});
+
 if (isMainThread) test('especies lee cantidades en orden incluso en el desborde y con un destino corto', () => {
   const arena = arenaDe(memoriaDe(1, 16), 0), lote = arena.nuevo(Rol.Tejido, -1, 0);
   const orden = sustancias.map(({ id }) => id).reverse();

@@ -618,6 +618,7 @@ export class ArenaLotes implements ArenaMateria {
 
   private transferir(de: number, a: number, origen: Lista, parte: Lista): void {
     if (de === a || parte.n === 0) return;
+    if (this.transferirSinReordenar(de, a, origen, parte)) return;
     const destino = this.contenido(a, this.lb);
     for (let k = 0; k < parte.n; k++) {
       const id = parte.id[k]!, q = parte.q[k]!;
@@ -627,6 +628,39 @@ export class ArenaLotes implements ArenaMateria {
     this.reservar(de, origen, a, destino);
     this.escribir(de, origen, this.nuevasA);
     this.escribir(a, destino, this.nuevasB);
+  }
+
+  /** En la arena fusionada los llamadores ya validaron ambas ranuras y su dueño.
+   * Si se conserva la composición en línea, solo cambian los dos cuantos y el calor ya seleccionado. */
+  private transferirSinReordenar(de: number, a: number, origen: Lista, parte: Lista): boolean {
+    const id = parte.id[0]!;
+    if (this.fisicas || id === 0 || (parte.n !== 1 && (parte.n !== 2 || parte.id[1] !== 0))) return false;
+    const cuantos = parte.q[0]!, indiceOrigen = origen.indice(id);
+    const cantidadOrigen = origen.q[indiceOrigen]! - cuantos;
+    if (!(cantidadOrigen > 0)) return false;
+
+    const bOrigen = this.bloqueContenido(de), bDestino = this.bloqueContenido(a);
+    const localOrigen = de % LOTES_POR_BLOQUE, localDestino = a % LOTES_POR_BLOQUE;
+    if (bOrigen.exceso[localOrigen] || bDestino.exceso[localDestino]) return false;
+    const ranuraOrigen = localOrigen * RANURAS + indiceOrigen;
+    const inicioDestino = localDestino * RANURAS, finDestino = inicioDestino + RANURAS;
+    let ranuraDestino = inicioDestino;
+    while (ranuraDestino < finDestino && bDestino.esp[ranuraDestino] !== id) ranuraDestino++;
+    if (ranuraDestino === finDestino) return false;
+
+    // Las ranuras en línea son compactas y el calor va al final de origen. Validar todo antes de tocar columnas.
+    const nuevaCantidadOrigen = natural(cantidadOrigen, 'Cantidad');
+    const nuevaCantidadDestino = natural(bDestino.cant[ranuraDestino]! + cuantos, 'Cantidad');
+    if (parte.n === 2) {
+      const calor = parte.q[1]!;
+      const nuevoCalorOrigen = natural(bOrigen.calor[localOrigen]! - calor, 'Calor');
+      const nuevoCalorDestino = natural(bDestino.calor[localDestino]! + calor, 'Calor');
+      bOrigen.calor[localOrigen] = nuevoCalorOrigen;
+      bDestino.calor[localDestino] = nuevoCalorDestino;
+    }
+    bOrigen.cant[ranuraOrigen] = nuevaCantidadOrigen;
+    bDestino.cant[ranuraDestino] = nuevaCantidadDestino;
+    return true;
   }
 
   mover({ de, a, esp, cuantos }: Traslado): number {

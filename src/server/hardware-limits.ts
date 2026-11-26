@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
+import { admiteBrokerPercepcionGpu } from '../world/gpu/broker-percepcion.js';
 import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { LOTES_POR_BLOQUE } from '../world/materia/arena.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
@@ -15,6 +16,23 @@ import { DESBORDES_POR_LOTE, RESERVA_LOTES_HISTORICA, RESERVA_LOTES_MAXIMA } fro
 export type MotorConfigProceso = MotorConfig & {
   auto?: { maximo: number; elegir(medidas: ReadonlyMap<number, number>): number };
 };
+
+/** Grupos JSON en el orden de CARTA_MOTOR_GPU. Los dueños sin asignar conservan la ruta CPU. */
+function gruposGpuDelProceso(env: NodeJS.ProcessEnv, hilos: MotorConfig['hilos'], gpu: readonly number[]): MotorConfig['gruposPercepcionGpu'] {
+  const texto = env.CARTA_MOTOR_GPU_GRUPOS?.trim();
+  if (!texto) return undefined;
+  if (hilos === 'auto') throw new Error('CARTA_MOTOR_GPU_GRUPOS requiere un CARTA_MOTOR_HILOS explícito.');
+  if (env.CARTA_PERCEPCION_DUENOS !== '1' || env.CARTA_PERCEPCION_COSTE_DUENOS !== '1') {
+    throw new Error('CARTA_MOTOR_GPU_GRUPOS requiere CARTA_PERCEPCION_DUENOS=1 y CARTA_PERCEPCION_COSTE_DUENOS=1.');
+  }
+  let grupos: unknown;
+  try { grupos = JSON.parse(texto); }
+  catch { throw new Error('CARTA_MOTOR_GPU_GRUPOS debe ser una lista JSON de grupos de dueños.'); }
+  if (!Array.isArray(grupos) || !admiteBrokerPercepcionGpu(hilos, gpu, undefined, grupos)) {
+    throw new Error('CARTA_MOTOR_GPU_GRUPOS requiere un grupo no vacío por GPU compatible, con dueños válidos y disjuntos.');
+  }
+  return grupos;
+}
 
 /** Configuración del coordinador V23, independiente de los parámetros guardados. */
 export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = process.env,
@@ -31,10 +49,12 @@ export function motorConfig(seed: number | undefined, env: NodeJS.ProcessEnv = p
     }
     return indice;
   }) : [];
+  const gruposPercepcionGpu = gruposGpuDelProceso(env, hilos === 'auto' ? hilos : Number(hilos), gpu);
   const maximo = hilos === 'auto' ? availableParallelism() : undefined;
   const reservaLotesMateria = reservaMateriaHost(memoria ?? hostMemory());
   return { hilos: hilos === 'auto' ? hilos : Number(hilos), gpu: [...new Set(gpu)],
     ...(maximo === undefined ? {} : { auto: { maximo, elegir: medidas => hilosAuto(medidas, maximo) } }),
+    ...(gruposPercepcionGpu === undefined ? {} : { gruposPercepcionGpu }),
     ...(reservaLotesMateria > RESERVA_LOTES_HISTORICA ? { reservaLotesMateria } : {}),
     ...(env.CARTA_CORTE_TRANSFERIBLE === '1' ? { instantaneaTransferible: true } : {}),
     decisionGpu: 'siempre', verificar: false, semilla: seed ?? null };

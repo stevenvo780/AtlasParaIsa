@@ -20,8 +20,8 @@ import { applyGesture } from '../actuar/gestos.js';
 import { faunaCacheAppended, faunaCacheFiltered, type Animal } from '../animals.js';
 import { percepcionDe, olvidarPercepcion } from '../decision/percepcion.js';
 import type { TerrenoPercepcion } from '../decision/terreno-percepcion.js';
-import { ArenaLotes, LOTES_POR_BLOQUE, ranurasDesborde } from '../materia/arena.js';
-import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, decodificarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
+import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE } from '../materia/arena.js';
+import { codificarEnVuelo, codificarPaginas, decodificarEnVuelo, indexarPaginas, saldoEnVuelo, type LoteGuardado } from '../materia/checkpoint.js';
 import { plegarLibros, sumarEnVuelo, type TotalesMateria } from '../materia/libro.js';
 import { sustanciasMundo } from '../materia/mundo.js';
 import { cargarSustancias, crearServicioQuimico, serializarSustancias, type ServicioQuimicoImpl } from '../materia/servicio.js';
@@ -825,16 +825,20 @@ export class Dueno implements CtxF0 {
   /** La materia para `Instantanea` (en barrera, con todos los dueños detenidos). null sin `v23.materia`. */
   instantaneaMateria(pendientes: readonly Intento[]): MateriaCheckpoint | null {
     if (!this.materia || !this.quimica) return null;
-    const arena = this.materia as ArenaLotes & { guardar?(): { lotes: Iterable<LoteGuardado>; libres: Iterable<LoteRef> } };
-    if (!arena.guardar) throw new Error('La arena de lotes no sabe volcarse: falta ArenaLotes.guardar() (pedido de m4a al integrador).');
+    const arena = this.materia as ArenaLotes;
     this.totales = plegarLibros(this.#piezas.libros, this.totales);
-    const terreno = this.terrenoPercibido, { lotes: propios, libres } = arena.guardar();
-    const lotes = Array.from(propios, l => ({ ...l, celda: celdaMundo(terreno, l.celda) }));
+    const terreno = this.terrenoPercibido;
+    function* lotes(): IterableIterator<LoteGuardado> {
+      for (const lote of arena.muestras()) {
+        lote.celda = celdaMundo(terreno, lote.celda);
+        yield lote;
+      }
+    }
     const enVuelo = pendientes.filter(i => i.materia !== null).map(i => ({ ...i, celda: celdaMundo(terreno, i.celda) }));
     return {
       epoca: this.epoca, tick: this.mundo.tick,
       sustancias: serializarSustancias(this.quimica as ServicioQuimicoImpl), registro: this.registro.guardar(),
-      paginas: codificarPaginas(this.epoca, lotes, libres), enVuelo: codificarEnVuelo(enVuelo),
+      paginas: codificarPaginas(this.epoca, lotes(), arena.libres()), enVuelo: codificarEnVuelo(enVuelo),
       inicial: this.totales.inicial, fuentes: this.totales.fuentes, sumideros: this.totales.sumideros,
     };
   }
@@ -843,15 +847,32 @@ export class Dueno implements CtxF0 {
    * estaban en vuelo (quien llama los repone en un buzón). */
   cargarMateria(cp: MateriaCheckpoint): Intento[] {
     if (!this.materia || !this.quimica) throw new Error('Cargar materia exige v23.materia.');
-    const terreno = this.terrenoPercibido, { lotes: guardados, libres } = decodificarPaginas(cp.epoca, cp.paginas);
+    const terreno = this.terrenoPercibido;
     // Guardados previos: recoger roca dejaba su lote Objeto ligado a la celda aunque la persona ya lo llevaba.
     const carga = new Set<LoteRef>();
     for (const persona of this.mundo.people) for (const lote of persona.carga ?? []) carga.add(lote);
-    // Con un dueño todo lote ligado a un organismo es suyo; con varios, cada dueño adopta los de los suyos al repartir.
-    const lotes = guardados.map(l => ({ ...l, celda: l.rol === Rol.Objeto && carga.has(l.ref) ? REF_NULA : celdaLocal(terreno, l.celda), dueno: 0 }));
-    this.reservarMateria(Math.ceil((lotes.length + libres.length) / LOTES_POR_CHUNK_NUEVO));
-    this.#desborde!.prepararF0(ranurasDesborde(lotes));
-    (this.materia as ArenaLotes).cargar(lotes, libres);
+    const celdaGuardada = (lote: LoteGuardado): number =>
+      lote.rol === Rol.Objeto && carga.has(lote.ref) ? REF_NULA : lote.celda;
+    let desborde = 0;
+    const paginasLocales = new Map<number, number>();
+    const indice = indexarPaginas(cp.epoca, cp.paginas, (lote, especies) => {
+      const celda = celdaGuardada(lote);
+      if (celda >= 0) paginasLocales.set(celda - celda % 256, 0);
+      desborde += desbordeDeEspecies(especies);
+    });
+    // Se dan de alta en el orden del archivo, antes de instalar los lotes por ranura.
+    for (const pagina of paginasLocales.keys()) paginasLocales.set(pagina, celdaLocal(terreno, pagina));
+    this.reservarMateria(Math.ceil(indice.ranuras / LOTES_POR_CHUNK_NUEVO));
+    this.#desborde!.prepararF0(desborde);
+    (this.materia as ArenaLotes).cargarPorRanura(indice.ranuras, ranura => {
+      const lote = indice.leer(ranura);
+      if (lote === undefined || typeof lote === 'number') return lote;
+      const celda = celdaGuardada(lote), desplazamiento = celda % 256;
+      lote.celda = celda < 0 ? REF_NULA : paginasLocales.get(celda - desplazamiento)! + desplazamiento;
+      // Cada dueño adopta los lotes de sus organismos al repartir.
+      lote.dueno = 0;
+      return lote;
+    });
     this.registro.cargar(cp.registro);
     this.totales = { inicial: [...cp.inicial], fuentes: [...cp.fuentes], sumideros: [...cp.sumideros] };
     const q = this.quimica, saldo = saldoEnVuelo(cp.enVuelo, id => q.sustancia(id));

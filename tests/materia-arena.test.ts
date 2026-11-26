@@ -4,13 +4,13 @@ import test from 'node:test';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
 import { ClaseSustancia, TIPOS } from '../src/shared/materia.js';
 import { NE, TABLA } from '../src/shared/naturaleza.js';
-import { ArenaLotes, LOTES_POR_BLOQUE, type MemoriaMateria } from '../src/world/materia/arena.js';
+import { ArenaLotes, desbordeDeEspecies, LOTES_POR_BLOQUE, ranurasDesborde, type MemoriaMateria } from '../src/world/materia/arena.js';
 import {
   codificarCheckpoint, codificarEnVuelo, codificarPaginas, decodificarCheckpoint, decodificarEnVuelo, decodificarPaginas,
-  saldoEnVuelo,
+  indexarPaginas, saldoEnVuelo,
 } from '../src/world/materia/checkpoint.js';
 import { comprobarConservacion, plegarLibros, registrarConservacion, sumarEnVuelo, type TotalesMateria } from '../src/world/materia/libro.js';
-import { REF_NULA, TipoIntento, slotDe, type Intento } from '../src/world/motor/contratos.js';
+import { REF_NULA, TipoIntento, genDe, refDe, slotDe, type Intento } from '../src/world/motor/contratos.js';
 import type { World } from '../src/world/mundo/tipos.js';
 import type { Elements } from '../src/world/soa/arena.js';
 import { Parte, Rol, libroVacio, type Libro, type LoteRef, type ServicioQuimico, type Sustancia } from '../src/world/materia/tipos.js';
@@ -661,6 +661,56 @@ if (isMainThread) test('el punto de control detecta la corrupción de cualquier 
     } catch { /* detectada */ }
   }
   assert.equal(aceptados, 0, `${aceptados} de ${bytes.length * 8} bits cambiados pasaron por buenos`);
+});
+
+if (isMainThread) test('el índice VMAT conserva el orden de ranuras y de reutilización con las páginas intercaladas', () => {
+  const genMax = genDe(Number.MAX_SAFE_INTEGER);
+  const lotes = [
+    { ref: refDe(2, 7), celda: 5, rol: Rol.Pieza, forma: 23, dueno: 0, pares: Float64Array.of(0, 17, 1, 3) },
+    { ref: refDe(3, 4), celda: 256, rol: Rol.Aire, forma: 0, dueno: 1, pares: Float64Array.of(0, 0, 1, 2) },
+    { ref: refDe(0, 1), celda: 5, rol: Rol.Pieza, forma: 13, dueno: 0,
+      pares: Float64Array.from([0, 358, ...sustancias.flatMap(({ id }) => [id, id === 2 ? 0 : 1])]) },
+    { ref: refDe(6, 9), celda: REF_NULA, rol: Rol.Objeto, forma: 53, dueno: 1, pares: new Float64Array() },
+  ];
+  const libres = [refDe(5, 3), refDe(4, genMax), refDe(1, 17)];
+  const bytes = codificarPaginas(1, lotes, libres);
+  let desborde = 0;
+  const visitas: number[] = [];
+  const indice = indexarPaginas(1, bytes, (lote, especies) => {
+    visitas.push(slotDe(lote.ref));
+    desborde += desbordeDeEspecies(especies);
+  });
+  assert.deepEqual(visitas, [2, 0, 3, 6]);
+  assert.equal(desborde, ranurasDesborde(lotes));
+  assert.equal(indice.ranuras, lotes.length + libres.length);
+  assert.equal(indice.leer(indice.ranuras), undefined);
+  assert.deepEqual(indice.leer(1), libres[2]);
+
+  const porArray = arenaDe(memoriaDe(2, 7), 0), porIndice = arenaDe(memoriaDe(2, 7), 0);
+  porArray.cargar(lotes, libres);
+  porIndice.cargarPorRanura(indice.ranuras, indice.leer);
+  assert.deepEqual([...porIndice.muestras()], [...porArray.muestras()]);
+  assert.deepEqual([...porIndice.libres()], [...porArray.libres()]);
+  assert.deepEqual(porIndice.saldo(), porArray.saldo());
+  assert.equal(porIndice.propio(lotes[3].ref), false);
+  const enCelda = new Float64Array(2);
+  assert.equal(porIndice.lotes(5, Rol.Pieza, enCelda), 2);
+  assert.deepEqual(Array.from(enCelda), [lotes[0].ref, lotes[2].ref]);
+  assert.deepEqual(codificarPaginas(1, porIndice.muestras(), porIndice.libres()),
+    codificarPaginas(1, porArray.muestras(), porArray.libres()));
+  for (const ref of [refDe(5, 4), refDe(1, 18), refDe(7, 0)]) {
+    assert.equal(porIndice.nuevo(Rol.Pieza, 5, 0), ref);
+    assert.equal(porArray.nuevo(Rol.Pieza, 5, 0), ref);
+  }
+
+  const corrupto = bytes.slice();
+  const vista = new DataView(corrupto.buffer);
+  const primerLote = 40;
+  for (const ranura of [0, 7, 0xffff_fffe]) {
+    vista.setFloat64(primerLote, ranura, true);
+    assert.throws(() => indexarPaginas(1, corrupto), /Ranura de materia duplicada|Ranuras de materia no consecutivas/);
+  }
+  assert.throws(() => indexarPaginas(1, bytes.subarray(0, bytes.length - 1)), /truncado/);
 });
 
 if (isMainThread) test('el registro comprueba el balance global a los 2.400 ticks, incluso con asientos sin plegar', async () => {

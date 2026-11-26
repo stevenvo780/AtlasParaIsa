@@ -110,8 +110,12 @@ function leerPares(pares: Float64Array, m: Lista): Lista {
 export function ranurasDesborde(lotes: readonly LoteGuardado[]): number {
   const pares = new Lista();
   let desborde = 0;
-  for (const lote of lotes) desborde += Math.max(0, leerPares(lote.pares, pares).especies() - RANURAS);
+  for (const lote of lotes) desborde += desbordeDeEspecies(leerPares(lote.pares, pares).especies());
   return desborde;
+}
+
+export function desbordeDeEspecies(especies: number): number {
+  return Math.max(0, especies - RANURAS);
 }
 
 /** Entradas y salidas de una ecuación agrupadas por sustancia (id, ν, id, ν…), ya comprobado su balance. */
@@ -724,24 +728,37 @@ export class ArenaLotes implements ArenaMateria {
   cargar(lotes: readonly LoteGuardado[], libres: readonly LoteRef[]): void {
     if (this.op.lotes.slots !== 0) throw new Error('La carga de materia exige una arena vacía.');
     const porSlot = new Map(lotes.map(l => [slotDe(l.ref), l]));
-    const retirados = new Map(libres.map(ref => [slotDe(ref), genDe(ref)]));
-    const devolver: number[] = [];
-    for (let s = 0; s < lotes.length + libres.length; s++) {
+    const retirados = new Map(libres.map(ref => [slotDe(ref), ref]));
+    this.cargarPorRanura(lotes.length + libres.length, s => porSlot.get(s) ?? retirados.get(s));
+  }
+
+  /** Instala en el mismo orden de encadenado que la carga desde arrays. */
+  cargarPorRanura(cantidad: number, leer: (ranura: number) => LoteGuardado | LoteRef | undefined): void {
+    if (this.op.lotes.slots !== 0) throw new Error('La carga de materia exige una arena vacía.');
+    let primerLibre = cantidad, ultimoLibre = -1;
+    for (let s = 0; s < cantidad; s++) {
       if (this.op.lotes.reserve() !== s) throw new Error('Ranuras de materia no consecutivas durante la carga.');
       const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
-      const lote = porSlot.get(s);
-      if (lote) {
+      const lote = leer(s);
+      if (lote === undefined) throw new Error(`Falta la ranura ${s} de materia.`);
+      if (typeof lote === 'number') {
+        const gen = genDe(lote);
+        b.gen[i] = gen;
+        b.marcas[i * MARCAS + USADO] = 1;
+        if (gen < GEN_MAX) {
+          primerLibre = Math.min(primerLibre, s);
+          ultimoLibre = s;
+        }
+      } else {
         b.gen[i] = genDe(lote.ref);
         this.escribirUno(s, leerPares(lote.pares, this.lp));
         this.instalar(s, lote.rol, this.celdaDe(lote.celda, lote.rol), lote.forma, lote.dueno);
-      } else {
-        const gen = retirados.get(s);
-        if (gen === undefined) throw new Error(`Falta la ranura ${s} de materia.`);
-        b.gen[i] = gen;
-        b.marcas[i * MARCAS + USADO] = 1;
-        if (gen < GEN_MAX) devolver.push(s);
       }
     }
-    for (const s of devolver) this.op.lotes.release(s);
+    // Se devuelven después de asignar todas las ranuras. El asignador LIFO las reutiliza en orden descendente.
+    for (let s = primerLibre; s <= ultimoLibre; s++) {
+      const b = this.bloque(s), i = s % LOTES_POR_BLOQUE;
+      if (b.marcas[i * MARCAS + ACTIVO] === 0 && b.gen[i] < GEN_MAX) this.op.lotes.release(s);
+    }
   }
 }

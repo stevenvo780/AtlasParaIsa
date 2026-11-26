@@ -402,7 +402,34 @@ export interface Motor {
   detalle(uid: number): Promise<Person | null>; // inspector: lo serializa el dueño en el F1 siguiente
   telemetria(): TelemetriaMotor;
   reparto(): import('../../shared/vistas-v23.js').RepartoVisible | undefined;
+  /** Muestreo de laboratorio a demanda, entre pasos, sin reunir ni copiar el mundo. */
+  muestraCarga(): MuestraCargaMotor | undefined;
   cerrar(): Promise<void>;
+}
+
+export interface CargaChunk {
+  chunk: ChunkId;
+  px: number;
+  py: number;
+  dueno: Hilo;
+  personas: number;
+  fauna: number;
+  /** Vencimientos que anuncia la columna `decideEn` para el próximo tick, sin inferir urgencias. */
+  personasVencen: number;
+  faunaVence: number;
+}
+
+export interface MuestraCargaMotor {
+  fuente: 'frenteConfirmado';
+  tick: number;
+  epoca: number;
+  chunks: CargaChunk[];
+  ranurasVivas: number;
+  fueraDeChunkActivo: number;
+  conOtroDueno: number;
+  claseDesconocida: number;
+  /** Tiempos totales por dueño del último tick, sin EMA. Los conteos corresponden al frente al cierre de ese tick. */
+  fasesPorDuenoMs: { F1: number; eco: number; F2: number; F3F4: number; F5F6: number; total: number }[] | null;
 }
 
 /** Implementan: M4a y M7. Consumen: V1 (panel «Motor»), 0C (diagnóstico), M8 (banco). */

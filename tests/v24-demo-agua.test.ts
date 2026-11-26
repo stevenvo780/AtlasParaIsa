@@ -4,14 +4,16 @@ import { balanceConservacion, paramsDeEncender } from '../scripts/lab/encender.m
 import type { StructureView } from '../src/shared/life.js';
 import { beberConCuerpo } from '../src/world/actuar/recursos.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
-import { aguaMaterialDisponible, waterAvailable } from '../src/world/inventions.js';
+import { aguaMaterialDisponible, hayDepositoObraEnDisco, waterAvailable } from '../src/world/inventions.js';
 import { metabolizar, vistaCuerpo } from '../src/world/materia/cuerpo.js';
 import { lotesDeCelda, sustanciasDe } from '../src/world/materia/ley-mundo.js';
 import type { EstadoObra } from '../src/world/materia/piezas.js';
 import { Parte, Rol } from '../src/world/materia/tipos.js';
 import { ctxMateriaDe, enlazarCtx, refDeOrganismo } from '../src/world/motor/acceso.js';
 import { slotDe } from '../src/world/motor/contratos.js';
+import { RADIUS } from '../src/world/mundo/tipos.js';
 import { paramsOf, setParams } from '../src/world/params.js';
+import { CHUNK_SIZE } from '../src/world/terrain.js';
 
 test('la consulta de agua suma la cisterna de la vista con el inventario material del dueño', () => {
   const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'obra' }));
@@ -36,6 +38,25 @@ test('la consulta de agua suma la cisterna de la vista con el inventario materia
   assert.equal(waterAvailable(mundo, punto), ambiente);
   assert.equal(waterAvailable(vista, punto), ambiente + stock);
   assert.equal(aguaMaterialDisponible(vista, c, punto, true, celda), ambiente + stock);
+
+  // El borde del disco toca una celda de la planta lejos de su ancla.
+  const centro = { x: punto.x - RADIUS, y: punto.y };
+  const alBorde = { ...vista, structures: [{ ...cisterna, x: punto.x + CHUNK_SIZE }] };
+  const conCriba = (w: typeof vista) =>
+    aguaMaterialDisponible(w, c, punto, hayDepositoObraEnDisco(w, centro, RADIUS, 'agua'), celda);
+  assert.equal(hayDepositoObraEnDisco(alBorde, centro, RADIUS, 'agua'), true);
+  assert.equal(hayDepositoObraEnDisco(alBorde, centro, RADIUS, 'comida'), false);
+  assert.equal(conCriba(alBorde), ambiente + stock);
+  assert.equal(aguaMaterialDisponible(alBorde, c, punto, true, -1), 0);
+
+  obraMaterial.agua = -1;
+  assert.equal(hayDepositoObraEnDisco(alBorde, centro, RADIUS, 'agua'), false);
+  assert.equal(conCriba(alBorde), aguaMaterialDisponible(alBorde, c, punto, true, celda));
+  obraMaterial.agua = Number.MAX_SAFE_INTEGER;
+  assert.equal(hayDepositoObraEnDisco(alBorde, centro, RADIUS, 'agua'), true);
+  assert.equal(conCriba(alBorde), ambiente);
+  obraMaterial.agua = deposito;
+  assert.equal(conCriba(alBorde), ambiente + stock);
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 

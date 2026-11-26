@@ -19,7 +19,7 @@ import { candidatoCortejo, candidatoCuidar, deseoCria, provisionCrianza } from '
 import { containedWaterQuanta, canHandleContainedWater } from '../technology-water.js';
 import { vecinos } from '../rejilla.js';
 import { settlementOpportunity, cooperationOpportunity, updateCulturalNormsOnOutcome } from '../society.js';
-import { aguaMaterialDisponible, comidaEnObra, foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
+import { aguaMaterialDisponible, comidaEnObra, hayDepositoObraEnDisco, foodAvailable, waterAvailable, REST_FATIGUE_RATE, REST_ENERGY_RATE, constructionCost, constructionOpportunity, modularBuildReady, inventionOpportunity, repairOpportunity } from '../inventions.js';
 import { HAMBRE_POR_UNIDAD } from '../ecologia-constantes.js';
 import { familyOpportunity, observedForagersByCell, earlierForagerExhausts, reproductiveReadiness, closeKin, availableToShare } from '../family.js';
 import { filtrarCerca, algunoCerca, primeroCerca } from '../indice-puntos.js';
@@ -148,8 +148,8 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   const puedePagar = (pasos: number, trabajo = 0) => cuerpo
     ? reserva >= pasos * (pasoJ + 6 * basal) + trabajo * (TRABAJO_J_TICK + basal)
     : planAffordable(person, payload, pasos, trabajo);
-  const aguaLibre = (p: Point, celda?: number): number => materia
-    ? aguaMaterialDisponible(world, materia, p, obra, celda)
+  const aguaLibre = (p: Point, celda?: number, incluirObra = obra): number => materia
+    ? aguaMaterialDisponible(world, materia, p, incluirObra, celda)
     : waterAvailable(world, p);
   let comidaCargada = 0, aguaCargada = 0;
   if (evaluarAlimento && materia) for (const lote of carga) {
@@ -217,13 +217,14 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (cuerpo && materia) {
     food = undefined;
     let mejor = 0;
+    const hayDeposito = obra && hayDepositoObraEnDisco(materia.mundo, person, RADIUS, 'comida');
     const kg = BOCADO_KG * escala * tramo, prevista = Math.max(basal * tramo, apetito * RESERVA_OBJETIVO_J_KG * masa);
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
       const j = comidaEnCelda(materia, cuerpo, tile, kg, materialCells?.[i], evaluarAlimento)
         + (pasos === 0 ? comidaCargada : 0)
-        + (obra ? comidaEnObra(materia, cuerpo, tile, kg, evaluarAlimento) : 0);
+        + (hayDeposito ? comidaEnObra(materia, cuerpo, tile, kg, evaluarAlimento) : 0);
       const valor = Math.min(j, prevista) / (tramo + pasos * 6 + recelo(tile) * 6);
       if (valor > mejor) { food = tile; mejor = valor; comidaJ = j; }
     }
@@ -387,11 +388,12 @@ export function choose(world: World, person: Person, policyScores?: Map<string, 
   if (cuerpo) {
     water = undefined;
     let mejor = 0;
+    const hayDeposito = obra && hayDepositoObraEnDisco(world, person, RADIUS, 'agua');
     const sorbo = SORBO_KG * escala * tramo;
     for (let i = 0; i < reachableTiles.length; i++) {
       const tile = reachableTiles[i]!, pasos = reachableSteps[i]!;
       if (!puedePagar(pasos)) continue;
-      const valor = Math.min(sorbo, aguaLibre(tile, materialCells?.[i]) + (pasos === 0 ? aguaCargada : 0)) / (tramo + pasos * 6 + recelo(tile) * 6);
+      const valor = Math.min(sorbo, aguaLibre(tile, materialCells?.[i], hayDeposito) + (pasos === 0 ? aguaCargada : 0)) / (tramo + pasos * 6 + recelo(tile) * 6);
       if (valor > mejor) { water = tile; mejor = valor; }
     }
   } else if (cisterna || (water && (disputada || !(dwOf(water, soaPercibida(CONSULTA.agua)) > UMBRAL.agua)

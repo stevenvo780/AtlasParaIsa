@@ -8,6 +8,7 @@ import { Store } from '../src/server/store.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { escalon } from '../src/shared/interruptores.js';
 import { assertChronicleJournal } from '../src/world/chronicle-journal.js';
+import { repartirPorTramos } from '../src/world/motor/bloques.js';
 import { Dueno, duenoSi } from '../src/world/motor/contexto.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { parseParams } from '../src/world/params.js';
@@ -47,6 +48,19 @@ function escenario(t: TestContext, cadaTicks: number, basePesosCorte = false) {
     persona.target = { x: destino.x, y: destino.y };
     persona.action = 'rest';
     persona.decisionAt = 120;
+  }
+  if (basePesosCorte) {
+    const paginas = Object.values(inicial.chunks);
+    const reparto = repartirPorTramos(paginas.map(pagina => pagina.cx), paginas.map(pagina => pagina.cy), 2);
+    const remotas = new Set(paginas.filter((_, i) => reparto[i] === 1).map(pagina => `${pagina.cx},${pagina.cy}`));
+    const destino = inicial.tiles.find(tesela => tesela.terrain !== 'water'
+      && remotas.has(`${tesela.x >> 4},${tesela.y >> 4}`));
+    const persona = inicial.people.find(p => p.role === 'neighbor' && p.policy);
+    assert.ok(destino && persona);
+    persona.x = destino.x;
+    persona.y = destino.y;
+    persona.target = { x: destino.x, y: destino.y };
+    inicial.adaptationEnabled = false;
   }
   store.guardar({ world: inicial, materia: null });
 

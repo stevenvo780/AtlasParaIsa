@@ -98,6 +98,7 @@ export function reunir(coordinador: World, cabecera: World, partes: readonly Wor
   mundo.communities = copia(coordinador.communities);
   mundo.events = copia(coordinador.events);
   mundo.history = copia(coordinador.history);
+  if (coordinador.chronicleJournal) mundo.chronicleJournal = copia(coordinador.chronicleJournal);
   const campos = mundo as unknown as Record<string, unknown>, origen = (m: World, k: string): unknown => (m as unknown as Record<string, unknown>)[k];
   for (const k of DEL_COORDINADOR) campos[k] = [...copia(coordinador[k]), ...partes.flatMap(p => p[k] as unknown[])];
   for (const k of UNIDAS) if (todos.some(m => origen(m, k) !== undefined)) campos[k] = fundir(copia(origen(cabecera, k)), todos.map(m => origen(m, k)));

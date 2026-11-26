@@ -25,7 +25,7 @@ import { pruneBonds } from '../lineage.js';
 import { cerrarMateriaGpu } from '../materia/ley-mundo.js';
 import { cargarSustancias, crearServicioQuimico } from '../materia/servicio.js';
 import type { MateriaCheckpoint } from '../materia/tipos.js';
-import { addEvent } from '../mundo/crear.js';
+import { appendWorldEvent } from '../mundo/crear.js';
 import { stepWorld, type FaseMedicion } from '../mundo/paso.js';
 import { TICKS_PER_DAY, type Person, type World } from '../mundo/tipos.js';
 import { paramsOf } from '../params.js';
@@ -431,8 +431,6 @@ class MotorDuenos implements Motor {
       this.#regiones();
       this.#rebalancear();
       const resultados = this.#gestos(gestos);
-      // Un gesto aplicado aquí escribe la crónica directamente: el contador común sigue desde donde quedó.
-      this.#contadores.fijarCronica(m.eventCounter + 1);
       m.invitations = m.invitations.filter(invitacion => invitacion.until > m.tick);
       m.reminders = m.reminders.filter(aviso => aviso.until > m.tick);
       if (this.#altas.length) {
@@ -520,7 +518,7 @@ class MotorDuenos implements Motor {
       for (const alta of parte.altas) this.#altas.push(alta);
     }
     sucesos.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
-    for (const { id, tick: _tick, ...suceso } of sucesos) if (addEvent(m, suceso).id !== id) this.cronicaDesfasada++;
+    for (const { id, tick: _tick, ...suceso } of sucesos) if (appendWorldEvent(m, suceso).id !== id) this.cronicaDesfasada++;
     this.#contadores.fijarCronica(m.eventCounter + 1);
   }
   /** Sucesos cuyo id en el diario no es el que su dueño dio (debe ser 0: ver `#cronica`). */

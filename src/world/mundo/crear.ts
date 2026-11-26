@@ -36,15 +36,21 @@ export function walkable(world: World, p: Point, lookup?: TileLookup): boolean {
 }
 
 
+/** Ruta directa de registro en el diario y la ventana visible de `world` (sin el desvío multi-dueño de `addEvent`). */
+export function appendWorldEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
+  const result = recordChronicleEvent(world, event);
+  world.events.push(result);
+  if (world.events.length > MAX_EVENTS) world.events.shift();
+  return result;
+}
+
+
 export function addEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
   // Con varios dueños, el suceso se numera con el contador compartido y llega al diario por el dueño (m4a).
   // Se comprueba por forma y no con `instanceof Dueno` para no cerrar el ciclo crear ↔ motor/contexto.
   const c = ctxSi(world) as (object & { hilos?: number; registrarSuceso?(e: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent }) | undefined;
   if (c?.registrarSuceso && (c.hilos ?? 1) > 1) return c.registrarSuceso(event);
-  const result = recordChronicleEvent(world, event);
-  world.events.push(result);
-  if (world.events.length > MAX_EVENTS) world.events.shift();
-  return result;
+  return appendWorldEvent(world, event);
 }
 
 

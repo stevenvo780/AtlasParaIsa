@@ -241,7 +241,7 @@ function sample(world: World): WorldSample {
   return { tick: world.tick, population: world.people.length, hunger: hunger / n, energy: energy / n, fatigue: fatigue / n, thirst: thirst / n, discoveries: world.discoveredChunks, settlements: world.settlementCount, cooperation: world.totals.cooperation ?? 0, births: world.totals.births ?? 0 };
 }
 export function recordSample(world: World): void {
-  if (world.tick % 60 !== 0) return;
+  if (world.tick % 60 !== 0 || world.history.at(-1)?.tick === world.tick) return;
   world.history.push(sample(world)); world.history = world.history.slice(-96);
 }
 export function worldStatistics(world: World): WorldStatsRecursos {

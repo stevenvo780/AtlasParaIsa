@@ -29,6 +29,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { Instantanea } from '../world/motor/contratos.js';
 import { codificarCheckpoint, decodificarCheckpoint } from '../world/materia/checkpoint.js';
 import { cargarSustancias, type ServicioQuimicoImpl } from '../world/materia/servicio.js';
+import { AgendaTerritorial, type CorteAgendaTerritorial } from '../world/territorio/agenda.js';
 
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
  * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
@@ -53,6 +54,36 @@ export interface LoadedSnapshot {
    * La diferencia con `savedAt` es el retroceso del rescate: el cuerpo que lo superaba
    * es ilegible, así que en pasos no se puede medir, solo en tiempo de servicio. */
   supersededAt: number | null;
+}
+
+// El sello del snapshot cubre el corte y el SHA de los bytes exactos de materia.
+const CAMPO_AGENDA = 'agendaTerritorialV1';
+const AGENDA_DURABLE_KEY = 'v24-agenda-durable-v1';
+interface AdjuntoAgenda {
+  corte: CorteAgendaTerritorial;
+  materiaDigest: string | null;
+}
+type LoadedSnapshotBruto = LoadedSnapshot & { agendaBruta?: unknown };
+interface InstantaneaCargada {
+  instantanea: Instantanea;
+  epoca: number;
+  /** La época del corte es la de la instantánea, antes de reservar la nueva época de ejecución. */
+  corteAgenda?: CorteAgendaTerritorial;
+}
+
+function separarAgenda(world: World): unknown {
+  const record = world as World & { [CAMPO_AGENDA]?: unknown };
+  const agenda = record[CAMPO_AGENDA];
+  delete record[CAMPO_AGENDA];
+  return agenda;
+}
+
+function validarCorteAgenda(corte: unknown, epoca: number, tick: number): CorteAgendaTerritorial {
+  try { return AgendaTerritorial.restaurar(corte, epoca, tick).corte(epoca); }
+  catch (error) {
+    if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;
+    throw new SnapshotSemanticError('Corte de agenda territorial inválido o de otro tick o época.', { cause: error });
+  }
 }
 /** Cadencia de la revisión COMPLETA del mundo (`assertWorld`) dentro de `save()`.
  * Recorrer el mundo entero cuesta O(tiles + gente + recetas) y a día 5 (40 personas,
@@ -708,40 +739,44 @@ export class Store {
     });
   }
 
-  cargarInstantanea(): { instantanea: Instantanea; epoca: number } | null {
+  cargarInstantanea(): InstantaneaCargada | null {
     const carga = this.cargarGuardadoCompleto();
     if (!carga) { this.assertNewCompleteStore(); return null; }
-    const { instantanea, epoca } = carga;
-    return { instantanea, epoca };
+    const { metadatos: _metadatos, ...instantanea } = carga;
+    return instantanea;
   }
 
-  cargarGuardadoCompleto(): { instantanea: Instantanea; epoca: number; metadatos: Omit<LoadedSnapshot, 'world'> } | null {
+  cargarGuardadoCompleto(): (InstantaneaCargada & { metadatos: Omit<LoadedSnapshot, 'world'> }) | null {
     if (this.readOnly || this.db.isTransaction) throw new Error('Store.cargarInstantanea requiere una transacción propia de escritura.');
     return this.loadTransaction(rawTransaction => {
       const anterior = this.readCompleteEpoch();
       if (anterior === null) return null;
       const loaded = this.loadVerified(rawTransaction, true);
       if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
-      const materia = this.decodeCompleteMatter(this.readCompleteMatter(loaded.slot), loaded.world.tick);
+      const bytes = this.readCompleteMatter(loaded.slot);
+      const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
+      const { world, agendaBruta, ...metadatos } = loaded;
+      const corteAgenda = this.decodeCompleteAgenda(agendaBruta, bytes, materia, world.tick, anterior);
       const epoca = Math.max(anterior, materia?.epoca ?? 0) + 1;
       if (!Number.isSafeInteger(epoca)) throw new SnapshotSemanticError('La época de carga excede el rango de enteros exactos.');
       this.db.prepare('UPDATE main.metadata SET value=? WHERE key=?').run(String(epoca), EPOCA_COMPLETA_KEY);
       if (this.readCompleteEpoch() !== epoca) throw new SnapshotSemanticError('La época cambió antes del commit.');
-      const { world, ...metadatos } = loaded;
-      return { instantanea: { world, materia }, epoca, metadatos };
+      return { instantanea: { world, materia }, epoca, metadatos, ...(corteAgenda && { corteAgenda }) };
     }, true);
   }
 
   /** Verifica una copia en solo lectura sin abrir una época del motor. */
   verificarGuardado(): LoadedSnapshot | null {
     return this.loadTransaction(rawTransaction => {
-      const complete = this.readCompleteEpoch() !== null;
-      const loaded = this.loadVerified(rawTransaction, complete);
-      if (complete) {
-        if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
-        this.decodeCompleteMatter(this.readCompleteMatter(loaded.slot), loaded.world.tick);
-      }
-      return loaded;
+      const epoca = this.readCompleteEpoch();
+      const loaded = this.loadVerified(rawTransaction, epoca !== null);
+      if (epoca === null) return loaded;
+      if (!loaded) throw new SnapshotPhysicalError('Falta el mundo del guardado completo.');
+      const { agendaBruta, ...verificado } = loaded;
+      const bytes = this.readCompleteMatter(loaded.slot);
+      const materia = this.decodeCompleteMatter(bytes, loaded.world.tick);
+      this.decodeCompleteAgenda(agendaBruta, bytes, materia, loaded.world.tick, epoca);
+      return verificado;
     });
   }
 
@@ -766,6 +801,17 @@ export class Store {
     } finally { void quimica?.cerrar(); }
   }
 
+  private decodeCompleteAgenda(raw: unknown, bytes: Uint8Array | null, materia: Instantanea['materia'], tick: number, epocaReservada: number): CorteAgendaTerritorial | undefined {
+    if (raw === undefined) return undefined;
+    const adjunto = raw as Partial<AdjuntoAgenda> | null;
+    if (!adjunto || typeof adjunto !== 'object' || adjunto.materiaDigest !== (bytes === null ? null : checksum(bytes)))
+      throw new SnapshotSemanticError('La agenda territorial no corresponde a la materia del guardado.');
+    const epoca = materia?.epoca ?? adjunto.corte?.epoca;
+    if (epoca === undefined || epoca > epocaReservada)
+      throw new SnapshotSemanticError('La época de la agenda territorial no corresponde al guardado.');
+    return validarCorteAgenda(adjunto.corte, epoca, tick);
+  }
+
   private readCompleteEpoch(): number | null {
     const row = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(EPOCA_COMPLETA_KEY) as { value: string } | undefined;
     if (!row) return null;
@@ -773,6 +819,10 @@ export class Store {
     if (!Number.isSafeInteger(epoca) || epoca < 0 || String(epoca) !== row.value)
       throw new SnapshotSemanticError('Contador durable de épocas inválido.');
     return epoca;
+  }
+
+  private requiereAgenda(): boolean {
+    return !!this.db.prepare('SELECT 1 FROM main.metadata WHERE key=?').get(AGENDA_DURABLE_KEY);
   }
 
   private assertNewCompleteStore(): void {
@@ -818,7 +868,7 @@ export class Store {
    *    posterior; si lo guarda, adoptarlo tiraría lo ya vivido y la recuperación tiene
    *    que ser explícita (`previous()`, que poda y revoca en una copia nueva).
    */
-  private loadVerified(rawTransaction: boolean, complete = false): LoadedSnapshot | null {
+  private loadVerified(rawTransaction: boolean, complete = false): LoadedSnapshotBruto | null {
     const chronicleStamp = this.chronicleStamp();
     this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
@@ -849,8 +899,12 @@ export class Store {
     throw new Error(`Snapshot missing or unusable in every backup slot (${refusals.join('; ')}). Explicit recovery required.`);
   }
   private loadSlot(row: Row, decoded: World, slot: SnapshotSlot, rawTransaction: boolean, chronicleStamp: ChronicleStamp,
-    skipped: string[], supersededAt: number | null, complete: boolean): LoadedSnapshot {
+    skipped: string[], supersededAt: number | null, complete: boolean): LoadedSnapshotBruto {
     const declaredChronicle = decoded.chronicleJournal !== undefined;
+    const agendaBruta = separarAgenda(decoded);
+    if (!complete && agendaBruta !== undefined) throw new SnapshotSemanticError('La agenda territorial requiere guardado completo.');
+    if (complete && slot === 0 && agendaBruta === undefined && this.requiereAgenda())
+      throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
     const world = this.migrateSnapshot(decoded, complete);
     this.onProgress?.();
     if (slot > 0) this.assertNothingNewerThan(world);
@@ -897,7 +951,8 @@ export class Store {
     this.rememberSlotBounds(row.digest, world);
     if (!sameChronicleStamp(chronicleStamp, this.chronicleStamp())) chronicleFailure('database changed while loading');
     if (!rawTransaction) this.rememberChronicle(world, chronicleStamp);
-    return { world, savedAt: row.saved_at, slot, skipped, supersededAt: slot > 0 ? supersededAt : null };
+    return { world, savedAt: row.saved_at, slot, skipped, supersededAt: slot > 0 ? supersededAt : null,
+      ...(agendaBruta !== undefined && { agendaBruta }) };
   }
   /** ¿El cuerpo del slot 0 se lee entero? Lo pregunta `save()` cuando esta conexión aún
    * no ha cargado nada (no consta el estado de la cadena) y solo la primera vez: después
@@ -1644,20 +1699,26 @@ export class Store {
     this.saveSnapshot(world, inputs, requiredSessions, changes);
   }
 
-  guardar(i: Instantanea): void {
-    this.guardarConEntradas(i, [], []);
+  guardar(i: Instantanea, corteAgenda?: CorteAgendaTerritorial): void {
+    this.guardarConEntradas(i, [], [], corteAgenda);
   }
 
-  guardarConEntradas({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[], sesiones: string[]): void {
+  guardarConEntradas({ world, materia }: Instantanea, inputs: { gesture: Gesture; result: GestureResult }[], sesiones: string[], corteAgenda?: CorteAgendaTerritorial): void {
     if (!ley(world, 'guardadoCompleto')) throw new Error('Store.guardar requiere v23.guardadoCompleto.');
     if (world.version !== RULES_VERSION) throw new SnapshotSemanticError('El guardado completo de la V23 requiere un mundo nuevo.');
     if (materia !== null && materia.tick !== world.tick) throw new SnapshotSemanticError('Los ticks de mundo y materia no coinciden.');
-    this.saveSnapshot(world, inputs, sesiones, [], materia === null ? null : codificarCheckpoint(materia));
+    const bytes = materia === null ? null : codificarCheckpoint(materia);
+    const adjunto = corteAgenda === undefined ? undefined : {
+      corte: validarCorteAgenda(corteAgenda, materia?.epoca ?? this.readCompleteEpoch() ?? 0, world.tick),
+      materiaDigest: bytes === null ? null : checksum(bytes),
+    };
+    this.saveSnapshot(world, inputs, sesiones, [], bytes, adjunto);
   }
 
   private saveSnapshot(world: World, inputs: { gesture: Gesture; result: GestureResult }[], requiredSessions: string[],
-    changes: readonly SnapshotReplayChange[], matter?: Uint8Array | null): void {
+    changes: readonly SnapshotReplayChange[], matter?: Uint8Array | null, agenda?: AdjuntoAgenda): void {
     const complete = matter !== undefined;
+    if (Object.hasOwn(world, CAMPO_AGENDA)) throw new SnapshotSemanticError('Campo reservado para el corte durable de la agenda territorial.');
     const retired = world.retiredChunks;
     if (this.db.isTransaction) { this.verifiedChronicle = null; throw new Error("Store.save requires its own transaction."); }
     const chronicleStamp = this.chronicleStamp();
@@ -1710,7 +1771,9 @@ export class Store {
       memoBefore.horizon ??= this.technologyArchive.latestTick();
     }
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
-    let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
+    let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle,
+      technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)), ...(agenda && { [CAMPO_AGENDA]: agenda }) },
+    paramsOf(world), this.snapshotInlineTileLimit);
     let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
     let written: WrittenSnapshot | undefined;
@@ -1731,10 +1794,14 @@ export class Store {
     let chronicleTriggers = false;
     try {
       const epoca = this.readCompleteEpoch();
+      if (complete && !agenda && this.requiereAgenda())
+        throw new SnapshotSemanticError('Este mundo requiere guardar su corte de agenda territorial.');
+      if (agenda && epoca !== null && agenda.corte.epoca !== epoca)
+        throw new SnapshotSemanticError('La agenda territorial no pertenece a la época reservada del motor.');
       if (complete && epoca === null) {
         this.assertNewCompleteStore();
         this.db.exec('CREATE TABLE main.snapshot_matter (slot INTEGER PRIMARY KEY, world_digest TEXT NOT NULL, body BLOB) STRICT');
-        this.db.prepare('INSERT INTO main.metadata VALUES (?,?)').run(EPOCA_COMPLETA_KEY, '0');
+        this.db.prepare('INSERT INTO main.metadata VALUES (?,?)').run(EPOCA_COMPLETA_KEY, String(agenda?.corte.epoca ?? 0));
       } else if (!complete && epoca !== null) {
         throw new Error('El mundo usa guardado completo. Guárdalo con Store.guardar.');
       }
@@ -1818,6 +1885,7 @@ export class Store {
       }
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
       if (complete) this.db.prepare('INSERT OR REPLACE INTO main.snapshot_matter VALUES (0,?,?)').run(bodyDigest, matter);
+      if (agenda) this.db.prepare('INSERT OR IGNORE INTO main.metadata VALUES (?,?)').run(AGENDA_DURABLE_KEY, '1');
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
@@ -1827,6 +1895,7 @@ export class Store {
       else this.collectSnapshots(collectionTicket);
       });
       if (replay && this.replayParent(bodyDigest) !== body) throw new SnapshotPhysicalError('Replay head changed before commit.');
+      if (agenda && !this.requiereAgenda()) throw new SnapshotSemanticError('La marca de agenda territorial cambió antes del commit.');
       if (chronicleTriggers) {
         this.assertChronicleOrigin({ ...world, chronicleJournal: committedChronicle }, true);
         this.assertChronicleArchive({ ...world, chronicleJournal: committedChronicle });
@@ -2077,6 +2146,7 @@ export class Store {
    * también al verificar el baseline de un guardado o reconstruir una recuperación. */
   private migrateSnapshot(decoded: World, complete = false): World {
     const params = takeSnapshotParams(decoded);
+    separarAgenda(decoded);
     if (complete && !params.v23.guardadoCompleto) throw new SnapshotSemanticError('El guardado completo requiere v23.guardadoCompleto.');
     setParams(decoded, params);
     if (ley(decoded, 'guardadoCompleto')) {
@@ -2090,9 +2160,11 @@ export class Store {
 
   /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
    * una recuperación imposible no deja una copia a medias. */
-  private verifyPrevious(decoded: World, complete: boolean): { world: World; declaredJournal: boolean } {
+  private verifyPrevious(decoded: World, complete: boolean): { world: World; declaredJournal: boolean; agendaBruta: unknown } {
     if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new SnapshotSemanticError('Invalid snapshot world. Explicit recovery required.');
     const declaredChronicle = decoded.chronicleJournal !== undefined;
+    const agendaBruta = separarAgenda(decoded);
+    if (!complete && agendaBruta !== undefined) throw new SnapshotSemanticError('La agenda territorial requiere guardado completo.');
     const world = this.migrateSnapshot(decoded, complete);
     this.assertChronicleOrigin(world, declaredChronicle, true);
     this.assertChronicleArchive(world, true);
@@ -2102,7 +2174,7 @@ export class Store {
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
     if (declaredJournal && (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter)) technologyFailure('previous snapshot contains uncommitted executions');
-    return { world, declaredJournal };
+    return { world, declaredJournal, agendaBruta };
   }
   /**
    * Recuperación explícita a un punto anterior, en una copia NUEVA: recorre la cadena
@@ -2119,7 +2191,8 @@ export class Store {
     try {
       this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
       this.technologyArchive.beginHostTransaction();
-      complete = this.readCompleteEpoch() !== null;
+      const epoca = this.readCompleteEpoch();
+      complete = epoca !== null;
     for (const slot of SNAPSHOT_SLOTS) {
       if (slot < fromSlot) continue;
       const candidate = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
@@ -2136,9 +2209,14 @@ export class Store {
         refusals.push(`slot ${slot}: ${error.message}`); continue;
       }
       try {
-        const { world } = this.verifyPrevious(decoded, complete);
+        const { world, agendaBruta } = this.verifyPrevious(decoded, complete);
+        if (complete && slot === 0 && agendaBruta === undefined && this.requiereAgenda())
+          throw new SnapshotSemanticError('Falta el corte territorial del guardado vigente.');
         const bytes = complete ? this.readCompleteMatter(slot) : null;
-        if (complete) this.decodeCompleteMatter(bytes, world.tick);
+        if (epoca !== null) {
+          const materia = this.decodeCompleteMatter(bytes, world.tick);
+          this.decodeCompleteAgenda(agendaBruta, bytes, materia, world.tick, epoca);
+        }
         chosen = { slot, row: candidate, matterDigest: bytes === null ? null : checksum(bytes) };
         break;
       }
@@ -2166,7 +2244,7 @@ export class Store {
       if (!copied || copied.body !== chosen.row.body || copied.digest !== chosen.row.digest || copied.saved_at !== chosen.row.saved_at)
         throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
       const copiedWorld = (complete ? recovered.snapshotParts.read(copied.body) : recovered.readSnapshot(copied.body)) as World;
-      const { world, declaredJournal } = recovered.verifyPrevious(copiedWorld, complete);
+      const { world, declaredJournal, agendaBruta } = recovered.verifyPrevious(copiedWorld, complete);
       const matter = complete ? recovered.readCompleteMatter(chosen.slot) : null;
       if ((matter === null ? null : checksum(matter)) !== chosen.matterDigest)
         throw new Error('La materia del respaldo seleccionado cambió antes de copiarlo.');
@@ -2188,7 +2266,8 @@ export class Store {
       recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
       recovered.writeTechnologyMetadata(recovered.flushTechnology(world, true, chain), null);
-      const prepared = recovered.snapshotParts.prepare({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), recovered.snapshotInlineTileLimit);
+      const prepared = recovered.snapshotParts.prepare({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)),
+        ...(agendaBruta !== undefined && { [CAMPO_AGENDA]: agendaBruta }) }, paramsOf(world), recovered.snapshotInlineTileLimit);
       const { body } = recovered.snapshotParts.write(prepared);
       const digest = checksum(body);
       recovered.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, digest, chosen.row.saved_at);
@@ -2198,6 +2277,8 @@ export class Store {
       if (complete) {
         recovered.db.prepare('INSERT OR REPLACE INTO main.snapshot_matter VALUES (0,?,?)').run(digest, matter);
         recovered.db.exec('DELETE FROM main.snapshot_matter WHERE slot<>0');
+        if (agendaBruta === undefined) recovered.db.prepare('DELETE FROM main.metadata WHERE key=?').run(AGENDA_DURABLE_KEY);
+        else recovered.db.prepare('INSERT OR IGNORE INTO main.metadata VALUES (?,?)').run(AGENDA_DURABLE_KEY, '1');
       }
       recovered.db.prepare('DELETE FROM main.metadata WHERE key=?').run(DEEP_CHECKPOINT_SAVES_KEY);
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);

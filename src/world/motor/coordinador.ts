@@ -43,7 +43,7 @@ import {
   AVISO, CTL, CTL_DUENO, Dueno, ORDEN, RESERVA_DESBORDE, RESERVA_LOTES, celdaDueno, duenoDe, duenoSi,
   type Migrante, type MigranteChunk, type ParteTick,
 } from './contexto.js';
-import { Clase, TipoIntento, slotDe, type ChunkId, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type TelemetriaMotor } from './contratos.js';
+import { Clase, TipoIntento, slotDe, type CargaChunk, type ChunkId, type FrentePublico, type Hilo, type Instantanea, type Intento, type Motor, type MotorConfig, type MuestraCargaMotor, type TelemetriaMotor } from './contratos.js';
 import { TRAMO, azarDeHilo, crearDueno, faseDueno, ligarCompartido, type DatosDueno } from './dueno-worker.js';
 import { leyesActivas } from './leyes.js';
 import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './rebalanceo.js';
@@ -70,6 +70,30 @@ const telemetriaVacia = (hilos: number): TelemetriaMotor => ({
   faseMs: { F0: 0, eco: 0, percibir: 0, actuar: 0, aplicar: 0 }, esperaBarreraMs: 0, ocupacion: new Float32Array(hilos),
   gpuMs: [], gpuBytes: [], gpuEstado: [], intentos: 0, rechazados: 0, migraciones: 0, fotogramasSaltados: 0,
 });
+
+function cargaChunk(chunk: ChunkId, px: number, py: number, dueno: Hilo): CargaChunk {
+  return { chunk, px, py, dueno, personas: 0, fauna: 0, personasVencen: 0, faunaVence: 0 };
+}
+
+function cargaDelFrente(frente: FrentePublico, epoca: number, chunks: CargaChunk[], fasesPorDuenoMs: MuestraCargaMotor['fasesPorDuenoMs']): MuestraCargaMotor {
+  const { tick, alta, vivo, chunk, clase, decideEn, dueno } = frente;
+  const porChunk = new Map(chunks.map(carga => [carga.chunk, carga]));
+  let ranurasVivas = 0, fueraDeChunkActivo = 0, conOtroDueno = 0, claseDesconocida = 0;
+  for (let slot = 0; slot < alta; slot++) {
+    if (vivo[slot] !== 1) continue;
+    ranurasVivas++;
+    const carga = porChunk.get(chunk[slot]!);
+    if (!carga) { fueraDeChunkActivo++; continue; }
+    if (dueno[slot] !== carga.dueno) conOtroDueno++;
+    const vence = decideEn[slot]! <= tick + 1 ? 1 : 0;
+    switch (clase[slot]) {
+      case Clase.Persona: carga.personas++; carga.personasVencen += vence; break;
+      case Clase.Animal: carga.fauna++; carga.faunaVence += vence; break;
+      default: claseDesconocida++;
+    }
+  }
+  return { fuente: 'frenteConfirmado', tick, epoca, chunks, ranurasVivas, fueraDeChunkActivo, conOtroDueno, claseDesconocida, fasesPorDuenoMs };
+}
 
 /** Arma el motor sobre un mundo ya creado o cargado. Con `config.hilos === 1` no lanza workers: el hilo que llama es el
  * único dueño y `paso` hace lo mismo que `stepWorld`. Con más, reparte el mundo entre dueños (exige `v23.duenos`). */
@@ -151,6 +175,13 @@ class MotorUnico implements Motor {
     const t = d.terreno;
     return { paginas: Array.from(d.chunks, c => [t.paginaX[c]!, t.paginaY[c]!, 0]),
       msPorHilo: this.#t.hz > 0 ? [1000 / this.#t.hz] : [] };
+  }
+
+  muestraCarga(): MuestraCargaMotor | undefined {
+    const d = duenoSi(this.#mundo);
+    if (!d || d.frente.tick !== this.#mundo.tick) return undefined;
+    const t = d.terreno;
+    return cargaDelFrente(d.frente, this.#epoca, Array.from(d.chunks, c => cargaChunk(c, t.paginaX[c]!, t.paginaY[c]!, 0)), null);
   }
 
   cerrar(): Promise<void> {
@@ -573,6 +604,22 @@ class MotorDuenos implements Motor {
         .map(({ px, py, chunk }) => [px, py, this.#terreno.duenoChunk[chunk]!]),
       msPorHilo: Array.from({ length: this.#hilos }, (_, h) => this.#control[celdaDueno(h, CTL_DUENO.msTick)]!),
     };
+  }
+
+  muestraCarga(): MuestraCargaMotor | undefined {
+    if (!this.#piscina || this.#fatal) return undefined;
+    const frente = this.#d.frente;
+    if (frente.tick !== this.#mundo.tick) return undefined;
+    const chunks: CargaChunk[] = [];
+    for (const p of this.#paginas.values()) if (p.estado === 'activo') chunks.push(cargaChunk(p.chunk, p.px, p.py, this.#terreno.duenoChunk[p.chunk]!));
+    const control = this.#control;
+    const fasesPorDuenoMs = frente.tick === this.#t.tick && control[celdaDueno(0, CTL_DUENO.msTick)]! > 0
+      ? Array.from({ length: this.#hilos }, (_, h) => ({
+        F1: control[celdaDueno(h, CTL_DUENO.msF1)]!, eco: control[celdaDueno(h, CTL_DUENO.msEco)]!,
+        F2: control[celdaDueno(h, CTL_DUENO.msPercibir)]!, F3F4: control[celdaDueno(h, CTL_DUENO.msActuar)]!,
+        F5F6: control[celdaDueno(h, CTL_DUENO.msAplicar)]!, total: control[celdaDueno(h, CTL_DUENO.msTick)]!,
+      })) : null;
+    return cargaDelFrente(frente, this.#epoca, chunks, fasesPorDuenoMs);
   }
 
   detalle(uid: number): Promise<Person | null> {

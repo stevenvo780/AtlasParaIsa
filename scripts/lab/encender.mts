@@ -4,7 +4,7 @@
  *
  *   tsx scripts/lab/encender.mts --semilla 51926 --hasta materia --dias 3 [--params p.json | "a.b=1,c.d=2"] [--regimen abierto|defecto]
  *        [--hilos N] [--gpu 0[,1]] [--cada N] [--tope-mortales N] [--continuar] [--salida corrida.jsonl] [--sin-comprobar]
- *        [--n N] [--ticks N] [--perfil] [--digesto]
+ *        [--n N] [--ticks N] [--perfil] [--digesto] [--panel-corto]
  *
  *  --hasta X     enciende los interruptores hasta X incluido, en el orden de `ORDEN_ENCENDIDO` (`escalon()`); se aplica
  *                ENCIMA de `--params`. Sin él, rigen los interruptores de `--params` (todos apagados por defecto).
@@ -12,6 +12,8 @@
  *  --gpu         añade materiaGpu sobre el escalón y usa las tarjetas indicadas. Por defecto corre en CPU.
  *  --cada N      comprueba los invariantes y las leyes cada N ticks. Sin él, cada tick, cada invariante con su propia cadencia.
  *  --continuar   no para en la primera violación dura: las anota todas (para ver su alcance, no para estabilizar).
+ *  --panel-corto mide cada paso y sigue tras la extinción mortal. Comprueba al inicio, según --cada (120 por defecto)
+ *                y al cierre de cada día.
  *
  * Salida: una línea JSON por suceso, en stdout y (si se pide) en `--salida`:
  *   {tipo:'inicio'}  semilla, interruptores, hilos, comprobadores disponibles.
@@ -44,9 +46,9 @@ import { archivoDeChunks, poblar } from './poblacion.mjs';
 
 export interface OpcionesEncender {
   semilla: number; hasta?: Interruptor; params?: string; dias: number; regimen: 'abierto' | 'defecto';
-  /** Cada cuántos ticks se comprueba todo; `undefined` = cada tick con la cadencia propia de cada invariante. */
+  /** Cada cuántos ticks se comprueba todo. En el panel son 120 por defecto, fuera del panel rige cada invariante. */
   cada?: number; topeMortales?: number; continuar: boolean; salida?: string; comprobar: boolean; gpu?: number[];
-  n?: number; ticks?: number; perfil?: boolean; digesto?: boolean; hilos?: number;
+  n?: number; ticks?: number; perfil?: boolean; digesto?: boolean; hilos?: number; panelCorto?: boolean;
 }
 
 const entero = (texto: string, nombre: string, minimo = 1): number => {
@@ -63,6 +65,7 @@ export function argumentosEncender(args: string[]): OpcionesEncender {
     if (bandera === '--sin-comprobar') { o.comprobar = false; continue; }
     if (bandera === '--perfil') { o.perfil = true; continue; }
     if (bandera === '--digesto') { o.digesto = true; continue; }
+    if (bandera === '--panel-corto') { o.panelCorto = true; continue; }
     const valor = args[++i];
     if (valor === undefined) throw new Error(`Falta valor para ${bandera}`);
     switch (bandera) {
@@ -157,15 +160,38 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   const contexto = worldContext(origen);
   const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
   const medicion: FaseMedicion | undefined = o.perfil && !motor ? { clock: cpuMs, fases: {}, v23: {} } : undefined;
-  const paso = (): void => {
-    if (motor) motor.paso([]);
-    else if (medicion) stepWorld(origen, [], contexto, medicion);
+  const paso = (): number => {
+    if (motor) return motor.paso([]).tick;
+    if (medicion) stepWorld(origen, [], contexto, medicion);
     else stepWorld(origen);
+    return origen.tick;
+  };
+  const reunir = (tick: number): void => {
+    if (!motor) return;
+    mundo = motor.vista();
+    if (mundo.tick !== tick) throw new Error(`Vista del tick ${mundo.tick}, se esperaba ${tick}.`);
+    const dueno = duenoSi(origen);
+    if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
+    // La vista reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
+    enlazarCtx(mundo, dueno);
   };
   const ticks = o.ticks ?? o.dias * TICKS_PER_DAY;
+  const panel = o.panelCorto ? { pasosMedidos: 0, pasoMaximoMs: 0, pasosSobre30s: 0, comprobacionesRegiones: 0 } : undefined;
+  const cada = o.cada ?? (panel ? 120 : undefined);
+  const mortalesIniciales = panel ? mundo.people.filter(p => p.role === 'neighbor') : [];
+  const fundadores = new Set(mortalesIniciales.map(p => p.id));
+  const primerFundador = mortalesIniciales[0];
+  const puertaInicial = panel ? {
+    cohorteFundadoraHomogenea: primerFundador !== undefined && mortalesIniciales.every(p =>
+      p.genome.generation === primerFundador.genome.generation && p.demography.age === primerFundador.demography.age),
+    poblacionInicial: mortalesIniciales.length,
+    nacimientosIniciales: mundo.totals.births ?? 0,
+    muertesIniciales: mundo.demographyDynamics.deaths,
+    muertesPorCausaIniciales: { ...mundo.demographyDynamics.causes },
+  } : undefined;
   let msPared = 0, msCpu = 0;
   const carriles = new Map(listaInvariantes().map(i => [i.id, i.carril]));
-  const comprobador = o.comprobar ? crearComprobador({ cadencia: o.cada === undefined }) : null;
+  const comprobador = o.comprobar ? crearComprobador({ cadencia: cada === undefined }) : null;
   const leyesEncendidas = LEYES.filter(l => params.v23[l.interruptor]);
   const entorno = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
     semilla: o.semilla, hasta: o.hasta ?? null, params: o.params ?? null, regimen: o.regimen, interruptores: interruptoresEncendidos(params.v23),
@@ -173,19 +199,21 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     mortales: mundo.people.filter(p => p.role === 'neighbor').length, fauna: mundo.animals.length, ...extra,
   });
   escribirFila({ tipo: 'inicio', ...entorno(), leyes: leyesEncendidas.map(l => l.id), invariantes: [...carriles.keys()], comprobar: o.comprobar,
-    cada: o.cada ?? 'propia', ticksPorDia: TICKS_PER_DAY, hilos: motor?.telemetria().hilos ?? 1, gpu: params.motor.gpu });
+    cada: cada ?? 'propia', ticksPorDia: TICKS_PER_DAY, hilos: motor?.telemetria().hilos ?? 1, gpu: params.motor.gpu,
+    ...(puertaInicial && { puertaCorta: puertaInicial }) });
 
   let violaciones = 0, duras = 0, avisoSinContexto = false;
   const fin = (estado: string, dia?: number): number => {
     const medido = mundo.tick;
-    const maxRssMiB = process.resourceUsage().maxRSS / 1024;
+    const rssPicoKiB = process.resourceUsage().maxRSS;
     const porTick = (fases: Record<string, number>) => Object.fromEntries(Object.entries(fases).map(([fase, ms]) => [fase, ms / medido]));
     const perfil = o.perfil && medido > 0 ? {
       msCpuPorTick: msCpu / medido, msParedPorTick: msPared / medido, ticksPorSegundo: medido * 1000 / msPared,
-      ...(medicion ? { cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases) } : {}), maxRssMiB,
+      ...(medicion ? { cpuPorFaseV23: porTick(medicion.v23!), cpuPorSubfase: porTick(medicion.fases) } : {}), maxRssMiB: rssPicoKiB / 1024,
     } : undefined;
     const digesto = o.digesto ? digestoCompleto(mundo, archivo, motor?.instantanea().materia) : undefined;
-    escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto });
+    escribirFila({ tipo: 'fin', estado, tick: mundo.tick, dia, violaciones, duras, perfil, digesto,
+      ...(panel && { puertaCorta: { ...panel, rssPicoKiB } }) });
     return duras ? 2 : 0;
   };
   const registrar = (lista: Violacion[]): boolean => {
@@ -202,6 +230,8 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
     if (!o.comprobar) return false;
     // El comprobador por corrida suma a los invariantes los de historia (Δpoblación, acumulados, nacimientos).
     const invariantes = comprobador!(mundo);
+    // Los invariantes regionales recorren el mundo residente completo, una cobertura por región del corte.
+    if (panel) panel.comprobacionesRegiones += Object.keys(mundo.chunks).length;
     // Los ganchos locales requieren el contexto del dueño, no el mundo reunido.
     const deLeyes = comprobarLeyes(origen, leyesEncendidas);
     const balance = motor && duenoSi(origen)?.balanceIntentos();
@@ -220,24 +250,32 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
   let causasAntes = { ...mundo.demographyDynamics.causes };
   let faunaAntes = { ...mundo.animalDynamics };
   if (revisar() && !o.continuar) return fin('violacion');
-  for (let dia = 1; mundo.tick < ticks; dia++) {
+  const contarCausasFauna = params.v23.fauna && !(panel && motor);
+  let tick = mundo.tick;
+  for (let dia = 1; tick < ticks; dia++) {
     const causasFauna: Record<string, number> = {};
-    for (let t = 0; t < TICKS_PER_DAY && mundo.tick < ticks; t++) {
+    for (let t = 0; t < TICKS_PER_DAY && tick < ticks; t++) {
       const muertesFaunaAntes = mundo.animalDynamics.deaths;
-      if (o.perfil) {
-        const pared = performance.now(), cpu = cpuMs();
-        paso();
-        msCpu += cpuMs() - cpu;
-        msPared += performance.now() - pared;
-      } else paso();
-      if (motor) {
-        mundo = motor.vista();
-        const dueno = duenoSi(origen);
-        if (!dueno) throw new Error('El motor repartido no abrió el contexto del coordinador.');
-        // La vista reúne todos los organismos; el contexto de 0 da acceso al libro y la arena globales.
-        enlazarCtx(mundo, dueno);
+      const anterior = tick;
+      if (o.perfil || panel) {
+        const cpu = o.perfil ? cpuMs() : 0, pared = performance.now();
+        tick = paso();
+        const ms = performance.now() - pared;
+        if (o.perfil) { msCpu += cpuMs() - cpu; msPared += ms; }
+        if (panel) {
+          panel.pasosMedidos++;
+          panel.pasoMaximoMs = Math.max(panel.pasoMaximoMs, ms);
+          if (ms > 30_000) panel.pasosSobre30s++;
+        }
+      } else tick = paso();
+      if (panel && tick !== anterior + 1) {
+        throw new Error(`El paso saltó del tick ${anterior} al ${tick}.`);
       }
-      if (params.v23.fauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
+      const toca = cada === undefined || tick % cada === 0;
+      const cierraDia = t + 1 === TICKS_PER_DAY || tick === ticks;
+      const revisarPaso = toca || Boolean(panel && cierraDia);
+      if (!panel || cierraDia || o.comprobar && revisarPaso) reunir(tick);
+      if (contarCausasFauna && mundo.animalDynamics.deaths > muertesFaunaAntes) {
         for (let i = mundo.events.length - 1; i >= 0; i--) {
           const evento = mundo.events[i]!;
           if (evento.tick < mundo.tick) break;
@@ -246,17 +284,18 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
           }
         }
       }
-      const toca = o.cada === undefined || mundo.tick % o.cada === 0;
-      if (toca && revisar() && !o.continuar) return fin('violacion');
+      if (revisarPaso && revisar() && !o.continuar) return fin('violacion');
     }
-    if (o.cada !== undefined && mundo.tick % o.cada !== 0 && revisar() && !o.continuar) return fin('violacion');
+    if (!panel && cada !== undefined && tick % cada !== 0 && revisar() && !o.continuar) return fin('violacion');
     archivar();
     const dinamica = mundo.demographyDynamics;
     const fauna = { ...mundo.animalDynamics };
-    const mortales = mundo.people.filter(p => p.role === 'neighbor').length;
+    const vecinos = mundo.people.filter(p => p.role === 'neighbor');
+    const mortales = vecinos.length;
     const nacimientos = mundo.totals.births ?? 0;
     escribirFila({
       tipo: 'dia', dia, tick: mundo.tick, poblacion: mortales, personas: mundo.people.length,
+      ...(panel && { fundadoresMortalesVivos: vecinos.filter(p => fundadores.has(p.id)).length }),
       nacimientos, nacidosDia: nacimientos - nacidosAntes, muertes: dinamica.deaths, muertesDia: dinamica.deaths - muertesAntes,
       muertesPorCausa: { ...dinamica.causes }, muertesPorCausaDia: Object.fromEntries(Object.entries(dinamica.causes).map(([k, v]) => [k, v - (causasAntes[k as keyof typeof causasAntes] ?? 0)])),
       fauna: mundo.animals.length, faunaDinamica: fauna,
@@ -265,14 +304,15 @@ function correr(o: OpcionesEncender, origen: World, motor: Motor | undefined, es
         predations: fauna.predations - faunaAntes.predations, humanHunts: fauna.humanHunts - faunaAntes.humanHunts,
         waterConsumed: fauna.waterConsumed - faunaAntes.waterConsumed, plantConsumed: fauna.plantConsumed - faunaAntes.plantConsumed,
       },
-      faunaMuertesPorCausaDia: causasFauna, vistasMedias: vistasMedias(mundo.tiles),
+      ...(panel && motor ? {} : { faunaMuertesPorCausaDia: causasFauna }),
+      vistasMedias: vistasMedias(mundo.tiles),
       comunidades: mundo.communities.length, estructuras: mundo.structures.length,
       totales: { ...mundo.totals }, conservacion: balanceConservacion(mundo), violaciones, duras,
       ...(params.motor.gpu.length ? { gpuMateria: diagnosticoMateriaGpu(mundo) } : {}),
     });
     nacidosAntes = nacimientos; muertesAntes = dinamica.deaths; causasAntes = { ...dinamica.causes };
     faunaAntes = fauna;
-    if (mortales === 0) return fin('extinta', dia);
+    if (!panel && mortales === 0) return fin('extinta', dia);
     if (o.topeMortales && mortales >= o.topeMortales) return fin('tope', dia);
   }
   return fin(duras ? 'violacion' : 'completo');
@@ -291,7 +331,7 @@ function digestoCompleto(mundo: World, archivo: ReadonlyMap<string, Buffer>, reu
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--help')) {
-    process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 20).join('\n') + '\n');
+    process.stdout.write(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 22).join('\n') + '\n');
   } else {
     (async () => {
       const o = argumentosEncender(process.argv.slice(2));

@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { serialize } from 'node:v8';
 import { createWorld, type World } from '../src/world/index.js';
-import { comprobarInvariantes, comprobarLeyes, crearObservadorNacimientos, listaInvariantes } from '../src/world/invariantes.js';
+import { comprobarInvariantes, comprobarLeyes, crearObservadorNacimientos, listaInvariantes, registrar } from '../src/world/invariantes.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { Ley } from '../src/world/motor/acceso.js';
 import { enlazarCtx } from '../src/world/motor/acceso.js';
 import { cargarPunto, argumentosCorrida, confianzaMutuaMinima, paramsDeCorrida } from '../scripts/lab/poblacion.mjs';
-import { argumentosEncender, paramsDeEncender, vistasMedias } from '../scripts/lab/encender.mjs';
+import { argumentosEncender, encender, paramsDeEncender, vistasMedias } from '../scripts/lab/encender.mjs';
 import { juzgarCinta, juzgarRecuperacion, leerSalud, planDeCaidas, FASES, argumentosCaidas } from '../scripts/lab/caidas.mjs';
 
 const conInterruptores = (m: World, hasta: Parameters<typeof escalon>[0]): World => {
@@ -100,6 +100,30 @@ test('encender: argumentos y escalón de interruptores en un mundo de un hilo', 
   assert.ok(p.v23.materia && p.v23.cuerpos && p.v23.natalidad && !p.v23.fauna && !p.v23.duenos);
   assert.equal(p.motor.hilos, 1); assert.deepEqual(p.motor.gpu, []);
   assert.deepEqual(paramsDeEncender({ regimen: 'defecto' }).v23, DEFAULT_PARAMS.v23);
+});
+
+test('encender: el panel corto comprueba una vez por corte, incluso en el cierre parcial', async () => {
+  const cortes: { tick: number; regiones: number }[] = [];
+  const retirar = registrar({
+    id: 'prueba.cortes-panel', carril: 'prueba', gravedad: 'dura', alcance: 'region', cadaTicks: 60,
+    comprobar: mundo => {
+      cortes.push({ tick: mundo.tick, regiones: Object.keys(mundo.chunks).length });
+      return [];
+    },
+  });
+  try {
+    for (const [ticks, comprobados] of [[3, [0, 2, 3]], [4, [0, 2, 4]]] as const) {
+      cortes.length = 0;
+      const filas: Record<string, unknown>[] = [];
+      const o = argumentosEncender(['--panel-corto', '--regimen', 'defecto', '--cada', '2', '--ticks', String(ticks)]);
+      assert.equal(await encender(o, fila => filas.push(fila)), 0);
+      assert.deepEqual(cortes.map(corte => corte.tick), comprobados);
+      assert.equal(filas.find(fila => fila.tipo === 'dia')?.fundadoresMortalesVivos, 14);
+      const fin = filas.at(-1)?.puertaCorta as { comprobacionesRegiones: number; pasosMedidos: number };
+      assert.equal(fin.comprobacionesRegiones, cortes.reduce((total, corte) => total + corte.regiones, 0));
+      assert.equal(fin.pasosMedidos, ticks);
+    }
+  } finally { retirar(); }
 });
 
 test('encender: las vistas medias cuentan solo las teselas terrestres residentes', () => {

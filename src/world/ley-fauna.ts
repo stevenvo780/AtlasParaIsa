@@ -542,7 +542,6 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
   const a = f.animal, fa = a.fauna!, cu = a.cuerpo!, d = f.decision, fr = c.frente;
   f.celda = c.terreno.celda(a.x, a.y); f.destino = -1;
   metabolizar(c, cu, f.celda, 1);
-  crecer(c, cu, 1);
   if (cu.gestacion) {
     const masa = gestar(c, cu, 1), g = cu.gestacion;
     if (g && masa >= plantillaDe(c, cu).m0) e.partos.push(f);
@@ -550,6 +549,8 @@ function actuar(c: CtxLeyMateria, e: Estado, f: Fila): void {
     else if (g && g.bajoBasalDesde >= 0 && c.tick - g.bajoBasalDesde >= DIAS_ABORTO * TICKS_PER_DAY
       && c.materia.vista(g.embrion).masa <= margenKg(c, e, f, f.celda)) { abortar(c, cu); contarHuella(e, f, f.celda, masaDe(c, cu)); }
   }
+  // El mantenimiento ya se pagó. Si el tejido adulto sintetiza primero, puede acaparar toda la proteína del tubo.
+  crecer(c, cu, 1);
   fa.miedo = d.miedo; fa.habituacion = d.habituacion; fa.huyeDe = d.huyeDe; fa.persigue = d.presaUid; fa.pareja = d.pareja;
   // Contacto con la presa (posiciones del frente): muerde y no se mueve este tick.
   if (d.accion === 'hunt' && d.presa !== REF_NULA) {

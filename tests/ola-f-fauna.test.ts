@@ -269,6 +269,29 @@ test('el embrión sigue creciendo aunque consuma el último precursor disponible
   assert.equal(balanceConservacion(mundo)?.ok, true);
 });
 
+test('el embrión toma su ración de síntesis antes de que el tejido materno use el resto', () => {
+  const mundo = createWorld(7, paramsDeEncender({ regimen: 'abierto', hasta: 'intentos' }));
+  stepWorld(mundo);
+  const c = ctxMateriaDe(mundo), [madre, otro] = mundo.animals;
+  assert.ok(madre?.cuerpo && madre.fauna && otro?.uid);
+  const cuerpo = madre.cuerpo, sobrante = c.materia.nuevo(Rol.Cadaver, -1, 0);
+  concebir(c, cuerpo, { genoma: madre.fauna.genoma, otro: otro.uid, inicio: c.tick });
+  const embrion = cuerpo.gestacion!.embrion;
+  for (const { id, nu } of plantillaDe(c, cuerpo).partes) {
+    for (const destino of [sobrante, cuerpo.digestivo]) {
+      const cuantos = 12 * nu;
+      assert.equal(c.materia.moverParte(cuerpo.tejido, destino, { parte: Parte.Exacta, esp: id, cuantos, kappa: null }), cuantos);
+    }
+  }
+  const proteina = sustanciasDe(c).proteina, proteinaMaterna = c.materia.cuantos(cuerpo.tejido, proteina);
+
+  stepWorld(mundo);
+
+  assert.ok(c.materia.cuantos(embrion, proteina) > 0);
+  assert.ok(c.materia.cuantos(cuerpo.tejido, proteina) > proteinaMaterna);
+  assert.equal(balanceConservacion(mundo)?.ok, true);
+});
+
 test('I10: la ley de la fauna no lee especie ni linaje fundador', () => {
   for (const f of ['src/world/ley-fauna.ts', 'src/world/soa/alarma.ts']) {
     const fuente = readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');

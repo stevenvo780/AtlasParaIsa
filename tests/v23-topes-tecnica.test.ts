@@ -5,6 +5,10 @@ import { evaluateMaterialProperties } from '../src/shared/chemistry.js';
 import { escalon } from '../src/shared/interruptores.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
 import { defaultChemistryState, formulaSignature } from '../src/world/chemistry.js';
+import { ctxMateriaDe } from '../src/world/motor/acceso.js';
+import { crearMotor } from '../src/world/motor/coordinador.js';
+import { leerReceta, registrarReceta } from '../src/world/materia/proceso.js';
+import type { Paso } from '../src/world/materia/tipos.js';
 import { assertWorld, createWorld } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { materialCapacities, programSignature, rawMaterial } from '../src/world/technology.js';
@@ -62,4 +66,25 @@ test('la técnica activa conserva 600 fórmulas químicas y rechaza composicione
   assert.throws(() => assertWorld(loaded), /finito y no negativo/);
   setParams(world, parseParams({ v23: { tecnica: false } }, params));
   assert.throws(() => assertWorld(world), /chemistry.formulas/);
+});
+
+test('el registro material recarga 300 recetas de trece pasos sin pasar por los presupuestos del catálogo anterior', async t => {
+  const world = createWorld(7, parseParams({ v23: escalon('tecnica') }));
+  const motor = crearMotor(world, { hilos: 1, gpu: [], decisionGpu: 'siempre', verificar: false, semilla: 7 });
+  t.after(() => motor.cerrar());
+  motor.cargar({ world, materia: null }, 0);
+  const registro = ctxMateriaDe(world).globales.registro;
+  const recetas = Array.from({ length: 300 }, (_, i) => {
+    const pasos: Paso[] = Array.from({ length: 13 }, (_, j) => ({ op: 'mojar', hasta: { ticks: i + j + 1 } }));
+    return { id: registrarReceta(registro, pasos), pasos };
+  });
+  assert.equal(new Set(recetas.map(r => r.id)).size, 300);
+
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.guardar(motor.instantanea());
+  const carga = store.cargarInstantanea()!;
+  motor.cargar(carga.instantanea, carga.epoca);
+  const nuevo = ctxMateriaDe(carga.instantanea.world).globales.registro;
+  for (const { id, pasos } of recetas) assert.deepEqual(leerReceta(nuevo, id), pasos);
 });

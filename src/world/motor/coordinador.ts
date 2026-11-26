@@ -95,6 +95,8 @@ class MotorUnico implements Motor {
 
   constructor(mundo: World) { this.#mundo = mundo; }
 
+  vista(): World { return this.#mundo; }
+
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] } {
     const inicio = performance.now(), fases = this.#medicion.fases = {} as Partial<Record<FaseNombre, number>>;
     const resultados = stepWorld(this.#mundo, [...gestos], undefined, this.#medicion);
@@ -492,6 +494,16 @@ class MotorDuenos implements Motor {
   }
 
   // ── Instantánea, carga y el resto del contrato ─────────────────────────────────────────────────────────
+
+  vista(): World {
+    if (this.#fatal) throw this.#fatal;
+    if (!this.#piscina) return this.#mundo;
+    try {
+      const { world } = this.#reunirMundo();
+      recordSample(world);
+      return world;
+    } catch (error) { throw this.#fallo(error); }
+  }
 
   instantanea(): Instantanea {
     if (this.#fatal) throw this.#fatal;

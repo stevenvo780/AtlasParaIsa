@@ -598,7 +598,7 @@ function createServerApp(options: Omit<AppOptions, 'store'> & { store?: Store; g
     if (!motor || !conDuenos) return world;
     const ahora = performance.now();
     if (!lecturaMotor || lecturaMotor.tick !== tickMotor && (forzar || ahora - ultimaLecturaMotor >= TURBO_MIRROR_MS)) {
-      lecturaMotor = motor.instantanea().world;
+      lecturaMotor = motor.vista();
       ultimaLecturaMotor = ahora;
     }
     return lecturaMotor;

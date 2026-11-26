@@ -11,7 +11,7 @@ import { crearMotor } from '../src/world/motor/coordinador.js';
 import { createWorld } from '../src/world/mundo/crear.js';
 import { DEFAULT_PARAMS } from '../src/world/params.js';
 
-test('una página que vuelve a su dueño conserva la roca que queda y continúa ardiendo', async () => {
+test('una página que vuelve a su dueño conserva la roca que queda y continúa ardiendo', async prueba => {
   const semilla = 7, hilos = 2;
   const mundo = createWorld(semilla, {
     ...DEFAULT_PARAMS,
@@ -64,7 +64,14 @@ test('una página que vuelve a su dueño conserva la roca que queda y continúa 
     motor.paso([]);
     assert.ok(d.materia.cuantos(fuego, madera) < combustibleEnVuelo, 'el fuego sigue consumiendo madera en el dueño original');
     for (let i = 0; i < DEFAULT_PARAMS.v23.cadenciaMateria; i++) motor.paso([]);
-    assert.equal(motor.instantanea().world.tiles.find(t => t.x === x && t.y === y)?.stone, 3);
+    const codificarMateria = prueba.mock.method(d, 'instantaneaMateria');
+    const vista = motor.vista();
+    assert.equal(codificarMateria.mock.callCount(), 0);
+    const durable = motor.instantanea();
+    assert.ok(durable.materia);
+    assert.equal(codificarMateria.mock.callCount(), 1);
+    assert.deepEqual(vista, durable.world);
+    assert.equal(vista.tiles.find(t => t.x === x && t.y === y)?.stone, 3);
     const lotes = new Float64Array(1);
     assert.equal(d.materia.lotes(celda, Rol.Suelo, lotes), 1);
     assert.equal(lotes[0], suelo);

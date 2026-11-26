@@ -393,6 +393,8 @@ export interface Instantanea { world: World; materia: MateriaCheckpoint | null }
  * Consumen: el servidor (`sim-worker`, `app`) vía el integrador, M6 y PS. */
 export interface Motor {
   paso(gestos: readonly Gesture[]): { tick: number; resultados: GestureResult[] };
+  /** Mundo reunido en barrera para proyectar el paso completo. */
+  vista(): World;
   instantanea(): Instantanea;
   cargar(i: Instantanea, epoca: number): void; // reparte tras Store.cargarInstantanea() o una recuperación y abre la época: su primer fotograma es completo
   /** Desde entonces entrega un fotograma cada `cadencia` ticks si hay crédito (protocolo en shared/fotograma.ts). */

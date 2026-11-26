@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calcularVentana } from '../src/world/decision/percepcion.js';
+import { calcularVentana, PercibidorCpu } from '../src/world/decision/percepcion.js';
 import { CanalCompartido } from '../src/world/gpu/canal.js';
 import { CELDAS_VENTANA_GPU, PercibidorGpu, tieneVentanas } from '../src/world/gpu/percibir-gpu.js';
-import { PuentePercepcion } from '../src/world/gpu/puente.js';
+import { crearPuentePercepcion, PuentePercepcion } from '../src/world/gpu/puente.js';
 import { ErrorDispositivo, type CanalGpu, type LotePercepcion, type Percibidor, type Plan } from '../src/world/motor/contratos.js';
 import { crearFixtureGpu } from './fixtures/gpu-percibir.js';
 
@@ -142,4 +142,33 @@ test('G CUDA real devuelve el BFS completo en un plan sin consultas de celdas', 
     assert.deepEqual(r.ventana, pasos);
     assert.deepEqual(r.ventanaCelda, celdas);
   } finally { canal.cerrar(); }
+});
+
+test('V24 CUDA real: el puente por coste compara CPU y GPU sobre la misma vista', {
+  skip: !process.env.COMPUTE_NVRTC && 'Se requiere COMPUTE_NVRTC',
+}, () => {
+  const { frente, terreno } = crearFixtureGpu();
+  (frente.x as Float32Array)[0] = -1;
+  (frente.y as Float32Array)[0] = 0;
+  const plan: Plan = { id: 0, transitable: Float32Array.of(0, 0, 0.2), celdas: [], organismos: [], acciones: 0, w: null };
+  const planes = [plan];
+  const pasos = new Int16Array(CELDAS_VENTANA_GPU), celdas = new Int32Array(CELDAS_VENTANA_GPU);
+  calcularVentana(terreno, -1, 0, plan.transitable, pasos, celdas, 0);
+  const cpu = new PercibidorCpu({ frente, terreno });
+  const conexion = crearPuentePercepcion([0], frente, terreno, cpu, false, true, true);
+  const usados = new Set();
+  try {
+    assert.equal(conexion.tarjetas, 1);
+    for (let despacho = 1; despacho <= 4; despacho++) {
+      const lote = { tick: 7, despacho, slots: Int32Array.of(0), plan: Uint16Array.of(0) };
+      conexion.puente.lanzar(lote, planes);
+      const r = conexion.puente.esperar(2_000);
+      assert.ok(tieneVentanas(r));
+      assert.equal(r.despacho, despacho);
+      assert.deepEqual(r.ventana.subarray(0, CELDAS_VENTANA_GPU), pasos);
+      assert.deepEqual(r.ventanaCelda.subarray(0, CELDAS_VENTANA_GPU), celdas);
+      usados.add(conexion.puente.ultimosLotes[0]?.dispositivo);
+    }
+    assert.deepEqual(usados, new Set(['cpu', 'gpu0']));
+  } finally { conexion.puente.cerrar(); }
 });

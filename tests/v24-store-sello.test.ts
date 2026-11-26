@@ -79,6 +79,6 @@ for (const corromper of [false, true]) {
     assert.equal(store.db.isTransaction, false);
     intercalarCommit.mock.restore();
     observarLecturas.mock.restore();
-    assert.equal(store.load()!.world.tick, corromper ? 0 : 1);
+    assert.equal(store.cargarInstantanea()!.instantanea.world.tick, corromper ? 0 : 1);
   });
 }

@@ -12,9 +12,10 @@ import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
-import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda, fichaMateriales } from './inspector-view.js';
+import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda, fichaMateriales, necesidadesPersona } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
 import { DvrPlayer, PerfilCinta, crearRedCinta, leerEscenaArchivo, type DvrFrameInfo, type DvrState } from './dvr-player.js';
+import { DetalleCinta, personaDeDetalleExactoParaContexto, personaYaCompleta, type ContextoDetalle } from './detalle-cinta.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
 import { mountArchiveCuts } from './archivo-cortes.js';
 import { telemetryKpis, viewportCensusText, renderLifeTelemetry, renderLandTelemetry, renderCommunityTelemetry, renderPersonTelemetry, renderAnimalTelemetry, renderTileTelemetry, renderChemistryTelemetry, luzMundo, datosGrafo, grafoComunidades, histogramaTamanos, type GrafoDibujado, type HudNav } from './telemetry-hud.js';
@@ -51,6 +52,18 @@ let capasV23Firma = '';
 let connection: Connection | null = null;
 /** V21: reproductor DVR de la cinta (`/api/cinta/*`), su barra y el bucle rAF que lo avanza. `null` = modo vivo por WebSocket. */
 let dvr: DvrPlayer | null = null;
+/** Ficha L0 de un habitante en vista resumida. Nodo aparte: no entra en el HTML de la tarjeta. */
+const detalleCinta = new DetalleCinta({
+  pedir: (req, signal) => dvr?.enabled ? dvr.consultarAparte(req, signal) : Promise.reject(new Error('sin cinta')),
+  pausar: () => {
+    if (!dvr?.enabled || !dvr.playing) return false;
+    dvr.setPlaying(false);
+    return true;
+  },
+  contexto: () => contextoDetalle(),
+  avisar: texto => message(texto),
+  alCambiar: () => { inspectorSignature = ''; if (world && selected.kind === 'person') renderInspector(); },
+});
 let dvrBar: DvrBarController | null = null;
 let dvrResize: ResizeObserver | null = null;
 let dvrRaf = 0;
@@ -252,6 +265,7 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
   if (info.presente) registrarVisitaPresente(frame);
+  refrescarDetalleCinta();
 }
 
 function startTape(): void {
@@ -279,7 +293,7 @@ function startTape(): void {
     if (dvr !== player) return; // se salió del mundo mientras cargaba
     if (!active) { // cinta apagada o sin respuesta: de vuelta al modo vivo clásico por WebSocket
       if (archivo) el('map-loading').textContent = 'La grabación no está disponible.';
-      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); return;
+      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); refrescarDetalleCinta(); return;
     }
     landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
     if (player.escenaInicial?.tramo) dvrBar?.seleccionarTramo(player.escenaInicial.tramo);
@@ -300,6 +314,7 @@ function stopTape(): void {
   dvr?.stop(); dvr = null; dvrBar?.destroy(); dvrBar = null;
   landscape?.setDvrMode(false);
   document.getElementById('game')?.classList.remove('has-dvr');
+  refrescarDetalleCinta();
 }
 
 /** Atajos de la cinta (Espacio, «,», «.», «0»): nunca mientras se escribe ni con modificadores. */
@@ -319,6 +334,7 @@ function tapeShortcut(event: KeyboardEvent): void {
 type Drawer = NotebookPage;
 function drawer(name: Drawer, open?: boolean): void {
   const next = notebook?.show(name, open) ?? false;
+  if (name === 'inspector') { if (next) refrescarDetalleCinta(); else detalleCinta.olvidarVista(); }
   if (next && mobile()) { el('layers-popover').hidden = true; el('layers-toggle').setAttribute('aria-expanded', 'false'); }
   if (name === 'whisper' && !next && pickingWhisper) setPickingWhisper(false);
   syncPickingMode();
@@ -892,6 +908,25 @@ function replacePersonCard(html: string): void {
   selectInspectorTab(inspectorTab, false);
   syncSelectionLabel();
   restore();
+  refrescarDetalleCinta();
+}
+/** Contexto del habitante en pantalla. Null si el cajón está cerrado, no hay fotograma o el mundo no es ese instante. */
+function contextoDetalle(): ContextoDetalle | null {
+  const cajon = document.getElementById('inspector-drawer');
+  if (!cajon || cajon.hidden || !dvr?.enabled || dvr.epocaFotograma == null || !world || selected.kind !== 'person') return null;
+  const id = selected.id;
+  const persona = world.people.find(p => p.id === id);
+  if (!persona) return null;
+  return {
+    id: persona.id, x: persona.x, y: persona.y, tick: world.tick, cabezal: dvr.currentTick,
+    epoca: dvr.epocaFotograma, nivel: dvr.nivel, niveles: dvr.niveles, completa: personaYaCompleta(persona),
+  };
+}
+/** Tras pintar la tarjeta, un fotograma o abrir el cajón. Cerrado: no se recorre `people`. */
+function refrescarDetalleCinta(): void {
+  const cajon = document.getElementById('inspector-drawer');
+  if (!cajon || cajon.hidden) return;
+  detalleCinta.sincronizar(detalleCinta.nodoEn(cajon));
 }
 /** M2: «IR A S I · Ficha». El botón de ficha no repite S o I (ya tienen su botón, que queda marcado). */
 function syncSelectionLabel(): void {
@@ -904,6 +939,7 @@ function syncSelectionLabel(): void {
 }
 function selectInspectorTab(tab: typeof inspectorTab, resetScroll = true): void {
   if (!document.getElementById(`inspector-section-${tab}`)) tab = 'now';
+  const cambia = tab !== inspectorTab;
   inspectorTab = tab;
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-inspector-tab]')) {
     const active = button.dataset.inspectorTab === tab;
@@ -911,6 +947,7 @@ function selectInspectorTab(tab: typeof inspectorTab, resetScroll = true): void 
   }
   for (const section of el('inhabitant-card').querySelectorAll<HTMLElement>('[role="tabpanel"]')) section.hidden = section.id !== `inspector-section-${tab}`;
   if (resetScroll) el('inhabitant-card').scrollTop = 0;
+  if (cambia && tab !== 'kit') detalleCinta.olvidarVista(); // Equipo conserva el PersonView exacto si tick e id coinciden
 }
 function toggleTasks(open: boolean): void {
   el('task-palette').hidden = !open;
@@ -948,7 +985,7 @@ function renderInspector(): void {
   }
   el('person-primary').classList.toggle('animal-primary', false);
   if (selected.kind === 'person') {
-    const p = person();
+    const p = personaDeDetalleExactoParaContexto(detalleCinta, contextoDetalle()) ?? person();
     if (!p) {
       const id = selected.id, legacy = world.demography?.recent.find(entry=>entry.id===id);
       // M1: estar fuera de `people` no es morir. Solo `demography.recent` acredita una muerte; si no,
@@ -987,7 +1024,7 @@ function renderInspector(): void {
     // The progress meter is rendered by the always-visible telemetry below.
     const sections = inheritedAndLearned(persona ? { ...p, working: false, experiences: persona.experiences, trust: persona.trust } : { ...p, working: false }, world, persona?.recipeIds, persona ?? null, id => { const event = cronica.get(id) ?? world?.events.find(event => event.id === id); return event && event.tick <= currentTick ? event : undefined; }, visibleEvents, { repertorio: historical ? 'no-grabado' : 'cargando' });
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3>${fichaMateriales(p)}${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, visibleEvents)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p>${necesidadesPersona(p)}${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3>${fichaMateriales(p)}${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, visibleEvents)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }

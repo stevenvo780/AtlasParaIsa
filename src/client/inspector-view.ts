@@ -39,6 +39,29 @@ export function meter(label: string, value: number): string {
   const v = Math.max(0, Math.min(100, Math.round(value * 100)));
   return `<div class="game-need"><span>${esc(label)}</span><meter min="0" max="100" value="${v}" aria-label="${esc(label)}">${v}%</meter><span>${v}%</span></div>`;
 }
+
+const numeroFinito = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+/** L1 conserva necesidad y etapa, y no copia energía, hambre ni cansancio. Un cero grabado sigue siendo finito. */
+export function instanteResumido(p: Pick<PersonView, 'energy' | 'hunger' | 'fatigue'>): boolean {
+  return !numeroFinito(p.energy) && !numeroFinito(p.hunger) && !numeroFinito(p.fatigue);
+}
+
+/** Una sola nota, y solo cuando el instante no trae las tres necesidades. No rellena otro tick. */
+export function notaGrabacionResumida(p: Pick<PersonView, 'energy' | 'hunger' | 'fatigue'>): string {
+  if (!instanteResumido(p)) return '';
+  return '<p class="drawer-note" data-grabacion="resumida">Esta grabación conserva la actividad y la etapa. Los datos individuales requieren el fotograma detallado de este instante.</p>';
+}
+
+/** Necesidades del habitante en el fotograma abierto. Ausente se omite; cero se muestra. */
+export function necesidadesPersona(p: Pick<PersonView, 'need' | 'energy' | 'hunger' | 'thirst' | 'fatigue'>): string {
+  const metros = ([['Energía', p.energy], ['Hambre', p.hunger], ['Sed', p.thirst], ['Cansancio', p.fatigue]] as const)
+    .map(([etiqueta, valor]) => numeroFinito(valor) ? meter(etiqueta, valor) : '')
+    .join('');
+  const titulo = typeof p.need === 'string' && p.need.trim()
+    ? `<h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>` : '';
+  return titulo || metros ? `<div class="game-needs">${titulo}${metros}</div>` : '';
+}
 export function animalSilhouette(species: AnimalView['species']): string {
   const paths = { hare: 'M5 17h12v-7h4v7h-4v4H3v-4h2ZM16 10V2h2v8m2 0V3h2v7', deer: 'M3 13h13V8h6v7h-4v7h-2v-7H6v7H4V13Zm15-5V1m4 7V1m-6 2h7', boar: 'M3 12h16v-2h3v8h-3v4h-2v-4H6v4H4v-4H1v-6h2Zm17 6h4v-3', fish: 'm2 6 6 6L2 18V6Zm6 6 6-5h6l4 5-4 5h-6l-6-5Z', wolf: 'M4 14h11V7l3-5 2 5h3v8h-3v7h-2v-6H7v6H5v-6l-5-4v-3l4 5Z', fox: 'M7 14h8V8l2-6 3 5h3v7h-3v7h-2v-5H9v5H7v-4l-6-2V8l6 6Z' };
   return svg(`<path d="${paths[species]}"/>`);
@@ -229,7 +252,7 @@ export function decisionFicha(p: PersonView, world: WorldView): string {
   const d = lecturaDecision(p);
   const presion = d.presionCorporal
     ? `<div class="skill-row"><span>Lo que más aprieta en su cuerpo</span><strong>${esc(d.presionCorporal.etiqueta)} · ${esc(percentage(d.presionCorporal.valor))}</strong></div>`
-    : '<p>Su estado corporal no llegó completo en esta vista.</p>';
+    : '';
   const base = d.razonBase ? `<p><strong>Cuerpo y cercanía.</strong> ${esc(enClaro(d.razonBase, { world }))}</p>` : '';
   const estrategia = d.inclinadaPorPolitica
     ? '<p data-policy="inclinada"><strong>Estrategia aprendida.</strong> Su política aprendida inclinó esta elección por encima de la opción que iba primera por cuerpo y cercanía. Combina su red heredada con el sesgo que fue adquiriendo en esta vida; ese sesgo no pasa a su descendencia. Sus cifras no viajan a este navegador, así que aquí no se inventa cuánto empujó cada acción.</p>'
@@ -297,7 +320,7 @@ const barraEscucha = (etiqueta: string, e: number | null, clase = ''): string =>
  * generación entre las vidas de esta vista. */
 export function escuchaFicha(p: PersonView, world: Pick<WorldView, 'people' | 'demography'>): string {
   const propia = escuchaDe(p as ConEscucha);
-  if (propia === null) return '<section class="escucha-ficha" data-escucha="sin-dato"><h4 class="detail-subtitle">Escucha</h4><p class="drawer-note">Sin dato: este mundo no hereda todavía la escucha, la disposición a atender un susurro.</p></section>';
+  if (propia === null) return '';
   const padres = (p.genome?.parents ?? []).map((id, i) => {
     const padre = world.people.find(q => q.id === id);
     const nombre = padre?.name ?? nombreConocido(id, world) ?? `Progenitor ${i + 1}`;
@@ -318,7 +341,7 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua',
     // M6: el resto de las prácticas que registra `outcome()` (world/index.ts), en claro.
     research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse a otros', accompany: 'Compañía', retreat: 'Buscar espacio' };
-  const skills = Object.entries(p.skills ?? {}).sort((a, b) => b[1] - a[1]);
+  const skills = Object.entries(p.skills ?? {}).filter((entry): entry is [string, number] => numeroFinito(entry[1])).sort((a, b) => b[1] - a[1]);
   const traitNames: Record<string, string> = { curiosity: 'Curiosidad', sociability: 'Sociabilidad', industriousness: 'Constancia', care: 'Cuidado', resilience: 'Resiliencia', escucha: 'Escucha' };
   const genome = p.genome;
   // M3: un progenitor fuera de la cámara se nombra y se puede ir a él; uno difunto abre su despedida.
@@ -348,8 +371,8 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
-  const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
-  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + cuerpoPersonaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + fichaTecnica(p.tecnicaVista) + remembered + learned, story: genetics + social + experiences };
+  const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${numeroFinito(p.health)?meter('Salud',p.health):''}${numeroFinito(p.vitality)?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
+  return { now: notaGrabacionResumida(p) + decisionFicha(p, world) + escuchaFicha(p, world) + cuerpoPersonaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + fichaTecnica(p.tecnicaVista) + remembered + learned, story: genetics + social + experiences };
 }
 
 /* ------------------------------------------------------------------ */
@@ -501,18 +524,24 @@ function piezasObra(structure: StructureView, world: WorldView | null): string {
   return `<div data-structure-pieces><span>Piezas físicas · ${esc(structure.piezas.length)}</span><ul>${filas}</ul></div>`;
 }
 
-/** Ficha › Cuerpo: masa, reserva, agua, digestivo, carga y temperatura. Persona o animal; todo campo ausente dice «sin dato». */
-export function cuerpoFicha(c: CuerpoVisible | undefined, sustancias?: SustanciasVisibles): string {
-  if (!c) return '<section class="cuerpo-ficha" data-cuerpo-ficha="sin-dato"><h4 class="detail-subtitle">Cuerpo</h4><p class="drawer-note">Sin dato: este mundo no trae cuerpos de átomos.</p></section>';
+/**
+ * Ficha › Cuerpo: masa, reserva, agua, digestivo, carga y temperatura.
+ * Animal y la llamada directa conservan el contrato: el campo ausente dice «sin dato».
+ * Persona (`persona`): sólo magnitudes registradas, cero real incluido; no se inventa un hueco.
+ */
+export function cuerpoFicha(c: CuerpoVisible | undefined, sustancias?: SustanciasVisibles, persona = false): string {
+  if (!c) return '<section class="cuerpo-ficha" data-cuerpo-ficha="sin-dato"><h4 class="detail-subtitle">Cuerpo</h4><p class="drawer-note">Sin dato: este instante no trae el cuerpo. No es un cuerpo en cero.</p></section>';
   const adulta = finitoV23(c.masaAdulta) && c.masaAdulta > 0 && finitoV23(c.masa) ? c.masa / c.masaAdulta : null;
   const carga = finitoV23(c.carga) && finitoV23(c.masa) && c.masa > 0 ? c.carga / c.masa : null;
   const principal = finitoV23(c.principal) ? sustanciaPorId(sustancias, c.principal) : undefined;
   const embrion = c.embrion ? gestacionFicha(c.embrion) : '';
+  const barra = (etiqueta: string, v: unknown, texto?: string): string => persona && !finitoV23(v) ? '' : barraPixeles(etiqueta, v, texto);
+  const campo = (etiqueta: string, valor: string | null, clave: string, origen: unknown): string => persona && !finitoV23(origen) ? '' : dato(etiqueta, valor, clave);
   return `<section class="cuerpo-ficha" data-cuerpo-ficha="ok"><h4 class="detail-subtitle">Cuerpo</h4>`
-    + dato('Masa', kg(c.masa), 'masa') + (adulta === null ? '' : barraPixeles('Sobre su masa adulta', adulta, `${number(adulta * 100)} %`))
-    + barraPixeles('Reserva de energía', c.reserva) + barraPixeles('Agua del tejido', c.agua)
-    + dato('En el tubo digestivo', kg(c.digestivo), 'digestivo') + dato('Carga a cuestas', kg(c.carga), 'carga') + (carga === null ? '' : barraPixeles('Peso de la carga', carga))
-    + dato('Temperatura', temperaturaTexto(c.T), 'temperatura')
+    + campo('Masa', kg(c.masa), 'masa', c.masa) + (adulta === null ? '' : barraPixeles('Sobre su masa adulta', adulta, `${number(adulta * 100)} %`))
+    + barra('Reserva de energía', c.reserva) + barra('Agua del tejido', c.agua)
+    + campo('En el tubo digestivo', kg(c.digestivo), 'digestivo', c.digestivo) + campo('Carga a cuestas', kg(c.carga), 'carga', c.carga) + (carga === null ? '' : barraPixeles('Peso de la carga', carga))
+    + campo('Temperatura', temperaturaTexto(c.T), 'temperatura', c.T)
     + (principal ? dato('Tejido principal', `${formulaDe(principal.atomos)} · ${nombreDerivado(principal)}`, 'principal') : '')
     + embrion + '</section>';
 }
@@ -530,9 +559,9 @@ export function crianzaFicha(c: CrianzaVisible | undefined, world: WorldView): s
   return `<section class="crianza-ficha" data-crianza><h4 class="detail-subtitle">Crianza</h4>${barraPixeles('Madurez', c.madurez, finitoV23(c.madurez) ? `${number(fraccion(c.madurez) * 100)} % de su masa adulta` : undefined)}<p class="drawer-note" data-cuidadores>${cuidadores === null ? sinDatoV23 : cuidadores.length ? `La cuidan: ${cuidadores.map(id => personLink(world, id)).join(' ')}` : 'Nadie la cuida ahora.'}</p></section>`;
 }
 
-/** Ficha de persona: cuerpo y, si es cría o está gestando, su crianza. Las dos aparecen solo con la ley encendida. */
+/** Ficha de persona: cuerpo (sólo lo registrado) y, si es cría o está gestando, su crianza. */
 export function cuerpoPersonaFicha(p: Pick<PersonView, 'cuerpoVisto' | 'crianza'>, world: WorldView): string {
-  return cuerpoFicha(p.cuerpoVisto, world.sustancias) + crianzaFicha(p.crianza, world);
+  return (p.cuerpoVisto ? cuerpoFicha(p.cuerpoVisto, world.sustancias, true) : '') + crianzaFicha(p.crianza, world);
 }
 
 /** Qué se extrajo sin matar, en pasado y en claro. */

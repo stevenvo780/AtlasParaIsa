@@ -200,6 +200,8 @@ export class DvrPlayer {
   playTick = 0;
   /** Último tick emitido (entero). */
   currentTick = 0;
+  /** Época del fotograma emitido (`entry.epoca`). Null hasta que hay fotograma. */
+  epocaFotograma: number | null = null;
   minTick = 0;
   maxTick = 0;
   latestDay = 0;
@@ -481,6 +483,14 @@ export class DvrPlayer {
   }
 
   togglePlaying(): void { this.setPlaying(!this.playing); }
+
+  /**
+   * Pide un trozo sin mover el cabezal, sin vaciar la cola y sin emitir fotograma.
+   * La señal es de quien llama: cancelar esta consulta no corta la reproducción, ni al revés.
+   */
+  consultarAparte(req: ChunkReq, signal: AbortSignal): Promise<ChunkResp> {
+    return this.options.fetchChunk({ ...req, signal });
+  }
 
   /** Ritmo explícito (`0,5×`…`25×`). Sale de tiempo real y del borde vivo. Ignora lo que no está en el contrato. */
   setSpeed(speed: Velocidad): void {
@@ -852,7 +862,7 @@ export class DvrPlayer {
     const salto = cambioDeNivel === 'salto';
     const cambio = salto ? this.nivel !== null && this.nivel !== entry.nivel : cambioDeNivel;
     let discontinuity = salto || cambio;
-    this.currentTick = frame.tick; this.started = true;
+    this.currentTick = frame.tick; this.started = true; this.epocaFotograma = entry.epoca;
     this.nivel = entry.nivel; this.paso = entry.paso;
     if (!salto && habiaFotograma && frame.tick > previo) {
       for (const l of this.lagunas) if (previo <= l.t0 && frame.tick >= l.t1) { discontinuity = true; this.options.onMarca?.({ tipo: 'laguna', laguna: l, texto: textoLaguna(l) }); }

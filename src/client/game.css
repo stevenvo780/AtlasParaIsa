@@ -61,37 +61,59 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 @media(max-width:760px){.heat-legend{right:12px;bottom:152px;max-width:150px}.game-shell:has(.game-drawer:not([hidden])) .heat-legend{visibility:hidden}}
 /* M1: el recuento de Vidas distingue la cámara del mundo. */
 .population-drawer h2>#population-count{display:block;margin:6px 0 0;font-size:13px;line-height:1.4}
-/* V21 — barra de transporte DVR («cine»): vidrio oscuro sobre el mismo verde pergamino del HUD; sólo existe con la cinta activa. */
-.dvr-bar{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:24;width:min(1080px,calc(100% - 40px));padding:8px 12px 7px;background:#1b2c23ed;border:1px solid #81977799;border-radius:12px;color:#eef3e1;box-shadow:0 8px 30px #0a1810a8,0 1px 0 #ffffff1a inset;backdrop-filter:blur(12px)}
+/* V21 — transporte de la cinta. En 1920×1080 es una fila de 860px (entre 740 y 860) y 52px de alto.
+   Los cortes de archivo reutilizan el nodo pero no `.dvr-transport`: no heredan esta altura. */
+.dvr-bar{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:24;width:min(860px,calc(100% - 32px));max-width:860px;padding:8px 12px 7px;background:#1b2c23ed;border:1px solid #81977799;border-radius:12px;color:#eef3e1;box-shadow:0 8px 30px #0a1810a8,0 1px 0 #ffffff1a inset;backdrop-filter:blur(12px)}
 .dvr-bar[hidden]{display:none}
-.dvr-transport{display:grid;grid-template-columns:auto auto minmax(160px,1fr) auto;gap:6px 14px;align-items:center;font-size:12px}
-.dvr-controls,.dvr-speeds,.dvr-engine{display:flex;align-items:center;gap:4px}
-.dvr-button,.dvr-speed,.dvr-live{font:inherit;color:inherit;background:#ffffff14;border:1px solid #ffffff24;border-radius:7px;min-height:34px;padding:0 9px;cursor:pointer;transition:background .15s,border-color .15s}
-.dvr-button{min-width:36px;font-size:15px;line-height:1}
-.dvr-play{min-width:42px;background:#8fae7a38;border-color:#a9c795aa}
-.dvr-speed{padding:0 7px;font-variant-numeric:tabular-nums}
-.dvr-button:hover,.dvr-speed:hover,.dvr-live:hover{background:#ffffff26}
-.dvr-button:focus-visible,.dvr-speed:focus-visible,.dvr-live:focus-visible,.dvr-range:focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}
+.dvr-bar{--dvr-pista:32px}
+.dvr-bar:has(.dvr-transport){z-index:26;padding:6px 8px;height:52px;max-height:56px;overflow:visible}
+.dvr-transport{display:grid;grid-template-columns:auto minmax(72px,max-content) minmax(350px,1fr) max-content max-content auto;grid-template-rows:minmax(0,1fr);align-items:center;gap:4px;height:100%;min-width:0;font-size:12px;overflow:visible}
+.dvr-play,.dvr-time,.dvr-ritmo-wrap,.dvr-live,.dvr-more-wrap{align-self:center}
+.dvr-controls,.dvr-engine{display:flex;align-items:center;gap:4px}
+.dvr-button,.dvr-speed,.dvr-ritmo,.dvr-live,.dvr-more{font:inherit;color:inherit;background:#ffffff14;border:1px solid #ffffff24;border-radius:7px;min-height:28px;padding:0 8px;cursor:pointer;transition:background .15s,border-color .15s}
+.dvr-button{min-width:32px;padding:0 6px;font-size:15px;line-height:1}
+.dvr-play{min-width:36px;height:32px;background:#8fae7a38;border-color:#a9c795aa}
+.dvr-speed{min-height:32px;padding:0 8px;font-size:13px;font-variant-numeric:tabular-nums;line-height:1;text-align:center}
+.dvr-ritmo{min-width:76px;padding:0 8px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap}
+.dvr-ritmo::after{content:"";display:inline-block;width:0;height:0;margin-left:6px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;vertical-align:2px}
+.dvr-ritmo[aria-expanded=true]::after{transform:scaleY(-1);vertical-align:0}
+.dvr-more{min-width:36px;padding:0 7px;font-size:16px;line-height:1;letter-spacing:0}
+.dvr-button:hover,.dvr-speed:hover,.dvr-ritmo:hover,.dvr-live:hover,.dvr-more:hover{background:#ffffff26}
+.dvr-button:focus-visible,.dvr-speed:focus-visible,.dvr-ritmo:focus-visible,.dvr-live:focus-visible,.dvr-more:focus-visible,.dvr-range:focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}
+.dvr-bar .dvr-range:focus-visible{outline-offset:-2px}
 .dvr-speed[aria-pressed=true]{background:#d6e8a4;border-color:#d6e8a4;color:#1b2c23;font-weight:700}
-.dvr-scrubber{position:relative;display:grid;grid-template-rows:26px auto;min-width:0}
-.dvr-sparkline{grid-area:1/1;width:100%;height:26px;overflow:visible;pointer-events:none}
-.dvr-spark-area{fill:#9bbd8630}.dvr-spark-line{fill:none;stroke:#b9d6a2;stroke-width:1.4;vector-effect:non-scaling-stroke;stroke-linejoin:round}.dvr-spark-base{stroke:#ffffff30;stroke-width:1;vector-effect:non-scaling-stroke}
-.dvr-playhead{position:absolute;top:0;width:2px;height:26px;margin-left:-1px;background:#f4e7a8;border-radius:1px;pointer-events:none;box-shadow:0 0 6px #f4e7a8aa}
-.dvr-range{grid-area:1/1;align-self:stretch;width:100%;height:26px;margin:0;background:transparent;opacity:.001;cursor:pointer;touch-action:none}
-.dvr-range:focus-visible{opacity:1;accent-color:#d6e8a4}
-.dvr-readout{display:flex;justify-content:space-between;gap:10px;margin-top:3px;font-size:11px;white-space:nowrap}
-.dvr-time{font-weight:700;color:#f1f5e8;font-variant-numeric:tabular-nums}
-.dvr-hover{color:#b8c9a8;overflow:hidden;text-overflow:ellipsis;min-height:1em}
-.dvr-engine{flex-wrap:nowrap;gap:8px}
-.dvr-badge{padding:5px 9px;background:#00000040;border:1px solid #ffffff1c;border-radius:999px;font-variant-numeric:tabular-nums;white-space:nowrap}
-/* V23 — cinta por niveles: escala (nivel y paso en tiempo de mundo), desfase con el presente y aviso de la grabación. */
-.dvr-escala{max-width:280px;overflow:hidden;text-overflow:ellipsis;color:#e6efcf;background:#d6e8a41c;border-color:#d6e8a450}
-.dvr-desfase{color:#d9c79a;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dvr-scrubber{position:relative;min-width:350px;height:var(--dvr-pista);min-height:var(--dvr-pista);max-height:var(--dvr-pista);overflow:visible;align-self:center}
+.dvr-track{position:absolute;inset:0;width:100%;height:var(--dvr-pista);overflow:hidden;border-radius:6px}
+.dvr-track::before{content:"";position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;border-radius:999px;background:linear-gradient(90deg,#ffffff28,#d6e8a466);box-shadow:inset 0 0 0 1px #ffffff1f;pointer-events:none;z-index:0}
+.dvr-bar svg.dvr-sparkline{position:absolute;left:0;top:0;width:100%;height:var(--dvr-pista);max-height:var(--dvr-pista);overflow:hidden;pointer-events:none;display:block;z-index:1}
+.dvr-spark-area{fill:#9bbd8640}.dvr-spark-line{fill:none;stroke:#d6e8a4;stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round}.dvr-spark-base{stroke:#ffffff30;stroke-width:1;vector-effect:non-scaling-stroke}
+.dvr-playhead{position:absolute;top:0;bottom:auto;width:2px;height:var(--dvr-pista);max-height:var(--dvr-pista);margin-left:-1px;background:#f4e7a8;border-radius:1px;pointer-events:none;box-shadow:0 0 6px #f4e7a8aa;z-index:2}
+.dvr-bar input.dvr-range.dvr-range{position:absolute;left:0;top:0;width:100%;height:var(--dvr-pista);min-height:0;max-height:var(--dvr-pista);margin:0;padding:0;border:0;border-radius:0;max-width:none;background:transparent;color:inherit;box-shadow:none;cursor:pointer;touch-action:none;appearance:none;-webkit-appearance:none;z-index:3}
+.dvr-bar .dvr-range::-webkit-slider-runnable-track{height:100%;background:transparent}
+.dvr-bar .dvr-range::-webkit-slider-thumb{-webkit-appearance:none;width:2px;height:100%;background:transparent;border:0}
+.dvr-bar .dvr-range::-moz-range-track{height:100%;background:transparent;border:0}
+.dvr-bar .dvr-range::-moz-range-thumb{width:2px;height:100%;background:transparent;border:0}
+.dvr-time{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:700;font-size:12px;color:#f1f5e8;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dvr-hover{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:3;padding:3px 7px;border-radius:6px;background:#14241ce8;color:#e7f0d4;font-size:11px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.dvr-hover:empty{display:none}
+.dvr-engine{flex-wrap:wrap;gap:6px;min-width:0}
+.dvr-badge{padding:4px 8px;background:#00000040;border:1px solid #ffffff1c;border-radius:999px;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* V23 — cinta por niveles: la escala y el desfase viven en el popover; el aviso de grabación flota sobre la pista. */
+.dvr-escala{max-width:100%;overflow:hidden;text-overflow:ellipsis;color:#e6efcf;background:#d6e8a41c;border-color:#d6e8a450;white-space:normal}
+.dvr-desfase{color:#d9c79a;font-variant-numeric:tabular-nums;white-space:normal}
 .dvr-desfase:empty,.dvr-estado:empty{display:none}
-.dvr-estado{margin-top:4px;padding:3px 8px;border-radius:6px;background:#e8b06a;color:#2a1a12;font-size:11px;font-weight:700;line-height:1.35}
-.dvr-live{padding:0 11px;color:#c9b4a8;white-space:nowrap}
-.dvr-live.is-live{color:#1b2c23;background:#e87a6a;border-color:#e87a6a;font-weight:700}
+.dvr-estado{position:absolute;left:0;right:0;bottom:calc(100% + 28px);z-index:4;margin:0;padding:3px 8px;border-radius:6px;background:#e8b06a;color:#2a1a12;font-size:11px;font-weight:700;line-height:1.35;pointer-events:none}
+.dvr-live{min-width:0;max-width:12em;overflow:hidden;text-overflow:ellipsis;padding:0 8px;font-size:12px;font-weight:500;color:#d7e0cc;background:transparent;white-space:nowrap}
+.dvr-live.is-live{color:#f6e7e2;background:#e87a6a22;border-color:#e87a6a66;font-weight:600}
 .dvr-transport[data-loading=true] .dvr-time::after{content:" …";opacity:.7}
+.dvr-more-wrap,.dvr-ritmo-wrap{position:relative;display:flex;align-items:center}
+.dvr-ritmo-menu{position:absolute;right:0;bottom:calc(100% + 8px);z-index:7;width:min(280px,calc(100vw - 24px));max-height:min(320px,50vh);overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;background:#1b2c23f5;color:#eef3e1;border:1px solid #81977799;border-radius:10px;box-shadow:0 12px 28px #0a1810cc}
+.dvr-ritmo-menu[hidden]{display:none}
+.dvr-ritmo-menu .dvr-speed[data-dvr-tiempo-real],.dvr-ritmo-menu .dvr-speed[data-dvr-paseo]{grid-column:1/-1}
+.dvr-popover{position:absolute;right:0;bottom:calc(100% + 8px);z-index:6;width:min(340px,calc(100vw - 24px));max-height:min(320px,50vh);overflow:auto;padding:10px;display:grid;gap:8px;background:#1b2c23f5;color:#eef3e1;border:1px solid #81977799;border-radius:10px;box-shadow:0 12px 28px #0a1810cc}
+.dvr-popover[hidden]{display:none}
+.dvr-popover-title{margin:0;font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:#c9d8b8}
+.dvr-popover .dvr-button{min-height:32px;min-width:44px}
 .game-shell.has-dvr .map-hint{display:none}
 .game-shell.has-archive-cuts{--base-cortes:92px;--tope-cortes:calc(var(--base-cortes) + var(--alto-cortes,110px) + 8px)}
 #archive-cuts{width:min(640px,calc(100% - 40px));bottom:var(--base-cortes);font-size:12px;line-height:1.35}
@@ -116,24 +138,19 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 /* V21 — observador puro: ninguna orden ni gesto; todo lo demás sigue vivo. */
 .game-shell.is-observer-only :is(#direct-toggle,#person-controls,#task-palette){display:none!important}
 .game-shell.is-observer-only .control-pair{grid-template-columns:1fr}
-@media(min-width:1101px){.dvr-engine{grid-column:4;grid-row:1}}
-@media(max-width:1100px) and (min-width:761px){.dvr-transport{grid-template-columns:auto 1fr auto;}.dvr-engine{grid-column:3;grid-row:1}.dvr-scrubber{grid-column:1/-1;grid-row:2}.dvr-badge:not(.dvr-escala){display:none}.dvr-escala{max-width:170px}}
 @media(max-width:760px){
-.dvr-bar{left:8px;right:8px;bottom:var(--base-cinta,88px);width:auto;transform:none;padding:7px 9px}
+.dvr-bar{left:8px;right:8px;--dvr-pista:44px;bottom:var(--base-cinta,88px);width:auto;max-width:none;transform:none;padding:6px 8px}
+.dvr-bar:has(.dvr-transport){height:auto;max-height:none}
 .game-shell.has-dvr{--base-cinta:88px}
-.dvr-transport{grid-template-columns:auto minmax(0,1fr);gap:6px 8px}
-.dvr-controls{grid-column:1;grid-row:1}.dvr-engine{grid-column:2;grid-row:1}.dvr-speeds{grid-column:1/-1;grid-row:3;flex-wrap:wrap}.dvr-scrubber{grid-column:1/-1;grid-row:2}
-.dvr-button,.dvr-speed,.dvr-live{min-height:40px}.dvr-badge:not(.dvr-escala){display:none}
-/* La fila de arriba cabe en 360 px: la escala se recorta con puntos suspensivos (el texto entero va en su title). */
-.dvr-engine{min-width:0;justify-content:flex-end}.dvr-live{flex:none}
-.dvr-escala{max-width:none;min-width:0;flex:0 1 auto;padding:4px 7px;font-size:11px}
-.dvr-scrubber{grid-template-rows:44px auto}
-.dvr-range{height:44px;min-height:44px;padding:0;border:0}
-.dvr-sparkline{align-self:center}
-.dvr-playhead{top:9px}
-.dvr-readout{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;margin-top:6px;white-space:normal}
-.dvr-desfase{text-align:right;white-space:normal}
-.dvr-hover:not(:empty){grid-column:1/-1;overflow:visible;overflow-wrap:anywhere}
+.dvr-transport{grid-template-columns:auto minmax(0,1fr) auto auto auto;grid-template-rows:44px 44px;height:auto;gap:6px}
+.dvr-play{grid-area:1/1}.dvr-time{grid-area:1/2;min-width:0;overflow:hidden;text-overflow:ellipsis}.dvr-ritmo-wrap{grid-area:1/3}.dvr-live{grid-area:1/4}.dvr-more-wrap{grid-area:1/5}
+.dvr-scrubber{grid-area:2/1/3/-1;height:44px;min-height:44px;max-height:44px;min-width:0}
+.dvr-button,.dvr-speed,.dvr-ritmo,.dvr-live,.dvr-more{min-height:44px;flex:0 0 auto}
+.dvr-play,.dvr-more,.dvr-ritmo{min-width:44px}
+.dvr-bar input.dvr-range{height:44px;min-height:44px;max-height:44px;padding:0;border:0}
+.dvr-engine{min-width:0}
+.dvr-escala{max-width:none;white-space:normal}
+.dvr-hover{white-space:normal;overflow-wrap:anywhere}
 /* La ficha deja sitio a la cinta para leer una historia y controlar su reproducción a la vez. */
 .game-shell.has-dvr:has(.game-drawer:not([hidden]):not(.inspector-drawer)) .dvr-bar{display:none}
 .game-shell.has-dvr:has(.inspector-drawer:not([hidden])) {
@@ -145,6 +162,8 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
   inset: auto;
   grid-row: 2;
   margin-inline: 8px;
+  height: auto;
+  max-height: none;
 }
 .game-shell.has-dvr:has(.inspector-drawer:not([hidden])) .inspector-drawer {
   position: relative;
@@ -155,8 +174,7 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
   max-height: none;
   margin: 0 10px 10px;
 }
-.dvr-speeds .dvr-speed{flex:1}
-.game-shell.has-dvr .world-coordinates,.game-shell.has-dvr .camera-controls,.game-shell.has-dvr .heat-legend{bottom:calc(var(--base-cinta) + 10px + var(--alto-cinta,134px))}
+.game-shell.has-dvr .world-coordinates,.game-shell.has-dvr .camera-controls,.game-shell.has-dvr .heat-legend{bottom:calc(var(--base-cinta) + 10px + var(--alto-cinta,112px))}
 }
 @media(prefers-reduced-motion:reduce){.dvr-bar,.dvr-bar *{transition:none!important}}
 
@@ -340,4 +358,4 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 .materia-ciclo{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
 @media(max-width:760px){.cuerpo-fila{grid-template-columns:minmax(0,1fr) 96px 56px;font-size:11px}.stats-tabs{overflow-x:auto}}
 
-.dvr-tramo{grid-column:1/-1;font-size:11px;color:#e9e1be}.dvr-tramo>summary{width:fit-content;min-height:32px;padding:8px;cursor:pointer}.dvr-tramo-controles{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.dvr-tramo button{min-height:32px;padding:4px 8px;color:inherit;background:#0004;border:1px solid #ffffff40;border-radius:6px}.dvr-tramo button:disabled{opacity:.45}.dvr-tramo :is(summary,button):focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}@media(max-width:760px){.dvr-tramo{grid-row:4}.dvr-tramo>summary,.dvr-tramo button{min-height:40px}}
+.dvr-tramo{font-size:11px;color:#e9e1be}.dvr-tramo>summary{width:fit-content;min-height:32px;padding:4px 2px;cursor:pointer}.dvr-tramo-controles{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.dvr-tramo button{min-height:32px;padding:4px 8px;color:inherit;background:#0004;border:1px solid #ffffff40;border-radius:6px}.dvr-tramo button:disabled{opacity:.45}.dvr-tramo :is(summary,button):focus-visible{outline:2px solid #d6e8a4;outline-offset:2px}@media(max-width:760px){.dvr-tramo>summary,.dvr-tramo button{min-height:44px}}

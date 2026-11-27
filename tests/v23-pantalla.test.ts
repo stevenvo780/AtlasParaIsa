@@ -121,11 +121,12 @@ test('histogramaTamanos: clases que se doblan hasta la mayor comunidad, con medi
   assert.match(histogramaTamanos([]), /data-histograma-vacio/);
 });
 
-test('escuchaFicha: barra propia junto a la de sus progenitores, «sin dato» si el mundo no trae la escucha', () => {
+test('escuchaFicha: barra propia junto a la de sus progenitores; si falta, la sección no se dibuja', () => {
   const view = projectWorld(createWorld(51926));
   const [s, i, hija] = [view.people.find(p => p.id === 's')!, view.people.find(p => p.id === 'i')!, view.people.find(p => p.id === 'neighbor-3')!];
   const sinEscucha = { ...hija, escucha: undefined, traits: { ...hija.traits!, escucha: undefined } };
-  assert.match(escuchaFicha(sinEscucha as typeof hija, view), /data-escucha="sin-dato"/);
+  assert.equal(escuchaFicha(sinEscucha as typeof hija, view), '');
+  assert.doesNotMatch(escuchaFicha(sinEscucha as typeof hija, view), /no hereda todavía/);
   // `PersonView.escucha` manda sobre `traits.escucha`: se fijan los dos.
   Object.assign(s, { escucha: .8 }); Object.assign(i, { escucha: .4 }); Object.assign(hija, { escucha: .6 });
   Object.assign(s.traits as object, { escucha: .8 }); Object.assign(i.traits as object, { escucha: .4 }); Object.assign(hija.traits as object, { escucha: .6 });

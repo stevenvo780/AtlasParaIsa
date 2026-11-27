@@ -181,15 +181,38 @@ export function renderCommunityTelemetry(communities?: CommunityView[]): string 
 }
 
 export function renderPersonTelemetry(p: PersonView): string {
-  const stage = p.lifeStage ? { juvenile: 'Joven', adult: 'Adulto', senescent: 'Mayor' }[p.lifeStage] : '—';
-  const progress = p.working || count(p.workProgress) > 0 ? `<div class="telemetry-work"><span>Trabajo en curso <strong>${percentage(p.workProgress)}</strong></span><meter aria-label="Progreso de la tarea" min="0" max="100" value="${esc(Math.round(Math.min(1, count(p.workProgress)) * 100))}"></meter></div>` : '';
+  const stage = p.lifeStage ? { juvenile: 'Joven', adult: 'Adulto', senescent: 'Mayor' }[p.lifeStage] : undefined;
+  const progress = finite(p.workProgress) && (p.working || p.workProgress > 0) ? `<div class="telemetry-work"><span>Trabajo en curso <strong>${percentage(p.workProgress)}</strong></span><meter aria-label="Progreso de la tarea" min="0" max="100" value="${esc(Math.round(Math.min(1, Math.max(0, p.workProgress)) * 100))}"></meter></div>` : '';
   const skillLabels: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Agua', research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse', accompany: 'Compañía', retreat: 'Buscar espacio' };
-  const skills = Object.entries(p.skills ?? {}).filter(([, value]) => finite(value) && value > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3);
-  return progress + section('Estado vital y etapa', facts([
-    ['Salud', percentage(p.health)], ['Vitalidad', percentage(p.vitality)], ['Etapa', stage], ['Edad', `${number(p.age)} pasos`],
-    ['Gen', p.genome ? `G${number(p.genome.generation)}` : '—'], ['Reserva', `${number(p.foodReserve, 2)} / ${number(p.foodReserveCapacity, 2)}`],
-    ['Madera', number(p.materials?.wood)], ['Piedra', number(p.materials?.stone)],
-  ])) + (p.craftFocus || p.craftTint ? section('Oficio emergente', `${swatch(p.craftTint)}<strong>${esc(p.craftFocus ?? 'Práctica material')}</strong>`) : '') + personCompoundsSection(p) + section('Habilidades y cultura personal', `${skills.length ? facts(skills.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)])) : '<p class="stats-note">Sin habilidades practicadas recibidas.</p>'}${facts(Object.entries(axes).map(([key, label]) => [label, percentage(p.culture?.[key as keyof typeof axes])]))}`);
+  const practiced = p.skills
+    ? Object.entries(p.skills).filter((entry): entry is [string, number] => finite(entry[1])).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3)
+    : null;
+  const skillsHtml = practiced === null ? '' : practiced.length
+    ? facts(practiced.map(([key, value]) => [skillLabels[key] ?? key, percentage(value)]))
+    : '<p class="stats-note">Ninguna habilidad en este instante.</p>';
+  const cultureRows: [string, string][] = [];
+  if (p.culture) for (const [key, label] of Object.entries(axes) as [keyof typeof axes, string][]) {
+    const value = p.culture[key];
+    if (finite(value)) cultureRows.push([label, percentage(value)]);
+  }
+  const generacion = p.genome?.generation;
+  const madera = p.materials?.wood;
+  const piedra = p.materials?.stone;
+  const vital: [string, string][] = [];
+  if (finite(p.health)) vital.push(['Salud', percentage(p.health)]);
+  if (finite(p.vitality)) vital.push(['Vitalidad', percentage(p.vitality)]);
+  if (stage) vital.push(['Etapa', stage]);
+  if (finite(p.age)) vital.push(['Edad', `${number(p.age)} pasos`]);
+  if (finite(generacion)) vital.push(['Gen', `G${number(generacion)}`]);
+  if (finite(p.foodReserve) && finite(p.foodReserveCapacity)) vital.push(['Reserva', `${number(p.foodReserve, 2)} / ${number(p.foodReserveCapacity, 2)}`]);
+  else if (finite(p.foodReserve)) vital.push(['Reserva', number(p.foodReserve, 2)]);
+  else if (finite(p.foodReserveCapacity)) vital.push(['Capacidad de reserva', number(p.foodReserveCapacity, 2)]);
+  if (finite(madera)) vital.push(['Madera', number(madera)]);
+  if (finite(piedra)) vital.push(['Piedra', number(piedra)]);
+  const habilidades = skillsHtml || cultureRows.length ? section('Habilidades y cultura personal', `${skillsHtml}${cultureRows.length ? facts(cultureRows) : ''}`) : '';
+  return progress + (vital.length ? section('Estado vital y etapa', facts(vital)) : '')
+    + (p.craftFocus || p.craftTint ? section('Oficio emergente', `${swatch(p.craftTint)}<strong>${esc(p.craftFocus ?? 'Práctica material')}</strong>`) : '')
+    + personCompoundsSection(p) + habilidades;
 }
 export function renderAnimalTelemetry(animal: AnimalView & { reproductiveReserve?: number }): string {
   const reserve = animal.reproReserve ?? animal.reproductiveReserve;

@@ -11,7 +11,10 @@ import {
   type CruceFaunaSaliente, type LoteFotoDuenos,
 } from '../../world/motor/fotograma-dueno.js';
 import { fundir } from '../../world/motor/reunir.js';
-import { reaccionObservadaDe } from '../../world/materia/reaccion-observada.js';
+import { reaccionObservadaDe, reaccionPublicada } from '../../world/materia/reaccion-observada.js';
+import { vistaEstructuraLenta } from '../../world/materia/piezas.js';
+import { leerReceta } from '../../world/materia/proceso.js';
+import { tecnicaVisible } from '../../shared/tecnica-visible.js';
 import type { ServicioQuimicoAuditable } from '../../world/materia/servicio.js';
 import { projectChemistry, VIEW_EVENTS, VIEW_MEMORIES } from '../../world/proyeccion.js';
 import { PAGE_SIDE } from '../../world/soa/region.js';
@@ -113,6 +116,19 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
       const muestra = necesitaCaras(f.tick, f.epoca, f.completo) ? null : carasConfirmadas!.muestra;
       const { stats, caras } = estadisticasFotograma(mundo, muestra);
       const vista = projectTapeFrame(mundo, runtime, instancia, [], stats);
+      // El mundo reunido no tiene el contexto del dueño: los ganchos no corren. La técnica, las piezas
+      // y la reacción tienen que salir igual que en el emisor del dueño, en este mismo tick.
+      const porPersona = new Map(mundo.people.map(p => [p.id, p]));
+      for (const persona of vista.people) {
+        const tecnica = porPersona.get(persona.id)?.technology?.tecnica;
+        if (tecnica) persona.tecnicaVista = tecnicaVisible(tecnica, id => leerReceta(c.globales.registro, id));
+      }
+      const ley = c as unknown as CtxLeyMateria;
+      if (vista.structures && ley.materia) {
+        vista.structures = vista.structures.map(s => vistaEstructuraLenta(ley, s));
+      }
+      const observada = reaccionPublicada(mundo) ?? reaccionObservadaDe(ley.materia);
+      if (observada) vista.reaccionObservada = observada;
       const { version: _version, sequence: _sequence, tick: _tick, day: _day, phase: _fase, tiles: _tiles,
         people, animals, places, events, memories, communities, structures, blueprints, technology, organization,
         whispers, weather, ...cabecera } = vista;

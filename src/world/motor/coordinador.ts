@@ -64,6 +64,7 @@ import { desequilibrio, repartir, tocaRebalancear, type MedidaReparto } from './
 import { RegistroContenido } from './registro.js';
 import { cabeceraDe, fundir, sinCheckpointTecnologia, type ParteMundo } from './reunir.js';
 import { crearArenasMateria, validarReservaLotesMateria } from './reserva-materia.js';
+import { fijarReaccionPublicada, reaccionObservadaDe } from '../materia/reaccion-observada.js';
 
 /** Comprueba por igualdad estructural profunda (jamás por contadores ni longitudes) que las partes remotas
  * no divergieron de su tecnología inicial y que `fundir` reproducirá exactamente la tecnología confirmada. */
@@ -1117,6 +1118,8 @@ class MotorDuenos implements Motor {
     const bajasPrevias = this.#bajasConfirmadas?.tick === this.#mundo.tick ? this.#bajasConfirmadas.bajas : [];
     const { world, bajas } = reunirCorte(this.#mundo, this.#cabecera, partes, this.#contadores.siguientes(),
       migrantesDelCorte(pendientes), bajasPrevias, opciones);
+    const observada = reaccionObservadaDe(duenoSi(this.#mundo)?.materia);
+    if (observada) fijarReaccionPublicada(world, observada);
     return { world, pendientes, tecnologiaRemotaEquivalente, bajas };
   }
 

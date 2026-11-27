@@ -3896,17 +3896,16 @@ export class Landscape {
       const act = p.view.action;
       if (act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && p.view.role !== 'S') continue;
       if (p.x < xLo || p.x > xHi || p.y < yLo || p.y > yHi) continue;
-      let nearest: RenderPerson | null = null;
-      let bestD = 3.2;
+      const best: { person: RenderPerson | null; d: number } = { person: null, d: 3.2 };
       visitNear(p, other => {
         if (other.view.id === p.view.id) return;
         if (p.view.role === 'S' && act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && other.view.role !== 'I') return;
         const d = Math.hypot(p.x - other.x, p.y - other.y);
-        if (d < bestD) { bestD = d; nearest = other; }
+        if (d < best.d) { best.d = d; best.person = other; }
       });
-      if (nearest) {
-        const kind = (p.view.role === 'S' && nearest.view.role === 'I') || act === 'accompany' || act === 'approach' ? 'bond' : 'cooperate';
-        drawArc(p, nearest, kind);
+      if (best.person) {
+        const kind = (p.view.role === 'S' && best.person.view.role === 'I') || act === 'accompany' || act === 'approach' ? 'bond' : 'cooperate';
+        drawArc(p, best.person, kind);
       }
     }
   }

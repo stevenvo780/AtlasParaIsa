@@ -1,0 +1,160 @@
+{
+  "tipo": "ensayo-laboratorio",
+  "estado": "completo",
+  "commit": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+  "fecha": "2026-11-27",
+  "inicio": "2026-11-27T02:19:56-05:00",
+  "fin": "2026-11-27T02:44:53-05:00",
+  "alcance": "Población sembrada. Se comprobó un ciclo de guardado y reapertura seguido de un tick. El ensayo no mide crecimiento emergente, estabilidad prolongada ni capacidad para un millón.",
+  "escena": {
+    "sintetica": true,
+    "semilla": 7,
+    "siembra": 7,
+    "n": 512000,
+    "zona": "0,0,1280,768",
+    "rebalanceo": false,
+    "calentar": 2,
+    "medir": 4,
+    "regimen": "abierto",
+    "duenos": 2,
+    "gpu": [],
+    "repartoInicial": "poblacion",
+    "indiceUidCompartido": false
+  },
+  "corte": {
+    "vecinos": 511921,
+    "personas": 511923,
+    "fauna": 40195,
+    "teselas": 1007360,
+    "paginasActivas": 3935,
+    "siguienteUid": 555359,
+    "tick": 6,
+    "epocaMateria": 0,
+    "formato": "snapshot-parts-v5",
+    "sqlite": {
+      "bytes": 1800577024,
+      "sha256": "3ce9642a6316cc041c42472245e2a3325f4a2a7d2067b602bb0b674d38791c78"
+    },
+    "sqliteCopiadoSha256Coincide": true,
+    "vmat": {
+      "bytes": 423463539,
+      "sha256": "2691880e8625db2e50d6ee2f331d97ca710054b086cace7c226db8258766345f"
+    },
+    "manifiestosSha256": {
+      "snapshot": "142ffa32fffb7c74d7ad0bec14fa576546c14550a127be4e530b125c0616e323",
+      "vmpt": "c27de653f591037813703b6d7d6637e19005daa9062004f79928bd5792b6d592"
+    },
+    "firmasPersonas": {
+      "ordenSha256": "9cfdef13ff590b497d50689d85af018d7177fddb29f6272b9caa6d266c4b4a27",
+      "filasSha256": "8e44f33d2a030da1079cb040919c562bdc612b0048b2c0f84f5a114fa44f05eb",
+      "pesosF64Sha256": "c9cc8c43597964fc66e54e8975378b64c25c9910ecea8deda3b8143418548906",
+      "politicas": 511923,
+      "nPesos": 108527676,
+      "cerosNegativos": 0
+    },
+    "firmasFauna": {
+      "ordenSha256": "27b04f948aa1fe2764acc222cc90b522297c1dbefd002b6cada937ca18357f0d",
+      "filasSha256": "2258018c5ada5e81fa1acc05735089dca43ce84aaffe892e65fae25507517c49"
+    }
+  },
+  "recuperacion": {
+    "escritorYLectorIndependientes": true,
+    "tickReabierto": 6,
+    "epocaReservada": 1,
+    "tickSiguiente": 7,
+    "cotejos": [
+      "orden, filas y UID de personas y fauna",
+      "pesos de políticas F64",
+      "VMAT",
+      "agenda del corte",
+      "saldo de materia incluido lo que queda en vuelo"
+    ],
+    "saldoExactoPorTick": [
+      6,
+      7
+    ],
+    "organismosFueraDeChunkActivoEnT7": 0,
+    "salidas": {
+      "guardar": 0,
+      "copiar": 0,
+      "leer": 0,
+      "total": 0
+    }
+  },
+  "tiemposMs": {
+    "pasos": [
+      {
+        "tick": 1,
+        "ms": 380159.064,
+        "calentamiento": true
+      },
+      {
+        "tick": 2,
+        "ms": 99847.114,
+        "calentamiento": true
+      },
+      {
+        "tick": 3,
+        "ms": 38059.978,
+        "calentamiento": false
+      },
+      {
+        "tick": 4,
+        "ms": 34176.178,
+        "calentamiento": false
+      },
+      {
+        "tick": 5,
+        "ms": 37115.597,
+        "calentamiento": false
+      },
+      {
+        "tick": 6,
+        "ms": 43211.305,
+        "calentamiento": false
+      }
+    ],
+    "guardarProceso": 1109466.276,
+    "guardarSoloStore": 82662.957,
+    "leerProceso": 374222.965,
+    "verificarShaCopia": 45021.692,
+    "cargarStore": 82750.404,
+    "avanzarT7": 41294.07,
+    "guardarRelojControl": 1113000,
+    "leerRelojControl": 379000
+  },
+  "recursos": {
+    "cpuAfinidad": [
+      2,
+      3
+    ],
+    "heapMiB": 28672,
+    "memoryMaxBytes": 55834574848,
+    "memoryPeakCgroupBytes": 33921716224,
+    "memoryPeakCgroupGiB": 31.59,
+    "swapMaxBytes": 0,
+    "swapCurrentBytes": 0,
+    "memoryEvents": {
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0
+    },
+    "limiteLecturaFisicaBytesPorSegundo": 40000000
+  },
+  "procedencia": {
+    "expediente": "archivo/v24-orquesta/guardado-512000-de86ec9",
+    "recibos": {
+      "datos/ensayo-512k-de86ec9-52g/guardado.json": "510934b182f4f3cf9aa04dbd7268b91eaed16315e8828c6a8fea480545152f5f",
+      "datos/ensayo-512k-de86ec9-52g/recuperacion.json": "5851b836f30af73aee735985702a76e4239f74ff6a9855ce898ef4a0c84e765a",
+      "datos/ensayo-512k-de86ec9-52g/memoria-cgroup.txt": "60d24007d28bb1946bb2c05ecb2ab831bed43bca83fadcd1a4f81512fa07c74a"
+    },
+    "arnes": {
+      "scripts/control.sh": "6ba14e6284bb5170edeb2c39a46af2bd9d7445a66a0b89ebb59f1bf0378d94ef",
+      "scripts/control.mjs": "9dc2eed4701624ebb1a3be7d127ef41a57fe09607580c60c1faf91047301cd27",
+      "scripts/perfiles.sh": "e94ee124557a93fee0c5511168448ef634b08e1014abbd88e53dc2066cd5c8c4",
+      "scripts/presion-lectura.sh": "02b89dd2ed1f5eb729290077753f48ddc0297a47ef05b1776865471813e80206"
+    },
+    "comando": "bash \"$EXPEDIENTE/scripts/control.sh\" \"$WORKTREE\" ETIQUETA_NUEVA --perfil-52",
+    "nota": "El arnés archivado requiere el entorno de laboratorio de la torre y un checkout limpio en el commit del ensayo. La escena se genera con createWorld y poblar. No requiere un SQLite previo."
+  }
+}

@@ -10,6 +10,14 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 27 de noviembre de 2026 — Guardado y recuperación de un mundo de laboratorio con 512.000 vecinos sembrados
+
+En `de86ec9`, dos dueños CPU guardaron un corte en T6 con **511.921 vecinos, 511.923 personas y 40.195 animales**. El proceso lector verificó la copia del SQLite sellado de **1.800.577.024 bytes** por SHA-256 y cotejó UID, orden y filas, 108.527.676 pesos de políticas F64, agenda y 423.463.539 bytes de VMAT. Reabrió el corte y avanzó a T7 con los dos dueños activos y saldo material exacto.
+
+El guardado duró 18 min 33 s y la fase de lectura y avance, 6 min 19 s según el reloj del controlador. T3–T6 tardaron 34,18–43,21 s por paso y T7 tras la reapertura, 41,29 s. El cgroup completo alcanzó **31,59 GiB** de `memory.peak`, bajo un límite de 52 GiB y sin swap ni eventos OOM. [Recibo con huellas, tiempos y procedimiento](evidencia-2026-11-27/escala-512k.json).
+
+La escena se generó en laboratorio con semilla y siembra 7, zona `0,0,1280,768`, y un artefacto de guardado separado. Este ciclo comprueba durabilidad al tamaño ensayado. El resultado no acredita crecimiento emergente, sostenimiento demográfico ni capacidad para un millón.
+
 ## 21 de noviembre de 2026 — Evolución abierta V15 (`RULES_VERSION = 12`) y sustrato multi-chip completo
 
 ### Resistencia 30 días, mundo vivo Dual-GPU `[0,1]`

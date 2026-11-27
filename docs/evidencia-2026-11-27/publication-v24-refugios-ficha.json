@@ -1,0 +1,200 @@
+{
+  "fecha": "2026-11-27T12:26:40-05:00",
+  "verificacion": {
+    "typecheck": "ok",
+    "build": "ok",
+    "pruebasDirigidas": 59,
+    "fallos": 0,
+    "deployCheck": "passed"
+  },
+  "dominio": {
+    "fecha": "2026-11-27T12:26:40-05:00",
+    "entrada": "/assets/index-CAb7P8q6.js",
+    "entradaSha256": "1e07631514ffa5feb1bbfb22e9d669a39fc36267cf2b580d512d67a8ab6b32e4",
+    "salud": {
+      "estado": "ok",
+      "tick": 162626,
+      "epoca": 8,
+      "ultimoTickGuardado": 162605,
+      "recargas": 0
+    }
+  },
+  "relevo": {
+    "simulado": false,
+    "resultado": "relevado",
+    "sha": "0b5889de5d605848e6da5388974f57e98700639a",
+    "shaAnterior": "6547f120ad67ab97bb38057045b1919a1eb4c28f",
+    "modoEntorno": "600",
+    "soloCambioReleaseDir": true,
+    "reinicioDeProceso": true,
+    "mundoCopiado": false,
+    "unidadesModificadas": false,
+    "timersModificados": false,
+    "perfilModificado": false,
+    "mismoDirectorioYCinta": true,
+    "mismoInodoMundo": true,
+    "mismoInodoCinta": true,
+    "instanciaCinta": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "backupMundo": {
+      "archivo": "world-20261127-1225.sqlite.gz",
+      "bytes": 92528641,
+      "sha256": "1d7dc61a13108d0dd35c4b99f0e971f1591472532d8ee7f2690fbdea68d1eaf7",
+      "gzip": "ok"
+    },
+    "backupCinta": {
+      "indice": "quick_check",
+      "crc": "firmado-en-segmentos.json",
+      "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662"
+    },
+    "saludInicial": {
+      "tick": 162588,
+      "epoca": 7,
+      "ultimoTickGuardado": 162400
+    },
+    "saludPreStop": {
+      "tick": 162604,
+      "epoca": 7,
+      "ultimoTickGuardado": 162600
+    },
+    "saludFinal": {
+      "tick": 162606,
+      "epoca": 8,
+      "ultimoTickGuardado": 162605
+    },
+    "generacion": {
+      "antes": 7,
+      "prevista": 8,
+      "observada": 8,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "avanceEnDosLecturas": true,
+    "tickDurableConservado": true,
+    "assetsAntiguosCopiados": [
+      "index-BUT1pbfc.css",
+      "index-C30cSDjH.js",
+      "index-CMETK2ER.js",
+      "index-DI0F2TXS.js",
+      "index-DOOEXXL4.js"
+    ],
+    "perfilSha256": "69ac43bed5f77e49edf3044a576d16a82d684426058ef102b0a516d5c6916285",
+    "timersSha256": "1e10c81c8501ffc980493b1a2cda5718139e1c0296741aa530ade2aa44bb0455",
+    "rollback": false
+  },
+  "navegador": {
+    "resultado": "medido",
+    "entrada": "/assets/index-CAb7P8q6.js",
+    "entradaSha256": "1e07631514ffa5feb1bbfb22e9d669a39fc36267cf2b580d512d67a8ab6b32e4",
+    "observado": [
+      {
+        "nombre": "Abeto 10525",
+        "energia": 87,
+        "salud": 44
+      },
+      {
+        "nombre": "Marea 11117",
+        "energia": 50,
+        "salud": 5
+      },
+      {
+        "nombre": "Marea 11117",
+        "energia": 60,
+        "salud": 5
+      },
+      {
+        "nombre": "Marea 11117",
+        "energia": 50,
+        "salud": 5
+      },
+      {
+        "nombre": "Marea 11117",
+        "energia": 50,
+        "salud": 5
+      },
+      {
+        "nombre": "Marea 11117",
+        "energia": 50,
+        "salud": 5
+      }
+    ],
+    "consultas": [
+      {
+        "tick": 155553,
+        "x": 28,
+        "y": 43,
+        "epoca": 5
+      },
+      {
+        "tick": 155553,
+        "x": 40,
+        "y": 25,
+        "epoca": 5
+      },
+      {
+        "tick": 155617,
+        "x": 40,
+        "y": 25,
+        "epoca": 5
+      },
+      {
+        "tick": 155585,
+        "x": 40,
+        "y": 25,
+        "epoca": 5
+      },
+      {
+        "tick": 155585,
+        "x": 28,
+        "y": 43,
+        "epoca": 5
+      }
+    ],
+    "t0": 155553,
+    "t1": 155617,
+    "errores": [],
+    "head": "0b5889de5d605848e6da5388974f57e98700639a",
+    "antes": {
+      "resultado": "medido",
+      "entrada": "/assets/index-DOOEXXL4.js",
+      "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0",
+      "observado": [
+        {
+          "nombre": "Abeto 10525",
+          "energia": 87,
+          "salud": 44
+        },
+        {
+          "nombre": "Marea 11117",
+          "energia": 50,
+          "salud": 5
+        },
+        {
+          "titulo": "Marea 11117",
+          "detalleDespues": false
+        }
+      ],
+      "consultas": [
+        {
+          "tick": 155553,
+          "x": 28,
+          "y": 43,
+          "epoca": 5
+        },
+        {
+          "tick": 155553,
+          "x": 40,
+          "y": 25,
+          "epoca": 5
+        }
+      ],
+      "t0": 155553,
+      "t1": 155617,
+      "errores": []
+    },
+    "pruebas": 59,
+    "escena": {
+      "x": 28,
+      "y": -1,
+      "paso": 155553
+    }
+  }
+}

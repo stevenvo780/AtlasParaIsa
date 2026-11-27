@@ -1,0 +1,124 @@
+{
+  "fecha": "2026-11-27T16:24:39-05:00",
+  "verificacion": {
+    "typecheck": "ok",
+    "build": "ok",
+    "pruebasDirigidas": 26,
+    "fallos": 0,
+    "deployCheck": "passed"
+  },
+  "dominio": {
+    "fecha": "2026-11-27T16:24:39-05:00",
+    "entrada": "/assets/index-BjilTDT6.js",
+    "entradaSha256": "ffc07b40761f21b474e5f42ffdaf953676a74fbdb08edbae76d61a77191a9495",
+    "salud": {
+      "estado": "ok",
+      "tick": 183750,
+      "epoca": 9,
+      "ultimoTickGuardado": 183738,
+      "recargas": 0
+    }
+  },
+  "relevo": {
+    "simulado": false,
+    "resultado": "relevado",
+    "sha": "5af48b24ffcbdbe32fb29e9c6124a42a4dd5d16c",
+    "shaAnterior": "0b5889de5d605848e6da5388974f57e98700639a",
+    "modoEntorno": "600",
+    "soloCambioReleaseDir": true,
+    "reinicioDeProceso": true,
+    "mundoCopiado": false,
+    "unidadesModificadas": false,
+    "timersModificados": false,
+    "perfilModificado": false,
+    "mismoDirectorioYCinta": true,
+    "mismoInodoMundo": true,
+    "mismoInodoCinta": true,
+    "instanciaCinta": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "backupMundo": {
+      "archivo": "world-20261127-1623.sqlite.gz",
+      "bytes": 122207354,
+      "sha256": "9fde1b53920a7e6aeb31cf5f657375219f65c1a659f06d3c082d7bd81b2d4fe3",
+      "gzip": "ok"
+    },
+    "backupCinta": {
+      "indice": "quick_check",
+      "crc": "firmado-en-segmentos.json",
+      "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662"
+    },
+    "saludInicial": {
+      "tick": 183713,
+      "epoca": 8,
+      "ultimoTickGuardado": 183600
+    },
+    "saludPreStop": {
+      "tick": 183737,
+      "epoca": 8,
+      "ultimoTickGuardado": 183600
+    },
+    "saludFinal": {
+      "tick": 183739,
+      "epoca": 9,
+      "ultimoTickGuardado": 183738
+    },
+    "generacion": {
+      "antes": 8,
+      "prevista": 9,
+      "observada": 9,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "avanceEnDosLecturas": true,
+    "tickDurableConservado": true,
+    "assetsAntiguosCopiados": [
+      "index-BUT1pbfc.css",
+      "index-C30cSDjH.js",
+      "index-CAb7P8q6.js",
+      "index-CMETK2ER.js",
+      "index-DI0F2TXS.js",
+      "index-DOOEXXL4.js"
+    ],
+    "perfilSha256": "69ac43bed5f77e49edf3044a576d16a82d684426058ef102b0a516d5c6916285",
+    "timersSha256": "1e10c81c8501ffc980493b1a2cda5718139e1c0296741aa530ade2aa44bb0455",
+    "rollback": false
+  },
+  "navegador": {
+    "resultado": "medido",
+    "entrada": "/assets/index-BjilTDT6.js",
+    "entradaSha256": "ffc07b40761f21b474e5f42ffdaf953676a74fbdb08edbae76d61a77191a9495",
+    "historico": {
+      "paso": 97089,
+      "nivel": 1,
+      "texto": "Grabación resumida · paso 97.089 Técnica sobre lotes La grabación resumida omite las fichas individuales de técnica. Borde vivo lleva a la parte reciente de la cinta."
+    },
+    "reciente": {
+      "paso": 183474,
+      "nivel": 0,
+      "reaccion": 183400,
+      "texto": "Grabación detallada · paso 183.474 Técnica sobre lotes La cámara muestra 253 fichas de técnica. Las cifras corresponden a esas fichas. Habitantes con recetas 164 En la zona visible Recetas distintas 43 En los repertorios recibidos Procesos en curso 10 Investigaciones o fabricaciones registradas en el fotograma Recetas de uso reciente en esta zona Receta n.º 103 · último uso en el paso 183.474 Unir 47,572 kg del insumo nº 12 Unir 33,687 kg del insumo nº 12 Receta n.º 134 · último uso en el paso 183.474 Receta n.º 53 · último uso en el paso 183.471 Receta n.º 144 · último uso en el paso 183.467 Receta n.º 213 · último uso en el paso 183.466 Receta n.º 379 · último uso en el paso 183.465 Receta n.º 368 · último uso en el paso 183.462 Receta n.º 110 · último uso en el paso 183.461 Receta n.º 111 · último uso en el paso 183.455 Receta n.º 58 · último uso en el paso 183.442 Receta n.º 159 · úl"
+    },
+    "errores": [],
+    "head": "5af48b24ffcbdbe32fb29e9c6124a42a4dd5d16c",
+    "antes": {
+      "resultado": "medido",
+      "entrada": "/assets/index-CAb7P8q6.js",
+      "entradaSha256": "1e07631514ffa5feb1bbfb22e9d669a39fc36267cf2b580d512d67a8ab6b32e4",
+      "historico": {
+        "paso": 97089,
+        "nivel": 1,
+        "texto": "Último estado recibido · paso 97089 MATERIA QUE CAMBIA DE MANOS Aprender a hacer Los habitantes prueban operaciones, conservan los procedimientos útiles y usan sus productos en trabajos posteriores. Descubiertos 0 Procedimientos en todo el mundo Productos 0 Objetos que existen ahora Usos 0 Aplicaciones con desgaste Generaciones 0 Profundidad de las recetas La técnica se transmite Acumulado del mundo Recetas enseñadas 0 Pasadas a otra persona por enseñanza cercana Productos reutilizados 0 Usados como materia de otro procedimiento (historial reciente) Diversidad de oficios 6 % Reparto de los oficios dominantes (100 % = por igual entre los 18 posibles) · Con habituación: lo que alguien ya practicó mucho le atrae menos, y más cuanto más curioso es · medido en el paso 97.009 La materia se conse"
+      },
+      "reciente": {
+        "paso": 183474,
+        "nivel": 0,
+        "reaccion": 183400,
+        "texto": "Último estado recibido · paso 97089 MATERIA QUE CAMBIA DE MANOS Aprender a hacer Los habitantes prueban operaciones, conservan los procedimientos útiles y usan sus productos en trabajos posteriores. Descubiertos 0 Procedimientos en todo el mundo Productos 0 Objetos que existen ahora Usos 0 Aplicaciones con desgaste Generaciones 0 Profundidad de las recetas La técnica se transmite Acumulado del mundo Recetas enseñadas 0 Pasadas a otra persona por enseñanza cercana Productos reutilizados 0 Usados como materia de otro procedimiento (historial reciente) Diversidad de oficios 6 % Reparto de los oficios dominantes (100 % = por igual entre los 18 posibles) · Con habituación: lo que alguien ya practicó mucho le atrae menos, y más cuanto más curioso es · medido en el paso 97.009 La materia se conserva Unidades del modelo Entrada acumulada 0 En productos 0 En residuos 0 Diferencia del balance 0 0 "
+      },
+      "errores": []
+    },
+    "coberturaDetalle": {
+      "desde": 154033,
+      "hasta": 183474
+    },
+    "pruebas": 26
+  }
+}

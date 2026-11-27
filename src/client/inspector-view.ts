@@ -142,7 +142,7 @@ export function fichaReaccion(obs: ReaccionObservada | undefined, alcance: 'mund
   const donde = alcance === 'obra'
     ? `Ocurrió en el lote nº ${number(obs.lote)}, no en la casa como tal.`
     : `Alcance: el lote nº ${number(obs.lote)}.`;
-  return `<p class="drawer-note" data-reaccion="aplicada" data-tick="${esc(obs.tick)}" data-lote="${esc(obs.lote)}">Reacción aplicada en el paso ${esc(obs.tick)}: ${par}, nivel ${esc(obs.nivel)}, ${esc(number(obs.veces))} ${obs.veces === 1 ? 'vez' : 'veces'}. ${donde}</p>`;
+  return `<p class="drawer-note" data-reaccion="aplicada" data-muestra="si" data-tick="${esc(obs.tick)}" data-lote="${esc(obs.lote)}">Muestra de una reacción aplicada en el paso ${esc(obs.tick)}: ${par}, nivel ${esc(obs.nivel)}, ${esc(number(obs.veces))} ${obs.veces === 1 ? 'vez' : 'veces'}. ${donde} La fecha es la de esa aplicación, no la de la vista que la enseña.</p>`;
 }
 
 function procedureReference(recipeId: string, technology: WorldView['technology']): string {

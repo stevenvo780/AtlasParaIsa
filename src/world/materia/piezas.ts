@@ -12,7 +12,7 @@ import { CHUNK_SIZE } from '../terrain.js';
 import { fluirCalor } from './fluir.js';
 import { fuegoEn, kappaDeRol, lotesDeCelda } from './ley-mundo.js';
 import { pasoLote, type CtxPaso } from './paso.js';
-import { anotarReaccionAplicada, reaccionObservadaDe } from './reaccion-observada.js';
+import { rearmarMuestraReaccion } from './reaccion-observada.js';
 import { desprender } from './romper.js';
 import { Parte, Rol, type LoteRef, type Pedido, type ProcesoMaterial, type VistaLote } from './tipos.js';
 
@@ -205,12 +205,7 @@ export function depositarEnObra(c: CtxLeyMateria, s: StructureView, tipo: Deposi
 
 function pasoPieza(c: CtxLeyMateria, lote: LoteRef, celda: number): void {
   const ctx: CtxPaso = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
-  if (!reaccionObservadaDe(c.materia)) {
-    ctx.anotar = (reaccion, veces, loteAplicado) => {
-      anotarReaccionAplicada(c.materia, reaccion, veces, loteAplicado, c.tick);
-      ctx.anotar = undefined;
-    };
-  }
+  rearmarMuestraReaccion(ctx, c.materia, () => c.tick);
   const entorno = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
   const vista = c.materia.vista(lote);
   const f = formaDeCodigo(vista.forma);

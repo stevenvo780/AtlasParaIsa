@@ -28,7 +28,8 @@ import { EmisorFotoDueno, type ParteFotoDueno } from '../src/world/motor/fotogra
 import type { FotogramaEnCurso, SucesoEnlaceCinta } from '../src/world/motor/fotograma.js';
 import { celdaObra, colocarPieza, type EstadoObra } from '../src/world/materia/piezas.js';
 import { pasoLote } from '../src/world/materia/paso.js';
-import { anotarReaccionAplicada, reaccionObservadaDe } from '../src/world/materia/reaccion-observada.js';
+import { anotarReaccionAplicada, reaccionObservadaDe, rearmarMuestraReaccion, VENTANA_MUESTRA_REACCION } from '../src/world/materia/reaccion-observada.js';
+import { ESTADISTICAS_CARAS_CADA_TICKS } from '../src/world/statistics.js';
 import type { ServicioQuimicoImpl } from '../src/world/materia/servicio.js';
 import { Rol } from '../src/world/materia/tipos.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
@@ -280,6 +281,8 @@ test('una reacción aplicada viaja en la vista viva y en la cinta; sin el campo 
   const conDato = fotogramaAVista(estadoVista(1), marco(mundo.tick, enCable), enCable, 1).vista;
   const panel = renderPanelMateria(leerMateria(conDato.materia), cicloVacio(), conDato.sustancias, conDato.tick, conDato.reaccionObservada);
   assert.match(panel, /data-reaccion="aplicada"/);
+  assert.match(panel, /data-muestra="si"/);
+  assert.match(panel, /Muestra/);
   assert.match(panel, new RegExp(`data-tick="${observada.tick}"`));
   assert.match(panel, new RegExp(`data-lote="${observada.lote}"`));
   assert.match(panel, /lote nº/);
@@ -297,6 +300,65 @@ test('una reacción aplicada viaja en la vista viva y en la cinta; sin el campo 
   assert.doesNotMatch(panelViejo, /data-reaccion="aplicada"/);
   assert.equal(fichaReaccion(undefined, 'mundo').includes('data-reaccion="no-grabado"'), true);
   t.diagnostic(JSON.stringify(observada));
+});
+
+test('la muestra de reacción cambia con la cadencia y una fase vacía conserva la fecha', async () => {
+  assert.equal(VENTANA_MUESTRA_REACCION, ESTADISTICAS_CARAS_CADA_TICKS);
+  const m = materiaReal();
+  try {
+    const kappa = [0, 0, 0, 200] as const;
+    let tick = 10;
+    const ctx = m.ctx(4);
+    const aplicar = (cuando: number) => {
+      tick = cuando;
+      const lote = m.lote({ H2: 1000, O2: 400 }, 295);
+      rearmarMuestraReaccion(ctx, m.arena, () => tick);
+      return pasoLote(ctx, lote, 1, kappa);
+    };
+    assert.ok(aplicar(10) > 0);
+    const primera = reaccionObservadaDe(m.arena);
+    assert.ok(primera);
+    assert.equal(primera.tick, 10);
+    const firma = serialize(primera);
+
+    assert.ok(aplicar(80) > 0);
+    assert.equal(reaccionObservadaDe(m.arena), primera);
+    assert.deepEqual(serialize(reaccionObservadaDe(m.arena)), firma);
+    assert.equal(ctx.anotar, undefined);
+
+    tick = 150;
+    rearmarMuestraReaccion(ctx, m.arena, () => tick);
+    assert.equal(ctx.anotar, undefined);
+    assert.equal(reaccionObservadaDe(m.arena)?.tick, 10);
+
+    const siguiente = 10 + VENTANA_MUESTRA_REACCION;
+    assert.ok(aplicar(siguiente) > 0);
+    const segunda = reaccionObservadaDe(m.arena);
+    assert.ok(segunda && segunda !== primera);
+    assert.equal(segunda.tick, siguiente);
+    assert.notDeepEqual(serialize(segunda), firma);
+
+    const ficha = fichaReaccion(primera, 'mundo');
+    assert.match(ficha, /data-muestra="si"/);
+    assert.match(ficha, /data-tick="10"/);
+    assert.match(ficha, /Muestra de una reacción aplicada en el paso 10/);
+    assert.doesNotMatch(fichaReaccion(undefined, 'mundo'), /Muestra|data-muestra/);
+
+    const cab = (obs?: typeof primera) => ({ tipo: 'mundo' as const, id: '', vista: { width: 40, height: 28, ...(obs ? { reaccionObservada: obs } : {}) } });
+    const clima = { tipo: 'clima' as const, id: '', vista: 'clear' as const };
+    const ver = (t: number, obs?: typeof primera) => fotogramaAVista(estadoVista(1), marco(t, [cab(obs), clima]), [cab(obs), clima], 1).vista;
+    const enEvento = ver(10, primera);
+    const vacia = ver(150, primera);
+    assert.equal(enEvento.reaccionObservada?.tick, 10);
+    assert.equal(vacia.reaccionObservada?.tick, 10);
+    assert.deepEqual(serialize(enEvento.reaccionObservada), serialize(vacia.reaccionObservada));
+    const panel = renderPanelMateria(null, cicloVacio(), undefined, 150, vacia.reaccionObservada);
+    assert.match(panel, /data-tick="10"/);
+    assert.match(panel, /Muestra/);
+    assert.doesNotMatch(panel, /data-tick="150"/);
+    assert.match(renderPanelMateria(null, cicloVacio(), undefined, 150), /data-reaccion="no-grabado"/);
+    assert.equal(ver(siguiente, segunda).reaccionObservada?.tick, siguiente);
+  } finally { await m.cerrar(); }
 });
 
 test('anotar una reacción no cambia los cuantos del paso', async () => {

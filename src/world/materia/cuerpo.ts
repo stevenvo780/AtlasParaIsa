@@ -41,7 +41,7 @@ import { PAGE_CELLS, pageOf, pageOffset } from '../soa/region.js';
 import { copiar, crearPlantilla, leerPlantilla } from './copiar.js';
 import { fluir } from './fluir.js';
 import { conservacion, lotesDeCelda, sustanciasDe, temperaturaDe, type LotesCelda } from './ley-mundo.js';
-import { anotarReaccionAplicada } from './reaccion-observada.js';
+import { rearmarMuestraReaccion } from './reaccion-observada.js';
 import { pasoLote, type CtxPaso } from './paso.js';
 import { esGasA } from './quimica.js';
 import { quemar, romper } from './romper.js';
@@ -90,12 +90,9 @@ function pasoDe(c: CtxLeyMateria): CtxPaso {
   let p = pasos.get(c);
   if (!p) {
     p = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
-    p.anotar = (reaccion, veces, lote) => {
-      anotarReaccionAplicada(c.materia, reaccion, veces, lote, c.tick);
-      p!.anotar = undefined;
-    };
     pasos.set(c, p);
   }
+  rearmarMuestraReaccion(p, c.materia, () => c.tick);
   return p;
 }
 

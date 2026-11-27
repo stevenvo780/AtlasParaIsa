@@ -23,7 +23,7 @@ import { fluirCalor } from './fluir.js';
 import { desprender, reparto, romper } from './romper.js';
 import { Parte, Rol, type Cuerpo, type LoteRef, type Paso, type ProcesoMaterial, type VistaLote } from './tipos.js';
 import { tecnicaVisible } from '../../shared/tecnica-visible.js';
-import { anotarReaccionAplicada, reaccionObservadaDe } from './reaccion-observada.js';
+import { rearmarMuestraReaccion } from './reaccion-observada.js';
 import { aprenderReceta, avanzarTecnicaDelMundo, decodificarEnsenanza, iniciarTecnica, mantenerTecnica } from '../technology.js';
 
 // ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
@@ -127,19 +127,14 @@ export const perfilDeVector = (vector: readonly number[]): Record<string, number
 
 const pasos = new WeakMap<object, CtxPaso>();
 /** El contexto de `pasoLote`, `fluir` y `romper` desde el de la ley: arena, química y azar del hilo.
- * La anotación no sortea: registra la primera reacción aplicada y luego se quita. */
+ * La anotación no sortea: como mucho una muestra por ventana, y luego se quita. */
 export function ctxPaso(c: CtxLeyMateria): CtxPaso {
   let p = pasos.get(c);
   if (!p) {
     p = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
-    if (!reaccionObservadaDe(c.materia)) {
-      p.anotar = (reaccion, veces, lote) => {
-        anotarReaccionAplicada(c.materia, reaccion, veces, lote, c.tick);
-        p!.anotar = undefined;
-      };
-    }
     pasos.set(c, p);
   }
+  rearmarMuestraReaccion(p, c.materia, () => c.tick);
   return p;
 }
 

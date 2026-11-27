@@ -2,8 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, projectWorld, stepWorld } from '../src/world/index.js';
 import { etiquetaEnDosLineas, origenReceta, technologyPane } from '../src/client/technology-art.js';
+import { tecnicaGrabada } from '../src/client/tecnica-grabada.js';
 import { resumenVivo } from '../src/server/resumen-vivo.js';
 import { paramsOf } from '../src/world/params.js';
+
+test('Oficios distingue datos ausentes de ceros grabados y conserva el panel anterior', () => {
+  const view = projectWorld(createWorld(51926));
+  const vacia = { ...view, people: [], structures: [], technology: undefined, organization: undefined, chemistry: undefined,
+    materia: undefined, sustancias: undefined, reaccionObservada: undefined };
+
+  assert.equal(tecnicaGrabada(vacia, null), null);
+  for (const nivel of [null, 0, 1] as const) {
+    const html = tecnicaGrabada(vacia, nivel, true)!;
+    assert.match(html, /data-tecnica-ausente/);
+    assert.doesNotMatch(html, /<strong>0<\/strong>/);
+  }
+  const legado = { ...view.technology!, dynamics: { ...view.technology!.dynamics, recipes: 1 } };
+  assert.equal(tecnicaGrabada({ ...vacia, technology: legado }, 1, true), null);
+  const persona = { ...view.people[0]!, tecnicaVista: { recetas: [], omitidas: 0, proceso: null, intentos: 0 } };
+  const grabada = tecnicaGrabada({ ...vacia, people: [persona] }, 0, true)!;
+  assert.match(grabada, /Habitantes con recetas<\/span><strong>0<\/strong>/);
+  assert.match(grabada, /Recetas distintas<\/span><strong>0<\/strong>/);
+  assert.doesNotMatch(grabada, /data-tecnica-ausente/);
+});
 
 test('M9: las etiquetas del grafo van en dos líneas sin cortar palabras', () => {
   assert.deepEqual(etiquetaEnDosLineas('Dar forma · Entrelazar · Comprimir 1733'), ['Dar forma · Entrelazar', 'Comprimir 1733']);

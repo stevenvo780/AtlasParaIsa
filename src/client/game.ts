@@ -6,7 +6,7 @@ import { SpatialSoundscape } from './soundscape.js';
 import { fetchJson, modoDeAjustes, validDirectory, validMap, validWhisperResult, validWhispers } from './ui-guards.js';
 import { renderMundoDeepStats } from './mundo-dashboard.js';
 import type { WorldMapResponse, WorldDirectoryResponse, DivineWhisper, DivineWhisperIntent, DivineWhisperRequest } from '../shared/worldmap.js';
-import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, Tile, Viewport, WorldView } from '../shared/types.js';
 import { validWorldInstanceId } from '../shared/world-instance.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
@@ -68,6 +68,9 @@ const detalleCinta = new DetalleCinta({
 let dvrBar: DvrBarController | null = null;
 let dvrResize: ResizeObserver | null = null;
 let dvrRaf = 0;
+let tapeRetry: ReturnType<typeof setTimeout> | null = null;
+let tapeStartup: 'idle' | 'loading' | 'unavailable' = 'idle';
+let tapeViewport: Viewport | null = null;
 let lastTapeHudAt = 0;
 let archiveCuts: ReturnType<typeof mountArchiveCuts> | null = null;
 /** V21: el servidor sólo deja observar (sin órdenes ni gestos): la UI de dirección e intervención no existe. */
@@ -220,6 +223,7 @@ function startupSettings(): GraphicsSettings {
 
 function enterWorld(flags: SessionFlags = {}): void {
   clean();
+  tapeViewport = null;
   personaInspeccionada = null;
   if (flags.archiveCuts) flags = { ...flags, archiveMode: true };
   sessionFlags = flags;
@@ -231,7 +235,11 @@ function enterWorld(flags: SessionFlags = {}): void {
   graphicsSettings = startupSettings();
   const modo = modoDeAjustes(graphicsSettings); modoActual = modo;
   if (!flags.archiveMode) connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); statsSignature = ''; if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (statsTab === 'communities') renderStats(); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); dvr?.setViewport(viewport); }, () => { following = false; renderControls(); }, { modo, cutArchive: !!flags.archiveCuts });
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => {
+    tapeViewport = viewport;
+    connection?.setViewport(viewport);
+    dvr?.setViewport(viewport);
+  }, () => { following = false; renderControls(); }, { modo, cutArchive: !!flags.archiveCuts });
   landscape.setTileCache(tileCache);
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -247,7 +255,7 @@ function enterWorld(flags: SessionFlags = {}): void {
     el('sound-toggle').hidden = true;
     archiveCuts = mountArchiveCuts(el('dvr-bar'), receiveArchiveCut, () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'));
     renderStatus();
-  } else if (flags.tapeEnabled || flags.archiveMode) startTape();
+  } else if (flags.tapeEnabled || flags.archiveMode) startTape(!flags.archiveMode);
   connection?.start();
 }
 
@@ -267,6 +275,7 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   const desplazamiento = info.reason === 'seek' || info.reason === 'step';
   if (world === null || info.discontinuity || desplazamiento || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
   else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
+  if (info.reason === 'refresh' && statsTab === 'technology') renderStats();
   if (info.discontinuity) landscape?.flushPlayback();
   if (info.presente) registrarVisitaPresente(frame);
   refrescarDetalleCinta();
@@ -277,9 +286,10 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   }
 }
 
-function startTape(): void {
-  const container = document.getElementById('dvr-bar'); if (!container) return;
+function startTape(retryOnFailure = false): void {
+  const container = document.getElementById('dvr-bar'); if (!container || dvr) return;
   const archivo = !!sessionFlags.archiveMode;
+  tapeStartup = 'loading';
   connection?.setTapeMode(true);
   dvrBar = mountDvrBar(container, {
     togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
@@ -288,22 +298,44 @@ function startTape(): void {
     reproducirTramo: (desde, hasta) => void dvr?.reproducirTramo(desde, hasta),
     seek: tick => void dvr?.seek(tick), jumpLive: () => void dvr?.jumpToLiveEdge(),
   });
-  const red = crearRedCinta({ alSesionTerminada: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });
-  const player = new DvrPlayer({
-    fetchMeta: red.fetchMeta, fetchChunk: red.fetchChunk,
+  const red = crearRedCinta({
+    alSesionTerminada: () => {
+      if (dvr === player) loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.');
+    },
+  });
+  const player: DvrPlayer = new DvrPlayer({
+    fetchMeta: async () => {
+      const meta = await red.fetchMeta();
+      if (dvr !== player) throw new Error('La vista de la cinta se cerró.');
+      return meta;
+    },
+    fetchChunk: red.fetchChunk,
     ...(archivo ? { metaPollMs: 0, abrirEnInicio: true, escenaArchivo: leerEscenaArchivo(new URLSearchParams(location.search)) }
       : { marcadores: new PerfilCinta({ red: red.marcadores }) }),
-    onAviso: texto => message(texto), onMarca: marca => message(marca.texto),
-    onFrame: receiveTapeFrame,
-    onStateChange: state => { dvrEstado = state; dvrBar?.update({ ...state, archivo }); },
+    onAviso: texto => { if (dvr === player) message(texto); },
+    onMarca: marca => { if (dvr === player) message(marca.texto); },
+    onFrame: (frame, info) => { if (dvr === player) receiveTapeFrame(frame, info); },
+    onStateChange: state => {
+      if (dvr !== player) return;
+      dvrEstado = state;
+      dvrBar?.update({ ...state, archivo });
+    },
   });
   dvr = player;
+  if (tapeViewport) player.setViewport(tapeViewport);
+  if (statsTab === 'technology') renderStats();
   void player.start().then(active => {
     if (dvr !== player) return; // se salió del mundo mientras cargaba
-    if (!active) { // cinta apagada o sin respuesta: de vuelta al modo vivo clásico por WebSocket
+    if (!active) { // Mientras se recupera la cinta se puede seguir recorriendo el mundo por WebSocket.
       if (archivo) el('map-loading').textContent = 'La grabación no está disponible.';
-      dvrBar?.destroy(); dvrBar = null; dvr = null; connection?.setTapeMode(false); landscape?.setDvrMode(false); refrescarDetalleCinta(); return;
+      stopTape();
+      connection?.setTapeMode(false);
+      tapeStartup = retryOnFailure ? 'loading' : 'unavailable';
+      if (retryOnFailure) tapeRetry = setTimeout(() => { tapeRetry = null; startTape(); }, 1500);
+      if (statsTab === 'technology') renderStats();
+      return;
     }
+    tapeStartup = 'idle';
     landscape?.setDvrMode(true); // el DVR ya entrega a 60 fps: el colchón V18 de Landscape sobraría (solo interpola A→B)
     if (player.escenaInicial?.tramo) dvrBar?.seleccionarTramo(player.escenaInicial.tramo);
     container.hidden = false; el('game').classList.add('has-dvr'); renderStatus();
@@ -318,6 +350,10 @@ function startTape(): void {
 }
 
 function stopTape(): void {
+  if (tapeRetry !== null) clearTimeout(tapeRetry);
+  tapeRetry = null;
+  tapeStartup = 'idle';
+  dvrEstado = null;
   cancelAnimationFrame(dvrRaf); dvrRaf = 0;
   dvrResize?.disconnect(); dvrResize = null;
   dvr?.stop(); dvr = null; dvrBar?.destroy(); dvrBar = null;
@@ -485,6 +521,10 @@ function wire(): void {
   el('salud-motor').addEventListener('click', () => { selectStatsTab('performance'); drawer('stats', true); void refreshMotor(); });
   el('salud-mundo').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
   el('stats-content').addEventListener('click', event => {
+    if ((event.target as Element).closest('[data-reintentar-cinta]')) {
+      if (sessionFlags.tapeEnabled && !sessionFlags.archiveMode && tapeStartup === 'unavailable') startTape();
+      return;
+    }
     const nodo = nodoDelGrafo(event); if (!nodo) return;
     // Fuera de la cámara: el directorio sabe dónde está, así que se va allí mientras llega su ficha.
     const lejos = world?.people.some(p => p.id === nodo.id) ? undefined : directory?.people.find(p => p.id === nodo.id);
@@ -1150,7 +1190,8 @@ const STATS_TICK_MS = 1000;
 let statsRenderedAt = -Infinity, statsTrailing: ReturnType<typeof setTimeout> | null = null;
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel || el('stats-drawer').hidden) return;
-  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}|${dvr?.nivel ?? ''}`;
+  const oficios = statsTab === 'technology' ? `${tapeStartup}|${world?.originX ?? 0}:${world?.originY ?? 0}:${world?.width ?? 0}:${world?.height ?? 0}` : '';
+  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}|${dvr?.nivel ?? ''}|${oficios}`;
   // Lo que cambia sin un paso nuevo (telemetría del motor, fichas y selección del grafo) entra en la parte que se refresca a 1 Hz.
   const vivo = statsTab === 'performance' ? motorVersion : statsTab === 'communities' ? `${personaDetails.size}|${activePersonId}|${selected.kind}` : '';
   const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}|${vivo}`;
@@ -1165,7 +1206,12 @@ function renderStats(): void {
   statsSignature = sig; statsRenderedAt = now;
   const restore = retainViewState(panel);
   const deepStats = document.getElementById('mundo-deep-stats') ?? Object.assign(document.createElement('div'), { id: 'mundo-deep-stats' });
-  const tecnica = world && statsTab === 'technology' ? tecnicaGrabada(world, dvr?.nivel ?? null) : null;
+  const esperaCinta = !!(sessionFlags.tapeEnabled || sessionFlags.archiveMode);
+  let tecnica = world && statsTab === 'technology' ? tecnicaGrabada(world, dvr?.nivel ?? null, esperaCinta) : null;
+  if (statsTab === 'technology' && sessionFlags.tapeEnabled && !sessionFlags.archiveMode && (tecnica !== null || !world)) {
+    if (tapeStartup === 'loading') tecnica = '<p class="stats-note" role="status">Cargando los datos de Oficios…</p>' + (tecnica ?? '');
+    if (tapeStartup === 'unavailable') tecnica = '<button type="button" class="button" data-reintentar-cinta>Reintentar la cinta</button>' + (tecnica ?? '');
+  }
   renderStatsContent(tecnica);
   // Estadísticas profundas de Mundo (mundo-dashboard.ts): lectura pura de lo recibido; un fallo suyo no tumba el panel.
   try { deepStats.innerHTML = world && tecnica === null ? renderMundoDeepStats(world, statsTab, directory) : ''; } catch { deepStats.innerHTML = '<p class="stats-note">Las estadísticas ampliadas no están disponibles ahora.</p>'; }
@@ -1195,7 +1241,11 @@ function nodoDelGrafo(event: MouseEvent): { id: string; nombre: string } | null 
   return mejor;
 }
 function renderStatsContent(tecnica: string | null): void {
-  const panel = document.getElementById('stats-content'); if (!panel || !world) return;
+  const panel = document.getElementById('stats-content'); if (!panel) return;
+  if (!world) {
+    panel.innerHTML = tecnica ?? '<p class="stats-note">Esperando datos del mundo…</p>';
+    return;
+  }
   const stats = world.stats, runtime = world.performance;
   const origen = dvr?.enabled
     ? (dvr.nivel ?? 0) > 0 ? 'Grabación resumida' : 'Grabación detallada'

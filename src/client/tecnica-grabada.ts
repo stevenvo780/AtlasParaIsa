@@ -14,7 +14,7 @@ function legadoConDatos(world: WorldView): boolean {
 }
 
 /** Vista de la técnica material que graba la cinta. Devuelve null para usar el panel del sistema anterior. */
-export function tecnicaGrabada(world: WorldView, nivel: Nivel | null): string | null {
+export function tecnicaGrabada(world: WorldView, nivel: Nivel | null, esperaCinta = false): string | null {
   const recetas = new Map<number, RecetaVisible>();
   let fichas = 0, habitantesConRecetas = 0, procesos = 0;
   for (const persona of world.people) {
@@ -33,7 +33,7 @@ export function tecnicaGrabada(world: WorldView, nivel: Nivel | null): string | 
   const resumida = nivel !== null && nivel > 0;
   const materiaVisible = !!world.materia || !!world.reaccionObservada || !!world.sustancias?.length
     || world.structures?.some(obra => obra.piezas?.length);
-  if (!fichas && !materiaVisible && (!resumida || legadoConDatos(world))) return null;
+  if (!fichas && !materiaVisible && ((!esperaCinta && nivel === null) || legadoConDatos(world))) return null;
 
   const evidencia = fichas
     ? `<p class="stats-note">La cámara muestra ${number(fichas)} fichas de técnica. Las cifras corresponden a esas fichas.</p>
@@ -42,7 +42,8 @@ export function tecnicaGrabada(world: WorldView, nivel: Nivel | null): string | 
       ${statCard('Procesos en curso', number(procesos), 'Investigaciones o fabricaciones registradas en el fotograma')}</div>`
     : `<p class="stats-empty" data-tecnica-ausente>${resumida
       ? 'La grabación resumida omite las fichas individuales de técnica. Borde vivo lleva a la parte reciente de la cinta.'
-      : 'Este fotograma no incluye fichas individuales de técnica.'}</p>`;
+      : nivel === null ? 'La vista recibida no incluye fichas individuales de técnica.'
+        : 'Este fotograma no incluye fichas individuales de técnica.'}</p>`;
   const recientes = Array.from(recetas.values()).sort((a, b) => b.usada - a.usada || a.id - b.id).slice(0, 12);
   const lista = recientes.length ? `<h4>Recetas de uso reciente en esta zona</h4>${recientes.map(receta => {
     const pasos = receta.pasos?.length

@@ -1,0 +1,182 @@
+{
+  "fechaVerificada": "2026-11-27T12:00:27-05:00",
+  "servicio": "atlas-publico.service",
+  "checkout": "v24-barra-y-fichas",
+  "mundo": "v24-de86ec9",
+  "relevo": {
+    "simulado": false,
+    "resultado": "relevado",
+    "sha": "5544fecf70c00b282dc7703321bfc2e44d2534c6",
+    "shaAnterior": "3188026e068a0ee9258a8f3255ff084a07c89577",
+    "modoEntorno": "600",
+    "soloCambioReleaseDir": true,
+    "reinicioDeProceso": true,
+    "mundoCopiado": false,
+    "unidadesModificadas": false,
+    "timersModificados": false,
+    "perfilModificado": false,
+    "mismoDirectorioYCinta": true,
+    "mismoInodoMundo": true,
+    "mismoInodoCinta": true,
+    "instanciaCinta": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "backupMundo": {
+      "archivo": "world-20261127-1159.sqlite.gz",
+      "bytes": 91808597,
+      "sha256": "9d3b9851a89f747cb824959204ff39d7d347103a2c0100435e6cd15ea923e314",
+      "gzip": "ok"
+    },
+    "backupCinta": {
+      "indice": "quick_check",
+      "crc": "firmado-en-segmentos.json",
+      "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662"
+    },
+    "saludInicial": {
+      "tick": 159963,
+      "epoca": 5,
+      "ultimoTickGuardado": 159800
+    },
+    "saludPreStop": {
+      "tick": 159992,
+      "epoca": 5,
+      "ultimoTickGuardado": 159800
+    },
+    "saludFinal": {
+      "tick": 159995,
+      "epoca": 6,
+      "ultimoTickGuardado": 159993
+    },
+    "generacion": {
+      "antes": 5,
+      "prevista": 6,
+      "observada": 6,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "avanceEnDosLecturas": true,
+    "tickDurableConservado": true,
+    "assetsAntiguosCopiados": [
+      "index-BUT1pbfc.css",
+      "index-C30cSDjH.js",
+      "index-CMETK2ER.js"
+    ],
+    "perfilSha256": "69ac43bed5f77e49edf3044a576d16a82d684426058ef102b0a516d5c6916285",
+    "timersSha256": "1e10c81c8501ffc980493b1a2cda5718139e1c0296741aa530ade2aa44bb0455",
+    "rollback": false
+  },
+  "dominio": {
+    "comprobado": "2026-11-27T12:00:27-05:00",
+    "assets": {
+      "/assets/index-DI0F2TXS.js": "76aca6a13e1fc98057011e9f16d5810847561eb5fadc2893ae7532089c95a8f8",
+      "/assets/index-BuPts9J7.css": "31b6a23f28f7f013780e76896edaf2194475dbfcf80c42f527522de72f324ad1"
+    },
+    "salud": {
+      "status": "ok",
+      "estado": "ok",
+      "tick": 160035,
+      "ultimoTickGuardado": 160000,
+      "epoca": 6,
+      "recargas": 0
+    }
+  },
+  "validacion": {
+    "deployCheck": "passed",
+    "typecheck": "ok",
+    "build": "ok",
+    "pruebasDirigidas": 187,
+    "fallos": 0,
+    "omitidas": 0
+  },
+  "visor": {
+    "resolucion": [
+      1920,
+      1080
+    ],
+    "medida": "Ficha abierta desde el mapa, mismo habitante e instante de la cinta pública en Chromium. Dimensiones en píxeles CSS.",
+    "barraAntes": [
+      1080,
+      96
+    ],
+    "barraDespues": [
+      860,
+      52
+    ],
+    "anchoUtilDePista": {
+      "antes": 184,
+      "despues": 480
+    },
+    "guionesEnResumen": {
+      "antes": 10,
+      "despues": 0
+    },
+    "habitante": {
+      "nombre": "Abeto 10525",
+      "energia": 0.87,
+      "hambre": 0,
+      "salud": 0.44,
+      "edad": 15492
+    },
+    "consulta": {
+      "t": "155553",
+      "n": "1",
+      "nivel": "0",
+      "epoca": "5",
+      "x": "28",
+      "y": "43",
+      "w": "1",
+      "h": "1"
+    },
+    "límite": "El detalle individual requiere el mismo habitante, paso y época grabados a nivel 0."
+  },
+  "controles": [
+    {
+      "resolucion": [
+        1920,
+        1080
+      ],
+      "barra": [
+        860,
+        52
+      ],
+      "anchoPista": 493,
+      "escenario": "Cinta sellada de lluvia",
+      "arrastre": 15205,
+      "inicio": 14401,
+      "siguienteFotograma": 14405,
+      "escape": true,
+      "erroresDePagina": []
+    },
+    {
+      "resolucion": [
+        390,
+        844
+      ],
+      "barra": [
+        374,
+        108
+      ],
+      "anchoPista": 356,
+      "escenario": "Cinta sellada de lluvia",
+      "arrastre": 15189,
+      "inicio": 14401,
+      "siguienteFotograma": 14405,
+      "escape": true,
+      "erroresDePagina": []
+    },
+    {
+      "resolucion": [
+        320,
+        844
+      ],
+      "barra": [
+        304,
+        108
+      ],
+      "anchoPista": 286,
+      "escenario": "Cinta sellada de lluvia",
+      "arrastre": 15189,
+      "inicio": 14401,
+      "siguienteFotograma": 14405,
+      "escape": true,
+      "erroresDePagina": []
+    }
+  ]
+}

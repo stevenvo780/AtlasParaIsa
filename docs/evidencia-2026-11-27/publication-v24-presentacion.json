@@ -1,0 +1,155 @@
+{
+  "relevo": {
+    "resultado": "relevado",
+    "sha": "84110ddfcfcd8e34c5a2323d3eb63c57d4264700",
+    "shaAnterior": "5af48b24ffcbdbe32fb29e9c6124a42a4dd5d16c",
+    "mismoDirectorioYCinta": true,
+    "mismoInodoCinta": true,
+    "mismoInodoMundo": true,
+    "instanciaCinta": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+    "generacion": {
+      "antes": 0,
+      "prevista": 1,
+      "observada": 1,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "tickDurableConservado": true,
+    "saludPreStop": {
+      "tick": 24871,
+      "epoca": 0,
+      "ultimoTickGuardado": 24800
+    },
+    "saludFinal": {
+      "tick": 24894,
+      "epoca": 1,
+      "ultimoTickGuardado": 24874
+    },
+    "rollback": false
+  },
+  "antes": {
+    "estado": "ok",
+    "tick": 21469,
+    "epoca": 0,
+    "ultimoTickGuardado": 21400,
+    "ticksPorSegundo": 15.739843286021763,
+    "gpu": [],
+    "recargas": 0,
+    "laboratoriosPausados": [
+      "atlas-v24-panel60-de86ec9-s19102.service",
+      "atlas-v24-panel60-de86ec9-s19105.service"
+    ],
+    "afinidad": 32
+  },
+  "perfil": {
+    "hilosMotor": 32,
+    "hilosSO": 46,
+    "config": {
+      "CARTA_MOTOR_HILOS": "32",
+      "CARTA_PERCEPCION_COSTE_DUENOS": "1",
+      "CARTA_MOTOR_GPU": "0,1",
+      "CARTA_MOTOR_GPU_GRUPOS": "[[0,2,3,4,6,7,8,10,11,12,14,15,16,18,19,20,22,23,24,26,27,28,30,31],[1,5,9,13,17,21,25,29]]",
+      "CARTA_PERCEPCION_DUENOS": "1"
+    },
+    "afinidad": "0-31",
+    "cpuSinCuota": true,
+    "cpuWeight": "10000",
+    "ioWeight": "10000"
+  },
+  "observacion": {
+    "intervaloSegundos": 13.24,
+    "avancePasosPorSegundo": 18.36,
+    "usoHilosLogicosEquivalentes": 5.92,
+    "inicio": {
+      "salud": {
+        "estado": "ok",
+        "tick": 25369,
+        "ticksPorSegundo": 27.856593237181016,
+        "segundosDesdeUltimoPaso": 0.2331869399999996,
+        "ultimoGuardado": 1795816512973,
+        "gpu": [
+          {
+            "dispositivo": 0,
+            "estado": "ok"
+          },
+          {
+            "dispositivo": 1,
+            "estado": "ok"
+          }
+        ],
+        "recargas": 0,
+        "diagnostico": {
+          "duras24h": 0,
+          "blandas24h": 0,
+          "ultimaViolacion": null,
+          "errorBitacora": null,
+          "registrosSinBitacora": 0
+        },
+        "operacion": null,
+        "epoca": 1,
+        "ultimoTickGuardado": 25200,
+        "status": "ok"
+      },
+      "cinta": {
+        "epoca": 1,
+        "instancia": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+        "pasoSerie": 25200,
+        "poblacion": 69,
+        "puntaBloques": 25355
+      }
+    },
+    "fin": {
+      "salud": {
+        "estado": "ok",
+        "tick": 25612,
+        "ticksPorSegundo": 23.01028390244626,
+        "segundosDesdeUltimoPaso": 0.16838201800000388,
+        "ultimoGuardado": 1795816533853,
+        "gpu": [
+          {
+            "dispositivo": 0,
+            "estado": "ok"
+          },
+          {
+            "dispositivo": 1,
+            "estado": "ok"
+          }
+        ],
+        "recargas": 0,
+        "diagnostico": {
+          "duras24h": 0,
+          "blandas24h": 0,
+          "ultimaViolacion": null,
+          "errorBitacora": null,
+          "registrosSinBitacora": 0
+        },
+        "operacion": null,
+        "epoca": 1,
+        "ultimoTickGuardado": 25600,
+        "status": "ok"
+      },
+      "cinta": {
+        "epoca": 1,
+        "instancia": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+        "pasoSerie": 25600,
+        "poblacion": 72,
+        "puntaBloques": 25599
+      }
+    }
+  },
+  "puerta": {
+    "revision": "84110ddfcfcd8e34c5a2323d3eb63c57d4264700",
+    "phase": "complete",
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "navegador": {
+    "resultado": "medido",
+    "head": "84110ddfcfcd8e34c5a2323d3eb63c57d4264700",
+    "entrada": "/assets/index-BjilTDT6.js",
+    "entradaSha256": "ffc07b40761f21b474e5f42ffdaf953676a74fbdb08edbae76d61a77191a9495",
+    "historico": 97089,
+    "reciente": 183474,
+    "errores": []
+  }
+}

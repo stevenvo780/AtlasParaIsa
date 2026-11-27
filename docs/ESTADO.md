@@ -11,17 +11,19 @@ El mundo anterior abrió con `de86ec9` y completó la observación de su primera
 
 A las 16:28:46 -05 se abrió un mundo nuevo con el visor publicado y una cinta independiente. Se comprobó el detalle corporal de los 16 habitantes en el paso 1 y el guardado del paso 400. Se archivó la apertura detallada del paso 1 al 397. [Contrato del mundo nuevo](evidencia-2026-11-27/publication-v24-mundo-inicio.json).
 
+El perfil de la presentación pública reabrió ese mismo mundo desde el paso 24.874 y conservó su cinta. La RTX 5070 Ti y la RTX 2060 aceptaron resultados de percepción. En la primera medición de 13,24 s, el motor avanzó 18,36 pasos/s, la cinta llegó al paso 25.599 y el guardado durable al 25.600, con 72 habitantes registrados. Las dos réplicas de Atlas en la torre quedaron pausadas de forma reversible. [Relevo y medición](evidencia-2026-11-27/publication-v24-presentacion.json).
+
 | Qué | Perfil de V24 |
 |---|---|
-| Código compilado y servido | `5af48b2`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-tecnica-grabada` con Node 22.23.3. El dominio sirve `/assets/index-BjilTDT6.js`. |
+| Código compilado y servido | `84110dd`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-presentacion-32` con Node 22.23.3. El dominio sirve `/assets/index-BjilTDT6.js`. |
 | Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
 | Mundo | `AtlasParaIsa-anexo/mundos/v24-inicio-20261127-1627`, semilla 3159104107, instancia `d5af3361-7465-4326-97fa-f95c1aad30fc`. El mundo anterior y su cinta quedaron conservados. |
-| Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con dos dueños CPU, sin CUDA. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |
+| Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con 32 dueños CPU y ambas GPU para percepción, con grupos intercalados de 24 dueños en la RTX 5070 Ti y 8 en la RTX 2060. El selector por coste conserva la ruta CPU para los lotes que resuelve más rápido. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |
 | Guardado | Hilo persistidor, cortes vivos transferibles de teselas y personas, adelanto de hasta tres pasos y `snapshot-parts-v5` con pesos por UID separados. `persistencia.cadaTicks=200`, `persistencia.ventanaEventosTicks=2400` y `red.deltas=true`. |
 | Cinta y visor | En `AtlasParaIsa-anexo/mundos/v24-inicio-20261127-1627-cinta`. Cinta dedicada `CNT2` de niveles n0–n4, catálogo `cinta.idx.sqlite`, tope de 50 GB decimales, fotogramas por dueño y sucesos directos. Historia abre en **Tiempo real** (1 segundo del mundo por segundo) salvo preferencia guardada. **Paseo** reproduce un paso por segundo y **Borde vivo** sigue al motor. |
 | Versiones | `PROTOCOL_VERSION` 10, SQLite de mundo `user_version` 5 y catálogo de cinta `user_version` 4. |
 | Respaldos | Mundo y cinta en `/mnt/Data2/respaldos-atlas-v24-inicio-20261127-1627` y su subdirectorio `cinta`, con sendos timers horarios activos. |
-| Perfil y lanzador | [perfil-v24.sh](../scripts/systemd/torre/perfil-v24.sh) · [publico-v24.sh](../scripts/systemd/torre/publico-v24.sh). |
+| Perfil y lanzador | [perfil-v24.sh](../scripts/systemd/torre/perfil-v24.sh) · [perfil-presentacion-v24.sh](../scripts/systemd/torre/perfil-presentacion-v24.sh) · [publico-v24.sh](../scripts/systemd/torre/publico-v24.sh). |
 
 En el mundo anterior, el censo de las 11:00 -05 registró **787 habitantes** en el paso 153800. En una vista detallada del paso 154065, los 134 habitantes tenían cuerpo y técnica registrados, 92 recordaban recetas y 535 de 538 construcciones mostraban piezas. La vista incluía una reacción aplicada en el paso 154000. En el nivel resumido de esa zona se conservaron las piezas y la reacción, aunque se omitieron los detalles individuales.
 

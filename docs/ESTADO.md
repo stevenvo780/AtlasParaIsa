@@ -5,7 +5,39 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V21 desde el 24 de noviembre de 2026, 09:56 -05, en la TORRE)
+## Vigente (V24 desde el 27 de noviembre de 2026, 01:19:02 -05, en la torre)
+
+El release `de86ec91523ce9a0181afb29d613f3897f1683ea` quedó verificado a las 01:20:01 -05. La observación de la primera hora está **en curso** y se acredita por separado. [Contrato V24](evidencia-2026-11-27/publication-v24.json).
+
+| Qué | Perfil de V24 |
+|---|---|
+| Código compilado y servido | `de86ec9`, worktree detached `AtlasParaIsa-anexo/worktrees/publico-v24-de86ec9` con Node 22.23.3. Se construyeron 215 artefactos idénticos al build observado de `38d26b3`. |
+| Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, PID de activación 2476524, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
+| Mundo | Nuevo en `AtlasParaIsa-anexo/mundos/v24-de86ec9`, semilla 283741774, instancia `8e2b9be7-d837-4bcb-998c-463d0128c662`. `access.scrypt` copiado de forma opaca desde el mundo anterior y verificado por atributos. |
+| Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con dos dueños CPU, sin CUDA. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |
+| Guardado | Hilo persistidor, cortes vivos transferibles de teselas y personas, adelanto de hasta tres pasos y `snapshot-parts-v5` con pesos por UID separados. `persistencia.cadaTicks=200`, `persistencia.ventanaEventosTicks=2400` y `red.deltas=true`. |
+| Cinta y visor | En `AtlasParaIsa-anexo/mundos/v24-de86ec9-cinta`. Cinta dedicada `CNT2` de niveles n0–n4, catálogo `cinta.idx.sqlite`, tope de 50 GB decimales, fotogramas por dueño y sucesos directos. El visor funciona en modo observador y ofrece Historia. |
+| Versiones | `PROTOCOL_VERSION` 10, SQLite de mundo `user_version` 5 y catálogo de cinta `user_version` 4. |
+| Respaldos | Mundo y cinta en `/mnt/Data2/respaldos-atlas-v24-de86ec9` y su subdirectorio `cinta`, con sendos timers horarios activos. |
+| Perfil y lanzador | [perfil-v24.sh](../scripts/systemd/torre/perfil-v24.sh) · [publico-v24.sh](../scripts/systemd/torre/publico-v24.sh). |
+
+### Puertas anteriores al corte
+
+- **Software por tandas.** 3.342 casos acreditados (3.289 pasan, 53 omitidos). La ejecución monolítica de `83b7cc3` conservó dos fallos. El dictamen incorpora T151 7/7 en `83b7cc3` y cinta 10/10 en `de86ec9`. Entre `38d26b3` y `de86ec9` cambiaron dos archivos de prueba y se cotejaron 784 blobs ajenos a pruebas. El smoke aislado de despliegue en `de86ec9` pasó 10/10.
+- **Panel de motor en `38d26b3`.** 8/8 semillas vivas al día 30, T72000, con saldo exacto y cero violaciones en todas. El mínimo era 6/8. El contrato conserva los ocho resultados y los sellos del cierre.
+- **Observación de laboratorio en `38d26b3`.** Fedora, 120 minutos y 241/241 respuestas `200`. Latencia p95 de `/health` de 1,536 ms. Avance visible T481→T39017 y durable T400→T39000. Reabrió en T39022, época 1, conservó el fotograma DVR T19501 y reanudó el avance. Chromium en 1440×900, 390×844 y 320×720.
+
+### Corte y primera hora
+
+El dominio respondió `200` y el HTML y los assets coincidieron con el build. Las solicitudes sin sesión a `/api/cinta/meta` y `/api/cinta/chunk` respondieron `401`. Las lecturas de salud avanzaron de T396 a T566 y el guardado durable confirmó T400, época 0, con materia. Se verificó por lectura local el fotograma T397 de L0. El respaldo inicial del mundo pasó `gzip -t` y el catálogo respaldado de cinta pasó `quick_check` y `foreign_key_check`. Los recibos están enumerados en el contrato.
+
+La **primera hora** empezó a las 01:19:10 -05. Sigue en curso y quedará acreditada por su recibo separado. El panel de 60 días está arrancando en laboratorio con ocho réplicas nuevas de `de86ec9`, independientes del mundo público y del panel de 30 días.
+
+## Anteriores, conservados
+
+- V22 (`a7ec79b`, worktree `publico-v22`) se detuvo durante el corte del 27 de noviembre. Atendía en la **ruta histórica del mundo V21**, `AtlasParaIsa-anexo/mundos/v21-20261124`, con `world.tape.sqlite` y `/api/tape/*`. La fase de parada comenzó a las 00:51:36 -05. El conjunto frío verificado queda en `/mnt/Data2/vuelta-atlas-v22-de86ec9`, con restauración comprobada en T127580. El expediente `archivo/v24-orquesta/corte-de86ec9/VUELTA-V22.md` conserva el lanzador fijado y los pasos de retorno, incluso con `main` adelantado. V23 no se publicó.
+
+### V21 (mundo abierto el el 24 de noviembre de 2026, 09:56 -05, en la TORRE)
 
 | Qué | Valor |
 |---|---|
@@ -21,9 +53,7 @@ el contrato.
 | Respaldos | HDD `/mnt/Data2/respaldos-atlas-v21` (timer horario `atlas-respaldo-publico.timer`, `RETENCION=24`, `RESPALDO_METODO=backup`, `MemoryHigh=3G`, `IOSchedulingClass=idle`, `Nice=15`) |
 | Contrato | [publication-v21.json](evidencia-2026-11-24/publication-v21.json) |
 
-Lo que esta publicación acredita: ablación de 9 brazos sobre V20 aislando la extinción mortal en `construccion.modular=true` (`V20_ALL pop=8` vs `NO_B_modular pop=93`) y corrección validada al día 15 en 4/4 semillas (`51926`: `pop=47, births=52, structs=75, chemFormulas=209`; `19104`: `pop=29`; `19101`: `pop=23`; `19103`: `pop=21`, cero extinciones); `53/53` pruebas V21 (`v21-tape-store`, `v21-turbo-server`, `v21-dvr-client`) y `180/180` pruebas de regresión unificada en 25 suites (`0` fallos); banco de cinta 500k teselas / 1 500 habitantes (`keyframe 47,9 KB`, `delta 262 B`, `182,6×` menor); `deploy-check.sh 2b93250` salida `0` (`10/10` smoke PASS); `gpuAutoprueba` PASS en GPU 0 (`14,20 ms`) y GPU 1 (`7,25 ms`); verificación viva en público (`200`), LAN (`2–5 ms`, `observerOnly=true, tapeEnabled=true, turbo=true`), `403` en `POST /api/login` de origen ajeno y `401` en `/api/tape/*` sin sesión; en vivo al día 8 (`tick 17 897`, ~24 min reales): `simHz=18,6 Hz` (`p50=8,68 ms`), `44` habitantes vivos (`30` nacimientos, `2` muertes), `7` comunidades, `45` estructuras, `130` fórmulas químicas, `25` teselas empedradas, deltas medios `17,1 KB` (`36,4 MiB` para 1 378 fotogramas, `auto_vacuum=INCREMENTAL`) y respaldo íntegro `/mnt/Data2/respaldos-atlas-v21/world-20261124-1020.sqlite.gz` (`17 MiB`, `gzip -t` OK).
-
-## Anteriores, conservados
+Lo que acreditó la publicación V21: ablación de 9 brazos sobre V20 aislando la extinción mortal en `construccion.modular=true` (`V20_ALL pop=8` vs `NO_B_modular pop=93`) y corrección validada al día 15 en 4/4 semillas (`51926`: `pop=47, births=52, structs=75, chemFormulas=209`; `19104`: `pop=29`; `19101`: `pop=23`; `19103`: `pop=21`, cero extinciones); `53/53` pruebas V21 (`v21-tape-store`, `v21-turbo-server`, `v21-dvr-client`) y `180/180` pruebas de regresión unificada en 25 suites (`0` fallos); banco de cinta 500k teselas / 1 500 habitantes (`keyframe 47,9 KB`, `delta 262 B`, `182,6×` menor); `deploy-check.sh 2b93250` salida `0` (`10/10` smoke PASS); `gpuAutoprueba` PASS en GPU 0 (`14,20 ms`) y GPU 1 (`7,25 ms`); verificación viva en público (`200`), LAN (`2–5 ms`, `observerOnly=true, tapeEnabled=true, turbo=true`), `403` en `POST /api/login` de origen ajeno y `401` en `/api/tape/*` sin sesión; en vivo al día 8 (`tick 17 897`, ~24 min reales): `simHz=18,6 Hz` (`p50=8,68 ms`), `44` habitantes vivos (`30` nacimientos, `2` muertes), `7` comunidades, `45` estructuras, `130` fórmulas químicas, `25` teselas empedradas, deltas medios `17,1 KB` (`36,4 MiB` para 1 378 fotogramas, `auto_vacuum=INCREMENTAL`) y respaldo íntegro `/mnt/Data2/respaldos-atlas-v21/world-20261124-1020.sqlite.gz` (`17 MiB`, `gzip -t` OK).
 
 - V20 (código `e7331ed`, reglas 14 + `CARTA_OPEN_WORLD=1` + `CARTA_SIM_WORKER=1`), servido del 24-11 01:58 al 24-11 09:56 -05 (alcanzó el día 118,35, tick 284 044, 90 fórmulas químicas, 373 recetas archivadas, 2 731 chunks archivados; 171,3 MiB SQLite, pero los mortales se extinguieron hacia el día 17 dejando solo a S e I vivos — `people=2`, `births=14` — por el atasco en `construccion.modular` corregido en V21); mundo detenido e intacto en `AtlasParaIsa-anexo/mundos/v20-20261124` (worktree `publico-v20`); último respaldo antes del corte `/mnt/Data2/respaldos-atlas-v20/world-20261124-0954.sqlite.gz` (50 MiB, `gzip -t` OK). **No arrancarlo.**
 

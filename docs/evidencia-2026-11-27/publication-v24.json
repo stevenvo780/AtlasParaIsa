@@ -1,0 +1,437 @@
+{
+  "published": true,
+  "dateGroup": "2026-11-27",
+  "kind": "V24 · Mundo abierto, dos dueños CPU, guardado vivo y cinta multinivel en modo observador",
+  "commit": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+  "codeRevision": "de86ec9",
+  "equivalenceChain": {
+    "engineMotorSoakPanelCommit": "38d26b337aea0ef1aaa20bf9c274c9170d8e44a8",
+    "intermediateSuiteCommit": "83b7cc3673daad05e748193efc1b6e8985910b77",
+    "releaseCommit": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+    "nonTestBlobsMatched": 784,
+    "buildArtifactsMatched": 215,
+    "onlyChangedFilesFromEngineToRelease": [
+      "tests/v24-gpu-duenos.test.ts",
+      "tests/v21-turbo-server.test.ts"
+    ]
+  },
+  "previousActiveRelease": {
+    "release": "V22",
+    "commit": "a7ec79be68195a82e8317e81097ef9fcfe81a02b",
+    "worktree": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v22",
+    "worldDirPath": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v21-20261124",
+    "worldPathNote": "V22 atendía sobre la ruta histórica v21-20261124 con cinta legada world.tape.sqlite y /api/tape/*. V23 no se publicó.",
+    "execStartObservedPreCutover": "/datos/workspaces/personal/AtlasParaIsa/scripts/systemd/torre/publico.sh",
+    "preCutoverObservedPid": 4137207,
+    "stoppedPid": 4137207,
+    "stopPhaseStartedAt": "2026-11-27T00:51:36-05:00"
+  },
+  "rulesVersion": 14,
+  "protocolVersion": 10,
+  "sqliteUserVersion": 5,
+  "snapshotFormat": "snapshot-parts-v5",
+  "tapeCatalogUserVersion": 4,
+  "tapeFormat": "CNT2 multinivel n0..n4 + cinta.idx.sqlite",
+  "profile": {
+    "sourceScript": "scripts/systemd/torre/perfil-v24.sh",
+    "launcherScript": "scripts/systemd/torre/publico-v24.sh",
+    "openWorld": true,
+    "simWorker": true,
+    "turbo": true,
+    "tape": true,
+    "observerOnly": true,
+    "motorHilos": 2,
+    "motorGpu": [],
+    "cartaParams": "persistencia.cadaTicks=200,persistencia.ventanaEventosTicks=2400,red.deltas=true,v23.guardadoCompleto=true,v23.fotograma=true,v23.cohesion=true,v23.natalidad=true,v23.comunidades=true,v23.materia=true,v23.cuerpos=true,v23.fauna=true,v23.tecnica=true,v23.obra=true,v23.intentos=true,v23.duenos=true",
+    "enabledFlags": [
+      "CARTA_GUARDADO_EN_HILO=1",
+      "CARTA_GUARDADO_VIVO=1",
+      "CARTA_GUARDADO_ADELANTO_TICKS=3",
+      "CARTA_CORTE_TRANSFERIBLE=1",
+      "CARTA_TESELAS_CORTE_DIRECTAS=1",
+      "CARTA_PERSONAS_CORTE_DIRECTAS=1",
+      "CARTA_SNAPSHOT_PACKED_PEOPLE=1",
+      "CARTA_SNAPSHOT_PESOS_SEPARADOS=1",
+      "CARTA_FOTOGRAMA_DUENOS=1",
+      "CARTA_CINTA_SUCESOS_DIRECTOS=1",
+      "CARTA_TAPE_TOPE_BYTES=50000000000"
+    ],
+    "unsetExperimentalFlags": [
+      "COMPUTE_NVRTC",
+      "CARTA_MOTOR_GPU_GRUPOS",
+      "CARTA_PERCEPCION_DUENOS",
+      "CARTA_PERCEPCION_COSTE_DUENOS",
+      "CARTA_BASE_PESOS_CORTE",
+      "CARTA_SNAPSHOT_PERSONAS_ZSTD",
+      "CARTA_FAUNA_CORTE_SOMBRA",
+      "CARTA_FAUNA_CORTE_DIRECTA",
+      "CARTA_MATERIA_FISICA_SEPARADA",
+      "CARTA_INDICE_UID",
+      "CARTA_GUARDADO_CPU_PERSISTIDOR",
+      "CARTA_PERFIL_FASES_GUARDADO",
+      "CARTA_PRUEBA_CABEZA_INICIAL",
+      "CARTA_ESPEJO_SIEMPRE"
+    ],
+    "tapeTopeBytes": 50000000000,
+    "tapeDiskReserveBytes": 4294967296
+  },
+  "deployCheck": {
+    "preCutoverIsolated": {
+      "revision": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+      "helperSha256": "502f6ab727ae8c00d01526026aa55fd2f46f0bd45dff4214b5534550d690da1c",
+      "startedAt": "2026-11-27T02:52:48Z",
+      "finishedAt": "2026-11-27T02:52:52.647Z",
+      "status": "passed",
+      "phase": "complete",
+      "exitCode": 0,
+      "buildExitCode": 0,
+      "smokeExitCode": 0,
+      "cleanup": true,
+      "smokeGatesAll10": true,
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/smoke-despliegue/report.json"
+    },
+    "releasePreparation": {
+      "worktree": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v24-de86ec9",
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/recibo-release.txt",
+      "distManifest": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/build-release.sha256"
+    }
+  },
+  "preCutoverGates": {
+    "softwareComposite": {
+      "shaMonolitico": "83b7cc3673daad05e748193efc1b6e8985910b77",
+      "shaCompuesto": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+      "lockSha256": "185eb69a536de8412034b5433a2d55ac5c3a0c2a412f4c606685951fe36d03e0",
+      "conteosMonolitico": {
+        "tests": 3342,
+        "pass": 3287,
+        "fail": 2,
+        "cancelled": 0,
+        "skipped": 53,
+        "todo": 0
+      },
+      "focalT151On83b7cc3": {
+        "tests": 7,
+        "pass": 7,
+        "host": "Fedora (4 physical CPUs)",
+        "logSha256": "ceab26112c99f1cbb2b9a36aeb05d3f88664c81e94fccbbdb07236f5a1761506"
+      },
+      "focalTapeOnDe86ec9": {
+        "tests": 10,
+        "pass": 10,
+        "host": "Fedora",
+        "logSha256": "7babc9e43aab5a7a4596230d897d01666180b9f782fd16afd42b80f4afb30387"
+      },
+      "conteosCompuestos": {
+        "tests": 3342,
+        "pass": 3289,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 53
+      },
+      "limitationNote": "Resultado compuesto por tandas (la suite monolítica de 83b7cc3 salió 1 antes de reparar focos y no se repitió monolíticamente en de86ec9).",
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/candidata-vinculo/reparacion-test/veredicto-por-tandas.json"
+    },
+    "sustainedObservation2h": {
+      "commit": "38d26b337aea0ef1aaa20bf9c274c9170d8e44a8",
+      "host": "Fedora (CPUs 0,2,4,6, NVMe btrfs)",
+      "durationMs": 7200693,
+      "cumple120Minutos": true,
+      "http200Samples": 241,
+      "non200Samples": 0,
+      "saludDegradada": 0,
+      "diagnosticosBlandosMax": 0,
+      "recargasMax": 0,
+      "healthLatencyMs": {
+        "p50": 1.195,
+        "p95": 1.536,
+        "p99": 2.297,
+        "max": 3.799
+      },
+      "rssMiB": {
+        "initial": 963.496,
+        "q1Median": 1198.662,
+        "q4Median": 1701.361,
+        "final": 1686.883,
+        "peakVmHwm": 1790.609,
+        "reopenedDropFromMiB": 1730.691,
+        "reopenedToMiB": 1111.883,
+        "resumedMiB": 1202.363
+      },
+      "ticksStart": 481,
+      "ticksEnd": 39017,
+      "durableTickEnd": 39000,
+      "reopenedTick": 39022,
+      "reopenedEpoch": 1,
+      "resumedTick": 39026,
+      "tapeFrameChecked": {
+        "tick": 19501,
+        "epoch": 0,
+        "sha256": "ceb73987b54b9ec2c78128204d59fe76b35097f7af439d4f04d2c7908b25d10c",
+        "exactMatchAfterReopen": true
+      },
+      "chromiumViewports": [
+        "1440x900",
+        "390x844",
+        "320x720"
+      ],
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/fedora/observacion-sostenida-38d26b3/observacion.json"
+    },
+    "panel8x30d": {
+      "expectedCommit": "38d26b337aea0ef1aaa20bf9c274c9170d8e44a8",
+      "manifiestoSha256": "a9e0aeba8f720d895425bc46c790cf88d93c1eb187f0a2b5dddef3b3d516ad94",
+      "paramsSha256": "1ef4bf921943a5bd6d5398ba46c1b6344319ca26841697570ec73bfc50d49d99",
+      "seeds": [
+        7,
+        51926,
+        19101,
+        19102,
+        19103,
+        19104,
+        19105,
+        19106
+      ],
+      "minimoVivas": 6,
+      "receiptPaths": {
+        "resultadoJson": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/puerta-repartida-38d26b3/resultado.json",
+        "cierreMd": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/puerta-repartida-38d26b3/CIERRE.md",
+        "evaluacionExit": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/puerta-repartida-38d26b3/evaluacion.exit",
+        "disparoJson": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/disparo.json"
+      },
+      "status": "passed",
+      "puertaReal": true,
+      "evaluacionExitCode": 0,
+      "vivasDia30": 8,
+      "seedResults": [
+        {
+          "semilla": 7,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 224,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19101,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 184,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19102,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 125,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19103,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 105,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19104,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 112,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19105,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 141,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 51926,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 170,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        },
+        {
+          "semilla": 19106,
+          "estado": "completo",
+          "tick": 72000,
+          "dias": 30,
+          "mortales": 158,
+          "mortalesIniciales": 14,
+          "hilos": 2,
+          "saldo": "exacto",
+          "violaciones": 0
+        }
+      ],
+      "disparoDecision": "LISTO",
+      "disparoUtc": "2026-11-27T05:31:46+00:00"
+    }
+  },
+  "postPublishObservation1h": {
+    "status": "in-progress",
+    "windowMinutesTarget": 60,
+    "startedAt": "2026-11-27T06:19:10.666+00:00",
+    "service": "atlas-v24-primera-hora-de86ec9.service",
+    "samples": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/primera-hora.ndjson",
+    "closingReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/primera-hora.json"
+  },
+  "status": "published",
+  "cutover": {
+    "status": "verified",
+    "dossier": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9",
+    "operationProcedure": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/EJECUCION.md",
+    "executionScript": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/efectuar-v24.sh",
+    "rollbackProcedure": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/VUELTA-V22.md",
+    "startedAt": "2026-11-27T01:19:02-05:00",
+    "verifiedAt": "2026-11-27T01:20:01-05:00",
+    "service": "atlas-publico.service",
+    "pid": 2476524,
+    "listen": "100.64.0.1:3000",
+    "envFile": "/home/stev/.config/atlas-para-isa/publicacion-v24.env",
+    "operationReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/operacion.log",
+    "exitCode": 0,
+    "domainHealth": {
+      "url": "https://atlas.humanizar.tech/health",
+      "httpStatus": 200,
+      "initial": {
+        "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/health-inicial.json",
+        "tick": 396,
+        "durableTick": 400,
+        "epoch": 0,
+        "diagnosticsHard24h": 0,
+        "diagnosticsSoft24h": 0
+      },
+      "advanced": {
+        "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/health-avance.json",
+        "tick": 566,
+        "durableTick": 400,
+        "epoch": 0,
+        "diagnosticsHard24h": 0,
+        "diagnosticsSoft24h": 0
+      }
+    },
+    "htmlAndAssetsMatchedDist": true,
+    "htmlReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/index.dominio.html",
+    "dvrUnauthenticated": {
+      "meta": 401,
+      "chunk": 401,
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/dvr-privado.txt"
+    },
+    "durableAndLocalDvr": {
+      "guardado": {
+        "tick": 400,
+        "epoca": 0,
+        "digest": "c9e8b172c67555cd0f59a255af644c864954393122bdb0edd4fde492ffdbabfb",
+        "materia": true
+      },
+      "cinta": {
+        "epoca": 0,
+        "nivel": 0,
+        "t0": 5,
+        "t1": 517,
+        "tick": 397,
+        "huella": "80dd7fe13a920bd69a7052a06412edd54eaeef80d33f5c84edcee75fade215c3"
+      },
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/durable-y-dvr.json"
+    },
+    "unitVerificationReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/unidades-verify.log",
+    "backups": {
+      "world": {
+        "path": "/mnt/Data2/respaldos-atlas-v24-de86ec9/world-20261127-0119.sqlite.gz",
+        "sha256": "3252ce2a6d4190751a0fe2d74f3c888e3d540414a135701445bf865d81267b02",
+        "dir": "/mnt/Data2/respaldos-atlas-v24-de86ec9",
+        "timer": "atlas-respaldo-publico.timer",
+        "gzipVerified": true
+      },
+      "tape": {
+        "path": "/mnt/Data2/respaldos-atlas-v24-de86ec9/cinta/cinta-20261127T061915Z-aAgT3S1c/cinta.idx.sqlite",
+        "sha256": "2cd06ed03a14a03d9e52e801f5b8aac4810b5802401d098d12900681d9dafe4c",
+        "dir": "/mnt/Data2/respaldos-atlas-v24-de86ec9/cinta",
+        "timer": "atlas-respaldo-cinta.timer",
+        "sqliteChecksVerified": true
+      },
+      "timersEnabledAndActive": true
+    }
+  },
+  "capturedAt": "2026-11-27T01:20:01-05:00",
+  "worktree": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v24-de86ec9",
+  "world": {
+    "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v24-de86ec9",
+    "tapeDir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v24-de86ec9-cinta",
+    "worldInstanceId": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "seed": 283741774,
+    "reset": true,
+    "credentialSourceCopiedFrom": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v21-20261124/access.scrypt",
+    "accessScryptAttributesVerified": {
+      "mode": "0600",
+      "ownerAndSizeCotejados": true
+    }
+  },
+  "preCutoverBackupAndRollback": {
+    "v22HourlyPreCutoverBackup": {
+      "path": "/mnt/Data2/respaldos-atlas-v21/world-20261127-0032.sqlite.gz",
+      "sha256": "7783732ec15fb699aa9059c6bb9f86eb76848659df3581238da9f83928def211",
+      "method": "horario",
+      "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/previo.sha256"
+    },
+    "v22ColdCombinedBackup": {
+      "dir": "/mnt/Data2/vuelta-atlas-v22-de86ec9",
+      "manifest": "/mnt/Data2/vuelta-atlas-v22-de86ec9/SHA256SUMS",
+      "sqliteQuickCheck": "ok",
+      "restoredSlot0Tick": 127580,
+      "restoredSlot0Digest": "1cd4f1231e748dcf154c5d50715aef169799875639dd8ad8dc37f5ce9475910a",
+      "verificationReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/frio-slot0.txt"
+    },
+    "rollbackProcedure": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/VUELTA-V22.md",
+    "frozenLauncher": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/vuelta-v22-fijada/publico-v22.sh",
+    "frozenSystemdUnit": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/vuelta-v22-fijada/atlas-publico.service",
+    "rollbackManifest": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/vuelta-v22-fijada/SHA256SUMS",
+    "capturedUnits": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/vuelta"
+  },
+  "postPublishPanel60d": {
+    "status": "starting",
+    "product": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+    "seeds": [
+      7,
+      51926,
+      19101,
+      19102,
+      19103,
+      19104,
+      19105,
+      19106
+    ],
+    "days": 60,
+    "ticks": 144000,
+    "independentNewWorldsFromFounders": true,
+    "manifest": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/panel60-de86ec9/manifiesto.json"
+  }
+}

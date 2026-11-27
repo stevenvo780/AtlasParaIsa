@@ -60,6 +60,22 @@ test('technology KPI uses catalogue recipe totals rather than the sampled defini
   world.stats!.blueprints = 45;
   const kpi = telemetryKpis(world).find(p => p.nav === 'technology')!;
   assert.match(kpi.value, /^321 ·/); assert.match(kpi.detail, /45 planos/);
+  assert.deepEqual(telemetryKpis(world, true).find(p => p.nav === 'technology'), kpi);
+});
+
+test('Oficios cuenta habitantes con recetas de la cinta en la cámara', () => {
+  const world = worldFixture();
+  const oficio = () => telemetryKpis(world, true).find(kpi => kpi.nav === 'technology')!;
+  assert.equal(oficio().value, 'Sin fichas');
+  world.reaccionObservada = { tick: 230, a: 1, b: 0, nivel: 1, lote: 2, veces: 1 };
+  assert.equal(oficio().summary, 'En esta vista · reacción observada');
+  const ficha = { recetas: [], omitidas: 0, proceso: null, intentos: 0 };
+  world.people = [{ ...personFixture(), tecnicaVista: ficha }];
+  assert.equal(oficio().value, '0 hab. con recetas');
+  world.people.push({ ...personFixture(), id: 'p-2', tecnicaVista: { ...ficha, omitidas: 2 } });
+  world.people.push({ ...personFixture(), id: 'p-3', tecnicaVista: { ...ficha, recetas: [{ id: 8, generacion: 1, usada: 220, padres: [] }] } });
+  assert.equal(oficio().value, '2 hab. con recetas');
+  assert.match(oficio().detail, /3 fichas de técnica/);
 });
 
 test('activity fractions include every work action and keep movement and survival separate', () => {

@@ -1,5 +1,6 @@
 /** Read-only telemetry over the received projection. No DOM, timers or simulation state. */
 import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../shared/types.js';
+import type { TecnicaVisible } from '../shared/tecnica-visible.js';
 import { esc, number, percentage } from './ui-catalog.js';
 import { censoDe } from './censo-view.js';
 import type { WorldDirectoryResponse } from '../shared/worldmap.js';
@@ -63,16 +64,53 @@ export function communitySummary(communities?: CommunityView[]) {
   return { total: communities?.length, cooperation: communities ? sum(values.map(c => c.cooperation)) : undefined,
     disputes: communities ? sum(values.map(c => c.disputes)) : undefined, cultures };
 }
-export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
+export function tieneRecetas(tecnica: TecnicaVisible): boolean {
+  return tecnica.recetas.length > 0 || tecnica.omitidas > 0;
+}
+
+/** El panel y su indicador distinguen las fichas de cinta de los datos del sistema anterior. */
+export function usaTecnicaGrabada(world: WorldView, fichas: number, esperaCinta: boolean): boolean {
+  if (fichas || world.materia || world.reaccionObservada || world.sustancias?.length
+    || world.structures?.some(obra => obra.piezas?.length)) return true;
+  if (!esperaCinta) return false;
+  const tech = world.technology;
+  return !(world.chemistry || world.organization?.evidence.executed || world.organization?.window.complete === true
+    || tech?.recipes.length || tech?.items.length
+    || Object.values(tech?.dynamics ?? {}).some(value => Number.isFinite(value) && value !== 0));
+}
+
+function oficiosKpi(world: WorldView | null, esperaCinta: boolean): TelemetryKpi {
+  const nav = 'technology', label = 'Oficios · recetas';
+  if (world) {
+    let fichas = 0, habitantesConRecetas = 0;
+    for (const { tecnicaVista } of world.people) {
+      if (!tecnicaVista) continue;
+      fichas++;
+      if (tieneRecetas(tecnicaVista)) habitantesConRecetas++;
+    }
+    if (usaTecnicaGrabada(world, fichas, esperaCinta)) {
+      return { nav, label, value: fichas ? `${number(habitantesConRecetas)} hab. con recetas` : 'Sin fichas',
+        summary: `En esta vista${world.reaccionObservada ? ' · reacción observada' : ''}`,
+        detail: `${fichas ? `Recuento sobre ${number(fichas)} fichas de técnica recibidas.` : 'La vista recibida no incluye fichas de técnica.'} Abrir Mundo › Oficios.` };
+    }
+  }
+  const recipes = world?.technology?.dynamics.recipes;
+  const items = world?.technology?.items;
+  const forged = forgedToolsCount(items), stats = world?.stats;
+  return { nav, label, value: `${number(recipes)} · ${number(items?.length)} obj.${forged === undefined ? '' : ` · ${forged} forj.`}${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
+    summary: `Fórmulas químicas ${number(stats?.chemicalFormulas)}`,
+    detail: `${number(recipes)} recetas registradas · ${number(items?.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` };
+}
+
+export function telemetryKpis(world: WorldView | null, esperaCinta = false): TelemetryKpi[] {
   const stats = world?.stats, census = world ? censoDe(world) : null;
   const generations = Object.entries(stats?.generations ?? {}).filter(([g, n]) => finite(Number(g)) && n > 0).map(([g]) => Number(g));
   const generation = generations.length ? generations.reduce((max, value) => Math.max(max, value), 0) : undefined;
   const activity = activitySplit(stats?.actions), community = communitySummary(world?.communities);
   const wildlife = stats?.wildlife ? sum(Object.values(stats.wildlife)) : undefined;
   const predators = stats?.wildlife ? count(stats.wildlife.fox) + count(stats.wildlife.wolf) : undefined;
-  const recipes = world?.technology?.dynamics.recipes;
   const runtime = world?.performance;
-  const herds = habituatedFauna(world?.animals), forged = forgedToolsCount(world?.technology?.items);
+  const herds = habituatedFauna(world?.animals);
   return [
     { nav: 'people', label: 'Vivos', value: `${number(world ? stats?.population ?? world.people.length : undefined)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
       summary: stats ? 'Población viva · todo el mundo' : world ? 'Habitantes recibidos · sin censo global' : 'Esperando el censo',
@@ -88,9 +126,7 @@ export function telemetryKpis(world: WorldView | null): TelemetryKpi[] {
     { nav: 'land', label: 'Cultivos · planos', value: `${number(stats?.cultivatedTiles)} · ${number(stats?.blueprints)}${count(stats?.pavedTiles) > 0 ? ` · ${number(stats?.pavedTiles)} calz.` : ''}`,
       summary: `${stats?.structures ? `Obras: ${number(sum(Object.values(stats.structures)))} componentes globales` : `Obras ${number(world?.structures?.length)} en vista`} · poliominós ${number(stats?.polyominoStructures)} · calzadas ${number(stats?.pavedTiles)}`,
       detail: `${number(stats?.cultivatedTiles)} cultivos en regiones activas · ${number(stats?.blueprints)} planos conocidos · ${number(world?.structures?.length)} obras en esta vista${stats?.pavedTiles !== undefined ? ` · ${number(stats.pavedTiles)} calzadas empedradas` : ''}${stats?.polyominoStructures !== undefined ? ` · ${number(stats.polyominoStructures)} edificios poliominó` : ''}. Abrir Mundo › Paisaje.` },
-    { nav: 'technology', label: 'Oficios · recetas', value: `${number(recipes)} · ${number(world?.technology?.items.length)} obj.${forged === undefined ? '' : ` · ${forged} forj.`}${count(stats?.chemicalFormulas) > 0 ? ` · ${number(stats?.chemicalFormulas)} fórm.` : ''}`,
-      summary: `Fórmulas químicas ${number(stats?.chemicalFormulas)}`,
-      detail: `${number(recipes)} recetas registradas · ${number(world?.technology?.items.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` },
+    oficiosKpi(world, esperaCinta),
     { nav: 'performance', label: 'Motor · p95 / Hz', value: `${number(runtime?.p95StepMs, 1)} ms · ${number(runtime?.tickHz, 1)} Hz`,
       detail: `Paso p95 ${number(runtime?.p95StepMs, 2)} ms · ${number(runtime?.tickHz, 2)} Hz en el estado recibido. Abrir Mundo › Rendimiento.` },
   ];

@@ -3,15 +3,8 @@ import type { RecetaVisible } from '../shared/tecnica-visible.js';
 import type { WorldView } from '../shared/types.js';
 import { statCard } from './charts.js';
 import { fichaReaccion } from './inspector-view.js';
+import { tieneRecetas, usaTecnicaGrabada } from './telemetry-hud.js';
 import { esc, number } from './ui-catalog.js';
-
-function legadoConDatos(world: WorldView): boolean {
-  const tech = world.technology;
-  return !!world.chemistry || !!world.organization?.evidence.executed
-    || world.organization?.window.complete === true
-    || !!tech?.recipes.length || !!tech?.items.length
-    || Object.values(tech?.dynamics ?? {}).some(value => Number.isFinite(value) && value !== 0);
-}
 
 /** Vista de la técnica material que graba la cinta. Devuelve null para usar el panel del sistema anterior. */
 export function tecnicaGrabada(world: WorldView, nivel: Nivel | null, esperaCinta = false): string | null {
@@ -21,7 +14,7 @@ export function tecnicaGrabada(world: WorldView, nivel: Nivel | null, esperaCint
     const tecnica = persona.tecnicaVista;
     if (!tecnica) continue;
     fichas++;
-    if (tecnica.recetas.length || tecnica.omitidas) habitantesConRecetas++;
+    if (tieneRecetas(tecnica)) habitantesConRecetas++;
     if (tecnica.proceso) procesos++;
     for (const receta of tecnica.recetas) {
       const previa = recetas.get(receta.id);
@@ -31,9 +24,7 @@ export function tecnicaGrabada(world: WorldView, nivel: Nivel | null, esperaCint
     }
   }
   const resumida = nivel !== null && nivel > 0;
-  const materiaVisible = !!world.materia || !!world.reaccionObservada || !!world.sustancias?.length
-    || world.structures?.some(obra => obra.piezas?.length);
-  if (!fichas && !materiaVisible && ((!esperaCinta && nivel === null) || legadoConDatos(world))) return null;
+  if (!usaTecnicaGrabada(world, fichas, esperaCinta || nivel !== null)) return null;
 
   const evidencia = fichas
     ? `<p class="stats-note">La cámara muestra ${number(fichas)} fichas de técnica. Las cifras corresponden a esas fichas.</p>

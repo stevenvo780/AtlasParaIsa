@@ -274,7 +274,14 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   // V24: el paisaje también recibe `changedTiles`: solo rehornea los trozos de 8×8 que tocan esas teselas.
   const desplazamiento = info.reason === 'seek' || info.reason === 'step';
   if (world === null || info.discontinuity || desplazamiento || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
-  else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
+  else {
+    recordarVistos(frame);
+    tileCache.ingest(tiles, frame.tick);
+    world = frame;
+    landscape?.update(frame, info.changedTiles);
+    acumularCronica(frame.events);
+    if (info.reason === 'refresh') renderTelemetryHud(frame);
+  }
   if (info.reason === 'refresh' && statsTab === 'technology') renderStats();
   if (info.discontinuity) landscape?.flushPlayback();
   if (info.presente) registrarVisitaPresente(frame);
@@ -906,7 +913,7 @@ function receiveWorld(next: WorldView, tilesToIngest: readonly Tile[] = next.til
 /** V21: en observación pura toda ayuda de la lista se completa con la nota única (sin «dar una orden»). */
 function observerNote(text: string): string { return observerOnly ? `${OBSERVER_NOTE} ${text}` : text; }
 function renderTelemetryHud(current: WorldView): void {
-  for (const kpi of telemetryKpis(current)) {
+  for (const kpi of telemetryKpis(current, !!(sessionFlags.tapeEnabled || sessionFlags.archiveMode))) {
     const button = el('hud-telemetry').querySelector<HTMLButtonElement>(`[data-hud-nav="${kpi.nav}"]`)!;
     const value = button.querySelector<HTMLElement>('[data-hud-value]')!;
     if (value.textContent !== kpi.value) value.textContent = kpi.value;

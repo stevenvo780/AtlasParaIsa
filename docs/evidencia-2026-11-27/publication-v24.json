@@ -296,12 +296,37 @@
     }
   },
   "postPublishObservation1h": {
-    "status": "in-progress",
+    "status": "passed",
     "windowMinutesTarget": 60,
     "startedAt": "2026-11-27T06:19:10.666+00:00",
     "service": "atlas-v24-primera-hora-de86ec9.service",
     "samples": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/primera-hora.ndjson",
-    "closingReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/primera-hora.json"
+    "closingReceipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/primera-hora.json",
+    "endedAt": "2026-11-27T07:19:10.765+00:00",
+    "elapsedMs": 3600100,
+    "samplesCount": 121,
+    "http200Count": 121,
+    "httpErrors": 0,
+    "degradedSamples": 0,
+    "reloadsMax": 0,
+    "hardDiagnosticsMax": 0,
+    "ticks": [
+      433,
+      47603
+    ],
+    "durableTicks": [
+      400,
+      47600
+    ],
+    "domainHealthLatencyMsP95": 617.259,
+    "mainThreadCpuPctP95": 0.067,
+    "rssMiB": {
+      "pico": 1337.2,
+      "medianaCuartoInicial": 903.3,
+      "medianaCuartoFinal": 1240.4
+    },
+    "rssInterpretation": "El RSS creció durante la ventana. La observación no establece una meseta.",
+    "closingReceiptSha256": "94e2118ab55d0f8bddf19ce1ff1bcb0de6ee8ec061b1a7047aeadb89928cb37a"
   },
   "status": "published",
   "cutover": {
@@ -378,7 +403,28 @@
         "timer": "atlas-respaldo-cinta.timer",
         "sqliteChecksVerified": true
       },
-      "timersEnabledAndActive": true
+      "timersEnabledAndActive": true,
+      "firstScheduled": {
+        "status": "passed",
+        "scheduledAt": "2026-11-27T02:00:00-05:00",
+        "world": {
+          "path": "/mnt/Data2/respaldos-atlas-v24-de86ec9/world-20261127-0200.sqlite.gz",
+          "sizeBytes": 11708878,
+          "exitCode": 0
+        },
+        "tape": {
+          "path": "/mnt/Data2/respaldos-atlas-v24-de86ec9/cinta/cinta-20261127T070007Z-WQRDjTLW",
+          "levels": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "exitCode": 0
+        },
+        "receipt": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/respaldos-programados-0200.txt",
+        "receiptSha256": "154037fd756e892ae72a98393e8b47a126ebc79f068f7b7baa64a9fe53aaac8e"
+      }
     }
   },
   "capturedAt": "2026-11-27T01:20:01-05:00",
@@ -417,7 +463,7 @@
     "capturedUnits": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/corte-de86ec9/ejecucion-corte/vuelta"
   },
   "postPublishPanel60d": {
-    "status": "starting",
+    "status": "running",
     "product": "de86ec91523ce9a0181afb29d613f3897f1683ea",
     "seeds": [
       7,
@@ -432,6 +478,16 @@
     "days": 60,
     "ticks": 144000,
     "independentNewWorldsFromFounders": true,
-    "manifest": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/panel60-de86ec9/manifiesto.json"
+    "manifest": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/panel60-de86ec9/manifiesto.json",
+    "verifiedStarts": 8,
+    "verifiedStartsByHost": {
+      "fedora": 2,
+      "torre": 4,
+      "torre-extra": 2
+    },
+    "startReceipts": [
+      "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/panel60-de86ec9/preflight/arranques-verificados-fedora.jsonl",
+      "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/panel60-de86ec9/preflight/arranques-verificados-torre.jsonl"
+    ]
   }
 }

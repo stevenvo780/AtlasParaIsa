@@ -7,7 +7,7 @@ el contrato.
 
 ## Vigente (V24 desde el 27 de noviembre de 2026, 01:19:02 -05, en la torre)
 
-El release `de86ec91523ce9a0181afb29d613f3897f1683ea` quedó verificado a las 01:20:01 -05. La observación de la primera hora está **en curso** y se acredita por separado. [Contrato V24](evidencia-2026-11-27/publication-v24.json).
+El release `de86ec91523ce9a0181afb29d613f3897f1683ea` quedó verificado a las 01:20:01 -05. La observación de la primera hora cerró a las 02:19:10 -05. [Contrato V24](evidencia-2026-11-27/publication-v24.json).
 
 | Qué | Perfil de V24 |
 |---|---|
@@ -31,7 +31,11 @@ El release `de86ec91523ce9a0181afb29d613f3897f1683ea` quedó verificado a las 01
 
 El dominio respondió `200` y el HTML y los assets coincidieron con el build. Las solicitudes sin sesión a `/api/cinta/meta` y `/api/cinta/chunk` respondieron `401`. Las lecturas de salud avanzaron de T396 a T566 y el guardado durable confirmó T400, época 0, con materia. Se verificó por lectura local el fotograma T397 de L0. El respaldo inicial del mundo pasó `gzip -t` y el catálogo respaldado de cinta pasó `quick_check` y `foreign_key_check`. Los recibos están enumerados en el contrato.
 
-La **primera hora** empezó a las 01:19:10 -05. Sigue en curso y quedará acreditada por su recibo separado. El panel de 60 días está arrancando en laboratorio con ocho réplicas nuevas de `de86ec9`, independientes del mundo público y del panel de 30 días.
+La **primera hora** completó 121/121 respuestas `200`, sin errores HTTP, diagnósticos duros, recargas ni muestras degradadas. El tick visible avanzó de T433 a T47603 y el durable, de T400 a T47600. La latencia p95 del dominio fue de 617,259 ms y el uso p95 del hilo principal de 0,067 %. El RSS pasó de una mediana de 903,3 MiB en el primer cuarto a 1.240,4 MiB en el último, con pico de 1.337,2 MiB. El crecimiento observado no permite afirmar que la memoria haya alcanzado una meseta.
+
+Los **primeros respaldos programados** de las 02:00 -05 cerraron con código 0. Se verificaron el archivo del mundo `world-20261127-0200.sqlite.gz` y el respaldo L1–L4 de la cinta `cinta-20261127T070007Z-WQRDjTLW`. El contrato enlaza los recibos.
+
+El **panel de 60 días** está en curso. Se verificaron ocho de ocho arranques en laboratorio, seis en la torre y dos en Fedora, con réplicas nuevas de `de86ec9` independientes del mundo público y del panel de 30 días. La verificación de arranque acredita la configuración inicial. El resultado de 60 días queda pendiente.
 
 ## Anteriores, conservados
 

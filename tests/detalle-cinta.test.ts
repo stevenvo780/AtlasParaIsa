@@ -147,8 +147,8 @@ test('al seleccionar se completa la ficha con el L0 exacto y se conservan los ce
   assert.equal(personaDeDetalleExactoParaContexto(cinta, actual), null);
   assert.match(ui.html(), new RegExp(ETIQUETA_DETALLE));
   assert.doesNotMatch(ui.html(), /sin dato|Energía|<dl/);
-  await cinta.verAlSeleccionar();
-  await cinta.verAlSeleccionar();
+  await cinta.verSiDisponible();
+  await cinta.verSiDisponible();
   assert.equal(peticiones, 1);
   assert.equal(ui.el.hidden, true);
   const precisa = personaDeDetalleExactoParaContexto(cinta, actual);

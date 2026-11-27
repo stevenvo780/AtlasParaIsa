@@ -78,6 +78,7 @@ let landscape: Landscape | null = null;
 const tileCache = new ClientTileCache(640);
 let selected: Selection = { kind: 'person', id: 's' };
 let activePersonId = 's';
+let personaInspeccionada: string | null = null;
 let control: 'inspect' | 'direct' = 'inspect';
 let following = false;
 let status: ConnectionStatus = 'connecting';
@@ -218,6 +219,7 @@ function startupSettings(): GraphicsSettings {
 
 function enterWorld(flags: SessionFlags = {}): void {
   clean();
+  personaInspeccionada = null;
   if (flags.archiveCuts) flags = { ...flags, archiveMode: true };
   sessionFlags = flags;
   visita = null; status = 'connecting'; cronica.clear(); evidenceDirty = true; hitosGuardados = []; journalFilter = 'todo';
@@ -261,11 +263,17 @@ function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   // Sin `changedTiles` (fotograma completo, base de trozo, salto) se ingiere la vista entera como siempre.
   const tiles = info.changedTiles ?? frame.tiles;
   // V24: el paisaje también recibe `changedTiles`: solo rehornea los trozos de 8×8 que tocan esas teselas.
-  if (world === null || info.discontinuity || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
+  const desplazamiento = info.reason === 'seek' || info.reason === 'step';
+  if (world === null || info.discontinuity || desplazamiento || now - lastTapeHudAt >= 160) { lastTapeHudAt = now; receiveWorld(frame, tiles, info.changedTiles); }
   else { recordarVistos(frame); tileCache.ingest(tiles, frame.tick); world = frame; landscape?.update(frame, info.changedTiles); acumularCronica(frame.events); }
   if (info.discontinuity) landscape?.flushPlayback();
   if (info.presente) registrarVisitaPresente(frame);
   refrescarDetalleCinta();
+  if (desplazamiento && dvr && !dvr.tramo && dvr.modoReloj !== 'borde-vivo'
+    && selected.kind === 'person' && selected.id === personaInspeccionada
+    && !el('inspector-drawer').hidden) {
+    void detalleCinta.verSiDisponible();
+  }
 }
 
 function startTape(): void {
@@ -358,11 +366,12 @@ function setPickingWhisper(active: boolean): void {
 function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && !pickingWhisper ? 'inspect' : 'ground'); }
 function choosePerson(id: string, focus = true): void {
   const person = world?.people.find(p => p.id === id); if (!person) { irAPersona(id); return; }
+  personaInspeccionada = id;
   buscando = null;
   inspectorTab = 'now'; toggleTasks(false); activePersonId = person.id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
   if (focus) landscape?.focus(person.x, person.y);
   inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
-  void detalleCinta.verAlSeleccionar();
+  void detalleCinta.verSiDisponible();
 }
 /** M3: seleccionar a alguien que no está en la cámara. Si murió hace poco se abre su despedida; si no,
  * se centra la cámara en la última posición conocida y se pide su ficha, que trae la posición exacta.

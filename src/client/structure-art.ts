@@ -523,6 +523,31 @@ export interface StructureSurface {
   culture?: { sharing: number; stewardship: number; openness: number };
 }
 
+/** Cubierta abierta de una obra material compacta, del mismo tamaño que su huella. */
+export function paintMaterialShelter(g: CanvasRenderingContext2D, forma: number, color: string, worn: boolean): void {
+  const pieza = formaDeCodigo(forma);
+  const ancho = Math.max(12, Math.min(22, Math.round(Math.sqrt(pieza.largo * pieza.ancho) * ART + 2)));
+  const izq = Math.floor((32 - ancho) / 2);
+  const alero = worn ? 17 : 15;
+  const alto = Math.max(4, Math.min(7, Math.round(pieza.grueso * ART + 3)));
+  const techo = alero - alto;
+
+  px(g, izq - 1, 27, ancho + 2, 3, K.shadow);
+  for (const x of [izq + 2, izq + ancho - 4]) {
+    px(g, x - 1, 26, 4, 2, K.stoneShade);
+    px(g, x, alero - 1, 2, 28 - alero, K.timber);
+    px(g, x, alero + 1, 1, 25 - alero, K.timberLight);
+  }
+  px(g, izq + 2, techo - 1, ancho - 4, 1, K.door);
+  for (let fila = 0; fila < alto; fila++) {
+    const borde = fila < 2 ? 2 - fila : 0;
+    px(g, izq + borde, techo + fila, ancho - 2 * borde, 1, color);
+    if (fila % 2 === 0) px(g, izq + borde, techo + fila, ancho - 2 * borde, 1, 'rgba(255,243,205,.24)');
+  }
+  px(g, izq, alero, ancho, 2, K.timber);
+  px(g, izq + 1, alero, ancho - 2, 1, 'rgba(255,243,205,.20)');
+}
+
 /** Parts change layout and capacity; material tones describe the blueprint cost, never an invented alloy. */
 export function paintStructure(g: CanvasRenderingContext2D, s: StructureView, surface: StructureSurface = {}): void {
   const tint = s.materialProfile?.tint;

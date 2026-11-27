@@ -1,7 +1,7 @@
 /**
  * Pide el L0 exacto de un habitante en un nivel resumido y entrega ese PersonView íntegro.
  * Lo pinta la ficha que ya existe. Aquí solo hay un botón y, si falla o sigue en camino, una nota.
- * La selección solicita el detalle cuando existe cobertura. El botón permite intentarlo de nuevo.
+ * La selección y los saltos de la cinta solicitan el detalle cuando existe cobertura.
  */
 import type { ChunkReq, ChunkResp, Nivel } from '../shared/cinta.js';
 import type { PersonView, WorldView } from '../shared/types.js';
@@ -161,8 +161,8 @@ export class DetalleCinta {
     this.publicar(sePuedePedir(ctx) ? { tipo: 'ofrecer', clave: claveDetalle(ctx) } : { tipo: 'oculto' });
   }
 
-  /** Se llama al elegir una persona. El paso de fotogramas solo actualiza la disponibilidad. */
-  async verAlSeleccionar(): Promise<void> {
+  /** Se llama al elegir una persona o al aterrizar tras mover el cabezal. */
+  async verSiDisponible(): Promise<void> {
     if (this.estado.tipo === 'ofrecer') await this.ver();
   }
 

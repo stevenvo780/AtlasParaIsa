@@ -30,7 +30,7 @@ import { claveRegion } from './regiones.js';
 import { cropSignature, cropStage, cropWorkMode, drawCropWork, paintCropField } from './crop-art.js';
 import { paintGeologyVeins, paintRoadTile, paintVetasComposicion } from './road-geology-art.js';
 import { footprintBox, footprintCells, isModular, paintCompactAccessories, paintConstructionSite, paintModularHall, structureExtent, type ExtendedStructure,
-  claveLote, figuraDeLote, humoDeFuego, paintFuego, paintLote, LOTE_SPRITE } from './structure-art.js';
+  claveLote, figuraDeLote, humoDeFuego, paintFuego, paintLote, LOTE_SPRITE, paintMaterialShelter } from './structure-art.js';
 import { brilloTermico, classifyTerrainPixel, colorCuerpoNegro, colorTermico, escarcha, hash3, materialNoise, newFieldPixel, prepareTerrainStencil, rnd,
   sustanciaDelPixel, umbralBayer as umbralTrama, waterDepthTone, type FieldSample, type Rgb } from './terrain-field.js';
 
@@ -2704,6 +2704,22 @@ export class Landscape {
   }
 
   private structureRaster(structure: StructureView): HTMLCanvasElement {
+    const pieza = structure.components.length === 0 && structure.condition > 0 && structure.piezas?.find(
+      p => p.x === structure.x && p.y === structure.y && p.rol === 'pieza' && p.masa > 0 && p.forma > 0,
+    );
+    if (pieza) {
+      const tono = css(rgb(...(this.paleta.color(pieza.principal) ?? LOTE_SIN_FICHA)));
+      const gastada = structure.condition < .3;
+      const clave = `cubierta:${pieza.forma}:${tono}:${gastada}`;
+      let raster = this.spriteCache.get(clave);
+      if (!raster) {
+        raster = document.createElement('canvas');
+        raster.width = raster.height = 32;
+        paintMaterialShelter(raster.getContext('2d')!, pieza.forma, tono, gastada);
+        this.cacheSprite(clave, raster);
+      }
+      return raster;
+    }
     const blueprint = this.curr?.blueprints?.find(b => b.id === structure.blueprintId);
     const materials = blueprint?.cost;
     const generation = blueprint?.generation;

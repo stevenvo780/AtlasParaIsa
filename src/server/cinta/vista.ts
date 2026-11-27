@@ -4,7 +4,8 @@ import {
   disposicion, ESQUEMA_CELDA, ESQUEMA_ORGANISMO, fotogramaDe, SERIE_CAMPOS,
   type EnlaceCinta, type Fotograma, type Suceso, type SucesoVista, type VistasLentas,
 } from '../../shared/fotograma.js';
-import type { MatTesela } from '../../shared/materia.js';
+import { cuerpoDeColumna } from '../../shared/cuerpo-columna.js';
+import type { MatTesela, SustanciaVista } from '../../shared/materia.js';
 import { PROTOCOL_VERSION, type AnimalView, type ChronicleEvent, type PersonView, type Tile, type WorldView } from '../../shared/types.js';
 import { ACTIONS as ACCIONES_FAUNA } from '../../world/animals.js';
 import { ACCIONES_PERSONA_FOTOGRAMA, type SucesoEnlaceCinta, type SucesoFotograma, type SucesosFotogramaDirectos, type SucesoVistaAdicional,
@@ -39,6 +40,8 @@ class CacheVista implements EstadoVista {
   readonly paginas = new Map<string, VistaPaginaFotograma>();
   readonly textos = new Map<number, Map<string, string>>();
   readonly catalogo = new Set<number>();
+  /** Sustancias internadas en la época. No se borra en un fotograma completo: el evento solo anuncia las nuevas. */
+  readonly sustancias = new Map<number, SustanciaVista>();
   eventos: ChronicleEvent[] = [];
   mundo: VistaMundoFotograma | undefined;
   reparto: WorldView['reparto'];
@@ -78,6 +81,7 @@ function aplicarSucesos(e: CacheVista, sucesos: readonly SucesoFotograma[], t: n
       break;
     case 'cronicaVista': e.eventos = s.vista?.slice(-VIEW_EVENTS) ?? []; break;
     case 'sustancia': {
+      e.sustancias.set(s.sustancia.id, s.sustancia);
       if (!e.catalogo.has(s.sustancia.id)) {
         e.catalogo.add(s.sustancia.id);
         catalogo.push({ t, sustancia: s.sustancia });
@@ -99,6 +103,10 @@ function aplicarSucesos(e: CacheVista, sucesos: readonly SucesoFotograma[], t: n
   return { hitos, catalogo };
 }
 
+function cuerpoEmitido(cuerpo: ReturnType<typeof cuerpoDeColumna>): { cuerpoVisto: NonNullable<ReturnType<typeof cuerpoDeColumna>> } | Record<string, never> {
+  return cuerpo ? { cuerpoVisto: cuerpo } : {};
+}
+
 function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animals: AnimalView[] } {
   const people: PersonView[] = [], animals: AnimalView[] = [];
   const vistos = new Set<number>();
@@ -117,7 +125,7 @@ function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animal
     };
     const masa = bin.getFloat32(b + campoO.masa, true), principal = bin.getUint32(b + campoO.principal, true);
     const fatiga = campoO.fatiga === undefined ? NaN : bin.getFloat32(b + campoO.fatiga, true);
-    const cuerpo = {
+    const columna = {
       masa, principal,
       ...(campoO.carga === undefined ? {} : { carga: bin.getFloat32(b + campoO.carga, true) }),
       ...(campoO.T === undefined ? {} : { T: bin.getFloat32(b + campoO.T, true) }),
@@ -136,14 +144,14 @@ function organismos(e: CacheVista, f: Fotograma): { people: PersonView[]; animal
         ...(base.foodReserve === undefined ? {} : { foodReserve: q2(base.foodReserve) }),
         ...(base.vitality === undefined ? {} : { vitality: q2(base.vitality) }),
         ...(campoO.escucha === undefined ? {} : { escucha: bin.getUint8(b + campoO.escucha) / escalaU8 }),
-        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, ...cuerpo } } : {}),
+        ...cuerpoEmitido(cuerpoDeColumna(base.cuerpoVisto, columna)),
       });
     } else if (clase === Clase.Animal) {
       const base = e.animales.get(clave), action = ACCIONES_FAUNA[accion];
       if (!base || reason === undefined || action === undefined) throw new Error(`La fila de fauna ${uid} no tiene vista, texto o acción válidos.`);
       animals.push({ ...base, ...telemetria, reason, action, fatigue: q2(Number.isNaN(fatiga) ? base.fatigue : fatiga), age: Math.floor(base.age / 20) * 20,
         ...(base.reproReserve === undefined ? {} : { reproReserve: q2(base.reproReserve) }),
-        ...(base.cuerpoVisto ? { cuerpoVisto: { ...base.cuerpoVisto, ...cuerpo } } : {}),
+        ...cuerpoEmitido(cuerpoDeColumna(base.cuerpoVisto, columna)),
       });
     } else throw new Error(`Clase de organismo inválida en la fila ${uid}.`);
   }
@@ -207,6 +215,11 @@ export function fotogramaAVista(estado: EstadoVista, f: Fotograma, sucesos: read
     technology: lento.tecnologia.get(''), organization: lento.organizacion.get(''),
     ...(lento.susurro.size ? { whispers: [...lento.susurro.values()] } : {}), ...(reparto ? { reparto } : {}),
   };
+  if (estado.sustancias.size) {
+    const ya = new Map((vista.sustancias ?? []).map(s => [s.id, s]));
+    for (const [id, s] of estado.sustancias) if (!ya.has(id)) ya.set(id, s);
+    vista.sustancias = [...ya.values()].sort((a, b) => a.id - b.id);
+  }
   const tilesCambiadas = estado.primero ? 'todas' : cambiadas;
   estado.primero = false;
   return { seq, epoca: f.epoca, t: f.tick, vista, tilesCambiadas, hitos, catalogo, serie, hz: serie.hz };

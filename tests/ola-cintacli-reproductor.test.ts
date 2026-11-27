@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { applyClientTapeDelta, type TapeClientDelta } from '../src/shared/tape-delta.js';
 import { CINTA, type Bifurcacion, type ChunkReq, type ChunkResp, type CintaMeta, type Laguna, type Marcador, type Nivel } from '../src/shared/cinta.js';
 import { PROTOCOL_VERSION, type Tile, type WorldView } from '../src/shared/types.js';
-import { DVR_LIMITS, DvrPlayer, PerfilCinta, leerEscenaArchivo, normalizeViewport, type DvrChunkRequest, type DvrFrameInfo, type DvrMarca, type DvrState, type EscenaArchivo } from '../src/client/dvr-player.js';
+import { DVR_LIMITS, DvrPlayer, PerfilCinta, leerEscenaArchivo, normalizeViewport, tickDeHistoria, type DvrChunkRequest, type DvrFrameInfo, type DvrMarca, type DvrState, type EscenaArchivo } from '../src/client/dvr-player.js';
 
 const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
@@ -145,10 +145,12 @@ test('la cinta avisa del presente con el fotograma de la época vigente', async 
   });
   try {
     await player.start();
-    assert.equal(player.atLiveEdge, true);
-    assert.equal(emitidos.at(-1)!.presente, false, 'el colchón puede caer antes del punto de reinicio');
+    assert.equal(player.modoReloj, 'tiempo-real');
+    assert.equal(player.atLiveEdge, false, 'el arranque no se engancha al borde vivo');
+    assert.equal(emitidos.at(-1)!.presente, false);
     epocaServida = 2;
     await player.jumpToLiveEdge();
+    assert.equal(player.modoReloj, 'borde-vivo');
     assert.equal(emitidos.at(-1)!.presente, true);
     await player.seek(98_400);
     assert.equal(emitidos.at(-1)!.presente, false);
@@ -222,7 +224,10 @@ test('enlace de escena de archivo: vuelve a t0 si el foco no se puede reconstrui
   const vivo = harness({ ...config, abrirEnInicio: false, escenaArchivo });
   await vivo.player.start();
   assert.equal(vivo.requests[0]?.x, undefined);
-  assert.equal(vivo.player.currentTick, 448);
+  assert.equal(vivo.requests[0]?.t, tickDeHistoria(80, 480));
+  assert.equal(vivo.player.currentTick, 416);
+  assert.equal(vivo.player.modoReloj, 'tiempo-real');
+  assert.equal(vivo.player.atLiveEdge, false);
   assert.equal(vivo.player.playing, true);
   vivo.player.stop();
 });
@@ -271,18 +276,20 @@ test('un tramo entre muestras solo muestra fotogramas dentro de los dos límites
   h.player.stop();
 });
 
-test('start: sin marcador cae en el presente, pide nivel auto y aterriza en el último fotograma ≤ t', async () => {
+test('start: sin marcador abre en la historia, en tiempo real, y no en el borde vivo', async () => {
   const h = harness();
   assert.equal(await h.player.start(), true);
   assert.equal(h.player.enabled, true);
   const primera = h.requests[0]!;
-  assert.equal(primera.nivel, 'auto'); assert.equal(primera.t, 240_000 - DVR_LIMITS.liveMargin); assert.equal(primera.n, DVR_LIMITS.chunkCount);
-  assert.deepEqual(h.emitted.map(e => e.tick), [239_968]);
+  assert.equal(primera.nivel, 'auto'); assert.equal(primera.t, tickDeHistoria(0, 240_000)); assert.equal(primera.n, DVR_LIMITS.chunkCount);
+  assert.deepEqual(h.emitted.map(e => e.tick), [239_936]);
   assert.equal(h.emitted[0]!.info.reason, 'start'); assert.equal(h.emitted[0]!.info.nivel, 0); assert.equal(h.emitted[0]!.info.paso, 4);
   assert.equal(h.emitted[0]!.info.discontinuity, true);
   assert.equal(h.player.nivel, 0); assert.equal(h.player.paso, 4);
-  assert.equal(h.player.atLiveEdge, true); assert.equal(h.player.latestDay, 101); assert.equal(h.player.simHz, 120);
+  assert.equal(h.player.modoReloj, 'tiempo-real');
+  assert.equal(h.player.atLiveEdge, false); assert.equal(h.player.latestDay, 101); assert.equal(h.player.simHz, 120);
   assert.equal(h.player.serie.length, 5);
+  assert.ok(h.emitted.length === 1, 'el primer fotograma sale sin esperar al reloj');
   h.player.stop();
 });
 
@@ -298,7 +305,7 @@ test('start: una cinta sin fotogramas queda activa pero no pide trozos; una cint
 test('el reloj cuenta fotogramas del nivel en curso: 6 por segundo a 1× aunque el paso sea 4 o 2400 ticks', async () => {
   for (const [objetivo, nivel, paso] of [[100_000, 3, 2400], [200_000, 2, 300], [230_000, 1, 32]] as const) {
     const h = harness();
-    await h.player.start(); await h.player.seek(objetivo);
+    await h.player.start(); await h.player.seek(objetivo); h.player.setSpeed(1);
     assert.equal(h.player.nivel, nivel); h.emitted.length = 0;
     await h.run(1100);
     assert.equal(h.emitted.length, 6, `nivel ${nivel}: 6 fotogramas en 1,1 s`);
@@ -341,7 +348,7 @@ test('a 25× varios fotogramas por rAF entregan solo el último (skipped) y el o
 
 test('cambio de nivel: el primer fotograma del nivel nuevo sale sin esperar, con discontinuidad y cambioDeNivel', async () => {
   const h = harness();
-  await h.player.start(); await h.player.seek(180_000);
+  await h.player.start(); await h.player.seek(180_000); h.player.setSpeed(1);
   assert.equal(h.player.nivel, 3); h.emitted.length = 0;
   await h.run(1500); // 4 fotogramas de L3 (182400…189600) y el salto a L2 (192000…)
   const ticks = h.emitted.map(e => e.tick);
@@ -453,7 +460,7 @@ test('el paso atrás invalida un salto en vuelo: solo cuenta la última orden', 
 test('laguna: el reproductor la salta, lo avisa y el fotograma que la cruza es discontinuo', async () => {
   const laguna: Laguna = { t0: 117_600, t1: 132_000 };
   const h = harness({ coberturas: [{ nivel: 3, t0: 0, t1: 117_600 }, { nivel: 3, t0: 132_000, t1: 240_000 }], lagunas: [laguna] });
-  await h.player.start(); await h.player.seek(112_800);
+  await h.player.start(); await h.player.seek(112_800); h.player.setSpeed(1);
   h.emitted.length = 0; h.holdResponses(false);
   await h.run(2500);
   const ticks = h.emitted.map(e => e.tick);
@@ -482,7 +489,7 @@ test('seek dentro de una laguna cae en su borde según la dirección; fuera de l
 test('bifurcación: al cruzar su punto la crónica recibe la línea con los días perdidos; sin discontinuidad', async () => {
   const b: Bifurcacion = { epoca: 0, desde: 60_000, hasta: 90_000, motivo: 'reinicio' };
   const h = harness({ coberturas: MULTINIVEL, bifurcaciones: [b] });
-  await h.player.start(); await h.player.seek(55_200);
+  await h.player.start(); await h.player.seek(55_200); h.player.setSpeed(1);
   assert.equal(h.marcas.length, 0, 'saltar a un punto no dispara la marca');
   h.emitted.length = 0;
   await h.run(1500);
@@ -490,7 +497,7 @@ test('bifurcación: al cruzar su punto la crónica recibe la línea con los día
   assert.equal(h.marcas[0]!.texto, 'El mundo se reinició: se perdieron 12,5 días no guardados.');
   assert.ok(h.emitted.every(e => !e.info.discontinuity));
   const restaurada = harness({ coberturas: MULTINIVEL, bifurcaciones: [{ ...b, motivo: 'restauracion' }] });
-  await restaurada.player.start(); await restaurada.player.seek(55_200); await restaurada.run(1500);
+  await restaurada.player.start(); await restaurada.player.seek(55_200); restaurada.player.setSpeed(1); await restaurada.run(1500);
   assert.match(restaurada.marcas[0]!.texto, /Se restauró una copia anterior del mundo: se perdieron 12,5 días/);
   h.player.stop(); restaurada.player.stop();
 });
@@ -551,7 +558,7 @@ test('seek sin nada en ese punto avisa y deja el cabezal donde estaba', async ()
 
 test('prefetch: un solo trozo en vuelo, nunca más allá del presente y sin repetir cuando no hay más', async () => {
   const h = harness();
-  await h.player.start(); await h.player.seek(239_800);
+  await h.player.start(); await h.player.seek(239_800); h.player.setSpeed(1);
   await h.run(10_000);
   assert.equal(h.player.currentTick, 240_000);
   const enVuelo = h.requests.length;
@@ -567,7 +574,7 @@ test('prefetch: un solo trozo en vuelo, nunca más allá del presente y sin repe
 
 test('prefetch con trozos de 90 y deltas perezosos: llegar el trozo no expande los deltas, se expanden al cruzarlos', async () => {
   const h = harness();
-  await h.player.start(); await h.player.seek(8_400);
+  await h.player.start(); await h.player.seek(8_400); h.player.setSpeed(1);
   await flush();
   assert.equal(h.requests.at(-1)!.n, 90);
   assert.ok(h.player.bufferedAhead >= 70);
@@ -580,7 +587,7 @@ test('prefetch con trozos de 90 y deltas perezosos: llegar el trozo no expande l
 
 test('paridad exacta: cada fotograma entregado por deltas es idéntico al grabado, también entre trozos', async () => {
   const h = harness();
-  await h.player.start(); await h.player.seek(8_400);
+  await h.player.start(); await h.player.seek(8_400); h.player.setSpeed(1);
   h.emitted.length = 0;
   await h.run(20_000);
   assert.ok(h.emitted.length > 100);
@@ -590,7 +597,7 @@ test('paridad exacta: cada fotograma entregado por deltas es idéntico al grabad
 
 test('changedTiles trae solo las teselas modificadas y se acumula al saltar fotogramas', async () => {
   const h = harness();
-  await h.player.start(); await h.player.seek(236_100); // L0: la comida cambia de tesela en cada fotograma
+  await h.player.start(); await h.player.seek(236_100); h.player.setSpeed(1); // L0: la comida cambia de tesela en cada fotograma
   h.emitted.length = 0;
   await h.run(500);
   const parcial = h.emitted.find(e => e.info.changedTiles);
@@ -756,7 +763,9 @@ test('al entrar retoma el último marcador a 1× con el aviso del desfase al pre
   const h = harness({ coberturas: MULTINIVEL, marcadores: perfil });
   await h.player.start();
   assert.equal(h.emitted[0]!.tick, 98_400); assert.equal(h.emitted[0]!.info.reason, 'start');
-  assert.equal(h.player.speed, 1, 'retoma a 1×, no a la velocidad guardada');
+  assert.equal(h.player.modoReloj, 'tiempo-real');
+  assert.equal(h.player.atLiveEdge, false);
+  assert.equal(h.player.speed, 1, 'sin modo guardado no restaura el 5× viejo ni engancha el borde');
   assert.deepEqual(h.avisos, ['Retomando en el día 42 · el presente está a 59 días']);
   h.player.stop();
 });
@@ -768,7 +777,8 @@ test('marcador en el presente avisa «estás en el presente»; marcador pasado d
   assert.deepEqual(vivo.avisos, ['Retomando en el día 100 · estás en el presente']);
   const nada = harness({ coberturas: MULTINIVEL, marcadores: new PerfilCinta({ almacen: almacenEnMemoria(), red: { leer: async () => [], escribir: async () => true } }) });
   await nada.player.start();
-  assert.equal(nada.avisos.length, 0); assert.equal(nada.requests[0]!.t, 240_000 - DVR_LIMITS.liveMargin);
+  assert.equal(nada.avisos.length, 0); assert.equal(nada.requests[0]!.t, tickDeHistoria(0, 240_000));
+  assert.equal(nada.player.modoReloj, 'tiempo-real'); assert.equal(nada.player.atLiveEdge, false);
   vivo.player.stop(); nada.player.stop();
 });
 

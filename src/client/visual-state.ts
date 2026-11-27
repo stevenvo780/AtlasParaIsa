@@ -189,6 +189,19 @@ export class MotionTracker {
     for (const id of this.tracks.keys()) if (!seen.has(id)) this.tracks.delete(id);
   }
 
+  /**
+   * Alarga el deslizamiento que acaba de abrirse hasta `holdMs` (como mucho 8 s). Solo pasos cortos ya
+   * registrados: no crea una trayectoria, no cruza un teletransporte y no inventa un hueco de archivo.
+   */
+  prolongar(holdMs: number, nowMs: number): void {
+    if (!(holdMs > 0) || !Number.isFinite(nowMs)) return;
+    const tope = Math.min(holdMs, 8_000);
+    for (const track of this.tracks.values()) {
+      if (track.startedAt !== nowMs || track.length <= 0 || track.length > MOTION_LIMITS.snapTiles) continue;
+      if (track.durationMs < tope) track.durationMs = tope;
+    }
+  }
+
   /** Estado visual en `nowMs`. `undefined` si el cuerpo no se ha recibido. */
   sample(id: string, nowMs: number): MotionView | undefined {
     const track = this.tracks.get(id);

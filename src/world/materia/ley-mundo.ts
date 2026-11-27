@@ -28,6 +28,7 @@ import { CanalCompartido } from '../gpu/canal.js';
 import { crearPasoMateriaGpu, lanzarMateriaGpuConPlazo, prepararMateriaGpu, type PasoMateriaGpu } from '../gpu/materia-gpu.js';
 import type { TotalesMateria } from './libro.js';
 import { CUENTA, MundoMaterial, NOMBRE_CUENTA, N_CUENTAS, luzDe, luzMedia, type BaseMundo, type Forzamiento } from './mundo.js';
+import { reaccionObservadaDe } from './reaccion-observada.js';
 import { Rol, type Kappa, type LoteRef, type Plantilla } from './tipos.js';
 import { vistaAireVacia, vistaVacia, type VistaAire, type VistaTesela } from './vistas.js';
 
@@ -357,6 +358,7 @@ function paginasVencidas(e: Estado, c: CtxLey, periodo: number): Int32Array | re
  */
 function eco(c: CtxLey): void {
   const e = estado(c), m = e.m, tick = c.tick, K = Math.max(1, Math.floor(c.params.v23.cadenciaMateria));
+  m.tickObservacion = tick;
   enlazarMateria(e.puente);
   asentar(e);
   m.completarPlantillas();
@@ -615,6 +617,8 @@ function proyectarMundo(c: CtxLey, vista: WorldView): void {
   e.caja.c = c as CtxLeyMateria;
   const cm = e.caja.c, m = e.m;
   vista.materia = panel(e);
+  const observada = reaccionObservadaDe(cm.materia);
+  if (observada) vista.reaccionObservada = observada;
   if (!e.aireVista) {
     e.aireVista = {};
     for (const [p, a] of e.aire) e.aireVista[`${c.terreno.paginaX[p]},${c.terreno.paginaY[p]}`] = a;

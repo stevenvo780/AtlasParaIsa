@@ -41,7 +41,7 @@ export function fastEqual(a: unknown, b: unknown): boolean {
  * El tipo obliga a mantener esta lista al día con `WorldView`. */
 const OPCIONALES = ['paused', 'pauseReason', 'originX', 'originY', 'infinite', 'discoveredChunks', 'settlementCount', 'activeChunks',
   'stats', 'performance', 'communities', 'animals', 'blueprints', 'structures', 'technology', 'organization', 'geologyKey', 'chemistry', 'whispers', 'instanceId', 'regionesVivas', 'demography',
-  'materia', 'lotes', 'sustancias', 'aire', 'reparto'] as const;
+  'materia', 'lotes', 'sustancias', 'aire', 'reparto', 'reaccionObservada'] as const;
 type ClavesOpcionales = { [K in keyof WorldView]-?: object extends Pick<WorldView, K> ? K : never }[keyof WorldView];
 const exhaustivo: Exclude<ClavesOpcionales, (typeof OPCIONALES)[number]> extends never ? true : never = true;
 void exhaustivo;

@@ -31,6 +31,9 @@ import { demographicTraits } from '../demography.js';
 import { parcialDiversidad, reducirDiversidad, type ParcialDiversidad } from '../diversidad.js';
 import { escuchaDe } from '../genetics.js';
 import { paramsOf } from '../params.js';
+import { tecnicaVisible } from '../../shared/tecnica-visible.js';
+import { selloObra, vistaEstructuraLenta } from '../materia/piezas.js';
+import { leerReceta } from '../materia/proceso.js';
 import { projectCraft } from '../projection.js';
 import { progresoConstruccion, projectTile, specialty } from '../proyeccion.js';
 import type { Person, World } from '../mundo/tipos.js';
@@ -38,7 +41,7 @@ import type { OrganismosMundo } from '../soa/organismos-mundo.js';
 import { PAGE_SIDE } from '../soa/region.js';
 import { residentFastAccess } from '../soa/terreno.js';
 import { tileLookup } from '../tile-index.js';
-import type { CtxLey } from './acceso.js';
+import type { CtxLey, CtxLeyMateria } from './acceso.js';
 import { Clase, REF_NULA, slotDe, type ChunkId, type Hilo, type Terreno } from './contratos.js';
 import type { FotogramaEnCurso, SucesoEnlaceCinta, SucesoFotograma } from './fotograma.js';
 import { nuevosDe } from './reunir.js';
@@ -402,6 +405,8 @@ export class EmisorFotoDueno {
     paginas: new Map(),
   };
   #tentativo: TentativoDueno | null = null;
+  /** Piezas ya proyectadas. El sello solo mira los lotes de esa obra; si no cambia, no se vuelve a leer la vista. */
+  #obras = new Map<string, { sello: string; condition: number; water: number; food: number; uses: number; vista: StructureView }>();
   #resyncVisto = 0;
   #trasFallback = false;
 
@@ -426,6 +431,7 @@ export class EmisorFotoDueno {
       this.#confirmado.animales.clear();
       this.#confirmado.estructuras.clear();
       this.#confirmado.paginas.clear();
+      this.#obras.clear();
       this.#tentativo = null;
       this.#resyncVisto = resync;
       this.#trasFallback = false;
@@ -459,6 +465,19 @@ export class EmisorFotoDueno {
     for (const [uid, f] of t.animales) if (f === null) this.#confirmado.animales.delete(uid); else this.#confirmado.animales.set(uid, f);
     for (const [id, f] of t.estructuras) if (f === null) this.#confirmado.estructuras.delete(id); else this.#confirmado.estructuras.set(id, f);
     for (const [key, f] of t.paginas) if (f === null) this.#confirmado.paginas.delete(key); else this.#confirmado.paginas.set(key, f);
+  }
+
+  /** Obra con piezas: relee los lotes solo si su composición o su calor cambiaron. */
+  #vistaEstructura(c: CtxLey, s: StructureView): StructureView {
+    if (!('materia' in c) || !(c as CtxLeyMateria).materia) return s;
+    const ley = c as CtxLeyMateria;
+    const sello = selloObra(ley, s);
+    if (!sello) return s;
+    const previa = this.#obras.get(s.id);
+    if (previa && previa.sello === sello && previa.condition === s.condition && previa.water === s.water && previa.food === s.food && previa.uses === s.uses) return previa.vista;
+    const vista = vistaEstructuraLenta(ley, s);
+    this.#obras.set(s.id, { sello, condition: s.condition, water: s.water, food: s.food, uses: s.uses, vista });
+    return vista;
   }
 
   /** F6 (`escribirFoto`, tras `escribirFotograma` exitoso y antes de `emigrar`): produce el lote del dueño. */
@@ -531,7 +550,7 @@ export class EmisorFotoDueno {
     const idsEstructurasVivas = new Set<string>();
     for (const s of estructurasVivas) {
       idsEstructurasVivas.add(s.id);
-      const suceso: SucesoFotograma = { tipo: 'estructura', id: s.id, vista: s };
+      const suceso: SucesoFotograma = { tipo: 'estructura', id: s.id, vista: this.#vistaEstructura(c, s) };
       const bytes = serialize(suceso);
       const firma = firmaDeBytes(bytes);
       const previa = emitirTodo ? undefined : this.#confirmado.estructuras.get(s.id);
@@ -558,6 +577,7 @@ export class EmisorFotoDueno {
         const uid = p.uid!;
         uidsPersonasVivas.add(uid);
         const { vista, textos } = proyectarPersonaLenta(m, p, cuerpo);
+        if (p.technology.tecnica) vista.tecnicaVista = tecnicaVisible(p.technology.tecnica, id => leerReceta(c.globales.registro, id));
         const suceso: SucesoFotograma = { tipo: 'persona', id: String(uid), vista };
         const bytes = serialize(suceso);
         const firmaVista = firmaDeBytes(bytes);

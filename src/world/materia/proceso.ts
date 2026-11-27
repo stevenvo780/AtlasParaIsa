@@ -22,6 +22,8 @@ import { pasoLote, type CtxPaso } from './paso.js';
 import { fluirCalor } from './fluir.js';
 import { desprender, reparto, romper } from './romper.js';
 import { Parte, Rol, type Cuerpo, type LoteRef, type Paso, type ProcesoMaterial, type VistaLote } from './tipos.js';
+import { tecnicaVisible } from '../../shared/tecnica-visible.js';
+import { anotarReaccionAplicada, reaccionObservadaDe } from './reaccion-observada.js';
 import { aprenderReceta, avanzarTecnicaDelMundo, decodificarEnsenanza, iniciarTecnica, mantenerTecnica } from '../technology.js';
 
 // ── Constantes físicas: viven en shared/naturaleza.ts (integrador) y se reexportan aquí ─────────────────────
@@ -124,10 +126,20 @@ export const perfilDeVector = (vector: readonly number[]): Record<string, number
 // ── Utilidades de lote ───────────────────────────────────────────────────────────────────────────────────
 
 const pasos = new WeakMap<object, CtxPaso>();
-/** El contexto de `pasoLote`, `fluir` y `romper` desde el de la ley: arena, química y azar del hilo. */
+/** El contexto de `pasoLote`, `fluir` y `romper` desde el de la ley: arena, química y azar del hilo.
+ * La anotación no sortea: registra la primera reacción aplicada y luego se quita. */
 export function ctxPaso(c: CtxLeyMateria): CtxPaso {
   let p = pasos.get(c);
-  if (!p) pasos.set(c, p = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() });
+  if (!p) {
+    p = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
+    if (!reaccionObservadaDe(c.materia)) {
+      p.anotar = (reaccion, veces, lote) => {
+        anotarReaccionAplicada(c.materia, reaccion, veces, lote, c.tick);
+        p!.anotar = undefined;
+      };
+    }
+    pasos.set(c, p);
+  }
   return p;
 }
 
@@ -239,7 +251,14 @@ export const leyTecnica: Ley = {
   F5: c => avanzarTecnicaDelMundo(c as CtxLeyMateria),
   F6: c => mantenerTecnica(c as CtxLeyMateria),
   aplicar: { Ensenar: (c, i) => aplicarEnsenar(c as CtxLeyMateria, i) },
-  proyectar: { mundo: (c, vista) => proyectarLotes(c as CtxLeyMateria, vista) },
+  proyectar: {
+    mundo: (c, vista) => proyectarLotes(c as CtxLeyMateria, vista),
+    persona: (c, p, vista) => {
+      const t = p.technology?.tecnica;
+      if (!t) return;
+      vista.tecnicaVista = tecnicaVisible(t, id => leerReceta(c.globales.registro, id));
+    },
+  },
   comprobar: c => comprobarTecnica(c as CtxLeyMateria),
 };
 

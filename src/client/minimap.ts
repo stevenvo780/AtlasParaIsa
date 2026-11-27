@@ -162,17 +162,54 @@ export function mountMinimap(
   let currentViewport: Viewport | null = null;
   let lastProj: MinimapProjection | null = null;
   let dragging = false;
+  // El terreno descubierto no depende de la cámara. Mover el recuadro no vuelve a pintar cada región.
+  let base: HTMLCanvasElement | null = null;
+  let baseMap: WorldMapResponse | null = null;
+  let baseW = 0;
+  let baseH = 0;
 
-  const draw = () => {
-    if (!ctx || !currentMap) return;
+  const size = (): { w: number; h: number } => {
     const rect = canvas.getBoundingClientRect();
-    const w = Math.max(120, Math.round(rect.width || canvas.width || 220));
-    const h = Math.max(90, Math.round(rect.height || canvas.height || 150));
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
-    }
-    lastProj = renderMinimap(ctx, w, h, currentMap, currentViewport);
+    return {
+      w: Math.max(120, Math.round(rect.width || canvas.width || 220)),
+      h: Math.max(90, Math.round(rect.height || canvas.height || 150)),
+    };
+  };
+
+  const paintBase = (w: number, h: number): void => {
+    if (!currentMap) return;
+    if (!base) base = document.createElement('canvas');
+    if (base.width !== w || base.height !== h) { base.width = w; base.height = h; }
+    const baseCtx = base.getContext('2d');
+    if (!baseCtx) return;
+    lastProj = renderMinimap(baseCtx, w, h, currentMap, null);
+    baseMap = currentMap;
+    baseW = w;
+    baseH = h;
+  };
+
+  const strokeViewport = (): void => {
+    if (!ctx || !lastProj || !currentViewport) return;
+    const proj = lastProj;
+    const vx = proj.offsetX + (currentViewport.x - proj.minX) * proj.scale;
+    const vy = proj.offsetY + (currentViewport.y - proj.minY) * proj.scale;
+    const vw = Math.max(5, currentViewport.width * proj.scale);
+    const vh = Math.max(4, currentViewport.height * proj.scale);
+    ctx.strokeStyle = '#f7f2e7';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(vx, vy, vw, vh);
+    ctx.fillStyle = 'rgba(247, 242, 231, 0.10)';
+    ctx.fillRect(vx, vy, vw, vh);
+  };
+
+  const draw = (mapChanged: boolean) => {
+    if (!ctx || !currentMap) return;
+    const { w, h } = size();
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    if (mapChanged || !base || baseMap !== currentMap || baseW !== w || baseH !== h) paintBase(w, h);
+    if (!base) return;
+    ctx.drawImage(base, 0, 0);
+    strokeViewport();
   };
 
   const teleportFromEvent = (ev: PointerEvent) => {
@@ -203,13 +240,14 @@ export function mountMinimap(
   canvas.addEventListener('pointercancel', onUp);
 
   return {
-    updateMap(map) { currentMap = map; draw(); },
-    updateViewport(vp) { currentViewport = vp; draw(); },
+    updateMap(map) { currentMap = map; draw(true); },
+    updateViewport(vp) { currentViewport = vp; draw(false); },
     destroy() {
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
+      if (base) { base.width = base.height = 0; base = null; }
     },
   };
 }

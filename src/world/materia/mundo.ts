@@ -38,6 +38,7 @@ import {
 import { ArenaLotes, LOTES_POR_BLOQUE } from './arena.js';
 import { indiceTipoEnlace, esGasA } from './quimica.js';
 import { binomial, medir, pasoLote, type CtxPaso } from './paso.js';
+import { anotarReaccionAplicada } from './reaccion-observada.js';
 import { fluir } from './fluir.js';
 import { copiar, crearPlantilla } from './copiar.js';
 import { cargarSustancias, serializarSustancias, type ServicioQuimicoImpl } from './servicio.js';
@@ -641,6 +642,8 @@ export class MundoMaterial {
   private readonly masaAire: number;
   /** Cuantos de agua por tesela que saturan el cielo a la temperatura media: la referencia del nivel del mar. */
   readonly cieloReferencia: number;
+  /** Tick que w publica antes de la química de este paso. −1 hasta entonces: no se anota una reacción sin fecha. */
+  tickObservacion = -1;
 
   private constructor(k: Nucleo) {
     this.arena = k.arena; this.quimica = k.quimica; this.libro = k.libro; this.cuentas = k.cuentas; this.hilo = k.hilo;
@@ -668,6 +671,11 @@ export class MundoMaterial {
         a ^= a + Math.imul(a ^ (a >>> 7), a | 61);
         return ((a ^ (a >>> 14)) >>> 0) / 4294967296;
       },
+    };
+    this.ctx.anotar = (reaccion, veces, lote) => {
+      if (self.tickObservacion < 0) return;
+      anotarReaccionAplicada(self.arena, reaccion, veces, lote, self.tickObservacion);
+      self.ctx.anotar = undefined;
     };
   }
 

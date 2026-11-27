@@ -11,6 +11,7 @@ import {
   type CruceFaunaSaliente, type LoteFotoDuenos,
 } from '../../world/motor/fotograma-dueno.js';
 import { fundir } from '../../world/motor/reunir.js';
+import { reaccionObservadaDe } from '../../world/materia/reaccion-observada.js';
 import type { ServicioQuimicoAuditable } from '../../world/materia/servicio.js';
 import { projectChemistry, VIEW_EVENTS, VIEW_MEMORIES } from '../../world/proyeccion.js';
 import { PAGE_SIDE } from '../../world/soa/region.js';
@@ -401,12 +402,14 @@ export function fuenteFotograma(inicial: World, epoca: number, instancia: string
         bornAt: p.bornAt, diedAt: p.diedAt, cause: p.cause,
       }));
 
+      const reaccionObservada = reaccionObservadaDe((ctxSi(m) as CtxLeyMateria | undefined)?.materia);
       const cabeceraMundo: VistaMundoFotograma = {
         geologyKey: publicGeologyKey(m.seed),
         width: 40, height: 28, originX: 0, originY: 0, infinite: true,
         activeChunks: lote.clavesActivas.size, discoveredChunks, settlementCount,
         stats,
         ...(chemistry ? { chemistry } : {}),
+        ...(reaccionObservada ? { reaccionObservada } : {}),
         demography: { deaths: demographyDynamics.deaths, causes: { ...demographyDynamics.causes }, recent: recentLegacy },
         ...(instancia !== undefined ? { instanceId: instancia } : {}),
         performance: { ...runtime },

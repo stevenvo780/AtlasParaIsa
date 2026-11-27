@@ -11,7 +11,8 @@ import type { CtxLey, CtxLeyMateria, Ley } from '../motor/acceso.js';
 import { CHUNK_SIZE } from '../terrain.js';
 import { fluirCalor } from './fluir.js';
 import { fuegoEn, kappaDeRol, lotesDeCelda } from './ley-mundo.js';
-import { pasoLote } from './paso.js';
+import { pasoLote, type CtxPaso } from './paso.js';
+import { anotarReaccionAplicada, reaccionObservadaDe } from './reaccion-observada.js';
 import { desprender } from './romper.js';
 import { Parte, Rol, type LoteRef, type Pedido, type ProcesoMaterial, type VistaLote } from './tipos.js';
 
@@ -203,7 +204,13 @@ export function depositarEnObra(c: CtxLeyMateria, s: StructureView, tipo: Deposi
 }
 
 function pasoPieza(c: CtxLeyMateria, lote: LoteRef, celda: number): void {
-  const ctx = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
+  const ctx: CtxPaso = { arena: c.materia, quimica: c.quimica, azar: () => c.azar() };
+  if (!reaccionObservadaDe(c.materia)) {
+    ctx.anotar = (reaccion, veces, loteAplicado) => {
+      anotarReaccionAplicada(c.materia, reaccion, veces, loteAplicado, c.tick);
+      ctx.anotar = undefined;
+    };
+  }
   const entorno = lotesDeCelda(c, celda, { suelo: -1, agua: -1, vida: -1, aire: -1 });
   const vista = c.materia.vista(lote);
   const f = formaDeCodigo(vista.forma);
@@ -279,6 +286,30 @@ function pasoObra(c: CtxLeyMateria): void {
     }
     if (!queda) celdas.delete(celda);
   }
+}
+
+const SELLO_IDS = new Uint32Array(16);
+const SELLO_Q = new Float64Array(16);
+/** Huella de las piezas ya colocadas. No recorre el mundo: solo los lotes de esta obra. */
+export function selloObra(c: CtxLeyMateria, s: StructureView): string {
+  const obra = estadoObra(s);
+  if (!obra) return '';
+  let sello = `${obra.piezas.length}`;
+  for (const p of obra.piezas) {
+    if (!c.materia.propio(p.lote)) { sello += `|${p.lote}:ajeno`; continue; }
+    const n = c.materia.especies(p.lote, SELLO_IDS, SELLO_Q);
+    sello += `|${p.lote}@${p.x},${p.y}:${c.materia.calor(p.lote)}#${n}:`;
+    for (let i = 0; i < n && i < SELLO_IDS.length; i++) sello += `${SELLO_IDS[i]}=${SELLO_Q[i]},`;
+  }
+  return sello;
+}
+
+/** Vista lenta de una obra: las piezas reales de sus lotes. Sin obra material, la estructura cruda. */
+export function vistaEstructuraLenta(c: CtxLeyMateria, s: StructureView): StructureView {
+  const obra = estadoObra(s);
+  if (!obra) return s;
+  const piezas = piezasVisibles(c, s);
+  return piezas.length || s.piezas !== undefined ? { ...s, piezas } : s;
 }
 
 function piezasVisibles(c: CtxLeyMateria, s: StructureView): LoteVisible[] {

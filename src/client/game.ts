@@ -12,7 +12,7 @@ import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection, type VinculoMapa } from './landscape.js';
 import { ClientTileCache } from './tile-cache.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
-import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda } from './inspector-view.js';
+import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink, faunaFicha, materiaTeselaFicha, lotesFicha, lotesDeCelda, fichaMateriales } from './inspector-view.js';
 import { applyObserverOnly, OBSERVER_NOTE, worldShell } from './world-shell.js';
 import { DvrPlayer, PerfilCinta, crearRedCinta, leerEscenaArchivo, type DvrFrameInfo, type DvrState } from './dvr-player.js';
 import { mountDvrBar, type DvrBarController } from './dvr-bar.js';
@@ -241,6 +241,9 @@ function enterWorld(flags: SessionFlags = {}): void {
 /** Con la cinta, el HUD pesado se rehace a ≈ 6 Hz (y en cada salto); el paisaje recibe todos los fotogramas. */
 function receiveTapeFrame(frame: WorldView, info: DvrFrameInfo): void {
   const now = performance.now();
+  // Paseo (y un hueco corto): el deslizamiento de cuerpos ya existente dura hasta el fotograma siguiente.
+  // Un hueco largo o una discontinuidad no se estira: no se inventan acciones entre medias.
+  landscape?.setDvrHold(!info.discontinuity && info.tickIntervalMs > 0 && info.tickIntervalMs <= 8_000 ? info.tickIntervalMs : 0);
   // V22: con trozos delta solo se ingieren las teselas que cambiaron (10–50) en vez de las ~6.000 de la vista.
   // Sin `changedTiles` (fotograma completo, base de trozo, salto) se ingiere la vista entera como siempre.
   const tiles = info.changedTiles ?? frame.tiles;
@@ -257,6 +260,8 @@ function startTape(): void {
   connection?.setTapeMode(true);
   dvrBar = mountDvrBar(container, {
     togglePlay: () => dvr?.togglePlaying(), step: delta => void dvr?.step(delta), setSpeed: speed => dvr?.setSpeed(speed),
+    setTiempoReal: () => dvr?.entrarEnTiempoReal(),
+    setPaseo: () => dvr?.entrarEnPaseo(),
     reproducirTramo: (desde, hasta) => void dvr?.reproducirTramo(desde, hasta),
     seek: tick => void dvr?.seek(tick), jumpLive: () => void dvr?.jumpToLiveEdge(),
   });
@@ -283,6 +288,7 @@ function startTape(): void {
     ajustarAltura();
     dvrResize = new ResizeObserver(ajustarAltura);
     dvrResize.observe(container);
+    player.setPaginaVisible(typeof document === 'undefined' || !document.hidden);
     const loop = (now: number): void => { player.advance(now); dvrRaf = requestAnimationFrame(loop); };
     dvrRaf = requestAnimationFrame(loop);
   });
@@ -976,12 +982,12 @@ function renderInspector(): void {
     const currentTick = world.tick;
     const visible = evidenciaVisible(currentTick);
     const visibleEvents = visible.events;
-    const signature = JSON.stringify([p, persona ?? null, visible.key, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    const signature = JSON.stringify([p, persona ?? null, visible.key, world.events.map(event => event.id), ownCommunity, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes, world.sustancias?.map(s => s.id), world.people.filter(q => q.role !== 'neighbor').map(q => [q.role, q.x, q.y])]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     // The progress meter is rendered by the always-visible telemetry below.
-    const sections = inheritedAndLearned(persona ? { ...p, working: false, experiences: persona.experiences, trust: persona.trust } : { ...p, working: false }, world, persona?.recipeIds, persona ?? null, id => { const event = cronica.get(id) ?? world?.events.find(event => event.id === id); return event && event.tick <= currentTick ? event : undefined; }, visibleEvents);
+    const sections = inheritedAndLearned(persona ? { ...p, working: false, experiences: persona.experiences, trust: persona.trust } : { ...p, working: false }, world, persona?.recipeIds, persona ?? null, id => { const event = cronica.get(id) ?? world?.events.find(event => event.id === id); return event && event.tick <= currentTick ? event : undefined; }, visibleEvents, { repertorio: historical ? 'no-grabado' : 'cargando' });
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, visibleEvents)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${renderPersonTelemetry(p)}${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3>${fichaMateriales(p)}${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, visibleEvents)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
@@ -1153,7 +1159,7 @@ function renderStatsContent(): void {
     return;
   }
   if (statsTab === 'materia') {
-    panel.innerHTML = stamp + renderPanelMateria(leerMateria(world.materia), cicloMateria, world.sustancias, world.tick);
+    panel.innerHTML = stamp + renderPanelMateria(leerMateria(world.materia), cicloMateria, world.sustancias, world.tick, world.reaccionObservada);
     return;
   }
   if (statsTab === 'performance') {
@@ -1204,8 +1210,9 @@ function renderStatsContent(): void {
 }
 document.addEventListener('keydown', tapeShortcut); // una sola vez: `wire()` corre en cada entrada al mundo
 window.addEventListener('pagehide', saveVisit);
-window.addEventListener('pagehide', () => dvr?.guardarAlSalir());
+window.addEventListener('pagehide', () => { dvr?.setPaginaVisible(false); dvr?.guardarAlSalir(); });
 document.addEventListener('visibilitychange', () => {
+  dvr?.setPaginaVisible(!document.hidden);
   soundscape.setHidden(document.hidden);
   if (document.hidden) saveVisit();
   else if (uiSession) {

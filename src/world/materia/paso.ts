@@ -51,6 +51,8 @@ export interface CtxPaso {
   readonly arena: ArenaMateria;
   readonly quimica: ServicioQuimico;
   azar(): number;
+  /** Si está, se llama una vez por reacción aplicada y el observador puede quitarla. No sortea ni cambia el paso. */
+  anotar?(reaccion: Reaccion, veces: number, lote: LoteRef): void;
 }
 
 /** J por cuanto de rebaja de barrera por familia (C–O, C–N, C–C/C–H, H–H): el `Kappa` de tipos.ts; lo pone el rol del lote. */
@@ -657,7 +659,7 @@ function pase(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa, T: number, V: nu
   for (let k = 0; k < m; k++) {
     const r = canales[k]!;
     if (r.dH > 0) pide += veces[k]! * r.dH;
-    else if (veces[k]! > 0) { const v = arena.aplicar(l, r, veces[k]!); total += v; calor -= v * r.dH; producir(r, v); }
+    else if (veces[k]! > 0) { const v = arena.aplicar(l, r, veces[k]!); total += v; calor -= v * r.dH; producir(r, v); if (v > 0 && c.anotar) c.anotar(r, v, l); }
   }
   if (pide > calor) {
     const f = calor / pide;
@@ -672,7 +674,7 @@ function pase(c: CtxPaso, l: LoteRef, dt: number, kappa: Kappa, T: number, V: nu
     }
   }
   for (let k = 0; k < m; k++) {
-    if (canales[k]!.dH > 0 && veces[k]! > 0) { const v = arena.aplicar(l, canales[k]!, veces[k]!); total += v; producir(canales[k]!, v); }
+    if (canales[k]!.dH > 0 && veces[k]! > 0) { const v = arena.aplicar(l, canales[k]!, veces[k]!); total += v; producir(canales[k]!, v); if (v > 0 && c.anotar) c.anotar(canales[k]!, v, l); }
   }
   canales.fill(null, 0, m);
   return total;

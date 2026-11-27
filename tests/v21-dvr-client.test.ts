@@ -5,7 +5,7 @@ import { CINTA, type SeriePunto } from '../src/shared/cinta.js';
 import { PROTOCOL_VERSION, type WorldView } from '../src/shared/types.js';
 import { VELOCIDADES } from '../src/client/dvr-player.js';
 import {
-  desfaseLabel, duracionDeMundo, duracionDeTicks, dvrEngineLabel, dvrHoverLabel, dvrTimeLabel, escalaLabel, marcasMarkup, mountDvrBar,
+  desfaseLabel, duracionDeMundo, duracionDeTicks, duracionPrecisa, dvrEngineLabel, dvrHoverLabel, dvrTimeLabel, escalaLabel, horaVisible, marcasMarkup, mountDvrBar, relojLabel, sigueBorde,
   nearestSeriePoint, renderDvrBar, segundosDeMundoPorSegundo, type DvrBarHandlers, type DvrBarState,
 } from '../src/client/dvr-bar.js';
 import { applyObserverOnly, OBSERVER_HIDDEN_IDS, OBSERVER_NOTE, worldShell } from '../src/client/world-shell.js';
@@ -35,15 +35,17 @@ test('renderDvrBar: transporte, velocidades, serie de fondo, insignia de escala,
   assert.match(html, /data-dvr-escala[^>]*>Resumen diario · 1 s = 12 d de mundo</);
   assert.match(html, /4 d de mundo hasta el presente/);
   assert.match(html, /⚡ 120 Hz/);
-  assert.match(html, /<button type="button" class="dvr-live" data-dvr-live aria-pressed="false"[^>]*>● Presente<\/button>/);
-  assert.doesNotMatch(html, /Borde vivo|NaN|undefined|Infinity/);
+  assert.match(html, /data-dvr-tiempo-real aria-pressed="false"[^>]*>Tiempo real</);
+  assert.match(html, /<button type="button" class="dvr-live" data-dvr-live aria-pressed="false"[^>]*>Borde vivo<\/button>/);
+  assert.doesNotMatch(html, /NaN|undefined|Infinity/);
 });
 
 test('renderDvrBar: pausa muestra ▶, el presente se resalta, la vista previa del punto aparece y un fallo de la cinta se dice', () => {
-  const paused = renderDvrBar(barState({ playing: false, atLiveEdge: true, aheadOfPlayhead: 12 }), serie()[2]!);
+  const paused = renderDvrBar(barState({ playing: false, atLiveEdge: true, aheadOfPlayhead: 12, modoReloj: 'tiempo-real' }), serie()[2]!);
   assert.match(paused, /aria-label="Reproducir"[^>]*>▶</);
-  assert.match(paused, /class="dvr-live is-live" data-dvr-live aria-pressed="true"/);
-  assert.match(paused, /en el presente/);
+  assert.match(paused, /class="dvr-live" data-dvr-live aria-pressed="false"/);
+  assert.doesNotMatch(paused, /en el presente/);
+  assert.match(paused, /7 min de mundo hasta el presente/);
   assert.match(paused, /<span class="dvr-hover" data-dvr-hover>Día 5 · 00:00 · Pob 20 · Fauna 5 · Obras 2 · Sustancias 4<\/span>/);
   assert.match(renderDvrBar(barState()), /<span class="dvr-hover" data-dvr-hover><\/span>/);
   assert.doesNotMatch(renderDvrBar(barState()), /dejó de grabar/);
@@ -78,6 +80,12 @@ test('escala: nivel y paso en tiempo de mundo (fps del nivel × paso × velocida
   assert.equal(escalaLabel(2, 0.5), 'Fauna en densidad · 1 s = 9 h de mundo');
   assert.equal(escalaLabel(1, 25), 'Sin telemetría · 1 s = 2 d de mundo');
   assert.equal(escalaLabel(null, 1), ''); assert.equal(escalaLabel(9 as never, 1), '');
+  assert.equal(duracionPrecisa(36), '36 s'); assert.equal(duracionPrecisa(144), '2 min 24 s');
+  assert.equal(relojLabel({ nivel: 0, speed: 1, modoReloj: 'tiempo-real', paso: 4 }), 'Tiempo real · 1 s = 1 s de mundo · fotograma cada 2 min 24 s · cada tick son 36 s · el terreno espera');
+  assert.equal(relojLabel({ nivel: 0, speed: 1, modoReloj: 'paseo', paso: 4 }), 'Paseo · 1 tick de mundo por segundo · fotograma cada 4 s · los cuerpos se deslizan entre fotos cercanas');
+  assert.match(renderDvrBar(barState({ modoReloj: 'paseo', paso: 4, nivel: 0 })), /data-dvr-paseo aria-pressed="true"[^>]*>Paseo</);
+  assert.equal(relojLabel({ nivel: 3, speed: 1, modoReloj: 'borde-vivo' }), 'Borde vivo · la imagen sigue el presente de la cinta');
+  assert.equal(horaVisible({ currentTick: 0, playTick: 5 / 36, modoReloj: 'tiempo-real' }), 'Día 1 · 00:00:05');
   assert.equal(duracionDeMundo(30), '30 s'); assert.equal(duracionDeMundo(5400), '1 h 30 min'); assert.equal(duracionDeMundo(86_400 * 2.25), '2 d 6 h'); assert.equal(duracionDeMundo(-5), '1 s');
 });
 
@@ -88,7 +96,13 @@ test('helpers de la barra: tiempo, motor, desfase y punto más cercano', () => {
   assert.equal(dvrEngineLabel(state), '⚡ 120 Hz');
   assert.equal(desfaseLabel({ aheadOfPlayhead: 4 * 2400 + 600, atLiveEdge: false }), '4 d 6 h de mundo hasta el presente');
   assert.equal(duracionDeTicks(2400 * 4 + 600), '4 d 6 h');
-  assert.equal(desfaseLabel({ aheadOfPlayhead: 5, atLiveEdge: true }), 'en el presente');
+  assert.equal(desfaseLabel({ aheadOfPlayhead: 5, atLiveEdge: true }), '3 min de mundo hasta el presente');
+  assert.equal(desfaseLabel({ aheadOfPlayhead: 5, atLiveEdge: true, modoReloj: 'borde-vivo' }), 'en el presente');
+  assert.equal(desfaseLabel({ aheadOfPlayhead: 0, atLiveEdge: true, modoReloj: 'tiempo-real' }), 'en la última foto');
+  assert.equal(sigueBorde({ aheadOfPlayhead: 0, modoReloj: 'tiempo-real' }), false);
+  assert.equal(sigueBorde({ aheadOfPlayhead: 16, modoReloj: 'borde-vivo' }), true);
+  assert.equal(sigueBorde({ aheadOfPlayhead: 0, archivo: true, modoReloj: 'ritmo' }), true);
+  assert.equal(sigueBorde({ aheadOfPlayhead: 8, archivo: true }), false);
   assert.equal(nearestSeriePoint(state.serie, 9000)!.t, 9600);
   assert.equal(nearestSeriePoint([], 1), null);
   assert.equal(dvrHoverLabel(null), '');
@@ -113,16 +127,29 @@ class FakeContainer {
 test('mountDvrBar: pinta la barra y delega cada botón en su manejador', () => {
   const container = new FakeContainer();
   const calls: unknown[] = [];
-  const handlers: DvrBarHandlers = { togglePlay: () => calls.push('play'), step: d => calls.push(['step', d]), setSpeed: s => calls.push(['speed', s]), seek: t => calls.push(['seek', t]), jumpLive: () => calls.push('live') };
+  const handlers: DvrBarHandlers = { togglePlay: () => calls.push('play'), step: d => calls.push(['step', d]), setSpeed: s => calls.push(['speed', s]), setTiempoReal: () => calls.push('tiempo'), seek: t => calls.push(['seek', t]), jumpLive: () => calls.push('live') };
   const bar = mountDvrBar(container as unknown as HTMLElement, handlers);
   bar.update(barState());
   assert.match(container.innerHTML, /class="dvr-transport"/);
-  container.click({ 'data-dvr-play': '' }); container.click({ 'data-dvr-live': '' });
+  container.click({ 'data-dvr-play': '' }); container.click({ 'data-dvr-tiempo-real': '' }); container.click({ 'data-dvr-live': '' });
   container.click({ 'data-dvr-step': '-1' }); container.click({ 'data-dvr-step': '1' });
   container.click({ 'data-dvr-speed': '10' }); container.click({ 'data-dvr-speed': '3' });
-  assert.deepEqual(calls, ['play', 'live', ['step', -1], ['step', 1], ['speed', 10]]);
+  assert.deepEqual(calls, ['play', 'tiempo', 'live', ['step', -1], ['step', 1], ['speed', 10]]);
   bar.destroy();
   assert.equal(container.innerHTML, ''); assert.equal(container.listeners.size, 0);
+});
+
+test('el tiempo accesible sigue el arrastre antes de soltar el deslizador', () => {
+  const container = new FakeContainer();
+  const handlers: DvrBarHandlers = { togglePlay() {}, step() {}, setSpeed() {}, seek() {}, jumpLive() {} };
+  const bar = mountDvrBar(container as unknown as HTMLElement, handlers);
+  bar.update(barState());
+  const attrs: Record<string, string> = {};
+  const input = { value: '3600', hasAttribute: (name: string) => name === 'data-dvr-range',
+    setAttribute: (name: string, value: string) => { attrs[name] = value; } };
+  container.listeners.get('input')!({ target: input });
+  assert.equal(attrs['aria-valuetext'], 'Día 2 · 12:00');
+  bar.destroy();
 });
 
 /* ------------------------------------------------------------------ */

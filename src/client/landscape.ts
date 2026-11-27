@@ -586,6 +586,8 @@ export class Landscape {
   private sceneRevision = 0;
   /* V22 — rendimiento a 60 fps con zoom lejano */
   private dvrMode = false;
+  /** Hueco hasta el próximo fotograma de la cinta, solo si es corto (Paseo). 0 = el deslizamiento medido. */
+  private dvrHoldMs = 0;
   private gridRevision = 0;
   private gridTilesRef: readonly Tile[] | null = null;
   private bakedSeed: number | undefined;
@@ -608,6 +610,8 @@ export class Landscape {
   /** Teselas (con borde) con las que se selló cada trozo de la ventana: una ventana nueva solo re-sella lo que cambió. */
   private chunkRefs = new Map<string, (Tile | undefined)[]>();
   private windowChunkKeys: string[] = [];
+  /** Trozos de una recomposición de cámara cuya firma aún no se miró: se reparte entre fotogramas. */
+  private pendingPrep: { cx: number; cy: number }[] | null = null;
   private stampCounter = 0;
   /** Sube si cambia algo que `SceneProps` deriva de la rejilla (árboles, cabañas, agua, rasgos), no con cada tesela. */
   private propsRevision = 0;
@@ -635,6 +639,8 @@ export class Landscape {
   /** V20: semilla del mundo para la geología latente (veta de hierro/cal/sal) horneada en el suelo. */
   private worldSeed: number | undefined;
   private sceneKey = '';
+  /** Identidad de la rejilla retenida. Si no cambia, un paneo no vuelve a pintar la escena. */
+  private sceneGridKey = '';
   private ambientKey = '';
   private eventAccents: EventAccent[] = [];
   private effects = { water: 0, vegetation: 0, rain: 0, events: 0, shadows: 0 };
@@ -852,7 +858,12 @@ export class Landscape {
       this.cadence.observe(world.sequence, world.tick, now);
       this.interval = this.cadence.tickIntervalMs;
       // V22: el DVR ya entrega los fotogramas a su ritmo exacto. Los cuerpos interpolan sin el colchón V18.
-      if (this.dvrMode) { if (!this.reduceMotion) { this.peopleMotion.ingest(world.people, now); this.animalMotion.ingest(world.animals ?? [], now); } }
+      if (this.dvrMode) {
+        if (!this.reduceMotion) {
+          this.peopleMotion.ingest(world.people, now); this.animalMotion.ingest(world.animals ?? [], now);
+          if (this.dvrHoldMs > 0) { this.peopleMotion.prolongar(this.dvrHoldMs, now); this.animalMotion.prolongar(this.dvrHoldMs, now); }
+        }
+      }
       else this.playback.push(world, world.sequence, world.tick, now);
     }
 
@@ -946,6 +957,9 @@ export class Landscape {
    * V22: `true` cuando `DvrPlayer` conduce la reproducción. El colchón V18 (`PlaybackBuffer`, 3–6 s de retraso) se
    * puentea —el DVR ya da un ritmo regular— pero `MotionTracker` sigue interpolando A→B entre ticks consecutivos.
    */
+  /** El reproductor avisa cuánto falta para el fotograma siguiente. Más de 8 s no se estira: el terreno espera. */
+  setDvrHold(ms: number): void { this.dvrHoldMs = Number.isFinite(ms) && ms > 0 && ms <= 8_000 ? ms : 0; }
+
   setDvrMode(active: boolean): void {
     if (this.dvrMode === active) return;
     this.dvrMode = active; this.perf.dvrMode = active;
@@ -1206,7 +1220,9 @@ export class Landscape {
     const composed = cache.composeViewport(x, y, w, h, live);
     this.perf.windowComposes++;
     this.setWindow(x, y, w, h, composed.tiles);
-    this.bakeGround();
+    // Paneo, teclado o zoom: la rejilla nueva entra ya, pero los trozos que faltan se hornean por tandas.
+    // Hornearlos todos aquí clavaba el fotograma (cientos de ms al alejar). Lo ya visto sigue en la caché.
+    this.bakeGround(false, BAKE_BUDGET_MS);
     this.sceneKey = '';
     this.measureCoverage(view, performance.now());
   }
@@ -1357,30 +1373,72 @@ export class Landscape {
    * Las memorias por tesela (material, borde de bioma, forma de árbol) duran mientras dure el objeto tesela; `force`
    * (el mismo objeto reenviado, quizá mutado en sitio) o una semilla nueva las vacían.
    */
-  private bakeGround(force = false): void {
+  private bakeGround(force = false, syncBudget?: number): void {
     if (this.worldW === 0 || this.worldH === 0) return;
     const first = !this.groundBaked || force;
     if (force || this.bakedSeed !== this.worldSeed) {
       this.groundMaterials = new WeakMap(); this.biomeFractions = new WeakMap(); this.treeForms = new WeakMap();
       this.chunkRefs = new Map(); this.chunkStamp.clear();
     }
+    const budgeted = syncBudget !== undefined && Number.isFinite(syncBudget);
+    const prepStart = performance.now();
     const refs = new Map<string, (Tile | undefined)[]>(), keys: string[] = [];
+    const pending: { cx: number; cy: number }[] = [];
+    let prepOpen = true;
     for (let cy = Math.floor(this.originY / CHUNK_ART_TILES); cy <= Math.floor((this.originY + this.worldH - 1) / CHUNK_ART_TILES); cy++) {
       for (let cx = Math.floor(this.originX / CHUNK_ART_TILES); cx <= Math.floor((this.originX + this.worldW - 1) / CHUNK_ART_TILES); cx++) {
-        const x0 = cx * CHUNK_ART_TILES, y0 = cy * CHUNK_ART_TILES, key = `${cx}:${cy}`;
-        const next = this.chunkTileRefs(x0, y0), previous = this.chunkRefs.get(key);
-        if (!previous || !sameRefs(previous, next) || !this.chunkStamp.has(key)) {
-          this.chunkStamp.set(key, ++this.stampCounter);
-          this.refreshChunkForms(x0, y0);
+        const key = `${cx}:${cy}`, previous = this.chunkRefs.get(key);
+        if (budgeted && prepOpen && performance.now() - prepStart >= (syncBudget ?? 0)) prepOpen = false;
+        if (!prepOpen) {
+          // Lo ya firmado sigue en pantalla; la firma nueva espera a los fotogramas siguientes.
+          if (previous && this.chunkStamp.has(key)) { refs.set(key, previous); keys.push(key); }
+          pending.push({ cx, cy });
+          continue;
         }
-        refs.set(key, next); keys.push(key);
+        this.prepareChunk(cx, cy, previous, refs, keys);
       }
     }
     for (const key of this.chunkStamp.keys()) if (!refs.has(key)) this.chunkStamp.delete(key);
     this.chunkRefs = refs; this.windowChunkKeys = keys;
+    this.pendingPrep = pending.length ? pending : null;
     this.propsRevision++;
-    this.syncTerrain(first || keys.length <= BAKE_SYNC_WINDOW ? Infinity : BAKE_BUDGET_MS);
+    // El primer encuadre y una ventana pequeña se hornean de una vez (las pruebas leen el suelo en el mismo fotograma).
+    // Una recomposición de cámara trae su propio presupuesto: el resto lo sigue `frame` → `resumePrep`.
+    const budget = syncBudget ?? (first || keys.length <= BAKE_SYNC_WINDOW ? Infinity : BAKE_BUDGET_MS);
+    const left = budget === Infinity ? Infinity : Math.max(0, budget - (performance.now() - prepStart));
+    if (left > 0) this.syncTerrain(left);
     this.groundBaked = true; this.bakedSeed = this.worldSeed;
+  }
+
+  /** Firma de un trozo (y sus formas de árbol) y lo anota en la ventana que se dibuja. `true` si hay decoración nueva. */
+  private prepareChunk(cx: number, cy: number, previous: (Tile | undefined)[] | undefined, refs: Map<string, (Tile | undefined)[]>, keys: string[]): boolean {
+    const x0 = cx * CHUNK_ART_TILES, y0 = cy * CHUNK_ART_TILES, key = `${cx}:${cy}`;
+    const next = this.chunkTileRefs(x0, y0);
+    let changed = false;
+    if (!previous || !sameRefs(previous, next) || !this.chunkStamp.has(key)) {
+      this.chunkStamp.set(key, ++this.stampCounter);
+      changed = this.refreshChunkForms(x0, y0) || !previous;
+    }
+    if (!refs.has(key)) keys.push(key);
+    refs.set(key, next);
+    return changed;
+  }
+
+  /** Sigue la firma aplazada por un paneo o un zoom, sin ocupar el fotograma. */
+  private resumePrep(budgetMs: number): void {
+    const pending = this.pendingPrep;
+    if (!pending?.length || this.lodTier() === 'map') return;
+    const start = performance.now();
+    const refs = this.chunkRefs, keys = this.windowChunkKeys;
+    const still: { cx: number; cy: number }[] = [];
+    let open = true, changed = false;
+    for (const item of pending) {
+      if (open && performance.now() - start >= budgetMs) open = false;
+      if (!open) { still.push(item); continue; }
+      changed = this.prepareChunk(item.cx, item.cy, refs.get(`${item.cx}:${item.cy}`), refs, keys) || changed;
+    }
+    this.pendingPrep = still.length ? still : null;
+    if (changed) { this.propsRevision++; this.sceneKey = ''; }
   }
 
   /** Teselas de un trozo con su borde de 1 (lo que mira su firma): 10×10 referencias. */
@@ -2025,6 +2083,7 @@ export class Landscape {
     }
     this.reportViewport();
     this.ensureWindow(now);
+    this.resumePrep(BAKE_BUDGET_MS);
     this.syncTerrain(BAKE_BUDGET_MS); // V24: lo visible que falte se hornea por tandas, sin bloquear el fotograma
     const renderAt = performance.now();
     this.render(now);
@@ -2118,23 +2177,33 @@ export class Landscape {
     // Ventana visible en tiles (con holgura para copas altas).
     const halfW = this.cssW / this.cam.zoom / 2;
     const halfH = this.cssH / this.cam.zoom / 2;
-    const x0 = Math.max(this.originX, Math.floor(this.cam.x - halfW) - 1);
-    const x1 = Math.min(this.originX + this.worldW - 1, Math.ceil(this.cam.x + halfW) + 1);
-    const y0 = Math.max(this.originY, Math.floor(this.cam.y - halfH) - 3);
-    const y1 = Math.min(this.originY + this.worldH - 1, Math.ceil(this.cam.y + halfH) + 3);
-
-    // Pixel-art decoration needs only eight poses/s. Moving people retain full RAF interpolation.
-    // With reduced motion, a stationary snapshot costs one cached scene composite per frame.
-    const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
+    const vx0 = Math.max(this.originX, Math.floor(this.cam.x - halfW) - 1);
+    const vx1 = Math.min(this.originX + this.worldW - 1, Math.ceil(this.cam.x + halfW) + 1);
+    const vy0 = Math.max(this.originY, Math.floor(this.cam.y - halfH) - 3);
+    const vy1 = Math.min(this.originY + this.worldH - 1, Math.ceil(this.cam.y + halfH) + 3);
+    // Quien se desliza entre dos ticks rehace lo visible cada fotograma. Si nadie se mueve, la rejilla
+    // retenida se pinta una vez y el paneo solo mueve el volcado; la pose (8/s) refresca lo que se ve.
+    const glide = people.some(person => person.moving) || animals.some(animal => animal.moving);
+    const pose = glide ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
     const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
     const selectedTile = this.selection?.kind === 'tile' ? this.selection : null;
     const far = this.cam.zoom < FAR_ZOOM; // solo en llamadas directas (pruebas): `render` usa `drawFar` lejos
+    const gridId = `${this.originX}:${this.originY}:${this.worldW}:${this.worldH}:${this.gridRevision}:${this.propsRevision}:${this.structureRevision}:${this.vivasKey}:${[...(this.activeLayers ?? [])].join(',')}:${this.layer}:${this.capaCalor ?? ''}:${far ? 'far' : 'near'}`;
+    const sceneKey = glide
+      ? `${gridId}:${this.sceneRevision}:${vx0}:${vx1}:${vy0}:${vy1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`
+      : `${gridId}:${this.sceneRevision}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`;
     // V24: el lienzo de escena (16 px/tesela sobre la ventana) solo vive en el nivel cercano.
     const sceneW = Math.max(1, this.worldW * ART), sceneH = Math.max(1, this.worldH * ART);
-    if (this.scene.width !== sceneW || this.scene.height !== sceneH) { this.scene.width = sceneW; this.scene.height = sceneH; this.sceneCtx.imageSmoothingEnabled = false; this.sceneKey = ''; }
-    const sceneKey = `${this.sceneRevision}:${[...(this.activeLayers ?? [])].join(',')}:${this.layer}:${this.capaCalor ?? ''}:${this.vivasKey}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}:${far ? 'far' : 'near'}`;
+    if (this.scene.width !== sceneW || this.scene.height !== sceneH) { this.scene.width = sceneW; this.scene.height = sceneH; this.sceneCtx.imageSmoothingEnabled = false; this.sceneKey = ''; this.sceneGridKey = ''; }
     if (sceneKey === this.sceneKey) return;
-    this.sceneKey = sceneKey; this.perf.sceneBuilds++;
+    const paintAll = !glide && this.sceneGridKey !== gridId;
+    this.sceneGridKey = gridId;
+    this.sceneKey = sceneKey;
+    const x0 = paintAll ? this.originX : vx0;
+    const x1 = paintAll ? this.originX + this.worldW - 1 : vx1;
+    const y0 = paintAll ? this.originY : vy0;
+    const y1 = paintAll ? this.originY + this.worldH - 1 : vy1;
+    this.perf.sceneBuilds++;
     // V24: solo se borra lo que se va a volcar (lo visible con la holgura de copas); el resto del lienzo nunca se ve.
     {
       const cx0 = Math.max(0, (x0 - this.originX - 1) * ART), cy0 = Math.max(0, (y0 - this.originY - 1) * ART);
@@ -3013,15 +3082,18 @@ export class Landscape {
     const cx0 = Math.floor(Math.max(x0 - 1, this.originX) / CHUNK_ART_TILES), cx1 = Math.floor(Math.min(x1 + 1, this.originX + this.worldW - 1) / CHUNK_ART_TILES);
     const cy0 = Math.floor(Math.max(y0, this.originY) / CHUNK_ART_TILES), cy1 = Math.floor(Math.min(y1 + 3, this.originY + this.worldH - 1) / CHUNK_ART_TILES);
     const start = performance.now();
+    // Una ventana chica (el encuadre de prueba, o un pueblo) se hornea entera: el pixel-art lejano coincide con el cercano.
+    // Una ventana grande se reparte: un zoom no hornea cientos de copas en el mismo fotograma.
+    const syncCanopy = (cx1 - cx0 + 1) * (cy1 - cy0 + 1) <= 128;
     for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
       const key = `${cx}:${cy}`, stamp = this.chunkStamp.get(key);
       if (stamp === undefined) continue;
       let entry = this.canopyCache.get(key);
       if (!entry || entry.stamp !== stamp || entry.structureRevision !== this.structureRevision || (entry.scale !== scale && this.zoomSettled)) {
-        if (entry && performance.now() - start > BAKE_BUDGET_MS) { /* se usa la copa anterior (otra escala) este fotograma */ }
+        if (!syncCanopy && performance.now() - start > BAKE_BUDGET_MS) { /* la anterior, o ninguna, hasta el fotograma siguiente */ }
         else entry = this.buildCanopy(key, cx * CHUNK_ART_TILES, cy * CHUNK_ART_TILES, entry && !this.zoomSettled ? entry.scale : scale, stamp, entry);
       }
-      if (!entry.canvas) continue;
+      if (!entry?.canvas) continue;
       g.drawImage(entry.canvas, cx * CHUNK_ART_TILES * ART - CANOPY_PAD.left, cy * CHUNK_ART_TILES * ART - CANOPY_PAD.top,
         CHUNK_ART_TILES * ART + CANOPY_PAD.left + CANOPY_PAD.right, CHUNK_ART_TILES * ART + CANOPY_PAD.top + CANOPY_PAD.bottom);
       this.drawCalls++; this.perf.canopyBlits++;
@@ -3083,7 +3155,7 @@ export class Landscape {
       if (!present) continue;
       const key = `${bx}:${by}`, version = stamp * 64 + present;
       let block = this.mapCache.get(key);
-      if ((!block || block.stamp !== version) && (!block || performance.now() - start < BAKE_BUDGET_MS)) block = this.buildMapBlock(key, bx * MAP_BLOCK, by * MAP_BLOCK, version, block);
+      if ((!block || block.stamp !== version) && performance.now() - start < BAKE_BUDGET_MS) block = this.buildMapBlock(key, bx * MAP_BLOCK, by * MAP_BLOCK, version, block);
       if (!block || block.canvas.width === 0) continue;
       const x = Math.round((this.cssW / 2 + (block.x - this.cam.x) * zoom) * dpr), y = Math.round((this.cssH / 2 + (block.y - this.cam.y) * zoom) * dpr);
       const xe = Math.round((this.cssW / 2 + (block.x + MAP_BLOCK - this.cam.x) * zoom) * dpr), ye = Math.round((this.cssH / 2 + (block.y + MAP_BLOCK - this.cam.y) * zoom) * dpr);
@@ -3800,18 +3872,38 @@ export class Landscape {
       else if (ev.kind === 'meeting') drawArc(a, b, 'bond');
     }
 
-    // 2. Active live social actions (share, cooperate, accompany, approach) & S↔I proximity
+    // 2. Acciones vivas (compartir, cooperar, acompañar, acercarse) y la cercanía S↔I.
+    // El radio es 3,2 teselas: una rejilla de 4 y su vecindad 3×3 encuentra al mismo más cercano, sin recorrer a todos.
+    const CELL = 4;
+    const view = this.visibleBounds();
+    const xLo = view.x0 - 6, xHi = view.x1 + 6, yLo = view.y0 - 6, yHi = view.y1 + 6;
+    const bucketKey = (x: number, y: number): number => (Math.floor(x / CELL) + 8_388_608) * 16_777_216 + (Math.floor(y / CELL) + 8_388_608);
+    const buckets = new Map<number, RenderPerson[]>();
+    for (const p of people) {
+      if (p.x < xLo || p.x > xHi || p.y < yLo || p.y > yHi) continue;
+      const key = bucketKey(p.x, p.y);
+      const list = buckets.get(key);
+      if (list) list.push(p); else buckets.set(key, [p]);
+    }
+    const visitNear = (p: RenderPerson, fn: (other: RenderPerson) => void): void => {
+      const cx = Math.floor(p.x / CELL), cy = Math.floor(p.y / CELL);
+      for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) {
+        const list = buckets.get((x + 8_388_608) * 16_777_216 + (y + 8_388_608));
+        if (list) for (const other of list) fn(other);
+      }
+    };
     for (const p of people) {
       const act = p.view.action;
       if (act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && p.view.role !== 'S') continue;
+      if (p.x < xLo || p.x > xHi || p.y < yLo || p.y > yHi) continue;
       let nearest: RenderPerson | null = null;
       let bestD = 3.2;
-      for (const other of people) {
-        if (other.view.id === p.view.id) continue;
-        if (p.view.role === 'S' && act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && other.view.role !== 'I') continue;
+      visitNear(p, other => {
+        if (other.view.id === p.view.id) return;
+        if (p.view.role === 'S' && act !== 'share' && act !== 'cooperate' && act !== 'accompany' && act !== 'approach' && other.view.role !== 'I') return;
         const d = Math.hypot(p.x - other.x, p.y - other.y);
         if (d < bestD) { bestD = d; nearest = other; }
-      }
+      });
       if (nearest) {
         const kind = (p.view.role === 'S' && nearest.view.role === 'I') || act === 'accompany' || act === 'approach' ? 'bond' : 'cooperate';
         drawArc(p, nearest, kind);

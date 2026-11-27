@@ -6,14 +6,18 @@
  */
 import { CINTA, type Bifurcacion, type Laguna, type Nivel, type SeriePunto } from '../shared/cinta.js';
 import { esc } from './ui-catalog.js';
-import { TICKS_POR_DIA, VELOCIDADES, type DvrState, type Velocidad } from './dvr-player.js';
+import { SEGUNDOS_POR_TICK, TICKS_POR_DIA, VELOCIDADES, type DvrState, type ModoReloj, type Velocidad } from './dvr-player.js';
 
-export type DvrBarState = Pick<DvrState, 'playing' | 'speed' | 'currentTick' | 'minTick' | 'maxTick' | 'latestDay' | 'simHz' | 'serie' | 'bifurcaciones' | 'lagunas' | 'nivel' | 'aheadOfPlayhead' | 'atLiveEdge'> & Partial<Pick<DvrState, 'loading' | 'estado'>> & { archivo?: boolean };
+export type DvrBarState = Pick<DvrState, 'playing' | 'speed' | 'currentTick' | 'minTick' | 'maxTick' | 'latestDay' | 'simHz' | 'serie' | 'bifurcaciones' | 'lagunas' | 'nivel' | 'aheadOfPlayhead' | 'atLiveEdge'> & Partial<Pick<DvrState, 'loading' | 'estado' | 'modoReloj' | 'playTick' | 'paso'>> & { archivo?: boolean };
 
 export interface DvrBarHandlers {
   togglePlay(): void;
   step(delta: -1 | 1): void;
   setSpeed(speed: Velocidad): void;
+  /** 1 s de mundo por 1 s de pared. Opcional para quien aún no lo conecta. */
+  setTiempoReal?(): void;
+  /** Un tick de mundo por segundo de pared. */
+  setPaseo?(): void;
   seek(tick: number): void;
   jumpLive(): void;
   reproducirTramo?(desde: number, hasta: number): void;
@@ -29,8 +33,8 @@ const SPARK_POINTS = 160;
 const SPARK_W = 100, SPARK_H = 24;
 /** El arrastre del deslizador pide un `seek` como mucho cada tanto, y siempre al soltar (ms). */
 const SCRUB_DEBOUNCE_MS = 150;
-/** Segundos de mundo por tick: un día de mundo son 86 400 s repartidos en `TICKS_POR_DIA` ticks. */
-const SEGUNDOS_POR_TICK = 86_400 / TICKS_POR_DIA;
+const modoDe = (state: Partial<Pick<DvrBarState, 'modoReloj'>>): ModoReloj => state.modoReloj ?? 'ritmo';
+const relojPreciso = (modo: ModoReloj | undefined): boolean => modo === 'tiempo-real' || modo === 'paseo';
 
 /** Nombre del nivel de la cinta (cinta-sonnet §2): lo que el usuario ve en la insignia. */
 export const NOMBRE_NIVEL: Record<Nivel, string> = {
@@ -65,6 +69,29 @@ export function escalaLabel(nivel: Nivel | null | undefined, velocidad: number):
   return `${NOMBRE_NIVEL[nivel]} · 1 s = ${duracionDeMundo(segundosDeMundoPorSegundo(nivel, velocidad))} de mundo`;
 }
 
+/** Duración con los segundos que `duracionDeMundo` redondea: 144 s son «2 min 24 s», no «2 min». */
+export function duracionPrecisa(segundos: number): string {
+  const s = Math.max(0, Math.round(num(segundos)));
+  if (s < 60) return `${s} s`;
+  const parte = (n: number, unidad: string): string => n ? `${n} ${unidad}` : '';
+  if (s < 3600) return [parte(Math.floor(s / 60), 'min'), parte(s % 60, 's')].filter(Boolean).join(' ');
+  if (s < 86_400) return [parte(Math.floor(s / 3600), 'h'), parte(Math.floor(s % 3600 / 60), 'min'), parte(s % 60, 's')].filter(Boolean).join(' ');
+  const resto = s % 86_400;
+  return [parte(Math.floor(s / 86_400), 'd'), parte(Math.floor(resto / 3600), 'h'), parte(Math.floor(resto % 3600 / 60), 'min')].filter(Boolean).join(' ');
+}
+
+/**
+ * Insignia del reloj. Tiempo real dice 1 s = 1 s y cuánto tarda el fotograma: cada tick son 36 s y no hay
+ * interpolación entre medias. Un ritmo conserva la escala de fotogramas.
+ */
+export function relojLabel(state: Pick<DvrBarState, 'nivel' | 'speed'> & Partial<Pick<DvrBarState, 'modoReloj' | 'paso'>>): string {
+  if (state.modoReloj === 'borde-vivo') return 'Borde vivo · la imagen sigue el presente de la cinta';
+  const paso = state.paso && state.paso > 0 ? state.paso : state.nivel != null && state.nivel in NOMBRE_NIVEL ? CINTA.pasos[state.nivel] : 1;
+  if (state.modoReloj === 'tiempo-real') return `Tiempo real · 1 s = 1 s de mundo · fotograma cada ${duracionPrecisa(paso * SEGUNDOS_POR_TICK)} · cada tick son ${SEGUNDOS_POR_TICK} s · el terreno espera`;
+  if (state.modoReloj === 'paseo') return `Paseo · 1 tick de mundo por segundo · fotograma cada ${duracionPrecisa(paso)} · los cuerpos se deslizan entre fotos cercanas`;
+  return escalaLabel(state.nivel, state.speed);
+}
+
 /** Punto de la serie más cercano al tick (o `null` si no hay serie). */
 export function nearestSeriePoint(serie: readonly SeriePunto[], tick: number): SeriePunto | null {
   let best: SeriePunto | null = null, bestDistance = Infinity;
@@ -75,11 +102,23 @@ export function nearestSeriePoint(serie: readonly SeriePunto[], tick: number): S
   return best;
 }
 
-/** «Día X · HH:MM» para el cabezal: el día y la hora de mundo salen del tick. */
-export function dvrTimeLabel(state: Pick<DvrBarState, 'currentTick'>, tick = state.currentTick): string {
-  const t = Math.max(0, int(tick)), dia = Math.floor(t / TICKS_POR_DIA) + 1;
-  const minutos = Math.floor((t % TICKS_POR_DIA) / TICKS_POR_DIA * 1440);
-  return `Día ${dia} · ${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
+/** «Día X · HH:MM» para el cabezal. Con `preciso`, incluye segundos: en tiempo real el reloj avanza entre fotogramas. */
+export function dvrTimeLabel(state: Pick<DvrBarState, 'currentTick'>, tick = state.currentTick, preciso = false): string {
+  const t = Math.max(0, preciso ? num(tick) : int(tick)), dia = Math.floor(t / TICKS_POR_DIA) + 1;
+  const segundos = (t % TICKS_POR_DIA) / TICKS_POR_DIA * 86_400;
+  if (!preciso) {
+    const minutos = Math.floor(segundos / 60);
+    return `Día ${dia} · ${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
+  }
+  const total = Math.floor(segundos + 1e-9);
+  const h = Math.floor(total / 3600), m = Math.floor(total % 3600 / 60), s = total % 60;
+  return `Día ${dia} · ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** Hora que muestra la barra: en tiempo real sale de `playTick` (fracción incluida) y lleva segundos. */
+export function horaVisible(state: Pick<DvrBarState, 'currentTick'> & Partial<Pick<DvrBarState, 'modoReloj' | 'playTick'>>): string {
+  const preciso = relojPreciso(state.modoReloj);
+  return dvrTimeLabel(state, preciso ? (state.playTick ?? state.currentTick) : state.currentTick, preciso);
 }
 
 /** Vista previa al pasar/arrastrar sobre la línea: «Día · Pob · Fauna · Obras · Sustancias». */
@@ -89,10 +128,22 @@ export function dvrHoverLabel(point: SeriePunto | null): string {
 
 export function dvrEngineLabel(state: Pick<DvrBarState, 'simHz'>): string { return `⚡ ${int(state.simHz)} Hz`; }
 
-/** «a 4 d 6 h del presente», o «en el presente» dentro del margen del borde. */
-export function desfaseLabel(state: Pick<DvrBarState, 'aheadOfPlayhead' | 'atLiveEdge' | 'archivo'>): string {
-  if (state.archivo) return state.atLiveEdge ? 'Fin de la grabación' : `${duracionDeTicks(state.aheadOfPlayhead)} de mundo hasta el final`;
-  return state.atLiveEdge ? 'en el presente' : `${duracionDeTicks(state.aheadOfPlayhead)} de mundo hasta el presente`;
+/**
+ * El botón «Borde vivo» está pulsado solo si ese modo fue elegido. La cercanía al final
+ * (`atLiveEdge`, margen de ticks) no lo enciende. En archivo, «Último fotograma» marca la posición exacta.
+ */
+export function sigueBorde(state: Pick<DvrBarState, 'aheadOfPlayhead'> & Partial<Pick<DvrBarState, 'modoReloj' | 'archivo'>>): boolean {
+  if (state.archivo) return num(state.aheadOfPlayhead) <= 0;
+  return state.modoReloj === 'borde-vivo';
+}
+
+/** Distancia al presente, o al final si es archivo. «en el presente» solo mientras se sigue el borde. */
+export function desfaseLabel(state: Pick<DvrBarState, 'aheadOfPlayhead' | 'atLiveEdge'> & Partial<Pick<DvrBarState, 'archivo' | 'modoReloj'>>): string {
+  const ahead = Math.max(0, num(state.aheadOfPlayhead));
+  if (state.archivo) return ahead <= 0 ? 'Fin de la grabación' : `${duracionDeTicks(ahead)} de mundo hasta el final`;
+  if (state.modoReloj === 'borde-vivo') return 'en el presente';
+  if (ahead <= 0) return 'en la última foto';
+  return `${duracionDeTicks(ahead)} de mundo hasta el presente`;
 }
 
 /** Posición horizontal (0–100) de un tick dentro de la cinta. */
@@ -130,16 +181,21 @@ export function sparklineMarkup(serie: readonly SeriePunto[], minTick: number, m
 const ESTADO_ERROR = '⚠ La cinta dejó de grabar: el mundo sigue, pero esto no se guarda.';
 
 export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null = null): string {
+  const modo = modoDe(state);
   const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1;
   const min = int(state.minTick), max = Math.max(min, int(state.maxTick)), tick = Math.min(max, Math.max(min, int(state.currentTick)));
-  const time = esc(dvrTimeLabel(state));
-  const playing = !!state.playing, live = !!state.atLiveEdge;
-  const escala = escalaLabel(state.nivel, speed);
+  const time = esc(horaVisible(state));
+  const playing = !!state.playing, live = sigueBorde(state);
+  const escala = relojLabel(state);
+  const ritmo = modo === 'ritmo';
   return `<div class="dvr-transport" role="group" aria-label="Reproductor del mundo"${state.loading ? ' data-loading="true"' : ''}>`
     + `<div class="dvr-controls"><button type="button" class="dvr-button" data-dvr-step="-1" aria-label="Fotograma anterior (,)" title="Fotograma anterior (,)">⏮</button>`
     + `<button type="button" class="dvr-button dvr-play" data-dvr-play aria-pressed="${playing}" aria-label="${playing ? 'Pausar' : 'Reproducir'}" title="Espacio">${playing ? '⏸' : '▶'}</button>`
     + `<button type="button" class="dvr-button" data-dvr-step="1" aria-label="Fotograma siguiente (.)" title="Fotograma siguiente (.)">⏭</button></div>`
-    + `<div class="dvr-speeds" role="group" aria-label="Velocidad">${VELOCIDADES.map(s => `<button type="button" class="dvr-speed" data-dvr-speed="${s}" aria-pressed="${s === speed}">${s}×</button>`).join('')}</div>`
+    + `<div class="dvr-speeds" role="group" aria-label="Velocidad">`
+    + `<button type="button" class="dvr-speed" data-dvr-tiempo-real aria-pressed="${modo === 'tiempo-real'}" title="1 segundo de mundo por cada segundo">Tiempo real</button>`
+    + `<button type="button" class="dvr-speed" data-dvr-paseo aria-pressed="${modo === 'paseo'}" title="Un tick de mundo por cada segundo. En detalle, una foto cada 4 segundos">Paseo</button>`
+    + `${VELOCIDADES.map(s => `<button type="button" class="dvr-speed" data-dvr-speed="${s}" aria-pressed="${ritmo && s === speed}">${s}×</button>`).join('')}</div>`
     + `<div class="dvr-scrubber"><svg class="dvr-sparkline" viewBox="0 0 ${SPARK_W} ${SPARK_H}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${sparklineMarkup(state.serie, min, max, state.bifurcaciones, state.lagunas)}</svg>`
     + `<span class="dvr-playhead" data-dvr-playhead style="left:${dvrPercent(tick, min, max).toFixed(2)}%" aria-hidden="true"></span>`
     + `<input type="range" class="dvr-range" data-dvr-range min="${min}" max="${max}" step="1" value="${tick}" aria-label="Línea de tiempo del mundo" aria-valuetext="${time}">`
@@ -148,7 +204,7 @@ export function renderDvrBar(state: DvrBarState, hoverPoint: SeriePunto | null =
     + `<details class="dvr-tramo"><summary>Elegir tramo</summary><div class="dvr-tramo-controles"><button type="button" data-tramo-inicio>Marcar inicio</button><button type="button" data-tramo-fin>Marcar final</button><button type="button" data-tramo-play disabled>Ver tramo</button><span data-tramo-label role="status">Elige inicio y final en la línea de tiempo</span></div></details>`
     + `<div class="dvr-engine"><span class="dvr-badge dvr-escala" data-dvr-escala title="Qué tanto mundo pasa por cada segundo de reproducción">${esc(escala)}</span>`
     + (state.archivo ? '' : `<span class="dvr-badge" data-dvr-engine title="Velocidad del motor (ticks por segundo)">${esc(dvrEngineLabel(state))}</span>`)
-    + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="${state.archivo ? 'Último fotograma (0)' : 'Volver al presente (0)'}">${state.archivo ? 'Último fotograma' : '● Presente'}</button></div></div>`;
+    + `<button type="button" class="dvr-live${live ? ' is-live' : ''}" data-dvr-live aria-pressed="${live}" title="${state.archivo ? 'Último fotograma (0)' : 'Seguir el presente de la cinta (0)'}">${state.archivo ? 'Último fotograma' : 'Borde vivo'}</button></div></div>`;
 }
 
 /** Monta la barra en `container` (`#dvr-bar`). Delegación de eventos: el HTML interior se puede reemplazar sin reenganchar. */
@@ -171,6 +227,8 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
       if (detalle) { detalle.open = false; detalle.querySelector('summary')?.focus({ preventScroll: true }); }
     }
     else if (button.hasAttribute('data-dvr-play')) handlers.togglePlay();
+    else if (button.hasAttribute('data-dvr-tiempo-real')) handlers.setTiempoReal?.();
+    else if (button.hasAttribute('data-dvr-paseo')) handlers.setPaseo?.();
     else if (button.hasAttribute('data-dvr-live')) handlers.jumpLive();
     else if (button.hasAttribute('data-dvr-step')) handlers.step(button.getAttribute('data-dvr-step') === '-1' ? -1 : 1);
     else if (button.hasAttribute('data-dvr-speed')) {
@@ -188,7 +246,12 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     if (!(event.target as Element | null)?.hasAttribute?.('data-dvr-range')) return;
     scrubbing = true;
     const tick = rangeValue(event);
-    if (last) { setText('[data-dvr-time]', dvrTimeLabel(last, tick)); setText('[data-dvr-hover]', dvrHoverLabel(nearestSeriePoint(last.serie, tick))); }
+    if (last) {
+      const time = dvrTimeLabel(last, tick, relojPreciso(last.modoReloj));
+      setText('[data-dvr-time]', time);
+      (event.target as HTMLInputElement).setAttribute('aria-valuetext', time);
+      setText('[data-dvr-hover]', dvrHoverLabel(nearestSeriePoint(last.serie, tick)));
+    }
     clearTimeout(scrubTimer);
     scrubTimer = setTimeout(() => handlers.seek(tick), SCRUB_DEBOUNCE_MS);
   };
@@ -211,14 +274,18 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
     if (!node || node.getAttribute(name) === value) return;
     if (value === null) node.removeAttribute(name); else node.setAttribute(name, value);
   };
-  /** Lo que `renderDvrBar` deriva de `playing`, `speed`, `atLiveEdge`, `loading` y `estado`, sobre los mismos nodos. */
+  /** Lo que `renderDvrBar` deriva de `playing`, `speed`, el modo y el final de archivo, sobre los mismos nodos. */
   const ajustarControles = (state: DvrBarState): void => {
-    const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1, playing = !!state.playing, live = !!state.atLiveEdge;
+    const modo = modoDe(state), ritmo = modo === 'ritmo';
+    const speed = VELOCIDADES.includes(state.speed) ? state.speed : 1, playing = !!state.playing;
+    const live = sigueBorde(state);
     setAttr(query('.dvr-transport'), 'data-loading', state.loading ? 'true' : null);
     const play = query('[data-dvr-play]');
     setAttr(play, 'aria-pressed', String(playing)); setAttr(play, 'aria-label', playing ? 'Pausar' : 'Reproducir');
     setText('[data-dvr-play]', playing ? '⏸' : '▶');
-    for (const b of container.querySelectorAll('[data-dvr-speed]')) setAttr(b, 'aria-pressed', String(Number(b.getAttribute('data-dvr-speed')) === speed));
+    setAttr(query('[data-dvr-tiempo-real]'), 'aria-pressed', String(modo === 'tiempo-real'));
+    setAttr(query('[data-dvr-paseo]'), 'aria-pressed', String(modo === 'paseo'));
+    for (const b of container.querySelectorAll('[data-dvr-speed]')) setAttr(b, 'aria-pressed', String(ritmo && Number(b.getAttribute('data-dvr-speed')) === speed));
     const vivo = query('[data-dvr-live]');
     setAttr(vivo, 'aria-pressed', String(live)); vivo?.classList.toggle('is-live', live);
     setText('[data-dvr-estado]', state.estado === 'error' ? ESTADO_ERROR : '');
@@ -252,12 +319,13 @@ export function mountDvrBar(container: HTMLElement, handlers: DvrBarHandlers): D
         const range = query<HTMLInputElement>('[data-dvr-range]'); if (range) { range.min = String(min); range.max = String(max); }
       }
       const tick = Math.min(max, Math.max(min, int(state.currentTick)));
+      const hora = horaVisible(state);
       const range = query<HTMLInputElement>('[data-dvr-range]');
-      if (range && !scrubbing) { range.min = String(min); range.max = String(max); range.value = String(tick); range.setAttribute('aria-valuetext', dvrTimeLabel(state)); }
+      if (range && !scrubbing) { range.min = String(min); range.max = String(max); range.value = String(tick); range.setAttribute('aria-valuetext', hora); }
       const head = query<HTMLElement>('[data-dvr-playhead]'); if (head) head.style.left = `${dvrPercent(tick, min, max).toFixed(2)}%`;
-      if (!scrubbing) setText('[data-dvr-time]', dvrTimeLabel(state));
+      if (!scrubbing) setText('[data-dvr-time]', hora);
       setText('[data-dvr-desfase]', desfaseLabel(state));
-      setText('[data-dvr-escala]', escalaLabel(state.nivel, state.speed));
+      setText('[data-dvr-escala]', relojLabel(state));
       setText('[data-dvr-engine]', dvrEngineLabel(state));
       if (pintada) ajustarControles(state);
       if (inicio !== null || fin !== null) actualizarTramo();

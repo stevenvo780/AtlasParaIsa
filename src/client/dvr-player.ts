@@ -5,11 +5,11 @@
  * y recibe los fotogramas por `onFrame`. `advance(nowMs)` se llama en cada `requestAnimationFrame`.
  *
  * La cinta tiene 5 niveles de paso fijo (`CINTA.pasos`): el reproductor pide siempre `nivel: 'auto'` (el más fino que
- * cubra el tick pedido) y cada fotograma de la cola lleva el nivel que lo sirvió. A 1× se muestran `CINTA.fpsNormal`
- * fotogramas por segundo DEL NIVEL EN CURSO (no ticks): en L3 son 6 días de mundo por segundo. El reloj cuenta
- * fotogramas, así que un salto de paso entre dos fotogramas contiguos (cadencia variable en L0, cambio de nivel) no
- * acelera ni frena la reproducción. Cuando el siguiente fotograma es de otro nivel se entrega sin esperar y con
- * `discontinuity: true` (`cambioDeNivel: true`): el cliente funde o corta, nunca interpola posiciones entre niveles.
+ * cubra el tick pedido) y cada fotograma de la cola lleva el nivel que lo sirvió. El modo por defecto es «Tiempo real»:
+ * 1 s de reloj de mundo por 1 s de pared, con el día de `TICKS_POR_DIA` ticks (36 s por tick) y el salto real hasta el
+ * fotograma siguiente (la decimación del nivel). No usa los Hz del motor, el refresco ni el atraso. Los ritmos `0,5×`…
+ * `25×` siguen contando fotogramas: a 1× son `CINTA.fpsNormal` fotogramas por segundo del nivel en curso. «Borde vivo»
+ * solo si la persona lo elige. En ritmo, un fotograma de otro nivel se entrega sin esperar y con `discontinuity: true`.
  *
  * Invariantes:
  *  - El cabezal nunca supera lo cargado: con la cola vacía espera, no salta ni retrocede.
@@ -27,8 +27,12 @@ import type { Tile, Viewport, WorldView } from '../shared/types.js';
 
 /** Ticks de mundo por día (unidad: tick). */
 export const TICKS_POR_DIA = DEMOGRAPHY_TICKS_PER_DAY;
+/** Segundos de reloj de mundo por tick: un día son 86 400 s repartidos en `TICKS_POR_DIA` ticks (36 s). */
+export const SEGUNDOS_POR_TICK = 86_400 / TICKS_POR_DIA;
 export const VELOCIDADES = CINTA.velocidades;
 export type Velocidad = (typeof CINTA.velocidades)[number];
+/** «Tiempo real» es el arranque. «Paseo» es un tick de mundo por segundo. «Borde vivo» sigue la cinta. «Ritmo» es un múltiplo de `CINTA.fpsNormal`. */
+export type ModoReloj = 'tiempo-real' | 'paseo' | 'borde-vivo' | 'ritmo';
 
 export const DVR_LIMITS = {
   /** Tamaño de la cola de fotogramas por delante del cabezal (fotogramas). */
@@ -43,13 +47,27 @@ export const DVR_LIMITS = {
   liveEdgeTicks: 60,
   /** Sondeo de `/api/cinta/meta` y fusión de cambios de cámara (ms). */
   metaPollMs: 2000, viewportCoalesceMs: 200,
-  /** Tope de un paso del reloj (ms): una pestaña dormida no provoca saltos. */
+  /**
+   * Ya no recorta el reloj visible: un PC a 5 Hz entrega 200 ms y debe contarlos enteros.
+   * La suspensión (pestaña oculta) descarta el hueco en `setPaginaVisible`, no con este tope.
+   */
   maxDtMs: 100,
   /** Cada cuánto de reproducción se guarda el marcador (ms). */
   marcadorCadaMs: 5000,
   /** Tamaño máximo de la ventana de cámara que se pide, en teselas. */
   camaraMaxAncho: 96, camaraMaxAlto: 64,
 } as const;
+
+/**
+ * Tick que se pide al abrir sin marcador. Si la cinta tiene historia por detrás del borde vivo, cae ahí (el fotograma
+ * que aterrice queda fuera de `liveEdgeTicks`). Si toda la cinta cabe en el borde, el primer tick grabado.
+ */
+export function tickDeHistoria(minTick: number, maxTick: number, margen = DVR_LIMITS.liveEdgeTicks): number {
+  const min = Math.floor(minTick), max = Math.floor(Math.max(minTick, maxTick));
+  if (!(max > min)) return min;
+  const fuera = max - margen - 1;
+  return fuera > min ? fuera : min;
+}
 
 export type DvrFrameReason = 'start' | 'play' | 'seek' | 'step' | 'refresh';
 export interface DvrFrameInfo {
@@ -86,7 +104,7 @@ export interface DvrState {
   enabled: boolean;
   /** `'error'`: la cinta dejó de grabar (el motor sigue); se muestra en la barra. */
   estado: CintaMeta['estado'];
-  playing: boolean; speed: Velocidad;
+  playing: boolean; speed: Velocidad; modoReloj: ModoReloj;
   /** Cabezal continuo: el último fotograma emitido más la fracción hacia el siguiente. */
   playTick: number; currentTick: number;
   /** Primer y último tick grabado (`t0`/`t1` de la meta); `maxTick` es «el presente». */
@@ -176,6 +194,8 @@ export class DvrPlayer {
   estado: CintaMeta['estado'] = 'ok';
   playing = true;
   speed: Velocidad = 1;
+  /** Arranque normal: tiempo real. El archivo (`abrirEnInicio`) pasa a ritmo 1× al abrir, pausado. */
+  modoReloj: ModoReloj = 'tiempo-real';
   /** Cabezal continuo (fraccionario), en ticks del mundo. */
   playTick = 0;
   /** Último tick emitido (entero). */
@@ -216,8 +236,16 @@ export class DvrPlayer {
   private refreshReintentos = 0;
   private started = false;
   private lastNow: number | null = null;
-  /** Fotogramas de reloj acumulados sin entregar (fracción del siguiente). */
+  /** Fotogramas de reloj acumulados sin entregar (fracción del siguiente), solo en ritmo. */
   private credito = 0;
+  /** Ticks de mundo acumulados, con fracción, todavía no entregados. Tiempo real no lo trunca a entero. */
+  private creditoTicks = 0;
+  /** Último segundo de mundo ya publicado en la barra. */
+  private ultimoSegundo = Number.NaN;
+  /** El borde vivo no encadena otro salto mientras el anterior sigue en vuelo. */
+  private snapEnCurso = false;
+  /** `false` mientras la pestaña está oculta o la página se va. El hueco no se reproduce al volver. */
+  private paginaVisible = true;
   private cargando: Promise<void> | null = null;
   private polling: Promise<void> | null = null;
   private pasos: Promise<void> = Promise.resolve();
@@ -237,12 +265,18 @@ export class DvrPlayer {
   get atLiveEdge(): boolean { return this.aheadOfPlayhead <= (this.options.abrirEnInicio ? 0 : DVR_LIMITS.liveEdgeTicks); }
   /** Último tick cargado (emitido o en cola): el cabezal no puede pasar de aquí. */
   get maxLoadedTick(): number { return this.frames.length ? this.frames[this.frames.length - 1]!.tick : this.currentTick; }
-  /** Duración visual de un fotograma a la velocidad actual. */
-  get tickIntervalMs(): number { return 1000 / (CINTA.fpsNormal * this.speed); }
+  /** Duración visual de un fotograma. Tiempo real: paso × 36 s. Paseo: paso × 1 s (un tick por segundo). */
+  get tickIntervalMs(): number {
+    const paso = Math.max(1, this.paso ?? 1);
+    if (this.modoReloj === 'tiempo-real') return paso * SEGUNDOS_POR_TICK * 1000;
+    if (this.modoReloj === 'paseo') return paso * 1000;
+    if (this.modoReloj === 'borde-vivo') return 0;
+    return 1000 / (CINTA.fpsNormal * this.speed);
+  }
 
   snapshot(): DvrState {
     return {
-      enabled: this.enabled, estado: this.estado, playing: this.playing, speed: this.speed,
+      enabled: this.enabled, estado: this.estado, playing: this.playing, speed: this.speed, modoReloj: this.modoReloj,
       playTick: this.playTick, currentTick: this.currentTick, minTick: this.minTick, maxTick: this.maxTick,
       latestDay: this.latestDay, simHz: this.simHz, epoca: this.epoca, epocaVista: this.epocaVista,
       nivel: this.nivel, paso: this.paso, nivelPedido: this.nivelPedido, niveles: this.niveles,
@@ -257,8 +291,8 @@ export class DvrPlayer {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Lee la meta y coloca el cabezal: en el último marcador del perfil a 1× si lo hay, o en el presente. Emite el primer
-   * fotograma. `false` si la cinta no responde (el cliente vuelve al modo vivo).
+   * Lee la meta y coloca el cabezal. Con historia, el primer fotograma sale ya (no espera al reloj) y no se engancha
+   * al borde vivo. El modo guardado manda; si no hay, tiempo real. `false` si la cinta no responde.
    */
   async start(): Promise<boolean> {
     this.stopTimers();
@@ -304,42 +338,134 @@ export class DvrPlayer {
   /* Reproducción a 60 fps                                            */
   /* ---------------------------------------------------------------- */
 
-  /** Un paso del reloj de animación (`nowMs`: el de `requestAnimationFrame`). */
+  /**
+   * Un paso del reloj (`nowMs`: tiempo monotónico). Con la pestaña visible se acumula el intervalo entero,
+   * también 200 o 500 ms. Oculta, el intervalo no cuenta: al volver, `lastNow` está vacío y no hay salto.
+   * La fracción por debajo de un tick se queda.
+   */
   advance(nowMs: number): void {
-    const dt = this.lastNow === null || !Number.isFinite(nowMs) ? 0 : clamp(nowMs - this.lastNow, 0, DVR_LIMITS.maxDtMs);
-    if (Number.isFinite(nowMs)) this.lastNow = nowMs;
+    if (!this.paginaVisible) this.lastNow = null;
+    const transcurrido = !this.paginaVisible || this.lastNow === null || !Number.isFinite(nowMs) ? 0 : nowMs - this.lastNow;
+    const dt = transcurrido > 0 ? transcurrido : 0;
+    if (this.paginaVisible && Number.isFinite(nowMs)) this.lastNow = nowMs;
     if (!this.enabled || !this.started) return;
-    if (this.playing && !this.jumping && dt > 0) {
-      this.credito += dt / 1000 * CINTA.fpsNormal * this.speed;
-      // Con la cola vacía el reloj espera sin acumular deuda: al llegar el trozo no se entrega un racimo.
-      if (!this.frames.length) this.credito = Math.min(this.credito, 1);
-      const batch: QueuedFrame[] = [];
-      let cambio = false;
-      let fueraDelTramo = false;
-      while (this.frames.length) {
-        const next = this.frames[0]!;
-        if (this.tramo && next.tick > this.tramo.hasta) { fueraDelTramo = true; break; }
-        const previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
-        const otroNivel = previo !== null && next.nivel !== previo;
-        if (otroNivel) { if (!batch.length) { batch.push(this.frames.shift()!); cambio = true; this.credito = Math.max(0, this.credito - 1); } break; }
-        if (this.credito < 1) break;
-        batch.push(this.frames.shift()!); this.credito -= 1;
+    if (this.playing && !this.jumping) {
+      let seguir = true;
+      if (this.modoReloj === 'borde-vivo') {
+        if (dt > 0 || this.aheadOfPlayhead > DVR_LIMITS.liveMargin) this.seguirBorde();
+      } else if (dt > 0 && this.esRelojDeTicks()) seguir = this.avanzarReloj(dt);
+      else if (dt > 0) seguir = this.avanzarRitmo(dt);
+      if (!seguir) return;
+      if (dt > 0) {
+        this.msReproduciendo += dt;
+        if (this.msReproduciendo >= DVR_LIMITS.marcadorCadaMs) { this.msReproduciendo = 0; this.guardarMarcador(false); }
       }
-      // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega. Los deltas intermedios sí se aplican
-      // (cada uno parte del anterior) pero su fotograma no se emite; sus teselas cambiadas se acumulan en el entregado.
-      if (batch.length && !this.deliver(batch, 'play', batch.length - 1, cambio)) return;
-      if (this.tramo && (fueraDelTramo || this.currentTick >= this.tramo.hasta ||
-          (!this.frames.length && this.currentTick >= this.maxTick))) {
-        this.tramo = null; this.playing = false; this.credito = 0; this.options.onAviso?.('Terminó el tramo.'); this.notify();
-      } else if (this.options.abrirEnInicio && this.currentTick >= this.maxTick) {
-        this.playing = false; this.credito = 0; this.notify();
-      }
-      this.msReproduciendo += dt;
-      if (this.msReproduciendo >= DVR_LIMITS.marcadorCadaMs) { this.msReproduciendo = 0; this.guardarMarcador(false); }
-      this.actualizarCabezal();
     }
     if (this.refreshPending) void this.refresh();
     this.prefetch();
+  }
+
+  /** Ritmo `0,5×`…`25×`: fotogramas del nivel en curso, no segundos de mundo. */
+  private avanzarRitmo(dt: number): boolean {
+    this.credito += dt / 1000 * CINTA.fpsNormal * this.speed;
+    // Con la cola vacía el reloj espera sin acumular deuda: al llegar el trozo no se entrega un racimo.
+    if (!this.frames.length) this.credito = Math.min(this.credito, 1);
+    const batch: QueuedFrame[] = [];
+    let cambio = false;
+    let fueraDelTramo = false;
+    while (this.frames.length) {
+      const next = this.frames[0]!;
+      if (this.tramo && next.tick > this.tramo.hasta) { fueraDelTramo = true; break; }
+      const previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
+      const otroNivel = previo !== null && next.nivel !== previo;
+      if (otroNivel) { if (!batch.length) { batch.push(this.frames.shift()!); cambio = true; this.credito = Math.max(0, this.credito - 1); } break; }
+      if (this.credito < 1) break;
+      batch.push(this.frames.shift()!); this.credito -= 1;
+    }
+    // A 10×–25× se cruzan varios fotogramas por rAF: solo el último se entrega. Los deltas intermedios sí se aplican.
+    if (batch.length && !this.deliver(batch, 'play', batch.length - 1, cambio)) return false;
+    this.cerrarReproduccion(fueraDelTramo);
+    this.actualizarCabezal();
+    return true;
+  }
+
+  /** Tiempo real: 1/36 ticks por segundo de pared. Paseo: 1 tick por segundo. El nivel no cambia esa cadencia. */
+  private ticksPorSegundo(): number {
+    return this.modoReloj === 'paseo' ? 1 : 1 / SEGUNDOS_POR_TICK;
+  }
+
+  private esRelojDeTicks(): boolean {
+    return this.modoReloj === 'tiempo-real' || this.modoReloj === 'paseo';
+  }
+
+  /**
+   * El hueco hasta el fotograma siguiente es su tick real (decimación), no `CINTA.fpsNormal`. La fracción que no llega
+   * al siguiente tick permanece. Con la cola vacía no se guarda más de un fotograma de crédito.
+   */
+  private avanzarReloj(dt: number): boolean {
+    this.creditoTicks += dt / 1000 * this.ticksPorSegundo();
+    const batch: QueuedFrame[] = [];
+    let cambio = false;
+    let fueraDelTramo = false;
+    while (this.frames.length) {
+      const next = this.frames[0]!;
+      if (this.tramo && next.tick > this.tramo.hasta) { fueraDelTramo = true; break; }
+      const desde = batch.length ? batch[batch.length - 1]!.tick : this.currentTick;
+      const span = next.tick - desde;
+      const previo = batch.length ? batch[batch.length - 1]!.nivel : this.nivel;
+      const otroNivel = previo !== null && next.nivel !== previo;
+      if (otroNivel && batch.length) break;
+      if (span > this.creditoTicks + 1e-9) break;
+      if (span > 0) this.creditoTicks -= span;
+      batch.push(this.frames.shift()!);
+      if (otroNivel) { cambio = true; break; }
+    }
+    if (!batch.length && !this.frames.length) {
+      const tope = Math.max(1, this.paso ?? 1);
+      if (this.creditoTicks > tope) this.creditoTicks = tope;
+    }
+    if (batch.length && !this.deliver(batch, 'play', batch.length - 1, cambio)) return false;
+    this.cerrarReproduccion(fueraDelTramo);
+    this.actualizarCabezal();
+    this.notificarSegundo();
+    return true;
+  }
+
+  /** Borde vivo: un fotograma cuando la cinta avanza un paso; si el hueco es grande, un solo salto, sin pase de horas. */
+  private seguirBorde(): void {
+    if (this.jumping || this.snapEnCurso) return;
+    const objetivo = this.liveTick();
+    if (this.currentTick >= objetivo) return;
+    const siguiente = this.frames[0];
+    const paso = Math.max(1, siguiente?.paso ?? this.paso ?? 1);
+    if (siguiente && siguiente.tick <= objetivo && objetivo - this.currentTick <= paso * 2) {
+      const next = this.frames.shift()!;
+      const cambio = this.nivel !== null && next.nivel !== this.nivel;
+      this.deliver([next], 'play', 0, cambio);
+      return;
+    }
+    if (objetivo - this.currentTick <= paso) return;
+    this.snapEnCurso = true;
+    void this.jump(objetivo, 'seek', 1).finally(() => { this.snapEnCurso = false; });
+  }
+
+  private cerrarReproduccion(fueraDelTramo: boolean): void {
+    if (this.tramo && (fueraDelTramo || this.currentTick >= this.tramo.hasta ||
+        (!this.frames.length && this.currentTick >= this.maxTick))) {
+      this.tramo = null; this.playing = false; this.credito = 0; this.creditoTicks = 0;
+      this.options.onAviso?.('Terminó el tramo.'); this.notify();
+    } else if (this.options.abrirEnInicio && this.currentTick >= this.maxTick) {
+      this.playing = false; this.credito = 0; this.creditoTicks = 0; this.notify();
+    }
+  }
+
+  /** Publica el reloj de la barra cuando cambia el segundo de mundo, sin esperar al fotograma siguiente. */
+  private notificarSegundo(): void {
+    if (!this.esRelojDeTicks()) return;
+    const segundo = Math.floor(Math.max(0, this.playTick) * SEGUNDOS_POR_TICK + 1e-9);
+    if (segundo === this.ultimoSegundo) return;
+    this.ultimoSegundo = segundo;
+    this.notify();
   }
 
   /* ---------------------------------------------------------------- */
@@ -349,16 +475,64 @@ export class DvrPlayer {
   setPlaying(playing: boolean): void {
     if (this.playing === playing) return;
     this.playing = playing;
-    if (!playing) this.guardarMarcador(false);
+    if (playing) this.lastNow = null; // el hueco de la pausa, o de una pestaña dormida, no se reproduce
+    else this.guardarMarcador(false);
     this.notify();
   }
 
   togglePlaying(): void { this.setPlaying(!this.playing); }
 
+  /** Ritmo explícito (`0,5×`…`25×`). Sale de tiempo real y del borde vivo. Ignora lo que no está en el contrato. */
   setSpeed(speed: Velocidad): void {
-    if (!VELOCIDADES.includes(speed) || this.speed === speed) return;
+    if (!VELOCIDADES.includes(speed)) return;
+    if (this.modoReloj === 'ritmo' && this.speed === speed) return;
+    this.modoReloj = 'ritmo';
     this.speed = speed;
-    this.prefetch(); this.notify();
+    this.credito = 0;
+    this.snapEnCurso = false;
+    this.prefetch();
+    this.guardarMarcador(false);
+    this.notify();
+  }
+
+  /** La pestaña pasó a oculta o volvió. El hueco intermedio no se reproduce. */
+  setPaginaVisible(visible: boolean): void {
+    if (this.paginaVisible === visible) return;
+    this.paginaVisible = visible;
+    this.lastNow = null;
+  }
+
+  /** Vuelve a 1 s de mundo por 1 s de pared, en el fotograma actual, sin saltar al borde. */
+  entrarEnTiempoReal(): void {
+    this.entrarReloj('tiempo-real');
+  }
+
+  /** Un tick de mundo por segundo de pared, en cualquier nivel. En detalle, un fotograma cada 4 s. */
+  entrarEnPaseo(): void {
+    this.entrarReloj('paseo');
+  }
+
+  private entrarReloj(modo: 'tiempo-real' | 'paseo'): void {
+    if (this.modoReloj === modo) return;
+    this.modoReloj = modo;
+    this.credito = 0;
+    this.creditoTicks = 0;
+    this.lastNow = null;
+    this.snapEnCurso = false;
+    this.actualizarCabezal();
+    this.prefetch();
+    this.guardarMarcador(false);
+    this.notify();
+  }
+
+  /** Un seek o un paso sueltan el borde vivo: si no, el siguiente fotograma desharía la búsqueda. */
+  private soltarBorde(): void {
+    if (this.modoReloj !== 'borde-vivo') return;
+    this.modoReloj = 'tiempo-real';
+    this.snapEnCurso = false;
+    this.creditoTicks = 0;
+    this.lastNow = null;
+    this.guardarMarcador(false);
   }
 
   /** `'auto'` (por defecto) o un nivel fijo: se repite lo cargado en el tick actual con el nivel pedido. */
@@ -378,6 +552,7 @@ export class DvrPlayer {
   async seek(tick: number): Promise<void> {
     if (!this.enabled || !Number.isFinite(tick)) return;
     this.tramo = null;
+    this.soltarBorde();
     await this.jump(tick, 'seek', Math.sign(tick - this.currentTick) || 1);
   }
 
@@ -385,6 +560,7 @@ export class DvrPlayer {
   step(delta: -1 | 1): Promise<void> {
     if (!this.enabled || !this.started) return Promise.resolve();
     this.tramo = null;
+    this.soltarBorde();
     if (this.playing) { this.playing = false; this.notify(); }
     if (delta > 0) return this.adelantar();
     // Varios clics seguidos se encadenan: cada uno parte del fotograma en que dejó el anterior.
@@ -401,6 +577,7 @@ export class DvrPlayer {
     if (fin <= inicio) { this.options.onAviso?.('El final debe estar después del inicio.'); return; }
     const tramo = { desde: inicio, hasta: fin };
     this.tramo = tramo;
+    this.soltarBorde();
     this.playing = false;
     const ok = await this.jump(inicio, 'seek', 1, { tramo });
     if (this.tramo !== tramo) return; // Otro salto o tramo sustituyó a este mientras llegaba el corte.
@@ -408,23 +585,29 @@ export class DvrPlayer {
     this.playing = true; this.lastNow = null; this.notify();
   }
 
-  /** Vuelve al presente (con colchón) y reproduce. */
+  /** Borde vivo, a propósito: salta al presente de la cinta y lo sigue. En archivo es el último fotograma, pausado. */
   async jumpToLiveEdge(): Promise<void> {
     this.tramo = null;
     this.playing = !this.options.abrirEnInicio;
     if (!this.enabled) { this.notify(); return; }
     this.epocaVista = null;
+    const seguir = !this.options.abrirEnInicio;
+    if (seguir) { this.modoReloj = 'borde-vivo'; this.snapEnCurso = true; }
     // La meta puede tener varios segundos: el motor y la reproducción tienen relojes distintos.
     // Una orden posterior del usuario invalida esta consulta, incluso antes de pedir el trozo.
     const gen = this.generacion;
-    if (!this.options.abrirEnInicio) {
-      try {
-        const meta = await this.options.fetchMeta();
-        if (gen !== this.generacion) return;
-        this.applyMeta(meta);
-      } catch { if (gen !== this.generacion) return; }
-    }
-    await this.jump(this.liveTick(), 'seek', 1, { alPresente: !this.options.abrirEnInicio });
+    try {
+      if (seguir) {
+        try {
+          const meta = await this.options.fetchMeta();
+          if (gen !== this.generacion) return;
+          this.applyMeta(meta);
+        } catch { if (gen !== this.generacion) return; }
+      }
+      const pinto = await this.jump(this.liveTick(), 'seek', 1, { alPresente: seguir });
+      // `jump` sube la generación: guardar solo si ese salto es el que quedó en pantalla.
+      if (pinto) this.guardarMarcador(false);
+    } finally { if (seguir) this.snapEnCurso = false; }
   }
 
   /** La cámara cambió: se fusiona ~200 ms y se refresca el trozo en `currentTick` sin perder la posición. */
@@ -453,6 +636,8 @@ export class DvrPlayer {
 
   private async arrancar(): Promise<void> {
     if (this.options.abrirEnInicio) {
+      this.modoReloj = 'ritmo';
+      this.speed = 1;
       this.playing = false;
       const escena = this.escenaDisponible();
       if (escena) {
@@ -463,10 +648,21 @@ export class DvrPlayer {
       await this.jump(this.minTick, 'start', 1);
       return;
     }
+    const guardado = this.options.marcadores?.leerModo() ?? null;
+    if (guardado?.modo === 'borde-vivo') this.modoReloj = 'borde-vivo';
+    else if (guardado?.modo === 'paseo') this.modoReloj = 'paseo';
+    else if (guardado?.modo === 'ritmo') { this.modoReloj = 'ritmo'; this.speed = guardado.velocidad; }
+    else this.modoReloj = 'tiempo-real';
+    if (this.modoReloj === 'borde-vivo') {
+      this.snapEnCurso = true;
+      try { await this.jump(this.liveTick(), 'start', 1, { alPresente: true }); }
+      finally { this.snapEnCurso = false; }
+      this.options.onAviso?.('Borde vivo: sigues el presente de la cinta.');
+      return;
+    }
     let marcador: Marcador | null = null;
     try { marcador = await this.options.marcadores?.ultimo() ?? null; } catch { marcador = null; }
     if (marcador && this.maxTick >= marcador.t) {
-      this.speed = 1;
       const objetivo = clamp(marcador.t, this.minTick, this.maxTick);
       if (await this.jump(objetivo, 'start', 1)) {
         const dia = Math.floor(this.currentTick / TICKS_POR_DIA) + 1;
@@ -477,7 +673,8 @@ export class DvrPlayer {
         return;
       }
     }
-    await this.jump(this.liveTick(), 'start', 1);
+    // Historia navegable, ya. No se espera al reloj ni se engancha el borde vivo a la velocidad del motor.
+    await this.jump(tickDeHistoria(this.minTick, this.maxTick), 'start', 1);
   }
 
   private escenaDisponible(): EscenaArchivo | undefined {
@@ -494,7 +691,10 @@ export class DvrPlayer {
     const perfil = this.options.marcadores;
     if (!perfil || !this.started || this.marcadorEnVuelo && !alSalir) return;
     this.marcadorEnVuelo = true;
-    void perfil.guardar({ epoca: this.epocaActual(), t: this.currentTick, nivel: this.nivel ?? 0, velocidad: this.speed }, alSalir)
+    perfil.guardarModo({ modo: this.modoReloj, velocidad: this.speed });
+    // El servidor solo admite los múltiplos de `CINTA.velocidades`. El modo vive en el almacén local.
+    const velocidad = this.modoReloj === 'ritmo' ? this.speed : 1;
+    void perfil.guardar({ epoca: this.epocaActual(), t: this.currentTick, nivel: this.nivel ?? 0, velocidad }, alSalir)
       .catch(() => undefined).finally(() => { this.marcadorEnVuelo = false; });
   }
 
@@ -548,7 +748,9 @@ export class DvrPlayer {
 
   private hasFrames(): boolean { return this.niveles.length > 0 && this.maxTick >= this.minTick; }
   private liveTick(): number { return this.options.abrirEnInicio ? this.maxTick : Math.max(this.minTick, this.maxTick - DVR_LIMITS.liveMargin); }
-  private chunkCount(): number { return this.speed >= DVR_LIMITS.fastSpeed ? DVR_LIMITS.fastChunkCount : DVR_LIMITS.chunkCount; }
+  private chunkCount(): number {
+    return this.modoReloj === 'ritmo' && this.speed >= DVR_LIMITS.fastSpeed ? DVR_LIMITS.fastChunkCount : DVR_LIMITS.chunkCount;
+  }
   /** Colchón mínimo por delante antes de pedir más: ≥ 45 fotogramas y, a velocidad alta, ≈ 1,5 s de reproducción. */
   private prefetchThreshold(): number { return Math.max(DVR_LIMITS.prefetchBelow, Math.ceil(CINTA.fpsNormal * this.speed * 1.5)); }
 
@@ -662,8 +864,14 @@ export class DvrPlayer {
     this.notify();
   }
 
-  /** `playTick`: el último fotograma más la fracción de reloj hacia el siguiente. */
+  /** `playTick`: el último fotograma más la fracción de reloj hacia el siguiente. En tiempo real la fracción es en ticks. */
   private actualizarCabezal(): void {
+    if (this.esRelojDeTicks() && !this.jumping) {
+      const siguiente = this.frames[0];
+      const bruto = this.currentTick + Math.max(0, this.creditoTicks);
+      this.playTick = siguiente ? Math.min(bruto, siguiente.tick) : bruto;
+      return;
+    }
     const siguiente = this.frames[0];
     this.playTick = siguiente && this.playing && !this.jumping
       ? this.currentTick + clamp(this.credito, 0, 1) * (siguiente.tick - this.currentTick)
@@ -729,7 +937,7 @@ export class DvrPlayer {
     const target = this.fueraDeLaguna(clamp(Math.floor(t), this.minTick, Math.max(this.minTick, this.maxTick)), direccion);
     const gen = ++this.generacion;
     this.aborter?.abort(); this.cargando = null;
-    this.frames = []; this.jumping = true; this.refreshPending = false; this.credito = 0; this.agotado = null;
+    this.frames = []; this.jumping = true; this.refreshPending = false; this.credito = 0; this.creditoTicks = 0; this.agotado = null;
     this.notify();
     const { camaraMaxAncho, camaraMaxAlto } = DVR_LIMITS;
     const ventana = escena ? normalizeViewport({ x: escena.x - camaraMaxAncho / 2, y: escena.y - camaraMaxAlto / 2,
@@ -773,7 +981,7 @@ export class DvrPlayer {
     if (!this.enabled || !this.started || this.currentTick <= this.minTick) return;
     const gen = ++this.generacion;
     this.aborter?.abort(); this.cargando = null;
-    this.frames = []; this.jumping = true; this.refreshPending = false; this.credito = 0; this.agotado = null;
+    this.frames = []; this.jumping = true; this.refreshPending = false; this.credito = 0; this.creditoTicks = 0; this.agotado = null;
     const chunk = await this.fetchChunk(this.currentTick - 1, 1, gen);
     if (gen !== this.generacion) return;
     this.jumping = false;
@@ -792,7 +1000,7 @@ export class DvrPlayer {
     const next = this.frames.shift();
     if (!next) return;
     const cambio = this.nivel !== null && next.nivel !== this.nivel;
-    this.credito = 0;
+    this.credito = 0; this.creditoTicks = 0;
     if (this.deliver([next], 'step', 0, cambio)) this.prefetch();
   }
 
@@ -845,6 +1053,7 @@ export interface RedMarcadores {
 
 const CLAVE_PERFIL = 'carta.cinta.perfil';
 const CLAVE_MARCADORES = 'carta.cinta.marcadores';
+const CLAVE_MODO = 'carta.cinta.modo';
 /** Se guardan los 5 últimos por perfil, igual que el servidor (marcadores). */
 const MARCADORES_POR_PERFIL = 5;
 
@@ -901,6 +1110,23 @@ export class PerfilCinta {
       const lista = crudo ? JSON.parse(crudo) as unknown : [];
       return Array.isArray(lista) ? lista.filter(esMarcador).filter(m => m.perfil === this.perfil) : [];
     } catch { return []; }
+  }
+
+  /** Modo de reloj de este perfil. `null` si no hay uno guardado: el arranque usa tiempo real. */
+  leerModo(): { modo: ModoReloj; velocidad: Velocidad } | null {
+    try {
+      const crudo = this.almacen?.getItem(`${CLAVE_MODO}.${this.perfil}`);
+      if (!crudo) return null;
+      const dato = JSON.parse(crudo) as { modo?: unknown; velocidad?: unknown };
+      if (dato.modo !== 'tiempo-real' && dato.modo !== 'paseo' && dato.modo !== 'borde-vivo' && dato.modo !== 'ritmo') return null;
+      const velocidad = VELOCIDADES.includes(dato.velocidad as Velocidad) ? dato.velocidad as Velocidad : 1;
+      return { modo: dato.modo, velocidad };
+    } catch { return null; }
+  }
+
+  /** El modo se guarda solo en local: el servidor rechaza una velocidad que no esté en `CINTA.velocidades`. */
+  guardarModo(modo: { modo: ModoReloj; velocidad: Velocidad }): void {
+    try { this.almacen?.setItem(`${CLAVE_MODO}.${this.perfil}`, JSON.stringify(modo)); } catch { /* almacén lleno o bloqueado */ }
   }
 
   /** El marcador más reciente entre el servidor y el almacén local, o `null` si no hay ninguno. */

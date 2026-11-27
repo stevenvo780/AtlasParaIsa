@@ -62,6 +62,8 @@ export interface PersonView {
   /** V23: emergent craft colorHex (dominant compound/tool tint) and continuous vocation focus derived from real deeds & chemistry. */
   craftTint?: string;
   craftFocus?: string;
+  /** V23 (`v23.tecnica`): recetas de lotes de esta persona. Ausente = no grabado. No lleva el tick del fotograma. */
+  tecnicaVista?: import('./tecnica-visible.js').TecnicaVisible;
 }
 /** T036(h): lo que el inspector pide por habitante y no viaja en cada `state`. */
 export interface PersonDetail {
@@ -124,6 +126,8 @@ export interface WorldView {
   reparto?: import('./vistas-v23.js').RepartoVisible;
   /** V24: active/recent asynchronous Divine Whispers (non-coercive inspirations awaiting reception). */
   whispers?: import('./worldmap.js').DivineWhisper[];
+  /** Primera reacción que la arena aplicó. Ausente = esta vista no la trae. No se infiere de las sustancias. */
+  reaccionObservada?: import('./reaccion-observada.js').ReaccionObservada;
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
   /** M10: claves «cx,cy» (regiones de 16 × 16) que el servidor simula ahora dentro de esta ventana; el resto

@@ -1,3 +1,5 @@
+import type { ReaccionObservada } from '../shared/reaccion-observada.js';
+import type { TecnicaVisible } from '../shared/tecnica-visible.js';
 import type { AnimalView, BlueprintView, ChronicleEvent, PersonDetail, PersonView, StructureView, Tile, WorldView } from '../shared/types.js';
 import type { CrianzaVisible, CuerpoVisible, LoteVisible, SustanciasVisibles } from '../shared/vistas-v23.js';
 import { ClaseSustancia, TIPOS, type Propiedades, type SustanciaVista } from '../shared/materia.js';
@@ -32,7 +34,11 @@ export function destinationLink(person: PersonView): string {
   return `<button class="entity-link" title="Centrar la cámara en este destino" data-place-x="${esc(person.target.x)}" data-place-y="${esc(person.target.y)}">${label}: ${number(person.target.x, 1)}, ${number(person.target.y, 1)} ${icon.arrow}</button>`;
 }
 
-export function meter(label: string, value: number): string { const v = Math.max(0, Math.min(100, Math.round(value * 100))); return `<div class="game-need"><span>${esc(label)}</span><meter min="0" max="100" value="${v}" aria-label="${esc(label)}">${v}%</meter><span>${v}%</span></div>`; }
+export function meter(label: string, value: number): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `<div class="game-need" data-meter="no-grabado"><span>${esc(label)}</span><em class="sin-dato">no grabado</em></div>`;
+  const v = Math.max(0, Math.min(100, Math.round(value * 100)));
+  return `<div class="game-need"><span>${esc(label)}</span><meter min="0" max="100" value="${v}" aria-label="${esc(label)}">${v}%</meter><span>${v}%</span></div>`;
+}
 export function animalSilhouette(species: AnimalView['species']): string {
   const paths = { hare: 'M5 17h12v-7h4v7h-4v4H3v-4h2ZM16 10V2h2v8m2 0V3h2v7', deer: 'M3 13h13V8h6v7h-4v7h-2v-7H6v7H4V13Zm15-5V1m4 7V1m-6 2h7', boar: 'M3 12h16v-2h3v8h-3v4h-2v-4H6v4H4v-4H1v-6h2Zm17 6h4v-3', fish: 'm2 6 6 6L2 18V6Zm6 6 6-5h6l4 5-4 5h-6l-6-5Z', wolf: 'M4 14h11V7l3-5 2 5h3v8h-3v7h-2v-6H7v6H5v-6l-5-4v-3l4 5Z', fox: 'M7 14h8V8l2-6 3 5h3v7h-3v7h-2v-5H9v5H7v-4l-6-2V8l6 6Z' };
   return svg(`<path d="${paths[species]}"/>`);
@@ -77,14 +83,66 @@ export function structureV20Facts(structure: StructureView): string {
 }
 export function structureCard(structure: StructureView, world: WorldView | null): string {
   const blueprint = world?.blueprints?.find(b => b.id === structure.blueprintId);
-  const parts = [...new Set(structure.components)].map(part => `${componentNames[part]}${structure.components.filter(p => p === part).length > 1 ? ` ×${structure.components.filter(p => p === part).length}` : ''}`);
+  const nombrePieza = (part: string): string => (componentNames as Record<string, string>)[part] ?? `componente «${part}» (sin nombre en el catálogo legado)`;
+  const parts = [...new Set(structure.components)].map(part => `${nombrePieza(part)}${structure.components.filter(p => p === part).length > 1 ? ` ×${structure.components.filter(p => p === part).length}` : ''}`);
   const cisterns = structure.components.filter(part => part === 'cistern').length, granaries = structure.components.filter(part => part === 'granary').length;
-  return `<section class="structure-card" data-structure="${esc(structure.id)}">${meter('Estado', structure.condition)}<div class="structure-reserves">${cisterns ? `<div data-structure-water><span>Agua en la cisterna</span><strong>${resourceQuantity(structure.water)} <small>/ ${number(cisterns * .6, 2)} u.</small></strong></div>` : ''}${granaries ? `<div data-structure-food><span>Alimento en el granero</span><strong>${resourceQuantity(structure.food)} <small>/ ${number(granaries * .7, 2)} u.</small></strong></div>` : ''}</div>${structureV19Facts(structure as ExtendedStructure)}${structureV20Facts(structure)}<p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p>${parts.length ? `<p class="structure-components" data-structure-design>Diseño: ${parts.join(' · ')}</p>` : ''}${structure.piezas !== undefined ? `<div class="structure-benefit" data-structure-pieces><span>Piezas físicas recibidas</span><strong>${number(structure.piezas.length)}</strong></div>` : ''}<div class="structure-benefit"><span>Usos con beneficio</span><strong>${number(structure.uses)}</strong></div><p class="drawer-note structure-history-note">Acumulados desde su construcción; no indican ocupación actual.</p>${blueprint ? `<details class="person-detail" data-detail="structure-blueprint-${esc(structure.id)}"><summary>Proyecto y materiales</summary>${blueprintCard(blueprint, world)}</details>` : ''}</section>`;
+  const agua = structure.water === undefined ? '<em class="sin-dato">no grabado</em>' : resourceQuantity(structure.water);
+  const comida = structure.food === undefined ? '<em class="sin-dato">no grabado</em>' : resourceQuantity(structure.food);
+  return `<section class="structure-card" data-structure="${esc(structure.id)}">${meter('Estado', structure.condition)}<div class="structure-reserves">${cisterns ? `<div data-structure-water><span>Agua en la cisterna</span><strong>${agua} <small>/ ${number(cisterns * .6, 2)} u.</small></strong></div>` : ''}${granaries ? `<div data-structure-food><span>Alimento en el granero</span><strong>${comida} <small>/ ${number(granaries * .7, 2)} u.</small></strong></div>` : ''}</div>${structureV19Facts(structure as ExtendedStructure)}${structureV20Facts(structure)}<p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p>${parts.length ? `<p class="structure-components" data-structure-design>Diseño: ${parts.join(' · ')}</p>` : ''}${piezasObra(structure, world)}${fichaReaccion(world?.reaccionObservada, 'obra')}<div class="structure-benefit"><span>Usos con beneficio</span><strong>${number(structure.uses)}</strong></div><p class="drawer-note structure-history-note">Acumulados desde su construcción; no indican ocupación actual.</p>${blueprint ? `<details class="person-detail" data-detail="structure-blueprint-${esc(structure.id)}"><summary>Proyecto y materiales</summary>${blueprintCard(blueprint, world)}</details>` : ''}</section>`;
 }
 
 /** A positive reserve smaller than the display precision must never read as zero. */
 export function resourceQuantity(value: number): string {
   return value > 0 && value < .01 ? `&lt;${number(.01, 2)}` : number(value, 2);
+}
+
+/** Inventario legado de madera y piedra. Ausente no es cero. */
+export function fichaMateriales(p: Pick<PersonView, 'materials'>): string {
+  const m = p.materials;
+  if (!m) return '<p class="drawer-note" data-materiales="no-grabado">El inventario de madera y piedra no vino en este fotograma.</p>';
+  const celda = (etiqueta: string, valor: number | undefined, marca: string): string => {
+    const marcaIcono = marca === 'wood' ? icon.leaf : icon.hammer;
+    if (typeof valor !== 'number' || !Number.isFinite(valor)) return `<span data-material="${marca}">${marcaIcono}<em class="sin-dato">no grabado</em> ${etiqueta}</span>`;
+    return `<span data-material="${marca}" data-cero="${valor === 0 ? 'si' : 'no'}">${marcaIcono}<strong>${number(valor)}</strong> ${etiqueta}</span>`;
+  };
+  return `<div class="material-pouch" data-materiales="legado">${celda('madera', m.wood, 'wood')}${celda('piedra', m.stone, 'stone')}</div><p class="drawer-note">Contador legado. Un cero es cero de ese contador, no la masa del cuerpo ni de los lotes.</p>`;
+}
+
+/** Técnica sobre lotes de esta persona en su tick. Ausente no es «ninguna receta». */
+export function fichaTecnica(t: TecnicaVisible | undefined): string {
+  if (!t) return '<section class="tecnica-ficha" data-tecnica="no-grabado"><h4 class="detail-subtitle">Técnica sobre lotes</h4><p class="drawer-note">Esta ficha no trae técnica sobre lotes. Puede ser un mundo sin esa ley o un fotograma que no la grabó. No es cero recetas.</p></section>';
+  const receta = (r: TecnicaVisible['recetas'][number]): string => {
+    const origen = r.padres.length ? `Sale de las recetas nº ${r.padres.join(', ')}.` : 'No consta de qué receta sale ni de quién la enseñó.';
+    const pasos = r.pasos === undefined
+      ? '<p data-pasos="no-grabado">Esos pasos no estaban en el registro de este tick.</p>'
+      : r.pasos.length
+        ? `<ol>${r.pasos.map(p => `<li data-op="${esc(p.op)}">${esc(p.texto)}</li>`).join('')}</ol>`
+        : '<p data-pasos="ninguno">El registro la tiene sin pasos.</p>';
+    return `<article data-receta="${esc(r.id)}" data-tick="${esc(r.usada)}"><h5>Receta nº ${esc(r.id)} · generación ${esc(r.generacion)}</h5><p>Último uso en el paso ${esc(r.usada)}. ${esc(origen)}</p>${pasos}</article>`;
+  };
+  const lista = t.recetas.length
+    ? t.recetas.map(receta).join('') + (t.omitidas ? `<p>Hay ${esc(t.omitidas)} recetas más recordadas; aquí están las de uso más reciente.</p>` : '')
+    : '<p data-recetas="ninguna">No recuerda ninguna receta de lotes en este paso.</p>';
+  const proceso = t.proceso
+    ? `<div data-proceso="${esc(t.proceso.tipo)}" data-desde="${esc(t.proceso.desde)}"><p>${t.proceso.tipo === 'research' ? 'Investiga' : 'Fabrica'} la receta nº ${esc(t.proceso.receta)}, paso ${esc(t.proceso.paso)} de ${esc(t.proceso.total)}, desde el paso ${esc(t.proceso.desde)}.</p><ol>${t.proceso.pasos.map(p => `<li data-op="${esc(p.op)}">${esc(p.texto)}</li>`).join('')}</ol></div>`
+    : '<p data-proceso="ninguno">Ningún proceso en curso.</p>';
+  const intentos = Number.isFinite(t.intentos) ? `${number(t.intentos)} intentos registrados` : 'intentos no grabados';
+  return `<section class="tecnica-ficha" data-tecnica="ok"><h4 class="detail-subtitle">Técnica sobre lotes</h4><p data-intentos>${esc(intentos)}.</p>${proceso}${lista}</section>`;
+}
+
+/** Una reacción aplicada de verdad. Una fórmula o dos fotos distintas no bastan. */
+export function fichaReaccion(obs: ReaccionObservada | undefined, alcance: 'mundo' | 'obra'): string {
+  if (!obs) {
+    const texto = alcance === 'obra'
+      ? 'Esta vista no trae una reacción aplicada a la obra. La fórmula de una pieza no es una reacción.'
+      : 'Esta vista no trae una reacción aplicada. No se deduce de las sustancias presentes.';
+    return `<p class="drawer-note" data-reaccion="no-grabado">${texto}</p>`;
+  }
+  const par = obs.b > 0 ? `las sustancias nº ${number(obs.a)} y nº ${number(obs.b)}` : `la sustancia nº ${number(obs.a)} sola`;
+  const donde = alcance === 'obra'
+    ? `Ocurrió en el lote nº ${number(obs.lote)}, no en la casa como tal.`
+    : `Alcance: el lote nº ${number(obs.lote)}.`;
+  return `<p class="drawer-note" data-reaccion="aplicada" data-tick="${esc(obs.tick)}" data-lote="${esc(obs.lote)}">Reacción aplicada en el paso ${esc(obs.tick)}: ${par}, nivel ${esc(obs.nivel)}, ${esc(number(obs.veces))} ${obs.veces === 1 ? 'vez' : 'veces'}. ${donde}</p>`;
 }
 
 function procedureReference(recipeId: string, technology: WorldView['technology']): string {
@@ -256,7 +314,7 @@ export function escuchaFicha(p: PersonView, world: Pick<WorldView, 'people' | 'd
 /** T036(h): `p.experiences`, `p.trust` y el repertorio (`recipeIds`) ya no viajan en el `state`:
  * llegan con `{type:'persona'}`. `undefined` significa «todavía no ha llegado» y se dibuja como
  * «cargando…»; una lista vacía sí significa «no hay nada», y se dice con esas palabras. */
-export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades' | 'procedimientos' | 'inventadas'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id), eventosRecibidos: readonly ChronicleEvent[] = world.events): { now: string; kit: string; story: string } {
+export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades' | 'procedimientos' | 'inventadas'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id), eventosRecibidos: readonly ChronicleEvent[] = world.events, opciones?: { repertorio?: 'cargando' | 'no-grabado' }): { now: string; kit: string; story: string } {
   const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua',
     // M6: el resto de las prácticas que registra `outcome()` (world/index.ts), en claro.
     research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse a otros', accompany: 'Compañía', retreat: 'Buscar espacio' };
@@ -277,18 +335,21 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const experiences = `<details class="person-detail" data-detail="experiences"><summary>Últimas experiencias${p.experiences === undefined ? '' : ` <span class="detail-badge">${Math.min(8, p.experiences.length)}</span>`}</summary><p>Registro reciente de esta vida simulada. Conserva el momento y el episodio que lo originó.</p>${p.experiences === undefined ? '<p class="drawer-note" data-loading="experiences">Cargando sus últimas experiencias…</p>' : p.experiences.length ? `<ol class="experience-list">${p.experiences.slice(-8).reverse().map(experience => { const cause = buscarEpisodio(experience.causeId); return `<li><span class="experience-tick">${esc(momento(experience.tick).toLocaleUpperCase('es'))}</span><p>${esc(textoDeExperiencia(experience.text, cause, world))}</p><small><strong>Qué influyó:</strong> ${esc(cause ? enClaro(cause.cause, { world }) : 'El episodio que lo causó no está entre los que recibió este navegador.')}</small></li>`; }).join('')}</ol>` : '<p>Aún no hay experiencias registradas.</p>'}</details>`;
   const technology = world?.technology;
   const knowledge = recipeIds ?? technology?.knowledge?.find(entry => entry.actorId === p.id)?.recipeIds;
+  const avisoRepertorio = opciones?.repertorio === 'no-grabado'
+    ? '<p class="drawer-note" data-procedures="no-grabado">Este fotograma no grabó el repertorio del catálogo legado. No se cuenta como cero.</p>'
+    : '<p class="drawer-note" data-loading="procedures">Cargando su repertorio…</p>';
   const remembered = `<details class="person-detail" data-detail="procedures"><summary>Procedimientos que recuerda${knowledge ? ` <span class="detail-badge">${knowledge.length}</span>` : ''}</summary>
-    ${!knowledge ? '<p class="drawer-note" data-loading="procedures">Cargando su repertorio…</p>' : knowledge.length
+    ${!knowledge ? avisoRepertorio : knowledge.length
       ? `${extra?.inventadas ? `<p class="drawer-note" data-invented>Inventó ${number(extra.inventadas)} ${extra.inventadas === 1 ? 'procedimiento' : 'procedimientos'} de los que el mundo conserva.</p>` : ''}${knowledge.slice(0,32).map(id => `<div class="skill-row procedure-row">${procedureReference(id, technology)}${origenProcedimiento(id, extra?.procedimientos, world)}</div>`).join('')}${knowledge.length > 32 ? `<p>Aquí se muestran 32 de los ${number(knowledge.length)} procedimientos que recuerda.</p>` : ''}`
-      : '<p>No recuerda ningún procedimiento ahora.</p>'}
-    <p>Este repertorio cambia al aprender y olvidar. Es distinto de los rasgos heredados. Recordar un procedimiento no asegura tener los materiales para realizarlo.</p></details>`;
+      : '<p data-procedures="ninguno">No recuerda ningún procedimiento ahora.</p>'}
+    <p>Este repertorio cambia al aprender y olvidar. Es distinto de los rasgos heredados y de la técnica sobre lotes. Recordar un procedimiento no asegura tener los materiales para realizarlo.</p></details>`;
   const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];
   const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item => forgedToolMarkup(item, world)).join('')}${products.length > 8 ? `<p>Se muestran 8 de los ${number(products.length)} objetos que lleva.</p>` : ''}<p>La masa del material cambia al usarlo o transformarlo. El agua de su composición es distinta del agua potable transportada. Las unidades de material y de agua del entorno son diferentes. Llevar un objeto no implica recordar cómo se fabrica.</p></details>` : '';
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
   const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
-  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + cuerpoPersonaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
+  return { now: decisionFicha(p, world) + escuchaFicha(p, world) + cuerpoPersonaFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + fichaTecnica(p.tecnicaVista) + remembered + learned, story: genetics + social + experiences };
 }
 
 /* ------------------------------------------------------------------ */
@@ -427,6 +488,17 @@ export function lotesFicha(lotes: readonly LoteVisible[] | undefined, sustancias
   if (!aqui.length) return '';
   const cards = aqui.map(l => `<article class="lote-ficha" data-lote="${esc(l.rol)}"><strong>${esc(ROL_LOTE[l.rol] ?? l.rol)}</strong>${dato('Masa', kg(l.masa), 'masa')}${dato('Temperatura', temperaturaTexto(l.T), 'temperatura')}${dato('Forma', finitoV23(l.forma) ? (l.forma === 0 ? 'montón sin forma' : `forma ${number(l.forma)}`) : null, 'forma')}${sustanciaFicha(sustanciaPorId(sustancias, l.principal), l.principal, l.T)}</article>`).join('');
   return `<section class="lotes-casilla" data-lotes><h4 class="detail-subtitle">Lo que hay en el suelo</h4>${cards}</section>`;
+}
+
+function piezasObra(structure: StructureView, world: WorldView | null): string {
+  if (structure.piezas === undefined) return '<p class="drawer-note" data-piezas="no-grabado">Las piezas físicas de esta obra no vinieron en esta vista.</p>';
+  if (!structure.piezas.length) return '<p class="drawer-note" data-piezas="ninguna">Ninguna pieza física observada en esta obra en este paso.</p>';
+  const filas = structure.piezas.map(l => {
+    const s = sustanciaPorId(world?.sustancias, l.principal);
+    const nombre = s ? `${formulaDe(s.atomos)} · ${nombreDerivado(s)}` : (finitoV23(l.principal) && l.principal > 0 ? `sustancia nº ${l.principal} (su estructura no vino en esta vista)` : 'sustancia no grabada');
+    return `<li data-pieza="${esc(l.principal)}">${esc(nombre)} · ${esc(kg(l.masa) ?? 'masa no grabada')} · ${esc(temperaturaTexto(l.T) ?? 'temperatura no grabada')}</li>`;
+  }).join('');
+  return `<div data-structure-pieces><span>Piezas físicas · ${esc(structure.piezas.length)}</span><ul>${filas}</ul></div>`;
 }
 
 /** Ficha › Cuerpo: masa, reserva, agua, digestivo, carga y temperatura. Persona o animal; todo campo ausente dice «sin dato». */

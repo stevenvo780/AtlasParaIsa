@@ -1,0 +1,304 @@
+{
+  "relevo": {
+    "resultado": "relevado",
+    "sha": "be50290bb58926f16bea9925f5996baa43cacafd",
+    "shaAnterior": "d0db3d8f5cf32290a54638f9b81a20e20b096a8a",
+    "instanciaCinta": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+    "mismoDirectorioYCinta": true,
+    "tickDurableConservado": true,
+    "saludPreStop": {
+      "tick": 45446,
+      "epoca": 3,
+      "ultimoTickGuardado": 45400
+    },
+    "saludFinal": {
+      "tick": 45480,
+      "epoca": 4,
+      "ultimoTickGuardado": 45447
+    },
+    "rollback": false
+  },
+  "navegador": {
+    "resultado": "medido",
+    "head": "be50290bb58926f16bea9925f5996baa43cacafd",
+    "entrada": "/assets/index-DlYvI6Lw.js",
+    "entradaSha256": "05fb97db74de1eddefdffe528a6e59e48fbdcd4240c1c29bc7b08f3bec73f71b",
+    "vistas": 146
+  },
+  "auditoria": {
+    "cintaPublicaN0N1": {
+      "fotogramas": [
+        {
+          "tick": 44148,
+          "nivel": 0,
+          "habitantes": 45,
+          "animales": 2,
+          "obras": 94,
+          "censo": 78,
+          "recetas": 27,
+          "reaccion": 44000,
+          "sustancias": 2
+        },
+        {
+          "tick": 33,
+          "nivel": 1,
+          "habitantes": 16,
+          "animales": 75,
+          "obras": 4,
+          "censo": 16,
+          "recetas": 0,
+          "reaccion": 1
+        }
+      ],
+      "recorridos": [
+        {
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          },
+          "vistas": [
+            "Cinta detallada/Mundo/life",
+            "Cinta detallada/Mundo/land",
+            "Cinta detallada/Mundo/communities",
+            "Cinta detallada/Mundo/technology",
+            "Cinta detallada/Mundo/materia",
+            "Cinta detallada/Mundo/performance",
+            "Cinta detallada/Vidas/people",
+            "Cinta detallada/Vidas/animals",
+            "Cinta detallada/Vidas/communities",
+            "Cinta detallada/Vidas/structures",
+            "Cinta detallada/Ficha/obra",
+            "Cinta detallada/Ficha/persona/now",
+            "Cinta detallada/Ficha/persona/kit",
+            "Cinta detallada/Ficha/persona/story",
+            "Cinta detallada/Ficha/animal/now",
+            "Cinta detallada/Ficha/animal/story",
+            "Cinta detallada/Ajustes",
+            "Cinta detallada/Capas",
+            "Cinta detallada/Mapa",
+            "Cinta detallada/Carta",
+            "Cinta detallada/Crónica",
+            "Cinta detallada/Reproductor",
+            "Cinta detallada/Susurros",
+            "Cinta detallada/Ficha/tesela",
+            "Historia/Mundo/life",
+            "Historia/Mundo/land",
+            "Historia/Mundo/communities",
+            "Historia/Mundo/technology",
+            "Historia/Mundo/materia",
+            "Historia/Mundo/performance",
+            "Historia/Vidas/people",
+            "Historia/Vidas/animals",
+            "Historia/Vidas/communities",
+            "Historia/Vidas/structures",
+            "Historia/Ficha/obra",
+            "Historia/Ficha/persona/now",
+            "Historia/Ficha/persona/kit",
+            "Historia/Ficha/persona/story",
+            "Historia/Ficha/animal/now",
+            "Historia/Ficha/animal/story",
+            "Historia/Susurros"
+          ],
+          "errores": [],
+          "fallos": []
+        },
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "vistas": [
+            "Cinta detallada/Mundo/life",
+            "Cinta detallada/Mundo/land",
+            "Cinta detallada/Mundo/communities",
+            "Cinta detallada/Mundo/technology",
+            "Cinta detallada/Mundo/materia",
+            "Cinta detallada/Mundo/performance",
+            "Cinta detallada/Vidas/people",
+            "Cinta detallada/Vidas/animals",
+            "Cinta detallada/Vidas/communities",
+            "Cinta detallada/Vidas/structures",
+            "Cinta detallada/Ajustes",
+            "Cinta detallada/Capas",
+            "Cinta detallada/Mapa",
+            "Cinta detallada/Carta",
+            "Cinta detallada/Crónica",
+            "Cinta detallada/Reproductor",
+            "Cinta detallada/Susurros",
+            "Historia/Mundo/life",
+            "Historia/Mundo/land",
+            "Historia/Mundo/communities",
+            "Historia/Mundo/technology",
+            "Historia/Mundo/materia",
+            "Historia/Mundo/performance",
+            "Historia/Susurros"
+          ],
+          "errores": [],
+          "fallos": []
+        }
+      ]
+    },
+    "cintaPublicaN0N3": {
+      "fotogramas": [
+        {
+          "tick": 44148,
+          "nivel": 0,
+          "habitantes": 45,
+          "animales": 2,
+          "obras": 94,
+          "censo": 78,
+          "recetas": 27,
+          "reaccion": 44000,
+          "sustancias": 2
+        },
+        {
+          "tick": 1,
+          "nivel": 3,
+          "habitantes": 2,
+          "obras": 3,
+          "recetas": 0
+        }
+      ],
+      "recorridos": [
+        {
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          },
+          "vistas": [
+            "Cinta detallada/Mundo/life",
+            "Cinta detallada/Mundo/land",
+            "Cinta detallada/Mundo/communities",
+            "Cinta detallada/Mundo/technology",
+            "Cinta detallada/Mundo/materia",
+            "Cinta detallada/Mundo/performance",
+            "Cinta detallada/Vidas/people",
+            "Cinta detallada/Vidas/animals",
+            "Cinta detallada/Vidas/communities",
+            "Cinta detallada/Vidas/structures",
+            "Cinta detallada/Ficha/obra",
+            "Cinta detallada/Ficha/persona/now",
+            "Cinta detallada/Ficha/persona/kit",
+            "Cinta detallada/Ficha/persona/story",
+            "Cinta detallada/Ficha/animal/now",
+            "Cinta detallada/Ficha/animal/story",
+            "Cinta detallada/Ajustes",
+            "Cinta detallada/Capas",
+            "Cinta detallada/Mapa",
+            "Cinta detallada/Carta",
+            "Cinta detallada/Crónica",
+            "Cinta detallada/Reproductor",
+            "Cinta detallada/Susurros",
+            "Cinta detallada/Ficha/tesela",
+            "Historia/Mundo/life",
+            "Historia/Mundo/land",
+            "Historia/Mundo/communities",
+            "Historia/Mundo/technology",
+            "Historia/Mundo/materia",
+            "Historia/Mundo/performance",
+            "Historia/Vidas/people",
+            "Historia/Vidas/animals",
+            "Historia/Vidas/communities",
+            "Historia/Vidas/structures",
+            "Historia/Ficha/obra",
+            "Historia/Ficha/persona/now",
+            "Historia/Ficha/persona/kit",
+            "Historia/Ficha/persona/story",
+            "Historia/Susurros"
+          ],
+          "errores": [],
+          "fallos": []
+        }
+      ]
+    },
+    "mundoAisladoEnVivo": {
+      "fotogramas": [],
+      "recorridos": [
+        {
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          },
+          "vistas": [
+            "Borde vivo/Mundo/life",
+            "Borde vivo/Mundo/land",
+            "Borde vivo/Mundo/communities",
+            "Borde vivo/Mundo/technology",
+            "Borde vivo/Mundo/materia",
+            "Borde vivo/Mundo/performance",
+            "Borde vivo/Vidas/people",
+            "Borde vivo/Vidas/animals",
+            "Borde vivo/Vidas/communities",
+            "Borde vivo/Vidas/structures",
+            "Borde vivo/Ficha/obra",
+            "Borde vivo/Ficha/persona/now",
+            "Borde vivo/Ficha/persona/kit",
+            "Borde vivo/Ficha/persona/story",
+            "Borde vivo/Ficha/animal/now",
+            "Borde vivo/Ficha/animal/story",
+            "Borde vivo/Ajustes",
+            "Borde vivo/Capas",
+            "Borde vivo/Mapa",
+            "Borde vivo/Carta",
+            "Borde vivo/Crónica",
+            "Borde vivo/Reproductor",
+            "Borde vivo/Susurros",
+            "Borde vivo/Ficha/tesela",
+            "Historia/Mundo/life",
+            "Historia/Mundo/land",
+            "Historia/Mundo/communities",
+            "Historia/Mundo/technology",
+            "Historia/Mundo/materia",
+            "Historia/Mundo/performance",
+            "Historia/Vidas/people",
+            "Historia/Vidas/animals",
+            "Historia/Vidas/communities",
+            "Historia/Vidas/structures",
+            "Historia/Ficha/obra",
+            "Historia/Ficha/persona/now",
+            "Historia/Ficha/persona/kit",
+            "Historia/Ficha/persona/story",
+            "Historia/Ficha/animal/now",
+            "Historia/Ficha/animal/story",
+            "Historia/Susurros",
+            "Borde vivo/Susurros tras un salto fallido"
+          ],
+          "errores": [],
+          "fallos": []
+        }
+      ]
+    }
+  },
+  "comprobaciones": {
+    "vidaResumida": "Grabación resumida · paso 1 Este nivel de la grabación omite el censo global y las estadísticas de vida.",
+    "paisajeResumido": "Grabación resumida · paso 1 Este nivel de la grabación omite las estadísticas de suelo, agua y cultivos. Infraestructura y conectividad Regiones descubiertas 2 Regiones activas 8 Obras en vista 3 Infraestructura: regiones activas. Regiones descubiertas: territorio acumulado.",
+    "obraSinTesela": "Estado 100% En condiciones de uso. Diseño: Armazón · Cubierta Las piezas físicas de esta obra no vinieron en esta vista. Esta vista no trae una reacción aplicada a la obra. La fórmula de una pieza no es una reacción. Registro de construcción · paso 0 Usos con beneficio 0 Acumulados desde su construcción; no indican ocupación actual. Este tramo no conserva esta casilla.",
+    "susurros": [
+      {
+        "vista": "Borde vivo/Susurros",
+        "permiteEnviar": true
+      },
+      {
+        "vista": "Historia/Susurros",
+        "permiteEnviar": false
+      },
+      {
+        "vista": "Borde vivo/Susurros tras un salto fallido",
+        "permiteEnviar": false
+      }
+    ]
+  },
+  "datosNoGrabados": [
+    "El libro de inventario global de materia no viaja en los fotogramas actuales.",
+    "Los niveles resumidos conservan solo los campos grabados a esa resolución."
+  ],
+  "puerta": {
+    "revision": "be50290bb58926f16bea9925f5996baa43cacafd",
+    "phase": "complete",
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "pruebasDirigidas": 109,
+  "typecheck": true
+}

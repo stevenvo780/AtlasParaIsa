@@ -15,9 +15,11 @@ El perfil de la presentación pública reabrió ese mismo mundo desde el paso 24
 
 Oficios reintenta la cinta si falla la primera consulta y ofrece «Reintentar la cinta» si vuelve a fallar. El panel y el resumen superior muestran el alcance de la vista. En un fotograma del mundo público renderizado en Chromium a 1920×1080, ambos indicaron 15 habitantes con recetas. El panel mostró tres recetas distintas y una reacción aplicada. [Verificación de Oficios](evidencia-2026-11-27/publication-v24-oficios.json).
 
+La revisión del visor comprobó las pestañas de Mundo y Vidas, las fichas de persona, fauna, obra y tesela, y los modales y controles de observación. Historia usa el fotograma elegido. Rendimiento distingue la medición grabada del monitor actual. Las vistas resumidas indican qué omitió la grabación. Materia muestra el catálogo y la última reacción recibidos con sus propios datos. El libro global de inventario material queda fuera de los fotogramas de la cinta actual. [Auditoría del visor](evidencia-2026-11-27/publication-v24-visor-auditado.json).
+
 | Qué | Perfil de V24 |
 |---|---|
-| Código compilado y servido | `d0db3d8`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-oficios-resumen` con Node 22.23.3. El dominio sirve `/assets/index-ClJkCFyq.js`. |
+| Código compilado y servido | `be50290`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-auditoria-visor` con Node 22.23.3. El dominio sirve `/assets/index-DlYvI6Lw.js`. |
 | Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
 | Mundo | `AtlasParaIsa-anexo/mundos/v24-inicio-20261127-1627`, semilla 3159104107, instancia `d5af3361-7465-4326-97fa-f95c1aad30fc`. El mundo anterior y su cinta quedaron conservados. |
 | Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con 32 dueños CPU y ambas GPU para percepción, con grupos intercalados de 24 dueños en la RTX 5070 Ti y 8 en la RTX 2060. El selector por coste conserva la ruta CPU para los lotes que resuelve más rápido. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |

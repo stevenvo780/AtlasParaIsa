@@ -1,0 +1,155 @@
+{
+  "fecha": "2026-11-27T10:59:41-05:00",
+  "servicio": "atlas-publico.service",
+  "mundo": "v24-de86ec9",
+  "checkout": "v24-estabilizar-visor",
+  "relevo": {
+    "simulado": false,
+    "resultado": "relevado",
+    "sha": "3188026e068a0ee9258a8f3255ff084a07c89577",
+    "shaAnterior": "de86ec91523ce9a0181afb29d613f3897f1683ea",
+    "modoEntorno": "600",
+    "soloCambioReleaseDir": true,
+    "reinicioDeProceso": true,
+    "mundoCopiado": false,
+    "unidadesModificadas": false,
+    "timersModificados": false,
+    "perfilModificado": false,
+    "mismoDirectorioYCinta": true,
+    "mismoInodoMundo": true,
+    "mismoInodoCinta": true,
+    "instanciaCinta": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "backupMundo": {
+      "archivo": "world-20261127-1059.sqlite.gz",
+      "bytes": 81251218,
+      "sha256": "149c098ea497f983e0ddbb8fd75b8ae412e5bda6c6924cbe026dab5ee0aa23a0",
+      "gzip": "ok"
+    },
+    "backupCinta": {
+      "indice": "quick_check",
+      "crc": "firmado-en-segmentos.json",
+      "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662"
+    },
+    "saludInicial": {
+      "tick": 153747,
+      "epoca": 4,
+      "ultimoTickGuardado": 153600
+    },
+    "saludPreStop": {
+      "tick": 153774,
+      "epoca": 4,
+      "ultimoTickGuardado": 153600
+    },
+    "saludFinal": {
+      "tick": 153780,
+      "epoca": 5,
+      "ultimoTickGuardado": 153776
+    },
+    "generacion": {
+      "antes": 4,
+      "prevista": 5,
+      "observada": 5,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "avanceEnDosLecturas": true,
+    "tickDurableConservado": true,
+    "assetsAntiguosCopiados": [],
+    "perfilSha256": "69ac43bed5f77e49edf3044a576d16a82d684426058ef102b0a516d5c6916285",
+    "timersSha256": "1e10c81c8501ffc980493b1a2cda5718139e1c0296741aa530ade2aa44bb0455",
+    "rollback": false
+  },
+  "entradaPublica": {
+    "ruta": "/assets/index-CMETK2ER.js",
+    "sha256": "e1761d0cf35bf4bc5711299c7161b3e9d892d10f47d569fba572627edd605a5f"
+  },
+  "verificacion": {
+    "deployCheck": "passed",
+    "typecheck": "ok",
+    "build": "ok",
+    "archivosPruebaAfectados": 55,
+    "casos": 433,
+    "pasan": 428,
+    "omitidos": 5,
+    "fallan": 0,
+    "navegador": [
+      "reloj inicial",
+      "selección y arrastre",
+      "repetición de Historia",
+      "fichas con reacción y receta en escenario controlado"
+    ]
+  },
+  "censoHorario": {
+    "fecha": "2026-11-27T11:00:00-05:00",
+    "paso": 153800,
+    "epoca": 5,
+    "habitantes": 787
+  },
+  "muestraCintaPublica": {
+    "epoca": 5,
+    "ultimo": 154065,
+    "ventana": {
+      "x": 0,
+      "y": 0,
+      "w": 240,
+      "h": 200
+    },
+    "resultados": [
+      {
+        "nivelSolicitado": 0,
+        "nivelServido": 0,
+        "paso": 154065,
+        "habitantesEnVentana": 134,
+        "conCuerpo": 134,
+        "conTecnica": 134,
+        "conRecetas": 92,
+        "obras": 538,
+        "obrasConPiezas": 535,
+        "pasoMuestraReaccion": 154000
+      },
+      {
+        "nivelSolicitado": 1,
+        "nivelServido": 1,
+        "paso": 154049,
+        "habitantesEnVentana": 133,
+        "conCuerpo": 0,
+        "conTecnica": 0,
+        "conRecetas": 0,
+        "obras": 538,
+        "obrasConPiezas": 535,
+        "pasoMuestraReaccion": 154000
+      }
+    ]
+  },
+  "camaraEscenaSintetica": {
+    "habitantes": 625,
+    "fauna": 215,
+    "obras": 1564,
+    "unidad": "ms",
+    "p95AntesYDespues": {
+      "zoom": [
+        177,
+        30
+      ],
+      "arrastreCerca": [
+        18.6,
+        19.6
+      ],
+      "arrastreMapa": [
+        7.7,
+        13.6
+      ]
+    },
+    "maximoZoomAntesYDespues": [
+      492,
+      54
+    ]
+  },
+  "limitaciones": [
+    "Los niveles resumidos pueden omitir datos individuales.",
+    "La química registra una muestra aplicada por arena, como máximo cada 200 pasos."
+  ],
+  "intentosPrevios": [
+    "El verificador restauró el código anterior al interpretar el cambio de época del proceso como un fallo.",
+    "El verificador restauró el código anterior al recibir un estado HTTP concatenado al JSON de salud. El relevo final leyó correctamente ambas señales."
+  ]
+}

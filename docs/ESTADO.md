@@ -7,19 +7,21 @@ el contrato.
 
 ## Vigente (V24 desde el 27 de noviembre de 2026, 01:19:02 -05, en la torre)
 
-El release `de86ec91523ce9a0181afb29d613f3897f1683ea` quedó verificado a las 01:20:01 -05. La observación de la primera hora cerró a las 02:19:10 -05. [Contrato V24](evidencia-2026-11-27/publication-v24.json).
+El mundo abrió con `de86ec9` y completó la observación de su primera hora a las 02:19:10 -05. A las 10:59:41 -05 se publicó `3188026` sobre el mismo mundo y la misma cinta. [Publicación inicial de V24](evidencia-2026-11-27/publication-v24.json) · [Relevo del visor](evidencia-2026-11-27/publication-v24-visor.json).
 
 | Qué | Perfil de V24 |
 |---|---|
-| Código compilado y servido | `de86ec9`, worktree detached `AtlasParaIsa-anexo/worktrees/publico-v24-de86ec9` con Node 22.23.3. Se construyeron 215 artefactos idénticos al build observado de `38d26b3`. |
-| Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, PID de activación 2476524, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
-| Mundo | Nuevo en `AtlasParaIsa-anexo/mundos/v24-de86ec9`, semilla 283741774, instancia `8e2b9be7-d837-4bcb-998c-463d0128c662`. `access.scrypt` copiado de forma opaca desde el mundo anterior y verificado por atributos. |
+| Código compilado y servido | `3188026`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-estabilizar-visor` con Node 22.23.3. El dominio sirve `/assets/index-CMETK2ER.js`. |
+| Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
+| Mundo | `AtlasParaIsa-anexo/mundos/v24-de86ec9`, semilla 283741774, instancia `8e2b9be7-d837-4bcb-998c-463d0128c662`. El relevo conservó el guardado y la cinta. |
 | Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con dos dueños CPU, sin CUDA. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |
 | Guardado | Hilo persistidor, cortes vivos transferibles de teselas y personas, adelanto de hasta tres pasos y `snapshot-parts-v5` con pesos por UID separados. `persistencia.cadaTicks=200`, `persistencia.ventanaEventosTicks=2400` y `red.deltas=true`. |
-| Cinta y visor | En `AtlasParaIsa-anexo/mundos/v24-de86ec9-cinta`. Cinta dedicada `CNT2` de niveles n0–n4, catálogo `cinta.idx.sqlite`, tope de 50 GB decimales, fotogramas por dueño y sucesos directos. El visor funciona en modo observador y ofrece Historia. |
+| Cinta y visor | En `AtlasParaIsa-anexo/mundos/v24-de86ec9-cinta`. Cinta dedicada `CNT2` de niveles n0–n4, catálogo `cinta.idx.sqlite`, tope de 50 GB decimales, fotogramas por dueño y sucesos directos. Historia abre en **Tiempo real** (1 segundo del mundo por segundo) salvo preferencia guardada. **Paseo** reproduce un paso por segundo y **Borde vivo** sigue al motor. |
 | Versiones | `PROTOCOL_VERSION` 10, SQLite de mundo `user_version` 5 y catálogo de cinta `user_version` 4. |
 | Respaldos | Mundo y cinta en `/mnt/Data2/respaldos-atlas-v24-de86ec9` y su subdirectorio `cinta`, con sendos timers horarios activos. |
 | Perfil y lanzador | [perfil-v24.sh](../scripts/systemd/torre/perfil-v24.sh) · [publico-v24.sh](../scripts/systemd/torre/publico-v24.sh). |
+
+El censo de las 11:00 -05 registró **787 habitantes** en el paso 153800. En una vista detallada del paso 154065, los 134 habitantes tenían cuerpo y técnica registrados, 92 recordaban recetas y 535 de 538 construcciones mostraban piezas. La vista incluía una reacción aplicada en el paso 154000. En el nivel resumido de esa zona se conservaron las piezas y la reacción, aunque se omitieron los detalles individuales.
 
 ### Puertas anteriores al corte
 

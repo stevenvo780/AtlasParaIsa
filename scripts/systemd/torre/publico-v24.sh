@@ -16,6 +16,7 @@ fi
 
 # En la torre el nombre del proceso evita la regla de ananicy para node.
 if [[ "$HOST" == 100.64.0.1 ]]; then
+  source scripts/systemd/torre/perfil-presentacion-v24.sh
   ln -sf -- "$(command -v node)" dist/carta-isa
   exec ./dist/carta-isa dist/server/server/main.js
 fi

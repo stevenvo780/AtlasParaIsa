@@ -1,0 +1,7 @@
+# Cargar después de perfil-v24.sh en la presentación de la torre.
+export CARTA_MOTOR_HILOS=32
+export CARTA_MOTOR_GPU=0,1
+export COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so
+export CARTA_PERCEPCION_DUENOS=1 CARTA_PERCEPCION_COSTE_DUENOS=1
+# Las tarjetas comparten la percepción. La 5070 Ti recibe 24 dueños y la 2060 recibe 8.
+export CARTA_MOTOR_GPU_GRUPOS='[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23],[24,25,26,27,28,29,30,31]]'

@@ -26,6 +26,7 @@ import { EvidenceTimeline, evidenceAtTick, personLink, recentEvidence } from './
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
+import { tecnicaGrabada } from './tecnica-grabada.js';
 import { readHitos, readStoredWorldVisit, readVisitCounters, saveHitos, saveVisitCounters, saveWorldVisit,
   type HitoGuardado, type VisitCounters } from './visit-memory.js';
 import { enClaro } from './textos.js';
@@ -1149,7 +1150,7 @@ const STATS_TICK_MS = 1000;
 let statsRenderedAt = -Infinity, statsTrailing: ReturnType<typeof setTimeout> | null = null;
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel || el('stats-drawer').hidden) return;
-  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}`;
+  const structure = `${statsTab}|${directory?.tick ?? -1}|${status}|${world?.paused ? 1 : 0}|${focusedRecipe ?? ''}|${focusedCommunity ?? ''}|${recipeDetails.size}|${dvr?.nivel ?? ''}`;
   // Lo que cambia sin un paso nuevo (telemetría del motor, fichas y selección del grafo) entra en la parte que se refresca a 1 Hz.
   const vivo = statsTab === 'performance' ? motorVersion : statsTab === 'communities' ? `${personaDetails.size}|${activePersonId}|${selected.kind}` : '';
   const sig = `${structure}#${world?.tick ?? -1}|${world?.sequence ?? -1}|${vivo}`;
@@ -1164,9 +1165,10 @@ function renderStats(): void {
   statsSignature = sig; statsRenderedAt = now;
   const restore = retainViewState(panel);
   const deepStats = document.getElementById('mundo-deep-stats') ?? Object.assign(document.createElement('div'), { id: 'mundo-deep-stats' });
-  renderStatsContent();
+  const tecnica = world && statsTab === 'technology' ? tecnicaGrabada(world, dvr?.nivel ?? null) : null;
+  renderStatsContent(tecnica);
   // Estadísticas profundas de Mundo (mundo-dashboard.ts): lectura pura de lo recibido; un fallo suyo no tumba el panel.
-  try { deepStats.innerHTML = world ? renderMundoDeepStats(world, statsTab, directory) : ''; } catch { deepStats.innerHTML = '<p class="stats-note">Las estadísticas ampliadas no están disponibles ahora.</p>'; }
+  try { deepStats.innerHTML = world && tecnica === null ? renderMundoDeepStats(world, statsTab, directory) : ''; } catch { deepStats.innerHTML = '<p class="stats-note">Las estadísticas ampliadas no están disponibles ahora.</p>'; }
   el('stats-content').append(deepStats);
   restore();
 }
@@ -1192,11 +1194,15 @@ function nodoDelGrafo(event: MouseEvent): { id: string; nombre: string } | null 
   for (const n of grafo.dibujo.nodos) { const d = (n.x - punto.x) ** 2 + (n.y - punto.y) ** 2; if (d < distancia) { distancia = d; mejor = n; } }
   return mejor;
 }
-function renderStatsContent(): void {
+function renderStatsContent(tecnica: string | null): void {
   const panel = document.getElementById('stats-content'); if (!panel || !world) return;
   const stats = world.stats, runtime = world.performance;
-  const stamp = `<div class="stats-scope"><span class="scope-dot"></span><span>${status === 'live' && !world.paused ? 'Estado recibido del servidor' : 'Último estado recibido'} · paso ${world.tick}</span></div>`;
+  const origen = dvr?.enabled
+    ? (dvr.nivel ?? 0) > 0 ? 'Grabación resumida' : 'Grabación detallada'
+    : status === 'live' && !world.paused ? 'Estado recibido del servidor' : 'Último estado recibido';
+  const stamp = `<div class="stats-scope"><span class="scope-dot"></span><span>${origen} · paso ${number(world.tick)}</span></div>`;
   if (statsTab === 'technology') {
+    if (tecnica !== null) { panel.innerHTML = stamp + tecnica; return; }
     // The notebook already draws the last twenty with whatever detail arrived; only a recipe outside it needs its own card.
     const listed = world.technology?.recipes.slice(-20).some(recipe=>recipe.id===focusedRecipe) ?? false;
     const targeted = listed ? undefined : (focusedRecipe ? recipeDetails.get(focusedRecipe) : null) ?? world.technology?.recipes.find(recipe=>recipe.id===focusedRecipe);
@@ -1206,7 +1212,7 @@ function renderStatsContent(): void {
     return;
   }
   if (statsTab === 'materia') {
-    panel.innerHTML = stamp + renderPanelMateria(leerMateria(world.materia), cicloMateria, world.sustancias, world.tick, world.reaccionObservada);
+    panel.innerHTML = stamp + renderPanelMateria(leerMateria(world.materia), cicloMateria, world.sustancias, world.tick, world.reaccionObservada, !!dvr?.enabled);
     return;
   }
   if (statsTab === 'performance') {

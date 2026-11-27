@@ -189,17 +189,17 @@ function cicloMarkup(c: CicloMateria): string {
   return `<div class="materia-bloque" data-materia-ciclo="${series.length}"><h4 class="detail-subtitle">El ciclo</h4><div class="materia-ciclo">${dibujo}</div><p class="stats-note">De cada elemento, el compartimento cuya parte más cambió en las lecturas de este navegador.</p></div>`;
 }
 
-export function renderPanelMateria(v: VistaMateria | null, ciclo: CicloMateria = cicloVacio(), catalogo?: SustanciasVisibles, tickActual: number = v?.tick ?? 0, observada?: ReaccionObservada): string {
+export function renderPanelMateria(v: VistaMateria | null, ciclo: CicloMateria = cicloVacio(), catalogo?: SustanciasVisibles, tickActual: number = v?.tick ?? 0, observada?: ReaccionObservada, grabacion = false): string {
   const luz = luzMateria(v);
   if (!v) {
-    const citado = !!catalogo?.length;
-    const luzPanel = citado
-      ? { estado: 'sin-dato' as const, valor: 'sin libro', motivo: 'El libro agregado no vino en este fotograma. Hay sustancias citadas; no se inventa el reparto.' }
+    const citado = !!catalogo?.length, noGrabado = grabacion || citado || !!observada;
+    const luzPanel = noGrabado
+      ? { estado: 'sin-dato' as const, valor: 'sin libro', motivo: 'El libro agregado de materia no se recibió para este paso.' }
       : luz;
     const texto = citado
-      ? 'Este fotograma no trae el libro agregado de la materia. El catálogo de sustancias citado sí llegó: no se rellena el libro con ceros.'
-      : 'El servidor sirve este mundo sin la ley de materia: el reparto de los átomos, la energía y las sustancias aparecen cuando se enciende.';
-    return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luzPanel.estado}" data-libro="${citado ? 'no-grabado' : 'ausente'}">${cabecera(null, luzPanel)}<p class="stats-empty">${esc(texto)}</p>${fichaReaccion(observada, 'mundo')}</section>`;
+      ? 'Este fotograma incluye sustancias del catálogo. El libro agregado de materia no se recibió para este paso.'
+      : noGrabado ? 'El libro agregado de materia no se recibió para este paso.' : 'El servidor sirve este mundo sin la ley de materia: el reparto de los átomos, la energía y las sustancias aparecen cuando se enciende.';
+    return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luzPanel.estado}" data-libro="${noGrabado ? 'no-grabado' : 'ausente'}">${cabecera(null, luzPanel)}<p class="stats-empty">${esc(texto)}</p>${fichaReaccion(observada, 'mundo')}</section>`;
   }
   return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luz.estado}">${cabecera(v, luz)}${repartoMarkup(v)}${tablaMarkup(v)}${cuentasMarkup(v)}${sustanciasMarkup(v, catalogo, tickActual)}${cicloMarkup(ciclo)}${fichaReaccion(observada, 'mundo')}</section>`;
 }

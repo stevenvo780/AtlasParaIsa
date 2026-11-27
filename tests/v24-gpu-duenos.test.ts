@@ -113,9 +113,16 @@ test('vencer en cola o tras reclamar el envío permite que ambos dueños recuper
   const duplicado = new PercibidorBroker(percepcion.vista, epoca, 8);
   const independiente = new PercibidorBroker(percepcion.vista, otra.abrirEpoca(18), 0);
   t.after(() => [primero, retrasado, duplicado, independiente].forEach(cliente => cliente.cerrar()));
-  const paquetes: Uint8Array[] = [];
+  const paquetes: { identidad: { generacion: number; epoca: number; dueno: number; tick: number; despacho: number }; datos: Uint8Array }[] = [];
   const observar = new BroadcastChannel(`${epoca.canal}:1`);
-  observar.onmessage = ({ data }) => paquetes.push(data.datos);
+  // La observación se instala antes de enviar: esperar un temporizador no garantiza
+  // que el event loop haya entregado los mensajes de BroadcastChannel.
+  let completarPaquetes!: () => void;
+  const recibidos = new Promise<void>(resolve => { completarPaquetes = resolve; });
+  observar.onmessage = ({ data }) => {
+    paquetes.push(data);
+    if (paquetes.length === 2) completarPaquetes();
+  };
   const entrada = watch(dir);
   t.after(() => { entrada.close(); observar.close(); });
   const enServidor = new Promise<void>(resolve => {
@@ -166,11 +173,15 @@ test('vencer en cola o tras reclamar el envío permite que ambos dueños recuper
   assert.equal(medida.detalle?.cpuTransitoVencido, 1);
   assert.equal(medida.detalle?.erroresCanal, 0);
   assert.ok(medida.detalle!.cpuOcupada >= 1 && medida.detalle!.colaMicros! > 0);
-  await esperar(0);
+  await recibidos;
   assert.equal(paquetes.length, 2);
-  const valorNuevo = paquetes[1]![0]!;
-  paquetes[0]![0] ^= 0xff;
-  assert.equal(paquetes[1]![0], valorNuevo, 'el nuevo despacho tiene otro búfer');
+  assert.deepEqual(paquetes.map(({ identidad }) => identidad), [1, 2].map(despacho => ({
+    generacion: epoca.generacion, epoca: 18, dueno: 17, tick: lote.tick, despacho,
+  })));
+  const valorNuevo = paquetes[1]!.datos[0]!;
+  paquetes[0]!.datos[0] ^= 0xff;
+  assert.equal(paquetes[1]!.datos[0], valorNuevo, 'el nuevo despacho tiene otro búfer');
+  t.diagnostic(JSON.stringify({ identidades: paquetes.map(({ identidad }) => identidad), detalle: medida.detalle }));
 });
 
 test('la ranura del corredor conserva la identidad global del dueño en el despacho', { timeout: 10_000 }, async t => {
@@ -449,15 +460,31 @@ test('el motor distribuye los grupos CUDA y conserva los modos compartido y dual
   const hilos = 3, gpu = [0, 1], gruposPercepcionGpu = [[2, 0], [1]];
   const params = parseParams({ v23: escalon('duenos'), motor: { ...base.motor, hilos, gpu } }, base);
   const mundo = createWorld(semilla, params);
-  const { x, y } = mundo.tiles.find(celda => celda.x >= 32 && celda.terrain !== 'water')!;
-  for (const persona of mundo.people.slice(-2)) Object.assign(persona, { x, y, target: { x, y }, decisionAt: 2 });
+  // El reparto inicial por tramos Morton da al oeste dos dueños (norte y sur) y al este el tercero.
+  const regiones = [{ x: 0, y: 0 }, { x: 0, y: 16 }, { x: 32, y: 0 }];
+  const ventanasPorDueno = 3;
+  const ultimoTick = ventanasPorDueno * hilos;
+  for (const [i, persona] of mundo.people.entries()) {
+    if (i < ultimoTick) {
+      const region = regiones[i % hilos]!;
+      const destino = mundo.tiles.find(celda => celda.terrain !== 'water'
+        && celda.x >= region.x + 4 && celda.x < region.x + 12
+        && celda.y >= region.y + 4 && celda.y < region.y + 12);
+      assert.ok(destino, `terreno de la región del dueño ${i % hilos}`);
+      ({ x: persona.x, y: persona.y } = destino);
+    }
+    // Un fundador distinto vence en cada tick. Cada ranura tiene tres oportunidades de responder dentro del plazo real.
+    Object.assign(persona, { action: 'rest', target: { x: persona.x, y: persona.y }, fatigue: 0.8,
+      decisionAt: Math.min(i + 1, ultimoTick + 1) });
+  }
   const motor = crearMotor(mundo, { hilos, gpu, gruposPercepcionGpu, decisionGpu: 'siempre', verificar: true, semilla, medirBrokerGpu: true });
   try {
     assert.equal(await motor.prepararBrokerGpu?.(), true);
-    for (let i = 1; i <= 3; i++) assert.equal(motor.paso([]).tick, i);
+    for (let i = 1; i <= ultimoTick; i++) assert.equal(motor.paso([]).tick, i);
     const tarjetas = motor.telemetria().gpuBrokers!;
     assert.deepEqual(tarjetas.map(tarjeta => tarjeta.duenosPorRanura), gruposPercepcionGpu);
     assert.ok(tarjetas.every(tarjeta => tarjeta.detalle!.aceptadas.every(n => n > 0)), JSON.stringify(tarjetas));
+    t.diagnostic(JSON.stringify({ gruposPercepcionGpu, tarjetas }));
   } finally { await motor.cerrar(); }
 });
 

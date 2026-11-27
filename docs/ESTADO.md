@@ -7,11 +7,11 @@ el contrato.
 
 ## Vigente (V24 desde el 27 de noviembre de 2026, 01:19:02 -05, en la torre)
 
-El mundo abrió con `de86ec9` y completó la observación de su primera hora a las 02:19:10 -05. A las 10:59:41 -05 se publicó `3188026` sobre el mismo mundo y la misma cinta. Al mediodía se verificó `5544fec`, con la barra compacta y la ficha detallada por habitante. [Publicación inicial de V24](evidencia-2026-11-27/publication-v24.json) · [Relevo del visor](evidencia-2026-11-27/publication-v24-visor.json) · [Barra y fichas](evidencia-2026-11-27/publication-v24-barra-fichas.json).
+El mundo abrió con `de86ec9` y completó la observación de su primera hora a las 02:19:10 -05. A las 10:59:41 -05 se publicó `3188026` sobre el mismo mundo y la misma cinta. Al mediodía se verificó `5544fec`, con la barra compacta. A las 12:11:41 -05 se verificó `6547f12`, que abre la ficha detallada al seleccionar al habitante. [Publicación inicial de V24](evidencia-2026-11-27/publication-v24.json) · [Relevo del visor](evidencia-2026-11-27/publication-v24-visor.json) · [Barra y fichas](evidencia-2026-11-27/publication-v24-barra-fichas.json) · [Ficha con un clic](evidencia-2026-11-27/publication-v24-ficha-directa.json).
 
 | Qué | Perfil de V24 |
 |---|---|
-| Código compilado y servido | `5544fec`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-barra-y-fichas` con Node 22.23.3. El dominio sirve `/assets/index-DI0F2TXS.js`. |
+| Código compilado y servido | `6547f12`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-ficha-directa` con Node 22.23.3. El dominio sirve `/assets/index-DOOEXXL4.js`. |
 | Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
 | Mundo | `AtlasParaIsa-anexo/mundos/v24-de86ec9`, semilla 283741774, instancia `8e2b9be7-d837-4bcb-998c-463d0128c662`. El relevo conservó el guardado y la cinta. |
 | Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con dos dueños CPU, sin CUDA. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |
@@ -23,7 +23,7 @@ El mundo abrió con `de86ec9` y completó la observación de su primera hora a l
 
 El censo de las 11:00 -05 registró **787 habitantes** en el paso 153800. En una vista detallada del paso 154065, los 134 habitantes tenían cuerpo y técnica registrados, 92 recordaban recetas y 535 de 538 construcciones mostraban piezas. La vista incluía una reacción aplicada en el paso 154000. En el nivel resumido de esa zona se conservaron las piezas y la reacción, aunque se omitieron los detalles individuales.
 
-El visor permite abrir **Ver ficha detallada** desde un fotograma resumido cuando el tramo conserva detalle. Al pulsarlo pide una sola casilla en ese paso y época. A 1920×1080, con la ficha abierta, la barra ocupa 860×52 px y la pista dispone de 480 px para recorrer la historia.
+Al seleccionar un habitante en un fotograma resumido, el visor consulta una sola casilla si el tramo conserva detalle. La ficha usa datos del mismo habitante, paso y época. A 1920×1080, con la ficha abierta, la barra ocupa 860×52 px y la pista dispone de 480 px para recorrer la historia.
 
 ### Puertas anteriores al corte
 

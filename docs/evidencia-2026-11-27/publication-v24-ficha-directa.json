@@ -1,0 +1,146 @@
+{
+  "fecha": "2026-11-27T12:11:41-05:00",
+  "verificacion": {
+    "typecheck": "ok",
+    "build": "ok",
+    "pruebasDirigidas": 28,
+    "fallos": 0,
+    "deployCheck": "passed"
+  },
+  "dominio": {
+    "fecha": "2026-11-27T12:11:41-05:00",
+    "entrada": "/assets/index-DOOEXXL4.js",
+    "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0",
+    "salud": {
+      "estado": "ok",
+      "tick": 161032,
+      "epoca": 7,
+      "ultimoTickGuardado": 161006,
+      "recargas": 0
+    }
+  },
+  "relevo": {
+    "simulado": false,
+    "resultado": "relevado",
+    "sha": "6547f120ad67ab97bb38057045b1919a1eb4c28f",
+    "shaAnterior": "5544fecf70c00b282dc7703321bfc2e44d2534c6",
+    "modoEntorno": "600",
+    "soloCambioReleaseDir": true,
+    "reinicioDeProceso": true,
+    "mundoCopiado": false,
+    "unidadesModificadas": false,
+    "timersModificados": false,
+    "perfilModificado": false,
+    "mismoDirectorioYCinta": true,
+    "mismoInodoMundo": true,
+    "mismoInodoCinta": true,
+    "instanciaCinta": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "backupMundo": {
+      "archivo": "world-20261127-1211.sqlite.gz",
+      "bytes": 90613512,
+      "sha256": "d9c2f3554de6f98c6a29c6ee7cbd2d8672ed3e942dceea5ea22e197dbbd84232",
+      "gzip": "ok"
+    },
+    "backupCinta": {
+      "indice": "quick_check",
+      "crc": "firmado-en-segmentos.json",
+      "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662"
+    },
+    "saludInicial": {
+      "tick": 160986,
+      "epoca": 6,
+      "ultimoTickGuardado": 160800
+    },
+    "saludPreStop": {
+      "tick": 161005,
+      "epoca": 6,
+      "ultimoTickGuardado": 161000
+    },
+    "saludFinal": {
+      "tick": 161011,
+      "epoca": 7,
+      "ultimoTickGuardado": 161006
+    },
+    "generacion": {
+      "antes": 6,
+      "prevista": 7,
+      "observada": 7,
+      "motivo": "Store.cargarInstantanea reserva max(anterior, materia.epoca)+1; en este mundo eso es la generación de /health + 1"
+    },
+    "avanceEnDosLecturas": true,
+    "tickDurableConservado": true,
+    "assetsAntiguosCopiados": [
+      "index-BUT1pbfc.css",
+      "index-C30cSDjH.js",
+      "index-CMETK2ER.js",
+      "index-DI0F2TXS.js"
+    ],
+    "perfilSha256": "69ac43bed5f77e49edf3044a576d16a82d684426058ef102b0a516d5c6916285",
+    "timersSha256": "1e10c81c8501ffc980493b1a2cda5718139e1c0296741aa530ade2aa44bb0455",
+    "rollback": false
+  },
+  "navegador": {
+    "resultado": "medido",
+    "head": "6547f120ad67ab97bb38057045b1919a1eb4c28f",
+    "entrada": "/assets/index-DOOEXXL4.js",
+    "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0",
+    "antes": {
+      "caso": "resumen",
+      "nivel": 1,
+      "tick": 155553,
+      "seleccion": "Abeto 10525",
+      "metros": false,
+      "consultas": 0,
+      "errores": [],
+      "entrada": "/assets/index-DI0F2TXS.js",
+      "entradaSha256": "76aca6a13e1fc98057011e9f16d5810847561eb5fadc2893ae7532089c95a8f8"
+    },
+    "mapa": [
+      {
+        "caso": "resumen",
+        "nivel": 1,
+        "tick": 155553,
+        "seleccion": "Abeto 10525",
+        "metros": true,
+        "consultas": 1,
+        "errores": [],
+        "entrada": "/assets/index-DOOEXXL4.js",
+        "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0"
+      },
+      {
+        "caso": "detalle",
+        "nivel": 0,
+        "tick": 155553,
+        "seleccion": "Abeto 10525",
+        "metros": true,
+        "consultas": 0,
+        "errores": [],
+        "entrada": "/assets/index-DOOEXXL4.js",
+        "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0"
+      },
+      {
+        "caso": "podada",
+        "nivel": 1,
+        "tick": 155553,
+        "seleccion": "Abeto 10525",
+        "metros": false,
+        "consultas": 0,
+        "errores": [],
+        "entrada": "/assets/index-DOOEXXL4.js",
+        "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0"
+      },
+      {
+        "caso": "hueco",
+        "nivel": 1,
+        "tick": 155553,
+        "seleccion": "Abeto 10525",
+        "metros": false,
+        "consultas": 1,
+        "errores": [],
+        "entrada": "/assets/index-DOOEXXL4.js",
+        "entradaSha256": "6c9b826c63d11759ee73830627836aa14359cf89c5925eea37d85fe1e10c63e0"
+      }
+    ],
+    "tests": 28
+  }
+}

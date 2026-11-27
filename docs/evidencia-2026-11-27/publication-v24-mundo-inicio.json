@@ -1,0 +1,61 @@
+{
+  "fecha": "2026-11-27T16:28:46-05:00",
+  "codigo": "5af48b24ffcbdbe32fb29e9c6124a42a4dd5d16c",
+  "mundo": "v24-inicio-20261127-1627",
+  "cinta": "v24-inicio-20261127-1627-cinta",
+  "arranque": {
+    "vieja": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "instancia": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+    "semilla": 3159104107,
+    "guardado": {
+      "tick": 400,
+      "epoca": 0,
+      "digest": "d8e7a0b98dd1ec22b5cfcad345c00c1c53b0c67f2a23c930a30d5c7d06704c68",
+      "materia": true
+    },
+    "cinta": {
+      "epoca": 0,
+      "detalleDesde": 1,
+      "detalleHasta": 397,
+      "personas": 16,
+      "conCuerpo": 16,
+      "bytes": 8215521,
+      "topeBytes": 50000000000
+    }
+  },
+  "dominio": {
+    "entrada": "/assets/index-BjilTDT6.js",
+    "sha256": "ffc07b40761f21b474e5f42ffdaf953676a74fbdb08edbae76d61a77191a9495",
+    "salud": {
+      "estado": "ok",
+      "tick": 1463,
+      "epoca": 0,
+      "ultimoTickGuardado": 1400,
+      "recargas": 0,
+      "gpu": []
+    }
+  },
+  "hardware": {
+    "hilosDisponibles": 32,
+    "hilosDelProceso": 12,
+    "procesosDeSimulacion": 2,
+    "gpuSimulacion": []
+  },
+  "mundoAnterior": {
+    "ruta": "v24-de86ec9",
+    "instancia": "8e2b9be7-d837-4bcb-998c-463d0128c662",
+    "respaldo": "/mnt/Data2/respaldos-atlas-v24-de86ec9/world-20261127-1628.sqlite.gz"
+  },
+  "respaldos": {
+    "mundo": "/mnt/Data2/respaldos-atlas-v24-inicio-20261127-1627/world-20261127-1629.sqlite.gz",
+    "cinta": "/mnt/Data2/respaldos-atlas-v24-inicio-20261127-1627/cinta/cinta-20261127T212936Z-CZRGdTJL"
+  },
+  "aperturaArchivada": {
+    "directorio": "/datos/workspaces/personal/AtlasParaIsa-anexo/archivo/v24-orquesta/reinicio-20261127-1627/apertura-l0",
+    "version": 1,
+    "epoca": 0,
+    "t0": 1,
+    "t1": 397,
+    "validacion": "sin cuarentena"
+  }
+}

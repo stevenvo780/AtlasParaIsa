@@ -193,6 +193,9 @@ export const TipoIntento = {
 } as const;
 export type TipoIntento = (typeof TipoIntento)[keyof typeof TipoIntento];
 
+/** Órdenes del coordinador a un dueño (`Gesto`, dato[0]). */
+export const ORDEN = { gesto: 0, replica: 1, ceder: 2, detalle: 3, directorio: 4 } as const;
+
 /** Producen: M4b, M5, W, N, F, T1, S y E. Aplica: M5 (`motor/aplicar.ts`) en el dueño destino. */
 export interface Intento {
   tipo: TipoIntento;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadavg } from 'node:os';
 import { Buzones, conectarBuzon, type FaseMotor } from '../src/world/motor/buzon.js';
-import { TipoIntento, type Buzon, type Cola, type Intento } from '../src/world/motor/contratos.js';
+import { ORDEN, TipoIntento, type Buzon, type Cola, type Intento } from '../src/world/motor/contratos.js';
 import { ErrorFatalMotor } from '../src/world/paralelo/barrera.js';
 import { Piscina } from '../src/world/paralelo/piscina.js';
 import { ENVIOS, ERR, crear, mensaje, mismoMensaje, type DatosBuzones } from './lib/motor-hilos.js';
@@ -95,6 +95,31 @@ for (const hilos of [1, 2]) {
     assert.notDeepEqual(orden(8), primera);
   });
 }
+
+test('B publica el directorio antes de vincular sin cambiar el azar ni el orden del resto', () => {
+  const recoger = (directorio: boolean, sorteo: number) => {
+    const buzones = new Buzones(2), emisor = buzones.dueno(0, () => 0);
+    let sorteos = 0;
+    const receptor = buzones.dueno(1, () => { sorteos++; return sorteo; });
+    const enviar = (secuencia: number, orden: number = ORDEN.detalle) => {
+      emisor.enviar(1, { ...mensaje(0, 0, secuencia), tipo: TipoIntento.Gesto,
+        materia: null, dato: Float64Array.of(orden) });
+    };
+    buzones.fijarFase(5);
+    emisor.enviar(1, { ...mensaje(0, 0, 10), tipo: TipoIntento.Vincular });
+    enviar(20);
+    buzones.fijarFase(0);
+    enviar(30, directorio ? ORDEN.directorio : ORDEN.detalle);
+    enviar(40);
+    return { orden: vaciarEnSuFase(buzones, receptor, 'B').map(i => i.a), sorteos };
+  };
+  for (const sorteo of [0.99, 0]) {
+    const referencia = recoger(false, sorteo);
+    assert.deepEqual(referencia.orden, sorteo === 0 ? [20, 30, 40, 10] : [10, 20, 30, 40]);
+    assert.equal(referencia.sorteos, 3);
+    assert.deepEqual(recoger(true, sorteo), { orden: [30, ...referencia.orden.filter(a => a !== 30)], sorteos: 3 });
+  }
+});
 
 test('con memoria compartida, los arrays entregados son vistas que solo valen durante la llamada y el espacio se recicla', () => {
   const buzones = new Buzones(2), buzon = buzones.dueno(0, semilla(4));

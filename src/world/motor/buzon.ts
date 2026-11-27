@@ -1,7 +1,7 @@
 import { ErrorFatalMotor } from '../paralelo/barrera.js';
 import { crecerSAB, crearSAB } from '../soa/arena.js';
 import type { Buzon, Cola, Hilo, Intento } from './contratos.js';
-import { TipoIntento } from './contratos.js';
+import { ORDEN, TipoIntento } from './contratos.js';
 
 export type FaseMotor = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 const FASE_LECTURA = { M: 1, A: 5, B: 1, C: 6, F0: 0 } as const;
@@ -82,16 +82,23 @@ function entregar(datos: Float64Array, inicio: number, f: (i: Intento) => void):
   });
 }
 
-function vaciar(cola: ColaCompartida, f: (i: Intento) => void, azar?: () => number): number {
+function esAltaDirectorio(datos: Float64Array, inicio: number): boolean {
+  return datos[inicio] === TipoIntento.Gesto && datos[inicio + 7]! > 0
+    && datos[inicio + CABECERA + Math.max(0, datos[inicio + 6]!)] === ORDEN.directorio;
+}
+
+function vaciar(cola: ColaCompartida, f: (i: Intento) => void, azar?: () => number, priorizarDirectorio = false): number {
   const datos = new Float64Array(cola.datos);
   const fin = Atomics.load(cola.cursores, 0);
   let inicio = Number(Atomics.load(cola.cursores, 1));
   const orden = azar ? [] as number[] : null;
-  let n = 0;
+  let tieneAltas = false, n = 0;
   // Un envío reserva su rango antes de copiarlo. Solo el prefijo publicado es legible.
   while (inicio < Number(fin) && inicio < cola.listos.length && Atomics.load(cola.listos, inicio) === 1) {
-    if (orden) orden.push(inicio);
-    else entregar(datos, inicio, f);
+    if (orden) {
+      orden.push(inicio);
+      if (priorizarDirectorio && !tieneAltas) tieneAltas = esAltaDirectorio(datos, inicio);
+    } else entregar(datos, inicio, f);
     Atomics.store(cola.listos, inicio, 0);
     inicio += CABECERA + Math.max(0, datos[inicio + 6]) + Math.max(0, datos[inicio + 7])
       + Math.ceil(Math.max(0, datos[inicio + 8]) / PALABRA);
@@ -99,6 +106,16 @@ function vaciar(cola: ColaCompartida, f: (i: Intento) => void, azar?: () => numb
   }
   if (orden && azar) {
     barajar(orden, azar);
+    if (tieneAltas) {
+      // En F1, los intentos (p. ej. Vincular al nacer) pueden consultar un UID del paso anterior.
+      // Barajamos la misma cola y adelantamos sus altas sin cambiar los sorteos ni el orden de los demás mensajes.
+      let pendientes = 0;
+      for (const posicion of orden) {
+        if (esAltaDirectorio(datos, posicion)) entregar(datos, posicion, f);
+        else orden[pendientes++] = posicion;
+      }
+      orden.length = pendientes;
+    }
     for (const posicion of orden) entregar(datos, posicion, f);
   }
   const leidos = BigInt(inicio);
@@ -152,7 +169,7 @@ export function conectarBuzon(memoria: MemoriaBuzones, hilo: Hilo, azar: () => n
     const entrada = cola === 'F0' ? memoria.f0 : memoria.duenos[destino]?.[cola];
     if (!entrada) throw new RangeError(`Destino sin buzón: ${destino}.`);
     enviar(entrada, i);
-  }, (cola, f, rng) => vaciar(cola === 'F0' ? memoria.f0 : propio[cola], f, rng));
+  }, (cola, f, rng) => vaciar(cola === 'F0' ? memoria.f0 : propio[cola], f, rng, cola === 'B'));
 }
 
 export class Buzones {

@@ -43,7 +43,7 @@ import { aplicarCola } from './aplicar.js';
 import { Buzones, type FaseMotor } from './buzon.js';
 import { Contadores, crearLibros } from './contadores.js';
 import {
-  Clase, DATO_MATERIA, DATO_TOMAR, REF_NULA, TipoIntento, genDe, refDe, slotDe,
+  Clase, DATO_MATERIA, DATO_TOMAR, ORDEN, REF_NULA, TipoIntento, genDe, refDe, slotDe,
   type Buzon, type ChunkId, type FrenteEscritura, type FrentePublico, type Globales, type Hilo, type Intento, type Ref, type Slot,
   type Terreno, type TerrenoDueno,
 } from './contratos.js';
@@ -70,8 +70,7 @@ export const MEMORIA_DIRECTORIO_TICKS = TICKS_PER_DAY;
  * para que un nonce nuevo nunca repita uno anterior al guardado aunque el contador no se guarde. */
 const NONCES_POR_TICK = 2 ** 22;
 
-/** Órdenes del coordinador a un dueño (`Gesto`, dato[0]). */
-export const ORDEN = { gesto: 0, replica: 1, ceder: 2, detalle: 3, directorio: 4 } as const;
+export { ORDEN } from './contratos.js';
 /** Avisos de un dueño al coordinador (`Global`, dato[0]). */
 export const AVISO = { lugar: 0, comunidad: 1, resultado: 2, tick: 3, parte: 4, detalle: 5, chunk: 6, foto: 7 } as const;
 

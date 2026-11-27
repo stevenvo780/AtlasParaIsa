@@ -317,15 +317,53 @@ test('createApp turbo + tape: DVR content from the tape thread, viewport clippin
   assert.ok(meta.timeline.length > 0 && meta.timeline.length <= 240);
   const available = Math.min(30, meta.totalFrames);
   assert.ok(available >= 3, `flushed frames readable during turbo (got ${available})`);
+  const cintaMeta = (await f.http('/api/cinta/meta')).json();
+  assert.deepEqual(cintaMeta.bifurcaciones, [], 'la referencia debe pertenecer a una sola época');
+  assert.deepEqual(cintaMeta.lagunas.filter((laguna: { t0: number; t1: number }) =>
+    laguna.t0 <= meta.maxTick && laguna.t1 >= tick0), [], 'no debe haber lagunas en el tramo de referencia');
+  // Meta y chunks son lecturas independientes: count es un máximo y una página
+  // puede cortarse por bytes o continuidad. Fijamos los ticks ya visibles en la cinta.
+  const referencia: number[] = [];
+  const lectorReferencia = new LectorCinta(cintaDeMundo(f.worldPath));
+  try {
+    let desde = tick0;
+    while (referencia.length < available) {
+      const pagina = JSON.parse(lectorReferencia.chunkAntiguo(desde, available - referencia.length,
+        { x: 10, y: 6, width: 24, height: 16 })) as TapeChunkResponse;
+      assert.ok(pagina.frames.length > 0, 'la referencia debe avanzar hasta los fotogramas de la meta');
+      const ticks = pagina.frames.map(frame => frame.tick).filter(tick => tick <= meta.maxTick);
+      assert.ok(ticks.length > 0 && ticks[0]! >= desde, 'la referencia no debe repetir ni salir del corte');
+      referencia.push(...ticks);
+      const ultimo = referencia.at(-1)!;
+      if (referencia.length < available) {
+        assert.ok(pagina.hasMore && ultimo < meta.maxTick, 'la referencia debe anunciar lo que falta');
+        desde = ultimo + 1;
+      }
+    }
+  } finally { lectorReferencia.close(); }
   const res = await f.http(`/api/tape/chunk?fromTick=${tick0}&count=${available}&x=10&y=6&width=24&height=16`, undefined, { 'Accept-Encoding': 'gzip' });
   assert.equal(res.status, 200, res.text); assert.equal(res.headers['content-encoding'], 'gzip');
   const chunk = res.json() as TapeChunkResponse;
-  assert.equal(chunk.frames.length, available);
   assert.equal(chunk.fromTick, tick0); assert.equal(chunk.toTick, chunk.frames.at(-1)!.tick);
   assert.equal(chunk.hasMore, chunk.toTick < chunk.maxTick);
   if (meta.totalFrames > available) assert.equal(chunk.hasMore, true);
-  for (let i = 1; i < chunk.frames.length; i++) {
-    const paso = chunk.frames[i]!.tick - chunk.frames[i - 1]!.tick;
+  const frames = [...chunk.frames];
+  let pagina = chunk;
+  while (frames.length < referencia.length) {
+    assert.ok(pagina.hasMore && pagina.frames.length > 0, 'una página corta debe anunciar una continuación que avance');
+    const desde = pagina.toTick + 1;
+    const siguiente = await f.http(`/api/tape/chunk?fromTick=${desde}&count=${referencia.length - frames.length}&x=10&y=6&width=24&height=16`, undefined, { 'Accept-Encoding': 'gzip' });
+    assert.equal(siguiente.status, 200, siguiente.text); assert.equal(siguiente.headers['content-encoding'], 'gzip');
+    pagina = siguiente.json() as TapeChunkResponse;
+    assert.ok(pagina.frames.length > 0 && pagina.fromTick >= desde, 'la continuación debe avanzar sin repetir');
+    assert.equal(pagina.fromTick, pagina.frames[0]!.tick);
+    assert.equal(pagina.toTick, pagina.frames.at(-1)!.tick);
+    assert.equal(pagina.hasMore, pagina.toTick < pagina.maxTick);
+    frames.push(...pagina.frames);
+  }
+  assert.deepEqual(frames.map(frame => frame.tick), referencia, 'las páginas deben cubrir exactamente la cinta de referencia');
+  for (let i = 1; i < frames.length; i++) {
+    const paso = frames[i]!.tick - frames[i - 1]!.tick;
     assert.ok(paso >= CINTA.pasos[0] && paso <= PASO_MAXIMO, `history at the tape cadence (${paso})`);
   }
   const first = chunk.frames[0]!;
@@ -334,6 +372,12 @@ test('createApp turbo + tape: DVR content from the tape thread, viewport clippin
   assert.equal(typeof first.geologyKey, 'number');
   assert.ok(first.instanceId && first.performance && first.stats && first.demography && first.technology);
   assert.ok(first.people.every(p => p.x >= 9 && p.x < 35 && p.y >= 5 && p.y < 23));
+  for (const frame of frames) {
+    assert.equal(frame.originX, 10); assert.equal(frame.width, 24);
+    assert.ok(frame.tiles.every(tile => tile.x >= 10 && tile.x < 34 && tile.y >= 6 && tile.y < 22));
+    assert.ok(frame.people.every(p => p.x >= 9 && p.x < 35 && p.y >= 5 && p.y < 23));
+  }
+  t.diagnostic(`cinta: referencia=${referencia.length}, primeraPagina=${chunk.frames.length}, final=${frames.at(-1)!.tick}`);
   await f.app.close();
   assert.equal(resources(), baseline, 'close() cancels the pending setImmediate of the turbo loop');
   const closedTick = f.app.world.tick;

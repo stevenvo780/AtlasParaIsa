@@ -13,9 +13,11 @@ A las 16:28:46 -05 se abrió un mundo nuevo con el visor publicado y una cinta i
 
 El perfil de la presentación pública reabrió ese mismo mundo desde el paso 24.874 y conservó su cinta. La RTX 5070 Ti y la RTX 2060 aceptaron resultados de percepción. En la primera medición de 13,24 s, el motor avanzó 18,36 pasos/s, la cinta llegó al paso 25.599 y el guardado durable al 25.600, con 72 habitantes registrados. Las dos réplicas de Atlas en la torre quedaron pausadas de forma reversible. [Relevo y medición](evidencia-2026-11-27/publication-v24-presentacion.json).
 
+Oficios reintenta la cinta si falla la primera consulta y ofrece «Reintentar la cinta» si vuelve a fallar. El panel y el resumen superior muestran el alcance de la vista. En un fotograma del mundo público renderizado en Chromium a 1920×1080, ambos indicaron 15 habitantes con recetas. El panel mostró tres recetas distintas y una reacción aplicada. [Verificación de Oficios](evidencia-2026-11-27/publication-v24-oficios.json).
+
 | Qué | Perfil de V24 |
 |---|---|
-| Código compilado y servido | `84110dd`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-presentacion-32` con Node 22.23.3. El dominio sirve `/assets/index-BjilTDT6.js`. |
+| Código compilado y servido | `d0db3d8`, worktree detached `AtlasParaIsa-anexo/worktrees/v24-oficios-resumen` con Node 22.23.3. El dominio sirve `/assets/index-ClJkCFyq.js`. |
 | Servicio y acceso | `atlas-publico.service` en `100.64.0.1:3000`, una sola instancia. [Dominio público](https://atlas.humanizar.tech). |
 | Mundo | `AtlasParaIsa-anexo/mundos/v24-inicio-20261127-1627`, semilla 3159104107, instancia `d5af3361-7465-4326-97fa-f95c1aad30fc`. El mundo anterior y su cinta quedaron conservados. |
 | Reglas | `RULES_VERSION = 14`. Motor abierto Turbo con 32 dueños CPU y ambas GPU para percepción, con grupos intercalados de 24 dueños en la RTX 5070 Ti y 8 en la RTX 2060. El selector por coste conserva la ruta CPU para los lotes que resuelve más rápido. Activadas materia, cuerpos, fauna, cohesión, natalidad, comunidades, técnica, obra e intentos. |

@@ -1,0 +1,98 @@
+{
+  "relevos": [
+    {
+      "resultado": "relevado",
+      "shaAnterior": "84110ddfcfcd8e34c5a2323d3eb63c57d4264700",
+      "sha": "2216a7cb71e8084c64b37f7df74cc05822740ec2",
+      "instanciaCinta": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+      "mismoDirectorioYCinta": true,
+      "tickDurableConservado": true,
+      "saludPreStop": {
+        "tick": 37046,
+        "epoca": 1,
+        "ultimoTickGuardado": 37000
+      },
+      "saludFinal": {
+        "tick": 37058,
+        "epoca": 2,
+        "ultimoTickGuardado": 37048
+      },
+      "rollback": false
+    },
+    {
+      "resultado": "relevado",
+      "shaAnterior": "2216a7cb71e8084c64b37f7df74cc05822740ec2",
+      "sha": "d0db3d8f5cf32290a54638f9b81a20e20b096a8a",
+      "instanciaCinta": "d5af3361-7465-4326-97fa-f95c1aad30fc",
+      "mismoDirectorioYCinta": true,
+      "tickDurableConservado": true,
+      "saludPreStop": {
+        "tick": 37817,
+        "epoca": 2,
+        "ultimoTickGuardado": 37800
+      },
+      "saludFinal": {
+        "tick": 37828,
+        "epoca": 3,
+        "ultimoTickGuardado": 37819
+      },
+      "rollback": false
+    }
+  ],
+  "reproduccion": {
+    "estadoHTTPInicial": 503,
+    "entrada": "/assets/index-BjilTDT6.js",
+    "texto": "Estado recibido del servidor · paso 285 MATERIA QUE CAMBIA DE MANOS Aprender a hacer Los habitantes prueban operaciones, conservan los procedimientos útiles y usan sus productos en trabajos posteriores. Descubiertos 0 Procedimientos en todo el mundo Productos 0 Objetos que existen ahora Usos 0 Aplicaciones con desgaste Generaciones 0 Profundidad de las recetas La técnica se transmite Acumulado del mundo Recetas enseñ"
+  },
+  "chromium": {
+    "head": "d0db3d8f5cf32290a54638f9b81a20e20b096a8a",
+    "entrada": "/assets/index-ClJkCFyq.js",
+    "entradaSha256": "909980e47d7bfaa26b229c851d962bdc46368eff6b223d89529bf018eb5ef5d0",
+    "casos": [
+      {
+        "fallos": 0,
+        "consultas": 2,
+        "trasFallo": null,
+        "resumen": "Oficios · recetas 1 hab. con recetas En esta vista · reacción observada",
+        "errores": []
+      },
+      {
+        "fallos": 1,
+        "consultas": 3,
+        "trasFallo": null,
+        "resumen": "Oficios · recetas 2 hab. con recetas En esta vista · reacción observada",
+        "errores": []
+      },
+      {
+        "fallos": 2,
+        "consultas": 4,
+        "trasFallo": "Estado recibido del servidor · paso 509 Reintentar la cinta Técnica sobre lotes La vista recibida no incluye fichas individuales de técnica.",
+        "resumen": "Oficios · recetas 1 hab. con recetas En esta vista · reacción observada",
+        "errores": []
+      }
+    ]
+  },
+  "cintaPublica": {
+    "pantalla": [
+      1920,
+      1080
+    ],
+    "paso": 37501,
+    "nivel": 0,
+    "pasoReaccion": 37400,
+    "fichas": 32,
+    "personasConRecetas": 15,
+    "recetasDistintas": 3,
+    "pasoReceta": "Unir 0,004 kg del insumo nº 7",
+    "resumen": "Oficios · recetas 15 hab. con recetas En esta vista · reacción observada",
+    "errores": []
+  },
+  "puerta": {
+    "revision": "d0db3d8f5cf32290a54638f9b81a20e20b096a8a",
+    "phase": "complete",
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "pruebasDirigidas": 36
+}

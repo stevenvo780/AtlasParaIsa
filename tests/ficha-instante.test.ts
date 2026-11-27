@@ -2,9 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SustanciaVista } from '../src/shared/materia.js';
-import type { PersonView, WorldView } from '../src/shared/types.js';
+import type { PersonView, StructureView, WorldView } from '../src/shared/types.js';
 import type { CuerpoVisible } from '../src/shared/vistas-v23.js';
-import { cuerpoFicha, cuerpoPersonaFicha, decisionFicha, fichaMateriales, inheritedAndLearned, necesidadesPersona } from '../src/client/inspector-view.js';
+import { cuerpoFicha, cuerpoPersonaFicha, decisionFicha, faunaFicha, fichaMateriales, inheritedAndLearned, necesidadesAnimal, necesidadesPersona, structureCard } from '../src/client/inspector-view.js';
 import { renderPersonTelemetry } from '../src/client/telemetry-hud.js';
 
 const mundo = (people: PersonView[] = []): WorldView =>
@@ -80,6 +80,44 @@ test('un cero no rellena el campo vecino ausente, y la reserva a medias nombra s
   const decision = decisionFicha(p, mundo([p]));
   assert.match(decision, /Hambre · 0%/);
   assert.doesNotMatch(decision, /Sed ·|no llegó completo/);
+});
+
+test('la historia grabada no espera una ficha viva ni inventa el nombre de un progenitor fuera de ese instante', () => {
+  const p = persona({
+    lifeStage: 'adult', culture: { sharing: 0.7, stewardship: 0, openness: 0.1 },
+    genome: { generation: 1, parents: ['fuera'], learningRate: 0.3, cooperation: 0.5, mutations: 0 },
+  });
+  const vivo = inheritedAndLearned(p, mundo([p]), undefined, null);
+  assert.match(vivo.story, /data-loading="family"/);
+  const cinta = inheritedAndLearned(p, mundo([p]), undefined, null, undefined, [], { repertorio: 'no-grabado' });
+  assert.doesNotMatch(cinta.now + cinta.story, /data-loading|Cargando|Comprobando/);
+  assert.match(cinta.story, /data-experiences="no-grabado"/);
+  assert.match(cinta.story, /Progenitor fuera de este fotograma/);
+  assert.doesNotMatch(cinta.story, /data-parent="fuera"/);
+});
+
+test('un animal resumido omite las barras ausentes y conserva un cero registrado', () => {
+  const medidores = necesidadesAnimal({ hunger: 0 });
+  assert.match(medidores, /aria-label="Hambre"[^>]*>0%/);
+  assert.doesNotMatch(medidores, /no grabado|Energía|Sed|Cansancio|Salud/);
+  const fauna = faunaFicha({}, mundo());
+  assert.equal((fauna.match(/data-fauna-ficha="sin-dato"/g) ?? []).length, 1);
+  assert.doesNotMatch(fauna, /data-cuerpo-ficha/);
+});
+
+test('la obra muestra su fecha y constructor registrados sin atribuirse una reacción global', () => {
+  const obra: StructureView = {
+    id: 'obra', name: 'Refugio', x: 3, y: 4, blueprintId: 'plano', components: ['frame'],
+    condition: 1, water: 0, food: 0, uses: 0, builtAt: 16, builderId: 'nara', storedWood: 0,
+    piezas: [{ x: 3, y: 4, rol: 'pieza', forma: 1, principal: 7, masa: 2, T: 290 }],
+  };
+  const view = { ...mundo([persona()]), reaccionObservada: { tick: 29, veces: 1, a: 7, b: 0, nivel: 1, lote: 1 } };
+  const ficha = structureCard(obra, view);
+  assert.match(ficha, /data-structure-built[^>]*>Registro de construcción · paso 16/);
+  assert.match(ficha, /data-person-link="nara">Nara/);
+  assert.match(ficha, /Bodega: 0 madera/);
+  assert.doesNotMatch(ficha, /0 piedra|data-reaccion="aplicada"/);
+  assert.match(ficha, /data-pieza="7"/);
 });
 
 test('instante con necesidades y sin escucha ni cuerpo no resume ni acusa al mundo', () => {

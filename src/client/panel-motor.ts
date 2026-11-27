@@ -48,6 +48,7 @@ export interface VistaMotor {
   hilos: number | null; ocupacion: number[] | null; ocupacionMedia: number | null; desequilibrio: number | null; esperaBarreraMs: number | null;
   fases: FaseMotor[];
   tarjetas: TarjetaMotor[];
+  tarjetasConocidas: boolean;
   intentos: number | null; rechazados: number | null; migraciones: number | null; saltados: number | null;
   recargas: number | null; servidor: SaludVisible['estado'] | null;
 }
@@ -62,10 +63,11 @@ export function vistaMotor(t: TelemetriaRecibida | null, salud: SaludVisible | n
       fases: FASES_MOTOR.map(([clave, etiqueta]) => ({ clave, etiqueta, ms: t.faseMs[clave] })),
       // `gpuEstado` sigue el orden de `MotorConfig.gpu`; /health nombra cada tarjeta por su índice CUDA en ese mismo orden.
       tarjetas: t.gpuEstado.map((estado, i) => ({ dispositivo: salud?.gpu.length === t.gpuEstado.length ? salud.gpu[i]!.dispositivo : i, estado, ms: t.gpuMs[i]!, mib: t.gpuBytes[i]! / 1048576 })),
+      tarjetasConocidas: true,
       intentos: t.intentos, rechazados: t.rechazados, migraciones: t.migraciones, saltados: t.fotogramasSaltados, recargas, servidor,
     };
   }
-  if (!paso && !salud) return { fuente: 'nada', tick: null, hz: null, hzObjetivo: null, diasPorMinuto: null, retraso, hilos: null, ocupacion: null, ocupacionMedia: null, desequilibrio: null, esperaBarreraMs: null, fases: [], tarjetas: [], intentos: null, rechazados: null, migraciones: null, saltados: null, recargas, servidor };
+  if (!paso && !salud) return { fuente: 'nada', tick: null, hz: null, hzObjetivo: null, diasPorMinuto: null, retraso, hilos: null, ocupacion: null, ocupacionMedia: null, desequilibrio: null, esperaBarreraMs: null, fases: [], tarjetas: [], tarjetasConocidas: false, intentos: null, rechazados: null, migraciones: null, saltados: null, recargas, servidor };
   const hz = finito(paso?.tickHz) ? paso.tickHz : salud ? salud.ticksPorSegundo : null;
   return {
     fuente: 'paso', tick: salud?.tick ?? null, hz, hzObjetivo: finito(paso?.tickHzObjetivo) ? paso.tickHzObjetivo : null,
@@ -74,6 +76,7 @@ export function vistaMotor(t: TelemetriaRecibida | null, salud: SaludVisible | n
     esperaBarreraMs: finito(paso?.tiempoBarreraMs) ? paso.tiempoBarreraMs : null,
     fases: fasesMedidas(paso)?.fases.map(f => ({ clave: f.clave, etiqueta: f.etiqueta, ms: f.ms })) ?? [],
     tarjetas: (salud?.gpu ?? []).map(g => ({ dispositivo: g.dispositivo, estado: g.estado, ms: null, mib: null })),
+    tarjetasConocidas: salud !== null,
     intentos: null, rechazados: null, migraciones: null, saltados: null, recargas, servidor,
   };
 }
@@ -135,7 +138,7 @@ function fases(v: VistaMotor): string {
 
 const estadosTarjeta: Record<TarjetaMotor['estado'], string> = { ok: 'Activa', cpu: 'Caída a CPU', sin: 'No disponible' };
 function tarjetas(v: VistaMotor): string {
-  if (!v.tarjetas.length) return `<div class="motor-bloque" data-motor-tarjetas="0"><h4 class="detail-subtitle">Tarjetas</h4><p class="stats-note">${v.fuente === 'nada' ? `Tarjetas ${sinDato}.` : 'Sin tarjetas gráficas: todo el cómputo va en CPU.'}</p></div>`;
+  if (!v.tarjetas.length) return `<div class="motor-bloque" data-motor-tarjetas="${v.tarjetasConocidas ? '0' : 'sin-dato'}"><h4 class="detail-subtitle">Tarjetas</h4><p class="stats-note">${v.tarjetasConocidas ? 'El servidor informó cero tarjetas.' : `Tarjetas ${sinDato}.`}</p></div>`;
   const filas = v.tarjetas.map(t => `<article class="motor-tarjeta" data-estado="${t.estado}"><strong>GPU ${esc(number(t.dispositivo))}</strong><span class="detail-badge">${esc(estadosTarjeta[t.estado])}</span><small>${t.ms === null ? `tiempo ${sinDato}` : esc(`${number(t.ms, 2)} ms por paso`)} · ${t.mib === null ? `memoria ${sinDato}` : esc(`${number(t.mib, 1)} MiB`)}</small></article>`).join('');
   return `<div class="motor-bloque" data-motor-tarjetas="${v.tarjetas.length}"><h4 class="detail-subtitle">Tarjetas</h4><div class="motor-tarjetas">${filas}</div></div>`;
 }
@@ -156,7 +159,7 @@ function trafico(v: VistaMotor): string {
     + `<span data-motor-colas>Colas del buzón (M, A, B, F0)<strong>${sinDato}</strong></span>`
     + `<span>Intentos entre dueños<strong>${cifra(v.intentos)}</strong></span><span>Rechazados<strong>${cifra(v.rechazados)}${rechazo}</strong></span>`
     + `<span>Migraciones<strong>${cifra(v.migraciones)}</strong></span><span data-motor-saltados>Fotogramas saltados<strong>${cifra(v.saltados)}</strong></span>`
-    + `<span data-motor-recargas>Recargas tras un fallo del paso<strong>${cifra(v.recargas)}</strong></span><span>Tarjetas en respaldo de CPU<strong>${v.tarjetas.length ? esc(number(enCpu)) : sinDato}</strong></span>`
+    + `<span data-motor-recargas>Recargas tras un fallo del paso<strong>${cifra(v.recargas)}</strong></span><span>Tarjetas en respaldo de CPU<strong>${v.tarjetasConocidas ? esc(number(enCpu)) : sinDato}</strong></span>`
     + '</div>' + (lecturaReparto(v) ? `<p class="stats-note" data-motor-lectura>${esc(lecturaReparto(v)!)}</p>` : '') + '<p class="stats-note">Un fallo de tarjeta se recalcula en CPU en el mismo paso; un fallo del paso recarga el último guardado y el mundo sigue.</p></div>';
 }
 
@@ -168,7 +171,7 @@ export function renderPanelMotor(v: VistaMotor, luz: LuzSalud): string {
 export function firmaMotor(v: VistaMotor, luz: LuzSalud): string {
   const como = (x: number | null, escala: number): number | null => x === null ? null : Math.round(x * escala);
   return JSON.stringify([v.fuente, v.tick, como(v.hz, 10), como(v.diasPorMinuto, 100), v.retraso, v.hilos, v.ocupacion?.map(escalon), como(v.ocupacionMedia, 100), como(v.desequilibrio, 100), como(v.esperaBarreraMs, 100),
-    v.fases.map(f => [f.clave, Math.round(f.ms * 100)]), v.tarjetas.map(t => [t.dispositivo, t.estado, como(t.ms, 100), como(t.mib, 10)]), v.intentos, v.rechazados, v.migraciones, v.saltados, v.recargas, v.servidor, luz.estado, luz.motivo]);
+    v.fases.map(f => [f.clave, Math.round(f.ms * 100)]), v.tarjetasConocidas, v.tarjetas.map(t => [t.dispositivo, t.estado, como(t.ms, 100), como(t.mib, 10)]), v.intentos, v.rechazados, v.migraciones, v.saltados, v.recargas, v.servidor, luz.estado, luz.motivo]);
 }
 
 /** Lectura de `RUTA_MOTOR`: 404 significa que este servidor aún no la sirve (no es un fallo que reintentar). */

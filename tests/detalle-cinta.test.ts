@@ -131,6 +131,33 @@ test('juzgar L0 devuelve el PersonView íntegro y solo aplica un delta del mismo
   assert.deepEqual(roto, { ok: false, motivo: 'cercano' });
 });
 
+test('no se recupera de la caché la misma identidad al cambiar de instancia', async () => {
+  let actual = contexto({ instancia: 'a' });
+  let solicitudes = 0;
+  const reemplazo = { ...exacta, energy: 0.02 };
+  const cinta = new DetalleCinta({
+    pedir: async () => {
+      solicitudes++;
+      const { instancia } = actual;
+      return trozo({ baseFrame: { ...marco(12, [instancia === 'a' ? exacta : reemplazo]), instanceId: instancia } });
+    },
+    pausar: () => false,
+    contexto: () => actual,
+  });
+  cinta.sincronizar(null);
+  await cinta.ver();
+  assert.equal(cinta.personaSiCoincide(actual), exacta);
+  actual = contexto({ instancia: 'b' });
+  assert.equal(cinta.personaSiCoincide(actual), null);
+  cinta.sincronizar(null);
+  await cinta.ver();
+  assert.equal(cinta.personaSiCoincide(actual), reemplazo);
+  assert.equal(solicitudes, 2);
+  const otroMundo = trozo({ baseFrame: { ...marco(12, [exacta]), instanceId: 'a' } });
+  assert.deepEqual(juzgarL0(otroMundo, actual), { ok: false, motivo: 'instancia' });
+  assert.equal(juzgarL0(trozo(), actual).ok, true, 'el archivo anterior puede omitir el identificador');
+});
+
 test('al seleccionar se completa la ficha con el L0 exacto y se conservan los ceros', async () => {
   let actual = contexto();
   let cambios = 0;

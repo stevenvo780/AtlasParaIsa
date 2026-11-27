@@ -53,6 +53,10 @@ test('vistaMotor usa la telemetría si llega; si no, el paso y /health, con null
   const nada = vistaMotor(null, null, undefined);
   assert.equal(nada.fuente, 'nada');
   assert.equal(luzMotor(nada).estado, 'sin-dato');
+  const grabado = vistaMotor(null, null, paso);
+  assert.match(renderPanelMotor(grabado, luzMotor(grabado)), /data-motor-tarjetas="sin-dato"/);
+  const cpu = vistaMotor(null, salud({ gpu: [] }), paso);
+  assert.match(renderPanelMotor(cpu, luzMotor(cpu)), /El servidor informó cero tarjetas/);
 });
 
 test('luzMotor: sano, atención (tarjeta en CPU, saltos nuevos, ritmo bajo, degradado) y grave (parado o quieto)', () => {

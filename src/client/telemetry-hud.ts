@@ -1,4 +1,5 @@
 /** Read-only telemetry over the received projection. No DOM, timers or simulation state. */
+import type { Nivel } from '../shared/cinta.js';
 import type { AnimalView, CommunityView, PersonView, StructureView, WorldStats, WorldView } from '../shared/types.js';
 import type { TecnicaVisible } from '../shared/tecnica-visible.js';
 import { esc, number, percentage } from './ui-catalog.js';
@@ -43,13 +44,19 @@ export function cropCounts(tiles: WorldView['tiles']): Record<CropStage, number>
   for (const tile of tiles) stages[cropStage(tile.cultivation)]++;
   return stages;
 }
-export function viewportCensus(world: WorldView) {
-  return { people: world.people.length, animals: world.animals?.length, structures: world.structures?.length,
-    crops: world.tiles.filter(tile => finite(tile.cultivation) && tile.cultivation > 0).length };
+export function viewportCensus(world: WorldView, nivel: Nivel | null = null) {
+  // En una vista completa el productor omite cultivation cuando vale cero.
+  let crops: number | undefined;
+  if ((nivel === null || nivel < 2) && world.tiles.length) {
+    crops = 0;
+    for (const tile of world.tiles) if (finite(tile.cultivation) && tile.cultivation > 0) crops++;
+  }
+  return { people: nivel !== null && nivel >= 3 ? undefined : world.people.length,
+    animals: world.animals?.length, structures: world.structures?.length, crops };
 }
-export function viewportCensusText(world: WorldView): string {
-  const c = viewportCensus(world);
-  return `En vista: ${number(c.people)} hab · ${number(c.animals)} fauna · ${number(c.structures)} obras · ${number(c.crops)} cultivos`;
+export function viewportCensusText(world: WorldView, nivel: Nivel | null = null): string {
+  const c = viewportCensus(world, nivel);
+  return `En vista: ${number(c.people)} hab · ${number(c.animals)} fauna · ${number(c.structures)} obras · ${nivel === 1 && c.crops !== undefined ? '≈' : ''}${number(c.crops)} cultivos`;
 }
 
 const axes = { sharing: 'Compartir', stewardship: 'Cuidado', openness: 'Apertura' } as const;
@@ -102,7 +109,7 @@ function oficiosKpi(world: WorldView | null, esperaCinta: boolean): TelemetryKpi
     detail: `${number(recipes)} recetas registradas · ${number(items?.length)} objetos proyectados · ${number(forged)} herramientas químicas forjadas en vista · ${number(stats?.blueprints)} planos${stats?.chemicalFormulas !== undefined ? ` · ${number(stats.chemicalFormulas)} fórmulas químicas emergentes` : ''}. Abrir Mundo › Técnica.` };
 }
 
-export function telemetryKpis(world: WorldView | null, esperaCinta = false): TelemetryKpi[] {
+export function telemetryKpis(world: WorldView | null, esperaCinta = false, nivel: Nivel | null = null): TelemetryKpi[] {
   const stats = world?.stats, census = world ? censoDe(world) : null;
   const generations = Object.entries(stats?.generations ?? {}).filter(([g, n]) => finite(Number(g)) && n > 0).map(([g]) => Number(g));
   const generation = generations.length ? generations.reduce((max, value) => Math.max(max, value), 0) : undefined;
@@ -111,9 +118,11 @@ export function telemetryKpis(world: WorldView | null, esperaCinta = false): Tel
   const predators = stats?.wildlife ? count(stats.wildlife.fox) + count(stats.wildlife.wolf) : undefined;
   const runtime = world?.performance;
   const herds = habituatedFauna(world?.animals);
+  const censusOmitted = nivel !== null && nivel >= 3;
+  const people = stats?.population ?? (censusOmitted ? undefined : world?.people.length);
   return [
-    { nav: 'people', label: 'Vivos', value: `${number(world ? stats?.population ?? world.people.length : undefined)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
-      summary: stats ? 'Población viva · todo el mundo' : world ? 'Habitantes recibidos · sin censo global' : 'Esperando el censo',
+    { nav: 'people', label: 'Vivos', value: `${number(people)} · ${generation === undefined ? '—' : `G${number(generation)}`}`,
+      summary: stats ? 'Población viva · todo el mundo' : censusOmitted ? 'Censo omitido en este nivel' : world ? 'Habitantes recibidos · sin censo global' : 'Esperando el censo',
       detail: census ? `${number(census.neighbors)} vecinos · ${number(census.identities)} S/I · J/A/M: ${number(census.lifeStage.juvenile)}/${number(census.lifeStage.adult)}/${number(census.lifeStage.senescent)} · sin etapa: ${number(census.lifeStage.unknown)}. Mundo › Vidas.` : 'Censo no recibido. Abrir Vidas.' },
     { nav: 'life', label: 'Faena / descanso', value: `${percentage(activity.working)} / ${percentage(activity.resting)}`,
       summary: `Nacimientos ${number(stats?.totals?.births)} / muertes ${number(world?.demography?.deaths)} · acumulados`,
@@ -181,26 +190,29 @@ function isSitePending(site: StructureTelemetry['site']): boolean {
 export function structureRollup(structures?: readonly StructureTelemetry[]) {
   const values = structures ?? [];
   const optionalSum = (key: 'storedWood' | 'storedStone') => values.some(s => finite(s[key])) ? sum(values.map(s => s[key] ?? 0)) : undefined;
-  return { total: structures?.length, food: structures ? sum(values.map(s => s.storedFood ?? s.food)) : undefined,
+  const reserve = values.map(s => s.storedFood ?? s.food).filter(finite);
+  return { total: structures?.length, food: reserve.length || structures?.length === 0 ? sum(reserve) : undefined,
     wood: optionalSum('storedWood'), stone: optionalSum('storedStone'),
     sites: values.some(s => s.site !== undefined) ? values.filter(s => isSitePending(s.site)).length : undefined,
     installed: values.some(s => s.installed !== undefined) ? sum(values.map(s => s.installed?.length ?? 0)) : undefined,
     multiTile: values.some(s => s.footprint !== undefined) ? values.filter(s => footprintArea(s.footprint) > 1).length : undefined,
     footprintTiles: values.some(s => s.footprint !== undefined) ? sum(values.map(s => footprintArea(s.footprint))) : undefined };
 }
-export function renderLandTelemetry(world: WorldView): string {
-  const stages = cropCounts(world.tiles);
+export function renderLandTelemetry(world: WorldView, nivel: Nivel | null = null): string {
+  const cultivationMeasured = (nivel === null || nivel < 2) && world.tiles.length > 0;
+  const stages = cropCounts(cultivationMeasured ? world.tiles : []);
   const s = structureRollup(world.structures), wildlife = world.stats?.wildlife, dynamics = world.stats?.animalDynamics;
   const speciesLabels: Record<string, string> = { hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces', fox: 'Zorros', wolf: 'Lobos' };
   const predators = wildlife ? count(wildlife.fox) + count(wildlife.wolf) : undefined;
   const total = wildlife ? sum(Object.values(wildlife)) : undefined;
   const ratio = (n: number | undefined) => dynamics && dynamics.deaths > 0 && n !== undefined ? percentage(n / dynamics.deaths) : '—';
-  return section('Cultivos por estado en esta vista', facts(Object.entries(stages).map(([key, value]) => [cropLabels[key as CropStage], number(value)])), 'Casillas recibidas de esta cámara; los cultivos se clasifican por su avance.')
+  return section('Cultivos por estado en esta vista', facts(Object.entries(stages).map(([key, value]) => [cropLabels[key as CropStage], number(cultivationMeasured ? value : undefined)])),
+    !cultivationMeasured ? 'No se recibieron datos de cultivo para esta cámara.' : nivel === 1 ? 'Estimación para las casillas recibidas. La grabación redondea el avance.' : 'Casillas recibidas de esta cámara. Los cultivos se clasifican por su avance.')
     + section('Almacenes y obras en esta vista', facts([
       ['Obras', number(s.total)], ['Alimento almacenado', number(s.food, 2)], ['Madera almacenada', number(s.wood, 2)], ['Piedra almacenada', number(s.stone, 2)],
       ['Obras sin terminar', number(s.sites)], ['Tecnología instalada', number(s.installed)], ['Obras de varias casillas', number(s.multiTile)], ['Casillas de huella', number(s.footprintTiles)],
-    ]), 'Existencias del modelo. — indica un campo aún no proyectado; no significa cero.')
-    + renderRoadsAndChemistryRollup(world)
+    ]), 'Existencias y obras según los campos recibidos. — indica un dato ausente.')
+    + renderRoadsAndChemistryRollup(world, nivel)
     + section('Fauna por especie y depredadores', facts([
       ['Herbívoros y otros no depredadores', number(total === undefined || predators === undefined ? undefined : total - predators)], ['Carnívoros · zorros y lobos', number(predators)],
       ...Object.entries(wildlife ?? {}).map(([key, value]): [string, string] => [speciesLabels[key] ?? key, number(value)]),
@@ -340,16 +352,27 @@ function personCompoundsSection(p: PersonView): string {
 }
 
 /** V20 en Mundo › Paisaje: calzadas, edificios poliominó, sinergias y compuestos en las bodegas visibles. */
-export function renderRoadsAndChemistryRollup(world: WorldView): string {
+export function renderRoadsAndChemistryRollup(world: WorldView, nivel: Nivel | null = null): string {
   const stats = world.stats, structures = world.structures ?? [];
   const stored = structures.flatMap(s => s.storedCompounds ?? []);
-  const polyHere = structures.filter(s => (s.cells?.length ?? 0) > 1).length, linksHere = structures.reduce((n, s) => n + count(s.synergy?.sharedEdges), 0);
-  const trails = world.tiles.filter(t => roadState(t) === 'trail').length, paved = world.tiles.filter(t => roadState(t) === 'paved').length;
+  const sinObras = world.structures?.length === 0;
+  const hasStorage = sinObras || structures.some(s => s.storedCompounds !== undefined);
+  const footprints = structures.map(s => s.cells?.length ?? (s.footprint && footprintArea(s.footprint))).filter(finite);
+  const edges = structures.map(s => s.synergy?.sharedEdges).filter(finite);
+  const roadsMeasured = (nivel === null || nivel < 2) && world.tiles.length > 0;
+  let trails = 0, paved = 0;
+  if (roadsMeasured) for (const tile of world.tiles) {
+    const road = roadState(tile);
+    if (road === 'trail') trails++;
+    if (road === 'paved') paved++;
+  }
   return section('Caminos, edificios y química', facts([
     ['Calzadas empedradas', number(stats?.pavedTiles)], ['Edificios poliominó', number(stats?.polyominoStructures)], ['Enlaces de sinergia', number(stats?.synergyLinks)],
     ['Fórmulas descubiertas', number(stats?.chemicalFormulas ?? world.chemistry?.totalFormulas)],
-    ['Compuestos en bodegas de esta vista', `${number(stored.length)} lotes · ${number(stored.reduce((n, l) => n + count(l.mass), 0), 2)} u.`],
-    ['Sendas y calzadas en vista', `${number(trails)} · ${number(paved)}`], ['Poliominós en vista', number(polyHere)], ['Muros compartidos en vista', number(linksHere)],
+    ['Compuestos en bodegas de esta vista', hasStorage ? `${number(stored.length)} lotes · ${number(sum(stored.map(l => l.mass)), 2)} u.` : '—'],
+    ['Sendas y calzadas en vista', roadsMeasured ? `${number(trails)} · ${number(paved)}` : '—'],
+    ['Poliominós en vista', number(footprints.length || sinObras ? footprints.filter(n => n > 1).length : undefined)],
+    ['Muros compartidos en vista', number(edges.length || sinObras ? sum(edges) : undefined)],
   ]), 'Las cifras globales cuentan regiones activas; las de «en vista» solo lo que llegó a esta cámara. — indica un campo aún no proyectado.');
 }
 

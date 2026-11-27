@@ -146,6 +146,10 @@ test('la casa nombra la pieza cuando hay ficha y dice la ausencia cuando no', ()
   assert.match(renderPanelMateria(null), /sin la ley de materia/);
   assert.match(renderPanelMateria(null), /data-reaccion="no-grabado"/);
   assert.doesNotMatch(structureCard(casa, mundo()), /data-reaccion="aplicada"/);
-  assert.match(renderPanelMateria(null, undefined, [agua]), /data-libro="no-grabado"/);
-  assert.doesNotMatch(renderPanelMateria(null, undefined, [agua]), /0 mmol/);
+  const soloCatalogo = renderPanelMateria(null, undefined, [agua]);
+  assert.match(soloCatalogo, /data-libro="no-grabado"/);
+  assert.match(soloCatalogo, /Sustancias del catálogo recibido/);
+  assert.match(soloCatalogo, new RegExp(`data-sustancia="${agua.id}"`));
+  assert.doesNotMatch(soloCatalogo, /0 mmol|\d+ kg/);
+  assert.match(renderPanelMateria(null, undefined, undefined, 150, undefined, true), /data-libro="no-grabado"/);
 });

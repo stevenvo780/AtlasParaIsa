@@ -1,4 +1,5 @@
 /** Read-only deep statistics over received data; no simulation or DOM side effects. */
+import type { Nivel } from '../shared/cinta.js';
 import type { CommunityView, WorldView } from '../shared/types.js';
 import type { WorldDirectoryResponse } from '../shared/worldmap.js';
 import { ELEMENTS, type ThermalPhase } from '../shared/chemistry.js';
@@ -58,8 +59,14 @@ export function summarizeMundo(world: WorldView, directory?: WorldDirectoryRespo
   };
 }
 
-function life(world: WorldView, directory?: WorldDirectoryResponse | null): string {
-  const s = world.stats, census = s?.census, summary = summarizeMundo(world, directory);
+function life(world: WorldView, directory: WorldDirectoryResponse | null | undefined, nivel: Nivel | null): string {
+  const s = world.stats;
+  if (!s && nivel !== null && nivel >= 2) {
+    const cantidad = world.people.length;
+    const habitantes = nivel === 2 ? ` En esta vista: ${number(cantidad)} ${cantidad === 1 ? 'habitante' : 'habitantes'}.` : '';
+    return note(`Este nivel de la grabación omite el censo global y las estadísticas de vida.${habitantes}`);
+  }
+  const census = s?.census, summary = summarizeMundo(world, directory);
   const generationScope = s?.generations ? 'censo' : directory ? 'directorio' : 'en vista';
   const generations = s?.generations
     ? Object.entries(s.generations).filter(([, n]) => n > 0).map(([g]) => Number(g)).filter(finite)
@@ -107,8 +114,9 @@ function life(world: WorldView, directory?: WorldDirectoryResponse | null): stri
   return censusHtml + animalHtml + whisperHtml;
 }
 
-function land(world: WorldView, directory?: WorldDirectoryResponse | null): string {
+function land(world: WorldView, directory: WorldDirectoryResponse | null | undefined, nivel: Nivel | null): string {
   const s = world.stats;
+  const sinEstadisticas = !s && nivel !== null && nivel >= 2;
   const visible = new Map(world.structures?.map(v => [v.id, v]));
   const structures = directory?.structures.map(v => ({ ...v, workshop: (visible.get(v.id)?.synergy?.workshopBonus ?? 0) > 0 })) ?? world.structures?.map(v => ({
     id: v.id, name: v.name, x: v.x, y: v.y, cells: v.cells?.length ?? (v.footprint ? v.footprint.width * v.footprint.height : undefined),
@@ -117,20 +125,26 @@ function land(world: WorldView, directory?: WorldDirectoryResponse | null): stri
   }));
   const top = structures?.filter(v => (v.cells ?? 0) > 1 || (v.kilnTier ?? 0) > 0 || v.workshop)
     .sort((a, b) => (b.cells ?? 0) - (a.cells ?? 0)).slice(0, 12);
-  return section('Infraestructura y conectividad', cards([
+  const infraestructura: [string, string][] = [
     ['Calzadas pavimentadas', number(s?.pavedTiles)], ['Senderos', number(s?.trailTiles)], ['Cultivos', number(s?.cultivatedTiles)],
     ['Salones poliominó', number(s?.polyominoStructures)], ['Sinergias entre obras', number(s?.synergyLinks)],
     ['Regiones descubiertas', number(world.discoveredChunks)], ['Regiones activas', number(world.activeChunks)],
-  ]), 'Infraestructura: regiones activas. Regiones descubiertas: territorio acumulado.')
-    + section('Hidrología y desigualdad espacial', facts([
+  ];
+  if (sinEstadisticas) {
+    infraestructura.push(['Obras en vista', number(world.structures?.length)]);
+  }
+  const datosInfra = sinEstadisticas ? infraestructura.filter(([, valor]) => valor !== '—') : infraestructura;
+  const aviso = sinEstadisticas ? note('Este nivel de la grabación omite las estadísticas de suelo, agua y cultivos.') : '';
+  return aviso + (datosInfra.length ? section('Infraestructura y conectividad', cards(datosInfra), 'Infraestructura: regiones activas. Regiones descubiertas: territorio acumulado.') : '')
+    + (sinEstadisticas ? '' : section('Hidrología y desigualdad espacial', facts([
       ['Agua dulce', number(s?.freshWater, 2)], ['Distancia media al agua potable', s?.distanciaMediaAgua === -1 ? 'Sin fuente potable en las celdas cargadas' : finite(s?.distanciaMediaAgua) ? `${number(s.distanciaMediaAgua, 2)} celdas` : '—'],
       ['Regiones sin agua', percentage(s?.regionesSinAgua)], ['Celdas con comida', percentage(s?.fraccionCeldasConComida)], ['Gini de recursos por región', number(s?.giniRecursosPorRegion, 3)],
-    ]), 'Mediciones de regiones activas; — indica que el servidor no envió el dato.')
-    + section('Catálogo de grandes obras', top?.length ? grid(top.map(v =>
+    ]), 'Mediciones de regiones activas; — indica que el servidor no envió el dato.'))
+    + (sinEstadisticas && !top?.length ? '' : section('Catálogo de grandes obras', top?.length ? grid(top.map(v =>
       `<article class="stat-card" data-structure="${esc(v.id)}"><header style="overflow-wrap:anywhere">${swatch(v.tint)}${esc(v.name)}</header>${facts([
         ['Celdas', number(v.cells)], ['Condición', percentage(v.condition)], ['Nivel de horno', finite(v.kilnTier) ? `T${number(v.kilnTier)}` : '—'],
       ])}${jump(v.x, v.y)}</article>`).join('')) : note(structures ? 'No hay grandes obras identificables en los datos recibidos.' : 'Catálogo de obras no recibido.'),
-    directory ? 'Hasta 12 obras del directorio global, ordenadas por celdas.' : 'Hasta 12 obras en vista, ordenadas por celdas.');
+    directory ? 'Hasta 12 obras del directorio global, ordenadas por celdas.' : 'Hasta 12 obras en vista, ordenadas por celdas.'));
 }
 
 /** Pluralizes from the rounded figure shown, so 2401 ticks reads «1 día», not «1 días». */
@@ -139,12 +153,12 @@ const ageLabel = (ticks: number): string => {
   return `${days} ${days === '1' ? 'día' : 'días'}`;
 };
 
-function communities(world: WorldView, directory?: WorldDirectoryResponse | null): string {
+function communities(world: WorldView, directory: WorldDirectoryResponse | null | undefined, personasParciales: boolean): string {
   const local = new Map(world.communities?.map(c => [c.id, c]));
   const rows = directory ? directory.communities.map(c => ({ ...c, culture: local.get(c.id)?.culture, formedAt: local.get(c.id)?.formedAt })) : world.communities?.map(c => ({ ...c, memberCount: c.memberCount ?? c.members.length }));
   const ranked = rows ? [...rows].sort((a, b) => b.memberCount - a.memberCount) : [];
-  const roster = directory?.people ?? world.people;
-  const unaffiliated = roster.every(p => p.communityId !== undefined) ? roster.filter(p => p.communityId === null).length : undefined;
+  const roster = directory?.people ?? (personasParciales ? undefined : world.people);
+  const unaffiliated = roster?.every(p => p.communityId !== undefined) ? roster.filter(p => p.communityId === null).length : undefined;
   const axes: readonly [keyof CommunityView['culture'], string][] = [['sharing', 'Compartir'], ['stewardship', 'Cuidado'], ['openness', 'Apertura']];
   return section('Asentamientos y clanes', cards([
     ['Asentamientos globales', number(world.settlementCount)], ['Comunidades recibidas', number(rows?.length)],
@@ -217,11 +231,12 @@ function performance(world: WorldView): string {
       rows.length ? bars(rows, 'ms', 20) : note('No se recibieron mediciones por fase.'));
 }
 
-export function renderMundoDeepStats(world: WorldView, tab: MundoTab, directory?: WorldDirectoryResponse | null): string {
+export function renderMundoDeepStats(world: WorldView, tab: MundoTab, directory?: WorldDirectoryResponse | null, nivel: Nivel | null = null): string {
+  const personasParciales = nivel !== null && nivel >= 3;
   switch (tab) {
-    case 'life': return life(world, directory);
-    case 'land': return land(world, directory);
-    case 'communities': return communities(world, directory);
+    case 'life': return life(world, directory, nivel);
+    case 'land': return land(world, directory, nivel);
+    case 'communities': return communities(world, directory, personasParciales);
     case 'technology': return technology(world);
     case 'materia': return '';
     case 'performance': return performance(world);

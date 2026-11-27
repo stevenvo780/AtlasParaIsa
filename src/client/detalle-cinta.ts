@@ -19,10 +19,11 @@ export interface CoberturaNivel { nivel: Nivel; t0: number; t1: number; fotogram
 /** `completa` = la vista ya trae la telemetría que L1 omite. `cabezal` es el tick ya emitido. */
 export interface ContextoDetalle {
   id: string; x: number; y: number; tick: number; cabezal: number; epoca: number;
+  instancia?: string;
   nivel: Nivel | null; niveles: readonly CoberturaNivel[]; completa: boolean;
 }
-export interface PedidoDetalle { epoca: number; tick: number; id: string }
-export type MotivoRechazo = 'cercano' | 'podado' | 'ausente' | 'nivel' | 'epoca';
+export interface PedidoDetalle { epoca: number; tick: number; id: string; instancia?: string }
+export type MotivoRechazo = 'cercano' | 'podado' | 'ausente' | 'nivel' | 'epoca' | 'instancia';
 export type JuicioDetalle = { ok: true; persona: PersonView } | { ok: false; motivo: MotivoRechazo };
 export interface DepsDetalle {
   pedir: (req: ChunkReq, signal: AbortSignal) => Promise<ChunkResp>;
@@ -60,7 +61,8 @@ export function pedidoChunk(ctx: Pick<ContextoDetalle, 'epoca' | 'tick' | 'x' | 
 export const sePuedePedir = (ctx: ContextoDetalle | null): ctx is ContextoDetalle =>
   !!ctx && ctx.nivel !== null && ctx.nivel !== 0 && !ctx.completa && ctx.cabezal === ctx.tick && !!ctx.id && l0Cubre(ctx.niveles, ctx.tick) && !!pedidoChunk(ctx);
 
-export const claveDetalle = (p: Pick<PedidoDetalle, 'epoca' | 'tick' | 'id'>): string => `${p.epoca}:${p.tick}:${p.id}`;
+export const claveDetalle = (p: PedidoDetalle): string =>
+  `${p.instancia ? `${p.instancia}:` : ''}${p.epoca}:${p.tick}:${p.id}`;
 
 /** Tick del `baseFrame`, o la base más los deltas de ese trozo si uno cae en el tick exacto. */
 function fotogramaEnTick(base: WorldView, deltas: readonly TapeClientDelta[] | undefined, tick: number): WorldView | null {
@@ -80,13 +82,14 @@ function fotogramaEnTick(base: WorldView, deltas: readonly TapeClientDelta[] | u
   return frame.tick === tick ? frame : null;
 }
 
-/** Solo L0 de la época pedida y esa id. Un tick vecino, otro nivel u otra persona no prestan campos. */
+/** Solo L0 de la instancia, época, paso e identidad pedidos. */
 export function juzgarL0(chunk: ChunkResp, pedido: PedidoDetalle): JuicioDetalle {
   if (chunk.nivel !== 0) return { ok: false, motivo: 'nivel' };
   if (chunk.epoca !== pedido.epoca) return { ok: false, motivo: 'epoca' };
   if (!chunk.baseFrame) return { ok: false, motivo: 'podado' };
   const frame = fotogramaEnTick(chunk.baseFrame, chunk.deltas, pedido.tick);
   if (!frame) return { ok: false, motivo: 'cercano' };
+  if (pedido.instancia && frame.instanceId && frame.instanceId !== pedido.instancia) return { ok: false, motivo: 'instancia' };
   const persona = frame.people?.find(p => p.id === pedido.id);
   if (!persona || persona.id !== pedido.id || !personaYaCompleta(persona)) return { ok: false, motivo: 'ausente' };
   return { ok: true, persona };
@@ -184,7 +187,7 @@ export class DetalleCinta {
       const chunk = await this.deps.pedir(req, ac.signal);
       if (this.vuelo?.ac !== ac) return;
       this.vuelo = null;
-      const juicio = juzgarL0(chunk, { epoca: ctx.epoca, tick: ctx.tick, id: ctx.id });
+      const juicio = juzgarL0(chunk, ctx);
       this.guardar(clave, juicio);
       this.aplicar(clave, gen, juicio);
     } catch (error) {

@@ -78,6 +78,30 @@ test('Oficios cuenta habitantes con recetas de la cinta en la cámara', () => {
   assert.match(oficio().detail, /3 fichas de técnica/);
 });
 
+test('un recorte de cinta distingue recuentos omitidos y ceros medidos', () => {
+  const world = worldFixture();
+  world.tiles = [{ x: 0, y: 0, terrain: 'soil', moisture: 0, vegetation: 0, food: 0 }];
+  assert.equal(viewportCensus(world, 0).crops, 0);
+  assert.match(viewportCensusText(world, 1), /≈0 cultivos/);
+  assert.match(viewportCensusText(world, 2), /— cultivos/);
+  assert.match(renderLandTelemetry(world, 2), /Sin arar<strong>—<\/strong>/);
+
+  delete world.stats;
+  delete world.animals;
+  world.people = [personFixture()];
+  assert.match(viewportCensusText(world, 3), /— hab · — fauna/);
+  assert.equal(telemetryKpis(world, true, 3)[0]!.value, '— · —');
+  assert.equal(telemetryKpis(world, true, 4)[0]!.summary, 'Censo omitido en este nivel');
+  assert.match(telemetryKpis(world, true, 2)[0]!.value, /^1 ·/);
+
+  world.structures = [structureFixture()];
+  const sinBodegas = renderLandTelemetry(world);
+  assert.match(sinBodegas, /Compuestos en bodegas de esta vista<strong>—<\/strong>/);
+  assert.match(sinBodegas, /Muros compartidos en vista<strong>—<\/strong>/);
+  world.structures[0]!.storedCompounds = [];
+  assert.match(renderLandTelemetry(world), /Compuestos en bodegas de esta vista<strong>0 lotes/);
+});
+
 test('activity fractions include every work action and keep movement and survival separate', () => {
   const actions = Object.fromEntries(['farm', 'build', 'gather', 'forage', 'hunt', 'craft', 'research', 'invent', 'repair', 'cooperate', 'share'].map(key => [key, 1]));
   const a = activitySplit({ ...actions, rest: 4, move: 1, explore: 1, approach: 1, accompany: 1, retreat: 1, eat: 2, drink: 2, unknown: 1 });

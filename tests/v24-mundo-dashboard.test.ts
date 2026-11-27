@@ -284,6 +284,26 @@ test('legacy member counts, unknown affiliation and missing footprint do not inv
   fact(renderMundoDeepStats(w, 'land'), 'Celdas', '4');
 });
 
+test('reduced tape frames compact missing statistics and retain recorded counts', () => {
+  const w = rich();
+  delete w.stats;
+  w.people = [];
+  const vida = renderMundoDeepStats(w, 'life', null, 4);
+  assert.match(vida, /omite el censo global/);
+  assert.doesNotMatch(vida, /stat-card|<strong>—<\/strong>/);
+  card(renderMundoDeepStats(w, 'communities', null, 4), 'Sin comunidad · en vista', '—');
+  w.people = [person()];
+  assert.doesNotMatch(renderMundoDeepStats(w, 'life', null, 3), /1 habitantes/);
+  card(renderMundoDeepStats(w, 'communities', null, 3), 'Sin comunidad · en vista', '—');
+  assert.match(renderMundoDeepStats(w, 'life', null, 2), /En esta vista: 1 habitante/);
+  w.activeChunks = 0;
+  const paisaje = renderMundoDeepStats(w, 'land', null, 3);
+  assert.match(paisaje, /omite las estadísticas de suelo, agua y cultivos/);
+  assert.doesNotMatch(paisaje, /Hidrología|Calzadas pavimentadas/);
+  card(paisaje, 'Regiones activas', '0');
+  card(paisaje, 'Obras en vista', String(w.structures!.length));
+});
+
 const attack = `<img src=x onerror="alert('x')">&</script><script>alert(1)</script>`;
 const escapedAttack = '&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt;&amp;&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;';
 

@@ -181,6 +181,13 @@ function sustanciasMarkup(v: VistaMateria, catalogo: SustanciasVisibles | undefi
   return `<div class="materia-bloque" data-materia-sustancias="${v.sustancias.length}"><h4 class="detail-subtitle">Sustancias aparecidas · ${esc(number(v.sustancias.length))}</h4><ul class="materia-sustancias">${filas}</ul></div>`;
 }
 
+function catalogoSinLibro(catalogo: SustanciasVisibles): string {
+  const fichas = catalogo.slice(0, 48);
+  const filas = fichas.map(s => `<li data-sustancia="${esc(s.id)}"><strong>${formulaDe(s.atomos)} <small>${esc(nombreDerivado(s))}</small></strong></li>`).join('');
+  const limite = fichas.length < catalogo.length ? ` Se muestran ${number(fichas.length)} de ${number(catalogo.length)} fichas recibidas.` : '';
+  return `<div class="materia-bloque" data-materia-sustancias="${fichas.length}"><h4 class="detail-subtitle">Sustancias del catálogo recibido</h4><p class="stats-note">La cantidad presente y el paso de aparición no se recibieron.${esc(limite)}</p><ul class="materia-sustancias">${filas}</ul></div>`;
+}
+
 function cicloMarkup(c: CicloMateria): string {
   const series = ELEMENTOS.map((s, e) => ({ s, e, m: compartimentoQueSeMueve(c, e) })).filter(x => x.m && x.m.rango > 0);
   if (c.ticks.length < 2) return `<div class="materia-bloque" data-materia-ciclo="0"><h4 class="detail-subtitle">El ciclo</h4><p class="stats-note">El ciclo se dibuja con las lecturas que este navegador va recibiendo: aún hay ${number(c.ticks.length)} de las 2 que hacen falta.</p></div>`;
@@ -196,10 +203,8 @@ export function renderPanelMateria(v: VistaMateria | null, ciclo: CicloMateria =
     const luzPanel = noGrabado
       ? { estado: 'sin-dato' as const, valor: 'sin libro', motivo: 'El libro agregado de materia no se recibió para este paso.' }
       : luz;
-    const texto = citado
-      ? 'Este fotograma incluye sustancias del catálogo. El libro agregado de materia no se recibió para este paso.'
-      : noGrabado ? 'El libro agregado de materia no se recibió para este paso.' : 'El servidor sirve este mundo sin la ley de materia: el reparto de los átomos, la energía y las sustancias aparecen cuando se enciende.';
-    return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luzPanel.estado}" data-libro="${noGrabado ? 'no-grabado' : 'ausente'}">${cabecera(null, luzPanel)}<p class="stats-empty">${esc(texto)}</p>${fichaReaccion(observada, 'mundo')}</section>`;
+    const texto = noGrabado ? '' : '<p class="stats-empty">El servidor sirve este mundo sin la ley de materia: el reparto de los átomos, la energía y las sustancias aparecen cuando se enciende.</p>';
+    return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luzPanel.estado}" data-libro="${noGrabado ? 'no-grabado' : 'ausente'}">${cabecera(null, luzPanel)}${texto}${catalogo?.length ? catalogoSinLibro(catalogo) : ''}${fichaReaccion(observada, 'mundo')}</section>`;
   }
   return `<section class="stats-section materia-panel" data-panel-materia data-estado="${luz.estado}">${cabecera(v, luz)}${repartoMarkup(v)}${tablaMarkup(v)}${cuentasMarkup(v)}${sustanciasMarkup(v, catalogo, tickActual)}${cicloMarkup(ciclo)}${fichaReaccion(observada, 'mundo')}</section>`;
 }

@@ -267,9 +267,9 @@ test('Mundo hooks the exact dashboard API, refreshes with the directory, and a f
   const code = source('game.ts');
   assert.match(code, /import \{ renderMundoDeepStats \} from '\.\/mundo-dashboard\.js'/);
   assert.ok(existsSync(new URL('../src/client/mundo-dashboard.ts', import.meta.url)), 'el módulo importado por game.ts debe existir (integrar sprint/v24-mundo-dashboard)');
-  assert.match(code, /renderMundoDeepStats\(world, statsTab, directory\)/);
+  assert.match(code, /renderMundoDeepStats\(world, statsTab, directorioVisible\(\), dvr\?\.nivel \?\? null\)/);
   assert.match(code, /try \{ deepStats\.innerHTML = world && tecnica === null \? renderMundoDeepStats/);
-  assert.match(code, /\$\{directory\?\.tick \?\? -1\}/, 'the stats signature follows the directory');
+  assert.match(code, /\$\{directorioVisible\(\)\?\.tick \?\? -1\}/, 'the stats signature follows the directory');
   assert.match(code, /name === 'stats' && next\) \{ renderStats\(\); void refreshDirectory\(\)/);
 });
 

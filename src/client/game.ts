@@ -362,6 +362,7 @@ function choosePerson(id: string, focus = true): void {
   inspectorTab = 'now'; toggleTasks(false); activePersonId = person.id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
   if (focus) landscape?.focus(person.x, person.y);
   inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
+  void detalleCinta.verAlSeleccionar();
 }
 /** M3: seleccionar a alguien que no está en la cámara. Si murió hace poco se abre su despedida; si no,
  * se centra la cámara en la última posición conocida y se pide su ficha, que trae la posición exacta.

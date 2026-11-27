@@ -1,7 +1,7 @@
 /**
  * Pide el L0 exacto de un habitante en un nivel resumido y entrega ese PersonView íntegro.
  * Lo pinta la ficha que ya existe. Aquí solo hay un botón y, si falla o sigue en camino, una nota.
- * No sustituye el mundo ni pide nada hasta «Ver ficha detallada».
+ * La selección solicita el detalle cuando existe cobertura. El botón permite intentarlo de nuevo.
  */
 import type { ChunkReq, ChunkResp, Nivel } from '../shared/cinta.js';
 import type { PersonView, WorldView } from '../shared/types.js';
@@ -95,7 +95,7 @@ export function juzgarL0(chunk: ChunkResp, pedido: PedidoDetalle): JuicioDetalle
 type Estado = { tipo: 'oculto' } | { tipo: 'ofrecer' | 'pidiendo' | 'listo'; clave: string } | { tipo: 'aviso'; clave: string; texto: string };
 
 function htmlControl(estado: Estado): string {
-  if (estado.tipo === 'oculto') return '';
+  if (estado.tipo === 'oculto' || estado.tipo === 'listo') return '';
   const ocupado = estado.tipo === 'pidiendo';
   const boton = `<button type="button" class="button secondary" data-detalle-cinta-ver${ocupado ? ' aria-busy="true" aria-disabled="true"' : ''}>${ETIQUETA_DETALLE}</button>`;
   const nota = estado.tipo === 'pidiendo' ? TEXTO_BUSCANDO : estado.tipo === 'aviso' ? estado.texto : '';
@@ -161,7 +161,12 @@ export class DetalleCinta {
     this.publicar(sePuedePedir(ctx) ? { tipo: 'ofrecer', clave: claveDetalle(ctx) } : { tipo: 'oculto' });
   }
 
-  /** Clic explícito. Pausa para leer ese instante. No mueve el cabezal ni el mundo. */
+  /** Se llama al elegir una persona. El paso de fotogramas solo actualiza la disponibilidad. */
+  async verAlSeleccionar(): Promise<void> {
+    if (this.estado.tipo === 'ofrecer') await this.ver();
+  }
+
+  /** Pausa la reproducción para conservar el instante que se está inspeccionando. */
   async ver(): Promise<void> {
     const ctx = this.deps.contexto();
     if (!sePuedePedir(ctx) || this.vuelo?.clave === claveDetalle(ctx)) return;
@@ -234,12 +239,16 @@ export class DetalleCinta {
   private publicar(estado: Estado): void { this.estado = estado; this.pintar(); }
 
   private pintar(): void {
-    const html = htmlControl(this.estado), hidden = this.estado.tipo === 'oculto', nodo = this.nodo;
+    const html = htmlControl(this.estado), hidden = !html, nodo = this.nodo;
     if (!nodo || (this.pintado === html && this.oculto === hidden)) return;
     const activo = nodo.ownerDocument?.activeElement;
     const recuperar = !!activo && nodo.contains(activo);
     this.pintado = html; this.oculto = hidden; nodo.hidden = hidden; nodo.innerHTML = html;
-    if (recuperar) nodo.querySelector<HTMLElement>('[data-detalle-cinta-ver]')?.focus({ preventScroll: true });
+    if (recuperar) {
+      const destino = nodo.querySelector<HTMLElement>('[data-detalle-cinta-ver]')
+        ?? nodo.parentElement?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      destino?.focus({ preventScroll: true });
+    }
   }
 }
 

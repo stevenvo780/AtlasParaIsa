@@ -131,12 +131,13 @@ test('juzgar L0 devuelve el PersonView íntegro y solo aplica un delta del mismo
   assert.deepEqual(roto, { ok: false, motivo: 'cercano' });
 });
 
-test('el mismo panel pinta la ficha existente con el L0 exacto y, si no se conserva, solo lo conocido', async () => {
+test('al seleccionar se completa la ficha con el L0 exacto y se conservan los ceros', async () => {
   let actual = contexto();
   let cambios = 0;
+  let peticiones = 0;
   const ui = nodo();
   const cinta = new DetalleCinta({
-    pedir: async () => trozo(),
+    pedir: async () => { peticiones++; return trozo(); },
     pausar: () => true,
     contexto: () => actual,
     avisar: () => {},
@@ -146,7 +147,10 @@ test('el mismo panel pinta la ficha existente con el L0 exacto y, si no se conse
   assert.equal(personaDeDetalleExactoParaContexto(cinta, actual), null);
   assert.match(ui.html(), new RegExp(ETIQUETA_DETALLE));
   assert.doesNotMatch(ui.html(), /sin dato|Energía|<dl/);
-  await cinta.ver();
+  await cinta.verAlSeleccionar();
+  await cinta.verAlSeleccionar();
+  assert.equal(peticiones, 1);
+  assert.equal(ui.el.hidden, true);
   const precisa = personaDeDetalleExactoParaContexto(cinta, actual);
   assert.equal(precisa, exacta);
   assert.equal(cambios, 1);
